@@ -1,4 +1,4 @@
-<!-- coverage-matrix last-reviewed: 2026-07-18 -->
+<!-- coverage-matrix last-reviewed: 2026-10-21 -->
 # Coverage matrix — Sisense → ThoughtSpot
 
 Every Sisense construct and its conversion status. Cite in the migration report. Within
@@ -40,7 +40,7 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 |---|---|---|
 | `datasets[].schema.tables[]` → Tables | Mapped | one Table TML per source table; `db_column_name` on every column |
 | Sisense column type codes → data types | Mapped | int/bool/string/datetime/double/date/… (`_SISENSE_TYPE_CODES`) |
-| `relations[]` → joins | Mapped | oid-resolved endpoints; most-connected table = fact; ON clause references columns by display **name** (matches the model `column_id`) |
+| `relations[]` → joins | Mapped | oid-resolved endpoints; each join runs fact (MANY) → dimension (ONE), the fact being the table with more distinct join keys (then fewer shared keys, more measures, more relations, name) — deterministic, so two facts sharing dimensions never trips I17 (BL-398); ON clause references columns by display **name** (matches the model `column_id`) |
 | Composite-key relations (multi-column) | Mapped | ALL column pairs conjoined in the ON clause (`[F::a]=[D::a] AND [F::b]=[D::b]`) — no dropped pair / fan-out |
 | Join cardinality | Approximated | Sisense v2 exports none → defaults `MANY_TO_ONE` and **flags the join NEEDS REVIEW** (a many-to-many bridge would fan out) |
 | Custom-SQL table (`type: custom`) | Mapped | `sql_expression` carried onto the table |

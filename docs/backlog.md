@@ -256,7 +256,7 @@ are roughly ordered by value÷effort.
 | BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
 | ~~BL-396~~ | ~~ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import~~ | DONE (2026-10-21 — ts-object-model-erd 1.9.3) |
 | BL-397 | Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504) | 2026-11-30 |
-| BL-398 | Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs | 2026-11-15 |
+| ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 
 ### Tier 3 — Opportunistic
 
@@ -14351,3 +14351,12 @@ or the many side of the relationship) with a deterministic tie-break on name; ad
 runs the build under several hash seeds and asserts one join set.
 
 **Target:** 2026-11-15.
+
+**Resolved 2026-10-21:** ts-cli v0.179.0. `_fact_rank` ranks every table once — more distinct
+join keys (a fact carries one foreign key per dimension), then fewer shared keys (a key joined
+on from several relations is the table's own), more measures, more relation endpoints, table
+id — and each relation runs from the higher-ranked table, so the graph is acyclic by
+construction and hash-independent. Reproduced first: the two-fact/shared-dimension shape gave
+6 join sets over 12 seeds (5 tripping I17), and with a snowflaked Category 3 sets (8 tripping);
+after the fix 1 set each, 0 tripping. `test_join_set_identical_across_hash_seeds` builds
+under 12 seeds in subprocesses.

@@ -69,8 +69,10 @@ ts sisense build-model --input <bundle.json> --connection "<TS connection>" \
   --database <DATABASE> --schema <SCHEMA> --model-name "<Model name>" --out out/ \
   [--join-type LEFT_OUTER] [--lower-db-table] [--overrides overrides.json]
 ```
-Emits Table TMLs + Model TML + `mapping.json`. The most-connected table becomes the fact;
-joins carry the relation's cardinality. Plain JAQL aggregations map via the aggregation map
+Emits Table TMLs + Model TML + `mapping.json`. Every join runs from the fact (MANY) side to
+the dimension (ONE) side — the side carrying more distinct join keys is the fact, then fewer
+shared keys, more measures, more relations, and table name — and carries the relation's
+cardinality (default MANY_TO_ONE). The same bundle always yields the same join graph. Plain JAQL aggregations map via the aggregation map
 (`sum`→SUM, `avg`→AVERAGE, …); calculated-column formulas translate through the deterministic
 JAQL subset. Window / time-intelligence / population-stats / R are flagged NEEDS REVIEW —
 never faked. `--lower-db-table` lowercases `db_table` for Databricks (folds unquoted names).
@@ -128,6 +130,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |
 | 1.0.3 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A literal with a quote is emitted double-quoted (read SQL-standard: `''` is one quote), a backslash doubled, and every product under a division bracketed |
 | 1.0.2 | 2026-10-06 | **2-arg `round` no longer imports as a wrong number (ts-cli v0.156.0, BL-331).** It was emitted verbatim and marked Approximated, but Approximated still imports: `round(x, 0)` was NULL on every row and `round(x, 2)` rounded to the nearest 2. A literal decimal count now converts to ThoughtSpot's increment (`2` → `0.01`) and is Migrated; a non-literal one is NEEDS REVIEW. Coverage matrix updated |
 | 1.0.1 | 2026-09-22 | **I7 untranslatable gate added.** Step 1 flagged JAQL formulas NEEDS REVIEW with no instruction to open [sisense-formula-translation.md](../../shared/mappings/sisense/sisense-formula-translation.md) first. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |
