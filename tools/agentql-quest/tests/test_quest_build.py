@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -393,6 +394,16 @@ def test_the_schema_checker_follows_2020_12_integers():
     ({"type": "array", "minItems": "1"}, "minItems must be an integer"),
     ({"enum": "x"}, "enum must be a list"),
     ({"anyOf": []}, "anyOf must be a non-empty list"),
+    # What the 2020-12 metaschema requires, so a consumer's validator never errors on the schema.
+    ({"type": "string", "title": None}, "title must be a string"),
+    ({"type": "string", "description": ["two", "lines"]}, "description must be a string"),
+    ({"type": "object", "properties": {"b": {"type": "string"}}, "required": ["b", "b"],
+      "additionalProperties": False}, "required lists a name twice"),
+    ({"type": "array", "minItems": -1}, "minItems must be an integer, 0 or more"),
+    ({"type": "array", "minItems": True}, "minItems must be an integer, 0 or more"),
+    ({"type": "object", "properties": {"b": {"type": "string"}}, "required": [["b"]],
+      "additionalProperties": False}, "required a list of names"),
+    ({"$schema": "http://json-schema.org/draft-04/schema#", "type": "string"}, "supported only at the root"),
 ])
 def test_the_schema_checker_refuses_what_it_cannot_enforce(field, needle):
     # Refused as a schema problem before any data is checked, never a silent pass or a traceback.
@@ -418,9 +429,49 @@ def test_a_ref_that_loops_is_refused_not_a_recursion_error(defs):
     assert any("refers back to itself" in e for e in errors), errors
 
 
-def test_defs_must_be_an_object():
-    schema = dict(_one_field({"type": "string"}), **{"$defs": []})
-    assert any("$defs must be an object" in e for e in B.check_schema({"a": "x"}, schema))
+@pytest.mark.parametrize("root_keys,needle", [
+    ({"$schema": "http://json-schema.org/draft-04/schema#"}, "$schema must be"),
+    ({"$id": "https://example.com/quest.schema.json#part"}, "$id must be a URI without a fragment"),
+])
+def test_the_root_pins_the_dialect_and_a_plain_id(root_keys, needle):
+    schema = dict(_one_field({"type": "string"}), **root_keys)
+    assert any(needle in e for e in B.check_schema({"a": "x"}, schema))
+
+
+@pytest.mark.parametrize("name", ["lines~1text", "lines/text", "high%6Cight", "a b"])
+def test_definition_names_need_no_decoding(name):
+    # A real validator decodes JSON Pointer (~1) and percent escapes in $ref; the checker doesn't.
+    schema = _one_field({"$ref": f"#/$defs/{name}"}, {name: {"type": "string"}})
+    assert any("use letters, digits and _ only" in e for e in B.check_schema({"a": "x"}, schema))
+
+
+def test_a_ref_that_loops_through_anyof_is_refused_not_a_recursion_error():
+    defs = {"h": {"anyOf": [{"enum": ["all"], "$ref": "#/$defs/h"}, {"type": "array"}]}}
+    errors = B.check_schema({"a": "all"}, _one_field({"$ref": "#/$defs/h"}, defs))
+    assert any("reaches itself" in e for e in errors), errors
+
+
+def test_a_ref_to_a_non_object_definition_is_refused():
+    errors = B.check_schema({"a": "x"}, _one_field({"$ref": "#/$defs/t"}, {"t": True}))
+    assert errors and all(e.startswith("quest.schema.json") for e in errors), errors
+
+
+@pytest.mark.parametrize("text,needle", [
+    ('{"type": "object", "enum": [NaN]}', "NaN is not JSON"),
+    ('{"type": "object",}', "not valid JSON"),
+])
+def test_a_schema_file_that_is_not_strict_json_fails_the_gate(monkeypatch, tmp_path, text, needle):
+    monkeypatch.setattr(B, "SCHEMA", tmp_path / "quest.schema.json")
+    B.SCHEMA.write_text(text, encoding="utf-8")
+    assert any(needle in e for e in B.build(check=True)[2])
+
+
+@pytest.mark.parametrize("field", [{"type": "string"}, {"$ref": "#/$defs/x"}])
+@pytest.mark.parametrize("defs", [[], "xyz"])  # a string "contains" the name, then can't be indexed by it
+def test_defs_must_be_an_object(field, defs):
+    schema = dict(_one_field(field), **{"$defs": defs})
+    errors = B.check_schema({"a": "x"}, schema)
+    assert any("$defs must be an object" in e for e in errors) and all(e.startswith("quest.schema.json") for e in errors)
 
 
 def test_unused_schema_definitions_are_checked_too():
@@ -473,6 +524,22 @@ def test_compile_quest_refuses_a_blank_model(doc, capture, model):
     assert "lesson-sql.md: no Model named in its header" in B.compile_quest(doc, *capture, model)[1]
 
 
+@pytest.mark.parametrize("old,new,ok", [
+    ('FROM "(Sample) Retail - Apparel"', 'from "(Sample) Retail - Apparel"', True),   # AgentQL is case-insensitive
+    ('FROM "(Sample) Retail - Apparel"', 'FROM\n  "(Sample) Retail - Apparel"', True),  # laid out over two lines
+    ('FROM "(Sample) Retail - Apparel"', 'XFROM "(Sample) Retail - Apparel"', False),  # not the keyword
+    ('FROM "(Sample) Retail - Apparel"', 'FROM "(Sample) Retail - Apparel 2"', False),  # a longer name
+])
+def test_the_from_check_matches_the_keyword_and_the_whole_name(doc, capture, old, new, ok):
+    date, cases = capture
+    cases = copy.deepcopy(cases)
+    assert old in cases[CASE]["agentql"]
+    cases[CASE]["agentql"] = cases[CASE]["agentql"].replace(old, new)
+    errors = B.compile_quest(doc, date, cases, MODEL)[1]
+    flagged = any(e.startswith(f"{CASE}: the capture header names Model") for e in errors)
+    assert flagged is not ok, errors
+
+
 def test_the_header_model_is_read_from_the_capture_line_only():
     text = "A note on Model **`Decoy`**.\n\ncaptured live on the sample Model **` Real `** (a cluster)"
     assert B.parse_capture_model(text) == "Real"
@@ -501,6 +568,22 @@ def test_the_page_fails_its_play_through_without_a_model(doc, capture, tmp_path)
 def test_out_may_not_name_a_file_written_beside_the_page(tmp_path, name):
     assert B.main(["--out", str(tmp_path / name)]) == 2
     assert not (tmp_path / name).exists()
+
+
+def test_a_real_2020_12_validator_accepts_the_published_pair(tmp_path):
+    # The built-in checker is a strict subset; this is the consumer's view. CI installs jsonschema
+    # (validate.yml), so there this always runs; elsewhere it runs when jsonschema is installed.
+    try:
+        import jsonschema
+    except ImportError:
+        if os.environ.get("CI"):
+            pytest.fail("CI must install jsonschema (see validate.yml)")
+        pytest.skip("jsonschema is not installed")
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    schema = json.loads((tmp_path / "quest.schema.json").read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator.check_schema(schema)
+    jsonschema.Draft202012Validator(schema).validate(json.loads((tmp_path / "quest.json").read_text(encoding="utf-8")))
 
 
 def test_every_schema_field_is_required(schema):

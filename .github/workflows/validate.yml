@@ -31,7 +31,7 @@ jobs:
 
       - name: Install test/runtime deps
         run: |
-          pip install pytest pyyaml radon pip-audit
+          pip install pytest pyyaml radon pip-audit jsonschema==4.25.1
           pip install -e tools/ts-cli
 
       - name: Install optional extras for audit coverage
@@ -276,7 +276,7 @@ jobs:
 
       - name: Install test/runtime deps
         run: |
-          pip install pytest pyyaml
+          pip install pytest pyyaml jsonschema==4.25.1
           pip install -e tools/ts-cli
 
       - name: Run unit + validator tests

@@ -382,7 +382,8 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
             "realms": realms, "routes": routes}, errors
 
 
-# The JSON Schema keywords quest.schema.json may use (the repo has no jsonschema dependency).
+# The JSON Schema keywords quest.schema.json may use. Pre-commit needs no extra package for this;
+# CI also validates the published pair with the real jsonschema (see the README).
 # lint_schema checks the schema first, whole, and accepts only a strict form _check enforces
 # exactly: an unknown keyword, an object rule away from its properties, an object that allows
 # unlisted or optional fields, $id or $defs below the root, or a broken or looping $ref fails
@@ -390,6 +391,8 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
 _SCHEMA_NOTES = {"$schema", "$id", "title", "description", "$defs"}
 _SCHEMA_RULES = {"type", "enum", "required", "properties", "additionalProperties", "items",
                  "minItems", "anyOf", "$ref"}
+_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+_DEF_NAME = re.compile(r"[A-Za-z0-9_]+")  # nothing JSON Pointer (~ /) or a URI (%) would decode
 _JSON_TYPES = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool,
                "null": type(None)}
 
@@ -404,6 +407,13 @@ def lint_schema(node, root: dict, where: str = "#") -> list[str]:
     if unknown:
         return bad(f"uses {sorted(unknown)}, which check_schema does not support")
     errors: list[str] = []
+    for k in ("title", "description"):  # the metaschema types these too
+        if k in node and not isinstance(node[k], str):
+            errors += bad(f"{k} must be a string")
+    if node is root and node.get("$schema", _DIALECT) != _DIALECT:
+        errors += bad(f"$schema must be {_DIALECT!r}, the dialect check_schema follows")
+    if node is root and "$id" in node and not (isinstance(node["$id"], str) and re.fullmatch(r"[^#]*#?", node["$id"])):
+        errors += bad("$id must be a URI without a fragment")
     if node is not root and {"$id", "$schema", "$defs"} & node.keys():
         # $ref always resolves against the root's $defs, so nothing below may start a new scope.
         errors += bad("$id, $schema and $defs are supported only at the root")
@@ -422,10 +432,13 @@ def lint_schema(node, root: dict, where: str = "#") -> list[str]:
             return errors + bad("properties must be an object and required a list of names")
         if set(node.get("required", [])) != set(node.get("properties", {})):
             errors += bad("every property must be required")
+        if len(set(node.get("required", []))) != len(node.get("required", [])):
+            errors += bad("required lists a name twice")
     if "enum" in node and not isinstance(node["enum"], list):
         errors += bad("enum must be a list")
-    if "minItems" in node and (not isinstance(node["minItems"], int) or isinstance(node["minItems"], bool)):
-        errors += bad("minItems must be an integer")
+    if "minItems" in node and (not isinstance(node["minItems"], int) or isinstance(node["minItems"], bool)
+                               or node["minItems"] < 0):
+        errors += bad("minItems must be an integer, 0 or more")
     if "$ref" in node:
         ref, seen = node["$ref"], set()
         defs = root.get("$defs") if isinstance(root.get("$defs"), dict) else {}
@@ -450,8 +463,24 @@ def lint_schema(node, root: dict, where: str = "#") -> list[str]:
         if not isinstance(node.get("$defs", {}), dict):
             return errors + bad("$defs must be an object")
         for k, sub in (node.get("$defs") or {}).items():
+            if not _DEF_NAME.fullmatch(k):
+                errors += bad(f"definition name {k!r}: use letters, digits and _ only")
             errors += lint_schema(sub, root, f"#/$defs/{k}")
+            if _rechecks_itself(sub, node["$defs"], (f"#/$defs/{k}",)):
+                errors += bad(f"#/$defs/{k} reaches itself through $ref/anyOf without reading any deeper")
     return errors
+
+
+def _rechecks_itself(node, defs: dict, stack: tuple) -> bool:
+    """True if checking `node` leads back to a definition on `stack` while still checking the same
+    value: through $ref and anyOf only (properties and items always move to a smaller value)."""
+    if not isinstance(node, dict):
+        return False
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/") and ref[8:] in defs:
+        if ref in stack or _rechecks_itself(defs[ref[8:]], defs, stack + (ref,)):
+            return True
+    return any(_rechecks_itself(b, defs, stack) for b in node.get("anyOf") or [] if isinstance(node.get("anyOf"), list))
 
 
 def _same(a, b) -> bool:
@@ -586,6 +615,10 @@ def render(template: str, data: dict, fonts_css: str = "") -> str:
     return template.replace(PLACEHOLDER, payload).replace(FONT_PLACEHOLDER, fonts_css)
 
 
+def _not_json(name: str):
+    raise ValueError(f"quest.schema.json: {name} is not JSON (JSON.parse and strict parsers reject it)")
+
+
 def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     """Validate, and unless `check`, render. Returns (html or None, data, errors)."""
     capture = LESSON_SQL.read_text(encoding="utf-8")
@@ -595,7 +628,12 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     doc = yaml.safe_load(raw) or {}
     data, errors = compile_quest(doc, date, cases, model)
     errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))  # modules, lessons, titles
-    errors += check_schema(data, json.loads(SCHEMA.read_text(encoding="utf-8")))
+    try:
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"), parse_constant=_not_json)
+    except ValueError as e:  # includes JSONDecodeError
+        errors.append(str(e) if str(e).startswith("quest.schema.json") else f"quest.schema.json: not valid JSON ({e})")
+    else:
+        errors += check_schema(data, schema)
     if errors:
         return None, data, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too

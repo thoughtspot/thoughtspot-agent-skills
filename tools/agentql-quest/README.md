@@ -104,16 +104,23 @@ checks its own output against it, so the PR gate fails when the data and the sch
 apart. Every field is required and nothing else is allowed, so a front end can rely on the
 shape. A new field goes into `build.py` and the schema in the same change (either alone fails
 the gate); bump `schema_version` for any change a front end would notice. The check is a small
-built-in one, because the repo has no `jsonschema` dependency. It checks the schema itself first,
-whole, and accepts only a small, strict form of JSON Schema it can enforce exactly. It refuses:
-- a keyword it doesn't know;
+built-in one, so pre-commit needs no extra package. It checks the schema itself first, whole,
+and accepts only a small, strict form of JSON Schema 2020-12 that it can enforce exactly. It
+refuses:
+
+- a keyword it doesn't know, or a `$schema` other than 2020-12;
 - an object rule (`required`, `additionalProperties`) away from that object's `properties`;
-- an object that allows unlisted or optional fields;
-- `$id` or `$defs` below the root;
-- a broken or looping `$ref`.
-Reviews compared it with a real 2020-12 validator, through thousands of random schema and data
-edits, and found no difference on what it accepts. If you need a form it refuses, extend the
-checker and its tests first.
+- an object that allows unlisted or optional fields, or lists a field twice;
+- `$id`, `$schema` or `$defs` below the root, and definition names other than letters, digits
+  and `_`;
+- a broken `$ref`, or one that reaches itself (directly, or through `anyOf`);
+- a schema file that isn't strict JSON (`NaN`, trailing commas).
+
+If you need a form it refuses, extend the checker and its tests first.
+
+CI also installs the real `jsonschema` (pinned in `validate.yml`) and validates the published
+`quest.json` against the published `quest.schema.json`, metaschema included, so a consumer's
+validator is the final judge. Locally that test runs only if `jsonschema` is installed.
 
 So a question is edited in `encounters.yaml`, never in a front end, and a second front end
 (for example an explorable map) plays the same content by loading `quest.json`.
