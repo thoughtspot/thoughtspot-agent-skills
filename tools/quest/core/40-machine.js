@@ -14,9 +14,11 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     const settled = f => !!f && (f.kind === "win" || f.kind === "magic");
     const firstDone = (s, progress) => !!(progress[realms[0].id] || {}).done || !!s.firstDone;
     // Whether a realm's gate is locked is decided once, when the gate opens (the "realm" action),
-    // and kept in the state: the screen drawn and the actions accepted then agree even if the save
-    // changes meanwhile (another tab). A state without it (made by hand) is judged from `progress`.
-    const locked = (s, progress) => (typeof s.locked === "boolean" ? s.locked : s.realm !== 0 && !firstDone(s, progress));
+    // and kept in the state as `gate`: the screen drawn and the actions accepted then agree even if
+    // the save changes meanwhile (another tab). It counts only for the realm it was decided for; any
+    // other state (made or moved by hand) is judged from `progress`.
+    const locked = (s, progress) => (s.gate && s.gate.realm === s.realm ? s.gate.locked
+                                                                          : s.realm !== 0 && !firstDone(s, progress));
     // The question a screen asks: a hall's petition, a quest's path, or the foe's point.
     function question(s) {
       const r = realms[s.realm];
@@ -62,10 +64,10 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         sound("fanfare");
       };
       switch (action.type) {
-        case "map": sound("blip"); Object.assign(s, { screen: "map", flash: null }); break;
+        case "map": sound("blip"); Object.assign(s, { screen: "map", flash: null, gate: null }); break;
         case "realm": sound("blip");
-          Object.assign(s, { screen: "realm", realm: action.realm, flash: null, locked: undefined });
-          s.locked = locked(s, progress);
+          Object.assign(s, { screen: "realm", realm: action.realm, flash: null, gate: null });
+          s.gate = { realm: s.realm, locked: locked(s, progress) };
           break;
         case "enter": sound("blip");
           Object.assign(s, r.halls.length ? { screen: "hall", hall: 0, step: 0, gold: 0, flash: null }

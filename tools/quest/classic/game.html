@@ -291,7 +291,7 @@ const firstDone = () => machine.firstDone(state, loadProgress());
 // Do an action: the machine decides what changes, the page plays its sounds, saves, and redraws.
 function dispatch(action) {
   const out = machine.act(state, action, loadProgress());
-  if (out.refused) return render();   // what is shown is what the machine accepts: redraw it
+  if (out.refused) return render();   // nothing changes: redraw, which puts focus back on the first button
   state = out.state;
   for (const fx of out.effects) {
     if (fx.type === "sound") Sound.play(fx.name);

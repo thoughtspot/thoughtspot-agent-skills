@@ -195,7 +195,7 @@ sources:
 | `expected '…' N time(s) in the SQL` | a whole-statement fact moved, e.g. the fact table is read twice (pruning off) | same: check whether the lesson still holds |
 | `scroll: match '…' hits no line` | a `scroll` substring no longer appears in the AgentQL | update `scroll` |
 | `it asks about a row cap or a null guard, which ThoughtSpot adds` | a who point credits the row cap or a null guard to the Model or the AgentQL | answer `thoughtspot`: both are ThoughtSpot cluster settings |
-| `'…' is a name from a published work` | a word in the pack or the page is on the denylist | use a generic fantasy name |
+| `'…' is a name from a published work` | a word in the pack, the page (`classic/`), `core/`, or the built `quest.json` (often text a plugin took from its sources) is on the denylist | use a generic fantasy name |
 | `denylist: …` | `denylist.txt` is missing, or holds a line that isn't a hash | restore it; add names only with `denylist.py add` |
 | `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |

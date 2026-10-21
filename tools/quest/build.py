@@ -907,6 +907,13 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     if errors:
         return None, data, schema, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
+    # What ships, too: text the plugins bring in from their sources, and the schema, go out in
+    # quest.json and quest.schema.json (the page's template and core are scanned above).
+    try:
+        for word in denylist.hits(json.dumps(data, ensure_ascii=False) + json.dumps(schema, ensure_ascii=False), denylist.load()):
+            errors.append(f"quest.json: {word!r} is a name from a published work (denylist.txt); use a generic fantasy name")
+    except (OSError, ValueError) as e:
+        errors.append(f"denylist: {e}")
     html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts, art, core)
     return html, data, schema, errors
 

@@ -253,7 +253,8 @@ matches the full shape. The Lake's `COALESCE` compiles to a `CASE` with no aggre
 - **Storage:** hashed and normalised (lowercased, accents stripped) single words and two-word
   phrases from published fantasy works. A helper adds entries, so the names themselves are never
   committed.
-- **Scope:** content, strings, maps and `art/classic/`.
+- **Scope:** the whole pack (content, strings, maps, art, promo), the page template (`classic/`),
+  the shared `core/`, and what ships: the built `quest.json` and `quest.schema.json`.
 - **Report:** the offending word from our content, never the list.
 
 The existing test fixture that uses a published place name (`test_quest_build.py`, an unknown
