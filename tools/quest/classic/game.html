@@ -182,11 +182,12 @@ p { margin: 0; max-width: 62ch; }
     <button type="button" id="sound-music" aria-pressed="false"></button>
   </div></div>
 
-<!-- Written by build.py from encounters.yaml + the captured lesson SQL. Do not edit here. -->
+<!-- Written by build.py from the pack (content.yaml) + the captured lesson SQL. Do not edit here. -->
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
 <script>
 const QUEST = JSON.parse(document.getElementById("quest-data").textContent);
 const REALMS = QUEST.realms;
+const SAVE_KEY = QUEST.pack.storage_key;  // saves are <key>-progress and <key>-sound
 
 const ART = {
   title: String.raw`
@@ -355,8 +356,8 @@ const Sound = (() => {
   const AC = typeof AudioContext !== "undefined" ? AudioContext
     : typeof webkitAudioContext !== "undefined" ? webkitAudioContext : null;
   const prefs = { sfx: true, music: false };
-  try { Object.assign(prefs, JSON.parse(localStorage.getItem("aqq-sound") || "{}")); } catch {}
-  const save = () => { try { localStorage.setItem("aqq-sound", JSON.stringify(prefs)); } catch {} };
+  try { Object.assign(prefs, JSON.parse(localStorage.getItem(`${SAVE_KEY}-sound`) || "{}")); } catch {}
+  const save = () => { try { localStorage.setItem(`${SAVE_KEY}-sound`, JSON.stringify(prefs)); } catch {} };
   let ctx = null, master = null, musicBus = null, unlocked = false;
   let track = null, want = null, timer = null, lead = { i: 0, t: 0 }, bass = { i: 0, t: 0 };
   const hz = n => 440 * Math.pow(2, (n - 69) / 12);          // MIDI note number to frequency
@@ -473,7 +474,7 @@ const COURSE_MAX = OPEN.reduce((n, r) => n + maxGold(r), 0);
 // whole number between 0 and the realm's maximum. Older saves stored `true`: done with 0 gold.
 function loadProgress() {
   let raw = {};
-  try { raw = JSON.parse(localStorage.getItem("aqq-progress") || "{}") || {}; } catch { return {}; }
+  try { raw = JSON.parse(localStorage.getItem(`${SAVE_KEY}-progress`) || "{}") || {}; } catch { return {}; }
   const out = {};
   for (const r of REALMS) {
     const v = raw[r.id];
@@ -489,7 +490,7 @@ function finishRealm(id, gold) {
   const p = loadProgress(), prev = p[id] || { done: false, best: 0 };
   const record = gold > prev.best;
   p[id] = { done: true, best: Math.max(prev.best, gold) };
-  try { localStorage.setItem("aqq-progress", JSON.stringify(p)); } catch {}
+  try { localStorage.setItem(`${SAVE_KEY}-progress`, JSON.stringify(p)); } catch {}
   return record;
 }
 const treasury = () => Object.entries(loadProgress()).reduce((n, [id, v]) => n + (OPEN.some(r => r.id === id) ? v.best : 0), 0);
@@ -525,10 +526,10 @@ function table(columns, rows) {
       `<td data-col="${esc(columns[i] || "")}">${cell(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
+// Every pane, in the pack's order; the first is the guide's (the AI's scroll).
 function panes(e, p) {
-  return `<div class="pane"><span class="lbl">YOUR SCROLL: the AgentQL the AI wrote</span>${code(e.agentql, p.scrollHl, "agent", "Your AgentQL")}</div>
-    <div class="pane"><span class="lbl">THE DRAGON: SQL ThoughtSpot generated</span>${code(e.sql, p.sqlHl, "", "Generated warehouse SQL")}
-    <span class="cap">Captured from generate-sql on ${esc(QUEST.model)}, ${esc(QUEST.captured)}. Lesson ${esc(e.lesson)}.</span></div>`;
+  return e.panes.map((pane, i) => `<div class="pane"><span class="lbl">${esc(pane.label)}</span>${code(pane.lines, p.highlights[pane.id], i === 0 ? "agent" : "", pane.name)}${
+    pane.caption ? `\n    <span class="cap">${esc(pane.caption)}</span>` : ""}</div>`).join("\n    ");
 }
 
 // One answer. Right: +gold, move on. Wrong: lose gold (never below 0), answer again.
@@ -619,7 +620,7 @@ const SCREENS = {
     const r = realm(), h = hall(), t = h.trials[state.step];
     const head = `<div class="status"><span class="lbl">${esc(h.title.toUpperCase())}</span>${goldTag()}
       <span><span class="lbl">PETITION</span> ${state.step + 1}/${h.trials.length}</span></div>`;
-    const intro = t.kind === "route" ? "A merchant asks which engine should answer this question:" : "A petitioner makes a claim before the court:";
+    const intro = t.kind === "choice" ? "A merchant asks which engine should answer this question:" : "A petitioner makes a claim before the court:";
     if (state.flash) {
       const f = state.flash, lastInHall = state.step + 1 >= h.trials.length, lastHall = state.hall + 1 >= r.halls.length;
       const next = !settled(f) ? "Judge again" : !lastInHall ? "Next petitioner" : lastHall ? "Hear the royal decree" : `On to hall ${state.hall + 2}`;
@@ -672,7 +673,7 @@ const SCREENS = {
     const e = encounter();
     return `<div class="status"><span class="lbl">THE AGENTQL PATH</span>${goldTag()}</div>${art("wizard")}
       <p>The <span class="hot">Wizard</span> is the AI. His only job is to understand the question and write it down. In this game, his AgentQL is your <span class="hot">scroll</span>:</p>
-      ${code(e.agentql, [], "agent", "Your AgentQL")}
+      ${code(e.panes[0].lines, [], "agent", e.panes[0].name)}
       ${choices([{ label: "Carry the scroll to the Forge", go: go({ screen: "forge" }) }])}`;
   },
   forge() {
@@ -690,7 +691,7 @@ const SCREENS = {
     if (state.flash) {
       const f = state.flash, last = state.step + 1 >= e.points.length;
       return `${head}${panes(e, q)}
-        ${feedback(f, q.lesson, q.hint, q.options[q.correct])}
+        ${feedback(f, q.why, q.hint, q.options[q.correct])}
         ${choices([{ label: !settled(f) ? "Try again" : last ? "Watch the dragon fall" : "Next scale", go: () => {
           if (settled(f)) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
           state.flash = null; render();
@@ -704,10 +705,10 @@ const SCREENS = {
     const r = realm(), e = encounter();
     const record = finishRealm(r.id, state.gold);
     Sound.play("fanfare");
-    const TAG = { model: "MODEL", thoughtspot: "THOUGHTSPOT", agentql: "AGENTQL" };
-    const item = p => `<li><span class="who">${TAG[p.ruleBy]}</span><span>${esc(p.rule)}</span></li>`;
-    const rules = e.points.filter(p => p.rule && (p.ruleBy === "model" || p.ruleBy === "thoughtspot"));
-    const yours = e.points.filter(p => p.rule && p.ruleBy === "agentql");
+    const TAGS = QUEST.pack.rule_tags, group = p => p.rule && TAGS[p.ruleTag] ? TAGS[p.ruleTag].group : "";
+    const item = p => `<li><span class="who">${esc(TAGS[p.ruleTag].label)}</span><span>${esc(p.rule)}</span></li>`;
+    const rules = e.points.filter(p => group(p) === "rules");
+    const yours = e.points.filter(p => group(p) === "yours");
     return `${realmScene(r)}<h2>The dragon falls</h2>
       <p>You carry home <span class="hot">${state.gold} of ${maxGold(r)} gold</span>${record ? ", your best here yet" : ""}.</p>
       <p class="lbl">DETERMINISTIC RULES UNCOVERED</p>

@@ -1,4 +1,4 @@
-# AgentQL Quest: the realm map, and what the game adds on top of the course.
+# AgentQL Quest's content: the realm map, and what the game adds on top of the course.
 #
 # Every player starts in the Kingdom of Law (Module 0, the foundation): four short halls, each
 # teaching one idea and testing it straight away. Every other realm is one quest, a couple of
@@ -10,18 +10,25 @@
 #      Model added; one may be the part only your AgentQL asked for
 #   5. the hoard: gold, and the rules you uncovered
 #
-# The SQL is never written here. `build.py` reads the AgentQL and the generated warehouse SQL
-# for each encounter's `case` from references/lesson-sql.md (the committed capture of
-# `tools/agentql-retest --suite lessons guards`). This file holds only what the capture can't.
+# The SQL is never written here. The agentql_capture check (checks/agentql_capture.py) reads the
+# AgentQL and the generated warehouse SQL for each encounter's `case` from references/lesson-sql.md
+# (the committed capture of `tools/agentql-retest --suite lessons guards`) and fills the `sql`
+# pane. This file holds only what the capture can't. pack.yaml names the panes and the checks.
+#
+# Each realm and encounter has an `id` (lowercase letters, digits and _), and so does each hall.
+# An encounter supplies the `scroll` pane (its AgentQL, laid out for reading).
 #
 # Per dragon point:
-#   sql:       whole SQL lines to highlight (indentation ignored). Each must still be in the
-#              capture exactly, so a recapture that edits the line fails the build.
-#   scroll:    substrings of the AgentQL lines to highlight. [] = nothing (itself a clue).
+#   sql:       whole SQL lines to highlight in the `sql` pane (indentation ignored). Each must
+#              still be in the capture exactly, so a recapture that edits the line fails the build.
+#   scroll:    substrings of the AgentQL lines to highlight in the `scroll` pane. [] = nothing
+#              (itself a clue). A point highlights a pane by naming it.
 #   sql_count: {text: n} facts about the whole statement that one line can't pin down.
+#   why:       the explanation shown after the answer.
 #   rule:      the deterministic rule this scale shows, listed in the hoard when it breaks.
-#   rule_by:   who adds that rule (model | thoughtspot), or agentql for the player's own part,
-#              or determinism for the conclusion. A who point takes it from its answer.
+#   rule_tag:  who adds that rule (model | thoughtspot), or agentql for the player's own part,
+#              or determinism for the conclusion (pack.yaml's rule_tags). A who point takes it
+#              from its answer.
 #   '*' in sql/scroll highlights everything.
 #
 # The build fails (offline, no cluster) when:
@@ -29,8 +36,10 @@
 #     in learning-path.md; or an encounter's `lesson` doesn't list its case under Guarded by,
 #     or belongs to a different module than its realm
 #   - a `case` is missing from the capture, or was not SUCCESS
-#   - `agentql` differs from the captured AgentQL by anything but layout
+#   - the `scroll` AgentQL differs from the captured AgentQL by anything but layout
 #   - an `sql` line, `scroll` substring or `sql_count` no longer holds
+#   - a point credits a row cap or null guard to anyone but ThoughtSpot
+#   - a word from the denylist of published fantasy names appears anywhere in the pack
 
 # Each lesson the text names, with a word its heading must contain: a renumbered or retitled
 # course fails the build instead of pointing players at the wrong lesson.
@@ -102,7 +111,8 @@ realms:
                   "An answer in the Spotter conversation. Coming soon: pin it to a Liveboard",
                   "Spotter Canvas only. It can't be pinned to a Liveboard."]
     halls:
-      - title: The Hall of Two Paths
+      - id: two_paths
+        title: The Hall of Two Paths
         teach:
           - ThoughtSpot has two ways to create a query over the same governed Model.
           - A person uses Keyword Search, and their words become keywords. An AI agent writes AgentQL, which can express more.
@@ -121,7 +131,8 @@ realms:
             why: >-
               AgentQL. Keeping every product, matched or not, takes an outer join, which
               keywords can't express.
-      - title: The Hall of Checking
+      - id: checking
+        title: The Hall of Checking
         teach:
           - With Keyword Search, a person checks the query by reading the keywords. No SQL to read.
           - The same keyword review for AgentQL is the planned solution, coming soon. The more an agent can express, the more it has to get right, which is why checking matters.
@@ -140,7 +151,8 @@ realms:
             why: >-
               False. Valid SQL is not proof of correct business logic. A query can compile, run
               and return a confident wrong number, which is why a person checks the intent.
-      - title: The Hall of the Forge
+      - id: forge
+        title: The Hall of the Forge
         teach:
           - ThoughtSpot never executes AgentQL. It compiles it into warehouse SQL, on the same governed engine keyword search uses.
           - You query the Model, not the tables, so the Model's joins, formulas and security rules go into the SQL ThoughtSpot writes.
@@ -159,7 +171,8 @@ realms:
             why: >-
               True. You query the Model, not the tables. Row-level security is the one part that
               differs by design: it filters each user's rows to what they may see.
-      - title: The Hall of the Third Engine
+      - id: third_engine
+        title: The Hall of the Third Engine
         teach:
           - Some questions need analysis beyond SQL, such as a forecast or a statistical test. Spotter uses Code Complete for those.
           - Its code runs on the results of a governed query, and its answers live in Spotter Canvas.
@@ -192,7 +205,7 @@ realms:
     covers: >-
       The gentle start: a simple question, written in AgentQL, and the rules ThoughtSpot and
       the Model add to even the simplest SQL.
-    encounters: [l2_filter_case_insensitive]
+    encounters: [west_sales]
 
   - id: lake
     name: The Craftsmen of the Lake
@@ -202,7 +215,7 @@ realms:
     covers: >-
       A question keywords can't ask. The Model still forges the joins and the security, and
       your AgentQL adds the one thing it couldn't: every product, sold or not.
-    encounters: [l3_all_products_left_join]
+    encounters: [every_product]
 
   - id: forests
     name: The Golden Forests
@@ -212,7 +225,7 @@ realms:
     covers: >-
       A question in two steps: total each store first, then average those totals. Your AgentQL
       builds the steps, and the Model still supplies the joins and the names.
-    encounters: [l5_cte_two_step]
+    encounters: [two_steps]
 
   - id: isles
     name: The Shifting Isles
@@ -222,11 +235,12 @@ realms:
     covers: >-
       Ranking within each region, with a window function only AgentQL can write, compiled
       with the same null-safe, governed rules as everything else.
-    encounters: [l5_rank]
+    encounters: [rank_in_region]
 
 encounters:
   # ---- Dwarven Mines: the simple introduction, with the keyword path blocked --------------------
-  - case: l2_filter_case_insensitive
+  - id: west_sales
+    case: l2_filter_case_insensitive
     lesson: "2.3"
     quest: What were sales in the West region?
     path:
@@ -243,7 +257,7 @@ encounters:
         code_complete: >-
           Not Code Complete. That is for analysis beyond SQL, after the query. A total with a
           filter is the database's job.
-    agentql: |
+    scroll: |
       SELECT SUM("t1"."sales") AS s
       FROM "(Sample) Retail - Apparel" AS "t1"
       WHERE "t1"."region" = 'west'
@@ -260,7 +274,7 @@ encounters:
           Filtering on region brought in a join to the stores table, on STOREID. Your scroll
           never mentioned stores or keys. Who added the join?
         hint: Region lives in a different table from sales. Who knows how they connect?
-        lesson: >-
+        why: >-
           The Model. Region lives in the stores table, so filtering on it brings in that join,
           with the type and keys the Model defines.
       - kind: who
@@ -272,7 +286,7 @@ encounters:
           Your scroll wrote 'west' in lower case, but the data says 'West'. The query still
           finds the West's sales. Who made them match?
         hint: Compare your WHERE with the SQL's WHERE. Something was wrapped around REGION.
-        lesson: >-
+        why: >-
           ThoughtSpot. Text = and IN always compile case-insensitively, with LOWER(), and there
           is no case-sensitive form.
       - kind: who
@@ -284,12 +298,12 @@ encounters:
           The sum is wrapped in CASE WHEN ... IS NOT NULL ... ELSE 0. Your scroll has no null
           check. Who added it?
         hint: Look for a null check in your scroll. There isn't one.
-        lesson: >-
+        why: >-
           ThoughtSpot wraps this SUM in a null guard, so an empty total comes back as 0, not
           NULL.
       - kind: choice
         rule: The same AgentQL, Model and user always compile to the same SQL
-        rule_by: determinism
+        rule_tag: determinism
         sql: ['*']
         scroll: ['*']
         ask: >-
@@ -301,7 +315,7 @@ encounters:
           - text: Slightly different SQL, because AI is involved
           - text: It depends on the Wizard's mood
         hint: Where does the AI sit, before ThoughtSpot compiles the scroll or inside it?
-        lesson: >-
+        why: >-
           Same scroll, same Model, same user: same SQL. Compilation is deterministic. The AI's
           step is different: asked again, the Wizard might word the scroll differently, which
           is why a person checks what the agent asked.
@@ -310,7 +324,8 @@ encounters:
       AI, so this AgentQL compiles to exactly this SQL, every time.
 
   # ---- Craftsmen of the Lake: a question keywords can't ask -------------------------------------
-  - case: l3_all_products_left_join
+  - id: every_product
+    case: l3_all_products_left_join
     lesson: "3.4"
     quest: >-
       Show me every product with its sales in the West region. Products never sold in the
@@ -327,7 +342,7 @@ encounters:
         code_complete: >-
           Not Code Complete. Nothing here needs analysis beyond SQL; an outer join is a
           database job, so it stays in governed SQL.
-    agentql: |
+    scroll: |
       WITH all_p AS (
         SELECT "t1"."product" AS p
         FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."product"
@@ -356,7 +371,7 @@ encounters:
         hint: >-
           Neither key appears in your scroll, and ThoughtSpot compiles the SQL that runs. Who
           knows how the tables relate?
-        lesson: >-
+        why: >-
           The Model supplied the relationships: the join type and the keys. Two people asking
           this question get the same joins, every time.
       - kind: who
@@ -372,12 +387,12 @@ encounters:
         hint: >-
           Not every line comes from the Model. This one goes against the Model's default join,
           and it is in your scroll.
-        lesson: >-
+        why: >-
           Your AgentQL. This is the expressibility AgentQL adds. ThoughtSpot kept your join
           shape and still applied the Model's keys, and its own null guards, inside it.
       - kind: choice
         rule: Row-level security rules come from the Model and are added when ThoughtSpot compiles
-        rule_by: model
+        rule_tag: model
         sql: []
         scroll: []
         ask: >-
@@ -390,7 +405,7 @@ encounters:
           - text: Yes, by leaving the filter out of the AgentQL
           - text: Yes, if the Wizard words the question cleverly
         hint: The filter is not something the Wizard writes. Where are the RLS rules defined?
-        lesson: >-
+        why: >-
           The RLS rules live in the Model, and ThoughtSpot adds them when it compiles, so
           leaving them out of the AgentQL changes nothing: the agent never wrote them. Each
           user gets their own filter. Lesson 3.3 shows the injected filter.
@@ -399,7 +414,8 @@ encounters:
       the Model and ThoughtSpot, applied exactly as it is to every other query.
 
   # ---- Golden Forests: a question in two steps --------------------------------------------------
-  - case: l5_cte_two_step
+  - id: two_steps
+    case: l5_cte_two_step
     lesson: "5.1"
     quest: What is the average total sales per store?
     path:
@@ -413,7 +429,7 @@ encounters:
           CTE, which the Wizard can write.
         code_complete: >-
           Not Code Complete. Both steps can be written in AgentQL, so they stay in governed SQL.
-    agentql: |
+    scroll: |
       WITH st AS (
         SELECT "t1"."store" AS store, SUM("t1"."sales") AS s
         FROM "(Sample) Retail - Apparel" AS "t1" GROUP BY "t1"."store")
@@ -428,7 +444,7 @@ encounters:
           The SQL first builds a step called qt_0, then averages over it. Who decided the
           question needed two steps?
         hint: Look at the first line of your scroll.
-        lesson: >-
+        why: >-
           Your AgentQL. The CTE is the shape of your question. ThoughtSpot kept both steps and
           compiled each one against the Model.
       - kind: who
@@ -438,7 +454,7 @@ encounters:
         scroll: ['"t1"."store" AS store']
         ask: Your scroll asked for "store". The SQL reads STORENAME. Who translated it?
         hint: Your scroll uses business names only. Something maps them to the warehouse.
-        lesson: >-
+        why: >-
           The Model. You query business names like "store", and the Model maps each one to its
           physical column.
       - kind: who
@@ -453,7 +469,7 @@ encounters:
           Inside the first step, sales are joined to stores on STOREID. Your scroll has no join
           at all. Who added it?
         hint: Store names and sales live in different tables. Who knows how they connect?
-        lesson: >-
+        why: >-
           The Model. Grouping sales by store needs the stores table, so the Model's join and
           keys go in, even inside your CTE.
       - kind: who
@@ -465,13 +481,14 @@ encounters:
         scroll: []
         ask: LIMIT 100000 closes the statement. Your scroll has no LIMIT. Who added it?
         hint: It isn't in your scroll, and ThoughtSpot compiles the SQL that runs.
-        lesson: ThoughtSpot capped this statement at 100,000 rows, even with its two steps.
+        why: ThoughtSpot capped this statement at 100,000 rows, even with its two steps.
     takeaway: >-
       The two steps were yours. Inside each step, the Model and ThoughtSpot applied the same
       rules they apply everywhere, so the result is just as repeatable.
 
   # ---- Shifting Isles: ranking within each region ------------------------------------------------
-  - case: l5_rank
+  - id: rank_in_region
+    case: l5_rank
     lesson: "5.2"
     quest: Rank each region's stores by their sales.
     path:
@@ -484,7 +501,7 @@ encounters:
           AgentQL. A rank within each region is a window function, and the Wizard can write one.
         code_complete: >-
           Not Code Complete. A ranking can be written in AgentQL, so it stays in governed SQL.
-    agentql: |
+    scroll: |
       SELECT "t1"."region" AS r, "t1"."store" AS store, SUM("t1"."sales") AS s,
              RANK() OVER (PARTITION BY "t1"."region" ORDER BY SUM("t1"."sales") DESC) AS rk
       FROM "(Sample) Retail - Apparel" AS "t1"
@@ -499,7 +516,7 @@ encounters:
           rank() over (partition by REGION ...) ranks stores inside each region. Who asked for
           that?
         hint: Look at the second line of your scroll.
-        lesson: >-
+        why: >-
           Your AgentQL. The window function is the expressibility AgentQL adds: a rank that
           restarts in every region.
       - kind: who
@@ -512,7 +529,7 @@ encounters:
           The ranking orders stores by the null-safe sum, CASE WHEN ... ELSE 0, and the same
           guard wraps the sales column. Your scroll ordered by a plain SUM. Who made it safe?
         hint: Your scroll has no null check anywhere.
-        lesson: >-
+        why: >-
           ThoughtSpot. The SUM your window function orders by gets the same null guard as the
           sales column, so the ranking orders by exactly the totals you see.
       - kind: who
@@ -524,12 +541,12 @@ encounters:
         scroll: []
         ask: Sales are joined to stores on STOREID. Your scroll has no join. Who added it?
         hint: Region and store live in a different table from sales.
-        lesson: >-
+        why: >-
           The Model. Region and store come from the stores table, so its join and keys go in,
           the same as for a simple total.
       - kind: choice
         rule: The same AgentQL, Model and user always compile to the same SQL
-        rule_by: determinism
+        rule_tag: determinism
         sql: ['*']
         scroll: ['*']
         ask: >-
@@ -541,7 +558,7 @@ encounters:
           - text: Slightly different SQL, because AI is involved
           - text: It depends on the Wizard's mood
         hint: Where does the AI sit, before ThoughtSpot compiles the scroll or inside it?
-        lesson: >-
+        why: >-
           Same scroll, same Model, same user: same SQL, however advanced the shape. That is what
           makes the answer repeatable, and testable.
     takeaway: >-

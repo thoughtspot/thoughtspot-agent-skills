@@ -1,0 +1,42 @@
+# AgentQL Quest's manifest: what this game is, where it is published, and which checks it needs.
+# The engine (tools/quest/build.py) contains no AgentQL wording or rules; this pack names them.
+# Design: docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md (§3.2).
+
+id: agentql
+title: AgentQL Quest
+publish_path: agentql-quest            # the Pages folder: the live URL never changes
+storage_key: aqq                       # saves are aqq-progress and aqq-sound
+unlock: first_realm_first              # every other realm waits for the first
+
+# Plugins in tools/quest/checks/, run in this order.
+checks: [agentql_capture, course_refs, agentql_rules]
+sources:                               # read-only inputs the plugins check against
+  lesson_sql: agents/cli/ts-object-model-agentql-query/references/lesson-sql.md
+  learning_path: agents/cli/ts-object-model-agentql-query/references/learning-path.md
+
+# The code panes every encounter shows, in order. The first is the guide's (the AI's scroll).
+#   from:  content (the encounter supplies it under the pane's id) or the plugin that fills it
+#   match: how a point's highlight finds lines: contains (a substring) or line (a whole line,
+#          indentation ignored, so a recapture that edits the line fails the build)
+#   label, name, caption: keys in strings.yaml (caption may name {model}, {captured}, {lesson})
+panes:
+  - {id: scroll, from: content,         match: contains, label: pane_scroll_label, name: pane_scroll_name, caption: ""}
+  - {id: sql,    from: agentql_capture, match: line,     label: pane_sql_label,    name: pane_sql_name,    caption: pane_sql_caption}
+
+# The reward screen's tags: label, and where each is shown.
+rule_tags:
+  model:       {label: MODEL,       group: rules}
+  thoughtspot: {label: THOUGHTSPOT, group: rules}
+  agentql:     {label: AGENTQL,     group: yours}
+  determinism: {label: "",          group: verdict}   # hidden; the verdict stands in for them
+
+# The roles the engine knows, named this pack's way.
+lexicon:
+  guide: The Wizard                    # writes the scroll (the AI)
+  compiler: The Forge                  # turns it into what runs (ThoughtSpot + the Model)
+  foe: dragon
+  reward: hoard
+  currency: gold
+
+explore:
+  realms: []                           # realms with a map (none until the explore prototype)

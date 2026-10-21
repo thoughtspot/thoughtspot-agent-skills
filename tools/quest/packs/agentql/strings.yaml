@@ -1,0 +1,12 @@
+# Every sentence a front end shows that isn't content. Flat keys; {name} placeholders are filled
+# by the engine. More of the page's wording moves here with the shared front-end core.
+
+send_to: Send it to {engine}
+claim_true: Heed them. It is true.
+claim_false: Banish them. It is false.
+
+pane_scroll_label: "YOUR SCROLL: the AgentQL the AI wrote"
+pane_scroll_name: Your AgentQL
+pane_sql_label: "THE DRAGON: SQL ThoughtSpot generated"
+pane_sql_name: Generated warehouse SQL
+pane_sql_caption: Captured from generate-sql on {model}, {captured}. Lesson {lesson}.

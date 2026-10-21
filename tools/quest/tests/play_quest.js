@@ -10,6 +10,9 @@ const html = fs.readFileSync(process.argv[2], "utf8");
 const data = html.split('<script id="quest-data" type="application/json">')[1].split("</script>")[0];
 const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const Q = JSON.parse(data);
+const KEY = Q.pack.storage_key;  // saves are <key>-progress and <key>-sound
+const TAGS = Q.pack.rule_tags;
+const groupOf = pt => (pt.rule && TAGS[pt.ruleTag] ? TAGS[pt.ruleTag].group : "");
 let current = "";
 const fail = (msg, where) => { console.error(`FAIL${where ? ` on screen "${where}"` : ""}: ${msg}`); process.exit(1); };
 
@@ -125,7 +128,7 @@ if (P.intervals.size !== 0) fail("hiding the tab should stop the music");
 P.doc.hidden = false; P.fire("visibilitychange", {});
 if (P.intervals.size !== 1) fail("showing the tab again should resume the music");
 P.click("sound-music"); if (snd.prefs.music || P.intervals.size !== 0) fail("the music button should turn music off");
-if (JSON.parse(P.store["aqq-sound"]).music !== false) fail("the music setting should be remembered");
+if (JSON.parse(P.store[`${KEY}-sound`]).music !== false) fail("the music setting should be remembered");
 log.push("input: number keys, clicks, S/M keys and buttons, key repeat, hidden tab all go through the real listeners");
 
 // Other roads wait for Law.
@@ -148,6 +151,8 @@ law.halls.forEach((h, hi) => {
   press(0); expect("trials", `hall ${hi + 1}'s petitions`);
   h.trials.forEach((t, ti) => {
     if (!has(t.text)) fail("petition not shown", where());
+    const intro = t.kind === "claim" ? "makes a claim before the court" : "asks which engine should answer";
+    if (!text().includes(intro)) fail(`a ${t.kind} trial should open with "${intro}"`, where());
     const how = hi === 0 && ti === 0 ? "wrong-then-right" : hi === 0 && ti === 1 ? "magic" : hi === 1 && ti === 0 ? "wrong-then-right" : "right";
     answerQuestion(t.correct, t.options.length, how, t.why, t.options[t.correct]);
   });
@@ -179,22 +184,27 @@ Q.realms.forEach((r, ri) => {
   answerQuestion(p.correct, p.options.length, "right", p.outcomes[p.correct].why, p.options[p.correct]);
   expect("wizard", "the Wizard writes the AgentQL after the right path");
   press(0); expect("forge", "the scroll goes to the Forge"); press(0); expect("battle", "the fight starts");
-  if (!Q.model || !text().includes(`Captured from generate-sql on ${Q.model}, ${Q.captured}.`)) fail("the dragon should name the Model and date it was captured on", where());
+  e.panes.forEach(pane => {
+    if (!has(pane.label) || (pane.caption && !has(pane.caption))) fail(`the ${pane.id} pane should show its label and caption`, where());
+  });
+  const capture = Q.meta.agentql_capture;
+  if (capture && (!capture.model || !text().includes(`Captured from generate-sql on ${capture.model}, ${capture.captured}.`)))
+    fail("the dragon should name the Model and date it was captured on", where());
   e.points.forEach((pt, k) => {
     if (!has(pt.ask)) fail("question not shown", where());
     const lit = (P.screen.innerHTML.match(/class="ln[^"]*\bon\b/g) || []).length;
-    const want = (pt.sqlHl === "all" ? e.sql.length : pt.sqlHl.length) + (pt.scrollHl === "all" ? e.agentql.length : pt.scrollHl.length);
+    const want = e.panes.reduce((n, pane) => n + (pt.highlights[pane.id] === "all" ? pane.lines.length : pt.highlights[pane.id].length), 0);
     if (lit !== want) fail(`expected ${want} highlighted lines, found ${lit}`, where());
-    answerQuestion(pt.correct, pt.options.length, k === 1 ? "wrong-then-right" : "right", pt.lesson, pt.options[pt.correct]);
+    answerQuestion(pt.correct, pt.options.length, k === 1 ? "wrong-then-right" : "right", pt.why, pt.options[pt.correct]);
   });
   expect("victory", "the dragon falls");
   if (!text().includes("DETERMINISTIC RULES UNCOVERED")) fail("the hoard should be headed as deterministic rules", where());
   if (!text().includes("for the same user, always compiles to the same SQL.")) fail("every hoard ends on determinism", where());
   const hoard = text(), yoursAt = hoard.indexOf("YOUR PART");
-  e.points.filter(pt => pt.rule && pt.ruleBy !== "determinism").forEach(pt => {
+  e.points.filter(pt => groupOf(pt) === "rules" || groupOf(pt) === "yours").forEach(pt => {
     if (!has(pt.rule)) fail(`the hoard should list "${pt.rule}"`, where());
     const inYours = yoursAt >= 0 && hoard.indexOf(pt.rule.slice(0, 30)) > yoursAt;
-    if ((pt.ruleBy === "agentql") !== inYours) fail(`"${pt.rule}" is in the wrong part of the hoard`, where());
+    if ((groupOf(pt) === "yours") !== inYours) fail(`"${pt.rule}" is in the wrong part of the hoard`, where());
   });
   expected[r.id] = WIN * (1 + e.points.length) - LOSS;
   if (S().gold !== expected[r.id]) fail(`${r.id} should end with ${expected[r.id]} gold, has ${S().gold}`, where());
@@ -202,7 +212,7 @@ Q.realms.forEach((r, ri) => {
   log.push(`${r.id}: path + ${e.points.length} scales, ${expected[r.id]} gold`);
 });
 
-const saved = JSON.parse(P.store["aqq-progress"]);
+const saved = JSON.parse(P.store[`${KEY}-progress`]);
 Object.entries(expected).forEach(([id, g]) => { if (!saved[id] || !saved[id].done || saved[id].best !== g) fail(`${id} should save best ${g}`); });
 const total = Object.values(expected).reduce((a, b) => a + b, 0);
 if (!text().includes("Course complete") || !text().includes(`${total} of`)) fail(`the map should show the course high score ${total}`, where());
@@ -221,7 +231,7 @@ log.push("audio that throws, or no audio at all: the game still plays, silently"
 // ---- a tampered save: markup, impossible scores, unknown realms ---------------------------------------
 const evil = JSON.stringify({ law: null, mines: { done: true, best: "<img src=x onerror=alert(1)>" },
                               lake: { done: true, best: 999 }, forests: "x", atlantis: { done: true, best: 50 } });
-const T = boot({ saved: { "aqq-progress": evil } });
+const T = boot({ saved: { [`${KEY}-progress`]: evil } });
 T.click(0);
 if (T.S().screen !== "map") fail("a tampered save must not stop the map rendering");
 if (/<img/i.test(T.screen.innerHTML)) fail("saved values must never reach the page as markup");

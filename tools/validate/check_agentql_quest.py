@@ -2,15 +2,16 @@
 """
 check_agentql_quest.py — AgentQL Quest still matches the captured lesson SQL it is built from.
 
-The game in tools/quest/ is built from encounters.yaml plus the committed
-agents/cli/ts-object-model-agentql-query/references/lesson-sql.md. A recapture can move
-the generated SQL out from under an encounter, so that a "who put this line here?" question
-points at a line that changed or no longer exists — the game would then teach something the
-SQL no longer shows. This runs the build's own validation (`build.py --check`) and fails on
-any drift: a missing or rejected case, AgentQL changed beyond layout, an `sql` line no longer
-present exactly, an `sql_count` that no longer holds, a capture header naming a Model the
-AgentQL doesn't query, or built data that no longer fits tools/quest/quest.schema.json
-(the contract quest.json is published with).
+The game is built by tools/quest/build.py from its pack (tools/quest/packs/agentql/: content.yaml,
+pack.yaml, strings.yaml) plus the committed
+agents/cli/ts-object-model-agentql-query/references/lesson-sql.md. A recapture can move the
+generated SQL out from under an encounter, so that a "who put this line here?" question points at
+a line that changed or no longer exists — the game would then teach something the SQL no longer
+shows. This runs the build's own validation (`build.py --check`) and fails on any drift: a missing
+or rejected case, AgentQL changed beyond layout, an `sql` line no longer present exactly, an
+`sql_count` that no longer holds, a capture header naming a Model the AgentQL doesn't query, a row
+cap or null guard credited to anyone but ThoughtSpot, a published fantasy name, or built data that
+no longer fits the pack's generated quest.schema.json (from tools/quest/schema/core.json).
 
 Lives here, as a thin wrapper, so the gate is catalogued with the other validators in
 docs/quality-gates.md; the logic stays beside the tool it guards.

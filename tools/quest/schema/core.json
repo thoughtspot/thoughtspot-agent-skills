@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quest data",
+  "description": "The general part of every pack's quest.json schema (version 2). build.py generates each pack's schema from this one: it sets $id and title, and fills the parts that depend on the pack: pack.strings (one string per key in strings.yaml), pack.rule_tags (one entry per tag), meta (one object per plugin that declares one), the refs on realms and encounters (what each plugin declares), and point.highlights, point.ruleTag and pane.id (from the pack's panes and tags). Those parts are empty here, so this file on its own is the schema of a pack with no plugins. Every field is required and nothing else is allowed, so a front end can rely on the shape. Bump schema_version for any change a front end would notice.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pack", "meta", "realms", "routes"],
+  "properties": {
+    "schema_version": {"description": "2 for this layout.", "enum": [2]},
+    "pack": {"$ref": "#/$defs/pack"},
+    "meta": {
+      "description": "Per plugin, what it records about the whole quest (where its sources came from, for example).",
+      "type": "object", "additionalProperties": false, "required": [], "properties": {}
+    },
+    "realms": {
+      "description": "In map order. The first is where every player starts.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/realm"}
+    },
+    "routes": {
+      "description": "Suggested paths across the map, per audience. Never enforced.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["who", "path"],
+        "properties": {
+          "who": {"type": "string"},
+          "path": {"description": "Realm ids, in order.", "type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "texts": {"type": "array", "items": {"type": "string"}},
+    "highlight": {
+      "description": "Indexes of the lines to highlight, or \"all\".",
+      "anyOf": [{"enum": ["all"]}, {"type": "array", "items": {"type": "integer"}}]
+    },
+    "pack": {
+      "description": "The pack's settings, from its pack.yaml and strings.yaml.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "storage_key", "unlock", "explore_realms", "lexicon", "rule_tags", "strings"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "storage_key": {"description": "Saves are <storage_key>-progress and <storage_key>-sound.", "type": "string"},
+        "unlock": {"description": "first_realm_first: every other realm waits until the first is done.", "enum": ["first_realm_first", "none"]},
+        "explore_realms": {"description": "Realms that have a map.", "$ref": "#/$defs/texts"},
+        "lexicon": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["guide", "compiler", "foe", "reward", "currency"],
+          "properties": {
+            "guide": {"type": "string"}, "compiler": {"type": "string"}, "foe": {"type": "string"},
+            "reward": {"type": "string"}, "currency": {"type": "string"}
+          }
+        },
+        "rule_tags": {
+          "description": "Per tag: its label and where the reward screen shows it.",
+          "type": "object", "additionalProperties": false, "required": [], "properties": {}
+        },
+        "strings": {
+          "description": "Every sentence a front end shows that isn't content, by key.",
+          "type": "object", "additionalProperties": false, "required": [], "properties": {}
+        }
+      }
+    },
+    "rule_tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "group"],
+      "properties": {
+        "label": {"type": "string"},
+        "group": {"description": "rules: the rules uncovered. yours: the player's part. verdict: hidden, the verdict stands in.", "enum": ["rules", "yours", "verdict"]}
+      }
+    },
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "rows"],
+      "properties": {
+        "columns": {"$ref": "#/$defs/texts"},
+        "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}}
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "cells"],
+      "properties": {"label": {"type": "string"}, "cells": {"$ref": "#/$defs/texts"}}
+    },
+    "realm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "depth", "minutes", "covers", "sealed", "scroll", "halls", "decree", "encounters", "refs"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "depth": {"type": "string"},
+        "minutes": {"type": "integer"},
+        "covers": {"type": "string"},
+        "sealed": {"description": "Shown on the map but not playable yet.", "type": "boolean"},
+        "scroll": {"description": "The full comparison table, shown as the recap on the decree.", "anyOf": [{"$ref": "#/$defs/table"}, {"type": "null"}]},
+        "halls": {"type": "array", "items": {"$ref": "#/$defs/hall"}},
+        "decree": {"$ref": "#/$defs/texts"},
+        "encounters": {"type": "array", "items": {"$ref": "#/$defs/encounter"}},
+        "refs": {"description": "What plugins record about the realm.", "type": "object", "additionalProperties": false, "required": [], "properties": {}}
+      }
+    },
+    "hall": {
+      "description": "Teaches one idea with a slice of the scroll, then asks its trials.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "teach", "columns", "rows", "trials"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "teach": {"$ref": "#/$defs/texts"},
+        "columns": {"$ref": "#/$defs/texts"},
+        "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}},
+        "trials": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/trial"}}
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text", "why", "options", "correct"],
+      "properties": {
+        "kind": {"description": "claim: true or false. choice: pick one option.", "enum": ["claim", "choice"]},
+        "text": {"type": "string"},
+        "why": {"type": "string"},
+        "options": {"$ref": "#/$defs/texts"},
+        "correct": {"description": "Index into options.", "type": "integer"}
+      }
+    },
+    "encounter": {
+      "description": "One quest: the business question, the path choice, the panes, then the foe's points.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "quest", "path", "panes", "points", "takeaway", "refs"],
+      "properties": {
+        "id": {"type": "string"},
+        "quest": {"type": "string"},
+        "path": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["options", "outcomes", "correct"],
+          "properties": {
+            "options": {"$ref": "#/$defs/texts"},
+            "outcomes": {
+              "description": "One per option. blocked costs nothing: the player chooses again.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "why"],
+                "properties": {"kind": {"enum": ["win", "loss", "blocked"]}, "why": {"type": "string"}}
+              }
+            },
+            "correct": {"type": "integer"}
+          }
+        },
+        "panes": {"description": "In the pack's pane order. The first is the guide's.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/pane"}},
+        "points": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/point"}},
+        "takeaway": {"type": "string"},
+        "refs": {"description": "What plugins record about the encounter.", "type": "object", "additionalProperties": false, "required": [], "properties": {}}
+      }
+    },
+    "pane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "name", "lines", "caption"],
+      "properties": {
+        "id": {"type": "string"},
+        "label": {"description": "Shown above the pane.", "type": "string"},
+        "name": {"description": "Read to screen readers before the lines.", "type": "string"},
+        "lines": {"$ref": "#/$defs/texts"},
+        "caption": {"description": "Shown under the pane, or \"\".", "type": "string"}
+      }
+    },
+    "point": {
+      "description": "One question about the panes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ask", "hint", "why", "highlights", "options", "correct", "rule", "ruleTag"],
+      "properties": {
+        "ask": {"type": "string"},
+        "hint": {"type": "string"},
+        "why": {"description": "The explanation shown after the answer.", "type": "string"},
+        "highlights": {"description": "Per pane id, the lines to highlight.", "type": "object", "additionalProperties": false, "required": [], "properties": {}},
+        "options": {"$ref": "#/$defs/texts"},
+        "correct": {"type": "integer"},
+        "rule": {"description": "The rule the reward screen lists, or \"\".", "type": "string"},
+        "ruleTag": {"description": "One of the pack's rule tags, or \"\" when there is no rule.", "enum": [""]}
+      }
+    }
+  }
+}

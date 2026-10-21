@@ -6,9 +6,9 @@ it; a dragon made of SQL rises from the fire; the player names who wrote each li
 Drawn at 320x200 in the game's own amber palette, scaled 3x with hard pixels and CRT scanlines.
 All art and the 5x7 font are original.
 
-    python3 tools/quest/promo/make_ad.py <out_dir>                 # GIF + poster
-    python3 tools/quest/promo/make_ad.py <out_dir> --video-frames  # also 1920x1200 frames
-    swift tools/quest/promo/encode_mp4.swift <out_dir>/video-frames/manifest.txt <out.mp4> 30
+    python3 tools/quest/packs/agentql/promo/make_ad.py <out_dir>                 # GIF + poster
+    python3 tools/quest/packs/agentql/promo/make_ad.py <out_dir> --video-frames  # also 1920x1200 frames
+    swift tools/quest/packs/agentql/promo/encode_mp4.swift <out_dir>/video-frames/manifest.txt <out.mp4> 30
 """
 import math
 import random
@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw
 
 W, H, SCALE = 320, 200, 3
-# The game's palette (game.html :root), plus two darker browns for depth.
+# The game's palette (classic/game.html :root), plus two darker browns for depth.
 C = {"K": (0, 0, 0), "G": (21, 14, 6), "D": (42, 26, 8), "R": (74, 50, 16), "M": (168, 114, 42),
      "A": (255, 180, 58), "H": (255, 230, 176), "E": (255, 106, 69)}
 SCAN = 150                                   # scanline rows are this /255 as bright

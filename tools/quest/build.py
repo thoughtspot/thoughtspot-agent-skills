@@ -1,34 +1,60 @@
 #!/usr/bin/env python3
-"""Build AgentQL Quest, the browser game for the Learn AgentQL course.
+"""Build a quest: a browser game made from a pack of content, such as AgentQL Quest.
 
-Joins two sources into the game's data, `quest.json`, and one self-contained `index.html`:
+A pack is a folder under `packs/` (design: docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md):
 
-  - `references/lesson-sql.md` of the ts-object-model-agentql-query skill: the AgentQL and
-    the warehouse SQL ThoughtSpot generated for each lesson, captured live and committed.
-    It is the only source of SQL; the game never carries a hand-written copy.
-  - `encounters.yaml` (next to this script): which parts of that SQL the game asks about,
-    who put each one there, and the text the player reads.
+  - `pack.yaml`: the manifest. Its id, title, Pages folder and save key; the code panes every
+    encounter shows; the reward screen's rule tags; the lexicon; and the checks (plugins) to run.
+  - `content.yaml`: the realms, halls, encounters and their questions.
+  - `strings.yaml`: wording a front end shows that isn't content.
 
-The data and the fonts are written into the page rather than shipped beside it, so the file
-makes no outside requests and runs from GitHub Pages, any static host, or a double-click. The same
-data is also written beside the page as `quest.json`, the contract `quest.schema.json` describes,
-so another front end can play the same checked content without parsing the YAML or the capture.
+The engine knows only general things: realms, halls, trials, encounters, panes, points, routes,
+scoring and saves. Anything specific to one game, such as AgentQL's captured SQL and course, is a
+plugin in `checks/` that the pack names.
+
+The build writes the game's data, `quest.json`; the schema it fits, `quest.schema.json`, generated
+for this pack from `schema/core.json`; and one self-contained `index.html` (the classic text
+adventure, `classic/game.html` with the data and fonts written in), so the page makes no outside
+requests and runs from GitHub Pages, any static host, or a double-click.
 
     python3 tools/quest/build.py                   # write tools/quest/dist/
     python3 tools/quest/build.py --out _site/index.html   # quest.json and its schema land beside it
     python3 tools/quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
+    python3 tools/quest/build.py --pack <id>       # another pack (default: agentql)
 
-Fails when an encounter no longer matches the capture or the course: a lesson or Module the
-text names that the course no longer has, a missing or rejected case, AgentQL that differs by
-more than layout, an `sql` line that is no longer in the SQL exactly, an `sql_count` that no
-longer holds, or a capture header that names a different Model from the one the AgentQL queries;
-or when the data no longer fits `quest.schema.json`. A recapture that changes what a lesson
-teaches therefore breaks the build instead of quietly teaching something false.
+Fails when the content, a plugin's check, the published-name denylist or the generated schema
+says so. For AgentQL Quest that includes a lesson or Module the text names that the course no
+longer has, a missing or rejected case, AgentQL that differs by more than layout, an `sql` line
+that is no longer in the SQL exactly, an `sql_count` that no longer holds, a row cap or null guard
+credited to anyone but ThoughtSpot, or a capture header that names a different Model from the one
+the AgentQL queries. A recapture that changes what a lesson teaches therefore breaks the build
+instead of quietly teaching something false.
+
+Plugins
+-------
+A plugin is a module in `checks/` with a NAME. Everything else is optional:
+
+  KEYS          {level: {content keys it owns}}, levels top, realm, encounter, point, trial, path.
+                The build rejects any content key that neither the engine nor a plugin owns.
+  REFS          {"realm" | "encounter": {key: JSON Schema}}: what it records under that level's refs.
+  META          a JSON Schema object for what it records under meta[NAME].
+  FILLS         the pane ids it fills (a pane's `from` in pack.yaml names the plugin).
+  POINT_KINDS, TRIAL_KINDS   point and trial kinds it compiles; COMPILES_PATH: it compiles paths.
+  load(pack, errors) -> ctx                       read its sources once
+  meta(ctx) -> dict
+  realm(ctx, r, where, errors) -> refs
+  encounter(ctx, e, panes, where, errors) -> refs  may fill panes {id: lines}
+  check_point(ctx, p, panes, where, errors)        any point
+  point(ctx, p, panes, highlights, where, errors) -> {options, correct, rule_tag}   its kinds
+  trial(ctx, t, where, errors) -> trial            its kinds
+  path(ctx, path, where, errors) -> path
+  finish(ctx, pack, data, errors)                  whole-quest checks
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import importlib.util
 import json
 import pathlib
 import re
@@ -36,19 +62,24 @@ import sys
 
 import yaml
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import denylist  # noqa: E402
+
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-LESSON_SQL = ROOT / "agents/cli/ts-object-model-agentql-query/references/lesson-sql.md"
-LEARNING_PATH = ROOT / "agents/cli/ts-object-model-agentql-query/references/learning-path.md"
-ENCOUNTERS = HERE / "encounters.yaml"
-TEMPLATE = HERE / "game.html"
-SCHEMA = HERE / "quest.schema.json"
-SCHEMA_VERSION = 1
+PACKS = HERE / "packs"
+CHECKS = HERE / "checks"
+CORE_SCHEMA = HERE / "schema" / "core.json"
+TEMPLATE = HERE / "classic" / "game.html"
+DENYLIST = HERE / "denylist.txt"
+DEFAULT_PACK = "agentql"
+SCHEMA_VERSION = 2
 BESIDE = ("quest.json", "quest.schema.json")  # written next to the page, so --out may not name them
 FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
 PLACEHOLDER = "__QUEST_DATA__"
 FONT_PLACEHOLDER = "/*__FONT_FACES__*/"
+PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
 
 # (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
 FONTS = (
@@ -57,330 +88,476 @@ FONTS = (
     ("IBM Plex Mono", 600, "ibm-plex-mono-latin-600-normal.woff2"),
 )
 
-WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
-WHO_ORDER = ("forge", "agentql", "ai")
-RULE_BY = ("model", "thoughtspot", "agentql", "determinism")
+ID = re.compile(r"[a-z][a-z0-9_]*")
+RESERVED_IDS = {"hall"}  # step ids are "<encounter id>:<step>" and "hall:<hall id>"
 ALL = "*"
-_STRING = re.compile(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""")    # string literals and quoted names
+LEVELS = ("top", "realm", "hall", "encounter", "point", "trial", "path")
+CORE_KEYS = {
+    "top": {"realms", "encounters", "routes"},
+    "realm": {"id", "name", "depth", "minutes", "covers", "sealed", "scroll", "halls", "decree", "encounters",
+              "source"},  # source: a note for maintainers, not shown
+    "hall": {"id", "title", "teach", "columns", "rows", "trials"},
+    "encounter": {"id", "quest", "path", "points", "takeaway"},  # plus the ids of content panes
+    "point": {"kind", "ask", "hint", "why", "options", "rule", "rule_tag"},  # plus pane ids (highlights)
+    "trial": {"kind", "text", "why", "options", "claim", "truth"},
+    "path": {"options"},
+}
+MANIFEST_KEYS = {"id", "title", "publish_path", "storage_key", "unlock", "checks", "sources", "panes",
+                 "rule_tags", "lexicon", "explore"}
+LEXICON = ("guide", "compiler", "foe", "reward", "currency")
+GROUPS = ("rules", "yours", "verdict")
+UNLOCKS = ("first_realm_first", "none")
+MATCHES = ("contains", "line")
 
 
-def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
-    """Read the capture date and, per case id, its AgentQL and generated SQL (None if rejected).
+class Pack:
+    """One pack folder, read and checked as far as it can be without its content compiled."""
 
-    The layout is fixed by tools/agentql-retest/build_lesson_sql.py: a `## <case id>` heading,
-    an AgentQL ```sql block, then a second ```sql block only when the status was SUCCESS.
-    """
-    m = re.search(r"captured live on .*? on\s+(\d{4}-\d{2}-\d{2})", text, re.S)
-    date = m.group(1) if m else None
-    cases: dict[str, dict] = {}
-    for block in re.split(r"^## ", text, flags=re.M)[1:]:
-        cid = block.split("\n", 1)[0].strip()
-        blocks = re.findall(r"```sql\n(.*?)\n```", block, re.S)
-        ok = "`status: SUCCESS`" in block and len(blocks) > 1
-        cases[cid] = {"agentql": blocks[0] if blocks else "", "sql": blocks[1] if ok else None}
-    return date, cases
+    def __init__(self, pid: str, packs: pathlib.Path | None = None):
+        self.dir = (packs or PACKS) / pid
+        self.errors: list[str] = []
+        self.manifest = self._yaml("pack.yaml")
+        self.content_text = (self.dir / "content.yaml").read_text(encoding="utf-8")
+        self.doc = yaml.safe_load(self.content_text) or {}
+        self.strings = self._yaml("strings.yaml")
+        m = self.manifest
+        self.id, self.title = m.get("id"), m.get("title", "")
+        self.publish_path, self.storage_key = m.get("publish_path", ""), m.get("storage_key", "")
+        self.panes = m.get("panes") or []
+        self.rule_tags = m.get("rule_tags") or {}
+        self._check_manifest(pid)
+
+    def _yaml(self, name: str) -> dict:
+        data = yaml.safe_load((self.dir / name).read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            self.errors.append(f"{name}: must be a mapping")
+            return {}
+        return data
+
+    def source(self, name: str) -> pathlib.Path:
+        return ROOT / (self.manifest.get("sources") or {})[name]
+
+    def string(self, key: str, **values: str) -> str:
+        text = self.strings.get(key, "")
+        for k, v in values.items():
+            text = text.replace("{" + k + "}", v)
+        return text
+
+    def _check_manifest(self, pid: str) -> None:
+        m, err = self.manifest, self.errors.append
+        for k in sorted(set(m) - MANIFEST_KEYS):
+            err(f"pack.yaml: unknown key {k!r}")
+        if self.id != pid or not ID.fullmatch(str(self.id)):
+            err(f"pack.yaml: id must be the folder name ({pid!r}), lowercase letters, digits and _")
+        if not self.title:
+            err("pack.yaml: missing title")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", str(self.publish_path)):
+            err("pack.yaml: publish_path must be a folder name (lowercase letters, digits and -)")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", str(self.storage_key)):
+            err("pack.yaml: storage_key must be lowercase letters, digits, - and _")
+        if m.get("unlock") not in UNLOCKS:
+            err(f"pack.yaml: unlock must be one of {list(UNLOCKS)}")
+        for name in m.get("checks") or []:
+            if not (CHECKS / f"{name}.py").is_file():
+                err(f"pack.yaml: no plugin checks/{name}.py")
+        for name, rel in (m.get("sources") or {}).items():
+            if not isinstance(rel, str) or not (ROOT / rel).is_file():
+                err(f"pack.yaml: source {name!r} is not a file in the repo: {rel!r}")
+        lexicon = m.get("lexicon") or {}
+        if sorted(lexicon) != sorted(LEXICON) or not all(isinstance(v, str) and v for v in lexicon.values()):
+            err(f"pack.yaml: lexicon must name exactly {list(LEXICON)}")
+        for tag, spec in self.rule_tags.items():
+            if not ID.fullmatch(str(tag)) or not isinstance(spec, dict) or set(spec) != {"label", "group"} \
+                    or not isinstance(spec.get("label"), str) or spec.get("group") not in GROUPS:
+                err(f"pack.yaml: rule tag {tag!r} needs a label and a group ({'/'.join(GROUPS)})")
+        if not isinstance((m.get("explore") or {}).get("realms", []), list):
+            err("pack.yaml: explore.realms must be a list of realm ids")
+        for k, v in self.strings.items():
+            if not ID.fullmatch(str(k)) or not isinstance(v, str):
+                err(f"strings.yaml: {k!r} must be a lowercase key with a text value")
+        self._check_panes()
+
+    def _check_panes(self) -> None:
+        err, ids = self.errors.append, []
+        if not self.panes:
+            err("pack.yaml: needs at least one pane")
+        for n, p in enumerate(self.panes, 1):
+            if not isinstance(p, dict):
+                err(f"pack.yaml: pane {n} must be a mapping")
+                continue
+            pid = p.get("id")
+            if not ID.fullmatch(str(pid)) or pid in ids:
+                err(f"pack.yaml: pane {n}: id must be unique, lowercase letters, digits and _")
+            ids.append(pid)
+            if set(p) != {"id", "from", "match", "label", "name", "caption"}:
+                err(f"pack.yaml: pane {pid}: needs exactly id, from, match, label, name, caption")
+            if p.get("from") != "content" and p.get("from") not in (self.manifest.get("checks") or []):
+                err(f"pack.yaml: pane {pid}: from must be content or one of the pack's checks")
+            if p.get("match") not in MATCHES:
+                err(f"pack.yaml: pane {pid}: match must be one of {list(MATCHES)}")
+            for k in ("label", "name"):
+                if p.get(k) not in self.strings:
+                    err(f"pack.yaml: pane {pid}: {k} {p.get(k)!r} is not in strings.yaml")
+            if p.get("caption") and p.get("caption") not in self.strings:
+                err(f"pack.yaml: pane {pid}: caption {p.get('caption')!r} is not in strings.yaml")
+
+    @property
+    def pane_ids(self) -> list[str]:
+        return [p.get("id") for p in self.panes if isinstance(p, dict)]
+
+    @property
+    def content_panes(self) -> list[str]:
+        return [p.get("id") for p in self.panes if isinstance(p, dict) and p.get("from") == "content"]
 
 
-def parse_capture_model(text: str) -> str | None:
-    """The Model the capture was taken on, from the header's "captured live on the sample Model **`…`**"."""
-    m = re.search(r"captured\s+live\s+on\s+the\s+sample\s+Model\s+\*\*`([^`]+)`\*\*", text)
-    return m.group(1).strip() if m else None
+def pack_ids(packs: pathlib.Path | None = None) -> list[str]:
+    return sorted(p.parent.name for p in (packs or PACKS).glob("*/pack.yaml"))
 
 
-def _norm(sql: str) -> str:
-    """Normalise layout only: line breaks and indentation may differ, nothing else.
-
-    Outside string literals, runs of whitespace collapse to one space, and whitespace is
-    dropped just inside brackets and before commas — the places a reader adds line breaks.
-    `(Sample) Retail` and `(Sample)Retail`, or `a, b` and `a,b`, stay different. String
-    literals and double-quoted names are kept byte for byte.
-    """
-    parts = _STRING.split(sql)
-    for i in range(0, len(parts), 2):
-        s = re.sub(r"\s+", " ", parts[i])  # not " ".join(split()): that trims the edges next to a literal
-        s = re.sub(r"\(\s+", "(", s)
-        s = re.sub(r"\s+([),])", r"\1", s)
-        parts[i] = s
-    return "".join(parts).strip()
+def check_packs_unique(packs: pathlib.Path | None = None) -> list[str]:
+    """Every pack is served from the same origin, and saving rewrites the whole progress object,
+    so two packs sharing a storage key would erase each other's saves."""
+    errors, seen, packs = [], {}, packs or PACKS
+    for pid in pack_ids(packs):
+        m = yaml.safe_load((packs / pid / "pack.yaml").read_text(encoding="utf-8")) or {}
+        for key in ("id", "publish_path", "storage_key"):
+            other = seen.setdefault((key, m.get(key)), pid)
+            if other != pid:
+                errors.append(f"packs {other} and {pid} share {key} {m.get(key)!r}")
+    return errors
 
 
-def _scroll_hl(matches: list[str], lines: list[str], where: str, errors: list[str]) -> list[int] | str:
-    """AgentQL highlights: substring match (the display copy is already pinned to the capture)."""
+def load_plugins(names: list[str]) -> list:
+    plugins = []
+    for name in names:
+        path = CHECKS / f"{name}.py"
+        if not path.is_file():
+            continue  # reported by the manifest check
+        spec = importlib.util.spec_from_file_location(f"quest_check_{name}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if getattr(mod, "NAME", None) != name:
+            raise ValueError(f"checks/{name}.py must set NAME = {name!r}")
+        plugins.append(mod)
+    return plugins
+
+
+def _unknown(item: dict, allowed: set[str], where: str, errors: list[str]) -> None:
+    for k in sorted(set(item) - allowed, key=str):
+        errors.append(f"{where}: unknown key {k!r} (no check owns it)")
+
+
+def _id(value, where: str, seen: set, errors: list[str]) -> str:
+    if not isinstance(value, str) or not ID.fullmatch(value) or value in RESERVED_IDS:
+        errors.append(f"{where}: id {value!r} must be lowercase letters, digits and _ (and not 'hall')")
+        return str(value)
+    if value in seen:
+        errors.append(f"{where}: duplicate id {value!r}")
+    seen.add(value)
+    return value
+
+
+def _highlight(matches: list[str], lines: list[str], mode: str, where: str, errors: list[str]) -> list[int] | str:
+    """`contains`: substring match. `line`: each match must equal a whole line (indentation
+    ignored), so a recapture that edits that line — LIMIT 100000 → 1000000, JOIN → LEFT OUTER
+    JOIN — fails."""
     if ALL in matches:
         return "all"
     hits: set[int] = set()
     for m in matches:
-        found = [i for i, line in enumerate(lines) if m in line]
-        if not found:
-            errors.append(f"{where}: match {m!r} hits no line")
+        if mode == "line":
+            found = [i for i, line in enumerate(lines) if line.strip() == m.strip()]
+            if not found:
+                errors.append(f"{where}: no line is exactly {m!r}")
+        else:
+            found = [i for i, line in enumerate(lines) if m in line]
+            if not found:
+                errors.append(f"{where}: match {m!r} hits no line")
         hits.update(found)
     return sorted(hits)
 
 
-def _sql_hl(matches: list[str], lines: list[str], where: str, errors: list[str]) -> list[int] | str:
-    """SQL highlights: each match must equal a whole line (ignoring indentation), so a
-    recapture that edits that line — LIMIT 100000 → 1000000, JOIN → LEFT OUTER JOIN — fails."""
-    if ALL in matches:
-        return "all"
-    hits: set[int] = set()
-    for m in matches:
-        found = [i for i, line in enumerate(lines) if line.strip() == m.strip()]
-        if not found:
-            errors.append(f"{where}: no SQL line is exactly {m!r}")
-        hits.update(found)
-    return sorted(hits)
+class Compiler:
+    """Turns a pack's content, with its plugins, into the game's data."""
+
+    def __init__(self, pack: Pack, plugins: list, contexts: dict | None = None):
+        self.pack, self.plugins = pack, plugins
+        self.errors: list[str] = list(pack.errors)
+        given = contexts or {}  # tests hand in a plugin's sources already loaded, e.g. an edited capture
+        self.ctx = {pl.NAME: given[pl.NAME] if pl.NAME in given else (pl.load(pack, self.errors) if hasattr(pl, "load") else None)
+                    for pl in plugins}
+        self.owned = {lvl: set().union(*(getattr(pl, "KEYS", {}).get(lvl, set()) for pl in plugins)) for lvl in LEVELS}
+        self.point_kinds = {k: pl for pl in plugins for k in getattr(pl, "POINT_KINDS", ())}
+        self.trial_kinds = {k: pl for pl in plugins for k in getattr(pl, "TRIAL_KINDS", ())}
+        self.path_plugin = next((pl for pl in plugins if getattr(pl, "COMPILES_PATH", False)), None)
+        self.meta = {pl.NAME: pl.meta(self.ctx[pl.NAME]) for pl in plugins if getattr(pl, "META", None)}
+
+    def _hooks(self, name: str):
+        return [(pl, self.ctx[pl.NAME]) for pl in self.plugins if hasattr(pl, name)]
+
+    def _refs(self, level: str, item: dict, where: str) -> dict:
+        refs = {}
+        for pl, ctx in self._hooks(level):
+            refs.update(getattr(pl, level)(ctx, item, where, self.errors) if level == "realm"
+                        else getattr(pl, level)(ctx, item, self._panes, where, self.errors))
+        return refs
+
+    def trial(self, t: dict, where: str) -> dict:
+        kind = t.get("kind")
+        allowed = CORE_KEYS["trial"] | self.owned["trial"]
+        _unknown(t, allowed, where, self.errors)
+        if kind in self.trial_kinds:
+            pl = self.trial_kinds[kind]
+            return pl.trial(self.ctx[pl.NAME], t, where, self.errors)
+        if kind == "claim":
+            if not t.get("claim") or not t.get("why") or not isinstance(t.get("truth"), bool):
+                self.errors.append(f"{where}: a claim needs claim, why and a true/false truth")
+            return {"kind": "claim", "text": t.get("claim", ""), "why": t.get("why", ""),
+                    "options": [self.pack.string("claim_true"), self.pack.string("claim_false")],
+                    "correct": 0 if t.get("truth") is True else 1}
+        if kind == "choice":
+            opts = t.get("options") or []
+            correct = [i for i, o in enumerate(opts) if isinstance(o, dict) and o.get("correct")]
+            if len(opts) < 2 or len(correct) != 1 or not t.get("text") or not t.get("why"):
+                self.errors.append(f"{where}: a choice needs text, why, 2+ options and exactly one correct")
+            return {"kind": "choice", "text": t.get("text", ""), "why": t.get("why", ""),
+                    "options": [o.get("text", "") for o in opts if isinstance(o, dict)], "correct": correct[0] if correct else 0}
+        kinds = sorted({"claim", "choice"} | set(self.trial_kinds))
+        self.errors.append(f"{where}: kind must be one of {kinds}, got {kind!r}")
+        return {"kind": "choice", "text": "", "why": "", "options": [], "correct": 0}
+
+    def halls(self, r: dict, rid: str, hall_ids: set) -> list[dict]:
+        """A realm of halls teaches one idea per hall, with just the slice of the comparison table it
+        needs, then tests it straight away. The full table (`scroll`) is the recap at the end."""
+        errors = self.errors
+        scroll = r.get("scroll") or {}
+        columns = scroll.get("columns") or []
+        rows = {row.get("label"): row.get("cells") or [] for row in scroll.get("rows") or []}
+        for label, cells in rows.items():
+            if len(cells) != len(columns):
+                errors.append(f"realm {rid}: scroll row {label!r} has {len(cells)} cells for {len(columns)} "
+                              f"columns (an unquoted comma in YAML splits a cell)")
+        halls, taught = [], set()
+        for n, h in enumerate(r.get("halls") or [], 1):
+            where = f"realm {rid} hall {n}"
+            _unknown(h, CORE_KEYS["hall"], where, errors)
+            hid = _id(h.get("id"), where, hall_ids, errors)
+            cols = h.get("columns") or []
+            bad_cols = [c for c in cols if c not in columns]
+            bad_rows = [x for x in h.get("rows") or [] if x not in rows]
+            if bad_cols or bad_rows:
+                errors.append(f"{where}: unknown scroll columns {bad_cols} or rows {bad_rows}")
+            if not h.get("title") or not h.get("teach"):
+                errors.append(f"{where}: needs a title and something to teach")
+            trials = [self.trial(t, f"{where} trial {i}") for i, t in enumerate(h.get("trials") or [], 1)]
+            if not trials:
+                errors.append(f"{where}: needs at least one question")
+            idx = [columns.index(c) for c in cols if c in columns]
+            table = [{"label": x, "cells": [rows[x][i] for i in idx if i < len(rows[x])]} for x in h.get("rows") or [] if x in rows]
+            taught.update(x for x in h.get("rows") or [])
+            halls.append({"id": hid, "title": h.get("title", ""), "teach": h.get("teach") or [], "columns": cols,
+                          "rows": table, "trials": trials})
+        for label in rows:
+            if halls and label not in taught:
+                errors.append(f"realm {rid}: scroll row {label!r} is in the recap but no hall teaches it")
+        return halls
+
+    def path(self, p: dict, where: str) -> dict:
+        if self.path_plugin:
+            _unknown(p, self.owned["path"], where, self.errors)
+            return self.path_plugin.path(self.ctx[self.path_plugin.NAME], p, where, self.errors)
+        _unknown(p, CORE_KEYS["path"], where, self.errors)
+        opts = [o for o in p.get("options") or [] if isinstance(o, dict)]
+        wins = [i for i, o in enumerate(opts) if o.get("outcome") == "win"]
+        if len(opts) < 2 or len(wins) != 1 or any(o.get("outcome") not in ("win", "loss", "blocked") or not o.get("why")
+                                                   for o in opts):
+            self.errors.append(f"{where}: a path needs 2+ options, each with an outcome (win/loss/blocked) and why, "
+                               f"and exactly one win")
+        return {"options": [o.get("text", "") for o in opts],
+                "outcomes": [{"kind": o.get("outcome", "loss"), "why": o.get("why", "")} for o in opts],
+                "correct": wins[0] if wins else 0}
+
+    def point(self, p: dict, where: str) -> dict:
+        errors, pack = self.errors, self.pack
+        _unknown(p, CORE_KEYS["point"] | set(pack.pane_ids) | self.owned["point"], where, errors)
+        highlights = {}
+        for spec in pack.panes:
+            matches = p.get(spec["id"]) or []
+            if not isinstance(matches, list):
+                errors.append(f"{where}: {spec['id']} must be a list of matches")
+                matches = []
+            highlights[spec["id"]] = _highlight(matches, self._panes.get(spec["id"]) or [], spec["match"],
+                                                f"{where} {spec['id']}", errors)
+        out = {"ask": p.get("ask", ""), "hint": p.get("hint", ""), "why": p.get("why", ""), "highlights": highlights}
+        for field in ("ask", "hint", "why"):
+            if not out[field]:
+                errors.append(f"{where}: missing {field}")
+        for pl, ctx in self._hooks("check_point"):
+            pl.check_point(ctx, p, self._panes, where, errors)
+        kind = p.get("kind")
+        default_tag = ""
+        if kind in self.point_kinds:
+            pl = self.point_kinds[kind]
+            got = pl.point(self.ctx[pl.NAME], p, self._panes, highlights, where, errors)
+            options, correct, default_tag = got["options"], got["correct"], got.get("rule_tag", "")
+        elif kind == "choice":
+            opts = p.get("options") or []
+            right = [i for i, o in enumerate(opts) if isinstance(o, dict) and o.get("correct")]
+            if len(opts) < 2 or len(right) != 1:
+                errors.append(f"{where}: a choice needs 2+ options and exactly one correct")
+            options, correct = [o.get("text", "") for o in opts if isinstance(o, dict)], right[0] if right else 0
+        else:
+            errors.append(f"{where}: kind must be one of {sorted({'choice'} | set(self.point_kinds))}, got {kind!r}")
+            options, correct = [], 0
+        tag = p.get("rule_tag") or default_tag
+        if p.get("rule") and tag not in pack.rule_tags:
+            errors.append(f"{where}: rule_tag must be one of {list(pack.rule_tags)}, got {tag!r}")
+        out.update(options=options, correct=correct, rule=p.get("rule", ""),
+                   ruleTag=tag if p.get("rule") and tag in pack.rule_tags else "")
+        return out
+
+    def encounter(self, e: dict, where: str) -> dict:
+        errors, pack = self.errors, self.pack
+        _unknown(e, CORE_KEYS["encounter"] | set(pack.content_panes) | self.owned["encounter"], where, errors)
+        self._panes = {pid: str(e.get(pid) or "").rstrip("\n").splitlines() for pid in pack.content_panes}
+        for pid in pack.content_panes:
+            if not self._panes[pid]:
+                errors.append(f"{where}: missing the {pid} pane")
+        refs = self._refs("encounter", e, where)
+        panes = []
+        for spec in pack.panes:
+            lines = self._panes.get(spec["id"])
+            if lines is None:
+                errors.append(f"{where}: {spec['from']} did not fill the {spec['id']} pane")
+                lines = []
+            panes.append({"id": spec["id"], "label": pack.string(spec["label"]), "name": pack.string(spec["name"]),
+                          "lines": lines, "caption": self.caption(spec, refs, where)})
+        points = [self.point(p, f"{where} point {i}") for i, p in enumerate(e.get("points") or [], 1)]
+        if not points:
+            errors.append(f"{where}: no points")
+        for field in ("quest", "path", "takeaway"):
+            if not e.get(field):
+                errors.append(f"{where}: missing {field}")
+        return {"id": e.get("id", ""), "quest": e.get("quest", ""), "path": self.path(e.get("path") or {}, f"{where} path"),
+                "panes": panes, "points": points, "takeaway": e.get("takeaway", ""), "refs": refs}
+
+    def caption(self, spec: dict, refs: dict, where: str) -> str:
+        if not spec.get("caption"):
+            return ""
+        values = {k: str(v) for m in self.meta.values() for k, v in m.items()} | {k: str(v) for k, v in refs.items()}
+        text = self.pack.strings.get(spec["caption"], "")
+        for name in re.findall(r"\{(\w+)\}", text):
+            if name not in values:
+                self.errors.append(f"{where}: caption {spec['caption']} names {{{name}}}, which nothing provides")
+        return self.pack.string(spec["caption"], **values)
+
+    def compile(self) -> dict:
+        errors, pack, doc = self.errors, self.pack, self.pack.doc
+        _unknown(doc, CORE_KEYS["top"] | self.owned["top"], "content.yaml", errors)
+        encounter_ids, hall_ids, realm_ids = set(), set(), set()
+        by_id: dict[str, dict] = {}
+        for n, e in enumerate(doc.get("encounters") or [], 1):
+            eid = _id(e.get("id"), f"encounter {n}", encounter_ids, errors)
+            by_id[eid] = self.encounter(e, f"encounter {eid}")
+
+        realms, used = [], set()
+        for n, r in enumerate(doc.get("realms") or [], 1):
+            rid = _id(r.get("id"), f"realm {n}", realm_ids, errors)
+            where = f"realm {rid}"
+            _unknown(r, CORE_KEYS["realm"] | self.owned["realm"], where, errors)
+            for field in ("name", "covers", "depth", "minutes"):
+                if not r.get(field):
+                    errors.append(f"{where}: missing {field}")
+            if not isinstance(r.get("minutes"), int) or isinstance(r.get("minutes"), bool):
+                errors.append(f"{where}: minutes must be a whole number")  # never 4.0: strict decoders reject a float
+            halls = self.halls(r, rid, hall_ids)
+            trials = [t for h in halls for t in h["trials"]]
+            enc_ids = list(r.get("encounters") or [])
+            for eid in enc_ids:
+                if eid not in by_id:
+                    errors.append(f"{where}: encounter {eid!r} is not defined under encounters")
+                elif eid in used:
+                    errors.append(f"{where}: encounter {eid!r} is already in another realm")
+                used.add(eid)
+            sealed = bool(r.get("sealed"))
+            if sealed and (trials or enc_ids):
+                errors.append(f"{where}: a sealed realm has no trials or encounters")
+            if not sealed and not (trials or enc_ids):
+                errors.append(f"{where}: an open realm needs trials or encounters (or sealed: true)")
+            if halls and not r.get("decree"):
+                errors.append(f"{where}: a realm of halls needs a decree")
+            realms.append({
+                "id": rid, "name": r.get("name", ""), "depth": r.get("depth", ""),
+                "minutes": r.get("minutes", 0), "covers": r.get("covers", ""), "sealed": sealed,
+                "scroll": r.get("scroll"), "halls": halls, "decree": r.get("decree") or [],
+                "encounters": [by_id[eid] for eid in enc_ids if eid in by_id], "refs": self._refs("realm", r, where),
+            })
+        if not realms:
+            errors.append("realms: none defined")
+        elif pack.manifest.get("unlock") == "first_realm_first" and realms[0]["sealed"]:
+            errors.append("realms: the first realm is where every player starts, and every other realm waits "
+                          "for it (unlock: first_realm_first); it can't be sealed")
+        for eid in by_id:
+            if eid not in used:
+                errors.append(f"encounter {eid}: defined under encounters but in no realm")
+        explore = (pack.manifest.get("explore") or {}).get("realms", [])
+        for rid in explore if isinstance(explore, list) else []:
+            if rid not in realm_ids:
+                errors.append(f"pack.yaml: explore realm {rid!r} is not a realm")
+
+        routes = []
+        for rt in doc.get("routes") or []:
+            bad = [x for x in rt.get("path") or [] if x not in realm_ids]
+            if bad or not rt.get("who") or not rt.get("path"):
+                errors.append(f"route {rt.get('who')!r}: needs who and a path of realm ids (unknown: {bad})")
+            routes.append({"who": rt.get("who", ""), "path": rt.get("path") or []})
+
+        data = {"schema_version": SCHEMA_VERSION, "pack": self.pack_data(), "meta": self.meta,
+                "realms": realms, "routes": routes}
+        for pl, ctx in self._hooks("finish"):
+            pl.finish(ctx, pack, data, errors)
+        return data
+
+    def pack_data(self) -> dict:
+        m = self.pack.manifest
+        return {"id": self.pack.id, "title": self.pack.title, "storage_key": self.pack.storage_key,
+                "unlock": m.get("unlock"), "explore_realms": list((m.get("explore") or {}).get("realms") or []),
+                "lexicon": dict(m.get("lexicon") or {}), "rule_tags": self.pack.rule_tags, "strings": self.pack.strings}
 
 
-def _point(p: dict, who: dict, sql: list[str], scroll: list[str], cases: dict[str, dict],
-           where: str, errors: list[str]) -> dict:
-    kind = p.get("kind")
-    out = {
-        "ask": p.get("ask", ""), "hint": p.get("hint", ""), "lesson": p.get("lesson", ""),
-        "sqlHl": _sql_hl(p.get("sql") or [], sql, f"{where} sql", errors),
-        "scrollHl": _scroll_hl(p.get("scroll") or [], scroll, f"{where} scroll", errors),
-    }
-    for field in ("ask", "hint", "lesson"):
-        if not out[field]:
-            errors.append(f"{where}: missing {field}")
-    # Facts about the whole statement that a single highlighted line can't pin down,
-    # e.g. the fact table appears once (pruning held) or only one join is outer.
-    whole = "\n".join(sql)
-    for needle, want in (p.get("sql_count") or {}).items():
-        got = whole.count(needle)
-        if got != want:
-            errors.append(f"{where}: expected {needle!r} {want} time(s) in the SQL, found {got}")
-    stripped = [line.strip() for line in sql if line.strip()]
-    last = p.get("sql_last_line")
-    if last and (not stripped or stripped[-1] != last.strip()):
-        errors.append(f"{where}: expected the statement to end with {last!r}, it ends with {stripped[-1] if stripped else None!r}")
-    for before, after in p.get("sql_before") or []:
-        ia = next((i for i, l in enumerate(stripped) if l == before.strip()), None)
-        ib = next((i for i, l in enumerate(stripped) if l == after.strip()), None)
-        if ia is None or ib is None or ia >= ib:
-            errors.append(f"{where}: expected {before!r} before {after!r} in the SQL")
-    # "Could the AI write X?" — only true while the capture still shows X being rejected.
-    rejected = p.get("rejected_case")
-    if rejected:
-        cap = cases.get(rejected)
-        if cap is None:
-            errors.append(f"{where}: rejected_case {rejected!r} is not in lesson-sql.md")
-        elif cap["sql"] is not None:
-            errors.append(f"{where}: rejected_case {rejected!r} now compiles (SUCCESS), so the answer is wrong")
-    if kind == "who":
-        if not p.get("sql"):
-            errors.append(f"{where}: a who point must highlight the SQL it asks about")
-        target = WHO_ANSWERS.get(p.get("answer"))
-        if target is None:
-            errors.append(f"{where}: answer must be one of {sorted(WHO_ANSWERS)}, got {p.get('answer')!r}")
-            target = "forge"
-        out["options"] = [who.get(k, "") for k in WHO_ORDER]
-        out["correct"] = WHO_ORDER.index(target)
-    elif kind == "choice":
-        opts = p.get("options") or []
-        correct = [i for i, o in enumerate(opts) if o.get("correct")]
-        if len(opts) < 2 or len(correct) != 1:
-            errors.append(f"{where}: a choice needs 2+ options and exactly one correct")
-        out["options"] = [o.get("text", "") for o in opts]
-        out["correct"] = correct[0] if correct else 0
-    else:
-        errors.append(f"{where}: kind must be 'who' or 'choice', got {kind!r}")
-    return out
+def compile_pack(pack: Pack, contexts: dict | None = None) -> tuple[dict, list[str]]:
+    """Compile a pack with the plugins it names. Returns (data, errors). `contexts` replaces a
+    plugin's loaded sources by name (tests use it to compile against an edited capture)."""
+    compiler = Compiler(pack, load_plugins(pack.manifest.get("checks") or []), contexts)
+    data = compiler.compile()
+    return data, compiler.errors
 
 
-def _path(path: dict, engines: dict, where: str, errors: list[str]) -> dict:
-    """The quest's first question: which engine fits the merchant's intent?
+def pack_schema(pack: Pack, plugins: list | None = None) -> dict:
+    """This pack's schema: schema/core.json with the pack's parts filled in and closed (every field
+    listed and required), so it passes lint_schema and a real 2020-12 validator."""
+    core = json.loads(CORE_SCHEMA.read_text(encoding="utf-8"), parse_constant=_not_json)
+    plugins = load_plugins(pack.manifest.get("checks") or []) if plugins is None else plugins
+    schema = {"$schema": core["$schema"], "$id": f"{PAGES}/{pack.publish_path}/quest.schema.json",
+              "title": f"{pack.title} data"}
+    schema.update({k: v for k, v in core.items() if k not in schema})
+    defs = schema["$defs"]
 
-    The dragon is the AgentQL path, so AgentQL must be the answer. Every other engine either
-    explains why it doesn't fit (`why`) or is closed in this realm (`blocked`), which costs no
-    gold: the player simply chooses again.
-    """
-    order = list(engines)
-    answer, blocked, why = path.get("answer"), path.get("blocked") or {}, path.get("why") or {}
-    if answer != "agentql":
-        errors.append(f"{where}: the dragon is the AgentQL path, so path.answer must be 'agentql', got {answer!r}")
-    if answer in blocked:
-        errors.append(f"{where}: the right path can't be blocked")
-    outcomes = []
-    for k in order:
-        text = blocked.get(k) if k in blocked else why.get(k)
-        if not text:
-            errors.append(f"{where}: path needs a why (or blocked) text for {k}")
-        outcomes.append({"kind": "blocked" if k in blocked else "win" if k == answer else "loss", "why": text or ""})
-    for k in list(blocked) + list(why):
-        if k not in engines:
-            errors.append(f"{where}: unknown engine {k!r} in path")
-    return {"options": [f"Send it to {engines[k]}" for k in order], "outcomes": outcomes,
-            "correct": order.index(answer) if answer in order else 0}
+    def close(node: dict, props: dict) -> None:
+        node["properties"], node["required"] = props, list(props)
 
-
-def _encounter(e: dict, n: int, who: dict, engines: dict, cases: dict[str, dict], errors: list[str]) -> dict | None:
-    cid = e.get("case", f"#{n}")
-    cap = cases.get(cid)
-    if cap is None:
-        errors.append(f"{cid}: not in lesson-sql.md")
-        return None
-    if cap["sql"] is None:
-        errors.append(f"{cid}: captured status was not SUCCESS, so there is no SQL to fight")
-        return None
-    agentql = (e.get("agentql") or "").rstrip("\n")
-    if _norm(agentql) != _norm(cap["agentql"]):
-        errors.append(f"{cid}: agentql differs from the captured AgentQL (only layout may differ)")
-    sql_lines, scroll_lines = cap["sql"].splitlines(), agentql.splitlines()
-    points = [_point(p, who, sql_lines, scroll_lines, cases, f"{cid} point {i}", errors)
-              for i, p in enumerate(e.get("points") or [], 1)]
-    if not points:
-        errors.append(f"{cid}: no points")
-    for field in ("quest", "path", "takeaway"):
-        if not e.get(field):
-            errors.append(f"{cid}: missing {field}")
-    for i, (raw, pt) in enumerate(zip(e.get("points") or [], points), 1):
-        if raw.get("kind") == "who" and not raw.get("rule"):
-            errors.append(f"{cid} point {i}: a who point needs a rule (the hoard lists it)")
-        # The hoard tags each rule with who adds it; a who point's answer already says so.
-        by = raw.get("rule_by") or (raw.get("answer") if raw.get("kind") == "who" else None)
-        if raw.get("rule") and by not in RULE_BY:
-            errors.append(f"{cid} point {i}: rule_by must be one of {list(RULE_BY)}, got {by!r}")
-        pt["rule"], pt["ruleBy"] = raw.get("rule", ""), by or ""
-    return {"case": cid, "lesson": str(e.get("lesson") or ""), "quest": e.get("quest", ""),
-            "path": _path(e.get("path") or {}, engines, f"{cid} path", errors),
-            "agentql": scroll_lines, "sql": sql_lines, "points": points, "takeaway": e.get("takeaway", "")}
-
-
-def _trial(t: dict, engines: dict, where: str, errors: list[str]) -> dict:
-    kind = t.get("kind")
-    if kind == "claim":
-        if not t.get("claim") or not t.get("why") or not isinstance(t.get("truth"), bool):
-            errors.append(f"{where}: a claim needs claim, why and a true/false truth")
-        return {"kind": "claim", "text": t.get("claim", ""), "why": t.get("why", ""),
-                "options": ["Heed them. It is true.", "Banish them. It is false."],
-                "correct": 0 if t.get("truth") is True else 1}
-    if kind == "route":
-        order = list(engines)
-        if t.get("answer") not in engines:
-            errors.append(f"{where}: answer must be one of {order}, got {t.get('answer')!r}")
-        if not t.get("petition") or not t.get("why"):
-            errors.append(f"{where}: a route needs petition and why")
-        return {"kind": "route", "text": t.get("petition", ""), "why": t.get("why", ""),
-                "options": [f"Send it to {engines[k]}" for k in order],
-                "correct": order.index(t["answer"]) if t.get("answer") in engines else 0}
-    errors.append(f"{where}: kind must be 'claim' or 'route', got {kind!r}")
-    return {"kind": kind, "text": "", "why": "", "options": [], "correct": 0}
-
-
-def _halls(r: dict, engines: dict, rid: str, errors: list[str]) -> list[dict]:
-    """Law teaches one idea per hall, with just the slice of the comparison table it needs,
-    then tests it straight away. The full table (`scroll`) is the recap at the end."""
-    scroll = r.get("scroll") or {}
-    columns = scroll.get("columns") or []
-    rows = {row.get("label"): row.get("cells") or [] for row in scroll.get("rows") or []}
-    for label, cells in rows.items():
-        if len(cells) != len(columns):
-            errors.append(f"realm {rid}: scroll row {label!r} has {len(cells)} cells for {len(columns)} "
-                          f"columns (an unquoted comma in YAML splits a cell)")
-    halls, taught = [], set()
-    for n, h in enumerate(r.get("halls") or [], 1):
-        where = f"realm {rid} hall {n}"
-        cols = h.get("columns") or []
-        bad_cols = [c for c in cols if c not in columns]
-        bad_rows = [x for x in h.get("rows") or [] if x not in rows]
-        if bad_cols or bad_rows:
-            errors.append(f"{where}: unknown scroll columns {bad_cols} or rows {bad_rows}")
-        if not h.get("title") or not h.get("teach"):
-            errors.append(f"{where}: needs a title and something to teach")
-        trials = [_trial(t, engines, f"{where} trial {i}", errors) for i, t in enumerate(h.get("trials") or [], 1)]
-        if not trials:
-            errors.append(f"{where}: needs at least one question")
-        idx = [columns.index(c) for c in cols if c in columns]
-        table = [{"label": x, "cells": [rows[x][i] for i in idx if i < len(rows[x])]} for x in h.get("rows") or [] if x in rows]
-        taught.update(x for x in h.get("rows") or [])
-        halls.append({"title": h.get("title", ""), "teach": h.get("teach") or [], "columns": cols,
-                      "rows": table, "trials": trials})
-    for label in rows:
-        if halls and label not in taught:
-            errors.append(f"realm {rid}: scroll row {label!r} is in the recap but no hall teaches it")
-    return halls
-
-
-def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
-                  model: str | None) -> tuple[dict, list[str]]:
-    """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors).
-
-    `model` is the Model the capture's header names (see parse_capture_model)."""
-    errors: list[str] = []
-    model = (model or "").strip()
-    if not model:
-        errors.append("lesson-sql.md: no Model named in its header")
-    who = doc.get("who_options") or {}
-    missing = [k for k in WHO_ORDER if not who.get(k)]
-    if missing:
-        errors.append(f"who_options: missing {missing}")
-    engines = doc.get("engines") or {}
-    if len(engines) < 2:
-        errors.append("engines: need at least two engines for petitions")
-    if not date:
-        errors.append("lesson-sql.md: no capture date found in its header")
-
-    by_case: dict[str, dict] = {}
-    for n, e in enumerate(doc.get("encounters") or [], 1):
-        built = _encounter(e, n, who, engines, cases, errors)
-        if built:
-            by_case[built["case"]] = built
-            # The dragon's caption names the header's Model: it must be the one this AgentQL queries.
-            if model and not re.search(rf'\bFROM\s+"{re.escape(model)}"', cases[built["case"]]["agentql"], re.I):
-                errors.append(f"{built['case']}: the capture header names Model {model!r}, "
-                              f"but this AgentQL does not query FROM \"{model}\"")
-
-    realms, used, ids = [], set(), set()
-    for r in doc.get("realms") or []:
-        rid = r.get("id") or "?"
-        if rid in ids:
-            errors.append(f"realm {rid}: duplicate id")
-        ids.add(rid)
-        for field in ("name", "covers", "depth", "minutes"):
-            if not r.get(field):
-                errors.append(f"realm {rid}: missing {field}")
-        for field in ("module", "minutes"):  # whole numbers, never 4.0: strict decoders reject a float
-            if not isinstance(r.get(field), int) or isinstance(r.get(field), bool):
-                errors.append(f"realm {rid}: {field} must be a whole number")
-        halls = _halls(r, engines, rid, errors)
-        trials = [t for h in halls for t in h["trials"]]
-        enc_ids = list(r.get("encounters") or [])
-        for cid in enc_ids:
-            if cid not in by_case and not any(e.get("case") == cid for e in doc.get("encounters") or []):
-                errors.append(f"realm {rid}: encounter {cid!r} is not defined under encounters")
-            elif cid in used:
-                errors.append(f"realm {rid}: encounter {cid!r} is already in another realm")
-            used.add(cid)
-        sealed = bool(r.get("sealed"))
-        if sealed and (trials or enc_ids):
-            errors.append(f"realm {rid}: a sealed realm has no trials or encounters")
-        if not sealed and not (trials or enc_ids):
-            errors.append(f"realm {rid}: an open realm needs trials or encounters (or sealed: true)")
-        if halls and not r.get("decree"):
-            errors.append(f"realm {rid}: a realm of halls needs a decree")
-        realms.append({
-            "id": rid, "name": r.get("name", ""), "module": r.get("module"), "depth": r.get("depth", ""),
-            "minutes": r.get("minutes", 0), "covers": r.get("covers", ""), "sealed": sealed,
-            "scroll": r.get("scroll"), "halls": halls, "decree": r.get("decree") or [],
-            "encounters": [by_case[c] for c in enc_ids if c in by_case],
-        })
-    if not realms:
-        errors.append("realms: none defined")
-    elif realms[0]["sealed"] or not realms[0]["halls"]:
-        errors.append("realms: the first realm is where every player starts; it must be open with halls")
-    for cid in by_case:
-        if cid not in used:
-            errors.append(f"{cid}: defined under encounters but in no realm")
-
-    routes = []
-    for rt in doc.get("routes") or []:
-        bad = [x for x in rt.get("path") or [] if x not in ids]
-        if bad or not rt.get("who") or not rt.get("path"):
-            errors.append(f"route {rt.get('who')!r}: needs who and a path of realm ids (unknown: {bad})")
-        routes.append({"who": rt.get("who", ""), "path": rt.get("path") or []})
-
-    return {"schema_version": SCHEMA_VERSION, "captured": date, "model": model,
-            "realms": realms, "routes": routes}, errors
+    close(defs["pack"]["properties"]["strings"], {k: {"type": "string"} for k in pack.strings})
+    close(defs["pack"]["properties"]["rule_tags"], {k: {"$ref": "#/$defs/rule_tag"} for k in pack.rule_tags})
+    close(schema["properties"]["meta"], {pl.NAME: pl.META for pl in plugins if getattr(pl, "META", None)})
+    for level in ("realm", "encounter"):
+        refs = {}
+        for pl in plugins:
+            refs.update(getattr(pl, "REFS", {}).get(level, {}))
+        close(defs[level]["properties"]["refs"], refs)
+    close(defs["point"]["properties"]["highlights"], {pid: {"$ref": "#/$defs/highlight"} for pid in pack.pane_ids})
+    defs["point"]["properties"]["ruleTag"]["enum"] = ["", *pack.rule_tags]
+    defs["pane"]["properties"]["id"] = {"enum": pack.pane_ids}
+    return schema
 
 
 # The JSON Schema keywords quest.schema.json may use. Pre-commit needs no extra package for this;
@@ -535,63 +712,6 @@ def _check(value, schema: dict, root: dict, where: str) -> list[str]:
     return errors
 
 
-def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]], dict[str, str]]:
-    """Module numbers; per lesson number ("3.4") the case ids its **Guarded by** line names; and
-    per lesson number its heading title."""
-    modules = set(re.findall(r"^## Module (\d+)\b", text, re.M))
-    lessons: dict[str, set[str]] = {}
-    titles: dict[str, str] = {}
-    for m in re.finditer(r"^### (\d+\.\d+)\b([^\n]*)(.*?)(?=^##)", text + "\n##", re.S | re.M):
-        guarded = re.findall(r"\*\*Guarded by:?\*\*:?([^\n]*)", m.group(3))
-        lessons[m.group(1)] = {cid for line in guarded for cid in re.findall(r"`([^`]+)`", line)}
-        titles[m.group(1)] = m.group(2).strip()
-    return modules, lessons, titles
-
-
-def check_course_refs(encounters_text: str, doc: dict, modules: set[str], lessons: dict[str, set[str]],
-                      titles: dict[str, str] | None = None) -> list[str]:
-    """The game's text names lessons and modules by number; the course renumbers them.
-
-    Every "lesson X.Y" / "Module N" (or "Modules N and M") in encounters.yaml must still exist,
-    and each encounter's `lesson` must be one whose Guarded by line lists the encounter's case,
-    so "In lesson 3.4's live run" points at the lesson that actually teaches this SQL.
-    """
-    errors = []
-    expect = doc.get("lesson_titles") or {}
-    named = set(re.findall(r"\blessons? (\d+\.\d+)\b", encounters_text, re.I))
-    named |= {str(e.get("lesson")) for e in doc.get("encounters") or [] if e.get("lesson")}
-    for ref in sorted(named):
-        if ref not in lessons:
-            errors.append(f"encounters.yaml names lesson {ref}, which learning-path.md no longer has")
-        elif titles is not None:
-            # A renumbered or retitled course can leave a number pointing at a different lesson.
-            want = expect.get(ref)
-            if not want:
-                errors.append(f"lesson {ref} is named but has no entry in lesson_titles")
-            elif want.lower() not in titles.get(ref, "").lower():
-                errors.append(f"lesson {ref} is now {titles.get(ref)!r}, not the lesson about {want!r}")
-    for a, b in re.findall(r"\bModules? (\d+)(?: and (\d+))?\b", encounters_text):
-        for ref in filter(None, (a, b)):
-            if ref not in modules:
-                errors.append(f"encounters.yaml names Module {ref}, which learning-path.md no longer has")
-    realm_of = {cid: r for r in doc.get("realms") or [] for cid in r.get("encounters") or []}
-    for r in doc.get("realms") or []:
-        if str(r.get("module")) not in modules:
-            errors.append(f"realm {r.get('id')}: Module {r.get('module')} is not in learning-path.md")
-    for e in doc.get("encounters") or []:
-        cid, lesson = e.get("case"), str(e.get("lesson") or "")
-        realm = realm_of.get(cid)
-        if realm and lesson and lesson.split(".")[0] != str(realm.get("module")):
-            errors.append(f"{cid}: lesson {lesson} is not in Module {realm.get('module')}, its realm's module")
-        if not lesson:
-            errors.append(f"{cid}: missing lesson (the learning-path.md lesson it comes from)")
-        elif lesson not in lessons:
-            errors.append(f"{cid}: lesson {lesson} is not in learning-path.md")
-        elif cid not in lessons[lesson]:
-            errors.append(f"{cid}: lesson {lesson}'s Guarded by line does not list {cid}")
-    return errors
-
-
 def font_faces(font_dir: pathlib.Path = FONT_DIR) -> str:
     """@font-face rules with each font inlined as a data: URI, so the page loads nothing."""
     rules = []
@@ -618,30 +738,29 @@ def _not_json(name: str):
     raise ValueError(f"quest.schema.json: {name} is not JSON (JSON.parse and strict parsers reject it)")
 
 
-def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
-    """Validate, and unless `check`, render. Returns (html or None, data, errors)."""
-    capture = LESSON_SQL.read_text(encoding="utf-8")
-    date, cases = parse_lesson_sql(capture)
-    model = parse_capture_model(capture)
-    raw = ENCOUNTERS.read_text(encoding="utf-8")
-    doc = yaml.safe_load(raw) or {}
-    data, errors = compile_quest(doc, date, cases, model)
-    errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))  # modules, lessons, titles
+def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None, dict, dict, list[str]]:
+    """Validate, and unless `check`, render. Returns (html or None, data, schema, errors)."""
+    pack = Pack(pack_id)
+    data, errors = compile_pack(pack)
+    errors += check_packs_unique()
+    errors += denylist.scan(pack.dir)
+    schema: dict = {}
     try:
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"), parse_constant=_not_json)
+        schema = pack_schema(pack)
     except ValueError as e:  # includes JSONDecodeError
-        errors.append(str(e) if str(e).startswith("quest.schema.json") else f"quest.schema.json: not valid JSON ({e})")
+        errors.append(str(e) if str(e).startswith("quest.schema.json") else f"schema/core.json: not valid JSON ({e})")
     else:
         errors += check_schema(data, schema)
     if errors:
-        return None, data, errors
+        return None, data, schema, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
     html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts)
-    return html, data, errors
+    return html, data, schema, errors
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--pack", default=DEFAULT_PACK, help=f"the pack to build (default: {DEFAULT_PACK})")
     ap.add_argument("--out", default=str(DEFAULT_OUT),
                     help="output HTML (default: tools/quest/dist/index.html); "
                          "quest.json and quest.schema.json are written beside it")
@@ -650,29 +769,32 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if pathlib.Path(args.out).name.casefold() in BESIDE:  # case-insensitive filesystems
-        print(f"agentql-quest: --out names the page; {pathlib.Path(args.out).name} is written beside it", file=sys.stderr)
+        print(f"quest: --out names the page; {pathlib.Path(args.out).name} is written beside it", file=sys.stderr)
         return 2
-    html, data, errors = build(check=args.check)
+    if args.pack not in pack_ids():
+        print(f"quest: no pack {args.pack!r} (packs: {', '.join(pack_ids())})", file=sys.stderr)
+        return 2
+    html, data, schema, errors = build(args.pack, check=args.check)
+    name = f"quest {args.pack}"
     if errors:
-        print("agentql-quest: encounters.yaml no longer matches lesson-sql.md, the course or quest.schema.json:",
-              file=sys.stderr)
+        print(f"{name}: the pack does not build:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
     open_realms = [r for r in data["realms"] if not r["sealed"]]
     encs = [e for r in data["realms"] for e in r["encounters"]]
-    summary = (f"{len(open_realms)}/{len(data['realms'])} realms open, {len(encs)} dragons, "
-               f"{sum(len(e['points']) for e in encs)} scales, "
+    summary = (f"{len(open_realms)}/{len(data['realms'])} realms open, {len(encs)} encounters, "
+               f"{sum(len(e['points']) for e in encs)} points, "
                f"{sum(len(h['trials']) for r in data['realms'] for h in r['halls'])} hall questions")
     if args.check:
-        print(f"agentql-quest: OK ({summary})")
+        print(f"{name}: OK ({summary})")
         return 0
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    out.with_name("quest.schema.json").write_text(SCHEMA.read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"agentql-quest: wrote {out}, quest.json and quest.schema.json ({summary})")
+    out.with_name("quest.schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"{name}: wrote {out}, quest.json and quest.schema.json ({summary})")
     return 0
 
 
