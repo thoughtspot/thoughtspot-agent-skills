@@ -26,9 +26,15 @@ BINARY = {".png", ".gif", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2", "
 _SALT = b"quest-denylist\0"
 
 
-def words(text: str) -> list[str]:
-    """Lowercased, accents and apostrophes stripped ("Zorbin's" is one word), letters and digits only."""
-    plain = unicodedata.normalize("NFKD", re.sub(r"['\u2019]", "", text)).encode("ascii", "ignore").decode("ascii").lower()
+APOSTROPHES = re.compile("['\u2019\u02bc]")
+
+
+def words(text: str, apostrophe: str = "") -> list[str]:
+    """Lowercased, accents stripped, letters and digits only. Apostrophes are removed ("Zqxvorn's"
+    is one word, as add() stores a name) or, with apostrophe=" ", split ("Zqxvorn" and "s"); hits()
+    reads text both ways, so a listed name is caught in possessives and contractions too."""
+    folded = unicodedata.normalize("NFKD", text)
+    plain = APOSTROPHES.sub(apostrophe, folded).encode("ascii", "ignore").decode("ascii").lower()
     return re.findall(r"[a-z0-9]+", plain)
 
 
@@ -44,19 +50,22 @@ def load(path: pathlib.Path = DENYLIST) -> set[str]:
     hand would never match anything, and would itself be committed), raises."""
     if not path.is_file():
         raise FileNotFoundError(f"{path.name} is missing; the published-name check can't run without it")
-    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()
-             if line.strip() and not line.startswith("#")]
-    bad = [n for n, line in enumerate(lines, 1) if not HASH.fullmatch(line)]
+    entries = [(n, line.strip()) for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1)
+               if line.strip() and not line.strip().startswith("#")]
+    bad = [n for n, line in entries if not HASH.fullmatch(line)]
     if bad:
-        raise ValueError(f"{path.name}: entries {bad} are not hashes; add names with denylist.py add, never by hand")
-    return set(lines)
+        raise ValueError(f"{path.name}: lines {bad} are not hashes; add names with denylist.py add, never by hand")
+    if not entries:
+        raise ValueError(f"{path.name} holds no hashes; the published-name check can't run without them")
+    return {line for _, line in entries}
 
 
 def hits(text: str, hashes: set[str]) -> list[str]:
     """The words, and two-word names, in `text` that are on the list."""
-    ws = words(text)
-    found = [w for w in ws if digest(w) in hashes]
-    found += [f"{a} {b}" for a, b in zip(ws, ws[1:]) if digest(f"{a} {b}") in hashes]
+    found = []
+    for ws in (words(text), words(text, " ")):
+        found += [w for w in ws if digest(w) in hashes]
+        found += [f"{a} {b}" for a, b in zip(ws, ws[1:]) if digest(f"{a} {b}") in hashes]
     return sorted(set(found))
 
 
@@ -77,7 +86,8 @@ def add(lines: list[str], path: pathlib.Path = DENYLIST) -> int:
     long = [n for n, line in enumerate(lines, 1) if len(words(line)) > 2]
     if long:
         raise ValueError(f"lines {long} have more than two words; add one or two words per line")
-    hashes = load(path) if path.is_file() else set()
+    hashes = load(path) if path.is_file() and any(
+        x.strip() and not x.strip().startswith("#") for x in path.read_text(encoding="utf-8-sig").splitlines()) else set()
     new = {digest(line) for line in lines if words(line)} - hashes
     header = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#")] if path.is_file() else []
     path.write_text("\n".join(header + sorted(hashes | new)) + "\n", encoding="utf-8")

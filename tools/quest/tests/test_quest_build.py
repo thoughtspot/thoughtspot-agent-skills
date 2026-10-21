@@ -1132,7 +1132,7 @@ def test_a_caption_must_name_only_what_something_provides(doc, capture):
 SECOND_PACK = {
     "pack.yaml": """
 id: second
-title: The Second Quest
+title: The Other Quest
 publish_path: second-quest
 storage_key: sq
 unlock: first_realm_first
@@ -1142,7 +1142,7 @@ panes:
   - {id: rune, from: content, match: contains, label: rune_label, name: rune_name, caption: ""}
 rule_tags:
   lore: {label: LORE, group: rules}
-lexicon: {guide: The Scribe, compiler: The Loom, foe: golem, reward: chest, currency: shells}
+lexicon: {guide: The Scribe, compiler: The Spindle, foe: golem, reward: chest, currency: shells}
 explore: {realms: []}
 """,
     "strings.yaml": """
@@ -1224,7 +1224,7 @@ def test_a_second_game_needs_only_a_pack(second_pack):
     blob = json.dumps([data, {k: v for k, v in schema.items() if k != "$id"}]).lower()
     for word in ("agentql", "lesson", "module", "case", "model", "thoughtspot", "dragon", "sql"):
         assert word not in blob, word
-    assert schema["$id"].endswith("/second-quest/quest.schema.json") and schema["title"] == "The Second Quest data"
+    assert schema["$id"].endswith("/second-quest/quest.schema.json") and schema["title"] == "The Other Quest data"
 
 
 def test_the_core_schema_alone_is_valid_for_a_pack_with_no_plugins():
@@ -1513,7 +1513,9 @@ def test_a_pane_named_like_a_content_key_is_refused_cleanly(tmp_path, pane):
                             encoding="utf-8")
         _, errors = B.compile_pack(B.Pack("agentql", packs))
     else:
-        files = {k: v.replace("rune", pane) for k, v in SECOND_PACK.items() if k in ("pack.yaml", "content.yaml")}
+        files = {"pack.yaml": SECOND_PACK["pack.yaml"].replace("{id: rune,", f"{{id: {pane},"),
+                 "content.yaml": SECOND_PACK["content.yaml"].replace("    rune: |", f"    {pane}: |")
+                                                            .replace("        rune: [leaf]", f"        {pane}: [leaf]")}
         _, errors = B.compile_pack(_second(tmp_path, files=files))
     assert f"pack.yaml: pane id {pane!r} is also a content key; rename the pane" in errors
 
@@ -1533,7 +1535,7 @@ def test_a_plugin_must_name_itself_and_hook_its_meta(tmp_path, monkeypatch, plug
 @pytest.mark.parametrize("old,new,needle", [
     ("checks: []", "checks: 5", "checks must be a list"),
     ("explore: {realms: []}", "explore: [moon]", "explore must be a mapping"),
-    ("lexicon: {guide: The Scribe, compiler: The Loom, foe: golem, reward: chest, currency: shells}",
+    ("lexicon: {guide: The Scribe, compiler: The Spindle, foe: golem, reward: chest, currency: shells}",
      "lexicon: [guide, compiler, foe, reward, currency]", "lexicon must be a mapping"),
     ("label: rune_label,", "label: [rune_label],", "label ['rune_label'] is not in strings.yaml"),
     ('caption: ""}', "caption: [x]}", "caption ['x'] is not in strings.yaml"),
@@ -1581,3 +1583,76 @@ def test_a_plugin_may_own_hall_keys(doc, capture):
     without.compile()
     assert not any("unknown key 'note'" in e for e in with_plugin.errors)
     assert any("unknown key 'note'" in e for e in without.errors)
+
+
+# ---- review of PR 2a, round 3 ----------------------------------------------------------------
+
+@pytest.mark.parametrize("text,hit", [
+    ("Zqxvorn's lair", "zqxvorn"),               # possessive, straight apostrophe
+    ("Zqxvorn’s lair", "zqxvorn"),          # curly apostrophe
+    ("ZQXVORN'S HOARD", "zqxvorn"),
+    ("Zqxvorn'd come", "zqxvorn"),               # contraction
+    ("the Qqa Zzb's gate", "qqa zzb"),           # a two-word name, possessive
+    ("Zqx'vorn", "zqxvorn"),                     # an apostrophe inside the name itself
+])
+def test_a_listed_name_is_caught_in_possessives_and_contractions(text, hit):
+    import denylist as D
+    assert hit in D.hits(text, {D.digest("zqxvorn"), D.digest("qqa zzb")})
+
+
+def test_the_game_text_with_apostrophes_has_no_false_hits():
+    import denylist as D
+    assert D.hits("The Wizard's scroll. The West's sales. Don't.", D.load()) == []
+
+
+@pytest.mark.parametrize("text,error", [
+    ("# header only\n", "holds no hashes"),
+    ("", "holds no hashes"),
+    ("# header\n\n" + "a" * 20 + "\nzqxvorn\n", "lines [4] are not hashes"),
+    ("# header\n" + "a" * 20 + " # trailing\n", "lines [2] are not hashes"),
+])
+def test_a_denylist_that_isnt_hashes_fails_closed(tmp_path, text, error):
+    import denylist as D
+    path = tmp_path / "denylist.txt"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=re.escape(error)):
+        D.load(path)
+
+
+def test_a_denylist_tolerates_a_bom_and_indented_comments(tmp_path):
+    import denylist as D
+    path = tmp_path / "denylist.txt"
+    path.write_text("﻿# header\n   # indented note\n" + "b" * 20 + "\n", encoding="utf-8")
+    assert D.load(path) == {"b" * 20}
+
+
+def test_adding_names_can_start_a_new_list(tmp_path):
+    import denylist as D
+    path = tmp_path / "new.txt"
+    assert D.add(["zqxvorn"], path) == 1 and D.load(path) == {D.digest("zqxvorn")}
+
+
+def test_a_denylist_of_names_is_a_build_error(tmp_path, monkeypatch):
+    import denylist as D
+    bad = tmp_path / "denylist.txt"
+    bad.write_text("zqxvorn\n", encoding="utf-8")
+    real_load = D.load
+    monkeypatch.setattr(D, "load", lambda path=None: real_load(bad))
+    assert any(e.startswith("denylist: denylist.txt: lines [1] are not hashes") for e in B.build(check=True)[3])
+
+
+def test_a_highlight_must_be_text(tmp_path):
+    files = {"content.yaml": SECOND_PACK["content.yaml"].replace("        rune: [leaf]", "        rune: [5]")}
+    assert any("rune must be a list of text matches" in e for e in B.compile_pack(_second(tmp_path, files=files))[1])
+
+
+@pytest.mark.parametrize("old,new,needle", [
+    ("sources: {}", "sources: [a]", "sources must be a mapping"),
+    ("rule_tags:\n  lore: {label: LORE, group: rules}", "rule_tags: [lore]", "rule_tags must be a mapping"),
+    ('panes:\n  - {id: rune, from: content, match: contains, label: rune_label, name: rune_name, caption: ""}',
+     "panes: rune", "panes must be a list"),
+])
+def test_every_manifest_container_shape_is_checked(tmp_path, old, new, needle):
+    text = SECOND_PACK["pack.yaml"]
+    assert old in text, old
+    assert any(needle in e for e in _second(tmp_path, files={"pack.yaml": text.replace(old, new)}).errors)

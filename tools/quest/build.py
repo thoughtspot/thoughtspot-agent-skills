@@ -133,8 +133,6 @@ class Pack:
             if key in m and not isinstance(m[key], kind):
                 self.errors.append(f"pack.yaml: {key} must be a {'list' if kind is list else 'mapping'}")
                 m[key] = kind()  # checked as empty from here on, so the rest reports cleanly
-        if not isinstance(self.strings, dict):
-            self.errors.append("strings.yaml: must be a mapping")
         self._check_manifest(pid)
 
     def _yaml(self, name: str) -> dict:
