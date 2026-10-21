@@ -26,10 +26,28 @@
   $("close").textContent = S("explore_close");
 
   const PAD = { left: S("explore_pad_left"), up: S("explore_pad_up"), down: S("explore_pad_down"),
-                right: S("explore_pad_right"), talk: S("explore_pad_talk") };
+                right: S("explore_pad_right"), talk: S("explore_pad_talk"), weapon: S("explore_pad_weapon") };
   for (const b of document.querySelectorAll("#pad button")) { b.textContent = PAD[b.dataset.key]; b.setAttribute("aria-label", PAD[b.dataset.key]); }
   Sound.label();
   const toast = t => { $("toast").textContent = t; };
+  // ---- the fun, which never touches the quest: loot found, chests opened, barrels rolled, the
+  // weapon in hand. Saved apart from progress, under <storage key>-explore. ----------------------
+  const ITEMS = FRAMES.items, FUN_KEY = `${pack.storage_key}-explore`, MIMIC = "mimic";
+  const fun = (() => {
+    let f = {};
+    try { f = JSON.parse(localStorage.getItem(FUN_KEY) || "{}") || {}; } catch { f = {}; }
+    const items = Array.isArray(f.items) ? f.items.filter(i => ITEMS[i]) : [];
+    if (!items.includes(FRAMES.weapon)) items.unshift(FRAMES.weapon);    // you start with this one
+    return { items, weapon: ITEMS[f.weapon] && items.includes(f.weapon) ? f.weapon : FRAMES.weapon,
+             done: f.done && typeof f.done === "object" ? f.done : {} };
+  })();
+  const saveFun = () => { try { localStorage.setItem(FUN_KEY, JSON.stringify(fun)); } catch {} };
+  const itemName = id => S(`item_${id}`);
+  const weapons = () => fun.items.filter(i => ITEMS[i].kind === "weapon");
+  function gain(ids) {
+    for (const id of ids) fun.items.push(id);
+    saveFun(); hud();
+  }
   // The gold bar: where you are, and your gold (this quest's, in a realm; every realm's, on the map).
   const open = realms.filter(r => !r.sealed), maxGold = Quest.rules.maxGold;
   function hud() {
@@ -37,6 +55,18 @@
     $("hud-place").textContent = r ? r.name : S("explore_hud_map");
     $("hud-gold").textContent = r ? S("explore_hud_gold", { gold: state.gold, max: maxGold(r) })
                                   : S("explore_hud_gold", { gold: progress.treasury(), max: open.reduce((n, x) => n + maxGold(x), 0) });
+    $("hud-kit").textContent = S("explore_hud_kit", { weapon: itemName(fun.weapon).toUpperCase(),
+                                                      n: fun.items.filter(i => ITEMS[i].kind === "treasure").length });
+  }
+  // X: the next weapon you carry.
+  function switchWeapon() {
+    const w = weapons();
+    if (w.length < 2) return;
+    fun.weapon = w[(w.indexOf(fun.weapon) + 1) % w.length];
+    saveFun(); hud();
+    if (world) world.held.setFrame(ITEMS[fun.weapon].frame);
+    toast(S("explore_weapon", { weapon: itemName(fun.weapon) }));
+    Sound.play("blip");
   }
   const announce = t => { $("live").textContent = t; };
 
@@ -49,6 +79,11 @@
   function show() {
     $("dialog-title").textContent = state.screen !== "map" && realms[state.realm] ? realms[state.realm].name : pack.title;
     $("screen").innerHTML = screens.draw(state.screen);
+    if (state.screen === "battle" && state.step === 0 && !state.flash) {      // what you face it with
+      const line = document.createElement("p");
+      line.className = "dim"; line.textContent = S("explore_face_foe", { weapon: itemName(fun.weapon) });
+      $("screen").prepend(line);
+    }
     Sound.music(screens.MUSIC_FOR[state.screen] || "map");
     $("screen").querySelector(".choices button")?.focus({ preventScroll: true });
   }
@@ -112,6 +147,7 @@
       Sound.play("blip");
       return openDialog("portal");
     }
+    if (obj.type === "chest" || obj.type === "barrel" || obj.type === "hoard") return world.play(obj);
     if (obj.type === "exit") {               // leave the realm; a quest left unfinished is not saved
       state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
       Sound.play("blip");
@@ -130,6 +166,7 @@
     const k = (e.key || "").toLowerCase();
     if (k === "s" && !e.repeat) { e.preventDefault(); return Sound.toggle("sfx"); }
     if (k === "m" && !e.repeat) { e.preventDefault(); return Sound.toggle("music"); }
+    if (k === "x" && !e.repeat && !dialog.open) { e.preventDefault(); return switchWeapon(); }
     if (dialog.open) {
       const n = parseInt(e.key, 10);
       if (!e.repeat && n >= 1 && n <= actions.length) { e.preventDefault(); dispatch(actions[n - 1]); }
@@ -154,6 +191,7 @@
   for (const b of document.querySelectorAll("#pad button")) {
     const k = b.dataset.key;
     if (k === "talk") { b.addEventListener("click", () => { Sound.unlock(); if (world && !dialog.open) talk(world.nearby()); }); continue; }
+    if (k === "weapon") { b.addEventListener("click", () => { Sound.unlock(); if (!dialog.open) switchWeapon(); }); continue; }
     b.addEventListener("pointerdown", e => { e.preventDefault(); Sound.unlock(); pad[k] = true; });
     for (const ev of ["pointerup", "pointerleave", "pointercancel"]) b.addEventListener(ev, () => { pad[k] = false; });
   }
@@ -204,7 +242,7 @@
       for (const o of map.getObjectLayer("objects").objects) {
         const prop = n => ((o.properties || []).find(p => p.name === n) || {}).value;
         const x = o.x + o.width / 2, y = o.y + o.height / 2;
-        const obj = { type: o.type, x, y, to: prop("to"),
+        const obj = { type: o.type, x, y, to: prop("to"), key: `${this.mapId}:${o.id}`, loot: prop("loot"), roll: prop("roll"),
                       step: ROLES.includes(o.type) ? `${prop("encounter")}:${o.type}` : o.type === "throne" ? `hall:${prop("hall")}` : null };
         if (o.type === "spawn") { this.spawn = { x, y }; continue; }
         if (o.type === "gate") {
@@ -212,18 +250,30 @@
           g.requires = String(prop("requires") || "").split(",").map(s => s.trim()).filter(Boolean);
           this.gates.push(g); continue;
         }
-        obj.sprite = this.solid.create(x, y, "tiles", FRAMES[o.type] ?? FRAMES.portal);
+        const opened = !!fun.done[obj.key];
+        const frame = o.type === "portal" ? FRAMES.portals[obj.to] ?? FRAMES.portal
+          : o.type === "chest" && opened ? (obj.loot === MIMIC ? FRAMES.mimic : FRAMES.chest_open)
+          : o.type === "hoard" && opened ? FRAMES.hoard_empty : FRAMES[o.type] ?? FRAMES.portal;
+        obj.sprite = this.solid.create(x, y, "tiles", frame);
+        if (o.type === "barrel" && opened) this.place(obj, ...this.rolledTo(obj));
+        if (o.type === "barrel") obj.sprite.setDepth(2);
         // The living breathe: a pixel up and down, out of step with each other.
         if (!reduced && ["merchant", "guide", "foe"].includes(o.type))
           this.time.addEvent({ delay: 650 + 90 * this.objects.length, loop: true,       // a pixel up, a pixel down
                                callback: () => obj.sprite.setY(obj.sprite.y === y ? y - 1 : y) });
         this.objects.push(obj);
       }
+      // A hoard lies hidden under its barrel until the barrel has rolled off it.
+      for (const h of this.objects.filter(o => o.type === "hoard")) {
+        const b = this.objects.find(o => o.type === "barrel" && o.x === h.x && o.y === h.y);
+        this.hide(h, !!b && !fun.done[b.key]);
+      }
       // The player's body moves; what you see follows it, facing the way it walks, with a step bob.
       this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setVisible(false);
       this.player.body.setSize(12, 12);
       this.look = this.add.image(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setDepth(10);
       this.events.on("postupdate", () => this.follow());
+      this.held = this.add.image(this.spawn.x, this.spawn.y, "tiles", ITEMS[fun.weapon].frame).setDepth(11).setScale(0.75);
       this.physics.add.collider(this.player, walls);
       this.physics.add.collider(this.player, this.solid);
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -252,13 +302,14 @@
       if (!on) this.input.keyboard.resetKeys();
       this.player.setVelocity(0, 0);
       this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y));
+      this.hold();
       this.frozen = on;
     }
     // Whoever the player stands next to, up, down, left or right (not across a corner); the one the
     // game waits on first, so the right one answers when two are close.
     nearby() {
       const p = this.player, want = machine.expected(state);
-      const close = this.objects.filter(o => {
+      const close = this.objects.filter(o => !o.hidden).filter(o => {
         const dx = Math.abs(o.x - p.x), dy = Math.abs(o.y - p.y);
         // Beside it: within reach on one axis, overlapping it on the other (half the 12px body
         // plus half the 16px tile, so a player pressed against it anywhere along its side counts).
@@ -274,7 +325,7 @@
       const dx = (c.left.isDown || pad.left ? -1 : 0) + (c.right.isDown || pad.right ? 1 : 0);
       const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
       this.player.setVelocity(dx * v, dy * v);
-      if (dx) this.look.setFlipX(dx < 0);
+      if (dx) { this.look.setFlipX(dx < 0); this.held.setFlipX(dx < 0); }
     }
     // After the physics step, so what you see is where the body is; bob only when it really moved.
     follow() {
@@ -282,6 +333,55 @@
       const b = this.player.body, moving = !this.frozen && (Math.abs(b.deltaX()) > 0.01 || Math.abs(b.deltaY()) > 0.01);
       const step = !reduced && moving && Math.floor(this.time.now / 140) % 2;
       this.look.setPosition(Math.round(this.player.x), Math.round(this.player.y) - (step ? 1 : 0));
+      this.hold();
+    }
+    // The weapon sits in the hand the player faces with.
+    hold() {
+      this.held.setPosition(this.look.x + (this.look.flipX ? -6 : 6), this.look.y + 3);
+    }
+    hide(obj, hidden) {
+      obj.hidden = hidden;
+      obj.sprite.setVisible(!hidden);
+      obj.sprite.body.enable = !hidden;
+    }
+    rolledTo(b) {
+      const [dx, dy] = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[b.roll] || [0, 0];
+      return [b.x + dx * TILE, b.y + dy * TILE];
+    }
+    place(obj, x, y) {
+      obj.x = x; obj.y = y;
+      obj.sprite.setPosition(x, y);
+      obj.sprite.refreshBody();
+    }
+    // A chest, a barrel or a hoard: none of them is a step, so the machine never hears of it.
+    play(obj) {
+      if (obj.hidden) return toast(S("explore_nobody"));
+      const first = !fun.done[obj.key];
+      if (obj.type === "chest") {
+        if (!first) return toast(S(obj.loot === MIMIC ? "explore_mimic" : "explore_chest_empty"));
+        fun.done[obj.key] = true;
+        if (obj.loot === MIMIC) { obj.sprite.setFrame(FRAMES.mimic); Sound.play("steal"); saveFun(); return toast(S("explore_mimic")); }
+        obj.sprite.setFrame(FRAMES.chest_open); Sound.play("coin");
+        gain([obj.loot]);
+        return toast(S("explore_found", { item: itemName(obj.loot) }));
+      }
+      if (obj.type === "barrel") {
+        if (!first) return toast(S("explore_nobody"));
+        fun.done[obj.key] = true; saveFun();
+        const [x, y] = this.rolledTo(obj), from = { x: obj.x, y: obj.y };
+        this.place(obj, x, y);
+        if (!reduced) { obj.sprite.setPosition(from.x, from.y); this.tweens.add({ targets: obj.sprite, x, y, angle: 360, duration: 320 }); }
+        const hoard = this.objects.find(o => o.type === "hoard" && o.x === from.x && o.y === from.y);
+        if (hoard) this.hide(hoard, false);
+        Sound.play("blip");
+        return toast(S("explore_barrel"));
+      }
+      if (!first) return toast(S("explore_hoard_empty"));                // the hoard
+      fun.done[obj.key] = true;
+      const loot = String(obj.loot || "").split(",").map(s => s.trim()).filter(id => ITEMS[id]);
+      obj.sprite.setFrame(FRAMES.hoard_empty); Sound.play("fanfare");
+      gain(loot);
+      return toast(S("explore_hoard", { items: loot.map(itemName).join(", ") }));
     }
   }
   // Standing by a portal says where it goes, as the classic map's entry does (best gold, sealed,
@@ -339,6 +439,14 @@
   window.Quest.explore = {
     state: () => state, world: () => world, talk, dispatch, actions: () => actions, dialogOpen: () => dialog.open,
     async smoke(realmId) {
+      // Stand on a floor tile next to something (the walk itself is maps.py's check and play_map.js's).
+      const stand = obj => {
+        const spot = [[0, TILE], [0, -TILE], [-TILE, 0], [TILE, 0]].map(([dx, dy]) => ({ x: obj.x + dx, y: obj.y + dy }))
+          .find(s => { const t = world.walls.getTileAtWorldXY(s.x, s.y); return !(t && t.index > 0)
+                       && !world.objects.some(o => o !== obj && !o.hidden && o.x === s.x && o.y === s.y); });
+        if (!spot) throw new Error(`no floor next to ${obj.step || obj.type}`);
+        world.player.setPosition(spot.x, spot.y);
+      };
       const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
       const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
       await until(() => world && world.mapId === "overworld");
@@ -361,6 +469,8 @@
       if (!(world.player.x > x0 + 8)) throw new Error(`the right arrow didn't walk (x ${x0} -> ${world.player.x})`);
       const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
       const ri = realms.findIndex(r => r.id === realmId);
+      for (const o of world.objects.filter(x => x.type === "portal"))      // each realm's own door
+        if (o.sprite.frame.name !== (FRAMES.portals[o.to] ?? FRAMES.portal)) throw new Error(`the ${o.to} door is the wrong one`);
       // Standing by the portal names its realm, with the classic map's mark.
       world.player.setPosition(portal.x, portal.y + TILE);
       await until(() => $("toast").textContent.includes(realms[ri].name));
@@ -406,6 +516,28 @@
       dispatch({ type: "enter" });
       await until(() => world && world.mapId === realmId);
       {
+        // The fun: a chest's loot, a mimic's teeth, a barrel rolled off a hoard, a weapon switched.
+        const of = t => world.objects.filter(o => o.type === t);
+        const has = () => fun.items.length;
+        for (const c of of("chest")) {
+          const n = has(); stand(c); await wait(60); talk(world.nearby());
+          if (c.loot === MIMIC ? has() !== n || c.sprite.frame.name !== FRAMES.mimic : has() !== n + 1 || !fun.items.includes(c.loot))
+            throw new Error(`the chest of ${c.loot} gave the wrong thing`);
+        }
+        for (const b of of("barrel")) {
+          const hoard = of("hoard").find(h => h.x === b.x && h.y === b.y);
+          if (hoard && !hoard.hidden) throw new Error("a hoard showed before its barrel rolled");
+          stand(b); await wait(60); talk(world.nearby()); await wait(400);
+          if (!hoard) continue;
+          if (hoard.hidden || b.x === hoard.x && b.y === hoard.y) throw new Error("the barrel didn't roll off its hoard");
+          const n = has(); stand(hoard); await wait(60); talk(world.nearby());
+          if (has() !== n + String(hoard.loot).split(",").length) throw new Error("the hoard gave the wrong loot");
+        }
+        const w0 = fun.weapon;
+        key("keydown", "x", 88); key("keyup", "x", 88);
+        if (weapons().length > 1 && (fun.weapon === w0 || world.held.frame.name !== ITEMS[fun.weapon].frame))
+          throw new Error("X didn't switch the weapon in hand");
+        log(`FUN ${fun.items.join(",")} | ${fun.weapon}`);
         // Beside someone along a whole side counts; across a corner doesn't.
         const first = world.objects.find(o => o.step === machine.expected(state));
         world.player.setPosition(first.x - 14, first.y + 11);
@@ -419,8 +551,9 @@
         const before = JSON.stringify(state);
         if (!key("keydown", "Enter", 13, { repeat: true }).defaultPrevented) throw new Error("held Enter reached the dialog's button");
         if (JSON.stringify(state) !== before) throw new Error("held Enter changed the game");
-        dialog.close(); await wait(50);
-        if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error("closing the dialog didn't hand back the map");
+        dialog.close();
+        try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
+        if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
       }
       if (!reduced) {                        // the living breathe
         const someone = world.objects.find(o => ["merchant", "guide", "foe"].includes(o.type));
@@ -435,12 +568,7 @@
         if (want === null) break;
         const obj = world.objects.find(o => o.step === want);
         if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward) throw new Error("the chest opened before you claimed it");
-        // Stand on a floor tile next to it (the walk itself is maps.py's check and play_map.js's).
-        const spot = [[0, TILE], [0, -TILE], [-TILE, 0], [TILE, 0]].map(([dx, dy]) => ({ x: obj.x + dx, y: obj.y + dy }))
-          .find(s => { const t = world.walls.getTileAtWorldXY(s.x, s.y); return !(t && t.index > 0)
-                       && !world.objects.some(o => o !== obj && o.x === s.x && o.y === s.y); });
-        if (!spot) throw new Error(`no floor next to ${want}`);
-        world.player.setPosition(spot.x, spot.y);
+        stand(world.objects.find(o => o.step === want));
         await wait(80);
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);

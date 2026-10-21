@@ -851,10 +851,12 @@ def check_vendor() -> list[str]:
     return errors
 
 
-TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne"}   # what explore.js draws
+TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne",   # what explore.js draws
+              "chest", "chest_open", "mimic", "barrel", "hoard", "hoard_empty"}
+TILE_TABLES = {"portals", "items", "weapon"}   # a door per realm, the loot, the weapon you start with
 
 
-def check_tiles(pack: "Pack") -> list[str]:
+def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
     """tiles/tiles.json names a frame of tiles/tiles.png (16px, left to right, top to bottom) for
     everything the explore page draws."""
     folder = pack.dir / "tiles"
@@ -866,12 +868,36 @@ def check_tiles(pack: "Pack") -> list[str]:
     if not size or size[0] % 16 or size[1] % 16:
         return ["tiles/tiles.png: needs a PNG of whole 16px tiles"]
     count = (size[0] // 16) * (size[1] // 16)
-    errors = [f"tiles/tiles.json: needs {k!r}" for k in sorted(TILE_NAMES - set(frames))]
-    errors += [f"tiles/tiles.json: {k!r} is not used by the explore page" for k in sorted(set(frames) - TILE_NAMES)]
-    for k, v in frames.items():
-        if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v < count:
+    frame = lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v < count
+    errors = [f"tiles/tiles.json: needs {k!r}" for k in sorted((TILE_NAMES | TILE_TABLES) - set(frames))]
+    errors += [f"tiles/tiles.json: {k!r} is not used by the explore page" for k in sorted(set(frames) - TILE_NAMES - TILE_TABLES)]
+    for k in sorted(TILE_NAMES & set(frames)):
+        if not frame(frames[k]):
             errors.append(f"tiles/tiles.json: {k!r} must be a frame of tiles.png, 0 to {count - 1}")
+    portals, items = frames.get("portals"), frames.get("items")
+    if not isinstance(portals, dict) or not all(isinstance(k, str) and frame(v) for k, v in portals.items()):
+        errors.append("tiles/tiles.json: portals maps a realm id to its door's frame")
+    if not isinstance(items, dict) or not items or not all(
+            isinstance(k, str) and ID.fullmatch(k) and isinstance(v, dict) and set(v) == {"frame", "kind"}
+            and frame(v["frame"]) and v["kind"] in ("weapon", "treasure") for k, v in items.items()):
+        errors.append("tiles/tiles.json: items maps an id to {frame, kind: weapon or treasure}")
+    elif (items.get(frames.get("weapon")) or {}).get("kind") != "weapon":
+        errors.append("tiles/tiles.json: weapon names the weapon item you start with")
+    if isinstance(items, dict) and "mimic" in items:
+        errors.append("tiles/tiles.json: 'mimic' is a chest, not an item")
+    ids = {r["id"] for r in (data or {}).get("realms") or []}
+    if data and isinstance(portals, dict):
+        errors += [f"tiles/tiles.json: portals names {k!r}, which is not a realm" for k in sorted(set(portals) - ids)]
     return errors
+
+
+def explore_items(pack: "Pack") -> set[str]:
+    """The loot's ids (tiles/tiles.json items): each needs its name, item_<id>, in strings.yaml."""
+    try:
+        items = json.loads((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8")).get("items")
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return set(items) if isinstance(items, dict) else set()
 
 
 def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
@@ -952,7 +978,10 @@ def check_classic(pack: Pack, data: dict, art: dict, template: str, unused: bool
     """Everything the classic page reads must be in the pack, and the pack's art must all be used.
     `unused`: also refuse strings nothing reads (skipped when the compile already failed, since a
     broken trial can make a used string look unused)."""
-    strings, pieces = classic_needs(template, core, bool((data.get("pack") or {}).get("explore_realms")))
+    explorable = bool((data.get("pack") or {}).get("explore_realms"))
+    strings, pieces = classic_needs(template, core, explorable)
+    if explorable:
+        strings |= {f"item_{k}" for k in explore_items(pack)}   # read as S(`item_${id}`), which the scan can't see
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
     used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)
@@ -984,7 +1013,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
         errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
         if data["pack"]["explore_realms"]:
             errors += check_vendor()
-            errors += check_tiles(pack)
+            errors += check_tiles(pack, data)
     try:
         errors += (denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
                    + denylist.scan(EXPLORE_DIR))

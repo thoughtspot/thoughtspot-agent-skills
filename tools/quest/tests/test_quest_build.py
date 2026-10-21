@@ -3317,3 +3317,96 @@ def test_a_map_draws_with_the_atlas_the_page_draws(tmp_path, monkeypatch):
     f.write_text(json.dumps(m), encoding="utf-8")
     data, _ = B.compile_pack(B.Pack("agentql", packs))
     assert any("must be ../tiles/tiles.png" in e for e in MAPS.check_maps(packs / "agentql", data))
+
+
+# ---- PR 7: chests, barrels, hoards, weapons, a door per realm -------------------------------------
+
+FUN_ITEMS = {"sword": {"frame": 1, "kind": "weapon"}, "gem": {"frame": 2, "kind": "treasure"}}
+
+
+def _fun_cave(tmp_path, extra, rows=CAVE_ROWS, walls=None):
+    objects = dict(CAVE_OBJECTS, **{k: v for k, v in extra.items()})
+    cave = _tmj(rows, objects, CAVE_GATE)
+    pack, data = _explorable(tmp_path, cave=cave)
+    (pack.dir / "tiles").mkdir(exist_ok=True)
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS}), encoding="utf-8")
+    return MAPS.check_maps(pack.dir, data)
+
+
+def _rows(*edits):
+    rows = [list(r) for r in CAVE_ROWS]
+    for x, y, ch in edits:
+        rows[y][x] = ch
+    return ["".join(r) for r in rows]
+
+
+def test_chests_barrels_and_hoards_that_fit_pass(tmp_path):
+    rows = _rows((3, 4, "c"), (6, 2, "k"), (6, 4, "b"))      # a chest, a mimic, a barrel
+    errors = _fun_cave(tmp_path, {"c": ("chest", {"loot": "gem"}), "k": ("chest", {"loot": "mimic"}),
+                                  "b": ("barrel", {"roll": "right"})}, rows)
+    assert errors == [], errors
+
+
+@pytest.mark.parametrize("edits,extra,needle", [
+    ([(2, 2, "c")], {"c": ("chest", {"loot": "crown"})}, "loot='crown' is not an item"),
+    ([(6, 3, "b")], {"b": ("barrel", {"roll": "sideways"})}, "roll must be one of"),
+    ([(1, 2, "b")], {"b": ("barrel", {"roll": "left"})}, "which isn't open floor"),                # into the wall
+    ([(4, 1, "b")], {"b": ("barrel", {"roll": "left"})}, "which isn't open floor"),                # onto the merchant
+    ([(7, 3, "b")], {"b": ("barrel", {"roll": "right"})}, "which isn't open floor"),               # onto the gate
+    # a barrel just past the gate: where it stands blocks the way to the foe, so the quest would care
+    ([(9, 3, "b")], {"b": ("barrel", {"roll": "down"})}, "can't be reached when the game waits on the_rune:foe"),
+    # a chest walled into a corner nobody can reach, even at the end
+    ([(10, 1, "c"), (9, 1, "#"), (10, 2, "#")], {"c": ("chest", {"loot": "gem"})}, "can't be reached, even once the quest is done"),
+])
+def test_the_fun_on_a_map_never_blocks_the_quest(tmp_path, edits, extra, needle):
+    errors = _fun_cave(tmp_path, extra, _rows(*edits))
+    assert any(needle in e for e in errors), errors
+
+
+def test_a_hoard_lies_under_one_barrel_and_names_items(tmp_path):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    objs = _layer(cave, "objectgroup")["objects"]
+    objs.append({"id": 90, "type": "hoard", "x": 6 * TILE, "y": 2 * TILE, "width": TILE, "height": TILE,
+                 "properties": [{"name": "loot", "type": "string", "value": "gem,crown"}]})
+    pack, data = _explorable(tmp_path, cave=cave)
+    (pack.dir / "tiles").mkdir(exist_ok=True)
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any("must name items in tiles/tiles.json" in e for e in errors), errors
+    assert any("a hoard lies under exactly one barrel" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda f: f["portals"].update(moon=9), "portals names 'moon', which is not a realm"),
+    (lambda f: f["portals"].update(law=999), "portals maps a realm id to its door's frame"),
+    (lambda f: f["items"].update(gem={"frame": 3}), "items maps an id to {frame, kind"),
+    (lambda f: f["items"].update(gem={"frame": 3, "kind": "snack"}), "items maps an id to {frame, kind"),
+    (lambda f: f.update(weapon="red_potion"), "weapon names the weapon item you start with"),
+    (lambda f: f["items"].update(mimic={"frame": 3, "kind": "treasure"}), "'mimic' is a chest, not an item"),
+    (lambda f: f.pop("barrel"), "needs 'barrel'"),
+])
+def test_a_broken_loot_or_door_table_fails_the_build(tmp_path, monkeypatch, edit, needle):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/tiles/tiles.json"
+    frames = json.loads(f.read_text(encoding="utf-8"))
+    edit(frames)
+    f.write_text(json.dumps(frames), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert any(needle in e for e in B.build(check=True)[3])
+
+
+def test_every_item_has_a_name(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/strings.yaml"
+    f.write_text(f.read_text(encoding="utf-8").replace("item_axe: axe\n", ""), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert any("the classic page needs 'item_axe'" in e for e in B.build(check=True)[3])
+
+
+def test_the_packs_maps_have_fun_in_them():
+    mines = json.loads((PACK_DIR / "maps/mines.tmj").read_text(encoding="utf-8"))
+    kinds = [o["type"] for l in mines["layers"] if l["type"] == "objectgroup" for o in l["objects"]]
+    assert kinds.count("chest") >= 2 and kinds.count("barrel") == kinds.count("hoard") == 1
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    assert set(frames["portals"]) == {r["id"] for r in data["realms"]} and len(set(frames["portals"].values())) == len(data["realms"])

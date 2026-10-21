@@ -117,7 +117,7 @@ empty_court: THE COURT FINDS YOUR PURSE EMPTY
 empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
 
 # ---- The explore page (explore/), and classic mode's way back to it. ----
-explore_help: Arrow keys walk. Enter or Space talks to whoever you stand next to. S and M switch sound effects and music.
+explore_help: Arrow keys walk. Enter or Space talks to whoever, or whatever, you stand next to. X switches weapon. S and M switch sound effects and music.
 explore_classic: Play the classic version
 explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
 explore_close: Close (Esc)
@@ -134,3 +134,21 @@ explore_hud_gold: "GOLD {gold}/{max}"
 explore_back: Back to the explore map
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
 explore_near_sealed: "{name}{mark}."
+explore_pad_weapon: Weapon
+explore_found: "You open the chest: {item}!"
+explore_mimic: "The chest snaps at you. A mimic! Nothing inside but teeth."
+explore_chest_empty: The chest is empty.
+explore_barrel: You roll the barrel aside. Something glints underneath.
+explore_hoard: "A troll's hoard: {items}!"
+explore_hoard_empty: The troll's hoard is empty now.
+explore_weapon: "You ready the {weapon}."
+explore_face_foe: "You face it with your {weapon}."
+explore_hud_kit: "{weapon} · LOOT {n}"
+item_sword: sword
+item_dagger: dagger
+item_axe: axe
+item_staff: staff
+item_red_potion: red potion
+item_blue_potion: blue potion
+item_green_potion: green potion
+item_shield: shield
