@@ -7,7 +7,9 @@ names, pipe them in, one per line; nothing is echoed back:
 
     python3 tools/quest/denylist.py add < names.txt
 
-A build fails on a hit and reports the word from our own content, never the list.
+Keep names.txt outside the repo (or delete it after). Each line is one name of one or two words;
+longer lines are refused, not silently dropped. A build fails on a hit and reports the word from
+our own content, never the list.
 """
 from __future__ import annotations
 
@@ -19,7 +21,8 @@ import unicodedata
 
 HERE = pathlib.Path(__file__).resolve().parent
 DENYLIST = HERE / "denylist.txt"
-SCANNED = (".yaml", ".yml", ".md", ".txt", ".py", ".json", ".tmj")
+BINARY = {".png", ".gif", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".mp4", ".webm",
+          ".mp3", ".ogg", ".wav", ".pdf", ".zip"}  # everything else is read as text
 _SALT = b"quest-denylist\0"
 
 
@@ -49,11 +52,12 @@ def hits(text: str, hashes: set[str]) -> list[str]:
 
 
 def scan(folder: pathlib.Path, hashes: set[str] | None = None) -> list[str]:
-    """Errors for every listed word in the folder's text files (content, strings, maps, art, promo)."""
+    """Errors for every listed word in every file of the folder except known binaries (content,
+    strings, maps, art with or without a suffix, the page, promo scripts)."""
     hashes = load() if hashes is None else hashes
     errors = []
     for path in sorted(folder.rglob("*")):
-        if path.is_file() and (path.suffix in SCANNED or "art" in path.relative_to(folder).parts):
+        if path.is_file() and path.suffix.lower() not in BINARY and "__pycache__" not in path.parts:
             for word in hits(path.read_text(encoding="utf-8", errors="ignore"), hashes):
                 errors.append(f"{path.relative_to(folder)}: {word!r} is a name from a published work "
                               f"(denylist.txt); use a generic fantasy name")
@@ -61,8 +65,11 @@ def scan(folder: pathlib.Path, hashes: set[str] | None = None) -> list[str]:
 
 
 def add(lines: list[str], path: pathlib.Path = DENYLIST) -> int:
+    long = [n for n, line in enumerate(lines, 1) if len(words(line)) > 2]
+    if long:
+        raise ValueError(f"lines {long} have more than two words; add one or two words per line")
     hashes = load(path)
-    new = {digest(line) for line in lines if words(line) and len(words(line)) <= 2} - hashes
+    new = {digest(line) for line in lines if words(line)} - hashes
     header = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#")] if path.is_file() else []
     path.write_text("\n".join(header + sorted(hashes | new)) + "\n", encoding="utf-8")
     return len(new)

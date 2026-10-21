@@ -70,12 +70,10 @@ one game is a **plugin** in `checks/` that the pack names. Design:
 [docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md](../../docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md).
 
 ```
-packs/agentql/            ┐
-  pack.yaml               │                     ┌─► quest.json         (the checked data, see "The data contract")
-  content.yaml            ├─► build.py ─────────┼─► quest.schema.json  (generated for this pack)
-  strings.yaml            │   + checks/*.py     │
-lesson-sql.md, learning-path.md (the pack's sources) └─► index.html   (one self-contained file, quest.json inside)
-classic/game.html, fonts/, schema/core.json, denylist.txt
+packs/agentql/{pack,content,strings}.yaml ─┐
+lesson-sql.md, learning-path.md (sources) ─┤                   ┌─► quest.json         (the checked data)
+classic/game.html, fonts/                 ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
+schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► index.html         (self-contained, quest.json inside)
 ```
 
 - **`packs/agentql/pack.yaml`**, the manifest: the id, title, Pages folder (`agentql-quest`), save
@@ -168,7 +166,13 @@ sources:
 | `expected '…' N time(s) in the SQL` | a whole-statement fact moved, e.g. the fact table is read twice (pruning off) | same: check whether the lesson still holds |
 | `scroll: match '…' hits no line` | a `scroll` substring no longer appears in the AgentQL | update `scroll` |
 | `it asks about a row cap or a null guard, which ThoughtSpot adds` | a point credits the row cap or a null guard to the Model or the AgentQL | answer `thoughtspot`: both are ThoughtSpot cluster settings |
-| `'…' is a name from a published work` | a word in the pack is on the denylist | use a generic fantasy name |
+| `'…' is a name from a published work` | a word in the pack or the page is on the denylist | use a generic fantasy name |
+| `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
+| `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
+| `id '…' must be lowercase letters, digits and _ (and not 'hall')` or `duplicate id` | a realm, hall or encounter id breaks the step-id grammar | rename it |
+| `caption … names {…}, which nothing provides` | a pane caption names a value no plugin records | fix the caption in `strings.yaml` |
+| `a who point takes its rule tag from its answer` | a `who` point sets `rule_tag` | drop it; the answer decides the tag |
+| `reads the source '…', which sources doesn't name` | a plugin needs a source the manifest lacks | add it under `sources` |
 | `unknown key '…' (no check owns it)` | a content key that neither the engine nor a plugin knows (often a typo) | fix the key, or add it to the plugin that owns it |
 | `lesson-sql.md: no Model named in its header` | the capture's header lost the "captured live on the sample Model" line | regenerate `lesson-sql.md` with `tools/agentql-retest/build_lesson_sql.py` |
 | `the capture header names Model '…', but this AgentQL does not query FROM "…"` | the header and the captured AgentQL disagree about the Model, so the caption would name the wrong one | recapture, or fix the generator's header |

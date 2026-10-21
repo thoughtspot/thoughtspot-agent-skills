@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 NAME = "agentql_capture"
+SOURCES = {"lesson_sql"}
 AGENTQL_PANE, SQL_PANE = "scroll", "sql"
 KEYS = {"encounter": {"case"}, "point": {"sql_count", "sql_last_line", "sql_before", "rejected_case"}}
 REFS = {"encounter": {"case": {"description": "The lesson-sql.md case id.", "type": "string"}}}
@@ -24,7 +25,6 @@ META = {
         "captured": {"description": "The date the lesson SQL was captured (YYYY-MM-DD).", "type": "string"},
     },
 }
-FILLS = {SQL_PANE}
 
 _STRING = re.compile(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""")    # string literals and quoted names
 

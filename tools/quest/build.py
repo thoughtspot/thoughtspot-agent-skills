@@ -37,9 +37,12 @@ A plugin is a module in `checks/` with a NAME. Everything else is optional:
   KEYS          {level: {content keys it owns}}, levels top, realm, encounter, point, trial, path.
                 The build rejects any content key that neither the engine nor a plugin owns.
   REFS          {"realm" | "encounter": {key: JSON Schema}}: what it records under that level's refs.
-  META          a JSON Schema object for what it records under meta[NAME].
-  FILLS         the pane ids it fills (a pane's `from` in pack.yaml names the plugin).
+  META          a JSON Schema object for what it records under meta[NAME] (needs a meta hook).
+  SOURCES       the pack.yaml sources it reads; a pack that lacks one fails before compiling.
   POINT_KINDS, TRIAL_KINDS   point and trial kinds it compiles; COMPILES_PATH: it compiles paths.
+                A kind belongs to one owner: the engine's own (claim, choice) can't be taken.
+A pane whose `from` names the plugin is filled by its encounter hook. Plugins run in the order the
+pack lists them; none may depend on another's output.
   load(pack, errors) -> ctx                       read its sources once
   meta(ctx) -> dict
   realm(ctx, r, where, errors) -> refs
@@ -106,7 +109,7 @@ MANIFEST_KEYS = {"id", "title", "publish_path", "storage_key", "unlock", "checks
                  "rule_tags", "lexicon", "explore"}
 LEXICON = ("guide", "compiler", "foe", "reward", "currency")
 GROUPS = ("rules", "yours", "verdict")
-UNLOCKS = ("first_realm_first", "none")
+UNLOCKS = ("first_realm_first",)  # the only rule a front end implements today
 MATCHES = ("contains", "line")
 
 
@@ -119,12 +122,16 @@ class Pack:
         self.manifest = self._yaml("pack.yaml")
         self.content_text = (self.dir / "content.yaml").read_text(encoding="utf-8")
         self.doc = yaml.safe_load(self.content_text) or {}
+        self.strings_text = (self.dir / "strings.yaml").read_text(encoding="utf-8")
         self.strings = self._yaml("strings.yaml")
         m = self.manifest
         self.id, self.title = m.get("id"), m.get("title", "")
         self.publish_path, self.storage_key = m.get("publish_path", ""), m.get("storage_key", "")
-        self.panes = m.get("panes") or []
-        self.rule_tags = m.get("rule_tags") or {}
+        self.panes = m.get("panes") if isinstance(m.get("panes"), list) else []
+        self.rule_tags = m.get("rule_tags") if isinstance(m.get("rule_tags"), dict) else {}
+        if not isinstance(self.strings, dict) or not isinstance(m.get("sources") or {}, dict) \
+                or not isinstance(m.get("checks") or [], list):
+            self.errors.append("pack.yaml/strings.yaml: checks must be a list, sources and strings mappings")
         self._check_manifest(pid)
 
     def _yaml(self, name: str) -> dict:
@@ -138,10 +145,8 @@ class Pack:
         return ROOT / (self.manifest.get("sources") or {})[name]
 
     def string(self, key: str, **values: str) -> str:
-        text = self.strings.get(key, "")
-        for k, v in values.items():
-            text = text.replace("{" + k + "}", v)
-        return text
+        """The string, with each {name} filled once (a value is never filled again)."""
+        return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), self.strings.get(key, ""))
 
     def _check_manifest(self, pid: str) -> None:
         m, err = self.manifest, self.errors.append
@@ -158,9 +163,9 @@ class Pack:
         if m.get("unlock") not in UNLOCKS:
             err(f"pack.yaml: unlock must be one of {list(UNLOCKS)}")
         for name in m.get("checks") or []:
-            if not (CHECKS / f"{name}.py").is_file():
+            if not ID.fullmatch(str(name)) or not (CHECKS / f"{name}.py").is_file():
                 err(f"pack.yaml: no plugin checks/{name}.py")
-        for name, rel in (m.get("sources") or {}).items():
+        for name, rel in (m.get("sources") if isinstance(m.get("sources"), dict) else {}).items():
             if not isinstance(rel, str) or not (ROOT / rel).is_file():
                 err(f"pack.yaml: source {name!r} is not a file in the repo: {rel!r}")
         lexicon = m.get("lexicon") or {}
@@ -172,7 +177,7 @@ class Pack:
                 err(f"pack.yaml: rule tag {tag!r} needs a label and a group ({'/'.join(GROUPS)})")
         if not isinstance((m.get("explore") or {}).get("realms", []), list):
             err("pack.yaml: explore.realms must be a list of realm ids")
-        for k, v in self.strings.items():
+        for k, v in (self.strings if isinstance(self.strings, dict) else {}).items():
             if not ID.fullmatch(str(k)) or not isinstance(v, str):
                 err(f"strings.yaml: {k!r} must be a lowercase key with a text value")
         self._check_panes()
@@ -231,13 +236,15 @@ def load_plugins(names: list[str]) -> list:
     plugins = []
     for name in names:
         path = CHECKS / f"{name}.py"
-        if not path.is_file():
+        if not ID.fullmatch(str(name)) or not path.is_file():
             continue  # reported by the manifest check
         spec = importlib.util.spec_from_file_location(f"quest_check_{name}", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         if getattr(mod, "NAME", None) != name:
             raise ValueError(f"checks/{name}.py must set NAME = {name!r}")
+        if getattr(mod, "META", None) and not hasattr(mod, "meta"):
+            raise ValueError(f"checks/{name}.py declares META but has no meta hook")
         plugins.append(mod)
     return plugins
 
@@ -287,10 +294,24 @@ class Compiler:
         self.ctx = {pl.NAME: given[pl.NAME] if pl.NAME in given else (pl.load(pack, self.errors) if hasattr(pl, "load") else None)
                     for pl in plugins}
         self.owned = {lvl: set().union(*(getattr(pl, "KEYS", {}).get(lvl, set()) for pl in plugins)) for lvl in LEVELS}
-        self.point_kinds = {k: pl for pl in plugins for k in getattr(pl, "POINT_KINDS", ())}
-        self.trial_kinds = {k: pl for pl in plugins for k in getattr(pl, "TRIAL_KINDS", ())}
+        self.point_kinds = self._kinds("POINT_KINDS", {"choice"})
+        self.trial_kinds = self._kinds("TRIAL_KINDS", {"claim", "choice"})
+        for pid in pack.pane_ids:  # a point highlights a pane by naming it, so it can't share a key's name
+            if pid in CORE_KEYS["encounter"] | CORE_KEYS["point"] | self.owned["encounter"] | self.owned["point"]:
+                self.errors.append(f"pack.yaml: pane id {pid!r} is also a content key; rename the pane")
         self.path_plugin = next((pl for pl in plugins if getattr(pl, "COMPILES_PATH", False)), None)
         self.meta = {pl.NAME: pl.meta(self.ctx[pl.NAME]) for pl in plugins if getattr(pl, "META", None)}
+
+    def _kinds(self, attr: str, core: set[str]) -> dict:
+        owners: dict = {}
+        for pl in self.plugins:
+            for kind in getattr(pl, attr, ()):
+                if kind in core or kind in owners:
+                    self.errors.append(f"checks/{pl.NAME}.py: {attr} {kind!r} already belongs to "
+                                       f"{'the engine' if kind in core else owners[kind].NAME}")
+                else:
+                    owners[kind] = pl
+        return owners
 
     def _hooks(self, name: str):
         return [(pl, self.ctx[pl.NAME]) for pl in self.plugins if hasattr(pl, name)]
@@ -312,11 +333,16 @@ class Compiler:
         if kind == "claim":
             if not t.get("claim") or not t.get("why") or not isinstance(t.get("truth"), bool):
                 self.errors.append(f"{where}: a claim needs claim, why and a true/false truth")
+            for key in ("claim_true", "claim_false"):
+                if not self.pack.strings.get(key):
+                    self.errors.append(f"{where}: a claim's buttons come from strings.yaml, which has no {key}")
             return {"kind": "claim", "text": t.get("claim", ""), "why": t.get("why", ""),
                     "options": [self.pack.string("claim_true"), self.pack.string("claim_false")],
                     "correct": 0 if t.get("truth") is True else 1}
         if kind == "choice":
             opts = t.get("options") or []
+            for i, o in enumerate(o for o in opts if isinstance(o, dict)):
+                _unknown(o, {"text", "correct"}, f"{where} option {i + 1}", self.errors)
             correct = [i for i, o in enumerate(opts) if isinstance(o, dict) and o.get("correct")]
             if len(opts) < 2 or len(correct) != 1 or not t.get("text") or not t.get("why"):
                 self.errors.append(f"{where}: a choice needs text, why, 2+ options and exactly one correct")
@@ -340,7 +366,7 @@ class Compiler:
         halls, taught = [], set()
         for n, h in enumerate(r.get("halls") or [], 1):
             where = f"realm {rid} hall {n}"
-            _unknown(h, CORE_KEYS["hall"], where, errors)
+            _unknown(h, CORE_KEYS["hall"] | self.owned["hall"], where, errors)
             hid = _id(h.get("id"), where, hall_ids, errors)
             cols = h.get("columns") or []
             bad_cols = [c for c in cols if c not in columns]
@@ -368,6 +394,8 @@ class Compiler:
             return self.path_plugin.path(self.ctx[self.path_plugin.NAME], p, where, self.errors)
         _unknown(p, CORE_KEYS["path"], where, self.errors)
         opts = [o for o in p.get("options") or [] if isinstance(o, dict)]
+        for i, o in enumerate(opts, 1):
+            _unknown(o, {"text", "outcome", "why"}, f"{where} option {i}", self.errors)
         wins = [i for i, o in enumerate(opts) if o.get("outcome") == "win"]
         if len(opts) < 2 or len(wins) != 1 or any(o.get("outcome") not in ("win", "loss", "blocked") or not o.get("why")
                                                    for o in opts):
@@ -402,6 +430,8 @@ class Compiler:
             options, correct, default_tag = got["options"], got["correct"], got.get("rule_tag", "")
         elif kind == "choice":
             opts = p.get("options") or []
+            for i, o in enumerate(o for o in opts if isinstance(o, dict)):
+                _unknown(o, {"text", "correct"}, f"{where} option {i + 1}", errors)
             right = [i for i, o in enumerate(opts) if isinstance(o, dict) and o.get("correct")]
             if len(opts) < 2 or len(right) != 1:
                 errors.append(f"{where}: a choice needs 2+ options and exactly one correct")
@@ -528,7 +558,13 @@ class Compiler:
 def compile_pack(pack: Pack, contexts: dict | None = None) -> tuple[dict, list[str]]:
     """Compile a pack with the plugins it names. Returns (data, errors). `contexts` replaces a
     plugin's loaded sources by name (tests use it to compile against an edited capture)."""
-    compiler = Compiler(pack, load_plugins(pack.manifest.get("checks") or []), contexts)
+    plugins = load_plugins(pack.manifest.get("checks") or [])
+    sources = pack.manifest.get("sources") if isinstance(pack.manifest.get("sources"), dict) else {}
+    missing = [f"pack.yaml: checks/{pl.NAME}.py reads the source {s!r}, which sources doesn't name"
+               for pl in plugins for s in sorted(getattr(pl, "SOURCES", ())) if s not in sources]
+    if missing or pack.errors:
+        return {}, pack.errors + missing  # nothing else can be read reliably
+    compiler = Compiler(pack, plugins, contexts)
     data = compiler.compile()
     return data, compiler.errors
 
@@ -539,7 +575,11 @@ def pack_schema(pack: Pack, plugins: list | None = None) -> dict:
     core = json.loads(CORE_SCHEMA.read_text(encoding="utf-8"), parse_constant=_not_json)
     plugins = load_plugins(pack.manifest.get("checks") or []) if plugins is None else plugins
     schema = {"$schema": core["$schema"], "$id": f"{PAGES}/{pack.publish_path}/quest.schema.json",
-              "title": f"{pack.title} data"}
+              "title": f"{pack.title} data",
+              "description": f"The data of {pack.title} (quest.json, version {SCHEMA_VERSION}), compiled by "
+                             f"tools/quest/build.py from the {pack.id} pack. Generated from tools/quest/schema/core.json "
+                             f"with this pack's strings, rule tags, panes and plugins filled in. Every field is "
+                             f"required and nothing else is allowed, so a front end can rely on the shape."}
     schema.update({k: v for k, v in core.items() if k not in schema})
     defs = schema["$defs"]
 
@@ -743,14 +783,15 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     pack = Pack(pack_id)
     data, errors = compile_pack(pack)
     errors += check_packs_unique()
-    errors += denylist.scan(pack.dir)
+    errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent)
     schema: dict = {}
     try:
         schema = pack_schema(pack)
     except ValueError as e:  # includes JSONDecodeError
         errors.append(str(e) if str(e).startswith("quest.schema.json") else f"schema/core.json: not valid JSON ({e})")
     else:
-        errors += check_schema(data, schema)
+        if data:  # a pack that failed before compiling has no data to check
+            errors += check_schema(data, schema)
     if errors:
         return None, data, schema, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too

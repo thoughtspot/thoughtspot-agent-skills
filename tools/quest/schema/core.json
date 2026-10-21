@@ -47,7 +47,7 @@
         "id": {"type": "string"},
         "title": {"type": "string"},
         "storage_key": {"description": "Saves are <storage_key>-progress and <storage_key>-sound.", "type": "string"},
-        "unlock": {"description": "first_realm_first: every other realm waits until the first is done.", "enum": ["first_realm_first", "none"]},
+        "unlock": {"description": "first_realm_first: every other realm waits until the first is done.", "enum": ["first_realm_first"]},
         "explore_realms": {"description": "Realms that have a map.", "$ref": "#/$defs/texts"},
         "lexicon": {
           "type": "object",

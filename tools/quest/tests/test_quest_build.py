@@ -1026,32 +1026,61 @@ def test_the_crediting_scope_is_exactly_a_row_cap_or_a_full_null_guard(sql, lit,
     assert (set(lit) <= RULES._credit_lines(sql)) is inside
 
 
+# Made-up names stand in for the real list, so no published name is ever written here.
+INVENTED = {"glimmerdeep", "ashen vale"}
+
+
+def _invented(monkeypatch):
+    import denylist as D
+    hashes = {D.digest(n) for n in INVENTED}
+    monkeypatch.setattr(D, "load", lambda *a, **k: hashes)
+    return hashes
+
+
 def test_the_denylist_hashes_words_and_two_word_names():
     import denylist as D
-    hashes = {D.digest("moria"), D.digest("white mountains")}
-    assert D.hits("Into the MORIA deep", hashes) == ["moria"]
-    assert D.hits("The White\n  Mountains", hashes) == ["white mountains"]
+    hashes = {D.digest(n) for n in INVENTED}
+    assert D.hits("Into the GLIMMERDEEP below", hashes) == ["glimmerdeep"]
+    assert D.hits("The Ashen\n  Vale", hashes) == ["ashen vale"]
     assert D.hits("The White Peaks", hashes) == []
-    assert D.hits("Mória", hashes) == ["moria"]                      # accents don't hide a name
-    assert all(len(h) == 20 and "moria" not in h for h in hashes)     # only hashes are committed
+    assert D.hits("Glímmerdéep", hashes) == ["glimmerdeep"]           # accents don't hide a name
+    assert all(len(h) == 20 and "glimmer" not in h for h in hashes)   # only hashes are committed
 
 
-def test_a_published_name_anywhere_in_the_pack_fails_the_build(tmp_path, monkeypatch):
-    packs = _copy_packs(tmp_path)
-    content = packs / "agentql/content.yaml"
-    content.write_text(content.read_text(encoding="utf-8").replace("The Dwarven Mines of Silver Ore",
-                                                                   "The Mines of Moria"), encoding="utf-8")
-    monkeypatch.setattr(B, "PACKS", packs)
+@pytest.mark.parametrize("where", ["packs/agentql/content.yaml", "packs/agentql/art/classic/mines",
+                                   "packs/agentql/promo/encode_mp4.swift", "packs/agentql/maps/over.TMJ",
+                                   "classic/game.html"])
+def test_a_published_name_anywhere_in_the_pack_or_page_fails_the_build(tmp_path, monkeypatch, where):
+    # Every file but known binaries, any suffix or none, any case; and the classic page itself.
+    quest = tmp_path / "quest"
+    shutil.copytree(B.PACKS, quest / "packs", ignore=shutil.ignore_patterns("*.png", "*.gif"))
+    shutil.copytree(B.TEMPLATE.parent, quest / "classic")
+    target = quest / where
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text((target.read_text(encoding="utf-8") if target.exists() else "") + "\n# the glimmerdeep\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", quest / "packs")
+    monkeypatch.setattr(B, "TEMPLATE", quest / "classic/game.html")
+    _invented(monkeypatch)
     errors = B.build(check=True)[3]
-    assert any("content.yaml: 'moria' is a name from a published work" in e for e in errors), errors
+    assert any("'glimmerdeep' is a name from a published work" in e for e in errors), errors
 
 
-def test_the_committed_pack_and_this_test_file_use_no_published_names():
+def test_the_committed_quest_uses_no_listed_name():
     import denylist as D
-    assert D.scan(B.PACKS) == []
-    assert D.hits(pathlib.Path(__file__).read_text(encoding="utf-8").replace("Moria", "").replace("MORIA", "")
-                  .replace("Mória", "").replace("moria", "").replace("White\n  Mountains", "")
-                  .replace("white mountains", ""), D.load()) == []
+    assert D.scan(B.PACKS) == [] and D.scan(B.TEMPLATE.parent) == [] and D.scan(HERE) == []
+
+
+def test_adding_names_writes_only_hashes(tmp_path):
+    import denylist as D
+    path = tmp_path / "denylist.txt"
+    path.write_text("# header\n", encoding="utf-8")
+    assert D.add(["Glimmerdeep", "ashen vale", ""], path) == 2
+    text = path.read_text(encoding="utf-8")
+    assert "glimmer" not in text.lower() and "ashen" not in text.lower() and text.startswith("# header")
+    assert D.load(path) == {D.digest("glimmerdeep"), D.digest("ashen vale")}
+    with pytest.raises(ValueError, match="more than two words"):
+        D.add(["the ashen vale road"], path)
 
 
 def test_two_packs_may_not_share_a_save_key(tmp_path):
@@ -1202,3 +1231,221 @@ def test_the_core_schema_alone_is_valid_for_a_pack_with_no_plugins():
     core = json.loads(B.CORE_SCHEMA.read_text(encoding="utf-8"))
     assert B.lint_schema(core, core) == []
     assert "$id" not in core  # each pack's generated schema sets its own, at the address it is published
+
+
+# ---- review of PR 2a: holes in the new checks, and a second game that builds but breaks --------
+
+def test_a_who_point_cannot_retag_its_answer(doc, capture):
+    # answer: thoughtspot with rule_tag: model would show MODEL beside a null guard on the hoard.
+    eid, raw = _in_scope_who_points(doc, capture)[0]
+    point = next(p for p in next(e for e in doc["encounters"] if e["id"] == eid)["points"] if p == raw)
+    point["rule_tag"] = "model"
+    assert any("takes its rule tag from its answer" in e for e in _errors(doc, capture))
+
+
+def test_agentql_halls_ask_claims_and_routes_only(doc, capture):
+    _law(doc)["halls"][0]["trials"].append({"kind": "choice", "text": "Which is a Model?", "why": "This one.",
+                                            "options": [{"text": "A", "correct": True}, {"text": "B"}]})
+    assert any("halls ask claims and routes only, got 'choice'" in e for e in _errors(doc, capture))
+
+
+def test_each_pack_schema_describes_its_own_game(schema):
+    assert schema["description"].startswith("The data of AgentQL Quest")
+    assert "empty here" not in schema["description"]
+
+
+@pytest.mark.parametrize("level,edit", [
+    ("realm", lambda d: _law(d).update(colour="red")),
+    ("hall", lambda d: _law(d)["halls"][0].update(colour="red")),
+    ("trial", lambda d: _law(d)["halls"][0]["trials"][0].update(colour="red")),
+    ("path", lambda d: _encounter(d)["path"].update(colour="red")),
+])
+def test_unknown_keys_are_refused_at_every_level(doc, capture, level, edit):
+    edit(doc)
+    assert any("unknown key 'colour' (no check owns it)" in e for e in _errors(doc, capture)), level
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda d: _law(d).update(id="Law"), "realm 1: id 'Law' must be lowercase"),
+    (lambda d: _realm(d, "mines").update(id="law"), "duplicate id 'law'"),
+    (lambda d: _law(d)["halls"][1].update(id="two_paths"), "duplicate id 'two_paths'"),
+    (lambda d: _law(d)["halls"][0].pop("id"), "id None must be lowercase"),
+])
+def test_realm_and_hall_ids_are_checked(doc, capture, edit, needle):
+    edit(doc)
+    assert any(needle in e for e in _errors(doc, capture))
+
+
+def test_routes_name_only_realms(doc, capture):
+    doc["routes"][0]["path"].append("the_far_marsh")
+    assert any("unknown: ['the_far_marsh']" in e for e in _errors(doc, capture))
+
+
+@pytest.mark.parametrize("old,new,needle", [
+    ("id: agentql", "id: other", "id must be the folder name"),
+    ("title: AgentQL Quest", "title: ''", "missing title"),
+    ("publish_path: agentql-quest", "publish_path: Agentql Quest", "publish_path must be a folder name"),
+    ("  lesson_sql: agents/cli/ts-object-model-agentql-query/references/lesson-sql.md",
+     "  lesson_sql: no/such/file.md", "source 'lesson_sql' is not a file in the repo"),
+    ("explore:\n  realms: []", "explore:\n  realms: mines", "explore.realms must be a list"),
+    ("checks: [agentql_capture, course_refs, agentql_rules]", "checks: [agentql_capture, course_refs, agentql_rules, ../build]",
+     "no plugin checks/../build.py"),
+    ("unlock: first_realm_first", "unlock: none", "unlock must be one of"),
+    ("lexicon:", "colour: red\nlexicon:", "unknown key 'colour'"),
+    ("{id: scroll, from: content,", "{id: scroll, from: nowhere,", "from must be content or one of the pack's checks"),
+    ("match: contains,", "match: regex,", "match must be one of"),
+    ("{id: sql,    from: agentql_capture,", "{id: scroll, from: agentql_capture,", "id must be unique"),
+    ("caption: pane_sql_caption}", "caption: no_such_caption}", "caption 'no_such_caption' is not in strings.yaml"),
+    ("name: pane_sql_name,", "name: pane_sql_name, colour: red,", "needs exactly id, from, match, label, name, caption"),
+])
+def test_every_manifest_rule_is_checked(tmp_path, old, new, needle):
+    packs = _copy_packs(tmp_path)
+    manifest = packs / "agentql/pack.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    assert old in text, old
+    manifest.write_text(text.replace(old, new), encoding="utf-8")
+    assert any(needle in e for e in B.Pack("agentql", packs).errors), B.Pack("agentql", packs).errors
+
+
+def test_strings_keys_and_send_to_are_checked(doc, capture, tmp_path):
+    packs = _copy_packs(tmp_path)
+    strings = packs / "agentql/strings.yaml"
+    strings.write_text(strings.read_text(encoding="utf-8") + "Bad Key: x\n", encoding="utf-8")
+    assert any("'Bad Key' must be a lowercase key" in e for e in B.Pack("agentql", packs).errors)
+    pack = B.Pack("agentql")
+    pack.doc, pack.strings = doc, dict(pack.strings, send_to="Send it along")
+    _, errors = B.compile_pack(pack, {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    assert "strings.yaml: send_to must name {engine}" in errors
+
+
+def test_two_packs_may_not_share_a_pages_folder(tmp_path):
+    packs = _copy_packs(tmp_path)
+    shutil.copytree(packs / "agentql", packs / "second")
+    manifest = packs / "second/pack.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("id: agentql", "id: second")
+                        .replace("storage_key: aqq", "storage_key: sq"), encoding="utf-8")
+    assert B.check_packs_unique(packs) == ["packs agentql and second share publish_path 'agentql-quest'"]
+
+
+def test_a_plugin_source_the_pack_does_not_name_fails_before_compiling(tmp_path):
+    packs = _copy_packs(tmp_path)
+    manifest = packs / "agentql/pack.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(text.replace("  learning_path: agents/cli/ts-object-model-agentql-query/references/learning-path.md\n", ""),
+                        encoding="utf-8")
+    data, errors = B.compile_pack(B.Pack("agentql", packs))
+    assert data == {} and errors == ["pack.yaml: checks/course_refs.py reads the source 'learning_path', which sources doesn't name"]
+
+
+def test_a_kind_belongs_to_one_owner(doc, capture, monkeypatch):
+    monkeypatch.setattr(RULES, "TRIAL_KINDS", {"route", "claim"})
+    monkeypatch.setattr(CR, "POINT_KINDS", {"who"}, raising=False)
+    pack = B.Pack("agentql")
+    pack.doc = doc
+    compiler = B.Compiler(pack, [CAP, CR, RULES], {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    assert any("TRIAL_KINDS 'claim' already belongs to the engine" in e for e in compiler.errors)
+    assert any("POINT_KINDS 'who' already belongs to course_refs" in e for e in compiler.errors)
+
+
+def test_strings_are_filled_once():
+    pack = B.Pack("agentql")
+    pack.strings = dict(pack.strings, x="{a} and {b}")
+    assert pack.string("x", a="{b}", b="two") == "{b} and two"
+
+
+def _second(tmp_path, edit_text=None, files=None) -> B.Pack:
+    packs = tmp_path / "packs"
+    (packs / "second").mkdir(parents=True, exist_ok=True)
+    for name, text in SECOND_PACK.items():
+        if files and name in files:
+            text = files[name]
+        (packs / "second" / name).write_text(text.lstrip(), encoding="utf-8")
+    return B.Pack("second", packs)
+
+
+@pytest.mark.parametrize("file,old,new,needle", [
+    ("strings.yaml", "claim_true: True.\n", "", "which has no claim_true"),
+    ("pack.yaml", "{id: rune,", "{id: why,", "pane id 'why' is also a content key"),
+    ("pack.yaml", "{id: rune,", "{id: path,", "pane id 'path' is also a content key"),
+    ("content.yaml", "- {text: Burn it, outcome: loss, why: No.}", "- {text: Burn it, outcome: win, why: No.}",
+     "exactly one win"),
+    ("content.yaml", "- {text: Burn it, outcome: loss, why: No.}", "- {text: Burn it, outcome: maybe, why: No.}",
+     "an outcome (win/loss/blocked)"),
+    ("content.yaml", "options: [{text: The stem, correct: true}, {text: The leaf}]",
+     "options: [{text: The stem}, {text: The leaf}]", "a choice needs text, why, 2+ options and exactly one correct"),
+    ("content.yaml", "rule_tag: lore", "rule_tag: legend", "rule_tag must be one of ['lore']"),
+])
+def test_a_second_game_that_would_break_does_not_build(tmp_path, file, old, new, needle):
+    text = SECOND_PACK[file]
+    assert old in text, old
+    pack = _second(tmp_path, files={file: text.replace(old, new)})
+    errors = pack.errors or B.compile_pack(pack)[1]
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("file,old,new,needle", [
+    ("content.yaml", "- {text: Read it, outcome: win, why: Yes.}", "- {text: Read it, outcome: win, why: Yes., colour: red}",
+     "unknown key 'colour'"),
+    ("content.yaml", "    path:\n      options:", "    path:\n      colour: red\n      options:", "unknown key 'colour'"),
+    ("pack.yaml", "explore: {realms: []}", "explore: {realms: [moon]}", "explore realm 'moon' is not a realm"),
+    ("content.yaml", "    rune: |\n      stem\n      leaf\n", "", "missing the rune pane"),
+    ("content.yaml", "        rune: [leaf]", "        rune: leaf", "rune must be a list of matches"),
+])
+def test_a_second_game_with_a_broken_path_pane_or_map_does_not_build(tmp_path, file, old, new, needle):
+    text = SECOND_PACK[file]
+    assert old in text, old
+    pack = _second(tmp_path, files={file: text.replace(old, new)})
+    errors = pack.errors or B.compile_pack(pack)[1]
+    assert any(needle in e for e in errors), errors
+
+
+def test_a_pack_needs_a_pane(tmp_path):
+    text = SECOND_PACK["pack.yaml"]
+    old = "panes:\n  - {id: rune, from: content, match: contains, label: rune_label, name: rune_name, caption: \"\"}\n"
+    assert old in text
+    assert "pack.yaml: needs at least one pane" in _second(tmp_path, files={"pack.yaml": text.replace(old, "panes: []\n")}).errors
+
+
+def test_pane_ids_are_closed_in_the_schema(schema, built):
+    assert schema["$defs"]["pane"]["properties"]["id"] == {"enum": ["scroll", "sql"]}
+    built["realms"][1]["encounters"][0]["panes"][0]["id"] = "notes"
+    assert any("'notes' is not one of ['scroll', 'sql']" in e for e in B.check_schema(built, schema))
+
+
+def test_a_point_lighting_every_line_in_scope_is_still_in_scope():
+    sql = ["SELECT CASE", '  WHEN sum("x") IS NOT NULL THEN sum("x")', "  ELSE 0", "END", "LIMIT 100000"]
+    credit = RULES._credit_lines(sql)
+    assert credit == {1, 2, 3, 4}            # SELECT CASE runs past the guard; END and LIMIT are in it
+    assert {1, 2, 3, 4} <= credit and {4} <= credit
+
+
+def test_a_capture_without_a_date_fails(doc, capture):
+    _, cases = capture
+    assert "lesson-sql.md: no capture date found in its header" in _compile(doc, (None, cases))[1]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_page_saves_under_the_packs_key(doc, capture, tmp_path):
+    # Another pack's key: a page that still wrote aqq-* would fail the play-through's save checks.
+    data, errors = _compile(doc, capture)
+    assert errors == []
+    data["pack"]["storage_key"] = "zz"
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, B.font_faces()), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "play_quest.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_choice_options_take_only_text_and_correct(doc, capture):
+    choice = next(p for p in _encounter(doc)["points"] if p["kind"] == "choice")
+    choice["options"][0]["corect"] = True
+    assert any("option 1: unknown key 'corect'" in e for e in _errors(doc, capture))
+
+
+def test_a_who_point_lighting_exactly_the_lines_in_scope_must_credit_thoughtspot():
+    rules = RULES.Rules(B.Pack("agentql"))
+    panes = {"sql": ["SELECT a", "LIMIT 100000"], "scroll": ["SELECT a"]}
+    errors = []
+    RULES.point(rules, {"kind": "who", "answer": "model", "sql": ["LIMIT 100000"], "rule": "r"}, panes,
+                {"sql": [1], "scroll": []}, "p", errors)
+    assert any("row cap or a null guard" in e for e in errors), errors

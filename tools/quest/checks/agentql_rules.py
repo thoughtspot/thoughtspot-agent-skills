@@ -114,6 +114,8 @@ def point(rules: Rules, p: dict, panes: dict[str, list[str]], highlights: dict, 
         errors.append(f"{where}: a who point must highlight the SQL it asks about")
     if not p.get("rule"):
         errors.append(f"{where}: a who point needs a rule (the hoard lists it)")
+    if "rule_tag" in p:  # otherwise a null guard answered thoughtspot could still be tagged MODEL
+        errors.append(f"{where}: a who point takes its rule tag from its answer; drop rule_tag")
     answer = p.get("answer")
     target = WHO_ANSWERS.get(answer)
     if target is None:
@@ -131,3 +133,10 @@ def finish(rules: Rules, pack, data: dict, errors: list[str]) -> None:
     realms = data.get("realms") or []
     if realms and not realms[0]["halls"]:
         errors.append("realms: the first realm is where every player starts; it must teach in halls")
+    # The classic page introduces every non-claim trial as a petition about engines.
+    for r in pack.doc.get("realms") or []:
+        for h in r.get("halls") or []:
+            for t in h.get("trials") or []:
+                if t.get("kind") not in ("claim", "route"):
+                    errors.append(f"realm {r.get('id')} hall {h.get('id')}: AgentQL Quest's halls ask claims and "
+                                  f"routes only, got {t.get('kind')!r}")

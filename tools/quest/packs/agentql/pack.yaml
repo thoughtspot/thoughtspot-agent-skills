@@ -8,7 +8,7 @@ publish_path: agentql-quest            # the Pages folder: the live URL never ch
 storage_key: aqq                       # saves are aqq-progress and aqq-sound
 unlock: first_realm_first              # every other realm waits for the first
 
-# Plugins in tools/quest/checks/, run in this order.
+# Plugins in tools/quest/checks/ (see "Plugins" in build.py).
 checks: [agentql_capture, course_refs, agentql_rules]
 sources:                               # read-only inputs the plugins check against
   lesson_sql: agents/cli/ts-object-model-agentql-query/references/lesson-sql.md

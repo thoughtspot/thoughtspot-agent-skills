@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 NAME = "course_refs"
+SOURCES = {"learning_path"}
 KEYS = {"top": {"lesson_titles"}, "realm": {"module"}, "encounter": {"lesson"}}
 REFS = {
     "realm": {"module": {"description": "The course module the realm teaches.", "type": "integer"}},
@@ -88,4 +89,5 @@ def encounter(course, e: dict, panes: dict, where: str, errors: list[str]) -> di
 
 
 def finish(course, pack, data: dict, errors: list[str]) -> None:
-    errors.extend(check_course_refs(pack.content_text, pack.doc, *course))
+    # strings.yaml is scanned too: wording that names a lesson must stay in step as well.
+    errors.extend(check_course_refs(pack.content_text + "\n" + pack.strings_text, pack.doc, *course))
