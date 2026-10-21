@@ -339,8 +339,9 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
         for field in ("name", "covers", "depth", "minutes"):
             if not r.get(field):
                 errors.append(f"realm {rid}: missing {field}")
-        if not isinstance(r.get("module"), int):
-            errors.append(f"realm {rid}: module must be a number")
+        for field in ("module", "minutes"):  # whole numbers, never 4.0: strict decoders reject a float
+            if not isinstance(r.get(field), int) or isinstance(r.get(field), bool):
+                errors.append(f"realm {rid}: {field} must be a whole number")
         halls = _halls(r, engines, rid, errors)
         trials = [t for h in halls for t in h["trials"]]
         enc_ids = list(r.get("encounters") or [])
@@ -383,11 +384,9 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
 
 
 # The JSON Schema keywords quest.schema.json may use. Pre-commit needs no extra package for this;
-# CI also validates the published pair with the real jsonschema (see the README).
-# lint_schema checks the schema first, whole, and accepts only a strict form _check enforces
-# exactly: an unknown keyword, an object rule away from its properties, an object that allows
-# unlisted or optional fields, $id or $defs below the root, or a broken or looping $ref fails
-# before any data is looked at.
+# CI also validates the published pair with the real jsonschema (see the README). lint_schema
+# checks the schema first, whole, and accepts only a strict form of 2020-12 that _check enforces
+# exactly; the README lists what it refuses.
 _SCHEMA_NOTES = {"$schema", "$id", "title", "description", "$defs"}
 _SCHEMA_RULES = {"type", "enum", "required", "properties", "additionalProperties", "items",
                  "minItems", "anyOf", "$ref"}

@@ -119,8 +119,9 @@ refuses:
 If you need a form it refuses, extend the checker and its tests first.
 
 CI also installs the real `jsonschema` (pinned in `validate.yml`) and validates the published
-`quest.json` against the published `quest.schema.json`, metaschema included, so a consumer's
-validator is the final judge. Locally that test runs only if `jsonschema` is installed.
+`quest.json` against the published `quest.schema.json` the way a consumer's
+`jsonschema.validate()` would, metaschema included. Locally that test runs only if a jsonschema
+that supports 2020-12 (4.0 or later) is installed, and skips otherwise.
 
 So a question is edited in `encounters.yaml`, never in a front end, and a second front end
 (for example an explorable map) plays the same content by loading `quest.json`.
@@ -140,7 +141,9 @@ So a question is edited in `encounters.yaml`, never in a front end, and a second
 | `lesson-sql.md: no Model named in its header` | the capture's header lost the "captured live on the sample Model" line | regenerate `lesson-sql.md` with `tools/agentql-retest/build_lesson_sql.py` |
 | `the capture header names Model '…', but this AgentQL does not query FROM "…"` | the header and the captured AgentQL disagree about the Model, so the caption would name the wrong one | recapture, or fix the generator's header |
 | `quest: …` or `quest.…: …`, for example `missing '…'`, `'…' is not in quest.schema.json`, `expected …, got …`, `… is not one of …`, `needs at least … item(s)`, `matches none of its allowed shapes (…)` | the built data no longer fits the contract (the path says where) | change `build.py` and the schema together |
-| `quest.schema.json #/…: …` | the schema uses something the built-in check can't enforce | use only the supported forms the message names |
+| `quest.schema.json #…: …` | the schema uses something the built-in check can't enforce | use only the supported forms the message names |
+| `quest.schema.json: not valid JSON (…)` or `… NaN is not JSON` | the schema file isn't strict JSON | fix the file; every JSON parser must read it |
+| `realm …: module must be a whole number` (or `minutes`) | a number like `4.0` | write `4` |
 
 ## Adding an encounter or opening a realm
 

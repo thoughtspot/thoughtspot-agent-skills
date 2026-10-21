@@ -364,6 +364,13 @@ def test_the_schema_checker_applies_every_rule(field, defs, value, needle):
     assert any(needle in e for e in errors), errors
 
 
+@pytest.mark.parametrize("field", ["minutes", "module"])
+def test_integer_fields_must_be_whole_numbers_in_the_yaml(doc, capture, field):
+    # 2020-12 calls 4.0 an integer, but strictly typed decoders (Go, serde) don't.
+    doc["realms"][0][field] = 4.0
+    assert any(f"realm law: {field} must be" in e for e in B.compile_quest(doc, *capture, MODEL)[1])
+
+
 def test_the_schema_checker_follows_2020_12_integers():
     assert B.check_schema({"a": 1.0}, _one_field({"type": "integer"})) == []
     assert B.check_schema({"a": 1.5}, _one_field({"type": "integer"})) != []
@@ -432,6 +439,7 @@ def test_a_ref_that_loops_is_refused_not_a_recursion_error(defs):
 @pytest.mark.parametrize("root_keys,needle", [
     ({"$schema": "http://json-schema.org/draft-04/schema#"}, "$schema must be"),
     ({"$id": "https://example.com/quest.schema.json#part"}, "$id must be a URI without a fragment"),
+    ({"$id": 5}, "$id must be a URI without a fragment"),
 ])
 def test_the_root_pins_the_dialect_and_a_plain_id(root_keys, needle):
     schema = dict(_one_field({"type": "string"}), **root_keys)
@@ -445,8 +453,12 @@ def test_definition_names_need_no_decoding(name):
     assert any("use letters, digits and _ only" in e for e in B.check_schema({"a": "x"}, schema))
 
 
-def test_a_ref_that_loops_through_anyof_is_refused_not_a_recursion_error():
-    defs = {"h": {"anyOf": [{"enum": ["all"], "$ref": "#/$defs/h"}, {"type": "array"}]}}
+@pytest.mark.parametrize("defs", [
+    {"h": {"anyOf": [{"enum": ["all"], "$ref": "#/$defs/h"}, {"type": "array"}]}},
+    {"h": {"anyOf": [{"type": "array"}, {"$ref": "#/$defs/h"}]}},                       # in a later branch
+    {"h": {"anyOf": [{"$ref": "#/$defs/g"}]}, "g": {"anyOf": [{"$ref": "#/$defs/h"}]}},  # through another def
+])
+def test_a_ref_that_loops_through_anyof_is_refused_not_a_recursion_error(defs):
     errors = B.check_schema({"a": "all"}, _one_field({"$ref": "#/$defs/h"}, defs))
     assert any("reaches itself" in e for e in errors), errors
 
@@ -571,19 +583,22 @@ def test_out_may_not_name_a_file_written_beside_the_page(tmp_path, name):
 
 
 def test_a_real_2020_12_validator_accepts_the_published_pair(tmp_path):
-    # The built-in checker is a strict subset; this is the consumer's view. CI installs jsonschema
-    # (validate.yml), so there this always runs; elsewhere it runs when jsonschema is installed.
+    # The built-in checker is a strict subset; this is a consumer's jsonschema.validate() call. CI
+    # installs jsonschema 4.x (validate.yml), so there it always runs; elsewhere it skips unless a
+    # 2020-12-capable jsonschema is installed (Ubuntu 22.04's system one is 3.2).
     try:
         import jsonschema
-    except ImportError:
-        if os.environ.get("CI"):
-            pytest.fail("CI must install jsonschema (see validate.yml)")
-        pytest.skip("jsonschema is not installed")
+        validator = jsonschema.Draft202012Validator
+    except (ImportError, AttributeError) as e:  # absent, broken, or older than 4.0
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            pytest.fail(f"CI must install jsonschema 4.x (see validate.yml): {e!r}")
+        pytest.skip(f"no 2020-12 jsonschema here: {e!r}")
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
     schema = json.loads((tmp_path / "quest.schema.json").read_text(encoding="utf-8"))
-    jsonschema.Draft202012Validator.check_schema(schema)
-    jsonschema.Draft202012Validator(schema).validate(json.loads((tmp_path / "quest.json").read_text(encoding="utf-8")))
+    data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
+    assert jsonschema.validators.validator_for(schema) is validator  # what jsonschema.validate() would pick
+    jsonschema.validate(data, schema)  # a consumer's call: metaschema check, then the data
 
 
 def test_every_schema_field_is_required(schema):
