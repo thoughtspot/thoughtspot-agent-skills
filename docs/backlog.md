@@ -255,6 +255,8 @@ are roughly ordered by value÷effort.
 | ~~BL-382~~ | ~~The Snowflake from-direction translator (`sv_sql`) does not strip SQL comments: `/* x */` and `-- y` became `/ * [T::X] * /` and `- - [T::Y]`~~ | DONE (2026-10-07 — ts-cli v0.173.0) |
 | BL-395 | Re-run the AgentQL retest suite on 26.9.0.sw and reconcile `limitations.md` (3 tickets fixed only in that release, the regex row) | 2026-11-30 |
 | BL-396 | ERD `order-fulfilment` example fails I18/I19: an alias self-join and alias names in 19 `on:` clauses — lint-clean when written, rejected by import | 2026-11-15 |
+| BL-397 | Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504) | 2026-11-30 |
+| BL-398 | Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs | 2026-11-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -14301,5 +14303,45 @@ replace it with a flattened manager column on a view, the I18 fix); remove the R
 bullet; re-render `model_erd.html` (its viewer is baked, and `tests/test_examples.py`
 fails on drift); PATCH-bump `ts-object-model-erd`. Then `ts tml lint --dir` on the
 example's `tml/` must be clean.
+
+**Target:** 2026-11-15.
+
+## BL-397 — Join shapes import rejects that `ts tml lint` does not check `Tier 2`
+
+**Filed:** 2026-10-21. **Source:** the independent review of the I17-I19 lint rules, which
+probed se-thoughtspot with `VALIDATE_ONLY`.
+
+**What.** Two Model join shapes fail import, and no lint rule names them:
+
+1. **`cardinality: MANY_TO_MANY`** — rejected outright, error 14528 (probes R13a/R13b).
+   `ts_cli/powerbi/tables.py` emits it for a many-to-many relationship, so a Power BI
+   conversion with one passes lint and fails at import.
+2. **A `referencing_join` declared under its destination table's entry** — rejected,
+   14504 "Relationships do not exist" (probe R14; under the source, R14c, imports).
+
+**Do.** Live-confirm both once more, then add them as invariants (next free ids) in
+`tml_lint.py` with the CANONICAL-RULE-SET marker updated, an entry each in
+`ts-model-conversion-invariants.md`, and tests. Decide what the Power BI converter should emit
+for a many-to-many relationship (a bridge table, or a NEEDS REVIEW flag) in the same PR, since
+the new rule will start failing its output.
+
+**Target:** 2026-11-30.
+
+## BL-398 — Sisense join direction depends on set iteration order `Tier 2`
+
+**Filed:** 2026-10-21. **Source:** the independent review of the I17-I19 lint rules.
+
+**What.** `ts_cli/sisense/build_model.py` picks each relation's source table with
+`sorted(rel_tables, key=lambda t: part[t], reverse=True)`, where `rel_tables` is a `set`. When
+two tables have the same connection count the sort is stable over the set's order, which
+depends on string hashing — so the join graph differs between runs. The review fed two facts
+sharing a Product and a Calendar dimension through it under 12 `PYTHONHASHSEED` values and got
+7 distinct join sets, 8 of the 12 runs tripping I17 (a second route). The conversion's lint
+gate therefore flakes. I17's advice ("alias it per role") is the wrong fix: the real fix is a
+deterministic, fact-to-dimension orientation.
+
+**Do.** Reproduce with two `PYTHONHASHSEED` values; orient by role (the side with measures,
+or the many side of the relationship) with a deterministic tie-break on name; add a test that
+runs the build under several hash seeds and asserts one join set.
 
 **Target:** 2026-11-15.

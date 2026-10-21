@@ -16,10 +16,11 @@ from ts_cli.tml_join_graph import (
 from ts_cli.tml_lint import lint_tml
 
 
-def _j(frm_phys, to_node, lcol="K", rcol="K", to_phys=None, name=None, on=True):
+def _j(frm_phys, to_node, lcol="K", rcol="K", to_phys=None, name=None, on=True,
+       card="MANY_TO_ONE"):
     """A join from a table whose physical name is `frm_phys` to node `to_node`."""
     j = {"name": name or f"{frm_phys}_TO_{to_node}", "with": to_node,
-         "type": "INNER", "cardinality": "MANY_TO_ONE"}
+         "type": "INNER", "cardinality": card}
     if on:
         j["on"] = f"[{frm_phys}::{lcol}] = [{to_phys or to_node}::{rcol}]"
     return j
@@ -135,6 +136,49 @@ class TestProbeShapes:
             _t("ORDERS"))) == []
 
 
+class TestCardinalitySetsDirection:
+    """An arrow runs MANY -> ONE. A ONE_TO_MANY join declared under the dimension is
+    the same arrow as a MANY_TO_ONE declared under the fact (review probes R4-R12)."""
+
+    def test_one_to_many_legs_under_the_dimension_are_clean(self):  # R4: OK
+        assert lint_tml(_model(
+            _t("PRODUCT", _j("PRODUCT", "LINES", card="ONE_TO_MANY"),
+               _j("PRODUCT", "INVENTORY", card="ONE_TO_MANY")),
+            _t("LINES", _j("LINES", "ORDERS")), _t("ORDERS", _j("ORDERS", "DATE")),
+            _t("INVENTORY", _j("INVENTORY", "DATE")), _t("DATE"))) == []
+
+    def test_one_flipped_leg_makes_a_diamond(self):  # R4f: 13124
+        """Same placement as the accepted shared-dimension Model, one leg 1:M: now
+        PRODUCT -> INVENTORY, so LINES reaches DATE by two routes."""
+        f = lint_tml(_model(
+            _t("LINES", _j("LINES", "ORDERS"), _j("LINES", "PRODUCT")),
+            _t("INVENTORY", _j("INVENTORY", "PRODUCT", card="ONE_TO_MANY"),
+               _j("INVENTORY", "DATE")),
+            _t("ORDERS", _j("ORDERS", "DATE")), _t("PRODUCT"), _t("DATE")))
+        assert _ids(f) == ["I17"]
+        assert "two join paths reach 'DATE' from 'LINES'" in f[0]
+
+    def test_mirror_pair_is_two_joins_on_one_arrow(self):  # R12: 13124, not a cycle
+        f = lint_tml(_model(
+            _t("ORDERS", _j("ORDERS", "EMPLOYEE")),
+            _t("EMPLOYEE", _j("EMPLOYEE", "ORDERS", card="ONE_TO_MANY"))))
+        assert _ids(f) == ["I17"]
+        assert "2 joins run from 'ORDERS' to 'EMPLOYEE'" in f[0] and "13124" in f[0]
+
+    def test_both_many_to_one_mirror_is_a_cycle(self):  # P1: 13123
+        f = lint_tml(_model(
+            _t("ORDERS", _j("ORDERS", "EMPLOYEE")),
+            _t("EMPLOYEE", _j("EMPLOYEE", "ORDERS"))))
+        assert _ids(f) == ["I17"] and "13123" in f[0]
+
+    def test_one_to_one_follows_placement(self):  # R4h: OK
+        assert lint_tml(_model(
+            _t("LINES", _j("LINES", "ORDERS"), _j("LINES", "PRODUCT")),
+            _t("INVENTORY", _j("INVENTORY", "PRODUCT", card="ONE_TO_ONE"),
+               _j("INVENTORY", "DATE")),
+            _t("ORDERS", _j("ORDERS", "DATE")), _t("PRODUCT"), _t("DATE"))) == []
+
+
 class TestEdgeCases:
     def test_deep_diamond_is_reported_once_at_its_split_point(self):
         """X -> A, then A splits and rejoins at D, which continues to E. Only (A, D) is a
@@ -178,7 +222,27 @@ class TestEdgeCases:
             _t("C", _j("C", "D"), _j("C", "S")), _t("D", _j("D", "C")),
             _t("S")))
         assert sorted(_ids(f)) == ["I17", "I17", "I17"]
-        assert any("reach 'S' from 'A/B'" in x and "A/B -> C/D -> S" in x for x in f)
+        assert any("reach 'S' from 'cycle(A, B)'" in x
+                   and "cycle(A, B) -> cycle(C, D) -> S" in x for x in f)
+
+    def test_a_table_named_like_a_cycle_does_not_collide(self):
+        """A real table `A/B` beside a real cycle A <-> B must not merge with it."""
+        f = lint_tml(_model(
+            _t("A", _j("A", "B")), _t("B", _j("B", "A")),
+            _t("A/B", _j("A/B", "S")), _t("S")))
+        assert _ids(f) == ["I17"] and "cycle" in f[0]
+
+    def test_non_string_names_do_not_crash(self):
+        f = lint_tml(_model(_t(2024, {"name": "j", "with": 123}), _t(123)))
+        assert f == []
+
+    def test_escaped_names_in_on_resolve(self):
+        """An exported Model writes `[dim_date\\.csv::id]` for a table named
+        `dim_date.csv` (seen on 7 of 599 real Models in the review sweep)."""
+        assert lint_tml(_model(
+            _t("FACT", {"name": "j", "with": "dim_date.csv",
+                        "on": "[FACT::DATE_ID] = [dim_date\\.csv::date_id]"}),
+            _t("dim_date.csv"))) == []
 
     def test_on_table_names_are_case_insensitive(self):
         assert lint_tml(_model(
@@ -268,14 +332,46 @@ class TestRequiredJoinKey:
         f = lint_required_join_key(m, self.KEY, table_joins=idx)
         assert len(f) == 1 and "does not equate 'customer_id'" in f[0]
 
-    def test_referencing_join_declared_on_the_target_table(self):
+    def test_referencing_join_is_looked_up_on_the_declaring_table_only(self):
+        """A referencing join lives in the declaring entry's Table TML; one placed under
+        its destination is rejected at import (14504, review probe R14), so a join of
+        that name on the OTHER table is not this join."""
         m = self._m(_t("LINES", {"with": "ORDERS", "referencing_join": "O_TO_L"}),
                     _t("ORDERS"))
         idx = table_join_index({"ORDERS": {"joins_with": [
             {"name": "O_TO_L", "destination": {"name": "LINES"},
              "on": "[ORDERS::ID] = [LINES::ORDER_ID] AND "
                    "[ORDERS::customer_id] = [LINES::customer_id]"}]}})
-        assert lint_required_join_key(m, self.KEY, table_joins=idx) == []
+        f = lint_required_join_key(m, self.KEY, table_joins=idx)
+        assert len(f) == 1 and "cannot be checked" in f[0]
+
+    def test_key_under_or_does_not_count(self):
+        m = self._m(_t("ORDERS", {"name": "j", "with": "CUSTOMER",
+                                  "on": "[ORDERS::CUST] = [CUSTOMER::ID] or "
+                                        "[ORDERS::customer_id] = [CUSTOMER::customer_id]"}),
+                    _t("CUSTOMER"))
+        assert len(lint_required_join_key(m, self.KEY)) == 1
+
+    def test_key_inside_an_expression_does_not_count(self):
+        m = self._m(_t("ORDERS", {"name": "j", "with": "CUSTOMER",
+                                  "on": "[ORDERS::CUST] = [CUSTOMER::ID] and "
+                                        "[ORDERS::customer_id] = [CUSTOMER::customer_id] + 1"}),
+                    _t("CUSTOMER"))
+        assert len(lint_required_join_key(m, self.KEY)) == 1
+
+    def test_separately_parenthesised_conjuncts_count(self):
+        m = self._m(_t("ORDERS", {"name": "j", "with": "CUSTOMER",
+                                  "on": "([ORDERS::CUST] = [CUSTOMER::ID]) and "
+                                        "([ORDERS::customer_id] = [CUSTOMER::customer_id])"}),
+                    _t("CUSTOMER"))
+        assert lint_required_join_key(m, self.KEY) == []
+
+    def test_a_column_named_like_or_is_not_an_operator(self):
+        m = self._m(_t("ORDERS", {"name": "j", "with": "CUSTOMER",
+                                  "on": "[ORDERS::or] = [CUSTOMER::not] and "
+                                        "[ORDERS::customer_id] = [CUSTOMER::customer_id]"}),
+                    _t("CUSTOMER"))
+        assert lint_required_join_key(m, self.KEY) == []
 
     def test_referencing_join_without_its_table_tml_says_so(self):
         m = self._m(_t("ORDERS", {"with": "INCIDENT", "referencing_join": "O_TO_I"}),

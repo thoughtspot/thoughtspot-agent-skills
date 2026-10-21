@@ -667,28 +667,39 @@ hand-built equivalent).
 
 ### I17 — One join route between any two tables: no cycles, no second paths
 
-**Rule:** read the Model's joins as a **directed** graph (an arrow from each `model_tables[]`
-entry to its `joins[].with`, each alias its own node). It must contain no cycle that follows
-the arrows, and no two different arrow-following routes from one table to another.
+**Rule:** read the Model's joins as a **directed** graph, each alias its own node, with every
+arrow running from a join's MANY side to its ONE side. `cardinality` sets the direction, not
+placement: a `MANY_TO_ONE` or `ONE_TO_ONE` join (or one with no cardinality) points from its
+`model_tables[]` entry to `with:`, and a `ONE_TO_MANY` join points from `with:` back to the
+entry — so a 1:M declared under a dimension is the same arrow as an M:1 declared under the
+fact. The graph must contain no cycle that follows the arrows, and no two different
+arrow-following routes from one table to another.
 
 **Failure mode:** the import is rejected, and the message names nothing:
 
 | Shape | Server response |
 |---|---|
-| A → B and B → A, or A → B → C → A | error **13123**, "Schema validation failed" |
+| A → B and B → A (both `MANY_TO_ONE`), or A → B → C → A | error **13123**, "Schema validation failed" |
 | A → B → D and A → C → D (two routes to D) | error **13124**, "Schema validation failed" |
+| M:1 under A to B, plus 1:M under B to A — the same arrow twice | error **13124** |
+| the shared-dimension Model below with one leg flipped to `ONE_TO_MANY` | error **13124** — the flip makes a second route |
 
 **Direction is what matters.** Two fact tables sharing dimensions —
 `ORDERS → DATE`, `INVENTORY → DATE`, `ORDER_LINES → PRODUCT`, `INVENTORY → PRODUCT` — form a
 loop only when the arrows are ignored. That is the ordinary multi-fact shape and imports
-fine, so I17 never flags it. A check that ignores direction flags every multi-fact Model.
+fine — as it does with the same legs written as 1:M joins under the dimensions — so I17 never
+flags it. A check that ignores direction flags every multi-fact Model; one that takes
+direction from placement instead of cardinality both flags valid Models and misses rejected
+ones.
 
 **Fix:** alias the table the second route reaches, once per role (the I14 pattern):
 `ORDERS → SHIPPER` (an alias of `SUPPLIER`) beside `PRODUCT → SUPPLIER` imports clean. I14 is
 the degenerate case of this rule — two joins between one pair — and keeps its own id.
 
-**Evidence:** live probe on se-thoughtspot 2026-10-21 — throwaway Models over existing tables,
-`--policy VALIDATE_ONLY` and `ALL_OR_NONE` giving identical results; nothing persisted.
+**Evidence:** live probes on se-thoughtspot 2026-10-21 — throwaway Models over existing tables,
+every shape under `--policy VALIDATE_ONLY`, the rejected ones also under `ALL_OR_NONE` with the
+same result; nothing persisted. The cardinality rows came from an independent review's probes,
+which also showed `MANY_TO_MANY` is rejected outright (14528 — not checked by lint; BL-397).
 
 **Enforced by:** `ts tml lint` — it names the cycle, or both routes from their lowest shared
 starting table, which the server's response never does.

@@ -12,7 +12,8 @@ Invariant definitions: [`ts-model-conversion-invariants.md`](ts-model-conversion
 
 Lint the generated **Model** TML before `ts tml import` — a parser-based check of
 the hard invariants that `--policy VALIDATE_ONLY` does **not** catch (ThoughtSpot
-accepts the TML and then behaves wrong, or rejects it on import):
+accepts the TML and then behaves wrong, or rejects it on import), plus the join-graph
+rules it does catch but reports only as a bare error code:
 
 - **I1** — every `formulas[]` entry has a paired `columns[]` entry (`formula_id:` == `id:`). *(Unpaired formula silently dropped.)*
 - **I2** — no `aggregation:` inside any `formulas[]` entry. *(Raises "FORMULA is not a valid aggregation type".)*
@@ -22,6 +23,9 @@ accepts the TML and then behaves wrong, or rejects it on import):
 - **I12** — every `column_id` is `TABLE::col`-qualified, never bare — even on a single-table model. *(Hard import rejection: "These column_id/formula_id values are incorrect", error_code 14547.)*
 - **I13** — every `[formula_*]` reference (in a `formulas[].expr`) and every `columns[].formula_id` matches a declared `formulas[].id`. *(Hard import rejection: `error_code 14516`, "Search did not find \"formula_X\"" — an unresolvable bracket reference is parsed as search tokens. Distinct from I9, which mandates the id form in the first place.)*
 - **I15** — no column-root key (`description`, `name`, `column_id`, `formula_id`) inside a `columns[]` entry's `properties:`. *(A Model import silently ignores unknown keys under `properties:` — the TML validates clean, imports with `status_code OK`, and the value is gone. BL-232: five sites emitted `description` there and every gate in the repo passed; 19 of 19 descriptions were discarded on a live import. Contrast `synonyms`, which must stay under `properties:`.)*
+- **I17** — one join route between any two tables. Read each join as an arrow from its MANY side to its ONE side (a `ONE_TO_MANY` join points from `with:` back to the declaring entry): no cycle along the arrows, no two routes to one table. *(Rejected with "Schema validation failed", error 13123 / 13124, naming no join. Two facts sharing a dimension are fine.)*
+- **I18** — no self-join, aliased or not. *(Rejected, 13125 / 14565.)*
+- **I19** — a join's `on:` names only its two tables, by physical name — never a third table or an alias. *("Invalid srcTable or destTable in join expression".)*
 
 `ts tml lint` reads raw TML file paths via `--file`/`--dir` (the same input `ts tml
 import` takes) and exits non-zero on any finding, so it gates the import (replace

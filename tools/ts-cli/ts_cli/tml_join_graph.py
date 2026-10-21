@@ -1,22 +1,29 @@
 """A Model's join graph, as ThoughtSpot validates it — plus the opt-in join-key rule.
 
-The graph is DIRECTED: an edge runs from a `model_tables[]` entry to its `joins[].with`
-target, and every entry is its own node (`alias` when present, else `id`, else `name` —
-the same identity `tml_lint._node_id` uses). Direction is the whole point. A loop that
-only appears when direction is ignored — two fact tables sharing a date and a product
-dimension — is the ordinary multi-fact shape and imports fine; ThoughtSpot rejects only
-a loop that follows the arrows, or two arrow-following routes between one pair.
+The graph is DIRECTED, and the direction comes from `cardinality`, not from which entry
+declares the join: an arrow runs from the MANY side to the ONE side. A MANY_TO_ONE or
+ONE_TO_ONE join (or one with no cardinality) points from its `model_tables[]` entry to
+its `with:` target; a ONE_TO_MANY join points the other way, so a 1:M join declared
+under a dimension is the same arrow as an M:1 declared under the fact. Every entry is
+its own node (`alias` when present, else `id`, else `name`). Direction is the whole
+point. A loop that only appears when direction is ignored — two fact tables sharing a
+date and a product dimension — is the ordinary multi-fact shape and imports fine;
+ThoughtSpot rejects only a loop that follows the arrows, or two arrow-following routes
+between one pair.
 
 Live-probed on se-thoughtspot 2026-10-21 with throwaway Models over existing tables
-(nothing persisted), `VALIDATE_ONLY` and `ALL_OR_NONE` agreeing on every shape:
+(nothing persisted). Every shape was checked with `VALIDATE_ONLY`; the rejected ones
+were also imported `ALL_OR_NONE`, with the same result:
 
 | Shape | Server response |
 |---|---|
-| directed cycle, including A -> B plus B -> A | error 13123 "Schema validation failed" |
+| directed cycle, A -> B -> C -> A or A -> B plus B -> A (both MANY_TO_ONE) | error 13123 "Schema validation failed" |
 | two directed routes to one table (a diamond) | error 13124 "Schema validation failed" |
+| two joins on the same arrow from different entries (M:1 under A, 1:M under B) | error 13124 |
+| a 1:M leg that turns a shared-dimension loop into a diamond | error 13124 |
 | a table joined to itself, aliased or not | 13125 / 14565 "INTERNAL ERROR" |
 | `on:` naming a third table, or an alias | "Invalid srcTable or destTable in join expression" |
-| two facts sharing dimensions (undirected loop only) | OK |
+| two facts sharing dimensions (undirected loop only), M:1 or 1:M legs | OK |
 | `on:` sides in either order | OK |
 
 The server's text never says which joins are at fault — the code is the only signal —
@@ -32,22 +39,39 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# `[TABLE::COL]` inside a join `on:` clause.
-_JOIN_ON_REF_RE = re.compile(r"\[([^\[\]]+?)::([^\[\]]+)\]")
-# One equality term: `[T1::C1] = [T2::C2]`, tolerating the optional wrapping parens.
-_JOIN_ON_EQ_RE = re.compile(r"\[([^\[\]]+?)::([^\[\]]+)\]\s*=\s*\[([^\[\]]+?)::([^\[\]]+)\]")
+# `[TABLE::COL]` inside a join `on:` clause. A name may carry server escapes — an exported
+# Model writes `[dim_date\.csv::date_id]` for a table named `dim_date.csv` — so a
+# backslash-escaped character is part of the name, and `on_clause_refs` unescapes it.
+_NAME = r"(?:\\.|[^\[\]\\])+?"
+_JOIN_ON_REF_RE = re.compile(rf"\[({_NAME})::({_NAME})\]")
+_UNESCAPE_RE = re.compile(r"\\(.)")
+# The whole of one AND-conjunct: `[T1::C1] = [T2::C2]` and nothing else.
+_JOIN_ON_EQ_RE = re.compile(rf"^\[({_NAME})::({_NAME})\]\s*=\s*\[({_NAME})::({_NAME})\]$")
+_TOP_LEVEL_AND_RE = re.compile(r"\s+and\s+", re.IGNORECASE)
+_OR_NOT_RE = re.compile(r"\b(or|not)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class Edge:
-    frm: str          # node id of the source entry
-    to: str           # node id of the target entry
+    frm: str          # node id of the declaring entry
+    to: str           # node id of the `with:` target
     name: str         # join name, for messages
     join: dict        # the raw joins[] entry
 
+    @property
+    def one_to_many(self) -> bool:
+        return str(self.join.get("cardinality") or "").upper() == "ONE_TO_MANY"
+
+    @property
+    def arrow(self) -> tuple[str, str]:
+        """(many side, one side): the direction the server validates."""
+        return (self.to, self.frm) if self.one_to_many else (self.frm, self.to)
+
 
 def node_id(entry: dict) -> str:
-    return entry.get("alias") or entry.get("id") or entry.get("name") or "?"
+    """A model_tables entry's node identity: `alias`, else `id` (pinned to `name` by
+    I4), else `name`. Stringified — a YAML-typed `name: 2024` must not crash the lint."""
+    return str(entry.get("alias") or entry.get("id") or entry.get("name") or "?")
 
 
 class JoinGraph:
@@ -59,7 +83,7 @@ class JoinGraph:
         self._entries: list[dict] = []
         for t in model_tables or []:
             if isinstance(t, dict):
-                self.physical.setdefault(node_id(t), t.get("name") or "?")
+                self.physical.setdefault(node_id(t), str(t.get("name") or "?"))
                 self._entries.append(t)
         self._by_lower = {n.lower(): n for n in self.physical}
         self.edges: list[Edge] = []
@@ -71,26 +95,39 @@ class JoinGraph:
                 to = self.resolve(j["with"])
                 if to is None:
                     continue
-                name = j.get("name") or j.get("referencing_join") or "(unnamed)"
+                name = str(j.get("name") or j.get("referencing_join") or "(unnamed)")
                 self.edges.append(Edge(frm, to, name, j))
 
-    def resolve(self, ref: str):
+    def resolve(self, ref):
+        ref = str(ref)
         if ref in self.physical:
             return ref
-        return self._by_lower.get(str(ref).lower())
+        return self._by_lower.get(ref.lower())
 
     def is_self_join(self, e: Edge) -> bool:
         return self.physical[e.frm].lower() == self.physical[e.to].lower()
 
-    def adjacency(self, skip_self: bool = True) -> dict[str, list[str]]:
-        """Deduplicated successors, sorted for deterministic output. Parallel edges
-        collapse — two joins between one ordered pair is I14's finding, not a cycle's."""
+    def adjacency(self) -> dict[str, list[str]]:
+        """Deduplicated successors along each join's arrow (many -> one), sorted for
+        deterministic output. Self-joins are left out (I18). Parallel arrows collapse
+        here; `parallel_arrows` reports them."""
         adj: dict[str, set] = {n: set() for n in self.physical}
         for e in self.edges:
-            if skip_self and self.is_self_join(e):
-                continue
-            adj[e.frm].add(e.to)
+            if not self.is_self_join(e):
+                src, dst = e.arrow
+                adj[src].add(dst)
         return {n: sorted(s) for n, s in adj.items()}
+
+    def parallel_arrows(self) -> list[tuple[str, str, list[Edge]]]:
+        """Arrows carried by two or more joins declared from DIFFERENT entries — an M:1
+        under A plus a 1:M under B, both A -> B (server error 13124). Two joins declared
+        under the same entry to the same target are I14's finding and are left to it."""
+        by_arrow: dict[tuple[str, str], list[Edge]] = {}
+        for e in self.edges:
+            if not self.is_self_join(e):
+                by_arrow.setdefault(e.arrow, []).append(e)
+        return [(src, dst, es) for (src, dst), es in sorted(by_arrow.items())
+                if len({(e.frm, e.to) for e in es}) > 1]
 
 
 def strongly_connected(adj: dict[str, list[str]]) -> list[list[str]]:
@@ -192,9 +229,9 @@ def ambiguous_paths(graph: JoinGraph) -> list[tuple[str, str, list[str], list[st
     the LOWEST shared ancestor, so a diamond deep in a chain is reported once at its
     split point rather than again for every table above it.
 
-    A directed cycle is collapsed to one node first, named by its members joined with
-    `/`: the cycle is reported on its own, path counting through a loop is meaningless,
-    and a second route that merely passes through a cycle is still a second route.
+    A directed cycle is collapsed to one node first, labelled `cycle(A, B)`: the cycle
+    is reported on its own, path counting through a loop is meaningless, and a second
+    route that merely passes through a cycle is still a second route.
     """
     dag = _condense(graph.adjacency())
     anc = _Ancestors(dag)
@@ -211,12 +248,13 @@ def ambiguous_paths(graph: JoinGraph) -> list[tuple[str, str, list[str], list[st
 
 
 def _condense(adj: dict[str, list[str]]) -> dict[str, list[str]]:
-    """The condensation DAG: each strongly connected component becomes one node, named
-    by its sorted members joined with `/` (a single table keeps its own name)."""
+    """The condensation DAG: each strongly connected component becomes one node,
+    labelled `cycle(A, B)` (a single table keeps its own name). The label shape keeps a
+    collapsed cycle from colliding with an ordinary table name such as `A/B`."""
     label: dict[str, str] = {}
     for comp in strongly_connected(adj):
         for n in comp:
-            label[n] = "/".join(comp)
+            label[n] = f"cycle({', '.join(comp)})" if len(comp) > 1 else n
     out: dict[str, set] = {lbl: set() for lbl in label.values()}
     for v, ws in adj.items():
         for w in ws:
@@ -263,22 +301,57 @@ def _lowest(shared: set, anc: _Ancestors) -> str:
     return lowest[0] if lowest else sorted(shared)[0]
 
 
+def _unescape(name: str) -> str:
+    return _UNESCAPE_RE.sub(r"\1", name).strip()
+
+
+def on_clause_refs(on: str) -> list[tuple[str, str]]:
+    """Every `[TABLE::COL]` in an `on:` clause as unescaped (table, column) pairs."""
+    return [(_unescape(t), _unescape(c)) for t, c in _JOIN_ON_REF_RE.findall(on or "")]
+
+
 def on_clause_tables(on: str) -> list[str]:
     """Table names referenced in an `on:` clause, in order, de-duplicated."""
     seen: list[str] = []
-    for table, _col in _JOIN_ON_REF_RE.findall(on or ""):
-        t = table.strip()
-        if t not in seen:
-            seen.append(t)
+    for table, _col in on_clause_refs(on):
+        if table not in seen:
+            seen.append(table)
     return seen
 
 
+def _wraps_whole(term: str) -> bool:
+    """True when `term`'s opening `(` is closed by its final character — `(a) and (b)`
+    starts and ends with parens that are NOT a pair."""
+    depth = 0
+    for i, ch in enumerate(term):
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth == 0:
+            return i == len(term) - 1
+    return False
+
+
+def _strip_parens(term: str) -> str:
+    term = term.strip()
+    while term.startswith("(") and _wraps_whole(term):
+        term = term[1:-1].strip()
+    return term
+
+
 def _equates_key(on: str, key: str, tables: set) -> bool:
-    """True when some `[T1::key] = [T2::key]` term spans both joined tables."""
-    for t1, c1, t2, c2 in _JOIN_ON_EQ_RE.findall(on or ""):
-        if c1.strip().lower() == c2.strip().lower() == key.lower():
-            if {t1.strip().lower(), t2.strip().lower()} == tables:
-                return True
+    """True when a top-level AND-conjunct is exactly `[T1::key] = [T2::key]` spanning
+    both joined tables. Any OR or NOT in the clause disqualifies it: a key under an OR
+    constrains nothing, and for a tenant-isolation rule a false pass is the dangerous
+    direction. A conjunct with anything else in it (`= [B::key] + 1`) does not count."""
+    on = on or ""
+    if _OR_NOT_RE.search(_JOIN_ON_REF_RE.sub("", on)):
+        return False
+    for term in _TOP_LEVEL_AND_RE.split(_strip_parens(on)):
+        m = _JOIN_ON_EQ_RE.match(_strip_parens(term))
+        if not m:
+            continue
+        t1, c1, t2, c2 = (_unescape(x) for x in m.groups())
+        if c1.lower() == c2.lower() == key.lower() and {t1.lower(), t2.lower()} == tables:
+            return True
     return False
 
 
@@ -330,17 +403,14 @@ def lint_required_join_key(model_tml: dict, keys: list, exempt: list = (),
 
 
 def _join_on(graph: JoinGraph, e: Edge, table_joins: dict):
-    """The join's `on:` — inline, else the referenced Table TML join. A referenced join
-    can be declared on either table's TML, so both are looked up."""
+    """The join's `on:` — inline, else the referenced Table TML join, which lives in the
+    DECLARING entry's Table TML: a referencing join placed under its destination is
+    rejected at import (14504 "Relationships do not exist", live-probed 2026-10-21)."""
     on = e.join.get("on")
     ref = e.join.get("referencing_join")
     if on or not ref:
         return on
-    for table in (graph.physical[e.frm], graph.physical[e.to]):
-        on = table_joins.get((table.lower(), ref))
-        if on:
-            return on
-    return None
+    return table_joins.get((graph.physical[e.frm].lower(), ref))
 
 
 def _join_key_findings(graph: JoinGraph, e: Edge, keys: list, table_joins: dict) -> list[str]:

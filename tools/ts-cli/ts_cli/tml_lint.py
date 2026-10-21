@@ -29,7 +29,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ts_cli.tml_join_graph import JoinGraph, ambiguous_paths, directed_cycles, on_clause_tables
+from ts_cli.tml_join_graph import (
+    JoinGraph, ambiguous_paths, directed_cycles, node_id, on_clause_refs, on_clause_tables,
+)
 
 # Chart types whose rendering needs an explicit encoding — an x/y (+ series) axis map
 # (legacy cartesian, `chart.axis_configs`) or the ADVANCED_* shelf model
@@ -282,16 +284,6 @@ def _check_misplaced_column_root_keys(columns: list) -> list[str]:
     return findings
 
 
-def _node_id(entry: dict) -> str:
-    """A model_tables entry's node identity.
-
-    `alias` wins when present — that is the whole point of an alias, and it is
-    what `joins[].with` and `column_id` prefixes reference. Otherwise `id`
-    (which I4 already pins to `name`), else `name`.
-    """
-    return entry.get("alias") or entry.get("id") or entry.get("name") or "?"
-
-
 def _check_duplicate_join_pairs(model_tables: list) -> list[str]:
     """I14 — no ordered table pair may be joined more than once.
 
@@ -310,7 +302,7 @@ def _check_duplicate_join_pairs(model_tables: list) -> list[str]:
     for t in model_tables:
         if not isinstance(t, dict):
             continue
-        frm = _node_id(t)
+        frm = node_id(t)  # alias, else id, else name — tml_join_graph's one definition
         seen: dict[str, list[str]] = {}
         for j in t.get("joins") or []:
             if not isinstance(j, dict):
@@ -334,15 +326,26 @@ def _check_duplicate_join_pairs(model_tables: list) -> list[str]:
 def _check_join_path_ambiguity(model_tables: list) -> list[str]:
     """I17 — the directed join graph must have one route between any two tables.
 
-    Two shapes, both rejected at import with nothing but a code ("Schema validation
-    failed", live-probed 2026-10-21): a cycle that follows the join arrows, A -> B plus
-    B -> A included (13123), and two arrow-following routes from one table to another
-    (13124). Direction matters: two fact tables sharing a date dimension form a loop
-    only when direction is ignored, and that Model imports fine — so it is never
-    flagged. I14's duplicate pair is the degenerate two-route case and keeps its own id.
+    An arrow runs from a join's MANY side to its ONE side, so `cardinality` sets it, not
+    which entry declares the join (a ONE_TO_MANY points from `with:` back to the entry).
+    Three shapes, all rejected at import with nothing but a code ("Schema validation
+    failed", live-probed 2026-10-21): a cycle that follows the arrows (13123); two
+    arrow-following routes from one table to another (13124); and two joins on the same
+    arrow declared from different entries — an M:1 under A plus a 1:M under B (13124).
+    Two fact tables sharing a date dimension form a loop only when direction is ignored,
+    and that Model imports fine, so it is never flagged. Two joins declared under one
+    entry to the same target are I14's case and keep its id.
     """
     graph = JoinGraph(model_tables)
     findings: list[str] = []
+    for src, dst, edges in graph.parallel_arrows():
+        findings.append(
+            f"I17: {len(edges)} joins run from '{src}' to '{dst}' "
+            f"({', '.join(f'{e.name} under {e.frm}' for e in edges)}) — two routes "
+            f"between one pair, so ThoughtSpot rejects the Model (error 13124, 'Schema "
+            f"validation failed'). A ONE_TO_MANY join points from its with: table back to "
+            f"the table it is declared under. Keep one join, or alias '{dst}' per role."
+        )
     for cycle in directed_cycles(graph):
         findings.append(
             f"I17: the joins form a cycle ({' -> '.join(cycle)}) — ThoughtSpot rejects "
@@ -527,12 +530,6 @@ def _check_bare_column_id_single_table(model_tables: list, columns: list) -> lis
     return findings
 
 
-# A bracketed `[TABLE::COL]` reference inside a join `on:` expression. Matches
-# regardless of the surrounding operator (`=`, `>=`, `<`, `and`, ...) — we only
-# need every bracketed structural ref the expression contains.
-_ON_REF_RE = re.compile(r"\[([^\[\]]+?)::([^\[\]]+?)\]")
-
-
 def _check_table_col_ref(
     ref: str,
     context: str,
@@ -599,7 +596,8 @@ def _check_join_targets(
                     f"not exist in schema' on import."
                 )
             on_clause = j.get("on") or ""
-            for table_part, col_part in _ON_REF_RE.findall(on_clause):
+            # every bracketed ref, whatever the operator; server escapes (`dim\.csv`) undone
+            for table_part, col_part in on_clause_refs(on_clause):
                 findings.extend(
                     _check_table_col_ref(
                         f"{table_part}::{col_part}", f"join on '{src_name}'",
