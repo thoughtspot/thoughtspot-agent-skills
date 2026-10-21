@@ -32,7 +32,8 @@ APOSTROPHES = re.compile("['\u2019\u02bc]")
 def words(text: str, apostrophe: str = "") -> list[str]:
     """Lowercased, accents stripped, letters and digits only. Apostrophes are removed ("Zqxvorn's"
     is one word, as add() stores a name) or, with apostrophe=" ", split ("Zqxvorn" and "s"); hits()
-    reads text both ways, so a listed name is caught in possessives and contractions too."""
+    reads text both ways, so a listed name is caught in possessives and contractions too. Known
+    limit: the possessive of a listed name that has an apostrophe of its own is not caught."""
     folded = unicodedata.normalize("NFKD", text)
     plain = APOSTROPHES.sub(apostrophe, folded).encode("ascii", "ignore").decode("ascii").lower()
     return re.findall(r"[a-z0-9]+", plain)
@@ -89,7 +90,8 @@ def add(lines: list[str], path: pathlib.Path = DENYLIST) -> int:
     hashes = load(path) if path.is_file() and any(
         x.strip() and not x.strip().startswith("#") for x in path.read_text(encoding="utf-8-sig").splitlines()) else set()
     new = {digest(line) for line in lines if words(line)} - hashes
-    header = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#")] if path.is_file() else []
+    header = [line for line in path.read_text(encoding="utf-8-sig").splitlines()
+              if line.strip().startswith("#")] if path.is_file() else []
     path.write_text("\n".join(header + sorted(hashes | new)) + "\n", encoding="utf-8")
     return len(new)
 

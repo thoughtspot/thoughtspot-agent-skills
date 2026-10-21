@@ -1154,7 +1154,7 @@ rune_name: The rune
     "content.yaml": """
 realms:
   - id: shore
-    name: The Shore
+    name: The Pebble Shore
     depth: Overview
     minutes: 2
     covers: Reading runes.
@@ -1170,7 +1170,7 @@ realms:
             options: [{text: The stem, correct: true}, {text: The leaf}]
     decree: [Runes have two parts.]
   - id: cave
-    name: The Cave
+    name: The Hollow Cave
     depth: Reads runes
     minutes: 2
     covers: One rune.
@@ -1540,6 +1540,7 @@ def test_a_plugin_must_name_itself_and_hook_its_meta(tmp_path, monkeypatch, plug
     ("label: rune_label,", "label: [rune_label],", "label ['rune_label'] is not in strings.yaml"),
     ('caption: ""}', "caption: [x]}", "caption ['x'] is not in strings.yaml"),
     ("{id: rune,", "{id: [rune],", "id must be unique"),
+    ("{id: rune,", "{id: .inf,", "id must be unique"),   # YAML .inf is a float whose str() looks like an id
 ])
 def test_a_malformed_manifest_gives_errors_not_tracebacks(tmp_path, old, new, needle):
     text = SECOND_PACK["pack.yaml"]
@@ -1594,6 +1595,7 @@ def test_a_plugin_may_own_hall_keys(doc, capture):
     ("Zqxvorn'd come", "zqxvorn"),               # contraction
     ("the Qqa Zzb's gate", "qqa zzb"),           # a two-word name, possessive
     ("Zqx'vorn", "zqxvorn"),                     # an apostrophe inside the name itself
+    ("Zqxvorn\u02bcs lair", "zqxvorn"),          # modifier-letter apostrophe
 ])
 def test_a_listed_name_is_caught_in_possessives_and_contractions(text, hit):
     import denylist as D
@@ -1622,7 +1624,7 @@ def test_a_denylist_that_isnt_hashes_fails_closed(tmp_path, text, error):
 def test_a_denylist_tolerates_a_bom_and_indented_comments(tmp_path):
     import denylist as D
     path = tmp_path / "denylist.txt"
-    path.write_text("﻿# header\n   # indented note\n" + "b" * 20 + "\n", encoding="utf-8")
+    path.write_text("\ufeff# header\n   # indented note\n" + "b" * 20 + "\n", encoding="utf-8")
     assert D.load(path) == {"b" * 20}
 
 
@@ -1656,3 +1658,12 @@ def test_every_manifest_container_shape_is_checked(tmp_path, old, new, needle):
     text = SECOND_PACK["pack.yaml"]
     assert old in text, old
     assert any(needle in e for e in _second(tmp_path, files={"pack.yaml": text.replace(old, new)}).errors)
+
+
+def test_adding_names_keeps_bom_and_indented_comments(tmp_path):
+    import denylist as D
+    path = tmp_path / "denylist.txt"
+    path.write_text("\ufeff# header line one\n   # indented note\n" + "c" * 20 + "\n", encoding="utf-8")
+    D.add(["zqxvorn"], path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[:2] == ["# header line one", "   # indented note"] and D.load(path) == {"c" * 20, D.digest("zqxvorn")}
