@@ -291,7 +291,7 @@ const firstDone = () => machine.firstDone(state, loadProgress());
 // Do an action: the machine decides what changes, the page plays its sounds, saves, and redraws.
 function dispatch(action) {
   const out = machine.act(state, action, loadProgress());
-  if (out.refused) return;
+  if (out.refused) return render();   // what is shown is what the machine accepts: redraw it
   state = out.state;
   for (const fx of out.effects) {
     if (fx.type === "sound") Sound.play(fx.name);
@@ -383,7 +383,7 @@ const SCREENS = {
     const head = `${r.halls.length ? art("crown") : realmScene(r)}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
     if (r.sealed) return `${head}<p class="dim">${H("realm_sealed")}</p>
       ${choices([{ label: S("back_to_map"), action: MAP_ACTION }])}`;
-    if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">${H("realm_locked", { first: REALMS[0].name })}</p>
+    if (machine.locked(state, loadProgress())) return `${head}<p class="dim">${H("realm_locked", { first: REALMS[0].name })}</p>
       ${choices([{ label: S("travel_to", { first: REALMS[0].name }), action: { type: "realm", realm: 0 } }, { label: S("back_to_map"), action: MAP_ACTION }])}`;
     return `${head}<p class="dim">${H("realm_max", { max: maxGold(r) })}</p>
       ${choices([{ label: S(r.halls.length ? "enter_halls" : "take_quest"), action: { type: "enter" } }, { label: S("back_to_map"), action: MAP_ACTION }])}`;

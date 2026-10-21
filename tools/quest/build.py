@@ -785,7 +785,7 @@ def _html_text(text: str) -> str:
 
 
 def core_files(core_dir: pathlib.Path | None = None) -> list[pathlib.Path]:
-    return sorted((core_dir or CORE_DIR).glob("*.js"))
+    return sorted(p for p in (core_dir or CORE_DIR).glob("*.js") if not p.name.startswith(".") and p.is_file())
 
 
 def core_script(core_dir: pathlib.Path | None = None) -> str:
@@ -884,7 +884,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     data, errors = compile_pack(pack)
     errors += check_packs_unique()
     try:
-        errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent)
+        errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
     except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes
         errors.append(f"denylist: {e}")
     schema: dict = {}

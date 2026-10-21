@@ -21,8 +21,6 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       }
       return out;
     }
-    // Is `gold` a record for this realm? (What finish() would report, without writing.)
-    const isRecord = (p, id, gold) => gold > (p[id] || { best: 0 }).best;
     function finish(id, gold) {
       const p = load(), prev = p[id] || { done: false, best: 0 };
       const record = gold > prev.best;
@@ -33,6 +31,6 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     const open = Q.rules.open(realms);
     const treasury = () => Object.entries(load()).reduce((n, [id, v]) => n + (open.some(r => r.id === id) ? v.best : 0), 0);
     const courseDone = () => { const p = load(); return open.every(r => p[r.id] && p[r.id].done); };
-    return { load, finish, isRecord, treasury, courseDone };
+    return { load, finish, treasury, courseDone };
   };
 })(Quest);

@@ -13,7 +13,10 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     const fresh = () => ({ screen: "title", realm: 0, hall: 0, enc: 0, step: 0, gold: 0, flash: null });
     const settled = f => !!f && (f.kind === "win" || f.kind === "magic");
     const firstDone = (s, progress) => !!(progress[realms[0].id] || {}).done || !!s.firstDone;
-    const locked = (s, progress) => s.realm !== 0 && !firstDone(s, progress);
+    // Whether a realm's gate is locked is decided once, when the gate opens (the "realm" action),
+    // and kept in the state: the screen drawn and the actions accepted then agree even if the save
+    // changes meanwhile (another tab). A state without it (made by hand) is judged from `progress`.
+    const locked = (s, progress) => (typeof s.locked === "boolean" ? s.locked : s.realm !== 0 && !firstDone(s, progress));
     // The question a screen asks: a hall's petition, a quest's path, or the foe's point.
     function question(s) {
       const r = realms[s.realm];
@@ -60,7 +63,10 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       };
       switch (action.type) {
         case "map": sound("blip"); Object.assign(s, { screen: "map", flash: null }); break;
-        case "realm": sound("blip"); Object.assign(s, { screen: "realm", realm: action.realm, flash: null }); break;
+        case "realm": sound("blip");
+          Object.assign(s, { screen: "realm", realm: action.realm, flash: null, locked: undefined });
+          s.locked = locked(s, progress);
+          break;
         case "enter": sound("blip");
           Object.assign(s, r.halls.length ? { screen: "hall", hall: 0, step: 0, gold: 0, flash: null }
                                           : { screen: "quest", enc: 0, step: 0, gold: 0, flash: null });

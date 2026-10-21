@@ -73,7 +73,7 @@ one game is a **plugin** in `checks/` that the pack names. Design:
 packs/agentql/{pack,content,strings}.yaml ─┐
 packs/agentql/art/classic/*.txt           ─┤
 lesson-sql.md, learning-path.md (sources) ─┤                   ┌─► quest.json         (the checked data)
-classic/game.html, fonts/                 ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
+classic/game.html, core/*.js, fonts/      ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
 schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► index.html         (self-contained, quest.json inside)
 ```
 
