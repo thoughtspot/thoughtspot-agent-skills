@@ -43,11 +43,16 @@ def main(argv: list[str]) -> int:
         try:
             for tmj in sorted((site / pack.publish_path / "explore" / "maps").glob("*.tmj")):
                 url = f"http://127.0.0.1:{server.server_address[1]}/{pack.publish_path}/explore/#look={tmj.stem}"
-                subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", "--hide-scrollbars",
-                                f"--user-data-dir={tmp}/profile-{tmj.stem}", "--virtual-time-budget=4000",
-                                "--window-size=1040,620", f"--screenshot={out / (tmj.stem + '.png')}", url],
-                               capture_output=True, timeout=120)
-                print(out / f"{tmj.stem}.png")
+                shot = out / f"{tmj.stem}.png"
+                shot.unlink(missing_ok=True)
+                r = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", "--hide-scrollbars",
+                                    f"--user-data-dir={tmp}/profile-{tmj.stem}", "--virtual-time-budget=4000",
+                                    "--window-size=1040,620", f"--screenshot={shot}", url],
+                                   capture_output=True, timeout=120)
+                if r.returncode != 0 or not shot.is_file():
+                    print(f"no screenshot of {tmj.stem} (Chrome exit {r.returncode})", file=sys.stderr)
+                    return 1
+                print(shot)
         finally:
             server.shutdown()
     return 0

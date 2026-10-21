@@ -121,7 +121,7 @@ tools/quest/
       strings.yaml             every sentence a front end shows that isn't content
       art/classic/*.txt        the ASCII scenes
       maps/*.tmj               Tiled maps: the overworld, plus one per explorable realm
-      tiles/                   a Kenney 1-Bit Pack subset (CC0 note)
+      tiles/                   Kenney Tiny Dungeon's atlas plus one row of ours (CC0 note)
       promo/                   the poster, the GIF and make_ad.py (moved)
 ```
 
@@ -290,14 +290,15 @@ route realm) is replaced with a made-up name in PR 1.
 |---|---|---|
 | Engine | **Phaser 4.2.1** (MIT), the arcade-physics build (1,266,396 bytes minified) | The current stable major: 4.0 shipped April 2026, and 4.2.1 is npm `latest`. It includes walking, collision, cameras, input and Tiled map loading. It has the largest body of examples overall, though Phaser 4-specific ones still lag Phaser 3's. Vendored and pinned (§9). |
 | Maps | **Tiled 1.10 or later**, saved as `.tmj` JSON with tilesets embedded (no external `.tsx`/`.tsj`) | Realms are drawn visually, and Phaser's Tiled loader reads the file directly. Tiled 1.9 wrote an object's `type` as `class`, which Phaser doesn't read; 1.10 went back to `type`. |
-| Art | **Kenney 1-Bit Pack** (CC0, 1,078 files, 16×16 tiles), tinted amber (decision 2) | Monochrome, so tinting matches the video's CRT look. CC0 means no attribution or licence risk in a public repo. Only the tiles used are committed. |
+| Art | **Kenney Tiny Dungeon** (CC0, 16×16), in the amber monitor (decision 2, revised 2026-10-22; first Kenney 1-Bit tinted amber) | Shaded, outlined sprites at the mid-to-late-80s standard, with a fitting tile for every role. CC0 means no attribution or licence risk in a public repo. |
 | Dialogue | Not needed: questions come from `quest.json` | Ink or similar only if characters later need branching conversation. |
 
 Rejected: KAPLAY (thinner for a game with several maps), RPG JS (smaller community), Godot (tens
 of MB on the web, harder in CI), RPG Maker (commercial licence).
 
 **Phaser settings this design relies on:**
-- **Renderer: force WebGL (`type: Phaser.WEBGL`) and draw maps with `TilemapLayer`.**
+- **Renderer (revised in PR 6): `Phaser.AUTO`, WebGL where there is one, else a 2D canvas,** and
+  draw maps with `TilemapLayer`. Originally forced WebGL for the amber tint, which PR 6 removed.
   `TilemapLayer.setTint` works only under WebGL; the default `AUTO` mode can fall back to Canvas,
   which ignores tile tint. `TilemapGPULayer` has no tint API at all. If WebGL isn't available, the
   page offers classic mode.
@@ -512,6 +513,11 @@ kept, and the character can be asked again.
 - The manual checklist, served locally: Chrome, Safari and Firefox on desktop; Safari on
   iPhone; and reduced motion.
 
+6. **Art pass** (decision 2, revised): Kenney Tiny Dungeon inside the amber monitor, wall faces and
+   tops, a `decor` layer, motion (none with reduced motion), the gold bar, no tint.
+7. **Fun:** chests, a rolling barrel over a hoard, weapons, a door per realm, and people to talk
+   to (`npc`), none of them a step, all checked never to block the quest.
+
 **Then:** you play it, and the remaining realms get maps.
 
 ## 7. A second game
@@ -533,6 +539,9 @@ site's home page.
 1. **Explore sits beside classic.** It becomes the default only when all five realms are
    explorable, with classic linked.
 2. **The art is Kenney 1-Bit, tinted amber,** for the prototype. Revisit only if it feels generic.
+   *Revised 2026-10-22:* the maintainer judged it too early-80s and picked **Kenney Tiny Dungeon**
+   (CC0, mid-to-late-80s top-down) from a style board of four directions, inside the amber
+   monitor frame. With no tint, WebGL is no longer required (`Phaser.AUTO`; see §4.1).
 3. **Testing uses a manual checklist** until explore becomes the default. Then a Playwright smoke
    test on the runner's own Chrome.
 4. **The engine is renamed** `tools/quest/` now, as PR 1, while only one pack depends on it. The

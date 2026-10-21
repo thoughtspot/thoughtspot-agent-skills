@@ -851,7 +851,7 @@ def check_vendor() -> list[str]:
     return errors
 
 
-TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal"}   # what explore.js draws
+TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne"}   # what explore.js draws
 
 
 def check_tiles(pack: "Pack") -> list[str]:
