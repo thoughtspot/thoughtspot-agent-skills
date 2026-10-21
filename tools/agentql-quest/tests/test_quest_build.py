@@ -52,8 +52,11 @@ def _built_encounters(data):
     return [e for r in data["realms"] for e in r["encounters"]]
 
 
+MODEL = "(Sample) Retail - Apparel"
+
+
 def _built_html(doc, capture):
-    data, errors = B.compile_quest(doc, *capture)
+    data, errors = B.compile_quest(doc, *capture, MODEL)
     assert errors == []
     return B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, B.font_faces())
 
@@ -287,6 +290,86 @@ def test_every_path_plays_through_headlessly(doc, capture, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+# ---- the data contract (quest.json / quest.schema.json) -----------------------------------------
+
+def _embedded(page: pathlib.Path) -> dict:
+    html = page.read_text(encoding="utf-8")
+    m = re.search(r'<script id="quest-data" type="application/json">(.*?)</script>', html, re.S)
+    return json.loads(m.group(1))
+
+
+@pytest.fixture(scope="module")
+def schema():
+    return json.loads(B.SCHEMA.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def built(doc, capture):
+    data, errors = B.compile_quest(doc, *capture, MODEL)
+    assert errors == []
+    return data
+
+
+def test_built_data_fits_the_schema(built, schema):
+    assert B.check_schema(built, schema) == []
+    assert built["schema_version"] == B.SCHEMA_VERSION == schema["properties"]["schema_version"]["enum"][0]
+
+
+def _first_point(data):
+    return _built_encounters(data)[0]["points"][0]
+
+
+@pytest.mark.parametrize("break_it,needle", [
+    (lambda d: _first_point(d).update(colour="red"), "'colour' is not in quest.schema.json"),
+    (lambda d: d["realms"][0].update(module="0"), "realms[0].module: expected integer"),
+    (lambda d: _first_point(d).update(correct=True), "correct: expected integer, got bool"),
+    (lambda d: _built_encounters(d)[0].pop("takeaway"), "missing 'takeaway'"),
+    (lambda d: _first_point(d).update(ruleBy="wizard"), "'wizard' is not one of"),
+    (lambda d: _first_point(d).update(sqlHl="some"), "sqlHl: matches none of its allowed shapes"),
+    (lambda d: _built_encounters(d)[0].update(points=[]), "points: needs at least 1 item(s)"),
+    (lambda d: d.update(schema_version=2), "schema_version: 2 is not one of [1]"),
+])
+def test_data_that_drifts_from_the_schema_fails(built, schema, break_it, needle):
+    break_it(built)
+    errors = B.check_schema(built, schema)
+    assert any(needle in e for e in errors), errors
+
+
+def test_the_schema_checker_refuses_keywords_it_cannot_enforce():
+    # A schema rule the checker silently skipped would look enforced and not be.
+    assert "does not support" in B.check_schema("x", {"type": "string", "pattern": "^y"})[0]
+    assert "unknown $ref" in B.check_schema("x", {"$ref": "#/$defs/nope"})[0]
+
+
+def test_every_schema_field_is_required(schema):
+    # A front end may rely on every field being present; an optional one would need a default.
+    def walk(node, where):
+        if isinstance(node, dict):
+            if "properties" in node:
+                assert set(node.get("required", [])) == set(node["properties"]), where
+                assert node.get("additionalProperties") is False, where
+            for k, v in node.items():
+                walk(v, f"{where}/{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{where}[{i}]")
+    walk(schema, "#")
+
+
+def test_main_writes_quest_json_beside_the_page(tmp_path):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
+    assert data == _embedded(page)
+    assert data["model"] == MODEL
+
+
+def test_the_model_name_comes_from_the_capture_not_the_page():
+    assert MODEL not in B.TEMPLATE.read_text(encoding="utf-8")
+    assert B.parse_capture_model("captured live on the sample Model **`Acme Sales`** (a cluster)") == "Acme Sales"
+    assert B.parse_capture_model("no header here") is None
+
+
 # ---- the published site ----------------------------------------------------------------------
 
 def _site_build_script():
@@ -306,6 +389,8 @@ def test_pages_workflow_builds_home_page_and_game_in_its_folder(tmp_path):
     assert home.is_file() and game.is_file()
     assert "<title>ThoughtSpot Agent Skills</title>" in home.read_text(encoding="utf-8")
     assert "<title>AgentQL Quest</title>" in game.read_text(encoding="utf-8")
+    # The data contract is published beside the game, identical to what the page embeds.
+    assert json.loads((game.parent / "quest.json").read_text(encoding="utf-8")) == _embedded(game)
     # Every local image the home page shows must be in the site, or it renders as a broken image.
     for src in re.findall(r'<img[^>]+src="([^":]+)"', home.read_text(encoding="utf-8")):
         assert (site / src).is_file(), f"home page shows {src}, which the build did not copy"

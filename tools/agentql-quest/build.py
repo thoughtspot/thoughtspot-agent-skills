@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build AgentQL Quest, the browser game for the Learn AgentQL course.
 
-Joins two sources into one self-contained `index.html`:
+Joins two sources into the game's data, `quest.json`, and one self-contained `index.html`:
 
   - `references/lesson-sql.md` of the ts-object-model-agentql-query skill: the AgentQL and
     the warehouse SQL ThoughtSpot generated for each lesson, captured live and committed.
@@ -10,16 +10,18 @@ Joins two sources into one self-contained `index.html`:
     who put each one there, and the text the player reads.
 
 The data and the fonts are written into the page rather than shipped beside it, so the file
-makes no outside requests and runs from GitHub Pages, any static host, or a double-click.
+makes no outside requests and runs from GitHub Pages, any static host, or a double-click. The same
+data is also written beside the page as `quest.json`, the contract `quest.schema.json` describes,
+so another front end can play the same checked content without parsing the YAML or the capture.
 
-    python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/index.html
-    python3 tools/agentql-quest/build.py --out _site/index.html
+    python3 tools/agentql-quest/build.py                   # write tools/agentql-quest/dist/{index.html,quest.json}
+    python3 tools/agentql-quest/build.py --out _site/index.html   # quest.json lands beside it
     python3 tools/agentql-quest/build.py --check           # validate only (tools/validate/check_agentql_quest.py)
 
 Fails when an encounter no longer matches the capture or the course: a lesson or Module the
 text names that the course no longer has, a missing or rejected case, AgentQL
 that differs by more than layout, an `sql` line that is no longer in the SQL exactly, or an
-`sql_count` that no longer holds. A recapture that changes what a lesson teaches therefore
+`sql_count` that no longer holds; or data that no longer fits `quest.schema.json`. A recapture that changes what a lesson teaches therefore
 breaks the build instead of quietly teaching something false.
 """
 from __future__ import annotations
@@ -39,6 +41,8 @@ LESSON_SQL = ROOT / "agents/cli/ts-object-model-agentql-query/references/lesson-
 LEARNING_PATH = ROOT / "agents/cli/ts-object-model-agentql-query/references/learning-path.md"
 ENCOUNTERS = HERE / "encounters.yaml"
 TEMPLATE = HERE / "game.html"
+SCHEMA = HERE / "quest.schema.json"
+SCHEMA_VERSION = 1
 FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
 PLACEHOLDER = "__QUEST_DATA__"
@@ -73,6 +77,12 @@ def parse_lesson_sql(text: str) -> tuple[str | None, dict[str, dict]]:
         ok = "`status: SUCCESS`" in block and len(blocks) > 1
         cases[cid] = {"agentql": blocks[0] if blocks else "", "sql": blocks[1] if ok else None}
     return date, cases
+
+
+def parse_capture_model(text: str) -> str | None:
+    """The Model the capture was taken on, from the header's "on the sample Model **`…`**"."""
+    m = re.search(r"Model \*\*`([^`]+)`\*\*", text)
+    return m.group(1) if m else None
 
 
 def _norm(sql: str) -> str:
@@ -289,7 +299,8 @@ def _halls(r: dict, engines: dict, rid: str, errors: list[str]) -> list[dict]:
     return halls
 
 
-def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[dict, list[str]]:
+def compile_quest(doc: dict, date: str | None, cases: dict[str, dict],
+                  model: str = "") -> tuple[dict, list[str]]:
     """Turn encounters.yaml plus the capture into the game's data. Returns (data, errors)."""
     errors: list[str] = []
     who = doc.get("who_options") or {}
@@ -356,7 +367,56 @@ def compile_quest(doc: dict, date: str | None, cases: dict[str, dict]) -> tuple[
             errors.append(f"route {rt.get('who')!r}: needs who and a path of realm ids (unknown: {bad})")
         routes.append({"who": rt.get("who", ""), "path": rt.get("path") or []})
 
-    return {"captured": date, "realms": realms, "routes": routes}, errors
+    return {"schema_version": SCHEMA_VERSION, "captured": date, "model": model,
+            "realms": realms, "routes": routes}, errors
+
+
+# The JSON Schema keywords quest.schema.json may use. Anything else fails, so the schema can
+# never lean on a rule this checker would silently skip (the repo has no jsonschema dependency).
+_SCHEMA_NOTES = {"$schema", "$id", "title", "description", "$defs"}
+_SCHEMA_RULES = {"type", "enum", "required", "properties", "additionalProperties", "items",
+                 "minItems", "anyOf", "$ref"}
+_JSON_TYPES = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool,
+               "null": type(None)}
+
+
+def check_schema(value, schema: dict, root: dict | None = None, where: str = "quest") -> list[str]:
+    """Check `value` against the subset of JSON Schema that quest.schema.json uses."""
+    root = root or schema
+    unknown = set(schema) - _SCHEMA_NOTES - _SCHEMA_RULES
+    if unknown:
+        return [f"quest.schema.json uses {sorted(unknown)}, which check_schema does not support"]
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if not ref.startswith("#/$defs/") or ref[8:] not in root.get("$defs", {}):
+            return [f"quest.schema.json: unknown $ref {ref!r}"]
+        return check_schema(value, root["$defs"][ref[8:]], root, where)
+    if "anyOf" in schema:
+        if not any(not check_schema(value, s, root, where) for s in schema["anyOf"]):
+            return [f"{where}: matches none of its allowed shapes"]
+    errors: list[str] = []
+    if "type" in schema:
+        t = _JSON_TYPES[schema["type"]]
+        # bool is an int in Python; JSON keeps them apart.
+        if not isinstance(value, t) or (t is int and isinstance(value, bool)):
+            return [f"{where}: expected {schema['type']}, got {type(value).__name__}"]
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{where}: {value!r} is not one of {schema['enum']}")
+    if isinstance(value, dict):
+        props = schema.get("properties", {})
+        errors += [f"{where}: missing {k!r}" for k in schema.get("required", []) if k not in value]
+        if schema.get("additionalProperties") is False:
+            errors += [f"{where}: {k!r} is not in quest.schema.json" for k in value if k not in props]
+        for k, v in value.items():
+            if k in props:
+                errors += check_schema(v, props[k], root, f"{where}.{k}")
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            errors.append(f"{where}: needs at least {schema['minItems']} item(s)")
+        if "items" in schema:
+            for i, v in enumerate(value):
+                errors += check_schema(v, schema["items"], root, f"{where}[{i}]")
+    return errors
 
 
 def parse_learning_path(text: str) -> tuple[set[str], dict[str, set[str]], dict[str, str]]:
@@ -440,11 +500,16 @@ def render(template: str, data: dict, fonts_css: str = "") -> str:
 
 def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
     """Validate, and unless `check`, render. Returns (html or None, data, errors)."""
-    date, cases = parse_lesson_sql(LESSON_SQL.read_text(encoding="utf-8"))
+    capture = LESSON_SQL.read_text(encoding="utf-8")
+    date, cases = parse_lesson_sql(capture)
+    model = parse_capture_model(capture)
     raw = ENCOUNTERS.read_text(encoding="utf-8")
     doc = yaml.safe_load(raw) or {}
-    data, errors = compile_quest(doc, date, cases)
+    data, errors = compile_quest(doc, date, cases, model or "")
+    if not model:
+        errors.append("lesson-sql.md: no Model named in its header")
     errors += check_course_refs(raw, doc, *parse_learning_path(LEARNING_PATH.read_text(encoding="utf-8")))  # modules, lessons, titles
+    errors += check_schema(data, json.loads(SCHEMA.read_text(encoding="utf-8")))
     if errors:
         return None, data, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
@@ -454,14 +519,16 @@ def build(check: bool = False) -> tuple[str | None, dict, list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=str(DEFAULT_OUT), help="output HTML (default: tools/agentql-quest/dist/index.html)")
+    ap.add_argument("--out", default=str(DEFAULT_OUT),
+                    help="output HTML (default: tools/agentql-quest/dist/index.html); quest.json is written beside it")
     ap.add_argument("--check", action="store_true", help="validate only; write nothing")
     ap.add_argument("--root", help="accepted for parity with the other validators; paths resolve from this script")
     args = ap.parse_args(argv)
 
     html, data, errors = build(check=args.check)
     if errors:
-        print("agentql-quest: encounters.yaml no longer matches lesson-sql.md:", file=sys.stderr)
+        print("agentql-quest: encounters.yaml no longer matches lesson-sql.md, the course or quest.schema.json:",
+              file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
@@ -476,7 +543,9 @@ def main(argv: list[str] | None = None) -> int:
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    print(f"agentql-quest: wrote {out} ({summary})")
+    quest_json = out.with_name("quest.json")
+    quest_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"agentql-quest: wrote {out} and {quest_json.name} ({summary})")
     return 0
 
 

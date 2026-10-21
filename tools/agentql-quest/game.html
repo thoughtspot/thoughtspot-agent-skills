@@ -528,7 +528,7 @@ function table(columns, rows) {
 function panes(e, p) {
   return `<div class="pane"><span class="lbl">YOUR SCROLL: the AgentQL the AI wrote</span>${code(e.agentql, p.scrollHl, "agent", "Your AgentQL")}</div>
     <div class="pane"><span class="lbl">THE DRAGON: SQL ThoughtSpot generated</span>${code(e.sql, p.sqlHl, "", "Generated warehouse SQL")}
-    <span class="cap">Captured from generate-sql on (Sample) Retail - Apparel, ${esc(QUEST.captured)}. Lesson ${esc(e.lesson)}.</span></div>`;
+    <span class="cap">Captured from generate-sql on ${esc(QUEST.model)}, ${esc(QUEST.captured)}. Lesson ${esc(e.lesson)}.</span></div>`;
 }
 
 // One answer. Right: +gold, move on. Wrong: lose gold (never below 0), answer again.

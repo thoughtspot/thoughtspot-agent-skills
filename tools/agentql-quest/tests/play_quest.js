@@ -179,6 +179,7 @@ Q.realms.forEach((r, ri) => {
   answerQuestion(p.correct, p.options.length, "right", p.outcomes[p.correct].why, p.options[p.correct]);
   expect("wizard", "the Wizard writes the AgentQL after the right path");
   press(0); expect("forge", "the scroll goes to the Forge"); press(0); expect("battle", "the fight starts");
+  if (!Q.model || !text().includes(`Captured from generate-sql on ${Q.model}, ${Q.captured}.`)) fail("the dragon should name the Model and date it was captured on", where());
   e.points.forEach((pt, k) => {
     if (!has(pt.ask)) fail("question not shown", where());
     const lit = (P.screen.innerHTML.match(/class="ln[^"]*\bon\b/g) || []).length;

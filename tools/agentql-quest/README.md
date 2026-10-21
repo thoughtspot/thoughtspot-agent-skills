@@ -64,9 +64,9 @@ player's first click or key press.
 ## How it is built
 
 ```
-encounters.yaml ─┐
-lesson-sql.md ───┼─► build.py ─► index.html  (one self-contained file)
-game.html ───────┤
+encounters.yaml ─┐                ┌─► quest.json  (the checked data, see "The data contract")
+lesson-sql.md ───┼─► build.py ────┤
+game.html ───────┤                └─► index.html  (one self-contained file, quest.json inside)
 fonts/ ──────────┘
 ```
 
@@ -79,15 +79,33 @@ fonts/ ──────────┘
 - **`game.html`** is the page with `__QUEST_DATA__` and `/*__FONT_FACES__*/` placeholders.
   `build.py` writes the data and the fonts into it, so the page makes **no outside requests**
   and runs from Pages, any static host, or a double-click.
+- **`quest.schema.json`** describes `quest.json`; see below.
 - **`fonts/`** holds the Latin subsets of VT323 and IBM Plex Mono (Fontsource 5.3.0), with
   their SIL Open Font License files.
 
 ```bash
-python3 tools/agentql-quest/build.py                      # → tools/agentql-quest/dist/index.html
+python3 tools/agentql-quest/build.py                      # → tools/agentql-quest/dist/{index.html,quest.json}
 python3 tools/agentql-quest/build.py --check              # validate only
 python3 tools/validate/check_agentql_quest.py --root .    # the same, as pre-commit and CI run it
 pytest tools/agentql-quest/tests -q                       # includes a headless play-through (needs node)
 ```
+
+## The data contract
+
+`quest.json` is everything a front end needs to play the quest, already checked: the realms in
+map order, each hall's teaching and questions, and each encounter's business question, path
+choice, AgentQL, captured SQL (one string per line), scales and hoard rules, plus the Model and
+date of the capture. Pages publishes it at `/agentql-quest/quest.json`, next to the game.
+
+[`quest.schema.json`](quest.schema.json) (JSON Schema) describes every field, and `build.py`
+checks its own output against it, so the PR gate fails when the data and the schema drift
+apart. Every field is required and nothing else is allowed, so a front end can rely on the
+shape. To add a field, add it to the schema first; bump `schema_version` for any change a front
+end would notice. The check is a small built-in one (the repo has no `jsonschema` dependency)
+and it refuses any schema keyword it can't enforce.
+
+So a question is edited in `encounters.yaml`, never in a front end, and a second front end
+(for example an explorable map) plays the same content by loading `quest.json`.
 
 ## When the build fails
 
@@ -101,6 +119,7 @@ pytest tools/agentql-quest/tests -q                       # includes a headless 
 | `no SQL line is exactly '…'` | a recapture changed that line of the generated SQL | re-read the new SQL; update the point, **and its lesson text if the behaviour moved** (a changed row cap or join type means the lesson is now wrong, not just the highlight) |
 | `expected '…' N time(s) in the SQL` | a whole-statement fact moved, e.g. the fact table is read twice (pruning off) | same: check whether the lesson still holds |
 | `match '…' hits no line` | a `scroll` substring no longer appears in the AgentQL | update `scroll` |
+| `quest.….: … quest.schema.json` | the built data no longer fits the contract | update `build.py` and the schema together |
 
 ## Adding an encounter or opening a realm
 
