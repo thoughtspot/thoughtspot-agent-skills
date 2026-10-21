@@ -727,6 +727,14 @@ def _build_table_aggregations_map(parsed: list) -> dict[str, dict]:
             if isinstance(d, dict) and isinstance(d.get("table"), dict) and d["table"].get("name")}
 
 
+def _build_table_joins_index(parsed: list) -> dict:
+    """(table lower, join name) -> on:, from this batch's Table TMLs (JOIN-KEY rule)."""
+    from ts_cli.tml_join_graph import table_join_index
+    return table_join_index({d["table"]["name"]: d["table"] for d in parsed
+                             if isinstance(d, dict) and isinstance(d.get("table"), dict)
+                             and d["table"].get("name")})
+
+
 def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, set],
                   table_aggs: Optional[dict] = None) -> dict:
     """Lint pass 2 — lint one already-parsed doc (lint_tml + optional cross-reference
@@ -766,6 +774,16 @@ def lint_tml_cmd(
         [], "--pattern",
         help="Glob(s) to filter --dir files, e.g. --pattern '*.liveboard.tml'",
     ),
+    require_join_key: List[str] = typer.Option(
+        [], "--require-join-key",
+        help="Opt-in: every Model join must equate this column on both tables "
+             "(repeatable), e.g. a tenant key in a shared-schema warehouse",
+    ),
+    exempt: List[str] = typer.Option(
+        [], "--exempt",
+        help="With --require-join-key: skip joins touching this table, physical or "
+             "alias name (repeatable) — shared reference tables with no tenant key",
+    ),
 ) -> None:
     """Lint TML for the model invariants VALIDATE_ONLY does not catch, plus guid placement.
 
@@ -784,6 +802,12 @@ def lint_tml_cmd(
     on its own (the common case) skips this check — there is no ground truth for what
     tables already exist in ThoughtSpot from a model file alone.
 
+    --require-join-key is an opt-in convention, not an invariant (ThoughtSpot imports
+    such a Model): every join must carry `[A::KEY] = [B::KEY]`, so rows from different
+    tenants in one schema can never match. Its findings are prefixed JOIN-KEY:. A join
+    that only references a Table TML join is checked against that Table TML when it is
+    in the same batch.
+
     Output: JSON {"clean": bool, "results": [{index, type, name, findings: [...]}]}.
     Exit code 1 if any document has findings, else 0.
 
@@ -792,8 +816,12 @@ def lint_tml_cmd(
       ts tml lint --dir ./tml_out
       ts tml lint --dir ./tml_out --order tableau --model-phase base
       ts tml lint --file table.tml --file model.tml   # also runs the XREF cross-ref check
+      ts tml lint --dir ./tml --require-join-key customer_id --exempt CALENDAR
       cat payload.json | ts tml lint
     """
+    if exempt and not require_join_key:
+        typer.echo("--exempt only applies with --require-join-key.", err=True)
+        raise SystemExit(2)
     tmls = load_input_tmls(file, directory, patterns=(pattern or None), order=order, model_phase=model_phase)
 
     # Pass 1 — parse every doc up front, then build the generated-tables map
@@ -801,11 +829,16 @@ def lint_tml_cmd(
     parsed, parse_errors = _parse_tml_docs(tmls)
     tables = _build_generated_tables_map(parsed)
     table_aggs = _build_table_aggregations_map(parsed)
+    table_joins = _build_table_joins_index(parsed) if require_join_key else {}
 
     results = []
     any_findings = False
     for i in range(len(tmls)):
         entry = _lint_one_doc(i, parsed[i], parse_errors, tables, table_aggs)
+        if require_join_key and entry["type"] == "model":
+            from ts_cli.tml_join_graph import lint_required_join_key
+            entry["findings"] += lint_required_join_key(
+                parsed[i], require_join_key, exempt, table_joins)
         results.append(entry)
         any_findings = any_findings or bool(entry["findings"])
 
