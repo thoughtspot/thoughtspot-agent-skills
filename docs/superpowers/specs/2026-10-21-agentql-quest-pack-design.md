@@ -518,7 +518,7 @@ kept, and the character can be asked again.
 To add a game, create `tools/quest/packs/<id>/` with:
 - `pack.yaml`, with its own `id`, `publish_path` and `storage_key`;
 - `content.yaml` and `strings.yaml` (with every string the classic page reads);
-- `art/classic/` (the pieces the classic page reads, and a scene per realm without halls);
+- `art/classic/` (the pieces the classic page reads, and optionally a scene per realm without halls);
 - maps, if it should be explorable.
 
 It uses none of the AgentQL plugins, or new ones of its own. Its sources of truth are its own to

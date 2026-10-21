@@ -249,6 +249,9 @@ def load_plugins(names: list[str]) -> list:
         spec.loader.exec_module(mod)
         if getattr(mod, "NAME", None) != name:
             raise ValueError(f"checks/{name}.py must set NAME = {name!r}")
+        strings = getattr(mod, "STRINGS", set())
+        if isinstance(strings, str) or not all(isinstance(k, str) for k in strings):
+            raise ValueError(f"checks/{name}.py: STRINGS must be a set of strings.yaml keys")
         if getattr(mod, "META", None) and not hasattr(mod, "meta"):
             raise ValueError(f"checks/{name}.py declares META but has no meta hook")
         plugins.append(mod)
@@ -806,10 +809,11 @@ def classic_needs(template: str) -> tuple[set[str], set[str]]:
     return strings | {"page_description"}, set(_ART_CALL.findall(script)) | {"map"}  # the head's description
 
 
-def engine_strings(pack: Pack, plugins: list) -> set[str]:
-    """The strings the engine and plugins read: claim buttons, pane labels and captions, and each
-    plugin's STRINGS."""
-    keys = {"claim_true", "claim_false"}
+def engine_strings(pack: Pack, plugins: list, data: dict) -> set[str]:
+    """The strings the engine and plugins read: the claim buttons (when a hall asks a claim), pane
+    labels and captions, and each plugin's STRINGS."""
+    claims = any(t["kind"] == "claim" for r in data.get("realms") or [] for h in r["halls"] for t in h["trials"])
+    keys = {"claim_true", "claim_false"} if claims else set()
     for spec in pack.panes:
         if isinstance(spec, dict):
             keys |= {spec.get(k) for k in ("label", "name", "caption") if isinstance(spec.get(k), str) and spec.get(k)}
@@ -834,9 +838,12 @@ def check_classic(pack: Pack, data: dict, art: dict, template: str) -> list[str]
     strings, pieces = classic_needs(template)
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
-    used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []))
+    used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)
     errors += [f"strings.yaml: {k!r} is not used by the page, the engine or a plugin" for k in sorted(set(pack.strings) - used)]
     errors += [f"art/classic/{k}.txt: the classic page needs it" for k in sorted(pieces - set(art))]
+    for r in data.get("realms") or []:  # the page plays a realm's halls, or its one encounter
+        if r["halls"] and r["encounters"] or len(r["encounters"]) > 1:
+            errors.append(f"realm {r['id']}: the classic page plays either halls or one encounter per realm")
     for k in sorted(set(art) - pieces - scenes):
         errors.append(f"art/classic/{k}.txt: not used (the page reads {sorted(pieces)}, and scene_<realm id> "
                       f"for each realm without halls)")

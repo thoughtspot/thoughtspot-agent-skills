@@ -105,9 +105,13 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   `__PAGE_TITLE__`, `__PAGE_DESCRIPTION__`, `/*__FONT_FACES__*/`) that `build.py` fills in one
   pass. It holds no game's wording or art: the build checks the pack holds every string and art
   piece the page reads (from its `S()`, `H()` and `art()` calls), and that every string is used by
-  the page, the engine or a plugin, and every art file by the page. What the page still draws or
-  says itself, for any game: the hall's throne room (`hallScene`), its English `lang`, the sound
-  group's label, and trimming a leading "The " from realm names in the routes. It makes **no outside
+  the page, the engine or a plugin, and every art file by the page. The page plays a realm's halls,
+  or its one encounter, so a realm may have one or the other. What the page still draws or says
+  itself, for any game: the hall's throne room (`hallScene`); the frames around the map and around a
+  realm's name in its scene; the quote marks around a quest's question; the routes' `:` and ` → `;
+  the `[n]` key hints, the `n/m` petition counter and the decree's numbering; the foe's `█░` bar;
+  its English `lang` and the sound group's label; and trimming a leading "The " from realm names in
+  the routes. It makes **no outside
   requests** and runs from Pages, any static host, or a double-click.
 - **`schema/core.json`** is the general part of every pack's schema; see below.
 - **`denylist.txt`** holds hashes of names from published fantasy works. A pack using one fails
@@ -184,7 +188,9 @@ sources:
 | `'…' is a name from a published work` | a word in the pack or the page is on the denylist | use a generic fantasy name |
 | `denylist: …` | `denylist.txt` is missing, or holds a line that isn't a hash | restore it; add names only with `denylist.py add` |
 | `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
-| `art/classic/….txt: not used` | an art file the page never reads (or a scene for a realm that doesn't exist) | remove it, or fix its name |
+| `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
+| `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
+| `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
 | `id '…' must be lowercase letters, digits and _ (and not 'hall')` or `duplicate id` | a realm, hall or encounter id breaks the step-id grammar | rename it |
@@ -218,7 +224,9 @@ fails the build.
 ## Adding a game
 
 Create `packs/<id>/` with a `pack.yaml` (its own `id`, `publish_path` and `storage_key`, which
-no other pack may share: every game is served from the same origin), a `content.yaml` and a
-`strings.yaml`. It uses none of AgentQL's plugins, or new ones of its own (see "Plugins" in
+no other pack may share: every game is served from the same origin), a `content.yaml`, a
+`strings.yaml` holding every string the classic page reads, and `art/classic/` holding the pieces
+it reads (scenes are optional: a realm without one shows a banner). The build lists anything
+missing. It uses none of AgentQL's plugins, or new ones of its own (see "Plugins" in
 `build.py`); its schema is generated from the core and its own plugins. Build it with
 `python3 tools/quest/build.py --pack <id>`.

@@ -1869,3 +1869,94 @@ def test_render_needs_every_placeholder_exactly_once(mark):
 def test_wording_in_attributes_is_escaped():
     # H() output is for element text; an attribute takes the plain string, escaped.
     assert 'aria-label="${esc(S("legend_label"))}"' in B.TEMPLATE.read_text(encoding="utf-8")
+
+
+# ---- PR 2b review, round 2: the smoke play must finish every realm --------------------------------
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("break_it,needle", [
+    # victory's "Back to the map" leads nowhere: the old smoke play looped and passed
+    (lambda h: h.replace('${choices([{ label: S("back_to_map"), go: toMap }, { label: S("quest_again")',
+                         '${choices([{ label: S("back_to_map"), go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }, { label: S("quest_again")'),
+     "ran out of steps"),
+    # the last realm's map entry opens the first realm instead
+    (lambda h: h.replace('go: go({ screen: "realm", realm: i, flash: null })', 'go: go({ screen: "realm", realm: i === REALMS.length - 1 ? 0 : i, flash: null })'),
+     'did not open from the map'),
+])
+def test_the_smoke_play_fails_a_realm_it_cannot_finish(tmp_path, break_it, needle):
+    template = B.TEMPLATE.read_text(encoding="utf-8")
+    broken = break_it(template)
+    assert broken != template
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    page = tmp_path / "index.html"
+    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode != 0 and needle in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_smoke_play_shows_content_braces_as_written(tmp_path):
+    # A formula's {date} is content, not an unfilled placeholder.
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    data["realms"][1]["encounters"][0]["panes"][0]["lines"].append("last_value(sum(balance), query_groups(), {date})")
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_the_page_plays_halls_or_one_encounter_per_realm(doc, capture):
+    pack = B.Pack("agentql")
+    data, _ = B.compile_pack(pack, {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    data["realms"][0]["encounters"] = data["realms"][1]["encounters"]
+    data["realms"][2]["encounters"] = data["realms"][2]["encounters"] * 2
+    errors = B.check_classic(pack, data, ART, B.TEMPLATE.read_text(encoding="utf-8"))
+    assert "realm law: the classic page plays either halls or one encounter per realm" in errors
+    assert "realm lake: the classic page plays either halls or one encounter per realm" in errors
+
+
+def test_claim_buttons_count_as_used_only_when_a_hall_asks_a_claim(tmp_path):
+    pack = _second(tmp_path)
+    data, _ = B.compile_pack(pack)
+    assert {"claim_true", "claim_false"} <= B.engine_strings(pack, [], data)
+    data["realms"][0]["halls"][0]["trials"] = [t for t in data["realms"][0]["halls"][0]["trials"] if t["kind"] != "claim"]
+    assert not {"claim_true", "claim_false"} & B.engine_strings(pack, [], data)
+
+
+def test_a_plugin_lists_its_strings_as_a_set(tmp_path, monkeypatch):
+    (tmp_path / "odd.py").write_text('NAME = "odd"\nSTRINGS = "send_to"\n', encoding="utf-8")
+    monkeypatch.setattr(B, "CHECKS", tmp_path)
+    with pytest.raises(ValueError, match="STRINGS must be a set"):
+        B.load_plugins(["odd"])
+
+
+def test_a_sealed_realm_may_have_a_scene(doc, capture):
+    pack = B.Pack("agentql")
+    data, _ = B.compile_pack(pack, {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    data["realms"][4]["sealed"], data["realms"][4]["encounters"] = True, []
+    assert not any("scene_isles" in e for e in B.check_classic(pack, data, ART, B.TEMPLATE.read_text(encoding="utf-8")))
+
+
+def test_placeholder_names_anywhere_in_the_pack_are_never_filled(doc, capture):
+    marks = " ".join([B.PLACEHOLDER, B.ART_PLACEHOLDER, B.TITLE_PLACEHOLDER, B.DESCRIPTION_PLACEHOLDER, B.FONT_PLACEHOLDER, r"\1 \g<0> $&"])
+    data, _ = _compile(doc, capture)
+    data["pack"]["title"] = data["pack"]["strings"]["page_description"] = marks
+    html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "FONTS", dict(ART, title=marks))
+    head = html.split("<style>", 1)[0]
+    assert head.count(B._html_text(marks)) == 2               # the title and the description, as written
+    art = json.loads(html.split('<script id="classic-art" type="application/json">', 1)[1].split("</script>", 1)[0])
+    assert art["title"] == marks
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_soon_marker_comes_from_the_pack():
+    script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
+    lines = script.splitlines()
+    take = lambda start: "\n".join(lines[lines.index(next(x for x in lines if x.startswith(start))):][:5])
+    js = "\n".join([next(x for x in lines if x.startswith("const esc =")), next(x for x in lines if x.startswith("const fill =")),
+                    'const STRINGS = {"soon_marker": "Soon:"};', next(x for x in lines if x.startswith("const S =")),
+                    take("function cell(c)")])
+    out = subprocess.run(["node", "-e", js + '\nconsole.log(JSON.stringify([cell("Pin it. Soon: tomorrow"), cell("Coming soon: x")]))'],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ['Pin it. <span class="soon">Soon:</span> tomorrow', "Coming soon: x"]
