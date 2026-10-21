@@ -31,7 +31,9 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     }
     // The step the current screen waits on, as a map's objects name it (design §4.2), or null.
     function expected(s) {
-      const r = realms[s.realm], enc = r.encounters[s.enc];
+      const r = realms[s.realm];
+      if (!r) return null;
+      const enc = r.encounters[s.enc];
       switch (s.screen) {
         case "quest": return enc ? `${enc.id}:merchant` : null;
         case "guide": return enc ? `${enc.id}:guide` : null;

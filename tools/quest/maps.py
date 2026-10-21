@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import math
 import pathlib
+import re
 
 ROLES = ("merchant", "guide", "compiler", "foe", "reward")
 PROPS = {"spawn": set(), "exit": set(), "portal": {"to"}, "throne": {"hall"}, "gate": {"requires"},
@@ -81,7 +82,7 @@ class Map:
     def __init__(self, path: pathlib.Path, errors: list[str]):
         self.path, self.name, self.errors = path, f"maps/{path.name}", errors
         try:
-            self.doc = json.loads(path.read_text(encoding="utf-8"))
+            self.doc = json.loads(path.read_text(encoding="utf-8"), parse_constant=_not_json)
         except (OSError, ValueError) as e:
             errors.append(f"{self.name}: not readable Tiled JSON ({e})")
             self.doc = {}
@@ -100,9 +101,9 @@ class Map:
             errors.append(f"{self.name}: {self.w}x{self.h} is over {MAX_TILES:,} tiles")
             self.w = self.h = 1
             d = {}
-        if d and d.get("orientation", "orthogonal") != "orthogonal":
+        if d and d.get("orientation") != "orthogonal":
             errors.append(f"{self.name}: orientation must be orthogonal (the checks and the explore page lay tiles out square)")
-        if d.get("infinite"):
+        if d.get("infinite") not in (None, False):
             errors.append(f"{self.name}: is infinite; uncheck Infinite in Tiled's map properties")
         layers = d.get("layers") if isinstance(d.get("layers"), list) else []
         for layer in layers:
@@ -110,8 +111,10 @@ class Map:
                 errors.append(f"{self.name}: a layer is not a JSON object")
             elif layer.get("type") == "group":
                 errors.append(f"{self.name}: layer {layer.get('name')!r} is a group; keep every layer at the top level")
-            elif any(layer.get(k) for k in ("offsetx", "offsety", "startx", "starty")):
+            elif any(k in layer and not (_num(layer[k]) and layer[k] == 0) for k in ("offsetx", "offsety", "startx", "starty")):
                 errors.append(f"{self.name}: layer {layer.get('name')!r} is offset; set its offsets to 0")
+            elif layer.get("type") == "tilelayer" and ("compression" in layer or layer.get("encoding", "csv") != "csv"):
+                errors.append(f"{self.name}: tile layer {layer.get('name')!r} must be CSV, with no encoding or compression set")
             elif layer.get("type") == "tilelayer" and (layer.get("x"), layer.get("y")) != (0, 0):
                 errors.append(f"{self.name}: tile layer {layer.get('name')!r} needs x 0 and y 0 (Phaser places it there)")
         layers = [l for l in layers if isinstance(l, dict)]
@@ -128,7 +131,7 @@ class Map:
         if d and [l.get("name") for l in groups] != ["objects"]:
             errors.append(f"{self.name}: needs exactly one object layer, named objects (the explore page reads that one)")
         good = lambda l: (isinstance(l.get("data"), list) and len(l["data"]) == self.w * self.h
-                          and all(isinstance(g, int) and not isinstance(g, bool) and g >= 0 for g in l["data"])
+                          and all(isinstance(g, int) and not isinstance(g, bool) and 0 <= g < 2 ** 32 for g in l["data"])
                           and (l.get("width"), l.get("height")) == (self.w, self.h))
         for l in tiles:
             if not good(l):
@@ -151,7 +154,7 @@ class Map:
                     errors.append(f"{where}: uses a Tiled template, which Phaser doesn't resolve; detach it")
                 if "class" in o and "type" not in o:
                     errors.append(f"{where}: has a class but no type (saved by Tiled 1.9); save with Tiled 1.10 or later")
-                if not all(_num(o.get(k, 0)) and math.isfinite(o.get(k, 0)) for k in ("x", "y", "width", "height")):
+                if not all(k in o and _num(o[k]) and abs(o[k]) < 1e9 for k in ("x", "y", "width", "height")):
                     errors.append(f"{where}: x, y, width and height must be numbers")
                     continue
                 if (o.get("rotation") or o.get("point") or o.get("ellipse")
@@ -162,8 +165,11 @@ class Map:
                     errors.append(f"{where}: must be exactly one tile on the grid ({self.tw}x{self.th} at a multiple of "
                                   f"{self.tw}; snap to grid in Tiled); the explore page gives it a body that size at its centre")
                     continue
+                tile = self._tile(o)
+                if any(x["tile"] == tile for x in self.objects):   # the page could only ever talk to one of them
+                    errors.append(f"{where}: shares its tile {tile} with another object; give each its own")
                 self.objects.append({"type": o.get("type"), "props": _props(o, where, errors), "where": where,
-                                     "tile": self._tile(o), "rect": self._rect(o)})
+                                     "tile": tile, "rect": self._rect(o)})
         pack_dir = path.parent.parent.resolve()
         sets = d.get("tilesets") if isinstance(d.get("tilesets"), list) else []
         if d and [t.get("name") if isinstance(t, dict) else None for t in sets] != ["tiles"]:
@@ -173,14 +179,21 @@ class Map:
                 errors.append(f"{self.name}: a tileset is not a JSON object")
             elif "source" in ts:
                 errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (Phaser reads embedded tilesets only)")
+            elif "tiles" in ts and not (isinstance(ts["tiles"], list) and all(
+                    isinstance(t, dict) and isinstance(t.get("properties", []), list) for t in ts["tiles"])):
+                errors.append(f"{self.name}: tileset {ts.get('name')!r} has per-tile data Phaser can't read")
             else:
                 image = ts.get("image")
                 try:
                     target = (path.parent / image).resolve() if isinstance(image, str) and image else None
                 except (OSError, ValueError):
                     target = None
+                try:
+                    there = target is not None and target.is_file()
+                except OSError:     # a name too long for the file system, say
+                    there = False
                 if (target is None or not target.is_relative_to(pack_dir) or target.suffix.lower() not in IMAGES
-                        or not target.is_file()):
+                        or not there):
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not in the pack "
                                   f"(a {'/'.join(IMAGES)} file under the pack's folder)")
 
@@ -213,8 +226,13 @@ def step_of(o: dict) -> str | None:
     return None
 
 
+STEP_ID = re.compile(r"(?:hall|[a-z0-9_]+):[a-z0-9_]+")
+
+
 def requires(gate: dict) -> list[str]:
-    return [s.strip() for s in gate["props"].get("requires", "").split(",") if s.strip()]
+    """A gate's steps. Only spaces are trimmed: Python and the page's JavaScript trim other
+    characters differently, so anything else is part of the id (and fails STEP_ID)."""
+    return [s.strip(" ") for s in gate["props"].get("requires", "").split(",") if s.strip(" ")]
 
 
 def _near(t: tuple[int, int]) -> list[tuple[int, int]]:
@@ -278,14 +296,12 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
         if o["type"] == "gate":
             if not all(m.inside(t) for t in o["rect"]):
                 errors.append(f"{o['where']}: is not wholly on the map")
-            elif len(o["rect"]) != 1:
-                errors.append(f"{o['where']}: must fill exactly one tile (the explore page blocks one; use a gate per tile)")
             if not requires(o):
                 errors.append(f"{o['where']}: requires names no step, so it never blocks anything")
+            elif not all(STEP_ID.fullmatch(r) for r in requires(o)):
+                errors.append(f"{o['where']}: requires must be step ids (letters, digits, _ and one :) separated by commas")
         elif not m.inside(o["tile"]):
             errors.append(f"{o['where']}: is outside the map")
-        elif len(o["rect"]) != 1:
-            errors.append(f"{o['where']}: must fill exactly one tile (it is solid on one tile only)")
     if len(m.of("spawn")) != 1:
         errors.append(f"{m.name}: needs exactly one spawn")
     edge = {(x, y) for x in range(m.w) for y in (0, m.h - 1)} | {(x, y) for y in range(m.h) for x in (0, m.w - 1)}
@@ -342,9 +358,9 @@ def check_maps(pack_dir: pathlib.Path, data: dict) -> list[str]:
     folder = pack_dir / "maps"
     files = sorted(p for p in folder.iterdir() if p.is_file()) if folder.is_dir() else []
     present = {p.stem: p for p in files if p.suffix == ".tmj"}
+    folders = [f"maps/{p.name}/: maps/ holds no folders" for p in sorted(folder.iterdir()) if p.is_dir()] if folder.is_dir() else []
     if not explore:
-        return [f"maps/{p.name}: no realm is explorable (explore.realms), so no map is used"
-                for p in files if p.suffix.lower() not in IMAGES]
+        return folders + [f"maps/{p.name}: no realm is explorable (explore.realms), so no map is used" for p in files]
     errors = []
     realms = {r["id"]: r for r in data.get("realms") or []}
     images = set()
@@ -354,9 +370,7 @@ def check_maps(pack_dir: pathlib.Path, data: dict) -> list[str]:
                 images.add((m.parent / ts["image"]).resolve())
             except (KeyError, TypeError, OSError, ValueError):
                 pass    # reported by the map's own checks
-    for p in sorted(folder.iterdir()) if folder.is_dir() else []:
-        if p.is_dir():
-            errors.append(f"maps/{p.name}/: maps/ holds no folders")
+    errors += folders
     for p in files:
         if p.suffix != ".tmj" and p.resolve() not in images:
             errors.append(f"maps/{p.name}: not used (maps/ holds {OVERWORLD}.tmj, a .tmj per realm in explore.realms, "
@@ -387,3 +401,7 @@ def _tilesets(path: pathlib.Path) -> list[dict]:
         return []
     sets = doc.get("tilesets") if isinstance(doc, dict) else None
     return [t for t in sets if isinstance(t, dict)] if isinstance(sets, list) else []
+
+
+def _not_json(name: str):
+    raise ValueError(f"{name} is not JSON (the page's JSON.parse rejects it)")
