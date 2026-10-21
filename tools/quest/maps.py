@@ -39,10 +39,13 @@ ROLES = ("merchant", "guide", "compiler", "foe", "reward")
 PROPS = {"spawn": set(), "exit": set(), "portal": {"to"}, "throne": {"hall"}, "gate": {"requires"},
          # for fun, never a step: a chest of loot (or a mimic), a barrel that rolls one tile off a hoard
          "chest": {"loot"}, "barrel": {"roll"}, "hoard": {"loot"},
+         # someone to talk to, never a step: `look` (tiles.json npcs) and `says` (lines in
+         # strings.yaml) or `about` (a realm, described from its own content)
+         "npc": {"look", "says", "about"},
          **{role: {"encounter"} for role in ROLES}}
 REALM_TYPES = set(PROPS) - {"portal"}
-OVERWORLD_TYPES = {"spawn", "portal", "gate", "chest", "barrel", "hoard"}
-EXTRAS = ("chest", "barrel", "hoard")
+OVERWORLD_TYPES = {"spawn", "portal", "gate", "chest", "barrel", "hoard", "npc"}
+EXTRAS = ("chest", "barrel", "hoard", "npc")
 ROLLS = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
 MIMIC = "mimic"
 OVERWORLD = "overworld"
@@ -87,6 +90,9 @@ class Map:
     def __init__(self, path: pathlib.Path, errors: list[str]):
         self.path, self.name, self.errors = path, f"maps/{path.name}", errors
         self.items: set[str] = set()     # the pack's loot (tiles/tiles.json), for chests and hoards
+        self.npcs: set[str] = set()      # who an npc can look like (tiles/tiles.json npcs)
+        self.strings: set[str] = set()   # what an npc can say (strings.yaml), and the realms it can tell of
+        self.realm_ids: set[str] = set()
         try:
             self.doc = json.loads(path.read_text(encoding="utf-8"), parse_constant=_not_json)
         except (OSError, ValueError) as e:
@@ -179,9 +185,10 @@ class Map:
                                      "tile": tile, "rect": self._rect(o)})
         pack_dir = path.parent.parent.resolve()
         try:
-            self.items = set((json.loads((pack_dir / "tiles" / "tiles.json").read_text(encoding="utf-8")).get("items") or {}))
+            frames = json.loads((pack_dir / "tiles" / "tiles.json").read_text(encoding="utf-8"))
+            self.items, self.npcs = set(frames.get("items") or {}), set(frames.get("npcs") or {})
         except (OSError, ValueError, AttributeError):
-            self.items = set()
+            pass
         sets = d.get("tilesets") if isinstance(d.get("tilesets"), list) else []
         if d and [t.get("name") if isinstance(t, dict) else None for t in sets] != ["tiles"]:
             errors.append(f"{self.name}: needs exactly one tileset, named tiles (the explore page draws with that one)")
@@ -320,7 +327,7 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
     every = {x for g, needs in gates for x in needs}
     if not errors:
         late = walk(every)
-        for o in m.of("chest") + m.of("barrel") + m.of("hoard"):
+        for o in m.of("chest") + m.of("barrel") + m.of("hoard") + m.of("npc"):
             if not reach(o, late):
                 errors.append(f"{o['where']}: can't be reached, even once the quest is done")
     return errors
@@ -336,6 +343,11 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
     for o in m.objects:
         if o["type"] not in allowed:
             errors.append(f"{o['where']}: type must be one of {sorted(allowed)}")
+            continue
+        if o["type"] == "npc":         # look, and one of says / about
+            ok = "look" in o["props"] and set(o["props"]) <= PROPS["npc"] and len(set(o["props"]) & {"says", "about"}) == 1
+            if not ok:
+                errors.append(f"{o['where']}: needs look, and either says or about")
             continue
         missing, extra = PROPS[o["type"]] - set(o["props"]), set(o["props"]) - PROPS[o["type"]]
         if missing or extra:
@@ -364,6 +376,14 @@ def _extras(m: Map, errors: list[str]) -> None:
     """Chests, barrels and hoards: loot the pack names, barrels that roll onto open floor, a hoard
     under each barrel that hides one."""
     items = m.items
+    for o in m.of("npc"):
+        if o["props"].get("look") not in m.npcs:
+            errors.append(f"{o['where']}: look={o['props'].get('look')!r} is not one of tiles/tiles.json's npcs")
+        says = [x.strip() for x in o["props"].get("says", "").split(",") if x.strip()]
+        if "says" in o["props"] and (not says or any(k not in m.strings for k in says)):
+            errors.append(f"{o['where']}: says={o['props']['says']!r} must name lines in strings.yaml")
+        if "about" in o["props"] and o["props"]["about"] not in m.realm_ids:
+            errors.append(f"{o['where']}: about={o['props']['about']!r} is not a realm")
     taken = {o["tile"] for o in m.objects if o["type"] not in ("barrel", "hoard")}
     for o in m.of("chest"):
         loot = o["props"].get("loot", "")
@@ -458,12 +478,12 @@ def check_maps(pack_dir: pathlib.Path, data: dict) -> list[str]:
     if OVERWORLD not in present:
         errors.append(f"maps/{OVERWORLD}.tmj: missing (every explorable pack needs an overworld)")
     else:
-        errors += check_overworld(Map(present[OVERWORLD], []), list(realms.values()))
+        errors += check_overworld(_with(Map(present[OVERWORLD], []), data), list(realms.values()))
     for rid in explore:
         if rid not in present:
             errors.append(f"maps/{rid}.tmj: missing (realm {rid} is in explore.realms)")
         elif rid in realms:
-            errors += check_realm_map(Map(present[rid], []), realms[rid])
+            errors += check_realm_map(_with(Map(present[rid], []), data), realms[rid])
     return errors
 
 
@@ -485,3 +505,26 @@ def _png_size(path: pathlib.Path) -> tuple[int, int] | None:
     if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
         return None
     return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def _with(m: Map, data: dict) -> Map:
+    """A map that knows the pack's lines and realms, for its npcs."""
+    m.strings = set(((data.get("pack") or {}).get("strings") or {}))
+    m.realm_ids = {r["id"] for r in data.get("realms") or []}
+    return m
+
+
+def npc_lines(pack_dir: pathlib.Path) -> set[str]:
+    """Every line the pack's npcs say (strings.yaml keys), which the page reads by name."""
+    lines = set()
+    for path in sorted((pack_dir / "maps").glob("*.tmj")) if (pack_dir / "maps").is_dir() else []:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            for layer in doc.get("layers") or []:
+                for o in layer.get("objects") or [] if isinstance(layer, dict) else []:
+                    for p in o.get("properties") or [] if isinstance(o, dict) and o.get("type") == "npc" else []:
+                        if isinstance(p, dict) and p.get("name") == "says" and isinstance(p.get("value"), str):
+                            lines |= {x.strip() for x in p["value"].split(",") if x.strip()}
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue    # reported by the map checks
+    return lines

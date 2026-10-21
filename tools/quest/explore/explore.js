@@ -147,7 +147,7 @@
       Sound.play("blip");
       return openDialog("portal");
     }
-    if (obj.type === "chest" || obj.type === "barrel" || obj.type === "hoard") return world.play(obj);
+    if (obj.type === "chest" || obj.type === "barrel" || obj.type === "hoard" || obj.type === "npc") return world.play(obj);
     if (obj.type === "exit") {               // leave the realm; a quest left unfinished is not saved
       state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
       Sound.play("blip");
@@ -243,6 +243,7 @@
         const prop = n => ((o.properties || []).find(p => p.name === n) || {}).value;
         const x = o.x + o.width / 2, y = o.y + o.height / 2;
         const obj = { type: o.type, x, y, to: prop("to"), key: `${this.mapId}:${o.id}`, loot: prop("loot"), roll: prop("roll"),
+                      look: prop("look"), says: prop("says"), about: prop("about"), said: 0,
                       step: ROLES.includes(o.type) ? `${prop("encounter")}:${o.type}` : o.type === "throne" ? `hall:${prop("hall")}` : null };
         if (o.type === "spawn") { this.spawn = { x, y }; continue; }
         if (o.type === "gate") {
@@ -253,12 +254,13 @@
         const opened = !!fun.done[obj.key];
         const frame = o.type === "portal" ? FRAMES.portals[obj.to] ?? FRAMES.portal
           : o.type === "chest" && opened ? (obj.loot === MIMIC ? FRAMES.mimic : FRAMES.chest_open)
-          : o.type === "hoard" && opened ? FRAMES.hoard_empty : FRAMES[o.type] ?? FRAMES.portal;
+          : o.type === "hoard" && opened ? FRAMES.hoard_empty
+          : o.type === "npc" ? FRAMES.npcs[obj.look] : FRAMES[o.type] ?? FRAMES.portal;
         obj.sprite = this.solid.create(x, y, "tiles", frame);
         if (o.type === "barrel" && opened) this.place(obj, ...this.rolledTo(obj));
         if (o.type === "barrel") obj.sprite.setDepth(2);
         // The living breathe: a pixel up and down, out of step with each other.
-        if (!reduced && ["merchant", "guide", "foe"].includes(o.type))
+        if (!reduced && ["merchant", "guide", "foe", "npc"].includes(o.type))
           this.time.addEvent({ delay: 650 + 90 * this.objects.length, loop: true,       // a pixel up, a pixel down
                                callback: () => obj.sprite.setY(obj.sprite.y === y ? y - 1 : y) });
         this.objects.push(obj);
@@ -273,6 +275,7 @@
       this.player.body.setSize(12, 12);
       this.look = this.add.image(this.spawn.x, this.spawn.y, "tiles", FRAMES.player).setDepth(10);
       this.events.on("postupdate", () => this.follow());
+      this.facing = [0, 1];
       this.held = this.add.image(this.spawn.x, this.spawn.y, "tiles", ITEMS[fun.weapon].frame).setDepth(11).setScale(0.75);
       this.physics.add.collider(this.player, walls);
       this.physics.add.collider(this.player, this.solid);
@@ -314,8 +317,14 @@
         // Beside it: within reach on one axis, overlapping it on the other (half the 12px body
         // plus half the 16px tile, so a player pressed against it anywhere along its side counts).
         return (dx <= TILE * 1.25 && dy < 14) || (dy <= TILE * 1.25 && dx < 14);
-      }).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
+      }).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y)
+                        || this.ahead(b) - this.ahead(a));         // a tie goes to the one you face
       return close.find(o => o.step && o.step === want) || close[0] || null;
+    }
+    // How squarely the player faces something: 1 straight ahead, -1 behind.
+    ahead(o) {
+      const dx = o.x - this.player.x, dy = o.y - this.player.y, d = Math.hypot(dx, dy) || 1;
+      return (dx * this.facing[0] + dy * this.facing[1]) / d;
     }
     update() {
       if (this.frozen) return;
@@ -326,6 +335,7 @@
       const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
       this.player.setVelocity(dx * v, dy * v);
       if (dx) { this.look.setFlipX(dx < 0); this.held.setFlipX(dx < 0); }
+      if (dx || dy) this.facing = [Math.sign(dx), Math.sign(dy)];
     }
     // After the physics step, so what you see is where the body is; bob only when it really moved.
     follow() {
@@ -356,6 +366,13 @@
     // A chest, a barrel or a hoard: none of them is a step, so the machine never hears of it.
     play(obj) {
       if (obj.hidden) return toast(S("explore_nobody"));
+      if (obj.type === "npc") {              // the next of its lines, round and round
+        const lines = obj.about ? [(r => S("explore_npc_about", { realm: r.name, covers: r.covers }))(realms.find(r => r.id === obj.about))]
+                                : String(obj.says).split(",").map(k => S(k.trim()));
+        const line = lines[obj.said++ % lines.length];
+        Sound.play("blip");
+        return toast(line);
+      }
       const first = !fun.done[obj.key];
       if (obj.type === "chest") {
         if (!first) return toast(S(obj.loot === MIMIC ? "explore_mimic" : "explore_chest_empty"));
@@ -446,6 +463,7 @@
                        && !world.objects.some(o => o !== obj && !o.hidden && o.x === s.x && o.y === s.y); });
         if (!spot) throw new Error(`no floor next to ${obj.step || obj.type}`);
         world.player.setPosition(spot.x, spot.y);
+        world.facing = [Math.sign(obj.x - spot.x), Math.sign(obj.y - spot.y)];   // and face it, as a player would
       };
       const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
       const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
@@ -469,6 +487,18 @@
       if (!(world.player.x > x0 + 8)) throw new Error(`the right arrow didn't walk (x ${x0} -> ${world.player.x})`);
       const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
       const ri = realms.findIndex(r => r.id === realmId);
+      const npcs = async () => {                                         // everyone has something to say
+        for (const n of world.objects.filter(x => x.type === "npc")) {
+          stand(n); await wait(60);
+          const lines = n.about ? 1 : String(n.says).split(",").length;
+          const heard = [];
+          for (let i = 0; i <= lines; i++) { talk(world.nearby()); heard.push($("toast").textContent); }
+          if (!heard[0] || heard[lines] !== heard[0] || new Set(heard).size !== lines)
+            throw new Error(`the ${n.look} by (${n.x}, ${n.y}) said ${JSON.stringify(heard)}`);
+        }
+        log(`NPCS ${world.mapId} ${world.objects.filter(x => x.type === "npc").length}`);
+      };
+      await npcs();
       for (const o of world.objects.filter(x => x.type === "portal"))      // each realm's own door
         if (o.sprite.frame.name !== (FRAMES.portals[o.to] ?? FRAMES.portal)) throw new Error(`the ${o.to} door is the wrong one`);
       // Standing by the portal names its realm, with the classic map's mark.
@@ -538,6 +568,7 @@
         if (weapons().length > 1 && (fun.weapon === w0 || world.held.frame.name !== ITEMS[fun.weapon].frame))
           throw new Error("X didn't switch the weapon in hand");
         log(`FUN ${fun.items.join(",")} | ${fun.weapon}`);
+        await npcs();
         // Beside someone along a whole side counts; across a corner doesn't.
         const first = world.objects.find(o => o.step === machine.expected(state));
         world.player.setPosition(first.x - 14, first.y + 11);

@@ -853,7 +853,7 @@ def check_vendor() -> list[str]:
 
 TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne",   # what explore.js draws
               "chest", "chest_open", "mimic", "barrel", "hoard", "hoard_empty"}
-TILE_TABLES = {"portals", "items", "weapon"}   # a door per realm, the loot, the weapon you start with
+TILE_TABLES = {"portals", "items", "weapon", "npcs"}   # a door per realm, the loot, the first weapon, who npcs look like
 
 
 def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
@@ -875,6 +875,9 @@ def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
         if not frame(frames[k]):
             errors.append(f"tiles/tiles.json: {k!r} must be a frame of tiles.png, 0 to {count - 1}")
     portals, items = frames.get("portals"), frames.get("items")
+    npcs = frames.get("npcs")
+    if not isinstance(npcs, dict) or not all(isinstance(k, str) and ID.fullmatch(k) and frame(v) for k, v in npcs.items()):
+        errors.append("tiles/tiles.json: npcs maps a look to its frame")
     if not isinstance(portals, dict) or not all(isinstance(k, str) and frame(v) for k, v in portals.items()):
         errors.append("tiles/tiles.json: portals maps a realm id to its door's frame")
     if not isinstance(items, dict) or not items or not all(
@@ -982,6 +985,7 @@ def check_classic(pack: Pack, data: dict, art: dict, template: str, unused: bool
     strings, pieces = classic_needs(template, core, explorable)
     if explorable:
         strings |= {f"item_{k}" for k in explore_items(pack)}   # read as S(`item_${id}`), which the scan can't see
+        strings |= maps.npc_lines(pack.dir)                     # the lines the maps' npcs say
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
     used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)

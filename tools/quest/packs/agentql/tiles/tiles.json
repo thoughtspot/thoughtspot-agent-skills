@@ -59,5 +59,11 @@
       "frame": 102,
       "kind": "treasure"
     }
+  },
+  "npcs": {
+    "elder": 100,
+    "villager": 99,
+    "ranger": 112,
+    "miner": 86
   }
 }

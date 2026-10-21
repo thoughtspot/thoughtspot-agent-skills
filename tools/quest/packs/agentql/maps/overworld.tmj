@@ -10,7 +10,7 @@
  "tileheight": 16,
  "infinite": false,
  "nextlayerid": 5,
- "nextobjectid": 8,
+ "nextobjectid": 13,
  "layers": [
   {
    "id": 1,
@@ -657,6 +657,121 @@
        "name": "loot",
        "type": "string",
        "value": "blue_potion"
+      }
+     ]
+    },
+    {
+     "id": 8,
+     "name": "",
+     "type": "npc",
+     "x": 128,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "look",
+       "type": "string",
+       "value": "elder"
+      },
+      {
+       "name": "says",
+       "type": "string",
+       "value": "npc_elder_walk,npc_elder_order,npc_elder_fun"
+      }
+     ]
+    },
+    {
+     "id": 9,
+     "name": "",
+     "type": "npc",
+     "x": 48,
+     "y": 64,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "look",
+       "type": "string",
+       "value": "villager"
+      },
+      {
+       "name": "about",
+       "type": "string",
+       "value": "mines"
+      }
+     ]
+    },
+    {
+     "id": 10,
+     "name": "",
+     "type": "npc",
+     "x": 48,
+     "y": 16,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "look",
+       "type": "string",
+       "value": "ranger"
+      },
+      {
+       "name": "about",
+       "type": "string",
+       "value": "lake"
+      }
+     ]
+    },
+    {
+     "id": 11,
+     "name": "",
+     "type": "npc",
+     "x": 224,
+     "y": 32,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "look",
+       "type": "string",
+       "value": "villager"
+      },
+      {
+       "name": "about",
+       "type": "string",
+       "value": "isles"
+      }
+     ]
+    },
+    {
+     "id": 12,
+     "name": "",
+     "type": "npc",
+     "x": 256,
+     "y": 80,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "look",
+       "type": "string",
+       "value": "ranger"
+      },
+      {
+       "name": "about",
+       "type": "string",
+       "value": "forests"
       }
      ]
     }
