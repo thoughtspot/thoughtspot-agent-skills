@@ -97,3 +97,17 @@ def test_connection_name_only_no_fqn():
 def test_spotter_enabled_by_default():
     _, _, model, _ = _build()
     assert model["properties"]["spotter_config"]["is_spotter_enabled"] is True
+
+
+def test_many_to_many_relationship_is_skipped_and_flagged():
+    """A Model join cannot be MANY_TO_MANY (error 14528, lint I20), and emitting one as
+    MANY_TO_ONE would fan out silently, so the join is left out and flagged (BL-397)."""
+    from ts_cli.tml_lint import lint_tml
+    inv = _inv()
+    inv["relationships"][0].update({"fromCardinality": "many", "toCardinality": "many"})
+    files, mapping = assemble(inv, {}, "MyConn", "db1", "sch1", "LEFT_OUTER", False)
+    model_doc = next(tml for fn, tml in files if fn.endswith(".model.tml"))
+    assert not [j for t in model_doc["model"]["model_tables"] for j in t.get("joins", [])]
+    row = mapping["relationships"][0]
+    assert row["status"] == "NEEDS REVIEW" and "bridge table" in row["note"]
+    assert not [f for f in lint_tml(model_doc) if f.startswith("I20")]

@@ -74,6 +74,14 @@ def _build_joins(rels, table_names, dropped_ids, join_type):
                              "note": "join key column has no physical match (dropped); join skipped"})
             continue
         card = _cardinality(rel)
+        if card == "MANY_TO_MANY":
+            # A Model join cannot be MANY_TO_MANY (error 14528, lint I20), and emitting it
+            # as MANY_TO_ONE would fan out and inflate totals silently. Leave it out.
+            rel_rows.append({"name": nm, "status": "NEEDS REVIEW",
+                             "note": "many-to-many relationship has no Model join (ThoughtSpot "
+                                     "rejects MANY_TO_MANY); join skipped — model a bridge table "
+                                     "in the warehouse and join it MANY_TO_ONE from each side"})
+            continue
         joins_by_src.setdefault(ft, []).append({
             "with": tt,
             "on": f"[{ft}::{fc}] = [{tt}::{tc}]",

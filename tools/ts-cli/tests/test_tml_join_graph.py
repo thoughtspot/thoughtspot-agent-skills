@@ -445,3 +445,63 @@ class TestLintCommand:
         self._write(tmp_path, _model(_t("ORDERS")))
         res, _ = self._run(tmp_path, "--exempt", "X")
         assert res.exit_code == 2
+
+
+class TestManyToManyAndReferencingJoins:
+    """I20 (MANY_TO_MANY Model join, 14528) and I21 (a referencing_join its own Table
+    TML does not declare, 14504) — both from the review probes R13/R14, 2026-10-21."""
+
+    def test_many_to_many_join_is_flagged(self):
+        f = lint_tml(_model(
+            _t("INVENTORY", _j("INVENTORY", "PRODUCT", card="MANY_TO_MANY")), _t("PRODUCT")))
+        assert _ids(f) == ["I20"] and "14528" in f[0] and "bridge table" in f[0]
+
+    def test_other_cardinalities_pass_i20(self):
+        for card in ("MANY_TO_ONE", "ONE_TO_MANY", "ONE_TO_ONE"):
+            assert lint_tml(_model(
+                _t("INVENTORY", _j("INVENTORY", "PRODUCT", card=card)), _t("PRODUCT"))) == []
+
+    @staticmethod
+    def _ref_model(under, with_):
+        return _model(_t(under, {"with": with_, "referencing_join": "ORDERS_to_LINES"}),
+                      _t(with_))
+
+    def test_referencing_join_under_its_declaring_table_passes(self):  # R14c: OK
+        from ts_cli.tml_lint import lint_referencing_joins, table_join_names
+        names = table_join_names({"LINES": {"joins_with": [{"name": "ORDERS_to_LINES"}]},
+                                  "ORDERS": {"joins_with": []}})
+        assert lint_referencing_joins(self._ref_model("LINES", "ORDERS"), names) == []
+
+    def test_referencing_join_under_the_other_table_is_flagged(self):  # R14: 14504
+        from ts_cli.tml_lint import lint_referencing_joins, table_join_names
+        names = table_join_names({"LINES": {"joins_with": [{"name": "ORDERS_to_LINES"}]},
+                                  "ORDERS": {"joins_with": []}})
+        f = lint_referencing_joins(self._ref_model("ORDERS", "LINES"), names)
+        assert _ids(f) == ["I21"] and "declared on 'LINES'" in f[0] and "14504" in f[0]
+
+    def test_unknown_join_name_is_flagged_without_an_owner(self):
+        from ts_cli.tml_lint import lint_referencing_joins, table_join_names
+        names = table_join_names({"LINES": {"joins_with": []}, "ORDERS": {"joins_with": []}})
+        f = lint_referencing_joins(self._ref_model("LINES", "ORDERS"), names)
+        assert _ids(f) == ["I21"] and "declared on" not in f[0]
+
+    def test_table_not_in_batch_is_not_checked(self):
+        from ts_cli.tml_lint import lint_referencing_joins
+        assert lint_referencing_joins(self._ref_model("LINES", "ORDERS"), {}) == []
+
+    def test_i21_runs_in_the_lint_command_only_with_tables(self, tmp_path):
+        import json as _json
+        import yaml as _yaml
+        from typer.testing import CliRunner
+        from ts_cli.cli import app
+        (tmp_path / "m.model.tml").write_text(_yaml.safe_dump(self._ref_model("ORDERS", "LINES")))
+        alone = CliRunner().invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+        assert not [f for r in _json.loads(alone.stdout)["results"] for f in r["findings"]
+                    if f.startswith("I21")]
+        (tmp_path / "LINES.table.tml").write_text(_yaml.safe_dump({"table": {
+            "name": "LINES", "columns": [], "joins_with": [{"name": "ORDERS_to_LINES"}]}}))
+        (tmp_path / "ORDERS.table.tml").write_text(_yaml.safe_dump({"table": {
+            "name": "ORDERS", "columns": []}}))
+        both = CliRunner().invoke(app, ["tml", "lint", "--dir", str(tmp_path)])
+        assert [f[:4] for r in _json.loads(both.stdout)["results"] for f in r["findings"]
+                if f.startswith("I21")] == ["I21:"]

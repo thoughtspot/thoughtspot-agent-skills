@@ -12,10 +12,13 @@ generated TML. I15 is the misplaced-column-root-key check (BL-232): a `descripti
 Table column that is not breaks every AgentQL/SpotQL query on it. I17-I19 are the
 join-graph rules (live-probed 2026-10-21): the server rejects a cycle, a second route,
 a self-join, or an `on:` naming the wrong tables, but its message names none of the
-joins at fault — these do. Rules mirror the invariants in
+joins at fault — these do. I20 (a MANY_TO_MANY Model join) and I21 (a
+`referencing_join` its own Table TML does not declare; cross-file, like I16) are
+rejected with clear messages, but only at import — after a converter has finished.
+Rules mirror the invariants in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
-CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19
+CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19/I20/I21
     The one authoritative enumeration of what this module checks, gated by
     tools/validate/check_lint_invariant_list.py against the findings the code
     actually emits. Do not restate this set anywhere else — name the concept
@@ -229,6 +232,7 @@ def lint_tml(data: dict) -> list[str]:
     findings.extend(_check_join_path_ambiguity(model_tables))
     findings.extend(_check_self_joins(model_tables))
     findings.extend(_check_join_on_tables(model_tables))
+    findings.extend(_check_many_to_many_joins(model_tables))
     findings.extend(_check_misplaced_column_root_keys(columns))
 
     return findings
@@ -701,6 +705,87 @@ def table_aggregations(table: dict) -> dict[str, tuple]:
             if key:
                 out.setdefault(str(key).lower(), role)
     return out
+
+
+def _check_many_to_many_joins(model_tables: list) -> list[str]:
+    """I20 — a Model join's `cardinality` may not be MANY_TO_MANY.
+
+    Rejected at import, error 14528: "Invalid value MANY_TO_MANY of field
+    ...joins...cardinality. Allowed values are MANY_TO_ONE, ONE_TO_MANY, ONE_TO_ONE"
+    (live-probed 2026-10-21). A Table TML's `joins_with` lists MANY_TO_MANY in its own
+    vocabulary; that was not probed, so only Model joins are checked. A many-to-many
+    relationship needs a bridge table (two MANY_TO_ONE joins), modelled in the warehouse.
+    """
+    findings: list[str] = []
+    for t in model_tables:
+        if not isinstance(t, dict):
+            continue
+        for j in t.get("joins") or []:
+            if isinstance(j, dict) and str(j.get("cardinality") or "").upper() == "MANY_TO_MANY":
+                findings.append(
+                    f"I20: join '{j.get('name') or j.get('referencing_join') or '(unnamed)'}' "
+                    f"({node_id(t)} -> {j.get('with', '?')}) is MANY_TO_MANY — ThoughtSpot "
+                    f"rejects it (error 14528: allowed values are MANY_TO_ONE, ONE_TO_MANY, "
+                    f"ONE_TO_ONE). Model the relationship through a bridge table, joined "
+                    f"MANY_TO_ONE from each side, or drop the join."
+                )
+    return findings
+
+
+def table_join_names(tables: dict) -> dict[str, set]:
+    """physical table name (lower) -> the names of its Table TML `joins_with[]` entries.
+    `tables` maps a table name to its parsed `table:` body (the I21 input)."""
+    return {str(name).lower(): {jw.get("name") for jw in (body or {}).get("joins_with") or []
+                                if isinstance(jw, dict) and jw.get("name")}
+            for name, body in (tables or {}).items()}
+
+
+def lint_referencing_joins(model_tml: dict, join_names: dict[str, set]) -> list[str]:
+    """I21 — a `referencing_join` must name a join in its OWN entry's Table TML.
+
+    A Model join that references a Table TML join sits under the entry whose Table
+    declares it. Placed under the other table — or naming a join that table does not
+    have — it is rejected at import, error 14504 "Relationships do not exist" (live-
+    probed 2026-10-21: the same join imports under its declaring table and fails under
+    its destination). Cross-file: only entries whose Table TML is in the batch
+    (`join_names`, from `table_join_names`) are checked — a Model linted alone has no
+    ground truth for what its Tables declare.
+    """
+    model = (model_tml or {}).get("model")
+    if not isinstance(model, dict):
+        return []
+    findings: list[str] = []
+    for t, ref in _undeclared_refs(model, join_names):
+        findings.append(
+            f"I21: '{node_id(t)}' references join '{ref}', which its Table TML "
+            f"('{t.get('name')}') does not declare{_declared_on(ref, model, join_names)}. "
+            f"ThoughtSpot rejects this (error 14504, 'Relationships do not exist')."
+        )
+    return findings
+
+
+def _undeclared_refs(model: dict, join_names: dict[str, set]):
+    """(model_tables entry, referencing_join) pairs whose entry's Table TML is in the
+    batch and does not declare that join."""
+    for t in model.get("model_tables") or []:
+        if not isinstance(t, dict):
+            continue
+        declared = join_names.get(str(t.get("name") or "").lower())
+        if declared is None:
+            continue  # that Table's TML is not in the batch
+        for j in t.get("joins") or []:
+            ref = j.get("referencing_join") if isinstance(j, dict) else None
+            if ref and ref not in declared:
+                yield t, ref
+
+
+def _declared_on(ref: str, model: dict, join_names: dict[str, set]) -> str:
+    """Where a misplaced join IS declared, as a message suffix ('' if nowhere in batch)."""
+    display = {str(e.get("name") or "").lower(): e.get("name")
+               for e in model.get("model_tables") or [] if isinstance(e, dict)}
+    owners = sorted(display.get(n, n) for n, names in join_names.items() if ref in names)
+    return (f" — it is declared on '{owners[0]}', so the join belongs under that table's "
+            f"entry") if owners else ""
 
 
 def lint_model_table_aggregation(model_tml: dict, tables: dict[str, dict]) -> list[str]:

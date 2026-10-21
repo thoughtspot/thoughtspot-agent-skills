@@ -736,12 +736,15 @@ def _build_table_joins_index(parsed: list) -> dict:
 
 
 def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, set],
-                  table_aggs: Optional[dict] = None) -> dict:
+                  table_aggs: Optional[dict] = None, table_bodies: Optional[dict] = None) -> dict:
     """Lint pass 2 — lint one already-parsed doc (lint_tml + optional cross-reference
     check against the batch's generated-tables map). Returns the result entry
     ``{index, type, name, findings}``.
     """
-    from ts_cli.tml_lint import lint_cross_references, lint_model_table_aggregation, lint_tml
+    from ts_cli.tml_lint import (
+        lint_cross_references, lint_model_table_aggregation, lint_referencing_joins, lint_tml,
+        table_join_names,
+    )
 
     if i in parse_errors:
         return {"index": i, "type": "?", "name": None, "findings": [parse_errors[i]]}
@@ -749,6 +752,7 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
     if tables and isinstance(data, dict) and isinstance(data.get("model"), dict):
         findings = findings + lint_cross_references(data, tables)
         findings = findings + lint_model_table_aggregation(data, table_aggs or {})
+        findings = findings + lint_referencing_joins(data, table_join_names(table_bodies or {}))
     inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
     return {
         "index": i,
@@ -829,12 +833,15 @@ def lint_tml_cmd(
     parsed, parse_errors = _parse_tml_docs(tmls)
     tables = _build_generated_tables_map(parsed)
     table_aggs = _build_table_aggregations_map(parsed)
+    table_bodies = {d["table"]["name"]: d["table"] for d in parsed
+                    if isinstance(d, dict) and isinstance(d.get("table"), dict)
+                    and d["table"].get("name")}
     table_joins = _build_table_joins_index(parsed) if require_join_key else {}
 
     results = []
     any_findings = False
     for i in range(len(tmls)):
-        entry = _lint_one_doc(i, parsed[i], parse_errors, tables, table_aggs)
+        entry = _lint_one_doc(i, parsed[i], parse_errors, tables, table_aggs, table_bodies)
         if require_join_key and entry["type"] == "model":
             from ts_cli.tml_join_graph import lint_required_join_key
             entry["findings"] += lint_required_join_key(
