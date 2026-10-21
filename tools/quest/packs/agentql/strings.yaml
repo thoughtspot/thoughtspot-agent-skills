@@ -53,6 +53,9 @@ take_quest: Take the quest
 hall_of: HALL {n} OF {total}
 hear_petitions: Hear the petitions ({n})
 petition_label: PETITION
+hall_steps_forward: steps forward
+soon_marker: "Coming soon:"
+sr_highlighted: "Highlighted:"
 intro_choice: "A merchant asks which engine should answer this question:"
 intro_claim: "A petitioner makes a claim before the court:"
 court_hint: Not quite. Think again about what this hall just taught.

@@ -162,6 +162,7 @@ const lawQs = law.halls.reduce((n, h) => n + h.trials.length, 0);
 expected.law = WIN * (lawQs - 1) - LOSS;                         // one magic (no gold); one paid miss
 if (S().gold !== expected.law) fail(`Law should end with ${expected.law} gold, has ${S().gold}`, where());
 expect("decree", "the last hall ends in the decree");
+if (!has(Q.pack.strings.record_best)) fail("a first finish should say it is the best here yet", where());
 law.scroll.rows.forEach(row => { if (!has(row.label)) fail(`the recap is missing "${row.label}"`, where()); });
 log.push(`law: ${law.halls.length} halls, ${lawQs} questions, ${expected.law} gold`);
 press(0); expect("map", "the decree returns to the map");
@@ -199,6 +200,7 @@ Q.realms.forEach((r, ri) => {
     answerQuestion(pt.correct, pt.options.length, k === 1 ? "wrong-then-right" : "right", pt.why, pt.options[pt.correct]);
   });
   expect("victory", "the dragon falls");
+  if (!has(Q.pack.strings.record_best)) fail("a first finish should say it is the best here yet", where());
   if (!text().includes("DETERMINISTIC RULES UNCOVERED")) fail("the hoard should be headed as deterministic rules", where());
   if (!text().includes("for the same user, always compiles to the same SQL.")) fail("every hoard ends on determinism", where());
   const hoard = text(), yoursAt = hoard.indexOf("YOUR PART");

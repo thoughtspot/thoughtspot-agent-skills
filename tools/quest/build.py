@@ -7,6 +7,7 @@ A pack is a folder under `packs/` (design: docs/superpowers/specs/2026-10-21-age
     encounter shows; the reward screen's rule tags; the lexicon; and the checks (plugins) to run.
   - `content.yaml`: the realms, halls, encounters and their questions.
   - `strings.yaml`: wording a front end shows that isn't content.
+  - `art/classic/*.txt`: the classic page's ASCII art (see the tool's README).
 
 The engine knows only general things: realms, halls, trials, encounters, panes, points, routes,
 scoring and saves. Anything specific to one game, such as AgentQL's captured SQL and course, is a
@@ -14,8 +15,9 @@ plugin in `checks/` that the pack names.
 
 The build writes the game's data, `quest.json`; the schema it fits, `quest.schema.json`, generated
 for this pack from `schema/core.json`; and one self-contained `index.html` (the classic text
-adventure, `classic/game.html` with the data and fonts written in), so the page makes no outside
-requests and runs from GitHub Pages, any static host, or a double-click.
+adventure, `classic/game.html` with the data, the pack's art, its title and description, and the
+fonts written in), so the page makes no outside requests and runs from GitHub Pages, any static
+host, or a double-click.
 
     python3 tools/quest/build.py                   # write tools/quest/dist/
     python3 tools/quest/build.py --out _site/index.html   # quest.json and its schema land beside it
@@ -39,6 +41,7 @@ A plugin is a module in `checks/` with a NAME. Everything else is optional:
   REFS          {"realm" | "encounter": {key: JSON Schema}}: what it records under that level's refs.
   META          a JSON Schema object for what it records under meta[NAME] (needs a meta hook).
   SOURCES       the pack.yaml sources it reads; a pack that lacks one fails before compiling.
+  STRINGS       the strings.yaml keys it reads (so the build knows they are used).
   POINT_KINDS, TRIAL_KINDS   point and trial kinds it compiles; COMPILES_PATH: it compiles paths.
                 A kind belongs to one owner: the engine's own (claim, choice) can't be taken.
 A pane whose `from` names the plugin is filled by its encounter hook. Plugins run in the order the
@@ -783,10 +786,12 @@ def render(template: str, data: dict, fonts_css: str = "", art: dict | None = No
         if template.count(mark) != 1:
             raise ValueError(f"game.html must contain {mark} exactly once")
     pack = data.get("pack") or {}
-    return (template.replace(PLACEHOLDER, _script_json(data)).replace(ART_PLACEHOLDER, _script_json(art or {}))
-            .replace(TITLE_PLACEHOLDER, _html_text(pack.get("title", "")))
-            .replace(DESCRIPTION_PLACEHOLDER, _html_text((pack.get("strings") or {}).get("page_description", "")))
-            .replace(FONT_PLACEHOLDER, fonts_css))
+    values = {PLACEHOLDER: _script_json(data), ART_PLACEHOLDER: _script_json(art or {}),
+              TITLE_PLACEHOLDER: _html_text(pack.get("title", "")),
+              DESCRIPTION_PLACEHOLDER: _html_text((pack.get("strings") or {}).get("page_description", "")),
+              FONT_PLACEHOLDER: fonts_css}
+    # One pass over the template, so a placeholder's name inside the pack's own text is never filled.
+    return re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], template)
 
 
 # What the classic page reads from a pack: the string keys in its S("…") / H("…") calls (including
@@ -798,7 +803,19 @@ _ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
 def classic_needs(template: str) -> tuple[set[str], set[str]]:
     script = template.split("<script>", 1)[-1]
     strings = {k for arg in _STRING_CALL.findall(script) for k in re.findall(r'"([a-z0-9_]+)"', arg)}
-    return strings, set(_ART_CALL.findall(script)) | {"map"}
+    return strings | {"page_description"}, set(_ART_CALL.findall(script)) | {"map"}  # the head's description
+
+
+def engine_strings(pack: Pack, plugins: list) -> set[str]:
+    """The strings the engine and plugins read: claim buttons, pane labels and captions, and each
+    plugin's STRINGS."""
+    keys = {"claim_true", "claim_false"}
+    for spec in pack.panes:
+        if isinstance(spec, dict):
+            keys |= {spec.get(k) for k in ("label", "name", "caption") if isinstance(spec.get(k), str) and spec.get(k)}
+    for pl in plugins:
+        keys |= set(getattr(pl, "STRINGS", ()))
+    return keys
 
 
 def classic_art(pack: Pack) -> tuple[dict, list[str]]:
@@ -815,12 +832,14 @@ def classic_art(pack: Pack) -> tuple[dict, list[str]]:
 def check_classic(pack: Pack, data: dict, art: dict, template: str) -> list[str]:
     """Everything the classic page reads must be in the pack, and the pack's art must all be used."""
     strings, pieces = classic_needs(template)
-    realms = {r["id"] for r in data.get("realms") or []}
+    scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
+    used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []))
+    errors += [f"strings.yaml: {k!r} is not used by the page, the engine or a plugin" for k in sorted(set(pack.strings) - used)]
     errors += [f"art/classic/{k}.txt: the classic page needs it" for k in sorted(pieces - set(art))]
-    for k in sorted(set(art) - pieces):
-        if not (k.startswith("scene_") and k[6:] in realms):
-            errors.append(f"art/classic/{k}.txt: not used (the page reads {sorted(pieces)} and scene_<realm id>)")
+    for k in sorted(set(art) - pieces - scenes):
+        errors.append(f"art/classic/{k}.txt: not used (the page reads {sorted(pieces)}, and scene_<realm id> "
+                      f"for each realm without halls)")
     return errors
 
 

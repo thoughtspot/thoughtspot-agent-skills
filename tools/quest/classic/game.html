@@ -198,7 +198,7 @@ const MAP_ROWS = ART.map.split("\n");
 // The pack's wording (strings.yaml). S() is plain text; H() is HTML: the text escaped, then
 // *word* highlighted, **word** bold and [text](https://…) linked, then {name} filled in escaped.
 const STRINGS = QUEST.pack.strings;
-const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
+const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
 const S = (k, v = {}) => fill(STRINGS[k], v);
 const H = (k, v = {}) => fill(esc(STRINGS[k]).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
   .replace(/\*(.+?)\*/g, '<span class="hot">$1</span>')
@@ -216,7 +216,7 @@ function hallScene(title, petitioning) {
     ? ["      o   o                o       o   o",
        "     /|\\ /|\\     o        /|\\     /|\\ /|\\",
        "     / \\ / \\    /|\\       / \\     / \\ / \\",
-       "                / \\  steps forward"]
+       "                / \\  " + S("hall_steps_forward")]
     : ["      o   o    o      o      o    o   o",
        "     /|\\ /|\\  /|\\    /|\\    /|\\  /|\\ /|\\",
        "     / \\ / \\  / \\    / \\    / \\  / \\ / \\"];
@@ -423,11 +423,12 @@ function choices(list) {
 
 function code(lines, hl, cls, label) {
   return `<div class="sr-only">${esc(label)}:</div><pre class="scroll">${lines.map((l, i) =>
-    `<span class="ln ${cls}${isOn(hl, i) ? " on" : ""}">${isOn(hl, i) ? '<span class="sr-only">Highlighted: </span>' : ""}${esc(l)}</span>`).join("")}</pre>`;
+    `<span class="ln ${cls}${isOn(hl, i) ? " on" : ""}">${isOn(hl, i) ? `<span class="sr-only">${H("sr_highlighted")} </span>` : ""}${esc(l)}</span>`).join("")}</pre>`;
 }
 
 function cell(c) {
-  const m = /^(.*?)(Coming soon:)(.*)$/.exec(c);
+  const at = c.indexOf(S("soon_marker")), mark = S("soon_marker");  // styled wherever a cell says it
+  const m = mark && at >= 0 ? [c, c.slice(0, at), mark, c.slice(at + mark.length)] : null;
   return m ? `${esc(m[1])}<span class="soon">${esc(m[2])}</span>${esc(m[3])}` : esc(c);
 }
 function table(columns, rows) {

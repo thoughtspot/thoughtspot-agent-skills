@@ -71,6 +71,7 @@ one game is a **plugin** in `checks/` that the pack names. Design:
 
 ```
 packs/agentql/{pack,content,strings}.yaml ─┐
+packs/agentql/art/classic/*.txt           ─┤
 lesson-sql.md, learning-path.md (sources) ─┤                   ┌─► quest.json         (the checked data)
 classic/game.html, fonts/                 ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
 schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► index.html         (self-contained, quest.json inside)
@@ -100,8 +101,13 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   - `agentql_rules`: who-put-it-there questions, the three engines, AgentQL as the foe's path,
     and crediting: a who-put-it-there question about a row cap or a null guard must answer
     ThoughtSpot.
-- **`classic/game.html`** is the page with `__QUEST_DATA__` and `/*__FONT_FACES__*/`
-  placeholders. `build.py` writes the data and the fonts into it, so the page makes **no outside
+- **`classic/game.html`** is the page, with five placeholders (`__QUEST_DATA__`, `__CLASSIC_ART__`,
+  `__PAGE_TITLE__`, `__PAGE_DESCRIPTION__`, `/*__FONT_FACES__*/`) that `build.py` fills in one
+  pass. It holds no game's wording or art: the build checks the pack holds every string and art
+  piece the page reads (from its `S()`, `H()` and `art()` calls), and that every string is used by
+  the page, the engine or a plugin, and every art file by the page. What the page still draws or
+  says itself, for any game: the hall's throne room (`hallScene`), its English `lang`, the sound
+  group's label, and trimming a leading "The " from realm names in the routes. It makes **no outside
   requests** and runs from Pages, any static host, or a double-click.
 - **`schema/core.json`** is the general part of every pack's schema; see below.
 - **`denylist.txt`** holds hashes of names from published fantasy works. A pack using one fails

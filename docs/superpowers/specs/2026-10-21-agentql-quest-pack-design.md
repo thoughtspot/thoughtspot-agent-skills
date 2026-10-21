@@ -264,7 +264,8 @@ route realm) is replaced with a made-up name in PR 1.
 - **`core/` is plain scripts, not ES modules.** Each one adds to one `Quest` global.
   - Classic mode: `build.py` concatenates them, in a fixed order, into the single inline script.
     So classic stays one self-contained file that runs from a double-click. The build refuses
-    any inlined core or `art/classic/` file containing `</script` or `<!--`, in any case.
+    any inlined core file containing `</script` or `<!--`, in any case. (`art/classic/` is
+    written in as escaped JSON, like the data, so it can't close the element.)
   - Explore: loads the same files with `<script src>`.
 - **The state machine moves out of rendering.** `Quest.act(state, action)` returns the new state
   plus effects (play a sound, save progress), and `render()` only draws.
@@ -516,7 +517,8 @@ kept, and the character can be asked again.
 
 To add a game, create `tools/quest/packs/<id>/` with:
 - `pack.yaml`, with its own `id`, `publish_path` and `storage_key`;
-- `content.yaml` and `strings.yaml`;
+- `content.yaml` and `strings.yaml` (with every string the classic page reads);
+- `art/classic/` (the pieces the classic page reads, and a scene per realm without halls);
 - maps, if it should be explorable.
 
 It uses none of the AgentQL plugins, or new ones of its own. Its sources of truth are its own to

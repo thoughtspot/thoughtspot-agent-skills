@@ -1716,7 +1716,6 @@ def test_wording_is_escaped_then_marked_up(tmp_path):
     # H(): the pack's text is escaped, then *x*, **x** and [x](https://…) become markup; values are
     # escaped and never marked up; S() is plain text.
     script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
-    helpers = script[script.index("const STRINGS"):script.index("const MAP_ROWS") if "const MAP_ROWS" in script[script.index("const STRINGS"):] else script.index("const H =") + 400]
     start, end = script.index("const STRINGS"), script.index("// The throne room")
     js = (script[script.index("const esc ="):].split("\n", 1)[0] + "\n" + script[start:end].replace(
         "const STRINGS = QUEST.pack.strings;", "const STRINGS = " + json.dumps({
@@ -1734,29 +1733,139 @@ def test_wording_is_escaped_then_marked_up(tmp_path):
 def test_the_page_title_and_description_are_escaped(doc, capture):
     data, _ = _compile(doc, capture)
     data["pack"]["title"] = 'Quest <b>"&'
+    data["pack"]["strings"]["page_description"] = 'Say "<hi>" & go'
     html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", ART)
     assert "<title>Quest &lt;b&gt;&quot;&amp;</title>" in html
+    assert '<meta name="description" content="Say &quot;&lt;hi&gt;&quot; &amp; go">' in html
+    assert '<h1 class="sr-only">${esc(QUEST.pack.title)}</h1>' in B.TEMPLATE.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_a_second_game_renders_and_plays_with_its_own_wording_and_art(tmp_path):
-    # Its own content and plugins (none), AgentQL's strings and art as a starting point: the page
-    # needs nothing else from the engine.
+def test_a_second_game_renders_and_plays_on_its_own_wording_and_art(tmp_path):
+    # Every string and art piece is the second game's own (no AgentQL words), and its page plays to
+    # the end of every realm with nothing blank, undefined or unfilled.
     pack = _second(tmp_path)
-    shutil.copytree(PACK_DIR / "art", pack.dir / "art")
-    (pack.dir / "art/classic/scene_cave.txt").write_text("@BANNER\n  cave\n", encoding="utf-8")
-    for k in [p for p in (pack.dir / "art/classic").glob("scene_*.txt") if p.stem not in ("scene_cave",)]:
-        k.unlink()
-    strings = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
-    strings.update(rune_label="THE RUNE", rune_name="The rune")
-    (pack.dir / "strings.yaml").write_text(yaml.safe_dump(strings, allow_unicode=True), encoding="utf-8")
+    needed, pieces = B.classic_needs(B.TEMPLATE.read_text(encoding="utf-8"))
+    agentql = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
+    own = {k: f"<{k}> " + " ".join(re.findall(r"\{\w+\}", agentql[k])) for k in needed}
+    own.update(claim_true="Yes.", claim_false="No.", rune_label="THE RUNE", rune_name="The rune",
+               soon_marker="Soon:", page_description="A game about runes.")
+    (pack.dir / "strings.yaml").write_text(yaml.safe_dump(own, allow_unicode=True), encoding="utf-8")
+    (pack.dir / "art/classic").mkdir(parents=True)
+    for piece in pieces | {"scene_cave"}:
+        (pack.dir / f"art/classic/{piece}.txt").write_text(f"@BANNER\n  {piece}\n" if piece.startswith("scene_") else f"[{piece}]\n",
+                                                          encoding="utf-8")
     pack = B.Pack("second", pack.dir.parent)
     data, errors = B.compile_pack(pack)
     art, art_errors = B.classic_art(pack)
     assert errors == [] and art_errors == [] and B.check_classic(pack, data, art, B.TEMPLATE.read_text(encoding="utf-8")) == []
     page = tmp_path / "index.html"
     page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, B.font_faces(), art), encoding="utf-8")
-    assert "<title>The Other Quest</title>" in page.read_text(encoding="utf-8")
+    html = page.read_text(encoding="utf-8")
+    assert "<title>The Other Quest</title>" in html
     r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "decree" in r.stdout and "victory" in r.stdout, r.stdout
+    script = html.split("<script>", 1)[1]
+    for word in ("AgentQL", "Wizard", "Forge", "Dragon", "Spotter", "Kingdom of Law"):
+        assert word not in script and word not in json.dumps(own), word
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_agentql_page_smoke_plays_every_realm(tmp_path):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.count("victory") == 4 and "decree" in r.stdout
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("break_it,needle", [
+    (lambda h: h.replace('${H("victory_title")}', ""), None),                 # still renders: control
+    (lambda h: h.replace("return `${realmScene(r)}<h2>${H(\"victory_title\")}</h2>", "return ``; `"), "rendered nothing"),
+    (lambda h: h.replace('art("foe")', 'ART.nothing'), '"undefined"'),
+    (lambda h: h.replace('H("realm_max", { max: maxGold(r) })', 'H("realm_max")'), "unfilled {max}"),
+])
+def test_the_smoke_play_catches_a_broken_screen(tmp_path, break_it, needle):
+    template = B.TEMPLATE.read_text(encoding="utf-8")
+    broken = break_it(template)
+    assert broken != template or needle is None
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    page = tmp_path / "index.html"
+    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
+    if needle is None:
+        assert r.returncode == 0, r.stderr
+    else:
+        assert r.returncode != 0 and needle in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda d: (d / "strings.yaml").write_text((d / "strings.yaml").read_text(encoding="utf-8").replace("verdict:", "unused_verdict:"), encoding="utf-8"),
+     "strings.yaml: the classic page needs 'verdict'"),
+    (lambda d: (d / "strings.yaml").write_text((d / "strings.yaml").read_text(encoding="utf-8") + "\nzz_unused: hello\n", encoding="utf-8"),
+     "strings.yaml: 'zz_unused' is not used"),
+    (lambda d: (d / "strings.yaml").write_text((d / "strings.yaml").read_text(encoding="utf-8").replace("page_description:", "page_descr:"), encoding="utf-8"),
+     "the classic page needs 'page_description'"),
+    (lambda d: (d / "art/classic/foe.txt").unlink(), "art/classic/foe.txt: the classic page needs it"),
+    (lambda d: (d / "art/classic/goblin.txt").write_text("x\n", encoding="utf-8"), "art/classic/goblin.txt: not used"),
+    (lambda d: (d / "art/classic/scene_law.txt").write_text("x\n", encoding="utf-8"), "art/classic/scene_law.txt: not used"),
+    (lambda d: (d / "art/classic/Bad.txt").write_text("x\n", encoding="utf-8"), "art/classic/Bad.txt: name it with lowercase"),
+])
+def test_the_build_refuses_a_pack_the_page_cannot_use(tmp_path, monkeypatch, edit, needle):
+    packs = _copy_packs(tmp_path)
+    edit(packs / "agentql")
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any(needle in e for e in errors), errors
+
+
+def test_art_survives_the_page_round_trip(doc, capture):
+    data, _ = _compile(doc, capture)
+    art = dict(ART, title="</script><!--<script> & ok")
+    html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "", art)
+    body = html.split('<script id="classic-art" type="application/json">', 1)[1].split("</script>", 1)[0]
+    assert not set(body) & set("<>&") and json.loads(body)["title"] == "</script><!--<script> & ok"
+
+
+def test_placeholder_names_in_pack_text_are_never_filled(doc, capture):
+    data, _ = _compile(doc, capture)
+    data["pack"]["strings"]["verdict"] = "__CLASSIC_ART__ __PAGE_TITLE__ /*__FONT_FACES__*/"
+    html = B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, "FONTS", ART)
+    body = html.split('<script id="quest-data" type="application/json">', 1)[1].split("</script>", 1)[0]
+    assert json.loads(body)["pack"]["strings"]["verdict"] == "__CLASSIC_ART__ __PAGE_TITLE__ /*__FONT_FACES__*/"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_fill_takes_values_literally_and_only_its_own():
+    script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
+    line = next(x for x in script.splitlines() if x.startswith("const fill ="))
+    js = line + '\nconsole.log(JSON.stringify([fill("{a} {a} {b} {constructor} {toString}", {a: "$& $1"})]))'
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ["$& $1 $& $1 {b} {constructor} {toString}"]
+
+
+def test_art_keeps_its_trailing_spaces():
+    # An editor that trims trailing whitespace would change the page; this notices.
+    lines = (PACK_DIR / "art/classic/scene_mines.txt").read_text(encoding="utf-8").splitlines()
+    assert sum(1 for x in lines if x != x.rstrip()) == 5
+
+
+def test_the_build_keeps_arts_trailing_spaces():
+    assert sum(1 for x in ART["scene_mines"].split("\n") if x != x.rstrip()) == 5
+
+
+@pytest.mark.parametrize("mark", [B.PLACEHOLDER, B.FONT_PLACEHOLDER, B.ART_PLACEHOLDER, B.TITLE_PLACEHOLDER,
+                                  B.DESCRIPTION_PLACEHOLDER])
+def test_render_needs_every_placeholder_exactly_once(mark):
+    template = B.TEMPLATE.read_text(encoding="utf-8")
+    for broken in (template.replace(mark, ""), template.replace(mark, mark + mark)):
+        with pytest.raises(ValueError, match=re.escape(mark)):
+            B.render(broken, {"pack": {}})
+
+
+def test_wording_in_attributes_is_escaped():
+    # H() output is for element text; an attribute takes the plain string, escaped.
+    assert 'aria-label="${esc(S("legend_label"))}"' in B.TEMPLATE.read_text(encoding="utf-8")

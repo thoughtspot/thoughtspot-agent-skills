@@ -24,6 +24,7 @@ WHO_ANSWERS = {"model": "forge", "thoughtspot": "forge", "agentql": "agentql"}
 WHO_ORDER = ("forge", "agentql", "ai")
 KEYS = {"top": {"who_options", "engines"}, "point": {"answer"}, "trial": {"petition", "answer"},
         "path": {"answer", "blocked", "why"}}
+STRINGS = {"send_to"}
 POINT_KINDS = {"who"}
 TRIAL_KINDS = {"route"}
 COMPILES_PATH = True
