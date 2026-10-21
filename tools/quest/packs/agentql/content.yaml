@@ -38,7 +38,7 @@
 #   - a `case` is missing from the capture, or was not SUCCESS
 #   - the `scroll` AgentQL differs from the captured AgentQL by anything but layout
 #   - an `sql` line, `scroll` substring or `sql_count` no longer holds
-#   - a point credits a row cap or null guard to anyone but ThoughtSpot
+#   - a who point credits a row cap or null guard to anyone but ThoughtSpot
 #   - a word from the denylist of published fantasy names appears anywhere in the pack
 
 # Each lesson the text names, with a word its heading must contain: a renumbered or retitled

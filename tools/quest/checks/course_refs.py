@@ -43,7 +43,7 @@ def check_course_refs(content_text: str, doc: dict, modules: set[str], lessons: 
     named |= {str(e.get("lesson")) for e in doc.get("encounters") or [] if e.get("lesson")}
     for ref in sorted(named):
         if ref not in lessons:
-            errors.append(f"content.yaml names lesson {ref}, which learning-path.md no longer has")
+            errors.append(f"content.yaml or strings.yaml names lesson {ref}, which learning-path.md no longer has")
         elif titles is not None:
             # A renumbered or retitled course can leave a number pointing at a different lesson.
             want = expect.get(ref)
@@ -54,7 +54,7 @@ def check_course_refs(content_text: str, doc: dict, modules: set[str], lessons: 
     for a, b in re.findall(r"\bModules? (\d+)(?: and (\d+))?\b", content_text):
         for ref in filter(None, (a, b)):
             if ref not in modules:
-                errors.append(f"content.yaml names Module {ref}, which learning-path.md no longer has")
+                errors.append(f"content.yaml or strings.yaml names Module {ref}, which learning-path.md no longer has")
     realm_of = {eid: r for r in doc.get("realms") or [] for eid in r.get("encounters") or []}
     for r in doc.get("realms") or []:
         if str(r.get("module")) not in modules:

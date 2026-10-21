@@ -102,3 +102,6 @@ formula-fidelity-data/
 **/crosscheck.json
 **/PROVENANCE.md
 **/COPYING.MPL
+
+# Plain-text names fed to tools/quest/denylist.py add; only their hashes are committed.
+names.txt

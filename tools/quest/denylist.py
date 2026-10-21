@@ -27,8 +27,8 @@ _SALT = b"quest-denylist\0"
 
 
 def words(text: str) -> list[str]:
-    """Lowercased, accents stripped, letters and digits only."""
-    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
+    """Lowercased, accents and apostrophes stripped ("Zorbin's" is one word), letters and digits only."""
+    plain = unicodedata.normalize("NFKD", re.sub(r"['\u2019]", "", text)).encode("ascii", "ignore").decode("ascii").lower()
     return re.findall(r"[a-z0-9]+", plain)
 
 
@@ -36,11 +36,20 @@ def digest(phrase: str) -> str:
     return hashlib.sha256(_SALT + " ".join(words(phrase)).encode("ascii")).hexdigest()[:20]
 
 
+HASH = re.compile(r"[0-9a-f]{20}")
+
+
 def load(path: pathlib.Path = DENYLIST) -> set[str]:
+    """The hashes. Fails closed: a missing file, or a line that isn't a hash (a name typed in by
+    hand would never match anything, and would itself be committed), raises."""
     if not path.is_file():
-        return set()
-    return {line.strip() for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.startswith("#")}
+        raise FileNotFoundError(f"{path.name} is missing; the published-name check can't run without it")
+    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.startswith("#")]
+    bad = [n for n, line in enumerate(lines, 1) if not HASH.fullmatch(line)]
+    if bad:
+        raise ValueError(f"{path.name}: entries {bad} are not hashes; add names with denylist.py add, never by hand")
+    return set(lines)
 
 
 def hits(text: str, hashes: set[str]) -> list[str]:
@@ -68,7 +77,7 @@ def add(lines: list[str], path: pathlib.Path = DENYLIST) -> int:
     long = [n for n, line in enumerate(lines, 1) if len(words(line)) > 2]
     if long:
         raise ValueError(f"lines {long} have more than two words; add one or two words per line")
-    hashes = load(path)
+    hashes = load(path) if path.is_file() else set()
     new = {digest(line) for line in lines if words(line)} - hashes
     header = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#")] if path.is_file() else []
     path.write_text("\n".join(header + sorted(hashes | new)) + "\n", encoding="utf-8")

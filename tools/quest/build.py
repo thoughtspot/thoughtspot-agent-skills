@@ -26,7 +26,7 @@ Fails when the content, a plugin's check, the published-name denylist or the gen
 says so. For AgentQL Quest that includes a lesson or Module the text names that the course no
 longer has, a missing or rejected case, AgentQL that differs by more than layout, an `sql` line
 that is no longer in the SQL exactly, an `sql_count` that no longer holds, a row cap or null guard
-credited to anyone but ThoughtSpot, or a capture header that names a different Model from the one
+credited to anyone but ThoughtSpot by a who point, or a capture header that names a different Model from the one
 the AgentQL queries. A recapture that changes what a lesson teaches therefore breaks the build
 instead of quietly teaching something false.
 
@@ -34,7 +34,7 @@ Plugins
 -------
 A plugin is a module in `checks/` with a NAME. Everything else is optional:
 
-  KEYS          {level: {content keys it owns}}, levels top, realm, encounter, point, trial, path.
+  KEYS          {level: {content keys it owns}}, levels top, realm, hall, encounter, point, trial, path.
                 The build rejects any content key that neither the engine nor a plugin owns.
   REFS          {"realm" | "encounter": {key: JSON Schema}}: what it records under that level's refs.
   META          a JSON Schema object for what it records under meta[NAME] (needs a meta hook).
@@ -74,7 +74,6 @@ PACKS = HERE / "packs"
 CHECKS = HERE / "checks"
 CORE_SCHEMA = HERE / "schema" / "core.json"
 TEMPLATE = HERE / "classic" / "game.html"
-DENYLIST = HERE / "denylist.txt"
 DEFAULT_PACK = "agentql"
 SCHEMA_VERSION = 2
 BESIDE = ("quest.json", "quest.schema.json")  # written next to the page, so --out may not name them
@@ -129,9 +128,13 @@ class Pack:
         self.publish_path, self.storage_key = m.get("publish_path", ""), m.get("storage_key", "")
         self.panes = m.get("panes") if isinstance(m.get("panes"), list) else []
         self.rule_tags = m.get("rule_tags") if isinstance(m.get("rule_tags"), dict) else {}
-        if not isinstance(self.strings, dict) or not isinstance(m.get("sources") or {}, dict) \
-                or not isinstance(m.get("checks") or [], list):
-            self.errors.append("pack.yaml/strings.yaml: checks must be a list, sources and strings mappings")
+        shapes = {"checks": list, "sources": dict, "lexicon": dict, "explore": dict, "rule_tags": dict, "panes": list}
+        for key, kind in shapes.items():
+            if key in m and not isinstance(m[key], kind):
+                self.errors.append(f"pack.yaml: {key} must be a {'list' if kind is list else 'mapping'}")
+                m[key] = kind()  # checked as empty from here on, so the rest reports cleanly
+        if not isinstance(self.strings, dict):
+            self.errors.append("strings.yaml: must be a mapping")
         self._check_manifest(pid)
 
     def _yaml(self, name: str) -> dict:
@@ -191,7 +194,7 @@ class Pack:
                 err(f"pack.yaml: pane {n} must be a mapping")
                 continue
             pid = p.get("id")
-            if not ID.fullmatch(str(pid)) or pid in ids:
+            if not isinstance(pid, str) or not ID.fullmatch(pid) or pid in ids:
                 err(f"pack.yaml: pane {n}: id must be unique, lowercase letters, digits and _")
             ids.append(pid)
             if set(p) != {"id", "from", "match", "label", "name", "caption"}:
@@ -201,14 +204,14 @@ class Pack:
             if p.get("match") not in MATCHES:
                 err(f"pack.yaml: pane {pid}: match must be one of {list(MATCHES)}")
             for k in ("label", "name"):
-                if p.get(k) not in self.strings:
+                if not isinstance(p.get(k), str) or p.get(k) not in self.strings:
                     err(f"pack.yaml: pane {pid}: {k} {p.get(k)!r} is not in strings.yaml")
-            if p.get("caption") and p.get("caption") not in self.strings:
+            if p.get("caption") and (not isinstance(p.get("caption"), str) or p.get("caption") not in self.strings):
                 err(f"pack.yaml: pane {pid}: caption {p.get('caption')!r} is not in strings.yaml")
 
     @property
     def pane_ids(self) -> list[str]:
-        return [p.get("id") for p in self.panes if isinstance(p, dict)]
+        return [p.get("id") for p in self.panes if isinstance(p, dict) and isinstance(p.get("id"), str)]
 
     @property
     def content_panes(self) -> list[str]:
@@ -296,9 +299,6 @@ class Compiler:
         self.owned = {lvl: set().union(*(getattr(pl, "KEYS", {}).get(lvl, set()) for pl in plugins)) for lvl in LEVELS}
         self.point_kinds = self._kinds("POINT_KINDS", {"choice"})
         self.trial_kinds = self._kinds("TRIAL_KINDS", {"claim", "choice"})
-        for pid in pack.pane_ids:  # a point highlights a pane by naming it, so it can't share a key's name
-            if pid in CORE_KEYS["encounter"] | CORE_KEYS["point"] | self.owned["encounter"] | self.owned["point"]:
-                self.errors.append(f"pack.yaml: pane id {pid!r} is also a content key; rename the pane")
         self.path_plugin = next((pl for pl in plugins if getattr(pl, "COMPILES_PATH", False)), None)
         self.meta = {pl.NAME: pl.meta(self.ctx[pl.NAME]) for pl in plugins if getattr(pl, "META", None)}
 
@@ -411,8 +411,8 @@ class Compiler:
         highlights = {}
         for spec in pack.panes:
             matches = p.get(spec["id"]) or []
-            if not isinstance(matches, list):
-                errors.append(f"{where}: {spec['id']} must be a list of matches")
+            if not isinstance(matches, list) or not all(isinstance(m, str) for m in matches):
+                errors.append(f"{where}: {spec['id']} must be a list of text matches")
                 matches = []
             highlights[spec["id"]] = _highlight(matches, self._panes.get(spec["id"]) or [], spec["match"],
                                                 f"{where} {spec['id']}", errors)
@@ -562,8 +562,11 @@ def compile_pack(pack: Pack, contexts: dict | None = None) -> tuple[dict, list[s
     sources = pack.manifest.get("sources") if isinstance(pack.manifest.get("sources"), dict) else {}
     missing = [f"pack.yaml: checks/{pl.NAME}.py reads the source {s!r}, which sources doesn't name"
                for pl in plugins for s in sorted(getattr(pl, "SOURCES", ())) if s not in sources]
-    if missing or pack.errors:
-        return {}, pack.errors + missing  # nothing else can be read reliably
+    owned = set().union(*(set().union(*getattr(pl, "KEYS", {}).values()) for pl in plugins)) if plugins else set()
+    clash = [f"pack.yaml: pane id {pid!r} is also a content key; rename the pane" for pid in pack.pane_ids
+             if pid in CORE_KEYS["encounter"] | CORE_KEYS["point"] | owned]
+    if missing or clash or pack.errors:
+        return {}, pack.errors + missing + clash  # nothing else can be read reliably
     compiler = Compiler(pack, plugins, contexts)
     data = compiler.compile()
     return data, compiler.errors
@@ -783,7 +786,10 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     pack = Pack(pack_id)
     data, errors = compile_pack(pack)
     errors += check_packs_unique()
-    errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent)
+    try:
+        errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent)
+    except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes
+        errors.append(f"denylist: {e}")
     schema: dict = {}
     try:
         schema = pack_schema(pack)

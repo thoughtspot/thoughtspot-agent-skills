@@ -718,7 +718,7 @@ def test_pages_path_filters_cover_the_game_and_its_sources():
     # Everything the site is built from: the game, its data, schema, fonts, poster and capture.
     poster = PACK_DIR / "promo/agentql-quest-poster.png"
     for needed in (B.HERE / "build.py", CONTENT, PACK_DIR / "pack.yaml", PACK_DIR / "strings.yaml",
-                   B.CHECKS / "agentql_capture.py", B.TEMPLATE, B.CORE_SCHEMA, B.DENYLIST, poster, LESSON_SQL,
+                   B.CHECKS / "agentql_capture.py", B.TEMPLATE, B.CORE_SCHEMA, B.HERE / "denylist.txt", poster, LESSON_SQL,
                    *sorted(B.FONT_DIR.glob("*.woff2"))):
         assert any(rx.fullmatch(_rel(needed)) for rx in filters), f"pages.yml would not redeploy for {_rel(needed)}"
 
@@ -1027,7 +1027,7 @@ def test_the_crediting_scope_is_exactly_a_row_cap_or_a_full_null_guard(sql, lit,
 
 
 # Made-up names stand in for the real list, so no published name is ever written here.
-INVENTED = {"glimmerdeep", "ashen vale"}
+INVENTED = {"zqxvorn", "qqa zzb"}
 
 
 def _invented(monkeypatch):
@@ -1040,11 +1040,11 @@ def _invented(monkeypatch):
 def test_the_denylist_hashes_words_and_two_word_names():
     import denylist as D
     hashes = {D.digest(n) for n in INVENTED}
-    assert D.hits("Into the GLIMMERDEEP below", hashes) == ["glimmerdeep"]
-    assert D.hits("The Ashen\n  Vale", hashes) == ["ashen vale"]
+    assert D.hits("Into the ZQXVORN below", hashes) == ["zqxvorn"]
+    assert D.hits("The Qqa\n  Zzb", hashes) == ["qqa zzb"]
     assert D.hits("The White Peaks", hashes) == []
-    assert D.hits("Glímmerdéep", hashes) == ["glimmerdeep"]           # accents don't hide a name
-    assert all(len(h) == 20 and "glimmer" not in h for h in hashes)   # only hashes are committed
+    assert D.hits("Zqxvórn", hashes) == ["zqxvorn"]           # accents don't hide a name
+    assert all(len(h) == 20 and "zqxv" not in h for h in hashes)   # only hashes are committed
 
 
 @pytest.mark.parametrize("where", ["packs/agentql/content.yaml", "packs/agentql/art/classic/mines",
@@ -1057,13 +1057,13 @@ def test_a_published_name_anywhere_in_the_pack_or_page_fails_the_build(tmp_path,
     shutil.copytree(B.TEMPLATE.parent, quest / "classic")
     target = quest / where
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text((target.read_text(encoding="utf-8") if target.exists() else "") + "\n# the glimmerdeep\n",
+    target.write_text((target.read_text(encoding="utf-8") if target.exists() else "") + "\n# the zqxvorn\n",
                       encoding="utf-8")
     monkeypatch.setattr(B, "PACKS", quest / "packs")
     monkeypatch.setattr(B, "TEMPLATE", quest / "classic/game.html")
     _invented(monkeypatch)
     errors = B.build(check=True)[3]
-    assert any("'glimmerdeep' is a name from a published work" in e for e in errors), errors
+    assert any("'zqxvorn' is a name from a published work" in e for e in errors), errors
 
 
 def test_the_committed_quest_uses_no_listed_name():
@@ -1075,12 +1075,12 @@ def test_adding_names_writes_only_hashes(tmp_path):
     import denylist as D
     path = tmp_path / "denylist.txt"
     path.write_text("# header\n", encoding="utf-8")
-    assert D.add(["Glimmerdeep", "ashen vale", ""], path) == 2
+    assert D.add(["Zqxvorn", "qqa zzb", ""], path) == 2
     text = path.read_text(encoding="utf-8")
-    assert "glimmer" not in text.lower() and "ashen" not in text.lower() and text.startswith("# header")
-    assert D.load(path) == {D.digest("glimmerdeep"), D.digest("ashen vale")}
+    assert "zqxv" not in text.lower() and "qqa" not in text.lower() and text.startswith("# header")
+    assert D.load(path) == {D.digest("zqxvorn"), D.digest("qqa zzb")}
     with pytest.raises(ValueError, match="more than two words"):
-        D.add(["the ashen vale road"], path)
+        D.add(["the qqa zzb road"], path)
 
 
 def test_two_packs_may_not_share_a_save_key(tmp_path):
@@ -1389,7 +1389,7 @@ def test_a_second_game_that_would_break_does_not_build(tmp_path, file, old, new,
     ("content.yaml", "    path:\n      options:", "    path:\n      colour: red\n      options:", "unknown key 'colour'"),
     ("pack.yaml", "explore: {realms: []}", "explore: {realms: [moon]}", "explore realm 'moon' is not a realm"),
     ("content.yaml", "    rune: |\n      stem\n      leaf\n", "", "missing the rune pane"),
-    ("content.yaml", "        rune: [leaf]", "        rune: leaf", "rune must be a list of matches"),
+    ("content.yaml", "        rune: [leaf]", "        rune: leaf", "rune must be a list of text matches"),
 ])
 def test_a_second_game_with_a_broken_path_pane_or_map_does_not_build(tmp_path, file, old, new, needle):
     text = SECOND_PACK[file]
@@ -1449,3 +1449,135 @@ def test_a_who_point_lighting_exactly_the_lines_in_scope_must_credit_thoughtspot
     RULES.point(rules, {"kind": "who", "answer": "model", "sql": ["LIMIT 100000"], "rule": "r"}, panes,
                 {"sql": [1], "scroll": []}, "p", errors)
     assert any("row cap or a null guard" in e for e in errors), errors
+
+
+# ---- review of PR 2a, round 2 ----------------------------------------------------------------
+
+def test_the_committed_denylist_is_hashes_only():
+    import denylist as D
+    lines = [x for x in D.DENYLIST.read_text(encoding="utf-8").splitlines() if x.strip() and not x.startswith("#")]
+    assert lines and all(D.HASH.fullmatch(x) for x in lines)
+    assert D.load() == set(lines)
+
+
+def test_the_denylist_fails_closed(tmp_path, monkeypatch):
+    import denylist as D
+    with pytest.raises(FileNotFoundError):
+        D.load(tmp_path / "missing.txt")
+    typed = tmp_path / "denylist.txt"
+    typed.write_text("# header\nzqxvorn\n", encoding="utf-8")   # a name typed in by hand
+    with pytest.raises(ValueError, match="not hashes"):
+        D.load(typed)
+
+    def gone(*a, **k):
+        raise FileNotFoundError("denylist.txt is missing")
+    monkeypatch.setattr(D, "load", gone)
+    assert "denylist: denylist.txt is missing" in B.build(check=True)[3]
+
+
+@pytest.mark.parametrize("text,hit", [("Zqx'vorn", "zqxvorn"), ("Zqx’vorn", "zqxvorn"), ("the Qqa's Zzb", "")])
+def test_apostrophes_do_not_split_a_name(text, hit):
+    import denylist as D
+    found = D.hits(text, {D.digest("zqxvorn"), D.digest("qqas zzb")})
+    assert found == ([hit] if hit else ["qqas zzb"])
+
+
+def test_the_denylist_skips_binaries_and_caches(tmp_path):
+    import denylist as D
+    for rel in ("art.png", "ART.PNG", "__pycache__/x.pyc", "notes.txt"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("zqxvorn", encoding="utf-8")
+    assert D.scan(tmp_path, {D.digest("zqxvorn")}) == [
+        "notes.txt: 'zqxvorn' is a name from a published work (denylist.txt); use a generic fantasy name"]
+
+
+def test_lesson_numbers_in_strings_are_checked(doc, capture):
+    pack = B.Pack("agentql")
+    pack.doc, pack.strings_text = doc, pack.strings_text + "\nhint: see lesson 9.9\n"
+    _, errors = B.compile_pack(pack, {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    assert any("strings.yaml names lesson 9.9" in e for e in errors)
+
+
+def test_both_claim_buttons_are_required(tmp_path):
+    pack = _second(tmp_path, files={"strings.yaml": SECOND_PACK["strings.yaml"].replace("claim_false: False.\n", "")})
+    assert any("which has no claim_false" in e for e in B.compile_pack(pack)[1])
+
+
+@pytest.mark.parametrize("pane", ["case", "options"])
+def test_a_pane_named_like_a_content_key_is_refused_cleanly(tmp_path, pane):
+    # `case` is agentql_capture's; `options` is the engine's and used to crash the compile.
+    if pane == "case":
+        packs = _copy_packs(tmp_path)
+        manifest = packs / "agentql/pack.yaml"
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace("{id: scroll, from: content,", "{id: case, from: content,"),
+                            encoding="utf-8")
+        _, errors = B.compile_pack(B.Pack("agentql", packs))
+    else:
+        files = {k: v.replace("rune", pane) for k, v in SECOND_PACK.items() if k in ("pack.yaml", "content.yaml")}
+        _, errors = B.compile_pack(_second(tmp_path, files=files))
+    assert f"pack.yaml: pane id {pane!r} is also a content key; rename the pane" in errors
+
+
+@pytest.mark.parametrize("plugin,needle", [
+    ('NAME = "odd"\nMETA = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}\n',
+     "declares META but has no meta hook"),
+    ('NAME = "other"\n', "must set NAME = 'odd'"),
+])
+def test_a_plugin_must_name_itself_and_hook_its_meta(tmp_path, monkeypatch, plugin, needle):
+    (tmp_path / "odd.py").write_text(plugin, encoding="utf-8")
+    monkeypatch.setattr(B, "CHECKS", tmp_path)
+    with pytest.raises(ValueError, match=needle):
+        B.load_plugins(["odd"])
+
+
+@pytest.mark.parametrize("old,new,needle", [
+    ("checks: []", "checks: 5", "checks must be a list"),
+    ("explore: {realms: []}", "explore: [moon]", "explore must be a mapping"),
+    ("lexicon: {guide: The Scribe, compiler: The Loom, foe: golem, reward: chest, currency: shells}",
+     "lexicon: [guide, compiler, foe, reward, currency]", "lexicon must be a mapping"),
+    ("label: rune_label,", "label: [rune_label],", "label ['rune_label'] is not in strings.yaml"),
+    ('caption: ""}', "caption: [x]}", "caption ['x'] is not in strings.yaml"),
+    ("{id: rune,", "{id: [rune],", "id must be unique"),
+])
+def test_a_malformed_manifest_gives_errors_not_tracebacks(tmp_path, old, new, needle):
+    text = SECOND_PACK["pack.yaml"]
+    assert old in text, old
+    pack = _second(tmp_path, files={"pack.yaml": text.replace(old, new)})
+    errors = pack.errors + B.compile_pack(pack)[1]
+    assert any(needle in e for e in errors), errors
+
+
+def test_choice_trial_options_take_only_text_and_correct(tmp_path):
+    text = SECOND_PACK["content.yaml"]
+    old = "options: [{text: The stem, correct: true}, {text: The leaf}]"
+    assert old in text
+    pack = _second(tmp_path, files={"content.yaml": text.replace(old, "options: [{text: The stem, correct: true, why: x}, {text: The leaf}]")})
+    assert any("option 1: unknown key 'why'" in e for e in B.compile_pack(pack)[1])
+
+
+def test_load_plugins_never_loads_a_path_outside_checks():
+    assert B.load_plugins(["../build", "agentql_capture/../agentql_rules"]) == []
+
+
+def test_a_broken_manifest_reports_only_its_own_errors(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    manifest = packs / "agentql/pack.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("storage_key: aqq", "storage_key: AQQ!"), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any("storage_key must be" in e for e in errors)
+    assert not any(e.startswith("quest") for e in errors), errors   # no schema noise from data never compiled
+
+
+def test_a_plugin_may_own_hall_keys(doc, capture):
+    import types
+    notes = types.SimpleNamespace(NAME="notes", KEYS={"hall": {"note"}})
+    _law(doc)["halls"][0]["note"] = "for maintainers"
+    pack = B.Pack("agentql")
+    pack.doc = doc
+    with_plugin = B.Compiler(pack, [CAP, CR, RULES, notes], {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    with_plugin.compile()
+    without = B.Compiler(pack, [CAP, CR, RULES], {"agentql_capture": CAP.Capture(*capture, MODEL)})
+    without.compile()
+    assert not any("unknown key 'note'" in e for e in with_plugin.errors)
+    assert any("unknown key 'note'" in e for e in without.errors)
