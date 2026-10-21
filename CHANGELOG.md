@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-22
+- fix: ts-object-model-erd 1.9.4 — the organic layout caps each repulsion step, so a Model's first view can no longer fling a node thousands of pixels off-screen (the 28-table example's layout span drops from 10,333 to 4,561 px; no other Model across a 52-graph benchmark gets worse). Affects the ts-audit report's ERD too, which shares the renderer. Order Fulfilment example screenshots refreshed.
 - feat: ts-audit 2.6.0 — the assessment profile is honoured: `ts audit run --assessment spotter|general` (default general) sets the AI-readiness checks' bar (A1 95%/50%, A2 80%/25%, A6 required/recommended, A3-A4 HIGH/MEDIUM), from one table in `ts_cli/audit/assessment.py`. The skill always asked for the profile and never passed it on (BL-399).
 - chore: bump ts-cli to v0.181.0
 - feat: `ts tml lint` I20 (a `MANY_TO_MANY` Model join, rejected with 14528) and I21 (a `referencing_join` under an entry whose own Table TML does not declare it, rejected with 14504; checked when the Table TMLs are linted alongside). Power BI (ts-convert-from-powerbi 1.1.8) and Sisense (ts-convert-from-sisense 1.0.5) now leave a many-to-many relationship out and flag it NEEDS REVIEW instead of emitting a join that fails import. Filed BL-399: ts-audit's assessment profile is never used.

@@ -14312,6 +14312,9 @@ the manager alias, its self-join, formula and column are removed rather than rep
 flattened view (the example has no warehouse to hold one), and the README now says self-joins are
 not supported. Both examples lint clean; `model_erd.html` re-rendered. The screenshots still show
 the removed table.
+**Screenshots refreshed 2026-10-22** (ts-object-model-erd 1.9.4), captured in headless Chrome at
+1600x1000. Doing so exposed an organic-layout bug — an uncapped repulsion step flung the
+PRODUCT/CATEGORY tail ~7,000 px out — fixed in the same change.
 
 ## BL-397 — Join shapes import rejects that `ts tml lint` does not check `Tier 2`
 

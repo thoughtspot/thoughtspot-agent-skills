@@ -732,10 +732,13 @@ function computeOrganic(){
   var avgH=nodes.reduce(function(s,n){return s+n.h;},0)/nc;
   var minSep=NODE_W+40,minSepY=avgH+40;
   var repK=Math.max(180000,NODE_W*NODE_W*nc*1.5),spring=(NODE_W+avgH)*1.2*scale;
+  var maxRep=NODE_W*.6;
   nodes.forEach(function(n,i){var a=i/nc*Math.PI*2;n.x=cx+Math.cos(a)*rad+(rnd()-.5)*40;n.y=cy+Math.sin(a)*ry+(rnd()-.5)*40;});
   for(var it=0;it<500;it++){var cool=1-it/500;
     for(var i=0;i<nc;i++)for(var k=i+1;k<nc;k++){var a=nodes[i],b=nodes[k];
-      var dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2),rep=repK/d2;
+      // Cap the step: uncapped, repK/d2 for two nodes that start close throws one thousands
+      // of px, and springs + gravity cannot reel it back before the layout cools.
+      var dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2),rep=Math.min(repK/d2,maxRep);
       a.x+=dx/d*rep*cool;a.y+=dy/d*rep*cool;b.x-=dx/d*rep*cool;b.y-=dy/d*rep*cool;}
     edges.forEach(function(e){var dx=e.t.x-e.s.x,dy=e.t.y-e.s.y,d=Math.sqrt(dx*dx+dy*dy)||1,f=(d-spring)*.012*cool;
       e.s.x+=dx/d*f;e.s.y+=dy/d*f;e.t.x-=dx/d*f;e.t.y-=dy/d*f;});
