@@ -3014,7 +3014,7 @@ def test_a_spawn_on_the_edge_leaves_it_open(tmp_path):
 
 EXPLORE_FILES = ["index.html", "explore.js", "core.js", "quest.css", "fonts.css", "phaser.min.js", "art.json",
                  "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj",
-                 "phaser.LICENSE.md"]
+                 "phaser.LICENSE.md", "phaser.THIRD-PARTY.md", B.EXPLORE_MARK]
 
 
 def test_the_vendored_phaser_is_the_pinned_release():
@@ -3183,3 +3183,80 @@ def test_a_rebuild_leaves_no_old_explore_files(tmp_path):
     assert B.main(["--out", str(page)]) == 0
     assert not (tmp_path / "explore/maps/old.tmj").exists()
     assert (tmp_path / "explore/phaser.LICENSE.md").read_bytes() == (B.VENDOR / "LICENSE-phaser.md").read_bytes()
+
+
+
+# ---- re-review of PR 5 --------------------------------------------------------------------------
+
+def test_a_rebuild_never_deletes_a_folder_it_did_not_write(tmp_path):
+    (tmp_path / "explore").mkdir()
+    (tmp_path / "explore/notes.txt").write_text("mine", encoding="utf-8")
+    assert B.main(["--out", str(tmp_path / "index.html")]) == 1
+    assert (tmp_path / "explore/notes.txt").read_text(encoding="utf-8") == "mine"
+
+
+def test_the_build_refuses_to_write_into_its_own_sources(tmp_path):
+    before = (B.EXPLORE_DIR / "explore.js").read_bytes()
+    out = B.HERE / "index.html"
+    try:
+        assert B.main(["--out", str(out)]) == 1
+    finally:
+        for name in ("index.html", "quest.json", "quest.schema.json"):
+            (B.HERE / name).unlink(missing_ok=True)
+    assert (B.EXPLORE_DIR / "explore.js").read_bytes() == before
+
+
+def test_a_published_name_in_the_explore_page_fails_the_build(tmp_path, monkeypatch):
+    explore = tmp_path / "explore"
+    shutil.copytree(B.EXPLORE_DIR, explore)
+    (explore / "explore.js").write_text((explore / "explore.js").read_text(encoding="utf-8") + "\n// the zqxvorn\n", encoding="utf-8")
+    monkeypatch.setattr(B, "EXPLORE_DIR", explore)
+    _invented(monkeypatch)
+    assert any("explore.js: 'zqxvorn' is a name from a published work" in e for e in B.build(check=True)[3])
+
+
+def test_the_explore_smoke_fails_when_the_page_does(monkeypatch):
+    sys.path.insert(0, str(HERE))
+    import smoke_explore as SX
+    if SX.find_chrome() is None:
+        pytest.skip("no Chrome here")
+    monkeypatch.setattr(SX, "run", lambda *a, **k: ["MAP overworld", "ERROR smoke: timed out"])
+    assert SX.main([]) == 1
+
+
+def test_the_explore_page_keeps_its_test_hooks_local_and_its_log_unread():
+    js = (B.EXPLORE_DIR / "explore.js").read_text(encoding="utf-8")
+    assert 'const LOCAL = ["127.0.0.1", "localhost"].includes(location.hostname);' in js
+    assert re.search(r"const SMOKE = [^;]*&& LOCAL;", js) and "if (SMOKE) Quest.explore.smoke" in js
+    assert '<pre id="log" hidden></pre>' in (B.EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
+
+
+HELD_KEYS = r"""
+const fs = require("fs"), vm = require("vm");
+const html = fs.readFileSync(process.argv[1], "utf8");
+const block = id => html.split(`<script id="${id}" type="application/json">`)[1].split("</script>")[0];
+const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
+const listeners = {}, store = {};
+const el = () => ({ textContent: "", setAttribute() {} }), screen = { innerHTML: "", querySelector: () => null };
+const els = { "quest-data": { textContent: block("quest-data") }, "classic-art": { textContent: block("classic-art") },
+              live: el(), "sound-sfx": el(), "sound-music": el() };
+const ctx = vm.createContext({
+  document: { getElementById: id => els[id] || screen, hidden: false, addEventListener: (t, fn) => { (listeners[t] = listeners[t] || []).push(fn); } },
+  localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } },
+  setInterval: () => 1, clearInterval: () => {}, JSON, String, Number, parseInt, Object, Array, Math });
+vm.runInContext(js, ctx);
+const press = (key, repeat) => { let p = false; listeners.keydown.forEach(fn => fn({ key, repeat, preventDefault() { p = true; } })); return p; };
+const screenNow = () => vm.runInContext("Quest.classic.state().screen", ctx);
+console.log(JSON.stringify({ enter: press("Enter", true), space: press(" ", true), digit: [press("1", true), screenNow()],
+                             first: [press("1", false), screenNow()] }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_classic_page_holds_back_held_enter_only(tmp_path):
+    # Held Enter mustn't keep "clicking" the focused button; held Space still scrolls the page.
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    r = subprocess.run(["node", "-e", HELD_KEYS, str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"enter": True, "space": False, "digit": [False, "title"], "first": [True, "map"]}

@@ -230,16 +230,21 @@ and shows a link back to the map).
 ```
 explore/index.html, explore/explore.js ─┐
 core/*.js, core/quest.css, fonts/       ─┤                 ┌─► explore/index.html, explore.js, core.js, quest.css, fonts.css
-vendor/phaser-arcade-physics.min.js     ─┼─► build.py ─────┼─► explore/phaser.min.js
+vendor/ (Phaser and its notices)        ─┼─► build.py ─────┼─► explore/phaser.min.js, phaser.LICENSE.md, phaser.THIRD-PARTY.md
 packs/agentql/tiles/, maps/*.tmj        ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
 ```
 
+- **The build owns `explore/`:** it marks the folder it writes and replaces only a marked one. It
+  refuses to overwrite an `explore/` it didn't write, and to build inside `tools/quest/`.
 - **Everything is local** and the folder must stay under 3 MB (about 1.4 MB today). No outside
   requests: the fonts, Phaser and the art are all copied in.
 - **Phaser** 4.2.1 (MIT) is vendored in `vendor/`: `package.json` pins the release (Dependabot
   watches it), `phaser.sha256` records the file's hash, and the build refuses a file that fails
-  either check. Its MIT notice ships beside it (`explore/phaser.LICENSE.md`). To update: `npm pack phaser@<version>`, copy `dist/phaser-arcade-physics.min.js`, and
-  update the hash, `package.json` and `package-lock.json` together.
+  either check. Its MIT notice ships beside it (`explore/phaser.LICENSE.md`), and so do the notices
+  of what its build bundles (`explore/phaser.THIRD-PARTY.md`: eventemitter3, rbush, Simplify.js,
+  Earcut, psrdnoise). To update: `npm pack phaser@<version>`, copy
+  `dist/phaser-arcade-physics.min.js`, update the hash, `package.json` and `package-lock.json`
+  together, and recheck the bundled works in its `src/`.
 - **Tiles** are from Kenney's 1-Bit Pack (CC0, `tiles/LICENSE-kenney.txt`), tinted amber at run
   time, which needs WebGL; without it the page offers the classic version. `tiles/tiles.json` names
   each frame (floor, wall, player, the five roles, exit, gate, portal).
