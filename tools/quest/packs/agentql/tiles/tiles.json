@@ -1,13 +1,14 @@
 {
-  "floor": 0,
-  "wall": 1,
-  "player": 2,
-  "merchant": 3,
-  "guide": 4,
-  "compiler": 5,
-  "foe": 6,
-  "reward": 7,
-  "exit": 8,
-  "gate": 9,
-  "portal": 10
+  "wall": 40,
+  "wall_top": 132,
+  "player": 96,
+  "merchant": 87,
+  "guide": 84,
+  "compiler": 74,
+  "foe": 110,
+  "reward": 89,
+  "reward_open": 91,
+  "exit": 46,
+  "gate": 28,
+  "portal": 45
 }

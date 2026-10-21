@@ -15,11 +15,11 @@ such realm, saved by Tiled 1.10 or later as JSON with tilesets embedded. On a ma
   - a step id is "<encounter id>:<merchant|guide|compiler|foe|reward>" or "hall:<hall id>".
 
 Only what Phaser 4 and the explore page read the same way: an orthogonal, finite map; layers at
-the top level (no groups) with no offsets: tile layers `floor` and `walls`, the map's size, and one
-object layer `objects`; one embedded tileset named `tiles`; unrotated rectangle objects (not tile
-objects, which Tiled and Phaser anchor differently), each exactly one tile on the grid (the explore
-page gives each a 16px body at its centre); tiles of 16px; a wall all round the edge (the page
-doesn't stop the player at the map's edge).
+the top level (no groups) with no offsets: tile layers `floor` and `walls` and, if it likes, `decor`
+(drawn, never blocking), the map's size, and one object layer `objects`; one embedded tileset named
+`tiles`; unrotated rectangle objects (not tile objects, which Tiled and Phaser anchor differently),
+each exactly one tile on the grid (the explore page gives each a 16px body at its centre); tiles of
+16px; a wall all round the edge (the page doesn't stop the player at the map's edge).
 
 An object sits on the tile containing its centre.
 Everything but the spawn and gates is solid; reaching an object means standing on a walkable tile
@@ -121,8 +121,9 @@ class Map:
         if d and len(walls) != 1:
             errors.append(f"{self.name}: needs exactly one tile layer named walls (the collision)")
         tiles = [l for l in layers if l.get("type") == "tilelayer"]
-        if d and sorted(str(l.get("name")) for l in tiles) != ["floor", "walls"]:
-            errors.append(f"{self.name}: needs exactly the tile layers floor and walls (the explore page draws those two)")
+        if d and sorted(str(l.get("name")) for l in tiles) not in (["floor", "walls"], ["decor", "floor", "walls"]):
+            errors.append(f"{self.name}: needs exactly the tile layers floor and walls, and if it likes decor "
+                          f"(the explore page draws those)")
         for l in tiles:
             if (l.get("width"), l.get("height")) != (self.w, self.h):
                 errors.append(f"{self.name}: tile layer {l.get('name')!r} must be the map's size, {self.w}x{self.h}")
@@ -201,6 +202,17 @@ class Map:
                         or not there):
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not in the pack "
                                   f"(a {'/'.join(IMAGES)} file under the pack's folder)")
+                elif _png_size(target) is None:
+                    errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not a readable PNG")
+                elif _png_size(target) != (ts.get("imagewidth"), ts.get("imageheight")):
+                    errors.append(f"{self.name}: tileset {ts.get('name')!r} says its image is "
+                                  f"{ts.get('imagewidth')}x{ts.get('imageheight')}, but {image} is "
+                                  "{}x{}; reload the image in Tiled".format(*_png_size(target)))
+                count = ts.get("tilecount") if isinstance(ts.get("tilecount"), int) else 0
+                for l in tiles:
+                    data = l.get("data") if isinstance(l.get("data"), list) else []
+                    if any(isinstance(g, int) and (g & GID) > count for g in data):
+                        errors.append(f"{self.name}: layer {l.get('name')!r} uses a tile past the tileset's {count}")
 
     def _box(self, o: dict) -> tuple[float, float, float, float]:
         x, y, w, h = (float(o.get(k, 0) or 0) for k in ("x", "y", "width", "height"))
@@ -410,3 +422,10 @@ def _tilesets(path: pathlib.Path) -> list[dict]:
 
 def _not_json(name: str):
     raise ValueError(f"{name} is not JSON (the page's JSON.parse rejects it)")
+
+
+def _png_size(path: pathlib.Path) -> tuple[int, int] | None:
+    head = path.read_bytes()[:24]
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")

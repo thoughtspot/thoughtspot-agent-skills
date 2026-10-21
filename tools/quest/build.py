@@ -851,6 +851,29 @@ def check_vendor() -> list[str]:
     return errors
 
 
+TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal"}   # what explore.js draws
+
+
+def check_tiles(pack: "Pack") -> list[str]:
+    """tiles/tiles.json names a frame of tiles/tiles.png (16px, left to right, top to bottom) for
+    everything the explore page draws."""
+    folder = pack.dir / "tiles"
+    try:
+        frames = json.loads((folder / "tiles.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [f"tiles/tiles.json: an explorable pack names its tile frames here ({e})"]
+    size = maps._png_size(folder / "tiles.png") if (folder / "tiles.png").is_file() else None
+    if not size or size[0] % 16 or size[1] % 16:
+        return ["tiles/tiles.png: needs a PNG of whole 16px tiles"]
+    count = (size[0] // 16) * (size[1] // 16)
+    errors = [f"tiles/tiles.json: needs {k!r}" for k in sorted(TILE_NAMES - set(frames))]
+    errors += [f"tiles/tiles.json: {k!r} is not used by the explore page" for k in sorted(set(frames) - TILE_NAMES)]
+    for k, v in frames.items():
+        if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v < count:
+            errors.append(f"tiles/tiles.json: {k!r} must be a frame of tiles.png, 0 to {count - 1}")
+    return errors
+
+
 def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
     """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
     the fonts, Phaser, the art, and the pack's tiles and maps. Everything is local."""
@@ -961,8 +984,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
         errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
         if data["pack"]["explore_realms"]:
             errors += check_vendor()
-            if not (pack.dir / "tiles" / "tiles.json").is_file():
-                errors.append("tiles/tiles.json: an explorable pack names its tile frames here")
+            errors += check_tiles(pack)
     try:
         errors += (denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
                    + denylist.scan(EXPLORE_DIR))

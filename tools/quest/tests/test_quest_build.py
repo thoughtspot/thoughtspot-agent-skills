@@ -2371,6 +2371,19 @@ import maps as MAPS  # noqa: E402
 TILE = 16
 
 
+def _png(w: int, h: int) -> bytes:
+    """A real, blank RGBA PNG of w x h pixels."""
+    import struct
+    import zlib
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    raw = b"".join(b"\0" + b"\0" * (w * 4) for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+_PNG16 = _png(TILE, TILE)
+
+
 def _tmj(rows: list[str], objects: dict[str, tuple[str, dict]], gates: list[tuple[str, list[tuple[int, int]]]] = (),
          image: str = "tiles.png") -> dict:
     """A Tiled map from a picture: '#' is a wall, a letter is the object `objects` names, '.' floor.
@@ -2422,7 +2435,7 @@ def _explorable(tmp_path, cave=None, over=None, write_image=True):
     (pack.dir / "maps/cave.tmj").write_text(json.dumps(cave or _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)), encoding="utf-8")
     (pack.dir / "maps/overworld.tmj").write_text(json.dumps(over or _tmj(OVER_ROWS, OVER_OBJECTS)), encoding="utf-8")
     if write_image:
-        (pack.dir / "maps/tiles.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (pack.dir / "maps/tiles.png").write_bytes(_PNG16)
     pack = B.Pack("second", pack.dir.parent)
     data, errors = B.compile_pack(pack)
     assert errors == [], errors
@@ -2630,6 +2643,8 @@ def _obj(m, kind):
     (lambda m: _layer(m, "objectgroup").update(name="Object Layer 1"), "one object layer, named objects"),
     (lambda m: m["layers"].append({"type": "objectgroup", "name": "objects", "objects": []}), "one object layer, named objects"),
     (lambda m: m["layers"].pop(1), "exactly the tile layers floor and walls"),
+    (lambda m: m["layers"].insert(2, dict(m["layers"][1], name="decor")), None),          # a decor layer is fine
+    (lambda m: m["layers"].insert(2, dict(m["layers"][1], name="props")), "exactly the tile layers floor and walls"),
     (lambda m: m["layers"][1].update(width=3), "tile layer 'floor' must be the map's size"),
     (lambda m: m["tilesets"][0].update(name="kenney"), "one tileset, named tiles"),
     (lambda m: m["tilesets"].append(dict(m["tilesets"][0], firstgid=2)), "one tileset, named tiles"),
@@ -2660,7 +2675,7 @@ def test_a_map_phaser_would_read_differently_fails(tmp_path, edit, needle):
     cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
     edit(cave)
     pack, data = _explorable(tmp_path, cave=cave)
-    (tmp_path / "outside.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / "outside.png").write_bytes(_PNG16)
     errors = MAPS.check_maps(pack.dir, data)
     assert (errors == []) if needle is None else any(needle in e for e in errors), errors
 
@@ -3260,3 +3275,43 @@ def test_the_classic_page_holds_back_held_enter_only(tmp_path):
     r = subprocess.run(["node", "-e", HELD_KEYS, str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == {"enter": True, "space": False, "digit": [False, "title"], "first": [True, "map"]}
+
+
+# ---- PR 6: the art pass (Tiny Dungeon) ------------------------------------------------------------
+
+def test_the_packs_tiles_name_every_frame_the_explore_page_draws():
+    assert B.check_tiles(B.Pack("agentql")) == []
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    js = (B.EXPLORE_DIR / "explore.js").read_text(encoding="utf-8")
+    for name in set(re.findall(r"FRAMES\.([a-z_]+)", js)) | {"merchant", "guide", "compiler", "foe", "reward", "exit", "portal"}:
+        assert name in frames, name
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda f: f.pop("gate"), "needs 'gate'"),
+    (lambda f: f.update(gate=144), "'gate' must be a frame of tiles.png, 0 to 143"),
+    (lambda f: f.update(gate="28"), "'gate' must be a frame"),
+    (lambda f: f.update(sparkle=3), "'sparkle' is not used"),
+])
+def test_a_broken_tile_index_fails_the_build(tmp_path, monkeypatch, edit, needle):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/tiles/tiles.json"
+    frames = json.loads(f.read_text(encoding="utf-8"))
+    edit(frames)
+    f.write_text(json.dumps(frames), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert any(needle in e for e in B.build(check=True)[3])
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda m: m["tilesets"][0].update(imagewidth=176), "says its image is 176x192, but ../tiles/tiles.png is 192x192"),
+    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 145), "uses a tile past the tileset's 144"),
+])
+def test_a_map_must_match_its_tileset(tmp_path, monkeypatch, edit, needle):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/maps/mines.tmj"
+    m = json.loads(f.read_text(encoding="utf-8"))
+    edit(m)
+    f.write_text(json.dumps(m), encoding="utf-8")
+    data, _ = B.compile_pack(B.Pack("agentql", packs))
+    assert any(needle in e for e in MAPS.check_maps(packs / "agentql", data))

@@ -128,7 +128,9 @@ explore_pad_right: →
 explore_pad_talk: Talk
 explore_nobody: There is nobody close enough to talk to.
 explore_not_yet: Not yet. Someone else has something for you first.
-explore_no_webgl: This map needs WebGL, which this browser couldn't start. The classic version plays the same quests.
+explore_no_canvas: This map couldn't start in this browser. The classic version plays the same quests.
+explore_hud_map: THE REALMS
+explore_hud_gold: "GOLD {gold}/{max}"
 explore_back: Back to the explore map
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
 explore_near_sealed: "{name}{mark}."
