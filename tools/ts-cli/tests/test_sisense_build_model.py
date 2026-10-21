@@ -1,10 +1,12 @@
 """Unit tests for ts_cli.sisense.build_model — model assembly.
 
-Pure functions, no live cluster. A tiny synthetic inventory exercises: most-connected
-table = fact join orientation, default MANY_TO_ONE cardinality, the connection-name-only
-invariant, the duplicate-column -> fact dedup (dimension-side duplicate dropped), and
+Pure functions, no live cluster. A tiny synthetic inventory exercises: fact-to-dimension
+join orientation (deterministic across hash seeds — BL-398), default MANY_TO_ONE
+cardinality, the connection-name-only invariant, the duplicate-column -> fact dedup (dimension-side duplicate dropped), and
 calc-column formula translation (Migrated emitted, NEEDS REVIEW recorded but not emitted).
 """
+import json
+
 from ts_cli.sisense.build_model import assemble
 from ts_cli.sisense.tables import _col_role
 
@@ -82,7 +84,7 @@ def test_calc_column_name_collision_preserves_physical():
 def test_join_orientation_and_cardinality():
     _, _, model, _ = _build()
     joins = {t["name"]: t.get("joins", []) for t in model["model_tables"]}
-    # Fact is most-connected -> it is the source side of both joins.
+    # Fact carries two distinct join keys (dims one each) -> it is the source side of both joins.
     assert len(joins["Fact"]) == 2
     assert joins["Dim1"] == []
     assert joins["Dim2"] == []
@@ -294,3 +296,124 @@ def test_col_role_dimensional_vs_measure_heuristic():
         assert role(meas, "double") == "MEASURE", meas
     # a non-numeric column is always an attribute regardless of name
     assert role("Notes", "string") == "ATTRIBUTE"
+
+
+# --------------------------------------------------------------------------- #
+# BL-398 — join direction must not depend on set iteration (string hashing)
+# --------------------------------------------------------------------------- #
+def _col(name, dt="string"):
+    return {"id": name, "name": name, "data_type": dt, "calculated": False}
+
+
+def _rel(a_table, a_col, b_table, b_col):
+    return {"endpoints": [{"table": a_table, "column": a_col},
+                          {"table": b_table, "column": b_col}], "cardinality": "UNKNOWN"}
+
+
+def _two_fact_inv():
+    """Two facts (Sales, Returns) sharing a Product and a Calendar dimension. Every table
+    sits on exactly two relations, so connection counts tie everywhere — the shape the
+    BL-398 review used to show the join set varying with PYTHONHASHSEED."""
+    return {
+        "source": "TwoFact",
+        "tables": [
+            {"id": "Sales.csv", "name": "Sales", "columns": [
+                _col("ProductID", "int64"), _col("DateKey", "int64"),
+                _col("Amount", "double"), _col("Quantity", "double")]},
+            {"id": "Returns.csv", "name": "Returns", "columns": [
+                _col("ProductID", "int64"), _col("DateKey", "int64"),
+                _col("RefundAmount", "double")]},
+            {"id": "Product.csv", "name": "Product", "columns": [
+                _col("ProductID", "int64"), _col("ProductName"), _col("Price", "double")]},
+            {"id": "Calendar.csv", "name": "Calendar", "columns": [
+                _col("DateKey", "int64"), _col("Year", "int64"), _col("MonthName")]},
+        ],
+        # Endpoint order deliberately mixed (dimension first in some) — it must not matter.
+        "relations": [
+            _rel("Product.csv", "ProductID", "Sales.csv", "ProductID"),
+            _rel("Sales.csv", "DateKey", "Calendar.csv", "DateKey"),
+            _rel("Returns.csv", "ProductID", "Product.csv", "ProductID"),
+            _rel("Calendar.csv", "DateKey", "Returns.csv", "DateKey"),
+        ],
+        "warnings": [],
+    }
+
+
+def _snowflake_two_fact_inv():
+    """The two-fact shape plus a snowflaked Category under Product. Product now sits on
+    three relations and out-counts both facts — connection count alone points it at them."""
+    inv = _two_fact_inv()
+    inv["tables"][2]["columns"].append(_col("CategoryID", "int64"))
+    inv["tables"].append({"id": "Category.csv", "name": "Category", "columns": [
+        _col("CategoryID", "int64"), _col("CategoryName")]})
+    inv["relations"].append(_rel("Category.csv", "CategoryID", "Product.csv", "CategoryID"))
+    return inv
+
+
+def _join_set(model):
+    return sorted((t["name"], j["with"], j["cardinality"])
+                  for t in model["model_tables"] for j in t.get("joins", []))
+
+
+def _i17(model):
+    from ts_cli.tml_lint import lint_tml
+    return [f for f in lint_tml({"model": model}) if f.startswith("I17")]
+
+
+_SEED_SCRIPT = """
+import json, sys
+import json
+
+from ts_cli.sisense.build_model import assemble
+from ts_cli.tml_lint import lint_tml
+files, _ = assemble(json.load(sys.stdin), {}, "C", "db", "sch", "LEFT_OUTER", False)
+model = next(t for fn, t in files if fn.endswith(".model.tml"))["model"]
+joins = sorted((t["name"], j["with"], j["cardinality"])
+               for t in model["model_tables"] for j in t.get("joins", []))
+i17 = [f for f in lint_tml({"model": model}) if f.startswith("I17")]
+print(json.dumps({"joins": joins, "i17": i17}))
+"""
+
+
+def _build_under_seed(inv, seed):
+    """Build in a fresh interpreter: PYTHONHASHSEED is fixed per process, so the set
+    iteration order the bug depended on can only be varied across processes."""
+    import json
+    import os
+    import pathlib
+    import subprocess
+    import sys
+    import ts_cli
+    env = dict(os.environ, PYTHONHASHSEED=str(seed),
+               PYTHONPATH=str(pathlib.Path(ts_cli.__file__).resolve().parent.parent))
+    out = subprocess.run([sys.executable, "-c", _SEED_SCRIPT], input=json.dumps(inv),
+                         capture_output=True, text=True, env=env, check=True)
+    return json.loads(out.stdout)
+
+
+def test_join_set_identical_across_hash_seeds():
+    # BL-398: the source side was picked by a sort over a set, tie-broken by hash order.
+    for inv in (_two_fact_inv(), _snowflake_two_fact_inv()):
+        runs = [_build_under_seed(inv, seed) for seed in range(12)]
+        distinct = {json.dumps(r["joins"]) for r in runs}
+        assert len(distinct) == 1, f"{inv['source']}: {len(distinct)} join sets across seeds"
+        assert all(r["i17"] == [] for r in runs), runs[0]["i17"]
+
+
+def test_two_facts_sharing_dimensions_join_fact_to_dimension():
+    _, model = _run(_two_fact_inv())
+    assert _join_set(model) == [
+        ("Returns", "Calendar", "MANY_TO_ONE"), ("Returns", "Product", "MANY_TO_ONE"),
+        ("Sales", "Calendar", "MANY_TO_ONE"), ("Sales", "Product", "MANY_TO_ONE")]
+    assert _i17(model) == []
+
+
+def test_snowflaked_dimension_still_joins_fact_to_dimension():
+    # Product is the most-connected table (Sales, Returns, Category) but it is joined on
+    # its own key from both facts — that makes it the ONE side there, not the fact.
+    _, model = _run(_snowflake_two_fact_inv())
+    assert _join_set(model) == [
+        ("Product", "Category", "MANY_TO_ONE"),
+        ("Returns", "Calendar", "MANY_TO_ONE"), ("Returns", "Product", "MANY_TO_ONE"),
+        ("Sales", "Calendar", "MANY_TO_ONE"), ("Sales", "Product", "MANY_TO_ONE")]
+    assert _i17(model) == []

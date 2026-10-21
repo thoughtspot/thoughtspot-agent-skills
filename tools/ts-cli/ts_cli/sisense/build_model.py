@@ -4,9 +4,13 @@ Ported from the standalone converter (map/model.py). Pure functions, no I/O. The
 top-level entry point is assemble(): parsed inventory -> (files, mapping), mirroring
 the Power BI converter's assemble. build_model_tml builds the Model TML itself.
 
-Join orientation follows the standalone converter: the most-connected table is the
-fact (the source side of every join it participates in); cardinality is read from the
-relation (default MANY_TO_ONE).
+Join orientation: every join runs from the fact (MANY) side to the dimension (ONE) side,
+with cardinality read from the relation (default MANY_TO_ONE). Sisense exports no
+cardinality, so the fact side is inferred by ranking every table once (_fact_rank) and
+orienting each relation from the higher-ranked table to the lower. One global ranking
+makes the graph acyclic by construction and, unlike a per-relation sort over a set of two
+table ids, never depends on hash order (BL-398 — the join set used to vary with
+PYTHONHASHSEED, so `ts tml lint` I17 passed on one run and failed on the next).
 
 Model columns preserve the standalone converter's dedup behaviour: exactly ONE column
 per display name, bound to the MOST-CONNECTED table. When a key column (e.g. "Category
@@ -37,6 +41,68 @@ def _connectivity(relations: list) -> Counter:
             if ep.get("table"):
                 part[ep["table"]] += 1
     return part
+
+
+def _malformed_relation_note(eps: list, table_ids: set) -> str:
+    """Why a relation cannot become a join, or "" when it is a well-formed binary one."""
+    if len(eps) < 2 or len(eps) % 2 != 0:
+        return "relation does not have an even number (>= 2) of endpoints"
+    if any(ep.get("table") not in table_ids for ep in eps):
+        return "relation references an unknown table"
+    rel_tables = {ep.get("table") for ep in eps if ep.get("table")}
+    if len(rel_tables) != 2:
+        return f"relation spans {len(rel_tables)} tables; expected a binary relation"
+    return ""
+
+
+def _binary_relation_tables(rel: dict, table_ids: set):
+    """The two table ids a well-formed relation joins, else None (the caller flags it)."""
+    eps = rel.get("endpoints") or []
+    if _malformed_relation_note(eps, table_ids):
+        return None
+    return {ep["table"] for ep in eps}
+
+
+def _join_key_uses(relations: list, table_ids: set) -> dict:
+    """table_id -> Counter{frozenset(join columns): relations joined on that key set}."""
+    uses: dict = {}
+    for rel in relations:
+        if _binary_relation_tables(rel, table_ids) is None:
+            continue
+        keys: dict = {}
+        for ep in rel["endpoints"]:
+            keys.setdefault(ep["table"], set()).add(ep.get("column"))
+        for tid, cols in keys.items():
+            uses.setdefault(tid, Counter())[frozenset(cols)] += 1
+    return uses
+
+
+def _fact_rank(tables: list, relations: list, part: Counter) -> dict:
+    """table_id -> sort key; ascending order = most fact-like first (the join source).
+
+    Sisense exports no cardinality, so the MANY side is inferred from the shape of the
+    relations, strongest signal first:
+      1. more distinct join keys — a fact carries one foreign key per dimension it
+         references, while a dimension is joined on its one key however many tables
+         reference it (two facts sharing Product and Calendar: facts 2, dimensions 1);
+      2. fewer shared keys — a key set a table joins on in two or more relations is its
+         own key, referenced from several sides, which makes it the ONE side there (a
+         snowflaked Product joined by two facts and to Category out-counts the facts on
+         relations, but its ProductID is shared);
+      3. more measure columns (the side holding the numbers is the fact);
+      4. more relation endpoints (the standalone converter's original signal);
+      5. table id — a total, hash-independent tie-break.
+    """
+    table_ids = {t["id"] for t in tables}
+    uses = _join_key_uses(relations, table_ids)
+    rank: dict = {}
+    for t in tables:
+        tid = t["id"]
+        keys = uses.get(tid, Counter())
+        shared = sum(1 for n in keys.values() if n > 1)
+        measures = sum(1 for c in t.get("columns", []) if _col_role(c)[0] == "MEASURE")
+        rank[tid] = (-len(keys), shared, -measures, -part[tid], str(tid))
+    return rank
 
 
 def _col_name_index(tables: list) -> dict:
@@ -81,22 +147,15 @@ def _join_on_clause(eps: list, src_table, name_idx: dict) -> tuple:
     return " AND ".join(tokens), None
 
 
-def _build_one_join(rel: dict, part: Counter, table_ids: set, join_type: str,
+def _build_one_join(rel: dict, rank: dict, table_ids: set, join_type: str,
                     name_idx: dict, joins_by_src: dict) -> dict:
     """Emit one relation's join (into joins_by_src) and return its status row."""
     eps = rel.get("endpoints") or []
-    if len(eps) < 2 or len(eps) % 2 != 0:
-        return {"name": "?", "status": "NEEDS REVIEW",
-                "note": "relation does not have an even number (>= 2) of endpoints"}
-    if any(ep.get("table") not in table_ids for ep in eps):
-        return {"name": "?", "status": "NEEDS REVIEW",
-                "note": "relation references an unknown table"}
-    rel_tables = {ep.get("table") for ep in eps if ep.get("table")}
-    if len(rel_tables) != 2:
-        return {"name": "?", "status": "NEEDS REVIEW",
-                "note": f"relation spans {len(rel_tables)} tables; expected a binary relation"}
-    # Most-connected table is the source (fact) side of the join.
-    src_table, dst_table = sorted(rel_tables, key=lambda t: part[t], reverse=True)
+    bad = _malformed_relation_note(eps, table_ids)
+    if bad:
+        return {"name": "?", "status": "NEEDS REVIEW", "note": bad}
+    # The more fact-like table (lower _fact_rank key) is the source (MANY) side.
+    src_table, dst_table = sorted(_binary_relation_tables(rel, table_ids), key=rank.__getitem__)
     nm = f"{_clean(src_table)}_to_{_clean(dst_table)}"
     on, err = _join_on_clause(eps, src_table, name_idx)
     if err:
@@ -111,12 +170,12 @@ def _build_one_join(rel: dict, part: Counter, table_ids: set, join_type: str,
     return {"name": nm, "status": "Migrated", "note": f"{join_type}, {card}"}
 
 
-def _build_joins(relations: list, part: Counter, table_ids: set, join_type: str,
+def _build_joins(relations: list, rank: dict, table_ids: set, join_type: str,
                  name_idx: dict) -> tuple:
     """Relations -> ({src_table_id: [join,...]} keyed by the fact/source side, rel status
-    rows). The most-connected table is the source (fact); cardinality via _cardinality."""
+    rows). The higher-ranked table (_fact_rank) is the source; cardinality via _cardinality."""
     joins_by_src: dict = {}
-    rel_rows: list = [_build_one_join(rel, part, table_ids, join_type, name_idx, joins_by_src)
+    rel_rows: list = [_build_one_join(rel, rank, table_ids, join_type, name_idx, joins_by_src)
                       for rel in relations]
     return joins_by_src, rel_rows
 
@@ -218,7 +277,8 @@ def build_model_tml(inv: dict, model_name: str, join_type: str, part: Counter,
     table_ids = {t["id"] for t in tables}
 
     name_idx = _col_name_index(tables)
-    joins_by_src, rel_rows = _build_joins(relations, part, table_ids, join_type, name_idx)
+    rank = _fact_rank(tables, relations, part)
+    joins_by_src, rel_rows = _build_joins(relations, rank, table_ids, join_type, name_idx)
     model_tables = []
     for t in tables:
         entry = {"name": _clean(t["id"])}
