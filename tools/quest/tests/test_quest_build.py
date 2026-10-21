@@ -2116,8 +2116,9 @@ def test_the_machine_rules_and_text_never_touch_the_page_or_storage():
 
 
 def test_the_core_carries_no_agentql_wording():
+    # "merchant", "guide", "compiler", "foe" and "reward" are the engine's map object types (§4.2).
     core = B.core_script()
-    for word in ("AgentQL", "ThoughtSpot", "Wizard", "Forge", "Dragon", "dragon", "Kingdom of Law", "Spotter", "merchant"):
+    for word in ("AgentQL", "ThoughtSpot", "Wizard", "Forge", "Dragon", "dragon", "Kingdom of Law", "Spotter"):
         assert word not in core, word
 
 
@@ -2356,3 +2357,211 @@ def test_the_map_marks_and_focus_follow_the_save(tmp_path, save):
     after_first = strings["mark_after_first"].split("{")[0].strip() or strings["mark_after_first"]
     assert (after_first in got["mapHtml"]) == (save == "fresh")
     assert got["focusedOnDraw"] and got["still"]
+
+
+# ---- PR 4: maps bound to content (design §4.2), on made-up test maps ----------------------------
+
+import maps as MAPS  # noqa: E402
+
+TILE = 16
+
+
+def _tmj(rows: list[str], objects: dict[str, tuple[str, dict]], gates: list[tuple[str, list[tuple[int, int]]]] = (),
+         image: str = "tiles.png") -> dict:
+    """A Tiled map from a picture: '#' is a wall, a letter is the object `objects` names, '.' floor.
+    `gates` are (requires, [tiles]) rectangles of closed tiles."""
+    h, w = len(rows), len(rows[0])
+    data = [1 if rows[y][x] == "#" else 0 for y in range(h) for x in range(w)]
+    objs, n = [], 1
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch in objects:
+                kind, props = objects[ch]
+                objs.append({"id": n, "type": kind, "x": x * TILE, "y": y * TILE, "width": TILE, "height": TILE,
+                             "properties": [{"name": k, "type": "string", "value": v} for k, v in props.items()]})
+                n += 1
+    for requires, tiles in gates:
+        xs, ys = [t[0] for t in tiles], [t[1] for t in tiles]
+        objs.append({"id": n, "type": "gate", "x": min(xs) * TILE, "y": min(ys) * TILE,
+                     "width": (max(xs) - min(xs) + 1) * TILE, "height": (max(ys) - min(ys) + 1) * TILE,
+                     "properties": [{"name": "requires", "type": "string", "value": requires}]})
+        n += 1
+    return {"type": "map", "width": w, "height": h, "tilewidth": TILE, "tileheight": TILE, "orientation": "orthogonal",
+            "layers": [{"type": "tilelayer", "name": "walls", "width": w, "height": h, "data": data},
+                       {"type": "objectgroup", "name": "objects", "objects": objs}],
+            "tilesets": [{"firstgid": 1, "name": "tiles", "image": image, "tilewidth": TILE, "tileheight": TILE,
+                          "imagewidth": TILE, "imageheight": TILE, "tilecount": 1, "columns": 1}]}
+
+
+CAVE_ROWS = ["############",
+             "#S.M.G..#..#",
+             "#.......#F.#",
+             "#.C.......##",
+             "#X......#R.#",
+             "############"]
+CAVE_OBJECTS = {"S": ("spawn", {}), "X": ("exit", {}), "M": ("merchant", {"encounter": "the_rune"}),
+                "G": ("guide", {"encounter": "the_rune"}), "C": ("compiler", {"encounter": "the_rune"}),
+                "F": ("foe", {"encounter": "the_rune"}), "R": ("reward", {"encounter": "the_rune"})}
+CAVE_GATE = [("the_rune:compiler", [(8, 3)])]      # the foe's room opens once the compiler is reachable
+OVER_ROWS = ["#######", "#S....#", "##A#B##"]
+OVER_OBJECTS = {"S": ("spawn", {}), "A": ("portal", {"to": "shore"}), "B": ("portal", {"to": "cave"})}
+
+
+def _explorable(tmp_path, cave=None, over=None, write_image=True):
+    pack = _second(tmp_path)
+    manifest = pack.dir / "pack.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("explore: {realms: []}", "explore: {realms: [cave]}"),
+                        encoding="utf-8")
+    (pack.dir / "maps").mkdir()
+    (pack.dir / "maps/cave.tmj").write_text(json.dumps(cave or _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)), encoding="utf-8")
+    (pack.dir / "maps/overworld.tmj").write_text(json.dumps(over or _tmj(OVER_ROWS, OVER_OBJECTS)), encoding="utf-8")
+    if write_image:
+        (pack.dir / "maps/tiles.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    pack = B.Pack("second", pack.dir.parent)
+    data, errors = B.compile_pack(pack)
+    assert errors == [], errors
+    return pack, data
+
+
+def test_a_good_map_passes(tmp_path):
+    pack, data = _explorable(tmp_path)
+    assert MAPS.check_maps(pack.dir, data) == []
+
+
+def _spawn_in_wall():
+    m = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    m["layers"][0]["data"][1 * 12 + 1] = 1
+    return m
+
+
+@pytest.mark.parametrize("make,needle", [
+    # walls off the compiler, so its gate never opens either
+    (lambda: _tmj(["############", "#S.M.G..#..#", "###.....#F.#", "#.C#.......#", "###..X..#R.#", "############"],
+                  CAVE_OBJECTS, CAVE_GATE), "(compiler): can't be reached from the spawn"),
+    # the spawn in a wall
+    (_spawn_in_wall, "the spawn is outside the map, in a wall, or on a solid object"),
+    # a solid character parked in the one-tile way into the foe's room
+    (lambda: _tmj(["############", "#S.M....#..#", "#.......#F.#", "#.C.....G..#", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, []), "(foe): can't be reached from the spawn"),
+    # a gate that needs a step that is only behind it
+    (lambda: _tmj(CAVE_ROWS, CAVE_OBJECTS, [("the_rune:foe", [(8, 3)])]), "never opens (it needs the_rune:foe"),
+])
+def test_an_unreachable_map_fails(tmp_path, make, needle):
+    pack, data = _explorable(tmp_path, cave=make())
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda o: o.pop("G"), "step the_rune:guide needs exactly one object, has 0"),
+    (lambda o: o.update(G=("guide", {"encounter": "no_such"})), "no_such:guide is not a step of realm cave"),
+    (lambda o: o.update(Z=("guide", {"encounter": "the_rune"})), "step the_rune:guide needs exactly one object, has 2"),
+    (lambda o: o.pop("X"), "needs exactly one exit"),
+    (lambda o: o.update(X=("portal", {"to": "shore"})), "type must be one of"),
+    (lambda o: o.update(G=("guide", {"encounter": "the_rune", "colour": "red"})), "needs exactly the properties ['encounter']"),
+    (lambda o: o.update(G=("dragon", {})), "type must be one of"),
+])
+def test_a_realm_map_must_bind_every_step_once(tmp_path, edit, needle):
+    objects = dict(CAVE_OBJECTS)
+    edit(objects)
+    rows = CAVE_ROWS if "Z" not in objects else [r.replace("#X......", "#X.Z....") if i == 4 else r for i, r in enumerate(CAVE_ROWS)]
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, objects, CAVE_GATE))
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("objects,needle", [
+    (dict(OVER_OBJECTS, B=("portal", {"to": "moon"})), "to='moon' is not a realm"),
+    ({"S": ("spawn", {}), "A": ("portal", {"to": "shore"})}, "realm cave needs exactly one portal, has 0"),
+    (dict(OVER_OBJECTS, B=("exit", {})), "type must be one of"),
+])
+def test_the_overworld_needs_one_portal_per_realm(tmp_path, objects, needle):
+    pack, data = _explorable(tmp_path, over=_tmj(OVER_ROWS, objects))
+    assert any(needle in e for e in MAPS.check_maps(pack.dir, data))
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda m: m["tilesets"][0].update(source="tiles.tsx"), "is external; embed it"),
+    (lambda m: m["layers"][1]["objects"][0].update(template="spawn.tx"), "uses a Tiled template"),
+    (lambda m: m["layers"][0].update(name="floor"), "exactly one tile layer named walls"),
+    (lambda m: m["layers"][0].update(data="eJxjYGBgAAAABQAB"), "CSV, not base64"),
+    (lambda m: m["layers"][1]["objects"][1]["properties"][0].update(type="int", value=5), "must be a string"),
+    (lambda m: [o.update({"class": o.pop("type")}) for o in m["layers"][1]["objects"][:1]], "saved by Tiled 1.9"),
+])
+def test_every_map_is_one_phaser_can_load(tmp_path, edit, needle):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    edit(cave)
+    pack, data = _explorable(tmp_path, cave=cave)
+    assert any(needle in e for e in MAPS.check_maps(pack.dir, data)), MAPS.check_maps(pack.dir, data)
+
+
+def test_a_tileset_image_must_ship_with_the_pack(tmp_path):
+    pack, data = _explorable(tmp_path, write_image=False)
+    assert any("image 'tiles.png' is not in the pack" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_maps_are_only_for_explorable_realms(tmp_path):
+    pack, data = _explorable(tmp_path)
+    (pack.dir / "maps/shore.tmj").write_text("{}", encoding="utf-8")
+    assert any("maps/shore.tmj: not used" in e for e in MAPS.check_maps(pack.dir, data))
+    data["pack"]["explore_realms"] = []
+    assert any("no realm is explorable" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_the_build_runs_the_map_checks(tmp_path, monkeypatch):
+    pack, _ = _explorable(tmp_path, cave=_tmj(CAVE_ROWS, dict(CAVE_OBJECTS, G=("guide", {"encounter": "no_such"})), CAVE_GATE))
+    monkeypatch.setattr(B, "PACKS", pack.dir.parent)
+    errors = B.build("second", check=True)[3]
+    assert any("maps/cave.tmj" in e and "no_such:guide is not a step of realm cave" in e for e in errors), errors
+
+
+def _play_map(tmp_path, pack, data, core_edit=None):
+    quest = tmp_path / "quest.json"
+    quest.write_text(json.dumps(data), encoding="utf-8")
+    script = HERE / "play_map.js"
+    if core_edit:
+        copy = tmp_path / "quest_copy"
+        shutil.copytree(B.HERE / "core", copy / "core")
+        (copy / "tests").mkdir()
+        shutil.copy(script, copy / "tests/play_map.js")
+        f = copy / "core/40-machine.js"
+        old, new = core_edit
+        assert old in f.read_text(encoding="utf-8")
+        f.write_text(f.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+        script = copy / "tests/play_map.js"
+    return subprocess.run(["node", str(script), str(quest), str(pack.dir / "maps/cave.tmj"), "cave"],
+                          capture_output=True, text=True)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_a_realm_map_plays_through_the_machine(tmp_path):
+    pack, data = _explorable(tmp_path)
+    r = _play_map(tmp_path, pack, data)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads(r.stdout)
+    assert out["interactions"] == [f"the_rune:{x}" for x in MAPS.ROLES]
+    assert out["refused"] == 5 * 4 and out["saves"] == ["cave"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("edit,needle", [
+    # interact accepted for any step: the order is no longer enforced
+    (('if (a.type === "interact") return typeof a.step === "string" && a.step === expected(s);',
+      'if (a.type === "interact") return typeof a.step === "string";'), "was accepted while the game waits on"),
+    # the foe's step never comes up
+    (('case "battle": return enc ? `${enc.id}:foe` : null;', 'case "battle": return null;'), "never reached the_rune:foe"),
+])
+def test_the_map_play_through_catches_a_broken_machine(tmp_path, edit, needle):
+    pack, data = _explorable(tmp_path)
+    r = _play_map(tmp_path, pack, data, core_edit=edit)
+    assert r.returncode != 0 and needle in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_map_play_through_needs_every_step_on_the_map(tmp_path):
+    pack, data = _explorable(tmp_path)
+    cave = json.loads((pack.dir / "maps/cave.tmj").read_text(encoding="utf-8"))
+    cave["layers"][1]["objects"] = [o for o in cave["layers"][1]["objects"] if o["type"] != "compiler"]
+    (pack.dir / "maps/cave.tmj").write_text(json.dumps(cave), encoding="utf-8")
+    r = _play_map(tmp_path, pack, data)
+    assert r.returncode != 0 and "the map has no object for step the_rune:compiler" in r.stderr

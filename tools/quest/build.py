@@ -70,6 +70,7 @@ import yaml
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import denylist  # noqa: E402
+import maps  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -883,6 +884,8 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     pack = Pack(pack_id)
     data, errors = compile_pack(pack)
     errors += check_packs_unique()
+    if data:
+        errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
     try:
         errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
     except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes

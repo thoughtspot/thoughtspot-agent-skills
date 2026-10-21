@@ -181,6 +181,33 @@ that supports 2020-12 (4.0 or later) is installed, and skips otherwise.
 So a question is edited in the pack's `content.yaml`, never in a front end, and a second front
 end (for example an explorable map) plays the same content by loading `quest.json`.
 
+## Maps for the explore front end
+
+A pack whose `explore.realms` lists realms has a Tiled map for each, plus an overworld:
+`maps/overworld.tmj` and `maps/<realm id>.tmj`, saved by Tiled 1.10 or later as JSON (CSV tile
+data) with tilesets embedded and their images in the pack. `maps.py` checks them in the build
+(design §4.2):
+
+- **Collision** is one tile layer named `walls`: any non-empty tile blocks.
+- **Objects** have a `type` and string properties only:
+  - `spawn`, where the player appears (one per map);
+  - `portal to=<realm id>`, overworld only, one per realm;
+  - `exit`, realm maps only, one per map;
+  - `merchant`, `guide`, `compiler`, `foe`, `reward` with `encounter=<encounter id>`;
+  - `throne hall=<hall id>`;
+  - `gate requires=<step id>,…`.
+- **Steps:** a step id is `<encounter id>:<merchant|guide|compiler|foe|reward>` or
+  `hall:<hall id>`. Every step of a realm has exactly one object on its map.
+- **Reachability:** a flood-fill from the spawn, with every gate closed until the steps it requires
+  are reachable, must reach every object. Objects are solid; reaching one means standing on a
+  walkable tile next to it.
+- **No Tiled templates,** which Phaser doesn't resolve.
+
+Order isn't the map's job: `Quest.machine` accepts `interact {step}` only for the step the current
+screen waits on (`expected(state)`), so walking to the foe first does nothing.
+`tests/play_map.js` walks a realm's map through the machine with no canvas, and checks every step
+can be reached and finished and every out-of-order interaction is refused.
+
 ## When the build fails
 
 `build.py` refuses to build when the pack no longer holds together, or no longer matches its
@@ -200,6 +227,7 @@ sources:
 | `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
 | `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
+| `maps/….tmj: …` (for example `can't be reached from the spawn`, `never opens`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
 | `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
