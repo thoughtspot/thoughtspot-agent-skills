@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-21
+- docs: design proposal for quest packs and an explorable AgentQL Quest (`docs/superpowers/specs/2026-10-21-agentql-quest-pack-design.md`): a pack format that separates a game's content, words and maps from the engine, a Phaser 4 + Tiled map front end that plays the same checked `quest.json`, and a one-realm prototype plan.
 - feat: AgentQL Quest publishes its checked data as `quest.json` beside the game, described by a new `quest.schema.json` that `build.py --check` (the PR gate) enforces, so another front end can play the same content without parsing the YAML or the capture. The schema is published beside it, and CI also validates the published pair with the real `jsonschema` (pinned 4.25.1, test-only). The dragon's caption now names the Model from `lesson-sql.md`'s header (checked against the Model the captured AgentQL queries) instead of hard-coding it.
 
 ## 2026-10-20
