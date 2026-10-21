@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ts_cli.audit import checks_ai, checks_data, checks_human, checks_perf, checks_security
-from ts_cli.audit.context import build_context
+from ts_cli.audit.context import AuditContext, build_context
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import CHECK_META, Finding, build_summary
 
@@ -310,10 +310,19 @@ def run_audit(
     model_guids: list,
     angles: Optional[list] = None,
     assessment_name: Optional[str] = None,
+    ctx: Optional[AuditContext] = None,
 ) -> dict:
+    """Run the checks for ``angles`` and return findings, summary and corpus.
+
+    ``ctx`` replays captured data (``audit/snapshot.py``) instead of fetching:
+    ``client`` and ``model_guids`` are then unused for data and ``client`` may
+    be None. The assessment is applied either way — it is a choice about how
+    to read the data, not part of the data.
+    """
     from ts_cli.audit import assessment
     angles = angles or list(ANGLE_MODULES.keys())
-    ctx = build_context(client, model_guids, angles)
+    if ctx is None:
+        ctx = build_context(client, model_guids, angles)
     ctx.assessment = assessment.normalise(assessment_name)
     findings: list[Finding] = []
     checks_run = 0
@@ -332,8 +341,8 @@ def run_audit(
 
     corpus = build_corpus(
         ctx,
-        cluster_url=client.base_url,
-        profile_name=client._profile_name,
+        cluster_url=getattr(client, "base_url", ""),
+        profile_name=getattr(client, "_profile_name", ""),
         angles=angles,
     )
     corpus["assessment"] = assessment.label(ctx.assessment)

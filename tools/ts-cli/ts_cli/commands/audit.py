@@ -15,10 +15,51 @@ _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
 
 
+def _parse_angles(angles: Optional[str]) -> Optional[list]:
+    return [a.strip().upper() for a in angles.split(",")] if angles else None
+
+
+def _replay(snapshot_in: Path, angle_list: Optional[list], assessment_name: str) -> dict:
+    """Audit a captured snapshot: no profile, no client, no network."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.snapshot import SnapshotError, read_snapshot
+
+    try:
+        ctx, captured = read_snapshot(snapshot_in)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot replay snapshot: {exc}") from exc
+    missing = [a for a in (angle_list or []) if a not in captured]
+    if missing:
+        raise SystemExit(
+            f"Angle(s) {', '.join(missing)} not captured in snapshot {snapshot_in} "
+            f"(captured: {', '.join(captured) or 'none'}) — the data they read was not "
+            "fetched. Re-capture with those angles, or drop them from --angles.")
+    return run_audit(None, ctx.model_guids, angle_list or captured, assessment_name, ctx=ctx)
+
+
+def _capture(client, models: list, angle_list: Optional[list], assessment_name: str,
+             snapshot_out: Path) -> dict:
+    """Fetch the audit data, write it to ``snapshot_out``, then audit it as normal."""
+    from ts_cli.audit import ANGLE_MODULES, assessment, run_audit
+    from ts_cli.audit.context import build_context
+    from ts_cli.audit.snapshot import SnapshotError, write_snapshot
+
+    angles = angle_list or list(ANGLE_MODULES.keys())
+    ctx = build_context(client, models, angles)
+    ctx.assessment = assessment.normalise(assessment_name)
+    try:
+        write_snapshot(ctx, snapshot_out, angles)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot write snapshot: {exc}") from exc
+    typer.echo(f"Snapshot written to {snapshot_out}", err=True)
+    return run_audit(client, models, angles, assessment_name, ctx=ctx)
+
+
 @app.command("run")
 def run(
-    models: List[str] = typer.Option(..., "--models", "-m",
-                                     help="One or more model GUIDs to audit"),
+    models: Optional[List[str]] = typer.Option(
+        None, "--models", "-m",
+        help="One or more model GUIDs to audit (required unless --snapshot-in)"),
     profile: Optional[str] = _profile_option,
     angles: Optional[str] = typer.Option(None, "--angles", "-a",
                                           help="Comma-separated angle filter: A,D,H,P,S (default: all)"),
@@ -29,6 +70,13 @@ def run(
              "AI context recommended). Default: general"),
     output: Optional[Path] = typer.Option(None, "--output", "-o",
                                            help="Write JSON report to file instead of stdout"),
+    snapshot_out: Optional[Path] = typer.Option(
+        None, "--snapshot-out",
+        help="Also write the fetched audit data to this directory, for later replay"),
+    snapshot_in: Optional[Path] = typer.Option(
+        None, "--snapshot-in",
+        help="Audit a directory written by --snapshot-out instead of fetching: needs no "
+             "profile, ignores --models, and --angles defaults to the captured angles"),
 ) -> None:
     """Run audit checks against one or more ThoughtSpot models."""
     from ts_cli.audit import assessment, run_audit
@@ -37,10 +85,25 @@ def run(
         assessment.normalise(assessment_name)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    if snapshot_in and snapshot_out:
+        raise typer.BadParameter("--snapshot-in and --snapshot-out cannot be used together",
+                                 param_hint="--snapshot-in / --snapshot-out")
+    if not snapshot_in and not models:
+        raise typer.BadParameter("required unless --snapshot-in is given",
+                                 param_hint="--models")
 
-    angle_list = [a.strip().upper() for a in angles.split(",")] if angles else None
-    client = ThoughtSpotClient(resolve_profile(profile))
-    result = run_audit(client, models, angle_list, assessment_name)
+    angle_list = _parse_angles(angles)
+    if snapshot_in:
+        if models:
+            typer.echo("Note: --models is ignored with --snapshot-in; "
+                       "the snapshot's models are audited.", err=True)
+        result = _replay(snapshot_in, angle_list, assessment_name)
+    else:
+        client = ThoughtSpotClient(resolve_profile(profile))
+        if snapshot_out:
+            result = _capture(client, models, angle_list, assessment_name, snapshot_out)
+        else:
+            result = run_audit(client, models, angle_list, assessment_name)
     json_str = json.dumps(result, indent=2)
 
     if output:

@@ -4653,10 +4653,15 @@ ts audit report audit.json -o report.html
 
 | Flag | Default | Description |
 |---|---|---|
-| `--models`, `-m` | required | Model GUID to audit (repeatable) |
+| `--models`, `-m` | required | Model GUID to audit (repeatable). Not needed, and ignored, with `--snapshot-in` |
 | `--angles`, `-a` | all | Comma-separated subset of `A,D,H,P,S` |
 | `--assessment` | `general` | The bar the AI-readiness checks (A1–A4, A6) measure against. `spotter` (Spotter-ready): descriptions ≥ 95%, synonyms ≥ 80%, measure AI context required, missing AI instructions or Model description HIGH. `general`: ≥ 50%, ≥ 25%, AI context recommended (a gap is LOW), missing instructions or description MEDIUM. Coverage checks are HIGH below half their pass mark. The table lives in `ts_cli/audit/assessment.py`; the report header names the assessment used |
 | `--output`, `-o` | stdout | Write the JSON report to a file |
+| `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `files`). Refused if the data would not read back unchanged |
+| `--snapshot-in` | — | Audit a `--snapshot-out` directory instead of fetching: no profile, no network. `--angles` defaults to the captured angles; asking for an angle that was not captured is an error, because the A and H angles fetch data the others do not. Cannot be combined with `--snapshot-out` |
+
+A snapshot holds exported TML from the cluster it was captured on. Keep it outside the
+repository — this repo is public.
 
 ## `ts sets` — reusable Set inventory and report (read-only)
 
