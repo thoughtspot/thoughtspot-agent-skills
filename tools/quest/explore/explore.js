@@ -91,7 +91,13 @@
     if (obj.type === "portal") {
       const i = realms.findIndex(r => r.id === obj.to);
       if (!explorable.has(obj.to)) return toClassic(obj.to);
-      state = machine.act(state, { type: "realm", realm: i }, progress.load()).state;
+      // A portal is the map's entry for its realm: back to the map first (from a gate left open with
+      // Esc), so the gate is judged now, from the save as it is.
+      let at = state;
+      if (at.screen !== "map") at = machine.act(at, { type: "map" }, progress.load()).state;
+      const out = machine.act(at, { type: "realm", realm: i }, progress.load());
+      if (out.refused) { log(`ERROR portal ${obj.to}: ${out.refused}`); return toast(S("explore_not_yet")); }
+      state = out.state;
       Sound.play("blip");
       return openDialog("portal");
     }
