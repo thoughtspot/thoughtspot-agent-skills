@@ -2392,8 +2392,8 @@ def _tmj(rows: list[str], objects: dict[str, tuple[str, dict]], gates: list[tupl
                      "properties": [{"name": "requires", "type": "string", "value": requires}]})
         n += 1
     return {"type": "map", "width": w, "height": h, "tilewidth": TILE, "tileheight": TILE, "orientation": "orthogonal",
-            "layers": [{"type": "tilelayer", "name": "walls", "width": w, "height": h, "data": data},
-                       {"type": "tilelayer", "name": "floor", "width": w, "height": h, "data": [0] * (w * h)},
+            "layers": [{"type": "tilelayer", "name": "walls", "x": 0, "y": 0, "width": w, "height": h, "data": data},
+                       {"type": "tilelayer", "name": "floor", "x": 0, "y": 0, "width": w, "height": h, "data": [0] * (w * h)},
                        {"type": "objectgroup", "name": "objects", "objects": objs}],
             "tilesets": [{"firstgid": 1, "name": "tiles", "image": image, "tilewidth": TILE, "tileheight": TILE,
                           "imagewidth": TILE, "imageheight": TILE, "tilecount": 1, "columns": 1}]}
@@ -2626,7 +2626,7 @@ def _obj(m, kind):
     (lambda m: _obj(m, "gate").update(polygon=[{"x": 0, "y": 0}, {"x": 16, "y": 0}, {"x": 0, "y": 16}]),
      "must be an unrotated rectangle"),
     (lambda m: _obj(m, "foe").update(gid=1), "insert tile objects as rectangles"),
-    (lambda m: _obj(m, "gate").update(width=TILE * 2), "must fill exactly one tile (the explore page blocks one"),
+    (lambda m: _obj(m, "gate").update(width=TILE * 2), "must be exactly one tile on the grid"),
     (lambda m: _layer(m, "objectgroup").update(name="Object Layer 1"), "one object layer, named objects"),
     (lambda m: m["layers"].append({"type": "objectgroup", "name": "objects", "objects": []}), "one object layer, named objects"),
     (lambda m: m["layers"].pop(1), "exactly the tile layers floor and walls"),
@@ -2641,7 +2641,7 @@ def _obj(m, kind):
     (lambda m: _obj(m, "spawn").update(x=_obj(m, "merchant")["x"], y=_obj(m, "merchant")["y"]), "on a solid object"),
     (lambda m: m["layers"].insert(0, {"type": "imagelayer", "name": "sky"}), None),
     (lambda m: _obj(m, "merchant").update(x="16px"), "must be numbers"),
-    (lambda m: _obj(m, "guide").update(width=TILE * 3), "must fill exactly one tile"),
+    (lambda m: _obj(m, "guide").update(width=TILE * 3), "must be exactly one tile on the grid"),
     (lambda m: _obj(m, "gate")["properties"][0].update(value=" , "), "requires names no step"),
     (lambda m: _obj(m, "gate").update(x=TILE * 40), "is not wholly on the map"),
     (lambda m: _obj(m, "foe").update(x=TILE * 40), "is outside the map"),
@@ -2722,7 +2722,7 @@ def test_a_sealed_or_reserved_realm_cannot_be_explored(tmp_path):
 SHORE_ROWS = ["##########",
               "#S..1.#..#",
               "#.....#2.#",
-              "#X........",
+              "#X.......#",
               "##########"]
 SHORE_OBJECTS = {"S": ("spawn", {}), "X": ("exit", {}), "1": ("throne", {"hall": "first"}), "2": ("throne", {"hall": "second"})}
 SHORE_GATE = [("hall:first", [(6, 3)])]
@@ -2801,3 +2801,78 @@ def test_the_map_play_through_catches_the_machine_on_halls_and_interact(tmp_path
                            capture_output=True, text=True)
         fails.append(r.returncode != 0 and needle in r.stderr)
     assert any(fails), needle
+
+
+
+# ---- re-review of PR 4: what the explore page's physics needs ---------------------------------------
+
+@pytest.mark.parametrize("edit,needle", [
+    # objects the page gives a 16px body at their centre: off the grid, a point or smaller than a tile
+    # seals a one-tile corridor the walk thinks is open (the review drove the real engine to show it)
+    (lambda m: _obj(m, "reward").update(point=True, width=0, height=0), "must be an unrotated rectangle"),
+    (lambda m: _obj(m, "gate").update(point=True, width=0, height=0), "must be an unrotated rectangle"),
+    (lambda m: _obj(m, "gate").update(width=4, height=4), "must be exactly one tile on the grid"),
+    (lambda m: _obj(m, "foe").update(x=_obj(m, "foe")["x"] + 4), "must be exactly one tile on the grid"),
+    (lambda m: _obj(m, "guide").update(ellipse=True), "must be an unrotated rectangle"),
+    # tiles the 12px player can't walk between
+    (lambda m: m.update(tilewidth=8, tileheight=8), "tiles must be 16x16"),
+    # a tile layer Phaser places elsewhere, or at NaN (no walls at all)
+    (lambda m: _layer(m, "tilelayer").pop("x"), "needs x 0 and y 0"),
+    (lambda m: _layer(m, "tilelayer").update(x=16), "needs x 0 and y 0"),
+    # a floor Phaser can't read
+    (lambda m: next(l for l in m["layers"] if l["name"] == "floor").update(data="eJxjYGBgAAAABQAB", encoding="base64"),
+     "the floor layer must be 12x6 tile numbers"),
+    # the same property twice: the checks and the page would read different ones
+    (lambda m: _obj(m, "foe")["properties"].insert(0, {"name": "encounter", "type": "string", "value": "nosuch"}),
+     "property 'encounter' is given twice"),
+    (lambda m: _obj(m, "foe").update(properties={"encounter": "the_rune"}), "properties must be a list"),
+    (lambda m: _obj(m, "foe").update(type=["foe"]), "type must be text"),
+    (lambda m: _obj(m, "foe").update(x=float("nan")), "must be numbers"),
+    (lambda m: m["tilesets"][0].update(image="tiles\x00.png"), "is not in the pack"),
+])
+def test_a_map_the_explore_pages_physics_reads_differently_fails(tmp_path, edit, needle):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    edit(cave)
+    pack, data = _explorable(tmp_path, cave=cave)
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("make,needle", [
+    # an open edge: the page doesn't stop the player at the map's edge
+    (lambda: _tmj(["############", "#S.M.G..#F..", "#.......#...", "#.C.......##", "#X......#R.#", "############"],
+                  CAVE_OBJECTS, CAVE_GATE), "the map's edge must all be wall or someone solid"),
+    # the exit behind a gate: a player must be able to leave from the start
+    (lambda: _tmj(["############", "#S.M.G..#..#", "#.......#F.#", "#.C.......##", "#.......#RX#", "############"],
+                  CAVE_OBJECTS, CAVE_GATE), "(exit): can't be reached from the spawn"),
+    # two rooms that touch only at a wall corner: the player can't squeeze across it
+    (lambda: _tmj(["############", "#S.M.G.#####", "#.......#F.#", "#.C....#..##", "#X.....##R.#", "############"],
+                  CAVE_OBJECTS, []), "(foe): can't be reached when the game waits on the_rune:foe"),
+])
+def test_the_walk_follows_what_the_player_can_do(tmp_path, make, needle):
+    pack, data = _explorable(tmp_path, cave=make())
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+def test_a_huge_map_is_refused_quickly(tmp_path):
+    import time
+    pack, data = _explorable(tmp_path)
+    (pack.dir / "maps/cave.tmj").write_text(json.dumps(dict(_tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE), width=6000, height=6000)),
+                                            encoding="utf-8")
+    start = time.monotonic()
+    errors = MAPS.check_maps(pack.dir, data)
+    assert time.monotonic() - start < 5 and any("is over 40,000 tiles" in e for e in errors), errors
+
+
+def test_maps_holds_no_folders(tmp_path):
+    pack, data = _explorable(tmp_path)
+    (pack.dir / "maps/old").mkdir()
+    assert any("maps/old/: maps/ holds no folders" in e for e in MAPS.check_maps(pack.dir, data))
+
+
+def test_a_map_plays_one_realm_shape(tmp_path):
+    pack, data = _explorable(tmp_path)
+    cave = next(r for r in data["realms"] if r["id"] == "cave")
+    cave["halls"] = copy.deepcopy(data["realms"][0]["halls"])
+    assert any("has halls and an encounter" in e for e in MAPS.check_maps(pack.dir, data))

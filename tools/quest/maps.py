@@ -17,7 +17,9 @@ such realm, saved by Tiled 1.10 or later as JSON with tilesets embedded. On a ma
 Only what Phaser 4 and the explore page read the same way: an orthogonal, finite map; layers at
 the top level (no groups) with no offsets: tile layers `floor` and `walls`, the map's size, and one
 object layer `objects`; one embedded tileset named `tiles`; unrotated rectangle objects (not tile
-objects, which Tiled and Phaser anchor differently), each filling exactly one tile.
+objects, which Tiled and Phaser anchor differently), each exactly one tile on the grid (the explore
+page gives each a 16px body at its centre); tiles of 16px; a wall all round the edge (the page
+doesn't stop the player at the map's edge).
 
 An object sits on the tile containing its centre.
 Everything but the spawn and gates is solid; reaching an object means standing on a walkable tile
@@ -29,6 +31,7 @@ that step's object. The exit must be reachable from the start, so a player can a
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 ROLES = ("merchant", "guide", "compiler", "foe", "reward")
@@ -39,6 +42,8 @@ OVERWORLD_TYPES = {"spawn", "portal", "gate"}
 OVERWORLD = "overworld"
 IMAGES = (".png",)
 GID = 0x1FFFFFFF   # a tile number without Tiled's flip and rotation flags
+TILE = 16          # the explore page's tiles and its player's body are sized for 16px
+MAX_TILES = 200 * 200
 
 
 def _num(v) -> bool:
@@ -54,12 +59,19 @@ def realm_steps(realm: dict) -> list[str]:
 
 
 def _props(obj: dict, where: str, errors: list[str]) -> dict[str, str]:
-    out = {}
-    for p in obj.get("properties") or []:
-        if not isinstance(p, dict) or p.get("type", "string") != "string" or not isinstance(p.get("value"), str):
+    out: dict[str, str] = {}
+    props = obj.get("properties") or []
+    if not isinstance(props, list):
+        errors.append(f"{where}: properties must be a list")
+        return out
+    for p in props:
+        if (not isinstance(p, dict) or not isinstance(p.get("name"), str) or p.get("type", "string") != "string"
+                or not isinstance(p.get("value"), str)):
             errors.append(f"{where}: property {p.get('name') if isinstance(p, dict) else p!r} must be a string")
             continue
-        out[p.get("name")] = p["value"]
+        if p["name"] in out:   # the checks and the page must read the same one
+            errors.append(f"{where}: property {p['name']!r} is given twice")
+        out[p["name"]] = p["value"]
     return out
 
 
@@ -82,6 +94,12 @@ class Map:
         if not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in (self.w, self.h, self.tw, self.th)) and d:
             errors.append(f"{self.name}: needs whole-number width, height, tilewidth and tileheight")
             self.w = self.h = self.tw = self.th = 1
+        elif d and (self.tw, self.th) != (TILE, TILE):
+            errors.append(f"{self.name}: tiles must be {TILE}x{TILE} (the explore page's player is sized for them)")
+        if self.w * self.h > MAX_TILES:
+            errors.append(f"{self.name}: {self.w}x{self.h} is over {MAX_TILES:,} tiles")
+            self.w = self.h = 1
+            d = {}
         if d and d.get("orientation", "orthogonal") != "orthogonal":
             errors.append(f"{self.name}: orientation must be orthogonal (the checks and the explore page lay tiles out square)")
         if d.get("infinite"):
@@ -94,6 +112,8 @@ class Map:
                 errors.append(f"{self.name}: layer {layer.get('name')!r} is a group; keep every layer at the top level")
             elif any(layer.get(k) for k in ("offsetx", "offsety", "startx", "starty")):
                 errors.append(f"{self.name}: layer {layer.get('name')!r} is offset; set its offsets to 0")
+            elif layer.get("type") == "tilelayer" and (layer.get("x"), layer.get("y")) != (0, 0):
+                errors.append(f"{self.name}: tile layer {layer.get('name')!r} needs x 0 and y 0 (Phaser places it there)")
         layers = [l for l in layers if isinstance(l, dict)]
         walls = [l for l in layers if l.get("type") == "tilelayer" and l.get("name") == "walls"]
         if d and len(walls) != 1:
@@ -107,12 +127,13 @@ class Map:
         groups = [l for l in layers if l.get("type") == "objectgroup"]
         if d and [l.get("name") for l in groups] != ["objects"]:
             errors.append(f"{self.name}: needs exactly one object layer, named objects (the explore page reads that one)")
-        data = walls[0].get("data") if walls else None
-        if walls and (not isinstance(data, list) or len(data) != self.w * self.h
-                      or not all(isinstance(g, int) and not isinstance(g, bool) and g >= 0 for g in data)
-                      or (walls[0].get("width"), walls[0].get("height")) != (self.w, self.h)):
-            errors.append(f"{self.name}: the walls layer must be {self.w}x{self.h} tile numbers (CSV, not base64)")
-            data = None
+        good = lambda l: (isinstance(l.get("data"), list) and len(l["data"]) == self.w * self.h
+                          and all(isinstance(g, int) and not isinstance(g, bool) and g >= 0 for g in l["data"])
+                          and (l.get("width"), l.get("height")) == (self.w, self.h))
+        for l in tiles:
+            if not good(l):
+                errors.append(f"{self.name}: the {l.get('name')} layer must be {self.w}x{self.h} tile numbers (CSV, not base64)")
+        data = walls[0].get("data") if walls and good(walls[0]) else None
         self.wall = {(i % self.w, i // self.w) for i, g in enumerate(data or []) if g & GID}
         self.objects = []
         for layer in layers:
@@ -123,15 +144,23 @@ class Map:
                     errors.append(f"{self.name}: an object in layer {layer.get('name')!r} is not a JSON object")
                     continue
                 where = f"{self.name}: object {o.get('id')} ({o.get('type') or o.get('class') or '?'})"
+                if not isinstance(o.get("type", ""), str):
+                    errors.append(f"{where}: type must be text")
+                    continue
                 if "template" in o:
                     errors.append(f"{where}: uses a Tiled template, which Phaser doesn't resolve; detach it")
                 if "class" in o and "type" not in o:
                     errors.append(f"{where}: has a class but no type (saved by Tiled 1.9); save with Tiled 1.10 or later")
-                if not all(_num(o.get(k, 0)) for k in ("x", "y", "width", "height")):
+                if not all(_num(o.get(k, 0)) and math.isfinite(o.get(k, 0)) for k in ("x", "y", "width", "height")):
                     errors.append(f"{where}: x, y, width and height must be numbers")
                     continue
-                if o.get("rotation") or any(k in o for k in ("polygon", "polyline", "text", "gid")):
+                if (o.get("rotation") or o.get("point") or o.get("ellipse")
+                        or any(k in o for k in ("polygon", "polyline", "text", "gid"))):
                     errors.append(f"{where}: must be an unrotated rectangle (insert tile objects as rectangles)")
+                    continue
+                if (o.get("width"), o.get("height")) != (self.tw, self.th) or o.get("x", 0) % self.tw or o.get("y", 0) % self.th:
+                    errors.append(f"{where}: must be exactly one tile on the grid ({self.tw}x{self.th} at a multiple of "
+                                  f"{self.tw}; snap to grid in Tiled); the explore page gives it a body that size at its centre")
                     continue
                 self.objects.append({"type": o.get("type"), "props": _props(o, where, errors), "where": where,
                                      "tile": self._tile(o), "rect": self._rect(o)})
@@ -146,7 +175,10 @@ class Map:
                 errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (Phaser reads embedded tilesets only)")
             else:
                 image = ts.get("image")
-                target = (path.parent / image).resolve() if isinstance(image, str) and image else None
+                try:
+                    target = (path.parent / image).resolve() if isinstance(image, str) and image else None
+                except (OSError, ValueError):
+                    target = None
                 if (target is None or not target.is_relative_to(pack_dir) or target.suffix.lower() not in IMAGES
                         or not target.is_file()):
                     errors.append(f"{self.name}: tileset {ts.get('name')!r} image {image!r} is not in the pack "
@@ -244,7 +276,7 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
         if missing or extra:
             errors.append(f"{o['where']}: needs exactly the properties {sorted(PROPS[o['type']]) or 'none'}")
         if o["type"] == "gate":
-            if not o["rect"] <= {(x, y) for x in range(m.w) for y in range(m.h)}:
+            if not all(m.inside(t) for t in o["rect"]):
                 errors.append(f"{o['where']}: is not wholly on the map")
             elif len(o["rect"]) != 1:
                 errors.append(f"{o['where']}: must fill exactly one tile (the explore page blocks one; use a gate per tile)")
@@ -256,10 +288,19 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
             errors.append(f"{o['where']}: must fill exactly one tile (it is solid on one tile only)")
     if len(m.of("spawn")) != 1:
         errors.append(f"{m.name}: needs exactly one spawn")
+    edge = {(x, y) for x in range(m.w) for y in (0, m.h - 1)} | {(x, y) for y in range(m.h) for x in (0, m.w - 1)}
+    shut = m.wall | {o["tile"] for o in m.objects if o["type"] not in ("spawn", "gate")}   # walls, or someone solid
+    if m.doc and not edge <= shut:
+        x, y = min(edge - shut, key=lambda t: (t[1], t[0]))
+        errors.append(f"{m.name}: the map's edge must all be wall or someone solid (the explore page doesn't stop the player there); "
+                      f"({x}, {y}) isn't")
 
 
 def check_realm_map(m: Map, realm: dict) -> list[str]:
     errors = m.errors
+    # The walk follows realm_steps, which is the machine's order only for a realm of halls or of one encounter.
+    if realm["halls"] and realm["encounters"] or len(realm["encounters"]) > 1:
+        return errors + [f"{m.name}: realm {realm['id']} has halls and an encounter, or two encounters; a map plays one or the other"]
     _shape(m, REALM_TYPES, errors)
     if len(m.of("exit")) != 1:
         errors.append(f"{m.name}: needs exactly one exit")
@@ -306,8 +347,16 @@ def check_maps(pack_dir: pathlib.Path, data: dict) -> list[str]:
                 for p in files if p.suffix.lower() not in IMAGES]
     errors = []
     realms = {r["id"]: r for r in data.get("realms") or []}
-    images = {(p.parent / ts["image"]).resolve() for m in present.values() for p in [m]
-              for ts in (_tilesets(m)) if isinstance(ts.get("image"), str)}
+    images = set()
+    for m in present.values():
+        for ts in _tilesets(m):
+            try:
+                images.add((m.parent / ts["image"]).resolve())
+            except (KeyError, TypeError, OSError, ValueError):
+                pass    # reported by the map's own checks
+    for p in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if p.is_dir():
+            errors.append(f"maps/{p.name}/: maps/ holds no folders")
     for p in files:
         if p.suffix != ".tmj" and p.resolve() not in images:
             errors.append(f"maps/{p.name}: not used (maps/ holds {OVERWORLD}.tmj, a .tmj per realm in explore.realms, "

@@ -190,7 +190,10 @@ explore page would read differently from the check:
 
 - **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor` and
   `walls` (the map's size) and one object layer `objects`; one embedded tileset named `tiles`
-  whose `.png` is in the pack; objects are unrotated rectangles (not tile objects), one tile each.
+  whose `.png` is in the pack; 16px tiles; objects are unrotated rectangles (not tile objects or
+  points), each exactly one tile on the grid (snap to grid in Tiled), because the explore page
+  gives each a 16px body at its centre; a wall, or someone solid, all round the edge, because the
+  page doesn't stop the player at the map's edge.
 - **Collision** is the `walls` layer: any non-empty tile blocks.
 - **Objects** have a `type` and string properties only:
   - `spawn`, where the player appears (one per map);
@@ -234,7 +237,7 @@ sources:
 | `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
 | `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
-| `maps/….tmj: …` (for example `can't be reached from the spawn`, `never opens`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
+| `maps/….tmj: …` (for example `can't be reached when the game waits on …`, `must be exactly one tile on the grid`, `the map's edge must all be wall`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
 | `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
