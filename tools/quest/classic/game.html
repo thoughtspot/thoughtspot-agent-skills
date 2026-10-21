@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AgentQL Quest</title>
-<meta name="description" content="A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.">
+<title>__PAGE_TITLE__</title>
+<meta name="description" content="__PAGE_DESCRIPTION__">
 <style>
 /* Fonts are inlined by build.py (fonts/, SIL OFL 1.1), so the page makes no outside requests. */
 /*__FONT_FACES__*/
@@ -184,73 +184,29 @@ p { margin: 0; max-width: 62ch; }
 
 <!-- Written by build.py from the pack (content.yaml) + the captured lesson SQL. Do not edit here. -->
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
+<script id="classic-art" type="application/json">__CLASSIC_ART__</script>
 <script>
 const QUEST = JSON.parse(document.getElementById("quest-data").textContent);
 const REALMS = QUEST.realms;
 const SAVE_KEY = QUEST.pack.storage_key;  // saves are <key>-progress and <key>-sound
 
-const ART = {
-  title: String.raw`
-     _                    _    ___  _
-    /_\  __ _ ___ _ _ | |_ / _ \| |
-   / _ \/ _' / -_) ' \|  _| (_) | |__
-  /_/ \_\__, \___|_||_|\__|\__\_\____|
-        |___/        Q  U  E  S  T
-`,
-  dragon: String.raw`
-                 /\    /\
-                /  \__/  \
-      ~~~~~~   (  O    O  )
-     ~~~~~~~~   \   /\   /____
-       ~~~~~~    \  \/  /     \_
-                  \____/ /\  /\ \
-                   //  \/  \/  \/
-`,
-  wizard: String.raw`
-        /\
-       /**\
-      /____\
-      (o  o)
-     /| ~~ |\     The Wizard
-      |____|      (the AI)
-      /_||_\
-`,
-  forge: String.raw`
-     ____________
-    |  [######]  |    The Forge
-    |__|######|__|    (ThoughtSpot)
-       |######|
-     ~~~~~~~~~~~~
-`,
-  crown: String.raw`
-      _/\_/\_/\_
-      \ o    o /
-       \______/
-       /|    |\
-`,
-  banner: String.raw`
-       _______
-      | ~~~~~ |
-      |  ~~~  |
-      |_______|
-         | |
-`
-};
+// The pack's ASCII art (art/classic/*.txt), written in by build.py: title, guide, compiler, foe
+// (the lexicon's roles), crown, banner, map, and scene_<realm id> for each realm that has a scene.
+const ART = JSON.parse(document.getElementById("classic-art").textContent);
+const MAP_ROWS = ART.map.split("\n");
 
-// The map is drawn row by row and framed in code, so the border always lines up.
-const MAP_ROWS = [
-  String.raw`[3] CRAFTSMEN       =-=-=-=-=-=-        [5] THE SHIFTING`,
-  String.raw`    OF THE LAKE    =-=  LAKE  =-=       =-= ISLES =-=`,
-  String.raw`                    =-=-=-=-=-=-      =-=-=-=-=-=-=`,
-  String.raw`[2] DWARVEN MINES`,
-  String.raw`  /\/\/\/\                        ,,,,,,,,,,,,,`,
-  String.raw`   ##   ##        [1] KINGDOM     ,,[4] GOLDEN,,,`,
-  String.raw`                      OF LAW       ,,,FORESTS,,,`,
-  String.raw`                     _|^|^|_        ,,,,,,,,,`,
-  String.raw`                    |_|_|_|_|`
-];
-// The throne room for a Kingdom of Law hall: pillars with torches, the hall's banner, the
-// throne, and petitioners. During petitions one petitioner stands before the throne.
+// The pack's wording (strings.yaml). S() is plain text; H() is HTML: the text escaped, then
+// *word* highlighted, **word** bold and [text](https://…) linked, then {name} filled in escaped.
+const STRINGS = QUEST.pack.strings;
+const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
+const S = (k, v = {}) => fill(STRINGS[k], v);
+const H = (k, v = {}) => fill(esc(STRINGS[k]).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+  .replace(/\*(.+?)\*/g, '<span class="hot">$1</span>')
+  .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>'),
+  Object.fromEntries(Object.entries(v).map(([k, x]) => [k, esc(x)])));
+
+// The throne room for a hall: pillars with torches, the hall's banner, the throne, and
+// petitioners. During petitions one petitioner stands before the throne.
 function hallScene(title, petitioning) {
   const W = 50, pad = s => s.padEnd(W);
   const banner = title.toUpperCase();
@@ -281,57 +237,12 @@ function hallScene(title, petitioning) {
     .replace("\uE002", '<span class="hot crown">W</span>')).join("\n")}</pre>`;  // one cell wide, unlike ♛
 }
 
-const SCENES = {
- "mines": [
-  "@BANNER",
-  "       /\\           /\\/\\          /\\ ",
-  "      /  \\    /\\   /    \\   /\\   /  \\ ",
-  "     /    \\__/  \\_/      \\_/  \\_/    \\ ",
-  "        ||   $    __________    %   ||",
-  "        ||       /          \\       ||",
-  "        ||      |  .  ..  .  |      ||",
-  "   _____||______|____________|______||_____",
-  "         o        ______         o",
-  "        /|\\=    [_o____o_]     =/|\\ ",
-  "        / \\                     / \\ "
- ],
- "lake": [
-  "@BANNER",
-  "          _/\\_           _/\\_          _/\\_",
-  "         |    |  ___    |    |  ___   |    |",
-  "         |_[]_| |   |   |_[]_| |   |  |_[]_|",
-  "          |  |  |___|    |  |  |___|   |  |",
-  "!   =-=   |  |  =-=   =- |  | =-=   =- |  |  =-=",
-  "! =-   =- |  | =-   =-=  |  |  =-   =-=|  | =-",
-  "!   =-=      =-=   \\____o____/   =-=       =-=",
-  "! =-   =-=   =-   =-   =-=   =-   =-   =-=   =-"
- ],
- "forests": [
-  "@BANNER",
-  "     $     ,@@@@@,        %      ,@@@@@,     $",
-  "         ,@@@@@@@@@,          ,@@@@@@@@@,",
-  "        @@@@@@@@@@@@@   %    @@@@@@@@@@@@@",
-  "     %   '@@@@@@@@@'    ,@@,  '@@@@@@@@@'   %",
-  "            |   |      @@@@@@     |   |",
-  "     $      |   |       '||'      |   |     $",
-  "  __________|___|________||_______|___|__________"
- ],
- "isles": [
-  "@BANNER",
-  "            _/\\_                    ,/\\,",
-  "          _/    \\_       $        _/    \\_",
-  "!  =-=   /  ,  ,  \\   =-=   =-=  /   ||   \\   =-=",
-  "! =-=-= (__________) =-=-= =-=-=(____||____) =-=-=",
-  "!   =-=-=    =-=-=    =-=-=    =-=-=    =-=-=   =-",
-  "!  =-=-   =-=-   \\_o_/   =-=-   =-=-   =-=-   =-="
- ]
-};
-
 // A realm's scene: its art with the realm's name on a banner. Markers apply to the art only,
 // never to the banner, so no letter in a name can become a lantern.
 function realmScene(r) {
-  const lines = SCENES[r.id];
-  if (!lines) return art("banner", "hot");
+  const scene = ART[`scene_${r.id}`];
+  if (!scene) return art("banner", "hot");
+  const lines = scene.split("\n");
   const art_ = lines.filter(l => l !== "@BANNER").map(l => l.replace(/^!/, ""));
   const name = r.name.toUpperCase(), inner = name.length + 6;
   const W = Math.max(inner + 2, ...art_.map(l => l.length));
@@ -426,8 +337,8 @@ const Sound = (() => {
   function label() {
     const fx = document.getElementById("sound-sfx"), mu = document.getElementById("sound-music");
     if (!fx || !mu || !fx.setAttribute) return;
-    fx.textContent = `[S] Sound effects: ${prefs.sfx ? "on" : "off"}`;
-    mu.textContent = `[M] Music: ${prefs.music ? "on" : "off"}`;
+    fx.textContent = S("sound_sfx", { state: S(prefs.sfx ? "sound_on" : "sound_off") });
+    mu.textContent = S("sound_music", { state: S(prefs.music ? "sound_on" : "sound_off") });
     fx.setAttribute("aria-pressed", String(prefs.sfx));
     mu.setAttribute("aria-pressed", String(prefs.music));
   }
@@ -449,13 +360,12 @@ const Sound = (() => {
 
 // ---- Gold: right answers earn it, wrong ones cost some, magic is free. -------------------------
 const GOLD_WIN = 10, GOLD_LOSS = 5;
-const DETERMINISM = "So the same AgentQL, on the same Model, for the same user, always compiles to the same SQL.";
-const LEGEND = `<div class="legend" aria-label="Who is who">
-  <span><b>Wizard</b> = the AI</span><span><b>Scroll</b> = the AgentQL it wrote</span>
-  <span><b>Forge</b> = ThoughtSpot + the Model</span><span><b>Dragon</b> = the SQL that runs</span></div>`;
-const RULE = `<div class="rule-card"><span class="hot">THE RULE OF THE FORGE</span>
-  <p>Whatever the Forge adds or changes is the Forge's: tables, joins and keys, column names, null guards, LOWER(), the row cap. A shape your scroll asked for, and the SQL keeps, is yours: an outer join, two steps, a ranking. The Wizard only writes the scroll. ThoughtSpot compiles the SQL that runs.</p></div>`;
-const GOLD_RULES = `Each right answer earns ${GOLD_WIN} gold. A wrong one costs ${GOLD_LOSS}, but never more than you carry, and you answer again. Invoke magic to see the answer: no gold won or lost.`;
+const LEGEND = () => `<div class="legend" aria-label="${esc(S("legend_label"))}">
+  <span>${H("legend_guide")}</span><span>${H("legend_scroll")}</span>
+  <span>${H("legend_compiler")}</span><span>${H("legend_foe")}</span></div>`;
+const RULE = () => `<div class="rule-card"><span class="hot">${H("rule_title")}</span>
+  <p>${H("rule_text")}</p></div>`;
+const GOLD_RULES = () => S("gold_rules", { win: GOLD_WIN, loss: GOLD_LOSS });
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
@@ -543,89 +453,87 @@ function answer(kind) {
   render();
 }
 function magic() { Sound.play("magic"); state.flash = { kind: "magic", amount: 0 }; render(); }
-const MAGIC_LABEL = "Invoke magic: show me the answer (no gold won or lost)";
+const MAGIC_LABEL = () => S("magic_label");
 const settled = f => f.kind === "win" || f.kind === "magic";
 
 function announce(t) { const el = document.getElementById("live"); if (el) el.textContent = t; }
 
 function feedback(f, why, hint, correctText, court = false) {
-  announce(f.kind === "win" ? `Right. Plus ${f.amount} gold. ${why}` : f.kind === "magic" ? `The answer: ${correctText}. ${why}`
-           : f.kind === "blocked" ? `This path is closed here. ${hint}` : `Not quite. ${hint}`);
-  if (f.kind === "win") return `<div class="feedback"><span class="tag">+${f.amount} GOLD</span><p>${esc(why)}</p></div>`;
-  if (f.kind === "magic") return `<div class="feedback magic"><span class="tag">THE MAGIC REVEALS IT</span>
-    <p>The answer: <span class="hot">${esc(correctText)}</span></p><p>${esc(why)}</p></div>`;
-  if (f.kind === "blocked") return `<div class="feedback magic"><span class="tag">THIS PATH IS CLOSED HERE</span><p>${esc(hint)}</p></div>`;
-  const who = court ? "THE COURT" : "THE DRAGON";
-  const took = f.amount ? (court ? `THE COURT FINES YOU ${f.amount} GOLD` : `THE DRAGON TAKES ${f.amount} GOLD`)
-                        : `${who} FINDS YOUR PURSE EMPTY`;
+  announce(f.kind === "win" ? S("said_win", { amount: f.amount, why }) : f.kind === "magic" ? S("said_magic", { answer: correctText, why })
+           : f.kind === "blocked" ? S("said_blocked", { hint }) : S("said_miss", { hint }));
+  if (f.kind === "win") return `<div class="feedback"><span class="tag">${H("won_tag", { amount: f.amount })}</span><p>${esc(why)}</p></div>`;
+  if (f.kind === "magic") return `<div class="feedback magic"><span class="tag">${H("magic_tag")}</span>
+    <p>${H("magic_answer", { answer: correctText })}</p><p>${esc(why)}</p></div>`;
+  if (f.kind === "blocked") return `<div class="feedback magic"><span class="tag">${H("blocked_tag")}</span><p>${esc(hint)}</p></div>`;
+  const took = f.amount ? H(court ? "fine_court" : "fine_foe", { amount: f.amount }) : H(court ? "empty_court" : "empty_foe");
   return `<div class="feedback miss"><span class="tag">${took}</span><p>${esc(hint)}</p></div>`;
 }
 
-const meta = r => `${r.depth} · about ${r.minutes} min`;
+const meta = r => S("realm_meta", { depth: r.depth, minutes: r.minutes });
 const go = patch => () => { Sound.play("blip"); Object.assign(state, patch); render(); };
 const toMap = go({ screen: "map", flash: null });
-const goldTag = () => `<span><span class="lbl">GOLD</span> <span class="hot">${state.gold}</span></span>`;
+const goldTag = () => `<span><span class="lbl">${H("gold_tag")}</span> <span class="hot">${state.gold}</span></span>`;
 
 const SCREENS = {
   title() {
-    return `<h1 class="sr-only">AgentQL Quest</h1>${art("title", "hot")}
-      <p>A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into governed SQL, the same way every time.</p>
-      <p class="dim">Start in the Kingdom of Law, then take a quest in any realm. Each takes a few minutes. Earn gold with right answers.</p>
-      ${choices([{ label: "Open the map", go: toMap }])}
-      <p class="foot">Number keys or click to choose. S and M switch sound effects and music. <span class="cursor">&nbsp;</span><br>
-        Part of the <a href="https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md">Learn AgentQL course</a>
-        from <a href="https://github.com/thoughtspot/thoughtspot-agent-skills">ThoughtSpot Agent Skills</a>.</p>`;
+    return `<h1 class="sr-only">${esc(QUEST.pack.title)}</h1>${art("title", "hot")}
+      <p>${H("title_intro")}</p>
+      <p class="dim">${H("title_start")}</p>
+      ${choices([{ label: S("title_open"), go: toMap }])}
+      <p class="foot">${H("title_keys")} <span class="cursor">&nbsp;</span><br>
+        ${H("title_links")}</p>`;
   },
   map() {
     const done = loadProgress();
     const names = Object.fromEntries(REALMS.map(r => [r.id, r.name.replace(/^The /, "")]));
     const routes = QUEST.routes.map(rt => `<span><b>${esc(rt.who)}:</b> ${rt.path.map(id => esc(names[id] || id)).join(" → ")}</span>`).join("");
     const purse = courseDone()
-      ? `<p class="hot">Course complete. Your high score: ${treasury()} of ${COURSE_MAX} gold.</p>`
-      : `<p><span class="lbl">YOUR TREASURY</span> <span class="hot">${treasury()}</span> <span class="dim">of ${COURSE_MAX} gold (your best in each realm).</span></p>`;
-    return `<h2>The map</h2>
+      ? `<p class="hot">${H("course_complete", { score: treasury(), max: COURSE_MAX })}</p>`
+      : `<p><span class="lbl">${H("treasury_label")}</span> <span class="hot">${treasury()}</span> <span class="dim">${H("treasury_of", { max: COURSE_MAX })}</span></p>`;
+    return `<h2>${H("map_title")}</h2>
       <pre class="art" style="--cols:${cols(MAP)}" aria-hidden="true">${esc(MAP)}</pre>
       ${purse}
-      <div class="routes"><span>Suggested routes, if you'd like one:</span>${routes}</div>
+      <div class="routes"><span>${H("routes_intro")}</span>${routes}</div>
       ${choices(REALMS.map((r, i) => {
         const d = done[r.id];
-        const mark = d && d.done ? `  ✓ best ${d.best}/${maxGold(r)} gold` : r.sealed ? "  (not yet open)" : i === 0 ? "  (start here)" : !firstDone() ? "  (after Law)" : "";
-        return { label: `${r.name}. ${meta(r)}${mark}`, go: go({ screen: "realm", realm: i, flash: null }) };
+        const mark = d && d.done ? S("mark_best", { best: d.best, max: maxGold(r) }) : r.sealed ? S("mark_sealed")
+          : i === 0 ? S("mark_start") : !firstDone() ? S("mark_after_first") : "";
+        return { label: S("map_entry", { name: r.name, meta: meta(r), mark }), go: go({ screen: "realm", realm: i, flash: null }) };
       }))}`;
   },
   realm() {
     const r = realm();
     const head = `${r.halls.length ? art("crown") : realmScene(r)}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
-    if (r.sealed) return `${head}<p class="dim">The road here is not yet open. This realm is still being written.</p>
-      ${choices([{ label: "Back to the map", go: toMap }])}`;
-    if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">The roads open once you have studied in ${esc(REALMS[0].name)}, the foundation every other realm builds on.</p>
-      ${choices([{ label: `Travel to ${REALMS[0].name}`, go: go({ screen: "realm", realm: 0 }) }, { label: "Back to the map", go: toMap }])}`;
+    if (r.sealed) return `${head}<p class="dim">${H("realm_sealed")}</p>
+      ${choices([{ label: S("back_to_map"), go: toMap }])}`;
+    if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">${H("realm_locked", { first: REALMS[0].name })}</p>
+      ${choices([{ label: S("travel_to", { first: REALMS[0].name }), go: go({ screen: "realm", realm: 0 }) }, { label: S("back_to_map"), go: toMap }])}`;
     const enter = r.halls.length ? go({ screen: "hall", hall: 0, step: 0, gold: 0, flash: null })
                                  : go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null });
-    return `${head}<p class="dim">Up to ${maxGold(r)} gold to win here.</p>
-      ${choices([{ label: r.halls.length ? "Enter the first hall" : "Take the quest", go: enter }, { label: "Back to the map", go: toMap }])}`;
+    return `${head}<p class="dim">${H("realm_max", { max: maxGold(r) })}</p>
+      ${choices([{ label: S(r.halls.length ? "enter_halls" : "take_quest"), go: enter }, { label: S("back_to_map"), go: toMap }])}`;
   },
 
-  // ---- Kingdom of Law: one idea per hall, then its questions ----------------------------------
+  // ---- A realm of halls: one idea per hall, then its questions ---------------------------------
   hall() {
     const r = realm(), h = hall();
-    return `<div class="status"><span class="lbl">HALL ${state.hall + 1} OF ${r.halls.length}</span>${goldTag()}</div>
+    return `<div class="status"><span class="lbl">${H("hall_of", { n: state.hall + 1, total: r.halls.length })}</span>${goldTag()}</div>
       ${hallScene(h.title, false)}
       <h2>${esc(h.title)}</h2>
       ${h.teach.map(t => `<p>${esc(t)}</p>`).join("")}
       ${h.rows.length ? table(h.columns, h.rows) : ""}
-      ${choices([{ label: `Hear the petitions (${h.trials.length})`, go: go({ screen: "trials", step: 0, flash: null }) }, { label: "Back to the map", go: toMap }])}`;
+      ${choices([{ label: S("hear_petitions", { n: h.trials.length }), go: go({ screen: "trials", step: 0, flash: null }) }, { label: S("back_to_map"), go: toMap }])}`;
   },
   trials() {
     const r = realm(), h = hall(), t = h.trials[state.step];
     const head = `<div class="status"><span class="lbl">${esc(h.title.toUpperCase())}</span>${goldTag()}
-      <span><span class="lbl">PETITION</span> ${state.step + 1}/${h.trials.length}</span></div>`;
-    const intro = t.kind === "choice" ? "A merchant asks which engine should answer this question:" : "A petitioner makes a claim before the court:";
+      <span><span class="lbl">${H("petition_label")}</span> ${state.step + 1}/${h.trials.length}</span></div>`;
+    const intro = t.kind === "claim" ? H("intro_claim") : H("intro_choice");
     if (state.flash) {
       const f = state.flash, lastInHall = state.step + 1 >= h.trials.length, lastHall = state.hall + 1 >= r.halls.length;
-      const next = !settled(f) ? "Judge again" : !lastInHall ? "Next petitioner" : lastHall ? "Hear the royal decree" : `On to hall ${state.hall + 2}`;
+      const next = !settled(f) ? S("judge_again") : !lastInHall ? S("next_petitioner") : lastHall ? S("hear_decree") : S("on_to_hall", { n: state.hall + 2 });
       return `${head}${hallScene(h.title, true)}<p class="hot">${esc(t.text)}</p>
-        ${feedback(f, t.why, "Not quite. Think again about what this hall just taught.", t.options[t.correct], true)}
+        ${feedback(f, t.why, S("court_hint"), t.options[t.correct], true)}
         ${choices([{ label: next, go: () => {
           if (settled(f)) {
             if (!lastInHall) state.step++;
@@ -636,70 +544,70 @@ const SCREENS = {
         } }])}`;
     }
     return `${head}${hallScene(h.title, true)}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
-      ${choices([...t.options.map((o, i) => ({ label: o, go: () => answer(i === t.correct ? "win" : "loss") })), { label: MAGIC_LABEL, go: magic }])}`;
+      ${choices([...t.options.map((o, i) => ({ label: o, go: () => answer(i === t.correct ? "win" : "loss") })), { label: MAGIC_LABEL(), go: magic }])}`;
   },
   decree() {
     const r = realm();
     const record = finishRealm(r.id, state.gold); state.firstDone = state.firstDone || state.realm === 0;
     Sound.play("fanfare");
-    return `${art("crown", "hot")}<h2>Royal decree</h2>
-      <p>You carry <span class="hot">${state.gold} of ${maxGold(r)} gold</span> from ${esc(r.name)}${record ? ", your best here yet" : ""}. Let it be known across the realms:</p>
+    return `${art("crown", "hot")}<h2>${H("decree_title")}</h2>
+      <p>${H("decree_carry", { gold: state.gold, max: maxGold(r), realm: r.name, record: record ? S("record_best") : "" })}</p>
       ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
-      <p class="dim">The Scroll of Law: the whole comparison in one place.</p>
+      <p class="dim">${H("scroll_recap")}</p>
       ${r.scroll ? table(r.scroll.columns, r.scroll.rows) : ""}
-      <p class="dim">The roads to the other realms are open.</p>
-      ${choices([{ label: "Back to the map", go: toMap }])}`;
+      <p class="dim">${H("roads_open")}</p>
+      ${choices([{ label: S("back_to_map"), go: toMap }])}`;
   },
 
   // ---- Every other realm: one quest -----------------------------------------------------------
   quest() {
     const r = realm(), e = encounter(), p = e.path;
     const head = `<div class="status"><span class="lbl">${esc(r.name.toUpperCase())}</span>${goldTag()}</div>`;
-    const body = `${realmScene(r)}<p>A merchant brings a question:</p><p class="hot">"${esc(e.quest)}"</p>
-      <p>First, read the intent. Which path should Spotter take?</p>`;
+    const body = `${realmScene(r)}<p>${H("quest_intro")}</p><p class="hot">"${esc(e.quest)}"</p>
+      <p>${H("read_intent")}</p>`;
     if (state.flash) {
       const f = state.flash, chosen = state.choice ?? p.correct;
       const text = f.kind === "magic" ? p.outcomes[p.correct].why : p.outcomes[chosen].why;
       return `${head}${body}${feedback(f, text, text, p.options[p.correct])}
-        ${choices([{ label: settled(f) ? "Watch the Wizard write it" : "Choose again", go: () => {
-          if (settled(f)) state.screen = "wizard";
+        ${choices([{ label: S(settled(f) ? "watch_guide" : "choose_again"), go: () => {
+          if (settled(f)) state.screen = "guide";
           state.flash = null; render();
         } }])}`;
     }
     return `${head}${body}
-      ${choices([...p.options.map((o, i) => ({ label: o, go: () => { state.choice = i; answer(p.outcomes[i].kind); } })), { label: MAGIC_LABEL, go: magic }])}`;
+      ${choices([...p.options.map((o, i) => ({ label: o, go: () => { state.choice = i; answer(p.outcomes[i].kind); } })), { label: MAGIC_LABEL(), go: magic }])}`;
   },
-  wizard() {
+  guide() {
     const e = encounter();
-    return `<div class="status"><span class="lbl">THE AGENTQL PATH</span>${goldTag()}</div>${art("wizard")}
-      <p>The <span class="hot">Wizard</span> is the AI. His only job is to understand the question and write it down. In this game, his AgentQL is your <span class="hot">scroll</span>:</p>
+    return `<div class="status"><span class="lbl">${H("path_label")}</span>${goldTag()}</div>${art("guide")}
+      <p>${H("guide_text")}</p>
       ${code(e.panes[0].lines, [], "agent", e.panes[0].name)}
-      ${choices([{ label: "Carry the scroll to the Forge", go: go({ screen: "forge" }) }])}`;
+      ${choices([{ label: S("carry_scroll"), go: go({ screen: "compiler" }) }])}`;
   },
-  forge() {
+  compiler() {
     const e = encounter();
-    return `${art("forge")}
-      <p>The Forge is ThoughtSpot. It never runs the scroll. It compiles it against the Model's rules into warehouse SQL, and from the fire rises a dragon made of that SQL.</p>
-      ${LEGEND}${RULE}
-      <p class="dim">${e.points.length} scales. Say who put each line there, and it breaks. ${esc(GOLD_RULES)}</p>
-      ${choices([{ label: "Draw your weapon", go: go({ screen: "battle", step: 0, flash: null }) }])}`;
+    return `${art("compiler")}
+      <p>${H("compiler_text")}</p>
+      ${LEGEND()}${RULE()}
+      <p class="dim">${H("foe_points", { n: e.points.length, gold_rules: GOLD_RULES() })}</p>
+      ${choices([{ label: S("draw_weapon"), go: go({ screen: "battle", step: 0, flash: null }) }])}`;
   },
   battle() {
     const e = encounter(), q = e.points[state.step];
     const head = `<div class="status">${goldTag()}
-      <span><span class="lbl">DRAGON</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND}`;
+      <span><span class="lbl">${H("foe_label")}</span> ${bar(e.points.length - state.step, e.points.length, "█", "░")}</span></div>${LEGEND()}`;
     if (state.flash) {
       const f = state.flash, last = state.step + 1 >= e.points.length;
       return `${head}${panes(e, q)}
         ${feedback(f, q.why, q.hint, q.options[q.correct])}
-        ${choices([{ label: !settled(f) ? "Try again" : last ? "Watch the dragon fall" : "Next scale", go: () => {
+        ${choices([{ label: S(!settled(f) ? "try_again" : last ? "foe_falls" : "next_point"), go: () => {
           if (settled(f)) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
           state.flash = null; render();
         } }])}`;
     }
-    return `${head}${state.step === 0 ? art("dragon") : ""}${panes(e, q)}
+    return `${head}${state.step === 0 ? art("foe") : ""}${panes(e, q)}
       <p>${esc(q.ask)}</p>
-      ${choices([...q.options.map((o, i) => ({ label: o, go: () => answer(i === q.correct ? "win" : "loss") })), { label: MAGIC_LABEL, go: magic }])}`;
+      ${choices([...q.options.map((o, i) => ({ label: o, go: () => answer(i === q.correct ? "win" : "loss") })), { label: MAGIC_LABEL(), go: magic }])}`;
   },
   victory() {
     const r = realm(), e = encounter();
@@ -709,20 +617,20 @@ const SCREENS = {
     const item = p => `<li><span class="who">${esc(TAGS[p.ruleTag].label)}</span><span>${esc(p.rule)}</span></li>`;
     const rules = e.points.filter(p => group(p) === "rules");
     const yours = e.points.filter(p => group(p) === "yours");
-    return `${realmScene(r)}<h2>The dragon falls</h2>
-      <p>You carry home <span class="hot">${state.gold} of ${maxGold(r)} gold</span>${record ? ", your best here yet" : ""}.</p>
-      <p class="lbl">DETERMINISTIC RULES UNCOVERED</p>
-      <p class="dim">Added by the Model and ThoughtSpot, not by the AI, and applied the same way every time this AgentQL compiles.</p>
+    return `${realmScene(r)}<h2>${H("victory_title")}</h2>
+      <p>${H("carry_home", { gold: state.gold, max: maxGold(r), record: record ? S("record_best") : "" })}</p>
+      <p class="lbl">${H("rules_heading")}</p>
+      <p class="dim">${H("rules_note")}</p>
       <ul class="rules">${rules.map(item).join("")}</ul>
-      ${yours.length ? `<p class="lbl">YOUR PART, IN THE AGENTQL</p><ul class="rules">${yours.map(item).join("")}</ul>` : ""}
-      <p class="verdict">${esc(DETERMINISM)}</p>
+      ${yours.length ? `<p class="lbl">${H("yours_heading")}</p><ul class="rules">${yours.map(item).join("")}</ul>` : ""}
+      <p class="verdict">${H("verdict")}</p>
       <p>${esc(e.takeaway)}</p>
-      ${choices([{ label: "Back to the map", go: toMap }, { label: "Take this quest again", go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }])}`;
+      ${choices([{ label: S("back_to_map"), go: toMap }, { label: S("quest_again"), go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }])}`;
   }
 };
 
-const MUSIC_FOR = { hall: "court", trials: "court", decree: "court", quest: "battle", wizard: "battle",
-                    forge: "battle", battle: "battle", victory: "battle" };
+const MUSIC_FOR = { hall: "court", trials: "court", decree: "court", quest: "battle", guide: "battle",
+                    compiler: "battle", battle: "battle", victory: "battle" };
 
 function render() {
   const el = document.getElementById("screen");

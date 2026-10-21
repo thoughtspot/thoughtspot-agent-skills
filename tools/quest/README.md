@@ -83,7 +83,15 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
 - **`packs/agentql/content.yaml`** holds what the capture can't: the realms, halls and encounters,
   which SQL lines to ask about (matched as whole lines, never by line number), facts about the
   whole statement (`sql_count`), who put each one there, and the words shown.
-- **`packs/agentql/strings.yaml`** holds wording a front end shows that isn't content.
+- **`packs/agentql/strings.yaml`** holds every sentence a front end shows that isn't content: the
+  title screen, buttons, feedback, the legend and rule card, the hoard's headings, the verdict and
+  the course links. `*word*` is highlighted, `**word**` bold and `[text](https://…)` a link; the
+  page escapes everything else, and `{name}` is filled in by the page.
+- **`packs/agentql/art/classic/`** holds the classic page's ASCII art, one file per piece, each
+  file's text less its final newline: `title`, `guide`, `compiler` and `foe` (the lexicon's roles),
+  `crown`, `banner`, `map`, and `scene_<realm id>` for each realm with a scene (`@BANNER` marks
+  where the realm's name goes, a leading `!` shimmers a line, `$` and `%` are lanterns). The build
+  writes it into the classic page; it isn't in `quest.json`.
 - **`checks/`**, the plugins this pack names:
   - `agentql_capture`: the only source of SQL is `lesson-sql.md` (in the skill's `references/`),
     the AgentQL and `executable_sql` captured live by `tools/agentql-retest --suite lessons guards`
@@ -169,6 +177,8 @@ sources:
 | `it asks about a row cap or a null guard, which ThoughtSpot adds` | a who point credits the row cap or a null guard to the Model or the AgentQL | answer `thoughtspot`: both are ThoughtSpot cluster settings |
 | `'…' is a name from a published work` | a word in the pack or the page is on the denylist | use a generic fantasy name |
 | `denylist: …` | `denylist.txt` is missing, or holds a line that isn't a hash | restore it; add names only with `denylist.py add` |
+| `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
+| `art/classic/….txt: not used` | an art file the page never reads (or a scene for a realm that doesn't exist) | remove it, or fix its name |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |
 | `id '…' must be lowercase letters, digits and _ (and not 'hall')` or `duplicate id` | a realm, hall or encounter id breaks the step-id grammar | rename it |

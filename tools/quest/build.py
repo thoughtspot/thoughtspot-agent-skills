@@ -81,6 +81,8 @@ FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
 PLACEHOLDER = "__QUEST_DATA__"
 FONT_PLACEHOLDER = "/*__FONT_FACES__*/"
+ART_PLACEHOLDER = "__CLASSIC_ART__"
+TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER = "__PAGE_TITLE__", "__PAGE_DESCRIPTION__"
 PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
 
 # (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
@@ -763,16 +765,63 @@ def font_faces(font_dir: pathlib.Path = FONT_DIR) -> str:
     return "\n".join(rules)
 
 
-def render(template: str, data: dict, fonts_css: str = "") -> str:
-    if template.count(PLACEHOLDER) != 1:
-        raise ValueError(f"game.html must contain {PLACEHOLDER} exactly once")
-    if template.count(FONT_PLACEHOLDER) != 1:
-        raise ValueError(f"game.html must contain {FONT_PLACEHOLDER} exactly once")
-    # The JSON sits in a <script type="application/json">. Escaping every <, > and & keeps any
-    # string from closing the element or opening a "<!--<script" state in the HTML parser.
-    payload = (json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-               .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
-    return template.replace(PLACEHOLDER, payload).replace(FONT_PLACEHOLDER, fonts_css)
+def _script_json(value) -> str:
+    """JSON for a <script type="application/json">. Escaping every <, > and & keeps any string from
+    closing the element or opening a "<!--<script" state in the HTML parser."""
+    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
+
+
+def _html_text(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def render(template: str, data: dict, fonts_css: str = "", art: dict | None = None) -> str:
+    """The classic page: the data, the pack's art (art/classic/), its title and description and
+    the fonts written into classic/game.html."""
+    for mark in (PLACEHOLDER, FONT_PLACEHOLDER, ART_PLACEHOLDER, TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER):
+        if template.count(mark) != 1:
+            raise ValueError(f"game.html must contain {mark} exactly once")
+    pack = data.get("pack") or {}
+    return (template.replace(PLACEHOLDER, _script_json(data)).replace(ART_PLACEHOLDER, _script_json(art or {}))
+            .replace(TITLE_PLACEHOLDER, _html_text(pack.get("title", "")))
+            .replace(DESCRIPTION_PLACEHOLDER, _html_text((pack.get("strings") or {}).get("page_description", "")))
+            .replace(FONT_PLACEHOLDER, fonts_css))
+
+
+# What the classic page reads from a pack: the string keys in its S("…") / H("…") calls (including
+# both sides of a ternary), the art in its art("…") calls, the map, and a scene per realm.
+_STRING_CALL = re.compile(r"\b[SH]\(((?:[^()]|\([^()]*\))*?)[,)]")
+_ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
+
+
+def classic_needs(template: str) -> tuple[set[str], set[str]]:
+    script = template.split("<script>", 1)[-1]
+    strings = {k for arg in _STRING_CALL.findall(script) for k in re.findall(r'"([a-z0-9_]+)"', arg)}
+    return strings, set(_ART_CALL.findall(script)) | {"map"}
+
+
+def classic_art(pack: Pack) -> tuple[dict, list[str]]:
+    """The pack's art/classic/*.txt, by file name: each file's text less its final newline."""
+    folder, art, errors = pack.dir / "art" / "classic", {}, []
+    for path in sorted(folder.glob("*.txt")) if folder.is_dir() else []:
+        if not ID.fullmatch(path.stem):
+            errors.append(f"art/classic/{path.name}: name it with lowercase letters, digits and _")
+        text = path.read_text(encoding="utf-8")
+        art[path.stem] = text[:-1] if text.endswith("\n") else text
+    return art, errors
+
+
+def check_classic(pack: Pack, data: dict, art: dict, template: str) -> list[str]:
+    """Everything the classic page reads must be in the pack, and the pack's art must all be used."""
+    strings, pieces = classic_needs(template)
+    realms = {r["id"] for r in data.get("realms") or []}
+    errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
+    errors += [f"art/classic/{k}.txt: the classic page needs it" for k in sorted(pieces - set(art))]
+    for k in sorted(set(art) - pieces):
+        if not (k.startswith("scene_") and k[6:] in realms):
+            errors.append(f"art/classic/{k}.txt: not used (the page reads {sorted(pieces)} and scene_<realm id>)")
+    return errors
 
 
 def _not_json(name: str):
@@ -796,10 +845,14 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     else:
         if data:  # a pack that failed before compiling has no data to check
             errors += check_schema(data, schema)
+    art, art_errors = classic_art(pack)
+    errors += art_errors
+    if data:
+        errors += check_classic(pack, data, art, TEMPLATE.read_text(encoding="utf-8"))
     if errors:
         return None, data, schema, errors
     fonts = font_faces()  # read even under --check, so a missing font file fails pre-commit too
-    html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts)
+    html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts, art)
     return html, data, schema, errors
 
 

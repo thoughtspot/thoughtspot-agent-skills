@@ -10,3 +10,105 @@ pane_scroll_name: Your AgentQL
 pane_sql_label: "THE DRAGON: SQL ThoughtSpot generated"
 pane_sql_name: Generated warehouse SQL
 pane_sql_caption: Captured from generate-sql on {model}, {captured}. Lesson {lesson}.
+
+# ---- The classic page (classic/game.html). Markup: *word* is highlighted, **word** is bold,
+# [text](https://…) is a link; everything else is shown as written. {name} is filled by the page.
+
+page_description: A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.
+sound_sfx: "[S] Sound effects: {state}"
+sound_music: "[M] Music: {state}"
+sound_on: "on"
+sound_off: "off"
+
+# The title screen
+title_intro: "A text adventure about one idea: the AI understands your question and writes it as AgentQL, and ThoughtSpot compiles that AgentQL into governed SQL, the same way every time."
+title_start: Start in the Kingdom of Law, then take a quest in any realm. Each takes a few minutes. Earn gold with right answers.
+title_open: Open the map
+title_keys: Number keys or click to choose. S and M switch sound effects and music.
+title_links: "Part of the [Learn AgentQL course](https://github.com/thoughtspot/thoughtspot-agent-skills/blob/main/agents/cli/ts-object-model-agentql-query/references/learning-path.md)\n        from [ThoughtSpot Agent Skills](https://github.com/thoughtspot/thoughtspot-agent-skills)."
+
+# The map
+map_title: The map
+course_complete: "Course complete. Your high score: {score} of {max} gold."
+treasury_label: YOUR TREASURY
+treasury_of: of {max} gold (your best in each realm).
+routes_intro: "Suggested routes, if you'd like one:"
+map_entry: "{name}. {meta}{mark}"
+realm_meta: "{depth} · about {minutes} min"
+mark_best: "  ✓ best {best}/{max} gold"
+mark_sealed: "  (not yet open)"
+mark_start: "  (start here)"
+mark_after_first: "  (after Law)"
+
+# A realm's gate
+realm_sealed: The road here is not yet open. This realm is still being written.
+realm_locked: The roads open once you have studied in {first}, the foundation every other realm builds on.
+travel_to: Travel to {first}
+back_to_map: Back to the map
+realm_max: Up to {max} gold to win here.
+enter_halls: Enter the first hall
+take_quest: Take the quest
+
+# Halls and their petitions
+hall_of: HALL {n} OF {total}
+hear_petitions: Hear the petitions ({n})
+petition_label: PETITION
+intro_choice: "A merchant asks which engine should answer this question:"
+intro_claim: "A petitioner makes a claim before the court:"
+court_hint: Not quite. Think again about what this hall just taught.
+judge_again: Judge again
+next_petitioner: Next petitioner
+hear_decree: Hear the royal decree
+on_to_hall: On to hall {n}
+decree_title: Royal decree
+decree_carry: "You carry *{gold} of {max} gold* from {realm}{record}. Let it be known across the realms:"
+record_best: ", your best here yet"
+scroll_recap: "The Scroll of Law: the whole comparison in one place."
+roads_open: The roads to the other realms are open.
+
+# A quest
+gold_tag: GOLD
+quest_intro: "A merchant brings a question:"
+read_intent: First, read the intent. Which path should Spotter take?
+watch_guide: Watch the Wizard write it
+choose_again: Choose again
+path_label: THE AGENTQL PATH
+guide_text: "The *Wizard* is the AI. His only job is to understand the question and write it down. In this game, his AgentQL is your *scroll*:"
+carry_scroll: Carry the scroll to the Forge
+compiler_text: "The Forge is ThoughtSpot. It never runs the scroll. It compiles it against the Model's rules into warehouse SQL, and from the fire rises a dragon made of that SQL."
+legend_label: Who is who
+legend_guide: "**Wizard** = the AI"
+legend_scroll: "**Scroll** = the AgentQL it wrote"
+legend_compiler: "**Forge** = ThoughtSpot + the Model"
+legend_foe: "**Dragon** = the SQL that runs"
+rule_title: THE RULE OF THE FORGE
+rule_text: "Whatever the Forge adds or changes is the Forge's: tables, joins and keys, column names, null guards, LOWER(), the row cap. A shape your scroll asked for, and the SQL keeps, is yours: an outer join, two steps, a ranking. The Wizard only writes the scroll. ThoughtSpot compiles the SQL that runs."
+gold_rules: "Each right answer earns {win} gold. A wrong one costs {loss}, but never more than you carry, and you answer again. Invoke magic to see the answer: no gold won or lost."
+foe_points: "{n} scales. Say who put each line there, and it breaks. {gold_rules}"
+draw_weapon: Draw your weapon
+foe_label: DRAGON
+try_again: Try again
+foe_falls: Watch the dragon fall
+next_point: Next scale
+victory_title: The dragon falls
+carry_home: "You carry home *{gold} of {max} gold*{record}."
+rules_heading: DETERMINISTIC RULES UNCOVERED
+rules_note: Added by the Model and ThoughtSpot, not by the AI, and applied the same way every time this AgentQL compiles.
+yours_heading: YOUR PART, IN THE AGENTQL
+verdict: So the same AgentQL, on the same Model, for the same user, always compiles to the same SQL.
+quest_again: Take this quest again
+
+# Answers
+magic_label: "Invoke magic: show me the answer (no gold won or lost)"
+said_win: Right. Plus {amount} gold. {why}
+said_magic: "The answer: {answer}. {why}"
+said_blocked: This path is closed here. {hint}
+said_miss: Not quite. {hint}
+won_tag: +{amount} GOLD
+magic_tag: THE MAGIC REVEALS IT
+magic_answer: "The answer: *{answer}*"
+blocked_tag: THIS PATH IS CLOSED HERE
+fine_court: THE COURT FINES YOU {amount} GOLD
+fine_foe: THE DRAGON TAKES {amount} GOLD
+empty_court: THE COURT FINDS YOUR PURSE EMPTY
+empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
