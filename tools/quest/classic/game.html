@@ -52,7 +52,7 @@ function announce(t) { const el = document.getElementById("live"); if (el) el.te
 // Every screen's HTML (core/60-screens.js); the page only puts it on the screen.
 const screens = Quest.screens({ quest: QUEST, art: ART, progress, machine, state: () => state, announce,
                                 choose: list => { actions = list.map(c => c.action); } });
-const SCREENS = screens.SCREENS, MUSIC_FOR = screens.MUSIC_FOR;
+const MUSIC_FOR = screens.MUSIC_FOR;
 
 // Do an action: the machine decides what changes, the page plays its sounds, saves, and redraws.
 function dispatch(action) {
@@ -81,9 +81,13 @@ document.addEventListener("click", e => {
   if (b && actions[+b.dataset.i]) dispatch(actions[+b.dataset.i]);
 });
 document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;   // holding a key must not skip explanations
-  Sound.unlock();
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = (e.key || "").toLowerCase();
+  if (e.repeat) {   // holding a key must not skip explanations, nor Enter or Space "click" the focused button
+    if (k === "enter" || k === " ") e.preventDefault();
+    return;
+  }
+  Sound.unlock();
   if (k === "s") { e.preventDefault(); return Sound.toggle("sfx"); }
   if (k === "m") { e.preventDefault(); return Sound.toggle("music"); }
   const n = parseInt(e.key, 10);
@@ -96,7 +100,7 @@ state = machine.fresh();
 // Opened from the explore map at #realm=<id>: start at that realm's gate, with a way back to the map.
 const deep = typeof location === "undefined" ? null : /^#realm=([a-z0-9_]+)(&from=explore)?$/.exec(location.hash || "");
 const deepRealm = deep ? REALMS.findIndex(r => r.id === deep[1]) : -1;
-if (deepRealm >= 0) {
+if (deepRealm >= 0 && QUEST.pack.explore_realms.length) {
   for (const a of [{ type: "map" }, { type: "realm", realm: deepRealm }]) state = machine.act(state, a, loadProgress()).state;
   const back = document.getElementById("back-explore");
   if (deep[2] && back && back.querySelector) { back.querySelector("a").textContent = S("explore_back"); back.hidden = false; }

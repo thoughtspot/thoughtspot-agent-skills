@@ -2987,7 +2987,8 @@ def test_expected_is_null_for_a_realm_that_does_not_exist():
 # ---- PR 5: the explore front end (design §4) ------------------------------------------------------
 
 EXPLORE_FILES = ["index.html", "explore.js", "core.js", "quest.css", "fonts.css", "phaser.min.js", "art.json",
-                 "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj"]
+                 "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj",
+                 "phaser.LICENSE.md"]
 
 
 def test_the_vendored_phaser_is_the_pinned_release():
@@ -3130,3 +3131,29 @@ def test_the_explore_smoke_reads_the_page_log(edit, needle):
     data, _ = B.compile_pack(B.Pack("agentql"))
     problems = SX.check("mines", edit(list(GOOD_SMOKE)) if edit else list(GOOD_SMOKE), data)
     assert (problems == []) if needle is None else any(needle in p for p in problems), problems
+
+
+def test_the_explore_page_plays_in_a_real_browser():
+    # tests/smoke_explore.py: headless Chrome plays each explorable realm of the built site.
+    sys.path.insert(0, str(HERE))
+    import smoke_explore as SX
+    if SX.find_chrome() is None:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            pytest.fail("CI must have Chrome (ubuntu-latest ships it) to play the explore page")
+        pytest.skip("no Chrome here")
+    assert SX.main([]) == 0
+
+
+def test_only_an_explorable_pack_needs_the_explore_pages_strings():
+    template = B.TEMPLATE.read_text(encoding="utf-8")
+    assert "explore_help" not in B.classic_needs(template)[0]
+    assert "explore_help" in B.classic_needs(template, explore_page=True)[0]
+
+
+def test_a_rebuild_leaves_no_old_explore_files(tmp_path):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    (tmp_path / "explore/maps/old.tmj").write_text("{}", encoding="utf-8")
+    assert B.main(["--out", str(page)]) == 0
+    assert not (tmp_path / "explore/maps/old.tmj").exists()
+    assert (tmp_path / "explore/phaser.LICENSE.md").read_bytes() == (B.VENDOR / "LICENSE-phaser.md").read_bytes()

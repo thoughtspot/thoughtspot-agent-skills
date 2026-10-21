@@ -24,7 +24,7 @@
   $("classic").textContent = S("explore_classic");
   $("world").setAttribute("aria-label", S("explore_world"));
   $("close").textContent = S("explore_close");
-  $("dialog-title").textContent = pack.title;
+
   const PAD = { left: S("explore_pad_left"), up: S("explore_pad_up"), down: S("explore_pad_down"),
                 right: S("explore_pad_right"), talk: S("explore_pad_talk") };
   for (const b of document.querySelectorAll("#pad button")) { b.textContent = PAD[b.dataset.key]; b.setAttribute("aria-label", PAD[b.dataset.key]); }
@@ -39,6 +39,7 @@
                                   choose: list => { actions = list.map(c => c.action); } });
   const dialog = $("dialog");
   function show() {
+    $("dialog-title").textContent = state.screen !== "map" && realms[state.realm] ? realms[state.realm].name : pack.title;
     $("screen").innerHTML = screens.draw(state.screen);
     Sound.music(screens.MUSIC_FOR[state.screen] || "map");
     $("screen").querySelector(".choices button")?.focus({ preventScroll: true });
@@ -70,7 +71,7 @@
       if (fx.type === "sound") Sound.play(fx.name);
       else if (fx.type === "save") progress.finish(fx.realm, fx.gold);
     }
-    if (state.screen === "map") { closeDialog(); return goTo("overworld"); }
+    if (state.screen === "map") { closeDialog(); if (!world || world.mapId !== "overworld") goTo("overworld"); return; }
     if (dialogStep === "portal") {
       if (state.screen === "realm") return show();                  // still at the gate: locked or sealed
       closeDialog(); return goTo(realms[state.realm].id);
@@ -122,10 +123,14 @@
     if (dialog.open) {
       const n = parseInt(e.key, 10);
       if (!e.repeat && n >= 1 && n <= actions.length) { e.preventDefault(); dispatch(actions[n - 1]); }
+      if (e.repeat && (k === "enter" || k === " ")) e.preventDefault();   // holding a key must not skip explanations
       return;
     }
-    if ((k === "enter" || k === " ") && !e.repeat && world) { e.preventDefault(); talk(world.nearby()); }
+    // Enter and Space talk only on the map: on a link or a button they keep their own meaning.
+    const onMap = e.target === $("world") || e.target === document.body || !!(e.target.closest && e.target.closest("#world"));
+    if ((k === "enter" || k === " ") && !e.repeat && world && onMap) { e.preventDefault(); talk(world.nearby()); }
   });
+  $("world").addEventListener("pointerdown", () => $("world").focus({ preventScroll: true }));   // Phaser keeps the click
   document.addEventListener("click", e => {
     Sound.unlock();
     if (e.target.closest("#sound-sfx")) Sound.toggle("sfx");
@@ -138,8 +143,12 @@
     for (const ev of ["pointerup", "pointerleave", "pointercancel"]) b.addEventListener(ev, () => { pad[k] = false; });
   }
   document.addEventListener("visibilitychange", () => (document.hidden ? Sound.pause() : Sound.resume()));
-  // Back from classic mode: saves may have changed there.
-  window.addEventListener("pageshow", () => { if (world) world.refresh(); });
+  // Back from classic mode: saves may have changed there. A gate left open (the page may come back
+  // from the back/forward cache) is judged again next time, so close it.
+  window.addEventListener("pageshow", () => {
+    if (dialogStep === "portal") { closeDialog(); state = machine.act(state, { type: "map" }, progress.load()).state; }
+    if (world) world.refresh();
+  });
 
   // ---- the world: one Phaser scene per map ---------------------------------------------------
   const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -163,6 +172,7 @@
       const map = this.make.tilemap({ key: this.mapId });
       const tiles = map.addTilesetImage("tiles", "tiles");
       const floor = map.createLayer("floor", tiles), walls = map.createLayer("walls", tiles);
+      this.walls = walls;
       floor.setTint(DIM); walls.setTint(AMBER);
       walls.setCollisionByExclusion([-1]);
       this.objects = [];
@@ -207,18 +217,35 @@
       this.player.setVelocity(0, 0);
       this.frozen = on;
     }
+    // Whoever the player stands next to, up, down, left or right (not across a corner); the one the
+    // game waits on first, so the right one answers when two are close.
     nearby() {
-      const p = this.player;
-      return this.objects.filter(o => Math.abs(o.x - p.x) <= TILE * 1.25 && Math.abs(o.y - p.y) <= TILE * 1.25)
-        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0] || null;
+      const p = this.player, want = machine.expected(state);
+      const close = this.objects.filter(o => {
+        const dx = Math.abs(o.x - p.x), dy = Math.abs(o.y - p.y);
+        return (dx <= TILE * 1.25 && dy <= TILE * 0.6) || (dy <= TILE * 1.25 && dx <= TILE * 0.6);
+      }).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
+      return close.find(o => o.step && o.step === want) || close[0] || null;
     }
     update() {
       if (this.frozen) return;
+      const near = this.nearby();
+      if (near !== this.near) { this.near = near; describe(near); }
       const c = this.cursors, v = 90;
       const dx = (c.left.isDown || pad.left ? -1 : 0) + (c.right.isDown || pad.right ? 1 : 0);
       const dy = (c.up.isDown || pad.up ? -1 : 0) + (c.down.isDown || pad.down ? 1 : 0);
       this.player.setVelocity(dx * v, dy * v);
     }
+  }
+  // Standing by a portal says where it goes, as the classic map's entry does (best gold, sealed,
+  // locked until the first realm); the live region reads it too.
+  function describe(obj) {
+    if (!obj || obj.type !== "portal") return;
+    const i = realms.findIndex(r => r.id === obj.to), r = realms[i], d = progress.load()[r.id];
+    const mark = d && d.done ? S("mark_best", { best: d.best, max: Quest.rules.maxGold(r) }) : r.sealed ? S("mark_sealed")
+      : i === 0 ? S("mark_start") : !machine.firstDone(state, progress.load()) ? S("mark_after_first") : "";
+    const t = S("explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
+    toast(t); announce(t);
   }
   function goTo(mapId) {
     world = null;
@@ -226,6 +253,8 @@
     Sound.music(mapId === "overworld" ? "map" : "battle");
   }
 
+  // The scripted play (tests/smoke_explore.py) writes saves, so it runs only on a local server.
+  const SMOKE = location.hash.startsWith("#smoke=") && ["127.0.0.1", "localhost"].includes(location.hostname);
   // WebGL is required: tinting the tiles amber needs it. Without it, offer the classic version.
   let game;
   try {
@@ -233,12 +262,13 @@
       type: Phaser.WEBGL, parent: "world", width: 320, height: 144, pixelArt: true, backgroundColor: "#150e06",
       audio: { noAudio: true }, physics: { default: "arcade" }, scale: { mode: Phaser.Scale.FIT },
       input: { keyboard: { target: $("world") } }, banner: false,
-      // A headless smoke run (#smoke=) uses virtual time, which never fires animation frames.
-      fps: { forceSetTimeOut: location.hash.startsWith("#smoke=") }
+      // A headless smoke run uses virtual time, which never fires animation frames.
+      fps: { forceSetTimeOut: SMOKE }
     });
   } catch (e) {
     $("nogl").textContent = S("explore_no_webgl");
     $("nogl").style.display = "block";
+    for (const id of ["help", "world", "pad"]) $(id).hidden = true;
     log(`NOGL ${e.message}`);
     return;
   }
@@ -253,9 +283,19 @@
       const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
       const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
       await until(() => world && world.mapId === "overworld");
+      // Enter on a link keeps its meaning: the map must not take it.
+      $("classic").focus();
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      $("classic").dispatchEvent(enter);
+      if (enter.defaultPrevented) throw new Error("Enter on the classic link was taken by the map");
+      $("world").focus();
       const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
       const ri = realms.findIndex(r => r.id === realmId);
-      if (machine.locked(Object.assign({}, state, { realm: ri, locked: undefined }), progress.load())) {   // a fresh player plays the first realm first
+      // Standing by the portal names its realm.
+      world.player.setPosition(portal.x, portal.y + TILE);
+      await until(() => $("toast").textContent.includes(realms[ri].name));
+      log(`NEAR ${$("toast").textContent}`);
+      if (machine.locked(Object.assign({}, state, { realm: ri, gate: null }), progress.load())) {   // a fresh player plays the first realm first
         talk(portal); dispatch({ type: "enter" });
         if (world.mapId !== "overworld" || !dialog.open) throw new Error(`${realmId} let a fresh player in`);
         log(`LOCKED ${realmId}`);
@@ -271,7 +311,12 @@
         const want = machine.expected(state);
         if (want === null) break;
         const obj = world.objects.find(o => o.step === want);
-        world.player.setPosition(obj.x, obj.y + TILE);           // stand next to it, as a player would walk
+        // Stand on a floor tile next to it (the walk itself is maps.py's check and play_map.js's).
+        const spot = [[0, TILE], [0, -TILE], [-TILE, 0], [TILE, 0]].map(([dx, dy]) => ({ x: obj.x + dx, y: obj.y + dy }))
+          .find(s => { const t = world.walls.getTileAtWorldXY(s.x, s.y); return !(t && t.index > 0)
+                       && !world.objects.some(o => o !== obj && o.x === s.x && o.y === s.y); });
+        if (!spot) throw new Error(`no floor next to ${want}`);
+        world.player.setPosition(spot.x, spot.y);
         await wait(80);
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
@@ -283,9 +328,12 @@
         }
         if (state.screen === "map" || world.mapId === "overworld") break;
       }
+      // Nothing came from anywhere but this site.
+      for (const e of performance.getEntriesByType("resource"))
+        if (!e.name.startsWith(location.origin + "/") && !/^(data|blob):/.test(e.name)) log(`ERROR outside request ${e.name}`);
       log(`SMOKE ${realmId} ${steps.join(" ")} | ${JSON.stringify(progress.load()[realmId] || null)}`);
       return steps;
     }
   };
-  if (location.hash.startsWith("#smoke=")) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message}`));
+  if (SMOKE) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message}`));
 })();

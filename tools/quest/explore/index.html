@@ -11,7 +11,7 @@
 <style>
 /* The explore page: the map on the monitor, a dialog over it for every question. */
 .monitor { max-width: 1000px; }
-#world { position: relative; width: 100%; aspect-ratio: 20 / 9; background: var(--glass); }
+#world { position: relative; width: 100%; aspect-ratio: 20 / 8; background: var(--glass); }
 #world canvas { width: 100% !important; height: 100% !important; image-rendering: pixelated; display: block; }
 #world:focus-within { outline: 1px dashed var(--dim); }
 .bar-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; }
@@ -31,7 +31,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 </head>
 <body>
 <p class="sr-only" id="live" aria-live="polite"></p>
-<div class="monitor"><div class="screen">
+<main class="monitor"><div class="screen">
   <div class="bar-top"><span id="help"></span><a id="classic" href="../"></a></div>
   <div id="world" tabindex="0" aria-label=""></div>
   <p id="toast" role="status"></p>
@@ -45,14 +45,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
     <button type="button" id="sound-sfx" aria-pressed="true"></button>
     <button type="button" id="sound-music" aria-pressed="false"></button>
   </div>
-</div></div>
+</div></main>
 <dialog id="dialog" aria-labelledby="dialog-title">
   <button type="button" id="close"></button>
   <h2 class="sr-only" id="dialog-title"></h2>
   <div class="screen" id="screen"></div>
 </dialog>
-<pre class="sr-only" id="log"></pre>
-<script src="phaser.min.js"></script>
+<pre id="log" hidden></pre>
+<script src="phaser.min.js"></script><!-- Phaser 4.2.1, MIT licence: phaser.LICENSE.md -->
 <script src="core.js"></script>
 <script src="explore.js"></script>
 </body>
