@@ -31,7 +31,7 @@ const ctx = vm.createContext({
 const FILL = "(m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m)";
 if (!js.includes(FILL)) { console.error("FAIL: the page's fill() has changed; update smoke_page.js"); process.exit(1); }
 vm.runInContext("globalThis.__misses = [];\n" + js.replace(FILL, "(m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : (__misses.push(m), m))")
-                + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;", ctx);
+                + "\n;globalThis.__state = () => Quest.classic.state(); globalThis.__actions = () => Quest.classic.actions();", ctx);
 const fail = msg => { console.error(`FAIL: ${msg}`); process.exit(1); };
 const key = k => (listeners.keydown || []).forEach(fn => fn({ key: k, metaKey: false, ctrlKey: false, altKey: false,
                                                                 repeat: false, preventDefault() {} }));

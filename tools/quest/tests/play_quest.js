@@ -46,8 +46,9 @@ function boot({ audio = "fake", saved = {} } = {}) {
   if (audio === "fake") globals.AudioContext = FakeAudioContext;
   if (audio === "throws") globals.AudioContext = ThrowingAudioContext;
   page.ctx = vm.createContext(globals);
-  vm.runInContext(js + "\n;globalThis.__state = () => state; globalThis.__actions = () => actions;" +
-                  "globalThis.__sound = Sound; globalThis.__gold = { WIN: GOLD_WIN, LOSS: GOLD_LOSS };", page.ctx);
+  // The page's hooks for tests (Quest.classic) and the core's gold (Quest.rules).
+  vm.runInContext(js + "\n;globalThis.__state = () => Quest.classic.state(); globalThis.__actions = () => Quest.classic.actions();" +
+                  "globalThis.__sound = Quest.classic.sound; globalThis.__gold = { WIN: Quest.rules.GOLD_WIN, LOSS: Quest.rules.GOLD_LOSS };", page.ctx);
   page.fire = (type, ev) => (page.listeners[type] || []).forEach(fn => fn(ev));
   page.key = (k, extra = {}) => page.fire("keydown", { key: k, metaKey: false, ctrlKey: false, altKey: false,
                                                        repeat: false, preventDefault() {}, ...extra });

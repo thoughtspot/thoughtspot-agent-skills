@@ -101,9 +101,18 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   - `agentql_rules`: who-put-it-there questions, the three engines, AgentQL as the foe's path,
     and crediting: a who-put-it-there question about a row cap or a null guard must answer
     ThoughtSpot.
-- **`classic/game.html`** is the page, with five placeholders (`__QUEST_DATA__`, `__CLASSIC_ART__`,
-  `__PAGE_TITLE__`, `__PAGE_DESCRIPTION__`, `/*__FONT_FACES__*/`) that `build.py` fills in one
-  pass. It holds no game's wording or art: the build checks the pack holds every string and art
+- **`core/*.js`** is the front-end code every front end shares: plain scripts (not modules) that
+  each add to one `Quest` global, so the classic page inlines them all and the explore page can load
+  them one by one. `10-text.js` (escaping, `S()` and `H()`), `20-rules.js` (gold), `30-progress.js`
+  (saves under `<storage key>-progress`), `40-machine.js` (the rules of play) and `50-sound.js`
+  (effects and music, under `<storage key>-sound`). `Quest.machine(quest).act(state, action,
+  progress)` returns the next state and its effects (sounds to play, gold to save) and draws
+  nothing; an action the current screen doesn't offer is refused and changes nothing, so no front
+  end can skip a step. The actions are `map`, `realm`, `enter`, `hear`, `answer`, `magic`, `next`,
+  `carry`, `fight` and `again`. The build refuses a core file containing `</script` or `<!--`.
+- **`classic/game.html`** is the page, with six placeholders (`/*__QUEST_CORE__*/`, `__QUEST_DATA__`,
+  `__CLASSIC_ART__`, `__PAGE_TITLE__`, `__PAGE_DESCRIPTION__`, `/*__FONT_FACES__*/`) that `build.py`
+  fills in one pass. It draws the machine's state and turns clicks and keys into its actions. It holds no game's wording or art: the build checks the pack holds every string and art
   piece the page reads (from its `S()`, `H()` and `art()` calls), and that every string is used by
   the page, the engine or a plugin, and every art file by the page. The page plays a realm's halls,
   or its one encounter, so a realm may have one or the other. What the page still draws or says

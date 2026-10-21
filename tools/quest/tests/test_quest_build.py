@@ -1711,20 +1711,24 @@ def test_art_files_drop_one_final_newline_and_need_id_names(tmp_path):
     assert not art["map"].endswith("\n")
 
 
+CORE_TEXT = B.CORE_DIR / "10-text.js"
+
+
+def _node_core_text(expr: str) -> list:
+    """Run core/10-text.js in node, then print JSON.stringify(<expr>)."""
+    js = CORE_TEXT.read_text(encoding="utf-8") + f"\nconsole.log(JSON.stringify({expr}));"
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-def test_wording_is_escaped_then_marked_up(tmp_path):
+def test_wording_is_escaped_then_marked_up():
     # H(): the pack's text is escaped, then *x*, **x** and [x](https://…) become markup; values are
     # escaped and never marked up; S() is plain text.
-    script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
-    start, end = script.index("const STRINGS"), script.index("// The throne room")
-    js = (script[script.index("const esc ="):].split("\n", 1)[0] + "\n" + script[start:end].replace(
-        "const STRINGS = QUEST.pack.strings;", "const STRINGS = " + json.dumps({
-            "a": "<b> *hot* **bold** [link](https://example.com/x) [bad](javascript:alert(1)) {v}",
-            "plain": "{v} *not markup in S*"}) + ";"))
-    out = subprocess.run(["node", "-e", js + '\nconsole.log(JSON.stringify([H("a", {v: "*<i>*"}), S("plain", {v: "<x>"})]))'],
-                         capture_output=True, text=True)
-    assert out.returncode == 0, out.stderr
-    h, s = json.loads(out.stdout)
+    strings = {"a": "<b> *hot* **bold** [link](https://example.com/x) [bad](javascript:alert(1)) {v}",
+               "plain": "{v} *not markup in S*"}
+    h, s = _node_core_text(f'(w => [w.H("a", {{v: "*<i>*"}}), w.S("plain", {{v: "<x>"}})])(Quest.wording({json.dumps(strings)}))')
     assert h == ('&lt;b&gt; <span class="hot">hot</span> <b>bold</b> <a href="https://example.com/x">link</a> '
                  '[bad](javascript:alert(1)) *&lt;i&gt;*')
     assert s == "<x> *not markup in S*"
@@ -1839,12 +1843,8 @@ def test_placeholder_names_in_pack_text_are_never_filled(doc, capture):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_fill_takes_values_literally_and_only_its_own():
-    script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
-    line = next(x for x in script.splitlines() if x.startswith("const fill ="))
-    js = line + '\nconsole.log(JSON.stringify([fill("{a} {a} {b} {constructor} {toString}", {a: "$& $1"})]))'
-    out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
-    assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout) == ["$& $1 $& $1 {b} {constructor} {toString}"]
+    assert _node_core_text('[Quest.fill("{a} {a} {b} {constructor} {toString}", {a: "$& $1"})]') == [
+        "$& $1 $& $1 {b} {constructor} {toString}"]
 
 
 def test_art_keeps_its_trailing_spaces():
@@ -1858,7 +1858,7 @@ def test_the_build_keeps_arts_trailing_spaces():
 
 
 @pytest.mark.parametrize("mark", [B.PLACEHOLDER, B.FONT_PLACEHOLDER, B.ART_PLACEHOLDER, B.TITLE_PLACEHOLDER,
-                                  B.DESCRIPTION_PLACEHOLDER])
+                                  B.DESCRIPTION_PLACEHOLDER, B.CORE_PLACEHOLDER])
 def test_render_needs_every_placeholder_exactly_once(mark):
     template = B.TEMPLATE.read_text(encoding="utf-8")
     for broken in (template.replace(mark, ""), template.replace(mark, mark + mark)):
@@ -1871,34 +1871,33 @@ def test_wording_in_attributes_is_escaped():
     assert 'aria-label="${esc(S("legend_label"))}"' in B.TEMPLATE.read_text(encoding="utf-8")
 
 
-# ---- PR 2b review, round 2: the smoke play must finish every realm --------------------------------
-
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-@pytest.mark.parametrize("break_it,needle", [
+@pytest.mark.parametrize("where,old,new,needle", [
     # victory's "Back to the map" leads nowhere: the old smoke play looped and passed
-    (lambda h: h.replace('${choices([{ label: S("back_to_map"), go: toMap }, { label: S("quest_again")',
-                         '${choices([{ label: S("back_to_map"), go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }, { label: S("quest_again")'),
-     "ran out of steps"),
+    ("page", '{ label: S("back_to_map"), action: MAP_ACTION }, { label: S("quest_again")',
+     '{ label: S("back_to_map"), action: { type: "again" } }, { label: S("quest_again")', "ran out of steps"),
     # the last realm's map entry opens the first realm instead
-    (lambda h: h.replace('go: go({ screen: "realm", realm: i, flash: null })', 'go: go({ screen: "realm", realm: i === REALMS.length - 1 ? 0 : i, flash: null })'),
-     'did not open from the map'),
-    # a realm that returns to the map without finishing (the round-2 hole)
-    (lambda h: h.replace('if (state.step >= e.points.length) state.screen = "victory"; }',
-                         'if (state.step >= e.points.length) state.screen = state.realm === REALMS.length - 1 ? "map" : "victory"; }'),
+    ("page", 'action: { type: "realm", realm: i } };', 'action: { type: "realm", realm: i === REALMS.length - 1 ? 0 : i } };',
+     "did not open from the map"),
+    # a realm that returns to the map without finishing (the round-2 hole), now in the machine
+    ("core", 'if (s.step >= r.encounters[s.enc].points.length) finish("victory");',
+     'if (s.step >= r.encounters[s.enc].points.length) { if (s.realm === realms.length - 1) s.screen = "map"; else finish("victory"); }',
      'left realm "isles" without reaching victory'),
-    (lambda h: h.replace('else if (lastHall) state.screen = "decree";', 'else if (lastHall) state.screen = "map";'),
-     'left realm "law" without reaching decree'),
-    (lambda h: h.replace(': go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null });',
-                         ': go({ screen: "quest", realm: 1, enc: 0, step: 0, gold: 0, flash: null });'),
-     'left realm "lake" without reaching victory'),
+    ("core", 'else if (lastHall) finish("decree");', 'else if (lastHall) s.screen = "map";', 'left realm "law" without reaching decree'),
+    ("core", ': { screen: "quest", enc: 0, step: 0, gold: 0, flash: null });',
+     ': { screen: "quest", realm: 1, enc: 0, step: 0, gold: 0, flash: null });', 'left realm "lake" without reaching victory'),
 ])
-def test_the_smoke_play_fails_a_realm_it_cannot_finish(tmp_path, break_it, needle):
-    template = B.TEMPLATE.read_text(encoding="utf-8")
-    broken = break_it(template)
-    assert broken != template
+def test_the_smoke_play_fails_a_realm_it_cannot_finish(tmp_path, where, old, new, needle):
+    template, core = B.TEMPLATE.read_text(encoding="utf-8"), B.core_script()
+    if where == "page":
+        assert template.count(old) == 1, old
+        template = template.replace(old, new)
+    else:
+        assert core.count(old) == 1, old
+        core = core.replace(old, new)
     data, _ = B.compile_pack(B.Pack("agentql"))
     page = tmp_path / "index.html"
-    page.write_text(B.render(broken, data, "", ART), encoding="utf-8")
+    page.write_text(B.render(template, data, "", ART, core), encoding="utf-8")
     r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     assert r.returncode != 0 and needle in r.stderr, r.stdout + r.stderr
 
@@ -1959,14 +1958,12 @@ def test_placeholder_names_anywhere_in_the_pack_are_never_filled(doc, capture):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_soon_marker_comes_from_the_pack():
-    script = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1]
-    lines = script.splitlines()
-    take = lambda start: "\n".join(lines[lines.index(next(x for x in lines if x.startswith(start))):][:5])
-    js = "\n".join([next(x for x in lines if x.startswith("const esc =")), next(x for x in lines if x.startswith("const fill =")),
-                    'const STRINGS = {"soon_marker": "Soon:"};', next(x for x in lines if x.startswith("const S =")),
-                    take("function cell(c)")])
-    out = subprocess.run(["node", "-e", js + '\nconsole.log(JSON.stringify([cell("Pin it. Soon: tomorrow"), cell("Coming soon: x")]))'],
-                         capture_output=True, text=True)
+    lines = B.TEMPLATE.read_text(encoding="utf-8").split("<script>", 1)[1].splitlines()
+    start = lines.index(next(x for x in lines if x.startswith("function cell(c)")))
+    js = (CORE_TEXT.read_text(encoding="utf-8") + '\nconst esc = Quest.esc, { S } = Quest.wording({"soon_marker": "Soon:"});\n'
+          + "\n".join(lines[start:start + 5])
+          + '\nconsole.log(JSON.stringify([cell("Pin it. Soon: tomorrow"), cell("Coming soon: x")]))')
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == ['Pin it. <span class="soon">Soon:</span> tomorrow', "Coming soon: x"]
 
@@ -2022,3 +2019,100 @@ def test_a_broken_trial_does_not_also_report_its_strings_unused(tmp_path, monkey
     errors = B.build(check=True)[3]
     assert any("kind must be one of" in e for e in errors)
     assert not any("is not used by the page" in e for e in errors), errors
+
+
+# ---- PR 3: the shared core (core/*.js) and the state machine ------------------------------------
+
+def _node_core(js: str, data: dict | None = None):
+    """Run every core/*.js in node with QUEST set to the AgentQL pack's data, then `js`; returns
+    what it prints as JSON."""
+    data = data if data is not None else B.compile_pack(B.Pack("agentql"))[0]
+    prelude = "globalThis.localStorage = { s: {}, getItem(k) { return this.s[k] ?? null; }, setItem(k, v) { this.s[k] = v; } };\n"
+    src = prelude + B.core_script() + f"\nconst QUEST = {json.dumps(data)};\n" + js
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_machine_refuses_what_a_screen_does_not_offer():
+    got = _node_core("""
+      const m = Quest.machine(QUEST), at = (screen, extra = {}) => Object.assign(m.fresh(), { screen }, extra);
+      const tries = [
+        [at("title"), { type: "answer", option: 0 }],
+        [at("map"), { type: "realm", realm: QUEST.realms.length }],
+        [at("map"), { type: "realm", realm: -1 }],
+        [at("map"), { type: "enter" }],
+        [at("realm", { realm: 1 }), { type: "enter" }],                     // locked until the first realm is done
+        [at("battle", { realm: 1 }), { type: "answer", option: 99 }],
+        [at("battle", { realm: 1 }), { type: "next" }],                     // nothing to move on from yet
+        [at("battle", { realm: 1, flash: { kind: "loss", amount: 0 } }), { type: "answer", option: 0 }],
+        [at("guide", { realm: 1 }), { type: "fight" }],                      // the compiler comes first
+        [at("decree"), { type: "again" }],
+        [at("title"), null],
+        [at("title"), { type: "teleport" }],
+      ];
+      console.log(JSON.stringify(tries.map(([s, a]) => { const o = m.act(s, a, {}); return [!!o.refused, o.state === s, o.effects.length]; })));
+    """)
+    assert got == [[True, True, 0]] * 12
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_machine_plays_the_whole_game_without_a_page():
+    # What the explore front end will do: drive Quest.machine directly. Every realm is reachable and
+    # finishable; finishing saves before the fanfare; a tie with the best is not a record.
+    got = _node_core("""
+      const m = Quest.machine(QUEST), prog = Quest.progress(QUEST.realms, QUEST.pack.storage_key);
+      let s = m.fresh(); const log = [];
+      const go = a => { const o = m.act(s, a, prog.load()); if (o.refused) throw new Error(o.refused + " " + JSON.stringify(a));
+        s = o.state; for (const fx of o.effects) { log.push(fx.type === "sound" ? fx.name : "save:" + fx.realm); if (fx.type === "save") prog.finish(fx.realm, fx.gold); } };
+      const play = i => {
+        if (s.screen !== "map") go({ type: "map" });
+        go({ type: "realm", realm: i }); go({ type: "enter" });
+        for (let n = 0; n < 200 && !["decree", "victory"].includes(s.screen); n++) {
+          if (s.screen === "hall") go({ type: "hear" });
+          else if (s.screen === "guide") go({ type: "carry" });
+          else if (s.screen === "compiler") go({ type: "fight" });
+          else if (s.flash) go({ type: "next" });
+          else go({ type: "answer", option: m.question(s).correct });
+        }
+        return [s.screen, s.gold, s.record];
+      };
+      go({ type: "map" });
+      const first = QUEST.realms.map((r, i) => play(i));
+      const again = play(1);     // the same gold again: a tie, not a record
+      console.log(JSON.stringify({ first, again, saves: log.filter(x => x.startsWith("save")).length,
+        order: log.slice(log.indexOf("save:law"), log.indexOf("save:law") + 2), courseDone: prog.courseDone() }));
+    """)
+    assert [x[0] for x in got["first"]] == ["decree", "victory", "victory", "victory", "victory"]
+    assert all(x[2] is True for x in got["first"]) and got["again"][2] is False
+    assert got["saves"] == 6 and got["order"] == ["save:law", "fanfare"] and got["courseDone"] is True
+
+
+def test_the_machine_rules_and_text_never_touch_the_page_or_storage():
+    for name in ("10-text.js", "20-rules.js", "40-machine.js"):
+        text = (B.CORE_DIR / name).read_text(encoding="utf-8")
+        for word in ("document", "localStorage", "window", "innerHTML", "AudioContext"):
+            assert word not in text, (name, word)
+
+
+def test_the_core_carries_no_agentql_wording():
+    core = B.core_script()
+    for word in ("AgentQL", "ThoughtSpot", "Wizard", "Forge", "Dragon", "dragon", "Kingdom of Law", "Spotter", "merchant"):
+        assert word not in core, word
+
+
+@pytest.mark.parametrize("bad", ["x = '</script>';", "// <!-- a comment", "x = '</SCRIPT >';"])
+def test_the_build_refuses_core_code_that_could_break_the_page(tmp_path, monkeypatch, bad):
+    core = tmp_path / "core"
+    shutil.copytree(B.CORE_DIR, core)
+    (core / "60-bad.js").write_text(bad + "\n", encoding="utf-8")
+    monkeypatch.setattr(B, "CORE_DIR", core)
+    assert any("core/60-bad.js contains </script or <!--" in e for e in B.build(check=True)[3])
+
+
+def test_the_core_is_inlined_in_name_order():
+    script = B.core_script()
+    names = [p.name for p in B.core_files()]
+    assert names == sorted(names) and names[0] == "10-text.js"
+    assert [script.index(f"// ---- core/{n} ----") for n in names] == sorted(script.index(f"// ---- core/{n} ----") for n in names)

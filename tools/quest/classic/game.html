@@ -186,6 +186,9 @@ p { margin: 0; max-width: 62ch; }
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
 <script id="classic-art" type="application/json">__CLASSIC_ART__</script>
 <script>
+/*__QUEST_CORE__*/
+// ---- The classic page: draws the state Quest.machine keeps, and turns clicks and keys into its
+// actions. Everything else (wording, gold, saves, sound, the rules of play) is in core/. ----------
 const QUEST = JSON.parse(document.getElementById("quest-data").textContent);
 const REALMS = QUEST.realms;
 const SAVE_KEY = QUEST.pack.storage_key;  // saves are <key>-progress and <key>-sound
@@ -195,15 +198,10 @@ const SAVE_KEY = QUEST.pack.storage_key;  // saves are <key>-progress and <key>-
 const ART = JSON.parse(document.getElementById("classic-art").textContent);
 const MAP_ROWS = ART.map.split("\n");
 
-// The pack's wording (strings.yaml). S() is plain text; H() is HTML: the text escaped, then
-// *word* highlighted, **word** bold and [text](https://…) linked, then {name} filled in escaped.
+// The pack's wording (strings.yaml): S() plain text, H() HTML (see core/10-text.js).
 const STRINGS = QUEST.pack.strings;
-const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
-const S = (k, v = {}) => fill(STRINGS[k], v);
-const H = (k, v = {}) => fill(esc(STRINGS[k]).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-  .replace(/\*(.+?)\*/g, '<span class="hot">$1</span>')
-  .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>'),
-  Object.fromEntries(Object.entries(v).map(([k, x]) => [k, esc(x)])));
+const { S, H } = Quest.wording(STRINGS);
+const esc = Quest.esc;
 
 // The throne room for a hall: pillars with torches, the hall's banner, the throne, and
 // petitioners. During petitions one petitioner stands before the throne.
@@ -260,106 +258,11 @@ const MAP = (() => {
   return [edge, ...MAP_ROWS.map(r => "| " + r.padEnd(w) + " |"), edge].join("\n");
 })();
 
-// ---- Sound: generated with the Web Audio API, so there are no audio files and no requests. ----
-// Effects are on by default, music is off; both toggles are remembered. Browsers only allow
-// audio after the player clicks or presses a key, so nothing plays before that.
-const Sound = (() => {
-  const AC = typeof AudioContext !== "undefined" ? AudioContext
-    : typeof webkitAudioContext !== "undefined" ? webkitAudioContext : null;
-  const prefs = { sfx: true, music: false };
-  try { Object.assign(prefs, JSON.parse(localStorage.getItem(`${SAVE_KEY}-sound`) || "{}")); } catch {}
-  const save = () => { try { localStorage.setItem(`${SAVE_KEY}-sound`, JSON.stringify(prefs)); } catch {} };
-  let ctx = null, master = null, musicBus = null, unlocked = false;
-  let track = null, want = null, timer = null, lead = { i: 0, t: 0 }, bass = { i: 0, t: 0 };
-  const hz = n => 440 * Math.pow(2, (n - 69) / 12);          // MIDI note number to frequency
-
-  let broken = false;                                        // audio failed once: stay silent
-  function ensure() {
-    if (!AC || !unlocked || broken) return false;
-    try {
-      if (!ctx) {
-        ctx = new AC();
-        master = ctx.createGain(); master.gain.value = 0.16; master.connect(ctx.destination);
-        musicBus = ctx.createGain(); musicBus.gain.value = 0.45; musicBus.connect(master);
-      }
-      if (ctx.state === "suspended") ctx.resume();
-      return true;
-    } catch { broken = true; return false; }
-  }
-  function tone(freq, at, dur, type = "square", vol = 0.5, dest = master, slideTo = 0) {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, at);
-    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, at + dur);
-    g.gain.setValueAtTime(vol, at);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-    o.connect(g); g.connect(dest);
-    o.start(at); o.stop(at + dur + 0.02);
-  }
-  const EFFECTS = {
-    coin: t => { tone(hz(83), t, 0.07); tone(hz(88), t + 0.07, 0.25); },                 // gold
-    steal: t => { [88, 83, 79, 76].forEach((n, i) => tone(hz(n), t + i * 0.06, 0.07, "square", 0.3));  // coins tumbling away
-                  tone(130, t + 0.26, 0.3, "sawtooth", 0.35, master, 65); },
-    magic: t => [84, 88, 91, 96, 91, 96].forEach((n, i) => tone(hz(n), t + i * 0.05, 0.18, "triangle", 0.35)),
-    fanfare: t => [72, 76, 79, 84].forEach((n, i) => tone(hz(n), t + i * 0.11, i === 3 ? 0.5 : 0.12)),
-    blip: t => tone(hz(81), t, 0.045, "square", 0.2)
-  };
-  // Original loops, written for this game: [MIDI note or 0 for a rest, beats].
-  const TRACKS = {
-    map: { bpm: 96,
-      lead: [[72,1],[76,1],[79,1],[76,1],[77,1],[74,1],[71,2],[72,1],[74,1],[76,1],[79,1],[77,2],[74,2]],
-      bass: [[48,2],[55,2],[53,2],[55,2],[48,2],[52,2],[53,2],[55,2]] },
-    court: { bpm: 80,
-      lead: [[74,2],[77,1],[76,1],[74,2],[69,2],[70,2],[72,1],[70,1],[69,4]],
-      bass: [[50,4],[46,4],[43,4],[45,4]] },
-    battle: { bpm: 132,
-      lead: [[69,.5],[72,.5],[76,.5],[72,.5],[69,.5],[72,.5],[77,.5],[72,.5],[67,.5],[71,.5],[74,.5],[71,.5],[68,.5],[71,.5],[76,1]],
-      bass: [[45,1],[45,1],[41,1],[41,1],[43,1],[43,1],[40,1],[40,1]] }
-  };
-  function voice(part, notes, spb, type, vol) {
-    while (part.t < ctx.currentTime + 0.25) {
-      const [n, beats] = notes[part.i % notes.length];
-      if (n) tone(hz(n), part.t, beats * spb * 0.85, type, vol, musicBus);
-      part.t += beats * spb; part.i++;
-    }
-  }
-  function stopMusic() { clearInterval(timer); timer = null; track = null; }
-  function startMusic(name) {
-    if (!prefs.music || !name || !ensure() || document.hidden) return stopMusic();
-    if (track === name && timer) return;
-    stopMusic();
-    track = name;
-    const tr = TRACKS[name], spb = 60 / tr.bpm, t0 = ctx.currentTime + 0.05;
-    lead = { i: 0, t: t0 }; bass = { i: 0, t: t0 };
-    const tick = () => { voice(lead, tr.lead, spb, "square", 0.22); voice(bass, tr.bass, spb, "triangle", 0.5); };
-    tick(); timer = setInterval(tick, 100);
-  }
-  function label() {
-    const fx = document.getElementById("sound-sfx"), mu = document.getElementById("sound-music");
-    if (!fx || !mu || !fx.setAttribute) return;
-    fx.textContent = S("sound_sfx", { state: S(prefs.sfx ? "sound_on" : "sound_off") });
-    mu.textContent = S("sound_music", { state: S(prefs.music ? "sound_on" : "sound_off") });
-    fx.setAttribute("aria-pressed", String(prefs.sfx));
-    mu.setAttribute("aria-pressed", String(prefs.music));
-  }
-  return {
-    prefs,
-    unlock() { unlocked = true; try { startMusic(want); } catch { broken = true; } },
-    play(name) { try { if (prefs.sfx && ensure()) EFFECTS[name](ctx.currentTime + 0.01); } catch { broken = true; } },
-    music(name) { want = name; try { startMusic(name); } catch { broken = true; } },
-    toggle(which) {
-      prefs[which] = !prefs[which]; save(); label();
-      if (which === "music") startMusic(want);
-      else if (prefs.sfx) this.play("blip");
-    },
-    pause() { stopMusic(); },
-    resume() { startMusic(want); },
-    label
-  };
-})();
+// Sound effects and music (core/50-sound.js), saved under <storage key>-sound.
+const Sound = Quest.sound(SAVE_KEY, S);
 
 // ---- Gold: right answers earn it, wrong ones cost some, magic is free. -------------------------
-const GOLD_WIN = 10, GOLD_LOSS = 5;
+const { GOLD_WIN, GOLD_LOSS, maxGold } = Quest.rules;
 const LEGEND = () => `<div class="legend" aria-label="${esc(S("legend_label"))}">
   <span>${H("legend_guide")}</span><span>${H("legend_scroll")}</span>
   <span>${H("legend_compiler")}</span><span>${H("legend_foe")}</span></div>`;
@@ -367,55 +270,39 @@ const RULE = () => `<div class="rule-card"><span class="hot">${H("rule_title")}<
   <p>${H("rule_text")}</p></div>`;
 const GOLD_RULES = () => S("gold_rules", { win: GOLD_WIN, loss: GOLD_LOSS });
 
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const bar = (n, max, on, off) => `<span class="bar">${on.repeat(n)}<span class="gone">${off.repeat(max - n)}</span></span>`;
 const cols = t => Math.max(...String(t).split("\n").map(l => l.length));
 const art = (k, cls = "") => `<pre class="art ${cls}" style="--cols:${cols(ART[k])}" aria-hidden="true">${esc(ART[k])}</pre>`;
 const isOn = (hl, i) => hl === "all" || hl.includes(i);
 
-// Most gold a realm can give: every question answered right first time.
-const questionsIn = r => r.halls.reduce((n, h) => n + h.trials.length, 0) + r.encounters.reduce((n, e) => n + 1 + e.points.length, 0);
-const maxGold = r => questionsIn(r) * GOLD_WIN;
-const OPEN = REALMS.filter(r => !r.sealed);
-const COURSE_MAX = OPEN.reduce((n, r) => n + maxGold(r), 0);
-
-// Progress per realm: { done, best }. Older saves stored `true`; read those as done with 0 gold.
-// Saves come from the player's browser, so treat them as untrusted: only known realms, `best` as a
-// whole number between 0 and the realm's maximum. Older saves stored `true`: done with 0 gold.
-function loadProgress() {
-  let raw = {};
-  try { raw = JSON.parse(localStorage.getItem(`${SAVE_KEY}-progress`) || "{}") || {}; } catch { return {}; }
-  const out = {};
-  for (const r of REALMS) {
-    const v = raw[r.id];
-    if (v === true) out[r.id] = { done: true, best: 0 };
-    else if (v && typeof v === "object") {
-      const b = Math.floor(Number(v.best));
-      out[r.id] = { done: !!v.done, best: Number.isFinite(b) ? Math.max(0, Math.min(b, maxGold(r))) : 0 };
-    }
-  }
-  return out;
-}
-function finishRealm(id, gold) {
-  const p = loadProgress(), prev = p[id] || { done: false, best: 0 };
-  const record = gold > prev.best;
-  p[id] = { done: true, best: Math.max(prev.best, gold) };
-  try { localStorage.setItem(`${SAVE_KEY}-progress`, JSON.stringify(p)); } catch {}
-  return record;
-}
-const treasury = () => Object.entries(loadProgress()).reduce((n, [id, v]) => n + (OPEN.some(r => r.id === id) ? v.best : 0), 0);
-const courseDone = () => { const p = loadProgress(); return OPEN.every(r => p[r.id] && p[r.id].done); };
+const OPEN = Quest.rules.open(REALMS);
+const COURSE_MAX = Quest.rules.courseMax(REALMS);
+const progress = Quest.progress(REALMS, SAVE_KEY);   // saved under <storage key>-progress
+const loadProgress = progress.load, treasury = progress.treasury, courseDone = progress.courseDone;
+const machine = Quest.machine(QUEST);
 
 let state;
 let actions = [];
-const fresh = () => ({ screen: "title", realm: 0, hall: 0, enc: 0, step: 0, gold: 0, flash: null });
 const realm = () => REALMS[state.realm];
 const hall = () => realm().halls[state.hall];
 const encounter = () => realm().encounters[state.enc];
-const firstDone = () => !!(loadProgress()[REALMS[0].id] || {}).done || !!state.firstDone;
+const firstDone = () => machine.firstDone(state, loadProgress());
 
+// Do an action: the machine decides what changes, the page plays its sounds, saves, and redraws.
+function dispatch(action) {
+  const out = machine.act(state, action, loadProgress());
+  if (out.refused) return;
+  state = out.state;
+  for (const fx of out.effects) {
+    if (fx.type === "sound") Sound.play(fx.name);
+    else if (fx.type === "save") progress.finish(fx.realm, fx.gold);
+  }
+  render();
+}
+
+// Buttons: each is a label and the machine action it sends.
 function choices(list) {
-  actions = list.map(c => c.go);
+  actions = list.map(c => c.action);
   return `<ul class="choices">${list.map((c, i) =>
     `<li><button type="button" id="choice-${i}" data-i="${i}"><span class="key">[${i + 1}]</span> ${esc(c.label)}</button></li>`
   ).join("")}</ul>`;
@@ -443,19 +330,8 @@ function panes(e, p) {
     pane.caption ? `\n    <span class="cap">${esc(pane.caption)}</span>` : ""}</div>`).join("\n    ");
 }
 
-// One answer. Right: +gold, move on. Wrong: lose gold (never below 0), answer again.
-// Blocked (a path closed in this realm): nothing changes, choose again. Magic: shown, no gold.
-function answer(kind) {
-  if (kind === "win") { state.gold += GOLD_WIN; Sound.play("coin"); state.flash = { kind, amount: GOLD_WIN }; }
-  else if (kind === "loss") {
-    const taken = Math.min(GOLD_LOSS, state.gold);
-    state.gold -= taken; Sound.play("steal"); state.flash = { kind, amount: taken };
-  } else { Sound.play("blip"); state.flash = { kind, amount: 0 }; }
-  render();
-}
-function magic() { Sound.play("magic"); state.flash = { kind: "magic", amount: 0 }; render(); }
 const MAGIC_LABEL = () => S("magic_label");
-const settled = f => f.kind === "win" || f.kind === "magic";
+const settled = machine.settled;
 
 function announce(t) { const el = document.getElementById("live"); if (el) el.textContent = t; }
 
@@ -471,8 +347,8 @@ function feedback(f, why, hint, correctText, court = false) {
 }
 
 const meta = r => S("realm_meta", { depth: r.depth, minutes: r.minutes });
-const go = patch => () => { Sound.play("blip"); Object.assign(state, patch); render(); };
-const toMap = go({ screen: "map", flash: null });
+const MAP_ACTION = { type: "map" }, MAGIC = { type: "magic" }, NEXT = { type: "next" };
+const answers = options => options.map((o, i) => ({ label: o, action: { type: "answer", option: i } }));
 const goldTag = () => `<span><span class="lbl">${H("gold_tag")}</span> <span class="hot">${state.gold}</span></span>`;
 
 const SCREENS = {
@@ -480,7 +356,7 @@ const SCREENS = {
     return `<h1 class="sr-only">${esc(QUEST.pack.title)}</h1>${art("title", "hot")}
       <p>${H("title_intro")}</p>
       <p class="dim">${H("title_start")}</p>
-      ${choices([{ label: S("title_open"), go: toMap }])}
+      ${choices([{ label: S("title_open"), action: MAP_ACTION }])}
       <p class="foot">${H("title_keys")} <span class="cursor">&nbsp;</span><br>
         ${H("title_links")}</p>`;
   },
@@ -499,20 +375,18 @@ const SCREENS = {
         const d = done[r.id];
         const mark = d && d.done ? S("mark_best", { best: d.best, max: maxGold(r) }) : r.sealed ? S("mark_sealed")
           : i === 0 ? S("mark_start") : !firstDone() ? S("mark_after_first") : "";
-        return { label: S("map_entry", { name: r.name, meta: meta(r), mark }), go: go({ screen: "realm", realm: i, flash: null }) };
+        return { label: S("map_entry", { name: r.name, meta: meta(r), mark }), action: { type: "realm", realm: i } };
       }))}`;
   },
   realm() {
     const r = realm();
     const head = `${r.halls.length ? art("crown") : realmScene(r)}<h2>${esc(r.name)}</h2><p class="realm-meta">${esc(meta(r))}</p><p>${esc(r.covers)}</p>`;
     if (r.sealed) return `${head}<p class="dim">${H("realm_sealed")}</p>
-      ${choices([{ label: S("back_to_map"), go: toMap }])}`;
+      ${choices([{ label: S("back_to_map"), action: MAP_ACTION }])}`;
     if (state.realm !== 0 && !firstDone()) return `${head}<p class="dim">${H("realm_locked", { first: REALMS[0].name })}</p>
-      ${choices([{ label: S("travel_to", { first: REALMS[0].name }), go: go({ screen: "realm", realm: 0 }) }, { label: S("back_to_map"), go: toMap }])}`;
-    const enter = r.halls.length ? go({ screen: "hall", hall: 0, step: 0, gold: 0, flash: null })
-                                 : go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null });
+      ${choices([{ label: S("travel_to", { first: REALMS[0].name }), action: { type: "realm", realm: 0 } }, { label: S("back_to_map"), action: MAP_ACTION }])}`;
     return `${head}<p class="dim">${H("realm_max", { max: maxGold(r) })}</p>
-      ${choices([{ label: S(r.halls.length ? "enter_halls" : "take_quest"), go: enter }, { label: S("back_to_map"), go: toMap }])}`;
+      ${choices([{ label: S(r.halls.length ? "enter_halls" : "take_quest"), action: { type: "enter" } }, { label: S("back_to_map"), action: MAP_ACTION }])}`;
   },
 
   // ---- A realm of halls: one idea per hall, then its questions ---------------------------------
@@ -523,7 +397,7 @@ const SCREENS = {
       <h2>${esc(h.title)}</h2>
       ${h.teach.map(t => `<p>${esc(t)}</p>`).join("")}
       ${h.rows.length ? table(h.columns, h.rows) : ""}
-      ${choices([{ label: S("hear_petitions", { n: h.trials.length }), go: go({ screen: "trials", step: 0, flash: null }) }, { label: S("back_to_map"), go: toMap }])}`;
+      ${choices([{ label: S("hear_petitions", { n: h.trials.length }), action: { type: "hear" } }, { label: S("back_to_map"), action: MAP_ACTION }])}`;
   },
   trials() {
     const r = realm(), h = hall(), t = h.trials[state.step];
@@ -535,29 +409,21 @@ const SCREENS = {
       const next = !settled(f) ? S("judge_again") : !lastInHall ? S("next_petitioner") : lastHall ? S("hear_decree") : S("on_to_hall", { n: state.hall + 2 });
       return `${head}${hallScene(h.title, true)}<p class="hot">${esc(t.text)}</p>
         ${feedback(f, t.why, S("court_hint"), t.options[t.correct], true)}
-        ${choices([{ label: next, go: () => {
-          if (settled(f)) {
-            if (!lastInHall) state.step++;
-            else if (lastHall) state.screen = "decree";
-            else { state.hall++; state.step = 0; state.screen = "hall"; }
-          }
-          state.flash = null; render();
-        } }])}`;
+        ${choices([{ label: next, action: NEXT }])}`;
     }
     return `${head}${hallScene(h.title, true)}<p>${intro}</p><p class="hot">${esc(t.text)}</p>
-      ${choices([...t.options.map((o, i) => ({ label: o, go: () => answer(i === t.correct ? "win" : "loss") })), { label: MAGIC_LABEL(), go: magic }])}`;
+      ${choices([...answers(t.options), { label: MAGIC_LABEL(), action: MAGIC }])}`;
   },
   decree() {
     const r = realm();
-    const record = finishRealm(r.id, state.gold); state.firstDone = state.firstDone || state.realm === 0;
-    Sound.play("fanfare");
+    const record = state.record;   // saved, with the fanfare, by the action that finished the realm
     return `${art("crown", "hot")}<h2>${H("decree_title")}</h2>
       <p>${H("decree_carry", { gold: state.gold, max: maxGold(r), realm: r.name, record: record ? S("record_best") : "" })}</p>
       ${r.decree.map((d, i) => `<p>${i + 1}. ${esc(d)}</p>`).join("")}
       <p class="dim">${H("scroll_recap")}</p>
       ${r.scroll ? table(r.scroll.columns, r.scroll.rows) : ""}
       <p class="dim">${H("roads_open")}</p>
-      ${choices([{ label: S("back_to_map"), go: toMap }])}`;
+      ${choices([{ label: S("back_to_map"), action: MAP_ACTION }])}`;
   },
 
   // ---- Every other realm: one quest -----------------------------------------------------------
@@ -570,20 +436,17 @@ const SCREENS = {
       const f = state.flash, chosen = state.choice ?? p.correct;
       const text = f.kind === "magic" ? p.outcomes[p.correct].why : p.outcomes[chosen].why;
       return `${head}${body}${feedback(f, text, text, p.options[p.correct])}
-        ${choices([{ label: S(settled(f) ? "watch_guide" : "choose_again"), go: () => {
-          if (settled(f)) state.screen = "guide";
-          state.flash = null; render();
-        } }])}`;
+        ${choices([{ label: S(settled(f) ? "watch_guide" : "choose_again"), action: NEXT }])}`;
     }
     return `${head}${body}
-      ${choices([...p.options.map((o, i) => ({ label: o, go: () => { state.choice = i; answer(p.outcomes[i].kind); } })), { label: MAGIC_LABEL(), go: magic }])}`;
+      ${choices([...answers(p.options), { label: MAGIC_LABEL(), action: MAGIC }])}`;
   },
   guide() {
     const e = encounter();
     return `<div class="status"><span class="lbl">${H("path_label")}</span>${goldTag()}</div>${art("guide")}
       <p>${H("guide_text")}</p>
       ${code(e.panes[0].lines, [], "agent", e.panes[0].name)}
-      ${choices([{ label: S("carry_scroll"), go: go({ screen: "compiler" }) }])}`;
+      ${choices([{ label: S("carry_scroll"), action: { type: "carry" } }])}`;
   },
   compiler() {
     const e = encounter();
@@ -591,7 +454,7 @@ const SCREENS = {
       <p>${H("compiler_text")}</p>
       ${LEGEND()}${RULE()}
       <p class="dim">${H("foe_points", { n: e.points.length, gold_rules: GOLD_RULES() })}</p>
-      ${choices([{ label: S("draw_weapon"), go: go({ screen: "battle", step: 0, flash: null }) }])}`;
+      ${choices([{ label: S("draw_weapon"), action: { type: "fight" } }])}`;
   },
   battle() {
     const e = encounter(), q = e.points[state.step];
@@ -601,19 +464,15 @@ const SCREENS = {
       const f = state.flash, last = state.step + 1 >= e.points.length;
       return `${head}${panes(e, q)}
         ${feedback(f, q.why, q.hint, q.options[q.correct])}
-        ${choices([{ label: S(!settled(f) ? "try_again" : last ? "foe_falls" : "next_point"), go: () => {
-          if (settled(f)) { state.step++; if (state.step >= e.points.length) state.screen = "victory"; }
-          state.flash = null; render();
-        } }])}`;
+        ${choices([{ label: S(!settled(f) ? "try_again" : last ? "foe_falls" : "next_point"), action: NEXT }])}`;
     }
     return `${head}${state.step === 0 ? art("foe") : ""}${panes(e, q)}
       <p>${esc(q.ask)}</p>
-      ${choices([...q.options.map((o, i) => ({ label: o, go: () => answer(i === q.correct ? "win" : "loss") })), { label: MAGIC_LABEL(), go: magic }])}`;
+      ${choices([...answers(q.options), { label: MAGIC_LABEL(), action: MAGIC }])}`;
   },
   victory() {
     const r = realm(), e = encounter();
-    const record = finishRealm(r.id, state.gold);
-    Sound.play("fanfare");
+    const record = state.record;   // saved, with the fanfare, by the action that finished the realm
     const TAGS = QUEST.pack.rule_tags, group = p => p.rule && TAGS[p.ruleTag] ? TAGS[p.ruleTag].group : "";
     const item = p => `<li><span class="who">${esc(TAGS[p.ruleTag].label)}</span><span>${esc(p.rule)}</span></li>`;
     const rules = e.points.filter(p => group(p) === "rules");
@@ -626,7 +485,7 @@ const SCREENS = {
       ${yours.length ? `<p class="lbl">${H("yours_heading")}</p><ul class="rules">${yours.map(item).join("")}</ul>` : ""}
       <p class="verdict">${H("verdict")}</p>
       <p>${esc(e.takeaway)}</p>
-      ${choices([{ label: S("back_to_map"), go: toMap }, { label: S("quest_again"), go: go({ screen: "quest", enc: 0, step: 0, gold: 0, flash: null }) }])}`;
+      ${choices([{ label: S("back_to_map"), action: MAP_ACTION }, { label: S("quest_again"), action: { type: "again" } }])}`;
   }
 };
 
@@ -645,7 +504,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("#sound-sfx")) return Sound.toggle("sfx");
   if (e.target.closest("#sound-music")) return Sound.toggle("music");
   const b = e.target.closest(".choices button");
-  if (b) actions[+b.dataset.i]?.();
+  if (b && actions[+b.dataset.i]) dispatch(actions[+b.dataset.i]);
 });
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;   // holding a key must not skip explanations
@@ -654,14 +513,16 @@ document.addEventListener("keydown", e => {
   if (k === "s") { e.preventDefault(); return Sound.toggle("sfx"); }
   if (k === "m") { e.preventDefault(); return Sound.toggle("music"); }
   const n = parseInt(e.key, 10);
-  if (n >= 1 && n <= actions.length) { e.preventDefault(); actions[n - 1](); }
+  if (n >= 1 && n <= actions.length) { e.preventDefault(); dispatch(actions[n - 1]); }
 });
 
 document.addEventListener("visibilitychange", () => (document.hidden ? Sound.pause() : Sound.resume()));
 
-state = fresh();
+state = machine.fresh();
 Sound.label();
 render();
+// For headless tests (tests/play_quest.js): the page's state, its buttons' actions, and its sound.
+Quest.classic = { state: () => state, actions: () => actions, sound: Sound };
 </script>
 </body>
 </html>
