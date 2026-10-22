@@ -8,8 +8,8 @@ It grows by itself as rules are added — there is nothing to register here. Wit
 rules shipped it collects no cases; the synthetic-catalog tests below prove the runner
 catches what it should.
 
-A rule's `examples.<kind>.fixture` names a function in `audit_rule_fixtures.py` that
-returns an AuditContext. Only that one rule is run over it (`run_rule`), so a fixture
+A rule's `examples.<kind>.fixture` names a function in the `audit_rule_fixtures` package
+(tests/audit_rule_fixtures/, one module per category) that returns an AuditContext. Only that one rule is run over it (`run_rule`), so a fixture
 need not keep every other rule quiet.
 
 The catalog is loaded with `check_catalog()` (load + full validation, including the raw
@@ -48,7 +48,7 @@ def example_problems(cat: Catalog, rule_id: str, kind: str, fixtures=fx) -> List
         return [f"{where}: missing"]
     builder = getattr(fixtures, str(ex.get("fixture")), None)
     if not callable(builder):
-        return [f"{where}: no fixture '{ex.get('fixture')}' in {fixtures.__name__}.py"]
+        return [f"{where}: no fixture '{ex.get('fixture')}' in the {fixtures.__name__} package"]
     profile = ex.get("profile") or default_profile(cat)
     found = run_rule(builder(), cat, rule_id, profile)
     seen = [f"{f.severity} {f.object_type} '{f.object_name}'" for f in found]
@@ -236,8 +236,8 @@ def test_example_runner_detects_a_missing_fixture(tmp_path):
     rule = _ratio_entry()
     rule["examples"]["fires"]["fixture"] = "no_such_fixture"
     assert run_examples(_write_catalog(tmp_path, rule)) == [
-        "rules/test.yaml: A98: examples.fires: no fixture 'no_such_fixture' in "
-        "audit_rule_fixtures.py"]
+        "rules/test.yaml: A98: examples.fires: no fixture 'no_such_fixture' in the "
+        "audit_rule_fixtures package"]
 
 
 def test_example_runner_reports_catalog_problems_instead_of_running(tmp_path):

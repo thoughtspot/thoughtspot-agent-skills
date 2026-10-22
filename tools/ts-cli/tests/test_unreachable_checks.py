@@ -20,7 +20,7 @@ from ts_cli.audit.context import make_context
 
 # ── P17 — cross-references are by id ───────────────────────────────────────
 
-# The P17 contexts are named builders in audit_rule_fixtures.py (refs_*), so the P17
+# The P17 contexts are named builders in audit_rule_fixtures (perf.py, refs_*), so the P17
 # catalog rule's equivalence test runs over exactly these inputs.
 
 def test_p17_follows_a_real_id_reference_chain():

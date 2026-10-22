@@ -24,7 +24,7 @@ from ts_cli.audit import rules
 from ts_cli.audit.checks_data import check_d2, check_d3
 from ts_cli.audit.checks_perf import check_p6
 
-# The contexts are named builders in audit_rule_fixtures.py (the shapes from that
+# The contexts are named builders in audit_rule_fixtures (perf.py; the shapes from that
 # export), so the P6 catalog rule's equivalence test runs over exactly these inputs.
 
 

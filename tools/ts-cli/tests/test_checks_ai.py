@@ -1,5 +1,5 @@
 """The legacy A-checks (checks_ai.py). Their inputs are named builders in
-audit_rule_fixtures.py, so the A catalog rules' equivalence test runs over exactly
+audit_rule_fixtures (ai.py), so the A catalog rules' equivalence test runs over exactly
 these contexts."""
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_ai import check_a1, check_a2, check_a3, check_a4, check_a5, check_a6, ALL_CHECKS
@@ -78,7 +78,7 @@ def test_all_checks_has_six_entries():
 # --- Columns written as exported Model TML writes them -----------------------------
 # `synonyms` and `ai_context` under `properties:`, `description` at the column root
 # (counted across 599 Models on the SE demo cluster, 2026-10-21). The `fx.build_ai_col` helper
-# (audit_rule_fixtures.py) puts `synonyms` at the root, where real TML never does, which is how A2's
+# (audit_rule_fixtures/ai.py) puts `synonyms` at the root, where real TML never does, which is how A2's
 # root-only read went unnoticed: it scored every real Model 0%.
 
 

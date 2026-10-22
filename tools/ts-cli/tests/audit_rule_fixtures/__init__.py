@@ -12,9 +12,11 @@ catalog refers to fixtures by name, so a name must keep meaning one input.
 Layout — every public name is re-exported here, so `import audit_rule_fixtures as fx`
 and a rule's `fixture:` name resolve without knowing the module:
 
-    common.py    generic engine inputs (one per mode / engine behaviour)
+    common.py    generic engine inputs (one per mode / engine behaviour), and the
+                 all-category contexts test_checks_registry.py runs every check over
     ai.py        A — the legacy A-check tests' inputs, and AI_INPUTS
-    rls.py       Table/RLS shapes shared by S8/S9 and their P15/P14 clones
+    rls.py       shapes P and S share: the Table/RLS shapes of S8/S9 and their P15/P14
+                 clones, and the index-type shapes of P9/P11 and S2
     perf.py      P — the legacy P-check tests' inputs, and P_INPUTS
     security.py  S — the legacy S-check tests' inputs, and S_INPUTS
 

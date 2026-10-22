@@ -363,7 +363,11 @@ def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
     `is_group_member` AND the column's name appears (case-insensitively) anywhere in
     the model's formula expressions joined by spaces. Not a per-formula test: a mask
     on one column and a raw projection of another silence both (a known defect,
-    kept)."""
+    kept). A non-string name names nothing (False), as for @pii_category — S3 asks
+    only about PII columns, whose names are strings."""
+    name = _column_name(item)
+    if not isinstance(name, str):
+        return False
     exprs = " ".join(f.get("expr", "") for f in (_model_of(item).get("formulas") or []))
     lowered = exprs.lower()
-    return "is_group_member" in lowered and _column_name(item).lower() in lowered
+    return "is_group_member" in lowered and name.lower() in lowered

@@ -1,6 +1,7 @@
 """Generic engine fixtures: one small input per aggregation mode and engine behaviour
-(ratio, count, each, group, pairwise, composite; alias keying; data availability).
-Not tied to any category's legacy checks."""
+(ratio, count, each, group, pairwise, composite; alias keying; data availability), and
+the all-category contexts test_checks_registry.py runs every check over. Not tied to
+any one category's legacy checks."""
 from __future__ import annotations
 
 from ts_cli.audit.context import AuditContext, make_context
@@ -142,3 +143,46 @@ def models_for_readiness_score() -> AuditContext:
                                 scored("Partial", "g-partial", 50.0, True),
                                 scored("Bare", "g-bare", 20.0, False)])
 
+
+# test_checks_registry.py's contexts (every check, all angles)
+
+def registry_empty_context() -> AuditContext:
+    return make_context()
+
+
+def registry_populated_context() -> AuditContext:
+    """Every context field non-empty, in realistic TML shapes — designed to walk the
+    loops, not to trip anything in particular."""
+    tfqn = "t-1"
+    table = {"guid": "tg-1", "table": {
+        "name": "ORDERS",
+        "columns": [
+            {"name": "CUST_ID", "db_column_properties": {"data_type": "VARCHAR"}},
+            {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
+        ],
+        "rls_rules": {"rules": [{"name": "r1", "expr": "[ORDERS::CUST_ID] = 'x'"}]},
+    }}
+    model = {"guid": "m-1", "model": {
+        "name": "Sales",
+        "description": "orders and returns",
+        "columns": [
+            {"name": "Cust Id", "column_id": "ORDERS::CUST_ID",
+             "properties": {"column_type": "ATTRIBUTE"}},
+            {"name": "Amount", "column_id": "ORDERS::AMOUNT",
+             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+        ],
+        "model_tables": [{"name": "ORDERS", "fqn": tfqn, "joins": [
+            {"name": "j1", "on": "[ORDERS::CUST_ID] = [CUST::ID]"}]}],
+        "model_instructions": {"data_model_instructions": "Use last 30 days"},
+    }}
+    return make_context(
+        models=[model],
+        tables={tfqn: table},
+        dependents={"m-1": [{"id": "a-1", "type": "ANSWER", "name": "A"}]},
+        metadata=[{"id": "m-1", "type": "LOGICAL_TABLE", "name": "Sales"}],
+        ai_instructions={"m-1": {"nl_instructions_info": [
+            {"instructions": ["Filter by region"], "scope": "GLOBAL"}]}},
+        answers=[{"guid": "a-1", "answer": {"name": "A", "search_query": "[Amount]"}}],
+        model_guids=["m-1"],
+        warnings=[],
+    )

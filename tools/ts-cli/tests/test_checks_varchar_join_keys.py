@@ -19,7 +19,7 @@ from ts_cli.audit.checks_perf import check_p6
 
 import pytest
 
-# The contexts are named builders in audit_rule_fixtures.py, so the P6 (and later D2)
+# The contexts are named builders in audit_rule_fixtures (perf.py), so the P6 (and later D2)
 # catalog rules' equivalence tests run over exactly these inputs.
 
 

@@ -38,7 +38,7 @@ from ts_cli.audit.checks_perf import (
     check_p14, check_p15, check_p17,
 )
 
-# Every context below is a named builder in audit_rule_fixtures.py (the P section),
+# Every context below is a named builder in audit_rule_fixtures (perf.py and rls.py),
 # so the P catalog rules' equivalence test runs over exactly these inputs.
 
 

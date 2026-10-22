@@ -1,5 +1,5 @@
 """The legacy P-checks (checks_perf.py). Their inputs are named builders in
-audit_rule_fixtures.py, so the P catalog rules' equivalence test runs over exactly
+audit_rule_fixtures (perf.py), so the P catalog rules' equivalence test runs over exactly
 these contexts."""
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_perf import (

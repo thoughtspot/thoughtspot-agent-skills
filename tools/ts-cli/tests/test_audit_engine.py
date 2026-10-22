@@ -846,3 +846,14 @@ def test_named_in_masking_formula_searches_all_formulas_at_once():
     unmasked = fx.sec_masking_without_group_member()
     [col] = _children_of(unmasked, "model.column")
     assert fields.get(col, "@named_in_masking_formula", unmasked) is False
+
+
+@pytest.mark.parametrize("name", [None, 5, ["ssn"]])
+def test_named_in_masking_formula_is_false_for_a_non_string_name(name):
+    """Like @pii_category and @credential_term: a name that is not a string names no
+    column — it is neither stringified ("None" would match below) nor an error."""
+    ctx = make_context(models=[{"guid": "m-1", "model": {
+        "name": "M", "columns": [{"name": name}],
+        "formulas": [{"expr": "if is_group_member('hr') then [None] + [5] + [ssn] else 0"}]}}])
+    [col] = _children_of(ctx, "model.column")
+    assert fields.get(col, "@named_in_masking_formula", ctx) is False

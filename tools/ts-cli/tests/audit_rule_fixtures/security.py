@@ -6,13 +6,14 @@ import copy
 from ts_cli.audit.context import AuditContext, make_context
 
 from .ai import demo_corpus_models
-from .perf import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, build_index_col, build_index_model,
-                   build_rls_column_type, build_rls_expr, build_trip_table, build_trip_varchar,
-                   perf_rls_friendly_column_name, perf_rls_function_rule,
-                   perf_rls_integer_column, perf_rls_plain_rule, perf_rls_type_on_model_ignored,
-                   perf_table_without_rls, TRIP_FUNC_RULE, TRIP_TABLE_FQN)
-from .rls import (SEC_TABLE_FQN, build_sec_rls, build_sec_table, sec_rls_cased_varchar,
-                  sec_rls_uncased_varchar, sec_rls_upper_function)
+from .common import registry_empty_context, registry_populated_context
+from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, SEC_TABLE_FQN, TRIP_FUNC_RULE,
+                  TRIP_TABLE_FQN, build_index_col, build_index_model, build_rls_column_type,
+                  build_rls_expr, build_sec_rls, build_sec_table, build_trip_table,
+                  build_trip_varchar, perf_rls_friendly_column_name, perf_rls_function_rule,
+                  perf_rls_integer_column, perf_rls_plain_rule, perf_rls_type_on_model_ignored,
+                  perf_table_without_rls, sec_rls_cased_varchar, sec_rls_uncased_varchar,
+                  sec_rls_upper_function)
 
 
 # ── S: Security ─────────────────────────────────────────────────────────────
@@ -225,50 +226,6 @@ def build_index_pii_ctx(index_type) -> AuditContext:
         [build_index_col("customer_email", "ATTRIBUTE", index_type)])])
 
 
-# test_checks_registry.py's contexts (every check, all angles)
-
-def registry_empty_context() -> AuditContext:
-    return make_context()
-
-
-def registry_populated_context() -> AuditContext:
-    """Every context field non-empty, in realistic TML shapes — designed to walk the
-    loops, not to trip anything in particular."""
-    tfqn = "t-1"
-    table = {"guid": "tg-1", "table": {
-        "name": "ORDERS",
-        "columns": [
-            {"name": "CUST_ID", "db_column_properties": {"data_type": "VARCHAR"}},
-            {"name": "AMOUNT", "db_column_properties": {"data_type": "DOUBLE"}},
-        ],
-        "rls_rules": {"rules": [{"name": "r1", "expr": "[ORDERS::CUST_ID] = 'x'"}]},
-    }}
-    model = {"guid": "m-1", "model": {
-        "name": "Sales",
-        "description": "orders and returns",
-        "columns": [
-            {"name": "Cust Id", "column_id": "ORDERS::CUST_ID",
-             "properties": {"column_type": "ATTRIBUTE"}},
-            {"name": "Amount", "column_id": "ORDERS::AMOUNT",
-             "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
-        ],
-        "model_tables": [{"name": "ORDERS", "fqn": tfqn, "joins": [
-            {"name": "j1", "on": "[ORDERS::CUST_ID] = [CUST::ID]"}]}],
-        "model_instructions": {"data_model_instructions": "Use last 30 days"},
-    }}
-    return make_context(
-        models=[model],
-        tables={tfqn: table},
-        dependents={"m-1": [{"id": "a-1", "type": "ANSWER", "name": "A"}]},
-        metadata=[{"id": "m-1", "type": "LOGICAL_TABLE", "name": "Sales"}],
-        ai_instructions={"m-1": {"nl_instructions_info": [
-            {"instructions": ["Filter by region"], "scope": "GLOBAL"}]}},
-        answers=[{"guid": "a-1", "answer": {"name": "A", "search_query": "[Amount]"}}],
-        model_guids=["m-1"],
-        warnings=[],
-    )
-
-
 # Name heuristics swept: each PII category, word-boundary and first-match edges, and
 # the credential words in every spelling the pattern allows (or refuses).
 
@@ -287,7 +244,10 @@ PII_NAMES = [
 CREDENTIAL_NAMES = [
     "password", "Password", "PASSWD", "passwords", "my_password", "user password",
     "secret_key", "Secret-Key", "secretkey", "SECRET KEY", "api_key", "API-KEY", "apikey",
-    "api key", "token", "TOKEN", "Access Token", "tokens", "token_id", "TOKEN",
+    "api key", "token", "TOKEN", "Access Token", "tokens", "token_id",
+    # U+212A KELVIN SIGN in place of the K: it lower-cases to "k", so the (?i) pattern
+    # matches it as a whole-word "token".
+    "TO\u212aEN",
     "password token",
 ]
 

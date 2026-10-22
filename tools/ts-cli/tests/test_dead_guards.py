@@ -18,7 +18,7 @@ from ts_cli.audit.checks_human import check_h5
 from ts_cli.audit.checks_perf import check_p5
 from ts_cli.audit.context import make_context
 
-# The P5 contexts are named builders in audit_rule_fixtures.py, so the P5 catalog
+# The P5 contexts are named builders in audit_rule_fixtures (perf.py), so the P5 catalog
 # rule's equivalence test runs over exactly these inputs.
 
 

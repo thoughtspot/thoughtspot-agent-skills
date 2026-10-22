@@ -1,7 +1,7 @@
 """S2 / S3 / S8 / S9 — the four security checks that no test ever called.
 
 2026-09-22 audit finding 6.1: 27 of 51 checks are *imported* by a test and never
-invoked. `tests/test_checks_security.py:1-4` imports `check_s2`, `check_s3`,
+invoked. `tests/test_checks_security.py:4-7` imports `check_s2`, `check_s3`,
 `check_s8` and `check_s9` and calls none of them, so nothing had ever shown that
 any of the four can return a `Finding`. For a security check that is the worst
 class of defect — a check that cannot fire reports "no problem" about PII and

@@ -8,7 +8,14 @@ from ts_cli.audit.context import AuditContext, make_context
 from .ai import demo_corpus_models
 from .common import (model_75_columns, model_76_columns, model_id_columns,
                      model_role_playing_dimension)
-from .rls import sec_rls_cased_varchar, sec_rls_uncased_varchar, sec_rls_upper_function
+from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, TRIP_FUNC_RULE, TRIP_PLAIN_RULE,
+                  TRIP_TABLE_FQN, build_index_col, build_index_model,
+                  build_rls_column_type, build_rls_expr, build_trip_model, build_trip_table,
+                  build_trip_varchar, perf_rls_cased_varchar,
+                  perf_rls_friendly_column_name, perf_rls_function_rule,
+                  perf_rls_integer_column, perf_rls_plain_rule,
+                  perf_rls_type_on_model_ignored, perf_table_without_rls,
+                  sec_rls_cased_varchar, sec_rls_uncased_varchar, sec_rls_upper_function)
 
 
 # ── P: Performance ──────────────────────────────────────────────────────────
@@ -107,15 +114,6 @@ def perf_column_count_distinct() -> AuditContext:
 
 # test_checks_perf_trip.py's shapes (from the model and table TML schemas)
 
-def build_trip_model(**model_body) -> dict:
-    """A model TML document: `guid` at the root, everything else under `model:`.
-    The body is deep-copied, so shared constants are never mutated through it (one
-    deepcopy: an object listed twice stays one object)."""
-    body = {"name": "Sales"}
-    body.update(copy.deepcopy(model_body))
-    return {"guid": "m-1", "model": body}
-
-
 def build_trip_ctx(*models) -> AuditContext:
     return make_context(models=list(models))
 
@@ -134,33 +132,6 @@ def build_trip_join(with_table) -> dict:
     """An inline join — `type` and `cardinality` are required together."""
     return {"with": with_table, "on": f"[A::{with_table}_KEY] = [{with_table}::KEY]",
             "type": "INNER", "cardinality": "MANY_TO_ONE"}
-
-
-TRIP_TABLE_FQN = "DUNDERMIFFLIN.PUBLIC.BANK_EMPLOYEES"
-
-
-def build_trip_table(columns, rules=None) -> dict:
-    columns, rules = copy.deepcopy((columns, rules))
-    t = {"name": "BANK_EMPLOYEES", "db": "DUNDERMIFFLIN", "schema": "PUBLIC",
-         "db_table": "BANK_EMPLOYEES", "columns": columns}
-    if rules is not None:
-        t["rls_rules"] = {
-            "tables": [{"name": "BANK_EMPLOYEES"}],
-            "table_paths": [{"id": "BANK_EMPLOYEES_1", "table": "BANK_EMPLOYEES",
-                             "column": ["COUNTRY"]}],
-            "rules": rules,
-        }
-    return {"guid": "t-1", "table": t}
-
-
-def build_trip_table_ctx(columns, rules) -> AuditContext:
-    return make_context(tables={TRIP_TABLE_FQN: build_trip_table(columns, rules)})
-
-
-def build_trip_varchar(name, **props) -> dict:
-    return {"name": name, "db_column_name": name,
-            "properties": {"column_type": "ATTRIBUTE", **props},
-            "db_column_properties": {"data_type": "VARCHAR"}}
 
 
 # P2 — scalar formula density
@@ -393,81 +364,6 @@ def perf_spotter_31_default_indexed() -> AuditContext:
 def perf_spotter_config_absent() -> AuditContext:
     return build_trip_ctx(build_trip_model(columns=[
         build_trip_attribute("ORDERS", f"COL_{i}", index_type="DEFAULT") for i in range(31)]))
-
-
-# P14 / P15 — RLS expressions and columns
-
-TRIP_PLAIN_RULE = {"name": "Country rule", "expr": "ts_groups = [BANK_EMPLOYEES_1::COUNTRY]"}
-TRIP_FUNC_RULE = {"name": "Country rule",
-                  "expr": "upper ( [BANK_EMPLOYEES_1::COUNTRY] ) = ts_groups"}
-P14_FUNCTION_EXPRS = [
-    "trim ( [BANK_EMPLOYEES_1::COUNTRY] ) = ts_groups",
-    "cast ( [BANK_EMPLOYEES_1::COUNTRY] as varchar ) = ts_groups",
-    "concat ( [BANK_EMPLOYEES_1::COUNTRY] , 'x' ) = ts_groups",
-    "if ( ts_groups = 'admin' , true , [BANK_EMPLOYEES_1::COUNTRY] = ts_groups )",
-]
-
-
-def build_rls_expr(expr) -> AuditContext:
-    return build_trip_table_ctx([build_trip_varchar("COUNTRY")], [{"name": "R", "expr": expr}])
-
-
-def perf_rls_function_rule() -> AuditContext:
-    """upper(...) around the RLS column (P14 fires); COUNTRY is uncased VARCHAR (P15)."""
-    return build_trip_table_ctx([build_trip_varchar("COUNTRY")], [TRIP_FUNC_RULE])
-
-
-def perf_rls_plain_rule() -> AuditContext:
-    """A bare comparison on an uncased VARCHAR column: P15 fires, P14 does not."""
-    return build_trip_table_ctx([build_trip_varchar("COUNTRY")], [TRIP_PLAIN_RULE])
-
-
-def perf_table_without_rls() -> AuditContext:
-    return make_context(tables={TRIP_TABLE_FQN: build_trip_table([build_trip_varchar("COUNTRY")])})
-
-
-def perf_rls_cased_varchar() -> AuditContext:
-    return build_trip_table_ctx([build_trip_varchar("COUNTRY", value_casing="UPPER")],
-                                [TRIP_PLAIN_RULE])
-
-
-def perf_rls_integer_column() -> AuditContext:
-    int_col = {"name": "COUNTRY_ID", "db_column_name": "COUNTRY_ID",
-               "properties": {"column_type": "ATTRIBUTE"},
-               "db_column_properties": {"data_type": "INT64"}}
-    rule = {"name": "R", "expr": "ts_groups_int = [BANK_EMPLOYEES_1::COUNTRY_ID]"}
-    return build_trip_table_ctx([int_col], [rule])
-
-
-def perf_rls_type_on_model_ignored() -> AuditContext:
-    """A model column claims INT64; the TABLE's VARCHAR is what counts."""
-    lying_model = build_trip_model(columns=[
-        {"name": "COUNTRY", "column_id": "BANK_EMPLOYEES::COUNTRY",
-         "properties": {"column_type": "ATTRIBUTE"},
-         "db_column_properties": {"data_type": "INT64"}}])
-    return make_context(models=[lying_model], tables={
-        TRIP_TABLE_FQN: build_trip_table([build_trip_varchar("COUNTRY")], [TRIP_PLAIN_RULE])})
-
-
-#: Data types where `.upper()` and a case-insensitive match disagree: two ligatures
-#: whose upper case is "ST" (legacy reads STRING), and a dotted capital I (not STRING).
-P15_UNICODE_TYPES = ["\ufb06RING", "\ufb05RING", "STR\u0130NG"]
-
-
-def build_rls_column_type(data_type) -> AuditContext:
-    """An RLS rule on COUNTRY, an uncased column of `data_type`."""
-    col = {"name": "COUNTRY", "db_column_name": "COUNTRY",
-           "properties": {"column_type": "ATTRIBUTE"},
-           "db_column_properties": {"data_type": data_type}}
-    return build_trip_table_ctx([col], [TRIP_PLAIN_RULE])
-
-
-def perf_rls_friendly_column_name() -> AuditContext:
-    """Display name "Country" vs physical COUNTRY: the lookup misses (no P15)."""
-    friendly = {"name": "Country", "db_column_name": "COUNTRY",
-                "properties": {"column_type": "ATTRIBUTE"},
-                "db_column_properties": {"data_type": "VARCHAR"}}
-    return build_trip_table_ctx([friendly], [TRIP_PLAIN_RULE])
 
 
 # P17 — formula cross-reference chain depth
@@ -722,20 +618,8 @@ def guard_fact_model_other_constraint() -> AuditContext:
         {"constraint": [{"some_other_condition": {"column": "X"}}]})])
 
 
-# test_index_type_sense.py's shapes (P9, P11, S2)
-
-def build_index_col(name, ctype, index_type, column_id=None) -> dict:
-    props = {"column_type": ctype}
-    if index_type is not None:
-        props["index_type"] = index_type
-    return {"name": name, "column_id": column_id or f"T::{name}", "properties": props}
-
-
-def build_index_model(cols, **model) -> dict:
-    base = {"name": "M", "columns": cols}
-    base.update(model)
-    return {"guid": "m-1", "model": base}
-
+# test_index_type_sense.py's shapes (P9, P11, S2); the column and model builders
+# live in rls.py, which S2 shares
 
 def build_index_spotter_ctx(cols) -> AuditContext:
     return make_context(models=[build_index_model(
