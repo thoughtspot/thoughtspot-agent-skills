@@ -197,3 +197,44 @@ def test_a_transient_5xx_is_retried_then_skipped_per_model(status, tmp_path, cap
     for guid in ("m-ok", "m-bad"):
         assert f"AI instructions fetch failed for model {guid}: ThoughtSpot API {status}" in err
     assert TOKEN not in err and "Authorization" not in err
+
+
+def _reauth_failure(kind: str) -> Exception:
+    """What `_authenticate` raises when the token exchange itself fails other than by a
+    401/403 SystemExit: `resp.raise_for_status()` on a 500 (an OIDC account's bad
+    password answers 500/10000), or the network dropping during the exchange."""
+    if kind == "HTTPError":
+        resp = _response("https://example.thoughtspot.cloud/api/rest/2.0/auth/token/full",
+                         500, {"debug": "10000"})
+        return requests.HTTPError("500 Server Error", response=resp)
+    return requests.ConnectionError("connection reset")
+
+
+@pytest.mark.parametrize("kind", ["HTTPError", "ConnectionError"])
+def test_a_401_whose_reauthentication_raises_aborts_once(kind, tmp_path, capsys):
+    """The re-authentication after a 401 can itself raise (not exit). That is still a
+    credential/transport failure every later call would repeat: abort the run after ONE
+    token exchange, never swallow it as one Model's failure and re-try per Model."""
+    client, calls, reauth = _counting_client(tmp_path, 401)
+    reauth.side_effect = _reauth_failure(kind)
+    with pytest.raises(SystemExit) as exc:
+        run_audit(client, ["m-ok", "m-bad"], ["A"], "spotter")
+    assert exc.value.code not in (0, None)
+    assert reauth.call_count == 1
+    assert calls == {"m-ok": 1}
+    err = capsys.readouterr().err
+    assert "AI instructions fetch failed for model" not in err
+    abort = [ln for ln in err.splitlines() if "aborting" in ln]
+    assert len(abort) == 1 and kind in abort[0]
+    assert "example.thoughtspot.cloud" not in abort[0] and TOKEN not in err
+
+
+def test_a_404_skips_only_that_model(tmp_path, capsys):
+    """404 takes the 403 path (a per-Model skip), pinned on its own."""
+    out = run_audit(_client(tmp_path, lambda url: _response(url, 404, {"error": "No such object"})),
+                    ["m-ok", "m-bad"], ["A"], "spotter")
+    models = {m["guid"]: m for m in out["corpus"]["models"]}
+    assert models["m-bad"]["ai_analysis"]["instructions_read"] is False
+    assert models["m-ok"]["ai_analysis"]["instructions_read"] is True
+    assert ("AI instructions fetch failed for model m-bad: ThoughtSpot API 404 on POST "
+            + AI_PATH + " — No such object") in capsys.readouterr().err

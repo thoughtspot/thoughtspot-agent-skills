@@ -192,6 +192,29 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
 
 
+def _abort_if_request_failure(exc: Exception, guid: str) -> None:
+    """Exit the run when `exc` is a `requests` failure that escaped the client.
+
+    The client turns its own HTTP and network failures into a response or a
+    `SystemExit`; what escapes as a `requests.RequestException` is the re-authentication
+    after a 401 raising (a token exchange answering 500 — an OIDC account's bad password —
+    or the network dropping during it). Every later call would fail the same way, so it
+    is fatal once, never one swallowed failure and one re-authentication per Model. The
+    line names the exception type and, for an HTTP error, its status and path — never
+    the URL's host or any header."""
+    import requests
+    if not isinstance(exc, requests.RequestException):
+        return
+    resp = getattr(exc, "response", None)
+    where = ""
+    if resp is not None:
+        from urllib.parse import urlparse
+        where = f" ({resp.status_code} on {urlparse(resp.url or '').path or '?'})"
+    print(f"Error: AI instructions lookup for model {guid} failed while re-authenticating: "
+          f"{type(exc).__name__}{where} — aborting the audit", file=sys.stderr)
+    raise SystemExit(1) from exc
+
+
 def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
                            warnings: list) -> None:
     """`ai/instructions/get` per Model, into `out[guid]`; a failure leaves no entry
@@ -208,7 +231,8 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
     the credential itself is bad and every later call would fail the same way. It
     aborts the run (one line, `SystemExit(1)`) as before the fix, rather than
     re-authenticating and warning once per Model. A 403/404/5xx (after the client's
-    own 502/503/504 retries) is per Model and only skips that Model."""
+    own 502/503/504 retries) is per Model and only skips that Model. So does a
+    re-authentication that raises rather than exits (`_abort_if_request_failure`)."""
     from ts_cli.client import format_http_error
     _log("Fetching AI instructions...")
     for guid in model_guids:
@@ -223,7 +247,10 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
             else:
                 out[guid] = resp.json()
                 continue
+        except ValueError as exc:  # a body that is not JSON (requests' JSONDecodeError too)
+            reason = str(exc)
         except Exception as exc:  # the reason goes into the warning (the report cites it)
+            _abort_if_request_failure(exc, guid)
             reason = str(exc)
         msg = f"AI instructions fetch failed for model {guid}: {reason}"
         _log(f"Warning: {msg}")
