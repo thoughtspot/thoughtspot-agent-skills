@@ -1,10 +1,11 @@
 """`compare_findings` — are two audit finding lists the same, exactly?
 
 This was the equivalence gate that proved the rule catalog reproduces the legacy
-``check_*`` functions. The rule catalog replaced those functions (their last version is main@982c2010); their findings for every
-committed test input are pinned in ``tests/audit_rule_fixtures/legacy_findings.json.gz``
-and ``tests/test_audit_pinned_findings.py`` holds the catalog to them with this
-comparator. Its one obligation is never to call two different finding lists
+``check_*`` functions. The rule catalog replaced those functions (their last version
+is main@982c2010); their findings for every committed test input are pinned in
+``tests/audit_rule_fixtures/legacy_findings.json.gz`` and
+``tests/test_audit_pinned_findings.py`` holds the catalog to them with this comparator
+(and, separately, to each rule's finding order). Its one obligation is never to call two different finding lists
 identical, so it errs strict:
 
 - A finding is keyed by ``(check_id, object_type, object_guid, object_name, detail)``

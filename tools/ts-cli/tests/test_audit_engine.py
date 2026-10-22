@@ -501,13 +501,14 @@ def _children_of(ctx, scope: str) -> list:
 
 
 def test_reference_chain_depth_reports_each_formula_name_once():
-    """Formulas sharing a name are one node; only the last of them with references
-    carries the depth (legacy P17 keyed its graph by name)."""
+    """Formulas sharing a name are one node, holding the LAST one's references; the
+    FIRST of them with references carries the depth, where legacy P17's name-keyed dict
+    reported it — so the findings come in legacy order."""
     ctx = fx.perf_duplicate_formula_names()
     depths = [(i["name"], fields.get(i, "@reference_chain_depth", ctx))
               for i in _children_of(ctx, "model.formula")]
-    assert depths == [("A", None), ("B", 3), ("C", 2), ("D", 1), ("E", None),
-                      ("A", 3), ("Z", None), ("Z", 4)]
+    assert depths == [("A", 3), ("B", 3), ("C", 2), ("D", 1), ("E", None),
+                      ("A", None), ("Z", None), ("Z", 4)]
 
 
 def test_reference_chain_depth_owns_a_node_by_position_not_identity():
@@ -517,7 +518,7 @@ def test_reference_chain_depth_owns_a_node_by_position_not_identity():
     assert items[0]["obj"] is items[4]["obj"]
     assert [i["index"] for i in items] == [0, 1, 2, 3, 4]
     assert [fields.get(i, "@reference_chain_depth", ctx) for i in items] == \
-        [None, 2, 1, None, 3]
+        [3, 2, 1, None, None]
 
 
 def test_filter_with_a_scalar_column_is_named_not_an_error():

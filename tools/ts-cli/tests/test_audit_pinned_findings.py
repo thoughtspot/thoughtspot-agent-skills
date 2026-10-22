@@ -7,7 +7,8 @@ legacy check was run over every committed audit input (`AI_INPUTS`, `P_INPUTS`,
 what each reported is pinned in `audit_rule_fixtures/legacy_findings.json.gz`.
 These tests hold the catalog to those answers with the same strict comparator the
 equivalence gate used (`equivalence.compare_findings`: exact types, `None` vs `""`,
-key order, multiset of findings).
+key order, multiset of findings), plus each rule's finding ORDER, which the pin keeps
+as the legacy checks emitted it.
 
 They replace the legacy-vs-catalog equivalence tests, and they are the regression net
 for the 13 rules the 351-Model snapshot never exercises (D4, D5, D9, H9, P1, P4, P13,
@@ -66,7 +67,7 @@ import pytest
 import audit_pinned as ap
 from audit_run_rule import catalog, findings_by_rule
 from ts_cli.audit.engine.run import selected_rules
-from ts_cli.audit.equivalence import compare_findings
+from ts_cli.audit.equivalence import KEY_FIELDS, compare_findings
 
 CATEGORIES = ["A", "D", "H", "P", "S"]
 PROFILES = ap.PROFILES
@@ -101,6 +102,11 @@ def _committed_inputs() -> dict:
 def _legacy(name: str, profile: str, rule_id: str):
     """The pinned legacy findings ([] when the check found nothing), or "RAISES"."""
     return ap.entry(_pinned(), name, profile, rule_id)
+
+
+def _order(findings: list) -> list:
+    """A rule's findings as the sequence of their identity keys, in emitted order."""
+    return [tuple(f.get(k) for k in KEY_FIELDS) for f in findings]
 
 
 def _legacy_category(name: str, profile: str, category: str) -> list:
@@ -151,6 +157,11 @@ def test_catalog_reproduces_the_pinned_legacy_findings(category, profile):
             res = compare_findings(legacy, got.get(rule_id, []))
             if not res["identical"]:
                 differing[(name, rule_id)] = res
+            elif _order(legacy) != _order(got.get(rule_id, [])):
+                # compare_findings is a multiset; the report lists findings in emitted
+                # order, and the pin stores the legacy order, so hold the rule to it.
+                differing[(name, rule_id)] = {"order": (_order(legacy),
+                                                        _order(got.get(rule_id, [])))}
     assert differing == {}, {k: differing[k] for k in list(differing)[:5]}
     assert raised == {(n, r) for n, r in ENGINE_RAISES if r in rules}
     assert all(_legacy(n, profile, r) == ap.RAISES for n, r in raised)

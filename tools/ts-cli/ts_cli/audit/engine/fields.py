@@ -282,8 +282,10 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     hand-built model — its display name; both resolve back to the name (BL-300). A
     formula's edges are the other formulas its `expr` references. Formulas sharing a
     name share a node, holding the references of the LAST of them that has any;
-    `owner` maps each node to that formula's position in the list, so a rule reports a
-    node once — even when one formula mapping is listed twice.
+    `owner` maps each node to the position of the FIRST of them that has any, so a rule
+    reports a node once — even when one formula mapping is listed twice — and in the
+    order legacy P17 did (it walked its name-keyed dict, where a name keeps the place
+    of its first insertion).
     """
     by_ref: Dict[Any, Any] = {}
     for f in formulas:
@@ -302,7 +304,7 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
-            owner[fname] = i
+            owner.setdefault(fname, i)
     return graph, owner
 
 
