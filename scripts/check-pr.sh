@@ -5,7 +5,7 @@
 # Run main's copy, NEVER a PR checkout's (a PR can change its own copy of this file):
 #
 #     ( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
-#       git show origin/main:scripts/check-pr.sh > "$f"; bash "$f" <pr-number> )
+#       git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
 #
 # Every run ends with a `check-pr: PR #N ...` verdict line. No verdict line: it did not run.
 #
@@ -25,10 +25,12 @@
 #      and inline review comments;
 #   4. every path any commit or merge resolution touched, both sides of a rename;
 #   5. every raw commit object (author, committer, encoding and mergetag headers);
-#   6. the added content of every non-merge commit, again (see below).
-# Sections 2-6 use this script's own scanner: text is NFKC-normalised with invisible format
-# characters removed, then matched line by line AND with lines joined, so a name
-# hard-wrapped, split by an invisible line separator, or decomposed is still caught.
+#   6. added content again: per non-merge commit, and the PR's net diff.
+# Sections 2-6 use this script's own scanner: entities and percent-escapes decoded and
+# invisible format characters removed, then the raw, NFC and NFKC forms each matched line
+# by line AND with lines joined, so a name hard-wrapped, split by an invisible line
+# separator, or decomposed is still caught. Not caught: a wrap completed against a line
+# that is already on the base branch (that line is context, not added content).
 # Section 1 is the checker's own per-line scan, which also reports links.
 #
 # NOT scanned (BL-400): binary files, UTF-16 text included (listed for a manual look; the
@@ -74,17 +76,19 @@ EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 hermetic() {
     env -u PYTHONPATH -u PYTHONHOME -u GIT_CONFIG_PARAMETERS \
         GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_SOURCE="$EMPTY_TREE" \
-        GIT_CONFIG_COUNT=4 \
+        GIT_CONFIG_COUNT=5 \
         GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false \
         GIT_CONFIG_KEY_1=diff.noprefix GIT_CONFIG_VALUE_1=false \
         GIT_CONFIG_KEY_2=diff.mnemonicPrefix GIT_CONFIG_VALUE_2=false \
         GIT_CONFIG_KEY_3=core.attributesFile GIT_CONFIG_VALUE_3=/dev/null \
+        GIT_CONFIG_KEY_4=color.ui GIT_CONFIG_VALUE_4=never \
         "$@"
 }
 py() { hermetic python3 -E -s "$@"; }
 # Terminal-safe output: PR text could otherwise carry escape sequences to the terminal.
-# Drop control characters except tab and newline; bytes pass through (LC_ALL=C).
-show() { tr -d '\000-\010\013-\037\177'; }
+# Drop control characters except tab and newline, including UTF-8-encoded C1 controls
+# (U+0080-009F: CSI, OSC); every other byte passes through.
+show() { perl -pe 's/[\x00-\x08\x0b-\x1f\x7f]//g; s/\xc2[\x80-\x9f]//g'; }
 
 repo="$(gh repo view "$(git remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)" \
     || { echo "check-pr: cannot resolve the origin repository with gh" >&2; exit 2; }
@@ -129,8 +133,8 @@ checker="$vdir/check_customer_references.py"
 # The scanner for sections 2-6: main's checker, called directly (not through
 # --message-file, whose commit-message scissors handling would let one line hide the
 # rest), over whole text, normalised, per line and with lines joined.
-#   mode all: every finding; nowarn: FAIL only; names: list hits only;
-#   diff: names in a patch's added lines (split on newline only); paths: NUL-separated.
+#   mode all: every finding; nowarn: FAIL only; diff: list hits in a patch's added lines
+#   (split on newline only); paths: NUL-separated records.
 cat > "$tmp/scan.py" <<'EOF'
 import sys, unicodedata
 vdir, title, path, mode, expected = sys.argv[1:6]
@@ -138,12 +142,17 @@ sys.path.insert(0, vdir)
 import check_customer_references as c
 d = c.load_denylist()
 if (len(d) if d else 0) != int(expected):
-    print("FAIL  the private list changed during the run; run check-pr again")
+    print("ERROR the private list changed during the run; this is not a finding. Run check-pr again.")
     sys.exit(1)
 
-def fold(s):
-    s = unicodedata.normalize("NFKC", s)
-    return "".join(ch for ch in s if unicodedata.category(ch) != "Cf")
+def forms(rec):
+    # Decode entities and percent-escapes first, drop invisible format characters, THEN
+    # normalise. Scan raw, NFC and NFKC forms: each one alone misses something (NFKC
+    # turns a trademark sign into "TM"; raw misses decomposed accents).
+    base = "\n".join("".join(ch for ch in c.decode_line(l) if unicodedata.category(ch) != "Cf")
+                     for l in rec.splitlines())
+    return dict.fromkeys([base, unicodedata.normalize("NFC", base),
+                          unicodedata.normalize("NFKC", base)])
 
 raw = open(path, "rb").read().decode("utf-8", "replace")
 if mode == "diff":
@@ -151,19 +160,21 @@ if mode == "diff":
 records = [r for r in raw.split("\0") if r] if mode == "paths" else [raw]
 hits = []
 for rec in records:
-    text = fold(rec)
-    found = c.scan_text(text, "", d, grandfathered=set())
-    if d is not None:
-        per_line = {h.match for h in found if h.rule == "customer-name"}
-        joined = " ".join(c.decode_line(l) for l in text.splitlines())
-        for n in d.entries_in(joined):
-            if f"<denylist entry #{n}>" not in per_line:
-                found.append(c.Hit(0, "customer-name", f"<denylist entry #{n}> (split across lines)",
-                                   c._DENY_ADVICE))
-    hits += found
+    seen = {}
+    for text in forms(rec):
+        found = c.scan_text(text, "", d, grandfathered=set())
+        if d is not None:
+            per_line = {h.match for h in found if h.rule == "customer-name"}
+            for n in d.entries_in(" ".join(text.splitlines())):
+                if f"<denylist entry #{n}>" not in per_line:
+                    found.append(c.Hit(0, "customer-name",
+                                       f"<denylist entry #{n}> (split across lines)", c._DENY_ADVICE))
+        for h in found:
+            seen.setdefault((h.line, h.rule, h.match), h)
+    hits += seen.values()
 if mode == "nowarn":
     hits = [h for h in hits if h.level == "FAIL"]
-elif mode in ("names", "diff"):
+elif mode == "diff":
     hits = [h for h in hits if h.rule == "customer-name"]
 for h in hits:
     c._emit(f"{title}, line {h.line}", h, d)
@@ -235,10 +246,13 @@ section() {  # $1 = title, $2 = scan.py mode, rest = command producing the text
     fi
     echo
 }
-remerge()    { hermetic git show --remerge-diff --no-ext-diff --no-textconv --format= "$1"; }
+remerge()    { hermetic git show --remerge-diff --no-color --no-ext-diff --no-textconv --format= "$1"; }
 paths()      { hermetic git log -z --format= --name-only --no-renames --diff-merges=remerge "$mb..$head"; }
 rawcommits() { git rev-list "$mb..$head" | git cat-file --batch; }
-content()    { hermetic git log -p --no-merges --no-ext-diff --no-textconv --format= "$mb..$head"; }
+# Per commit, then the PR's net diff: a name wrapped across lines added by two different
+# commits is only adjacent in the net diff.
+content()    { hermetic git log -p --no-merges --no-color --no-ext-diff --no-textconv --format= "$mb..$head" \
+                   && hermetic git diff --no-color --no-ext-diff --no-textconv "$mb" "$head"; }
 
 echo "== Commits: added lines and commit messages"
 py "$checker" --root "$root" --range "$mb..$head" 2>&1 | show || rc=1

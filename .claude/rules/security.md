@@ -149,8 +149,9 @@ deliberately never goes into CI (the validator's docstring says why): **before r
 any PR, run main's copy of `scripts/check-pr.sh`** — never a PR checkout's, which the PR
 controls; the script's header gives the exact command. It checks the PR's commits, merge
 resolutions, added content, title, branch name, description, conversation and review
-comments, paths and raw commit objects against the list, fork PRs included. Binary files are listed for a manual look,
-and what it cannot see is listed in its header and tracked as BL-400.
+comments, paths and raw commit objects against the list, fork PRs included. Binary files
+are listed for a manual look, and what it cannot see is listed in its header and tracked
+as BL-400.
 
-If something slips through, removing it from the tip is not
-enough to un-publish it — tell a maintainer, who decides whether history needs action.
+If something slips through, removing it from the tip is not enough to un-publish it —
+tell a maintainer, who decides whether history needs action.

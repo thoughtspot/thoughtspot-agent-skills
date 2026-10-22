@@ -14414,7 +14414,8 @@ on a PR is the maintainer's `check-pr.sh`, which reads diffs and PR text, not tr
    inside file content.** `--range` matches per added line after `splitlines()` (which also
    breaks on U+2028, `\f`, `\v` and others) with no normalisation, so a hard-wrapped
    "Zorblax\nIndustries" or an NFD "Société" passes it. `check-pr.sh` closes this for PRs by
-   re-scanning every commit's added lines itself (NFKC, joined); the commit hooks do not.
+   re-scanning added lines itself (raw, NFC and NFKC forms, joined; per commit and the PR's
+   net diff); the commit hooks do not.
 4. **Non-Latin names cannot be listed.** `_norm` keeps ASCII letters and digits only, so a
    Cyrillic, Greek or CJK name normalises to nothing. `check-pr.sh` refuses such a list
    rather than ignore entries silently.
