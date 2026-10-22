@@ -312,3 +312,61 @@ def test_cli_replay_keeps_the_captured_assessment(_disc, tmp_path, monkeypatch):
     general = json.loads(general_out.read_text())
     assert general["corpus"]["assessment"] == "General"
     assert general["findings"] != live["findings"], "fixture must be bar-sensitive"
+
+
+# ── where a snapshot may be written ─────────────────────────────────────────
+# A snapshot is real exported TML under generic file names: never inside a git work
+# tree (the repo is public), never over a directory that is not an earlier snapshot.
+
+@pytest.mark.parametrize("git_entry", ["dir", "file"])  # a checkout, or a linked worktree
+def test_snapshot_refuses_a_directory_inside_a_git_work_tree(tmp_path, git_entry):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if git_entry == "dir":
+        (repo / ".git").mkdir()
+    else:
+        (repo / ".git").write_text("gitdir: /elsewhere\n")
+    with pytest.raises(SnapshotError, match="inside the git work tree"):
+        write_snapshot(_full_context(), repo / "snaps" / "new", ALL)
+    assert not (repo / "snaps").exists()
+
+
+def test_snapshot_refuses_a_non_empty_directory_that_is_not_a_snapshot(tmp_path):
+    target = tmp_path / "work"
+    target.mkdir()
+    (target / "models.json").write_text("my own file")
+    with pytest.raises(SnapshotError, match="not empty and holds no snapshot"):
+        write_snapshot(_full_context(), target, ALL)
+    assert (target / "models.json").read_text() == "my own file"
+
+
+def test_snapshot_refuses_a_file_path(tmp_path):
+    target = tmp_path / "a-file"
+    target.write_text("x")
+    with pytest.raises(SnapshotError, match="not a directory"):
+        write_snapshot(_full_context(), target, ALL)
+
+
+def test_snapshot_overwrites_an_earlier_snapshot_and_fills_an_empty_directory(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    write_snapshot(_full_context(), empty, ALL)          # empty: allowed
+    write_snapshot(_full_context(), empty, ["A"])        # an earlier snapshot: allowed
+    assert read_snapshot(empty)[1] == ["A"]
+
+
+def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
+    """The refusal comes before the fetch (13 minutes on a large estate), not after."""
+    import ts_cli.commands.audit as audit_cmd
+    calls = []
+    monkeypatch.setattr(audit_cmd, "resolve_profile", lambda p: "example")
+    monkeypatch.setattr(audit_cmd, "ThoughtSpotClient", lambda _p: calls.append("client") or MagicMock())
+    monkeypatch.setattr("ts_cli.audit.context.build_context",
+                        lambda *a, **k: calls.append("fetch"))
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    result = runner.invoke(_app(), ["audit", "run", "-m", "m1", "--snapshot-out",
+                                    str(repo / "snap"), "-o", str(tmp_path / "out.json")])
+    assert result.exit_code != 0
+    assert "Cannot write snapshot" in result.output and "git work tree" in result.output
+    assert "fetch" not in calls and not (repo / "snap").exists()

@@ -372,7 +372,8 @@ builder is still committed); re-pin the new name with `--input`.
    the snapshot did not capture (for example a new rule that `requires: [answers]` on a
    snapshot taken with `--angles A`); capture again with that category. Snapshots hold
    real exported TML: never commit one, and never paste findings that name customer
-   objects into the repo or a PR.
+   objects into the repo or a PR. `--snapshot-out` refuses, before fetching, a directory
+   inside any git work tree and a non-empty directory that holds no earlier snapshot.
 9. **Full checks:** `pytest tools/ts-cli/tests/ -q` and
    `python3 tools/validate/check_audit_catalog.py --root . --base origin/main`. A new rule
    needs no list edited anywhere: counts, the registry tests and the report meta all read

@@ -101,8 +101,12 @@ def _capture(client, models: list, angle_list: Optional[list], assessment_name: 
     from ts_cli.audit import data_needs, run_audit
     from ts_cli.audit.context import ALWAYS_FETCHED
     from ts_cli.audit.context import build_context
-    from ts_cli.audit.snapshot import SnapshotError, write_snapshot
+    from ts_cli.audit.snapshot import SnapshotError, prepare_snapshot_dir, write_snapshot
 
+    try:  # before the fetch: a refused directory must not cost a full capture
+        snapshot_out = prepare_snapshot_dir(snapshot_out)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot write snapshot: {exc}") from exc
     angles = angle_list or list(_catalog().categories)
     # Every profile's needs (a replay may pass a different --assessment); the manifest
     # records them so a replay can refuse what is missing.
@@ -137,7 +141,9 @@ def run(
                                            help="Write JSON report to file instead of stdout"),
     snapshot_out: Optional[Path] = typer.Option(
         None, "--snapshot-out",
-        help="Also write the fetched audit data to this directory, for later replay"),
+        help="Also write the fetched audit data to this directory, for later replay. "
+             "Refused inside a git work tree, or when the directory is non-empty and "
+             "not an earlier snapshot"),
     snapshot_in: Optional[Path] = typer.Option(
         None, "--snapshot-in",
         help="Audit a directory written by --snapshot-out instead of fetching: needs no "

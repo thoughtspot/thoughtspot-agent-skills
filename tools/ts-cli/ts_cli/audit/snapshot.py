@@ -25,6 +25,11 @@ Keys are written in insertion order, NOT sorted. The checks iterate the
 context's dicts (H5 walks ``dependents``), so dict order decides finding
 order; sorting keys reordered 45 of 5,091 findings on a real capture.
 
+A snapshot holds real exported TML, so where it may go is checked before anything is
+fetched (``prepare_snapshot_dir``): never inside a git work tree (this repo is
+public, and history is permanent), and never into a non-empty directory that is not
+an earlier snapshot (its generic file names would overwrite someone's files).
+
 The manifest is written last. A capture interrupted part-way leaves no
 manifest, which ``read_snapshot`` reports, never a half-written snapshot that
 reads as complete.
@@ -88,18 +93,49 @@ def _dumps(value, what: str) -> str:
 
 # ── write ───────────────────────────────────────────────────────────────────
 
+def _git_work_tree(path: Path):
+    """The nearest ancestor of `path` (itself included) holding a `.git` entry — a
+    directory, or the file a linked worktree or submodule has; None outside one."""
+    for candidate in [path, *path.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def prepare_snapshot_dir(out_dir: Path) -> Path:
+    """Resolve and create `out_dir` for a snapshot, refusing — with ``SnapshotError``,
+    before anything is fetched — a directory inside a git work tree, or a non-empty one
+    that is not an earlier snapshot (no ``manifest.json``)."""
+    out_dir = Path(out_dir).expanduser().resolve()
+    tree = _git_work_tree(out_dir)
+    if tree is not None:
+        raise SnapshotError(
+            f"{out_dir} is inside the git work tree {tree}. A snapshot holds real "
+            "exported TML: write it outside any repository (e.g. ~/audit-snapshots/<name>)")
+    if out_dir.exists() and not out_dir.is_dir():
+        raise SnapshotError(f"{out_dir} exists and is not a directory")
+    if out_dir.is_dir() and any(out_dir.iterdir()) and not (out_dir / MANIFEST).is_file():
+        raise SnapshotError(
+            f"{out_dir} is not empty and holds no snapshot ({MANIFEST}); a snapshot "
+            "overwrites files by generic names — choose an empty or new directory")
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SnapshotError(f"cannot create {out_dir}: {exc}") from exc
+    return out_dir
+
+
 def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str],
                    needs=None) -> None:
     """Write ``ctx``, the angles it was captured for and — when given — the ``needs``
     ``build_context`` fetched it with to ``out_dir``. Without ``needs`` the manifest
     records none, and a replay reads it as a legacy, angle-keyed snapshot.
 
-    Raises ``SnapshotError`` when the context holds data JSON cannot carry back
-    unchanged (for example non-string mapping keys); the half-written snapshot
+    Raises ``SnapshotError`` when ``out_dir`` is refused (``prepare_snapshot_dir``), or
+    when the context holds data JSON cannot carry back unchanged (for example non-string mapping keys); the half-written snapshot
     is left without a manifest, so it cannot be replayed by mistake.
     """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = prepare_snapshot_dir(out_dir)
     manifest_path = out_dir / MANIFEST
     if manifest_path.exists():
         manifest_path.unlink()
