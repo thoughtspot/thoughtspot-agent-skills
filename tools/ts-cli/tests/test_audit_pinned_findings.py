@@ -13,34 +13,40 @@ They replace the legacy-vs-catalog equivalence tests, and they are the regressio
 for the 13 rules the 351-Model snapshot never exercises (D4, D5, D9, H9, P1, P4, P13,
 P14, P15, S4, S5, S9, S10): every one of those fires in these inputs.
 
-An input whose builder changes on purpose no longer matches its pinned answer; there is
-no legacy check left to re-pin from, so such a change must say why in its commit and
-update the pinned entry by hand.
+**Scope: the 51 pinned rules only** (`audit_pinned.PINNED_RULE_IDS`, frozen). A rule
+added to the catalog after the pin is not compared here; its `fires`/`silent` examples
+(test_audit_rule_examples.py) are its net.
+
+**Changing a pinned rule, or an input builder, on purpose** — a threshold, severity or
+wording edit, a defect fixed (one of the strict xfails), a builder reshaped — fails
+here until the pin moves with it:
+
+    PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8 [--dry-run]
+    PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --input <name>
+
+It rewrites only the named entries from the CURRENT catalog, deterministically, and
+prints the before/after of every entry it changes. The gzip shows in a PR only as
+"Binary files differ", so that printed diff is the review artefact: paste it into the
+PR description. (The pin as plain sorted, indented JSON would be 3.6 MB, too large to
+review as a diff, so it stays gzipped at 66 KB.) Re-pinning an entry pinned as
+"RAISES" replaces the legacy raise with what the catalog reports; update
+LEGACY_RAISES / ENGINE_RAISES below in the same change.
 """
 from __future__ import annotations
 
-import gzip
-import json
-from functools import lru_cache
-from pathlib import Path
-
 import pytest
 
-import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, catalog, findings_by_rule
-from ts_cli.audit.engine.run import run_rule as engine_run_rule
+import audit_pinned as ap
+from audit_run_rule import catalog, findings_by_rule
 from ts_cli.audit.equivalence import compare_findings
 
-PINNED = Path(__file__).resolve().parent / "audit_rule_fixtures" / "legacy_findings.json.gz"
 CATEGORIES = ["A", "D", "H", "P", "S"]
-PROFILES = ["spotter", "general"]
-OWN_INPUTS = {"A": fx.AI_INPUTS, "D": fx.D_INPUTS, "H": fx.H_INPUTS, "P": fx.P_INPUTS,
-              "S": fx.S_INPUTS}
+PROFILES = ap.PROFILES
+OWN_INPUTS = ap.OWN_INPUTS
 
-#: (input, rule) pairs on which the legacy check RAISED (under both profiles). The
-#: engine must not raise on them (every category runs over every input below); what
-#: it reports there has no legacy answer to compare with. A None name or a list-valued
-#: `properties` aborts the legacy regex and lookup code.
+#: (input, rule) pairs on which the legacy check RAISED (under both profiles). What
+#: the catalog reports there has no legacy answer to compare with. A None name or a
+#: list-valued `properties` aborts the legacy regex and lookup code.
 LEGACY_RAISES = {
     "ai_model_name_none": {"H10"},
     "tml_value_shapes": {"H3", "P2", "P9", "P18"},
@@ -52,98 +58,84 @@ LEGACY_RAISES = {
 
 #: (input, rule) pairs on which the CATALOG raises too: A5 (a code rule) reads the
 #: column names as the legacy A5 did, and a None name raises in both. Pinned so that a
-#: fix shows up here; a raise anywhere else fails.
+#: fix shows up here; a pinned rule raising anywhere else fails.
 ENGINE_RAISES = {("perf_names_none", "A5"), ("data_names_none", "A5")}
 
 
-@lru_cache(maxsize=1)
 def _pinned() -> dict:
-    with gzip.open(PINNED, "rt", encoding="utf-8") as fh:
-        return json.load(fh)
+    return ap.pinned()
 
 
 def _committed_inputs() -> dict:
-    inputs: dict = {}
-    for named in OWN_INPUTS.values():
-        for name, build in named.items():
-            inputs.setdefault(name, build)
-    return inputs
+    return ap.committed_inputs()
 
 
 def _legacy(name: str, profile: str, rule_id: str):
     """The pinned legacy findings ([] when the check found nothing), or "RAISES"."""
-    return _pinned()["findings"].get(name, {}).get(profile, {}).get(rule_id, [])
+    return ap.entry(_pinned(), name, profile, rule_id)
 
 
 def _legacy_category(name: str, profile: str, category: str) -> list:
     out = []
-    for rule_id in active_rule_ids(category):
+    for rule_id in ap.pinned_rules(category):
         found = _legacy(name, profile, rule_id)
-        assert found != "RAISES", f"{name}: the legacy {rule_id} raised; nothing to probe"
+        assert found != ap.RAISES, f"{name}: the legacy {rule_id} raised; nothing to probe"
         out += found
     return out
 
 
-def _engine(build, category: str, profile: str):
-    """The catalog's findings by rule for one input, and the rules that raised. The
-    whole category runs first, as in an audit; only if that raises does each rule run
-    alone, so one raising rule cannot hide what the others report."""
-    try:
-        return findings_by_rule(build(), category, profile), set()
-    except Exception:  # noqa: BLE001 - narrowed rule by rule below
-        pass
-    got, raised = {}, set()
-    for rule_id in active_rule_ids(category):
-        try:
-            found = engine_run_rule(build(), catalog(), rule_id, profile)
-        except Exception:  # noqa: BLE001 - checked against ENGINE_RAISES
-            raised.add(rule_id)
-            continue
-        if found:
-            got[rule_id] = found
-    return got, raised
-
-
 def test_the_pinned_inputs_are_the_committed_inputs():
-    """An input added or renamed since the pin has no legacy answer: say so, loudly."""
+    """An input added or renamed since the pin has no legacy answer: say so, loudly
+    (repin_findings.py --input <name> pins a new one)."""
     assert sorted(_committed_inputs()) == _pinned()["inputs"]
     assert _pinned()["profiles"] == PROFILES
+
+
+def test_the_pinned_rule_set_is_frozen_and_covers_every_pinned_entry():
+    """Every pinned entry is one of the frozen rules, and every frozen rule is still in
+    the catalog (a rule id is never deleted; a retired one reports nothing and must be
+    re-pinned to [] on purpose)."""
+    in_file = {r for profiles in _pinned()["findings"].values()
+               for rules in profiles.values() for r in rules}
+    assert in_file <= set(ap.PINNED_RULE_IDS), in_file - set(ap.PINNED_RULE_IDS)
+    assert set(ap.PINNED_RULE_IDS) <= set(catalog().rules)
+    assert len(ap.PINNED_RULE_IDS) == len(set(ap.PINNED_RULE_IDS)) == 51
 
 
 @pytest.mark.parametrize("profile", PROFILES)
 @pytest.mark.parametrize("category", CATEGORIES)
 def test_catalog_reproduces_the_pinned_legacy_findings(category, profile):
-    """Every committed input, every rule of the category: the catalog's findings are the
-    legacy check's, exactly. The engine runs the whole category (as `ts audit run` does)
-    on every input — including those a legacy check raised on — and raises only where
-    ENGINE_RAISES says (where the legacy check raised as well)."""
+    """Every committed input, every pinned rule of the category: the catalog's findings
+    are the pinned ones, exactly. The engine runs the whole category (as `ts audit run`
+    does) on every input — including those a legacy check raised on — and a pinned rule
+    raises only where ENGINE_RAISES says (where the legacy check raised as well)."""
+    rules = ap.pinned_rules(category)
     differing, raised = {}, set()
     for name, build in _committed_inputs().items():
-        got, failed = _engine(build, category, profile)
-        raised |= {(name, rule_id) for rule_id in failed}
-        for rule_id in dict.fromkeys([*active_rule_ids(category), *got]):
+        got, failed = ap.catalog_by_rule(build, category, profile)
+        raised |= {(name, rule_id) for rule_id in failed if rule_id in rules}
+        for rule_id in rules:
             legacy = _legacy(name, profile, rule_id)
-            if legacy == "RAISES" or rule_id in failed:
+            if legacy == ap.RAISES or rule_id in failed:
                 continue
-            new = [f.to_dict() for f in got.get(rule_id, [])]
-            res = compare_findings(legacy, new)
+            res = compare_findings(legacy, got.get(rule_id, []))
             if not res["identical"]:
                 differing[(name, rule_id)] = res
     assert differing == {}, {k: differing[k] for k in list(differing)[:5]}
-    assert raised == {(n, r) for n, r in ENGINE_RAISES if r in active_rule_ids(category)}
-    assert all(_legacy(n, profile, r) == "RAISES" for n, r in raised)
+    assert raised == {(n, r) for n, r in ENGINE_RAISES if r in rules}
+    assert all(_legacy(n, profile, r) == ap.RAISES for n, r in raised)
 
 
 @pytest.mark.parametrize("profile", PROFILES)
 @pytest.mark.parametrize("category", CATEGORIES)
 def test_every_rule_fires_in_its_own_categorys_inputs(category, profile):
-    """Not vacuous: each active rule has pinned findings in its category's own inputs,
-    so the comparison above exercises every rule, not just the silent case."""
-    fired = dict.fromkeys(active_rule_ids(category), 0)
+    """Not vacuous: each pinned rule still active has pinned findings in its category's
+    own inputs, so the comparison above exercises every one, not just the silent case."""
+    fired = dict.fromkeys(ap.pinned_rules(category), 0)
     for name in OWN_INPUTS[category]:
         for rule_id in fired:
             legacy = _legacy(name, profile, rule_id)
-            fired[rule_id] += 0 if legacy == "RAISES" else len(legacy)
+            fired[rule_id] += 0 if legacy == ap.RAISES else len(legacy)
     assert all(fired.values()), fired
 
 
@@ -156,7 +148,7 @@ def test_the_rules_the_snapshot_never_exercises_are_pinned_firing():
         for rules in profiles.values():
             for rule_id in unexercised:
                 found = rules.get(rule_id, [])
-                counts[rule_id] += 0 if found == "RAISES" else len(found)
+                counts[rule_id] += 0 if found == ap.RAISES else len(found)
     assert all(counts.values()), counts
 
 
@@ -164,7 +156,7 @@ def test_the_legacy_raises_are_the_known_ones():
     pinned = {}
     for name, profiles in _pinned()["findings"].items():
         for profile, rules in profiles.items():
-            raised = {r for r, v in rules.items() if v == "RAISES"}
+            raised = {r for r, v in rules.items() if v == ap.RAISES}
             if raised:
                 pinned.setdefault(name, {})[profile] = raised
     assert pinned == {name: {p: rules for p in PROFILES} for name, rules in LEGACY_RAISES.items()}
@@ -333,6 +325,48 @@ def test_catalog_keeps_legacy_names_guids_and_edges(category, fixture, probe, pr
     old = _legacy_category(fixture, profile, category)
     assert any(probe(f) for f in old), "the input must exercise the case"
     build = _committed_inputs()[fixture]
-    new = [f.to_dict() for found in findings_by_rule(build(), category, profile).values()
-           for f in found]
+    got = findings_by_rule(build(), category, profile)
+    new = [f.to_dict() for rule_id in ap.pinned_rules(category) for f in got.get(rule_id, [])]
     assert compare_findings(old, new)["identical"] is True
+
+
+# ── repin_findings.py: the supported way to move the pin ────────────────────
+
+def test_repin_refuses_a_rule_outside_the_frozen_set_and_an_unknown_input(capsys):
+    import repin_findings
+    assert repin_findings.main(["--rule", "P19"]) == 1
+    assert repin_findings.main(["--input", "no_such_input"]) == 1
+    assert repin_findings.main([]) == 1
+    err = capsys.readouterr().err
+    assert "frozen pinned set" in err and "unknown input" in err
+
+
+def test_repin_rewrites_named_entries_deterministically(tmp_path, monkeypatch, capsys):
+    """Against a copy of the pin: re-pinning P8 from a catalog that reports nothing
+    removes its entries (and prints them as removed); re-pinning from the real catalog
+    restores the file byte for byte."""
+    import shutil
+
+    import repin_findings
+    copy = tmp_path / "pin.json.gz"
+    shutil.copy(ap.PINNED, copy)
+    monkeypatch.setattr(ap, "PINNED", copy)
+    original = copy.read_bytes()
+
+    real_current = ap.current
+    monkeypatch.setattr(ap, "current", lambda build, rule_id, profile: [])
+    assert repin_findings.main(["--rule", "P8", "--dry-run"]) == 0
+    assert copy.read_bytes() == original                       # dry run writes nothing
+    assert repin_findings.main(["--rule", "P8"]) == 0
+    out = capsys.readouterr().out
+    assert "P8 / perf_model_80_columns / spotter:" in out and "    - ('P8'," in out
+    after = ap.load()["findings"]
+    assert all("P8" not in rules for profiles in after.values() for rules in profiles.values())
+    def without_p8(findings):
+        return {(n, p, r): v for n, ps in findings.items() for p, rs in ps.items()
+                for r, v in rs.items() if r != "P8"}
+    assert without_p8(after) == without_p8(ap.pinned()["findings"])   # the rest untouched
+
+    monkeypatch.setattr(ap, "current", real_current)
+    assert repin_findings.main(["--rule", "P8"]) == 0
+    assert copy.read_bytes() == original

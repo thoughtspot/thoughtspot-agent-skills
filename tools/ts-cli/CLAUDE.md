@@ -274,7 +274,17 @@ rule engine (`ts_cli/audit/engine/`) — a check is a YAML rule, not a function.
    declared data reads, examples, the generated doc, rule-id history (`--base <ref>`).
 3. `python -m ts_cli.audit.generate` — regenerates the rule tables in
    `agents/cli/ts-audit/references/check-catalog.md` (never edit them by hand).
-4. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
-5. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
+4. **Changing one of the 51 rules the legacy checks ran** (threshold, severity, wording,
+   a defect fixed, `status`) or a committed input builder in `tests/audit_rule_fixtures/`:
+   `tests/test_audit_pinned_findings.py` holds those rules to the findings pinned in
+   `tests/audit_rule_fixtures/legacy_findings.json.gz`, and fails until the pin moves.
+   Re-pin only what you changed, from the current catalog:
+   `PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8`
+   (or `--input <name>`, or both; `--dry-run` to preview). It prints the before/after of
+   every entry it rewrites — paste that into the PR, since the gzip diff is unreadable.
+   A NEW rule is not pinned (`PINNED_RULE_IDS` in `tests/audit_pinned.py` is frozen);
+   its `fires`/`silent` examples are its regression net.
+5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
+6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
 
 A rule id is permanent: retire a rule (`status: retired`), never delete or reuse it.
