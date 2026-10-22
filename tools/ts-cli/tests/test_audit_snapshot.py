@@ -13,6 +13,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
+from ansi import plain
+
 from ts_cli.audit.context import AuditContext, build_context, make_context
 from ts_cli.audit.snapshot import SnapshotError, read_snapshot, write_snapshot
 
@@ -229,26 +231,26 @@ def test_cli_snapshot_in_rejects_an_angle_it_did_not_capture(tmp_path, no_profil
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap),
                                     "--angles", "D,H"])
     assert result.exit_code != 0
-    assert "H" in result.output and "not captured" in result.output
+    assert "H" in plain(result) and "not captured" in plain(result)
 
 
 def test_cli_snapshot_in_and_out_are_mutually_exclusive(tmp_path, no_profiles):
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(tmp_path / "a"),
                                     "--snapshot-out", str(tmp_path / "b")])
     assert result.exit_code != 0
-    assert "--snapshot-in" in result.output and "--snapshot-out" in result.output
+    assert "--snapshot-in" in plain(result) and "--snapshot-out" in plain(result)
 
 
 def test_cli_models_required_without_snapshot_in(tmp_path, no_profiles):
     result = runner.invoke(_app(), ["audit", "run"])
     assert result.exit_code != 0
-    assert "--models" in result.output
+    assert "--models" in plain(result)
 
 
 def test_cli_reports_a_bad_snapshot(tmp_path, no_profiles):
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(tmp_path / "nope")])
     assert result.exit_code != 0
-    assert "manifest.json" in result.output
+    assert "manifest.json" in plain(result)
 
 
 @patch("ts_cli.audit.context.discover_sets", return_value=_NO_SETS)
@@ -308,7 +310,7 @@ def test_cli_replay_keeps_the_captured_assessment(_disc, tmp_path, monkeypatch):
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap),
                                     "--assessment", "general", "-o", str(general_out)])
     assert result.exit_code == 0, result.output
-    assert "overrides" in result.output and "spotter" in result.output
+    assert "overrides" in plain(result) and "spotter" in plain(result)
     general = json.loads(general_out.read_text())
     assert general["corpus"]["assessment"] == "General"
     assert general["findings"] != live["findings"], "fixture must be bar-sensitive"
@@ -388,5 +390,5 @@ def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
     result = runner.invoke(_app(), ["audit", "run", "-m", "m1", "--snapshot-out",
                                     str(repo / "snap"), "-o", str(tmp_path / "out.json")])
     assert result.exit_code != 0
-    assert "Cannot write snapshot" in result.output and "git work tree" in result.output
+    assert "Cannot write snapshot" in plain(result) and "git work tree" in plain(result)
     assert "fetch" not in calls and not (repo / "snap").exists()
