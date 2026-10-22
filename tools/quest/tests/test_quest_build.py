@@ -3940,7 +3940,7 @@ def test_the_atlas_must_be_8_bit_rgba(tmp_path, monkeypatch):
     h = MAPS._png_size(packs / "agentql/tiles/tiles.png")[1]     # the real size, so only the format is wrong
     (packs / "agentql/tiles/tiles.png").write_bytes(_png_rows([bytes(192 * 4)] * h, [0], colour=6).replace(
         b"IHDR" + (192).to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 6]),
-        b"IHDR" + (192).to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 2])))
+        b"IHDR" + (192).to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 2])))     # colour type 2: RGB
     monkeypatch.setattr(B, "PACKS", packs)
     errors = B.build(check=True)[3]
     assert any("must be an 8-bit RGBA PNG" in e for e in errors), errors
@@ -4288,7 +4288,7 @@ def test_a_classic_folder_that_is_not_the_builds_survives_a_build_without_home(t
     _agentql_with(tmp_path, monkeypatch, ("  home: true ", "  home: false "))
     assert keep.exists() and (site / "classic").exists()
 
-# ---- art: a mountain for the Mines, an ornate library for Law, a canopy for the Forests ------------
+# ---- art: a mountain for the Mines, an ornate library for Law, a leafy lane for the Forests --------
 
 def test_the_scenes_use_their_new_art_and_it_is_licensed():
     frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
@@ -4306,7 +4306,7 @@ def test_the_scenes_use_their_new_art_and_it_is_licensed():
     assert walls[ly * w + lx - 1] == walls[ly * w + lx + 1] == 491 + 1           # a column either side of Law's door
     assert walls[(ly - 1) * w + lx] == 492 + 1                                    # its pediment over it
     fx, fy = at[("portal", "forests")]
-    assert all(floor[fy * w + x] == 499 + 1 for x in range(fx - 12, fx))          # the canopy lane up to the arch
+    assert all(floor[fy * w + x] == 499 + 1 for x in range(fx - 12, fx))          # the leafy lane up to the arch
     mx, my = at[("portal", "mines")]
     assert my == 1 and walls[mx] in (480 + 1, 481 + 1, 482 + 1)                   # the tunnel in the cliff, grass above
 
@@ -4329,3 +4329,28 @@ def test_the_cliff_slices_are_the_packs_own_in_place():
     assert "ADVENTURE = {480: 86, 481: 93, 482: 92, 483: 87, 484: 104, 485: 104, 486: 103, 487: 106, 488: 107, 489: 108," in src
     licence = (PACK_DIR / "tiles/LICENSE-adventure-awaits.txt").read_text(encoding="utf-8")
     assert "Slice 86, 93, 92, 87, 104, 104, 103, 106,\n107, 108 and 113" in licence
+
+
+def test_the_scenes_floors_and_the_cliffs_foot():
+    # (from the review of #661: each of these regressed silently before)
+    world = json.loads((PACK_DIR / "maps/overworld.tmj").read_text(encoding="utf-8"))
+    layer = lambda name: next(l for l in world["layers"] if l["name"] == name)["data"]
+    floor, decor, w = layer("floor"), layer("decor"), world["width"]
+    at = {(o["type"], (o["properties"][0]["value"] if o["properties"] else None)): (o["x"] // TILE, o["y"] // TILE)
+          for o in _layer(world, "objectgroup")["objects"]}
+    gx, gy = at[("npc", "wizard_guard")]
+    assert floor[gy * w + gx] - 1 in (48, 49, 50, 51)                            # Law's guard on the plaza's sand
+    fx, fy = at[("portal", "forests")]
+    assert floor[fy * w + fx] - 1 == 144                                          # the arch of leaves on grass
+    mx, my = at[("portal", "mines")]
+    assert decor[(my + 1) * w + mx - 2] - 1 in (487, 488, 489)                    # the cliff's foot along the yard (not under the rails)
+    assert all(floor[x] for x in range(14))                                       # the rock has a floor under it
+    src = (PACK_DIR / "tiles/make_atlas.py").read_text(encoding="utf-8")
+    assert "490: 113}" in src and "SAND_TO_KENNEY" in src and "GRASS_TO_KENNEY" in src
+
+
+def test_a_map_with_bad_layers_is_reported_not_a_traceback(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    (packs / "agentql/maps/overworld.tmj").write_text(json.dumps({"layers": "nope"}), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert B.build(check=True)[3]                                                 # errors, and no exception

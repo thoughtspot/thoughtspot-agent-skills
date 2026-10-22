@@ -11,7 +11,7 @@ Frames, 16px, 12 to a row:
     480-490  Adventure Awaits   Tiles/Slice N.png: a cliff face with a tunnel (ADVENTURE below)
     491-499  ours               Law's library (column, pediment, frieze, door, lamp, balustrade
                                 west and east), the Golden Forests' arch of leaves and the lane
-                                under their canopy
+                                fringed with their leaves
 The zips used (sha256): kenney_tiny-dungeon.zip c109438ab06f65fd80f9b2686a4cf9c7c11dc64444b47333ec71d602f8bb5fc7,
 kenney_tiny-town.zip 9768692dccff1d706408a5aedd6ca4f6cd1409506cbc84cb2f862919764be977,
 kenney_tiny-battle.zip 7751ec7d9a07e57baa9fa1174d6f78fcd779a050377227afee77993c73cb5f9e,
@@ -50,11 +50,13 @@ DRAWN = {
 
 # Adventure Awaits slices by frame, as they sit in the pack's own sheet: a cliff's grass top
 # (west, middle, east), its rock (west, middle twice, east), its sandy foot (west, middle, east),
-# and a tunnel into it. Its grass and sand are given Kenney's, so the two packs meet without a seam.
+# and a tunnel into it. Its grass is given Kenney's everywhere, and its sand Kenney's in the foot's
+# ground (487-489) only, where it meets the yard (the same colour lights the rock, which keeps it).
 ADVENTURE = {480: 86, 481: 93, 482: 92, 483: 87, 484: 104, 485: 104, 486: 103, 487: 106, 488: 107, 489: 108,
              490: 113}
-TO_KENNEY = {(195, 142, 101): (234, 165, 108),                                   # sand
-             (103, 156, 48): (132, 198, 105), (154, 191, 68): (139, 216, 125), (34, 120, 63): (101, 165, 86)}  # grass
+GRASS_TO_KENNEY = {(103, 156, 48): (132, 198, 105), (154, 191, 68): (139, 216, 125), (34, 120, 63): (101, 165, 86)}
+SAND_TO_KENNEY = {(195, 142, 101): (234, 165, 108)}
+SANDY_FOOT = {487, 488, 489}
 
 # Law's library: Tiny Dungeon's outline, the Forge's stone, gold trim. 16-letter rows are drawn as
 # they are; 8-letter rows are a left half, mirrored.
@@ -75,10 +77,9 @@ DRAWN.update({
                   ".......o", ".......o", ".......o", ".......o", "......oo", ".....ooo", "....oooo", "........"]),
     496: (STONE, [r.ljust(16, ".") for r in RAIL_WEST]),
     498: (LEAVES, ["..oooooo", ".ogggggg", "ogghgggh", "oghggghg", "ogghgooo", "ogggoddd", "oghgoddd", "ogggoddd",
-                   "oghgoddd", "ogggoddd", "oghgoddd", "ogggoddd", "otttoddd", "otttoddd", "otttoddd", "ooooodd."]),
+                   "oghgoddd", "ogggoddd", "oghgoddd", "ogggoddd", "otttoddd", "otttoddd", "otttoddd", "oooooddd"]),
 })
-# 499: the lane under the Golden Forests' canopy: leaves arch in from both sides over a shaded
-# path, dappled with sun.
+# 499: the Golden Forests' lane: a shaded path, dappled with sun, fringed with golden leaves.
 CANOPY = {"o": (63, 38, 49), "g": (255, 196, 70), "h": (230, 150, 40), "p": (150, 96, 58), "q": (112, 70, 44),
           "r": (214, 160, 96)}
 DRAWN[499] = (CANOPY, ["gghgghggghgghggh", "hgggoghggoghgggo", "oqoooqoooqoooqoo", "qqpqqqpqqqqpqqqp",
@@ -142,8 +143,9 @@ def main(dungeon, town, battle, adventure, out):
         for y in range(T):
             for x in range(T):
                 r, g, b, a = px[x, y]
-                if a and (r, g, b) in TO_KENNEY:
-                    px[x, y] = (*TO_KENNEY[(r, g, b)], a)
+                swap = GRASS_TO_KENNEY | (SAND_TO_KENNEY if frame in SANDY_FOOT else {})
+                if a and (r, g, b) in swap:
+                    px[x, y] = (*swap[(r, g, b)], a)
         tiles[frame] = tile
     top = Image.new("RGBA", (T, T), (47, 42, 72, 255))   # 132: the top of a wall: dark stone, a lighter rim, chips
     for x in range(T):
@@ -162,7 +164,8 @@ def main(dungeon, town, battle, adventure, out):
     for i, t in enumerate(tiles):
         atlas.alpha_composite(t, ((i % 12) * T, (i // 12) * T))
     atlas.save(out, optimize=True)
-    print(out, atlas.size, f"{len(tiles)} frames drawn, {rows * 12} slots")
+    drawn_n = sum(1 for t in tiles if t.getbbox())
+    print(out, atlas.size, f"{drawn_n} frames drawn, {rows * 12} slots")
 
 
 if __name__ == "__main__":

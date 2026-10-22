@@ -15,5 +15,6 @@ Support us by crediting Ishtar Pixels (this is not mandatory)
 ------------------------------
 
 Frames 480-490 of tiles.png are this pack's Tiles/Slice 86, 93, 92, 87, 104, 104, 103, 106,
-107, 108 and 113 (a cliff face with a tunnel), with its sand and grass recoloured to Kenney's
-(make_atlas.py, TO_KENNEY).
+107, 108 and 113 (a cliff face with a tunnel). Their grass is recoloured to Kenney's, and the
+sand of the cliff's foot (Slice 106, 107, 108) too (make_atlas.py, GRASS_TO_KENNEY and
+SAND_TO_KENNEY).

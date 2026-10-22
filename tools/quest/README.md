@@ -271,14 +271,14 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
   tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
   turned out to bundle GPL-3.0 code; design decision 5.)
-- **Tiles** are four CC0 packs in one atlas of 504 slots (500 drawn): Kenney's Tiny Dungeon (frames 0-131),
+- **Tiles** are four CC0 packs in one atlas of 504 slots (490 drawn): Kenney's Tiny Dungeon (frames 0-131),
   Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473: water, rock, boats)
-  (`tiles/LICENSE-kenney.txt`), and eleven slices of Ishtar Pixels' Adventure Awaits (480-490: a
-  cliff face with a tunnel, their grass and sand recoloured to Kenney's; `tiles/LICENSE-adventure-awaits.txt`). The others drawn are ours, drawn or
+  (`tiles/LICENSE-kenney.txt`), and ten slices of Ishtar Pixels' Adventure Awaits in eleven frames (480-490:
+  a cliff face with a tunnel, their grass and the foot's sand recoloured to Kenney's; `tiles/LICENSE-adventure-awaits.txt`). The others drawn are ours, drawn or
   recoloured in `make_atlas.py`: 132, a wall's top; 133-137, the realm guards; 138, the dragon;
   139, the Forge; 491-497, Law's library (a gold-capped column, a pediment, a frieze, an ornate
   door, a lamp, a balustrade either side); 498-499, the Golden Forests' arch of leaves and the
-  lane under their canopy. `tiles/make_atlas.py` rebuilds `tiles.png` from the packs' zips
+  lane fringed with their leaves. `tiles/make_atlas.py` rebuilds `tiles.png` from the packs' zips
   (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
   tests check. The tests can't rebuild it themselves (they don't have the zips), so after
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.

@@ -938,29 +938,31 @@ def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
         return errors + [f"tiles/tiles.png: {e}"]
     if alpha is None:
         return errors + ["tiles/tiles.png: must be an 8-bit RGBA PNG, not interlaced (make_atlas.py writes it so)"]
+    w = alpha[0]
+    empty = lambda f: not any(alpha[2][(f // (w // 16) * 16 + y) * w + (f % (w // 16)) * 16:][:16].strip(b"\0") for y in range(16))
+    # Every frame a map's tile layer draws is drawn in tiles.png: an empty one is an invisible wall.
+    total = (w // 16) * (len(alpha[2]) // w // 16)
+    blank = []                                             # kept apart, so neither check hides the other
+    for tmj in sorted((pack.dir / "maps").glob("*.tmj")):
+        try:
+            layers = json.loads(tmj.read_text(encoding="utf-8")).get("layers")
+        except (OSError, ValueError, AttributeError):
+            continue                                       # maps.py reports a map it can't read
+        used = {(g & 0x1FFFFFFF) - 1 for l in (layers if isinstance(layers, list) else [])
+                if isinstance(l, dict) and l.get("type") == "tilelayer"
+                for g in (l.get("data") if isinstance(l.get("data"), list) else []) if isinstance(g, int) and g & 0x1FFFFFFF}
+        blank += [f"maps/{tmj.name}: draws frame {f}, which tiles.png leaves empty" for f in sorted(used)
+                  if f < total and empty(f)]
     if not errors:
-        w = alpha[0]
-        empty = lambda f: not any(alpha[2][(f // (w // 16) * 16 + y) * w + (f % (w // 16)) * 16:][:16].strip(b"\0") for y in range(16))
         named = {k: v for k, v in frames.items() if k in TILE_NAMES}
         named |= {f"portals.{k}": v for k, v in (portals or {}).items()}
         named |= {f"npcs.{k}": v for k, v in (frames.get("npcs") or {}).items()}
         named |= {f"items.{k}": v["frame"] for k, v in (items or {}).items()}
         errors += [f"tiles/tiles.json: {k} is frame {v}, which tiles.png leaves empty" for k, v in named.items() if empty(v)]
-        # ...and so is every frame a map's tile layer draws: an empty one there is an invisible wall.
-        for tmj in sorted((pack.dir / "maps").glob("*.tmj")):
-            try:
-                layers = json.loads(tmj.read_text(encoding="utf-8")).get("layers") or []
-            except (OSError, ValueError, AttributeError):
-                continue                                   # maps.py reports a map it can't read
-            used = {(g & 0x1FFFFFFF) - 1 for l in layers if isinstance(l, dict) and l.get("type") == "tilelayer"
-                    for g in (l.get("data") or []) if isinstance(g, int) and g & 0x1FFFFFFF}
-            total = (w // 16) * (len(alpha[2]) // w // 16)
-            errors += [f"maps/{tmj.name}: draws frame {f}, which tiles.png leaves empty" for f in sorted(used)
-                       if f < total and empty(f)]
     ids = {r["id"] for r in (data or {}).get("realms") or []}
     if data and isinstance(portals, dict):
         errors += [f"tiles/tiles.json: portals names {k!r}, which is not a realm" for k in sorted(set(portals) - ids)]
-    return errors
+    return errors + blank
 
 
 def explore_items(pack: "Pack") -> set[str]:
