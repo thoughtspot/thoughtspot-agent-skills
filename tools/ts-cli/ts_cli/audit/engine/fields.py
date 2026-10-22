@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tup
 
 from ts_cli.audit import rules
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
+from ts_cli.audit.engine.memo import cached
 
 DerivedField = Callable[[dict, Any], Any]
 FIELDS: Dict[str, DerivedField] = {}
@@ -158,9 +159,14 @@ def _is_scalar_formula(item: dict, ctx: Any) -> bool:
     """Formula: no `columns[]` entry surfacing it (by `formula_id`) declares an
     `aggregation`. A formula with no `id` is not scalar when some aggregating column
     has no `formula_id` either (both read None) — the legacy P2 reading, kept."""
-    aggregated = {c.get("formula_id") for c in (_model_of(item).get("columns") or [])
-                  if (c.get("properties") or {}).get("aggregation")}
+    model = _model_of(item)
+    aggregated = cached("aggregated_formula_ids", model, _aggregated_formula_ids, model)
     return (item.get("obj") or {}).get("id") not in aggregated
+
+
+def _aggregated_formula_ids(model: dict) -> set:
+    return {c.get("formula_id") for c in (model.get("columns") or [])
+            if (c.get("properties") or {}).get("aggregation")}
 
 
 @register("has_date_constraint", uses=())
@@ -172,7 +178,8 @@ def _has_date_constraint(item: dict, ctx: Any) -> bool:
 
 def _fact_table_names(item: dict) -> set:
     model = item.get("obj") or {}
-    return rules.fact_tables(model.get("columns") or [], model.get("model_tables") or [])
+    return cached("fact_table_names", model, rules.fact_tables,
+                  model.get("columns") or [], model.get("model_tables") or [])
 
 
 @register("fact_tables", uses=())
@@ -196,7 +203,7 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     the context has no type and is not listed — unknown is not "a string"."""
     from ts_cli.audit.context import join_key_ids  # not gate-safe: import on use
     from ts_cli.audit.engine.messages import NameList
-    col_types = ctx.column_types(item["doc"])
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
     return NameList(k for k in join_key_ids((item.get("obj") or {}).get("on"))
                     if col_types.get(k, "").upper() in rules.STRING_TYPES)
 
@@ -277,7 +284,9 @@ def _reference_chain_depth(item: dict, ctx: Any):
     Model's reference graph (see _reference_graph). None — no value, so no finding —
     for a formula that references no other formula, or whose name another formula's
     references represent."""
-    graph, owner = _reference_graph(_model_of(item).get("formulas") or [])
+    model = _model_of(item)
+    graph, owner = cached("reference_graph", model, _reference_graph,
+                          model.get("formulas") or [])
     name = (item.get("obj") or {}).get("name", "")
     if name not in owner or owner[name] != item.get("index"):
         return None
@@ -360,16 +369,22 @@ def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
     Table TML (in the context) declares RLS rules; a later model table with the same
     key overrides an earlier one, and one whose Table TML is absent writes nothing.
     The column's key is its `column_id` prefix ("" without `::`)."""
+    model = _model_of(item)
+    has_rls = cached("rls_by_table_key", model, _rls_by_table_key, model, ctx)
+    cid = (item.get("obj") or {}).get("column_id", "")
+    table_name = cid.split("::")[0] if "::" in cid else ""
+    return has_rls.get(table_name, False)
+
+
+def _rls_by_table_key(model: dict, ctx: Any) -> Dict[Any, bool]:
     has_rls = {}
-    for mt in _model_of(item).get("model_tables") or []:
+    for mt in model.get("model_tables") or []:
         table = ctx.tables.get(mt.get("fqn", ""))
         if not table:
             continue
         rls = table.get("table", {}).get("rls_rules") or {}
         has_rls[rules.table_key(mt)] = bool(rls.get("rules"))
-    cid = (item.get("obj") or {}).get("column_id", "")
-    table_name = cid.split("::")[0] if "::" in cid else ""
-    return has_rls.get(table_name, False)
+    return has_rls
 
 
 @register("named_in_masking_formula", uses=())
@@ -383,9 +398,13 @@ def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
     name = _column_name(item)
     if not isinstance(name, str):
         return False
-    exprs = " ".join(f.get("expr", "") for f in (_model_of(item).get("formulas") or []))
-    lowered = exprs.lower()
+    model = _model_of(item)
+    lowered = cached("lowered_formula_text", model, _lowered_formula_text, model)
     return "is_group_member" in lowered and name.lower() in lowered
+
+
+def _lowered_formula_text(model: dict) -> str:
+    return " ".join(f.get("expr", "") for f in (model.get("formulas") or [])).lower()
 
 
 # The D (Data Modeling) and H (Human Readiness) fields live in their own modules;

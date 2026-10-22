@@ -26,6 +26,7 @@ import re
 from typing import Any, Dict, Optional
 
 from ts_cli.audit.engine.fields import _model_of, register
+from ts_cli.audit.engine.memo import cached
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -38,7 +39,12 @@ def _str(value: Any) -> str:
 
 def _joined_table_names(model: dict) -> set:
     """legacy H3's `joined`: the `name` of every model table that declares a join, and
-    every join's `with` (a table with `joins` absent or empty contributes nothing)."""
+    every join's `with` (a table with `joins` absent or empty contributes nothing).
+    Once per Model per run (engine/memo.py)."""
+    return cached("h3_joined_table_names", model, _build_joined_table_names, model)
+
+
+def _build_joined_table_names(model: dict) -> set:
     joined: set = set()
     for t in model.get("model_tables") or []:
         for j in t.get("joins") or []:
@@ -73,14 +79,20 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     """Model column: `[<its name>]` appears in the Model's formula expressions joined by
     spaces — or it surfaces a formula (`formula_id`) whose `[<display name>]` does."""
-    formulas = _model_of(item).get("formulas") or []
-    exprs = " ".join(e for e in (f.get("expr", "") for f in formulas) if isinstance(e, str))
+    model = _model_of(item)
+    formulas = model.get("formulas") or []
+    exprs = cached("h3_formula_text", model, _formula_text, formulas)
     column = item.get("obj") or {}
     if f"[{column.get('name', '')}]" in exprs:
         return True
     fid = column.get("formula_id")
     return bool(fid) and any(f"[{fn.get('name', '')}]" in exprs
                              for fn in formulas if fn.get("id") == fid)
+
+
+def _formula_text(formulas: list) -> str:
+    """The Model's formula expressions joined by spaces (non-strings skipped)."""
+    return " ".join(e for e in (f.get("expr", "") for f in formulas) if isinstance(e, str))
 
 
 # ── H4 / H5: dependents ─────────────────────────────────────────────────────
@@ -107,7 +119,11 @@ def _set_consumers(item: dict, ctx: Any) -> Any:
 
 def _known_table_guids(ctx: Any) -> set:
     """legacy H7's `table_guids`: every non-empty `model_tables[].fqn` of every Model,
-    and every Table TML key in the context."""
+    and every Table TML key in the context. Once per run (engine/memo.py)."""
+    return cached("h7_known_table_guids", ctx, _build_known_table_guids, ctx)
+
+
+def _build_known_table_guids(ctx: Any) -> set:
     guids: set = set()
     for doc in ctx.models:
         for mt in (doc.get("model") or {}).get("model_tables") or []:
@@ -139,7 +155,12 @@ def _normalize(expr: Any) -> Optional[str]:
 def _model_formula_names(ctx: Any) -> Dict[str, Any]:
     """Normalised expression -> the `name` of the LAST Model formula (across every
     Model, in order) with that expression, as legacy H9 builds it; its keys are H8's
-    set. An absent `expr` normalises to "" like any other."""
+    set. An absent `expr` normalises to "" like any other. Once per run — it is read for
+    every Answer formula (engine/memo.py)."""
+    return cached("h8_model_formula_names", ctx, _build_model_formula_names, ctx)
+
+
+def _build_model_formula_names(ctx: Any) -> Dict[str, Any]:
     names: Dict[str, Any] = {}
     for doc in ctx.models:
         for f in (doc.get("model") or {}).get("formulas") or []:

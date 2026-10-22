@@ -46,7 +46,7 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
-                "engine/predicates.py", "engine/messages.py",
+                "engine/predicates.py", "engine/messages.py", "engine/memo.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")

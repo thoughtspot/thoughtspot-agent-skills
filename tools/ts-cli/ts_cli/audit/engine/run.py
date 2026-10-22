@@ -29,7 +29,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set
 
 from ts_cli.audit.catalog_forms import BY_SEVERITY
 from ts_cli.audit.catalog_model import Catalog, Rule
-from ts_cli.audit.engine import bands, code_rules
+from ts_cli.audit.engine import bands, code_rules, memo
 from ts_cli.audit.engine.modes import MODES
 from ts_cli.audit.findings import Finding
 
@@ -44,8 +44,9 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
     """
     _check_selection(catalog, categories, profile)
     findings: List[Finding] = []
-    for rule in _selected(catalog, categories):
-        findings += _run_rule(ctx, catalog, rule, profile, layers or [])
+    with memo.run_scope():  # lookups shared across items are computed once per run
+        for rule in _selected(catalog, categories):
+            findings += _run_rule(ctx, catalog, rule, profile, layers or [])
     return findings
 
 
@@ -85,7 +86,8 @@ def run_rule(ctx, catalog: Catalog, rule_id: str, profile: str,
     _check_selection(catalog, [], profile)
     if rule_id not in catalog.rules:
         raise KeyError(f"unknown rule '{rule_id}'")
-    return _run_rule(ctx, catalog, catalog.rules[rule_id], profile, layers or [])
+    with memo.run_scope():
+        return _run_rule(ctx, catalog, catalog.rules[rule_id], profile, layers or [])
 
 
 def _check_selection(catalog: Catalog, categories: List[str], profile: str) -> None:

@@ -19,6 +19,7 @@ from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit import rules
 from ts_cli.audit.engine.fields import _model_of, register
+from ts_cli.audit.engine.memo import cached
 
 
 def _upper(value: Any) -> Optional[str]:
@@ -70,7 +71,12 @@ def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
 
 def _joined_keys(model: dict) -> set:
     """Every table on either side of a join: the declaring table's key (alias, else
-    name) and the join's `with`, as legacy D5 and D10 collect them."""
+    name) and the join's `with`, as legacy D5 and D10 collect them. Once per Model per
+    run (engine/memo.py)."""
+    return cached("joined_keys", model, _build_joined_keys, model)
+
+
+def _build_joined_keys(model: dict) -> set:
     joined: set = set()
     for t in model.get("model_tables") or []:
         for j in (t.get("joins") or []):
