@@ -304,6 +304,14 @@ if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check
   run_check "internal imports"   "tools/validate/check_internal_imports.py --root ."
 fi
 
+# Audit rule catalog — `ts audit`'s rules are YAML data, and a mistyped scope, operator
+# or category id fails silently (the rule just never fires). Validates the whole
+# catalog (unknown keys/vocabulary, duplicate ids, profile overrides, band order,
+# missing examples) when anything under ts_cli/audit/ or the validator changes.
+if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py)'; then
+  run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root ."
+fi
+
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
 # not a hand-rolled grep gate (.claude/rules/ts-cli.md; audit angle 11). Runs when a
 # convert skill or the validator changes.

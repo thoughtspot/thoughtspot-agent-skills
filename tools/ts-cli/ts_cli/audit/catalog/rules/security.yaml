@@ -1,0 +1,4 @@
+# Rules whose primary category is S (Security). One list entry per rule;
+# the shape is documented in ts_cli/audit/catalog_model.py and checked by
+# tools/validate/check_audit_catalog.py.
+[]

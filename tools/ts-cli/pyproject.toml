@@ -40,4 +40,4 @@ where = ["."]
 include = ["ts_cli*"]
 
 [tool.setuptools.package-data]
-"ts_cli" = ["audit/report_template.html", "qlik/data/qlik_ts_formula_map.json"]
+"ts_cli" = ["audit/report_template.html", "audit/catalog/*.yaml", "audit/catalog/rules/*.yaml", "qlik/data/qlik_ts_formula_map.json"]
