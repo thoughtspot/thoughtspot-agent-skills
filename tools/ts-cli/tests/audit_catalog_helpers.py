@@ -15,7 +15,7 @@ PKG_CATALOG = Path(__file__).resolve().parents[1] / "ts_cli" / "audit" / "catalo
 
 
 def _good_rule(**overrides) -> dict:
-    """An A6-shaped rule (the plan's worked example) that validates clean."""
+    """An A6-shaped rule (the catalog design's worked example) that validates clean."""
     rule = {
         "id": "A6",
         "title": "Measure AI context coverage below threshold",

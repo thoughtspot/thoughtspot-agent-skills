@@ -339,8 +339,8 @@ def _reference_chain_depth(item: dict, ctx: Any):
 
 
 # ── S: PII, credentials, masking and owning-table RLS ───────────────────────
-# The name heuristics, copied verbatim from the legacy checks_security.py; since Task 12b
-# deleted that module this is their single source (the smoke test's own list is BL-112).
+# The name heuristics, copied verbatim from the legacy checks_security.py; since the rule catalog
+# replaced that module this is their single source (the smoke test's own list is BL-112).
 # The legacy answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold
 # the rules that read them to the legacy findings.
 

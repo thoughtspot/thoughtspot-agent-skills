@@ -2,7 +2,7 @@
 
 The engine turns catalog rules (YAML data) into findings. Its output contract is the
 legacy check functions' (their answers are pinned for test_audit_pinned_findings.py
-since Task 12b deleted them), so these tests pin
+since the rule catalog replaced them), so these tests pin
 the contract exactly: detail text, metric type, legacy threshold dict (key order and
 number types), severity, the object a finding names, and the additive `categories` /
 `bands` payload.
@@ -667,7 +667,7 @@ def test_short_name_list_has_no_suffix():
     assert format(messages.NameList(["a", "b"]), "") == "a, b"
 
 
-# ── fix round 1 ─────────────────────────────────────────────────────────────
+# ── edge cases ──────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("expr", [
     {"all": [{"field": "n", "gt": 1}], "not": {"field": "flag", "truthy": True}},

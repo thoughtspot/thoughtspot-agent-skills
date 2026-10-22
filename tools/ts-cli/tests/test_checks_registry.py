@@ -3,7 +3,7 @@
 These do not prove a rule can *fire* (that is each family's trip-test file).
 They pin the things that hold for all of them regardless of what each one looks
 for, and they are keyed on the rule catalog itself (the legacy `ALL_CHECKS`
-registries until Task 12b), so a rule added to the catalog is covered here from its
+registries before the rule catalog), so a rule added to the catalog is covered here from its
 first commit without editing a list.
 """
 from pathlib import Path
@@ -124,7 +124,7 @@ def test_shared_rule_pairs_stay_in_step():
 
     A threshold tuned in one angle silently left the other on the old value, and
     `check_d2`/`check_p6` shipped the *same* two defects and had to be fixed twice
-    (#528). Until Task 12b this read checks_perf.py and checks_data.py for re-declared
+    (#528). Before the rule catalog this read checks_perf.py and checks_data.py for re-declared
     regexes and inlined thresholds. The pairs now live as catalog entries (and, for
     D1, a code rule's shared constants in engine/tml.py), so this holds each pair to
     the same logic — scope, data, aggregation and bands — holds the `legacy_threshold`

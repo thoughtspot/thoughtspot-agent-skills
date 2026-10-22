@@ -4,7 +4,7 @@ Pre-commit runs the rule-id history check against `git merge-base HEAD origin/ma
 offline. A missing `origin/main` already skips with a NOTE. A merge base git cannot
 compute — histories with no common ancestor, an unborn HEAD on an orphan branch, a
 shallow clone whose fork point is past its boundary — must skip the same way, never
-block the commit: the hook cannot be bypassed in this repo (Task 12a re-review Minor 2).
+block the commit: the hook cannot be bypassed in this repo.
 """
 from __future__ import annotations
 

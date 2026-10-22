@@ -1,6 +1,6 @@
 """H (Human Readiness): the inputs the legacy H-check tests use, and H_INPUTS.
 
-The legacy H checks (checks_human.py, deleted in Task 12b) were exercised by
+The legacy H checks (checks_human.py, deleted when the rule catalog replaced them) were exercised by
 test_checks_human.py, test_checks_human_trip.py, and the H halves of test_dead_guards.py
 (H5), test_unreachable_checks.py (H7), test_audit_context.py (H4/H5 over contexts
 `build_context` assembles, Set lookups failing included) and test_audit_snapshot.py
@@ -372,7 +372,7 @@ def build_client_with_one_model(guid, name="Sales"):
 
 def build_client_with_set_dependents(guid, dep_rows):
     """Model export + a Set dependents lookup carrying BOTH inaccessible flags true —
-    the admin shape observed live on the SE demo cluster 2026-10-02 (ruling R17)."""
+    the admin shape observed live on the SE demo cluster 2026-10-02."""
     edoc = yaml.safe_dump(build_sample_model(name="Sales", guid=guid))
 
     def post(url, json=None, **_kw):
@@ -428,7 +428,7 @@ def built_set_lookup_failed() -> AuditContext:
 
 
 def built_set_consumed_only_by_a_set() -> AuditContext:
-    """R14: a Set whose only dependent is another Set is not recorded (a warning)."""
+    """A Set whose only dependent is another Set is not recorded (a warning)."""
     return build_h_context(SETS_ONE, build_consumers(
         other_types=[{"guid": "s2", "name": "C", "type": "SET"}]))
 
@@ -439,7 +439,7 @@ def built_set_lookup_empty_response() -> AuditContext:
 
 
 def built_set_hidden_dependents_none() -> AuditContext:
-    """R17: inaccessible dependents returned, and there are none: an orphan."""
+    """Inaccessible dependents returned, and there are none: an orphan."""
     return build_h_context(SETS_ONE, client=build_client_with_set_dependents("m1", {}))
 
 
@@ -465,7 +465,7 @@ def h4_model_with_answer_beside_sets() -> AuditContext:
 
 
 def h5_set_listed_by_several_sources() -> AuditContext:
-    """R18: one Set under the Model AND each underlying Table's COHORT bucket."""
+    """One Set under the Model AND each underlying Table's COHORT bucket."""
     row = {"type": "SET", "guid": "s1", "name": "B"}
     return make_context(dependents={"m1": [dict(row)], "t1": [dict(row)],
                                     "t2": [dict(row)], "s1": []})

@@ -243,7 +243,7 @@ def test_undeclared_conditional_read_fails(tmp_path):
     assert "Traceback" not in res.stderr
 
 
-# The fix-round-2 mutations: each must FAIL the gate (the static read check), not just a
+# Read-declaration mutations: each must FAIL the gate (the static read check), not just a
 # behaviour test. (a) a field reading Set rows only on a branch no example reaches;
 # (b) H4's field counting every dependents row, declared {dependents} only; (c) a scope
 # missing from SCOPE_USES.
@@ -274,7 +274,7 @@ def test_read_declaration_mutations_fail_the_gate(tmp_path, rel, old, new, expec
     assert "Traceback" not in res.stderr
 
 
-# Fix round 3: the re-review's round-2 probes, each a mutation that read conditional
+# Probes of the read scan, each a mutation that read conditional
 # data past the scan. Every one must FAIL the gate, under the gate's own Python — which
 # cannot import context.py and so reads it from source.
 _IDX = ('@register("is_indexed", uses=(), values=(False, True),\n'
@@ -320,7 +320,7 @@ _D1_BODY = ('    """D1 — up to five findings per Model, one per measure over i
        "    def tables_for_model(self, model: dict) -> list:\n"),
       ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    ctx.probe()\n")],
      "(ctx.answers in AuditContext.probe)"),
-    # task 12a: a decorator without functools.wraps, and functools.partial
+    # a decorator without functools.wraps, and functools.partial
     ([("engine/fields.py", _IDX, "def _deco(fn):\n    def inner(*a):\n"
        "        return fn(*a)\n    return inner\n\n"
        "@_deco\ndef _probe(ctx):\n    return ctx.answers\n\n\n" + _IDX),
@@ -455,7 +455,7 @@ def test_history_unknown_ref_fails(tmp_path):
     assert "Traceback" not in res.stderr
 
 
-# ── review fix round 1: effective status per profile; merge-base base ───────
+# ── effective status per profile; merge-base base ───────
 
 def _set_rule(root: Path, rid: str, **changes) -> None:
     def edit(rules):

@@ -152,7 +152,7 @@ def _compact_finding(f: dict, model_index: dict, by_angle: Dict[str, str]) -> di
 def _compact_ai(ai: dict) -> dict:
     """A Model's `ai_analysis`, compacted. `rd` (instructions_read) is passed through
     only when the run recorded it: true/false when ai_instructions was fetched, null
-    when it was not; absent in JSON from before 12b."""
+    when it was not; absent in JSON from before the rule catalog."""
     out = {
         "do": ai.get("domain", ""),
         "ob": ai.get("objectives", []),

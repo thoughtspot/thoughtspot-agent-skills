@@ -24,8 +24,8 @@ OWN_INPUTS = {"A": fx.AI_INPUTS, "D": fx.D_INPUTS, "H": fx.H_INPUTS, "P": fx.P_I
               "S": fx.S_INPUTS}
 RAISES = "RAISES"
 
-#: The rule ids the pinned file covers: the 51 the legacy check functions ran when
-#: they were pinned (1ddb3185). FROZEN. The source of truth is the pin file's own
+#: The rule ids the pinned file covers: the 51 the legacy check functions ran
+#: (main@982c2010, the legacy oracle). FROZEN. The source of truth is the pin file's own
 #: `rules` list; this mirror must equal it (test_audit_pinned_findings.py fails
 #: otherwise), so the set cannot shrink or grow by editing one side. A rule added to the
 #: catalog later is not pinned; its `fires`/`silent` examples are its net. A pinned rule

@@ -3,8 +3,8 @@
 Driven through the REAL `ThoughtSpotClient.request` over a fake transport (its
 `requests.Session`), because that is where an HTTP failure takes its real shape: with
 the default `raise_for_status=True` a 4xx/5xx becomes one stderr line and
-`SystemExit(1)`, which `except Exception` does not catch — so until 12b fix round 3
-one Model's failed lookup aborted the whole `ts audit run` (re-review N6). A fake
+`SystemExit(1)`, which `except Exception` does not catch — so before this was fixed
+one Model's failed lookup aborted the whole `ts audit run`. A fake
 whose `post` raises a plain exception (the earlier tests) cannot show that.
 
 What must hold for a 403 and a 500 on one Model of two:

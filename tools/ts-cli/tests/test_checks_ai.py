@@ -1,5 +1,5 @@
-"""The A rules (rules/ai.yaml), as the legacy A-check tests (checks_ai.py, deleted in
-Task 12b) exercised them, now through `run_rule`. Their inputs are named builders in
+"""The A rules (rules/ai.yaml), as the legacy A-check tests (checks_ai.py, deleted when
+the rule catalog replaced them) exercised them, now through `run_rule`. Their inputs are named builders in
 audit_rule_fixtures (ai.py), whose legacy answers test_audit_pinned_findings.py pins.
 
 The legacy checks read the profile from `ctx.assessment` (default "general"; the
@@ -132,8 +132,8 @@ class TestSynonymsUnderProperties:
 
 # --- Assessment profiles (BL-399) ---------------------------------------------------
 # One row per (check, profile): the pass mark, and HIGH below half of it. The table lives
-# in the catalog (profiles.yaml and each A rule's `profiles:` block; assessment.py until
-# Task 12b); these pin each profile's promise from SKILL Step 2b.
+# in the catalog (profiles.yaml and each A rule's `profiles:` block; assessment.py before
+# the rule catalog); these pin each profile's promise from SKILL Step 2b.
 import pytest  # noqa: E402
 
 from ts_cli.audit.engine.run import resolve_profile  # noqa: E402

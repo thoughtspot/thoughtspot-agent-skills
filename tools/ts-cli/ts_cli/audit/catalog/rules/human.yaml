@@ -93,12 +93,12 @@
   title: Orphan model with no dependents
   description: >-
     A Model with no dependents but Sets — no Answer or Liveboard (a Set is a column
-    on the Model, so anything using it is a Model dependent already; ruling R15). A
+    on the Model, so anything using it is a Model dependent already). A
     Model the dependents lookup did not list has none.
   categories: [H]
   requires: [model_tml, dependents]
   # @dependent_count reads ctx.dependents, which Set discovery writes SET rows into; it
-  # skips them (R15), but it reads that data, so it declares it — fetched, never gates.
+  # skips them, but it reads that data, so it declares it — fetched, never gates.
   uses: [sets]
   scope: model
   aggregate:
@@ -118,7 +118,7 @@
     A Set (once, however many dependents lists name it) whose consumer lookup came
     back clean and empty. A Set whose lookup failed, was partial or was never made is
     skipped (`requires: [sets]`): absence means "not looked up", never "no consumers"
-    (BL-302, R14).
+    (BL-302).
   categories: [H]
   requires: [dependents, sets]
   scope: set

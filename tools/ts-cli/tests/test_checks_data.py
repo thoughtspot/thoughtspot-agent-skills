@@ -1,8 +1,8 @@
 import audit_rule_fixtures as fx
 from audit_run_rule import run_rule
 
-# The D rules (rules/data.yaml), as the legacy D-check tests (checks_data.py, deleted in
-# Task 12b) exercised them. The contexts are named builders in audit_rule_fixtures
+# The D rules (rules/data.yaml), as the legacy D-check tests (checks_data.py, deleted when
+# the rule catalog replaced them) exercised them. The contexts are named builders in audit_rule_fixtures
 # (data.py), whose legacy answers test_audit_pinned_findings.py pins.
 
 

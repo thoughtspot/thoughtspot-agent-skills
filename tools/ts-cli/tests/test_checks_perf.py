@@ -1,5 +1,5 @@
-"""The P rules (rules/perf.yaml), as the legacy P-check tests (checks_perf.py, deleted in
-Task 12b) exercised them. Their inputs are named builders in audit_rule_fixtures
+"""The P rules (rules/perf.yaml), as the legacy P-check tests (checks_perf.py, deleted when
+the rule catalog replaced them) exercised them. Their inputs are named builders in audit_rule_fixtures
 (perf.py), whose legacy answers test_audit_pinned_findings.py pins."""
 import audit_rule_fixtures as fx
 from audit_run_rule import run_rule

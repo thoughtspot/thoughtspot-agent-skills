@@ -1,5 +1,5 @@
 """The S rules (rules/security.yaml), as the legacy S-check tests (checks_security.py,
-deleted in Task 12b) exercised them. The contexts are named builders in
+deleted when the rule catalog replaced them) exercised them. The contexts are named builders in
 audit_rule_fixtures (security.py), whose legacy answers test_audit_pinned_findings.py
 pins."""
 import audit_rule_fixtures as fx

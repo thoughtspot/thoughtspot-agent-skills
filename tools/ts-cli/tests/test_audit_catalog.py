@@ -319,7 +319,7 @@ def test_check_catalog_reports_loader_errors_as_problems(tmp_path):
     assert len(problems) == 1 and problems[0].startswith("rules/ai.yaml:")
 
 
-# ── review round 1: typos must fail, never silently alter a rule ─────────────
+# ── typos must fail, never silently alter a rule ─────────────
 
 @pytest.mark.parametrize("typo", ["wher", "mach", "ovr"])
 def test_unknown_aggregate_key_rejected(tmp_path, typo):
@@ -498,7 +498,7 @@ def test_valid_operands_accepted(tmp_path):
     assert _problems(tmp_path, {"ai": [rule]}) == []
 
 
-# ── Task 4: categories carry the legacy angle key ────────────────────────────
+# ── categories carry the legacy angle key ────────────────────────────
 
 def test_shipped_categories_carry_legacy_angle_keys():
     cat = load_catalog(PKG_CATALOG)
@@ -525,7 +525,7 @@ def test_angle_key_required_and_unique(tmp_path):
                for p in problems), problems
 
 
-# ── Task 4: per-mode aggregate keys, operands, placeholders, severity source ─
+# ── per-mode aggregate keys, operands, placeholders, severity source ─
 
 def _each(**overrides) -> dict:
     """A clean `each` rule: fixed severity, no bands."""
@@ -670,7 +670,7 @@ def test_group_without_a_severity_source(tmp_path):
         "rules/ai.yaml: A6: mode group needs a severity (or bands) (profile: spotter, general)"]
 
 
-# ── fix round 1: one expression form per mapping ─────────────────────────────
+# ── one expression form per mapping ─────────────────────────────
 
 @pytest.mark.parametrize("expr, needle", [
     ({"all": [{"field": "n", "gt": 1}], "not": {"field": "f", "truthy": True}},
@@ -715,7 +715,7 @@ def test_count_scope_may_belong_to_an_enclosing_item(tmp_path):
     assert _problems(tmp_path / "each", {"ai": [each]}) == []
 
 
-# ── fix round 1: a severity bands override is rejected, never dropped ────────
+# ── a severity bands override is rejected, never dropped ────────
 
 def test_profile_severity_under_bands_rejected(tmp_path):
     rule = _good_rule(profiles={"general": {"severity": "CRITICAL"}})
@@ -739,7 +739,7 @@ def test_catalog_severity_with_bands_in_one_profile_accepted(tmp_path):
     assert _problems(tmp_path, {"ai": [rule]}) == []
 
 
-# ── fix round 1: each messages are validated ─────────────────────────────────
+# ── each messages are validated ─────────────────────────────────
 
 @pytest.mark.parametrize("message, needle", [
     ("{nme}", "unknown placeholder 'nme'"),
@@ -758,7 +758,7 @@ def test_derived_placeholders_only_in_each(tmp_path):
     assert any("unknown placeholder '@is_indexed'" in p for p in problems), problems
 
 
-# ── fix round 2 ──────────────────────────────────────────────────────────────
+# ── more operand and mode checks ────────────────────────────────────────────
 
 def test_null_profile_override_rejected(tmp_path):
     # The engine skips a null override, so under `general` the catalog bands would win

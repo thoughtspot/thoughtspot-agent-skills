@@ -1,4 +1,4 @@
-"""Snapshot capture and replay for `ts audit run` (audit rule catalog, task 1).
+"""Snapshot capture and replay for `ts audit run` (audit rule catalog).
 
 A snapshot freezes the data an audit reads — the AuditContext — so two
 engines can later be run over identical input. These tests pin the format
@@ -272,7 +272,7 @@ def test_cli_snapshot_out_writes_then_audits(_disc, tmp_path, monkeypatch):
     assert live["findings"] and replay["findings"] == live["findings"]
 
 
-# ── the captured assessment survives replay (review fix round 1) ────────────
+# ── the captured assessment survives replay ─────────────────────────────────
 
 def test_run_audit_with_ctx_keeps_its_assessment_when_none_is_given():
     from ts_cli.audit import run_audit

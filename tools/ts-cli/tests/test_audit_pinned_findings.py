@@ -1,10 +1,10 @@
 """The catalog against the legacy checks' own answers, after the legacy checks are gone.
 
-Task 12b deleted `ts_cli/audit/checks_*.py`. Before it did, `pin_legacy_findings.py`
-(commit 1ddb3185; removed with the legacy checks, since it imported them) ran every
-legacy check over every committed audit input (`AI_INPUTS`, `P_INPUTS`,
-`S_INPUTS`, `D_INPUTS`, `H_INPUTS` in `audit_rule_fixtures`) under both profiles and
-pinned what each check reported in `audit_rule_fixtures/legacy_findings.json.gz`.
+The rule catalog replaced the per-check functions `ts_cli/audit/checks_*.py`, whose
+last version is main@982c2010 (the legacy oracle). Before they were deleted, every
+legacy check was run over every committed audit input (`AI_INPUTS`, `P_INPUTS`,
+`S_INPUTS`, `D_INPUTS`, `H_INPUTS` in `audit_rule_fixtures`) under both profiles, and
+what each reported is pinned in `audit_rule_fixtures/legacy_findings.json.gz`.
 These tests hold the catalog to those answers with the same strict comparator the
 equivalence gate used (`equivalence.compare_findings`: exact types, `None` vs `""`,
 key order, multiset of findings).
@@ -43,6 +43,19 @@ PR description. (The pin as plain sorted, indented JSON would be 3.6 MB, too lar
 review as a diff, so it stays gzipped at 66 KB.) Re-pinning an entry pinned as
 "RAISES" replaces the legacy raise with what the catalog reports; update
 LEGACY_RAISES / ENGINE_RAISES below in the same change.
+
+**Regenerating the legacy answers** (to re-verify the pin from main alone — the script
+that first wrote it imported the checks and went with them):
+
+  1. Here, build and pickle every committed input:
+     `pickle.dump({n: b() for n, b in audit_pinned.committed_inputs().items()}, f)`.
+  2. In a worktree of 982c2010 (`git worktree add <dir> 982c2010`), for each input and
+     profile: set `ctx.assessment` to the profile, then for every `check_fn` in each
+     `ts_cli.audit.ANGLE_MODULES[...].ALL_CHECKS`, record
+     `[f.to_dict() for f in check_fn(ctx)]` under `check_fn.__name__[6:].upper()`, or
+     "RAISES" if it raises.
+  3. Compare with `audit_pinned.load()["findings"]` using `compare_findings` and, per
+     rule, list order: an absent entry is `[]`.
 """
 from __future__ import annotations
 
@@ -165,7 +178,7 @@ def test_the_rules_the_snapshot_never_exercises_are_pinned_firing(profile):
     unexercised = ["D4", "D5", "D9", "H9", "P1", "P4", "P13", "P14", "P15", "S4", "S5",
                    "S9", "S10"]
     # Effective status only, never pin membership: a rule dropped from the pin while
-    # still active must fail here, not be exempted (12b re-review N5).
+    # still active must fail here, not be exempted.
     active = {r.id for r in selected_rules(catalog(), CATEGORIES, profile)}
     counts = {r: 0 for r in unexercised if r in active}
     for profiles in _pinned()["findings"].values():
@@ -443,7 +456,7 @@ def test_repin_rewrites_only_the_named_entries(pin_copy, monkeypatch, capsys):
 
 def test_drop_rule_refuses_a_rule_still_active_under_a_profile(pin_copy, capsys, monkeypatch):
     """Every legitimate change to an active rule is a re-pin; dropping one would take
-    it out of the regression net. Retire it in the catalog first (12b re-review N5)."""
+    it out of the regression net. Retire it in the catalog first."""
     import repin_findings
     rule_id = _a_pinned_finding(ap.load())[2]
     active = copy.deepcopy(catalog().rules[rule_id])

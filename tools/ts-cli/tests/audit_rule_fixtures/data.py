@@ -18,7 +18,7 @@ from .perf import (build_join_chain, join_keys_composite, join_keys_integer,
 
 
 # ── D: Data Modeling ────────────────────────────────────────────────────────
-# The inputs the legacy D-check tests exercised checks_data.py (deleted in Task 12b) with:
+# The inputs the legacy D-check tests exercised checks_data.py (deleted when the rule catalog replaced them) with:
 # test_checks_data.py, test_checks_data_trip.py, and the D halves of
 # test_alias_and_join_names.py, test_checks_varchar_join_keys.py,
 # test_referencing_joins.py and test_checks_registry.py (the last three build theirs in

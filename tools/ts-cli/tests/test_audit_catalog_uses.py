@@ -1,4 +1,4 @@
-"""`uses:` and the data-read declarations (audit rule catalog, task 11 fix round 1).
+"""`uses:` and the data-read declarations (audit rule catalog).
 
 `uses:` names conditional data a rule reads but must not be skipped for lacking — it is
 fetched, never gates. Derived fields, code rules and scopes declare in their registries
@@ -239,7 +239,7 @@ def test_a_scope_reading_undeclared_data_fails(monkeypatch):
     assert any("scope 'answer' reads 'answers'" in p for p in problems)
 
 
-# ── fix round 3: what the scan follows, and where it fails closed ───────────
+# ── what the scan follows, and where it fails closed ───────────
 
 import functools
 
@@ -375,7 +375,7 @@ def test_running_interpreter_reads_a_relative_local_import_as_relative():
                                   ("m", 0, "a", "a"), ("m", 0, "b", "o")]
 
 
-# ── task 12a: closures, partials, same-named defs ───────────────────────────
+# ── closures, partials, same-named defs ───────────────────────────
 
 def _no_wraps(fn):
     """A decorator without functools.wraps: the registered function is `inner`, and

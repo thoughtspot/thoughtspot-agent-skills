@@ -23,7 +23,7 @@ from audit_run_rule import active_rule_ids, catalog, run_rule
 
 # The contexts are named builders in audit_rule_fixtures (human.py), whose legacy
 # answers test_audit_pinned_findings.py pins. The `checks_human.py:N` references below
-# are to the legacy module (deleted in Task 12b), which the H catalog rules reproduce.
+# are to the legacy module (deleted when the rule catalog replaced them), which the H catalog rules reproduce.
 MODEL_GUID, SET_GUID, ANSWER_1 = fx.HUMAN_MODEL_GUID, fx.HUMAN_SET_GUID, fx.HUMAN_ANSWER_1
 
 

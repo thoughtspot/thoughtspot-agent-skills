@@ -11,7 +11,7 @@
    formulas[]/columns[]". It lives on the TABLE the column resolves to.
 
 Either alone makes the check inert; it shipped with both. `check_d2` was a
-verbatim clone and had the same pair. (The legacy checks were deleted in Task 12b; the
+verbatim clone and had the same pair. (The legacy checks were deleted when the rule catalog replaced them; the
 tests run the P6 and D2 catalog rules.)
 """
 import audit_rule_fixtures as fx

@@ -1,8 +1,8 @@
 """S2 / S3 / S8 / S9 — the four security checks that no test ever called.
 
 2026-09-22 audit finding 6.1: 27 of 51 checks are *imported* by a test and never
-invoked. `tests/test_checks_security.py:4-7` imports `check_s2`, `check_s3`,
-`check_s8` and `check_s9` and calls none of them, so nothing had ever shown that
+invoked. `tests/test_checks_security.py` imported `check_s2`, `check_s3`,
+`check_s8` and `check_s9` and called none of them, so nothing had ever shown that
 any of the four can return a `Finding`. For a security check that is the worst
 class of defect — a check that cannot fire reports "no problem" about PII and
 RLS. `check_p6`/`check_d2` shipped in exactly that state for months
@@ -32,7 +32,7 @@ from ts_cli.audit.findings import CHECK_META
 # Every context below is a named builder in audit_rule_fixtures (rls.py and
 # security.py), whose legacy S answers — and P answers, for the P14/P15 clones —
 # test_audit_pinned_findings.py pins. The `checks_security.py:N` / `checks_perf.py:N`
-# references below are to the legacy modules (deleted in Task 12b), which the catalog
+# references below are to the legacy modules (deleted when the rule catalog replaced them), which the catalog
 # rules reproduce.
 
 

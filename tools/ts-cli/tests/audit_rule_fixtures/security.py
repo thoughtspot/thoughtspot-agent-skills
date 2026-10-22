@@ -17,7 +17,7 @@ from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, SEC_TABLE_FQN, TRIP_FUN
 
 
 # ── S: Security ─────────────────────────────────────────────────────────────
-# The inputs the legacy S-check tests exercised checks_security.py (deleted in Task 12b) with:
+# The inputs the legacy S-check tests exercised checks_security.py (deleted when the rule catalog replaced them) with:
 # test_checks_security.py, test_checks_security_trip.py, and the S halves of
 # test_alias_and_join_names.py, test_index_type_sense.py and test_checks_registry.py.
 # Those tests build their contexts here, so the S rules' examples and the pinned-findings

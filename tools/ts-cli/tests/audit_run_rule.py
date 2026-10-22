@@ -1,8 +1,8 @@
 """`run_rule` — what one catalog rule reports for a context, run the way `ts audit run`
 runs it.
 
-The audit's tests called the legacy check functions (`check_d3(ctx)`) until Task 12b
-deleted them; they now call `run_rule(ctx, "D3")`. It runs the rule's whole first
+The audit's tests called the legacy check functions (`check_d3(ctx)`) until the rule
+catalog replaced them; they now call `run_rule(ctx, "D3")`. It runs the rule's whole first
 category through the engine's `run_rules` (the call `ts audit run` makes) and keeps
 the rule's own findings, so a test sees exactly what an audit would report for it.
 

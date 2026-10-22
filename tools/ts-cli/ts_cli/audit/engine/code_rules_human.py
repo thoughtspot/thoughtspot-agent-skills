@@ -2,7 +2,7 @@
 (engine/code_rules.py imports this module at its end, so the registry, and the catalog
 gate's list of known names, always include them).
 
-Each reproduces its legacy check in checks_human.py (deleted in Task 12b) exactly. The
+Each reproduces its legacy check in checks_human.py (deleted when the rule catalog replaced them) exactly. The
 thresholds, regexes and per-item wordings below were copied verbatim from there; the
 legacy answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them
 to it. Where the legacy check would raise on a malformed value (a

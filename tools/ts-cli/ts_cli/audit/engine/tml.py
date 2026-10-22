@@ -2,7 +2,7 @@
 column references, indexing, string types — and the constants they grade by.
 
 Moved here from `ts_cli/audit/rules.py` when the legacy check functions were deleted
-(Task 12b; Ruling R1): every name left is read by a derived field (fields.py,
+(the rule catalog change): every name left is read by a derived field (fields.py,
 fields_data.py), a scope (scopes.py) or a code rule (code_rules.py). The helpers only
 the deleted checks used (`is_wide_and_not_progressive`, `FUNC_IN_EXPR`,
 `MIN_TABLES_FOR_JOIN_PROGRESSIVE`) went with them: D4/P4 and P14/S9 now carry that

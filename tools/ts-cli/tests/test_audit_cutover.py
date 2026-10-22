@@ -1,6 +1,6 @@
-"""`ts audit run` runs the rule catalog (Task 12a cut-over).
+"""`ts audit run` runs the rule catalog (the cut-over from the legacy checks).
 
-The legacy check modules still exist (12b deletes them); nothing on the `run_audit` /
+The legacy check modules are gone; nothing on the `run_audit` /
 `ts audit run` / `ts audit report` path may import them.
 """
 import copy
@@ -252,7 +252,7 @@ def _p_only_client(model):
 
 def test_a_run_fetches_only_what_its_rules_need_and_records_it():
     """A P-only run: no P rule reads AI instructions or Sets, so neither is fetched
-    for the report's sake (ruling, fix round 1) — and the corpus says so."""
+    for the report's sake (by decision) — and the corpus says so."""
     from unittest.mock import patch
 
     from ts_cli.audit import data_needs, run_audit
@@ -268,7 +268,7 @@ def test_a_run_fetches_only_what_its_rules_need_and_records_it():
     assert out["corpus"]["fetched_needs"] == ["dependents", "metadata", "model_tml",
                                               "table_tml"]
     assert out["corpus"]["models"][0]["ai_analysis"]["questions"] == []
-    # not looked up is not "failed": instructions_read is null, not false (12b review)
+    # not looked up is not "failed": instructions_read is null, not false
     assert out["corpus"]["models"][0]["ai_analysis"]["instructions_read"] is None
     with patch("ts_cli.audit.context.discover_sets",
                return_value={"sets": {}, "incomplete": [], "notes": []}):
@@ -315,14 +315,14 @@ def test_report_without_a_fetched_record_renders_as_before(tmp_path):
 
 
 # ── a failed AI-instructions lookup is "could not be read", not "None" ──────
-# (12a re-review Minor 1): `_fetch_ai_instructions` leaves no entry for a Model whose
+# `_fetch_ai_instructions` leaves no entry for a Model whose
 # lookup failed, so its questions are [] exactly as for a Model with none. The corpus
 # records per Model whether the lookup succeeded, and the report says which.
 
 # The lookup-failure tests (a failed lookup recorded as not read, its warning with the
 # reason, the audit completing) run through the real client's request path over a fake
 # transport in test_audit_ai_lookup_failures.py: a fake whose `post` raises cannot
-# produce the failure shape the real client does (12b re-review N6).
+# produce the failure shape the real client does.
 
 
 def test_instructions_read_is_left_out_when_the_caller_does_not_know_what_was_fetched():
@@ -443,7 +443,7 @@ def test_cli_rejects_an_unknown_category_and_assessment(tmp_path):
     assert data["corpus"]["assessment"] == "Spotter-ready"
 
 
-# ── review fix round 1: degenerate --angles ─────────────────────────────────
+# ── degenerate --angles ─────────────────────────────────
 
 def test_cli_empty_angle_selection_is_a_usage_error(tmp_path):
     from typer.testing import CliRunner

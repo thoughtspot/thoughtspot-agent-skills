@@ -1,4 +1,4 @@
-"""Rule-declared data fetching (audit rule catalog, task 11).
+"""Rule-declared data fetching (audit rule catalog).
 
 `build_context` fetches the optional data — AI instructions, Answer TML, Set discovery —
 when a selected rule `requires` it (`engine.run.needs_for`), not when a category letter
@@ -137,7 +137,7 @@ def test_needs_for_is_the_union_of_the_selected_rules_requires():
 
 
 #: What the shipped catalog fetches for each category on its own, under either profile.
-#: Until Task 12b this was checked against the legacy letter logic (`"A" in angles`
+#: Before the rule catalog this was checked against the legacy letter logic (`"A" in angles`
 #: fetches AI instructions, `"H" in angles` Answers and Sets) — the same answer, which
 #: the table below keeps. A change to what a selection fetches is a deliberate catalog
 #: change (a rule's `requires`/`uses`, or a profile switching a rule off): update the

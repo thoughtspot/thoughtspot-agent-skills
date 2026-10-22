@@ -37,7 +37,7 @@ from audit_run_rule import run_rule
 
 # Every context below is a named builder in audit_rule_fixtures (perf.py and rls.py),
 # whose legacy answers test_audit_pinned_findings.py pins. The `checks_perf.py:N`
-# references below are to the legacy module (deleted in Task 12b), which the P catalog
+# references below are to the legacy module (deleted when the rule catalog replaced them), which the P catalog
 # rules reproduce.
 
 

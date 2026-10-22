@@ -11660,7 +11660,7 @@ is invisible to the skill that reads the catalog.
 
 **Why a naive comparison is wrong.** The one current discrepancy, `H6`, is *correct*: it sits
 in the catalog's "Deferred / Not assigned" table (`| H6 | Duplicate sets — deferred (requires
-deep set comparison) |`) and had a stub `def check_h6` at `checks_human.py:171` that emitted
+deep set comparison) |`) and had a stub `def check_h6` at `checks_human.py:171` (main@982c2010) that emitted
 nothing (now a retired catalog rule in `rules/human.yaml`). Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
 single-id regex silently skips, so the exemption is accidental rather than expressed. Any
 rule must read the main catalog table and the deferred table as different things.
@@ -11675,8 +11675,8 @@ so it runs on every commit.
 
 **Target:** next validator pass.
 
-**Resolved 2026-10-23 (ts-cli v0.182.0, ts-audit 3.0.0; branch commit 474bf55e, "generate
-check-catalog.md and the report meta from the rule catalog"):** resolved by construction
+**Resolved 2026-10-23 (ts-cli v0.182.0, ts-audit 3.0.0; the audit rule catalog change,
+"generate check-catalog.md and the report meta from the rule catalog"):** resolved by construction
 rather than by the comparison proposed above. The checks are now rules in one catalog
 (`ts_cli/audit/catalog/rules/*.yaml`); a finding's `check_id` can only be its rule's id
 (`code_rules.check_findings` rejects any other), and `check-catalog.md`'s rule tables are
@@ -14480,7 +14480,7 @@ re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rul
    `ts_cli/audit/test_fixtures.py`'s
    `CHECK_CATALOG`, and the name anti-pattern regex kept twice (H1's `regex:` in
    `rules/human.yaml` and A5's `_NAME_ANTI` in `engine/code_rules.py`). The spec's
-   "`rules` shadowing in `checks_perf.py:241`" item is dropped: that module was deleted.
+   "`rules` shadowing in `checks_perf.py:241` (main@982c2010)" item is dropped: that module was deleted.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the

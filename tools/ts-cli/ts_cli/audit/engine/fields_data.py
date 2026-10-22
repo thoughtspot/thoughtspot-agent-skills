@@ -2,7 +2,7 @@
 
 Registered into the same registry as engine/fields.py (which imports this module at its
 end, so `fields.FIELDS` — and the catalog gate's list of known names — always includes
-them). Each reproduces what a legacy check in checks_data.py (deleted in Task 12b) read,
+them). Each reproduces what a legacy check in checks_data.py (deleted when the rule catalog replaced them) read,
 step for step, including the readings that are known to be wrong (the legacy answers
 pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it; fixing
 them is the follow-up work the spec lists):

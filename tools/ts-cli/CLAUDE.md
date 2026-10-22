@@ -178,7 +178,7 @@ ts_cli/
     context.py        — AuditContext dataclass + build_context(): always Model/Table TML, metadata, dependents; AI instructions, Answers and Sets only when the selected rules declare them (requires ∪ uses)
     snapshot.py       — --snapshot-out / --snapshot-in capture and replay (manifest records the fetched needs)
     findings.py       — Finding dataclass + build_summary() (by_category); CHECK_META built from the catalog
-    equivalence.py    — compare_findings: the strict finding-list comparator (exact types, multiset); the legacy check functions it compared the catalog with were deleted in Task 12b, and their answers are pinned in tests/audit_rule_fixtures/legacy_findings.json.gz
+    equivalence.py    — compare_findings: the strict finding-list comparator (exact types, multiset); the legacy check functions it compared the catalog with were deleted when the rule catalog replaced them, and their answers are pinned in tests/audit_rule_fixtures/legacy_findings.json.gz
     report.py         — HTML report renderer (compact payload + template injection)
     report_template.html — Self-contained HTML template with CSS/JS
     erd.py            — ERD data generation for audit reports (parses Model+Table TML)

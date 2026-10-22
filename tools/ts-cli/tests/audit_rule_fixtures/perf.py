@@ -19,7 +19,7 @@ from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, TRIP_FUNC_RULE, TRIP_PL
 
 
 # ── P: Performance ──────────────────────────────────────────────────────────
-# The inputs the legacy P-check tests exercised checks_perf.py (deleted in Task 12b) with: test_checks_perf.py,
+# The inputs the legacy P-check tests exercised checks_perf.py (deleted when the rule catalog replaced them) with: test_checks_perf.py,
 # test_checks_perf_trip.py, and the P halves of test_checks_varchar_join_keys.py,
 # test_referencing_joins.py, test_dead_guards.py, test_index_type_sense.py,
 # test_unreachable_checks.py, test_checks_registry.py and test_checks_security_trip.py.
