@@ -257,3 +257,113 @@ def _reference_chain_depth(item: dict, ctx: Any):
     if name not in owner or owner[name] != item.get("index"):
         return None
     return _bfs_depth(graph, name)
+
+
+# ── S: PII, credentials, masking and owning-table RLS ───────────────────────
+# The name heuristics are checks_security.py's, copied verbatim (that module stays
+# the legacy source until the cut-over); the equivalence gate proves the copies agree.
+
+#: (pattern, category, confidence) — a column's FIRST matching pattern names it.
+PII_PATTERNS = [
+    (re.compile(r"e[-_]?mail|email[-_]?addr", re.I), "email", "HIGH"),
+    (re.compile(r"phone|mobile|cell[-_]?phone|fax|tel(?:ephone)?", re.I), "phone", "HIGH"),
+    (re.compile(r"ssn|social[-_]?sec|national[-_]?id|tax[-_]?id|nin\b|sin\b", re.I),
+     "national_id", "HIGH"),
+    (re.compile(r"dob|birth[-_]?date|date[-_]?of[-_]?birth|birthday", re.I), "dob", "HIGH"),
+    (re.compile(r"credit[-_]?card|card[-_]?num|account[-_]?num|iban|routing[-_]?num", re.I),
+     "financial", "HIGH"),
+    (re.compile(r"first[-_]?name|last[-_]?name|surname|full[-_]?name|given[-_]?name", re.I),
+     "person_name", "MEDIUM"),
+    (re.compile(r"street[-_]?addr|postal[-_]?code|zip[-_]?code", re.I), "address", "MEDIUM"),
+]
+
+CREDENTIAL_PATTERN = re.compile(
+    r"\bpassword\b|\bpasswd\b|\bsecret[-_]?key\b|\bapi[-_]?key\b|\btoken\b",
+    re.IGNORECASE,
+)
+
+
+def _column_name(item: dict) -> Any:
+    """A column's name as the S checks read it: `.get("name", "")`."""
+    return (item.get("obj") or {}).get("name", "")
+
+
+def _pii_match(item: dict):
+    """`(category, confidence)` of the column name's first matching PII pattern, or
+    None. A non-string name matches nothing (the legacy regex would raise on it)."""
+    name = _column_name(item)
+    if not isinstance(name, str):
+        return None
+    for pattern, category, confidence in PII_PATTERNS:
+        if pattern.search(name):
+            return category, confidence
+    return None
+
+
+@register("pii_category")
+def _pii_category(item: dict, ctx: Any):
+    """Column: the PII category its name reads as (email, phone, national_id, dob,
+    financial, person_name, address — the first pattern that matches), or None."""
+    match = _pii_match(item)
+    return match[0] if match else None
+
+
+@register("pii_confidence")
+def _pii_confidence(item: dict, ctx: Any):
+    """Column: the confidence (HIGH / MEDIUM) of that PII pattern, or None."""
+    match = _pii_match(item)
+    return match[1] if match else None
+
+
+@register("credential_term")
+def _credential_term(item: dict, ctx: Any):
+    """Column: the credential word its name contains (password, passwd, secret key, api
+    key, token — whole words, any case), lower-cased as matched; None when none."""
+    name = _column_name(item)
+    match = CREDENTIAL_PATTERN.search(name) if isinstance(name, str) else None
+    return match.group().lower() if match else None
+
+
+def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
+    """legacy S2's lookup, step for step: the model's tables keyed by the prefix
+    their columns' `column_id` carries (alias, else name — BL-305), each True when its
+    Table TML (in the context) declares RLS rules; a later model table with the same
+    key overrides an earlier one, and one whose Table TML is absent writes nothing.
+    The column's key is its `column_id` prefix ("" without `::`)."""
+    has_rls = {}
+    for mt in _model_of(item).get("model_tables") or []:
+        table = ctx.tables.get(mt.get("fqn", ""))
+        if not table:
+            continue
+        rls = table.get("table", {}).get("rls_rules") or {}
+        has_rls[rules.table_key(mt)] = bool(rls.get("rules"))
+    cid = (item.get("obj") or {}).get("column_id", "")
+    table_name = cid.split("::")[0] if "::" in cid else ""
+    return has_rls.get(table_name, False)
+
+
+@register("owning_table_has_rls")
+def _owning_table_has_rls_field(item: dict, ctx: Any) -> bool:
+    """Model column: the Table its `column_id` prefix names (through the model's
+    `model_tables`, alias first) has RLS rules on its Table TML. False when that
+    Table TML is not in the context."""
+    return _owning_table_has_rls(item, ctx)
+
+
+@register("owning_table_rls_note")
+def _owning_table_rls_note(item: dict, ctx: Any) -> str:
+    """Model column: S2's wording of @owning_table_has_rls — " (table has RLS)" or
+    " WITHOUT table RLS" (a message suffix; the legacy detail switches on it)."""
+    return " (table has RLS)" if _owning_table_has_rls(item, ctx) else " WITHOUT table RLS"
+
+
+@register("named_in_masking_formula")
+def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
+    """Model column: legacy S3's masking heuristic — some formula of the model calls
+    `is_group_member` AND the column's name appears (case-insensitively) anywhere in
+    the model's formula expressions joined by spaces. Not a per-formula test: a mask
+    on one column and a raw projection of another silence both (a known defect,
+    kept)."""
+    exprs = " ".join(f.get("expr", "") for f in (_model_of(item).get("formulas") or []))
+    lowered = exprs.lower()
+    return "is_group_member" in lowered and _column_name(item).lower() in lowered

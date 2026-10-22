@@ -796,3 +796,53 @@ def test_derived_placeholder_with_a_path_raises_at_render():
     item = _item({"properties": {}})
     with pytest.raises(KeyError):
         messages.render("{@is_indexed.x}", {"name": "C"}, item, make_context())
+
+
+# ── S derived fields ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("name,category,confidence", [
+    ("customer_email", "email", "HIGH"), ("email_phone", "email", "HIGH"),
+    ("phone_email", "email", "HIGH"),  # first PATTERN wins, not first position
+    ("Hotel", "phone", "HIGH"), ("Cousin", "national_id", "HIGH"),
+    ("Single", None, None), ("Surname", "person_name", "MEDIUM"),
+    ("Zip Code", None, None), ("zip_code", "address", "MEDIUM"),
+    ("", None, None), (None, None, None), (5, None, None)])
+def test_pii_category_and_confidence(name, category, confidence):
+    item = _item({"name": name})
+    assert fields.get(item, "@pii_category", make_context()) == category
+    assert fields.get(item, "@pii_confidence", make_context()) == confidence
+
+
+@pytest.mark.parametrize("name,term", [
+    ("password", "password"), ("API-KEY", "api-key"), ("Access Token", "token"),
+    ("TOKEN", "token"), ("my_password", None), ("tokens", None),
+    ("password token", "password"), (None, None)])
+def test_credential_term_is_the_lower_cased_whole_word(name, term):
+    assert fields.get(_item({"name": name}), "@credential_term", make_context()) == term
+
+
+def test_owning_table_has_rls_follows_legacy_s2_lookup():
+    ctx = fx.sec_owning_table_edges()
+    got = {i["name"]: (fields.get(i, "@owning_table_has_rls", ctx),
+                       fields.get(i, "@owning_table_rls_note", ctx))
+           for i in _children_of(ctx, "model.column")}
+    note = {True: " (table has RLS)", False: " WITHOUT table RLS"}
+    expected = {"email_no_id": True,     # no column_id: key "", a nameless table with RLS
+                "phone_no_sep": True,    # no "::": key "" too
+                "email_x": False,        # alias X: the later model table wins
+                "email_y": True,         # a later Y whose Table TML is absent writes nothing
+                "email_nofqn": False, "email_e": False, "email_h": False,
+                "email_unknown": False}
+    assert got == {k: (v, note[v]) for k, v in expected.items()}
+
+
+def test_named_in_masking_formula_searches_all_formulas_at_once():
+    ctx = fx.sec_masking_edges()
+    got = {i["name"]: fields.get(i, "@named_in_masking_formula", ctx)
+           for i in _children_of(ctx, "model.column")}
+    # SSN is named only in a formula without is_group_member: still "masked", because
+    # the test is over the joined text of every formula.
+    assert got == {"Customer_Email": True, "home_phone": False, "ssn": True}
+    unmasked = fx.sec_masking_without_group_member()
+    [col] = _children_of(unmasked, "model.column")
+    assert fields.get(col, "@named_in_masking_formula", unmasked) is False

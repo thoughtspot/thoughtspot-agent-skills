@@ -18,37 +18,32 @@ import pytest
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_perf import check_p9, check_p11
 from ts_cli.audit.checks_security import check_s2
-from ts_cli.audit.context import make_context
 
 #: Every value the schema documents, and whether it means "this column is indexed".
 INDEXED = ["DEFAULT", "PREFIX_ONLY", "PREFIX_AND_SUBSTRING", "PREFIX_AND_WORD_SUBSTRING"]
 NOT_INDEXED = ["DONT_INDEX"]
 
-# Builders live in audit_rule_fixtures.py; the P9/P11 contexts are named builders
-# there, so the P catalog rules' equivalence test runs over exactly these inputs.
-_col = fx.build_index_col
-_model = fx.build_index_model
+# Builders live in audit_rule_fixtures; the P9/P11 contexts are named builders there
+# and the S2 ones are its `build_index_pii_ctx` family (S_INPUTS' `index_pii_*`), so
+# the P and S catalog rules' equivalence tests run over exactly these inputs.
 
 
 # ── S2: PII indexed without table RLS ──────────────────────────────────────
 
 def test_s2_flags_pii_indexed_by_default():
     """The commonest shape in exported TML, and the one S2 exists for."""
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", None)])])
-    assert len(check_s2(ctx)) == 1
+    assert len(check_s2(fx.build_index_pii_ctx(None))) == 1
 
 
 @pytest.mark.parametrize("idx", INDEXED)
 def test_s2_flags_pii_with_an_explicit_index_strategy(idx):
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", idx)])])
-    assert len(check_s2(ctx)) == 1
+    assert len(check_s2(fx.build_index_pii_ctx(idx))) == 1
 
 
 @pytest.mark.parametrize("idx", NOT_INDEXED)
 def test_s2_does_not_flag_pii_with_indexing_suppressed(idx):
     """DONT_INDEX is the mitigation, not the risk — and the only value we emit."""
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", idx)])])
-    assert check_s2(ctx) == []
+    assert check_s2(fx.build_index_pii_ctx(idx)) == []
 
 
 # ── P9: indexed ATTRIBUTE id columns ───────────────────────────────────────

@@ -98,22 +98,15 @@ def test_a_join_finding_is_not_anonymous():
 
 def test_s2_sees_table_rls_through_an_alias():
     """A role-playing dimension with RLS must not be reported as unprotected."""
+    import audit_rule_fixtures as fx
     from ts_cli.audit.checks_security import check_s2
-    tbl = {"guid": "t-1", "table": {"name": "CUSTOMERS", "columns": [],
-                                    "rls_rules": {"rules": [{"expr": "x = ts_groups"}]}}}
-    model = {"guid": "m-1", "model": {"name": "S", "columns": [
-        {"name": "customer_email", "column_id": "SHIP_TO::customer_email"}],
-        "model_tables": [{"name": "CUSTOMERS", "alias": "SHIP_TO", "fqn": "t-1"}]}}
-    findings = check_s2(make_context(models=[model], tables={"t-1": tbl}))
+    findings = check_s2(fx.sec_alias_table_with_rls())
     assert len(findings) == 1
     assert findings[0].severity == "INFO", "RLS is present — this is not a HIGH"
 
 
 def test_s2_still_reports_a_table_with_no_rls():
+    import audit_rule_fixtures as fx
     from ts_cli.audit.checks_security import check_s2
-    tbl = {"guid": "t-1", "table": {"name": "CUSTOMERS", "columns": []}}
-    model = {"guid": "m-1", "model": {"name": "S", "columns": [
-        {"name": "customer_email", "column_id": "SHIP_TO::customer_email"}],
-        "model_tables": [{"name": "CUSTOMERS", "alias": "SHIP_TO", "fqn": "t-1"}]}}
-    findings = check_s2(make_context(models=[model], tables={"t-1": tbl}))
+    findings = check_s2(fx.sec_alias_table_without_rls())
     assert len(findings) == 1 and findings[0].severity == "HIGH"

@@ -420,3 +420,106 @@ def test_p_rules_keep_legacy_names_and_guids(profile, fixture, probe):
     old, new = collect_both(getattr(fx, fixture)(), profile, P_RULES, categories=["P"])
     assert any(probe(f) for f in old), "the input must exercise the case"
     assert compare_findings(old, new)["identical"] is True
+
+
+S_RULES = ["S1", "S2", "S3", "S4", "S5", "S8", "S9", "S10"]
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_s_rules_equivalent_on_the_check_tests_inputs(profile):
+    """The S catalog rules (rules/security.yaml, the default engine runner) reproduce
+    checks_security.py exactly over every input its tests use (audit_rule_fixtures.
+    S_INPUTS: test_checks_security*.py's contexts and the S halves of the alias,
+    index-type and registry tests, the name heuristics swept across their patterns,
+    the owning-table and masking edges, raw None/absent names and guids, None where
+    lists are expected, and the demo corpus models)."""
+    import audit_rule_fixtures as fx
+
+    differing, fired = {}, dict.fromkeys(S_RULES, 0)
+    for name, build in fx.S_INPUTS.items():
+        old, new = collect_both(build(), profile, S_RULES, categories=["S"])
+        res = compare_findings(old, new)
+        if not res["identical"]:
+            differing[name] = res
+        for f in old:
+            fired[f["check_id"]] += 1
+    assert differing == {}
+    # Not vacuous: every rule fires somewhere in these inputs.
+    assert all(fired.values()), fired
+
+
+def _legacy_s_raises(ctx) -> bool:
+    from ts_cli.audit import checks_security
+    try:
+        for check in checks_security.ALL_CHECKS:
+            check(copy.deepcopy(ctx))
+    except Exception:  # noqa: BLE001 - any legacy failure makes the input incomparable
+        return True
+    return False
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_s_rules_equivalent_wherever_legacy_s_runs(profile):
+    """Every other committed audit input (AI_INPUTS, P_INPUTS) on which the legacy S
+    checks run cleanly: the engine must neither raise nor differ there. Inputs the
+    legacy checks raise on cannot be compared and are counted, not judged."""
+    import audit_rule_fixtures as fx
+
+    differing, compared, legacy_raised = {}, 0, []
+    for name, build in {**fx.AI_INPUTS, **fx.P_INPUTS}.items():
+        ctx = build()
+        if _legacy_s_raises(ctx):
+            legacy_raised.append(name)
+            continue
+        compared += 1
+        res = run_both(ctx, profile, S_RULES, categories=["S"])
+        if not res["identical"]:
+            differing[name] = res
+    assert differing == {}
+    assert compared > 300, (compared, legacy_raised)
+    # Only the inputs built to carry `name: None` columns make the legacy regexes raise.
+    assert legacy_raised == ["perf_names_none"]
+
+
+def test_every_s_input_runs_cleanly_on_the_legacy_checks():
+    """An S_INPUTS entry the legacy checks raise on would compare nothing."""
+    import audit_rule_fixtures as fx
+
+    assert [n for n, build in fx.S_INPUTS.items() if _legacy_s_raises(build())] == []
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("fixture,probe", [
+    # `name: None` / `guid: None` reach the finding as None, not ""
+    ("sec_names_none", lambda f: f["check_id"] == "S4" and f["object_name"] is None
+     and f["object_guid"] is None),
+    ("sec_names_none", lambda f: f["check_id"] == "S9" and f["object_name"] is None
+     and f["object_guid"] is None),
+    ("sec_names_none", lambda f: f["check_id"] == "S8" and f["object_guid"] is None),
+    # absent keys reach it as ""
+    ("sec_names_absent", lambda f: f["check_id"] == "S10" and f["object_name"] == ""
+     and f["object_guid"] == ""),
+    ("sec_names_absent", lambda f: f["check_id"] == "S9" and f["object_name"] == ""),
+    # S2: the owning table's RLS through "" keys, overriding aliases and absent tables
+    ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
+     and f["object_name"] == "email_no_id" and f["severity"] == "INFO"),
+    ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
+     and f["object_name"] == "email_x" and f["severity"] == "HIGH"),
+    ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
+     and f["object_name"] == "email_y" and f["severity"] == "INFO"),
+    # S3: the masking blob is case-insensitive on both sides
+    ("sec_masking_edges", lambda f: f["check_id"] == "S3" and f["object_name"] == "home_phone"),
+    # S5: `token` is HIGH, the other words CRITICAL, matched in any case
+    ("credential_names", lambda f: f["check_id"] == "S5" and f["object_name"] == "TOKEN"
+     and f["severity"] == "HIGH"),
+    # S9: the detail quotes the first 80 characters
+    ("sec_long_rls_expression", lambda f: f["check_id"] == "S9"
+     and len(f["detail"]) == len("Function in RLS expression prevents filter pushdown: ") + 80),
+])
+def test_s_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
+    import audit_rule_fixtures as fx
+
+    build = getattr(fx, fixture, None) or fx.S_INPUTS[fixture]
+    old, new = collect_both(build(), profile, S_RULES, categories=["S"])
+    assert any(probe(f) for f in old), "the input must exercise the case"
+    assert compare_findings(old, new)["identical"] is True
