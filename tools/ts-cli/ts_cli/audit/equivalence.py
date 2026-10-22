@@ -34,6 +34,18 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+from ts_cli.audit import checks_ai, checks_data, checks_human, checks_perf, checks_security
+
+#: The legacy check modules by category — the "old" side. `ts audit run` no longer
+#: uses them (it runs the catalog); this comparison is their last caller.
+ANGLE_MODULES = {
+    "A": checks_ai,
+    "D": checks_data,
+    "H": checks_human,
+    "P": checks_perf,
+    "S": checks_security,
+}
+
 KEY_FIELDS = ("check_id", "object_type", "object_guid", "object_name", "detail")
 COMPARED_FIELDS = ("angle", "severity", "metric", "threshold")
 MAX_LISTED_DIFFERENCES = 20
@@ -185,7 +197,6 @@ def _as_dict(finding) -> dict:
 
 
 def _legacy_findings(ctx, profile: str, categories: list) -> list[dict]:
-    from ts_cli.audit import ANGLE_MODULES
     legacy_ctx = copy.deepcopy(ctx)
     legacy_ctx.assessment = profile  # the legacy A-checks read the bar from the context
     return [f.to_dict() for cat in categories
@@ -193,7 +204,6 @@ def _legacy_findings(ctx, profile: str, categories: list) -> list[dict]:
 
 
 def _resolve_categories(categories: Optional[list]) -> list:
-    from ts_cli.audit import ANGLE_MODULES
     cats = list(categories) if categories is not None else list(ANGLE_MODULES)
     unknown = [c for c in cats if c not in ANGLE_MODULES]
     if unknown:
@@ -204,7 +214,6 @@ def _resolve_categories(categories: Optional[list]) -> list:
 def legacy_rule_ids(categories: Optional[list] = None) -> list[str]:
     """The rule ids the legacy checks run for ``categories``, named as
     ``audit/__init__.py`` names them: ``check_a1`` -> ``A1``."""
-    from ts_cli.audit import ANGLE_MODULES
     return [fn.__name__.replace("check_", "").upper()
             for cat in _resolve_categories(categories) for fn in ANGLE_MODULES[cat].ALL_CHECKS]
 

@@ -1,9 +1,19 @@
-"""Audit report renderer — compacts JSON, injects into HTML template."""
+"""Audit report renderer — compacts JSON, injects into HTML template.
+
+What the report says about categories and rules — the category tabs, labels and order,
+each rule's title, grading text and recommendation, and which rules feed the
+duplicates and cleanup views — comes from the rule catalog (generate.report_meta), not
+from the template. JSON written before the catalog cut-over (findings with `angle` and
+the legacy `threshold` dict only) still renders: a finding's categories are derived
+from its angle, and the metric bar falls back to the legacy pass mark.
+"""
 from __future__ import annotations
 
 import importlib.util
 import json
+import operator
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 TEMPLATE_PATH = Path(__file__).parent / "report_template.html"
@@ -27,65 +37,144 @@ def _read_erd_assets() -> dict | None:
         return None
 
 
+_OPS = {"lt": operator.lt, "lte": operator.le, "gt": operator.gt, "gte": operator.ge,
+        "eq": operator.eq}
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _bar(value: float, mark: float, ok: bool, unit: str, direction: str) -> Dict[str, Any]:
+    if mark:
+        width = min(100, round(value / mark * 100))
+    else:
+        width = 100 if value else 0
+    return {"v": value, "mark": mark, "ok": ok, "unit": unit, "dir": direction,
+            "w": max(0, width)}
+
+
+def metric_bar(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The metric bar for one finding, or None when there is none to draw.
+
+    From the uniform `bands` payload when present: the mark is the least severe level's
+    value (the pass mark for a higher-is-better metric, the limit for a lower-is-better
+    one) and the metric is a breach when any level matches it — so P8's 90 columns
+    against `gt 75` is a breach, not "ok". Without bands — JSON from before the
+    cut-over, or a code rule that grades in code (D1) — the legacy `threshold` dict is
+    read: `green` is the mark, and the direction is lower-is-better when its `yellow`
+    (where HIGH starts) lies above `green` (D1, P2, P7), else higher-is-better (the
+    coverage checks, in percent). No `green`, no bar — the old fallback to 80 drew
+    lower-is-better metrics as passing."""
+    value = finding.get("metric")
+    if not _number(value):
+        return None
+    bands = finding.get("bands") or {}
+    levels = [lv for lv in bands.get("levels") or []
+              if _number(lv.get("value")) and lv.get("op") in _OPS]
+    if levels:
+        breach = any(_OPS[lv["op"]](value, lv["value"]) for lv in levels)
+        unit = "%" if bands.get("unit") == "percent" else ""
+        return _bar(value, levels[-1]["value"], not breach, unit,
+                    bands.get("direction", "higher_is_better"))
+    threshold = finding.get("threshold") or {}
+    green, yellow = threshold.get("green"), threshold.get("yellow")
+    if not _number(green):
+        return None
+    if _number(yellow) and yellow > green:
+        return _bar(value, green, value <= green, "", "lower_is_better")
+    return _bar(value, green, value >= green, "%", "higher_is_better")
+
+
+def _catalog_meta() -> Dict[str, Any]:
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.generate import report_meta
+    return report_meta(load_catalog())
+
+
+def _categories_of(finding: Dict[str, Any], by_angle: Dict[str, str]) -> List[str]:
+    """A finding's category ids; for pre-cut-over JSON, its angle's category."""
+    cats = finding.get("categories")
+    if cats:
+        return list(cats)
+    angle = finding.get("angle", "")
+    return [by_angle.get(angle, angle)]
+
+
+def _check_text(meta: Dict[str, Any], run_meta: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+    """Per rule `{d: title, t: grading, r: recommendation}`: the catalog's, with the
+    audit run's own `check_meta` text winning where it has any (it describes that run)."""
+    out: Dict[str, Dict[str, str]] = {}
+    for cid in list(meta["checks"]) + [c for c in run_meta if c not in meta["checks"]]:
+        cat = meta["checks"].get(cid, {})
+        run = run_meta.get(cid) or {}
+        out[cid] = {"d": run.get("desc", cat.get("desc", "")),
+                    "t": run.get("thresholds", cat.get("thresholds", "")),
+                    "r": run.get("remediation", cat.get("remediation", ""))}
+    return out
+
+
+def _model_lookup(findings: list, corpus: Optional[dict]) -> tuple:
+    """`(lookup, index)`: one `{n, g}` per distinct (name, guid) — the corpus's Models
+    first, then each finding's object — and the position of each key."""
+    model_lookup: list = []
+    model_index: dict = {}
+    keys = [(m.get("name", ""), m.get("guid", "")) for m in (corpus or {}).get("models", [])]
+    keys += [(f.get("object_name", ""), f.get("object_guid", "")) for f in findings]
+    for key in keys:
+        if key not in model_index:
+            model_index[key] = len(model_lookup)
+            model_lookup.append({"n": key[0], "g": key[1]})
+    return model_lookup, model_index
+
+
+def _compact_finding(f: dict, model_index: dict, by_angle: Dict[str, str]) -> dict:
+    key = (f.get("object_name", ""), f.get("object_guid", ""))
+    cf: dict = {
+        "ci": f["check_id"],
+        "a": f["angle"],
+        "s": f["severity"],
+        "ot": f.get("object_type", ""),
+        "mi": model_index[key],
+        "d": f["detail"],
+    }
+    if f.get("metric") is not None:
+        cf["me"] = f["metric"]
+    if f.get("threshold"):
+        cf["th"] = f["threshold"]
+    cf["c"] = _categories_of(f, by_angle)
+    bar = metric_bar(f)
+    if bar:
+        cf["mb"] = bar
+    return cf
+
+
 def compact_payload(data: dict) -> dict:
     findings = data.get("findings", [])
     summary = data.get("summary", {})
     corpus = data.get("corpus")
 
-    model_lookup: list = []
-    model_index: dict = {}
-
-    if corpus:
-        for m in corpus.get("models", []):
-            key = (m.get("name", ""), m.get("guid", ""))
-            if key not in model_index:
-                model_index[key] = len(model_lookup)
-                model_lookup.append({"n": key[0], "g": key[1]})
-
-    for f in findings:
-        key = (f.get("object_name", ""), f.get("object_guid", ""))
-        if key not in model_index:
-            model_index[key] = len(model_lookup)
-            model_lookup.append({"n": key[0], "g": key[1]})
-
-    compact_findings = []
-    for f in findings:
-        key = (f.get("object_name", ""), f.get("object_guid", ""))
-        cf: dict = {
-            "ci": f["check_id"],
-            "a": f["angle"],
-            "s": f["severity"],
-            "ot": f.get("object_type", ""),
-            "mi": model_index[key],
-            "d": f["detail"],
-        }
-        if f.get("metric") is not None:
-            cf["me"] = f["metric"]
-        if f.get("threshold"):
-            cf["th"] = f["threshold"]
-        compact_findings.append(cf)
+    model_lookup, model_index = _model_lookup(findings, corpus)
+    meta = _catalog_meta()
+    by_angle = {c["angle_key"]: c["id"] for c in meta["categories"]}
+    compact_findings = [_compact_finding(f, model_index, by_angle) for f in findings]
 
     compact_summary = {
         "bs": summary.get("by_severity", {}),
         "ba": summary.get("by_angle", {}),
+        "bc": summary.get("by_category", {}),
         "os": summary.get("objects_scanned", {}),
         "cr": summary.get("checks_run", 0),
         "ac": summary.get("all_check_ids", []),
     }
 
-    check_meta = data.get("check_meta", {})
-    compact_check_meta = {}
-    for cid, meta in check_meta.items():
-        compact_check_meta[cid] = {
-            "d": meta.get("desc", ""),
-            "t": meta.get("thresholds", ""),
-        }
-
     result: dict = {
         "L": model_lookup,
         "F": compact_findings,
         "S": compact_summary,
-        "K": compact_check_meta,
+        "K": _check_text(meta, data.get("check_meta") or {}),
+        "G": {"categories": meta["categories"], "views": meta["views"],
+              "profiles": meta["profiles"]},
     }
 
     if corpus:

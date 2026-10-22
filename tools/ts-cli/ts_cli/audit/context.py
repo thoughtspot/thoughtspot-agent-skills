@@ -236,6 +236,11 @@ def _export_answers(client: Any, dependents: dict) -> list:
     return answers
 
 
+#: Data `build_context` fetches for every audit, whatever the needs: Model TML (with
+#: its associated Table TML), metadata headers and dependents.
+ALWAYS_FETCHED = frozenset({"model_tml", "table_tml", "metadata", "dependents"})
+
+
 def build_context(
     client: Any,
     model_guids: list,

@@ -62,21 +62,53 @@ def needs_for(catalog: Catalog, categories: List[str], profile: str,
     only when it is in here. Rules also read data they do not declare — Model and Table
     TML, which are fetched unconditionally for that reason; the catalog gate holds every
     rule's conditional reads to its declarations (catalog_uses.py)."""
-    _check_selection(catalog, categories, profile)
     needs: Set[str] = set()
-    for rule in _selected(catalog, categories):
-        merged, _ = bands.effective(rule, layers_for(rule, profile, layers or []))
-        if merged.status == "active":
-            needs.update(rule.requires, rule.uses)
+    for rule in selected_rules(catalog, categories, profile, layers):
+        needs.update(rule.requires, rule.uses)
     return needs
 
 
+def selected_rules(catalog: Catalog, categories: List[str], profile: str,
+                   layers: Optional[List[Dict[str, Any]]] = None) -> List[Rule]:
+    """The rules `run_rules(ctx, catalog, categories, profile, layers)` runs, in the
+    order it runs them: selected, active in the catalog, and still active once the
+    profile and `layers` are applied."""
+    _check_selection(catalog, categories, profile)
+    return [rule for rule in _selected(catalog, categories)
+            if bands.effective(rule, layers_for(rule, profile, layers or []))[0].status
+            == "active"]
+
+
 def _selected(catalog: Catalog, categories: List[str]) -> Iterator[Rule]:
-    """The catalog-active rules in any of `categories`. A layer cannot revive a rule
-    retired in the catalog here (only `run_rule`, run singly, can)."""
-    wanted = set(categories)
-    return (r for r in catalog.rules.values()
-            if r.status == "active" and wanted.intersection(r.categories))
+    """The catalog-active rules in any of `categories`, category by category in the
+    order given (catalog order within one), each once — the order the legacy checks
+    ran in. A layer cannot revive a rule retired in the catalog here (only `run_rule`,
+    run singly, can)."""
+    seen: Set[str] = set()
+    for category in categories:
+        for rule in catalog.rules.values():
+            if rule.status == "active" and category in rule.categories \
+                    and rule.id not in seen:
+                seen.add(rule.id)
+                yield rule
+
+
+def resolve_profile(catalog: Catalog, name: Optional[str]) -> str:
+    """The profile id `name` means: None (or "") is the catalog's default; otherwise a
+    profile's id or label, in any case, `_` and `-` alike ("Spotter-ready",
+    "spotter_ready" and "spotter" are one profile). ValueError for anything else."""
+    if not name:  # None or "" (as the legacy `name or DEFAULT`)
+        default = catalog.default_profile()
+        if default is None:
+            raise ValueError("the catalog marks no profile as the default")
+        return default
+    key = str(name).strip().lower().replace("_", "-")
+    for profile in catalog.profiles.values():
+        if key in (profile.id.lower().replace("_", "-"),
+                   profile.label.lower().replace("_", "-")):
+            return profile.id
+    raise ValueError(f"unknown assessment '{name}': use "
+                     f"{' or '.join(catalog.profiles)}")
 
 
 def run_rule(ctx, catalog: Catalog, rule_id: str, profile: str,

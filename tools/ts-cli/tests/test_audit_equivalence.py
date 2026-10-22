@@ -6,7 +6,7 @@ import copy
 
 import pytest
 
-from ts_cli.audit import ANGLE_MODULES
+from ts_cli.audit.equivalence import ANGLE_MODULES  # moved from ts_cli.audit (12a)
 from ts_cli.audit.context import AuditContext
 from ts_cli.audit.equivalence import (
     collect_both, compare_findings, legacy_rule_ids, main, per_rule_rows, run_both)

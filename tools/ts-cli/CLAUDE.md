@@ -261,13 +261,18 @@ were exposed to it.
 
 ## Adding an audit check
 
-1. Write the `check_XX` function in the appropriate `audit/checks_*.py` module
-   (AI → `checks_ai.py`, Data → `checks_data.py`, etc.). The function receives
-   an `AuditContext` and returns a list of `Finding` objects.
-2. Add the function to `ALL_CHECKS` in the same module — this is the registry
-   that `run_audit()` iterates.
-3. Add unit tests in `tools/ts-cli/tests/` covering the check's logic.
-4. Add a row to `agents/cli/ts-audit/references/check-catalog.md` with the check ID,
-   what it detects, and severity logic.
-5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
-6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
+`ts audit run` runs the rule catalog (`ts_cli/audit/catalog/rules/*.yaml`) through the
+rule engine (`ts_cli/audit/engine/`) — a check is a YAML rule, not a function.
+
+1. Add the rule entry (id, title, description, categories, requires/uses, scope,
+   aggregate, bands or severity, message, remediation, `fires`/`silent` examples) to the
+   category's `rules/*.yaml`; add the example fixtures to `tests/audit_rule_fixtures/`.
+   Only when no declarative form fits, register a code rule in `engine/code_rules*.py`.
+2. `python3 tools/validate/check_audit_catalog.py --root .` — vocabulary, overrides,
+   declared data reads, examples, the generated doc, rule-id history (`--base <ref>`).
+3. `python -m ts_cli.audit.generate` — regenerates the rule tables in
+   `agents/cli/ts-audit/references/check-catalog.md` (never edit them by hand).
+4. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
+5. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
+
+A rule id is permanent: retire a rule (`status: retired`), never delete or reuse it.

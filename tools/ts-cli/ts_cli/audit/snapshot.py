@@ -4,12 +4,17 @@ A snapshot is a directory holding one JSON file per ``AuditContext`` field plus
 ``manifest.json``::
 
     {"format": 1, "ts_cli_version": "...", "created": "...",
-     "angles": ["A", "D", ...], "files": ["answers.json", ...]}
+     "angles": ["A", "D", ...], "needs": ["ai_instructions", ...],
+     "files": ["answers.json", ...]}
 
-``angles`` records what the capture was asked for. The conditional data (AI
-instructions, Answer TML, Sets) is fetched when a selected rule declares it in
-``requires`` or ``uses`` (``engine.run.needs_for``), under every profile, so a
-replay can refuse an angle that was not captured rather than report it clean.
+``angles`` records what the capture was asked for, ``needs`` what it fetched: the
+data always fetched (``context.ALWAYS_FETCHED``) and the conditional data (AI
+instructions, Answer TML, Sets) a selected rule declares in ``requires`` or ``uses``
+(``engine.run.needs_for``, under every profile) or the report reads
+(``audit.REPORT_NEEDS``). A replay refuses a selection whose rules read data the
+snapshot did not capture, rather than report it clean. A manifest written before
+``needs`` was recorded is read by what its angles fetched then
+(``LEGACY_ANGLE_NEEDS``).
 
 Replaying a snapshot runs the checks over exactly the data a live run saw.
 That is what lets two audit engines be compared on identical input, so a
@@ -33,12 +38,17 @@ import json
 from pathlib import Path
 
 from ts_cli import __version__
-from ts_cli.audit.context import AuditContext
+from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext
 
 FORMAT = 1
 MANIFEST = "manifest.json"
 _FIELDS = [f.name for f in dataclasses.fields(AuditContext)]
 _TAG = "__ts_snapshot_type__"
+#: What a snapshot without `needs` in its manifest fetched for each angle: before the
+#: catalog, AI instructions for A, Answer TML and Sets for H (and since, under the
+#: shipped catalog, exactly the same — test_audit_context_needs.py).
+LEGACY_ANGLE_NEEDS = {"A": frozenset({"ai_instructions"}),
+                      "H": frozenset({"answers", "sets"})}
 
 
 class SnapshotError(Exception):
@@ -79,8 +89,11 @@ def _dumps(value, what: str) -> str:
 
 # ── write ───────────────────────────────────────────────────────────────────
 
-def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str]) -> None:
-    """Write ``ctx`` and the angles it was captured for to ``out_dir``.
+def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str],
+                   needs=None) -> None:
+    """Write ``ctx``, the angles it was captured for and — when given — the ``needs``
+    ``build_context`` fetched it with to ``out_dir``. Without ``needs`` the manifest
+    records none, and a replay reads it as a legacy, angle-keyed snapshot.
 
     Raises ``SnapshotError`` when the context holds data JSON cannot carry back
     unchanged (for example non-string mapping keys); the half-written snapshot
@@ -106,6 +119,8 @@ def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str]) -> None:
         "angles": list(angles),
         "files": sorted(files),
     }
+    if needs is not None:
+        manifest["needs"] = sorted(set(needs) | ALWAYS_FETCHED)
     manifest_path.write_text(_dumps(manifest, MANIFEST), encoding="utf-8")
 
 
@@ -155,11 +170,32 @@ def _read_manifest(in_dir: Path) -> dict:
     angles, files = manifest.get("angles"), manifest.get("files")
     if not isinstance(angles, list) or not isinstance(files, list):
         raise SnapshotError(f"{path} must list 'angles' and 'files'")
+    needs = manifest.get("needs")
+    if needs is not None and not (isinstance(needs, list)
+                                  and all(isinstance(n, str) for n in needs)):
+        raise SnapshotError(f"{path}: 'needs' must be a list of names")
     return manifest
+
+
+def captured_needs(manifest: dict) -> set:
+    """What the snapshot fetched: its manifest's ``needs``, or for a legacy manifest
+    without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``)."""
+    if manifest.get("needs") is not None:
+        return set(manifest["needs"])
+    out = set(ALWAYS_FETCHED)
+    for angle in manifest["angles"]:
+        out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
+    return out
 
 
 def read_snapshot(in_dir: Path) -> tuple[AuditContext, list[str]]:
     """Return the ``AuditContext`` stored in ``in_dir`` and the angles it was captured for."""
+    ctx, angles, _ = read_snapshot_needs(in_dir)
+    return ctx, angles
+
+
+def read_snapshot_needs(in_dir: Path) -> tuple[AuditContext, list[str], set]:
+    """``read_snapshot`` plus what the snapshot fetched (``captured_needs``)."""
     in_dir = Path(in_dir)
     manifest = _read_manifest(in_dir)
     listed = set(manifest["files"])
@@ -173,4 +209,4 @@ def read_snapshot(in_dir: Path) -> tuple[AuditContext, list[str]]:
         if name not in listed:
             raise SnapshotError(f"snapshot has no {field} data: {MANIFEST} does not list {name}")
         values[field] = _load(in_dir / name)
-    return AuditContext(**values), list(manifest["angles"])
+    return AuditContext(**values), list(manifest["angles"]), captured_needs(manifest)
