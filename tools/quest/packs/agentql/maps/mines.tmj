@@ -740,7 +740,7 @@
       {
        "name": "loot",
        "type": "string",
-       "value": "red_potion,shield,staff"
+       "value": "red_potion,green_potion,blue_potion,shield,staff"
       }
      ]
     },

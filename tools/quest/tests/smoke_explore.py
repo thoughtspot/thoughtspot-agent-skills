@@ -70,6 +70,8 @@ def check(realm: str, log: list[str], data: dict) -> list[str]:
             problems.append(f"at {want[i] if i < len(want) else s} the gate is {'shut' if s.endswith('[gate-shut]') else 'open'}")
     if not (json.loads(saved) or {}).get("done"):
         problems.append(f"{realm} was not saved as finished")
+    if f"EXIT {realm}" not in log:
+        problems.append(f"the exit of {realm} didn't take the player back to the overworld")
     return problems
 
 

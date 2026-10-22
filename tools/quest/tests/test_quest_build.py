@@ -2539,7 +2539,7 @@ def test_the_overworld_needs_one_portal_per_realm(tmp_path, objects, needle):
     (lambda m: m["layers"][2]["objects"][1]["properties"][0].update(type="int", value=5), "must be a string"),
     (lambda m: [o.update({"class": o.pop("type")}) for o in m["layers"][2]["objects"][:1]], "saved by Tiled 1.9"),
 ])
-def test_every_map_is_one_phaser_can_load(tmp_path, edit, needle):
+def test_every_map_is_one_the_page_can_load(tmp_path, edit, needle):
     cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
     edit(cave)
     pack, data = _explorable(tmp_path, cave=cave)
@@ -2672,7 +2672,7 @@ def _obj(m, kind):
     (lambda m: m["tilesets"][0].update(image="../pack.yaml"), "is not in the pack"),
     (lambda m: m["tilesets"][0].update(image="../../../outside.png"), "is not in the pack"),
 ])
-def test_a_map_phaser_would_read_differently_fails(tmp_path, edit, needle):
+def test_a_map_the_page_would_read_differently_fails(tmp_path, edit, needle):
     cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
     edit(cave)
     pack, data = _explorable(tmp_path, cave=cave)
@@ -3124,7 +3124,7 @@ def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, 
 
 GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
               "SMOKE mines west_sales:merchant[gate-shut] west_sales:guide[gate-shut] west_sales:compiler[gate-shut] "
-              "west_sales:foe west_sales:reward | {\"done\":true,\"best\":0}"]
+              "west_sales:foe west_sales:reward | {\"done\":true,\"best\":0}", "EXIT mines"]
 
 
 @pytest.mark.parametrize("edit,needle", [
@@ -3132,11 +3132,12 @@ GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
     (lambda log: [x for x in log if not x.startswith("LOCKED")], "was not locked for a fresh player"),
     (lambda log: [x for x in log if x != "MAP mines"], "map never loaded"),
     (lambda log: log + ["ERROR smoke: timed out"], "ERROR smoke"),
-    (lambda log: log[:-1], "no SMOKE line"),
-    (lambda log: log[:-1] + [log[-1].replace("west_sales:foe ", "")], "steps"),
-    (lambda log: log[:-1] + [log[-1].replace("west_sales:foe", "west_sales:foe[gate-shut]")], "at west_sales:foe the gate is shut"),
-    (lambda log: log[:-1] + [log[-1].replace("compiler[gate-shut]", "compiler")], "at west_sales:compiler the gate is open"),
-    (lambda log: log[:-1] + [log[-1].replace('{"done":true,"best":0}', "null")], "was not saved as finished"),
+    (lambda log: log[:-2] + log[-1:], "no SMOKE line"),
+    (lambda log: log[:-1], "the exit of mines didn't take the player back"),
+    (lambda log: log[:-2] + [log[-2].replace("west_sales:foe ", ""), log[-1]], "steps"),
+    (lambda log: log[:-2] + [log[-2].replace("west_sales:foe", "west_sales:foe[gate-shut]"), log[-1]], "at west_sales:foe the gate is shut"),
+    (lambda log: log[:-2] + [log[-2].replace("compiler[gate-shut]", "compiler"), log[-1]], "at west_sales:compiler the gate is open"),
+    (lambda log: log[:-2] + [log[-2].replace('{"done":true,"best":0}', "null"), log[-1]], "was not saved as finished"),
 ])
 def test_the_explore_smoke_reads_the_page_log(edit, needle):
     sys.path.insert(0, str(HERE))
@@ -3523,3 +3524,137 @@ def test_the_engine_stops_the_player_at_walls_and_solids():
     assert got["fast"]["x"] == 4 * 16 - 6 or got["fast"]["x"] == 5 * 16 - 6
     assert got["touching"] is True
     assert got["tile"] == [1, None, 3]
+
+
+
+# ---- review of the explore stack (#650) -----------------------------------------------------------
+
+def test_the_write_guard_goes_by_the_folder_not_its_spelling(monkeypatch, tmp_path):
+    copy = tmp_path / "quest"
+    shutil.copytree(B.HERE, copy, ignore=shutil.ignore_patterns("dist", "__pycache__", "tests"))
+    monkeypatch.setattr(B, "HERE", copy)
+    other = tmp_path / "QUEST"
+    if not other.exists():
+        pytest.skip("this disk is case-sensitive")
+    before = (copy / "explore/index.html").read_bytes()
+    assert B.main(["--out", str(other / "explore/index.html")]) == 1
+    assert (copy / "explore/index.html").read_bytes() == before
+
+
+def test_a_barrel_cant_roll_onto_another_and_tiles_arent_flipped(tmp_path):
+    cave = _with_objects(_tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE),
+                         [("barrel", 6, 4, {"roll": "right"}), ("barrel", 7, 4, {"roll": "up"})])
+    _layer(cave, "tilelayer")["data"][0] = 1 | 0x80000000
+    pack, data = _explorable(tmp_path, cave=cave)
+    (pack.dir / "tiles").mkdir(exist_ok=True)
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any("rolls right onto (7, 4), which isn't open floor" in e for e in errors), errors
+    assert any("flipped or rotated tiles" in e for e in errors), errors
+
+
+def test_the_explore_pages_saves_and_hooks_keep_to_themselves():
+    js = (B.EXPLORE_DIR / "explore.js").read_text(encoding="utf-8")
+    assert "FUN_KEY = `${pack.storage_key}-explore`" in js           # loot apart from progress
+    assert "`${storageKey}-progress`" in (B.CORE_DIR / "30-progress.js").read_text(encoding="utf-8")
+    assert "if (LOCAL) window.Quest.explore = {" in js                # test hooks only on a local server
+
+
+def test_every_item_is_found_somewhere():
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    found = {frames["weapon"]}
+    for path in (PACK_DIR / "maps").glob("*.tmj"):
+        for layer in json.loads(path.read_text(encoding="utf-8"))["layers"]:
+            for o in layer.get("objects", []):
+                for p in o.get("properties", []):
+                    if p["name"] == "loot":
+                        found |= {x.strip() for x in p["value"].split(",")}
+    assert set(frames["items"]) <= found, set(frames["items"]) - found
+
+
+ENGINE_SHOVE = r"""
+const fs = require("fs"); globalThis.Quest = {};
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const E = Quest.engine, T = 16, map = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const wallsSpec = map.layers.find(l => l.name === "walls");
+const walls = new E.Layer(wallsSpec); walls.setCollisionByExclusion();
+const objs = map.layers.find(l => l.type === "objectgroup").objects.filter(o => o.type !== "spawn")
+  .map(o => new E.Sprite(o.x + 8, o.y + 8, 0, true));
+const block = E.blocker(walls, () => objs.filter(s => s.body.enable));
+const inWall = (b) => { for (let y = Math.floor((b.y - 6) / T); y <= Math.floor((b.y + 5.999) / T); y++)
+  for (let x = Math.floor((b.x - 6) / T); x <= Math.floor((b.x + 5.999) / T); x++) { const t = walls.getTileAt(x, y); if (t && t.collides) return true; } return false; };
+// 1. a solid moved onto the player doesn't shove it: walking away, it never enters a wall or leaves the map
+const spawn = map.layers.find(l => l.type === "objectgroup").objects.find(o => o.type === "spawn");
+let box;
+const crate = new E.Sprite(spawn.x + 8, spawn.y + 8, 0, true); objs.push(crate);   // dropped right on top of the player
+const out = { shoved: 0, offmap: 0, inwall: 0, escaped: false };
+for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+  box = { x: spawn.x + 8, y: spawn.y + 8, w: 12, h: 12 };
+  for (let i = 0; i < 12; i++) {
+    const to = E.move(box, dx * 1.5, dy * 1.5, block);
+    if (Math.abs(to.x - box.x) > 2 || Math.abs(to.y - box.y) > 2) out.shoved++;
+    Object.assign(box, to);
+    if (inWall(box)) out.inwall++;
+  }
+  if (Math.abs(box.x - crate.x) >= 14 || Math.abs(box.y - crate.y) >= 14) out.escaped = true;
+}
+// 2. a random walk on the real map, with things moving onto the player now and then
+let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+box = { x: spawn.x + 8, y: spawn.y + 8, w: 12, h: 12 };
+for (let i = 0; i < 20000; i++) {
+  if (i % 997 === 0) { crate.x = box.x + (rnd() - 0.5) * 8; crate.y = box.y + (rnd() - 0.5) * 8; }
+  const dir = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]][Math.floor(rnd() * 6)];
+  Object.assign(box, E.move(box, dir[0] * 1.5, dir[1] * 1.5, block));
+  if (inWall(box)) out.inwall++;
+  if (box.x < 0 || box.y < 0 || box.x > map.width * T || box.y > map.height * T) out.offmap++;
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+@pytest.mark.parametrize("name", ["mines", "overworld"])
+def test_the_engine_never_shoves_the_player_through_walls(name):
+    # The review's blocker: a solid that moved onto the player (a barrel rolled there, a body that
+    # shifted) used to shove it a tile at a time, through walls and off the map.
+    r = subprocess.run(["node", "-e", ENGINE_SHOVE, str(B.EXPLORE_DIR / "engine.js"), str(PACK_DIR / f"maps/{name}.tmj")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got == {"shoved": 0, "offmap": 0, "inwall": 0, "escaped": True}, got
+
+
+
+ENGINE_RATE = r"""
+const fs = require("fs"); globalThis.Quest = {};
+let now = 0, queued = null;
+globalThis.performance = { now: () => now };
+globalThis.requestAnimationFrame = f => { queued = f; };
+const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+globalThis.document = { createElement: () => ({ getContext: () => ctx, width: 0, height: 0 }) };
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const target = { addEventListener() {} }, parent = { appendChild() {} };
+const out = {};
+for (const hz of [30, 60, 144]) {
+  now = 0; queued = null;
+  const game = Quest.engine.create({ parent, width: 320, height: 128, background: "#000", atlas: {}, columns: 12, keyTarget: target });
+  let body;
+  game.start(api => {
+    const l = api.addLayer({ name: "walls", width: 100, height: 3, data: new Array(300).fill(0) });
+    api.collide(l);
+    body = api.addPlayer(16, 24).setVelocity(90, 0);
+    return {};
+  });
+  for (let t = 0; t <= 1000; t += 1000 / hz) { now = t; const f = queued; queued = null; f && f(); }
+  out[hz] = Math.round(body.x - 16);
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_engine_walks_at_the_same_speed_at_any_refresh_rate():
+    r = subprocess.run(["node", "-e", ENGINE_RATE, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert all(80 <= v <= 95 for v in got.values()), got      # 90 px/s, give or take a frame

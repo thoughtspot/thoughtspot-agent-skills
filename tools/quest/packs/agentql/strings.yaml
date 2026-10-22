@@ -139,6 +139,7 @@ explore_found: "You open the chest: {item}!"
 explore_mimic: "The chest snaps at you. A mimic! Nothing inside but teeth."
 explore_chest_empty: The chest is empty.
 explore_barrel: You roll the barrel aside. Something glints underneath.
+explore_barrel_blocked: The barrel won't roll while you stand where it would go.
 explore_hoard: "A troll's hoard: {items}!"
 explore_hoard_empty: The troll's hoard is empty now.
 explore_weapon: "You ready the {weapon}."

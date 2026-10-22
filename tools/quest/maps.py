@@ -150,6 +150,9 @@ class Map:
                 errors.append(f"{self.name}: the {l.get('name')} layer must be {self.w}x{self.h} tile numbers (CSV, not base64)")
         data = walls[0].get("data") if walls and good(walls[0]) else None
         self.wall = {(i % self.w, i // self.w) for i, g in enumerate(data or []) if g & GID}
+        for l in tiles:
+            if isinstance(l.get("data"), list) and any(isinstance(g, int) and g & ~GID for g in l["data"]):
+                errors.append(f"{self.name}: layer {l.get('name')!r} has flipped or rotated tiles, which the page draws unflipped")
         self.objects = []
         for layer in layers:
             if layer.get("type") != "objectgroup":
@@ -392,7 +395,7 @@ def _extras(m: Map, errors: list[str]) -> None:
             errors.append(f"{o['where']}: says={o['props']['says']!r} must name lines in strings.yaml")
         if "about" in o["props"] and o["props"]["about"] not in m.realm_ids:
             errors.append(f"{o['where']}: about={o['props']['about']!r} is not a realm")
-    taken = {o["tile"] for o in m.objects if o["type"] not in ("barrel", "hoard")}
+    taken = {o["tile"] for o in m.objects if o["type"] != "hoard"}
     for o in m.of("chest"):
         loot = o["props"].get("loot", "")
         if loot != MIMIC and loot not in items:
@@ -409,7 +412,7 @@ def _extras(m: Map, errors: list[str]) -> None:
             errors.append(f"{b['where']}: roll must be one of {sorted(ROLLS)}")
             continue
         to = rolled(b)
-        if not m.inside(to) or to in m.wall or to in taken or to in gate_tiles or any(rolled(x) == to for x in m.of("barrel") if x is not b):
+        if not m.inside(to) or to in m.wall or to in taken - {b["tile"]} or to in gate_tiles or any(rolled(x) == to for x in m.of("barrel") if x is not b):
             errors.append(f"{b['where']}: rolls {b['props']['roll']} onto {to}, which isn't open floor")
 
 

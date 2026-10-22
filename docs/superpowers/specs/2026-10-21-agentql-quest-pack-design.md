@@ -430,7 +430,7 @@ kept, and the character can be asked again.
   local loop is how the manual checklist (§6) is done.
 - **No outside requests.**
 - **Budget:** 3 MB for the explore folder. The engine is about 10 KB, the fonts are 48 KB, and maps
-  and tiles are small (about 216 KB in all).
+  and tiles are small (about 199 KB in all).
 
 ## 5. Testing
 
@@ -447,11 +447,11 @@ kept, and the character can be asked again.
 - **Classic mode:** tested as in §3.6.
 - **Where tests live:** all tests stay in `tools/quest/tests/` (pack-specific ones under
   `tests/packs/agentql/`), one pytest root, so `validate.yml` and pre-commit name one path.
-- **Rendering (decision 3):** a manual checklist (§6) until explore becomes the default. Then a
-  Playwright smoke test that uses the Chrome already on GitHub's Ubuntu runner
-  (`channel: 'chrome'`), so no browser download. Runners have no GPU, and Chrome is removing its
-  automatic software-WebGL fallback, so the test launches with `--enable-unsafe-swiftshader` and
-  asserts that the canvas booted (not the classic-mode fallback).
+- **Rendering and play (decision 3, as built):** `tests/smoke_explore.py` runs in CI on the
+  Chrome already on GitHub's Ubuntu runner: it serves the build and plays the Mines with scripted
+  arrow-key events, walking each step's path with the engine's own collision, then the fun and the
+  exit; node tests cover the engine's geometry and timing. A manual checklist (§6) covers touch,
+  screen readers and other browsers.
 
 ## 6. Delivery
 
@@ -533,7 +533,8 @@ site's home page.
    (CC0, mid-to-late-80s top-down) from a style board of four directions, inside the amber
    monitor frame. With no tint, WebGL is no longer required (and after decision 5, a 2D canvas is all the page uses).
 3. **Testing uses a manual checklist** until explore becomes the default. Then a Playwright smoke
-   test on the runner's own Chrome.
+   test on the runner's own Chrome. *As built:* a headless Chrome play-through runs in CI already
+   (§5); the checklist covers what it can't.
 4. **The engine is renamed** `tools/quest/` now, as PR 1, while only one pack depends on it. The
    public URL doesn't change.
 5. **No game library** (2026-10-22). A review found that Phaser 4.2.1's build bundles a GPL-3.0
@@ -547,7 +548,7 @@ site's home page.
 | Risk | Mitigation |
 |---|---|
 | Walking adds time: the course is "about 15 minutes" | Small maps (one screen or two), every question within 2–3 minutes per realm |
-| Our own engine has bugs a library wouldn't | It does very little; node tests on its geometry, and the headless Chrome play-through on every map, in CI |
+| Our own engine has bugs a library wouldn't | It does very little; node tests on its geometry and timing, and a headless Chrome play-through that walks the Mines and the overworld with the arrow keys, in CI |
 | A canvas game is harder to make accessible | All questions are HTML dialogs; classic mode is always one link away |
 | Map edits silently break the course | The §4.2 checks (links, coverage, reachability) and the node map play-through, in the PR gate |
 | Two front ends drift apart | One `core/` for state, scoring, saves, sound and the question panel; both front ends' tests run on it |

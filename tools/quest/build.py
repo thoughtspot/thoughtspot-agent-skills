@@ -885,12 +885,29 @@ def explore_items(pack: "Pack") -> set[str]:
     return set(items) if isinstance(items, dict) else set()
 
 
+def _inside(path: pathlib.Path, folder: pathlib.Path) -> bool:
+    """Is `path` (which may not exist yet) `folder` or inside it, the way the file system sees it?
+    Compared by identity, not spelling: on a case-insensitive disk a differently cased name is the same folder."""
+    path = path.resolve()
+    if not folder.exists():
+        return path.is_relative_to(folder.resolve())
+    for p in (path, *path.parents):
+        if p.exists():
+            try:
+                if p.samefile(folder):
+                    return True
+            except OSError:
+                pass
+        elif p.name and p.parent.exists() and any(c.name.casefold() == p.name.casefold() and c.samefile(folder)
+                                                  for c in p.parent.iterdir()):
+            return True
+    return False
+
+
 def out_problems(out: pathlib.Path, explorable: bool) -> list[str]:
     """Before anything is written: the page's folder isn't one of the engine's own (tools/quest/
     except its dist/), and an explore/ already there is one this build wrote, not a link."""
-    folder = out.parent.resolve()
-    here = HERE.resolve()
-    if folder.is_relative_to(here) and not folder.is_relative_to(here / "dist"):
+    if _inside(out.parent, HERE) and not _inside(out.parent, HERE / "dist"):
         return [f"--out: {out.parent} is inside tools/quest/; build into tools/quest/dist/ or somewhere outside"]
     ex = out.parent / "explore"
     if explorable and (ex.is_symlink() or (ex.exists() and not (ex / EXPLORE_MARK).is_file())):

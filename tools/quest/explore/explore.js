@@ -128,7 +128,10 @@
     const b = e.target.closest(".choices button");
     if (b && actions[+b.dataset.i]) dispatch(actions[+b.dataset.i]);
   });
-  const toClassic = id => { location.href = `../#realm=${encodeURIComponent(id)}&from=explore`; };
+  const toClassic = id => {
+    if (SMOKE) return log(`ERROR the scripted play left for the classic page (${id})`);   // keep the log
+    location.href = `../#realm=${encodeURIComponent(id)}&from=explore`;
+  };
 
   // Talk to an object the player stands next to.
   function talk(obj) {
@@ -257,7 +260,7 @@
         // The living breathe: a pixel up and down, out of step with each other.
         if (!reduced && ["merchant", "guide", "foe", "npc"].includes(o.type))
           this.time.addEvent({ delay: 650 + 90 * this.objects.length, loop: true,       // a pixel up, a pixel down
-                               callback: () => obj.sprite.setY(obj.sprite.y === y ? y - 1 : y) });
+                               callback: () => obj.sprite.setOffsetY(obj.sprite.oy ? 0 : -1) });   // the picture, not the body
         this.objects.push(obj);
       }
       // A hoard lies hidden under its barrel until the barrel has rolled off it.
@@ -285,6 +288,8 @@
         const open = g.requires.every(done);
         g.setVisible(!open); g.body.enable = !open;
       }
+      for (const o of this.objects)       // the quest's chest is open only while it is being claimed
+        if (o.type === "reward") o.sprite.setFrame(dialogStep === o.step ? FRAMES.reward_open : FRAMES.reward);
     }
     openChest(step) {
       const o = this.objects.find(x => x.type === "reward" && x.step === step);
@@ -311,13 +316,14 @@
                         || this.ahead(b) - this.ahead(a));         // a tie goes to the one you face
       // Something that isn't a step (the exit, a door, a chest, someone to talk to) answers when you
       // face it squarely, so you can always leave; otherwise the step the game waits on answers first.
-      const faced = close.find(o => !o.step && this.ahead(o) > 0.7);
+      const faced = close.find(o => !o.step && this.ahead(o) > 0.8);     // squarely: not across a diagonal
       return faced || close.find(o => o.step && o.step === want) || close[0] || null;
     }
     // How squarely the player faces something: 1 straight ahead, -1 behind.
     ahead(o) {
       const dx = o.x - this.player.x, dy = o.y - this.player.y, d = Math.hypot(dx, dy) || 1;
-      return (dx * this.facing[0] + dy * this.facing[1]) / d;
+      const f = Math.hypot(this.facing[0], this.facing[1]) || 1;      // walking diagonally faces between two
+      return (dx * this.facing[0] + dy * this.facing[1]) / d / f;
     }
     update() {
       if (this.frozen) return;
@@ -377,8 +383,10 @@
       }
       if (obj.type === "barrel") {
         if (!first) return toast(S("explore_nobody"));
-        fun.done[obj.key] = true; saveFun();
         const [x, y] = this.rolledTo(obj), from = { x: obj.x, y: obj.y };
+        const p = this.player;              // never onto the player: step out of its way first
+        if (Math.abs(p.x - x) < TILE / 2 + p.w / 2 && Math.abs(p.y - y) < TILE / 2 + p.h / 2) return toast(S("explore_barrel_blocked"));
+        fun.done[obj.key] = true; saveFun();
         this.place(obj, x, y);
         if (!reduced) { obj.sprite.setPosition(from.x, from.y); this.tweens.add({ targets: obj.sprite, x, y, angle: 360, duration: 320 }); }
         const hoard = this.objects.find(o => o.type === "hoard" && o.x === from.x && o.y === from.y);
@@ -425,7 +433,7 @@
   const SMOKE = location.hash.startsWith("#smoke=") && LOCAL;
   // #look=<map>, locally: open that map straight away, for screenshots (tests/shoot_maps.py).
   const LOOK = LOCAL && /^#look=([a-z0-9_]+)$/.exec(location.hash);
-  // WebGL where the browser has it, else a 2D canvas; if neither starts, offer the classic version.
+  // A 2D canvas; if the page can't start one, offer the classic version.
   let game, MAPS;
   try {
     const image = src => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error(`couldn't load ${src}`)); i.src = src; });
@@ -437,6 +445,7 @@
       keyTarget: $("world"),
       timeouts: SMOKE || !!LOOK        // a headless run uses virtual time, which never fires animation frames
     });
+    game.onerror = e => log(`ERROR ${e && e.message}`);
   } catch (e) {
     $("nogl").textContent = S("explore_no_canvas");
     $("nogl").style.display = "block";
@@ -454,15 +463,6 @@
   if (LOCAL) window.Quest.explore = {
     state: () => state, world: () => world, talk, dispatch, actions: () => actions, dialogOpen: () => dialog.open,
     async smoke(realmId) {
-      // Stand on a floor tile next to something (the walk itself is maps.py's check and play_map.js's).
-      const stand = obj => {
-        const spot = [[0, TILE], [0, -TILE], [-TILE, 0], [TILE, 0]].map(([dx, dy]) => ({ x: obj.x + dx, y: obj.y + dy }))
-          .find(s => { const t = world.walls.getTileAtWorldXY(s.x, s.y); return !(t && t.index > 0)
-                       && !world.objects.some(o => o !== obj && !o.hidden && o.x === s.x && o.y === s.y); });
-        if (!spot) throw new Error(`no floor next to ${obj.step || obj.type}`);
-        world.player.setPosition(spot.x, spot.y);
-        world.facing = [Math.sign(obj.x - spot.x), Math.sign(obj.y - spot.y)];   // and face it, as a player would
-      };
       const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
       const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
       await until(() => world && world.mapId === "overworld");
@@ -481,14 +481,101 @@
         (document.activeElement || document.body).dispatchEvent(ev);
         return ev;
       };
-      const x0 = world.player.x;
-      key("keydown", "ArrowRight", 39); await wait(400); key("keyup", "ArrowRight", 39); await wait(50);
-      if (!(world.player.x > x0 + 8)) throw new Error(`the right arrow didn't walk (x ${x0} -> ${world.player.x})`);
+      // Walk, with the arrow keys and the engine's own collision, to a floor tile beside something:
+      // a tile path found over walls and solid bodies (as maps.py's walk), then each tile's centre
+      // reached by holding the arrow towards it. Throws if the engine won't let the player there.
+      const ARROWS = { left: ["ArrowLeft", 37], right: ["ArrowRight", 39], up: ["ArrowUp", 38], down: ["ArrowDown", 40] };
+      const blockedTile = (tx, ty) => {
+        const t = world.walls.getTileAt(tx, ty);
+        return !!(t && t.collides) || world.gates.concat(world.objects.map(o => o.sprite))
+          .some(sp => sp.body && sp.body.enable && Math.floor(sp.x / TILE) === tx && Math.floor(sp.y / TILE) === ty);
+      };
+      const walk = async (obj, avoid = []) => {
+        const p = world.player, goal = new Set([[0, 1], [0, -1], [1, 0], [-1, 0]]
+          .map(([dx, dy]) => [Math.floor(obj.x / TILE) + dx, Math.floor(obj.y / TILE) + dy])
+          .filter(([tx, ty]) => !blockedTile(tx, ty) && !avoid.some(a => a[0] === tx && a[1] === ty)).map(t => t.join()));
+        const start = [Math.floor(p.x / TILE), Math.floor(p.y / TILE)], from = { [start.join()]: null }, todo = [start];
+        let end = null;
+        while (todo.length && !end) {
+          const [tx, ty] = todo.shift();
+          if (goal.has([tx, ty].join())) { end = [tx, ty]; break; }
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            const n = [tx + dx, ty + dy];
+            if (n.join() in from || blockedTile(...n)) continue;
+            from[n.join()] = [tx, ty]; todo.push(n);
+          }
+        }
+        if (!end) throw new Error(`no path to ${obj.step || obj.type}`);
+        const path = [];
+        for (let t = end; t; t = from[t.join()]) path.unshift(t);
+        for (const [tx, ty] of path) {
+          for (const axis of ["x", "y"]) {
+            const want = (axis === "x" ? tx : ty) * TILE + TILE / 2;
+            for (let n = 0; Math.abs(p[axis] - want) > 0.75; n++) {
+              if (n > 120) throw new Error(`stuck walking to ${obj.step || obj.type} at (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`);
+              const [k, code] = ARROWS[axis === "x" ? (p[axis] < want ? "right" : "left") : (p[axis] < want ? "down" : "up")];
+              key("keydown", k, code); await wait(16); key("keyup", k, code);
+            }
+          }
+        }
+        const fx = obj.x - p.x, fy = obj.y - p.y;
+        world.facing = Math.abs(fx) >= Math.abs(fy) ? [Math.sign(fx), 0] : [0, Math.sign(fy)];   // face it, as a player would
+        await wait(30);
+      };
+      // The arrows walk at the page's speed, don't scroll the page, and let go when the map loses focus.
+      {
+        const x0 = world.player.x;
+        const ev = key("keydown", "ArrowRight", 39); await wait(500); key("keyup", "ArrowRight", 39); await wait(50);
+        const went = world.player.x - x0;
+        if (!ev.defaultPrevented) throw new Error("an arrow on the map scrolled the page");
+        if (!(went > 30 && went < 60)) throw new Error(`half a second of walking went ${went.toFixed(1)}px (90px/s expected)`);
+        key("keydown", "ArrowLeft", 37); $("world").blur(); await wait(50);
+        const x1 = world.player.x; await wait(300);
+        if (world.player.x !== x1) throw new Error("the player kept walking after the map lost focus");
+        $("world").focus();
+        // and the canvas draws: the top-left wall face isn't the background colour
+        const px = game.canvas.getContext("2d").getImageData(1 * TILE + 8 - Math.round(0), 8, 1, 1).data;
+        if (px[0] === 0x16 && px[1] === 0x13 && px[2] === 0x1f) throw new Error("the canvas drew no walls");
+      }
+      const playFun = async () => {
+          // The fun: a chest's loot, a mimic's teeth, a barrel rolled off a hoard, a weapon switched.
+          const of = t => world.objects.filter(o => o.type === t);
+          const has = () => fun.items.length;
+          for (const c of of("chest")) {
+            const n = has(); await walk(c); talk(world.nearby());
+            if (c.loot === MIMIC ? has() !== n || c.sprite.frame.name !== FRAMES.mimic : has() !== n + 1 || !fun.items.includes(c.loot))
+              throw new Error(`the chest of ${c.loot} gave the wrong thing`);
+            talk(world.nearby());
+            if (has() !== (c.loot === MIMIC ? n : n + 1)) throw new Error("a chest gave its loot twice");
+          }
+          for (const b of of("barrel")) {
+            const hoard = of("hoard").find(h => h.x === b.x && h.y === b.y);
+            if (hoard && !hoard.hidden) throw new Error("a hoard showed before its barrel rolled");
+            // standing where it would roll, it won't
+            const to = world.rolledTo(b).map(v => Math.floor(v / TILE));
+            await walk({ type: "barrel's landing", x: b.x, y: b.y }, [[0, 1], [0, -1], [1, 0], [-1, 0]]
+              .map(([dx, dy]) => [Math.floor(b.x / TILE) + dx, Math.floor(b.y / TILE) + dy]).filter(t => t.join() !== to.join()));
+            const at = [b.x, b.y];
+            talk(world.nearby()); await wait(400);
+            if (b.x !== at[0] || b.y !== at[1]) throw new Error("the barrel rolled onto the player");
+            await walk(b, [to]); talk(world.nearby()); await wait(400);
+            if (!hoard) continue;
+            if (hoard.hidden || b.x === hoard.x && b.y === hoard.y) throw new Error("the barrel didn't roll off its hoard");
+            const n = has(); await walk(hoard); talk(world.nearby());
+            if (has() !== n + String(hoard.loot).split(",").length) throw new Error("the hoard gave the wrong loot");
+          }
+          const w0 = fun.weapon;
+          key("keydown", "x", 88); key("keyup", "x", 88);
+          if (weapons().length > 1 && (fun.weapon === w0 || world.held.frame.name !== ITEMS[fun.weapon].frame))
+            throw new Error("X didn't switch the weapon in hand");
+          log(`FUN ${fun.items.join(",")} | ${fun.weapon}`);
+          await npcs();
+      };
       const portal = world.objects.find(o => o.type === "portal" && o.to === realmId);
       const ri = realms.findIndex(r => r.id === realmId);
       const npcs = async () => {                                         // everyone has something to say
         for (const n of world.objects.filter(x => x.type === "npc")) {
-          stand(n); await wait(60);
+          await walk(n);
           const lines = n.about ? 1 : String(n.says).split(",").length;
           const heard = [];
           for (let i = 0; i <= lines; i++) { talk(world.nearby()); heard.push($("toast").textContent); }
@@ -501,7 +588,7 @@
       for (const o of world.objects.filter(x => x.type === "portal"))      // each realm's own door
         if (o.sprite.frame.name !== (FRAMES.portals[o.to] ?? FRAMES.portal)) throw new Error(`the ${o.to} door is the wrong one`);
       // Standing by the portal names its realm, with the classic map's mark.
-      world.player.setPosition(portal.x, portal.y + TILE);
+      await walk(portal);
       await until(() => $("toast").textContent.includes(realms[ri].name));
       const locked0 = machine.locked(Object.assign({}, state, { realm: ri, gate: null }), progress.load());
       if (locked0 && !$("toast").textContent.includes(S("mark_after_first").trim())) throw new Error("the portal doesn't say it is locked");
@@ -545,29 +632,6 @@
       dispatch({ type: "enter" });
       await until(() => world && world.mapId === realmId);
       {
-        // The fun: a chest's loot, a mimic's teeth, a barrel rolled off a hoard, a weapon switched.
-        const of = t => world.objects.filter(o => o.type === t);
-        const has = () => fun.items.length;
-        for (const c of of("chest")) {
-          const n = has(); stand(c); await wait(60); talk(world.nearby());
-          if (c.loot === MIMIC ? has() !== n || c.sprite.frame.name !== FRAMES.mimic : has() !== n + 1 || !fun.items.includes(c.loot))
-            throw new Error(`the chest of ${c.loot} gave the wrong thing`);
-        }
-        for (const b of of("barrel")) {
-          const hoard = of("hoard").find(h => h.x === b.x && h.y === b.y);
-          if (hoard && !hoard.hidden) throw new Error("a hoard showed before its barrel rolled");
-          stand(b); await wait(60); talk(world.nearby()); await wait(400);
-          if (!hoard) continue;
-          if (hoard.hidden || b.x === hoard.x && b.y === hoard.y) throw new Error("the barrel didn't roll off its hoard");
-          const n = has(); stand(hoard); await wait(60); talk(world.nearby());
-          if (has() !== n + String(hoard.loot).split(",").length) throw new Error("the hoard gave the wrong loot");
-        }
-        const w0 = fun.weapon;
-        key("keydown", "x", 88); key("keyup", "x", 88);
-        if (weapons().length > 1 && (fun.weapon === w0 || world.held.frame.name !== ITEMS[fun.weapon].frame))
-          throw new Error("X didn't switch the weapon in hand");
-        log(`FUN ${fun.items.join(",")} | ${fun.weapon}`);
-        await npcs();
         // Beside someone along a whole side counts; across a corner doesn't.
         const first = world.objects.find(o => o.step === machine.expected(state));
         world.player.setPosition(first.x - 14, first.y + 11);
@@ -588,7 +652,7 @@
       if (!reduced) {                        // the living breathe
         const someone = world.objects.find(o => ["merchant", "guide", "foe"].includes(o.type));
         const ys = new Set();
-        for (let i = 0; i < 30; i++) { ys.add(someone.sprite.y); await wait(100); }
+        for (let i = 0; i < 30; i++) { ys.add(someone.sprite.oy); await wait(100); }
         if (ys.size < 2) throw new Error("nobody breathes");
       }
       {                                      // facing the exit, it answers, whoever else is close
@@ -606,7 +670,7 @@
         if (want === null) break;
         const obj = world.objects.find(o => o.step === want);
         if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward) throw new Error("the chest opened before you claimed it");
-        stand(world.objects.find(o => o.step === want));
+        await walk(world.objects.find(o => o.step === want));
         await wait(80);
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
@@ -623,6 +687,19 @@
       for (const e of performance.getEntriesByType("resource"))
         if (!e.name.startsWith(location.origin + "/") && !/^(data|blob):/.test(e.name)) log(`ERROR outside request ${e.name}`);
       log(`SMOKE ${realmId} ${steps.join(" ")} | ${JSON.stringify(progress.load()[realmId] || null)}`);
+      // Then the fun, which maps.py promises can all be reached once the quest is done: back in
+      // through the door (its gates open now), then out by the exit.
+      await until(() => world && world.mapId === "overworld");
+      const door = world.objects.find(o => o.type === "portal" && o.to === realmId);
+      await walk(door); talk(world.nearby());
+      if (!dialog.open || state.screen !== "realm") throw new Error(`the ${realmId} door didn't open`);
+      dispatch({ type: "enter" });
+      await until(() => world && world.mapId === realmId);
+      await playFun();
+      const exit = world.objects.find(o => o.type === "exit");
+      await walk(exit); talk(world.nearby());
+      await until(() => world && world.mapId === "overworld");
+      log(`EXIT ${realmId}`);
       return steps;
     }
   };

@@ -656,7 +656,7 @@
       {
        "name": "loot",
        "type": "string",
-       "value": "blue_potion"
+       "value": "dagger"
       }
      ]
     },

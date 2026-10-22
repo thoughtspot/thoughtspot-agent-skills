@@ -34,9 +34,11 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     setCollisionByExclusion() { this.forEachTile(t => { t.collides = t.index > 0; }); return this; }
   }
 
-  // Move a box (centre x, y; size w, h) by dx then dy, stopping at anything solid(x0, y0, x1, y1)
-  // reports. One axis at a time, so the box slides along walls; steps of at most half a tile, so
-  // nothing is passed through. Returns the new centre.
+  // Move a box (centre x, y; size w, h) by dx then dy, stopping at anything solid(x0, y0, x1, y1,
+  // from) reports. One axis at a time, so the box slides along walls; steps of at most half a tile,
+  // so nothing is passed through. A solid the box already overlaps where it stands (`from`) never
+  // stops it, so something that moved onto the player can be walked out of, and never shoves it.
+  // Returns the new centre.
   function move(box, dx, dy, solid) {
     let { x, y } = box;
     const hw = box.w / 2, hh = box.h / 2;
@@ -44,12 +46,12 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     for (let i = 0; i < steps; i++) {
       const sx = dx / steps, sy = dy / steps;
       if (sx) {
-        const nx = x + sx, hit = solid(nx - hw, y - hh, nx + hw, y + hh);
+        const nx = x + sx, hit = solid(nx - hw, y - hh, nx + hw, y + hh, [x - hw, y - hh, x + hw, y + hh]);
         if (!hit) x = nx;
         else x = sx > 0 ? hit.x0 - hw : hit.x1 + hw;          // flush against what it hit
       }
       if (sy) {
-        const ny = y + sy, hit = solid(x - hw, ny - hh, x + hw, ny + hh);
+        const ny = y + sy, hit = solid(x - hw, ny - hh, x + hw, ny + hh, [x - hw, y - hh, x + hw, y + hh]);
         if (!hit) y = ny;
         else y = sy > 0 ? hit.y0 - hh : hit.y1 + hh;
       }
@@ -58,19 +60,21 @@ var Quest = (typeof Quest === "object" && Quest) || {};
   }
 
   // What blocks a box: solid tiles of a layer and enabled sprite bodies (each one tile, centred).
-  // Returns the first rectangle it overlaps, or null. Touching edges don't count.
+  // Returns the first rectangle it overlaps that `from` (a box, [x0, y0, x1, y1]) doesn't already
+  // overlap, or null. Touching edges don't count.
   function blocker(layer, bodies) {
-    return (x0, y0, x1, y1) => {
-      const e = 1e-6;
+    const e = 1e-6;
+    const over = (r, a0, b0, a1, b1) => a0 < r.x1 - e && a1 > r.x0 + e && b0 < r.y1 - e && b1 > r.y0 + e;
+    return (x0, y0, x1, y1, from) => {
+      const hit = r => over(r, x0, y0, x1, y1) && !(from && over(r, ...from));
       for (let ty = Math.floor(y0 / TILE); ty <= Math.floor((y1 - e) / TILE); ty++)
         for (let tx = Math.floor(x0 / TILE); tx <= Math.floor((x1 - e) / TILE); tx++) {
-          const t = layer && layer.getTileAt(tx, ty);
-          if (t && t.collides) return { x0: tx * TILE, y0: ty * TILE, x1: tx * TILE + TILE, y1: ty * TILE + TILE };
+          const t = layer && layer.getTileAt(tx, ty), r = { x0: tx * TILE, y0: ty * TILE, x1: tx * TILE + TILE, y1: ty * TILE + TILE };
+          if (t && t.collides && hit(r)) return r;
         }
       for (const b of bodies()) {
-        const bx0 = b.x - TILE / 2, by0 = b.y - TILE / 2;
-        if (x0 < bx0 + TILE - e && x1 > bx0 + e && y0 < by0 + TILE - e && y1 > by0 + e)
-          return { x0: bx0, y0: by0, x1: bx0 + TILE, y1: by0 + TILE };
+        const r = { x0: b.x - TILE / 2, y0: b.y - TILE / 2, x1: b.x + TILE / 2, y1: b.y + TILE / 2 };
+        if (hit(r)) return r;
       }
       return null;
     };
@@ -79,7 +83,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
   // A one-tile picture from the atlas. A solid one has a body that blocks the player while enabled.
   class Sprite {
     constructor(x, y, frame, solid) {
-      this.x = x; this.y = y; this.frame = { name: frame };
+      this.x = x; this.y = y; this.frame = { name: frame }; this.oy = 0;   // oy: drawn this far below its body
       this.visible = true; this.flipX = false; this.depth = 0; this.scale = 1; this.angle = 0;
       this.body = solid ? { enable: true } : null;
     }
@@ -87,6 +91,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     setVisible(v) { this.visible = v; return this; }
     setPosition(x, y) { this.x = x; this.y = y; return this; }
     setY(y) { this.y = y; return this; }
+    setOffsetY(oy) { this.oy = oy; return this; }    // moves the picture, never the body
     setFlipX(f) { this.flipX = f; return this; }
     setDepth(d) { this.depth = d; return this; }
     setScale(s) { this.scale = s; return this; }
@@ -175,7 +180,6 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         camera.y += (camera.goal("y") - camera.y) * camera.lerp;
       }
       if (camera.fade) camera.fade = Math.max(0, 1 - (now - camera.fadeFrom) / camera.fadeMs);
-      draw();
     }
     function frame(ctx2, f, x, y, flip, scale, angle) {
       const sx = (f % columns) * TILE, sy = Math.floor(f / columns) * TILE, s = TILE * scale;
@@ -191,14 +195,34 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       ctx.fillRect(0, 0, width, height);
       if (!scene) return;
       const ox = Math.round(camera.x), oy = Math.round(camera.y);
-      for (const layer of scene.layers)
-        layer.forEachTile(t => { if (t.index > 0) frame(ctx, t.index - 1, t.x * TILE + TILE / 2 - ox, t.y * TILE + TILE / 2 - oy, false, 1, 0); });
+      const tx0 = Math.floor(ox / TILE), ty0 = Math.floor(oy / TILE), tx1 = tx0 + Math.ceil(width / TILE), ty1 = ty0 + Math.ceil(height / TILE);
+      for (const layer of scene.layers)                  // only the tiles in view
+        for (let ty = Math.max(0, ty0); ty <= Math.min(layer.height - 1, ty1); ty++)
+          for (let tx = Math.max(0, tx0); tx <= Math.min(layer.width - 1, tx1); tx++) {
+            const t = layer.layer.data[ty][tx];
+            if (t.index > 0) frame(ctx, t.index - 1, tx * TILE + TILE / 2 - ox, ty * TILE + TILE / 2 - oy, false, 1, 0);
+          }
       const sprites = scene.sprites.filter(s => s.visible).sort((a, b) => a.depth - b.depth);
-      for (const s of sprites) frame(ctx, s.frame.name, s.x - ox, s.y - oy, s.flipX, s.scale, s.angle);
+      for (const s of sprites) frame(ctx, s.frame.name, s.x - ox, s.y + s.oy - oy, s.flipX, s.scale, s.angle);
       if (camera.fade > 0) { ctx.globalAlpha = camera.fade; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); ctx.globalAlpha = 1; }
     }
-    const tick = () => { step(1000 / 60); schedule(); };
-    const schedule = () => (timeouts || typeof requestAnimationFrame !== "function" ? setTimeout(tick, 1000 / 60) : requestAnimationFrame(tick));
+    // Fixed steps of 1/60 s, as many as real time has passed (so speed is the same at 30, 60 or
+    // 144 Hz), catching up at most a quarter of a second after a stall. An error is reported and
+    // the loop goes on.
+    const STEP = 1000 / 60;
+    let last = null, owed = 0;
+    const tick = () => {
+      const t = typeof performance === "object" ? performance.now() : Date.now();
+      owed += last === null ? STEP : Math.min(250, t - last);
+      last = t;
+      try {
+        let n = 0;
+        while (owed >= STEP && n++ < 15) { step(STEP); owed -= STEP; }
+        draw();
+      } catch (e) { (game.onerror || (() => {}))(e); }
+      schedule();
+    };
+    const schedule = () => (timeouts || typeof requestAnimationFrame !== "function" ? setTimeout(tick, STEP) : requestAnimationFrame(tick));
 
     // A scene: the layers it draws, its sprites, the player's body and what blocks it.
     game.start = build => {

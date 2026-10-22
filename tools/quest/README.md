@@ -248,7 +248,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   refuses, before writing anything, an `explore/` it didn't write (or a link), and any output in
   `tools/quest/` other than `dist/`.
 - **Everything is ours and local:** no third-party code, no outside requests, and under 3 MB
-  (about 216 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
+  (about 199 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
   draws the map's tile layers and one-tile sprites from the atlas on a 2D canvas, moves the
   player's 12x12 body against solid tiles and solid sprites (one axis at a time, so it slides along
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
@@ -267,7 +267,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   `portals`), and every item's name is `item_<id>` in `strings.yaml`. Talk to an npc to hear its
   next line (in the toast, which screen readers read); a tie between two things beside you goes to
   the one you face.
-- **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide
+- **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide, people
   and foe breathe; maps fade in. With reduced motion on, none of it.
 - **Screenshots:** `python3 tools/quest/tests/shoot_maps.py <folder>` saves every map as a player
   first sees it (`explore/#look=<map>`, local only), for reviewing art and map changes.
