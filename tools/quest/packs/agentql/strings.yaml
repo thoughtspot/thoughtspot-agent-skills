@@ -118,6 +118,7 @@ empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
 
 # ---- The explore page (explore/), and classic mode's way back to it. ----
 explore_help: Arrow keys walk. Enter or Space talks to whoever, or whatever, you stand next to. X switches weapon. S and M switch sound effects and music.
+explore_help_touch: The arrows walk. Talk talks to whoever, or whatever, you stand next to. Weapon switches weapon.
 explore_classic: Play the classic version
 explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
 explore_close: Close (Esc)
@@ -125,7 +126,9 @@ explore_close_realm: Back to the realm (Esc)
 explore_leave: Leave for the world map
 explore_gate_locked: This door is locked. Answer the questions on this side to open it.
 explore_near_petitioner: A petitioner waits for your judgement. Press Enter or Space to hear them.
+explore_near_petitioner_touch: A petitioner waits for your judgement. Tap Talk to hear them.
 explore_near_step: Press Enter or Space to talk.
+explore_near_step_touch: Tap Talk to talk.
 explore_pad_left: ←
 explore_pad_up: ↑
 explore_pad_down: ↓
@@ -141,6 +144,7 @@ explore_all_done_title: Every realm complete!
 explore_intro: "A game about one idea: the AI writes your question as AgentQL, and ThoughtSpot compiles it into governed SQL, the same way every time."
 explore_all_done: You have crossed every realm. Replay any of them to raise your score.
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
+explore_near_portal_touch: "{name}{mark}. Tap Talk to go in."
 explore_near_sealed: "{name}{mark}."
 explore_pad_weapon: Weapon
 explore_found: "You open the chest: {item}!"

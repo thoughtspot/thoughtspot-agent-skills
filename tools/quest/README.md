@@ -139,7 +139,7 @@ pytest tools/quest/tests -q                              # includes a headless p
 
 ## The data contract
 
-`quest.json` (version 2) is everything a front end needs to play the quest, already checked:
+`quest.json` (version 3) is everything a front end needs to play the quest, already checked:
 
 - `pack`: the pack's id, title, save key, unlock rule, explorable realms, lexicon, rule tags and
   strings;
@@ -225,6 +225,9 @@ explore page would read differently from the check:
   is played: rolled once it can be reached, it frees its tile (unless a hoard is under it) and
   blocks the one it lands on. Objects are solid; reaching one means standing on a walkable tile
   next to it.
+- **Nothing crowds a step or the way in:** a chest, barrel or hoard beside a step (or a barrel
+  that rolls there) could take the talk from it, and an exit beside the spawn takes a second
+  Enter on arrival as "leave", so both fail the build.
 - **No Tiled templates,** which the explore page doesn't resolve.
 
 `Quest.machine` accepts `interact {step}` only for the step the current screen waits on
@@ -320,7 +323,9 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc
   (or "Back to the realm") closes it ("not now"; the step waits), and in a realm "Leave for the
   world map" goes back out beside its door (a quest left unfinished is not saved, as by the exit).
-  Standing by a portal names its realm and how you did there; by the step the game waits on, how
+  Each screen has one way out to the map: mid-realm that button (a screen's own "Back to the map"
+  is dropped), at the end (the decree, a victory) the screen's own. On a touch screen the words
+  say "Tap Talk" rather than "Press Enter or Space". Standing by a portal names its realm and how you did there; by the step the game waits on, how
   to talk to it; by a shut gate, that it is locked until the questions on this side are answered
   (a barred door). S and M switch sound.
 - **Checks:** the build checks the maps (above) and the tile index; `tests/play_map.js` walks

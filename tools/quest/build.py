@@ -80,7 +80,7 @@ CHECKS = HERE / "checks"
 CORE_SCHEMA = HERE / "schema" / "core.json"
 TEMPLATE = HERE / "classic" / "game.html"
 DEFAULT_PACK = "agentql"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3   # 3: pack.explore_home
 BESIDE = ("quest.json", "quest.schema.json")  # written next to the page, so --out may not name them
 FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
@@ -1207,6 +1207,9 @@ def main(argv: list[str] | None = None) -> int:
         write_classic(out.parent, html)
     else:
         out.write_text(html, encoding="utf-8")
+        old = out.parent / "classic"
+        if not old.is_symlink() and (old / EXPLORE_MARK).is_file():   # a classic/ an earlier build wrote, now stale
+            shutil.rmtree(old)
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     out.with_name("quest.schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if data["pack"]["explore_realms"]:

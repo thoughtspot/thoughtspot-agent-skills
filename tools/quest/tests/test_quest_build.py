@@ -347,7 +347,7 @@ def _first_point(data):
     (lambda d: _first_point(d).update(ruleTag="wizard"), "'wizard' is not one of"),
     (lambda d: _first_point(d)["highlights"].update(sql="some"), "highlights.sql: matches none of its allowed shapes"),
     (lambda d: _built_encounters(d)[0].update(points=[]), "points: needs at least 1 item(s)"),
-    (lambda d: d.update(schema_version=3), "schema_version: 3 is not one of [2]"),
+    (lambda d: d.update(schema_version=2), "schema_version: 2 is not one of [3]"),
 ])
 def test_data_that_drifts_from_the_schema_fails(built, schema, break_it, needle):
     break_it(built)
@@ -4231,6 +4231,8 @@ def _agentql_with(tmp_path, monkeypatch, *edits):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_without_home_the_classic_page_stays_home(tmp_path, monkeypatch):
+    (tmp_path / "site/classic").mkdir(parents=True)            # left by an earlier build with explore as home
+    (tmp_path / "site/classic" / B.EXPLORE_MARK).write_text("", encoding="utf-8")
     out = _agentql_with(tmp_path, monkeypatch, ("  home: true ", "  home: false "))
     assert '<script id="quest-data"' in out.read_text(encoding="utf-8") and not (out.parent / "classic").exists()
     assert 'id="classic" href="../"' in (out.parent / "explore/index.html").read_text(encoding="utf-8")
@@ -4251,3 +4253,15 @@ def test_a_pack_with_no_maps_shows_no_way_to_them(tmp_path):
     r = subprocess.run(["node", "-e", DEEP_LINK, str(page), ""], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["back"] is False
+
+
+# ---- polish: nothing crowds a step or the way in (a build rule now, for every map) -------------------
+
+@pytest.mark.parametrize("edits,extra,needle", [
+    ([(3, 2, "c")], {"c": ("chest", {"loot": "gem"})}, "beside a step"),                     # under the merchant
+    ([(5, 3, "b")], {"b": ("barrel", {"roll": "up"})}, "beside a step"),                     # rolls to under the guide
+    ([(1, 4, "."), (1, 2, "X")], {}, "beside the spawn"),                                     # the exit under the spawn
+])
+def test_a_map_crowding_a_step_or_the_spawn_fails(tmp_path, edits, extra, needle):
+    errors = _fun_cave(tmp_path, extra, _rows(*edits))
+    assert any(needle in e for e in errors), errors

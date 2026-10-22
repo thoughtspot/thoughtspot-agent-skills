@@ -489,7 +489,23 @@ def check_realm_map(m: Map, realm: dict) -> list[str]:
         for need in requires(g):
             if need not in steps:
                 errors.append(f"{g['where']}: requires {need!r}, which is not a step of realm {realm['id']}")
+    _uncrowded(m, errors)
     return errors + reachability(m, steps)
+
+
+def _uncrowded(m: Map, errors: list[str]) -> None:
+    """Talking goes to what you stand beside: a chest, barrel or hoard beside a step (or a barrel
+    that rolls there) could take the talk from it, and an exit beside the spawn takes a second
+    Enter on arrival as "leave"."""
+    steps = {o["tile"] for o in m.objects if step_of(o)}
+    for o in m.of("chest") + m.of("barrel") + m.of("hoard"):
+        tiles = {o["tile"]} | ({rolled(o)} if o["type"] == "barrel" else set())
+        if any(n in steps for t in tiles for n in _near(t)):
+            errors.append(f"{o['where']}: stands (or rolls) beside a step, which it could take the talk from; move it a tile further")
+    for s in m.of("spawn"):
+        for e in m.of("exit"):
+            if e["tile"] in _near(s["tile"]):
+                errors.append(f"{e['where']}: is beside the spawn, so a second Enter on arrival leaves; put it at least diagonal")
 
 
 def check_overworld(m: Map, realms: list[dict]) -> list[str]:

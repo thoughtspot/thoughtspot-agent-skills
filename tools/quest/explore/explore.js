@@ -23,7 +23,9 @@
   const FRAMES = await fetch("tiles.json").then(r => r.json());
 
   // ---- the page's words ----------------------------------------------------------------------
-  $("help").textContent = S("explore_help");
+  // On a touch screen (where the pad shows) the words say "tap Talk", not "press Enter or Space".
+  const TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+  $("help").textContent = S(TOUCH ? "explore_help_touch" : "explore_help");
   $("classic").textContent = S("explore_classic");
   $("intro").textContent = S("explore_intro");
   $("about").innerHTML = H("title_links");
@@ -49,7 +51,14 @@
              celebrated: f.celebrated === true };            // the course-complete notice, shown once
   };
   const fun = readFun();
-  const saveFun = () => { try { localStorage.setItem(FUN_KEY, JSON.stringify(fun)); } catch {} };
+  // Saved over what another tab may have saved since: loot, opened things and the notice only add up.
+  const saveFun = () => {
+    const there = readFun();
+    for (const i of there.items) if (!fun.items.includes(i)) fun.items.push(i);
+    fun.done = Object.assign({}, there.done, fun.done);
+    fun.celebrated = fun.celebrated || there.celebrated;
+    try { localStorage.setItem(FUN_KEY, JSON.stringify(fun)); } catch {}
+  };
   const itemName = id => S(`item_${id}`);
   const weapons = () => fun.items.filter(i => ITEMS[i].kind === "weapon");
   function gain(ids) {
@@ -93,6 +102,14 @@
       line.className = "dim"; line.textContent = S("explore_face_foe", { weapon: itemName(fun.weapon) });
       $("screen").prepend(line);
     }
+    // One way out of each screen: mid-realm, "Leave for the world map" (so the screen's own "Back to
+    // the map", always its last choice, goes); at the end (the decree, a victory), the screen's own.
+    const inRealm = !!world && world.mapId !== "overworld";
+    if (inRealm && actions.length > 1 && actions[actions.length - 1].type === "map" && !["decree", "victory"].includes(state.screen)) {
+      actions.pop();
+      $("screen").querySelector(".choices li:last-child")?.remove();
+    }
+    $("leave").hidden = !inRealm || actions.some(a => a.type === "map");
     Sound.music(screens.MUSIC_FOR[state.screen] || "map");
     $("screen").querySelector(".choices button")?.focus({ preventScroll: true });
   }
@@ -116,7 +133,7 @@
     dialogStep = step;
     const inRealm = !!world && world.mapId !== "overworld";
     $("close").textContent = S(inRealm ? "explore_close_realm" : "explore_close");
-    $("leave").hidden = !inRealm;
+
     if (world && /:reward$/.test(step)) world.openChest(step);    // the hoard's chest opens as you claim it
     if (world) world.freeze(true);
     if (!dialog.open) dialog.showModal();
@@ -467,11 +484,15 @@
   // locked until the first realm); by a shut gate, that it is locked and why; by the step the game
   // waits on, how to talk to it. The live region reads it too.
   let portalText = "";
+  // How to talk to the step beside you: a petitioner is heard, anyone else talked to.
+  const nearHint = obj => (obj.type === "throne" && obj.look
+    ? S(TOUCH ? "explore_near_petitioner_touch" : "explore_near_petitioner")
+    : S(TOUCH ? "explore_near_step_touch" : "explore_near_step"));
   function describe(obj) {
     const say = t => { toast(t); portalText = t; };   // #toast is a status region: read once, not twice
     if (obj && obj.requires) return say(S("explore_gate_locked"));
     if (obj && obj.step && obj.step === machine.expected(state))
-      return say(obj.type === "throne" && obj.look ? S("explore_near_petitioner") : S("explore_near_step"));
+      return say(nearHint(obj));
     if (!obj || obj.type !== "portal") {            // walked away: the words go with it
       if (portalText && $("toast").textContent === portalText) toast("");
       portalText = "";
@@ -480,7 +501,7 @@
     const i = realms.findIndex(r => r.id === obj.to), r = realms[i], d = progress.load()[r.id];
     const mark = d && d.done ? S("mark_best", { best: d.best, max: Quest.rules.maxGold(r) }) : r.sealed ? S("mark_sealed")
       : i === 0 ? S("mark_start") : !machine.firstDone(state, progress.load()) ? S("mark_after_first") : "";
-    const t = S(r.sealed ? "explore_near_sealed" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
+    const t = S(r.sealed ? "explore_near_sealed" : TOUCH ? "explore_near_portal_touch" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
     say(t);
   }
   // `from`: the realm just left, so the overworld puts the player beside that realm's door.
@@ -781,7 +802,7 @@
         try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
         // Beside the step the game waits on, the page says how to talk to it.
-        const hint = o => (o.type === "throne" && o.look ? S("explore_near_petitioner") : S("explore_near_step"));
+        const hint = nearHint;
         world.near = undefined; await wait(80);
         if ($("toast").textContent !== hint(first)) throw new Error(`beside the step, not its hint (${$("toast").textContent})`);
         for (const o of world.objects.filter(x => x.type === "throne" && x.look))      // a petitioner is drawn, not the throne
@@ -795,7 +816,7 @@
           world.player.setPosition(spot[0] * TILE + TILE / 2, spot[1] * TILE + TILE / 2); world.facing = [tx - spot[0], ty - spot[1]];
           if (world.nearby() !== o) continue;
           world.near = undefined; await wait(80);
-          if ([S("explore_near_step"), S("explore_near_petitioner")].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
+          if ([nearHint({}), nearHint({ type: "throne", look: true })].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
           checkedHint++;
         }
         if (!checkedHint) throw new Error("no step the game doesn't wait on could be stood beside alone, to check it gives no hint");
@@ -803,6 +824,8 @@
         // A question in a realm offers the way back to the realm (Esc) and out to the world map.
         talk(world.nearby());
         if ($("leave").hidden || $("close").textContent !== S("explore_close_realm")) throw new Error("a realm's dialog doesn't offer the way back and out");
+        if (actions.some(a => a.type === "map") || $("screen").textContent.includes(S("back_to_map")))
+          throw new Error("a question mid-realm offers two ways out to the map");
         const art = [...$("screen").querySelectorAll(".art")];
         if ($("portrait").hidden || art.some(a => getComputedStyle(a).display !== "none"))
           throw new Error("the dialog doesn't show who you talk to, or shows the classic page's art");
@@ -890,6 +913,7 @@
           if (state.screen === "decree" && !decreeSeen) {   // the decree: shown, kept by Esc, read again at a throne
             decreeSeen = true;
             if (!$("screen").textContent.includes(S("decree_title"))) throw new Error("the decree wasn't shown");
+            if (!$("leave").hidden || !actions.some(a => a.type === "map")) throw new Error("the decree's way out isn't its own button alone");
             dialog.close();
             try { await until(() => !world.frozen); } catch {}
             if (state.screen !== "decree" || dialog.open) throw new Error("closing the decree lost it");
