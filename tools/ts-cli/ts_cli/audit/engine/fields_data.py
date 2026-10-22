@@ -33,7 +33,8 @@ def _upper(value: Any) -> Optional[str]:
 # ── joins (D3, D11) ─────────────────────────────────────────────────────────
 
 @register("join_type", uses=(),
-          values=("", "INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER", None))
+          values=("", "INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER", None),
+          label="the join type")
 def _join_type(item: dict, ctx: Any) -> Optional[str]:
     """Join: its type upper-cased ("" when unset) — INNER, LEFT_OUTER, RIGHT_OUTER or
     OUTER (ThoughtSpot's full outer join). A referencing join's type comes from the
@@ -41,7 +42,8 @@ def _join_type(item: dict, ctx: Any) -> Optional[str]:
     return _upper((item.get("obj") or {}).get("type"))
 
 
-@register("join_cardinality", uses=())
+@register("join_cardinality", uses=(),
+          label="the join cardinality")
 def _join_cardinality(item: dict, ctx: Any) -> Optional[str]:
     """Join: its cardinality upper-cased ("" when unset; inline joins only carry one)."""
     return _upper((item.get("obj") or {}).get("cardinality"))
@@ -51,14 +53,16 @@ def _join_from_table(item: dict) -> dict:
     return (item.get("obj") or {}).get("model_table") or {}
 
 
-@register("join_from_name", uses=())
+@register("join_from_name", uses=(),
+          label="the table the join starts from")
 def _join_from_name(item: dict, ctx: Any) -> Any:
     """Join: the `name` of the model table it is declared on ("" when absent) — the
     physical name, not the alias (legacy D11's reading)."""
     return _join_from_table(item).get("name", "")
 
 
-@register("is_fact_to_fact_join", uses=(), values=(False, True))
+@register("is_fact_to_fact_join", uses=(), values=(False, True),
+          label="the join links two fact tables")
 def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
     """Join: both ends read as fact tables (more than 3 MEASURE columns — rules.
     table_role), each end looked up by NAME: the model table's `name` and the join's
@@ -87,13 +91,15 @@ def _build_joined_keys(model: dict) -> set:
     return joined
 
 
-@register("is_joined", uses=())
+@register("is_joined", uses=(),
+          label="the table takes part in a join")
 def _is_joined(item: dict, ctx: Any) -> bool:
     """Model table: its key (alias, else name) is on either side of some join."""
     return item.get("name") in _joined_keys(_model_of(item))
 
 
-@register("zero_column_role", uses=(), values=(None, "bridge", "leaf"))
+@register("zero_column_role", uses=(), values=(None, "bridge", "leaf"),
+          label="the table's place in the joins")
 def _zero_column_role(item: dict, ctx: Any) -> Optional[str]:
     """Model table, legacy D10: None when its `name` prefixes some model column's
     `column_id`; otherwise "bridge" when that name is on either side of a join, "leaf"
@@ -123,7 +129,8 @@ def _attribute_count(table_cols: List[dict]) -> int:
                if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE")
 
 
-@register("table_role", uses=())
+@register("table_role", uses=(),
+          label="the table's role (fact or dimension)")
 def _table_role(item: dict, ctx: Any) -> str:
     """Model table: "fact" (more than 3 MEASURE columns), "dimension", or "unknown"
     (no columns), its columns found by its key — alias, else name (tml.table_role)."""
@@ -131,19 +138,22 @@ def _table_role(item: dict, ctx: Any) -> str:
     return tml.table_role(cols, item.get("name"))
 
 
-@register("table_column_count", uses=())
+@register("table_column_count", uses=(),
+          label="the number of the table's columns")
 def _table_column_count(item: dict, ctx: Any) -> int:
     """Model table: how many model columns its key prefixes."""
     return len(_table_columns(item)[1])
 
 
-@register("attribute_count", uses=())
+@register("attribute_count", uses=(),
+          label="the number of ATTRIBUTE columns")
 def _attribute_count_field(item: dict, ctx: Any) -> int:
     """Model table: how many of its model columns are ATTRIBUTEs."""
     return _attribute_count(_table_columns(item)[1])
 
 
-@register("attribute_share", uses=())
+@register("attribute_share", uses=(),
+          label="the share of ATTRIBUTE columns")
 def _attribute_share(item: dict, ctx: Any) -> Optional[float]:
     """Model table: the fraction of its model columns that are ATTRIBUTEs (None
     without columns) — what legacy D6 compares (`> 0.4`). Its metric, the rounded
@@ -152,7 +162,8 @@ def _attribute_share(item: dict, ctx: Any) -> Optional[float]:
     return _attribute_count(table_cols) / len(table_cols) if table_cols else None
 
 
-@register("attribute_pct", uses=())
+@register("attribute_pct", uses=(),
+          label="the percentage of ATTRIBUTE columns")
 def _attribute_pct(item: dict, ctx: Any) -> Optional[float]:
     """Model table: that share as a percentage, rounded to 1 place (D6's metric)."""
     _, table_cols = _table_columns(item)
@@ -163,7 +174,8 @@ def _attribute_pct(item: dict, ctx: Any) -> Optional[float]:
 
 # ── models (D7) and metadata (D8) ───────────────────────────────────────────
 
-@register("table_set", uses=())
+@register("table_set", uses=(),
+          label="the Model's tables")
 def _table_set(item: dict, ctx: Any) -> list:
     """Model: each model table's identity as legacy D7 reads it — its `fqn`, or its
     `name` ("" when absent) when it has no `fqn` key at all (an explicit `fqn: None`
@@ -172,7 +184,8 @@ def _table_set(item: dict, ctx: Any) -> list:
             for t in (item.get("obj") or {}).get("model_tables") or []]
 
 
-@register("physical_table_key", uses=())
+@register("physical_table_key", uses=(),
+          label="the physical table (connection, database, schema, name)")
 def _physical_table_key(item: dict, ctx: Any) -> Any:
     """Metadata header: (connection, database, schema, table name) — each "" when
     absent — the physical table legacy D8 groups Table objects by. Renders

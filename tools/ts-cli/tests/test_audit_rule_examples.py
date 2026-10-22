@@ -123,11 +123,12 @@ def _wide_model(rule, ctx, profile) -> List[Finding]:
 def wide_registered():
     """`_wide_model` registered through the decorator, unregistered afterwards."""
     code_rules.code_rule(WIDE, placeholders={"count", "profile"}, severity="bands",
-                         uses=())(_wide_model)
+                         uses=(), label="graded on the Model's column count")(_wide_model)
     yield
     code_rules.REGISTRY.pop(WIDE, None)
     code_rules.PLACEHOLDERS.pop(WIDE, None)
     code_rules.SEVERITY_SOURCES.pop(WIDE, None)
+    code_rules.CODE_LABELS.pop(WIDE, None)
     code_rules.CODE_USES.pop(WIDE, None)
 
 
@@ -378,10 +379,12 @@ def _own_threshold(rule, ctx, profile) -> List[Finding]:
 @pytest.fixture
 def own_registered():
     code_rules.code_rule(OWN, placeholders={"count"}, severity={"HIGH", "INFO"},
-                          uses=(), own_threshold=True)(_own_threshold)
+                          uses=(), own_threshold=True,
+                          label="graded per measure")(_own_threshold)
     yield
     code_rules.REGISTRY.pop(OWN, None)
     code_rules.PLACEHOLDERS.pop(OWN, None)
+    code_rules.CODE_LABELS.pop(OWN, None)
     code_rules.SEVERITY_SOURCES.pop(OWN, None)
     code_rules.CODE_USES.pop(OWN, None)
     code_rules.OWN_THRESHOLD.discard(OWN)
@@ -506,7 +509,7 @@ def test_unregistered_code_rule_raises_at_run_time(tmp_path, wide_registered):
 
 def test_code_rule_registration_rejects_duplicates_and_bad_names(wide_registered):
     with pytest.raises(ValueError, match="already registered"):
-        code_rules.code_rule(WIDE, severity="bands", uses=())(_wide_model)
+        code_rules.code_rule(WIDE, severity="bands", uses=(), label="x")(_wide_model)
     for bad in ("Wide", "wide-model", "1wide", ""):
         with pytest.raises(ValueError, match="not a valid code rule name"):
             code_rules.code_rule(bad)

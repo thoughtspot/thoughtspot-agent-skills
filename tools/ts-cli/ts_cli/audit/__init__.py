@@ -54,7 +54,9 @@ def _inject_findings_into_erd(corpus: dict, findings: list, check_meta: dict) ->
             "where": f.object_name,
             "target": target,
             "detail": f.detail,
-            "rec": check_meta.get(f.check_id, {}).get("thresholds", ""),
+            # What the ERD shows as "Fix.": the rule's remediation, else its grading.
+            "rec": (check_meta.get(f.check_id, {}).get("remediation")
+                    or check_meta.get(f.check_id, {}).get("thresholds", "")),
         }
         erd["findings"].append(erd_finding)
 

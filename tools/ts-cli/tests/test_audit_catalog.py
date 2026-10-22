@@ -809,3 +809,30 @@ def test_unnamed_label_is_a_ratio_key_only(tmp_path):
     rule = _good_rule(aggregate={"mode": "count", "over": "model.column", "unnamed_label": "?"})
     problems = _problems(tmp_path, {"ai": [rule]})
     assert any("unknown key 'unnamed_label' for mode count" in p for p in problems), problems
+
+
+# ── what a reader sees agrees with the rule (final review I2, I3) ───────────
+
+@pytest.mark.parametrize("override, needle", [
+    ({"description": "A code rule (code:spotter_readiness) because ..."},
+     "description: shows engine identifier(s) code:spotter_readiness"),
+    ({"title": "Coverage of @has_synonyms"}, "title: shows engine identifier(s) @has_synonyms"),
+    ({"remediation": "See engine/fields.py"}, "remediation: shows engine identifier(s) engine/fields.py"),
+    ({"message": "@pct measures have AI context"}, "message: shows engine identifier(s) @pct"),
+    ({"profiles": {"general": {"bands": {
+        "direction": "higher_is_better", "unit": "percent",
+        "levels": [{"op": "lt", "value": 80, "severity": "LOW"}]},
+        "legacy_threshold": {"green": 80, "assessment": "{profile_label}"},
+        "message": "low on @is_indexed"}}},
+     "profiles.general.message: shows engine identifier(s) @is_indexed"),
+])
+def test_prose_with_an_engine_identifier_fails(tmp_path, override, needle):
+    problems = _problems(tmp_path, {"ai": [_good_rule(**override)]})
+    assert any(p.startswith("rules/ai.yaml: A6:") and needle in p for p in problems), problems
+
+
+def test_a_derived_field_placeholder_in_a_message_is_not_prose(tmp_path):
+    rule = _each(aggregate={"mode": "each", "where": {"field": "name", "exists": True}},
+                 message="{name} indexed: {@is_indexed}")
+    assert _problems(tmp_path, {"ai": [rule]}) == []
+

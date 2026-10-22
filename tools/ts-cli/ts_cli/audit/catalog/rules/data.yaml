@@ -19,11 +19,11 @@
   description: >-
     Five size measures per Model, each reported on its own when over its MEDIUM line
     and graded HIGH over its HIGH line: tables (10 / 15), columns (50 / 75), joins
-    (8 / 12), join depth (3 / 5) and formulas (30 / 50). A code rule
-    (code:model_complexity, grading table D1_MEASURES in engine/code_rules.py) because
-    one rule grades five measures against five pairs of lines and reports each with
-    its own legacy threshold — the catalog holds one set of bands and one threshold
-    per rule.
+    (8 / 12), join depth (3 / 5) and formulas (30 / 50).
+  # A code rule (code:model_complexity, grading table D1_MEASURES in
+  # engine/code_rules.py) because one rule grades five measures against five pairs of
+  # lines and reports each with its own legacy threshold — the catalog holds one set
+  # of bands and one threshold per rule.
   categories: [D]
   requires: [model_tml]
   implementation: code:model_complexity
@@ -40,8 +40,8 @@
     columns are string-typed on their Table TML (P6's test — a key whose Table TML is
     not in scope has an unknown type and is not reported), and, separately, MEDIUM
     when it joins on more than one key pair. The Table TMLs are optional enrichment:
-    the multi-key finding needs none. A code rule (code:join_keys) because one join
-    yields up to two independent findings.
+    the multi-key finding needs none. One join can yield both findings.
+  # A code rule (code:join_keys) because one join yields up to two independent findings.
   categories: [D]
   requires: [model_tml]
   implementation: code:join_keys
@@ -226,9 +226,9 @@
   description: >-
     A model table no model column comes from: INFO when it is on either side of a
     join (a bridge), MEDIUM when not (a leaf). Looked up — and reported — by the
-    table's `name`, so an aliased table always reads zero-column (BL-305, kept). A
-    code rule (code:zero_column_tables) because the finding names the table by its
-    `name`, where the model.table scope names it by alias.
+    table's `name`, so an aliased table always reads zero-column (BL-305, kept).
+  # A code rule (code:zero_column_tables) because the finding names the table by its
+  # `name`, where the model.table scope names it by alias.
   categories: [D]
   requires: [model_tml]
   implementation: code:zero_column_tables
@@ -271,9 +271,10 @@
     A column (by `db_column_name`, else `name`) whose column type differs between
     Models. Each Model contributes one type per column name — a later column, or a
     later Model of the same name, overwrites an earlier one — and the detail lists
-    every Model with its type. A code rule (code:column_type_divergence) because it
-    groups columns across Models and reports one type per Model, which the group
-    mode's per-item values cannot express.
+    every Model with its type.
+  # A code rule (code:column_type_divergence) because it groups columns across Models
+  # and reports one type per Model, which the group mode's per-item values cannot
+  # express.
   categories: [D]
   requires: [model_tml]
   implementation: code:column_type_divergence

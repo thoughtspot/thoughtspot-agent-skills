@@ -171,7 +171,7 @@ ts_cli/
     __init__.py       — run_audit(): selects catalog rules by category/profile, fetches what they declare, runs the engine; build_corpus; REPORT_NEEDS
     catalog/          — THE RULES: categories.yaml, profiles.yaml, rules/*.yaml (one entry per rule; edit thresholds/severities/wording here)
     catalog_model.py  — catalog loader + dataclasses (gate-safe, Python 3.9 + PyYAML)
-    catalog_validate.py, catalog_expr.py, catalog_code.py, catalog_forms.py, catalog_uses.py, catalog_reads.py — the catalog gate's checks (tools/validate/check_audit_catalog.py)
+    catalog_validate.py, catalog_expr.py, catalog_code.py, catalog_forms.py, catalog_uses.py, catalog_reads.py, catalog_consistency.py — the catalog gate's checks (tools/validate/check_audit_catalog.py)
     catalog_history.py — rule-id history: an id is retired, never removed or reused (--base / --merge-base-with)
     engine/           — rule engine: run.py (run_rules, needs_for, profiles), scopes, modes, bands, fields*.py (derived fields), code_rules*.py, memo.py (per-run lookups), tml.py (shared Model/Table TML helpers — formerly audit/rules.py)
     generate.py       — generates check-catalog.md's rule tables and report_meta / check_meta (`python -m ts_cli.audit.generate [--check]`)

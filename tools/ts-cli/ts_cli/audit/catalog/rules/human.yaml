@@ -50,10 +50,10 @@
     (over 400) or open with boilerplate ("This is a", "Column for", "Field for",
     "The ", "A "); a blank or absent description is A1's remit, not this rule's. One
     finding per Model, its metric the number of columns with an issue, listing the
-    first three. A code rule (code:description_quality) because each column's issue
-    is worded by its own kind and the Model's finding joins them — no mode words its
-    children one by one; the lengths and the boilerplate pattern are in
-    engine/code_rules_human.py.
+    first three.
+  # A code rule (code:description_quality) because each column's issue is worded by its
+  # own kind and the Model's finding joins them — no mode words its children one by
+  # one; the lengths and the boilerplate pattern are in engine/code_rules_human.py.
   categories: [H]
   requires: [model_tml]
   implementation: code:description_quality
@@ -218,10 +218,11 @@
     A Model name, column name or column description that reads as stale or
     temporary (do not use, deprecated, test, tmp, copy of, (2), backup, old, …; a
     name on the safe list — test_results, test_suite, … — never does). Each match is
-    its own finding, a description quoted to 60 characters. A code rule
-    (code:stale_names) because one rule reports on two scopes, the Model and its
-    columns, with three wordings; the patterns are in engine/code_rules_human.py.
-    Always LOW: nothing reads H4's result.
+    its own finding, a description quoted to 60 characters. Always LOW: nothing reads
+    H4's result.
+  # A code rule (code:stale_names) because one rule reports on two scopes, the Model
+  # and its columns, with three wordings; the patterns are in
+  # engine/code_rules_human.py.
   categories: [H]
   requires: [model_tml]
   implementation: code:stale_names

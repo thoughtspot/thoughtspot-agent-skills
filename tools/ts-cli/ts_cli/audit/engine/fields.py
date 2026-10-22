@@ -38,12 +38,15 @@ FIELD_USES: Dict[str, FrozenSet[str]] = {}   # name -> conditional data it reads
 # severity `map:` keyed on the field is checked against (a key no value equals never
 # maps — a typo, or YAML `"true"` for a boolean field).
 FIELD_VALUES: Dict[str, Tuple[Any, ...]] = {}
+# name -> how the field reads to an audit reader; generated text (the report, the check
+# catalog) writes this, never `@name`.
+FIELD_LABELS: Dict[str, str] = {}
 
 _PARENT = "parent."
 
 
-def register(name: str, *, uses: Any = None,
-             values: Optional[Iterable[Any]] = None) -> Callable[[DerivedField], DerivedField]:
+def register(name: str, *, uses: Any = None, values: Optional[Iterable[Any]] = None,
+             label: Optional[str] = None) -> Callable[[DerivedField], DerivedField]:
     """Decorator: make `fn(item, ctx)` available to rules as `@name`.
 
     `uses` is the conditional data (catalog_expr.CONDITIONAL_DATA) the function reads
@@ -54,8 +57,13 @@ def register(name: str, *, uses: Any = None,
     (catalog_uses.py), so a rule cannot be starved of data by a category move.
 
     `values`, optional, is every value the field can return — required of a field a
-    severity `map:` is keyed on (the catalog gate fails one that declares none)."""
+    severity `map:` is keyed on (the catalog gate fails one that declares none).
+
+    `label` is how the field reads to an audit reader, in place of `@name`: a clause for
+    a true/false field ("the join links two fact tables"), else a noun phrase ("the join
+    type"). Required, like `uses` — generated text never shows an engine identifier."""
     declared = _declared_uses(f"derived field '@{name}'", uses)
+    text = human_label(f"derived field '@{name}'", label)
     vocabulary = None if values is None else tuple(values)
 
     def deco(fn: DerivedField) -> DerivedField:
@@ -63,10 +71,23 @@ def register(name: str, *, uses: Any = None,
             raise ValueError(f"derived field '@{name}' is already registered")
         FIELDS[name] = fn
         FIELD_USES[name] = declared
+        FIELD_LABELS[name] = text
         if vocabulary is not None:
             FIELD_VALUES[name] = vocabulary
         return fn
     return deco
+
+
+def human_label(what: str, label: Any) -> str:
+    """`label`, checked: a non-blank string with no engine identifier in it (shared with
+    code_rules)."""
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError(f"{what}: label is required — how it reads to an audit reader "
+                         "(generated text shows it in place of the engine's name)")
+    if re.search(r"@\w|\bcode:\w", label):
+        raise ValueError(f"{what}: label must read as words, not engine identifiers: "
+                         f"{label!r}")
+    return label.strip()
 
 
 def _declared_uses(what: str, uses: Optional[Iterable[str]]) -> FrozenSet[str]:
@@ -125,13 +146,15 @@ def _step(value: Any, step: str) -> Any:
 
 # ── derived fields ──────────────────────────────────────────────────────────
 
-@register("is_indexed", uses=(), values=(False, True))
+@register("is_indexed", uses=(), values=(False, True),
+          label="the column is indexed for search")
 def _is_indexed(item: dict, ctx: Any) -> bool:
     """Column: text-search indexed (absent `index_type` means indexed by default)."""
     return tml.is_indexed(item.get("obj") or {})
 
 
-@register("has_synonyms", uses=())
+@register("has_synonyms", uses=(),
+          label="the column has synonyms")
 def _has_synonyms(item: dict, ctx: Any) -> bool:
     """Column: carries synonyms under `properties:` (exported TML) or at the root."""
     col = item.get("obj") or {}
@@ -140,13 +163,15 @@ def _has_synonyms(item: dict, ctx: Any) -> bool:
                 or col.get("synonyms"))
 
 
-@register("join_depth", uses=())
+@register("join_depth", uses=(),
+          label="the join depth")
 def _join_depth(item: dict, ctx: Any) -> int:
     """Model: longest join chain across `model_tables` (tml.join_depth)."""
     return tml.join_depth((item.get("obj") or {}).get("model_tables") or [])
 
 
-@register("is_coached", uses={"ai_instructions"})
+@register("is_coached", uses={"ai_instructions"},
+          label="the Model has Spotter coaching")
 def _is_coached(item: dict, ctx: Any) -> bool:
     """Model: coached — its ai/instructions response carries an instruction, or its TML
     has `model_instructions.data_model_instructions`. A model whose lookup failed (no
@@ -165,7 +190,8 @@ def _model_of(item: dict) -> dict:
     return ((item.get("parent") or {}).get("obj")) or {}
 
 
-@register("is_scalar_formula", uses=())
+@register("is_scalar_formula", uses=(),
+          label="no column aggregates the formula")
 def _is_scalar_formula(item: dict, ctx: Any) -> bool:
     """Formula: no `columns[]` entry surfacing it (by `formula_id`) declares an
     `aggregation`. A formula with no `id` is not scalar when some aggregating column
@@ -180,7 +206,8 @@ def _aggregated_formula_ids(model: dict) -> set:
             if (c.get("properties") or {}).get("aggregation")}
 
 
-@register("has_date_constraint", uses=())
+@register("has_date_constraint", uses=(),
+          label="the Model has a date constraint")
 def _has_date_constraint(item: dict, ctx: Any) -> bool:
     """Model: a `date_range_condition` anywhere in its `constraints` (a mapping in
     exported TML, a list in hand-built fixtures — searched as text, BL-303)."""
@@ -193,7 +220,8 @@ def _fact_table_names(item: dict) -> set:
                   model.get("columns") or [], model.get("model_tables") or [])
 
 
-@register("fact_tables", uses=())
+@register("fact_tables", uses=(),
+          label="the fact tables")
 def _fact_tables(item: dict, ctx: Any) -> List[str]:
     """Model: the distinct `model_tables[].name`s that read as fact tables
     (tml.fact_tables — keyed by name, not alias), sorted; a name list in messages."""
@@ -201,13 +229,15 @@ def _fact_tables(item: dict, ctx: Any) -> List[str]:
     return NameList(sorted(_fact_table_names(item)))
 
 
-@register("fact_table_count", uses=())
+@register("fact_table_count", uses=(),
+          label="the number of fact tables")
 def _fact_table_count(item: dict, ctx: Any) -> int:
     """Model: how many distinct table names read as fact tables (see @fact_tables)."""
     return len(_fact_table_names(item))
 
 
-@register("varchar_join_keys", uses=())
+@register("varchar_join_keys", uses=(),
+          label="the string-typed join keys")
 def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     """Join: the column ids in its `on` clause whose warehouse type, read off the Table
     TMLs (AuditContext.column_types), is a string type. A key whose table is not in
@@ -219,7 +249,8 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
                     if col_types.get(k, "").upper() in tml.STRING_TYPES)
 
 
-@register("is_string_type", uses=())
+@register("is_string_type", uses=(),
+          label="the column is string-typed")
 def _is_string_type(item: dict, ctx: Any) -> bool:
     """RLS column reference: its warehouse `data_type` is a string type
     (tml.is_string_type — `.upper()` against VARCHAR/CHAR/STRING/TEXT, exactly; an
@@ -227,7 +258,8 @@ def _is_string_type(item: dict, ctx: Any) -> bool:
     return tml.is_string_type((item.get("obj") or {}).get("data_type"))
 
 
-@register("varchar_join_key_count", uses=())
+@register("varchar_join_key_count", uses=(),
+          label="the number of string-typed join keys")
 def _varchar_join_key_count(item: dict, ctx: Any) -> int:
     """Join: how many of its keys are string-typed (see @varchar_join_keys)."""
     return len(_varchar_join_keys(item, ctx))
@@ -236,7 +268,8 @@ def _varchar_join_key_count(item: dict, ctx: Any) -> int:
 _IF_CALL = re.compile(r"\bif\s*\(", re.IGNORECASE)
 
 
-@register("if_call_count", uses=())
+@register("if_call_count", uses=(),
+          label="the number of IF calls")
 def _if_call_count(item: dict, ctx: Any) -> int:
     """Formula: how many `if (` calls its `expr` makes."""
     return len(_IF_CALL.findall((item.get("obj") or {}).get("expr", "")))
@@ -289,7 +322,8 @@ def _bfs_depth(graph: Dict[Any, list], start: Any) -> int:
     return max_d
 
 
-@register("reference_chain_depth", uses=())
+@register("reference_chain_depth", uses=(),
+          label="the depth of the formula's reference chain")
 def _reference_chain_depth(item: dict, ctx: Any):
     """Formula: the longest chain of formula references starting at its node of the
     Model's reference graph (see _reference_graph). None — no value, so no finding —
@@ -350,7 +384,8 @@ def _pii_match(item: dict):
     return None
 
 
-@register("pii_category", uses=())
+@register("pii_category", uses=(),
+          label="the kind of personal data the name suggests")
 def _pii_category(item: dict, ctx: Any):
     """Column: the PII category its name reads as (email, phone, national_id, dob,
     financial, person_name, address — the first pattern that matches), or None."""
@@ -358,14 +393,16 @@ def _pii_category(item: dict, ctx: Any):
     return match[0] if match else None
 
 
-@register("pii_confidence", uses=())
+@register("pii_confidence", uses=(),
+          label="how confidently the name suggests personal data")
 def _pii_confidence(item: dict, ctx: Any):
     """Column: the confidence (HIGH / MEDIUM) of that PII pattern, or None."""
     match = _pii_match(item)
     return match[1] if match else None
 
 
-@register("credential_term", uses=(), values=(None,) + CREDENTIAL_TERMS)
+@register("credential_term", uses=(), values=(None,) + CREDENTIAL_TERMS,
+          label="the credential word in the column name")
 def _credential_term(item: dict, ctx: Any):
     """Column: the credential word its name contains (password, passwd, secret key, api
     key, token — whole words, any case), lower-cased as matched; None when none."""
@@ -374,7 +411,8 @@ def _credential_term(item: dict, ctx: Any):
     return match.group().lower() if match else None
 
 
-@register("owning_table_has_rls", uses=(), values=(False, True))
+@register("owning_table_has_rls", uses=(), values=(False, True),
+          label="the column's table has row-level security")
 def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
     """Model column: the Table its `column_id` prefix names (through the model's
     `model_tables`, alias first) has RLS rules on its Table TML. False when that
@@ -403,7 +441,8 @@ def _rls_by_table_key(model: dict, ctx: Any) -> Dict[Any, bool]:
     return has_rls
 
 
-@register("named_in_masking_formula", uses=())
+@register("named_in_masking_formula", uses=(),
+          label="a masking formula names the column")
 def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
     """Model column: legacy S3's masking heuristic — some formula of the model calls
     `is_group_member` AND the column's name appears (case-insensitively) anywhere in

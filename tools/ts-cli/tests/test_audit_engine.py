@@ -564,7 +564,7 @@ def test_fact_tables_and_date_constraint():
 
 
 def test_register_adds_a_derived_field():
-    @fields.register("_test_upper_name", uses=())
+    @fields.register("_test_upper_name", uses=(), label="the name in capitals")
     def _upper(item, ctx):
         return item["name"].upper()
     try:
@@ -572,6 +572,7 @@ def test_register_adds_a_derived_field():
     finally:
         del fields.FIELDS["_test_upper_name"]
         del fields.FIELD_USES["_test_upper_name"]
+        del fields.FIELD_LABELS["_test_upper_name"]
 
 
 # ── predicates ──────────────────────────────────────────────────────────────
@@ -1007,3 +1008,27 @@ def test_set_and_group_keys_compare_as_python_does():
     assert _hashable("1") != _hashable(1)
     assert _as_set([1, True, 1.0, "s"]) == {1, "s"}
     assert _hashable(["a"]) != _hashable("a") and _hashable({"a": 1}) == _hashable({"a": 1})
+
+
+# ── every registration reads as words (final review I2) ─────────────────────
+
+def test_registrations_require_a_human_label():
+    from ts_cli.audit.engine import code_rules
+    with pytest.raises(ValueError, match="label is required"):
+        fields.register("_t_no_label", uses=())
+    with pytest.raises(ValueError, match="label is required"):
+        code_rules.code_rule("t_no_label", severity="bands", uses=())
+    with pytest.raises(ValueError, match="not engine identifiers"):
+        fields.register("_t_id_label", uses=(), label="@join_type of it")
+    with pytest.raises(ValueError, match="not engine identifiers"):
+        code_rules.code_rule("t_id_label", severity="bands", uses=(),
+                             label="graded in code:t_id_label")
+    assert "_t_no_label" not in fields.FIELDS and "t_no_label" not in code_rules.REGISTRY
+
+
+def test_every_shipped_registration_has_a_label():
+    from ts_cli.audit.engine import code_rules
+    assert set(fields.FIELD_LABELS) == set(fields.FIELDS)
+    assert set(code_rules.CODE_LABELS) == set(code_rules.REGISTRY)
+    assert all(v.strip() for v in fields.FIELD_LABELS.values())
+    assert all(v.strip() for v in code_rules.CODE_LABELS.values())

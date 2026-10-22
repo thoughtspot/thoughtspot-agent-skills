@@ -62,8 +62,7 @@
   description: >-
     A PII column (see S1) that no masking formula covers: some Model formula calls
     `is_group_member` and the column's name appears anywhere in the Model's formula
-    expressions (@named_in_masking_formula — a heuristic over all formulas at once,
-    not per formula). The detail says "no CLS", but column-level security is never
+    expressions (a heuristic over all formulas at once, not per formula). The detail says "no CLS", but column-level security is never
     read: that wording is the legacy text, kept until the check is fixed.
   categories: [S]
   requires: [model_tml]

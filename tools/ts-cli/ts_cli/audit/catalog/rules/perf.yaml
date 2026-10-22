@@ -97,8 +97,9 @@
   title: No date constraints on fact tables
   description: >-
     A Model with fact tables (a `model_tables` entry with more than 3 MEASURE columns,
-    matched by its `name` — engine/tml.py fact_tables) but no `date_range_condition` in its
-    `constraints`, so every query scans all history.
+    matched by its `name`) but no `date_range_condition` in its `constraints`, so every
+    query scans all history.
+  # Fact tables are found by engine/tml.py fact_tables.
   categories: [P]
   requires: [model_tml]
   scope: model

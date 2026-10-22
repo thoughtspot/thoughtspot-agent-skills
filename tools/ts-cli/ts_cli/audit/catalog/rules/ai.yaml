@@ -125,11 +125,12 @@
   description: >-
     A weighted readiness score per Model — descriptions 30%, coaching 25%, synonyms
     15%, Model description 15%, column-name quality 15% — graded HIGH below 50 and
-    MEDIUM below 80. Not profile-aware. A code rule (code:spotter_readiness, scored
-    by engine/code_rules.py readiness_score) because its column shares use their own denominator (a Model without columns
-    counts as one column, so its score is still defined) and its name-quality share
-    its own regexes: a composite rule would need a single-use derived field per
-    component.
+    MEDIUM below 80. Not profile-aware. A Model without columns counts as one column,
+    so its score is still defined.
+  # A code rule (code:spotter_readiness, scored by engine/code_rules.py
+  # readiness_score) because its column shares use their own denominator and its
+  # name-quality share its own regexes: a composite rule would need a single-use
+  # derived field per component.
   categories: [A]
   requires: [model_tml]
   # Reads ai_instructions (readiness_score -> @is_coached) but must not skip a Model whose

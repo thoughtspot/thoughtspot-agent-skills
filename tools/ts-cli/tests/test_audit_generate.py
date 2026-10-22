@@ -179,7 +179,7 @@ def test_no_data_structure_is_rendered_anywhere(meta, doc, toy_meta, toy_doc):
 
 def test_message_by_severity_renders_one_entry_per_severity(toy_meta, toy_doc):
     assert toy_meta["checks"]["T1"]["message"] == \
-        "HIGH: “Full outer join”; INFO: “{@join_type} join”"
+        "HIGH: “Full outer join”; INFO: “{join type} join”"
     assert "MEDIUM: “Token {name}”" in _row(toy_doc, "T7")
 
 
@@ -191,7 +191,9 @@ def test_legacy_threshold_by_severity_and_per_profile(toy_doc):
     assert rows["T2"] == ("| T2 | Spotter-ready: green=95, assessment=Spotter-ready, "
                           "yellow=47.5 · General: green=50, assessment=General, yellow=25 |")
     # a code rule that sets its own threshold per finding
-    assert rows["T5"] == "| T5 | set per finding by code:model_complexity |"
+    assert rows["T5"] == ("| T5 | set per finding — graded per size measure (tables, "
+                          "columns, joins, join depth, formulas), each against its own "
+                          "lines |")
 
 
 def test_profile_overrides_render_per_profile(toy_meta):
@@ -203,11 +205,12 @@ def test_profile_overrides_render_per_profile(toy_meta):
 
 def test_severity_maps_and_code_rules_render_as_text(toy_meta):
     assert toy_meta["checks"]["T1"]["thresholds"] == \
-        "HIGH when @join_type is OUTER; otherwise INFO"
+        "HIGH when the join type is OUTER; otherwise INFO"
     assert toy_meta["checks"]["T7"]["thresholds"] == \
-        "MEDIUM when name is token; otherwise CRITICAL"
-    assert toy_meta["checks"]["T5"]["thresholds"] == \
-        "graded in code:model_complexity — HIGH, MEDIUM"
+        "MEDIUM when the name is token; otherwise CRITICAL"
+    assert toy_meta["checks"]["T5"]["thresholds"] == (
+        "graded per size measure (tables, columns, joins, join depth, formulas), each "
+        "against its own lines — HIGH, MEDIUM")
     assert toy_meta["checks"]["T6"]["thresholds"] == "HIGH < 50, MEDIUM < 80"
 
 
@@ -297,3 +300,55 @@ def test_check_reports_a_malformed_catalog_without_a_traceback(tmp_path):
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode == 1 and "Traceback" not in res.stderr, res.stderr
     assert "FAIL" in res.stdout and "perf.yaml" in res.stdout
+
+
+# ── generated text never shows an engine identifier (final review I2) ────────
+# The report, the ERD's "Fix." line and check-catalog.md are read by audit readers:
+# a derived field reads as its registered label, a code rule as its registration's.
+
+_ENGINE_ID = re.compile(r"@[A-Za-z_]\w*|\bcode:[a-z_]\w*|\bengine/")
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def test_shipped_report_meta_and_doc_show_no_engine_identifiers(meta, cat):
+    found = sorted({m for s in _strings(meta) for m in _ENGINE_ID.findall(s)})
+    assert found == []
+    doc = generate.catalog_markdown(cat)
+    assert _ENGINE_ID.findall(doc) == []
+
+
+@pytest.mark.parametrize("severity, text", [
+    ({"field": "@join_type", "map": {"OUTER": "HIGH"}, "default": "INFO"},
+     "HIGH when the join type is OUTER; otherwise INFO"),
+    ({"field": "@is_fact_to_fact_join", "map": {True: "MEDIUM"}, "default": "INFO"},
+     "MEDIUM when the join links two fact tables; otherwise INFO"),
+    ({"field": "@owning_table_has_rls", "map": {False: "HIGH"}, "default": "INFO"},
+     "HIGH unless the column's table has row-level security; otherwise INFO"),
+    ({"field": "@credential_term", "map": {None: "LOW"}, "default": "HIGH"},
+     "LOW when the credential word in the column name is absent; otherwise HIGH"),
+    ({"field": "properties.column_type", "map": {"MEASURE": "LOW"}, "default": "INFO"},
+     "LOW when the column type is MEASURE; otherwise INFO"),
+])
+def test_severity_maps_read_as_words(severity, text):
+    assert generate.severity_text(severity) == text
+
+
+@pytest.mark.parametrize("template, text", [
+    ("{@join_type} join", "{join type} join"),
+    ("tables: {@fact_tables:head3}", "tables: {fact tables, first 3}"),
+    ("keys: {@varchar_join_keys:all}", "keys: {string-typed join keys}"),
+    ("'{@join_from_name}' -> '{obj.with}'", "'{table the join starts from}' -> '{with}'"),
+    ("{count}/{total} ({pct:.0f}%)", "{count}/{total} ({pct:.0f}%)"),
+])
+def test_message_placeholders_read_as_words(template, text):
+    assert generate.template_text(template) == text

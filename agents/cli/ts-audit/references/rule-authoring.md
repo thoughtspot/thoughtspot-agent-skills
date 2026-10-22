@@ -283,7 +283,7 @@ under each profile.
 
 | Gate | Run | Fails on |
 |---|---|---|
-| Catalog validator | `python3 tools/validate/check_audit_catalog.py --root .` (pre-commit, CI) | unknown keys or vocabulary, wrong operand types, a mode without its required keys, a severity the mode cannot produce, a non-overridable override, bands out of order, an active rule without `fires` and `silent` examples, undeclared data reads, `by_severity` gaps, a stale generated doc |
+| Catalog validator | `python3 tools/validate/check_audit_catalog.py --root .` (pre-commit, CI) | unknown keys or vocabulary, wrong operand types, a mode without its required keys, a severity the mode cannot produce, a non-overridable override, bands out of order, an active rule without `fires` and `silent` examples, undeclared data reads, `by_severity` gaps, a stale generated doc, prose (title, description, remediation, message text) naming an engine identifier (`@field`, `code:<name>`, `engine/…`) |
 | Rule-id history | the same script with `--base origin/main` (CI) or `--merge-base-with origin/main` (pre-commit) | an id removed since the base (retire it instead), or an id retired under every profile at the base that is active under any profile now (a reused id). Pre-commit skips with a notice when git has no merge base |
 | Generated doc | `python -m ts_cli.audit.generate --check` (from `tools/ts-cli/`; the validator runs it too) | `check-catalog.md`'s generated block differs from the catalog |
 | Examples as tests | `pytest tools/ts-cli/tests/test_audit_rule_examples.py` | `fires` produces no finding, or one at a severity other than stated; `silent` produces any finding |
@@ -485,12 +485,17 @@ schema implies, a join graph, a lookup into another document.
 1. Write a **pure function** of `(item, ctx)` in `engine/fields*.py`:
 
    ```python
-   @register("is_wide", uses=())          # the conditional data it reads; () for none
+   @register("is_wide", uses=(),          # the conditional data it reads; () for none
+             label="the Model is wide")   # how it reads in generated text
    def is_wide(item, ctx):
        return len((item.get("obj") or {}).get("columns") or []) > 75
    ```
 
-   `uses` is required. Declare `values=(...)` when a severity `map:` will key on it.
+   `uses` and `label` are required. `label` is how the field reads to an audit reader:
+   generated text (the report, the ERD's "Fix." line, `check-catalog.md`) writes it in
+   place of `@is_wide`, so it is a clause for a true/false field ("the Model is wide")
+   and a noun phrase otherwise ("the join type"). Declare `values=(...)` when a severity
+   `map:` will key on it.
    Import anything heavier than the standard library inside the function: the catalog
    gate imports these modules under a bare Python 3.9 with only PyYAML. Use `memo.cached`
    for per-run lookups over the whole context rather than recomputing them per item.
@@ -512,12 +517,15 @@ cross-rule dependency that nothing else would use. Examples:
 A one-off value is a derived field, not a code rule. Then:
 
 1. Register the function: `@code_rule("<name>", placeholders={...}, severity=...,
-   uses=...)` in `engine/code_rules*.py`, signature `(rule, ctx, profile) -> list[Finding]`.
+   uses=..., label="graded per join, on its key types and key count")` in
+   `engine/code_rules*.py`. `label` says how it grades, in words: generated text shows it
+   where a fixed-severity code rule's grading goes, never `code:<name>`, signature `(rule, ctx, profile) -> list[Finding]`.
    It receives the **effective** rule, with profile overrides applied. Grade with
    `bands.classify(value, rule.bands)`, word with `rule.message`, and never read the
    profile block yourself. Every finding's `check_id` must be the rule's id.
 2. The catalog entry is complete as for any rule: `implementation: code:<name>`, no
    `aggregate`, and the severity source the registration declares. Give the reason it is
-   code in its `description`.
+   code in a YAML comment beside `implementation:`, not in `description`: the
+   description is read by audit readers, and the gate fails one naming `code:<name>`.
 3. Examples, generate, snapshot and pinning work as in procedure 1. Add unit tests for
    each branch of the function.

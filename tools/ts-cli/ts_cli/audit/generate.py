@@ -13,9 +13,12 @@
                                    category labels
 
 Every rule's grading is rendered as text, never as a data structure: a band list as
-"HIGH < 25%, MEDIUM < 50%"; a severity map as "INFO when @owning_table_has_rls is true;
-otherwise HIGH"; a code rule that grades in code as the severities it declares; and a
-value that differs between profiles once per profile ("Spotter-ready: … · General: …").
+"HIGH < 25%, MEDIUM < 50%"; a severity map as "INFO when the column's table has
+row-level security; otherwise HIGH"; a code rule that grades in code as its registered
+label and the severities it declares; and a value that differs between profiles once
+per profile ("Spotter-ready: … · General: …"). Generated text is read by audit readers,
+so it never shows an engine identifier: a derived field is written as its registered
+`label`, a code rule as its registration's `label`, never `@name` or `code:<name>`.
 Messages and legacy threshold payloads in their per-severity form render one entry per
 severity.
 
@@ -30,6 +33,7 @@ rest of ts_cli.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,12 +79,37 @@ def bands_text(bands: Any) -> str:
                      for lv in bands.levels)
 
 
+def field_text(path: Any) -> str:
+    """How a field path reads: a derived field's registered label ('@join_type' ->
+    'the join type'), a TML path as words ('properties.column_type' -> 'the column
+    type')."""
+    path = str(path or "")
+    if path.startswith("@"):
+        from ts_cli.audit.engine.fields import FIELD_LABELS
+        label = FIELD_LABELS.get(path[1:])
+        if label:
+            return label
+        path = path[1:]
+    words = [w for w in path.split(".") if w not in ("parent", "obj", "properties")]
+    return "the " + " ".join(words).replace("_", " ")
+
+
+def _case_text(sev: str, field: str, key: Any) -> str:
+    if key is True:
+        return f"{sev} when {field}"
+    if key is False:
+        return f"{sev} unless {field}"
+    if key is None:
+        return f"{sev} when {field} is absent"
+    return f"{sev} when {field} is {_scalar(key)}"
+
+
 def severity_text(severity: Any) -> str:
-    """A fixed severity, or a map: 'HIGH when @join_type is OUTER; otherwise INFO'."""
+    """A fixed severity, or a map: 'HIGH when the join type is OUTER; otherwise INFO'."""
     if not isinstance(severity, dict):
         return str(severity)
-    cases = [f"{sev} when {severity.get('field')} is {_scalar(key)}"
-             for key, sev in (severity.get("map") or {}).items()]
+    field = field_text(severity.get("field"))
+    cases = [_case_text(sev, field, key) for key, sev in (severity.get("map") or {}).items()]
     return "; ".join(cases + [f"otherwise {severity.get('default')}"])
 
 
@@ -102,6 +131,11 @@ def _code_name(rule: Rule) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _code_label(name: str) -> str:
+    from ts_cli.audit.engine.code_rules import CODE_LABELS
+    return CODE_LABELS.get(name) or "graded in code"
+
+
 def grading(rule: Rule, pid: str) -> str:
     """How `rule` grades a finding under profile `pid`."""
     override = profile_override(rule, pid)
@@ -111,16 +145,34 @@ def grading(rule: Rule, pid: str) -> str:
     decl = code_rule_declaration(name) if name else None
     if decl is not None and isinstance(decl[0], frozenset):
         order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
-        return (f"graded in code:{name} — "
-                f"{', '.join(sorted(decl[0], key=order.index))}")
+        return f"{_code_label(name)} — {', '.join(sorted(decl[0], key=order.index))}"
     if bands is not None and (decl is None or decl[0] == "bands"):
         return bands_text(bands)
     return severity_text(severity) if severity is not None else "—"
 
 
+_DERIVED_PLACEHOLDER = re.compile(r"\{@([A-Za-z_]\w*)(?::([^{}]*))?\}")
+_ITEM_PLACEHOLDER = re.compile(r"\{obj\.([^{}]+)\}")
+
+
+def _placeholder_text(match: "re.Match") -> str:
+    """`{@fact_tables:head3}` -> `{fact tables, first 3}`: a derived field's label (its
+    leading article dropped), never its engine name."""
+    label = re.sub(r"^the ", "", field_text("@" + match.group(1)))
+    head = re.fullmatch(r"head(\d+)", match.group(2) or "")
+    return "{" + label + (f", first {head.group(1)}" if head else "") + "}"
+
+
+def template_text(template: str) -> str:
+    """A message template as a reader sees it: derived-field and item-path
+    placeholders in words (`{@join_type}` -> `{join type}`, `{obj.with}` -> `{with}`);
+    the rule's own named values (`{name}`, `{count}`) as they are."""
+    return _ITEM_PLACEHOLDER.sub(r"{\1}", _DERIVED_PLACEHOLDER.sub(_placeholder_text, template))
+
+
 def message_text(rule: Rule, pid: str) -> str:
     message = profile_override(rule, pid).get("message", rule.message)
-    return _by_severity_text(message, lambda m: f"“{m}”")
+    return _by_severity_text(message, lambda m: f"“{template_text(str(m))}”")
 
 
 def threshold_text(rule: Rule, pid: str, label: str) -> str:
@@ -128,7 +180,7 @@ def threshold_text(rule: Rule, pid: str, label: str) -> str:
     name = _code_name(rule)
     decl = code_rule_declaration(name) if name else None
     if decl is not None and decl[1]:
-        return f"set per finding by code:{name}"
+        return f"set per finding — {_code_label(name)}"
     value = profile_override(rule, pid).get("legacy_threshold", rule.legacy_threshold)
     if value is None:
         return "—"

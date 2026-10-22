@@ -61,7 +61,7 @@ def description_issue(column: dict) -> Optional[str]:
 
 
 @code_rule("description_quality", placeholders={"count", "issues"}, severity="severity",
-           uses=())
+           uses=(), label="one finding per Model, counting its columns' description issues")
 def description_quality(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """H2 — one finding per Model with any description issue; `{count}` is how many
     columns have one, `{issues}` the first three issues joined by "; "."""
@@ -113,7 +113,7 @@ def is_stale_description(desc: Any) -> bool:
 
 
 @code_rule("stale_names", placeholders={"what", "value"}, severity="severity_name",
-           uses=())
+           uses=(), label="one finding per stale-looking name or description")
 def stale_names(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """H10 — per Model: its name, then each column's name and description, every match
     its own finding (`{what}` names which, `{value}` quotes it — a description's first

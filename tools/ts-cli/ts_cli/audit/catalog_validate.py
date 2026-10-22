@@ -29,7 +29,9 @@ non-template value, a severity nothing uses it for (a profile's own entry: one t
 profile never emits; a catalog-level entry: one no profile using it emits), or (a
 message) no template for one the rule can emit under a profile; a code rule's entry that does not carry exactly the
 severity source its function declares it reads (bands, a severity — a plain name where
-required — or neither), or a `legacy_threshold` beside a function that sets its own.
+required — or neither), or a `legacy_threshold` beside a function that sets its own;
+prose (title, description, remediation, message text) that shows an engine identifier
+(catalog_consistency.py).
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
 live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
@@ -77,6 +79,9 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     rule_message_problems,
 )
 from ts_cli.audit.catalog_uses import data_declaration_problems, registry_read_problems
+from ts_cli.audit.catalog_consistency import (
+    category_prose_problems, rule_consistency_problems,
+)
 from ts_cli.audit.catalog_forms import (  # noqa: F401  (re-exported)
     BY_SEVERITY,
     form_coverage_problems,
@@ -426,7 +431,8 @@ def rule_problems(rule: Rule, cat: Catalog) -> List[str]:
     msgs = (_basic_problems(rule, cat) + implementation_problems(rule)
             + _engine_problems(rule, cat) + bands_problems(rule.bands, "bands")
             + _severity_problems(rule.severity, "severity")
-            + _profile_override_problems(rule, cat) + _examples_problems(rule, cat))
+            + _profile_override_problems(rule, cat) + _examples_problems(rule, cat)
+            + rule_consistency_problems(rule, cat))
     return [f"{rule.source_file}: {rule.id}: {m}" for m in msgs]
 
 
@@ -445,7 +451,7 @@ def _category_problems(cat: Catalog) -> List[str]:
             out.append(f"{CATEGORIES_FILE}: {c.id}: order {c.order} repeats {seen[c.order]}")
         seen.setdefault(c.order, c.id)
         out += _angle_key_problems(c.id, c.angle_key, angles)
-    return out
+    return out + category_prose_problems(cat, CATEGORIES_FILE)
 
 
 def _angle_key_problems(cid: str, angle_key: str, seen: Dict[str, str]) -> List[str]:

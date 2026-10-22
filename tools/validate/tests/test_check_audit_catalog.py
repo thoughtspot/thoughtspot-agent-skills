@@ -43,7 +43,8 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # (catalog_code.known_code_rules), and the modules those need. Nothing that pulls
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
-                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py", "engine/tml.py",
+                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py",
+                "catalog_consistency.py", "engine/tml.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
@@ -187,7 +188,7 @@ DEMO_REGISTRATION = """
 from ts_cli.audit.engine import bands, fields, messages, predicates, scopes  # noqa
 
 
-@code_rule("demo_rule", severity="severity", uses=())
+@code_rule("demo_rule", severity="severity", uses=(), label="graded in a demo")
 def _demo_rule(rule, ctx, profile):
     return []
 """
@@ -249,8 +250,8 @@ def test_undeclared_conditional_read_fails(tmp_path):
      " if d.get(\"type\") == \"SET\"]\n",
      "derived field '@owning_table_has_rls' reads 'dependents'"),
     ("engine/fields_human.py",
-     "@register(\"dependent_count\", uses={\"dependents\", \"sets\"})",
-     "@register(\"dependent_count\", uses={\"dependents\"})",
+     "@register(\"dependent_count\", uses={\"dependents\", \"sets\"},",
+     "@register(\"dependent_count\", uses={\"dependents\"},",
      "derived field '@dependent_count' reads 'sets'"),
     ("engine/scopes.py",
      "    \"set\": frozenset({\"dependents\", \"sets\"}),\n", "",
@@ -271,7 +272,8 @@ def test_read_declaration_mutations_fail_the_gate(tmp_path, rel, old, new, expec
 # Fix round 3: the re-review's round-2 probes, each a mutation that read conditional
 # data past the scan. Every one must FAIL the gate, under the gate's own Python — which
 # cannot import context.py and so reads it from source.
-_IDX = '@register("is_indexed", uses=(), values=(False, True))\n'
+_IDX = ('@register("is_indexed", uses=(), values=(False, True),\n'
+        '          label="the column is indexed for search")\n')
 _IDX_BODY = '    """Column: text-search indexed (absent `index_type` means indexed by default)."""\n'
 _D1 = '@code_rule("model_complexity"'
 _D1_BODY = ('    """D1 — up to five findings per Model, one per measure over its MEDIUM line."""\n'
@@ -542,3 +544,4 @@ def test_unreadable_ref_message_keeps_gits_error(tmp_path):
     res = _run_base(root, "no-such-ref")
     assert res.returncode == 1
     assert "['" not in res.stdout and "fatal" in res.stdout.lower(), res.stdout
+
