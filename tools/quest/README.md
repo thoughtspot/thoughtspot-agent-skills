@@ -261,7 +261,8 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **Tiles** are three of Kenney's CC0 packs in one atlas (`tiles/LICENSE-kenney.txt`): Tiny
   Dungeon (frames 0-131), Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473:
   water, rock, boats), plus a row of ours (132: a wall's top; 133-137: the realm guards, Tiny
-  Dungeon characters recoloured). `tiles/make_atlas.py` rebuilds `tiles.png` from the packs'
+  Dungeon characters recoloured; 138: the dragon and 139: the Forge, drawn pixel by pixel in
+  `make_atlas.py`, since none of the packs has either). `tiles/make_atlas.py` rebuilds `tiles.png` from the packs'
   zips (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
   tests check. The tests can't rebuild it themselves (they don't have Kenney's zips), so after
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
@@ -280,6 +281,9 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
   (the Lake, a fisherman), a tunnel of golden trees (the
   Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
+- **The Mines** read west to east: a hall where the merchant and the guide wait, a forge hall
+  with the Forge (the compiler) on the north wall between two anvils and torches, rails running
+  east to a barred door with a torch either side, and behind it the dragon's den with the hoard.
 - **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
   A petitioner stands before each throne (a throne's optional `look`, from `tiles.json`'s npcs);
   talking to them opens the hall's questions, and the gate to the next room stays shut until

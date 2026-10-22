@@ -41,7 +41,7 @@ def run(realm: str, site: pathlib.Path, port: int, chrome: str, profile: pathlib
     # CI's Ubuntu runners don't allow Chrome's sandbox (user namespaces); the page is our own local build.
     ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
     out = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", *ci, f"--user-data-dir={profile}",
-                          "--virtual-time-budget=60000", "--dump-dom", url], capture_output=True, text=True, timeout=180)
+                          "--virtual-time-budget=180000", "--dump-dom", url], capture_output=True, text=True, timeout=300)
     m = re.search(r'<pre[^>]*id="log"[^>]*>(.*?)</pre>', out.stdout, re.S)
     return html.unescape(m.group(1)).splitlines() if m else [f"ERROR no log in the page ({out.stderr[-300:]!r})"]
 
@@ -83,7 +83,8 @@ def check(realm: str, log: list[str], data: dict) -> list[str]:
     if not (json.loads(saved) or {}).get("done"):
         problems.append(f"{realm} was not saved as finished")
     if f"EXIT {realm}" not in log:
-        problems.append(f"the exit of {realm} didn't take the player back to the overworld")
+        problems.append(f"the exit of {realm} didn't take the player back to the overworld"
+                        + ("" if any(line.startswith("ERROR") for line in log) else " (or the play outran Chrome's virtual time budget)"))
     return problems
 
 

@@ -515,6 +515,10 @@ kept, and the character can be asked again.
    and the decree at the end. Asked for in play: a dialog in a realm offers "Back to the realm"
    and "Leave for the world map", and Elder Wren says which way each realm's door lies.
 
+10. **The Mines, clearer:** asked for in play (the gate was hard to find, the Forge didn't stand
+    out, and the dragon had no picture). The map reads west to east to a torch-lit barred door;
+    the Forge and the dragon get their own frames, used in every realm.
+
 **Then:** you play it, and the remaining realms get maps.
 
 ## 7. A second game

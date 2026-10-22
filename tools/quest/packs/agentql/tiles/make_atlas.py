@@ -3,6 +3,8 @@ Tiny Battle 1.0) plus our own row. Frames, 16px, 12 to a row:
     0-131    Tiny Dungeon       tilemap_packed.png, as it is
     132      ours               the top of a wall
     133-137  ours               the realm guards: Tiny Dungeon characters, recoloured
+    138      ours               the dragon, drawn in Tiny Dungeon's palette
+    139      ours               the Forge: a stone furnace with a fire in its mouth
     144-275  Tiny Town          tilemap_packed.png frame f is 144 + f
     276-473  Tiny Battle        tilemap_packed.png (18 to a row) frame f is 276 + f
 The zips used (sha256): kenney_tiny-dungeon.zip c109438ab06f65fd80f9b2686a4cf9c7c11dc64444b47333ec71d602f8bb5fc7,
@@ -24,6 +26,27 @@ GUARDS = [   # (frame, from Tiny Dungeon frame, how it is recoloured)
     (136, 97, ("tint", 0.12)),   # the Golden Forests: an elf in golden armour (not 96, the player)
     (137, 84, ("hue", 0.56)),    # Law: a wizard, in blue
 ]
+
+# Drawn here, pixel by pixel: the left half of each, mirrored. Letters are colours; "." is clear.
+DRAWN = {
+    138: ({"a": (63, 38, 49), "b": (232, 69, 55), "c": (255, 112, 109), "d": (118, 59, 54), "e": (247, 194, 130),
+           "w": (255, 255, 255)},
+          ["........", ".aa.....", "adda..e.", "addda.ac", "adddaaab", "adddabbb", "addabwab", "addabbbb",
+           ".adabcbb", "..aaabba", "...abeee", "..abbeee", "..abbeee", "..abaaee", "..aa.abb", ".....aaa"]),
+    139: ({"o": (38, 43, 68), "l": (192, 203, 220), "m": (139, 155, 180), "k": (82, 96, 124), "r": (232, 69, 55),
+           "n": (255, 150, 60), "y": (255, 214, 92), "w": (255, 246, 196), "d": (63, 38, 49)},
+          ["....oooo", "....olll", "....ommm", "..oooooo", ".ollllll", ".ommmmmm", ".ommoooo", ".omodddd",
+           ".omodrrn", ".omodrny", ".omodnyw", ".omoorny", ".ollllll", ".ommmmmm", ".okkkkkk", ".ooooooo"]),
+}
+
+
+def drawn(colours, half):
+    tile = Image.new("RGBA", (T, T), (0, 0, 0, 0))
+    for y, row in enumerate(half):
+        for x, ch in enumerate(row + row[::-1]):
+            if ch != ".":
+                tile.putpixel((x, y), (*colours[ch], 255))
+    return tile
 
 
 def frames(sheet, cols):
@@ -69,6 +92,8 @@ def main(dungeon, town, battle, out):
     tiles[132] = top
     for frame, source, how in GUARDS:
         tiles[frame] = recolour(td[source], how)
+    for frame, (colours, half) in DRAWN.items():
+        tiles[frame] = drawn(colours, half)
     rows = (len(tiles) + 11) // 12
     atlas = Image.new("RGBA", (12 * T, rows * T), (0, 0, 0, 0))
     for i, t in enumerate(tiles):
