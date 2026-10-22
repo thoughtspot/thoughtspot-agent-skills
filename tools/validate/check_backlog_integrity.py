@@ -65,6 +65,7 @@ from pathlib import Path
 from _novelty import (
     BaseUnavailable,
     merge_base_with_head,
+    read_head,
     novel_id_collisions,
     read_at,
     resolve_base,
@@ -179,8 +180,9 @@ def id_novelty_violations(root: Path, base: str) -> list[str]:
             section_headings(read_at(root, rev, ARCHIVE_REL))
         )
 
-    head_ids = set(section_headings(_read(root, BACKLOG_REL))) | set(
-        section_headings(_read(root, ARCHIVE_REL))
+    # The branch's ids, read where its merge base was taken (`read_head`).
+    head_ids = set(section_headings(read_head(root, base, BACKLOG_REL))) | set(
+        section_headings(read_head(root, base, ARCHIVE_REL))
     )
     return novel_id_collisions(head_ids, ids_at(merge_base), ids_at(base))
 

@@ -39,6 +39,7 @@ from pathlib import Path
 from _novelty import (
     BaseUnavailable,
     merge_base_with_head,
+    read_head,
     novel_id_collisions,
     read_at,
     resolve_base,
@@ -166,8 +167,7 @@ def rule_novelty_violations(root: Path, base: str, canonical_rel: str) -> list[s
         text = read_at(root, rev, canonical_rel)
         return {f"I{n}" for n in EMITTED_RE.findall(text)} if text else set()
 
-    head = {f"I{n}" for n in EMITTED_RE.findall(
-        (root / canonical_rel).read_text(encoding="utf-8"))}
+    head = {f"I{n}" for n in EMITTED_RE.findall(read_head(root, base, canonical_rel))}
     return novel_id_collisions(head, ids_at(merge_base), ids_at(base))
 
 

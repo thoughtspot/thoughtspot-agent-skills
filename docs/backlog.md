@@ -260,6 +260,9 @@ are roughly ordered by value÷effort.
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
 | BL-400 | Customer-name check: no CI backstop now that the private list stays local, so binary/UTF-16 blobs and accented spellings of a listed name go unchecked | 2026-12-31 |
 | BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
+| BL-402 | pre-commit's staged-file gates: `echo \| grep -q` under pipefail skips on a large staged set, quoted paths and a rename's old path never match, quest's JS/CSS runs no quest tests, ossie-roundtrip never runs | 2026-12-31 |
+| BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
+| BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -14476,3 +14479,64 @@ resubmission should start from current `main` and answer each item below.
    two-thirds unrelated backlog, session and validator changes.
 
 **Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
+
+## BL-402 — pre-commit's staged-file gates have four silent gaps `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the refute reviews of #660 (see BL-403).
+
+**Gaps, each measured in the review:**
+1. **SIGPIPE skip.** Every other gate tests `echo "$STAGED" | grep -q …` under
+   `set -euo pipefail`. When STAGED outgrows the pipe buffer, `grep -q` exits on its first
+   match, `echo` dies of SIGPIPE, and the pipeline's status fails the `if`: the gate is skipped,
+   silently. 1,000 staged paths skipped 1 run in 5; 1,400 paths, 5 in 5.
+2. **Quoted paths, and renames.** Git quotes a path with non-ASCII or a tab, so `\.py$` never
+   matches it; and STAGED shows a rename only by its new path, so a gate keyed to the old one
+   stays silent.
+3. **Non-Python sources.** A change to `tools/quest/explore/*.js`, `core/*.js` or `quest.css`
+   runs no quest tests (only the build check), nor does any non-Python change run erd's.
+4. **ossie-roundtrip** has tests that CI runs and pre-commit never does.
+
+**Do.** (1) Replace every `echo "$STAGED" | grep -q` with a here-string, as the unit-test block
+does. (2) Build STAGED with `-z` (or `core.quotePath=false`) and read it NUL-separated.
+(3) Let the quest suite's trigger include `tools/quest/` JS, CSS and HTML. (4) Give
+ossie-roundtrip a trigger, or record why it is CI-only.
+
+**Target:** 2026-12-31.
+
+## BL-403 — pre-commit's unit tests: select suites from a derived map, not a hand-written one `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** #660, which tried a hand-written suite-selection map and
+dropped it after three refute reviews each found a new class of miss.
+
+**The problem.** Any staged `.py` runs all seven suites (ts-cli, validate, formula-fidelity,
+agentql-retest, quest, erd, databricks): about 150 s against the hook's 15 s budget, on every
+commit that touches Python. CI runs every suite on every PR regardless, so the cost is local.
+
+**What a selection map has to cover (each found by a review, with a reproduced miss):** what a
+suite's tests import by path literal (ts-cli reads agents/databricks; validate reads
+tools/smoke-tests); what the code under test reads (ts-cli reads agents/shared/erd through
+ts_cli/audit); a renamed file's old path; and non-Python reads: 118 tracked files across ts-cli
+(function maps, the ts-audit catalog, calendar-builder SQL, tools/fixtures, its own fixtures),
+quest (README.md, the hook, pages.yml, its own JS/YAML/TMJ), erd (its examples, which must match
+a fresh render) and formula-fidelity (cases, runs). validate reads the whole repo.
+
+**Do.** Derive the map rather than write it: run each suite under an audit hook (a sitecustomize
+that records every tracked file opened, as the reviews did), commit the result as data, and
+select a suite when any staged path (by both names of a rename) is one it read, or Python
+outside every traced area is staged. Regenerate the data in CI and fail when it drifts. Keep
+"never weaker than main" as the test: replay the last few hundred commits through both hooks.
+
+**Target:** 2027-01-31.
+
+## BL-404 — `check_open_items` has no in-tree uniqueness rule `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the third refute review of #660.
+
+Two branches that each add a different `## #4` to the same open-items file both pass once the
+second updates from main: the novelty rule (`_novelty`) can't fire after an update, and unlike
+check_backlog_integrity this checker has no rule that an item number appears once in a tree.
+
+**Do.** Fail a file with the same item number twice.
+
+**Target:** 2026-12-31.
+

@@ -93,3 +93,40 @@ def test_a_merge_that_is_not_the_base_tip_keeps_head(repo):
     git(d, "checkout", "-q", "feature")
     git(d, "merge", "-q", "--no-edit", "other")   # merge, but first parent != main tip
     assert effective_head(d, "main") == "HEAD"
+
+
+def test_read_head_reads_the_pr_tip_on_the_merge_ref_and_the_tree_otherwise(repo):
+    """Every novelty validator reads the branch's ids through read_head (check_backlog_integrity,
+    check_open_items, check_coverage_matrix, check_lint_invariant_list)."""
+    from _novelty import read_head
+    d, fork, pr_head, main_tip = repo
+    git(d, "checkout", "-q", "feature")
+    (d / "g").write_text("uncommitted\n")
+    assert read_head(d, "main", "g") == "uncommitted\n"            # a plain branch: the working tree
+    git(d, "checkout", "-q", "--", "g")
+    make_merge_ref(d, main_tip)
+    assert read_head(d, "main", "f") == "1\n"                       # the merge ref: the PR's tip, not main's "2"
+    assert read_head(d, "main", "g") == "x\n"
+    assert read_head(d, "main", "missing") == ""
+
+
+def test_a_merge_ref_built_before_the_base_moved_is_still_the_merge_ref(repo):
+    """CI fetches the base again just before the novelty step, so the base may be ahead of the
+    merge ref's first parent; the PR's tip is still HEAD^2."""
+    d, fork, pr_head, main_tip = repo
+    make_merge_ref(d, main_tip)
+    git(d, "checkout", "-q", "main")
+    (d / "f").write_text("3\n")
+    git(d, "commit", "-qam", "c3: main moves on")
+    git(d, "checkout", "-q", "mergeref")
+    assert effective_head(d, "main") == "HEAD^2"
+
+
+def test_a_branch_sitting_on_a_merge_commit_of_the_base_keeps_head(repo):
+    """A branch created at (or fast-forwarded to) a merge commit already on main is not the merge
+    ref: its second parent is in main, so the working tree stays the branch's copy."""
+    d, fork, pr_head, main_tip = repo
+    git(d, "checkout", "-q", "main")
+    git(d, "merge", "-q", "--no-ff", "--no-edit", "feature")      # main now ends in a merge commit
+    git(d, "checkout", "-q", "-b", "sitting", "main")
+    assert effective_head(d, "main") == "HEAD"
