@@ -18,10 +18,11 @@ finding lists identical, so it errs strict:
 
 Run it over a snapshot (``audit/snapshot.py``)::
 
-    python -m ts_cli.audit.equivalence --snapshot DIR --profile spotter|general [--rules A1,D2]
+    python -m ts_cli.audit.equivalence --snapshot DIR --profile spotter|general [--rules|--checks A1,D2]
 
 It prints a per-rule ``rule | old | new | diff`` table and exits 0 only when the two
-sides are identical (1 when they differ, 2 when the comparison could not run).
+sides are identical (1 when they differ, 2 when the comparison could not run or the
+rule selection names nothing it can compare).
 """
 from __future__ import annotations
 
@@ -53,13 +54,19 @@ NewRunner = Callable[[object, str, list], Iterable]
 # ── exact comparison ────────────────────────────────────────────────────────
 
 def _same(a, b) -> bool:
-    """Equal including exact type and dict key order; NaN equals NaN."""
+    """Equal including exact type, sign of zero and dict key order/type; NaN equals NaN.
+
+    Dict keys go through the strict list branch, so ``{1: x}``, ``{1.0: x}`` and
+    ``{True: x}`` differ; floats compare their sign, so ``0.0`` and ``-0.0`` differ.
+    """
     if type(a) is not type(b):
         return False
     if isinstance(a, float):
-        return a == b or (math.isnan(a) and math.isnan(b))
+        if math.isnan(a) or math.isnan(b):
+            return math.isnan(a) and math.isnan(b)
+        return a == b and math.copysign(1.0, a) == math.copysign(1.0, b)
     if isinstance(a, dict):
-        return list(a) == list(b) and all(_same(a[k], b[k]) for k in a)
+        return _same(list(a), list(b)) and all(_same(a[k], b[k]) for k in a)
     if isinstance(a, (list, tuple)):
         return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
     return a == b
@@ -140,12 +147,15 @@ def _rule_sort_key(rule) -> tuple:
     return (m.group(1), int(m.group(2)), "") if m else (text, -1, text)
 
 
-def per_rule_rows(old: list[dict], new: list[dict], result: dict) -> list[tuple]:
+def per_rule_rows(old: list[dict], new: list[dict], result: dict,
+                  requested: Optional[list] = None) -> list[tuple]:
     """``(rule, old count, new count, diff)`` per rule, sorted A2 before A10.
 
-    ``diff`` counts the rule's one-sided findings plus its differing fields.
+    ``diff`` counts the rule's one-sided findings plus its differing fields. Every
+    ``requested`` rule gets a row even when neither side found anything, so a rule
+    the comparison never exercised is visible instead of absent.
     """
-    counts: dict = {}
+    counts: dict = {rule: [0, 0, 0] for rule in (requested or [])}
 
     def bump(rule, col):
         counts.setdefault(rule, [0, 0, 0])[col] += 1
@@ -191,6 +201,35 @@ def _resolve_categories(categories: Optional[list]) -> list:
     return cats
 
 
+def legacy_rule_ids(categories: Optional[list] = None) -> list[str]:
+    """The rule ids the legacy checks run for ``categories``, named as
+    ``audit/__init__.py`` names them: ``check_a1`` -> ``A1``."""
+    from ts_cli.audit import ANGLE_MODULES
+    return [fn.__name__.replace("check_", "").upper()
+            for cat in _resolve_categories(categories) for fn in ANGLE_MODULES[cat].ALL_CHECKS]
+
+
+def resolve_check_ids(check_ids: Optional[list], categories: Optional[list] = None):
+    """Validate requested rule ids; None means every rule.
+
+    Raises ``ValueError`` for an empty selection or an id the legacy checks do not
+    run for ``categories`` (a typo, the wrong case, or an uncaptured category) —
+    each of those would otherwise compare nothing and read as identical.
+    """
+    if check_ids is None:
+        return None
+    ids = list(dict.fromkeys(check_ids))
+    if not ids:
+        raise ValueError("no rule ids given: name at least one, or omit the selection")
+    known = legacy_rule_ids(categories)
+    unknown = [i for i in ids if i not in known]
+    if unknown:
+        raise ValueError(f"rule id(s) {', '.join(map(str, unknown))} are not run for "
+                         f"categories {', '.join(_resolve_categories(categories))} "
+                         f"(known: {', '.join(known)})")
+    return ids
+
+
 def collect_both(ctx, profile: str, check_ids: Optional[list] = None, *,
                  new_runner: Optional[NewRunner] = None,
                  categories: Optional[list] = None) -> tuple[list[dict], list[dict]]:
@@ -204,6 +243,7 @@ def collect_both(ctx, profile: str, check_ids: Optional[list] = None, *,
     from ts_cli.audit import assessment
     profile = assessment.normalise(profile)
     cats = _resolve_categories(categories)
+    check_ids = resolve_check_ids(check_ids, cats)
     old = _legacy_findings(ctx, profile, cats)
     runner = new_runner or _engine_runner
     new = [_as_dict(f) for f in runner(copy.deepcopy(ctx), profile, cats)]
@@ -254,8 +294,14 @@ def _format_differences(result: dict) -> list[str]:
     return lines
 
 
-def _report(old: list[dict], new: list[dict], result: dict) -> str:
-    out = [_format_table(per_rule_rows(old, new, result)), ""]
+def _report(old: list[dict], new: list[dict], result: dict,
+            requested: Optional[list] = None) -> str:
+    rows = per_rule_rows(old, new, result, requested)
+    out = [_format_table(rows), ""]
+    idle = [r[0] for r in rows if r[0] in (requested or []) and r[1] == r[2] == 0]
+    if idle:
+        out.append(f"not exercised: {', '.join(idle)} (no findings on either side, "
+                   "so this snapshot proves nothing about them)")
     if result["identical"]:
         out.append(f"IDENTICAL: {len(old)} findings on both sides")
     else:
@@ -272,7 +318,7 @@ def _parse_args(argv: Optional[list]) -> argparse.Namespace:
         description="Compare legacy audit checks with the rule engine over a snapshot.")
     p.add_argument("--snapshot", required=True, type=Path, help="snapshot directory")
     p.add_argument("--profile", default="general", choices=["spotter", "general"])
-    p.add_argument("--rules", default=None,
+    p.add_argument("--rules", "--checks", dest="rules", default=None,
                    help="comma-separated rule ids to compare (default: all)")
     return p.parse_args(argv)
 
@@ -281,16 +327,18 @@ def main(argv: Optional[list] = None, *, new_runner: Optional[NewRunner] = None)
     """Exit 0 when identical, 1 when the findings differ, 2 when the run could not happen."""
     from ts_cli.audit.snapshot import SnapshotError, read_snapshot
     args = _parse_args(argv)
-    check_ids = [r.strip() for r in args.rules.split(",") if r.strip()] if args.rules else None
+    check_ids = (None if args.rules is None
+                 else [r.strip() for r in args.rules.split(",") if r.strip()])
     try:
         ctx, captured = read_snapshot(args.snapshot)
+        check_ids = resolve_check_ids(check_ids, captured)
         old, new = collect_both(ctx, args.profile, check_ids, new_runner=new_runner,
                                 categories=captured)
     except (SnapshotError, ImportError, ValueError) as exc:
         print(f"equivalence: cannot compare: {exc}", file=sys.stderr)
         return 2
     result = compare_findings(old, new)
-    print(_report(old, new, result))
+    print(_report(old, new, result, check_ids))
     return 0 if result["identical"] else 1
 
 

@@ -8,7 +8,8 @@ import pytest
 
 from ts_cli.audit import ANGLE_MODULES
 from ts_cli.audit.context import AuditContext
-from ts_cli.audit.equivalence import compare_findings, main, per_rule_rows, run_both
+from ts_cli.audit.equivalence import (
+    compare_findings, legacy_rule_ids, main, per_rule_rows, run_both)
 from ts_cli.audit.findings import Finding
 
 
@@ -73,6 +74,8 @@ def test_duplicate_keys_with_one_changed_member():
 @pytest.mark.parametrize("old_val,new_val", [
     (30, 30.0), (1, True), (0, None), ({"a": 1, "b": 2}, {"b": 2, "a": 1}),
     ({"pass": 50}, {"pass": 50.0}), ([1, 2], [2, 1]),
+    ({1: "x"}, {1.0: "x"}), ({1: "x"}, {True: "x"}), ({1.0: "x"}, {True: "x"}),
+    (0.0, -0.0), ({"pass": 0.0}, {"pass": -0.0}),
 ])
 def test_values_compared_exactly(old_val, new_val):
     """1 == 1.0 == True in Python but they serialise differently, so they differ."""
@@ -95,6 +98,22 @@ def test_key_field_missing_is_not_none():
     res = compare_findings([old], [new])
     assert res["identical"] is False
     assert len(res["only_old"]) == 1 and len(res["only_new"]) == 1
+
+
+def test_angle_only_difference_is_reported():
+    """Legacy angles are long keys ("data_modeling"); an engine emitting the
+    category letter instead must not pass."""
+    res = compare_findings([_f(angle="data_modeling")], [_f(angle="D")])
+    assert res["identical"] is False
+    assert [(c["field"], c["old"], c["new"]) for c in res["changed"]] == [
+        ("angle", "data_modeling", "D")]
+
+
+def test_equal_counts_one_duplicated_one_missing():
+    a, b = _f(detail="a"), _f(detail="b")
+    res = compare_findings([a, b], [a, a])
+    assert res["identical"] is False
+    assert res["only_old"] == [b] and res["only_new"] == [a]
 
 
 def test_extra_fields_on_new_side_are_ignored():
@@ -121,6 +140,12 @@ def test_per_rule_rows_counts_and_diffs():
     new = [_f("A1"), _f("A1", detail="2", severity="LOW"), _f("P1", detail="p")]
     rows = per_rule_rows(old, new, compare_findings(old, new))
     assert rows == [("A1", 2, 2, 1), ("D1", 1, 0, 1), ("P1", 0, 1, 1)]
+
+
+def test_per_rule_rows_lists_requested_rules_with_no_findings():
+    old = [_f("A1")]
+    rows = per_rule_rows(old, old, compare_findings(old, old), requested=["A1", "D1"])
+    assert rows == [("A1", 1, 1, 0), ("D1", 0, 0, 0)]
 
 
 def test_per_rule_rows_sort_numerically_within_category():
@@ -207,6 +232,35 @@ def test_run_both_limits_categories():
     assert calls[0][2] == ["A"]
 
 
+def test_new_side_receives_a_copy_not_the_callers_ctx():
+    ctx = _ctx()
+    before = copy.deepcopy(ctx)
+    seen = []
+
+    def new(c, profile, categories):
+        seen.append(c)
+        c.models.clear()
+        c.assessment = "spotter"
+        return []
+
+    run_both(ctx, "general", None, new_runner=new)
+    assert seen[0] is not ctx and seen[0].models is not ctx.models
+    assert ctx == before
+
+
+@pytest.mark.parametrize("ids", [[], ["A99"], ["a4"], ["S1"]])
+def test_run_both_rejects_rule_ids_it_cannot_compare(ids):
+    """Empty, unknown, wrong case, or outside the selected categories: each would
+    otherwise compare nothing and report identical."""
+    with pytest.raises(ValueError):
+        run_both(_ctx(), "general", ids, new_runner=_legacy_runner(), categories=["A", "D"])
+
+
+def test_legacy_rule_ids_follow_check_function_names():
+    assert legacy_rule_ids(["A"]) == ["A1", "A2", "A3", "A4", "A5", "A6"]
+    assert "D1" in legacy_rule_ids(None)
+
+
 def test_run_both_rejects_unknown_profile():
     with pytest.raises(ValueError):
         run_both(_ctx(), "nonsense", None, new_runner=_legacy_runner())
@@ -225,7 +279,7 @@ def test_cli_exit_0_when_identical(tmp_path, capsys):
                 new_runner=_legacy_runner())
     out = capsys.readouterr().out
     assert code == 0
-    assert "rule" in out and "identical" in out.lower()
+    assert "rule" in out and "IDENTICAL:" in out and "NOT identical" not in out
 
 
 def test_cli_exit_1_when_different(tmp_path, capsys):
@@ -242,6 +296,34 @@ def test_cli_uses_captured_categories_and_rule_filter(tmp_path):
                  "--rules", "A4"], new_runner=_legacy_runner(calls))
     assert code == 0
     assert calls == [("general", "spotter", ["A", "D"])]
+
+
+def test_cli_checks_is_an_alias_of_rules(tmp_path):
+    calls = []
+    code = main(["--snapshot", str(_snapshot(tmp_path)), "--checks", "A4"],
+                new_runner=_legacy_runner(calls))
+    assert code == 0 and len(calls) == 1
+
+
+@pytest.mark.parametrize("rules", ["A99", "a4", ",", "", "S1"])
+def test_cli_rule_selection_that_compares_nothing_exits_2(tmp_path, capsys, rules):
+    """S1 is a real rule, but the snapshot captured only A and D."""
+    code = main(["--snapshot", str(_snapshot(tmp_path)), "--rules", rules],
+                new_runner=_legacy_runner())
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "IDENTICAL" not in captured.out
+    assert "cannot compare" in captured.err
+
+
+def test_cli_marks_requested_rule_without_findings_not_exercised(tmp_path, capsys):
+    code = main(["--snapshot", str(_snapshot(tmp_path)), "--rules", "A4,D1"],
+                new_runner=_legacy_runner())
+    out = capsys.readouterr().out
+    assert code == 0
+    assert any(line.split()[:7] == ["D1", "|", "0", "|", "0", "|", "0"]
+               for line in out.splitlines())
+    assert "not exercised: D1" in out
 
 
 def test_cli_bad_snapshot_exits_2(tmp_path, capsys):
