@@ -14410,10 +14410,11 @@ on a PR is the maintainer's `check-pr.sh`, which reads diffs and PR text, not tr
    lists such files and exits 3 for a manual look; that is a stopgap.
 2. **Accents.** `_norm` does not fold them: list "Mueller Quux" misses text "Müller Quux",
    list "Quuxlé Foods" misses "Quuxle Foods".
-3. **Names split across lines, or in decomposed Unicode, inside file content.** `--range`
-   matches per added line, after no normalisation: a hard-wrapped "Zorblax\nIndustries" or
-   an NFD "Société" in a file passes. (`check-pr.sh` covers both for PR text, paths and
-   commit objects by scanning those itself; it cannot for diffs without a checker change.)
+3. **Names split across lines, by an invisible separator, or in decomposed Unicode,
+   inside file content.** `--range` matches per added line after `splitlines()` (which also
+   breaks on U+2028, `\f`, `\v` and others) with no normalisation, so a hard-wrapped
+   "Zorblax\nIndustries" or an NFD "Société" passes it. `check-pr.sh` closes this for PRs by
+   re-scanning every commit's added lines itself (NFKC, joined); the commit hooks do not.
 4. **Non-Latin names cannot be listed.** `_norm` keeps ASCII letters and digits only, so a
    Cyrillic, Greek or CJK name normalises to nothing. `check-pr.sh` refuses such a list
    rather than ignore entries silently.

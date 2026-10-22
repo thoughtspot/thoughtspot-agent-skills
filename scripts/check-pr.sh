@@ -4,8 +4,8 @@
 #
 # Run main's copy, NEVER a PR checkout's (a PR can change its own copy of this file):
 #
-#     git fetch origin main && f="$(mktemp)" && git show origin/main:scripts/check-pr.sh > "$f" \
-#         && bash "$f" <pr-number>; rm -f "$f"
+#     ( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
+#       git show origin/main:scripts/check-pr.sh > "$f"; bash "$f" <pr-number> )
 #
 # Every run ends with a `check-pr: PR #N ...` verdict line. No verdict line: it did not run.
 #
@@ -24,13 +24,18 @@
 #   3. the PR title, head branch name, description, conversation comments, review bodies
 #      and inline review comments;
 #   4. every path any commit or merge resolution touched, both sides of a rename;
-#   5. every raw commit object (author, committer, encoding and mergetag headers).
-# Text sections are matched whole, line by line and joined, so a name hard-wrapped across
-# two lines of PR text is caught; Unicode is NFC-normalised first.
+#   5. every raw commit object (author, committer, encoding and mergetag headers);
+#   6. the added content of every non-merge commit, again (see below).
+# Sections 2-6 use this script's own scanner: text is NFKC-normalised with invisible format
+# characters removed, then matched line by line AND with lines joined, so a name
+# hard-wrapped, split by an invisible line separator, or decomposed is still caught.
+# Section 1 is the checker's own per-line scan, which also reports links.
 #
 # NOT scanned (BL-400): binary files, UTF-16 text included (listed for a manual look; the
-# run exits 3); a name split across lines, or spelled in decomposed Unicode, INSIDE a
-# file's content; base64 or compressed content; attachments; the edit history of PR text.
+# run exits 3); base64 or compressed content; Git LFS object content; attachments;
+# comments on individual commits; the edit history of PR text; other spellings of a name
+# (accent-folded "Mueller" for "Müller", markup inside a name). Non-Latin names cannot be
+# listed: such a list is refused.
 #
 # It never executes PR code. Commits are fetched as git objects and read as data, with
 # git and Python run hermetically: no global or system git config (textconv drivers,
@@ -56,13 +61,18 @@ if ! (( gmaj > 2 || (gmaj == 2 && gmin >= 42) )); then
     echo "check-pr: needs git 2.42 or later" >&2; exit 2
 fi
 
+# One meaning for a relative list path, wherever the steps below run from.
+if [[ -n "${TS_CUSTOMER_DENYLIST:-}" && "$TS_CUSTOMER_DENYLIST" != /* && "$TS_CUSTOMER_DENYLIST" != "~"* ]]; then
+    export TS_CUSTOMER_DENYLIST="$PWD/$TS_CUSTOMER_DENYLIST"
+fi
+
 root="$(git rev-parse --show-toplevel)" || exit 2
 cd "$root"
 
 # Hermetic environment for every command that reads PR content.
 EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 hermetic() {
-    env -u PYTHONPATH -u PYTHONHOME \
+    env -u PYTHONPATH -u PYTHONHOME -u GIT_CONFIG_PARAMETERS \
         GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_SOURCE="$EMPTY_TREE" \
         GIT_CONFIG_COUNT=4 \
         GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false \
@@ -73,7 +83,8 @@ hermetic() {
 }
 py() { hermetic python3 -E -s "$@"; }
 # Terminal-safe output: PR text could otherwise carry escape sequences to the terminal.
-show() { cat -v; }
+# Drop control characters except tab and newline; bytes pass through (LC_ALL=C).
+show() { tr -d '\000-\010\013-\037\177'; }
 
 repo="$(gh repo view "$(git remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)" \
     || { echo "check-pr: cannot resolve the origin repository with gh" >&2; exit 2; }
@@ -115,25 +126,45 @@ git archive "$ns/checker" tools/validate/check_customer_references.py tools/vali
 vdir="$tmp/tools/validate"
 checker="$vdir/check_customer_references.py"
 
-# The scanner for PR text and other non-diff sections: main's checker, called directly
-# (not through --message-file, whose commit-message scissors handling would let one line
-# hide the rest), over the whole text, NFC-normalised, per line and with lines joined.
+# The scanner for sections 2-6: main's checker, called directly (not through
+# --message-file, whose commit-message scissors handling would let one line hide the
+# rest), over whole text, normalised, per line and with lines joined.
+#   mode all: every finding; nowarn: FAIL only; names: list hits only;
+#   diff: names in a patch's added lines (split on newline only); paths: NUL-separated.
 cat > "$tmp/scan.py" <<'EOF'
 import sys, unicodedata
-vdir, title, path, mode = sys.argv[1:5]
+vdir, title, path, mode, expected = sys.argv[1:6]
 sys.path.insert(0, vdir)
 import check_customer_references as c
 d = c.load_denylist()
-text = unicodedata.normalize("NFC", open(path, "rb").read().decode("utf-8", "replace"))
-hits = c.scan_text(text, "", d, grandfathered=set())
+if (len(d) if d else 0) != int(expected):
+    print("FAIL  the private list changed during the run; run check-pr again")
+    sys.exit(1)
+
+def fold(s):
+    s = unicodedata.normalize("NFKC", s)
+    return "".join(ch for ch in s if unicodedata.category(ch) != "Cf")
+
+raw = open(path, "rb").read().decode("utf-8", "replace")
+if mode == "diff":
+    raw = "\n".join(l[1:] for l in raw.split("\n") if l.startswith("+"))
+records = [r for r in raw.split("\0") if r] if mode == "paths" else [raw]
+hits = []
+for rec in records:
+    text = fold(rec)
+    found = c.scan_text(text, "", d, grandfathered=set())
+    if d is not None:
+        per_line = {h.match for h in found if h.rule == "customer-name"}
+        joined = " ".join(c.decode_line(l) for l in text.splitlines())
+        for n in d.entries_in(joined):
+            if f"<denylist entry #{n}>" not in per_line:
+                found.append(c.Hit(0, "customer-name", f"<denylist entry #{n}> (split across lines)",
+                                   c._DENY_ADVICE))
+    hits += found
 if mode == "nowarn":
     hits = [h for h in hits if h.level == "FAIL"]
-if d is not None:
-    per_line = {h.match for h in hits if h.rule == "customer-name"}
-    for n in d.entries_in(" ".join(text.splitlines())):
-        if f"<denylist entry #{n}>" not in per_line:
-            hits.append(c.Hit(0, "customer-name", f"<denylist entry #{n}> (split across lines)",
-                              c._DENY_ADVICE))
+elif mode in ("names", "diff"):
+    hits = [h for h in hits if h.rule == "customer-name"]
 for h in hits:
     c._emit(f"{title}, line {h.line}", h, d)
 if not hits:
@@ -142,30 +173,39 @@ sys.exit(1 if any(h.level == "FAIL" for h in hits) else 0)
 EOF
 
 # The name check is the only thing this adds over CI: refuse to report "clean" without it,
-# and refuse a list with entries the checker would silently ignore.
-read -r entries dropped <<<"$(cd "$tmp" && py - "$vdir" <<'EOF' | tail -n 1
-import sys
+# and refuse a list with entries the checker would silently ignore or misread.
+listinfo="$(cd "$tmp" && py - "$vdir" <<'EOF'
+import sys, unicodedata
 sys.path.insert(0, sys.argv[1])
 import check_customer_references as c
 d = c.load_denylist()
 kept = {n for _, n in (d.substrings + d.words)} if d else set()
-raw = []
+bad = []
 p = c.denylist_path()
 if p.is_file():
     for n, line in enumerate(p.read_text(encoding="utf-8-sig", errors="replace").splitlines(), 1):
-        if line.strip() and not line.strip().startswith("#"):
-            raw.append(n)
-print(len(kept), ",".join(str(n) for n in raw if n not in kept) or "-")
+        name = line.strip()
+        if not name or name.startswith("#"):
+            continue
+        # Not kept, or not in the normal composed form the scanned text is folded to.
+        if n not in kept or unicodedata.normalize("NFKC", name) != name:
+            bad.append(n)
+print(len(d) if d else 0, ",".join(map(str, bad)) or "-")
 EOF
-)" || exit 2
+)" || { echo "check-pr: could not read the private list" >&2; exit 2; }
+read -r entries dropped <<<"$(printf '%s\n' "$listinfo" | tail -n 1)"
+[[ "$entries" =~ ^[0-9]+$ && -n "$dropped" ]] \
+    || { echo "check-pr: could not read the private list" >&2; exit 2; }
 if [[ "$entries" == "0" && $links_only -eq 0 ]]; then
     echo "check-pr: no usable names in the private list (missing, empty, or every entry under" >&2
     echo "          3 letters once normalised). Fix it, or pass --links-only. See .claude/rules/security.md." >&2
     exit 2
 fi
 if [[ "$dropped" != "-" ]]; then
-    echo "check-pr: private list entries $dropped would be ignored (duplicate, or under 3 ASCII" >&2
-    echo "          letters/digits once normalised, e.g. a non-Latin name). Rewrite or remove them." >&2
+    echo "check-pr: private list entries $dropped would be ignored or misread: a duplicate, under" >&2
+    echo "          3 ASCII letters/digits once normalised (e.g. a non-Latin name), or not in" >&2
+    echo "          composed Unicode (NFC/NFKC; common when copied from a macOS file name)." >&2
+    echo "          Retype or remove them." >&2
     exit 2
 fi
 
@@ -183,22 +223,22 @@ echo
 rc=0
 # Each section: collect its text into a file (a failed command is a setup error, never an
 # empty section), then scan it in THIS shell so a finding can set rc.
-section() {  # $1 = title, $2 = all|nowarn, rest = command producing the text
+section() {  # $1 = title, $2 = scan.py mode, rest = command producing the text
     local title="$1" mode="$2"; shift 2
     local f="$tmp/section.txt"
     "$@" > "$f" || { echo "check-pr: could not read: $title" >&2; exit 2; }
     echo "== $title"
     if [[ -s "$f" ]]; then
-        py "$tmp/scan.py" "$vdir" "$title" "$f" "$mode" 2>&1 | show || rc=1
+        py "$tmp/scan.py" "$vdir" "$title" "$f" "$mode" "$entries" 2>&1 | show || rc=1
     else
         echo "(nothing)"
     fi
     echo
 }
 remerge()    { hermetic git show --remerge-diff --no-ext-diff --no-textconv --format= "$1"; }
-paths()      { hermetic git log -z --format= --name-only --no-renames --diff-merges=remerge \
-                   "$mb..$head" | tr '\0' '\n' | sort -u; }
-rawcommits() { local s; for s in $(git rev-list "$mb..$head"); do git cat-file commit "$s"; echo; done; }
+paths()      { hermetic git log -z --format= --name-only --no-renames --diff-merges=remerge "$mb..$head"; }
+rawcommits() { git rev-list "$mb..$head" | git cat-file --batch; }
+content()    { hermetic git log -p --no-merges --no-ext-diff --no-textconv --format= "$mb..$head"; }
 
 echo "== Commits: added lines and commit messages"
 py "$checker" --root "$root" --range "$mb..$head" 2>&1 | show || rc=1
@@ -215,8 +255,9 @@ section "Conversation comments" all \
 section "Review bodies" all gh pr view "$pr" --repo "$repo" --json reviews --jq '.reviews[].body'
 section "Inline review comments" all \
     gh api "repos/$repo/pulls/$pr/comments" --paginate --jq '.[].body'
-section "Every path touched" all paths
+section "Every path touched" paths paths
 section "Raw commit objects (authors, committers, headers)" nowarn rawcommits
+section "Added content, lines joined (names only)" diff content
 
 binaries="$(hermetic git log --format= --numstat --no-renames --diff-merges=remerge "$mb..$head" \
     | awk -F'\t' '$1 == "-" { print $3 }' | sort -u)" || exit 2
