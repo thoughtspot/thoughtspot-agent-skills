@@ -31,7 +31,6 @@ that step's object. The exit must be reachable from the start, so a player can a
 from __future__ import annotations
 
 import json
-import math
 import pathlib
 import re
 
@@ -61,7 +60,7 @@ def realm_steps(realm: dict) -> list[str]:
 
 def _props(obj: dict, where: str, errors: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
-    props = obj.get("properties") or []
+    props = obj.get("properties", [])
     if not isinstance(props, list):
         errors.append(f"{where}: properties must be a list")
         return out
@@ -179,6 +178,12 @@ class Map:
                 errors.append(f"{self.name}: a tileset is not a JSON object")
             elif "source" in ts:
                 errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (Phaser reads embedded tilesets only)")
+            elif (ts.get("tilewidth"), ts.get("tileheight")) != (TILE, TILE) or not (
+                    isinstance(ts.get("tilecount"), int) and not isinstance(ts.get("tilecount"), bool) and ts["tilecount"] > 0):
+                errors.append(f"{self.name}: tileset {ts.get('name')!r} needs {TILE}x{TILE} tiles and a tilecount")
+            elif any(isinstance(g, int) and (g & GID) > ts["tilecount"] for l in tiles for g in (l.get("data") or [])
+                     if isinstance(l.get("data"), list)):
+                errors.append(f"{self.name}: a tile layer uses a tile past the tileset's {ts['tilecount']}")
             elif "tiles" in ts and not (isinstance(ts["tiles"], list) and all(
                     isinstance(t, dict) and isinstance(t.get("properties", []), list) for t in ts["tiles"])):
                 errors.append(f"{self.name}: tileset {ts.get('name')!r} has per-tile data Phaser can't read")
@@ -332,7 +337,7 @@ def check_realm_map(m: Map, realm: dict) -> list[str]:
     for g in m.of("gate"):
         for need in requires(g):
             if need not in steps:
-                errors.append(f"{g['where']}: requires {need}, which is not a step of realm {realm['id']}")
+                errors.append(f"{g['where']}: requires {need!r}, which is not a step of realm {realm['id']}")
     return errors + reachability(m, steps)
 
 

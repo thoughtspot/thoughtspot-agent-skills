@@ -2636,7 +2636,7 @@ def _obj(m, kind):
     (lambda m: _obj(m, "guide").update(properties=[]), "needs exactly the properties ['encounter']"),
     (lambda m: _obj(m, "guide")["properties"][0].update(type="int"), "must be a string"),
     (lambda m: _obj(m, "guide")["properties"][0].update(value=5), "must be a string"),
-    (lambda m: _obj(m, "gate")["properties"][0].update(value="nope:foe"), "requires nope:foe, which is not a step"),
+    (lambda m: _obj(m, "gate")["properties"][0].update(value="nope:foe"), "requires 'nope:foe', which is not a step"),
     (lambda m: _obj(m, "spawn").update(x=-TILE), "the spawn is outside the map"),
     (lambda m: _obj(m, "spawn").update(x=_obj(m, "merchant")["x"], y=_obj(m, "merchant")["y"]), "on a solid object"),
     (lambda m: m["layers"].insert(0, {"type": "imagelayer", "name": "sky"}), None),
@@ -2982,3 +2982,29 @@ def test_expected_is_null_for_a_realm_that_does_not_exist():
                                   m.act(Object.assign(m.fresh(), { screen: "quest", realm: 99 }), { type: "interact", step: "x:merchant" }, {}).refused ? "refused" : "taken"]));
     """)
     assert got == [None, "refused"]
+
+
+
+# ---- fourth review of PR 4 ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("edit,needle", [
+    (lambda m: m["tilesets"][0].update(tilewidth=32, tileheight=32), "needs 16x16 tiles and a tilecount"),
+    (lambda m: m["tilesets"][0].update(tilewidth=16, tileheight=2), "needs 16x16 tiles and a tilecount"),
+    (lambda m: m["tilesets"][0].pop("tilecount"), "needs 16x16 tiles and a tilecount"),
+    (lambda m: _layer(m, "tilelayer")["data"].__setitem__(0, 2), "uses a tile past the tileset's 1"),
+    (lambda m: _obj(m, "spawn").update(properties={}), "properties must be a list"),
+    (lambda m: _obj(m, "foe").pop("y"), "must be numbers"),
+    (lambda m: _layer(m, "objectgroup").update(startx=16), "is offset"),
+])
+def test_tilesets_and_objects_the_page_reads_differently_fail(tmp_path, edit, needle):
+    cave = _tmj(CAVE_ROWS, CAVE_OBJECTS, CAVE_GATE)
+    edit(cave)
+    pack, data = _explorable(tmp_path, cave=cave)
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any(needle in e for e in errors), errors
+
+
+def test_a_spawn_on_the_edge_leaves_it_open(tmp_path):
+    rows = ["############", "#..M.G..#F.#", "S.......#..#", "#.C.......##", "#X......#R.#", "############"]
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, CAVE_OBJECTS, CAVE_GATE))
+    assert any("the map's edge must all be wall" in e for e in MAPS.check_maps(pack.dir, data))
