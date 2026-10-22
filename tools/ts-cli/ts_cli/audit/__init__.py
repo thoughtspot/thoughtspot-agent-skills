@@ -316,14 +316,21 @@ def run_audit(
 
     ``ctx`` replays captured data (``audit/snapshot.py``) instead of fetching:
     ``client`` and ``model_guids`` are then unused for data and ``client`` may
-    be None. The assessment is applied either way — it is a choice about how
-    to read the data, not part of the data.
+    be None. A supplied ``ctx`` keeps the assessment it was captured with
+    unless ``assessment_name`` is given — the bar decides rule ids, severities
+    and thresholds, so falling back to the default would make a replay
+    disagree with the live run it recorded. A fetched ``ctx`` gets
+    ``assessment_name``, or the default when it is None.
     """
     from ts_cli.audit import assessment
     angles = angles or list(ANGLE_MODULES.keys())
     if ctx is None:
         ctx = build_context(client, model_guids, angles)
-    ctx.assessment = assessment.normalise(assessment_name)
+        ctx.assessment = assessment.normalise(assessment_name)
+    elif assessment_name is not None:
+        ctx.assessment = assessment.normalise(assessment_name)
+    else:
+        ctx.assessment = assessment.normalise(ctx.assessment)
     findings: list[Finding] = []
     checks_run = 0
     all_check_ids: list[str] = []

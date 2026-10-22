@@ -19,9 +19,13 @@ def _parse_angles(angles: Optional[str]) -> Optional[list]:
     return [a.strip().upper() for a in angles.split(",")] if angles else None
 
 
-def _replay(snapshot_in: Path, angle_list: Optional[list], assessment_name: str) -> dict:
-    """Audit a captured snapshot: no profile, no client, no network."""
-    from ts_cli.audit import run_audit
+def _replay(snapshot_in: Path, angle_list: Optional[list],
+            assessment_name: Optional[str]) -> dict:
+    """Audit a captured snapshot: no profile, no client, no network.
+
+    The captured assessment is used unless ``--assessment`` is given explicitly.
+    """
+    from ts_cli.audit import assessment, run_audit
     from ts_cli.audit.snapshot import SnapshotError, read_snapshot
 
     try:
@@ -34,10 +38,13 @@ def _replay(snapshot_in: Path, angle_list: Optional[list], assessment_name: str)
             f"Angle(s) {', '.join(missing)} not captured in snapshot {snapshot_in} "
             f"(captured: {', '.join(captured) or 'none'}) — the data they read was not "
             "fetched. Re-capture with those angles, or drop them from --angles.")
+    if assessment_name is not None and assessment.normalise(assessment_name) != ctx.assessment:
+        typer.echo(f"Note: --assessment {assessment.normalise(assessment_name)} overrides the "
+                   f"snapshot's captured assessment ({ctx.assessment}).", err=True)
     return run_audit(None, ctx.model_guids, angle_list or captured, assessment_name, ctx=ctx)
 
 
-def _capture(client, models: list, angle_list: Optional[list], assessment_name: str,
+def _capture(client, models: list, angle_list: Optional[list], assessment_name: Optional[str],
              snapshot_out: Path) -> dict:
     """Fetch the audit data, write it to ``snapshot_out``, then audit it as normal."""
     from ts_cli.audit import ANGLE_MODULES, assessment, run_audit
@@ -63,11 +70,12 @@ def run(
     profile: Optional[str] = _profile_option,
     angles: Optional[str] = typer.Option(None, "--angles", "-a",
                                           help="Comma-separated angle filter: A,D,H,P,S (default: all)"),
-    assessment_name: str = typer.Option(
-        "general", "--assessment",
+    assessment_name: Optional[str] = typer.Option(
+        None, "--assessment",
         help="Bar the AI-readiness checks measure against: spotter (descriptions >= 95%, "
              "synonyms >= 80%, AI context required) or general (>= 50%, >= 25%, "
-             "AI context recommended). Default: general"),
+             "AI context recommended). Default: general; with --snapshot-in, the "
+             "assessment the snapshot was captured with"),
     output: Optional[Path] = typer.Option(None, "--output", "-o",
                                            help="Write JSON report to file instead of stdout"),
     snapshot_out: Optional[Path] = typer.Option(

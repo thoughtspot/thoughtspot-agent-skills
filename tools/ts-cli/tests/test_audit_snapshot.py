@@ -271,3 +271,45 @@ def test_cli_snapshot_out_writes_then_audits(_disc, tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     live, replay = json.loads(live_out.read_text()), json.loads(replay_out.read_text())
     assert live["findings"] and replay["findings"] == live["findings"]
+
+
+# ── the captured assessment survives replay (review fix round 1) ────────────
+
+def test_run_audit_with_ctx_keeps_its_assessment_when_none_is_given():
+    from ts_cli.audit import run_audit
+    ctx = make_context(model_guids=["m1"], assessment="spotter")
+    result = run_audit(None, ["m1"], ["A"], ctx=ctx)
+    assert ctx.assessment == "spotter"
+    assert result["corpus"]["assessment"] == "Spotter-ready"
+
+
+@patch("ts_cli.audit.context.discover_sets", return_value=_NO_SETS)
+def test_cli_replay_keeps_the_captured_assessment(_disc, tmp_path, monkeypatch):
+    """A spotter capture replayed with default flags must not fall back to general:
+    the bar decides rule ids, severities and thresholds."""
+    import ts_cli.commands.audit as audit_cmd
+    monkeypatch.setattr(audit_cmd, "resolve_profile", lambda p: "example")
+    monkeypatch.setattr(audit_cmd, "ThoughtSpotClient", lambda _p: _fake_client())
+    snap, live_out = tmp_path / "snap", tmp_path / "live.json"
+    result = runner.invoke(_app(), ["audit", "run", "-m", "m1", "--assessment", "spotter",
+                                    "--snapshot-out", str(snap), "-o", str(live_out)])
+    assert result.exit_code == 0, result.output
+    assert read_snapshot(snap)[0].assessment == "spotter"
+
+    monkeypatch.setattr(audit_cmd, "ThoughtSpotClient", None)
+    replay_out, general_out = tmp_path / "replay.json", tmp_path / "general.json"
+    result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap),
+                                    "-o", str(replay_out)])
+    assert result.exit_code == 0, result.output
+    live, replay = json.loads(live_out.read_text()), json.loads(replay_out.read_text())
+    assert replay["findings"] == live["findings"]
+    assert replay["corpus"]["assessment"] == live["corpus"]["assessment"] == "Spotter-ready"
+
+    # An explicit flag still overrides the captured bar, and says so.
+    result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap),
+                                    "--assessment", "general", "-o", str(general_out)])
+    assert result.exit_code == 0, result.output
+    assert "overrides" in result.output and "spotter" in result.output
+    general = json.loads(general_out.read_text())
+    assert general["corpus"]["assessment"] == "General"
+    assert general["findings"] != live["findings"], "fixture must be bar-sensitive"
