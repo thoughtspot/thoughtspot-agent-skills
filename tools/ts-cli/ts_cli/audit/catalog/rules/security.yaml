@@ -36,7 +36,8 @@
     A PII column (see S1) that is text-search indexed (no `index_type: DONT_INDEX`),
     so its values surface in search suggestions. HIGH when the Table its
     `column_id` prefix names (through `model_tables`, alias first) has no RLS rules
-    on its Table TML — or that Table TML is not in scope — and INFO when it has.
+    on its Table TML — or that Table TML is not in scope — and INFO when it has. The
+    detail says which, so the message is worded per severity.
   categories: [S]
   requires: [model_tml]
   scope: model.column
@@ -47,7 +48,10 @@
         - {field: "@pii_category", exists: true}
         - {field: "@is_indexed", truthy: true}
   severity: {field: "@owning_table_has_rls", map: {true: INFO}, default: HIGH}
-  message: "PII column '{name}' is indexed{@owning_table_rls_note}"
+  message:
+    by_severity:
+      HIGH: "PII column '{name}' is indexed WITHOUT table RLS"
+      INFO: "PII column '{name}' is indexed (table has RLS)"
   remediation: Review security settings via ThoughtSpot UI or TML reimport
   examples:
     fires: {fixture: sec_pii_indexed_without_rls, severity: HIGH}

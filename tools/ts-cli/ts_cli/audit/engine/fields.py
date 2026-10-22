@@ -324,8 +324,13 @@ def _credential_term(item: dict, ctx: Any):
     return match.group().lower() if match else None
 
 
+@register("owning_table_has_rls")
 def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
-    """legacy S2's lookup, step for step: the model's tables keyed by the prefix
+    """Model column: the Table its `column_id` prefix names (through the model's
+    `model_tables`, alias first) has RLS rules on its Table TML. False when that
+    Table TML is not in the context.
+
+    legacy S2's lookup, step for step: the model's tables keyed by the prefix
     their columns' `column_id` carries (alias, else name — BL-305), each True when its
     Table TML (in the context) declares RLS rules; a later model table with the same
     key overrides an earlier one, and one whose Table TML is absent writes nothing.
@@ -340,21 +345,6 @@ def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
     cid = (item.get("obj") or {}).get("column_id", "")
     table_name = cid.split("::")[0] if "::" in cid else ""
     return has_rls.get(table_name, False)
-
-
-@register("owning_table_has_rls")
-def _owning_table_has_rls_field(item: dict, ctx: Any) -> bool:
-    """Model column: the Table its `column_id` prefix names (through the model's
-    `model_tables`, alias first) has RLS rules on its Table TML. False when that
-    Table TML is not in the context."""
-    return _owning_table_has_rls(item, ctx)
-
-
-@register("owning_table_rls_note")
-def _owning_table_rls_note(item: dict, ctx: Any) -> str:
-    """Model column: S2's wording of @owning_table_has_rls — " (table has RLS)" or
-    " WITHOUT table RLS" (a message suffix; the legacy detail switches on it)."""
-    return " (table has RLS)" if _owning_table_has_rls(item, ctx) else " WITHOUT table RLS"
 
 
 @register("named_in_masking_formula")

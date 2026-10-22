@@ -823,17 +823,15 @@ def test_credential_term_is_the_lower_cased_whole_word(name, term):
 
 def test_owning_table_has_rls_follows_legacy_s2_lookup():
     ctx = fx.sec_owning_table_edges()
-    got = {i["name"]: (fields.get(i, "@owning_table_has_rls", ctx),
-                       fields.get(i, "@owning_table_rls_note", ctx))
+    got = {i["name"]: fields.get(i, "@owning_table_has_rls", ctx)
            for i in _children_of(ctx, "model.column")}
-    note = {True: " (table has RLS)", False: " WITHOUT table RLS"}
     expected = {"email_no_id": True,     # no column_id: key "", a nameless table with RLS
                 "phone_no_sep": True,    # no "::": key "" too
                 "email_x": False,        # alias X: the later model table wins
                 "email_y": True,         # a later Y whose Table TML is absent writes nothing
                 "email_nofqn": False, "email_e": False, "email_h": False,
                 "email_unknown": False}
-    assert got == {k: (v, note[v]) for k, v in expected.items()}
+    assert got == expected
 
 
 def test_named_in_masking_formula_searches_all_formulas_at_once():

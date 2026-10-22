@@ -21,17 +21,20 @@ no entry there has no threshold (None).
 What these checks hold a rule to: the form has exactly the one key `by_severity`
 holding a non-empty mapping; its keys are severities; a message's values are
 templates (each checked as a plain message would be — against the mode's or the code
-rule's placeholders), a threshold's values are legacy threshold mappings. And under
-each profile, the message words exactly the severities the rule can emit — its bands'
-levels, its fixed or mapped `severity`, or a code rule's declared severities
-(catalog_code.emitted_severities) — so neither a gap (a run-time error) nor a template
-that can never be used passes; a threshold names no severity the rule never emits.
+rule's placeholders), a threshold's values are legacy threshold mappings. And the
+entries match the severities the rule can emit — its bands' levels, its fixed or
+mapped `severity`, or a code rule's declared severities
+(catalog_code.emitted_severities): under each profile, the message in force words
+every one (a gap is a run-time error); and no template or threshold names a severity
+nothing can use it for — judged per profile for a profile's own entry, and across
+every profile that uses it for a catalog-level entry (a severity only one profile
+emits is in use).
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from ts_cli.audit.catalog_code import emitted_severities, rule_message_problems
 from ts_cli.audit.catalog_expr import SEVERITIES, legacy_threshold_problems
@@ -87,21 +90,45 @@ def legacy_threshold_form_problems(value: Any, path: str) -> List[str]:
 
 # ── coverage: the templates match what the rule can emit ────────────────────
 
-def _coverage(rule: Rule, pid: str, key: str, need_all: bool) -> List[Tuple[str, str, str]]:
-    """`(path, severity, kind)` gaps between the by-severity entries of `key` in force
-    under profile `pid` and the severities the rule can emit there: `missing` (only
-    when `need_all`) and `extra`."""
+def _in_force(rule: Rule, pid: str, key: str) -> Optional[Tuple[str, Dict[str, Any], Set[str]]]:
+    """`(path, by-severity mapping, emitted severities)` of the `key` entry in force
+    under profile `pid` — None when it is not in the by-severity form, or when what the
+    rule emits there is unknown (an unregistered code rule, a missing severity source:
+    reported by other checks). `path` is the profile's own key when it overrides it,
+    else the catalog-level key."""
     override = profile_override(rule, pid)
     value = override.get(key, getattr(rule, key))
     if not isinstance(value, dict) or not isinstance(value.get(BY_SEVERITY), dict):
-        return []
+        return None
     emitted = emitted_severities(rule, override)
     if not emitted:
-        return []  # unknown or missing severity source: reported by other checks
+        return None
     path = f"profiles.{pid}.{key}" if key in override else key
-    keyed = {s for s in value[BY_SEVERITY] if s in SEVERITIES}
-    gaps = [(path, s, "missing") for s in emitted - keyed] if need_all else []
-    return gaps + [(path, s, "extra") for s in keyed - emitted]
+    return path, value[BY_SEVERITY], emitted
+
+
+def _coverage(rule: Rule, profiles: Iterable[str], key: str, need_all: bool
+              ) -> List[Tuple[str, str, str, List[str]]]:
+    """`(path, severity, kind, profiles)` gaps between the by-severity entries of `key`
+    and the severities the rule can emit: `missing` (only when `need_all`) under each
+    profile the entry is in force for, and `extra` — a profile's own entry for a
+    severity THAT profile never emits, a catalog-level entry for one that no profile
+    using it emits (a severity only some profiles emit is in use)."""
+    users: Dict[str, List[Tuple[str, Dict[str, Any], Set[str]]]] = {}
+    for pid in profiles:
+        found = _in_force(rule, pid, key)
+        if found is not None:
+            users.setdefault(found[0], []).append((pid, found[1], found[2]))
+    gaps: List[Tuple[str, str, str, List[str]]] = []
+    for path, uses in users.items():
+        keyed = {s for s in uses[0][1] if s in SEVERITIES}
+        if need_all:
+            gaps += [(path, s, "missing", [pid]) for pid, _, emitted in uses
+                     for s in sorted(emitted - keyed, key=SEVERITIES.index)]
+        emitted_by_any = set().union(*(emitted for _, _, emitted in uses))
+        gaps += [(path, s, "extra", [pid for pid, _, _ in uses])
+                 for s in keyed - emitted_by_any]
+    return gaps
 
 
 _GAP_WORDING = {
@@ -113,14 +140,17 @@ _GAP_WORDING = {
 
 
 def form_coverage_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
-    """Under each profile, a by-severity message words exactly the severities the rule
-    can emit (no gap, no template that can never be used), and a by-severity legacy
-    threshold names none it never emits (a missing one is a legitimate None)."""
+    """Under each profile, a by-severity message words every severity the rule can
+    emit there (no gap) and no template is one nothing can use; a by-severity legacy
+    threshold names no severity that can never be emitted (a missing one is a
+    legitimate None). A profile's own entry is held to that profile's severities, a
+    catalog-level one to those of the profiles that use it (see `_coverage`)."""
+    profiles = list(profiles)
     gaps: Dict[Tuple[str, str, str, str], List[str]] = {}
-    for pid in profiles:
-        for key, need_all in (("message", True), ("legacy_threshold", False)):
-            for path, sev, kind in _coverage(rule, pid, key, need_all):
-                gaps.setdefault((key, path, sev, kind), []).append(pid)
+    for key, need_all in (("message", True), ("legacy_threshold", False)):
+        for path, sev, kind, pids in _coverage(rule, profiles, key, need_all):
+            listed = gaps.setdefault((key, path, sev, kind), [])
+            listed += [p for p in pids if p not in listed]
     order = sorted(gaps, key=lambda g: (g[1], g[3], SEVERITIES.index(g[2])))
     return [f"{path}.{BY_SEVERITY}: {_GAP_WORDING[(key, kind)].format(sev=sev)} "
             f"(profile: {_known(gaps[(key, path, sev, kind)])})"

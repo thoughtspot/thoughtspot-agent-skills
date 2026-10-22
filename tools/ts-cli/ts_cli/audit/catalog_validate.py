@@ -23,8 +23,9 @@ categories, profiles, views, band ops/directions/units, severities; ids repeated
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
 example; a `{by_severity: ...}` message or legacy threshold with an unknown severity, a
-non-template value, a severity the rule never emits under some profile, or (a message)
-no template for one it can; a code rule's entry that does not carry exactly the
+non-template value, a severity nothing uses it for (a profile's own entry: one that
+profile never emits; a catalog-level entry: one no profile using it emits), or (a
+message) no template for one the rule can emit under a profile; a code rule's entry that does not carry exactly the
 severity source its function declares it reads (bands, a severity — a plain name where
 required — or neither), or a `legacy_threshold` beside a function that sets its own.
 
