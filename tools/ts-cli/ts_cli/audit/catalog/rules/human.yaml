@@ -97,6 +97,9 @@
     Model the dependents lookup did not list has none.
   categories: [H]
   requires: [model_tml, dependents]
+  # @dependent_count reads ctx.dependents, which Set discovery writes SET rows into; it
+  # skips them (R15), but it reads that data, so it declares it — fetched, never gates.
+  uses: [sets]
   scope: model
   aggregate:
     mode: each

@@ -18,7 +18,7 @@ the item's (or an enclosing item's) child; unknown scopes, modes, operators, der
 fields (`@name`, also as a step inside a path), code-rule names (`code:<name>`
 not registered), an `aggregate` block on a code rule (the function owns its logic),
 message placeholders (a code rule's: those its function declares), data requirements,
-`uses` values and reads neither declares (catalog_uses.py),
+`uses` values, undeclared reads by a rule or a registration (catalog_uses/_reads.py),
 categories, profiles, views, band ops/directions/units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
@@ -75,7 +75,7 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     known_code_rules,
     rule_message_problems,
 )
-from ts_cli.audit.catalog_uses import data_declaration_problems
+from ts_cli.audit.catalog_uses import data_declaration_problems, registry_read_problems
 from ts_cli.audit.catalog_forms import (  # noqa: F401  (re-exported)
     BY_SEVERITY,
     form_coverage_problems,
@@ -482,7 +482,7 @@ def validate_catalog(cat: Catalog, raw: Optional[Dict[str, List[Dict[str, Any]]]
     Pass `raw` (from `load_raw`) to also catch unknown keys and repeated ids, which the
     dataclasses cannot carry; `check_catalog` does this for you.
     """
-    problems = _category_problems(cat) + _profile_problems(cat)
+    problems = _category_problems(cat) + _profile_problems(cat) + registry_read_problems()
     if raw is not None:
         problems += _raw_problems(raw)
     for rule in cat.rules.values():

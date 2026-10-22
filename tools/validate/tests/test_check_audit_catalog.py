@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[3]
@@ -41,7 +42,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # (catalog_code.known_code_rules), and the modules those need. Nothing that pulls
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
-                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "rules.py",
+                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py", "rules.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
@@ -199,4 +200,35 @@ def test_undeclared_conditional_read_fails(tmp_path):
     res = _run(root)
     assert res.returncode == 1, res.stdout
     assert "A5: reads 'ai_instructions' (via code:spotter_readiness)" in res.stdout
+    assert "Traceback" not in res.stderr
+
+
+# The fix-round-2 mutations: each must FAIL the gate (the static read check), not just a
+# behaviour test. (a) a field reading Set rows only on a branch no example reaches;
+# (b) H4's field counting every dependents row, declared {dependents} only; (c) a scope
+# missing from SCOPE_USES.
+@pytest.mark.parametrize("rel,old,new,expect", [
+    ("engine/fields.py",
+     "        table = ctx.tables.get(mt.get(\"fqn\", \"\"))\n        if not table:\n",
+     "        table = ctx.tables.get(mt.get(\"fqn\", \"\"))\n        if not table:\n"
+     "            _ = [d for d in ctx.dependents.get(item.get(\"guid\"), [])"
+     " if d.get(\"type\") == \"SET\"]\n",
+     "derived field '@owning_table_has_rls' reads 'dependents'"),
+    ("engine/fields_human.py",
+     "@register(\"dependent_count\", uses={\"dependents\", \"sets\"})",
+     "@register(\"dependent_count\", uses={\"dependents\"})",
+     "derived field '@dependent_count' reads 'sets'"),
+    ("engine/scopes.py",
+     "    \"set\": frozenset({\"dependents\", \"sets\"}),\n", "",
+     "scope 'set' is not in SCOPE_USES"),
+])
+def test_read_declaration_mutations_fail_the_gate(tmp_path, rel, old, new, expect):
+    root = _copy_repo(tmp_path)
+    path = root / AUDIT_REL / rel
+    text = path.read_text()
+    assert text.count(old) == 1, old
+    path.write_text(text.replace(old, new))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert expect in res.stdout, res.stdout
     assert "Traceback" not in res.stderr

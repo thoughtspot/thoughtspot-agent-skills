@@ -58,7 +58,7 @@ def test_gate_fires_for_h4_without_dependents():
 
 def test_uses_covers_a_read_as_well_as_requires():
     def h4_uses_dependents(rules):
-        rules["H4"].update(requires=["model_tml"], uses=["dependents"])
+        rules["H4"].update(requires=["model_tml"], uses=["dependents", "sets"])
     assert _shipped_with(h4_uses_dependents) == []
 
 
@@ -111,7 +111,7 @@ def test_every_registered_field_and_code_rule_declares_its_uses():
     assert set(code_rules.CODE_USES) == set(code_rules.REGISTRY)
     for declared in list(fields.FIELD_USES.values()) + list(code_rules.CODE_USES.values()):
         assert set(declared) <= set(CONDITIONAL_DATA)
-    assert set(scopes.SCOPE_USES) <= set(scopes.ITERATORS)
+    assert set(scopes.SCOPE_USES) == set(scopes.ITERATORS)
 
 
 def test_register_requires_a_uses_declaration():
@@ -152,9 +152,11 @@ def _examples():
 
 @pytest.mark.parametrize("rule_id,example", list(_examples()))
 def test_a_rule_touches_no_conditional_data_it_does_not_declare(rule_id, example):
-    """The registries' declarations, checked against what each rule's examples read:
-    a field or code rule that reads conditional data its registration omits fails here
-    even though the gate (which trusts the registration) passes."""
+    """Second layer behind the static check (catalog_reads.py): the context attributes
+    a rule's examples actually read when run must be within its `requires ∪ uses` and
+    within what its registrations declare. It sees only the paths those two examples
+    execute, and only context attributes — never `sets`, which lives inside
+    `dependents` — so a branch-only or Set-only read is the static check's to catch."""
     cat = load_catalog()
     rule = cat.rules[rule_id]
     ctx = _Recording(getattr(fx, example["fixture"])())
@@ -162,3 +164,75 @@ def test_a_rule_touches_no_conditional_data_it_does_not_declare(rule_id, example
     touched = ctx.read & set(CONDITIONAL_DATA)
     assert touched <= set(rule.requires) | set(rule.uses), (rule_id, touched)
     assert touched <= set(data_reads(rule)), (rule_id, touched, data_reads(rule))
+
+
+# ── the static check of the registrations (catalog_reads.py) ────────────────
+
+from types import SimpleNamespace
+
+from ts_cli.audit.catalog_reads import registry_read_problems, static_reads
+
+
+def test_shipped_registrations_declare_every_static_read():
+    assert registry_read_problems() == []
+
+
+def _branch_only(item, ctx):
+    if item.get("never"):
+        return len(ctx.answers)
+    return 0
+
+
+def _helper(ctx):
+    return [d for rows in ctx.dependents.values() for d in rows]
+
+
+def _via_helper(item, ctx):
+    return _helper(ctx)
+
+
+def _via_field_name(item, ctx):
+    return fields.get(item, "@is_coached", ctx)
+
+
+def _via_scope_name(item, ctx):
+    return list(scopes.iterate(ctx, "answer.formula", parent=item))
+
+
+@pytest.mark.parametrize("fn,expected", [
+    (_branch_only, {"answers"}),
+    (_via_helper, {"dependents", "sets"}),          # dependents always implies sets
+    (_via_field_name, {"ai_instructions"}),
+    (_via_scope_name, {"answers"}),
+    (lambda item, ctx: item, set()),
+])
+def test_static_reads_follow_branches_helpers_fields_and_scopes(fn, expected):
+    assert set(static_reads([fn])) == expected
+
+
+def test_a_field_reading_undeclared_data_fails_the_gate(monkeypatch):
+    monkeypatch.setitem(fields.FIELDS, "t11_reads", _branch_only)
+    monkeypatch.setitem(fields.FIELD_USES, "t11_reads", frozenset())
+    problems = registry_read_problems()
+    assert problems == ["engine: derived field '@t11_reads' reads 'answers' (ctx.answers in "
+                        "_branch_only) but does not register it — add it to its uses"]
+
+
+def test_a_dependents_reader_must_declare_sets(monkeypatch):
+    monkeypatch.setitem(code_rules.REGISTRY, "t11_deps", _via_helper)
+    monkeypatch.setitem(code_rules.CODE_USES, "t11_deps", frozenset({"dependents"}))
+    [p] = registry_read_problems()
+    assert "code rule 't11_deps' reads 'sets'" in p
+
+
+def test_an_unregistered_scope_fails_closed(monkeypatch):
+    monkeypatch.delitem(scopes.SCOPE_USES, "set")
+    assert any("scope 'set' is not in SCOPE_USES" in p for p in registry_read_problems())
+    problems = _shipped_with(lambda rules: None)
+    assert any("H5" in p and "scope 'set' is not registered" in p for p in problems)
+
+
+def test_a_scope_reading_undeclared_data_fails(monkeypatch):
+    monkeypatch.setitem(scopes.SCOPE_USES, "answer", frozenset())
+    problems = registry_read_problems()
+    assert any("scope 'answer' reads 'answers'" in p for p in problems)

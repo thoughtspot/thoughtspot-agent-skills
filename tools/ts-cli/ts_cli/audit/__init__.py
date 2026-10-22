@@ -306,8 +306,8 @@ def _build_overlaps_from_ctx(models: list) -> list:
 
 
 def data_needs(angles: list, profiles: Optional[list] = None) -> set:
-    """What `build_context` must fetch for `angles`: the `requires` of the catalog rules
-    those categories select that are active under any of `profiles` (default: every
+    """What `build_context` must fetch for `angles`: `requires ∪ uses` of the catalog
+    rules those categories select that are active under any of `profiles` (default: every
     catalog profile — what a snapshot, replayable under either, captures). An angle the
     catalog does not know selects nothing, as it runs nothing."""
     from ts_cli.audit.catalog_model import load_catalog

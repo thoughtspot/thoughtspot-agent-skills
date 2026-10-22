@@ -64,7 +64,8 @@ Imports — read before adding one. The catalog gate (tools/validate/check_audit
 imports this module to learn the registered names, under the system Python 3.9 with
 only PyYAML, without executing the `ts_cli` package __init__ (typer, requests). So a
 module-level import here must stay within: catalog_model, catalog_validate (and
-catalog_expr, catalog_code, catalog_forms, catalog_uses, which it imports), rules,
+catalog_expr, catalog_code, catalog_forms, catalog_uses, catalog_reads, which it
+imports), rules,
 findings, and
 engine.{fields (and fields_data / fields_human, which it imports), scopes, predicates,
 messages, bands} — and code_rules_human, imported at the end of this module, holds to

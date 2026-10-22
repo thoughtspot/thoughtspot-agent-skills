@@ -50,9 +50,12 @@ SCOPES = [
     "join", "table", "table.rls_rule", "rls_column_ref",
     "answer", "answer.table_ref", "answer.formula", "set", "metadata",
 ]
-# Data an audit fetches only when a selected rule declares it (`requires` or `uses`):
-# what a derived field, code rule or scope registers it reads. Model and Table TML and
-# metadata are fetched for every audit, so nothing declares them for fetching.
+# The data a derived field, code rule or scope registers it reads, and the only values
+# `uses:` takes. AI instructions, Answer TML and Sets are fetched only when a selected
+# rule declares them (needs = requires ∪ uses, engine.run.needs_for); dependents are
+# fetched for every audit today but are declared all the same, because Set discovery
+# writes into them. Model and Table TML and metadata are fetched for every audit and
+# are never declared for fetching.
 CONDITIONAL_DATA = ["dependents", "ai_instructions", "answers", "sets"]
 # Child scope -> the scope its items belong to. Scopes not listed are top level.
 PARENT_SCOPE = {

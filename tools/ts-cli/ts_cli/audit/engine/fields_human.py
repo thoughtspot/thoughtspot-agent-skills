@@ -85,7 +85,9 @@ def _referenced_by_formula(item: dict, ctx: Any) -> bool:
 
 # ── H4 / H5: dependents ─────────────────────────────────────────────────────
 
-@register("dependent_count", uses={"dependents"})
+# Declares `sets` too: it reads `ctx.dependents`, which Set discovery writes SET rows
+# into. It filters them out (R15), but no static check can prove that (catalog_reads.py).
+@register("dependent_count", uses={"dependents", "sets"})
 def _dependent_count(item: dict, ctx: Any) -> int:
     """Model: how many `ctx.dependents` rows under its guid are not Sets. A Set is a
     column on the Model, so whatever uses it is already a Model dependent: a SET row

@@ -244,11 +244,12 @@ def build_context(
     """Fetch what an audit reads for `model_guids`.
 
     Model TML (with associated Table TML), metadata and dependents are always fetched.
-    The optional data is fetched only when it is in `needs` — the `requires` values of
-    the rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers`
-    (Answer TML of the dependents' Answers) and `sets` (Set discovery and each Set's
-    consumers). Anything that is not a `requires` value — a category letter from a
-    caller still passing angles — is rejected, not silently ignored.
+    The optional data is fetched only when it is in `needs` — `requires ∪ uses` of the
+    rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers` (Answer
+    TML of the dependents' Answers) and `sets` (Set discovery and each Set's consumers).
+    `dependents` may be in `needs` but is fetched regardless. Anything that is not a
+    `requires` value — a category letter from a caller still passing angles — is
+    rejected, not silently ignored.
     """
     needs = set(needs)
     unknown = sorted(needs - set(REQUIRES))

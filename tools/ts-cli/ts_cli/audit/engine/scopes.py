@@ -157,11 +157,19 @@ _CHILDREN: Dict[str, Callable[[Item, Any], Iterator[Item]]] = {
     "answer.formula": lambda p, ctx: _answer_formulas(p),
 }
 ITERATORS = {**_TOP, **_CHILDREN}
-# Top-level scope -> the conditional data (catalog_expr.CONDITIONAL_DATA) iterating it
-# reads; its child scopes read the same. A Set's rows come from Model/Table dependents
-# and from Set discovery. Read by the catalog gate (catalog_uses.py).
+# Scope -> the conditional data (catalog_expr.CONDITIONAL_DATA) iterating it reads; a
+# child scope includes its parent's, whose items it is reached through. Every scope in
+# ITERATORS is listed — the catalog gate fails one that is not (fail closed), and checks
+# each entry against the iterator's code (catalog_reads.py). A Set's rows come from
+# `ctx.dependents`, which Set discovery writes into, so "set" reads both.
+_NONE: frozenset = frozenset()
 SCOPE_USES: Dict[str, frozenset] = {
-    "answer": frozenset({"answers"}),
+    "model": _NONE, "model.column": _NONE, "model.formula": _NONE, "model.filter": _NONE,
+    "model.table": _NONE, "join": _NONE,
+    "table": _NONE, "table.rls_rule": _NONE, "rls_column_ref": _NONE,
+    "metadata": _NONE,
+    "answer": frozenset({"answers"}), "answer.table_ref": frozenset({"answers"}),
+    "answer.formula": frozenset({"answers"}),
     "set": frozenset({"dependents", "sets"}),
 }
 

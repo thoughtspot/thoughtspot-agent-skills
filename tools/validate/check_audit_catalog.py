@@ -8,7 +8,9 @@ operator, scope or category id would simply never match, and the rule would repo
 nothing on every Model forever. This gate makes those mistakes fail the commit:
 unknown keys, unknown scopes/modes/operators/data requirements/categories/profiles,
 conditional data a rule reads (its scope, derived fields or code, as their registries
-declare) that its `requires`/`uses` do not declare — it would silently not be fetched,
+declare) that its `requires`/`uses` do not declare — it would silently not be fetched —
+and a registered field, code rule or scope whose code reads conditional data its
+registration omits (a static scan of the compiled code; limits in catalog_reads.py),
 code-rule names that nothing registers, duplicate ids, a profile override of a key that
 defines what a rule means, band levels not ordered worst first, and an active rule
 without a `fires` and a `silent` example.
@@ -17,7 +19,7 @@ The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementa
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
 
 It imports the catalog modules (catalog_model, catalog_validate, catalog_expr,
-catalog_code, catalog_forms, catalog_uses) and, to learn the names rules may use, two engine registries:
+catalog_code, catalog_forms, catalog_uses, catalog_reads) and, to learn the names rules may use, two engine registries:
 derived fields (engine/fields.py and the engine/fields_data.py and
 engine/fields_human.py it imports, which need only audit/rules.py) and code rules
 (engine/code_rules.py and the engine/code_rules_human.py it imports, which need
