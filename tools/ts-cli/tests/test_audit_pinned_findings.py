@@ -34,7 +34,8 @@ under a profile, a builder reshaped — fails here until the pin moves with it:
 It rewrites only the named entries from the CURRENT catalog (a rule not active under a
 profile pins to [] there), deterministically, and prints the before/after of every
 entry it changes. Nothing leaves the pin silently: a rule leaves the frozen set only
-through `--drop-rule <id>`, a stale input only through `--drop-input <name>`, each
+through `--drop-rule <id>` (refused while the rule is active under any profile: retire
+it first), a stale input only through `--drop-input <name>`, each
 printing every entry it removes, and the write refuses any entry outside the file's
 frozen sets. The gzip shows in a PR only as
 "Binary files differ", so that printed diff is the review artefact: paste it into the
@@ -45,10 +46,13 @@ LEGACY_RAISES / ENGINE_RAISES below in the same change.
 """
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 import audit_pinned as ap
 from audit_run_rule import catalog, findings_by_rule
+from ts_cli.audit.engine.run import selected_rules
 from ts_cli.audit.equivalence import compare_findings
 
 CATEGORIES = ["A", "D", "H", "P", "S"]
@@ -160,7 +164,9 @@ def test_the_rules_the_snapshot_never_exercises_are_pinned_firing(profile):
     (each one still active under the profile)."""
     unexercised = ["D4", "D5", "D9", "H9", "P1", "P4", "P13", "P14", "P15", "S4", "S5",
                    "S9", "S10"]
-    active = {r for c in CATEGORIES for r in ap.active_pinned_rules(c, profile)}
+    # Effective status only, never pin membership: a rule dropped from the pin while
+    # still active must fail here, not be exempted (12b re-review N5).
+    active = {r.id for r in selected_rules(catalog(), CATEGORIES, profile)}
     counts = {r: 0 for r in unexercised if r in active}
     for profiles in _pinned()["findings"].values():
         for rule_id in counts:
@@ -425,8 +431,25 @@ def test_repin_rewrites_only_the_named_entries(pin_copy, monkeypatch, capsys):
     assert pin_copy.read_bytes() == original
 
 
-def test_drop_rule_is_the_only_way_out_and_prints_every_entry(pin_copy, capsys):
+def test_drop_rule_refuses_a_rule_still_active_under_a_profile(pin_copy, capsys, monkeypatch):
+    """Every legitimate change to an active rule is a re-pin; dropping one would take
+    it out of the regression net. Retire it in the catalog first (12b re-review N5)."""
     import repin_findings
+    active = copy.deepcopy(catalog().rules["D5"])
+    active.status, active.profiles = "active", {}
+    monkeypatch.setitem(catalog().rules, "D5", active)   # whatever the catalog says today
+    original = pin_copy.read_bytes()
+    assert repin_findings.main(["--drop-rule", "D5"]) == 1
+    assert "D5 is still active under spotter, general: retire it first" in \
+        capsys.readouterr().err
+    assert pin_copy.read_bytes() == original
+
+
+def test_drop_rule_is_the_only_way_out_and_prints_every_entry(pin_copy, capsys, monkeypatch):
+    import repin_findings
+    retired = copy.deepcopy(catalog().rules["D3"])
+    retired.status = "retired"
+    monkeypatch.setitem(catalog().rules, "D3", retired)   # retired in the catalog first
     before = ap.load()
     d3 = {k: v for k, v in _pinned_entries(before).items() if k[2] == "D3"}
     assert repin_findings.main(["--drop-rule", "D3"]) == 0

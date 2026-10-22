@@ -18,7 +18,8 @@ the one (rule, input) pair for both. A rule that is not active under a profile p
 to [] for that profile. Naming a committed input the pin does not have yet adds it.
 
 Nothing else changes, and nothing leaves the pin silently: a rule leaves the frozen set
-only through `--drop-rule`, an input only through `--drop-input`, and each prints every
+only through `--drop-rule` (refused while the rule is active under any profile: retire
+it first), an input only through `--drop-input`, and each prints every
 entry it removes. The file is rewritten deterministically (canonical order, gzip
 mtime 0), and the write refuses any entry outside the file's own frozen sets.
 
@@ -86,6 +87,7 @@ def _validate(args, doc: dict, inputs: dict) -> list:
                for r in (args.rule or []) if r not in rules]
     errors += [f"--drop-rule '{r}' is not pinned" for r in (args.drop_rule or [])
                if r not in rules]
+    errors += _still_active(args.drop_rule or [], rules)
     errors += [f"--drop-input '{n}' is not pinned" for n in (args.drop_input or [])
                if n not in pinned_inputs]
     errors += [f"--drop-input '{n}' is still a committed input: remove its builder first"
@@ -93,6 +95,23 @@ def _validate(args, doc: dict, inputs: dict) -> list:
     if not (args.rule or args.input or args.drop_rule or args.drop_input):
         errors.append("name at least one --rule, --input, --drop-rule or --drop-input")
     return errors
+
+
+def _still_active(drop_rules: list, pinned: set) -> list:
+    """A pinned rule may leave the pin only once it is active under no profile: every
+    legitimate change to an active rule is a re-pin, and a retired rule pins to [] at
+    no cost — so dropping an active one would only take it out of the regression net."""
+    from audit_run_rule import catalog
+    from ts_cli.audit.engine.run import selected_rules
+    out = []
+    for rule_id in (r for r in drop_rules if r in pinned):
+        rule = catalog().rules.get(rule_id)
+        profiles = [p for p in ap.PROFILES if rule is not None and any(
+            r.id == rule_id for r in selected_rules(catalog(), rule.categories, p))]
+        if profiles:
+            out.append(f"--drop-rule: {rule_id} is still active under {', '.join(profiles)}: "
+                       "retire it first (status: retired, at base or per profile)")
+    return out
 
 
 def _drop(doc: dict, args) -> int:

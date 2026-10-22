@@ -287,7 +287,8 @@ rule engine (`ts_cli/audit/engine/`) — a check is a YAML rule, not a function.
    rewrites — paste that into the PR, since the gzip diff is unreadable. The frozen rule
    set is the pin file's own `rules` list (mirrored by `PINNED_RULE_IDS` in
    `tests/audit_pinned.py`; a test fails if they differ): a rule leaves it only through
-   `--drop-rule <id>`, a removed input only through `--drop-input <name>`, each printing
+   `--drop-rule <id>`, which refuses a rule still active under any profile (retire it
+   first), a removed input only through `--drop-input <name>`, each printing
    every entry it removes. A NEW rule is not pinned; its `fires`/`silent` examples are
    its regression net.
 5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
