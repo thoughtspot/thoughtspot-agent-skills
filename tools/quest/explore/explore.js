@@ -729,8 +729,23 @@
         try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
         // Beside the step the game waits on, the page says how to talk to it.
+        const hint = o => (o.type === "throne" && o.look ? S("explore_near_petitioner") : S("explore_near_step"));
         world.near = undefined; await wait(80);
-        if (!$("toast").textContent.includes(S("explore_near_step").replace(/ to talk\.$/, ""))) throw new Error(`beside the step, no hint (${$("toast").textContent})`);
+        if ($("toast").textContent !== hint(first)) throw new Error(`beside the step, not its hint (${$("toast").textContent})`);
+        for (const o of world.objects.filter(x => x.type === "throne" && x.look))      // a petitioner is drawn, not the throne
+          if (o.sprite.frame.name !== FRAMES.npcs[o.look]) throw new Error(`the petitioner ${o.look} isn't drawn`);
+        // Beside a step the game doesn't wait on yet, no hint (only where one can be stood beside alone).
+        for (const o of world.objects.filter(x => x.step && x.step !== machine.expected(state))) {
+          const tx = Math.floor(o.x / TILE), ty = Math.floor(o.y / TILE);
+          const spot = [[0, 1], [0, -1], [1, 0], [-1, 0]].map(([dx, dy]) => [tx + dx, ty + dy]).find(([x, y]) => x > 0 && y > 0 && x < world.doc.width && y < world.doc.height && !blockedTile(x, y));
+          if (!spot) continue;
+          world.player.setPosition(spot[0] * TILE + TILE / 2, spot[1] * TILE + TILE / 2); world.facing = [tx - spot[0], ty - spot[1]];
+          if (world.nearby() !== o) continue;
+          world.near = undefined; await wait(80);
+          if ([S("explore_near_step"), S("explore_near_petitioner")].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
+          break;
+        }
+        world.player.setPosition(first.x - 14, first.y); world.near = undefined; await wait(80);
         // A question in a realm offers the way back to the realm (Esc) and out to the world map.
         talk(world.nearby());
         if ($("leave").hidden || $("close").textContent !== S("explore_close_realm")) throw new Error("a realm's dialog doesn't offer the way back and out");
@@ -739,7 +754,9 @@
           throw new Error("the dialog doesn't show who you talk to, or shows the classic page's art");
         $("leave").click();
         await until(() => world && world.mapId === "overworld");
-        if (dialog.open || state.screen !== "map") throw new Error("leaving for the world map left a dialog or a realm open");
+        try { await until(() => !world.frozen); } catch {}
+        if (dialog.open || state.screen !== "map" || world.frozen || !world.input.keyboard.enabled || document.activeElement !== $("world"))
+          throw new Error(`leaving for the world map didn't hand back the map (open ${dialog.open}, screen ${state.screen}, frozen ${world.frozen}, keys ${world.input.keyboard.enabled})`);
         const door = world.objects.find(o => o.type === "portal" && o.to === realmId);
         if (Math.abs(world.player.x - door.x) + Math.abs(world.player.y - door.y) > TILE + 0.5) throw new Error("leaving didn't put the player beside the realm's door");
         talk(door);
@@ -773,8 +790,9 @@
       const push = async (obj, axis, dir) => {
         const [k, code] = ARROWS[axis === "x" ? (dir > 0 ? "right" : "left") : (dir > 0 ? "down" : "up")];
         key("keydown", k, code); await wait(500); key("keyup", k, code); await wait(30);
-        const reach = Math.abs((axis === "x" ? world.player.x : world.player.y) - (axis === "x" ? obj.x : obj.y));
-        if (reach < TILE / 2 + 6 - 0.5) throw new Error(`walked into the ${obj.type || "gate"} (${reach.toFixed(1)}px from its centre)`);
+        // still on the near side, a body's half-width short of it: not into it, and not through it
+        const short = -((axis === "x" ? world.player.x : world.player.y) - (axis === "x" ? obj.x : obj.y)) * dir;
+        if (short < TILE / 2 + 6 - 0.5) throw new Error(`walked into the ${obj.type || "gate"} (${short.toFixed(1)}px short of its centre)`);
       };
       const pushed = new Set();
       const pushGates = async () => {
@@ -798,6 +816,7 @@
         await push(someone, Math.abs(dx) > Math.abs(dy) ? "x" : "y", Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : Math.sign(dy));
       }
       const chest = world.objects.find(o => o.type === "reward");
+      const gateCount = world.gates.length;
       const steps = [];
       let decreeSeen = false;
       for (let n = 0; n < 50; n++) {
@@ -831,6 +850,7 @@
         }
         if (state.screen === "map" || world.mapId === "overworld") break;
       }
+      if (pushed.size !== gateCount) throw new Error(`only ${pushed.size} of ${gateCount} gates were ever pushed against while shut`);
       // Nothing came from anywhere but this site.
       for (const e of performance.getEntriesByType("resource"))
         if (!e.name.startsWith(location.origin + "/") && !/^(data|blob):/.test(e.name)) log(`ERROR outside request ${e.name}`);
@@ -851,6 +871,10 @@
       dispatch({ type: "enter" });
       await until(() => world && world.mapId === realmId);
       wallsLook(true);
+      for (const g of world.gates) {         // open now: standing in the doorway, no word of a lock
+        world.player.setPosition(g.x, g.y); world.near = undefined; await wait(80);
+        if (g.body.enable || world.shutGate() || $("toast").textContent === S("explore_gate_locked")) throw new Error("an open gate still says it is locked");
+      }
       await playFun();
       const exit = world.objects.find(o => o.type === "exit");
       await walk(exit); talk(world.nearby());

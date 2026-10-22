@@ -3166,6 +3166,7 @@ GOOD_LAW_SMOKE = ["MAP overworld", "MAP law", "DECREE law", "MAP overworld",
     (lambda log: log[:-2] + [log[-2].replace("foe[gates:0]", "foe[gates:1]"), log[-1]], "at west_sales:foe gate 1 is shut"),
     (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler[gates:0]"), log[-1]], "at west_sales:compiler gate 1 is open"),
     (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler"), log[-1]], "the page logged 0 gates, the map has 1"),
+    (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler[gates:x]"), log[-1]], "gate 1 is drawn but not solid"),
     (lambda log: log[:-2] + [log[-2].replace('{"done":true,"best":0}', "null"), log[-1]], "was not saved as finished"),
 ])
 def test_the_explore_smoke_reads_the_page_log(edit, needle):
@@ -3982,25 +3983,35 @@ def test_every_law_hall_has_a_petitioner_and_elder_wren_points_the_way():
         assert realm in said, realm
 
 
-def test_a_barrel_in_the_wall_is_a_way_round_a_gate(tmp_path):
-    # rolled right, the barrel leaves a hole beside the gate into the foe's room, open to the reward
-    errors = _fun_cave(tmp_path, {"b": ("barrel", {"roll": "right"})}, _rows((8, 1, "b"), (10, 3, ".")))
-    assert any("guards nothing" in e for e in errors), errors
+@pytest.mark.parametrize("edits,roll,round_it", [
+    # rolled down into a niche, the barrel frees a hole in the wall: a way round the gate to the reward
+    ([(8, 1, "b"), (8, 2, "."), (10, 3, ".")], "down", True),
+    # rolled right, it lands on the hole's only way on: still no way round
+    ([(8, 1, "b"), (10, 3, ".")], "right", False),
+])
+def test_a_barrel_is_rolled_when_judging_a_gate(tmp_path, edits, roll, round_it):
+    errors = _fun_cave(tmp_path, {"b": ("barrel", {"roll": roll})}, _rows(*edits))
+    assert any("guards nothing" in e for e in errors) == round_it, errors
 
 
 @pytest.mark.parametrize("gates,needle", [
     # two doors into one room, opening after the same step: each matters while both are shut
     ([("the_rune:compiler", [(8, 3)]), ("the_rune:compiler", [(8, 1)])], None),
+    # a second way in through a gate that opens later (after the foe): the first still matters
+    ([("the_rune:compiler", [(8, 3)]), ("the_rune:foe", [(8, 1)])], None),
+    # the same second way, always open: the first guards nothing
+    ([("the_rune:compiler", [(8, 3)])], "guards nothing"),
 ])
 def test_gates_are_judged_in_the_order_of_play(tmp_path, gates, needle):
-    rows = ["############", "#S.M.G.....#", "#.......#F.#", "#.C.......##", "#X......#R.#", "############"]
+    # the foe's room has a second doorway at (8, 1), and is open on to the reward's
+    rows = ["############", "#S.M.G.....#", "#.......#F.#", "#.C........#", "#X......#R.#", "############"]
     pack, data = _explorable(tmp_path, cave=_tmj(rows, CAVE_OBJECTS, gates))
     errors = MAPS.check_maps(pack.dir, data)
     assert (errors == []) if needle is None else any(needle in e for e in errors), errors
 
 
 def test_a_law_gate_off_its_doorway_guards_nothing(tmp_path):
-    # the second gate moved into the room before its doorway: the third room is open from the start
+    # the second gate moved into the room before its doorway: the third room opens after hall 1, not hall 2
     law = json.loads((PACK_DIR / "maps/law.tmj").read_text(encoding="utf-8"))
     gates = sorted((o for o in law["layers"][-1]["objects"] if o["type"] == "gate"), key=lambda o: o["x"])
     gates[1]["x"] = 8 * TILE
@@ -4008,4 +4019,4 @@ def test_a_law_gate_off_its_doorway_guards_nothing(tmp_path):
     pack = tmp_path / "pack"
     shutil.copytree(PACK_DIR, pack)
     (pack / "maps/law.tmj").write_text(json.dumps(law), encoding="utf-8")
-    assert any("guards nothing" in e for e in MAPS.check_maps(pack, data))
+    assert any(f"object {gates[1]['id']} (gate): guards nothing" in e for e in MAPS.check_maps(pack, data))

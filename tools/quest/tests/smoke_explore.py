@@ -2,7 +2,7 @@
 serve it, open explore/#smoke=<realm> and read the page's log. The run must show the realm locked
 for a fresh player (when the pack's unlock rule asks it), load its map, talk to every step's object
 in order with each gate drawn and solid exactly until its own steps are done (and pushed against
-as soon as it can be reached), a realm of halls's decree shown, kept by Esc and shown again, and
+as soon as it can be reached), the decree of a realm of halls shown, kept by Esc and shown again, and
 the realm saved as finished.
 
 pytest runs it wherever Chrome is installed (GitHub's ubuntu-latest has it; CI fails without it).

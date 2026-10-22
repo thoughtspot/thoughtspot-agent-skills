@@ -221,9 +221,10 @@ explore page would read differently from the check:
   object; the exit must be reachable from the start. A gate that only opens after a step behind it,
   or a first step behind a gate, fails, and so does a gate that guards nothing:
   at some point of play while it is shut, opening it alone must let the player reach an object
-  they couldn't (a gate off its doorway, or a wall with a way round it, even past a barrel, would
-  not). Objects are solid; reaching one means standing on a walkable tile next
-  to it.
+  they couldn't (a gate off its doorway, or a wall with a way round it, would not). Here a barrel
+  is played: rolled once it can be reached, it frees its tile (unless a hoard is under it) and
+  blocks the one it lands on. Objects are solid; reaching one means standing on a walkable tile
+  next to it.
 - **No Tiled templates,** which the explore page doesn't resolve.
 
 `Quest.machine` accepts `interact {step}` only for the step the current screen waits on
@@ -307,8 +308,11 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
   explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
-  map loads, every step talked to in order, each gate shut exactly until its own steps are done, the decree of a realm of halls shown, kept by Esc and shown again, the
-  realm saved, Enter on a link left alone, no request outside the site, and the fun and the people
+  map loads, every step talked to in order, each gate drawn and solid exactly until its own steps
+  are done and pushed against while shut, the locked and talk hints only where they belong, a
+  petitioner drawn for each throne with a look, the dialog's portrait (and no ASCII art), "Leave
+  for the world map" handing back the map beside the realm's door, the decree of a realm of halls
+  shown, kept by Esc and shown again, the realm saved, Enter on a link left alone, no request outside the site, and the fun and the people
   (all with page-script events, not the browser's own input). pytest runs it wherever
   Chrome is installed, CI included. The scripted play writes saves, so it runs only on a local
   server (`127.0.0.1` or `localhost`). Touch, screen reader and cross-browser checks are a manual

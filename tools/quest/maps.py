@@ -27,8 +27,10 @@ next to it (up, down, left or right). The game plays a realm's steps in one orde
 which tests pin to Quest.machine's expected()), so the check walks that order: before each step,
 a flood-fill from the spawn with only the gates whose required steps are all done open must reach
 that step's object. The exit must be reachable from the start, so a player can always leave.
-Every gate must guard something: shut alone, with every other gate open, it cuts some object off
-(a gate beside its doorway, or a wall with a hole, would not).
+Every gate must guard something: at some point of play while it is shut, opening it alone must
+let the player reach an object they couldn't (a gate off its doorway, or a wall with a way round
+it, would not). Barrels are played: rolled once reachable, freeing their tile unless a hoard is
+under it, and blocking the tile they land on.
 """
 from __future__ import annotations
 
@@ -339,21 +341,33 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
             break       # every later step waits on this one
         done.add(s)
     # A gate guards something: at some point of play while it is shut, opening it alone lets the
-    # player reach an object they can't reach with it shut. Barrels and hoards count as open floor
-    # here (either tile may be free in play), the opposite of the must-reach walks above.
+    # player reach an object they can't reach with it shut. Barrels are played, not assumed: each
+    # stands where it is until the player can reach it, then may be rolled (its tile frees unless a
+    # hoard is under it, which is solid; the tile it lands on blocks), and the walk counts every
+    # tile seen in any of those states.
     if not errors:
         objs = [o for o in m.objects if o["type"] not in ("spawn", "gate")]
-        loose = {o["tile"] for o in objs if o["type"] not in ("barrel", "hoard")}
+        barrels = m.of("barrel")
+        fixed = {o["tile"] for o in objs if o["type"] != "barrel"}      # people, chests, hoards...
 
         def seen_with(done: set[str], also: dict | None = None) -> set[int]:
-            blocked = m.wall | loose | {t for g, needs in gates if g is not also and not set(needs) <= done for t in g["rect"]}
-            seen, todo = {start}, [start]
-            while todo:
-                for n in _near(todo.pop()):
-                    if m.inside(n) and n not in seen and n not in blocked:
-                        seen.add(n)
-                        todo.append(n)
-            return {i for i, o in enumerate(objs) if any(n in seen for n in _near(o["tile"]))}
+            shut = {t for g, needs in gates if g is not also and not set(needs) <= done for t in g["rect"]}
+            rolled_now: list[dict] = []
+            seen_all: set[tuple[int, int]] = set()
+            while True:
+                blocked = m.wall | fixed | shut | {b["tile"] for b in barrels if b not in rolled_now} | {rolled(b) for b in rolled_now}
+                seen, todo = {start}, [start]
+                while todo:
+                    for n in _near(todo.pop()):
+                        if m.inside(n) and n not in seen and n not in blocked:
+                            seen.add(n)
+                            todo.append(n)
+                seen_all |= seen
+                more = [b for b in barrels if b not in rolled_now and any(n in seen for n in _near(b["tile"]))]
+                if not more:
+                    break
+                rolled_now += more
+            return {i for i, o in enumerate(objs) if any(n in seen_all for n in _near(o["tile"]))}
 
         points = [set((steps or [])[:i]) for i in range(len(steps or []) + 1)]
         for g, needs in gates:
