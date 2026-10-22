@@ -32,8 +32,15 @@ findings.py; see its docstring for what else they may import) — WITHOUT execut
 requests and the whole CLI. So it runs under any python3 with PyYAML, including the
 EOL system interpreter.
 
+With `--base <ref>` it also holds rule ids to their history (catalog_history.py): an
+id present at `<ref>` that is gone now fails (retire it instead), and so does an id
+retired at `<ref>` that is active again (a retired id is never reused). `<ref>`'s
+catalog is read with `git show`, so any local ref works offline: pre-commit passes
+`HEAD`, CI `origin/main`. A `<ref>` with no catalog yet passes with a note; one git
+cannot read fails.
+
 Usage:
-    python3 tools/validate/check_audit_catalog.py --root .
+    python3 tools/validate/check_audit_catalog.py --root . [--base origin/main]
 
 Prints `PASS  audit catalog: N rule(s), M categories`, or `FAIL` plus one line per
 problem (`<file>: <id>: <message>`) and exits 1.
@@ -42,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -65,6 +73,46 @@ def _load_validator(root: Path) -> types.ModuleType:
 
 
 SKILL_REL = Path("agents/cli/ts-audit")
+RULES_REL = AUDIT_REL / "catalog" / "rules"
+
+
+class _GitError(Exception):
+    pass
+
+
+def _git(root: Path, *args: str) -> str:
+    res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise _GitError((res.stderr or res.stdout).strip().splitlines()[-1:] or ["git failed"])
+    return res.stdout
+
+
+def _base_rules(root: Path, ref: str):
+    """`ref`'s rule files as `{"rules/<name>": [entries]}`; None when it has none."""
+    import yaml
+    _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    names = [n for n in _git(root, "ls-tree", "--name-only", ref, f"{RULES_REL}/").split()
+             if n.endswith(".yaml")]
+    if not names:
+        return None
+    return {f"rules/{Path(n).name}": yaml.safe_load(_git(root, "show", f"{ref}:{n}")) or []
+            for n in names}
+
+
+def _history(root: Path, ref: str) -> tuple:
+    """(problems, note) for rule ids against `ref`."""
+    history = importlib.import_module("ts_cli.audit.catalog_history")
+    model = importlib.import_module("ts_cli.audit.catalog_model")
+    try:
+        base = _base_rules(root, ref)
+    except _GitError as exc:
+        return [f"--base {ref}: cannot read it with git ({exc})"], ""
+    if base is None:
+        return [], f"no rule catalog at {ref} — nothing to compare"
+    head = history.rule_entries(model.load_raw(root / AUDIT_REL / "catalog"))
+    old = history.rule_entries(base)
+    problems = history.history_problems(old, head, ref)
+    return problems, f"rule ids vs {ref}: {len(old)} at base, none removed or reused"
 
 
 def _doc_problems(root: Path) -> list:
@@ -79,6 +127,8 @@ def _doc_problems(root: Path) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
+    parser.add_argument("--base", default=None,
+                        help="git ref whose rule ids must survive (removed -> retired)")
     args = parser.parse_args()
     root = Path(args.root)
 
@@ -89,12 +139,18 @@ def main() -> int:
     cat, problems = validator.check_catalog(root / AUDIT_REL / "catalog")
     if not problems:
         problems = _doc_problems(root)
+    note = ""
+    if args.base and cat is not None:  # a catalog the loader could read
+        history, note = _history(root, args.base)
+        problems = problems + history
     if problems:
         print(f"FAIL  audit catalog: {len(problems)} problem(s)")
         for problem in problems:
             print(f"  {problem}")
         return 1
     print(f"PASS  audit catalog: {len(cat.rules)} rule(s), {len(cat.categories)} categories")
+    if note:
+        print(f"PASS  audit catalog: {note}")
     return 0
 
 

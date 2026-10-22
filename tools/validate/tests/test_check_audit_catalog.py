@@ -47,7 +47,7 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
-                "generate.py",
+                "generate.py", "catalog_history.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")
@@ -339,4 +339,109 @@ def test_scan_evasion_probes_fail_the_gate(tmp_path, edits, expect):
     res = _run(root)
     assert res.returncode == 1, res.stdout
     assert expect in res.stdout, res.stdout
+    assert "Traceback" not in res.stderr
+
+
+# ── rule-id history (--base <ref>) ──────────────────────────────────────────
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
+                          text=True).stdout
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    """A catalog-only repo copy with one commit, so HEAD is the base."""
+    root = _copy_repo(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", ".")
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t",
+         "commit", "-q", "-m", "base")
+    return root
+
+
+def _run_base(root: Path, ref: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPT), "--root", str(root), "--base", ref],
+                          capture_output=True, text=True)
+
+
+def _edit_rules(root: Path, name: str, edit) -> None:
+    path = root / AUDIT_REL / "catalog" / "rules" / name
+    rules = yaml.safe_load(path.read_text())
+    path.write_text(yaml.safe_dump(edit(rules), sort_keys=False, allow_unicode=True))
+
+
+def test_history_unchanged_catalog_passes(tmp_path):
+    root = _git_repo(tmp_path)
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "rule ids vs HEAD" in res.stdout
+
+
+def test_history_fails_when_a_rule_id_is_removed(tmp_path):
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != "P18"])
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "P18: removed since HEAD" in res.stdout and "status: retired" in res.stdout
+
+
+def test_history_allows_retiring_a_rule(tmp_path):
+    root = _git_repo(tmp_path)
+
+    def retire(rules):
+        for r in rules:
+            if r["id"] == "P18":
+                r["status"] = "retired"
+        return rules
+    _edit_rules(root, "perf.yaml", retire)
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 0 and "P18" not in res.stdout, res.stdout
+
+
+def test_history_fails_when_a_retired_id_reappears_as_a_rule(tmp_path):
+    root = _git_repo(tmp_path)
+
+    def reuse_h6(rules):
+        for r in rules:
+            if r["id"] == "H6":
+                r.update(status="active", title="Sets nobody can see")
+        return rules
+    _edit_rules(root, "human.yaml", reuse_h6)
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "H6: retired at HEAD and active again (was 'Duplicate sets', now 'Sets nobody " \
+           "can see')" in res.stdout
+
+
+def test_history_moving_a_rule_between_files_is_not_a_removal(tmp_path):
+    root = _git_repo(tmp_path)
+    moved = {}
+
+    def take(rules):
+        moved["P18"] = next(r for r in rules if r["id"] == "P18")
+        return [r for r in rules if r["id"] != "P18"]
+    _edit_rules(root, "perf.yaml", take)
+    _edit_rules(root, "security.yaml", lambda rules: rules + [moved["P18"]])
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 0 and "removed since" not in res.stdout, res.stdout
+
+
+def test_history_base_without_a_catalog_passes_with_a_note(tmp_path):
+    root = _git_repo(tmp_path)
+    (root / "README").write_text("x\n")
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "README")
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t",
+         "commit", "-q", "-m", "second")
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's well-known empty tree
+    orphan = _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t",
+                  "commit-tree", empty_tree, "-m", "empty").strip()
+    res = _run_base(root, orphan)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "no rule catalog at" in res.stdout
+
+
+def test_history_unknown_ref_fails(tmp_path):
+    root = _git_repo(tmp_path)
+    res = _run_base(root, "no-such-ref")
+    assert res.returncode == 1 and "cannot read" in res.stdout, res.stdout
     assert "Traceback" not in res.stderr

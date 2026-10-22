@@ -304,12 +304,18 @@ if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check
   run_check "internal imports"   "tools/validate/check_internal_imports.py --root ."
 fi
 
+audit_base=""  # the audit catalog's rule-id history base (below); none before a first commit
+git rev-parse --verify --quiet HEAD >/dev/null && audit_base=" --base HEAD"
+
 # Audit rule catalog — `ts audit`'s rules are YAML data, and a mistyped scope, operator
 # or category id fails silently (the rule just never fires). Validates the whole
 # catalog (unknown keys/vocabulary, duplicate ids, profile overrides, band order,
-# missing examples) when anything under ts_cli/audit/ or the validator changes.
+# missing examples, a stale generated check-catalog.md) when anything under ts_cli/audit/,
+# the validator or that doc changes. `--base HEAD` holds rule ids to their history
+# offline (an id in the last commit may be retired, never deleted or reused); CI checks
+# the whole branch against origin/main.
 if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py|^agents/cli/ts-audit/references/check-catalog\.md)'; then
-  run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root ."
+  run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root .$audit_base"
 fi
 
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
