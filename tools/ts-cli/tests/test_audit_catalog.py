@@ -755,3 +755,32 @@ def test_derived_placeholders_only_in_each(tmp_path):
     rule = _good_rule(message="{@is_indexed} {matched}")
     problems = _problems(tmp_path, {"ai": [rule]})
     assert any("unknown placeholder '@is_indexed'" in p for p in problems), problems
+
+
+# ── fix round 2 ──────────────────────────────────────────────────────────────
+
+def test_null_profile_override_rejected(tmp_path):
+    # The engine skips a null override, so under `general` the catalog bands would win
+    # and the profile's LOW would be silently dropped. The validator must say so.
+    rule = _each(severity="HIGH", aggregate={"mode": "each", "measure": "@join_depth"},
+                 bands={"direction": "lower_is_better", "unit": "depth",
+                        "levels": [{"op": "gt", "value": 3, "severity": "MEDIUM"}]},
+                 profiles={"general": {"bands": None, "severity": "LOW"}})
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert "rules/ai.yaml: A6: profiles.general.bands: null removes nothing — omit the " \
+           "key, or give the replacement value" in problems, problems
+    assert any("profiles.general.severity has no effect" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("key", ["status", "severity", "message", "remediation",
+                                 "legacy_threshold"])
+def test_null_profile_override_rejected_for_every_key(tmp_path, key):
+    rule = _good_rule(profiles={"general": {key: None}})
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(f"profiles.general.{key}: null removes nothing" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("message", ["{@is_indexed.x}", "{@is_indexed[0]}"])
+def test_derived_placeholder_must_be_the_whole_name(tmp_path, message):
+    problems = _problems(tmp_path, {"ai": [_each(message=message)]})
+    assert any("a derived placeholder is the whole name" in p for p in problems), problems

@@ -286,6 +286,11 @@ def _profile_override_problems(rule: Rule, cat: Catalog) -> List[str]:
             if key not in allowed:
                 out.append(f"{path}.{key} is not overridable "
                            f"(a profile may set: {_known(sorted(allowed))})")
+            elif value is None:
+                # The engine skips a null override ("removes nothing"), so accepting one
+                # would silently drop it — and mislead the per-profile checks below.
+                out.append(f"{path}.{key}: null removes nothing — omit the key, "
+                           "or give the replacement value")
             else:
                 out += _override_value_problems(key, value, f"{path}.{key}", rule)
     return out
@@ -345,8 +350,11 @@ def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
 
 
 def _profile_override(rule: Rule, pid: str) -> Dict[str, Any]:
+    """The profile's overrides as the engine applies them: a null value is skipped
+    (bands.effective — it removes nothing), so it is dropped here too."""
     override = rule.profiles.get(pid)
-    return override if isinstance(override, dict) else {}
+    return {k: v for k, v in override.items() if v is not None} \
+        if isinstance(override, dict) else {}
 
 
 def _shadowed_severity_problems(rule: Rule, cat: Catalog) -> List[str]:

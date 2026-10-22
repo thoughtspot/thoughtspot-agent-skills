@@ -676,3 +676,17 @@ def test_mode_supplies_exactly_its_declared_placeholders(mode, monkeypatch):
     components = set(rule["aggregate"].get("components", {}))
     item_reads = {"obj"} if mode == "each" else set()
     assert (supplied - components) | item_reads == MODE_PLACEHOLDERS[mode]
+
+
+def test_null_override_layer_is_ignored_and_reported():
+    # Runtime half of the catalog rule "a null override removes nothing".
+    [f] = _run(fx.model_measures_no_ai_context(), A6, layers=[{"A6": {"bands": None}}])
+    assert f.severity == "HIGH"
+    assert f.bands["provenance"]["bands"] == "catalog"
+    assert f.bands["provenance"]["ignored"] == [{"layer": "layer:2", "key": "bands"}]
+
+
+def test_derived_placeholder_with_a_path_raises_at_render():
+    item = _item({"properties": {}})
+    with pytest.raises(KeyError):
+        messages.render("{@is_indexed.x}", {"name": "C"}, item, make_context())

@@ -420,6 +420,9 @@ def placeholder_problems(template: Any, allowed: Optional[Set[str]], path: str,
             out.append(f"{path}: placeholders must be named ('{{}}' is positional)")
         elif head.startswith("@") and derived:
             out += derived_name_problems(head, path)
+            if fname != head:  # `{@name.x}` / `{@name[0]}` would raise at render time
+                out.append(f"{path}: '{{{fname}}}' — a derived placeholder is the whole "
+                           "name, with no '.' or '[' after it")
         elif allowed is not None and head not in allowed:
             out.append(f"{path}: unknown placeholder '{head}' "
                        f"(known: {_known(sorted(allowed))})")
