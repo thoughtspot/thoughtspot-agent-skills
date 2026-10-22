@@ -283,8 +283,8 @@ under each profile.
 
 | Gate | Run | Fails on |
 |---|---|---|
-| Catalog validator | `python3 tools/validate/check_audit_catalog.py --root .` (pre-commit, CI) | unknown keys or vocabulary, wrong operand types, a mode without its required keys, a severity the mode cannot produce, a non-overridable override, bands out of order, an active rule without `fires` and `silent` examples, undeclared data reads, `by_severity` gaps, a stale generated doc, prose (title, description, remediation, message text) naming an engine identifier (`@field`, `code:<name>`, `engine/…`) |
-| Rule-id history | the same script with `--base origin/main` (CI) or `--merge-base-with origin/main` (pre-commit) | an id removed since the base (retire it instead), or an id retired under every profile at the base that is active under any profile now (a reused id). Pre-commit skips with a notice when git has no merge base |
+| Catalog validator | `python3 tools/validate/check_audit_catalog.py --root .` (pre-commit, CI) | unknown keys or vocabulary, wrong operand types, a mode without its required keys, a severity the mode cannot produce, a non-overridable override, bands out of order, an active rule without `fires` and `silent` examples, undeclared data reads, `by_severity` gaps, a stale generated doc, prose (title, description, remediation, message text) naming an engine identifier (`@field`, `code:<name>`, `engine/…`), a `legacy_threshold` number that is not one of the rule's band values under that profile |
+| Rule-id history | the same script with `--base origin/main` (CI) or `--merge-base-with origin/main` (pre-commit) | an id removed since the base (retire it instead), an id retired under every profile at the base that is active under any profile now (a reused id), or a rule whose bands changed while its `description` still quotes a band value no profile grades by now. Pre-commit skips with a notice when git has no merge base |
 | Generated doc | `python -m ts_cli.audit.generate --check` (from `tools/ts-cli/`; the validator runs it too) | `check-catalog.md`'s generated block differs from the catalog |
 | Examples as tests | `pytest tools/ts-cli/tests/test_audit_rule_examples.py` | `fires` produces no finding, or one at a severity other than stated; `silent` produces any finding |
 | Pinned legacy findings | `pytest tools/ts-cli/tests/test_audit_pinned_findings.py` | any of the 51 pinned rules reports, on any committed input under either profile, anything but its pinned findings (exact types, multiset) |
@@ -425,6 +425,18 @@ Follow procedure 1 with these differences.
   Checking something else entirely is a new rule plus a retirement.
 - A profile-specific change goes in `profiles.<id>`; a change for both goes at the rule's
   top level. Remember a band list is replaced whole.
+- **A threshold lives in up to three places; move all of them.** When a rule's `bands`
+  change, under any profile, also change (a) its `legacy_threshold` — the old checks'
+  payload, e.g. A1's `{green: 50, assessment: …, yellow: 25.0}` — under the same profile
+  (add `profiles.<id>.legacy_threshold` when only one profile's bands move), keeping its
+  keys, key order and number types as they are; and (b) any number its `description`
+  quotes ("General 50%"). The catalog gate fails a `legacy_threshold` number that is not
+  one of that profile's band values, and the history gate fails a description still
+  quoting a band value that changed. Neither can see a number the description words some
+  other way ("half"), so re-read the description. Making A1 stricter for General (50 →
+  60) is: `profiles.general.bands` (HIGH < 30, MEDIUM < 60),
+  `profiles.general.legacy_threshold: {green: 60, assessment: '{profile_label}', yellow:
+  30.0}`, and "General 60%" in the description.
 - A behaviour change is a PATCH (a fix) or MINOR (new grading) skill bump, and its
   changelog row says what findings change.
 

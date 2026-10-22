@@ -15,12 +15,17 @@ rule's own): retired at `ref` means retired under every profile — a rule activ
 one profile never stopped running — and active now means active under any profile, so
 a retired rule revived only through `profiles.<p>.status` is caught.
 
+A third check reads history for a different reason: a band value that changed since
+`ref` and that the rule's `description` still quotes (`description_drift_problems`) —
+the description is prose, so only a change shows which of its numbers were thresholds.
+
 The gate (tools/validate/check_audit_catalog.py --base <ref>) reads `ref`'s catalog
 with git and passes both here. Kept importable on Python 3.9 with only PyYAML.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List
+import re
+from typing import Any, Dict, Iterable, List, Set
 
 from ts_cli.audit.catalog_model import RULES_DIR
 
@@ -86,4 +91,58 @@ def history_problems(base: Dict[str, Dict[str, Any]], head: Dict[str, Dict[str, 
             out.append(f"{rid}: retired at {ref} and active again under "
                        f"{', '.join(active_under)}{what} — a retired id is never reused: "
                        "give the rule a new id")
+    return out
+
+
+# ── a description quoting a band value that changed ─────────────────────────
+
+_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?!\w)")
+
+
+def _level_values(bands: Any) -> Set[float]:
+    levels = bands.get("levels") if isinstance(bands, dict) else None
+    return {float(lv["value"]) for lv in levels or []
+            if isinstance(lv, dict) and isinstance(lv.get("value"), (int, float))
+            and not isinstance(lv.get("value"), bool)}
+
+
+def band_values(entry: Dict[str, Any], profiles: Iterable[str]) -> Dict[str, Set[float]]:
+    """`{profile: effective band values}` of a raw rule entry (a profile's non-null
+    `bands` replaces the rule's whole list)."""
+    overrides = entry.get("profiles") if isinstance(entry.get("profiles"), dict) else {}
+    out = {}
+    for pid in list(profiles) or [""]:
+        block = overrides.get(pid) if pid else None
+        bands = block.get("bands") if isinstance(block, dict) else None
+        out[pid] = _level_values(bands if bands is not None else entry.get("bands"))
+    return out
+
+
+def _fmt(v: float) -> str:
+    return str(int(v)) if v.is_integer() else str(v)
+
+
+def description_drift_problems(base: Dict[str, Dict[str, Any]],
+                               head: Dict[str, Dict[str, Any]], ref: str,
+                               profiles: Iterable[str] = ()) -> List[str]:
+    """Rules whose band values changed since `ref` while the description still quotes a
+    value no profile grades by any more ("Spotter-ready 95%, General 50%" left behind
+    when General moved to 60)."""
+    profiles = list(profiles)
+    out: List[str] = []
+    for rid, new in head.items():
+        old = base.get(rid)
+        if old is None:
+            continue
+        before, after = band_values(old, profiles), band_values(new, profiles)
+        if before == after:
+            continue
+        still = set().union(*after.values()) if after else set()
+        gone = set().union(*before.values()) - still
+        quoted = {float(n) for n in _NUMBER.findall(str(new.get("description") or ""))}
+        stale = sorted(gone & quoted)
+        if stale:
+            out.append(f"{rid}: its bands changed since {ref}, but its description still "
+                       f"quotes {', '.join(_fmt(v) for v in stale)}, which no profile "
+                       "grades by now — update the description (and legacy_threshold)")
     return out

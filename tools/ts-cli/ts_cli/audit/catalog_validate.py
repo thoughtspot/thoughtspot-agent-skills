@@ -30,7 +30,8 @@ profile never emits; a catalog-level entry: one no profile using it emits), or (
 message) no template for one the rule can emit under a profile; a code rule's entry that does not carry exactly the
 severity source its function declares it reads (bands, a severity — a plain name where
 required — or neither), or a `legacy_threshold` beside a function that sets its own;
-prose (title, description, remediation, message text) that shows an engine identifier
+prose (title, description, remediation, message text) that shows an engine identifier,
+or a `legacy_threshold` number that is not one of the rule's band values
 (catalog_consistency.py).
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —

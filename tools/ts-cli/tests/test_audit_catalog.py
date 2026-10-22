@@ -230,9 +230,10 @@ def test_merged_bands_must_be_ordered(tmp_path):
 
 
 def test_catalog_bands_ordered_for_lower_is_better(tmp_path):
-    rule = _good_rule(bands={"direction": "lower_is_better", "unit": "count", "levels": [
-        {"op": "gt", "value": 75, "severity": "MEDIUM"},
-        {"op": "gt", "value": 150, "severity": "HIGH"}]})
+    rule = _good_rule(legacy_threshold=None, bands={
+        "direction": "lower_is_better", "unit": "count", "levels": [
+            {"op": "gt", "value": 75, "severity": "MEDIUM"},
+            {"op": "gt", "value": 150, "severity": "HIGH"}]})
     problems = _problems(tmp_path, {"ai": [rule]})
     assert any("bands" in p and "levels must be ordered worst first" in p
                for p in problems), problems
@@ -525,6 +526,7 @@ def test_angle_key_required_and_unique(tmp_path):
 def _each(**overrides) -> dict:
     """A clean `each` rule: fixed severity, no bands."""
     rule = _good_rule(bands=None, profiles={}, severity="HIGH", message="{name}",
+                      legacy_threshold=None,
                       aggregate={"mode": "each", "where": {"field": "name", "exists": True}})
     rule.update(overrides)
     return rule
@@ -836,3 +838,35 @@ def test_a_derived_field_placeholder_in_a_message_is_not_prose(tmp_path):
                  message="{name} indexed: {@is_indexed}")
     assert _problems(tmp_path, {"ai": [rule]}) == []
 
+
+def _a1_general_raised_to(raw, pass_mark, edit_threshold):
+    """The review's walkthrough: A1's General pass mark raised via profiles.general."""
+    a1 = next(r for f, rules in raw.items() if f.startswith("rules/")
+              for r in rules if r["id"] == "A1")
+    a1.setdefault("profiles", {})["general"] = {"bands": {
+        "direction": "higher_is_better", "unit": "percent",
+        "levels": [{"op": "lt", "value": pass_mark / 2, "severity": "HIGH"},
+                   {"op": "lt", "value": pass_mark, "severity": "MEDIUM"}]}}
+    if edit_threshold:
+        a1["profiles"]["general"]["legacy_threshold"] = {
+            "green": pass_mark, "assessment": "{profile_label}", "yellow": pass_mark / 2}
+    return raw
+
+
+def test_a1_pass_mark_raised_without_its_legacy_threshold_fails_the_gate():
+    """Final review I3: A1 General 50 -> 60 through `profiles.general.bands` passed every
+    gate while its findings kept claiming `green: 50`. It now fails until the payload
+    moves with the bands."""
+    from ts_cli.audit.catalog_model import build_catalog, load_raw
+    raw = _a1_general_raised_to(copy.deepcopy(load_raw()), 60, edit_threshold=False)
+    problems = validate_catalog(build_catalog(raw), raw)
+    assert any("A1: legacy_threshold under general: 25, 50 is not a band value (30, 60)"
+               in p for p in problems), problems
+    raw = _a1_general_raised_to(copy.deepcopy(load_raw()), 60, edit_threshold=True)
+    assert [p for p in validate_catalog(build_catalog(raw), raw) if "A1:" in p] == []
+
+
+def test_shipped_legacy_thresholds_agree_with_bands():
+    from ts_cli.audit.catalog_consistency import threshold_problems
+    cat = load_catalog()
+    assert [p for r in cat.rules.values() for p in threshold_problems(r, cat)] == []

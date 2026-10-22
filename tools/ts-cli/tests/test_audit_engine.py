@@ -151,6 +151,7 @@ def test_ratio_unit_ratio_classifies_the_fraction():
     rule["bands"] = {"direction": "higher_is_better", "unit": "ratio",
                      "levels": [{"op": "lt", "value": 0.4, "severity": "HIGH"}]}
     rule.pop("profiles")
+    rule.pop("legacy_threshold", None)  # its 80/40 would contradict these bands
     [f] = _run(fx.model_measures_no_ai_context(), rule)
     assert f.severity == "HIGH" and f.metric == 30.0
 

@@ -545,3 +545,40 @@ def test_unreadable_ref_message_keeps_gits_error(tmp_path):
     assert res.returncode == 1
     assert "['" not in res.stdout and "fatal" in res.stdout.lower(), res.stdout
 
+
+# ── final review I3: a description left quoting a changed band value ────────
+
+def _raise_a1_general(description=None):
+    def edit(rules):
+        for r in rules:
+            if r["id"] == "A1":
+                r.setdefault("profiles", {})["general"] = {
+                    "bands": {"direction": "higher_is_better", "unit": "percent",
+                              "levels": [{"op": "lt", "value": 30, "severity": "HIGH"},
+                                         {"op": "lt", "value": 60, "severity": "MEDIUM"}]},
+                    "legacy_threshold": {"green": 60, "assessment": "{profile_label}",
+                                         "yellow": 30}}
+                if description:
+                    r["description"] = description
+        return rules
+    return edit
+
+
+def test_history_fails_a_description_still_quoting_a_changed_band_value(tmp_path):
+    """The review's walkthrough: A1 General 50 -> 60, legacy_threshold moved with it,
+    the description still saying "General 50%"."""
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "ai.yaml", _raise_a1_general())
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "A1: its bands changed since HEAD, but its description still quotes 50" \
+        in res.stdout, res.stdout
+
+
+def test_history_passes_once_the_description_moves_with_the_bands(tmp_path):
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "ai.yaml", _raise_a1_general(
+        "Share of a Model's columns with a non-blank description, against the profile's "
+        "pass mark (Spotter-ready 95%, General 60%)."))
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 0, res.stdout + res.stderr

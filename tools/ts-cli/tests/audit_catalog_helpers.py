@@ -46,6 +46,7 @@ def _good_rule(**overrides) -> dict:
             "general": {
                 "bands": {"direction": "higher_is_better", "unit": "percent",
                           "levels": [{"op": "lt", "value": 80, "severity": "LOW"}]},
+                "legacy_threshold": {"green": 80, "assessment": "{profile_label}"},
             },
         },
         "message": "{matched}/{total} measures have AI context ({pct:.0f}%)",
