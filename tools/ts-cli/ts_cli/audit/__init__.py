@@ -180,8 +180,26 @@ def _build_ai_analysis(instructions: list, model_data: dict) -> dict:
     }
 
 
+def _model_ai_analysis(ctx, guid: str, model: dict, ai_fetched: Optional[bool]) -> dict:
+    """`_build_ai_analysis` over the Model's fetched instructions, plus — when the
+    caller knows whether ai_instructions was fetched — `instructions_read`: whether this
+    Model's `ai/instructions/get` lookup succeeded (a failure leaves no entry, so its
+    questions are [] exactly as for a Model with none), or None when none was made."""
+    instructions = []
+    for info in (ctx.ai_instructions.get(guid, {}).get("nl_instructions_info") or []):
+        instructions.extend(info.get("instructions") or [])
+    analysis = _build_ai_analysis(instructions, model)
+    if ai_fetched is not None:
+        analysis["instructions_read"] = guid in ctx.ai_instructions if ai_fetched else None
+    return analysis
+
+
 def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
-                 angles: Optional[list] = None) -> dict:
+                 angles: Optional[list] = None, ai_fetched: Optional[bool] = None) -> dict:
+    """The report's corpus. ``ai_fetched`` says whether ai_instructions was fetched for
+    this context: True records each Model's ``ai_analysis.instructions_read`` (whether
+    its lookup succeeded), False records it as None (not looked up), and None — the
+    caller does not know — leaves it out."""
     if not angles:
         from ts_cli.audit import catalog_model
         angles = list(catalog_model.load_catalog().categories)
@@ -204,15 +222,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
                 for mt in model_tables
             ],
         }
-        ai_data = ctx.ai_instructions.get(guid, {})
-        instructions = []
-        for info in (ai_data.get("nl_instructions_info") or []):
-            instructions.extend(info.get("instructions") or [])
-        entry["ai_analysis"] = _build_ai_analysis(instructions, m)
-        # Whether this Model's `ai/instructions/get` lookup succeeded: a failure leaves
-        # no entry, so its questions are [] exactly as for a Model with none. Only
-        # meaningful when ai_instructions was fetched (corpus.fetched_needs); additive.
-        entry["ai_analysis"]["instructions_read"] = guid in ctx.ai_instructions
+        entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
         models_out.append(entry)
 
     table_reuse = _build_table_reuse_from_ctx(models_out)
@@ -383,6 +393,7 @@ def run_audit(
         cluster_url=getattr(client, "base_url", ""),
         profile_name=getattr(client, "_profile_name", ""),
         angles=angles,
+        ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
     )
     corpus["assessment"] = catalog.profiles[profile].label
     if fetched_needs is not None:

@@ -267,6 +267,8 @@ def test_a_run_fetches_only_what_its_rules_need_and_records_it():
     assert out["corpus"]["fetched_needs"] == ["dependents", "metadata", "model_tml",
                                               "table_tml"]
     assert out["corpus"]["models"][0]["ai_analysis"]["questions"] == []
+    # not looked up is not "failed": instructions_read is null, not false (12b review)
+    assert out["corpus"]["models"][0]["ai_analysis"]["instructions_read"] is None
     with patch("ts_cli.audit.context.discover_sets",
                return_value={"sets": {}, "incomplete": [], "notes": []}):
         out_a = run_audit(_p_only_client(model), ["m1"], ["A", "H"])
@@ -339,6 +341,15 @@ def test_corpus_records_whether_the_ai_instructions_lookup_succeeded(fail, read)
     assert ai["instructions_read"] is read
     assert ai["questions"] == ([] if fail else ["Revenue means net revenue"])
     assert compact_payload(out)["C"]["m"][0]["ai"]["rd"] is read
+
+
+def test_instructions_read_is_left_out_when_the_caller_does_not_know_what_was_fetched():
+    """A supplied context with no fetched record (no snapshot manifest): unknown, so the
+    corpus says nothing rather than guess."""
+    from ts_cli.audit import run_audit
+    out = run_audit(None, [], ["P"], ctx=fx.registry_populated_context())
+    assert "fetched_needs" not in out["corpus"]
+    assert all("instructions_read" not in m["ai_analysis"] for m in out["corpus"]["models"])
 
 
 def _with_read_flag(read):

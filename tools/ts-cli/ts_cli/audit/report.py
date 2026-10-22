@@ -149,6 +149,21 @@ def _compact_finding(f: dict, model_index: dict, by_angle: Dict[str, str]) -> di
     return cf
 
 
+def _compact_ai(ai: dict) -> dict:
+    """A Model's `ai_analysis`, compacted. `rd` (instructions_read) is passed through
+    only when the run recorded it: true/false when ai_instructions was fetched, null
+    when it was not; absent in JSON from before 12b."""
+    out = {
+        "do": ai.get("domain", ""),
+        "ob": ai.get("objectives", []),
+        "pe": ai.get("personas", []),
+        "qu": ai.get("questions", []),
+    }
+    if "instructions_read" in ai:
+        out["rd"] = ai["instructions_read"]
+    return out
+
+
 def compact_payload(data: dict) -> dict:
     findings = data.get("findings", [])
     summary = data.get("summary", {})
@@ -191,16 +206,8 @@ def compact_payload(data: dict) -> dict:
                 "ds": m.get("description", ""),
                 "mt": [{"n": t["name"], "f": t["fqn"]} for t in m.get("model_tables", [])],
             }
-            ai = m.get("ai_analysis")
-            if ai:
-                cm["ai"] = {
-                    "do": ai.get("domain", ""),
-                    "ob": ai.get("objectives", []),
-                    "pe": ai.get("personas", []),
-                    "qu": ai.get("questions", []),
-                }
-                if "instructions_read" in ai:   # absent in JSON from before 12b
-                    cm["ai"]["rd"] = ai["instructions_read"]
+            if m.get("ai_analysis"):
+                cm["ai"] = _compact_ai(m["ai_analysis"])
             erd = m.get("erd")
             if erd:
                 cm["ed"] = erd

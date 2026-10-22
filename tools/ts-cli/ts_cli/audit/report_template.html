@@ -1183,7 +1183,7 @@ function buildScorecard(D, guid, filterAngle){
       var qNone = el("div","ai-sub");
       qNone.innerHTML = '<h4>Business Questions</h4>';
       qNone.appendChild(mutedNote(!collected("ai_instructions") ? NOT_COLLECTED
-        : cm.ai.rd === false ? "Could not be read — the AI-instructions lookup for this Model failed (see the run's warnings)."
+        : cm.ai.rd === false ? "Could not be read — the AI-instructions lookup for this Model failed; `ts audit run` printed the reason as a warning when it ran."
         : "None — no AI instructions on this Model.", "questions-status"));
       aiBody.appendChild(qNone);
     }
