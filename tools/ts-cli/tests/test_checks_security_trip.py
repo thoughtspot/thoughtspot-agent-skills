@@ -25,42 +25,19 @@ TML shapes follow the repo's own schemas, consulted for this file:
 """
 import pytest
 
+import audit_rule_fixtures as fx
 from ts_cli.audit.checks_perf import check_p14, check_p15
 from ts_cli.audit.checks_security import check_s2, check_s3, check_s8, check_s9
 from ts_cli.audit.context import make_context
 from ts_cli.audit.findings import CHECK_META
 
-TABLE_FQN = "AGENT_SKILLS.PUBLIC.CUSTOMERS"
-
-# A table column carries its warehouse type; a model column does not.
-TABLE_COLS = [
-    {"name": "COUNTRY", "db_column_name": "COUNTRY",
-     "properties": {"column_type": "ATTRIBUTE"},
-     "db_column_properties": {"data_type": "VARCHAR"}},
-    {"name": "REGION_ID", "db_column_name": "REGION_ID",
-     "properties": {"column_type": "ATTRIBUTE"},
-     "db_column_properties": {"data_type": "INT64"}},
-]
-
-
-def _rls(expr, path_column="COUNTRY"):
-    """`rls_rules` in the nested mapping form the table schema documents."""
-    return {
-        "tables": [{"name": "CUSTOMERS"}],
-        "table_paths": [{"id": "T_1", "table": "CUSTOMERS", "column": [path_column]}],
-        "rules": [{"name": "tenant filter", "expr": expr}],
-    }
-
-
-def _table(rls_rules=None, columns=None, name="CUSTOMERS", guid="t-1"):
-    t = {
-        "name": name, "db": "AGENT_SKILLS", "schema": "PUBLIC",
-        "db_table": "CUSTOMERS", "connection": {"name": "se-snowflake"},
-        "columns": TABLE_COLS if columns is None else columns,
-    }
-    if rls_rules:
-        t["rls_rules"] = rls_rules
-    return {"guid": guid, "table": t}
+# The table and RLS builders live in audit_rule_fixtures.py; the contexts the P14/P15
+# clone tests run are named builders there, so the P catalog rules' equivalence test
+# runs over exactly those inputs.
+TABLE_FQN = fx.SEC_TABLE_FQN
+TABLE_COLS = fx.SEC_TABLE_COLS
+_rls = fx.build_sec_rls
+_table = fx.build_sec_table
 
 
 def _mcol(name, column_id=None, index_type=None):
@@ -249,15 +226,11 @@ def test_s8_is_p15_minus_the_value_casing_guard():
     and P15 does not, and on an uncased one the estate gets two findings for one
     column.
     """
-    cased = [{"name": "COUNTRY", "db_column_name": "COUNTRY",
-              "properties": {"column_type": "ATTRIBUTE", "value_casing": "UPPER"},
-              "db_column_properties": {"data_type": "VARCHAR"}}]
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"),
-                                                 columns=cased)})
+    ctx = fx.sec_rls_cased_varchar()
     assert len(check_s8(ctx)) == 1
     assert check_p15(ctx) == []
 
-    uncased = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))})
+    uncased = fx.sec_rls_uncased_varchar()
     assert len(check_s8(uncased)) == 1 and len(check_p15(uncased)) == 1
 
 
@@ -297,7 +270,7 @@ def test_s9_is_a_verbatim_clone_of_p14():
     differ. Every such RLS expression is counted twice in the report, once HIGH
     (security) and once MEDIUM (performance).
     """
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("UPPER([T_1::COUNTRY]) = ts_groups"))})
+    ctx = fx.sec_rls_upper_function()
     s9, p14 = check_s9(ctx), check_p14(ctx)
     assert len(s9) == len(p14) == 1
     assert (s9[0].object_name, s9[0].object_guid) == (p14[0].object_name, p14[0].object_guid)

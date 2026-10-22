@@ -181,12 +181,9 @@ def test_both_angles_still_report_a_shared_rule():
     from ts_cli.audit.checks_data import check_d4
     from ts_cli.audit.checks_perf import check_p4
 
-    model = {"guid": "m-1", "model": {
-        "name": "Wide",
-        "model_tables": [{"name": f"T{i}"} for i in range(6)],
-        "properties": {"join_progressive": False},
-    }}
-    ctx = make_context(models=[model])
+    import audit_rule_fixtures as fx
+
+    ctx = fx.registry_wide_not_progressive()
     d4, p4 = check_d4(ctx), check_p4(ctx)
     assert len(d4) == 1 and d4[0].check_id == "D4"
     assert len(p4) == 1 and p4[0].check_id == "P4"

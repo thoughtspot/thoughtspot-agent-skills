@@ -13,46 +13,33 @@ never a key — so `if not set_deps` was always true and every set in the
 environment was reported an orphan, with a detail asserting a lookup that never
 happened.
 """
+import audit_rule_fixtures as fx
 from ts_cli.audit.checks_human import check_h5
 from ts_cli.audit.checks_perf import check_p5
 from ts_cli.audit.context import make_context
 
-
-def _fact_model(constraints=None):
-    """A model with a fact table, so P5 has something to report on."""
-    m = {"name": "Sales",
-         "columns": [{"name": f"M{i}", "column_id": f"ORDERS::M{i}",
-                      "properties": {"column_type": "MEASURE"}} for i in range(4)],
-         "model_tables": [{"name": "ORDERS"}]}
-    if constraints is not None:
-        m["constraints"] = constraints
-    return {"guid": "m-1", "model": m}
+# The P5 contexts are named builders in audit_rule_fixtures.py, so the P5 catalog
+# rule's equivalence test runs over exactly these inputs.
 
 
 # ── P5 — the real exported shape must suppress ─────────────────────────────
 
-REAL_CONSTRAINTS = {"constraint": [
-    {"date_range_condition": {"column": "Order Date", "period": "LAST_N_DAYS", "n": 90}}]}
-
-
 def test_p5_reports_a_fact_model_with_no_constraints():
-    assert len(check_p5(make_context(models=[_fact_model()]))) == 1
+    assert len(check_p5(fx.guard_fact_model_unconstrained())) == 1
 
 
 def test_p5_is_suppressed_by_the_real_mapping_shape():
     """The shape an export actually produces — previously ignored."""
-    assert check_p5(make_context(models=[_fact_model(REAL_CONSTRAINTS)])) == []
+    assert check_p5(fx.guard_fact_model_date_window()) == []
 
 
 def test_p5_is_still_suppressed_by_a_list_shape():
     """A hand-built fixture may pass a list; keep tolerating it."""
-    listed = [{"date_range_condition": {"column": "Order Date"}}]
-    assert check_p5(make_context(models=[_fact_model(listed)])) == []
+    assert check_p5(fx.guard_fact_model_listed_window()) == []
 
 
 def test_p5_is_not_suppressed_by_an_unrelated_constraint():
-    other = {"constraint": [{"some_other_condition": {"column": "X"}}]}
-    assert len(check_p5(make_context(models=[_fact_model(other)]))) == 1
+    assert len(check_p5(fx.guard_fact_model_other_constraint())) == 1
 
 
 # ── H5 — only speak about sets whose dependents were actually fetched ──────

@@ -373,3 +373,50 @@ def test_a_rules_keep_legacy_names_and_guids(profile, fixture, probe):
     old, new = collect_both(getattr(fx, fixture)(), profile, A_RULES, categories=["A"])
     assert any(probe(f) for f in old), "the input must exercise the case"
     assert compare_findings(old, new)["identical"] is True
+
+
+P_RULES = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P11", "P13", "P14",
+           "P15", "P16", "P17", "P18"]
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_p_rules_equivalent_on_the_check_tests_inputs(profile):
+    """The P catalog rules (rules/perf.yaml, the default engine runner) reproduce
+    checks_perf.py exactly over every input its tests use (audit_rule_fixtures.P_INPUTS:
+    test_checks_perf*.py's contexts and the P halves of the shared-check tests, the
+    threshold families swept across their boundaries, raw None/absent names and guids,
+    duplicate formula names, and the demo corpus models)."""
+    import audit_rule_fixtures as fx
+
+    differing, fired = {}, dict.fromkeys(P_RULES, 0)
+    for name, build in fx.P_INPUTS.items():
+        old, new = collect_both(build(), profile, P_RULES, categories=["P"])
+        res = compare_findings(old, new)
+        if not res["identical"]:
+            differing[name] = res
+        for f in old:
+            fired[f["check_id"]] += 1
+    assert differing == {}
+    # Not vacuous: every rule fires somewhere in these inputs.
+    assert all(fired.values()), fired
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("fixture,probe", [
+    # `name: None` / `guid: None` reach the finding as None, not ""
+    ("perf_names_none", lambda f: f["object_name"] is None and f["object_guid"] is None),
+    ("perf_names_none", lambda f: f["check_id"] == "P1" and f["object_guid"] is None),
+    # absent keys reach it as ""
+    ("perf_names_absent", lambda f: f["object_name"] == "" and f["object_guid"] == ""),
+    # legacy P17 keys its graph by name: one finding per name, later definition wins
+    ("perf_duplicate_formula_names",
+     lambda f: f["check_id"] == "P17" and f["object_name"] == "Z" and f["metric"] == 4),
+    ("perf_unnamed_formulas_with_references",
+     lambda f: f["check_id"] == "P17" and f["object_name"] == ""),
+])
+def test_p_rules_keep_legacy_names_and_guids(profile, fixture, probe):
+    import audit_rule_fixtures as fx
+
+    old, new = collect_both(getattr(fx, fixture)(), profile, P_RULES, categories=["P"])
+    assert any(probe(f) for f in old), "the input must exercise the case"
+    assert compare_findings(old, new)["identical"] is True

@@ -12,6 +12,7 @@ the answer was built on. Its condition was `not in`, so every healthy answer was
 reported as bypassing, and an answer built straight off a table — the object it
 exists to find — was silently excused.
 """
+import audit_rule_fixtures as fx
 from ts_cli.audit.checks_human import check_h7
 from ts_cli.audit.checks_perf import check_p17
 from ts_cli.audit.context import make_context
@@ -19,45 +20,27 @@ from ts_cli.audit.context import make_context
 
 # ── P17 — cross-references are by id ───────────────────────────────────────
 
-def _f(name, expr):
-    return {"id": f"formula_{name}", "name": name, "expr": expr}
-
-
-def _model_with(formulas):
-    return {"guid": "m-1", "model": {"name": "S", "formulas": formulas}}
-
+# The P17 contexts are named builders in audit_rule_fixtures.py (refs_*), so the P17
+# catalog rule's equivalence test runs over exactly these inputs.
 
 def test_p17_follows_a_real_id_reference_chain():
     """The shape every exported model actually carries."""
-    chain = [
-        _f("A", "[formula_B] + 1"),
-        _f("B", "[formula_C] * 2"),
-        _f("C", "[formula_D] - 3"),
-        _f("D", "sum ( [T::X] )"),
-    ]
-    findings = check_p17(make_context(models=[_model_with(chain)]))
+    findings = check_p17(fx.refs_id_chain_four())
     assert findings, "a 4-deep id-ref chain must be seen"
     assert max(f.metric for f in findings) >= 3
 
 
 def test_p17_still_follows_a_display_name_chain():
     """Tolerated for a hand-built model, even though it fails on import."""
-    chain = [
-        {"id": "formula_A", "name": "A", "expr": "[B] + 1"},
-        {"id": "formula_B", "name": "B", "expr": "[C] * 2"},
-        {"id": "formula_C", "name": "C", "expr": "[D] - 3"},
-        {"id": "formula_D", "name": "D", "expr": "sum ( [T::X] )"},
-    ]
-    assert check_p17(make_context(models=[_model_with(chain)]))
+    assert check_p17(fx.refs_display_chain_four())
 
 
 def test_p17_ignores_a_plain_column_reference():
-    flat = [_f("A", "sum ( [ORDERS::AMOUNT] )"), _f("B", "sum ( [ORDERS::COST] )")]
-    assert check_p17(make_context(models=[_model_with(flat)])) == []
+    assert check_p17(fx.refs_plain_columns()) == []
 
 
 def test_p17_does_not_count_a_self_reference():
-    assert check_p17(make_context(models=[_model_with([_f("A", "[formula_A] + 1")])])) == []
+    assert check_p17(fx.refs_self_reference()) == []
 
 
 # ── H7 — a Table guid is the bypass, a Model guid is healthy ───────────────

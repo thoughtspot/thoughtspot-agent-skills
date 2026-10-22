@@ -494,6 +494,51 @@ def test_derived_fields_registry():
         fields.get(_item({}), "@nope", ctx)
 
 
+def _children_of(ctx, scope: str) -> list:
+    return list(scopes.iterate(ctx, scope))
+
+
+def test_reference_chain_depth_reports_each_formula_name_once():
+    """Formulas sharing a name are one node; only the last of them with references
+    carries the depth (legacy P17 keyed its graph by name)."""
+    ctx = fx.perf_duplicate_formula_names()
+    depths = [(i["name"], fields.get(i, "@reference_chain_depth", ctx))
+              for i in _children_of(ctx, "model.formula")]
+    assert depths == [("A", None), ("B", 3), ("C", 2), ("D", 1), ("E", None),
+                      ("A", 3), ("Z", None), ("Z", 4)]
+
+
+def test_is_scalar_formula_reads_the_surfacing_columns_aggregation():
+    agg = _children_of(fx.perf_six_aggregated_formulas(), "model.formula")
+    raw = _children_of(fx.perf_six_scalar_formulas(), "model.formula")
+    ctx = make_context()
+    assert [fields.get(i, "@is_scalar_formula", ctx) for i in agg] == [False] * 6
+    assert [fields.get(i, "@is_scalar_formula", ctx) for i in raw] == [True] * 6
+
+
+def test_varchar_join_keys_need_the_table_tml():
+    """A key whose Table TML is absent has no type: unknown, not "a string"."""
+    for build, keys in ((fx.join_keys_composite, ["ORDERS::CUST_ID", "ORDERS::REGION"]),
+                        (fx.join_keys_table_missing, []),
+                        (fx.referencing_join_varchar, ["BASKETS_FACT::PROMOTION_KEY",
+                                                     "PROMOTION_DIMENSION::PROMOTION_KEY"])):
+        ctx = build()
+        (join,) = _children_of(ctx, "join")
+        assert fields.get(join, "@varchar_join_keys", ctx) == keys
+        assert fields.get(join, "@varchar_join_key_count", ctx) == len(keys)
+
+
+def test_fact_tables_and_date_constraint():
+    ctx = fx.perf_fact_model_unconstrained()
+    (model,) = _children_of(ctx, "model")
+    assert fields.get(model, "@fact_tables", ctx) == ["ORDERS"]
+    assert fields.get(model, "@fact_table_count", ctx) == 1
+    assert fields.get(model, "@has_date_constraint", ctx) is False
+    dated = fx.perf_fact_model_date_window()
+    (model,) = _children_of(dated, "model")
+    assert fields.get(model, "@has_date_constraint", dated) is True
+
+
 def test_register_adds_a_derived_field():
     @fields.register("_test_upper_name")
     def _upper(item, ctx):
