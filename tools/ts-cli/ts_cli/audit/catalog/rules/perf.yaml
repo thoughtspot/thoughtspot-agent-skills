@@ -91,7 +91,7 @@
   message: "join_progressive: false on {count}-table model — every query joins ALL tables"
   examples:
     fires: {fixture: perf_model_wide_not_progressive, severity: HIGH}
-    silent: {fixture: perf_single_table}
+    silent: {fixture: perf_model_wide_progressive}
 
 - id: P5
   title: No date constraints on fact tables
@@ -282,7 +282,7 @@
     mode: each
     where:
       all:
-        - {field: data_type, regex: '^(?i:VARCHAR|CHAR|STRING|TEXT)\Z'}
+        - {field: "@is_string_type", truthy: true}
         - {field: value_casing, truthy: false}
   severity: MEDIUM
   message: "VARCHAR RLS column '{name}' without value_casing"

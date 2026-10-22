@@ -508,6 +508,29 @@ def test_reference_chain_depth_reports_each_formula_name_once():
                       ("A", 3), ("Z", None), ("Z", 4)]
 
 
+def test_reference_chain_depth_owns_a_node_by_position_not_identity():
+    """One formula mapping listed twice is still one node, reported once."""
+    ctx = fx.perf_formula_listed_twice()
+    items = _children_of(ctx, "model.formula")
+    assert items[0]["obj"] is items[4]["obj"]
+    assert [i["index"] for i in items] == [0, 1, 2, 3, 4]
+    assert [fields.get(i, "@reference_chain_depth", ctx) for i in items] == \
+        [None, 2, 1, None, 3]
+
+
+def test_filter_with_a_scalar_column_is_named_not_an_error():
+    names = [i["name"] for i in _children_of(fx.perf_filter_scalar_column(), "model.filter")]
+    assert names == ["5", "True", "Region"]
+
+
+@pytest.mark.parametrize("data_type,expected", [
+    ("\ufb06RING", True), ("\ufb05RING", True), ("STR\u0130NG", False),
+    ("varchar", True), ("", False), (None, False)])
+def test_is_string_type_is_the_legacy_upper_case_test(data_type, expected):
+    item = {"obj": {"data_type": data_type}, "parent": None}
+    assert fields.get(item, "@is_string_type", make_context()) is expected
+
+
 def test_is_scalar_formula_reads_the_surfacing_columns_aggregation():
     agg = _children_of(fx.perf_six_aggregated_formulas(), "model.formula")
     raw = _children_of(fx.perf_six_scalar_formulas(), "model.formula")

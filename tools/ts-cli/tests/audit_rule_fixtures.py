@@ -11,6 +11,8 @@ catalog refers to fixtures by name, so a name must keep meaning one input.
 """
 from __future__ import annotations
 
+import copy
+
 from ts_cli.audit.context import AuditContext, make_context
 
 MODEL_GUID = "00000000-0000-4000-8000-000000000001"
@@ -462,6 +464,8 @@ def build_perf_model(name="Sales", guid="m-1", columns=None, formulas=None,
                      model_tables=None, properties=None, filters=None,
                      constraints=None) -> dict:
     """A model document as test_checks_perf.py has always built it."""
+    columns, formulas, model_tables, properties, filters, constraints = copy.deepcopy(
+        (columns, formulas, model_tables, properties, filters, constraints))
     return {"guid": guid, "model": {
         "name": name, "model_tables": model_tables or [{"name": "T1"}],
         "columns": columns or [], "formulas": formulas or [],
@@ -508,6 +512,13 @@ def perf_model_wide_not_progressive() -> AuditContext:
         properties={"join_progressive": False})])
 
 
+def perf_model_wide_progressive() -> AuditContext:
+    """Six tables with join_progressive true (P4 silent)."""
+    return make_context(models=[build_perf_model(
+        model_tables=[{"name": f"T{i}"} for i in range(6)],
+        properties={"join_progressive": True})])
+
+
 def perf_model_80_columns() -> AuditContext:
     return make_context(models=[build_perf_model(
         columns=[build_perf_col(f"C{i}") for i in range(80)])])
@@ -536,9 +547,11 @@ def perf_column_count_distinct() -> AuditContext:
 # test_checks_perf_trip.py's shapes (from the model and table TML schemas)
 
 def build_trip_model(**model_body) -> dict:
-    """A model TML document: `guid` at the root, everything else under `model:`."""
+    """A model TML document: `guid` at the root, everything else under `model:`.
+    The body is deep-copied, so shared constants are never mutated through it (one
+    deepcopy: an object listed twice stays one object)."""
     body = {"name": "Sales"}
-    body.update(model_body)
+    body.update(copy.deepcopy(model_body))
     return {"guid": "m-1", "model": body}
 
 
@@ -566,6 +579,7 @@ TRIP_TABLE_FQN = "DUNDERMIFFLIN.PUBLIC.BANK_EMPLOYEES"
 
 
 def build_trip_table(columns, rules=None) -> dict:
+    columns, rules = copy.deepcopy((columns, rules))
     t = {"name": "BANK_EMPLOYEES", "db": "DUNDERMIFFLIN", "schema": "PUBLIC",
          "db_table": "BANK_EMPLOYEES", "columns": columns}
     if rules is not None:
@@ -690,6 +704,25 @@ def perf_thin_fact_model() -> AuditContext:
     return build_trip_ctx(build_trip_model(
         model_tables=[{"name": "ORDERS", "fqn": "t-orders"}],
         columns=TRIP_FACT_COLUMNS[:3]))
+
+
+def build_aliased_fact_model(prefix: str) -> AuditContext:
+    """ORDERS aliased as O, its four measures' column_ids prefixed `prefix`. Legacy P5
+    matches fact tables by `name`, not alias (BL-305), so only "ORDERS::" reads as one."""
+    return build_trip_ctx(build_trip_model(
+        model_tables=[{"name": "ORDERS", "alias": "O", "fqn": "t-orders"}],
+        columns=[build_trip_measure(prefix, c)
+                 for c in ("AMOUNT", "COST", "QUANTITY", "DISCOUNT")]))
+
+
+def perf_fact_alias_prefixed() -> AuditContext:
+    """Alias-prefixed column_ids (as exported TML writes them): no P5 finding."""
+    return build_aliased_fact_model("O")
+
+
+def perf_fact_name_prefixed() -> AuditContext:
+    """Name-prefixed column_ids under an alias: P5 fires, naming ORDERS."""
+    return build_aliased_fact_model("ORDERS")
 
 
 def perf_fact_columns_without_tables() -> AuditContext:
@@ -855,6 +888,19 @@ def perf_rls_type_on_model_ignored() -> AuditContext:
         TRIP_TABLE_FQN: build_trip_table([build_trip_varchar("COUNTRY")], [TRIP_PLAIN_RULE])})
 
 
+#: Data types where `.upper()` and a case-insensitive match disagree: two ligatures
+#: whose upper case is "ST" (legacy reads STRING), and a dotted capital I (not STRING).
+P15_UNICODE_TYPES = ["\ufb06RING", "\ufb05RING", "STR\u0130NG"]
+
+
+def build_rls_column_type(data_type) -> AuditContext:
+    """An RLS rule on COUNTRY, an uncased column of `data_type`."""
+    col = {"name": "COUNTRY", "db_column_name": "COUNTRY",
+           "properties": {"column_type": "ATTRIBUTE"},
+           "db_column_properties": {"data_type": data_type}}
+    return build_trip_table_ctx([col], [TRIP_PLAIN_RULE])
+
+
 def perf_rls_friendly_column_name() -> AuditContext:
     """Display name "Country" vs physical COUNTRY: the lookup misses (no P15)."""
     friendly = {"name": "Country", "db_column_name": "COUNTRY",
@@ -893,6 +939,23 @@ def perf_formulas_real_export() -> AuditContext:
     return build_trip_ctx(build_trip_model(formulas=TRIP_REAL_EXPORT_FORMULAS))
 
 
+def perf_formula_listed_twice() -> AuditContext:
+    """One formula mapping listed twice (A -> B -> C -> D): legacy P17 reports A once."""
+    a = build_formula("A", "[formula_B]")
+    return build_trip_ctx(build_trip_model(formulas=[
+        a, build_formula("B", "[formula_C]"), build_formula("C", "[formula_D]"),
+        build_formula("D", "1"), a]))
+
+
+def perf_filter_scalar_column() -> AuditContext:
+    """Filters whose `column` is a scalar, not a list (hand-edited TML): P3 still
+    counts them."""
+    return build_trip_ctx(build_trip_model(filters=[
+        {"column": 5, "oper": "in", "values": ["x"]},
+        {"column": True, "oper": "in", "values": ["x"]},
+        {"column": "Region", "oper": "in", "values": ["x"]}]))
+
+
 def perf_display_ref_chain() -> AuditContext:
     """Depth 4 from A (P17 LOW), 3 from B (P17 INFO)."""
     return build_trip_ctx(build_trip_model(formulas=build_ref_chain(id_refs=False)))
@@ -909,7 +972,7 @@ def build_formula(name, expr) -> dict:
 
 
 def build_formula_doc(formulas) -> dict:
-    return {"guid": "m-1", "model": {"name": "S", "formulas": formulas}}
+    return {"guid": "m-1", "model": {"name": "S", "formulas": copy.deepcopy(formulas)}}
 
 
 def refs_id_chain_four() -> AuditContext:
@@ -952,13 +1015,13 @@ JOIN_KEYS_COMPOSITE_COLS = [
 
 
 def build_join_keys_table(cols) -> dict:
-    return {"table": {"name": "ORDERS", "columns": cols}}
+    return {"table": {"name": "ORDERS", "columns": copy.deepcopy(cols)}}
 
 
 def build_join_keys_model(on, model_columns=None) -> dict:
     return {"guid": "m-1", "model": {
         "name": "Sales",
-        "columns": model_columns or [
+        "columns": copy.deepcopy(model_columns) or [
             {"name": "Cust Id", "column_id": "ORDERS::CUST_ID"},
             {"name": "Id", "column_id": "CUST::ID"},
         ],
@@ -1076,7 +1139,7 @@ def build_guard_fact_model(constraints=None) -> dict:
                       "properties": {"column_type": "MEASURE"}} for i in range(4)],
          "model_tables": [{"name": "ORDERS"}]}
     if constraints is not None:
-        m["constraints"] = constraints
+        m["constraints"] = copy.deepcopy(constraints)
     return {"guid": "m-1", "model": m}
 
 
@@ -1185,10 +1248,10 @@ def build_sec_table(rls_rules=None, columns=None, name="CUSTOMERS", guid="t-1") 
     t = {
         "name": name, "db": "AGENT_SKILLS", "schema": "PUBLIC",
         "db_table": "CUSTOMERS", "connection": {"name": "se-snowflake"},
-        "columns": SEC_TABLE_COLS if columns is None else columns,
+        "columns": copy.deepcopy(SEC_TABLE_COLS if columns is None else columns),
     }
     if rls_rules:
-        t["rls_rules"] = rls_rules
+        t["rls_rules"] = copy.deepcopy(rls_rules)
     return {"guid": guid, "table": t}
 
 
@@ -1275,6 +1338,8 @@ def perf_unnamed_formulas_with_references() -> AuditContext:
 # Every P input, for the equivalence test — listed by hand (see AI_INPUTS).
 P_INPUTS = {fn.__name__: fn for fn in (
     perf_metadata_sql_view, perf_metadata_logical_only, perf_model_wide_not_progressive,
+    perf_model_wide_progressive, perf_fact_alias_prefixed, perf_fact_name_prefixed,
+    perf_formula_listed_twice, perf_filter_scalar_column,
     perf_model_80_columns, perf_model_50_columns, perf_table_seven_rls_rules,
     perf_formula_six_nested_ifs, perf_column_count_distinct,
     perf_six_scalar_formulas, perf_eleven_scalar_formulas, perf_six_aggregated_formulas,
@@ -1316,6 +1381,8 @@ P_INPUTS.update({f"id_suffix_{name}": (lambda name=name: build_id_column(name, "
 P_INPUTS.update({f"spotter_{n}_{idx or 'omitted'}":
                  (lambda n=n, idx=idx: build_spotter_columns(n, idx))
                  for n in (30, 31) for idx in (None, "DEFAULT", "DONT_INDEX")})
+P_INPUTS.update({f"rls_column_type_{i}": (lambda t=t: build_rls_column_type(t))
+                 for i, t in enumerate(P15_UNICODE_TYPES + ["varchar", "Text", "INT64", ""])})
 P_INPUTS.update({f"rls_function_{i}": (lambda e=e: build_rls_expr(e))
                  for i, e in enumerate(P14_FUNCTION_EXPRS)})
 P_INPUTS.update({f"join_chain_{n}_tables": (lambda n=n: build_join_chain(

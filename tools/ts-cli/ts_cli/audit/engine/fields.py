@@ -176,6 +176,14 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
                     if col_types.get(k, "").upper() in rules.STRING_TYPES)
 
 
+@register("is_string_type")
+def _is_string_type(item: dict, ctx: Any) -> bool:
+    """RLS column reference: its warehouse `data_type` is a string type
+    (rules.is_string_type — `.upper()` against VARCHAR/CHAR/STRING/TEXT, exactly; an
+    unknown "" type is not a string)."""
+    return rules.is_string_type((item.get("obj") or {}).get("data_type"))
+
+
 @register("varchar_join_key_count")
 def _varchar_join_key_count(item: dict, ctx: Any) -> int:
     """Join: how many of its keys are string-typed (see @varchar_join_keys)."""
@@ -191,14 +199,15 @@ def _if_call_count(item: dict, ctx: Any) -> int:
     return len(_IF_CALL.findall((item.get("obj") or {}).get("expr", "")))
 
 
-def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, dict]]:
+def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     """A Model's formula reference graph, keyed by formula NAME.
 
     A cross-reference is written as the formula's id (`[formula_<name>]`), or — in a
     hand-built model — its display name; both resolve back to the name (BL-300). A
     formula's edges are the other formulas its `expr` references. Formulas sharing a
     name share a node, holding the references of the LAST of them that has any;
-    `owner` maps each node to that formula, so a rule reports a node once.
+    `owner` maps each node to that formula's position in the list, so a rule reports a
+    node once — even when one formula mapping is listed twice.
     """
     by_ref: Dict[Any, Any] = {}
     for f in formulas:
@@ -210,14 +219,14 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, dict]]:
         if fid:
             by_ref[fid] = fname
     graph: Dict[Any, list] = {}
-    owner: Dict[Any, dict] = {}
-    for f in formulas:
+    owner: Dict[Any, int] = {}
+    for i, f in enumerate(formulas):
         fname = f.get("name", "")
         refs = rules.BRACKET_REF.findall(f.get("expr", ""))
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
-            owner[fname] = f
+            owner[fname] = i
     return graph, owner
 
 
@@ -244,8 +253,7 @@ def _reference_chain_depth(item: dict, ctx: Any):
     for a formula that references no other formula, or whose name another formula's
     references represent."""
     graph, owner = _reference_graph(_model_of(item).get("formulas") or [])
-    formula = item.get("obj") or {}
-    name = formula.get("name", "")
-    if owner.get(name) is not formula:
+    name = (item.get("obj") or {}).get("name", "")
+    if name not in owner or owner[name] != item.get("index"):
         return None
     return _bfs_depth(graph, name)

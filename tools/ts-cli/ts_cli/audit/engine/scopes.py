@@ -8,7 +8,9 @@
      "name":        the name a finding about this item reports,
      "object_type": the object_type a finding about this item reports,
      "scope":       the scope name,
-     "doc":         the top-level document the item came from (the Model TML, …)}
+     "doc":         the top-level document the item came from (the Model TML, …),
+     "index":       its position among its parent's children of this scope (top level:
+                    among the scope's items) — what tells apart one object listed twice}
 
 `guid` / `name` / `object_type` are what the legacy checks put on a finding, so they
 follow those, not the item's own identity — and are read as they read them
@@ -91,10 +93,18 @@ def _model_formulas(p: Item) -> Iterator[Item]:
         yield _item("model.formula", f, p, p["guid"], f.get("name", ""), "formula", p["doc"])
 
 
+def _filter_name(column: Any) -> str:
+    """A filter's `column` list joined; any other value (a hand-edited scalar) as text,
+    never an error — no legacy check names a filter, so this only labels it."""
+    if isinstance(column, (list, tuple)):
+        return ", ".join(str(c) for c in column)
+    return "" if column is None else str(column)
+
+
 def _model_filters(p: Item) -> Iterator[Item]:
     for f in p["obj"].get("filters") or []:
-        name = ", ".join(str(c) for c in f.get("column") or [])
-        yield _item("model.filter", f, p, p["guid"], name, "filter", p["doc"])
+        yield _item("model.filter", f, p, p["guid"], _filter_name(f.get("column")), "filter",
+                    p["doc"])
 
 
 def _model_tables(p: Item) -> Iterator[Item]:
@@ -162,10 +172,16 @@ def iterate(ctx, scope: str, parent: Optional[Item] = None) -> Iterator[Item]:
                              "item or any item enclosing it")
         parents = [owner]
     if parents is None:
-        yield from _TOP[scope](ctx)
+        yield from _indexed(_TOP[scope](ctx))
         return
     for p in parents:
-        yield from _CHILDREN[scope](p, ctx)
+        yield from _indexed(_CHILDREN[scope](p, ctx))
+
+
+def _indexed(items: Iterator[Item]) -> Iterator[Item]:
+    for i, item in enumerate(items):
+        item["index"] = i
+        yield item
 
 
 def ancestor(item: Optional[Item], scope: str) -> Optional[Item]:
