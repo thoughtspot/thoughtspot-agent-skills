@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, run_rule
+from audit_run_rule import active_rule_ids, catalog, run_rule
 
 # The contexts are named builders in audit_rule_fixtures (human.py), whose legacy
 # answers test_audit_pinned_findings.py pins. The `checks_human.py:N` references below
@@ -98,10 +98,11 @@ def test_h5_labels_a_set_as_object_type_table():
 # ALL_CHECKS; the catalog keeps the id as a retired rule with no logic (rules/human.yaml).
 
 def test_h6_is_a_deliberate_stub_and_returns_nothing_by_design():
-    assert run_rule(fx.human_rich_context(), "H6") == []
-    assert "H6" not in active_rule_ids("H"), (
+    assert catalog().rules["H6"].status == "retired", (
         "H6 is deliberately retired — see DEFERRED in test_checks_registry.py"
     )
+    assert "H6" not in active_rule_ids("H")
+    assert run_rule(fx.human_rich_context(), "H6") == []
 
 
 def test_h6_deferral_is_declared_in_the_check_catalog():
