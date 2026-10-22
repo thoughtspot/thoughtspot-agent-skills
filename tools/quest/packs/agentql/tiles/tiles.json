@@ -9,7 +9,7 @@
   "reward": 90,
   "reward_open": 91,
   "exit": 46,
-  "gate": 28,
+  "gate": 232,
   "portal": 45,
   "throne": 6,
   "chest": 89,
@@ -67,6 +67,10 @@
     "fisherman": 134,
     "sailor": 135,
     "golden_elf": 136,
-    "wizard_guard": 137
+    "wizard_guard": 137,
+    "petitioner_farmer": 85,
+    "petitioner_scholar": 99,
+    "petitioner_trader": 112,
+    "petitioner_monk": 111
   }
 }

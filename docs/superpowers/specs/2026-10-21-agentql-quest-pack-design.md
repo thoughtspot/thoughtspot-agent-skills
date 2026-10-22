@@ -388,7 +388,7 @@ Dwarven Mines, about 2–3 minutes:
   with a "back to the map" link (PR 5). Until PR 9 that was Law too.
 - **Saves are shared.** Classic (`/agentql-quest/`) and explore (`/agentql-quest/explore/`) share
   an origin and the `aqq` saves. Explore re-reads them on `pageshow` and before every portal
-  check, so returning with Back shows Law as done and the Mines as open.
+  check, so returning with Back from a realm played in classic shows it as done.
 
 ### 4.4 Questions as HTML over the game
 
@@ -510,8 +510,10 @@ kept, and the character can be asked again.
 8. **A world for the doors:** Tiny Town and Tiny Battle (CC0) join the atlas; the overworld becomes
    a scrolling world with a scene per realm (a mountain tunnel, a library over a moat, a pier, a
    tree tunnel, a boat) and a guard per realm, dressed for it, with one short line each.
-9. **Law explorable:** a library of four reading rooms, a throne per hall, a gate between rooms
-   that opens when the hall before it is done, and the decree at the end.
+9. **Law explorable:** a library of four reading rooms, a petitioner before each hall's throne, a
+   barred door between rooms that says it is locked and opens when the hall before it is done,
+   and the decree at the end. Asked for in play: a dialog in a realm offers "Back to the realm"
+   and "Leave for the world map", and Elder Wren says which way each realm's door lies.
 
 **Then:** you play it, and the remaining realms get maps.
 

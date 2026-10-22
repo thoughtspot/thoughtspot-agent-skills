@@ -10,7 +10,7 @@ such realm, saved by Tiled 1.10 or later as JSON with tilesets embedded. On a ma
         portal   to=<realm id>     overworld only: enters a realm
         exit                       realm maps only: back to the overworld
         merchant|guide|compiler|foe|reward   encounter=<encounter id>
-        throne   hall=<hall id>
+        throne   hall=<hall id> [look=<npc look>]   a hall; with a look, a petitioner stands for it
         gate     requires=<step id>,<step id>,...   blocks its tiles until those steps are DONE
   - a step id is "<encounter id>:<merchant|guide|compiler|foe|reward>" or "hall:<hall id>".
 
@@ -44,6 +44,9 @@ PROPS = {"spawn": set(), "exit": set(), "portal": {"to"}, "throne": {"hall"}, "g
          # strings.yaml) or `about` (a realm, described from its own content)
          "npc": {"look", "says", "about"},
          **{role: {"encounter"} for role in ROLES}}
+# Properties an object may have as well: a throne's `look` puts a person there (tiles.json npcs),
+# the petitioner you talk to; without one the throne itself is drawn.
+OPTIONAL = {"throne": {"look"}}
 REALM_TYPES = set(PROPS) - {"portal"}
 OVERWORLD_TYPES = {"spawn", "portal", "gate", "chest", "barrel", "hoard", "npc"}
 EXTRAS = ("chest", "barrel", "hoard", "npc")
@@ -308,9 +311,8 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
         if start in g["rect"]:
             return [f"{g['where']}: covers the spawn"]
 
-    def walk(done: set[str], only: dict | None = None) -> set[tuple[int, int]]:
-        # `only`: that gate alone is shut, whatever is done
-        blocked = m.wall | solid | {t for g, needs in gates if (g is only if only else not set(needs) <= done) for t in g["rect"]}
+    def walk(done: set[str]) -> set[tuple[int, int]]:
+        blocked = m.wall | solid | {t for g, needs in gates if not set(needs) <= done for t in g["rect"]}
         seen, todo = {start}, [start]
         while todo:
             for n in _near(todo.pop()):
@@ -336,12 +338,27 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
                           + (f" (still shut: {'; '.join(shut)})" if shut else ""))
             break       # every later step waits on this one
         done.add(s)
-    # A gate guards something: shut alone, with every other gate open, it cuts an object off.
+    # A gate guards something: at some point of play while it is shut, opening it alone lets the
+    # player reach an object they can't reach with it shut. Barrels and hoards count as open floor
+    # here (either tile may be free in play), the opposite of the must-reach walks above.
     if not errors:
         objs = [o for o in m.objects if o["type"] not in ("spawn", "gate")]
-        for g, _ in gates:
-            if all(reach(o, walk(set(), only=g)) for o in objs):
-                errors.append(f"{g['where']}: guards nothing (shut, with every other gate open, every object can still be reached)")
+        loose = {o["tile"] for o in objs if o["type"] not in ("barrel", "hoard")}
+
+        def seen_with(done: set[str], also: dict | None = None) -> set[int]:
+            blocked = m.wall | loose | {t for g, needs in gates if g is not also and not set(needs) <= done for t in g["rect"]}
+            seen, todo = {start}, [start]
+            while todo:
+                for n in _near(todo.pop()):
+                    if m.inside(n) and n not in seen and n not in blocked:
+                        seen.add(n)
+                        todo.append(n)
+            return {i for i, o in enumerate(objs) if any(n in seen for n in _near(o["tile"]))}
+
+        points = [set((steps or [])[:i]) for i in range(len(steps or []) + 1)]
+        for g, needs in gates:
+            if not any(seen_with(done, g) - seen_with(done) for done in points if not set(needs) <= done):
+                errors.append(f"{g['where']}: guards nothing (opening it alone, while it is shut, lets the player reach nothing new)")
     # Every bit of fun can be found by the end: chests and barrels where they stand, a hoard once its
     # barrel has rolled off it (with every gate open).
     every = {x for g, needs in gates for x in needs}
@@ -369,9 +386,13 @@ def _shape(m: Map, allowed: set[str], errors: list[str]) -> None:
             if not ok:
                 errors.append(f"{o['where']}: needs look, and either says or about")
             continue
-        missing, extra = PROPS[o["type"]] - set(o["props"]), set(o["props"]) - PROPS[o["type"]]
+        missing = PROPS[o["type"]] - set(o["props"])
+        extra = set(o["props"]) - PROPS[o["type"]] - OPTIONAL.get(o["type"], set())
         if missing or extra:
-            errors.append(f"{o['where']}: needs exactly the properties {sorted(PROPS[o['type']]) or 'none'}")
+            errors.append(f"{o['where']}: needs exactly the properties {sorted(PROPS[o['type']]) or 'none'}"
+                          + (f" (and may have {sorted(OPTIONAL[o['type']])})" if o["type"] in OPTIONAL else ""))
+        if o["type"] == "throne" and "look" in o["props"] and o["props"]["look"] not in m.npcs:
+            errors.append(f"{o['where']}: look={o['props']['look']!r} is not one of tiles/tiles.json's npcs")
         if o["type"] == "gate":
             if not all(m.inside(t) for t in o["rect"]):
                 errors.append(f"{o['where']}: is not wholly on the map")

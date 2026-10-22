@@ -227,22 +227,22 @@
     41,
     41,
     64,
-    0,
-    0,
-    76,
-    41,
-    64,
-    0,
+    7,
     0,
     76,
     41,
     64,
-    0,
+    7,
     0,
     76,
     41,
     64,
+    7,
     0,
+    76,
+    41,
+    64,
+    7,
     0,
     76,
     41,
@@ -389,7 +389,7 @@
      "name": "",
      "type": "throne",
      "x": 32,
-     "y": 16,
+     "y": 32,
      "width": 16,
      "height": 16,
      "rotation": 0,
@@ -399,6 +399,11 @@
        "name": "hall",
        "type": "string",
        "value": "two_paths"
+      },
+      {
+       "name": "look",
+       "type": "string",
+       "value": "petitioner_farmer"
       }
      ]
     },
@@ -407,7 +412,7 @@
      "name": "",
      "type": "throne",
      "x": 112,
-     "y": 16,
+     "y": 32,
      "width": 16,
      "height": 16,
      "rotation": 0,
@@ -417,6 +422,11 @@
        "name": "hall",
        "type": "string",
        "value": "checking"
+      },
+      {
+       "name": "look",
+       "type": "string",
+       "value": "petitioner_scholar"
       }
      ]
     },
@@ -425,7 +435,7 @@
      "name": "",
      "type": "throne",
      "x": 192,
-     "y": 16,
+     "y": 32,
      "width": 16,
      "height": 16,
      "rotation": 0,
@@ -435,6 +445,11 @@
        "name": "hall",
        "type": "string",
        "value": "forge"
+      },
+      {
+       "name": "look",
+       "type": "string",
+       "value": "petitioner_trader"
       }
      ]
     },
@@ -443,7 +458,7 @@
      "name": "",
      "type": "throne",
      "x": 272,
-     "y": 16,
+     "y": 32,
      "width": 16,
      "height": 16,
      "rotation": 0,
@@ -453,6 +468,11 @@
        "name": "hall",
        "type": "string",
        "value": "third_engine"
+      },
+      {
+       "name": "look",
+       "type": "string",
+       "value": "petitioner_monk"
       }
      ]
     },

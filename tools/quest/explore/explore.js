@@ -24,6 +24,7 @@
   $("classic").textContent = S("explore_classic");
   $("world").setAttribute("aria-label", S("explore_world"));
   $("close").textContent = S("explore_close");
+  $("leave").textContent = S("explore_leave");
 
   const PAD = { left: S("explore_pad_left"), up: S("explore_pad_up"), down: S("explore_pad_down"),
                 right: S("explore_pad_right"), talk: S("explore_pad_talk"), weapon: S("explore_pad_weapon") };
@@ -89,6 +90,9 @@
   }
   function openDialog(step) {
     dialogStep = step;
+    const inRealm = !!world && world.mapId !== "overworld";
+    $("close").textContent = S(inRealm ? "explore_close_realm" : "explore_close");
+    $("leave").hidden = !inRealm;
     if (world && /:reward$/.test(step)) world.openChest(step);    // the hoard's chest opens as you claim it
     if (world) world.freeze(true);
     if (!dialog.open) dialog.showModal();
@@ -103,6 +107,14 @@
   // Esc: not now. The close event comes a task later, so one from a dialog already reopened is stale.
   dialog.addEventListener("close", () => { if (!dialog.open && dialogStep !== null) closeDialog(); });
   $("close").addEventListener("click", closeDialog);
+  $("leave").addEventListener("click", () => { closeDialog(); leaveRealm(); });
+  // Out of a realm to the world map, beside its door; a quest left unfinished is not saved.
+  function leaveRealm() {
+    const left = world.mapId;
+    state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
+    Sound.play("blip");
+    goTo("overworld", left);
+  }
 
   // Do an action from a dialog button: the machine decides; then close the dialog once the game
   // waits on another step, and follow it to another map when it leaves this one.
@@ -136,7 +148,7 @@
 
   // Talk to an object the player stands next to.
   function talk(obj) {
-    if (!obj) return toast(S("explore_nobody"));
+    if (!obj) return toast(world && world.shutGate() ? S("explore_gate_locked") : S("explore_nobody"));
     toast("");
     if (obj.type === "portal") {
       const i = realms.findIndex(r => r.id === obj.to);
@@ -152,12 +164,7 @@
       return openDialog("portal");
     }
     if (obj.type === "chest" || obj.type === "barrel" || obj.type === "hoard" || obj.type === "npc") return world.play(obj);
-    if (obj.type === "exit") {               // leave the realm; a quest left unfinished is not saved
-      const left = world.mapId;
-      state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
-      Sound.play("blip");
-      return goTo("overworld", left);
-    }
+    if (obj.type === "exit") return leaveRealm();
     if (state.screen === "decree" && obj.type === "throne") return openDialog(obj.step);   // closed with Esc: a throne reads it again
     const out = machine.act(state, { type: "interact", step: obj.step }, progress.load());
     if (out.refused) return toast(S("explore_not_yet"));
@@ -263,12 +270,12 @@
         const frame = o.type === "portal" ? FRAMES.portals[obj.to] ?? FRAMES.portal
           : o.type === "chest" && opened ? (obj.loot === MIMIC ? FRAMES.mimic : FRAMES.chest_open)
           : o.type === "hoard" && opened ? FRAMES.hoard_empty
-          : o.type === "npc" ? FRAMES.npcs[obj.look] : FRAMES[o.type] ?? FRAMES.portal;
+          : o.type === "npc" || (o.type === "throne" && obj.look) ? FRAMES.npcs[obj.look] : FRAMES[o.type] ?? FRAMES.portal;
         obj.sprite = this.addSprite(x, y, frame, true);
         if (o.type === "barrel" && opened) this.place(obj, ...this.rolledTo(obj));
         if (o.type === "barrel") obj.sprite.setDepth(2);
         // The living breathe: a pixel up and down, out of step with each other.
-        if (!reduced && ["merchant", "guide", "foe", "npc"].includes(o.type))
+        if (!reduced && (["merchant", "guide", "foe", "npc"].includes(o.type) || (o.type === "throne" && obj.look)))
           this.time.addEvent({ delay: 650 + 90 * this.objects.length, loop: true,       // a pixel up, a pixel down
                                callback: () => obj.sprite.setOffsetY(obj.sprite.oy ? 0 : -1) });   // the picture, not the body
         this.objects.push(obj);
@@ -339,6 +346,12 @@
       const faced = close.find(o => !o.step && this.ahead(o) > 0.8);     // squarely: not across a diagonal
       return faced || close.find(o => o.step && o.step === want) || close[0] || null;
     }
+    // A shut gate the player stands beside, if any (gates aren't objects: nothing to talk to).
+    shutGate() {
+      const p = this.player;
+      return this.gates.find(g => g.body.enable && ((Math.abs(g.x - p.x) <= TILE * 1.25 && Math.abs(g.y - p.y) < 14)
+                                                    || (Math.abs(g.y - p.y) <= TILE * 1.25 && Math.abs(g.x - p.x) < 14))) || null;
+    }
     // How squarely the player faces something: 1 straight ahead, -1 behind.
     ahead(o) {
       const dx = o.x - this.player.x, dy = o.y - this.player.y, d = Math.hypot(dx, dy) || 1;
@@ -347,7 +360,7 @@
     }
     update() {
       if (this.frozen) return;
-      const near = this.nearby();
+      const near = this.nearby() || this.shutGate();
       if (near !== this.near) { this.near = near; describe(near); }
       const c = this.cursors, v = 90;
       const dx = (c.left.isDown || pad.left ? -1 : 0) + (c.right.isDown || pad.right ? 1 : 0);
@@ -424,10 +437,15 @@
     }
   }
   // Standing by a portal says where it goes, as the classic map's entry does (best gold, sealed,
-  // locked until the first realm); the live region reads it too.
+  // locked until the first realm); by a shut gate, that it is locked and why; by the step the game
+  // waits on, how to talk to it. The live region reads it too.
   let portalText = "";
   function describe(obj) {
-    if (!obj || obj.type !== "portal") {            // walked away: the portal's words go with it
+    const say = t => { toast(t); portalText = t; };   // #toast is a status region: read once, not twice
+    if (obj && obj.requires) return say(S("explore_gate_locked"));
+    if (obj && obj.step && obj.step === machine.expected(state))
+      return say(obj.type === "throne" && obj.look ? S("explore_near_petitioner") : S("explore_near_step"));
+    if (!obj || obj.type !== "portal") {            // walked away: the words go with it
       if (portalText && $("toast").textContent === portalText) toast("");
       portalText = "";
       return;
@@ -436,8 +454,7 @@
     const mark = d && d.done ? S("mark_best", { best: d.best, max: Quest.rules.maxGold(r) }) : r.sealed ? S("mark_sealed")
       : i === 0 ? S("mark_start") : !machine.firstDone(state, progress.load()) ? S("mark_after_first") : "";
     const t = S(r.sealed ? "explore_near_sealed" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
-    toast(t);                    // #toast is a status region: read once, not twice
-    portalText = t;
+    say(t);
   }
   // `from`: the realm just left, so the overworld puts the player beside that realm's door.
   function goTo(mapId, from = null) {
@@ -683,9 +700,24 @@
         dialog.close();
         try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
+        // Beside the step the game waits on, the page says how to talk to it.
+        world.near = undefined; await wait(80);
+        if (!$("toast").textContent.includes(S("explore_near_step").replace(/ to talk\.$/, ""))) throw new Error(`beside the step, no hint (${$("toast").textContent})`);
+        // A question in a realm offers the way back to the realm (Esc) and out to the world map.
+        talk(world.nearby());
+        if ($("leave").hidden || $("close").textContent !== S("explore_close_realm")) throw new Error("a realm's dialog doesn't offer the way back and out");
+        $("leave").click();
+        await until(() => world && world.mapId === "overworld");
+        if (dialog.open || state.screen !== "map") throw new Error("leaving for the world map left a dialog or a realm open");
+        const door = world.objects.find(o => o.type === "portal" && o.to === realmId);
+        if (Math.abs(world.player.x - door.x) + Math.abs(world.player.y - door.y) > TILE + 0.5) throw new Error("leaving didn't put the player beside the realm's door");
+        talk(door);
+        if (!$("leave").hidden || $("close").textContent !== S("explore_close")) throw new Error("the world map's dialog offers to leave for the world map");
+        dispatch({ type: "enter" });
+        await until(() => world && world.mapId === realmId);
       }
-      const someone = world.objects.find(o => ["merchant", "guide", "foe", "npc"].includes(o.type));
-      if (!reduced && someone) {             // the living breathe (a realm of halls has only thrones)
+      const someone = world.objects.find(o => ["merchant", "guide", "foe", "npc"].includes(o.type) || (o.type === "throne" && o.look));
+      if (!reduced && someone) {             // the living breathe (a petitioner too; an empty throne doesn't)
         const ys = new Set();
         for (let i = 0; i < 30; i++) { ys.add(someone.sprite.oy); await wait(100); }
         if (ys.size < 2) throw new Error("nobody breathes");
@@ -706,20 +738,29 @@
         face(step);
         if (world.nearby() !== step) throw new Error("facing the step the game waits on, it didn't answer");
       }
-      {                                      // solid things stop the player: the shut gate, and someone
-        const push = async (obj, axis, dir) => {
-          const [k, code] = ARROWS[axis === "x" ? (dir > 0 ? "right" : "left") : (dir > 0 ? "down" : "up")];
-          key("keydown", k, code); await wait(500); key("keyup", k, code); await wait(30);
-          const reach = Math.abs((axis === "x" ? world.player.x : world.player.y) - (axis === "x" ? obj.x : obj.y));
-          if (reach < TILE / 2 + 6 - 0.5) throw new Error(`walked into the ${obj.type || "gate"} (${reach.toFixed(1)}px from its centre)`);
-        };
-        const gate = world.gates.find(g => g.body.enable);
-        if (gate) {
+      // Solid things stop the player: every shut gate, as soon as it can be reached, and someone.
+      const push = async (obj, axis, dir) => {
+        const [k, code] = ARROWS[axis === "x" ? (dir > 0 ? "right" : "left") : (dir > 0 ? "down" : "up")];
+        key("keydown", k, code); await wait(500); key("keyup", k, code); await wait(30);
+        const reach = Math.abs((axis === "x" ? world.player.x : world.player.y) - (axis === "x" ? obj.x : obj.y));
+        if (reach < TILE / 2 + 6 - 0.5) throw new Error(`walked into the ${obj.type || "gate"} (${reach.toFixed(1)}px from its centre)`);
+      };
+      const pushed = new Set();
+      const pushGates = async () => {
+        for (const gate of world.gates.filter(g => g.body.enable && !pushed.has(g))) {
           const gateTile = { type: "gate", x: gate.x, y: gate.y };
-          await walk(gateTile);
+          try { await walk(gateTile); } catch (e) { if (/^no path/.test(e.message)) continue; throw e; }   // behind another gate: later
+          pushed.add(gate);
           const dx = gate.x - world.player.x, dy = gate.y - world.player.y;
           await push(gateTile, Math.abs(dx) > Math.abs(dy) ? "x" : "y", Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : Math.sign(dy));
+          // Beside it, the page says it is locked, and talking says so too.
+          await wait(80);
+          if ($("toast").textContent !== S("explore_gate_locked")) throw new Error(`beside the shut gate, no word that it is locked (${$("toast").textContent})`);
+          if (!world.nearby()) { toast(""); talk(null); if ($("toast").textContent !== S("explore_gate_locked")) throw new Error("talking at the shut gate didn't say it is locked"); }
         }
+      };
+      {
+        await pushGates();
         const someone = world.objects.find(o => o.step === machine.expected(state));
         await walk(someone);
         const dx = someone.x - world.player.x, dy = someone.y - world.player.y;
@@ -732,13 +773,15 @@
         const want = machine.expected(state);
         if (want === null) break;
         const obj = world.objects.find(o => o.step === want);
+        await pushGates();
         if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward) throw new Error("the chest opened before you claimed it");
         await walk(world.objects.find(o => o.step === want));
         await wait(80);
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
         if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward_open) throw new Error("the chest didn't open as you claimed it");
-        steps.push(want + (world.gates.length ? `[gates:${world.gates.map(g => (g.body.enable ? 1 : 0)).join("")}]` : ""));
+        // each gate: 1 shut (drawn and solid), 0 open (neither), x drawn but not solid or the other way
+        steps.push(want + (world.gates.length ? `[gates:${world.gates.map(g => (g.body.enable && g.visible ? 1 : !g.body.enable && !g.visible ? 0 : "x")).join("")}]` : ""));
         for (let d = 0; d < 60 && dialog.open; d++) {
           if (state.screen === "decree" && !decreeSeen) {   // the decree: shown, kept by Esc, read again at a throne
             decreeSeen = true;

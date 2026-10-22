@@ -219,9 +219,10 @@ explore page would read differently from the check:
   each encounter's merchant, guide, compiler, foe, reward). Before each step, a flood-fill from the
   spawn, with only the gates whose required steps are all **done** open, must reach that step's
   object; the exit must be reachable from the start. A gate that only opens after a step behind it,
-  or a first step behind a gate, fails, and so does a gate that guards nothing: shut alone, with
-  every other gate open, it must cut some object off (a gate beside its doorway, or a wall with a
-  way round it, would not). Objects are solid; reaching one means standing on a walkable tile next
+  or a first step behind a gate, fails, and so does a gate that guards nothing:
+  at some point of play while it is shut, opening it alone must let the player reach an object
+  they couldn't (a gate off its doorway, or a wall with a way round it, even past a barrel, would
+  not). Objects are solid; reaching one means standing on a walkable tile next
   to it.
 - **No Tiled templates,** which the explore page doesn't resolve.
 
@@ -265,7 +266,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
   `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
   person looks; the build checks it.
-- **The overworld** is a small world the camera scrolls (40x14): a plaza with Elder Wren, and a
+- **The overworld** is a small world the camera scrolls (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
   door for each realm in its own scene, each with a guard beside it who says in one line what the
   realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
   (`explore/#from=<realm>`), puts you back beside its door. The scenes: a
@@ -274,7 +275,8 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   (the Lake, a fisherman), a tunnel of golden trees (the
   Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
 - **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
-  Each room's throne opens its hall's questions, and the gate to the next room stays shut until
+  A petitioner stands before each throne (a throne's optional `look`, from `tiles.json`'s npcs);
+  talking to them opens the hall's questions, and the gate to the next room stays shut until
   that hall is done. After the last hall the realm's decree is shown; Esc closes it like any
   dialog, and talking to a throne shows it again until you leave.
 - **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
@@ -292,8 +294,11 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks to whoever
   is next to you (up, down, left or right; the one the game waits on first), but only while the
   map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc
-  closes it ("not now"; the step waits). Standing by a portal names its realm and how you did
-  there. S and M switch sound.
+  (or "Back to the realm") closes it ("not now"; the step waits), and in a realm "Leave for the
+  world map" goes back out beside its door (a quest left unfinished is not saved, as by the exit).
+  Standing by a portal names its realm and how you did there; by the step the game waits on, how
+  to talk to it; by a shut gate, that it is locked until the questions on this side are answered
+  (a barred door). S and M switch sound.
 - **Checks:** the build checks the maps (above) and the tile index; `tests/play_map.js` walks
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each

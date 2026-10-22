@@ -121,6 +121,11 @@ explore_help: Arrow keys walk. Enter or Space talks to whoever, or whatever, you
 explore_classic: Play the classic version
 explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
 explore_close: Close (Esc)
+explore_close_realm: Back to the realm (Esc)
+explore_leave: Leave for the world map
+explore_gate_locked: This door is locked. Answer the questions on this side to open it.
+explore_near_petitioner: A petitioner waits for your judgement. Press Enter or Space to hear them.
+explore_near_step: Press Enter or Space to talk.
 explore_pad_left: ←
 explore_pad_up: ↑
 explore_pad_down: ↓
@@ -147,7 +152,9 @@ explore_face_foe: "You face it with your {weapon}."
 explore_hud_kit: "{weapon} · LOOT {n}"
 explore_npc_about: "A traveller: Through that door lies {realm}. {covers}"
 npc_elder_walk: "Elder Wren: Arrows walk. Enter or Space talks to whoever is beside you."
-npc_elder_order: "Elder Wren: Start at the library of Law. The other realms open after it."
+npc_elder_order: "Elder Wren: Start at Law, the library north over the bridge. The other realms open after it."
+npc_elder_west: "Elder Wren: Northwest, up the rails: the Mines. Southwest, over the pier: the Lake town."
+npc_elder_east: "Elder Wren: Northeast, down the golden path: the Forests. Southeast, along the dock: the Isles."
 npc_elder_fun: "Elder Wren: X switches weapon. Chests and barrels hide things; none of it costs gold."
 guard_law: "Wizard guard: The Elven Kingdom of Law. Learn who writes the query, and why the answer stays governed."
 guard_mines: "Dwarf guard: The Dwarven Mines of Silver Ore. Read the SQL behind one simple question."

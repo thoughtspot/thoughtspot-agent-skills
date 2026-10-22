@@ -1918,7 +1918,7 @@
       {
        "name": "says",
        "type": "string",
-       "value": "npc_elder_walk,npc_elder_order,npc_elder_fun"
+       "value": "npc_elder_walk,npc_elder_order,npc_elder_west,npc_elder_east,npc_elder_fun"
       }
      ]
     },

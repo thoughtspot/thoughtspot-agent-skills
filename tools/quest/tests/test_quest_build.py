@@ -3954,3 +3954,58 @@ def test_an_item_pointing_at_an_empty_frame_fails_the_build(tmp_path, monkeypatc
     f.write_text(json.dumps(frames), encoding="utf-8")
     monkeypatch.setattr(B, "PACKS", packs)
     assert any("items.dagger is frame 140" in e for e in B.build(check=True)[3])
+
+
+# ---- PR 9: a petitioner for each hall --------------------------------------------------------------
+
+@pytest.mark.parametrize("props,needle", [
+    ({"hall": "first", "look": "elder"}, None),
+    ({"hall": "first", "look": "zqxvorn"}, "look='zqxvorn' is not one of tiles/tiles.json's npcs"),
+    ({"hall": "first", "says": "claim_true"}, "needs exactly the properties ['hall'] (and may have ['look'])"),
+])
+def test_a_throne_may_have_a_petitioner(tmp_path, props, needle):
+    objects = dict(SHORE_OBJECTS, **{"1": ("throne", props)})
+    pack, data = _explorable_shore(tmp_path, _tmj(SHORE_ROWS, objects, SHORE_GATE))
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert (errors == []) if needle is None else any(needle in e for e in errors), errors
+
+
+def test_every_law_hall_has_a_petitioner_and_elder_wren_points_the_way():
+    law = json.loads((PACK_DIR / "maps/law.tmj").read_text(encoding="utf-8"))
+    thrones = [o for layer in law["layers"] if layer["type"] == "objectgroup" for o in layer["objects"] if o["type"] == "throne"]
+    looks = [next(p["value"] for p in o["properties"] if p["name"] == "look") for o in thrones]
+    assert len(set(looks)) == len(thrones) == 4
+    strings = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
+    said = " ".join(strings[k] for k in ("npc_elder_order", "npc_elder_west", "npc_elder_east"))
+    for realm in ("Law", "Mines", "Lake", "Forests", "Isles"):
+        assert realm in said, realm
+
+
+def test_a_barrel_in_the_wall_is_a_way_round_a_gate(tmp_path):
+    # rolled right, the barrel leaves a hole beside the gate into the foe's room, open to the reward
+    errors = _fun_cave(tmp_path, {"b": ("barrel", {"roll": "right"})}, _rows((8, 1, "b"), (10, 3, ".")))
+    assert any("guards nothing" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("gates,needle", [
+    # two doors into one room, opening after the same step: each matters while both are shut
+    ([("the_rune:compiler", [(8, 3)]), ("the_rune:compiler", [(8, 1)])], None),
+])
+def test_gates_are_judged_in_the_order_of_play(tmp_path, gates, needle):
+    rows = ["############", "#S.M.G.....#", "#.......#F.#", "#.C.......##", "#X......#R.#", "############"]
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, CAVE_OBJECTS, gates))
+    errors = MAPS.check_maps(pack.dir, data)
+    assert (errors == []) if needle is None else any(needle in e for e in errors), errors
+
+
+def test_a_law_gate_off_its_doorway_guards_nothing(tmp_path):
+    # the second gate moved into the room before its doorway: the third room is open from the start
+    law = json.loads((PACK_DIR / "maps/law.tmj").read_text(encoding="utf-8"))
+    gates = sorted((o for o in law["layers"][-1]["objects"] if o["type"] == "gate"), key=lambda o: o["x"])
+    gates[1]["x"] = 8 * TILE
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    pack = tmp_path / "pack"
+    shutil.copytree(PACK_DIR, pack)
+    (pack / "maps/law.tmj").write_text(json.dumps(law), encoding="utf-8")
+    assert any("guards nothing" in e for e in MAPS.check_maps(pack, data))
