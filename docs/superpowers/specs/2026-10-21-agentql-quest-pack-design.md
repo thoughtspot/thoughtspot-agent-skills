@@ -112,7 +112,6 @@ tools/quest/
   classic/                     the text-adventure page (today's game.html, on core/)
   explore/                     the map front end (new)
   fonts/                       VT323 and IBM Plex Mono, with their OFL licences
-  vendor/                      Phaser, pinned and verified (§9)
   tests/                       all engine and pack tests (one pytest root, as today)
   packs/
     agentql/                   AgentQL Quest's pack
@@ -121,7 +120,7 @@ tools/quest/
       strings.yaml             every sentence a front end shows that isn't content
       art/classic/*.txt        the ASCII scenes
       maps/*.tmj               Tiled maps: the overworld, plus one per explorable realm
-      tiles/                   a Kenney 1-Bit Pack subset (CC0 note)
+      tiles/                   one atlas: Kenney's Tiny packs, Adventure Awaits, frames of ours (CC0 notes)
       promo/                   the poster, the GIF and make_ad.py (moved)
 ```
 
@@ -150,7 +149,7 @@ lexicon:                               # the roles the engine knows, named the p
   reward: hoard
   currency: gold
 explore:
-  realms: [mines]                      # realms with a map; others are played in classic mode
+  realms: [law, mines, lake, forests, isles]   # realms with a map; others are played in classic mode
 ```
 
 The build refuses two packs that share an `id`, a `publish_path` or a `storage_key`. Every pack is
@@ -189,7 +188,9 @@ Under `unlock: first_realm_first` the core requires the first realm to be open (
 other realm stays locked forever). That the first realm has *halls* is AgentQL's rule, so it lives
 in `agentql_rules`.
 
-### 3.4 `quest.json` version 2
+### 3.4 `quest.json` version 2 (now 3)
+
+Version 3 (the polish after PR 12, #659) adds `pack.explore_home`; the rest of this section is version 2 as designed.
 
 **What changes:**
 - **IDs:** every hall and encounter gets an `id` in the content, matching `^[a-z][a-z0-9_]*$`.
@@ -288,29 +289,21 @@ route realm) is replaced with a made-up name in PR 1.
 
 | Need | Choice | Why |
 |---|---|---|
-| Engine | **Phaser 4.2.1** (MIT), the arcade-physics build (1,266,396 bytes minified) | The current stable major: 4.0 shipped April 2026, and 4.2.1 is npm `latest`. It includes walking, collision, cameras, input and Tiled map loading. It has the largest body of examples overall, though Phaser 4-specific ones still lag Phaser 3's. Vendored and pinned (§9). |
-| Maps | **Tiled 1.10 or later**, saved as `.tmj` JSON with tilesets embedded (no external `.tsx`/`.tsj`) | Realms are drawn visually, and Phaser's Tiled loader reads the file directly. Tiled 1.9 wrote an object's `type` as `class`, which Phaser doesn't read; 1.10 went back to `type`. |
-| Art | **Kenney 1-Bit Pack** (CC0, 1,078 files, 16×16 tiles), tinted amber (decision 2) | Monochrome, so tinting matches the video's CRT look. CC0 means no attribution or licence risk in a public repo. Only the tiles used are committed. |
+| Engine | **`engine.js`, our own** (about 250 lines; decision 5) | It does only what the page needs: draws Tiled tile layers and one-tile sprites from one atlas on a 2D canvas, moves a 12x12 body against solid tiles and sprites, reads the arrow keys, follows the player and runs timers, tweens and a fade. No third-party code, so no licences to carry, and its geometry is tested in node. Phaser 4.2.1 was the first choice; it bundles GPL-3.0 code. |
+| Maps | **Tiled 1.10 or later**, saved as `.tmj` JSON with tilesets embedded (no external `.tsx`/`.tsj`) | Realms are drawn visually, and the page reads the file directly. Tiled 1.9 wrote an object's `type` as `class`; 1.10 went back to `type`. |
+| Art | **Kenney Tiny Dungeon** (CC0, 16×16), in the amber monitor (decision 2, revised 2026-10-22; first Kenney 1-Bit tinted amber) | Shaded, outlined sprites at the mid-to-late-80s standard, with a fitting tile for every role. CC0 means no attribution or licence risk in a public repo. |
 | Dialogue | Not needed: questions come from `quest.json` | Ink or similar only if characters later need branching conversation. |
 
 Rejected: KAPLAY (thinner for a game with several maps), RPG JS (smaller community), Godot (tens
 of MB on the web, harder in CI), RPG Maker (commercial licence).
 
-**Phaser settings this design relies on:**
-- **Renderer: force WebGL (`type: Phaser.WEBGL`) and draw maps with `TilemapLayer`.**
-  `TilemapLayer.setTint` works only under WebGL; the default `AUTO` mode can fall back to Canvas,
-  which ignores tile tint. `TilemapGPULayer` has no tint API at all. If WebGL isn't available, the
-  page offers classic mode.
-- **Audio: boot with `audio: { noAudio: true }`.** Phaser otherwise creates its own
-  AudioContext, and `core/`'s Web Audio module stays the only sound.
-- **Keyboard: limit Phaser's input to the canvas** with `input.keyboard.target` set to the
-  focusable canvas element.
-  - Phaser's keyboard manager calls `preventDefault` on captured keys. Scoped to the canvas, it
-    can't swallow Enter or Space on the dialog, the title links, the pause menu or the sound
-    buttons.
-  - When a dialog opens, the game also turns the manager off (`game.input.keyboard.enabled =
-    false`). When the dialog closes, it turns it back on. Pausing the scene already clears held keys;
-    `scene.input.keyboard.resetKeys()` on resume is a backup, so an arrow key never stays stuck.
+**What the page relies on from its engine:**
+- **A 2D canvas,** 320x128 (the maps' height), scaled up with crisp pixels. No WebGL is needed;
+  without a canvas the page offers classic mode.
+- **No audio of its own:** `core/`'s Web Audio module stays the only sound.
+- **Keys only on the map:** the engine listens for the arrows on the focusable map element, so it
+  can't swallow Enter or Space on the dialog, the links or the sound buttons. When a dialog opens
+  the page turns its keys off and clears held ones, so an arrow never stays stuck.
 
 ### 4.2 Binding maps to content
 
@@ -338,7 +331,7 @@ comma-separated: Tiled's list properties need 1.12, and ids can't contain commas
 They come from the content ids, and `hall` is reserved as an id, so the two forms can't collide.
 
 **Collision, for both the game and the checks:**
-- **One source:** a tile layer named `walls`, where any non-empty tile blocks. Phaser sets
+- **One source:** a tile layer named `walls`, where any non-empty tile blocks. The engine sets
   collision from that layer, and the build reads the same layer.
 - **Objects:** each sits on the tile containing its centre (Tiled anchors tile objects at the
   bottom-left, so the build converts). Characters, chests and portals are solid.
@@ -364,7 +357,7 @@ They come from the content ids, and `hall` is reserved as an id, so the two form
 - **Every map:**
   - tilesets embedded, never external `.tsx`/`.tsj`;
   - each tileset's image exists in the pack and ships in the explore build;
-  - no Tiled object templates (`template`), which Phaser doesn't resolve.
+  - no Tiled object templates (`template`), which the page doesn't resolve.
 
 Positions are otherwise free, so a map can be redrawn without touching content.
 
@@ -375,9 +368,9 @@ Dwarven Mines, about 2–3 minutes:
 1. You enter at the mine mouth. A **merchant** asks the business question and offers the three
    engines. The keyword path is blocked in this realm, as today: choosing it explains why and
    costs nothing.
-2. Deeper in, the **Wizard** writes the scroll (the AgentQL pane), and a gate opens.
-3. You carry it to the **Forge** at the end of the tunnel. The SQL pane appears and the
-   **dragon** wakes.
+2. Deeper in, the **Wizard** writes the scroll (the AgentQL pane).
+3. You carry it to the **Forge** in the forge hall. The SQL pane appears, the barred door east
+   opens, and behind it the **dragon** wakes.
 4. Each **scale** is a question from today's encounter, unchanged. Most highlight one or more SQL
    lines and ask who put them there; one is a choice. A right answer breaks a scale and plays the
    effect.
@@ -386,22 +379,23 @@ Dwarven Mines, about 2–3 minutes:
 **The overworld and Law:**
 - The overworld is a small map with the five realm portals. Sealed realms show a closed gate,
   and finished realms show your best gold.
-- The Kingdom of Law, once mapped, is four rooms, one per hall. A throne asks each hall's trials,
-  and the decree waits at the gate.
+- The Kingdom of Law is four rooms, one per hall (PR 9). A throne asks each hall's trials, a
+  gate between rooms opens once the hall before it is done, and the decree follows the last
+  hall's last question in the same dialog.
 
 **Unlocking in the prototype:**
 - **The same rule in both front ends.** The shared `unlock` rule applies to both, so a new player
   must finish Law first.
-- **Law opens in classic mode.** Law has no map yet, so its portal opens
-  `/agentql-quest/#realm=law`. Classic gains that deep link in PR 5 (today it always starts at
-  the title), plus a "back to the map" link when it was opened from explore.
-- **Saves are shared.** Classic (`/agentql-quest/`) and explore (`/agentql-quest/explore/`) share
+- **A realm without a map opens in classic mode** at its gate (`classic/#realm=<id>` since PR
+  12), with a "back to the map" link (PR 5). Since PR 11 every AgentQL realm has a map.
+- **Saves are shared.** Classic (`/agentql-quest/classic/` since PR 12) and explore
+  (`/agentql-quest/`, also at `/agentql-quest/explore/`) share
   an origin and the `aqq` saves. Explore re-reads them on `pageshow` and before every portal
-  check, so returning with Back shows Law as done and the Mines as open.
+  check, so returning with Back from a realm played in classic shows it as done.
 
 ### 4.4 Questions as HTML over the game
 
-When you interact, the scene pauses, Phaser's keyboard is turned off, and a modal `<dialog>`
+When you interact, the world freezes, the engine's keys are turned off, and a modal `<dialog>`
 opens over the canvas. It uses the same question rendering from `core/` as classic mode: panes
 with highlights, options, **Invoke magic**, feedback and gold. This:
 - keeps questions accessible: real buttons, focus management, a live region for results,
@@ -429,17 +423,18 @@ kept, and the character can be asked again.
 
 - **Side by side (decision 1):** classic stays the default at `/agentql-quest/`, one
   self-contained file that still runs from a double-click. Explore is published at
-  `/agentql-quest/explore/` as several files (page, scripts, Phaser, maps, tiles) and fetches
+  `/agentql-quest/explore/` as several files (page, scripts, engine, maps, tiles) and fetches
   `../quest.json`. Explore becomes the default only when all five realms are explorable, with
-  classic linked.
-- **Explore needs HTTP.** Browsers block `fetch` and XHR from `file://`, and Phaser's loader uses
-  XHR, so explore doesn't run from a double-click. To work locally, build into a folder and serve
+  classic linked. That happened in PR 12: explore is at `/agentql-quest/`, classic at
+  `/agentql-quest/classic/` (still self-contained), and old classic realm links are forwarded.
+- **Explore needs HTTP.** Browsers block `fetch` and XHR from `file://`, and the page uses
+  `fetch`, so explore doesn't run from a double-click. To work locally, build into a folder and serve
   it with `python3 -m http.server`. To test on a phone, use the same server, reached by the
   computer's LAN address. Pages deploys only from `main` and there are no preview deploys, so this
   local loop is how the manual checklist (§6) is done.
 - **No outside requests.**
-- **Budget:** 3 MB for the explore folder. Phaser is about 1.27 MB, the fonts are 48 KB, and maps
-  and tiles are small.
+- **Budget:** 3 MB for the explore folder. The engine is about 10 KB, the fonts are 48 KB, and maps
+  and tiles are small (about 310 KB in all).
 
 ## 5. Testing
 
@@ -456,11 +451,11 @@ kept, and the character can be asked again.
 - **Classic mode:** tested as in §3.6.
 - **Where tests live:** all tests stay in `tools/quest/tests/` (pack-specific ones under
   `tests/packs/agentql/`), one pytest root, so `validate.yml` and pre-commit name one path.
-- **Rendering (decision 3):** a manual checklist (§6) until explore becomes the default. Then a
-  Playwright smoke test that uses the Chrome already on GitHub's Ubuntu runner
-  (`channel: 'chrome'`), so no browser download. Runners have no GPU, and Chrome is removing its
-  automatic software-WebGL fallback, so the test launches with `--enable-unsafe-swiftshader` and
-  asserts that the Phaser canvas booted (not the classic-mode fallback).
+- **Rendering and play (decision 3, as built):** `tests/smoke_explore.py` runs in CI on the
+  Chrome already on GitHub's Ubuntu runner: it serves the build and plays the Mines with scripted
+  arrow-key events, walking each step's path with the engine's own collision, then the fun and the
+  exit; node tests cover the engine's geometry and timing. A manual checklist (§6) covers touch,
+  screen readers and other browsers.
 
 ## 6. Delivery
 
@@ -494,7 +489,7 @@ kept, and the character can be asked again.
 4. **Map binding:** the §4.2 object types, step ids and checks (the flood-fill included), and the
    node map play-through, on a tiny test map.
 5. **Explore prototype:**
-   - Phaser vendored with its §9 checks;
+   - the page on its own small engine (decision 5);
    - the Mines map and tiles, plus the overworld;
    - classic's `#realm=` deep link and return link;
    - the dialog, controls and the Pages build step;
@@ -512,7 +507,32 @@ kept, and the character can be asked again.
 - The manual checklist, served locally: Chrome, Safari and Firefox on desktop; Safari on
   iPhone; and reduced motion.
 
-**Then:** you play it, and the remaining realms get maps.
+6. **Art pass** (decision 2, revised): Kenney Tiny Dungeon inside the amber monitor, wall faces and
+   tops, a `decor` layer, motion (none with reduced motion), the gold bar, no tint.
+7. **Fun:** chests, a rolling barrel over a hoard, weapons, a door per realm, and people to talk
+   to (`npc`), none of them a step, all checked never to block the quest.
+8. **A world for the doors:** Tiny Town and Tiny Battle (CC0) join the atlas; the overworld becomes
+   a scrolling world with a scene per realm (a mountain tunnel, a library over a moat, a pier, a
+   tree tunnel, a boat) and a guard per realm, dressed for it, with one short line each.
+9. **Law explorable:** a library of four reading rooms, a petitioner before each hall's throne, a
+   barred door between rooms that says it is locked and opens when the hall before it is done,
+   and the decree at the end. Asked for in play: a dialog in a realm offers "Back to the realm"
+   and "Leave for the world map", and Elder Wren says which way each realm's door lies.
+
+10. **The Mines, clearer:** asked for in play (the gate was hard to find, the Forge didn't stand
+    out, and the foe looked like a red crab, not a dragon). The map reads west to east to a torch-lit barred door;
+    the Forge and the dragon get their own frames, used in every realm.
+
+11. **Every realm explorable:** the Lake (a craftsmen's town in the lake, a pier east to the
+    dragon's isle), the Golden Forests (a path through golden trees, a clearing with the Forge, a
+    barred door in the trees before the dragon's glade) and the Shifting Isles (isles joined by
+    stone bridges, the last bridge barred). Each reads west to east, as the Mines do.
+
+12. **Explore is home:** `explore.home` makes the explore page the pack's home page and moves the
+    classic page to `classic/`; each links to the other, old classic realm links are forwarded,
+    and finishing every realm shows a course-complete notice once.
+
+**Then:** you play it.
 
 ## 7. A second game
 
@@ -533,30 +553,33 @@ site's home page.
 1. **Explore sits beside classic.** It becomes the default only when all five realms are
    explorable, with classic linked.
 2. **The art is Kenney 1-Bit, tinted amber,** for the prototype. Revisit only if it feels generic.
+   *Revised 2026-10-22:* the maintainer judged it too early-80s and picked **Kenney Tiny Dungeon**
+   (CC0, mid-to-late-80s top-down) from a style board of four directions, inside the amber
+   monitor frame. With no tint, WebGL is no longer required (and after decision 5, a 2D canvas is all the page uses).
+   *Revised 2026-10-23:* Tiny Town and Tiny Battle joined in PR 8; for the three scenes they
+   couldn't draw, ten slices of Ishtar Pixels' Adventure Awaits (CC0, its grass and the cliff
+   foot's sand recoloured to Kenney's) give the Mines a mountainside, and frames of ours give Law an ornate front and
+   the Golden Forests a leafy lane and arch.
 3. **Testing uses a manual checklist** until explore becomes the default. Then a Playwright smoke
-   test on the runner's own Chrome.
+   test on the runner's own Chrome. *As built:* a headless Chrome play-through runs in CI already
+   (§5); the checklist covers what it can't.
 4. **The engine is renamed** `tools/quest/` now, as PR 1, while only one pack depends on it. The
    public URL doesn't change.
+5. **No game library** (2026-10-22). A review found that Phaser 4.2.1's build bundles a GPL-3.0
+   video polyfill (`rvfc-polyfill`), plus about a dozen other works whose notices we'd have to
+   carry, on a public, Pages-deployed repo. The maintainer chose an in-house engine (`engine.js`)
+   over a custom Phaser build or a legal ruling. Phaser never reaches `main`: the explore pull
+   requests merge together.
 
 ## 9. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Walking adds time: the course is "about 15 minutes" | Small maps (one screen or two), every question within 2–3 minutes per realm |
-| Phaser 4 is new (April 2026) | Use only basic features (tilemaps, arcade movement, cameras, input); pin one version |
-| **Vendored Phaser gets no security alerts today.** Snyk Code skips files over 1 MB and minified files, pip-audit is Python only, and Dependabot watches only Actions and `tools/ts-cli` | See **Vendored Phaser checks** below |
+| Our own engine has bugs a library wouldn't | It does very little; node tests on its geometry and timing, and a headless Chrome play-through that walks the Mines and the overworld with the arrow keys, in CI |
 | A canvas game is harder to make accessible | All questions are HTML dialogs; classic mode is always one link away |
 | Map edits silently break the course | The §4.2 checks (links, coverage, reachability) and the node map play-through, in the PR gate |
 | Two front ends drift apart | One `core/` for state, scoring, saves, sound and the question panel; both front ends' tests run on it |
 | Two packs overwrite each other's saves | A `storage_key` per pack; the build refuses duplicates |
 
-**Vendored Phaser checks** (all added in PR 5):
-- `vendor/package.json` and `package-lock.json` pin `phaser@4.2.1`. The lock records the npm
-  tarball's integrity.
-- An npm entry in `.github/dependabot.yml` for `vendor/`.
-- A test checks the vendored file's own SHA-256 against the value recorded beside it, which
-  matches jsDelivr's published per-file hash.
-- Another test checks that the version in `package.json` equals the version Phaser's file declares
-  (matched with `\bVERSION:"…"`, because the file also contains `LOG_VERSION`). So a Dependabot bump
-  fails until the vendored file is replaced. Phaser's only dependency, `eventemitter3`, is already
-  bundled, so `dependabot.yml` ignores it.
+(The vendored-Phaser checks planned here went with Phaser: decision 5.)

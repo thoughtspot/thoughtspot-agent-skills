@@ -258,6 +258,11 @@ are roughly ordered by value÷effort.
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
+| BL-400 | Customer-name check: no CI backstop now that the private list stays local, so binary/UTF-16 blobs and accented spellings of a listed name go unchecked | 2026-12-31 |
+| BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
+| BL-402 | pre-commit's staged-file gates: `echo \| grep -q` under pipefail skips on a large staged set, quoted paths and a rename's old path never match, quest's JS/CSS runs no quest tests, ossie-roundtrip never runs | 2026-12-31 |
+| BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
+| BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
 | BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
 | BL-407 | ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own | 2026-12-15 |
@@ -14413,6 +14418,148 @@ the check catalog rows from the table.
 
 **Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.
 
+## BL-400 — The private-name check has no backstop for blobs and spellings `Tier 2`
+
+**Filed:** 2026-10-22. **Source:** refute review of `scripts/check-pr.sh`.
+
+**Why now.** BL-385 and BL-387 lean on CI's `--all` tree scan as the backstop for what
+`--range` misses. That holds for LINKS. It does not hold for customer NAMES: the private
+list deliberately never goes into CI (see the checker's docstring), so the only name check
+on a PR is the maintainer's `check-pr.sh`, which reads diffs and PR text, not trees.
+
+**Gaps, each reproduced in the review:**
+1. **Binary and UTF-16 blobs.** Git diffs them as "Binary files differ", so a listed name
+   in a UTF-16LE CSV (Windows PowerShell 5.1's `>` default) is never read. `check-pr.sh`
+   lists such files and exits 3 for a manual look; that is a stopgap.
+2. **Accents.** `_norm` does not fold them: list "Mueller Quux" misses text "Müller Quux",
+   list "Quuxlé Foods" misses "Quuxle Foods".
+3. **Names split across lines, by an invisible separator, or in decomposed Unicode,
+   inside file content.** `--range` matches per added line after `splitlines()` (which also
+   breaks on U+2028, `\f`, `\v` and others) with no normalisation, so a hard-wrapped
+   "Zorblax\nIndustries" or an NFD "Société" passes it. `check-pr.sh` closes this for PRs by
+   re-scanning added lines itself (raw, NFC and NFKC forms, joined; per commit and the PR's
+   net diff); the commit hooks do not.
+4. **Non-Latin names cannot be listed.** `_norm` keeps ASCII letters and digits only, so a
+   Cyrillic, Greek or CJK name normalises to nothing. `check-pr.sh` refuses such a list
+   rather than ignore entries silently.
+5. **No plain-text mode.** `check-pr.sh` carries its own small scanner for PR text, because
+   `--message-file` applies commit-message scissors handling that lets one line hide the
+   rest. A `--text-file` mode (whole text, no truncation, lines also joined) would let it
+   drop that copy.
+
+**Do.** (1) A checker mode that, for every path changed in a range, reads the blob at each
+commit with `git cat-file` (no filters, no textconv) and decodes it through the existing
+UTF-16-aware decoder; have `check-pr.sh` call it and drop the exit-3 list. (2) NFKD-normalise
+and strip combining marks in `_norm` on both sides, plus ß→ss, æ→ae, ø→o. (3) Match
+names across a hunk's joined added lines. (4) Keep non-ASCII letters in `_norm` (with
+casefold). (5) `--text-file`.
+Tests for each, with synthetic names only.
+
+**Target:** 2026-12-31.
+
+## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
+
+**Filed:** 2026-10-22. **Source:** the 2026-09-14 review of PR #505, closed unmerged on
+2026-10-22 for inactivity. Recorded here so the findings outlive the closed PR. A
+resubmission should start from current `main` and answer each item below.
+
+**Blocking:**
+1. **Backup before the cascade delete (op 8).** The skill deletes with no backup and no
+   rollback, although `ts-dependency-manager` treats a pre-delete TML export as
+   non-negotiable for the same operation class (its Step 7, rollback at Step 11). Its own
+   open item #19 found the lookups reported 4 dependents where the cascade removed 12, so
+   the radius is not predictable. Take a TML export first, or state in SKILL.md why this
+   path is exempt.
+2. **The smoke test can cascade-delete from a pre-push gate.** `--run-delete` is passed
+   through verbatim by `run_smoke_tests.py`, and can sit in the gitignored
+   `smoke-config.local.json`. The runner should refuse destructive flags, or cap the
+   cascade the test may apply.
+3. **Cut op 9 (purge) from the first release.** The call is unparameterised (`POST
+   …/purge`, no body), so the confirmation shows a bounded list and authorises a possibly
+   unbounded action; there is no post-purge verification; and it clears the pending
+   ledger on success as if exactly those objects went. The open items also contradict
+   each other on whether purge was ever invoked (an early "never invoked" against a later
+   `GET` returning `Cannot Delete System Objects` from deletion logic). Its scope (#8) is
+   answerable from the REST spec via the SpotterCode MCP, per `api-research.md`, with no
+   live call. If purge returns later, it needs that answer first, plus a templated
+   confirmation screen and verification.
+4. **The SKILL.md header describes a read-only skill** ("seven read-only lookups… a
+   delete and a purge that are absent"), contradicting its own operations table (op 8
+   works) and open item #12's closure.
+
+**Should fix:**
+5. The smoke test claims to cover #19 (lookup vs apply under-reporting) but compares
+   preview against apply; #19 has no test.
+6. Open items #8 and #12 lead with superseded first headings and no forward pointer;
+   `check_open_items.py` reads only the first.
+7. Register the skill in `REQUIRED_EXTRA_ARGS` (`--column-guid`), regenerate
+   `docs/open-items-index.md`, add the `agents/PARITY.md` row. Without the first, the
+   runner silently SKIPs the smoke test of a destructive skill.
+8. Submit the skill on its own. The original diff was roughly one-third skill and
+   two-thirds unrelated backlog, session and validator changes.
+
+**Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
+
+## BL-402 — pre-commit's staged-file gates have four silent gaps `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the refute reviews of #660 (see BL-403).
+
+**Gaps, each measured in the review:**
+1. **SIGPIPE skip.** Every other gate tests `echo "$STAGED" | grep -q …` under
+   `set -euo pipefail`. When STAGED outgrows the pipe buffer, `grep -q` exits on its first
+   match, `echo` dies of SIGPIPE, and the pipeline's status fails the `if`: the gate is skipped,
+   silently. 1,000 staged paths skipped 1 run in 5; 1,400 paths, 5 in 5.
+2. **Quoted paths, and renames.** Git quotes a path with non-ASCII or a tab, so `\.py$` never
+   matches it; and STAGED shows a rename only by its new path, so a gate keyed to the old one
+   stays silent.
+3. **Non-Python sources.** A change to `tools/quest/explore/*.js`, `core/*.js` or `quest.css`
+   runs no quest tests (only the build check), nor does any non-Python change run erd's.
+4. **ossie-roundtrip** has tests that CI runs and pre-commit never does.
+
+**Do.** (1) Replace every `echo "$STAGED" | grep -q` with a here-string, as the unit-test block
+does. (2) Build STAGED with `-z` (or `core.quotePath=false`) and read it NUL-separated.
+(3) Let the quest suite's trigger include `tools/quest/` JS, CSS and HTML. (4) Give
+ossie-roundtrip a trigger, or record why it is CI-only.
+
+**Target:** 2026-12-31.
+
+## BL-403 — pre-commit's unit tests: select suites from a derived map, not a hand-written one `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** #660, which tried a hand-written suite-selection map and
+dropped it after three refute reviews each found a new class of miss.
+
+**The problem.** Any staged `.py` runs all seven suites (ts-cli, validate, formula-fidelity,
+agentql-retest, quest, erd, databricks): about 150 s against the hook's 15 s budget, on every
+commit that touches Python. CI runs every suite on every PR regardless, so the cost is local.
+
+**What a selection map has to cover (each found by a review, with a reproduced miss):** what a
+suite's tests import by path literal (ts-cli reads agents/databricks; validate reads
+tools/smoke-tests); what the code under test reads (ts-cli reads agents/shared/erd through
+ts_cli/audit); a renamed file's old path; and non-Python reads: 118 tracked files across ts-cli
+(function maps, the ts-audit catalog, calendar-builder SQL, tools/fixtures, its own fixtures),
+quest (README.md, the hook, pages.yml, its own JS/YAML/TMJ), erd (its examples, which must match
+a fresh render) and formula-fidelity (cases, runs). validate reads the whole repo.
+
+**Do.** Derive the map rather than write it: run each suite under an audit hook (a sitecustomize
+that records every tracked file opened, as the reviews did), commit the result as data, and
+select a suite when any staged path (by both names of a rename) is one it read, or Python
+outside every traced area is staged. Regenerate the data in CI and fail when it drifts. Keep
+"never weaker than main" as the test: replay the last few hundred commits through both hooks.
+
+**Target:** 2027-01-31.
+
+## BL-404 — `check_open_items` has no in-tree uniqueness rule `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the third refute review of #660.
+
+Two branches that each add a different `## #4` to the same open-items file both pass once the
+second updates from main: the novelty rule (`_novelty`) can't fire after an update, and unlike
+check_backlog_integrity this checker has no rule that an item number appears once in a tree.
+
+**Do.** Fail a file with the same item number twice.
+
+**Target:** 2026-12-31.
+
 ## BL-405 — one failed metadata or dependents batch aborts `ts audit run` `Tier 2`
 
 **Filed:** 2026-10-23. **Source:** the rule-catalog work (ts-audit 3.0.0), review finding
@@ -14561,3 +14708,4 @@ there, one unreadable Model aborts the whole audit. Not a regression — before 
    aborting, and add the case to `test_audit_ai_lookup_failures.py`.
 
 **Target:** 2027-01-31.
+

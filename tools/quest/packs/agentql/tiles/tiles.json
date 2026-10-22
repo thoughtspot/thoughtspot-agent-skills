@@ -1,0 +1,78 @@
+{
+  "wall": 40,
+  "wall_top": 132,
+  "player": 96,
+  "merchant": 87,
+  "guide": 84,
+  "compiler": 139,
+  "foe": 138,
+  "reward": 90,
+  "reward_open": 91,
+  "exit": 46,
+  "gate": 232,
+  "portal": 45,
+  "throne": 6,
+  "chest": 89,
+  "chest_open": 91,
+  "mimic": 92,
+  "barrel": 82,
+  "hoard": 66,
+  "hoard_empty": 66,
+  "portals": {
+    "law": 494,
+    "mines": 490,
+    "lake": 230,
+    "forests": 498,
+    "isles": 417
+  },
+  "weapon": "sword",
+  "items": {
+    "sword": {
+      "frame": 104,
+      "kind": "weapon"
+    },
+    "dagger": {
+      "frame": 103,
+      "kind": "weapon"
+    },
+    "axe": {
+      "frame": 118,
+      "kind": "weapon"
+    },
+    "staff": {
+      "frame": 129,
+      "kind": "weapon"
+    },
+    "red_potion": {
+      "frame": 115,
+      "kind": "treasure"
+    },
+    "blue_potion": {
+      "frame": 116,
+      "kind": "treasure"
+    },
+    "green_potion": {
+      "frame": 114,
+      "kind": "treasure"
+    },
+    "shield": {
+      "frame": 102,
+      "kind": "treasure"
+    }
+  },
+  "npcs": {
+    "elder": 100,
+    "miner": 86,
+    "dwarf_guard": 133,
+    "fisherman": 134,
+    "sailor": 135,
+    "golden_elf": 136,
+    "wizard_guard": 137,
+    "petitioner_farmer": 85,
+    "petitioner_scholar": 99,
+    "petitioner_trader": 112,
+    "petitioner_monk": 111,
+    "smith": 98,
+    "forester": 88
+  }
+}

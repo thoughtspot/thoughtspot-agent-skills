@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Quest data",
-  "description": "The general part of every pack's quest.json schema (version 2). build.py generates each pack's schema from this one: it sets $id and title, and fills the parts that depend on the pack: pack.strings (one string per key in strings.yaml), pack.rule_tags (one entry per tag), meta (one object per plugin that declares one), the refs on realms and encounters (what each plugin declares), and point.highlights, point.ruleTag and pane.id (from the pack's panes and tags). Those parts are empty here, so this file on its own is the schema of a pack with no plugins. Every field is required and nothing else is allowed, so a front end can rely on the shape. Bump schema_version for any change a front end would notice.",
+  "description": "The general part of every pack's quest.json schema (version 3). build.py generates each pack's schema from this one: it sets $id and title, and fills the parts that depend on the pack: pack.strings (one string per key in strings.yaml), pack.rule_tags (one entry per tag), meta (one object per plugin that declares one), the refs on realms and encounters (what each plugin declares), and point.highlights, point.ruleTag and pane.id (from the pack's panes and tags). Those parts are empty here, so this file on its own is the schema of a pack with no plugins. Every field is required and nothing else is allowed, so a front end can rely on the shape. Bump schema_version for any change a front end would notice.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "pack", "meta", "realms", "routes"],
   "properties": {
-    "schema_version": {"description": "2 for this layout.", "enum": [2]},
+    "schema_version": {"description": "3 for this layout (3 added pack.explore_home).", "enum": [3]},
     "pack": {"$ref": "#/$defs/pack"},
     "meta": {
       "description": "Per plugin, what it records about the whole quest (where its sources came from, for example).",
@@ -42,13 +42,14 @@
       "description": "The pack's settings, from its pack.yaml and strings.yaml.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "title", "storage_key", "unlock", "explore_realms", "lexicon", "rule_tags", "strings"],
+      "required": ["id", "title", "storage_key", "unlock", "explore_realms", "explore_home", "lexicon", "rule_tags", "strings"],
       "properties": {
         "id": {"type": "string"},
         "title": {"type": "string"},
         "storage_key": {"description": "Saves are <storage_key>-progress and <storage_key>-sound.", "type": "string"},
         "unlock": {"description": "first_realm_first: every other realm waits until the first is done.", "enum": ["first_realm_first"]},
         "explore_realms": {"description": "Realms that have a map.", "$ref": "#/$defs/texts"},
+        "explore_home": {"description": "The explore page is the pack's home page; the classic page moves to classic/.", "type": "boolean"},
         "lexicon": {
           "type": "object",
           "additionalProperties": false,

@@ -23,6 +23,7 @@ from _dirs import ALL_RUNTIMES
 from _novelty import (
     BaseUnavailable,
     merge_base_with_head,
+    read_head,
     novel_id_collisions,
     read_at,
     resolve_base,
@@ -158,7 +159,7 @@ def item_novelty_violations(root: Path, base: str, files: list[Path]) -> list[st
     out: list[str] = []
     for path in files:
         rel = str(path.relative_to(root))
-        head = _item_numbers(path.read_text(encoding="utf-8"))
+        head = _item_numbers(read_head(root, base, rel))
         at_mb = _item_numbers(read_at(root, merge_base, rel))
         at_base = _item_numbers(read_at(root, base, rel))
         for num in novel_id_collisions(head, at_mb, at_base):

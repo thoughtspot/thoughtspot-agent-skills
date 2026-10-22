@@ -34,6 +34,7 @@ from pathlib import Path
 from _novelty import (
     BaseUnavailable,
     merge_base_with_head,
+    read_head,
     novel_id_collisions,
     read_at,
     resolve_base,
@@ -134,7 +135,7 @@ def matrix_novelty_violations(root: Path, base: str, matrices: list[Path]) -> li
     out: list[str] = []
     for path in matrices:
         rel = str(path.relative_to(root))
-        head = set(matrix_ids(path.read_text(encoding="utf-8")))
+        head = set(matrix_ids(read_head(root, base, rel)))
         at_mb = set(matrix_ids(read_at(root, merge_base, rel)))
         at_base = set(matrix_ids(read_at(root, base, rel)))
         for bad in novel_id_collisions(head, at_mb, at_base):

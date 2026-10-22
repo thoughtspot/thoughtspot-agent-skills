@@ -64,12 +64,14 @@ import importlib.util
 import json
 import pathlib
 import re
+import shutil
 import sys
 
 import yaml
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import denylist  # noqa: E402
+import maps  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -78,7 +80,7 @@ CHECKS = HERE / "checks"
 CORE_SCHEMA = HERE / "schema" / "core.json"
 TEMPLATE = HERE / "classic" / "game.html"
 DEFAULT_PACK = "agentql"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3   # 3: pack.explore_home
 BESIDE = ("quest.json", "quest.schema.json")  # written next to the page, so --out may not name them
 FONT_DIR = HERE / "fonts"
 DEFAULT_OUT = HERE / "dist" / "index.html"
@@ -86,8 +88,14 @@ PLACEHOLDER = "__QUEST_DATA__"
 FONT_PLACEHOLDER = "/*__FONT_FACES__*/"
 ART_PLACEHOLDER = "__CLASSIC_ART__"
 CORE_PLACEHOLDER = "/*__QUEST_CORE__*/"
+CSS_PLACEHOLDER = "/*__QUEST_CSS__*/"
+CORE_CSS = HERE / "core" / "quest.css"   # the look, shared by the classic and explore pages
 CORE_DIR = HERE / "core"   # shared front-end code: plain scripts, inlined into the classic page in name order
 TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER = "__PAGE_TITLE__", "__PAGE_DESCRIPTION__"
+CLASSIC_HREF_PLACEHOLDER = "__CLASSIC_HREF__"   # the explore page's link to the classic page
+# Written at build time, so the home page has words and a way to the classic page before (or
+# without) its script: opened from a file, its fetches fail.
+CLASSIC_TEXT_PLACEHOLDER, EXPLORE_INTRO_PLACEHOLDER = "__CLASSIC_TEXT__", "__EXPLORE_INTRO__"
 PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
 
 # (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
@@ -185,6 +193,11 @@ class Pack:
                 err(f"pack.yaml: rule tag {tag!r} needs a label and a group ({'/'.join(GROUPS)})")
         if not isinstance((m.get("explore") or {}).get("realms", []), list):
             err("pack.yaml: explore.realms must be a list of realm ids")
+        home = (m.get("explore") or {}).get("home", False)
+        if not isinstance(home, bool):
+            err("pack.yaml: explore.home must be true or false")
+        elif home and not (m.get("explore") or {}).get("realms"):
+            err("pack.yaml: explore.home needs explorable realms (explore.realms)")
         for k, v in (self.strings if isinstance(self.strings, dict) else {}).items():
             if not ID.fullmatch(str(k)) or not isinstance(v, str):
                 err(f"strings.yaml: {k!r} must be a lowercase key with a text value")
@@ -560,6 +573,7 @@ class Compiler:
         m = self.pack.manifest
         return {"id": self.pack.id, "title": self.pack.title, "storage_key": self.pack.storage_key,
                 "unlock": m.get("unlock"), "explore_realms": list((m.get("explore") or {}).get("realms") or []),
+                "explore_home": (m.get("explore") or {}).get("home") is True,
                 "lexicon": dict(m.get("lexicon") or {}), "rule_tags": self.pack.rule_tags, "strings": self.pack.strings}
 
 
@@ -800,17 +814,20 @@ def core_script(core_dir: pathlib.Path | None = None) -> str:
     return "\n".join(parts)
 
 
-def render(template: str, data: dict, fonts_css: str = "", art: dict | None = None, core: str | None = None) -> str:
+def render(template: str, data: dict, fonts_css: str = "", art: dict | None = None, core: str | None = None,
+           css: str | None = None) -> str:
     """The classic page: the shared core (core/*.js), the data, the pack's art (art/classic/), its
     title and description and the fonts written into classic/game.html."""
-    for mark in (PLACEHOLDER, FONT_PLACEHOLDER, ART_PLACEHOLDER, TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER, CORE_PLACEHOLDER):
+    for mark in (PLACEHOLDER, FONT_PLACEHOLDER, ART_PLACEHOLDER, TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER, CORE_PLACEHOLDER,
+                 CSS_PLACEHOLDER):
         if template.count(mark) != 1:
             raise ValueError(f"game.html must contain {mark} exactly once")
     pack = data.get("pack") or {}
     values = {PLACEHOLDER: _script_json(data), ART_PLACEHOLDER: _script_json(art or {}),
               TITLE_PLACEHOLDER: _html_text(pack.get("title", "")),
               DESCRIPTION_PLACEHOLDER: _html_text((pack.get("strings") or {}).get("page_description", "")),
-              FONT_PLACEHOLDER: fonts_css, CORE_PLACEHOLDER: core_script() if core is None else core}
+              FONT_PLACEHOLDER: fonts_css, CORE_PLACEHOLDER: core_script() if core is None else core,
+              CSS_PLACEHOLDER: CORE_CSS.read_text(encoding="utf-8") if css is None else css}
     # One pass over the template, so a placeholder's name inside the pack's own text is never filled.
     return re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], template)
 
@@ -821,9 +838,238 @@ _STRING_CALL = re.compile(r"\b[SH]\(((?:[^()]|\([^()]*\))*?)[,)]")
 _ART_CALL = re.compile(r'\bart\("([a-z0-9_]+)"')
 
 
-def classic_needs(template: str, core: str | None = None) -> tuple[set[str], set[str]]:
-    """What the page and the core it inlines read from a pack."""
-    script = template.split("<script>", 1)[-1] + "\n" + (core_script() if core is None else core)
+EXPLORE_DIR = HERE / "explore"   # the explore front end: page template and its script
+EXPLORE_BUDGET = 3_000_000       # bytes for the whole explore folder (design §4.6)
+EXPLORE_MARK = ".written-by-build"   # in every explore/ the build writes, so a rebuild only ever replaces its own
+
+
+TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", "gate", "portal", "throne",   # what explore.js draws
+              "chest", "chest_open", "mimic", "barrel", "hoard", "hoard_empty"}
+TILE_TABLES = {"portals", "items", "weapon", "npcs"}   # a door per realm, the loot, the first weapon, who npcs look like
+
+
+def _png_alpha(path: pathlib.Path) -> tuple[int, int, bytes] | None:
+    """An 8-bit RGBA PNG's width, height and alpha channel (as make_atlas.py writes it), or None for
+    any other kind of PNG. Enough to tell an empty frame from a drawn one, without Pillow. A PNG
+    that can't be read raises ValueError."""
+    import struct
+    import zlib
+    try:
+        return _png_alpha_read(path)
+    except (ValueError, IndexError, struct.error, zlib.error) as e:
+        raise ValueError(f"not a readable PNG ({e})") from None
+
+
+def _png_alpha_read(path: pathlib.Path) -> tuple[int, int, bytes] | None:
+    import struct
+    import zlib
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos, idat, w, h = 8, b"", 0, 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, colour, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if (depth, colour, interlace) != (8, 6, 0):
+                return None
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * 4, [], bytearray(w * 4)
+    if not w or not h or len(raw) != h * (stride + 1):
+        raise ValueError("its image data is the wrong size")
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        if f > 4:
+            raise ValueError(f"row {y} has filter {f}")
+        for i in range(stride):
+            a = line[i - 4] if i >= 4 else 0
+            up, ul = prev[i], (prev[i - 4] if i >= 4 else 0)
+            if f == 1: line[i] = (line[i] + a) & 255
+            elif f == 2: line[i] = (line[i] + up) & 255
+            elif f == 3: line[i] = (line[i] + (a + up) // 2) & 255
+            elif f == 4:
+                p = a + up - ul
+                pa, pb, pc = abs(p - a), abs(p - up), abs(p - ul)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else up if pb <= pc else ul)) & 255
+        rows.append(bytes(line[3::4]))
+        prev = line
+    return w, h, b"".join(rows)
+
+
+def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
+    """tiles/tiles.json names a frame of tiles/tiles.png (16px, left to right, top to bottom) for
+    everything the explore page draws."""
+    folder = pack.dir / "tiles"
+    try:
+        frames = json.loads((folder / "tiles.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [f"tiles/tiles.json: an explorable pack names its tile frames here ({e})"]
+    size = maps._png_size(folder / "tiles.png") if (folder / "tiles.png").is_file() else None
+    if not size or size[0] % 16 or size[1] % 16:
+        return ["tiles/tiles.png: needs a PNG of whole 16px tiles"]
+    count = (size[0] // 16) * (size[1] // 16)
+    frame = lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v < count
+    errors = [f"tiles/tiles.json: needs {k!r}" for k in sorted((TILE_NAMES | TILE_TABLES) - set(frames))]
+    errors += [f"tiles/tiles.json: {k!r} is not used by the explore page" for k in sorted(set(frames) - TILE_NAMES - TILE_TABLES)]
+    for k in sorted(TILE_NAMES & set(frames)):
+        if not frame(frames[k]):
+            errors.append(f"tiles/tiles.json: {k!r} must be a frame of tiles.png, 0 to {count - 1}")
+    portals, items = frames.get("portals"), frames.get("items")
+    npcs = frames.get("npcs")
+    if not isinstance(npcs, dict) or not all(isinstance(k, str) and ID.fullmatch(k) and frame(v) for k, v in npcs.items()):
+        errors.append("tiles/tiles.json: npcs maps a look to its frame")
+    if not isinstance(portals, dict) or not all(isinstance(k, str) and frame(v) for k, v in portals.items()):
+        errors.append("tiles/tiles.json: portals maps a realm id to its door's frame")
+    if not isinstance(items, dict) or not items or not all(
+            isinstance(k, str) and ID.fullmatch(k) and isinstance(v, dict) and set(v) == {"frame", "kind"}
+            and frame(v["frame"]) and v["kind"] in ("weapon", "treasure") for k, v in items.items()):
+        errors.append("tiles/tiles.json: items maps an id to {frame, kind: weapon or treasure}")
+    elif (items.get(frames.get("weapon")) or {}).get("kind") != "weapon":
+        errors.append("tiles/tiles.json: weapon names the weapon item you start with")
+    if isinstance(items, dict) and "mimic" in items:
+        errors.append("tiles/tiles.json: 'mimic' is a chest, not an item")
+    # Every frame it names is drawn: an empty one would be an invisible door, person or item.
+    try:
+        alpha = _png_alpha(folder / "tiles.png")
+    except ValueError as e:
+        return errors + [f"tiles/tiles.png: {e}"]
+    if alpha is None:
+        return errors + ["tiles/tiles.png: must be an 8-bit RGBA PNG, not interlaced (make_atlas.py writes it so)"]
+    w = alpha[0]
+    empty = lambda f: not any(alpha[2][(f // (w // 16) * 16 + y) * w + (f % (w // 16)) * 16:][:16].strip(b"\0") for y in range(16))
+    # Every frame a map's tile layer draws is drawn in tiles.png: an empty one is an invisible wall.
+    total = (w // 16) * (len(alpha[2]) // w // 16)
+    blank = []                                             # kept apart, so neither check hides the other
+    for tmj in sorted((pack.dir / "maps").glob("*.tmj")):
+        try:
+            layers = json.loads(tmj.read_text(encoding="utf-8")).get("layers")
+        except (OSError, ValueError, AttributeError):
+            continue                                       # maps.py reports a map it can't read
+        used = {(g & 0x1FFFFFFF) - 1 for l in (layers if isinstance(layers, list) else [])
+                if isinstance(l, dict) and l.get("type") == "tilelayer"
+                for g in (l.get("data") if isinstance(l.get("data"), list) else []) if isinstance(g, int) and g & 0x1FFFFFFF}
+        blank += [f"maps/{tmj.name}: draws frame {f}, which tiles.png leaves empty" for f in sorted(used)
+                  if f < total and empty(f)]
+    if not errors:
+        named = {k: v for k, v in frames.items() if k in TILE_NAMES}
+        named |= {f"portals.{k}": v for k, v in (portals or {}).items()}
+        named |= {f"npcs.{k}": v for k, v in (frames.get("npcs") or {}).items()}
+        named |= {f"items.{k}": v["frame"] for k, v in (items or {}).items()}
+        errors += [f"tiles/tiles.json: {k} is frame {v}, which tiles.png leaves empty" for k, v in named.items() if empty(v)]
+    ids = {r["id"] for r in (data or {}).get("realms") or []}
+    if data and isinstance(portals, dict):
+        errors += [f"tiles/tiles.json: portals names {k!r}, which is not a realm" for k in sorted(set(portals) - ids)]
+    return errors + blank
+
+
+def explore_items(pack: "Pack") -> set[str]:
+    """The loot's ids (tiles/tiles.json items): each needs its name, item_<id>, in strings.yaml."""
+    try:
+        items = json.loads((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8")).get("items")
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return set(items) if isinstance(items, dict) else set()
+
+
+def _inside(path: pathlib.Path, folder: pathlib.Path) -> bool:
+    """Is `path` (which may not exist yet) `folder` or inside it, the way the file system sees it?
+    Compared by identity, not spelling: on a case-insensitive disk a differently cased name is the same folder."""
+    path = path.resolve()
+    if not folder.exists():
+        return path.is_relative_to(folder.resolve())
+    for p in (path, *path.parents):
+        if p.exists():
+            try:
+                if p.samefile(folder):
+                    return True
+            except OSError:
+                pass
+        elif p.name and p.parent.exists() and any(c.name.casefold() == p.name.casefold() and c.samefile(folder)
+                                                  for c in p.parent.iterdir()):
+            return True
+    return False
+
+
+def out_problems(out: pathlib.Path, explorable: bool, home: bool = False) -> list[str]:
+    """Before anything is written: the page's folder isn't one of the engine's own (tools/quest/
+    except its dist/), and an explore/ (or, when explore is the home page, a classic/) already there
+    is one this build wrote, not a link."""
+    if _inside(out.parent, HERE) and not _inside(out.parent, HERE / "dist"):
+        return [f"--out: {out.parent} is inside tools/quest/; build into tools/quest/dist/ or somewhere outside"]
+    for name, wanted in (("explore", explorable), ("classic", home)):
+        d = out.parent / name
+        if wanted and (d.is_symlink() or (d.exists() and not (d / EXPLORE_MARK).is_file())):
+            return [f"{name}/: {d} is already there and isn't a folder this build wrote; move it, or build somewhere else"]
+    return []
+
+
+def home_page(explore_page: str) -> str:
+    """The explore page as the pack's home page, one folder up from explore/: every relative URL
+    in it (its script, the engine, the tiles, ../quest.json) still resolves from explore/."""
+    head = "<head>"
+    if head not in explore_page:
+        raise ValueError("the explore page has no <head>")
+    return explore_page.replace(head, head + '\n<base href="explore/">', 1)
+
+
+def write_classic(out_dir: pathlib.Path, html: str) -> None:
+    """The classic page in <page folder>/classic/, when explore is the home page."""
+    d = out_dir / "classic"
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    (d / EXPLORE_MARK).write_text("Written by tools/quest/build.py, which replaces this folder on every build.\n",
+                                  encoding="utf-8")
+    (d / "index.html").write_text(html, encoding="utf-8")
+
+
+def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
+    """The explore front end, in <page folder>/explore/: its page, script, the shared core and look,
+    the fonts, the engine, the art, and the pack's tiles and maps. Everything is local.
+    out_problems() has already said it may."""
+    ex = out_dir / "explore"
+    if ex.exists():
+        shutil.rmtree(ex)    # a folder this build wrote (it carries the mark): no files left over
+    (ex / "maps").mkdir(parents=True, exist_ok=True)
+    (ex / EXPLORE_MARK).write_text("Written by tools/quest/build.py, which replaces this folder on every build.\n",
+                                   encoding="utf-8")
+    (ex / "tiles").mkdir(parents=True, exist_ok=True)
+    page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
+    values = {TITLE_PLACEHOLDER: _html_text(pack.title),
+              DESCRIPTION_PLACEHOLDER: _html_text(pack.strings.get("page_description", "")),
+              CLASSIC_HREF_PLACEHOLDER: "../classic/" if data["pack"]["explore_home"] else "../",   # from explore/
+              CLASSIC_TEXT_PLACEHOLDER: _html_text(pack.strings.get("explore_classic", "")),
+              EXPLORE_INTRO_PLACEHOLDER: _html_text(pack.strings.get("explore_intro", ""))}
+    (ex / "index.html").write_text(re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], page),
+                                   encoding="utf-8")
+    (ex / "explore.js").write_text((EXPLORE_DIR / "explore.js").read_text(encoding="utf-8"), encoding="utf-8")
+    (ex / "core.js").write_text(core, encoding="utf-8")
+    (ex / "quest.css").write_text(CORE_CSS.read_text(encoding="utf-8"), encoding="utf-8")
+    (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
+    (ex / "fonts").mkdir(exist_ok=True)
+    for f in sorted(FONT_DIR.glob("LICENSE-*.txt")):           # the OFL's text, with the fonts it covers
+        (ex / "fonts" / f.name).write_bytes(f.read_bytes())
+    (ex / "engine.js").write_text((EXPLORE_DIR / "engine.js").read_text(encoding="utf-8"), encoding="utf-8")
+    (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
+    (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")
+    for f in (pack.dir / "tiles").iterdir():
+        if f.is_file() and f.suffix.lower() in (".png", ".txt"):
+            (ex / "tiles" / f.name).write_bytes(f.read_bytes())
+    for f in (pack.dir / "maps").glob("*.tmj"):
+        (ex / "maps" / f.name).write_bytes(f.read_bytes())
+    size = sum(f.stat().st_size for f in ex.rglob("*") if f.is_file())
+    return [f"explore/: {size:,} bytes is over the {EXPLORE_BUDGET:,}-byte budget"] if size > EXPLORE_BUDGET else []
+
+
+def classic_needs(template: str, core: str | None = None, explore_page: bool = False) -> tuple[set[str], set[str]]:
+    """What the front ends read from a pack: the classic page, the core it inlines, and, for a pack
+    with explorable realms (`explore_page`), the explore page's script."""
+    js = EXPLORE_DIR / "explore.js"
+    explore = js.read_text(encoding="utf-8") if explore_page and js.is_file() else ""
+    script = template.split("<script>", 1)[-1] + "\n" + (core_script() if core is None else core) + "\n" + explore
     strings = {k for arg in _STRING_CALL.findall(script) for k in re.findall(r'"([a-z0-9_]+)"', arg)}
     return strings | {"page_description"}, set(_ART_CALL.findall(script)) | {"map"}  # the head's description
 
@@ -858,7 +1104,11 @@ def check_classic(pack: Pack, data: dict, art: dict, template: str, unused: bool
     """Everything the classic page reads must be in the pack, and the pack's art must all be used.
     `unused`: also refuse strings nothing reads (skipped when the compile already failed, since a
     broken trial can make a used string look unused)."""
-    strings, pieces = classic_needs(template, core)
+    explorable = bool((data.get("pack") or {}).get("explore_realms"))
+    strings, pieces = classic_needs(template, core, explorable)
+    if explorable:
+        strings |= {f"item_{k}" for k in explore_items(pack)}   # read as S(`item_${id}`), which the scan can't see
+        strings |= maps.npc_lines(pack.dir)                     # the lines the maps' npcs say
     scenes = {f"scene_{r['id']}" for r in data.get("realms") or [] if not r["halls"]}  # a realm of halls shows its crown
     errors = [f"strings.yaml: the classic page needs {k!r}" for k in sorted(strings - set(pack.strings))]
     used = strings | engine_strings(pack, load_plugins(pack.manifest.get("checks") or []), data)
@@ -878,13 +1128,21 @@ def _not_json(name: str):
     raise ValueError(f"quest.schema.json: {name} is not JSON (JSON.parse and strict parsers reject it)")
 
 
+BUILT: dict = {}
+
+
 def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None, dict, dict, list[str]]:
     """Validate, and unless `check`, render. Returns (html or None, data, schema, errors)."""
     pack = Pack(pack_id)
     data, errors = compile_pack(pack)
     errors += check_packs_unique()
+    if data:
+        errors += maps.check_maps(pack.dir, data)   # the explore front end's maps (design §4.2)
+        if data["pack"]["explore_realms"]:
+            errors += check_tiles(pack, data)
     try:
-        errors += denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
+        errors += (denylist.scan(pack.dir) + denylist.scan(TEMPLATE.parent) + denylist.scan(CORE_DIR)
+                   + denylist.scan(EXPLORE_DIR))
     except (OSError, ValueError) as e:  # fails closed: no list, or a list that isn't hashes
         errors.append(f"denylist: {e}")
     schema: dict = {}
@@ -915,6 +1173,7 @@ def build(pack_id: str = DEFAULT_PACK, check: bool = False) -> tuple[str | None,
     except (OSError, ValueError) as e:
         errors.append(f"denylist: {e}")
     html = None if check else render(TEMPLATE.read_text(encoding="utf-8"), data, fonts, art, core)
+    BUILT.update(pack=pack, art=art, fonts=fonts, core=core)   # for main() to write the explore folder
     return html, data, schema, errors
 
 
@@ -950,10 +1209,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: OK ({summary})")
         return 0
     out = pathlib.Path(args.out)
+    home = data["pack"]["explore_home"]
+    problems = out_problems(out, bool(data["pack"]["explore_realms"]), home)
+    if problems:
+        for e in problems:
+            print(f"{name}: {e}", file=sys.stderr)
+        return 1
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    if home:                       # explore is the home page; the classic page moves to classic/
+        write_classic(out.parent, html)
+    else:
+        out.write_text(html, encoding="utf-8")
+        old = out.parent / "classic"
+        if not old.is_symlink() and (old / EXPLORE_MARK).is_file():   # a classic/ an earlier build wrote, now stale
+            shutil.rmtree(old)
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     out.with_name("quest.schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if data["pack"]["explore_realms"]:
+        problems = write_explore(out.parent, BUILT["pack"], data, BUILT["art"], BUILT["fonts"], BUILT["core"])
+        if problems:
+            for e in problems:
+                print(f"  - {e}", file=sys.stderr)
+            return 1
+        if home:
+            out.write_text(home_page((out.parent / "explore" / "index.html").read_text(encoding="utf-8")), encoding="utf-8")
     print(f"{name}: wrote {out}, quest.json and quest.schema.json ({summary})")
     return 0
 

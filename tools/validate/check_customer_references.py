@@ -86,13 +86,14 @@ bare word is a customer's name. A maintainer can supply names that live OUTSIDE 
     name is printed as `<path redacted: denylist entry #N>`: CI logs on a public repo are
     public.
 
-To use it in CI, store the list as a repository secret and write it to a file in a step
-before the validators run, e.g.
-    printf '%s\\n' "$CUSTOMER_DENYLIST" > "$RUNNER_TEMP/denylist.txt"
-    echo "TS_CUSTOMER_DENYLIST=$RUNNER_TEMP/denylist.txt" >> "$GITHUB_ENV"
-with `env: CUSTOMER_DENYLIST: ${{ secrets.CUSTOMER_DENYLIST }}`. Secrets are not exposed
-to workflows triggered from forks, so on a fork PR the name check is skipped.
-validate.yml deliberately does not reference the secret until one exists.
+Do NOT put the list in CI. A repository secret is readable by everyone with push access,
+GitHub masks each line of a secret in logs, and any public pass/fail on contributor-
+supplied text is an oracle for whether a guessed name is on the list. Fork PRs get no
+secrets anyway, and a `pull_request_target` workflow that reads one beside fork content is
+the pattern GitHub warns against.
+The name check therefore runs only on a maintainer's machine: the hooks pick the list up
+automatically, and scripts/check-pr.sh runs this validator, with the list, over a PR's
+commits, text and paths before review (run main's copy; its header says how).
 
 Why a separate validator rather than a rule in check_secrets.py: check_secrets looks for
 *credentials* and exempts lines by value-shape heuristics tuned for secrets. A tenant link

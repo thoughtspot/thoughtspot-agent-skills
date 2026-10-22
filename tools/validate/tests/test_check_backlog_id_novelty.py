@@ -153,3 +153,53 @@ def _has(repo, branch):
     r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", branch],
                        capture_output=True, text=True)
     return r.returncode == 0
+
+
+def test_on_the_merge_ref_an_id_main_added_after_the_fork_is_not_the_branchs(tmp_path):
+    """GitHub's refs/pull/N/merge holds main's newer ids too. The fork point is taken from
+    the PR's own tip (HEAD^2), so the branch's ids must be read there as well, not from the
+    merged tree, or every id main added since the fork counts as the branch's (BL-400 on
+    #653)."""
+    repo = tmp_path / "r"
+    (repo / "docs").mkdir(parents=True)
+    _backlog(repo, ["BL-274"])
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-qm", "fork point")
+    main = "master" if _has(repo, "master") else "main"
+    _git(repo, "checkout", "-q", "-b", "feature")
+    (repo / "docs" / "other.md").write_text("the branch's own change\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-qm", "branch: no new id")
+    _git(repo, "checkout", "-q", main)
+    _backlog(repo, ["BL-274", "BL-275"])
+    _git(repo, "commit", "-qam", "main adds BL-275 after the fork")
+    _git(repo, "checkout", "-q", "-b", "mergeref", main)            # the merge ref: main first, the PR second
+    _git(repo, "merge", "-q", "--no-edit", "feature")
+
+    assert cbi.id_novelty_violations(repo, main) == []
+
+
+def test_on_the_merge_ref_a_real_collision_is_still_flagged(tmp_path):
+    """The other half of the merge-ref fix: the branch adds BL-401 to the backlog, main adds a
+    different BL-401 to the archive (different files, so the merge ref is created without a
+    conflict), and the branch's id is flagged."""
+    repo = tmp_path / "r"
+    (repo / "docs").mkdir(parents=True)
+    _backlog(repo, ["BL-274"])
+    _git(repo.parent, "init", "-q", str(repo))
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-qm", "fork point")
+    main = "master" if _has(repo, "master") else "main"
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _backlog(repo, ["BL-274", "BL-401"])
+    _git(repo, "commit", "-qam", "branch adds BL-401")
+    _git(repo, "checkout", "-q", main)
+    (repo / "docs" / "backlog-archive.md").write_text("# archive\n\n## BL-401 — another `Tier 3`\n\nbody\n",
+                                                      encoding="utf-8")
+    _git(repo, "commit", "-qam", "main archives a different BL-401")
+    _git(repo, "checkout", "-q", "-b", "mergeref", main)
+    _git(repo, "merge", "-q", "--no-edit", "feature")
+
+    assert cbi.id_novelty_violations(repo, main) == ["BL-401"]

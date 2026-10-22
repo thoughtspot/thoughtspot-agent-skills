@@ -4,7 +4,9 @@
 // order: { type: "sound", name } and { type: "save", realm, gold }. An action the current screen
 // doesn't offer is refused with a message and changes nothing, so a front end can't skip a step.
 //
-// Actions: map, realm {realm}, enter, hear, answer {option}, magic, next, carry, fight, again.
+// Actions: map, realm {realm}, enter, hear, answer {option}, magic, next, carry, fight, again, and
+// interact {step} for a map: accepted only when `step` is the one the current screen waits on
+// (expected(state)), and otherwise changing nothing; the front end then opens that step's dialog.
 var Quest = (typeof Quest === "object" && Quest) || {};
 (function (Q) {
   "use strict";
@@ -27,9 +29,25 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       if (s.screen === "battle") return r.encounters[s.enc].points[s.step];
       return null;
     }
+    // The step the current screen waits on, as a map's objects name it (design §4.2), or null.
+    function expected(s) {
+      const r = realms[s.realm];
+      if (!r) return null;
+      const enc = r.encounters[s.enc];
+      switch (s.screen) {
+        case "quest": return enc ? `${enc.id}:merchant` : null;
+        case "guide": return enc ? `${enc.id}:guide` : null;
+        case "compiler": return enc ? `${enc.id}:compiler` : null;
+        case "battle": return enc ? `${enc.id}:foe` : null;
+        case "victory": return enc ? `${enc.id}:reward` : null;
+        case "hall": case "trials": return r.halls[s.hall] ? `hall:${r.halls[s.hall].id}` : null;
+        default: return null;
+      }
+    }
     // What the current screen offers.
     function permitted(s, a, progress) {
       const r = realms[s.realm];
+      if (a.type === "interact") return typeof a.step === "string" && a.step === expected(s);
       switch (s.screen) {
         case "title": return a.type === "map";
         case "map": return a.type === "realm" && Number.isInteger(a.realm) && a.realm >= 0 && a.realm < realms.length;
@@ -77,6 +95,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         case "carry": sound("blip"); s.screen = "compiler"; break;
         case "fight": sound("blip"); Object.assign(s, { screen: "battle", step: 0, flash: null }); break;
         case "again": sound("blip"); Object.assign(s, { screen: "quest", enc: 0, step: 0, gold: 0, flash: null }); break;
+        case "interact": break;     // the step is the right one: nothing changes until its dialog acts
         case "magic": sound("magic"); s.flash = { kind: "magic", amount: 0 }; break;
         case "answer": {
           // Right: +gold, move on. Wrong: lose gold (never below 0), answer again. Blocked (a path
@@ -113,6 +132,6 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       }
       return { state: s, effects: fx };
     }
-    return { fresh, act, permitted, question, settled, firstDone, locked };
+    return { fresh, act, permitted, question, settled, firstDone, locked, expected };
   };
 })(Quest);

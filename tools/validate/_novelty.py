@@ -33,9 +33,11 @@ is that a gate must never go green because it could not run
 (`.claude/rules/repo-audit.md`).
 
 **Two inherited limits, true of every caller.** Two branches open at once still
-both pass, because neither has collided yet — the second is caught when it
-updates from `main`, which branch protection's `strict: true` requires before
-merge, so that setting is load-bearing. And because reading the base needs git,
+both pass, because neither has collided yet. Once the first merges, the second's
+next CI run (on its merge ref, before it updates from `main`) catches it. After it
+updates, the colliding value sits at its merge base, so this rule no longer fires
+and only a caller's in-tree uniqueness rule can (check_backlog_integrity has one;
+check_open_items does not). And because reading the base needs git,
 callers expose this as an opt-in `--base`: pre-commit and a `git archive` export
 have no base ref, and get only the within-tree half of their rules.
 """
@@ -80,15 +82,21 @@ def effective_head(root: Path, base: str) -> str:
     parent is exactly the base tip. In that case the PR's own tip is ``HEAD^2``, and
     the merge base taken against it is the real fork point.
 
-    Ambiguity worth naming: a developer who merges the base into their branch locally
-    produces the same shape. Using ``HEAD^2`` there measures the branch as it was
-    before that merge, which is the conservative reading — ids it genuinely allocated
-    still count, ids it inherited through the merge do not.
+    A developer who merges the base into their branch locally does NOT produce this
+    shape: that merge's first parent is the branch tip, not the base or behind it, so
+    HEAD is kept, and the novelty rule cannot fire there (see the module docstring).
     """
     if _run(["rev-parse", "--verify", "--quiet", "HEAD^2"], root).returncode != 0:
         return "HEAD"  # not a merge commit
     first_parent = _run(["rev-parse", "HEAD^1"], root).stdout.strip()
-    if first_parent and first_parent == resolve_base(root, base):
+    tip = resolve_base(root, base)
+    if first_parent and first_parent == tip:
+        return "HEAD^2"
+    # A merge ref built before the base moved on (CI fetches the base again before this step): its
+    # first parent is behind the base, and its second (the PR) is not in the base. A local merge of
+    # the base into a branch, or a branch sitting on a merge commit of the base's, fails one or other.
+    if (first_parent and _run(["merge-base", "--is-ancestor", first_parent, tip], root).returncode == 0
+            and _run(["merge-base", "--is-ancestor", "HEAD^2", tip], root).returncode != 0):
         return "HEAD^2"
     return "HEAD"
 
@@ -103,6 +111,21 @@ def merge_base_with_head(root: Path, base: str) -> str:
     if result.returncode != 0 or not result.stdout.strip():
         raise BaseUnavailable(f"no merge base between {base!r} and {head}")
     return result.stdout.strip()
+
+
+def read_head(root: Path, base: str, rel: str) -> str:
+    """The branch's copy of `rel`, read where its merge base is taken (`merge_base_with_head`).
+
+    On GitHub's merge ref that is the PR's own tip (``HEAD^2``): the merged tree also
+    holds every value the base gained since the fork, and reading it would count each
+    as the branch's own (BL-400 flagged on #653). Otherwise the working tree, so an
+    uncommitted edit is checked too. "" when the branch has no such file.
+    """
+    head = effective_head(root, base)
+    if head != "HEAD":
+        return read_at(root, head, rel)
+    path = root / rel
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
 def read_at(root: Path, rev: str, rel: str) -> str:
