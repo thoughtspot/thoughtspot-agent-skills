@@ -298,21 +298,18 @@ class ThoughtSpotClient:
         )
 
     def _token_from(self, resp: requests.Response) -> Tuple[str, Optional[int]]:
-        """(token, expiry_ms) from a 2xx `auth/token/full` answer; a clean exit, like the
-        401/403 handling above, when the answer carries no token (not JSON, not an
-        object, or no `token`) — never a KeyError traceback."""
+        """(token, expiry_ms) from a 2xx `auth/token/full` answer; a clean exit, like a
+        401/403, when it carries no token — never a KeyError traceback."""
         try:
             data = resp.json()
-        except ValueError:
+        except ValueError:  # not JSON: no token either
             data = None
         token = data.get("token") if isinstance(data, dict) else None
         if not isinstance(token, str) or not token:
             raise SystemExit(
                 f"Authentication failed for profile '{self._profile_name}': the token "
-                f"endpoint answered {resp.status_code} without a token.\n"
-                "Check the profile's base URL points at a ThoughtSpot instance, then "
-                "run /ts-profile-thoughtspot → U → Refresh credential."
-            )
+                f"endpoint answered {resp.status_code} without a token.\nCheck the profile's "
+                "base URL, then run /ts-profile-thoughtspot → U → Refresh credential.")
         return token, data.get("expiration_time_in_millis")
 
     def _authenticate(self) -> Tuple[str, Optional[int]]:
