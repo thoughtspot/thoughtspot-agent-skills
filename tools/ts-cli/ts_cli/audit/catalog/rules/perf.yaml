@@ -351,3 +351,25 @@
   examples:
     fires: {fixture: perf_column_count_distinct, severity: INFO}
     silent: {fixture: perf_model_80_columns}
+
+# Ids used before the catalog existed. Recorded as retired so the history gate holds
+# them: the gate reads only catalog history, and "the next free number" would hand
+# them out again.
+- id: P10
+  title: RLS bypass as exception
+  description: >-
+    Retired before the rule catalog: flagged `is_bypass_rls: true` until ts-audit's
+    check overhaul (#131) removed it. S10 and S4 report RLS bypass now. Recorded as
+    retired so the id is never reused.
+  status: retired
+  categories: [P]
+  scope: model
+
+- id: P12
+  title: Reserved (never assigned)
+  description: >-
+    Retired without ever running: the id was left unassigned when the checks were
+    renumbered (#131). Recorded as retired so it is never handed out by accident.
+  status: retired
+  categories: [P]
+  scope: model

@@ -176,3 +176,24 @@
   examples:
     fires: {fixture: sec_bypass_without_pii, severity: MEDIUM}
     silent: {fixture: sec_model_without_pii}
+
+# Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
+# reused.
+- id: S6
+  title: Conformed dimension divergence (pre-catalog)
+  description: >-
+    Retired before the rule catalog: ran as S6 until ts-audit's check overhaul (#131)
+    moved the check to the data-modeling angle, where it runs as D12. Recorded as
+    retired so the id is never reused.
+  status: retired
+  categories: [S]
+  scope: model
+
+- id: S7
+  title: Reserved (never assigned)
+  description: >-
+    Retired without ever running: the id was left unassigned when the checks were
+    renumbered (#131). Recorded as retired so it is never handed out by accident.
+  status: retired
+  categories: [S]
+  scope: model

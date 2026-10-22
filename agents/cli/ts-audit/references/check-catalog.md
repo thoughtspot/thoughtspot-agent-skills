@@ -170,13 +170,8 @@ A retired rule keeps its id, which is never reused.
 | ID | Title | Why |
 |---|---|---|
 | H6 | Duplicate sets | Deferred — requires deep set comparison. Retired with no logic: the id stays allocated so it is never reused, and the rule never runs (no profile may revive it). |
+| P10 | RLS bypass as exception | Retired before the rule catalog: flagged `is_bypass_rls: true` until ts-audit's check overhaul (#131) removed it. S10 and S4 report RLS bypass now. Recorded as retired so the id is never reused. |
+| P12 | Reserved (never assigned) | Retired without ever running: the id was left unassigned when the checks were renumbered (#131). Recorded as retired so it is never handed out by accident. |
+| S6 | Conformed dimension divergence (pre-catalog) | Retired before the rule catalog: ran as S6 until ts-audit's check overhaul (#131) moved the check to the data-modeling angle, where it runs as D12. Recorded as retired so the id is never reused. |
+| S7 | Reserved (never assigned) | Retired without ever running: the id was left unassigned when the checks were renumbered (#131). Recorded as retired so it is never handed out by accident. |
 <!-- END GENERATED -->
-
----
-
-## Unassigned ids
-
-| ID | Status |
-|---|---|
-| P10, P12 | Not assigned |
-| S6, S7 | Not assigned |
