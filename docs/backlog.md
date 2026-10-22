@@ -14476,34 +14476,6 @@ resubmission should start from current `main` and answer each item below.
    two-thirds unrelated backlog, session and validator changes.
 
 **Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
-## BL-402 — `ts tableau build-liveboard` should cross-check its output against the live Model
-
-**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau liveboard-migration
-submission — the auto-builder emitted tiles referencing columns by a slightly different
-case/suffix than the live Model actually has (a bucket-wrapper formula, a trailing-space
-name), and formulas dropped during a later Model-enrichment pass left some tiles with no
-resolvable reference at all. The migration skill currently documents a manual
-correction pass (`references/step-10-liveboard-generation.md`) as the only fix — resolving
-case/suffix/bucket-wrapper drift and genuinely-dropped-vs-typo triage by hand, every time.
-
-**Why it matters.** A step that exists only in prose, run by an agent reading a skill file,
-is exactly the kind of mechanical transformation this repo's own angle-11 codification
-principle says should move into `ts-cli` once it's well-understood enough to automate (see
-`.claude/rules/repo-audit.md`, angle 11). It is also easy to skip or do inconsistently by
-hand, and the live Model is right there to check against — `build-liveboard` already has
-the connection and profile it needs.
-
-**Do.** Add a verification pass to `ts tableau build-liveboard`: after generating liveboard
-TML, export the live Model it targets and resolve every `answer_columns[]`/`chart_columns[]`
-entry against the Model's actual formula/column names. For each unresolved reference, try
-(in order) an exact case-insensitive match, a known suffix variant, then report the rest as
-genuinely unresolved (not silently drop them). Surface a summary (`resolved_case_fixes`,
-`resolved_suffix_fixes`, `unresolved`) in the command's result JSON, matching the shape
-`ts tableau verify` already uses for formula-level drop reporting.
-
-**Target:** 2026-12-31, or the next Tableau liveboard-migration engagement, whichever comes
-first.
-
 ## BL-403 — Correct Step 7's "rerun when formulas are filtered" explanation
 
 **Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.

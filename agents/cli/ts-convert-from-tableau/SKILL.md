@@ -1921,14 +1921,6 @@ From the export (and/or `ts metadata search --guid {model_guid}`) record:
 (In **scope 3 / Liveboards only**, the model already exists from Step 1.5a — this export is
 the single source of its obj_id, columns, formulas, and parameter UUIDs.)
 
-### 10-pre2. Optional: an MCP-based dashboard tool, if the session already has one
-
-Hand-authored TML (rest of Step 10) stays the default path. If a Liveboard-building MCP tool
-is already connected, offer it as an alternative — default to declining absent a preference,
-never if Spotter was declined at Step 5.5, never block waiting for one. See
-[`thoughtspot-liveboard-tml.md`](../../shared/schemas/thoughtspot-liveboard-tml.md) §"Building
-a Liveboard via an MCP-based dashboard tool" for gotchas.
-
 ### 10-charts. Choose the charting library (ask once)
 
 Before resolving chart types, ask the user which charting library to target — **default
@@ -1968,10 +1960,6 @@ in the description — never fall back to TABLE_MODE as a lazy alternative.
 See [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
 "Mark class → chart type (Step 10a)" for the full Tableau mark-class → `chart.type` mapping
 table (bar/line/circle/square/pie/area/text/map/KPI-block/dual-axis combo).
-
-**Apply the confirmed chart/structure upgrades upfront** — see
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"Confirmed chart/structure upgrades (Step 10a)".
 
 **Combo / dual-axis rule (Muze path only).** A Tableau **dual-axis** worksheet (two `<pane>`
 marks with different mark classes, typically `Bar` + `Line`, on a secondary/synchronized
@@ -2513,6 +2501,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open or reports success on an unattributable failure. Parameter types `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc and chart-type fixes, optional MCP step. Backlog BL-402/403/404 |
+| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open or reports success on an unattributable failure. Parameter types `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`). Backlog BL-403/404 |
 
 **Older entries (v1.0.0–v1.46.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

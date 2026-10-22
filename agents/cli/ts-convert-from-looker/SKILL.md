@@ -569,17 +569,6 @@ Surface the model GUID to the user for future exports or updates.
 
 Only run if the user selected scope 1 (Models + Liveboards) or scope 3 (Liveboards only).
 
-### 10-pre. Optional: an MCP-based dashboard tool, if the session already has one
-
-The rest of Step 10 (below) builds the liveboard via hand-authored TML — that stays the
-default and primary path for every runtime this skill serves. If the session already has a
-Liveboard-building MCP tool connected (no particular one assumed or required — check what's
-available, don't look for a specific name), you may offer it as an alternative for this
-build; default to declining if the user has no preference. Never block waiting for one to
-become available — if none is connected, just proceed with TML as written. See
-[`../../shared/schemas/thoughtspot-liveboard-tml.md`](../../shared/schemas/thoughtspot-liveboard-tml.md)
-"Building a Liveboard via an MCP-based dashboard tool" for the gotchas found using one.
-
 ### 10a. Parse LookML dashboard file
 
 LookML dashboards are plain-text YAML (`.dashboard.lookml`). Extract the dashboard-level
@@ -906,7 +895,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-10-19 | Documents an optional MCP-based dashboard-building step (if the session already has one) as an alternative to hand-authored Liveboard TML — lightweight, non-blocking, same chart-type and formula-reference rules apply. See `agents/shared/schemas/thoughtspot-liveboard-tml.md`. No required-path behaviour change. |
 | 1.0.7 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.0.6 | 2026-10-06 | **`SUBSTR(col, pos, len)` mapping row corrected** (BL-340 class): SQL `SUBSTR` is 1-based and ThoughtSpot `substr` zero-based, so the identity row shifted every substring one character; it is now `substr ( [T::COL] , pos - 1 , len )` for a literal `pos` ≥ 1 (and `strlen` for the 2-argument form), with a `sql_string_op` pass-through for a `pos` ≤ 0 or a non-literal `pos` — the Snowflake / Databricks translators' rule |
 | 1.0.5 | 2026-09-22 | **I7 marker added at the classification step.** The skill already stated the rule in prose at §4a and checklisted it at step 6e — what it lacked was the machine-checkable marker, so no gate could tell it apart from a skill that said nothing, and the prose sat *after* the dimension and measure verdicts it needed to govern. The gate now heads Step 4, ahead of all three untranslatable verdicts; the §4a prose and the 6e checklist are unchanged. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |

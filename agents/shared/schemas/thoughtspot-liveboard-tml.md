@@ -620,35 +620,6 @@ the shared Model) use a **different** cross-reference convention than Model form
   reuse) a permanent Model formula to hold the logic and have the local formula just
   reference it by bare name.
 
-## Building a Liveboard via an MCP-based dashboard tool, instead of hand-authored TML
-
-Some sessions have an MCP tool connected that can build or modify a Liveboard directly (e.g.
-a `create_dashboard`/`modify_dashboard`-shaped tool), as an alternative to writing TML by
-hand. Treat this as strictly optional and secondary: the tool's name and availability are
-account- and session-specific (never hard-code one, and never assume a particular MCP
-server is configured), it is not available in every runtime a skill may run in, and it
-should never gate or block the TML-authoring path described above — if no such tool is
-connected, or the user has no preference, just build the TML. Gotchas found using one, where
-a skill offers it as an option:
-
-- **A target Model/Worksheet must have AI search ("Spotter") enabled for it** before such a
-  tool can build Answers against it — a gate separate from general query access (the Model
-  can still answer ordinary queries with it disabled). Check `model.properties.spotter_config
-  .is_spotter_enabled` before offering the option, and say so plainly if it's off rather than
-  letting the tool's own call fail opaquely.
-- **The chart-type reimport and answer-local-formula gotchas above apply here too** — a
-  dashboard built this way is still ordinary Liveboard TML underneath, subject to the same
-  `TABLE_MODE`-doesn't-survive-reimport and bare-name-reference rules.
-- **A tile that shows the same unfiltered value for every filter choice is not necessarily a
-  casing bug.** `=`/`!=`/`in` comparisons are case-insensitive in ThoughtSpot (see "String
-  comparison is case-insensitive" in `thoughtspot-formula-patterns.md`), so a filter literal
-  written in different case than the formula's own output (e.g. a lowercased "north region"
-  against a formula that emits "North Region") should still match — a casing difference alone
-  is not expected to be the cause. If several tiles all show the same value regardless of
-  which filter choice is selected, check the filter is actually attached to the right
-  column/formula first, and treat "it's a casing mismatch" as one hypothesis to verify, not
-  the default explanation.
-
 ---
 
 ## Limitations
