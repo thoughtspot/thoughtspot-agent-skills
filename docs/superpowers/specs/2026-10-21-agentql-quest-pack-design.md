@@ -120,7 +120,7 @@ tools/quest/
       strings.yaml             every sentence a front end shows that isn't content
       art/classic/*.txt        the ASCII scenes
       maps/*.tmj               Tiled maps: the overworld, plus one per explorable realm
-      tiles/                   Kenney Tiny Dungeon's atlas plus one row of ours (CC0 note)
+      tiles/                   one atlas: Kenney's Tiny packs, Adventure Awaits, frames of ours (CC0 notes)
       promo/                   the poster, the GIF and make_ad.py (moved)
 ```
 
@@ -556,6 +556,10 @@ site's home page.
    *Revised 2026-10-22:* the maintainer judged it too early-80s and picked **Kenney Tiny Dungeon**
    (CC0, mid-to-late-80s top-down) from a style board of four directions, inside the amber
    monitor frame. With no tint, WebGL is no longer required (and after decision 5, a 2D canvas is all the page uses).
+   *Revised 2026-10-23:* Tiny Town and Tiny Battle joined in PR 8; for the three scenes they
+   couldn't draw, eleven slices of Ishtar Pixels' Adventure Awaits (CC0, recoloured to Kenney's
+   grass and sand) give the Mines a mountainside, and frames of ours give Law an ornate front and
+   the Golden Forests a leafy lane and arch.
 3. **Testing uses a manual checklist** until explore becomes the default. Then a Playwright smoke
    test on the runner's own Chrome. *As built:* a headless Chrome play-through runs in CI already
    (§5); the checklist covers what it can't.

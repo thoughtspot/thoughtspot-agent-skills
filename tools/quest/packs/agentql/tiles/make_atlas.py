@@ -48,10 +48,13 @@ DRAWN = {
 }
 
 
-# Adventure Awaits slices by frame: a cliff's grass top (west, middle, east), its rock (west,
-# middle, middle again, east), its sandy foot (west, middle, east), and a tunnel into it.
-ADVENTURE = {480: 92, 481: 93, 482: 86, 483: 103, 484: 87, 485: 104, 486: 105, 487: 106, 488: 107, 489: 108,
+# Adventure Awaits slices by frame, as they sit in the pack's own sheet: a cliff's grass top
+# (west, middle, east), its rock (west, middle twice, east), its sandy foot (west, middle, east),
+# and a tunnel into it. Its grass and sand are given Kenney's, so the two packs meet without a seam.
+ADVENTURE = {480: 86, 481: 93, 482: 92, 483: 87, 484: 104, 485: 104, 486: 103, 487: 106, 488: 107, 489: 108,
              490: 113}
+TO_KENNEY = {(195, 142, 101): (234, 165, 108),                                   # sand
+             (103, 156, 48): (132, 198, 105), (154, 191, 68): (139, 216, 125), (34, 120, 63): (101, 165, 86)}  # grass
 
 # Law's library: Tiny Dungeon's outline, the Forge's stone, gold trim. 16-letter rows are drawn as
 # they are; 8-letter rows are a left half, mirrored.
@@ -88,6 +91,7 @@ MIRRORED = {497: 496}    # the balustrade's east side is its west side, mirrored
 def drawn(colours, half):
     tile = Image.new("RGBA", (T, T), (0, 0, 0, 0))
     for y, row in enumerate(half):
+        assert len(row) in (T // 2, T), (row, len(row))     # a half to mirror, or a whole row
         for x, ch in enumerate(row if len(row) == T else row + row[::-1]):
             if ch != ".":
                 tile.putpixel((x, y), (*colours[ch], 255))
@@ -130,10 +134,16 @@ def main(dungeon, town, battle, adventure, out):
     assert len(td) == 132 and len(tt) == 132 and len(tb) == 198, (len(td), len(tt), len(tb))
     clear = lambda: Image.new("RGBA", (T, T), (0, 0, 0, 0))
     tiles = td + [clear() for _ in range(12)] + tt + tb
-    tiles += [clear() for _ in range(max(DRAWN) + 1 - len(tiles))]
+    tiles += [clear() for _ in range(max([*DRAWN, *ADVENTURE, *MIRRORED]) + 1 - len(tiles))]
     for frame, n in ADVENTURE.items():
         tile = Image.open(pathlib.Path(adventure) / f"Slice {n}.png").convert("RGBA")
         assert tile.size == (T, T), (n, tile.size)
+        px = tile.load()
+        for y in range(T):
+            for x in range(T):
+                r, g, b, a = px[x, y]
+                if a and (r, g, b) in TO_KENNEY:
+                    px[x, y] = (*TO_KENNEY[(r, g, b)], a)
         tiles[frame] = tile
     top = Image.new("RGBA", (T, T), (47, 42, 72, 255))   # 132: the top of a wall: dark stone, a lighter rim, chips
     for x in range(T):
@@ -152,7 +162,7 @@ def main(dungeon, town, battle, adventure, out):
     for i, t in enumerate(tiles):
         atlas.alpha_composite(t, ((i % 12) * T, (i // 12) * T))
     atlas.save(out, optimize=True)
-    print(out, atlas.size, len(tiles), "frames")
+    print(out, atlas.size, f"{len(tiles)} frames drawn, {rows * 12} slots")
 
 
 if __name__ == "__main__":

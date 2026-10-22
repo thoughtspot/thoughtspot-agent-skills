@@ -3054,7 +3054,7 @@ def test_a_spawn_on_the_edge_leaves_it_open(tmp_path):
 
 # ---- PR 5: the explore front end (design §4) ------------------------------------------------------
 
-EXPLORE_FILES = ["index.html", "explore.js", "engine.js", "core.js", "quest.css", "fonts.css", "art.json",
+EXPLORE_FILES = ["tiles/LICENSE-adventure-awaits.txt", "index.html", "explore.js", "engine.js", "core.js", "quest.css", "fonts.css", "art.json",
                  "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj",
                  B.EXPLORE_MARK, "fonts/LICENSE-vt323.txt", "fonts/LICENSE-ibm-plex-mono.txt"]
 
@@ -3937,12 +3937,13 @@ def test_an_unknown_png_filter_is_an_error(tmp_path):
 
 def test_the_atlas_must_be_8_bit_rgba(tmp_path, monkeypatch):
     packs = _copy_packs(tmp_path)
-    (packs / "agentql/tiles/tiles.png").write_bytes(_png_rows([bytes(192 * 4)] * 640, [0], colour=6).replace(
-        b"IHDR" + (192).to_bytes(4, "big") + (640).to_bytes(4, "big") + bytes([8, 6]),
-        b"IHDR" + (192).to_bytes(4, "big") + (640).to_bytes(4, "big") + bytes([8, 2])))
+    h = MAPS._png_size(packs / "agentql/tiles/tiles.png")[1]     # the real size, so only the format is wrong
+    (packs / "agentql/tiles/tiles.png").write_bytes(_png_rows([bytes(192 * 4)] * h, [0], colour=6).replace(
+        b"IHDR" + (192).to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 6]),
+        b"IHDR" + (192).to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 2])))
     monkeypatch.setattr(B, "PACKS", packs)
     errors = B.build(check=True)[3]
-    assert any("tiles/tiles.png" in e for e in errors), errors
+    assert any("must be an 8-bit RGBA PNG" in e for e in errors), errors
 
 
 def test_guards_have_their_own_looks():
@@ -4308,3 +4309,23 @@ def test_the_scenes_use_their_new_art_and_it_is_licensed():
     assert all(floor[fy * w + x] == 499 + 1 for x in range(fx - 12, fx))          # the canopy lane up to the arch
     mx, my = at[("portal", "mines")]
     assert my == 1 and walls[mx] in (480 + 1, 481 + 1, 482 + 1)                   # the tunnel in the cliff, grass above
+
+
+@pytest.mark.parametrize("layer,frame", [("decor", 500), ("walls", 501)])
+def test_a_map_drawing_an_empty_frame_fails_the_build(tmp_path, monkeypatch, layer, frame):
+    packs = _copy_packs(tmp_path)
+    p = packs / "agentql/maps/overworld.tmj"
+    world = json.loads(p.read_text(encoding="utf-8"))
+    next(l for l in world["layers"] if l["name"] == layer)["data"][world["width"] * 4 + 3] = frame + 1
+    p.write_text(json.dumps(world), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any(f"maps/overworld.tmj: draws frame {frame}, which tiles.png leaves empty" in e for e in errors), errors
+
+
+def test_the_cliff_slices_are_the_packs_own_in_place():
+    # west, middle, east as they sit in Adventure Awaits' own sheet (a review found them mirrored)
+    src = (PACK_DIR / "tiles/make_atlas.py").read_text(encoding="utf-8")
+    assert "ADVENTURE = {480: 86, 481: 93, 482: 92, 483: 87, 484: 104, 485: 104, 486: 103, 487: 106, 488: 107, 489: 108," in src
+    licence = (PACK_DIR / "tiles/LICENSE-adventure-awaits.txt").read_text(encoding="utf-8")
+    assert "Slice 86, 93, 92, 87, 104, 104, 103, 106,\n107, 108 and 113" in licence

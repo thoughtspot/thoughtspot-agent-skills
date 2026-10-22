@@ -946,6 +946,17 @@ def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
         named |= {f"npcs.{k}": v for k, v in (frames.get("npcs") or {}).items()}
         named |= {f"items.{k}": v["frame"] for k, v in (items or {}).items()}
         errors += [f"tiles/tiles.json: {k} is frame {v}, which tiles.png leaves empty" for k, v in named.items() if empty(v)]
+        # ...and so is every frame a map's tile layer draws: an empty one there is an invisible wall.
+        for tmj in sorted((pack.dir / "maps").glob("*.tmj")):
+            try:
+                layers = json.loads(tmj.read_text(encoding="utf-8")).get("layers") or []
+            except (OSError, ValueError, AttributeError):
+                continue                                   # maps.py reports a map it can't read
+            used = {(g & 0x1FFFFFFF) - 1 for l in layers if isinstance(l, dict) and l.get("type") == "tilelayer"
+                    for g in (l.get("data") or []) if isinstance(g, int) and g & 0x1FFFFFFF}
+            total = (w // 16) * (len(alpha[2]) // w // 16)
+            errors += [f"maps/{tmj.name}: draws frame {f}, which tiles.png leaves empty" for f in sorted(used)
+                       if f < total and empty(f)]
     ids = {r["id"] for r in (data or {}).get("realms") or []}
     if data and isinstance(portals, dict):
         errors += [f"tiles/tiles.json: portals names {k!r}, which is not a realm" for k in sorted(set(portals) - ids)]

@@ -271,10 +271,10 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
   tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
   turned out to bundle GPL-3.0 code; design decision 5.)
-- **Tiles** are four CC0 packs in one atlas of 504 frames: Kenney's Tiny Dungeon (frames 0-131),
+- **Tiles** are four CC0 packs in one atlas of 504 slots (500 drawn): Kenney's Tiny Dungeon (frames 0-131),
   Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473: water, rock, boats)
   (`tiles/LICENSE-kenney.txt`), and eleven slices of Ishtar Pixels' Adventure Awaits (480-490: a
-  cliff face with a tunnel; `tiles/LICENSE-adventure-awaits.txt`). The rest are ours, drawn or
+  cliff face with a tunnel, their grass and sand recoloured to Kenney's; `tiles/LICENSE-adventure-awaits.txt`). The others drawn are ours, drawn or
   recoloured in `make_atlas.py`: 132, a wall's top; 133-137, the realm guards; 138, the dragon;
   139, the Forge; 491-497, Law's library (a gold-capped column, a pediment, a frieze, an ornate
   door, a lamp, a balustrade either side); 498-499, the Golden Forests' arch of leaves and the
@@ -296,7 +296,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   tunnel into a mountainside, with rails running into it (the Mines, a dwarf), an ornate library
   (a pediment over a gilded door between gold-capped columns) over a moat, reached by a bridge with
   a gold balustrade between two lamps (Law, a wizard), a pier to a small town in the lake (the
-  Lake, a fisherman), a lane under a golden canopy to an arch of leaves (the Golden Forests, an elf
+  Lake, a fisherman), a shaded lane fringed with golden leaves to an arch of leaves (the Golden Forests, an elf
   in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
 - **The Mines** read west to east: a hall where the merchant and the guide wait, a forge hall
   with the Forge (the compiler) on the north wall between two anvils and torches, mine track
