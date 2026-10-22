@@ -287,8 +287,9 @@ category or a derived field, and when a code rule is justified — is
    `tests/test_audit_pinned_findings.py` until the pin moves. Re-pin only what you
    changed, from the current catalog:
    `PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8`
-   (or `--input <name>`; `--dry-run` to preview). Paste its printed before/after into the
-   PR — the gzip diff is unreadable. A rule leaves the pinned set only through
+   (or `--input <name>`; `--dry-run` to preview; `--drop-input <name>` for a committed
+   input you removed or renamed). Paste its printed before/after (stdout; add
+   `2>/dev/null`) into the PR — the gzip diff is unreadable. A rule leaves the pinned set only through
    `--drop-rule <id>`, refused until the rule is retired (and `PINNED_RULE_IDS` in
    `tests/audit_pinned.py` must match the pin file's `rules`). A NEW rule is not pinned;
    its examples are its regression net.

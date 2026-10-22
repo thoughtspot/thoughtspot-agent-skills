@@ -260,6 +260,7 @@ are roughly ordered by value÷effort.
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
 | BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
+| BL-407 | ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -14450,7 +14451,10 @@ re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rul
 
 1. **The 16 catalog-vs-code contradictions:** D1, D2, D5, D6, D7, D9, D11, H1, H2, H10, S1,
    S2, S3, S5, the A4 title, and A5 not being profile-aware. For each one, the user decides
-   which side is right: the documented behaviour or the coded one.
+   which side is right: the documented behaviour or the coded one. The "documented" side
+   was the hand-written check catalog this work replaced with a generated one; read it at
+   `git show 982c2010:agents/cli/ts-audit/references/check-catalog.md` (the last commit
+   before the catalog work) and compare with the rule's current description.
 2. **H10 never emits MEDIUM.** Its documentation says "MEDIUM if also orphan", but the
    code reports LOW only and never reads H4's result. H1 and H2 are documented "per bad
    name" / "per violation" but report once per Model.
@@ -14471,12 +14475,33 @@ re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rul
    run.
 8. **P2** decides "scalar" from whether the column carries `aggregation:` rather than from
    the formula's expression (strict xfail in `test_checks_perf_trip.py`).
-9. **Housekeeping:** the stale titles in `ts_cli/audit/test_fixtures.py`'s
+9. **Housekeeping:** unused constants left from the check modules (find them with
+   `vulture tools/ts-cli/ts_cli/audit --min-confidence 80`); the stale titles in
+   `ts_cli/audit/test_fixtures.py`'s
    `CHECK_CATALOG`, and the name anti-pattern regex kept twice (H1's `regex:` in
-   `rules/human.yaml` and A5's `_NAME_ANTI` in `engine/code_rules.py`).
+   `rules/human.yaml` and A5's `_NAME_ANTI` in `engine/code_rules.py`). The spec's
+   "`rules` shadowing in `checks_perf.py:241`" item is dropped: that module was deleted.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.
 
 **Target:** 2027-01-31.
+
+## BL-407 — ts-audit Step 4 exports TML that nothing reads `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 review (minor 7).
+
+**What.** `agents/cli/ts-audit/SKILL.md` Step 4 has the agent export every enumerated
+object's TML (and each Model's associated Tables) 4-way parallel into
+`~/.cache/ts-audit/tml-corpus/`, a 1–5 minute step on a large estate. `ts audit run`
+(Step 5) exports the TML it audits itself and never reads that cache, so the step costs
+time and API calls for nothing. Pre-existing; 3.0.0 only made the skill say so.
+
+**Do.** Either drop Step 4 (keep the inventory confirmation from Step 3), or give the
+cache a reader: `ts audit run --snapshot-out` already captures exactly what an audit
+reads, so the skill could capture once and replay (`--snapshot-in`) for re-runs and
+follow-ups instead. Decide with the user; update the skill's step numbering and
+changelog.
+
+**Target:** 2026-12-15.

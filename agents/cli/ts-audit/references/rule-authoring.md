@@ -19,9 +19,15 @@ declarative form expresses are **code rules**, but even those keep a full catalo
 | Example fixtures (synthetic) | `tools/ts-cli/tests/audit_rule_fixtures/<category>.py` |
 | The human catalog (generated) | [check-catalog.md](check-catalog.md) |
 
-Commands below run from the repo root unless they say otherwise. They assume the `ts`
-on your PATH is this checkout (`pip install -e tools/ts-cli`); check with
-`python3 -c "import ts_cli; print(ts_cli.__file__)"`.
+Commands below run from the repo root. They assume the `ts` on your PATH runs this
+checkout's code (`pip install -e tools/ts-cli`, or `uv tool install --force -e
+tools/ts-cli`). Check with the interpreter `ts` itself runs, not your `python3`:
+
+```bash
+"$(head -1 "$(command -v ts)" | sed 's/^#!//')" -c "import ts_cli; print(ts_cli.__file__)"
+```
+
+It must print a path inside this checkout's `tools/ts-cli/`.
 
 ---
 
@@ -79,8 +85,10 @@ The shipped A6 entry, annotated. Keys not shown are described after it.
 severity: {field: "@join_type", map: {OUTER: HIGH}, default: INFO}
 ```
 
-The lookup is exact and type-sensitive (YAML `true` is a boolean key), and the field must
-declare its possible values (`@register(..., values=...)`). An `each` rule may instead
+The lookup is exact and type-sensitive (YAML `true` is a boolean key). When the map is
+keyed on a derived field (`@name`), the field must declare its possible values
+(`@register(..., values=...)`) and the gate checks the keys against them; a map on a
+plain path (`field: name`) is not checked, so spell its keys with care. An `each` rule may instead
 grade a `measure` (a field holding a number) with `bands`. A rule has one source, never
 both: `severity` beside `bands` is rejected.
 
@@ -217,11 +225,19 @@ rule's examples actually read when run (`test_audit_catalog_uses.py`).
 
 **Its limits, documented in `catalog_reads.py`.** The static scan does not see:
 
-- a name computed at run time (`getattr(ctx, name)` with a non-literal, `vars(ctx)`, `eval`);
-- a function reached only through a data structure, or a callable passed in;
+- a name computed at run time (`getattr(ctx, name)` with a non-literal, `vars(ctx)`,
+  `operator.attrgetter`, `eval`);
+- a function reached only through a data structure, or a callable passed in or returned;
 - context methods reached other than by their own name;
 - in a module the gate can only compile, a module-level name bound by anything but
-  `def` / `class` / `import`.
+  `def` / `class` / `import`;
+- a module imported by computed name (`importlib.import_module`, `__import__`), and
+  anything reached through it;
+- code outside `ts_cli.audit` reached through a module-level import (for example
+  `ts_cli.sets` from `context.py`).
+
+It also over-approximates: an attribute named like a context field on another object
+counts as a read, which fails loudly and is fixed by declaring.
 
 Write derived fields and code rules so the scan can follow them: literal attribute
 access on `ctx`, plain function calls, and literal scope names passed to `iterate`. A
@@ -240,7 +256,8 @@ layer. A rule's `profiles.<id>` block may replace only these keys:
 | `status`, `bands` (the whole list), `severity`, `message`, `remediation` | `scope`, `aggregate` (`where`, `match`, `measure`, ...), `implementation`, `requires`, `uses`, `categories`, `id` |
 
 `legacy_threshold` is also accepted in a profile block, only to reproduce the old
-per-profile threshold dict (A1, A2, A6). A null value in a profile block means "inherit".
+per-profile threshold dict (A1, A2, A6). To inherit a key, omit it from the profile
+block; a key set to null is rejected ("removes nothing — omit the key").
 The validator checks every **merged** band list, after the profile is applied: ordered
 worst first, with valid ops and severities. `status` per profile can switch a rule off
 under one profile. The history gate and the pinned findings judge the **effective** status
@@ -267,16 +284,20 @@ pinned; its examples are its regression net. A pinned rule changed on purpose mo
 pin with the re-pin helper:
 
 ```bash
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3 --dry-run
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --input <fixture name>
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --drop-rule D3   # retired rules only
+PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3 --dry-run 2>/dev/null
+PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3 2>/dev/null
+PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --input <fixture name> 2>/dev/null
+PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --drop-rule D3      # retired rules only
+PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --drop-input <name> # a removed/renamed input
 ```
 
 It rewrites only the named entries, from the current catalog. A rule not active under a
 profile pins to `[]` there. It prints a before/after for every entry it changes, and the
 gzip shows in a PR only as "Binary files differ", so **paste that output into the PR
-description**. `--drop-rule` is refused while the rule is active under any profile.
+description**. The before/after is on stdout; stderr carries progress lines, hence
+`2>/dev/null`. `--drop-rule` is refused while the rule is active under any profile.
+`--drop-input` takes out a committed input you removed or renamed (refused while the
+builder is still committed); re-pin the new name with `--input`.
 
 ---
 
@@ -311,7 +332,8 @@ description**. `--drop-rule` is refused while the rule is active under any profi
    `pytest tools/ts-cli/tests/test_audit_rule_examples.py -k <ID> -q`. Then add boundary
    tests if the rule has bands or a mapping: one input just inside and one just outside
    each level, under each profile it differs in.
-6. **Generate:** `cd tools/ts-cli && python -m ts_cli.audit.generate`.
+6. **Generate:** `(cd tools/ts-cli && python3 -m ts_cli.audit.generate)`. The subshell
+   keeps you at the repo root for the next step.
 7. **Show the user the generated row:**
    `grep -n "^| <ID> |" agents/cli/ts-audit/references/check-catalog.md`. This is how the
    rule will read to every audit reader. Confirm it says what they asked for.
@@ -337,7 +359,10 @@ description**. `--drop-rule` is refused while the rule is active under any profi
    real exported TML: never commit one, and never paste findings that name customer
    objects into the repo or a PR.
 9. **Full checks:** `pytest tools/ts-cli/tests/ -q` and
-   `python3 tools/validate/check_audit_catalog.py --root . --base origin/main`.
+   `python3 tools/validate/check_audit_catalog.py --root . --base origin/main`. A new rule
+   needs no list edited anywhere: counts, the registry tests and the report meta all read
+   the catalog, and a new rule is not pinned. A failure outside the rule's own tests is a
+   finding about the rule, not a list to update.
 10. **Commit** the rule, fixtures, tests and regenerated `check-catalog.md` together. At PR
     time, bump the ts-cli MINOR version, the ts-audit skill MINOR version with a
     changelog row, and add a CHANGELOG.md entry (see `.claude/rules/versioning.md`).
@@ -360,12 +385,18 @@ Follow procedure 1 with these differences.
   EOF
   ```
 
-  For a per-finding diff, `ts_cli.audit.equivalence.compare_findings(before, after)` lists
-  the findings only on one side and the fields that changed.
+  For a per-finding diff, `ts_cli.audit.equivalence.compare_findings(old, new)` takes the
+  two `findings` LISTS (`json.load(open(path))["findings"]`, not the whole documents) and
+  returns `only_old`, `only_new` and `changed`.
 - **If the rule is one of the 51 pinned rules**, `test_audit_pinned_findings.py` fails
-  until the pin moves. Re-pin it (`repin_findings.py --rule <ID>`, `--dry-run` first), check
-  that the printed before/after is exactly the change the user approved, and paste it
-  into the PR.
+  until the pin moves. Re-pin it (`repin_findings.py --rule <ID> 2>/dev/null`, `--dry-run`
+  first), check that the printed before/after is exactly the change the user approved,
+  and paste it into the PR.
+- **The rule's own behaviour tests** assert what it did before, on purpose: list them with
+  `grep -rln "\"<ID>\"" tools/ts-cli/tests --include='test_*.py'` and update each one
+  that pins the old threshold, severity or wording (`test_checks_<category>*.py`, the
+  rule's boundary tests). Every other test is independent of any one rule's grading; if a
+  test outside that list fails, treat it as a finding, not something to edit.
 - **Never change what an id means.** Narrowing a threshold or fixing a defect is a change.
   Checking something else entirely is a new rule plus a retirement.
 - A profile-specific change goes in `profiles.<id>`; a change for both goes at the rule's
@@ -378,16 +409,24 @@ Follow procedure 1 with these differences.
 1. Confirm with the user. Retiring removes the rule's findings from every future audit.
 2. Set `status: retired` on the entry. **Never delete the entry, and never reuse the id.**
    The history gate fails either. To switch it off under one profile only, set
-   `profiles.<id>.status: retired` instead.
+   `profiles.<id>.status: retired` instead; then its `fires` example must name the
+   profile it still runs under (`profile: spotter` when you retire it under the default,
+   `general`), or the example test fails.
 3. Leave the logic in place, or remove `aggregate` / `implementation` if no profile revives
    it. Update `description` to say why it was retired.
 4. If it is pinned, `repin_findings.py --rule <ID>` re-pins it to `[]`. Keeping it pinned
    proves it stays silent. Only if it should leave the pinned set,
    `repin_findings.py --drop-rule <ID>`, and remove it from `PINNED_RULE_IDS` in the same
    change.
-5. Regenerate (`python -m ts_cli.audit.generate`): it moves to "Retired rules".
-6. Add a changelog line to the ts-audit skill's `## Changelog` saying which rule was retired
-   and why.
+5. Regenerate (`(cd tools/ts-cli && python3 -m ts_cli.audit.generate)`): it moves to
+   "Retired rules", with its `description` as the reason. There is no other list of
+   retired rules to update: the tests read `status: retired` from the catalog.
+6. **The rule's own behaviour tests** expect it to fire. List them with
+   `grep -rln "\"<ID>\"" tools/ts-cli/tests --include='test_*.py'`, and delete or invert
+   (assert silence) each one that asserts a finding. A retired rule reports nothing,
+   so they fail.
+7. Run the full suite, then add a changelog line to the ts-audit skill's `## Changelog`
+   saying which rule was retired and why.
 
 ### 4. Add a category
 
@@ -399,9 +438,12 @@ Categories are data, but a new one reaches further than a rule:
 2. Move or add the rules that belong in it (`categories: [X, ...]`). A rule may belong to
    several categories. Its first category sets its finding's `angle`. Keep each rule in
    the rules file of its primary category, or add `rules/<name>.yaml`.
-3. Update the tests that pin the category list (`test_audit_catalog.py`'s
-   categories-and-profiles test) and the ts-audit skill. The category goes in the
-   "Audit angles" table, the Step 2a menu and the Step 5 catalog table.
+3. Update the one test that deliberately pins the category list,
+   `test_loads_categories_and_profiles` in `test_audit_catalog.py` (a regression net:
+   ids, labels and order are what audit JSON readers key on). Then update the ts-audit
+   skill everywhere it lists categories: the "Audit angles" table at the top, Step 0's
+   "B. Available angles" list, the Step 2a menu including its "X  All angles (A, D, H, P,
+   S)" line and the `--angles` examples, and the Step 5 catalog table.
 4. Regenerate, and render a report (`ts audit report`) to check the new tab and heatmap
    column.
 5. Known limit: the legacy `summary.by_angle` counts only the five original angle keys.
