@@ -60,6 +60,7 @@ _TOY_RULES = yaml.safe_load("""
     by_severity:
       HIGH: Full outer join
       INFO: "{@join_type} join"
+  remediation: Inner-join it, or document why it is outer
 - id: T2
   title: Toy coverage
   categories: [A]
@@ -227,6 +228,7 @@ def test_report_meta_shape(cat, meta):
 
 def test_report_meta_carries_titles_and_remediation(toy_meta):
     assert toy_meta["checks"]["T1"]["desc"] == "Toy outer join"
+    assert toy_meta["checks"]["T1"]["remediation"] == "Inner-join it, or document why it is outer"
     assert "T8" not in toy_meta["checks"]                 # retired: not in the report meta
 
 

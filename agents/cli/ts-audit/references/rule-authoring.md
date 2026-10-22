@@ -310,7 +310,7 @@ profile pins to `[]` there. It prints a before/after for every entry it changes,
 gzip shows in a PR only as "Binary files differ", so **paste that output into the PR
 description**. The before/after is on stdout; stderr carries progress lines, hence
 `2>/dev/null`. Redirect it to a file to paste from (`> repin-D3.txt`): piping it into
-`head` closes the pipe and kills the helper before it writes the pin. `--drop-rule` is refused while the rule is active under any profile.
+`head` can kill the helper before it writes the pin, once the output outgrows the pipe. `--drop-rule` is refused while the rule is active under any profile.
 `--drop-input` takes out a committed input you removed or renamed (refused while the
 builder is still committed); re-pin the new name with `--input`.
 
@@ -436,7 +436,9 @@ Follow procedure 1 with these differences.
    profile it still runs under (`profile: spotter` when you retire it under the default,
    `general`), or the example test fails.
 3. Leave the logic in place, or remove `aggregate` / `implementation` if no profile revives
-   it. Update `description` to say why it was retired.
+   it. Rewrite `description` to say the rule is retired and why ("Retired 2026-11: …"). It
+   is the "Why" column under "Retired rules", and a test requires the word "retired" in
+   it, so a detection description left unchanged fails.
 4. If it is pinned, `repin_findings.py --rule <ID>` re-pins it to `[]`. Keeping it pinned
    proves it stays silent. Only if it should leave the pinned set,
    `repin_findings.py --drop-rule <ID>`, and remove it from `PINNED_RULE_IDS` in the same

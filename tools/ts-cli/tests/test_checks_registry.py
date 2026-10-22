@@ -75,7 +75,9 @@ def test_every_inactive_rule_is_retired_on_purpose_and_listed():
 
     The catalog's own `status: retired` is the declaration (there is no second,
     hand-kept list to update): every rule that is not active must be retired, carry a
-    description saying why, and appear under "Retired rules" in the generated
+    description that says it is retired and why (it must contain the word "retired":
+    a detection description left as it was does not explain a retirement), and
+    appear under "Retired rules" in the generated
     check-catalog.md — never be deleted (the history gate fails that). Found by counting
     the legacy checks: 51 functions were defined, 50 registered, and the one gap (H6) is
     deliberate.
@@ -83,8 +85,10 @@ def test_every_inactive_rule_is_retired_on_purpose_and_listed():
     inactive = [r for r in catalog().rules.values() if r.status != "active"]
     assert all(r.status == "retired" for r in inactive), \
         [f"{r.id}: {r.status}" for r in inactive if r.status != "retired"]
-    undocumented = [r.id for r in inactive if not (r.description or "").strip()]
-    assert undocumented == [], f"retired without saying why: {undocumented}"
+    undocumented = [r.id for r in inactive if "retired" not in (r.description or "").lower()]
+    assert undocumented == [], (
+        f"retired without saying why: {undocumented} — the description must say the rule "
+        "is retired and why (rule-authoring.md, Retire a rule, step 3)")
     from ts_cli.audit.generate import catalog_markdown
     doc = catalog_markdown(catalog())
     retired_section = doc[doc.index("Retired rules"):] if "Retired rules" in doc else ""
