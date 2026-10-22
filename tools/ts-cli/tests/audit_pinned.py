@@ -16,6 +16,7 @@ from typing import Dict, List, Union
 import audit_rule_fixtures as fx
 from audit_run_rule import active_rule_ids, catalog, findings_by_rule
 from ts_cli.audit.engine.run import run_rule as engine_run_rule
+from ts_cli.audit.engine.run import selected_rules
 
 PINNED = Path(__file__).resolve().parent / "audit_rule_fixtures" / "legacy_findings.json.gz"
 PROFILES = ["spotter", "general"]
@@ -24,10 +25,12 @@ OWN_INPUTS = {"A": fx.AI_INPUTS, "D": fx.D_INPUTS, "H": fx.H_INPUTS, "P": fx.P_I
 RAISES = "RAISES"
 
 #: The rule ids the pinned file covers: the 51 the legacy check functions ran when
-#: they were pinned (1ddb3185). FROZEN — a rule added to the catalog later is not in
-#: here and is held to its own `fires`/`silent` examples instead
-#: (test_audit_rule_examples.py). A deliberate change to one of these rules is
-#: re-pinned with `repin_findings.py`; it never leaves this set.
+#: they were pinned (1ddb3185). FROZEN. The source of truth is the pin file's own
+#: `rules` list; this mirror must equal it (test_audit_pinned_findings.py fails
+#: otherwise), so the set cannot shrink or grow by editing one side. A rule added to the
+#: catalog later is not pinned; its `fires`/`silent` examples are its net. A pinned rule
+#: is re-pinned with `repin_findings.py --rule`; it leaves the set only through
+#: `repin_findings.py --drop-rule`, which prints every entry it removes.
 PINNED_RULE_IDS = (
     "A1", "A2", "A3", "A4", "A5", "A6",
     "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12",
@@ -62,13 +65,32 @@ def pinned() -> dict:
     return load()
 
 
-def _canonical(findings: dict) -> dict:
-    """Entries in one fixed order — inputs as `committed_inputs()` lists them (any other
-    name after, sorted), profiles as PROFILES, rules as PINNED_RULE_IDS — the order the
-    original pin was written in, so a re-pin never reorders what it did not change."""
+def strays(doc: dict) -> List[str]:
+    """Entries outside the document's own frozen sets — a rule not in `doc["rules"]`, a
+    profile not in PROFILES, an input not in `doc["inputs"]`. `write` refuses them:
+    nothing leaves the pin, or enters it, without the re-pin helper naming it."""
+    rules, inputs = set(doc["rules"]), set(doc["inputs"])
+    out = []
+    for name, profiles in doc["findings"].items():
+        if name not in inputs:
+            out.append(f"input {name}")
+        for profile, found in profiles.items():
+            if profile not in PROFILES:
+                out.append(f"profile {profile} ({name})")
+            out += [f"rule {r} ({name}/{profile})" for r in found if r not in rules]
+    return out
+
+
+def _canonical(doc: dict) -> dict:
+    """Entries in one fixed order — inputs as `committed_inputs()` lists them, then any
+    other pinned input in `doc["inputs"]` order; profiles as PROFILES; rules as
+    `doc["rules"]` — the order the original pin was written in, so a re-pin never
+    reorders what it did not change. Never drops an entry: `write` has already
+    refused anything outside the frozen sets."""
+    findings = doc["findings"]
     names = [n for n in committed_inputs() if n in findings]
-    names += sorted(n for n in findings if n not in names)
-    return {n: {p: {r: findings[n][p][r] for r in PINNED_RULE_IDS if r in findings[n][p]}
+    names += [n for n in doc["inputs"] if n in findings and n not in names]
+    return {n: {p: {r: findings[n][p][r] for r in doc["rules"] if r in findings[n][p]}
                 for p in PROFILES if p in findings[n]}
             for n in names}
 
@@ -76,8 +98,15 @@ def _canonical(findings: dict) -> dict:
 def write(doc: dict) -> None:
     """Write `doc` exactly as the original pin was written: compact JSON in canonical
     entry order, gzip with mtime 0 and no file name — the same content always gives the
-    same bytes."""
-    doc = {**doc, "findings": _canonical(doc["findings"])}
+    same bytes. ValueError, and nothing written, when an entry lies outside the
+    document's frozen sets (see `strays`)."""
+    bad = strays(doc)
+    if bad:
+        raise ValueError(f"pin entries outside its frozen sets: {', '.join(bad[:10])}")
+    canonical = _canonical(doc)
+    assert sum(len(r) for p in canonical.values() for r in p.values()) == \
+        sum(len(r) for p in doc["findings"].values() for r in p.values())
+    doc = {**doc, "findings": canonical}
     text = json.dumps(doc, separators=(",", ":"))
     with PINNED.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="",
                                                  mtime=0) as fh:
@@ -89,9 +118,20 @@ def entry(doc: dict, name: str, profile: str, rule_id: str) -> Entry:
     return doc["findings"].get(name, {}).get(profile, {}).get(rule_id, [])
 
 
-def pinned_rules(category: str) -> List[str]:
-    """The category's active rules the pin covers, in catalog order."""
-    return [r for r in active_rule_ids(category) if r in PINNED_RULE_IDS]
+def pinned_rules(category: str, doc: dict = None) -> List[str]:
+    """Every pinned rule of the category, WHATEVER its status: a rule retired at base,
+    or under a profile, reports nothing there, so its pin must say [] — retiring a
+    pinned rule fails the comparison until it is re-pinned."""
+    doc = doc or pinned()
+    return [r for r in doc["rules"] if category in catalog().rules[r].categories]
+
+
+def active_pinned_rules(category: str, profile: str, doc: dict = None) -> List[str]:
+    """The pinned rules of the category that are ACTIVE under `profile` — effective
+    status, the profile's `status` override applied — in catalog order: the ones
+    that must fire somewhere in their category's inputs."""
+    rules = set((doc or pinned())["rules"])
+    return [r.id for r in selected_rules(catalog(), [category], profile) if r.id in rules]
 
 
 def catalog_by_rule(build, category: str, profile: str):

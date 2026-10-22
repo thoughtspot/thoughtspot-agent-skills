@@ -13,19 +13,30 @@ They replace the legacy-vs-catalog equivalence tests, and they are the regressio
 for the 13 rules the 351-Model snapshot never exercises (D4, D5, D9, H9, P1, P4, P13,
 P14, P15, S4, S5, S9, S10): every one of those fires in these inputs.
 
-**Scope: the 51 pinned rules only** (`audit_pinned.PINNED_RULE_IDS`, frozen). A rule
-added to the catalog after the pin is not compared here; its `fires`/`silent` examples
+**Scope: the 51 pinned rules only.** The frozen set is the pin file's own `rules` list
+(`audit_pinned.PINNED_RULE_IDS` mirrors it; a test fails if they differ). A rule added
+to the catalog after the pin is not compared here; its `fires`/`silent` examples
 (test_audit_rule_examples.py) are its net.
 
+**Status counts per profile.** Every pinned rule is compared whatever its status: a
+rule that is not active under a profile (retired at base, or switched off by that
+profile's `status` override) reports nothing there, so its pin for that profile must
+be []. Only the pinned rules ACTIVE under a profile must fire somewhere in their
+category's inputs.
+
 **Changing a pinned rule, or an input builder, on purpose** — a threshold, severity or
-wording edit, a defect fixed (one of the strict xfails), a builder reshaped — fails
-here until the pin moves with it:
+wording edit, a defect fixed (one of the strict xfails), a `status` change at base or
+under a profile, a builder reshaped — fails here until the pin moves with it:
 
     PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8 [--dry-run]
     PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --input <name>
 
-It rewrites only the named entries from the CURRENT catalog, deterministically, and
-prints the before/after of every entry it changes. The gzip shows in a PR only as
+It rewrites only the named entries from the CURRENT catalog (a rule not active under a
+profile pins to [] there), deterministically, and prints the before/after of every
+entry it changes. Nothing leaves the pin silently: a rule leaves the frozen set only
+through `--drop-rule <id>`, a stale input only through `--drop-input <name>`, each
+printing every entry it removes, and the write refuses any entry outside the file's
+frozen sets. The gzip shows in a PR only as
 "Binary files differ", so that printed diff is the review artefact: paste it into the
 PR description. (The pin as plain sorted, indented JSON would be 3.6 MB, too large to
 review as a diff, so it stays gzipped at 66 KB.) Re-pinning an entry pinned as
@@ -91,15 +102,17 @@ def test_the_pinned_inputs_are_the_committed_inputs():
     assert _pinned()["profiles"] == PROFILES
 
 
-def test_the_pinned_rule_set_is_frozen_and_covers_every_pinned_entry():
-    """Every pinned entry is one of the frozen rules, and every frozen rule is still in
-    the catalog (a rule id is never deleted; a retired one reports nothing and must be
-    re-pinned to [] on purpose)."""
-    in_file = {r for profiles in _pinned()["findings"].values()
-               for rules in profiles.values() for r in rules}
-    assert in_file <= set(ap.PINNED_RULE_IDS), in_file - set(ap.PINNED_RULE_IDS)
-    assert set(ap.PINNED_RULE_IDS) <= set(catalog().rules)
-    assert len(ap.PINNED_RULE_IDS) == len(set(ap.PINNED_RULE_IDS)) == 51
+def test_the_pinned_rule_set_is_frozen_by_the_pin_file():
+    """The frozen rule set is data: the pin file's `rules` list. The code's mirror must
+    equal it (so neither side shrinks alone), the file holds no entry outside its own
+    sets, and every pinned id is in the catalog, active or retired (a rule id is never
+    deleted; a retired one pins to [] on purpose)."""
+    doc = _pinned()
+    assert tuple(doc["rules"]) == ap.PINNED_RULE_IDS
+    assert len(set(doc["rules"])) == len(doc["rules"])
+    assert ap.strays(doc) == []
+    missing = [r for r in doc["rules"] if r not in catalog().rules]
+    assert missing == [], f"pinned rule ids not in the catalog: {missing}"
 
 
 @pytest.mark.parametrize("profile", PROFILES)
@@ -129,9 +142,11 @@ def test_catalog_reproduces_the_pinned_legacy_findings(category, profile):
 @pytest.mark.parametrize("profile", PROFILES)
 @pytest.mark.parametrize("category", CATEGORIES)
 def test_every_rule_fires_in_its_own_categorys_inputs(category, profile):
-    """Not vacuous: each pinned rule still active has pinned findings in its category's
-    own inputs, so the comparison above exercises every one, not just the silent case."""
-    fired = dict.fromkeys(ap.pinned_rules(category), 0)
+    """Not vacuous: each pinned rule ACTIVE under this profile (effective status) has
+    pinned findings in its category's own inputs, so the comparison above exercises
+    every one, not just the silent case. A rule not active under the profile is pinned
+    to [] there instead, which the comparison holds it to."""
+    fired = dict.fromkeys(ap.active_pinned_rules(category, profile), 0)
     for name in OWN_INPUTS[category]:
         for rule_id in fired:
             legacy = _legacy(name, profile, rule_id)
@@ -139,16 +154,18 @@ def test_every_rule_fires_in_its_own_categorys_inputs(category, profile):
     assert all(fired.values()), fired
 
 
-def test_the_rules_the_snapshot_never_exercises_are_pinned_firing():
-    """The 13 rules the 351-Model snapshot gave no finding for rest on these inputs."""
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_rules_the_snapshot_never_exercises_are_pinned_firing(profile):
+    """The 13 rules the 351-Model snapshot gave no finding for rest on these inputs
+    (each one still active under the profile)."""
     unexercised = ["D4", "D5", "D9", "H9", "P1", "P4", "P13", "P14", "P15", "S4", "S5",
                    "S9", "S10"]
-    counts = {r: 0 for r in unexercised}
+    active = {r for c in CATEGORIES for r in ap.active_pinned_rules(c, profile)}
+    counts = {r: 0 for r in unexercised if r in active}
     for profiles in _pinned()["findings"].values():
-        for rules in profiles.values():
-            for rule_id in unexercised:
-                found = rules.get(rule_id, [])
-                counts[rule_id] += 0 if found == ap.RAISES else len(found)
+        for rule_id in counts:
+            found = profiles.get(profile, {}).get(rule_id, [])
+            counts[rule_id] += 0 if found == ap.RAISES else len(found)
     assert all(counts.values()), counts
 
 
@@ -331,42 +348,93 @@ def test_catalog_keeps_legacy_names_guids_and_edges(category, fixture, probe, pr
 
 
 # ── repin_findings.py: the supported way to move the pin ────────────────────
+# Every test here works on a temporary copy of the pin, with the cached document
+# cleared before and after, so none depends on test order or on the live catalog.
 
-def test_repin_refuses_a_rule_outside_the_frozen_set_and_an_unknown_input(capsys):
-    import repin_findings
-    assert repin_findings.main(["--rule", "P19"]) == 1
-    assert repin_findings.main(["--input", "no_such_input"]) == 1
-    assert repin_findings.main([]) == 1
-    err = capsys.readouterr().err
-    assert "frozen pinned set" in err and "unknown input" in err
-
-
-def test_repin_rewrites_named_entries_deterministically(tmp_path, monkeypatch, capsys):
-    """Against a copy of the pin: re-pinning P8 from a catalog that reports nothing
-    removes its entries (and prints them as removed); re-pinning from the real catalog
-    restores the file byte for byte."""
+@pytest.fixture
+def pin_copy(tmp_path, monkeypatch):
     import shutil
-
-    import repin_findings
     copy = tmp_path / "pin.json.gz"
     shutil.copy(ap.PINNED, copy)
+    ap.pinned.cache_clear()
     monkeypatch.setattr(ap, "PINNED", copy)
-    original = copy.read_bytes()
+    yield copy
+    ap.pinned.cache_clear()
 
-    real_current = ap.current
+
+def _pinned_entries(doc, exclude=()):
+    return {(n, p, r): v for n, ps in doc["findings"].items() for p, rs in ps.items()
+            for r, v in rs.items() if r not in exclude}
+
+
+def test_repin_refuses_unknown_names(pin_copy, capsys):
+    import repin_findings
+    original = pin_copy.read_bytes()
+    assert repin_findings.main(["--rule", "P19"]) == 1
+    assert repin_findings.main(["--input", "no_such_input"]) == 1
+    assert repin_findings.main(["--drop-rule", "P19"]) == 1
+    assert repin_findings.main(["--drop-input", "perf_model_80_columns"]) == 1  # committed
+    assert repin_findings.main([]) == 1
+    err = capsys.readouterr().err
+    assert "frozen rule set" in err and "unknown input" in err and "still a committed" in err
+    assert pin_copy.read_bytes() == original
+
+
+def test_the_pin_round_trips_byte_for_byte(pin_copy):
+    """Determinism without the catalog: writing what was read gives the same bytes."""
+    original = pin_copy.read_bytes()
+    ap.write(ap.load())
+    assert pin_copy.read_bytes() == original
+
+
+def test_write_refuses_entries_outside_the_frozen_sets(pin_copy):
+    original = pin_copy.read_bytes()
+    name, profile, rule_id = next(iter(_pinned_entries(ap.load())))   # any pinned entry
+    for stray in ("rule", "input", "profile"):
+        doc = ap.load()
+        if stray == "rule":
+            doc["rules"].remove(rule_id)
+        elif stray == "input":
+            doc["inputs"].remove(name)
+        else:
+            doc["findings"][name]["strict"] = {rule_id: []}
+        with pytest.raises(ValueError, match="outside its frozen sets"):
+            ap.write(doc)
+    assert pin_copy.read_bytes() == original
+
+
+def test_repin_rewrites_only_the_named_entries(pin_copy, monkeypatch, capsys):
+    """Re-pinning P8 from a catalog that reports nothing removes exactly its entries
+    and prints them; re-pinning from the original answers restores the bytes."""
+    import repin_findings
+    original, before = pin_copy.read_bytes(), ap.load()
+    names = {build: name for name, build in ap.committed_inputs().items()}
     monkeypatch.setattr(ap, "current", lambda build, rule_id, profile: [])
     assert repin_findings.main(["--rule", "P8", "--dry-run"]) == 0
-    assert copy.read_bytes() == original                       # dry run writes nothing
+    assert pin_copy.read_bytes() == original                    # a dry run writes nothing
     assert repin_findings.main(["--rule", "P8"]) == 0
     out = capsys.readouterr().out
     assert "P8 / perf_model_80_columns / spotter:" in out and "    - ('P8'," in out
-    after = ap.load()["findings"]
-    assert all("P8" not in rules for profiles in after.values() for rules in profiles.values())
-    def without_p8(findings):
-        return {(n, p, r): v for n, ps in findings.items() for p, rs in ps.items()
-                for r, v in rs.items() if r != "P8"}
-    assert without_p8(after) == without_p8(ap.pinned()["findings"])   # the rest untouched
+    after = ap.load()
+    assert _pinned_entries(after, exclude=()) == _pinned_entries(before, exclude=("P8",))
+    assert after["rules"] == before["rules"]                   # P8 stays pinned, as []
 
-    monkeypatch.setattr(ap, "current", real_current)
+    monkeypatch.setattr(ap, "current", lambda build, rule_id, profile:
+                        ap.entry(before, names[build], profile, rule_id))
     assert repin_findings.main(["--rule", "P8"]) == 0
-    assert copy.read_bytes() == original
+    assert pin_copy.read_bytes() == original
+
+
+def test_drop_rule_is_the_only_way_out_and_prints_every_entry(pin_copy, capsys):
+    import repin_findings
+    before = ap.load()
+    d3 = {k: v for k, v in _pinned_entries(before).items() if k[2] == "D3"}
+    assert repin_findings.main(["--drop-rule", "D3"]) == 0
+    out = capsys.readouterr().out
+    after = ap.load()
+    assert "D3" not in after["rules"]
+    assert _pinned_entries(after) == {k: v for k, v in _pinned_entries(before).items()
+                                      if k[2] != "D3"}
+    for (name, profile, _), value in d3.items():
+        assert f"D3 / {name} / {profile}: REMOVED ({len(value)} finding(s))" in out
+    assert "rule D3: REMOVED from the pinned rule set" in out

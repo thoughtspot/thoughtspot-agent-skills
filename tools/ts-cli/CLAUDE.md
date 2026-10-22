@@ -275,15 +275,21 @@ rule engine (`ts_cli/audit/engine/`) — a check is a YAML rule, not a function.
 3. `python -m ts_cli.audit.generate` — regenerates the rule tables in
    `agents/cli/ts-audit/references/check-catalog.md` (never edit them by hand).
 4. **Changing one of the 51 rules the legacy checks ran** (threshold, severity, wording,
-   a defect fixed, `status`) or a committed input builder in `tests/audit_rule_fixtures/`:
-   `tests/test_audit_pinned_findings.py` holds those rules to the findings pinned in
-   `tests/audit_rule_fixtures/legacy_findings.json.gz`, and fails until the pin moves.
-   Re-pin only what you changed, from the current catalog:
+   a defect fixed, its `status` at base or under a profile) or a committed input builder
+   in `tests/audit_rule_fixtures/`: `tests/test_audit_pinned_findings.py` holds those
+   rules to the findings pinned in `tests/audit_rule_fixtures/legacy_findings.json.gz`,
+   and fails until the pin moves. Every pinned rule is compared whatever its status; one
+   not active under a profile must be pinned to [] there. Re-pin only what you changed,
+   from the current catalog:
    `PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8`
-   (or `--input <name>`, or both; `--dry-run` to preview). It prints the before/after of
-   every entry it rewrites — paste that into the PR, since the gzip diff is unreadable.
-   A NEW rule is not pinned (`PINNED_RULE_IDS` in `tests/audit_pinned.py` is frozen);
-   its `fires`/`silent` examples are its regression net.
+   (or `--input <name>`, or both; `--dry-run` to preview; a rule not active under a
+   profile is written as [] for it). It prints the before/after of every entry it
+   rewrites — paste that into the PR, since the gzip diff is unreadable. The frozen rule
+   set is the pin file's own `rules` list (mirrored by `PINNED_RULE_IDS` in
+   `tests/audit_pinned.py`; a test fails if they differ): a rule leaves it only through
+   `--drop-rule <id>`, a removed input only through `--drop-input <name>`, each printing
+   every entry it removes. A NEW rule is not pinned; its `fires`/`silent` examples are
+   its regression net.
 5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
 6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
 
