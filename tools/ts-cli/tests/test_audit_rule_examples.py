@@ -122,9 +122,10 @@ def _wide_model(rule, ctx, profile) -> List[Finding]:
 @pytest.fixture
 def wide_registered():
     """`_wide_model` registered through the decorator, unregistered afterwards."""
-    code_rules.code_rule(WIDE)(_wide_model)
+    code_rules.code_rule(WIDE, placeholders={"count", "profile"})(_wide_model)
     yield
     code_rules.REGISTRY.pop(WIDE, None)
+    code_rules.PLACEHOLDERS.pop(WIDE, None)
 
 
 def _code_rule_entry(**body) -> dict:
@@ -282,6 +283,25 @@ def unused_code_rules(cat: Catalog) -> List[str]:
     shipped = {name for name, fn in code_rules.REGISTRY.items()
                if fn.__module__.startswith("ts_cli.")}
     return sorted(shipped - used)
+
+
+def test_code_rule_message_placeholders_are_checked(tmp_path, wide_registered):
+    """A code rule declares what it renders; its catalog message and every profile's
+    message are held to that — `{scroe}` must not pass because no mode applies."""
+    rule = _code_rule_entry(message="{cuont} columns")
+    rule["profiles"]["spotter"]["message"] = "{count} columns ({strict})"
+    _cat, problems = check_catalog(_write_catalog(tmp_path, rule))
+    assert problems == [
+        "rules/test.yaml: D99: message: unknown placeholder 'cuont' (known: count, profile)",
+        "rules/test.yaml: D99: profiles.spotter.message: unknown placeholder 'strict' "
+        "(known: count, profile)"]
+
+
+def test_code_rule_placeholders_must_be_names():
+    for bad in (["9x"], ["a.b"], "score"):
+        with pytest.raises(ValueError, match="placeholders"):
+            code_rules.code_rule("synthetic_bad_placeholders", placeholders=bad)
+    assert "synthetic_bad_placeholders" not in code_rules.REGISTRY
 
 
 def test_every_registered_code_rule_is_used_by_a_shipped_rule():

@@ -1,8 +1,8 @@
 """The aggregation modes: one function per mode, each turning one rule into findings.
 
 Every mode skips an item the rule `requires` data for that the context does not hold
-(it iterates with scopes.available, as code rules do), and renders the rule's `message` with its own placeholders
-(catalog_expr.MODE_PLACEHOLDERS). The `aggregate` keys each mode reads are listed in
+(it iterates with scopes.available, as code rules do), and renders the rule's
+`message` with its own placeholders (catalog_expr.MODE_PLACEHOLDERS). The `aggregate` keys each mode reads are listed in
 catalog_expr.AGGREGATE_KEYS; what a mode puts in `metric`:
 
     each       the `measure` value (None without a measure)
@@ -72,8 +72,11 @@ def _finding(rule: Rule, item: dict, severity: str, detail: str, metric: Any = N
     )
 
 
-def _names(items: List[dict]) -> NameList:
-    return NameList(i["name"] for i in items)
+def _names(items: List[dict], unnamed: Optional[str] = None) -> NameList:
+    """The items' names; with `unnamed`, that label for an object with no `name` key."""
+    if unnamed is None:
+        return NameList(i["name"] for i in items)
+    return NameList(i["name"] if "name" in (i["obj"] or {}) else unnamed for i in items)
 
 
 # ── each ────────────────────────────────────────────────────────────────────
@@ -106,7 +109,8 @@ def ratio(rule: Rule, ctx, profile: str) -> List[Finding]:
     """Share of the item's `over` children passing `where` that also `match`.
 
     An empty population is silent. Bands grade the percentage, or the fraction when
-    their unit is `ratio`.
+    their unit is `ratio`. `unnamed_label` names a child with no `name` key in the
+    name lists (default: its scope name, "").
     """
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
@@ -121,10 +125,12 @@ def ratio(rule: Rule, ctx, profile: str) -> List[Finding]:
         if severity is None:
             continue
         hit = {id(c) for c in matched}
+        unnamed = rule.aggregate.get("unnamed_label")
         values = {"name": item["name"], "value": value, "matched": len(matched),
                   "total": len(population), "pct": pct,
-                  "matched_names": _names(matched),
-                  "unmatched_names": _names([c for c in population if id(c) not in hit])}
+                  "matched_names": _names(matched, unnamed),
+                  "unmatched_names": _names([c for c in population if id(c) not in hit],
+                                            unnamed)}
         out.append(_finding(rule, item, severity, render(rule.message, values),
                             metric=round(pct, 1)))
     return out

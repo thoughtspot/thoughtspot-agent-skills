@@ -78,7 +78,7 @@ def test_all_checks_has_six_entries():
 # --- Columns written as exported Model TML writes them -----------------------------
 # `synonyms` and `ai_context` under `properties:`, `description` at the column root
 # (counted across 599 Models on the SE demo cluster, 2026-10-21). The `fx.build_ai_col` helper
-# above puts `synonyms` at the root, where real TML never does, which is how A2's
+# (audit_rule_fixtures.py) puts `synonyms` at the root, where real TML never does, which is how A2's
 # root-only read went unnoticed: it scored every real Model 0%.
 
 

@@ -90,7 +90,7 @@
   scope: model
   aggregate:
     mode: each
-    where: {field: "@has_ai_instructions", truthy: false}
+    where: {field: "@is_coached", truthy: false}
   severity: MEDIUM
   profiles:
     spotter:
@@ -125,8 +125,8 @@
   description: >-
     A weighted readiness score per Model — descriptions 30%, coaching 25%, synonyms
     15%, Model description 15%, column-name quality 15% — graded HIGH below 50 and
-    MEDIUM below 80. Not profile-aware. A code rule (code_rules.readiness_score)
-    because its column shares use their own denominator (a Model without columns
+    MEDIUM below 80. Not profile-aware. A code rule (code:spotter_readiness, scored
+    by engine/code_rules.py readiness_score) because its column shares use their own denominator (a Model without columns
     counts as one column, so its score is still defined) and its name-quality share
     its own regexes: a composite rule would need a single-use derived field per
     component.
@@ -166,6 +166,7 @@
         - {field: properties.column_type, regex: '^(?i:measure)\Z'}
         - {not: {field: properties.is_hidden, truthy: true}}
     match: {field: properties.ai_context, nonblank: true, truthy: true}
+    unnamed_label: "?"  # the legacy check lists a measure with no name as "?"
   bands:
     direction: higher_is_better
     unit: percent

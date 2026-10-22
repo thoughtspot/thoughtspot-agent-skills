@@ -784,3 +784,33 @@ def test_null_profile_override_rejected_for_every_key(tmp_path, key):
 def test_derived_placeholder_must_be_the_whole_name(tmp_path, message):
     problems = _problems(tmp_path, {"ai": [_each(message=message)]})
     assert any("a derived placeholder is the whole name" in p for p in problems), problems
+
+
+# ── ratio `unnamed_label` ───────────────────────────────────────────────────
+
+def _labelled(label, over="model.column", mode="ratio") -> dict:
+    rule = _good_rule()
+    rule["aggregate"]["unnamed_label"] = label
+    rule["aggregate"]["over"] = over
+    rule["aggregate"]["mode"] = mode
+    return rule
+
+
+def test_unnamed_label_accepted_on_a_ratio_over_named_children(tmp_path):
+    assert _problems(tmp_path, {"ai": [_labelled("?")]}) == []
+
+
+@pytest.mark.parametrize("rule,word", [
+    (_labelled(1), "aggregate.unnamed_label: must be a string"),
+    (_labelled("?", over="model.table"),
+     "aggregate.unnamed_label: 'model.table' items are not named by a `name` key"),
+])
+def test_unnamed_label_rejected_where_it_means_nothing(tmp_path, rule, word):
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(word in p for p in problems), problems
+
+
+def test_unnamed_label_is_a_ratio_key_only(tmp_path):
+    rule = _good_rule(aggregate={"mode": "count", "over": "model.column", "unnamed_label": "?"})
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any("unknown key 'unnamed_label' for mode count" in p for p in problems), problems

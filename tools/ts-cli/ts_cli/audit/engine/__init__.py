@@ -11,5 +11,5 @@
 
 Deliberately imports nothing: the catalog gate loads `engine.fields` and
 `engine.code_rules` without the rest of ts_cli (see catalog_expr.known_derived_fields
-and catalog_validate.known_code_rules).
+and catalog_code.known_code_rules).
 """

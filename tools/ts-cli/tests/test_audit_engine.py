@@ -330,6 +330,31 @@ def test_rule_skips_object_when_required_data_absent():
     assert [f.object_name for f in found] == ["Looked Up"]
 
 
+def test_scope_items_keep_name_and_guid_as_the_legacy_checks_read_them():
+    """`.get("name", "")` / `.get("guid", "")`, as the legacy checks read them: an absent
+    key reads "", a present None stays None (a finding about it carries None)."""
+    ctx = make_context(models=[
+        {"guid": None, "model": {"name": None, "columns": [{"properties": {}}]}},
+        {"model": {}}])
+    items = list(scopes.iterate(ctx, "model"))
+    assert [(i["name"], i["guid"]) for i in items] == [(None, None), ("", "")]
+    [col] = scopes.iterate(ctx, "model.column", parent=items[0])
+    assert (col["name"], col["guid"]) == ("", None)
+
+
+def test_ratio_unnamed_label_names_children_without_a_name_key():
+    labelled = copy.deepcopy(A6)
+    labelled["aggregate"]["unnamed_label"] = "?"
+    [f] = _run(fx.tml_unnamed_measure(), labelled)
+    assert f.detail.endswith("missing: ?")
+    [f] = _run(fx.tml_unnamed_measure(), A6)               # default: no label
+    assert f.detail.endswith("missing: ")
+    # A present-but-empty name is a name: it stays "".
+    blank = fx.build_tml_ctx(fx.build_tml_col("", "MEASURE"))
+    [f] = _run(blank, labelled)
+    assert f.detail.endswith("missing: ")
+
+
 def test_scopes_available_applies_requires_for_any_rule():
     """The public helper code rules iterate with: the rule's scope, minus the objects
     whose required data the context lacks — the same filter the modes apply."""

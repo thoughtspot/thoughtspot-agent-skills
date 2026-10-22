@@ -16,15 +16,17 @@ no `measure`; a `severity` that bands override, catalog or profile); an expressi
 mapping that mixes forms or lacks a comparison; a `count:` over a scope that is not
 the item's (or an enclosing item's) child; unknown scopes, modes, operators, derived
 fields (`@name`, also as a step inside a path), code-rule names (`code:<name>`
-not registered), an `aggregate` block on a code rule (the function owns its logic), message placeholders, data requirements, categories, profiles,
-views, band ops/directions/units, severities; ids repeated across files; a category without a unique
+not registered), an `aggregate` block on a code rule (the function owns its logic),
+message placeholders (a code rule's: those its function declares), data requirements,
+categories, profiles, views, band ops/directions/units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
 example.
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
-live in `catalog_expr.py` and are re-exported here. Two names come from engine
+live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
+`catalog_code.py`. Two names come from engine
 registries, each imported lazily so the gate stays free of typer/requests: derived
 fields (`engine/fields.py`, via `known_derived_fields`) and code rules
 (`implementation: code:<name>`, `engine/code_rules.py`, via `known_code_rules`).
@@ -33,7 +35,6 @@ Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -54,6 +55,13 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
     message_problems,
     placeholder_problems,
     severity_source_problems,
+)
+from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
+    CODE_IMPL,
+    code_rule_aggregate_problems,
+    implementation_problems,
+    known_code_rules,
+    rule_message_problems,
 )
 from ts_cli.audit.catalog_model import (
     CATEGORIES_FILE,
@@ -102,21 +110,6 @@ SEVERITY_MAP_KEYS = {"field", "map", "default"}
 
 _BAND_OPS_FOR = {"higher_is_better": {"lt", "lte", "eq"},
                  "lower_is_better": {"gt", "gte", "eq"}}
-# `implementation: code:<name>` — also the name check engine/code_rules.py registers by.
-CODE_IMPL = re.compile(r"^code:([a-z_][a-z0-9_]*)$")
-
-
-def known_code_rules() -> Set[str]:
-    """Names usable as `implementation: code:<name>` — the engine's code-rule registry.
-
-    Imported lazily, like `known_derived_fields`: the catalog gate loads
-    `engine/code_rules.py` (and the gate-safe modules it imports) without the rest of
-    ts_cli. See that module's docstring for what it may import.
-    """
-    from ts_cli.audit.engine.code_rules import REGISTRY
-    return set(REGISTRY)
-
-
 def _known(values: Iterable[str]) -> str:
     return ", ".join(values)
 
@@ -247,20 +240,6 @@ def _basic_problems(rule: Rule, cat: Catalog) -> List[str]:
     return out
 
 
-def _implementation_problems(rule: Rule) -> List[str]:
-    if rule.implementation == "declarative":
-        return []
-    m = CODE_IMPL.match(rule.implementation)
-    if not m:
-        return [f"implementation: '{rule.implementation}' must be 'declarative' "
-                "or 'code:<name>'"]
-    registered = known_code_rules()
-    if m.group(1) not in registered:
-        return [f"implementation: unknown code rule '{m.group(1)}' "
-                f"(registered: {_known(sorted(registered)) or 'none'})"]
-    return []
-
-
 def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> List[str]:
     if key == "status":
         return [] if value in STATUSES else [f"{path}: unknown status '{value}'"]
@@ -278,7 +257,7 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
     if not isinstance(value, str):
         return [f"{path}: must be a string"]
     if key == "message":
-        return message_problems(value, rule.aggregate, path)
+        return rule_message_problems(rule, value, path)
     return []
 
 
@@ -337,22 +316,13 @@ def _examples_problems(rule: Rule, cat: Catalog) -> List[str]:
 def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     """What the engine interprets: the aggregate block, the message's placeholders,
     the legacy threshold's placeholders, and where severity comes from."""
-    out = _code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
+    out = code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
-    out += message_problems(rule.message, rule.aggregate, "message")
+    out += rule_message_problems(rule, rule.message, "message")
     out += legacy_threshold_problems(rule.legacy_threshold, "legacy_threshold")
     if rule.implementation != "declarative":
         return out
     return out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
-
-
-def _code_rule_aggregate_problems(rule: Rule) -> List[str]:
-    """The function owns a code rule's logic, so an `aggregate` block beside it would
-    be dead data that reads as if it configured something."""
-    if not rule.aggregate:
-        return []
-    return [f"aggregate: a code rule ({rule.implementation}) owns its logic — "
-            "remove the aggregate block"]
 
 
 def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
@@ -397,7 +367,7 @@ def _shadowed_severity_problems(rule: Rule, cat: Catalog) -> List[str]:
 
 def rule_problems(rule: Rule, cat: Catalog) -> List[str]:
     """Every problem in one rule, each prefixed `<file>: <id>:`."""
-    msgs = (_basic_problems(rule, cat) + _implementation_problems(rule)
+    msgs = (_basic_problems(rule, cat) + implementation_problems(rule)
             + _engine_problems(rule, cat) + bands_problems(rule.bands, "bands")
             + _severity_problems(rule.severity, "severity")
             + _profile_override_problems(rule, cat) + _examples_problems(rule, cat))

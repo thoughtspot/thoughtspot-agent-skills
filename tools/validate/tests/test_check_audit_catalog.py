@@ -38,9 +38,10 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 
 # What the gate may import: the catalog modules, the engine's derived-field registry
 # (catalog_expr.known_derived_fields) and code-rule registry
-# (catalog_validate.known_code_rules), and the modules those need. Nothing that pulls
+# (catalog_code.known_code_rules), and the modules those need. Nothing that pulls
 # in typer or requests — a code rule importing more must do so inside its function.
-GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py", "rules.py",
+GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
+                "catalog_code.py", "rules.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/code_rules.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py")
@@ -170,3 +171,17 @@ def test_code_rule_names_checked_in_isolation(tmp_path):
     res = _run(root)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "1 rule(s)" in res.stdout
+
+
+def test_shipped_code_rule_message_typo_fails(tmp_path):
+    # The gate holds a code rule's message to the placeholders its function declares
+    # (A5 renders only {score}); a typo there has no mode to catch it otherwise.
+    root = _copy_repo(tmp_path)
+    ai = root / AUDIT_REL / "catalog" / "rules" / "ai.yaml"
+    text = ai.read_text()
+    assert "{score:.0f}" in text
+    ai.write_text(text.replace("{score:.0f}", "{scroe:.0f}"))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert "A5: message: unknown placeholder 'scroe' (known: score)" in res.stdout
+    assert "Traceback" not in res.stderr

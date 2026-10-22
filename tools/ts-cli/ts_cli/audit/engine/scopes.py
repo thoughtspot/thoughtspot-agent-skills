@@ -11,7 +11,8 @@
      "doc":         the top-level document the item came from (the Model TML, …)}
 
 `guid` / `name` / `object_type` are what the legacy checks put on a finding, so they
-follow those, not the item's own identity. A model's children report the Model's guid;
+follow those, not the item's own identity — and are read as they read them
+(`.get("name", "")`): an absent key is "", a present None stays None. A model's children report the Model's guid;
 an RLS rule reports its Table; an Answer's table reference reports the Answer.
 
 Without `parent`, every item of the scope (a child scope: every parent's children in
@@ -35,7 +36,7 @@ Item = Dict[str, Any]
 
 def _item(scope: str, obj: Any, parent: Optional[Item], guid: str, name: str,
           object_type: str, doc: Any) -> Item:
-    return {"obj": obj, "parent": parent, "guid": guid or "", "name": name or "",
+    return {"obj": obj, "parent": parent, "guid": guid, "name": name,
             "object_type": object_type, "scope": scope, "doc": doc}
 
 

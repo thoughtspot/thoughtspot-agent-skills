@@ -71,7 +71,9 @@ LEAF_OPERATORS = [op for op in OPERATORS if op not in _COMBINATORS]
 # mode to do more extend its entry here and in engine/modes.py together.
 #   each       one finding per scope item passing `where`; `measure` is a field whose
 #              value is the metric and what `bands` grade
-#   ratio      share of the item's `over` children passing `where` that also `match`
+#   ratio      share of the item's `over` children passing `where` that also `match`;
+#              `unnamed_label` (a string) names a child with no `name` key in the
+#              message's name lists — only for children named by that key
 #   count      number of the item's `over` children passing `where`
 #   group      scope items passing `where`, grouped by `key` (a path, or a list of
 #              paths for a composite key); `kind: duplicates` fires on a group of 2+,
@@ -83,7 +85,7 @@ LEAF_OPERATORS = [op for op in OPERATORS if op not in _COMBINATORS]
 #   composite  sum of `weights[n] * components[n]` per scope item
 AGGREGATE_KEYS: Dict[str, Set[str]] = {
     "each": {"mode", "where", "measure"},
-    "ratio": {"mode", "over", "where", "match"},
+    "ratio": {"mode", "over", "where", "match", "unnamed_label"},
     "count": {"mode", "over", "where"},
     "group": {"mode", "where", "key", "kind", "value", "member", "name", "guid"},
     "pairwise": {"mode", "where", "set"},
@@ -101,6 +103,9 @@ GROUP_GUIDS = ["first", "none"]
 # Modes that grade a measured value, so need `bands` (a fixed `severity` means nothing).
 MODES_NEEDING_BANDS = {"ratio", "count", "pairwise", "composite"}
 _FIELD_KEYS = ("measure", "value", "member", "set")
+# Child scopes whose items are named by the object's own `name` key (scopes.py), so
+# "has no name" means something for them (ratio `unnamed_label`).
+NAMED_BY_NAME_KEY = {"model.column", "model.formula", "answer.formula"}
 
 # Placeholders a message may use, per mode — supplied by engine/modes.py (a parity test
 # holds the two together). `composite` adds one per component name. `each` also reads
@@ -314,12 +319,25 @@ def aggregate_problems(agg: dict, scope: str, implementation: str) -> List[str]:
     out += _key_problems(agg, mode)
     out += _over_problems(agg.get("over"), scope)
     out += _mode_value_problems(agg)
+    out += _unnamed_label_problems(agg)
     item_scope = agg.get("over") if mode in ("ratio", "count") else scope
     item_scope = item_scope if item_scope in SCOPES else None
     for key in ("where", "match"):
         if key in agg:
             out += expr_problems(agg[key], f"aggregate.{key}", item_scope)
     return out
+
+
+def _unnamed_label_problems(agg: dict) -> List[str]:
+    if "unnamed_label" not in agg:
+        return []
+    if not isinstance(agg["unnamed_label"], str):
+        return ["aggregate.unnamed_label: must be a string"]
+    over = agg.get("over")
+    if over in SCOPES and over not in NAMED_BY_NAME_KEY:
+        return [f"aggregate.unnamed_label: '{over}' items are not named by a `name` key "
+                f"(only {_known(sorted(NAMED_BY_NAME_KEY))})"]
+    return []
 
 
 def _key_problems(agg: dict, mode: Any) -> List[str]:

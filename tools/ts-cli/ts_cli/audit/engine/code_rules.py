@@ -5,9 +5,13 @@ not a clever expression) keeps its full catalog entry — id, categories, requir
 message, remediation, bands where they apply, legacy_threshold, examples — and names a
 function here with `implementation: code:<name>`:
 
-    @code_rule("model_width")
+    @code_rule("model_width", placeholders={"count"})
     def model_width(rule: Rule, ctx: AuditContext, profile: str) -> List[Finding]:
         ...
+
+`placeholders` are the names the function renders `rule.message` with; the catalog
+validator holds the rule's message and every profile's message to them, as it holds a
+declarative rule's to its mode's.
 
 The contract (`run.run_rules` dispatches; `check_findings` enforces it):
 
@@ -43,7 +47,7 @@ only the permitted modules and fails if this one needs more.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List
 
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
 from ts_cli.audit.engine import bands, fields, scopes
@@ -56,19 +60,29 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only
 CodeRule = Callable[["Rule", Any, str], List[Finding]]
 
 REGISTRY: Dict[str, CodeRule] = {}
+# name -> the message placeholders the function renders (declared at registration).
+PLACEHOLDERS: Dict[str, FrozenSet[str]] = {}
+_PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def code_rule(name: str) -> Callable[[CodeRule], CodeRule]:
-    """Register the decorated function as `implementation: code:<name>`."""
+def code_rule(name: str, placeholders: Iterable[str] = ()) -> Callable[[CodeRule], CodeRule]:
+    """Register the decorated function as `implementation: code:<name>`, rendering its
+    message with `placeholders`."""
     if not isinstance(name, str) or not CODE_IMPL.match(f"code:{name}"):
         raise ValueError(f"'{name}' is not a valid code rule name "
                          "(lower case letters, digits and '_', not starting with a digit)")
+    if isinstance(placeholders, str) or \
+            not all(isinstance(p, str) and _PLACEHOLDER.match(p) for p in placeholders):
+        raise ValueError(f"code rule '{name}': placeholders must be a collection of "
+                         f"names, got {placeholders!r}")
+    declared = frozenset(placeholders)
 
     def register(fn: CodeRule) -> CodeRule:
         if name in REGISTRY:
             raise ValueError(f"code rule '{name}' is already registered "
                              f"({REGISTRY[name].__module__}.{REGISTRY[name].__qualname__})")
         REGISTRY[name] = fn
+        PLACEHOLDERS[name] = declared
         return fn
 
     return register
@@ -135,7 +149,7 @@ def readiness_score(item: dict, ctx: Any) -> float:
     desc_pct = (sum(1 for c in cols if _nonblank(c.get("description"))) / total) * 100
     syn_pct = (sum(1 for c in scopes.iterate(ctx, "model.column", parent=item)
                    if fields.get(c, "@has_synonyms", ctx)) / total) * 100
-    has_ai = bool(fields.get(item, "@has_ai_instructions", ctx))
+    has_ai = bool(fields.get(item, "@is_coached", ctx))
     has_desc = _nonblank(model.get("description"))
     anti = sum(1 for c in cols if _poor_name(c.get("name", "")))
     name_quality = ((total - anti) / total) * 100 if total else 100
@@ -146,7 +160,7 @@ def readiness_score(item: dict, ctx: Any) -> float:
             + name_quality * 0.15)
 
 
-@code_rule("spotter_readiness")
+@code_rule("spotter_readiness", placeholders={"score"})
 def spotter_readiness(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """A5 — one finding per model whose readiness score the bands grade."""
     out: List[Finding] = []

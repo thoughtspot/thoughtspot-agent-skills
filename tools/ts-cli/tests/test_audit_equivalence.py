@@ -357,3 +357,19 @@ def test_a_rules_equivalent_on_the_check_tests_inputs(profile):
     assert differing == {}
     # Not vacuous: every rule fires somewhere in these inputs.
     assert all(fired.values()), fired
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("fixture,probe", [
+    # a nameless measure: legacy A6 lists it as "?"
+    ("tml_unnamed_measure", lambda f: f["check_id"] == "A6" and f["detail"].endswith(": ?")),
+    # `name: None` / `guid: None` reach the finding as None, not ""
+    ("ai_model_name_none", lambda f: f["object_name"] is None),
+    ("ai_document_guid_none", lambda f: f["object_guid"] is None),
+])
+def test_a_rules_keep_legacy_names_and_guids(profile, fixture, probe):
+    import audit_rule_fixtures as fx
+
+    old, new = collect_both(getattr(fx, fixture)(), profile, A_RULES, categories=["A"])
+    assert any(probe(f) for f in old), "the input must exercise the case"
+    assert compare_findings(old, new)["identical"] is True

@@ -13,9 +13,6 @@ passed `{"instructions": "..."}`, a shape the API never returns, locking it in.
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_ai import check_a3, check_a5
 
-# The live shape; the contexts are named builders in audit_rule_fixtures.py.
-LIVE_SHAPE = fx.COACHED
-
 
 def test_a3_sees_instructions_in_the_live_response_shape():
     ctx = fx.instructions_live_shape()

@@ -401,18 +401,48 @@ def demo_corpus_models() -> AuditContext:
     return make_context(models=docs, ai_instructions={d["guid"]: {} for d in docs})
 
 
-# Every A input above, for the equivalence test: the named builders, the families
-# swept across every value their legacy tests probe (and the boundaries between).
-AI_INPUTS = {
-    **{name: fn for name, fn in list(globals().items())
-       if name.startswith(("ai_model_", "tml_", "instructions_")) and callable(fn)},
-    "demo_corpus_models": demo_corpus_models,
-    "models_with_and_without_ai_instructions": models_with_and_without_ai_instructions,
-    "model_measures_with_ai_context": model_measures_with_ai_context,
-    "model_measures_no_ai_context": model_measures_no_ai_context,
-    "model_without_measures": model_without_measures,
-    **{f"described_{n}_of_100": (lambda n=n: build_described_columns(n)) for n in range(101)},
-    **{f"synonyms_{n}_of_100": (lambda n=n: build_synonym_columns(n)) for n in range(101)},
-    **{f"measures_{c}_of_{t}": (lambda c=c, t=t: build_tml_measures(c, t))
-       for t in (1, 5, 10) for c in range(t + 1)},
-}
+def tml_unnamed_measure() -> AuditContext:
+    """A visible, uncovered measure with no `name` key: legacy A6 lists it as "?"."""
+    return build_tml_ctx(build_tml_col("Revenue", "MEASURE", AI_CONTEXT),
+                         {"column_id": "T::X", "properties": {"column_type": "MEASURE"}})
+
+
+def ai_model_name_none() -> AuditContext:
+    """A model whose `name` is present and None: findings carry object_name None."""
+    return make_context(models=[build_ai_model(name=None, columns=[build_ai_col("A")])],
+                        ai_instructions={"m-1": {}})
+
+
+def ai_document_guid_none() -> AuditContext:
+    """A model document whose `guid` is present and None: findings carry object_guid
+    None, and its instructions entry is keyed None."""
+    return make_context(models=[build_ai_model(guid=None, columns=[build_ai_col("A")])],
+                        ai_instructions={None: {}})
+
+
+# Every A input, for the equivalence test — listed by hand so another category's
+# fixtures cannot join and a renamed one cannot drop out silently; the profile-bar
+# families are swept across every value their legacy tests probe (and the boundaries).
+AI_INPUTS = {fn.__name__: fn for fn in (
+    ai_model_one_of_three_described, ai_model_all_described, ai_model_without_columns,
+    ai_model_one_of_three_with_synonyms, ai_model_all_with_synonyms, ai_model_uncoached,
+    ai_model_coached, ai_model_instructions_not_fetched, ai_model_without_description,
+    ai_model_described, ai_model_bare_columns, ai_model_ready, ai_model_name_none,
+    ai_document_guid_none,
+    tml_measures_full_ai_context, tml_measures_no_ai_context,
+    tml_measures_partial_ai_context, tml_measure_and_ten_ids, tml_hidden_measure_uncovered,
+    tml_measure_blank_ai_context, tml_attribute_only, tml_eight_measures_uncovered,
+    tml_four_columns_with_synonyms, tml_four_columns_without_synonyms,
+    tml_root_synonyms_column, tml_described_column_with_synonyms, tml_described_column,
+    tml_value_shapes, tml_unnamed_measure,
+    instructions_live_shape, instructions_empty_info, instructions_info_without_text,
+    instructions_tml_only,
+    demo_corpus_models, models_with_and_without_ai_instructions,
+    model_measures_with_ai_context, model_measures_no_ai_context, model_without_measures,
+)}
+AI_INPUTS.update({f"described_{n}_of_100": (lambda n=n: build_described_columns(n))
+                  for n in range(101)})
+AI_INPUTS.update({f"synonyms_{n}_of_100": (lambda n=n: build_synonym_columns(n))
+                  for n in range(101)})
+AI_INPUTS.update({f"measures_{c}_of_{t}": (lambda c=c, t=t: build_tml_measures(c, t))
+                  for t in (1, 5, 10) for c in range(t + 1)})
