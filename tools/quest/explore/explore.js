@@ -626,7 +626,9 @@
             if (t.index - 1 === FRAMES.wall) { faces++; if (at(t.x, t.y + 1) && at(t.x, t.y + 1).index - 1 === FRAMES.wall) throw new Error(`a brick face at (${t.x}, ${t.y}) has wall below`); }
             if (t.index - 1 === FRAMES.wall_top) { tops++; const b = at(t.x, t.y + 1); if (t.y + 1 < W.layer.height && !(b && (b.index - 1 === FRAMES.wall || b.index - 1 === FRAMES.wall_top))) throw new Error(`a wall top at (${t.x}, ${t.y}) has floor below`); }
           });
-          if (strict && (!faces || !tops)) throw new Error(`walls drew ${faces} faces and ${tops} tops`);
+          // a map built of brick walls shows both (a town or a forest of other solid tiles has neither)
+          const bricks = world.doc.layers.find(l => l.name === "walls").data.some(g => g - 1 === FRAMES.wall);
+          if (strict && bricks && (!faces || !tops)) throw new Error(`walls drew ${faces} faces and ${tops} tops`);
       };
       const playFun = async () => {
           // The fun: a chest's loot, a mimic's teeth, a barrel rolled off a hoard, a weapon switched.
@@ -703,7 +705,7 @@
           throw new Error("the player you see isn't where its body is");
         // Back from the classic page with gold won there: the bar shows it at once.
         const before = $("hud-gold").textContent;
-        progress.finish(realms[realms.length - 1].id, 10);
+        progress.finish([...realms].reverse().find(r => r.id !== realmId && r.id !== realms[0].id).id, 10);   // another realm, not this one
         window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
         if ($("hud-gold").textContent === before) throw new Error("the gold bar didn't catch up after Back");
       }

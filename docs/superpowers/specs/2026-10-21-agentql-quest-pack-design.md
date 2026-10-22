@@ -149,7 +149,7 @@ lexicon:                               # the roles the engine knows, named the p
   reward: hoard
   currency: gold
 explore:
-  realms: [law, mines]                 # realms with a map; others are played in classic mode
+  realms: [law, mines, lake, forests, isles]   # realms with a map; others are played in classic mode
 ```
 
 The build refuses two packs that share an `id`, a `publish_path` or a `storage_key`. Every pack is
@@ -519,7 +519,12 @@ kept, and the character can be asked again.
     out, and the foe looked like a red crab, not a dragon). The map reads west to east to a torch-lit barred door;
     the Forge and the dragon get their own frames, used in every realm.
 
-**Then:** you play it, and the remaining realms get maps.
+11. **Every realm explorable:** the Lake (a craftsmen's town on the shore, a pier east to the
+    dragon's isle), the Golden Forests (a path through golden trees, a clearing with the Forge, a
+    barred door in the trees before the dragon's glade) and the Shifting Isles (isles joined by
+    plank bridges, the last bridge barred). Each reads west to east, as the Mines do.
+
+**Then:** you play it.
 
 ## 7. A second game
 

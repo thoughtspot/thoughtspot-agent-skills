@@ -71,6 +71,8 @@
     "petitioner_farmer": 85,
     "petitioner_scholar": 99,
     "petitioner_trader": 112,
-    "petitioner_monk": 111
+    "petitioner_monk": 111,
+    "smith": 109,
+    "forester": 88
   }
 }

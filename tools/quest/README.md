@@ -284,6 +284,11 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **The Mines** read west to east: a hall where the merchant and the guide wait, a forge hall
   with the Forge (the compiler) on the north wall between two anvils and torches, mine track
   running east to a barred door with a torch over it, and behind it the dragon's den.
+- **The Lake, the Golden Forests and the Shifting Isles** read the same way: the merchant and the
+  guide in the west, the Forge between two anvils, a barred door east, and the dragon beyond it.
+  The Lake is a craftsmen's town with a pier out to the dragon's isle; the Forests a path through
+  golden trees to a glade; the Isles three isles joined by plank bridges. Someone in each (a smith,
+  a forester, an islander) points the way.
 - **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
   A petitioner stands before each throne (a throne's optional `look`, from `tiles.json`'s npcs);
   talking to them opens the hall's questions, and the gate to the next room stays shut until
