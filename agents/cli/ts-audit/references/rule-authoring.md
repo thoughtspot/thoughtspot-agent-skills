@@ -21,10 +21,19 @@ declarative form expresses are **code rules**, but even those keep a full catalo
 
 Commands below run from the repo root. They assume the `ts` on your PATH runs this
 checkout's code (`pip install -e tools/ts-cli`, or `uv tool install --force -e
-tools/ts-cli`). Check with the interpreter `ts` itself runs, not your `python3`:
+tools/ts-cli`). Check with the interpreter `ts` itself runs, not your `python3` (the
+entry point's first line names it, or — for a long path — a `/bin/sh` trampoline does):
 
 ```bash
-"$(head -1 "$(command -v ts)" | sed 's/^#!//')" -c "import ts_cli; print(ts_cli.__file__)"
+python3 - "$(command -v ts)" <<'EOF'
+import re, subprocess, sys
+lines = open(sys.argv[1]).read().splitlines()
+interp = lines[0][2:].strip()
+if interp.endswith("/sh"):
+    interp = re.search(r"'exec' '([^']+)'", lines[1]).group(1)
+print(subprocess.run([interp, "-c", "import ts_cli; print(ts_cli.__file__)"],
+                     capture_output=True, text=True).stdout.strip())
+EOF
 ```
 
 It must print a path inside this checkout's `tools/ts-cli/`.
