@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 
@@ -15,6 +15,11 @@ class Finding:
     detail: str
     metric: Optional[Union[int, float]] = None
     threshold: Optional[dict] = None
+    # Additive (rule catalog): every category the rule belongs to — `angle` stays the
+    # first one's legacy key — and the uniform band payload
+    # {direction, unit, levels: [{op, value, severity}], profile, provenance}.
+    categories: list[str] = field(default_factory=list)
+    bands: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -27,6 +32,8 @@ class Finding:
             "detail": self.detail,
             "metric": self.metric,
             "threshold": self.threshold,
+            "categories": list(self.categories),
+            "bands": self.bands,
         }
 
 

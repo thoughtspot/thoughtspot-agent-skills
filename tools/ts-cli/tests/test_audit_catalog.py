@@ -222,10 +222,30 @@ def test_nested_operator_inside_count_and_not_is_checked(tmp_path):
     assert any("unknown operator 'matches'" in p for p in problems), problems
 
 
-def test_derived_field_names_are_accepted_until_registry_exists(tmp_path):
+def test_registered_derived_field_accepted(tmp_path):
     rule = _good_rule()
     rule["aggregate"]["match"] = {"field": "@is_indexed", "truthy": True}
     assert _problems(tmp_path, {"ai": [rule]}) == []
+
+
+@pytest.mark.parametrize("where", ["match", "severity", "measure", "key", "parent"])
+def test_unknown_derived_field_rejected(tmp_path, where):
+    rule = _good_rule()
+    if where == "match":
+        rule["aggregate"]["match"] = {"field": "@no_such_field", "truthy": True}
+    elif where == "parent":
+        rule["aggregate"]["match"] = {"field": "parent.@no_such_field", "truthy": True}
+    elif where == "severity":
+        rule.update(bands=None, profiles={},
+                    severity={"field": "@no_such_field", "map": {"x": "HIGH"}, "default": "LOW"},
+                    aggregate={"mode": "each"})
+    elif where == "measure":
+        rule["aggregate"] = {"mode": "each", "measure": "@no_such_field"}
+    else:
+        rule.update(bands=None, profiles={}, severity="HIGH", aggregate={
+            "mode": "group", "kind": "duplicates", "key": ["name", "@no_such_field"]})
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any("unknown derived field '@no_such_field'" in p for p in problems), problems
 
 
 def test_duplicate_id_rejected(tmp_path):
@@ -372,7 +392,8 @@ def test_ratio_and_count_need_over(tmp_path, mode):
 
 def test_each_mode_needs_no_over(tmp_path):
     rule = _good_rule(aggregate={"mode": "each",
-                                 "where": {"field": "join_type", "eq": "OUTER"}})
+                                 "where": {"field": "join_type", "eq": "OUTER"}},
+                      bands=None, profiles={}, severity="HIGH")
     assert _problems(tmp_path, {"data": [rule]}) == []
 
 
@@ -467,3 +488,168 @@ def test_valid_operands_accepted(tmp_path):
         {"field": "y", "exists": False, "eq": "x", "contains": "a"},
     ]}
     assert _problems(tmp_path, {"ai": [rule]}) == []
+
+
+# ── Task 4: categories carry the legacy angle key ────────────────────────────
+
+def test_shipped_categories_carry_legacy_angle_keys():
+    cat = load_catalog(PKG_CATALOG)
+    assert {c.id: c.angle_key for c in cat.categories.values()} == {
+        "A": "ai", "D": "data_modeling", "H": "human", "P": "performance", "S": "security"}
+
+
+def _with_categories(tmp_path: Path, rows: list) -> list[str]:
+    root = _catalog_dir(tmp_path, {})
+    (root / "categories.yaml").write_text(yaml.safe_dump(rows, sort_keys=False))
+    return validate_catalog(load_catalog(root), load_raw(root))
+
+
+def test_angle_key_required_and_unique(tmp_path):
+    rows = [{"id": "A", "label": "AI", "order": 1, "angle_key": "ai"},
+            {"id": "B", "label": "B", "order": 2},
+            {"id": "C", "label": "C", "order": 3, "angle_key": "ai"}]
+    problems = _with_categories(tmp_path, rows)
+    assert any(p.startswith("categories.yaml: B:") and "angle_key is required" in p
+               for p in problems), problems
+    assert any(p.startswith("categories.yaml: C:") and "angle_key 'ai' repeats A" in p
+               for p in problems), problems
+
+
+# ── Task 4: per-mode aggregate keys, operands, placeholders, severity source ─
+
+def _each(**overrides) -> dict:
+    """A clean `each` rule: fixed severity, no bands."""
+    rule = _good_rule(bands=None, profiles={}, severity="HIGH", message="{name}",
+                      aggregate={"mode": "each", "where": {"field": "name", "exists": True}})
+    rule.update(overrides)
+    return rule
+
+
+def _group(**agg) -> dict:
+    return _each(aggregate={"mode": "group", **agg})
+
+
+@pytest.mark.parametrize("rule, needle", [
+    (_each(aggregate={"mode": "each", "match": {"field": "x", "truthy": True}}),
+     "unknown key 'match' for mode each"),
+    (_good_rule(aggregate={"mode": "ratio", "over": "model.column", "key": "name",
+                           "match": {"field": "x", "truthy": True}}),
+     "unknown key 'key' for mode ratio"),
+    (_good_rule(aggregate={"mode": "ratio", "over": "model.column"}),
+     "aggregate.match is required for mode ratio"),
+    (_group(key="name"), "aggregate.kind is required for mode group"),
+    (_group(kind="duplicates"), "aggregate.key is required for mode group"),
+    (_group(key="name", kind="twins"), "unknown kind 'twins'"),
+    (_group(key="name", kind="divergence"), "aggregate.value is required"),
+    (_group(key="name", kind="duplicates", value="x"), "only used by kind divergence"),
+    (_group(key="name", kind="duplicates", guid="last"), "aggregate.guid"),
+    (_group(key=[], kind="duplicates"), "composite key needs at least one path"),
+    (_group(key="name", kind="duplicates", name="{nme}"), "unknown placeholder 'nme'"),
+    (_each(aggregate={"mode": "pairwise"}), "aggregate.set is required for mode pairwise"),
+    (_each(aggregate={"mode": "composite", "components": {"a": "x"}, "weights": {"b": 1}}),
+     "aggregate.weights: must give one number per component"),
+    (_each(aggregate={"mode": "composite", "components": {"a": "x"}, "weights": {"a": "1"}}),
+     "aggregate.weights.a: needs a number"),
+    (_each(aggregate={"mode": "composite", "components": {"score": "x"},
+                      "weights": {"score": 1}}),
+     "'score' must be a placeholder-safe name"),
+    (_each(aggregate={"mode": "composite", "components": [], "weights": {}}),
+     "aggregate.components: must be a non-empty mapping"),
+])
+def test_mode_specific_aggregate_keys(tmp_path, rule, needle):
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(p.startswith("rules/ai.yaml: A6:") and needle in p for p in problems), problems
+
+
+@pytest.mark.parametrize("rule", [
+    _group(key=["dataSourceName", "name"], kind="duplicates", guid="none",
+           name="{key[0]} ({size})", member="parent.name"),
+    _group(key="name", kind="divergence", value="properties.column_type"),
+    _each(aggregate={"mode": "pairwise", "set": "model_tables.fqn"},
+          bands={"direction": "lower_is_better", "unit": "ratio",
+                 "levels": [{"op": "gt", "value": 0.5, "severity": "MEDIUM"}]},
+          message="{a} / {b}: {similarity:.2f} ({shared}/{union})"),
+    _each(aggregate={"mode": "composite", "components": {"desc": "x", "syn": "@has_synonyms"},
+                     "weights": {"desc": 0.5, "syn": 0.5}},
+          bands={"direction": "higher_is_better", "unit": "score",
+                 "levels": [{"op": "lt", "value": 80, "severity": "MEDIUM"}]},
+          message="{score:.0f} ({desc}, {syn})"),
+    _each(aggregate={"mode": "each", "measure": "@join_depth"},
+          bands={"direction": "lower_is_better", "unit": "depth",
+                 "levels": [{"op": "gt", "value": 3, "severity": "MEDIUM"}]},
+          message="{value} {anything.at.all}"),
+])
+def test_mode_specific_aggregate_keys_accepted(tmp_path, rule):
+    assert _problems(tmp_path, {"ai": [rule]}) == []
+
+
+def test_over_must_be_a_child_of_the_scope(tmp_path):
+    rule = _good_rule(scope="table")
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any("'model.column' items are not children of scope 'table'" in p
+               for p in problems), problems
+
+
+@pytest.mark.parametrize("expr, needle", [
+    ({"field": "x", "eq": ["a"]}, "'eq' needs a single value"),
+    ({"field": "x", "eq": {"a": 1}}, "'eq' needs a single value"),
+    ({"field": "x", "in": [["a"]]}, "'in' needs a list of single values"),
+    ({"field": "x", "contains": None}, "'contains' needs a single"),
+    ({"field": "x", "contains": ["a"]}, "'contains' needs a single"),
+])
+def test_eq_in_contains_operands_checked(tmp_path, expr, needle):
+    rule = _good_rule()
+    rule["aggregate"]["match"] = expr
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(needle in p for p in problems), problems
+
+
+def test_eq_accepts_null_and_booleans(tmp_path):
+    rule = _good_rule()
+    rule["aggregate"]["match"] = {"all": [{"field": "x", "eq": None},
+                                          {"field": "y", "eq": False},
+                                          {"field": "z", "in": [1, "a", None]}]}
+    assert _problems(tmp_path, {"ai": [rule]}) == []
+
+
+@pytest.mark.parametrize("mutate, needle", [
+    (lambda r: r.update(message="{matchd}/{total}"), "message: unknown placeholder 'matchd'"),
+    (lambda r: r.update(message="{matched"), "message: malformed template"),
+    (lambda r: r.update(message="{} measures"), "positional"),
+    (lambda r: r["profiles"]["general"].update(message="{count}"),
+     "profiles.general.message: unknown placeholder 'count'"),
+    (lambda r: r.update(legacy_threshold={"assessment": "{profile}"}),
+     "legacy_threshold.assessment: unknown placeholder 'profile'"),
+    (lambda r: r["profiles"]["general"].update(legacy_threshold={"a": "{x}"}),
+     "profiles.general.legacy_threshold.a: unknown placeholder 'x'"),
+])
+def test_message_placeholders_checked(tmp_path, mutate, needle):
+    rule = _good_rule()
+    mutate(rule)
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(p.startswith("rules/ai.yaml: A6:") and needle in p for p in problems), problems
+
+
+@pytest.mark.parametrize("rule, needle", [
+    (_good_rule(bands=None, profiles={}), "bands are required for mode ratio"),
+    (_each(severity=None), "mode each needs a severity (or bands)"),
+    (_group(key="name", kind="duplicates", severity=None) | {"severity": None},
+     "mode group needs a severity (or bands)"),
+    (_each(bands={"direction": "lower_is_better", "unit": "count",
+                  "levels": [{"op": "gt", "value": 3, "severity": "LOW"}]}),
+     "bands need aggregate.measure in mode each"),
+])
+def test_severity_source_required(tmp_path, rule, needle):
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(needle in p for p in problems), problems
+
+
+def test_severity_source_checked_under_every_profile(tmp_path):
+    rule = _good_rule(bands=None)  # bands only under profiles.general
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert [p for p in problems if "bands are required" in p] == [
+        "rules/ai.yaml: A6: bands are required for mode ratio "
+        "(it grades a measured value) (profile: spotter)"]
+    each = _each(severity=None, profiles={"general": {"severity": "LOW"},
+                                          "spotter": {"severity": "HIGH"}})
+    assert _problems(tmp_path / "each", {"ai": [each]}) == []

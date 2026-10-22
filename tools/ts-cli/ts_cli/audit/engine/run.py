@@ -1,0 +1,94 @@
+"""`run_rules` — run the catalog's rules over an AuditContext.
+
+The finding contract (what the equivalence gate compares with the legacy checks):
+
+    check_id     the rule id
+    angle        the `angle_key` of the rule's FIRST category ("ai", "data_modeling", …)
+    severity, object_type/name/guid, detail, metric   from the rule's mode (modes.py)
+    threshold    the rule's `legacy_threshold` — the profile's own when it sets one —
+                 with `{profile_label}` rendered; key order and number types as written
+                 in YAML; None when the rule has none
+    categories   every category id of the rule (additive)
+    bands        {direction, unit, levels, profile, provenance} (additive; bands.py)
+
+The profile is the `profile` argument and nothing else — never `ctx.assessment`, which
+a replayed snapshot carries from its capture.
+"""
+from __future__ import annotations
+
+import copy
+from typing import Any, Dict, List, Optional
+
+from ts_cli.audit.catalog_model import Catalog, Rule
+from ts_cli.audit.engine import bands
+from ts_cli.audit.engine.modes import MODES
+from ts_cli.audit.findings import Finding
+
+
+def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
+              layers: Optional[List[Dict[str, Any]]] = None) -> List[Finding]:
+    """Findings of every active rule in any of `categories`, under `profile`.
+
+    `layers` are further override layers after the profile, each `{rule_id: {key:
+    value}}`, applied in order; their provenance is `layer:2`, `layer:3`, … (the
+    catalog is layer 0, the profile layer 1).
+    """
+    _check_selection(catalog, categories, profile)
+    wanted = set(categories)
+    findings: List[Finding] = []
+    for rule in catalog.rules.values():
+        if rule.status != "active" or not wanted.intersection(rule.categories):
+            continue
+        findings += _run_rule(ctx, catalog, rule, profile, layers or [])
+    return findings
+
+
+def _check_selection(catalog: Catalog, categories: List[str], profile: str) -> None:
+    if profile not in catalog.profiles:
+        raise ValueError(f"unknown profile '{profile}' (known: {', '.join(catalog.profiles)})")
+    unknown = [c for c in categories if c not in catalog.categories]
+    if unknown:
+        raise ValueError(f"unknown categories {unknown} (known: {', '.join(catalog.categories)})")
+
+
+def layers_for(rule: Rule, profile: str, extra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The override layers for one rule: its profile block, then each extra layer."""
+    out = [{"source": f"profile:{profile}", "overrides": rule.profiles.get(profile) or {}}]
+    out += [{"source": f"layer:{i + 2}", "overrides": layer.get(rule.id) or {}}
+            for i, layer in enumerate(extra)]
+    return out
+
+
+def _run_rule(ctx, catalog: Catalog, rule: Rule, profile: str,
+              extra: List[Dict[str, Any]]) -> List[Finding]:
+    merged, provenance = bands.effective(rule, layers_for(rule, profile, extra))
+    if merged.status != "active":
+        return []
+    found = _dispatch(merged, ctx, profile)
+    stamp = {
+        "angle": catalog.categories[rule.categories[0]].angle_key,
+        "categories": list(rule.categories),
+        "bands": bands.payload(merged, profile, provenance),
+        "threshold": legacy_threshold(rule, profile, catalog.profiles[profile].label),
+    }
+    for f in found:
+        f.angle, f.categories = stamp["angle"], list(stamp["categories"])
+        f.bands, f.threshold = copy.deepcopy(stamp["bands"]), copy.deepcopy(stamp["threshold"])
+    return found
+
+
+def _dispatch(rule: Rule, ctx, profile: str) -> List[Finding]:
+    if rule.implementation != "declarative":
+        raise NotImplementedError(
+            f"{rule.id}: '{rule.implementation}' has no registered code rule")
+    return MODES[rule.aggregate["mode"]](rule, ctx, profile)
+
+
+def legacy_threshold(rule: Rule, profile: str, profile_label: str) -> Optional[dict]:
+    """The pre-catalog `threshold` dict: the profile's `legacy_threshold`, else the
+    rule's, with `{profile_label}` rendered in string values (order/types kept)."""
+    source = (rule.profiles.get(profile) or {}).get("legacy_threshold", rule.legacy_threshold)
+    if source is None:
+        return None
+    return {k: v.format_map({"profile_label": profile_label}) if isinstance(v, str) else
+            copy.deepcopy(v) for k, v in source.items()}

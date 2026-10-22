@@ -34,12 +34,19 @@ def _run(root: Path) -> subprocess.CompletedProcess:
                           capture_output=True, text=True)
 
 
+# What the gate may import: the catalog modules, and the engine's derived-field
+# registry (catalog_expr.known_derived_fields) with the one module it needs. Nothing
+# that pulls in typer or requests.
+GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py", "rules.py",
+                "engine/__init__.py", "engine/fields.py")
+
+
 def _copy_repo(tmp_path: Path) -> Path:
-    """The two catalog modules and the shipped catalog — nothing else of ts_cli."""
+    """GATE_MODULES and the shipped catalog — nothing else of ts_cli."""
     root = tmp_path / "repo"
     dst = root / AUDIT_REL
-    dst.mkdir(parents=True)
-    for name in ("catalog_model.py", "catalog_validate.py"):
+    (dst / "engine").mkdir(parents=True)
+    for name in GATE_MODULES:
         shutil.copy(REPO / AUDIT_REL / name, dst / name)
     shutil.copytree(REPO / AUDIT_REL / "catalog", dst / "catalog")
     return root
@@ -66,6 +73,33 @@ def test_needs_only_the_catalog_modules(tmp_path):
     res = _run(_copy_repo(tmp_path))
     assert res.returncode == 0, res.stdout + res.stderr
     assert "0 rule(s), 5 categories" in res.stdout
+
+
+GOOD_EACH_RULE = """\
+- id: A99
+  title: An indexed column
+  categories: [A]
+  scope: model.column
+  aggregate: {mode: each, where: {field: "@is_indexed", truthy: true}}
+  severity: LOW
+  examples:
+    fires: {fixture: x, severity: LOW}
+    silent: {fixture: y}
+"""
+
+
+def test_derived_fields_checked_in_isolation(tmp_path):
+    # The gate learns derived-field names from engine/fields.py without the rest of
+    # ts_cli: a registered name passes, an unknown one fails by name.
+    root = _copy_repo(tmp_path)
+    rules = root / AUDIT_REL / "catalog" / "rules" / "ai.yaml"
+    rules.write_text(GOOD_EACH_RULE)
+    res = _run(root)
+    assert res.returncode == 0, res.stdout + res.stderr
+    rules.write_text(GOOD_EACH_RULE.replace("@is_indexed", "@is_indexd"))
+    res = _run(root)
+    assert res.returncode == 1 and "unknown derived field '@is_indexd'" in res.stdout
+    assert "Traceback" not in res.stderr
 
 
 def test_shape_error_is_a_fail_not_a_traceback(tmp_path):

@@ -4,18 +4,25 @@
 message starts `<file>: <id>:` — the file relative to the catalog root and the rule,
 category or profile it is about — so a failing gate points at the line to fix.
 
-What it rejects: unknown keys (rule, aggregate, bands, severity mapping, examples);
-operand values of the wrong type (`in` without a list, a regex that does not compile,
-a non-numeric comparison, a non-boolean exists/nonblank/truthy); a ratio/count rule
-without `over`; unknown scopes, modes, operators, data requirements,
-categories, profiles, views, band ops/directions/units, severities; ids repeated across
-files; a profile override of a key that defines what a rule *means* (anything outside
-OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and in every
-profile's replacement bands; an active rule without a `fires` and a `silent` example.
+What it rejects: unknown keys (rule, aggregate — per mode —, bands, severity mapping,
+examples, categories, profiles); operand values of the wrong type (`eq` not a single
+value, `in` not a list of them, `contains` not one scalar, a regex that does not
+compile, a non-numeric comparison, a non-boolean exists/nonblank/truthy); a mode
+without its required aggregate keys (`over` for ratio/count, which must be a child
+scope of the rule's scope; `key`/`kind` for group; `set` for pairwise;
+`components`/`weights` for composite); a severity the mode cannot produce (no bands
+on a grading mode, neither severity nor bands on each/group, bands on an each rule with
+no `measure`); unknown scopes, modes, operators, derived fields (`@name`), message
+placeholders, data requirements, categories, profiles, views, band ops/directions/
+units, severities; ids repeated across files; a category without a unique
+`angle_key`; a profile override of a key that defines what a rule *means* (anything
+outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
+in every profile's replacement bands; an active rule without a `fires` and a `silent`
+example.
 
-The vocabulary below is the engine's contract (plan Task 4). Two registries do not exist
-yet and are hooks returning None ("not checked"): derived field names (`@name`, Task 4)
-and code-rule names (`implementation: code:<name>`, Task 5).
+Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
+live in `catalog_expr.py` and are re-exported here. One registry is still a hook
+returning None ("not checked"): code-rule names (`implementation: code:<name>`, Task 5).
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """
@@ -23,8 +30,26 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
+    AGGREGATE_KEYS,
+    LEAF_OPERATORS,
+    MODE_PLACEHOLDERS,
+    MODES,
+    OPERATORS,
+    PARENT_SCOPE,
+    SCOPES,
+    aggregate_problems,
+    expr_problems,
+    field_path_problems,
+    known_derived_fields,
+    legacy_threshold_problems,
+    message_placeholders,
+    placeholder_problems,
+    scan_expressions,
+    severity_source_problems,
+)
 from ts_cli.audit.catalog_model import (
     CATEGORIES_FILE,
     PROFILES_FILE,
@@ -40,17 +65,6 @@ from ts_cli.audit.catalog_model import (
 
 # ── vocabulary ──────────────────────────────────────────────────────────────
 
-SCOPES = [
-    "model", "model.column", "model.formula", "model.filter", "model.table",
-    "join", "table", "table.rls_rule", "rls_column_ref",
-    "answer", "answer.table_ref", "answer.formula", "set", "metadata",
-]
-MODES = ["each", "ratio", "count", "group", "pairwise", "composite"]
-OPERATORS = [
-    "eq", "in", "regex", "not_regex", "exists", "nonblank", "truthy",
-    "gt", "gte", "lt", "lte", "len_gt", "len_lt", "contains",
-    "all", "any", "not", "count",
-]
 REQUIRES = ["model_tml", "table_tml", "metadata", "dependents", "ai_instructions",
             "answers", "sets"]
 SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
@@ -69,31 +83,21 @@ RULE_KEYS = {
     "scope", "aggregate", "bands", "severity", "profiles", "message", "legacy_threshold",
     "remediation", "examples", "views",
 }
-CATEGORY_KEYS = {"id", "label", "order", "description"}
+CATEGORY_KEYS = {"id", "label", "order", "description", "angle_key"}
 PROFILE_KEYS = {"id", "label", "default"}
 BANDS_KEYS = {"direction", "unit", "levels"}
 LEVEL_KEYS = {"op", "value", "severity"}
 EXAMPLE_KINDS = ("fires", "silent")
 EXAMPLE_KEYS = {"fixture", "profile", "severity"}
-# Keys an `aggregate` block may carry. One constant so Task 4 can widen it (per mode)
-# when a mode gains parameters; anything else is a typo and fails validation.
-AGGREGATE_KEYS = {"mode", "over", "where", "match"}
-# Modes that measure a parent's children, so must say which children (`over`).
-MODES_NEEDING_OVER = {"ratio", "count"}
 # A mapping-valued severity: chosen from an item field, e.g.
 #   {field: join_type, map: {OUTER: HIGH, LEFT_OUTER: INFO}, default: MEDIUM}
+# The engine looks the field's value up in `map` (exact, type-sensitive: YAML `true`
+# is a boolean key) and falls back to `default`.
 SEVERITY_MAP_KEYS = {"field", "map", "default"}
 
-_COMBINATORS = {"all", "any", "not", "count"}
-LEAF_OPERATORS = [op for op in OPERATORS if op not in _COMBINATORS]
 _BAND_OPS_FOR = {"higher_is_better": {"lt", "lte", "eq"},
                  "lower_is_better": {"gt", "gte", "eq"}}
 _CODE_IMPL = re.compile(r"^code:([a-z_][a-z0-9_]*)$")
-
-
-def known_derived_fields() -> Optional[Set[str]]:
-    """Names usable as `field: '@name'`. None = not checked yet (registry is Task 4)."""
-    return None
 
 
 def known_code_rules() -> Optional[Set[str]]:
@@ -108,124 +112,6 @@ def _known(values: Iterable[str]) -> str:
 def _is_id_in(value: Any, ids: Dict[str, Any]) -> bool:
     """`value in ids`, false (not TypeError) when YAML gave a list or mapping."""
     return isinstance(value, str) and value in ids
-
-
-# ── predicate expressions (`where` / `match`) ───────────────────────────────
-
-def _field_problems(expr: dict, value: Any, path: str) -> List[str]:
-    if not isinstance(value, str) or not value.strip("@"):
-        return [f"{path}: must be a dotted path or '@derived' name"]
-    derived = known_derived_fields()
-    if value.startswith("@") and derived is not None and value[1:] not in derived:
-        return [f"{path}: unknown derived field '{value}'"]
-    return []
-
-
-def _list_problems(expr: dict, value: Any, path: str) -> List[str]:
-    if not isinstance(value, list) or not value:
-        return [f"{path}: must be a non-empty list of expressions"]
-    out: List[str] = []
-    for i, sub in enumerate(value):
-        out += expr_problems(sub, f"{path}[{i}]")
-    return out
-
-
-def _not_problems(expr: dict, value: Any, path: str) -> List[str]:
-    return expr_problems(value, path)
-
-
-def _count_problems(expr: dict, value: Any, path: str) -> List[str]:
-    if value not in SCOPES:
-        return [f"{path}: unknown scope '{value}' (known: {_known(SCOPES)})"]
-    return []
-
-
-def _where_problems(expr: dict, value: Any, path: str) -> List[str]:
-    if "count" not in expr:
-        return [f"{path}: 'where' inside an expression is only valid beside 'count'"]
-    return expr_problems(value, path)
-
-
-def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _compiles(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    try:
-        re.compile(value)
-    except re.error:
-        return False
-    return True
-
-
-# Operand checks for leaf operators; `eq` and `contains` take any scalar.
-_NUMERIC_OPS = ("gt", "gte", "lt", "lte", "len_gt", "len_lt")
-_BOOL_OPS = ("exists", "nonblank", "truthy")
-_OPERAND_CHECKS: Dict[str, Tuple[Callable[[Any], bool], str]] = {
-    "in": (lambda v: isinstance(v, list), "needs a list"),
-    "regex": (_compiles, "does not compile as a regular expression"),
-    "not_regex": (_compiles, "does not compile as a regular expression"),
-    **{op: (_is_number, "needs a number") for op in _NUMERIC_OPS},
-    **{op: (lambda v: isinstance(v, bool), "needs true or false") for op in _BOOL_OPS},
-}
-
-
-def _operand_problems(expr: dict, path: str) -> List[str]:
-    out: List[str] = []
-    for key, value in expr.items():
-        check = _OPERAND_CHECKS.get(key)
-        if check is not None and not check[0](value):
-            out.append(f"{path}: '{key}' {check[1]} (got {value!r})")
-    return out
-
-
-_EXPR_KEYS: Dict[str, Callable[[dict, Any, str], List[str]]] = {
-    "field": _field_problems,
-    "all": _list_problems,
-    "any": _list_problems,
-    "not": _not_problems,
-    "count": _count_problems,
-    "where": _where_problems,
-}
-
-
-def _pairing_problems(expr: dict, path: str, unknown: List[str]) -> List[str]:
-    """A comparison needs something to compare, and a field needs a comparison."""
-    leaves = [k for k in expr if k in LEAF_OPERATORS]
-    if leaves and "field" not in expr and "count" not in expr:
-        return [f"{path}: '{leaves[0]}' needs a 'field' (or 'count') to compare"]
-    if "field" in expr and not leaves and not unknown:
-        return [f"{path}: 'field' given with no operator"]
-    return []
-
-
-def expr_problems(expr: Any, path: str) -> List[str]:
-    """Problems in one `where`/`match` expression, recursing through all/any/not/count."""
-    if not isinstance(expr, dict) or not expr:
-        return [f"{path}: expected a non-empty mapping"]
-    unknown = [k for k in expr if k not in _EXPR_KEYS and k not in LEAF_OPERATORS]
-    out = [f"{path}: unknown operator '{k}' (known: {_known(OPERATORS)})" for k in unknown]
-    for key, value in expr.items():
-        handler = _EXPR_KEYS.get(key)
-        if handler is not None:
-            out += handler(expr, value, f"{path}.{key}")
-    return out + _operand_problems(expr, path) + _pairing_problems(expr, path, unknown)
-
-
-def scan_expressions(obj: Any, path: str) -> List[str]:
-    """Validate every `where` / `match` value found anywhere inside `obj`."""
-    out: List[str] = []
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            sub = f"{path}.{key}" if path else str(key)
-            out += expr_problems(value, sub) if key in ("where", "match") \
-                else scan_expressions(value, sub)
-    elif isinstance(obj, list):
-        for i, value in enumerate(obj):
-            out += scan_expressions(value, f"{path}[{i}]")
-    return out
 
 
 # ── bands ───────────────────────────────────────────────────────────────────
@@ -314,7 +200,7 @@ def _severity_map_problems(sev: dict, key: str) -> List[str]:
            for k in sorted(map(str, set(sev) - SEVERITY_MAP_KEYS))]
     out += [f"{key}.{k}: required" for k in sorted(SEVERITY_MAP_KEYS - set(sev))]
     if "field" in sev:
-        out += _field_problems(sev, sev["field"], f"{key}.field")
+        out += field_path_problems(sev["field"], f"{key}.field")
     mapping = sev.get("map")
     if "map" in sev and (not isinstance(mapping, dict) or not mapping):
         out.append(f"{key}.map: must be a non-empty mapping of value -> severity")
@@ -362,32 +248,6 @@ def _implementation_problems(rule: Rule) -> List[str]:
     return []
 
 
-def _aggregate_problems(rule: Rule) -> List[str]:
-    agg = rule.aggregate
-    out: List[str] = []
-    mode = agg.get("mode")
-    if mode is None:
-        if rule.implementation == "declarative":
-            out.append("aggregate.mode is required for a declarative rule")
-    elif mode not in MODES:
-        out.append(f"aggregate.mode: unknown mode '{mode}' (known: {_known(MODES)})")
-    return out + _over_problems(agg, mode) + scan_expressions(agg, "aggregate")
-
-
-def _over_problems(agg: dict, mode: Any) -> List[str]:
-    """Unknown aggregate keys (a typo'd `wher:` would otherwise filter nothing) and the
-    children scope a ratio/count rule measures."""
-    out = [f"aggregate: unknown key '{k}' (known: {_known(sorted(AGGREGATE_KEYS))})"
-           for k in sorted(map(str, set(agg) - AGGREGATE_KEYS))]
-    over = agg.get("over")
-    if over is None:
-        if mode in MODES_NEEDING_OVER:
-            out.append(f"aggregate.over is required for mode {mode} (the children it measures)")
-    elif over not in SCOPES:
-        out.append(f"aggregate.over: unknown scope '{over}' (known: {_known(SCOPES)})")
-    return out
-
-
 def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> List[str]:
     if key == "status":
         return [] if value in STATUSES else [f"{path}: unknown status '{value}'"]
@@ -400,8 +260,13 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
             return [exc.message]
         return _bands_key_problems(value, path) + bands_problems(parsed, path)
     if key == "legacy_threshold":
-        return [] if isinstance(value, dict) else [f"{path}: must be a mapping"]
-    return [] if isinstance(value, str) else [f"{path}: must be a string"]
+        return legacy_threshold_problems(value, path) if isinstance(value, dict) \
+            else [f"{path}: must be a mapping"]
+    if not isinstance(value, str):
+        return [f"{path}: must be a string"]
+    if key == "message":
+        return placeholder_problems(value, message_placeholders(rule.aggregate), path)
+    return []
 
 
 def _profile_override_problems(rule: Rule, cat: Catalog) -> List[str]:
@@ -451,10 +316,36 @@ def _examples_problems(rule: Rule, cat: Catalog) -> List[str]:
     return out
 
 
+def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
+    """What the engine interprets: the aggregate block, the message's placeholders,
+    the legacy threshold's placeholders, and where severity comes from."""
+    out = aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
+    out += placeholder_problems(rule.message, message_placeholders(rule.aggregate), "message")
+    out += legacy_threshold_problems(rule.legacy_threshold, "legacy_threshold")
+    if rule.implementation != "declarative":
+        return out
+    return out + _severity_source_by_profile(rule, cat)
+
+
+def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
+    """The mode's severity source must exist under EVERY profile — a profile block
+    replaces bands/severity but cannot supply them for the others."""
+    by_problem: Dict[str, List[str]] = {}
+    for pid in cat.profiles or [""]:
+        override = rule.profiles.get(pid)
+        override = override if isinstance(override, dict) else {}
+        has_bands = override.get("bands", rule.bands) is not None
+        has_severity = override.get("severity", rule.severity) is not None
+        for problem in severity_source_problems(rule.aggregate, has_bands, has_severity):
+            by_problem.setdefault(problem, []).append(pid)
+    return [f"{problem} (profile: {_known(pids)})" if pids != [""] else problem
+            for problem, pids in by_problem.items()]
+
+
 def rule_problems(rule: Rule, cat: Catalog) -> List[str]:
     """Every problem in one rule, each prefixed `<file>: <id>:`."""
     msgs = (_basic_problems(rule, cat) + _implementation_problems(rule)
-            + _aggregate_problems(rule) + bands_problems(rule.bands, "bands")
+            + _engine_problems(rule, cat) + bands_problems(rule.bands, "bands")
             + _severity_problems(rule.severity, "severity")
             + _profile_override_problems(rule, cat) + _examples_problems(rule, cat))
     return [f"{rule.source_file}: {rule.id}: {m}" for m in msgs]
@@ -467,13 +358,27 @@ def _category_problems(cat: Catalog) -> List[str]:
     if not cat.categories:
         out.append(f"{CATEGORIES_FILE}: -: at least one category is required")
     seen: Dict[int, str] = {}
+    angles: Dict[str, str] = {}
     for c in cat.categories.values():
         if not c.label.strip():
             out.append(f"{CATEGORIES_FILE}: {c.id}: label is required")
         if c.order in seen:
             out.append(f"{CATEGORIES_FILE}: {c.id}: order {c.order} repeats {seen[c.order]}")
         seen.setdefault(c.order, c.id)
+        out += _angle_key_problems(c.id, c.angle_key, angles)
     return out
+
+
+def _angle_key_problems(cid: str, angle_key: str, seen: Dict[str, str]) -> List[str]:
+    """`angle_key` is the legacy `Finding.angle` value a rule in this category emits
+    (its first category's); two categories sharing one would merge in `by_angle`."""
+    if not angle_key.strip():
+        return [f"{CATEGORIES_FILE}: {cid}: angle_key is required "
+                "(the legacy Finding.angle value, e.g. data_modeling)"]
+    if angle_key in seen:
+        return [f"{CATEGORIES_FILE}: {cid}: angle_key '{angle_key}' repeats {seen[angle_key]}"]
+    seen[angle_key] = cid
+    return []
 
 
 def _profile_problems(cat: Catalog) -> List[str]:

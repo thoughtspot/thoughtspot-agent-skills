@@ -2,7 +2,7 @@
 
 `ts audit`'s checks are data: YAML under `ts_cli/audit/catalog/`.
 
-    catalog/categories.yaml   [{id, label, order, description}]  — the report's tabs
+    catalog/categories.yaml   [{id, label, order, description, angle_key}] — report tabs
     catalog/profiles.yaml     [{id, label, default}]             — assessment profiles
     catalog/rules/*.yaml      [rule, ...]                        — one entry per rule
 
@@ -12,7 +12,7 @@ A rule entry (every key but `id`, `title`, `categories`, `scope` is optional):
       title: ...
       description: ...
       status: active                # active | retired
-      categories: [A]               # first one is the finding's legacy `angle`
+      categories: [A]               # the first one's angle_key is the finding's `angle`
       requires: [model_tml]         # data the rule reads; an object lacking it is skipped
       implementation: declarative   # or code:<name>
       scope: model                  # the object a finding is about
@@ -102,6 +102,9 @@ class Category:
     label: str
     order: int
     description: str = ""
+    # The legacy `Finding.angle` value ("ai", "data_modeling", ...) a rule whose first
+    # category this is emits. The letter `id` is the selector; findings keep `angle`.
+    angle_key: str = ""
 
 
 @dataclass
@@ -241,7 +244,9 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
 def _categories(rows: List[Dict[str, Any]]) -> Dict[str, Category]:
     cats = [Category(str(r["id"]), str(r.get("label", "")),
                      int(_expect(r.get("order"), int, 0, CATEGORIES_FILE, str(r["id"]), "order")),
-                     str(r.get("description", "")))
+                     str(r.get("description", "")),
+                     str(_expect(r.get("angle_key"), str, "", CATEGORIES_FILE, str(r["id"]),
+                                 "angle_key")))
             for r in rows]
     return {c.id: c for c in sorted(cats, key=lambda c: c.order)}
 

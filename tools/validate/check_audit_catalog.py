@@ -13,9 +13,11 @@ not ordered worst first, and an active rule without a `fires` and a `silent` exa
 The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementation,
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
 
-It imports the two catalog modules WITHOUT executing the `ts_cli` package __init__ —
-that pulls in typer, requests and the whole CLI — so it runs under any python3 with
-PyYAML, including the EOL system interpreter.
+It imports the catalog modules (catalog_model, catalog_validate, catalog_expr) and,
+to learn the derived-field names rules may use, the engine's field registry
+(engine/fields.py, which needs only audit/rules.py) — WITHOUT executing the `ts_cli`
+package __init__, which pulls in typer, requests and the whole CLI. So it runs under
+any python3 with PyYAML, including the EOL system interpreter.
 
 Usage:
     python3 tools/validate/check_audit_catalog.py --root .
