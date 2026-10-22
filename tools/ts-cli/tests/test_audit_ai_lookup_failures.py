@@ -140,3 +140,60 @@ def _dir(tmp_path: Path, name: str) -> Path:
     d = tmp_path / name
     d.mkdir()
     return d
+
+
+# --- A final 401 stays fatal; a transient 5xx is retried, then skipped per Model ------
+#
+# Only the per-Model failures (403/404/5xx, after the client's own retries) are a
+# "could not be read". A 401 that survives the client's single re-authentication means
+# the credential itself is bad: every later call would fail the same way, so the run
+# aborts as it did before the fix — once, not one re-auth and one warning per Model.
+
+def _counting_client(tmp_path: Path, ai_status: int):
+    """`_client` whose `ai/instructions/get` answers `ai_status` for EVERY Model, and
+    which counts the lookups per Model and the re-authentications."""
+    calls: dict = {}
+    client = _client(tmp_path, lambda url: _response(url, ai_status, {"error": "nope"}))
+    transport = client._session.request.side_effect
+
+    def counting(method, url, headers=None, timeout=None, **kw):
+        if url.endswith(AI_PATH):
+            guid = (kw.get("json") or {}).get("data_source_identifier")
+            calls[guid] = calls.get(guid, 0) + 1
+            return _response(url, ai_status, {"error": "nope"})
+        return transport(method, url, headers=headers, timeout=timeout, **kw)
+    client._session.request.side_effect = counting
+    reauth = MagicMock(return_value=(TOKEN, None))
+    client._authenticate = reauth
+    return client, calls, reauth
+
+
+def test_a_final_401_aborts_the_run_after_one_reauth(tmp_path, capsys):
+    client, calls, reauth = _counting_client(tmp_path, 401)
+    with pytest.raises(SystemExit) as exc:
+        run_audit(client, ["m-ok", "m-bad"], ["A"], "spotter")
+    assert exc.value.code not in (0, None)
+    assert reauth.call_count == 1                 # one re-auth, not one per Model
+    assert calls == {"m-ok": 2}                   # first Model: initial + post-re-auth try
+    err = capsys.readouterr().err
+    assert "ThoughtSpot API 401 on POST " + AI_PATH in err
+    assert "AI instructions fetch failed for model" not in err   # not a per-Model skip
+    assert TOKEN not in err and "Authorization" not in err
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_a_transient_5xx_is_retried_then_skipped_per_model(status, tmp_path, capsys):
+    client, calls, reauth = _counting_client(tmp_path, status)
+    out = run_audit(client, ["m-ok", "m-bad"], ["A"], "spotter")
+    err = capsys.readouterr().err
+
+    assert calls == {"m-ok": 4, "m-bad": 4}       # the client's 3 retries, per Model
+    assert reauth.call_count == 0
+    assert f"ThoughtSpot API {status} on POST " in err and "(transient) — retry 3/3" in err
+    models = {m["guid"]: m for m in out["corpus"]["models"]}
+    assert set(models) == {"m-ok", "m-bad"}                      # the run completed
+    assert all(m["ai_analysis"]["instructions_read"] is False for m in models.values())
+    assert [f for f in out["findings"] if f["check_id"] == "A3"] == []
+    for guid in ("m-ok", "m-bad"):
+        assert f"AI instructions fetch failed for model {guid}: ThoughtSpot API {status}" in err
+    assert TOKEN not in err and "Authorization" not in err
