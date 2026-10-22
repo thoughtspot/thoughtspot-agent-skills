@@ -99,16 +99,17 @@ def test_registries_are_not_empty():
 
 # ── BL-304: rules that used to exist twice now exist once ──────────────────
 
-def test_shared_rules_are_imported_not_re_implemented():
+def test_shared_rule_pairs_stay_in_step():
     """The data/perf split was made by copying; six rules existed twice.
 
     A threshold tuned in one angle silently left the other on the old value, and
     `check_d2`/`check_p6` shipped the *same* two defects and had to be fixed twice
     (#528). Until Task 12b this read checks_perf.py and checks_data.py for re-declared
-    regexes and inlined thresholds. The pairs now live in two places of a different
-    kind — a code rule's shared constant and a catalog literal, or two catalog
-    entries — so this asserts what the rule was for: the two halves of each pair
-    still agree, and no engine module carries its own copy of a shared pattern.
+    regexes and inlined thresholds. The pairs now live as catalog entries (and, for
+    D1, a code rule's shared constants in engine/tml.py), so this holds each pair to
+    the same logic — scope, data, aggregation and bands — holds the `legacy_threshold`
+    literals that restate a shared number to that number, and checks that the shared
+    bracketed-reference pattern is declared once in the audit code.
     """
     import re as _re
     from ts_cli.audit.engine import tml
@@ -119,15 +120,21 @@ def test_shared_rules_are_imported_not_re_implemented():
     def levels(rid):
         return [(b.op, b.value, b.severity) for b in cat[rid].bands.levels]
 
+    def logic(rid):
+        r = cat[rid]
+        return (r.scope, r.requires, r.uses, r.implementation, r.aggregate)
+
     # D4 / P4: one predicate (wide model, join_progressive off), one band.
-    if (cat["D4"].aggregate, levels("D4")) != (cat["P4"].aggregate, levels("P4")):
+    if (logic("D4"), levels("D4")) != (logic("P4"), levels("P4")):
         offenders.append("D4/P4: the join_progressive rule differs between the angles")
-    # S9 / P14: one function-call regex over the same RLS rules.
-    if cat["S9"].aggregate["where"] != cat["P14"].aggregate["where"]:
-        offenders.append("S9/P14: the RLS function-call regex differs")
+    # S9 / P14: the same walk over RLS rules with one function-call regex.
+    if logic("S9") != logic("P14"):
+        offenders.append("S9/P14: the RLS function-call rule differs")
     # S8 / P15: P15 is S8 plus the value_casing guard, nothing else.
-    if cat["P15"].aggregate["where"] != {"all": [cat["S8"].aggregate["where"],
-                                                {"field": "value_casing", "truthy": False}]}:
+    s8, p15 = logic("S8"), logic("P15")
+    if s8[:4] != p15[:4] or s8[4]["mode"] != p15[4]["mode"] or \
+            p15[4]["where"] != {"all": [s8[4]["where"],
+                                        {"field": "value_casing", "truthy": False}]}:
         offenders.append("S8/P15: P15 is no longer S8 plus the value_casing guard")
     # D1 grades with the shared constants; P8 and P7 carry them as catalog bands.
     if levels("P8") != [("gt", float(tml.MAX_MODEL_COLUMNS), "MEDIUM")]:
@@ -135,16 +142,24 @@ def test_shared_rules_are_imported_not_re_implemented():
     if levels("P7") != [("gt", float(tml.JOIN_DEPTH_YELLOW), "HIGH"),
                         ("gt", float(tml.JOIN_DEPTH_GREEN), "MEDIUM")]:
         offenders.append("P7: the join-depth bands differ from D1's")
+    # The legacy threshold payloads restate those numbers: they must say the same.
+    if cat["D4"].legacy_threshold != {"min_tables_for_flag": levels("D4")[0][1]}:
+        offenders.append("D4: legacy_threshold disagrees with its band")
+    if cat["P8"].legacy_threshold != {"max": tml.MAX_MODEL_COLUMNS}:
+        offenders.append("P8: legacy_threshold disagrees with the 75-column ceiling")
+    if cat["P7"].legacy_threshold != {"green": tml.JOIN_DEPTH_GREEN,
+                                      "yellow": tml.JOIN_DEPTH_YELLOW}:
+        offenders.append("P7: legacy_threshold disagrees with the join-depth bands")
 
-    # The shared regexes are declared once, in the helpers module.
-    engine = Path(__file__).resolve().parents[1] / "ts_cli" / "audit" / "engine"
-    for path in sorted(engine.glob("*.py")):
-        if path.name == "tml.py":   # the one declaration
-            continue
-        text = path.read_text()
-        for name in ("FUNC_IN_EXPR", "BRACKET_REF"):
-            if _re.search(rf"\b_?{name}\s*=\s*re\.compile", text):
-                offenders.append(f"engine/{path.name}: re-declares {name}")
+    # The bracketed-reference pattern is declared once (engine/tml.py BRACKET_REF): a
+    # copy under any name is found by its pattern text, not its name.
+    audit = Path(__file__).resolve().parents[1] / "ts_cli" / "audit"
+    literal = _re.compile(r"""re\.compile\(\s*r?["']\\\[\(\[\^\\\]\]\+\)\\\]["']""")
+    declaring = [str(path.relative_to(audit)) for path in sorted(audit.rglob("*.py"))
+                 if literal.search(path.read_text())]
+    assert "engine/tml.py" in declaring, "the scan no longer recognises the declaration"
+    offenders += [f"{p}: re-declares the BRACKET_REF pattern" for p in declaring
+                  if p != "engine/tml.py"]
 
     assert offenders == [], f"a shared rule has been copied apart: {offenders}"
 

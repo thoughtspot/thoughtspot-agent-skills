@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
+from ts_cli.audit.engine.tml import BRACKET_REF
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -66,10 +66,6 @@ class AuditContext:
         return result
 
 
-#: TML writes join operands bracketed: `[ORDERS::CUST_ID] = [CUST::ID]`.
-_BRACKETED = re.compile(r"\[([^\]]+)\]")
-
-
 def nl_instructions(ai_data: dict) -> list:
     """Instruction strings from an ``ai/instructions/get`` response.
 
@@ -95,7 +91,9 @@ def join_key_ids(on_str: str) -> list:
     An unbracketed clause is tolerated so a hand-built fixture still parses.
     """
     text = on_str or ""
-    bracketed = [m.strip() for m in _BRACKETED.findall(text) if m.strip()]
+    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: engine/tml.py's
+    # BRACKET_REF, the one declaration of that pattern (BL-304).
+    bracketed = [m.strip() for m in BRACKET_REF.findall(text) if m.strip()]
     if bracketed:
         return bracketed
     parts = text.replace("=", ",").replace(" and ", ",").split(",")
