@@ -309,7 +309,10 @@
         return (dx <= TILE * 1.25 && dy < 14) || (dy <= TILE * 1.25 && dx < 14);
       }).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y)
                         || this.ahead(b) - this.ahead(a));         // a tie goes to the one you face
-      return close.find(o => o.step && o.step === want) || close[0] || null;
+      // Something that isn't a step (the exit, a door, a chest, someone to talk to) answers when you
+      // face it squarely, so you can always leave; otherwise the step the game waits on answers first.
+      const faced = close.find(o => !o.step && this.ahead(o) > 0.7);
+      return faced || close.find(o => o.step && o.step === want) || close[0] || null;
     }
     // How squarely the player faces something: 1 straight ahead, -1 behind.
     ahead(o) {
@@ -587,6 +590,14 @@
         const ys = new Set();
         for (let i = 0; i < 30; i++) { ys.add(someone.sprite.y); await wait(100); }
         if (ys.size < 2) throw new Error("nobody breathes");
+      }
+      {                                      // facing the exit, it answers, whoever else is close
+        const exit = world.objects.find(o => o.type === "exit"), want = machine.expected(state);
+        const step = world.objects.find(o => o.step === want);
+        world.player.setPosition(exit.x, exit.y - TILE); world.facing = [0, 1];
+        if (world.nearby() !== exit) throw new Error("facing the exit, something else answered");
+        world.player.setPosition(step.x, step.y - TILE); world.facing = [0, 1];
+        if (world.nearby() !== step) throw new Error("facing the step the game waits on, it didn't answer");
       }
       const chest = world.objects.find(o => o.type === "reward");
       const steps = [];
