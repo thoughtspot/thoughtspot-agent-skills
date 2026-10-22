@@ -3085,7 +3085,7 @@ const html = fs.readFileSync(process.argv[1], "utf8");
 const block = id => html.split(`<script id="${id}" type="application/json">`)[1].split("</script>")[0];
 const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const el = () => ({ textContent: "", setAttribute() {} });
-const link = { textContent: "" }, back = { hidden: true, querySelector: () => link };
+const link = { textContent: "", href: "explore/", setAttribute(k, v) { this[k] = v; } }, back = { hidden: true, querySelector: () => link };
 const screen = { innerHTML: "", querySelector: () => null };
 const els = { "quest-data": { textContent: block("quest-data") }, "classic-art": { textContent: block("classic-art") },
               live: el(), "sound-sfx": el(), "sound-music": el(), "back-explore": back };
@@ -3098,7 +3098,7 @@ const ctx = vm.createContext({
 });
 vm.runInContext(js, ctx);
 const st = vm.runInContext("Quest.classic.state()", ctx);
-console.log(JSON.stringify({ screen: st.screen, realm: st.realm, back: !back.hidden, label: link.textContent }));
+console.log(JSON.stringify({ screen: st.screen, realm: st.realm, back: !back.hidden, label: link.textContent, href: link.href }));
 """
 
 
@@ -3120,6 +3120,7 @@ def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, 
     assert {k: got[k] for k in want} == want
     data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
     assert got["label"] == (data["pack"]["strings"]["explore_back"] if want["back"] else "")
+    assert got["href"] == ("explore/#from=mines" if want["back"] else "explore/")   # back beside the Mines' door
 
 
 GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
@@ -3772,3 +3773,141 @@ def test_the_engine_slides_the_player_into_a_one_tile_opening():
     r = subprocess.run(["node", "-e", ENGINE_ASSIST, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == {"-6": True, "-3": True, "0": True, "3": True, "6": True}
+
+
+
+# ---- second review of #653 ---------------------------------------------------------------------
+
+ENGINE_ASSIST_LOOP = r"""
+const fs = require("fs"); globalThis.Quest = {};
+let now = 0, queued = null;
+globalThis.performance = { now: () => now };
+globalThis.requestAnimationFrame = f => { queued = f; };
+const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+globalThis.document = { createElement: () => ({ getContext: () => ctx, width: 0, height: 0 }) };
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const rows = ["#######", "###.###", "#.....#", "#######"], T = 16;
+const out = {};
+for (const off of [-6, 6]) {
+  now = 0; queued = null;
+  const game = Quest.engine.create({ parent: { appendChild() {} }, width: 320, height: 128, background: "#000", atlas: {}, columns: 12,
+                                     keyTarget: { addEventListener() {} } });
+  let body;
+  game.start(api => {
+    const l = api.addLayer({ name: "walls", width: 7, height: 4, data: rows.join("").split("").map(c => c === "#" ? 1 : 0) });
+    l.setCollisionByExclusion(); api.collide(l);
+    body = api.addPlayer(3 * T + 8 + off, 2 * T + 8).setVelocity(0, -90);
+    return {};
+  });
+  for (let t = 0; t <= 1000; t += 1000 / 60) { now = t; const f = queued; queued = null; f && f(); }
+  out[off] = body.y < 2 * T;           // in the game's own loop, held Up slid it into the opening
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_game_loop_uses_corner_assist():
+    r = subprocess.run(["node", "-e", ENGINE_ASSIST_LOOP, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"-6": True, "6": True}
+
+
+def _png_rows(rows_rgba, filters, colour=6):
+    """A PNG of the given RGBA rows, each row written with the given filter type (an independent encoder)."""
+    import struct
+    import zlib
+    h, w = len(rows_rgba), len(rows_rgba[0]) // 4
+    raw, prev = b"", bytes(w * 4)
+    for y, row in enumerate(rows_rgba):
+        f = filters[y % len(filters)]
+        out = bytearray()
+        for i, x in enumerate(row):
+            a = row[i - 4] if i >= 4 else 0
+            b, c = prev[i], (prev[i - 4] if i >= 4 else 0)
+            pred = {0: 0, 1: a, 2: b, 3: (a + b) // 2}.get(f)
+            if f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if pa <= pb and pa <= pc else b if pb <= pc else c
+            out.append((x - pred) & 255)
+        raw += bytes([f]) + bytes(out)
+        prev = row
+    chunk = lambda k, d: struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, colour, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+@pytest.mark.parametrize("filters", [[0], [1], [2], [3], [4], [0, 1, 2, 3, 4]])
+def test_the_png_decoder_reads_every_filter(tmp_path, filters):
+    import random
+    rnd = random.Random(sum(filters) + len(filters))
+    rows = [bytes(rnd.randrange(256) for _ in range(8 * 4)) for _ in range(6)]
+    p = tmp_path / "x.png"
+    p.write_bytes(_png_rows(rows, filters))
+    w, h, alpha = B._png_alpha(p)
+    assert (w, h) == (8, 6) and alpha == b"".join(r[3::4] for r in rows)
+
+
+@pytest.mark.parametrize("damage,needle", [
+    (lambda d: d[: len(d) // 2], "not a readable PNG"),
+    (lambda d: d.replace(b"IDAT", b"IDAX"), "not a readable PNG"),
+])
+def test_a_broken_png_is_an_error_not_a_traceback(tmp_path, damage, needle):
+    p = tmp_path / "x.png"
+    p.write_bytes(damage(_png_rows([bytes(32)] * 4, [0])))
+    with pytest.raises(ValueError, match=needle):
+        B._png_alpha(p)
+
+
+def test_an_unknown_png_filter_is_an_error(tmp_path):
+    import struct
+    import zlib
+    good = _png_rows([bytes(32)] * 2, [0])
+    raw = bytes([5]) + bytes(32) + bytes([0]) + bytes(32)          # row 0 claims filter 5
+    chunk = lambda k, d: struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d) & 0xFFFFFFFF)
+    bad = good[:33] + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    p = tmp_path / "x.png"
+    p.write_bytes(bad)
+    with pytest.raises(ValueError, match="row 0 has filter 5"):
+        B._png_alpha(p)
+
+
+def test_the_atlas_must_be_8_bit_rgba(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    (packs / "agentql/tiles/tiles.png").write_bytes(_png_rows([bytes(192 * 4)] * 640, [0], colour=6).replace(
+        b"IHDR" + (192).to_bytes(4, "big") + (640).to_bytes(4, "big") + bytes([8, 6]),
+        b"IHDR" + (192).to_bytes(4, "big") + (640).to_bytes(4, "big") + bytes([8, 2])))
+    monkeypatch.setattr(B, "PACKS", packs)
+    errors = B.build(check=True)[3]
+    assert any("tiles/tiles.png" in e for e in errors), errors
+
+
+def test_guards_have_their_own_looks():
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))["npcs"]
+    npcs, _ = _overworld_npcs()
+    guard_frames = [frames[look] for look, says in npcs if says and says.startswith("guard_")]
+    elder = [frames[look] for look, says in npcs if says and says.startswith("npc_elder")]
+    assert len(set(guard_frames)) == len(guard_frames) and not set(guard_frames) & set(elder)
+
+
+def test_no_water_on_the_overworld_can_be_walked_on():
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    _, doc = _overworld_npcs()
+    W = doc["width"]
+    layer = {l["name"]: l for l in doc["layers"] if l["type"] == "tilelayer"}
+    objects = {(o["x"] // 16, o["y"] // 16) for l in doc["layers"] if l["type"] == "objectgroup" for o in l["objects"]}
+    WATER = {276 + f for f in (18, 19, 20, 36, 37, 38, 54, 55, 56)}
+    for i, g in enumerate(layer["floor"]["data"]):
+        if g - 1 in WATER and not layer["walls"]["data"][i] and (i % W, i // W) not in objects:
+            assert layer["decor"]["data"][i] - 1 in (37, 38, 39), ("open water at", i % W, i // W)   # a plank
+
+
+def test_an_item_pointing_at_an_empty_frame_fails_the_build(tmp_path, monkeypatch):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/tiles/tiles.json"
+    frames = json.loads(f.read_text(encoding="utf-8"))
+    frames["items"]["dagger"]["frame"] = 140
+    f.write_text(json.dumps(frames), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert any("items.dagger is frame 140" in e for e in B.build(check=True)[3])

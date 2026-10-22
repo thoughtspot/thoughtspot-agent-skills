@@ -103,7 +103,12 @@ const deepRealm = deep ? REALMS.findIndex(r => r.id === deep[1]) : -1;
 if (deepRealm >= 0 && QUEST.pack.explore_realms.length) {
   for (const a of [{ type: "map" }, { type: "realm", realm: deepRealm }]) state = machine.act(state, a, loadProgress()).state;
   const back = document.getElementById("back-explore");
-  if (deep[2] && back && back.querySelector) { back.querySelector("a").textContent = S("explore_back"); back.hidden = false; }
+  if (deep[2] && back && back.querySelector) {
+    const a = back.querySelector("a");
+    a.textContent = S("explore_back");
+    if (a.setAttribute) a.setAttribute("href", `explore/#from=${deep[1]}`);   // back beside this realm's door
+    back.hidden = false;
+  }
 }
 Sound.label();
 render();

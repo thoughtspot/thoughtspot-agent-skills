@@ -840,7 +840,17 @@ TILE_TABLES = {"portals", "items", "weapon", "npcs"}   # a door per realm, the l
 
 def _png_alpha(path: pathlib.Path) -> tuple[int, int, bytes] | None:
     """An 8-bit RGBA PNG's width, height and alpha channel (as make_atlas.py writes it), or None for
-    any other kind of PNG. Enough to tell an empty frame from a drawn one, without Pillow."""
+    any other kind of PNG. Enough to tell an empty frame from a drawn one, without Pillow. A PNG
+    that can't be read raises ValueError."""
+    import struct
+    import zlib
+    try:
+        return _png_alpha_read(path)
+    except (ValueError, IndexError, struct.error, zlib.error) as e:
+        raise ValueError(f"not a readable PNG ({e})") from None
+
+
+def _png_alpha_read(path: pathlib.Path) -> tuple[int, int, bytes] | None:
     import struct
     import zlib
     data = path.read_bytes()
@@ -858,8 +868,12 @@ def _png_alpha(path: pathlib.Path) -> tuple[int, int, bytes] | None:
             idat += body
         pos += 12 + n
     raw, stride, rows, prev = zlib.decompress(idat), w * 4, [], bytearray(w * 4)
+    if not w or not h or len(raw) != h * (stride + 1):
+        raise ValueError("its image data is the wrong size")
     for y in range(h):
         f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        if f > 4:
+            raise ValueError(f"row {y} has filter {f}")
         for i in range(stride):
             a = line[i - 4] if i >= 4 else 0
             up, ul = prev[i], (prev[i - 4] if i >= 4 else 0)
@@ -908,8 +922,13 @@ def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
     if isinstance(items, dict) and "mimic" in items:
         errors.append("tiles/tiles.json: 'mimic' is a chest, not an item")
     # Every frame it names is drawn: an empty one would be an invisible door, person or item.
-    alpha = _png_alpha(folder / "tiles.png")
-    if alpha and not errors:
+    try:
+        alpha = _png_alpha(folder / "tiles.png")
+    except ValueError as e:
+        return errors + [f"tiles/tiles.png: {e}"]
+    if alpha is None:
+        return errors + ["tiles/tiles.png: must be an 8-bit RGBA PNG, not interlaced (make_atlas.py writes it so)"]
+    if not errors:
         w = alpha[0]
         empty = lambda f: not any(alpha[2][(f // (w // 16) * 16 + y) * w + (f % (w // 16)) * 16:][:16].strip(b"\0") for y in range(16))
         named = {k: v for k, v in frames.items() if k in TILE_NAMES}

@@ -257,12 +257,16 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **Tiles** are three of Kenney's CC0 packs in one atlas (`tiles/LICENSE-kenney.txt`): Tiny
   Dungeon (frames 0-131), Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473:
   water, rock, boats), plus a row of ours (132: a wall's top; 133-137: the realm guards, Tiny
-  Dungeon characters recoloured). `tiles/make_atlas.py` rebuilds `tiles.png` from the packs.
+  Dungeon characters recoloured). `tiles/make_atlas.py` rebuilds `tiles.png` from the packs'
+  zips (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
+  tests check. The tests can't rebuild it themselves (they don't have Kenney's zips), so after
+  editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
   `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
   person looks; the build checks it.
 - **The overworld** is a small world the camera scrolls (40x14): a plaza with Elder Wren, and a
   door for each realm in its own scene, each with a guard beside it who says in one line what the
-  realm is for. Leaving a realm puts you back beside its door. The scenes: a
+  realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
+  (`explore/#from=<realm>`), puts you back beside its door. The scenes: a
   tunnel into a rocky cliff, with rails (the Mines, a dwarf), a library with bookshelves at its door,
   over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
   (the Lake, a fisherman), a tunnel of golden trees (the

@@ -282,14 +282,15 @@
       const door = this.from && this.objects.find(o => o.type === "portal" && o.to === this.from);
       if (door) {
         const open = ([dx, dy]) => { const tx = Math.floor(door.x / TILE) + dx, ty = Math.floor(door.y / TILE) + dy, t = walls.getTileAt(tx, ty);
-          return !(t && t.collides) && !this.objects.some(o => Math.floor(o.x / TILE) === tx && Math.floor(o.y / TILE) === ty); };
+          return tx >= 0 && ty >= 0 && tx < doc.width && ty < doc.height          // on the map: a door can be on its edge
+            && !(t && t.collides) && !this.objects.some(o => Math.floor(o.x / TILE) === tx && Math.floor(o.y / TILE) === ty); };
         const side = [[0, 1], [0, -1], [-1, 0], [1, 0]].find(open);
         if (side) start = { x: door.x + side[0] * TILE, y: door.y + side[1] * TILE };
       }
       this.player = this.addPlayer(start.x, start.y);                   // a 12x12 body
-      this.look = this.addSprite(this.spawn.x, this.spawn.y, FRAMES.player, false).setDepth(10);
+      this.look = this.addSprite(start.x, start.y, FRAMES.player, false).setDepth(10);
       this.facing = [0, 1];
-      this.held = this.addSprite(this.spawn.x, this.spawn.y, ITEMS[fun.weapon].frame, false).setDepth(11).setScale(0.75);
+      this.held = this.addSprite(start.x, start.y, ITEMS[fun.weapon].frame, false).setDepth(11).setScale(0.75);
       this.collide(walls);                                                // walls, and every enabled solid sprite
       this.cursors = this.input.keyboard.cursors;
       this.cameras.main.setBounds(0, 0, doc.width * TILE, doc.height * TILE);
@@ -475,7 +476,9 @@
   }
   const looking = LOOK && (LOOK[1] === "overworld" || explorable.has(LOOK[1])) ? LOOK[1] : null;   // a map that exists
   if (looking && looking !== "overworld") state = Object.assign(state, { realm: realms.findIndex(r => r.id === looking) });
-  goTo(looking || "overworld");
+  // Back from the classic page (explore/#from=<realm>): on the map, beside that realm's door.
+  const back = /^#from=([a-z0-9_]+)$/.exec(location.hash);
+  goTo(looking || "overworld", !looking && back && realms.some(r => r.id === back[1]) ? back[1] : null);
   $("world").focus({ preventScroll: true });
 
   // For tests: the state, the world, and a scripted play of one realm (see tests/smoke_explore.py).
@@ -738,6 +741,13 @@
       // Then the fun, which maps.py promises can all be reached once the quest is done: back in
       // through the door (its gates open now), then out by the exit.
       await until(() => world && world.mapId === "overworld");
+      // Back from the realm, by victory now and by the exit later: one tile from its door, on floor.
+      const besideDoor = how => {
+        const d = world.objects.find(o => o.type === "portal" && o.to === realmId);
+        if (Math.abs(Math.abs(world.player.x - d.x) + Math.abs(world.player.y - d.y) - TILE) > 0.5 || blockedTile(Math.floor(world.player.x / TILE), Math.floor(world.player.y / TILE)))
+          throw new Error(`back from ${realmId} by ${how}, the player wasn't one tile from its door`);
+      };
+      besideDoor("victory");
       const door = world.objects.find(o => o.type === "portal" && o.to === realmId);
       await walk(door); talk(world.nearby());
       if (!dialog.open || state.screen !== "realm") throw new Error(`the ${realmId} door didn't open`);
@@ -748,9 +758,7 @@
       const exit = world.objects.find(o => o.type === "exit");
       await walk(exit); talk(world.nearby());
       await until(() => world && world.mapId === "overworld");
-      const back = world.objects.find(o => o.type === "portal" && o.to === realmId);
-      if (Math.abs(world.player.x - back.x) + Math.abs(world.player.y - back.y) > TILE * 1.5)
-        throw new Error(`leaving ${realmId}, the player wasn't put back beside its door`);
+      besideDoor("the exit");
       log(`EXIT ${realmId}`);
       return steps;
     }
