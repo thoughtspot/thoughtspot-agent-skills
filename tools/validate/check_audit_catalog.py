@@ -34,13 +34,18 @@ EOL system interpreter.
 
 With `--base <ref>` it also holds rule ids to their history (catalog_history.py): an
 id present at `<ref>` that is gone now fails (retire it instead), and so does an id
-retired at `<ref>` that is active again (a retired id is never reused). `<ref>`'s
-catalog is read with `git show`, so any local ref works offline: pre-commit passes
-`HEAD`, CI `origin/main`. A `<ref>` with no catalog yet passes with a note; one git
-cannot read fails.
+retired at `<ref>` under every profile that is active again under any (a retired id is
+never reused — `status` is overridable per profile, so the effective status per
+profile is compared). `<ref>`'s catalog is read with `git show`, so it runs offline.
+CI passes `--base origin/main`. Pre-commit passes `--merge-base-with origin/main`: the
+merge base of HEAD with the local `origin/main` (no fetch), so an id that exists only
+on the branch may still be dropped or renamed; without a local `origin/main` the
+history check is skipped with a printed notice. A base with no catalog yet passes
+with a note; one git cannot read fails.
 
 Usage:
-    python3 tools/validate/check_audit_catalog.py --root . [--base origin/main]
+    python3 tools/validate/check_audit_catalog.py --root .
+        [--base origin/main | --merge-base-with origin/main]
 
 Prints `PASS  audit catalog: N rule(s), M categories`, or `FAIL` plus one line per
 problem (`<file>: <id>: <message>`) and exits 1.
@@ -83,14 +88,30 @@ class _GitError(Exception):
 def _git(root: Path, *args: str) -> str:
     res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
     if res.returncode != 0:
-        raise _GitError((res.stderr or res.stdout).strip().splitlines()[-1:] or ["git failed"])
+        lines = (res.stderr or res.stdout).strip().splitlines()
+        raise _GitError(lines[-1] if lines else f"git {args[0]} exited {res.returncode}")
     return res.stdout
+
+
+def _merge_base(root: Path, ref: str):
+    """`git merge-base HEAD <ref>`, or None when `ref` does not exist locally (no
+    fetch is ever made: pre-commit runs offline)."""
+    probe = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet",
+                            f"{ref}^{{commit}}"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        return None
+    return _git(root, "merge-base", "HEAD", ref).strip()
+
+
+def _yaml(text: str):
+    import yaml
+    return yaml.safe_load(text)
 
 
 def _base_rules(root: Path, ref: str):
     """`ref`'s rule files as `{"rules/<name>": [entries]}`; None when it has none."""
     import yaml
-    _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
     names = [n for n in _git(root, "ls-tree", "--name-only", ref, f"{RULES_REL}/").split()
              if n.endswith(".yaml")]
     if not names:
@@ -109,9 +130,16 @@ def _history(root: Path, ref: str) -> tuple:
         return [f"--base {ref}: cannot read it with git ({exc})"], ""
     if base is None:
         return [], f"no rule catalog at {ref} — nothing to compare"
-    head = history.rule_entries(model.load_raw(root / AUDIT_REL / "catalog"))
+    head_raw = model.load_raw(root / AUDIT_REL / "catalog")
+    try:
+        base["profiles.yaml"] = _yaml(_git(root, "show",
+                                          f"{ref}:{AUDIT_REL}/catalog/profiles.yaml")) or []
+    except _GitError:
+        base["profiles.yaml"] = []
+    head = history.rule_entries(head_raw)
     old = history.rule_entries(base)
-    problems = history.history_problems(old, head, ref)
+    problems = history.history_problems(old, head, ref,
+                                        history.profile_ids(head_raw, base))
     return problems, f"rule ids vs {ref}: {len(old)} at base, none removed or reused"
 
 
@@ -129,8 +157,21 @@ def main() -> int:
     parser.add_argument("--root", default=".", help="Repository root (default: cwd)")
     parser.add_argument("--base", default=None,
                         help="git ref whose rule ids must survive (removed -> retired)")
+    parser.add_argument("--merge-base-with", default=None, metavar="REF",
+                        help="like --base, against `git merge-base HEAD REF`; skipped "
+                             "with a notice when REF does not exist locally")
     args = parser.parse_args()
     root = Path(args.root)
+    skipped = ""
+    if args.merge_base_with and not args.base:
+        try:
+            args.base = _merge_base(root, args.merge_base_with)
+        except _GitError as exc:
+            print(f"FAIL  audit catalog: --merge-base-with {args.merge_base_with}: {exc}")
+            return 1
+        if args.base is None:
+            skipped = (f"NOTE  audit catalog: rule-id history not checked — "
+                       f"{args.merge_base_with} does not exist locally")
 
     if not (root / AUDIT_REL / "catalog_validate.py").is_file():
         print(f"FAIL  audit catalog: {AUDIT_REL}/catalog_validate.py not found under {root}")
@@ -151,6 +192,8 @@ def main() -> int:
     print(f"PASS  audit catalog: {len(cat.rules)} rule(s), {len(cat.categories)} categories")
     if note:
         print(f"PASS  audit catalog: {note}")
+    if skipped:
+        print(skipped)
     return 0
 
 

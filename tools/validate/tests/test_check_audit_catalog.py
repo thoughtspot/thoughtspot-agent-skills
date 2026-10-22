@@ -7,6 +7,7 @@ this pytest invocation in pre-commit.
 """
 from __future__ import annotations
 
+import copy
 import shutil
 import subprocess
 import sys
@@ -409,8 +410,8 @@ def test_history_fails_when_a_retired_id_reappears_as_a_rule(tmp_path):
     _edit_rules(root, "human.yaml", reuse_h6)
     res = _run_base(root, "HEAD")
     assert res.returncode == 1, res.stdout
-    assert "H6: retired at HEAD and active again (was 'Duplicate sets', now 'Sets nobody " \
-           "can see')" in res.stdout
+    assert "H6: retired at HEAD and active again under spotter, general (was 'Duplicate " \
+           "sets', now 'Sets nobody can see')" in res.stdout
 
 
 def test_history_moving_a_rule_between_files_is_not_a_removal(tmp_path):
@@ -445,3 +446,99 @@ def test_history_unknown_ref_fails(tmp_path):
     res = _run_base(root, "no-such-ref")
     assert res.returncode == 1 and "cannot read" in res.stdout, res.stdout
     assert "Traceback" not in res.stderr
+
+
+# ── review fix round 1: effective status per profile; merge-base base ───────
+
+def _set_rule(root: Path, rid: str, **changes) -> None:
+    def edit(rules):
+        for r in rules:
+            if r["id"] == rid:
+                for k, v in changes.items():
+                    if v is None:
+                        r.pop(k, None)
+                    else:
+                        r[k] = v
+        return rules
+    _edit_rules(root, "perf.yaml", edit)
+
+
+def _commit(root: Path, msg: str) -> str:
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "-A")
+    _git(root, "-c", "user.email=t@example.com", "-c", "user.name=t",
+         "commit", "-q", "-m", msg)
+    return _git(root, "rev-parse", "HEAD").strip()
+
+
+def test_history_retired_rule_revived_through_profile_overrides_fails(tmp_path):
+    """P18 retired (logic kept); then given a new title and revived under every profile
+    through `profiles.<p>.status` — it runs again, so it is a reuse."""
+    root = _git_repo(tmp_path)
+    _set_rule(root, "P18", status="retired")
+    _commit(root, "retire P18")
+    _set_rule(root, "P18", title="Something else entirely",
+              profiles={"general": {"status": "active"}, "spotter": {"status": "active"}})
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "P18: retired at HEAD and active again under spotter, general" in res.stdout
+
+
+def test_history_revival_under_one_profile_only_fails(tmp_path):
+    root = _git_repo(tmp_path)
+    _set_rule(root, "P18", status="retired")
+    _commit(root, "retire P18")
+    _set_rule(root, "P18", profiles={"spotter": {"status": "active"}})
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1 and "active again under spotter" in res.stdout, res.stdout
+
+
+def test_history_promoting_a_profile_only_rule_is_not_a_reuse(tmp_path):
+    """Base P18: retired in the catalog but active under spotter — it never stopped
+    running. Making it active everywhere is a promotion, not a reuse."""
+    root = _git_repo(tmp_path)
+    _set_rule(root, "P18", status="retired", profiles={"spotter": {"status": "active"}})
+    _commit(root, "P18 spotter-only")
+    _set_rule(root, "P18", status="active", profiles=None)
+    res = _run_base(root, "HEAD")
+    assert "P18" not in res.stdout, res.stdout
+
+
+def test_merge_base_lets_a_branch_drop_an_id_it_added(tmp_path):
+    """An id added only on the branch never shipped: dropping it is fine against the
+    merge base with origin/main (where HEAD would wrongly call it removed)."""
+    root = _git_repo(tmp_path)
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    def add_p19(rules):
+        p19 = copy.deepcopy(next(r for r in rules if r["id"] == "P18"))
+        p19["id"] = "P19"
+        return rules + [p19]
+    _edit_rules(root, "perf.yaml", add_p19)
+    _commit(root, "branch adds P19")
+    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != "P19"])
+    assert _run_base(root, "HEAD").returncode == 1  # what the old pre-commit did
+    res = subprocess.run([sys.executable, str(SCRIPT), "--root", str(root),
+                          "--merge-base-with", "origin/main"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "rule ids vs" in res.stdout
+    # an id that IS on origin/main still may not go
+    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != "P18"])
+    res = subprocess.run([sys.executable, str(SCRIPT), "--root", str(root),
+                          "--merge-base-with", "origin/main"], capture_output=True, text=True)
+    assert res.returncode == 1 and "P18: removed since" in res.stdout, res.stdout
+
+
+def test_merge_base_without_a_local_origin_main_skips_with_a_notice(tmp_path):
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != "P18"])
+    res = subprocess.run([sys.executable, str(SCRIPT), "--root", str(root),
+                          "--merge-base-with", "origin/main"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout
+    assert "NOTE  audit catalog: rule-id history not checked — origin/main does not " \
+           "exist locally" in res.stdout
+
+
+def test_unreadable_ref_message_keeps_gits_error(tmp_path):
+    root = _git_repo(tmp_path)
+    res = _run_base(root, "no-such-ref")
+    assert res.returncode == 1
+    assert "['" not in res.stdout and "fatal" in res.stdout.lower(), res.stdout
