@@ -189,20 +189,36 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         warnings.append(msg)
 
 
+_AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
+
+
 def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
                            warnings: list) -> None:
-    """`ai/instructions/get` per Model, into `out[guid]`; a failure leaves no entry."""
+    """`ai/instructions/get` per Model, into `out[guid]`; a failure leaves no entry
+    (the Model reads as "could not be read"; A3 skips it) and a warning with the reason.
+
+    `raise_for_status=False`, as the Answer and Model exports here: with the default the
+    real client turns a 4xx/5xx into `SystemExit(1)`, which no `except Exception`
+    catches, so one Model's failed lookup aborted the whole audit. A non-2xx reason is
+    `format_http_error`'s secret-free line (never the request headers), on the path
+    rather than the full URL; any other failure (a body that is not JSON) is caught
+    as before."""
+    from ts_cli.client import format_http_error
     _log("Fetching AI instructions...")
     for guid in model_guids:
         try:
-            resp = client.post("/api/rest/2.0/ai/instructions/get", json={
-                "data_source_identifier": guid,
-            })
-            out[guid] = resp.json()
+            resp = client.post(_AI_INSTRUCTIONS_PATH, json={"data_source_identifier": guid},
+                               raise_for_status=False)
+            if not resp.ok:
+                reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
+            else:
+                out[guid] = resp.json()
+                continue
         except Exception as exc:  # the reason goes into the warning (the report cites it)
-            msg = f"AI instructions fetch failed for model {guid}: {exc}"
-            _log(f"Warning: {msg}")
-            warnings.append(msg)
+            reason = str(exc)
+        msg = f"AI instructions fetch failed for model {guid}: {reason}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
 
 
 def _export_answers(client: Any, dependents: dict) -> list:

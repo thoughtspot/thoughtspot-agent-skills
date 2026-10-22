@@ -318,39 +318,10 @@ def test_report_without_a_fetched_record_renders_as_before(tmp_path):
 # lookup failed, so its questions are [] exactly as for a Model with none. The corpus
 # records per Model whether the lookup succeeded, and the report says which.
 
-def _ai_failing_client(model, fail=True):
-    client = _p_only_client(model)
-    ok = client.post.side_effect
-
-    def post(url, json=None, **kw):
-        if fail and url.endswith("/ai/instructions/get"):
-            raise RuntimeError("500 from ai/instructions/get")
-        return ok(url, json=json, **kw)
-    client.post.side_effect = post
-    return client
-
-
-@pytest.mark.parametrize("fail,read", [(True, False), (False, True)])
-def test_corpus_records_whether_the_ai_instructions_lookup_succeeded(fail, read):
-    from ts_cli.audit import run_audit
-    model = {"guid": "m1", "model": {"name": "Sales", "model_tables": [
-        {"name": "ORDERS", "fqn": "t1"}], "columns": [], "formulas": []}}
-    out = run_audit(_ai_failing_client(model, fail), ["m1"], ["A"])
-    ai = out["corpus"]["models"][0]["ai_analysis"]
-    assert "ai_instructions" in out["corpus"]["fetched_needs"]
-    assert ai["instructions_read"] is read
-    assert ai["questions"] == ([] if fail else ["Revenue means net revenue"])
-    assert compact_payload(out)["C"]["m"][0]["ai"]["rd"] is read
-
-
-def test_a_failed_ai_instructions_lookup_warns_with_its_reason(capsys):
-    """The report's "could not be read" note says `ts audit run` printed the reason:
-    the warning must carry it (12b re-review N4)."""
-    from ts_cli.audit import run_audit
-    model = {"guid": "m1", "model": {"name": "Sales", "model_tables": [], "columns": []}}
-    run_audit(_ai_failing_client(model), ["m1"], ["A"])
-    err = capsys.readouterr().err
-    assert "AI instructions fetch failed for model m1: 500 from ai/instructions/get" in err
+# The lookup-failure tests (a failed lookup recorded as not read, its warning with the
+# reason, the audit completing) run through the real client's request path over a fake
+# transport in test_audit_ai_lookup_failures.py: a fake whose `post` raises cannot
+# produce the failure shape the real client does (12b re-review N6).
 
 
 def test_instructions_read_is_left_out_when_the_caller_does_not_know_what_was_fetched():
