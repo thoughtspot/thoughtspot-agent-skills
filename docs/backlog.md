@@ -258,8 +258,8 @@ are roughly ordered by value÷effort.
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
-| BL-402 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-403 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
+| BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -14410,7 +14410,7 @@ the check catalog rows from the table.
 
 **Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.
 
-## BL-402 — one failed metadata or dependents batch aborts `ts audit run` `Tier 2`
+## BL-405 — one failed metadata or dependents batch aborts `ts audit run` `Tier 2`
 
 **Filed:** 2026-10-23. **Source:** the rule-catalog work (ts-audit 3.0.0), review finding
 PE-1. Pre-existing: the calls date from #145 and #167; the catalog work did not change them.
@@ -14435,7 +14435,7 @@ model. Test it the way `test_audit_ai_lookup_failures.py` does, through the real
 
 **Target:** 2026-12-15.
 
-## BL-403 — ts-audit behaviour fixes deferred by the rule-catalog reproduction `Tier 2`
+## BL-406 — ts-audit behaviour fixes deferred by the rule-catalog reproduction `Tier 2`
 
 **Filed:** 2026-10-23. **Source:** the rule-catalog design
 (`docs/superpowers/specs/2026-10-22-audit-rule-catalog-design.md`, "Migration: reproduce
