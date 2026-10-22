@@ -39,9 +39,10 @@ never reused — `status` is overridable per profile, so the effective status pe
 profile is compared). `<ref>`'s catalog is read with `git show`, so it runs offline.
 CI passes `--base origin/main`. Pre-commit passes `--merge-base-with origin/main`: the
 merge base of HEAD with the local `origin/main` (no fetch), so an id that exists only
-on the branch may still be dropped or renamed; without a local `origin/main` the
-history check is skipped with a printed notice. A base with no catalog yet passes
-with a note; one git cannot read fails.
+on the branch may still be dropped or renamed; without a local `origin/main`, or when
+git cannot compute a merge base (unrelated histories, an unborn HEAD, a shallow clone
+cut before the fork point), the history check is skipped with a printed notice. A
+base with no catalog yet passes with a note; a `--base` git cannot read fails.
 
 Usage:
     python3 tools/validate/check_audit_catalog.py --root .
@@ -103,6 +104,23 @@ def _merge_base(root: Path, ref: str):
     return _git(root, "merge-base", "HEAD", ref).strip()
 
 
+def _resolve_merge_base(root: Path, ref: str):
+    """`(merge base, "")`, or `(None, NOTE)` when there is nothing to compare against:
+    `ref` does not exist locally, or git cannot compute a merge base (no common
+    ancestor, an unborn HEAD, a shallow clone cut before the fork point). Either way
+    the history check is skipped with the note, never failed: pre-commit runs this
+    offline and cannot be bypassed, and a missing base is not a removed rule id."""
+    try:
+        base = _merge_base(root, ref)
+    except _GitError as exc:
+        return None, (f"NOTE  audit catalog: rule-id history not checked — no merge base "
+                      f"of HEAD and {ref} ({exc})")
+    if base is None:
+        return None, (f"NOTE  audit catalog: rule-id history not checked — "
+                      f"{ref} does not exist locally")
+    return base, ""
+
+
 def _yaml(text: str):
     import yaml
     return yaml.safe_load(text)
@@ -159,19 +177,13 @@ def main() -> int:
                         help="git ref whose rule ids must survive (removed -> retired)")
     parser.add_argument("--merge-base-with", default=None, metavar="REF",
                         help="like --base, against `git merge-base HEAD REF`; skipped "
-                             "with a notice when REF does not exist locally")
+                             "with a notice when REF does not exist locally or no "
+                             "merge base can be computed")
     args = parser.parse_args()
     root = Path(args.root)
     skipped = ""
     if args.merge_base_with and not args.base:
-        try:
-            args.base = _merge_base(root, args.merge_base_with)
-        except _GitError as exc:
-            print(f"FAIL  audit catalog: --merge-base-with {args.merge_base_with}: {exc}")
-            return 1
-        if args.base is None:
-            skipped = (f"NOTE  audit catalog: rule-id history not checked — "
-                       f"{args.merge_base_with} does not exist locally")
+        args.base, skipped = _resolve_merge_base(root, args.merge_base_with)
 
     if not (root / AUDIT_REL / "catalog_validate.py").is_file():
         print(f"FAIL  audit catalog: {AUDIT_REL}/catalog_validate.py not found under {root}")
