@@ -16,7 +16,7 @@ no `measure`; a `severity` that bands override, catalog or profile); an expressi
 mapping that mixes forms or lacks a comparison; a `count:` over a scope that is not
 the item's (or an enclosing item's) child; unknown scopes, modes, operators, derived
 fields (`@name`, also as a step inside a path), code-rule names (`code:<name>`
-not registered), message placeholders, data requirements, categories, profiles,
+not registered), an `aggregate` block on a code rule (the function owns its logic), message placeholders, data requirements, categories, profiles,
 views, band ops/directions/units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
@@ -337,12 +337,22 @@ def _examples_problems(rule: Rule, cat: Catalog) -> List[str]:
 def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     """What the engine interprets: the aggregate block, the message's placeholders,
     the legacy threshold's placeholders, and where severity comes from."""
-    out = aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
+    out = _code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
+        else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
     out += message_problems(rule.message, rule.aggregate, "message")
     out += legacy_threshold_problems(rule.legacy_threshold, "legacy_threshold")
     if rule.implementation != "declarative":
         return out
     return out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
+
+
+def _code_rule_aggregate_problems(rule: Rule) -> List[str]:
+    """The function owns a code rule's logic, so an `aggregate` block beside it would
+    be dead data that reads as if it configured something."""
+    if not rule.aggregate:
+        return []
+    return [f"aggregate: a code rule ({rule.implementation}) owns its logic — "
+            "remove the aggregate block"]
 
 
 def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:

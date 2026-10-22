@@ -21,6 +21,7 @@ top-level scope, raises rather than silently counting the whole context.
 
 `has_data(item, ctx, requirement)` answers the data-availability rule: an object whose
 rule `requires` data the context does not hold for it is skipped, not judged.
+`available(ctx, rule)` applies it: the rule's scope items with all their required data.
 """
 from __future__ import annotations
 
@@ -223,3 +224,12 @@ AVAILABILITY: Dict[str, Callable[[Item, Any], bool]] = {
 
 def has_data(item: Item, ctx, requirement: str) -> bool:
     return AVAILABILITY[requirement](item, ctx)
+
+
+def available(ctx, rule) -> Iterator[Item]:
+    """The items of `rule.scope` for which every `rule.requires` entry is available —
+    what a rule judges. The modes and the code rules both iterate with this, so
+    `requires` means the same thing for a declarative rule and a code rule."""
+    for item in iterate(ctx, rule.scope):
+        if all(has_data(item, ctx, req) for req in rule.requires):
+            yield item

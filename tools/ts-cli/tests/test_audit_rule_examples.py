@@ -28,7 +28,7 @@ import yaml
 import audit_rule_fixtures as fx
 from ts_cli.audit.catalog_model import CATALOG_DIR, CATEGORIES_FILE, PROFILES_FILE, Catalog
 from ts_cli.audit.catalog_validate import EXAMPLE_KINDS, check_catalog
-from ts_cli.audit.engine import bands, code_rules
+from ts_cli.audit.engine import bands, code_rules, scopes
 from ts_cli.audit.engine.run import run_rule, run_rules
 from ts_cli.audit.findings import Finding
 
@@ -104,15 +104,16 @@ WIDE = "synthetic_wide_model"
 
 
 def _wide_model(rule, ctx, profile) -> List[Finding]:
-    """A code rule: one finding per model with more columns than the bands allow."""
+    """A code rule: one finding per model with more columns than the bands allow.
+    Iterates with `scopes.available`, as the code-rule contract asks."""
     out = []
-    for model in ctx.models:
-        count = len(model["model"].get("columns") or [])
+    for item in scopes.available(ctx, rule):
+        count = len(item["obj"].get("columns") or [])
         severity = bands.classify(count, rule.bands)
         if severity:
             out.append(Finding(check_id=rule.id, angle="", severity=severity,
-                               object_type="model", object_name=model["model"]["name"],
-                               object_guid=model["guid"],
+                               object_type=item["object_type"], object_name=item["name"],
+                               object_guid=item["guid"],
                                detail=rule.message.format(count=count, profile=profile),
                                metric=count))
     return out
@@ -254,10 +255,47 @@ def test_example_runner_skips_retired_rules(tmp_path):
 def test_unknown_code_rule_rejected_by_validator(tmp_path, wide_registered):
     root = _write_catalog(tmp_path, _code_rule_entry(implementation="code:no_such_rule"))
     _cat, problems = check_catalog(root)
-    assert problems == ["rules/test.yaml: D99: implementation: unknown code rule "
-                        "'no_such_rule' (registered: synthetic_wide_model)"]
+    [problem] = problems
+    assert problem.startswith("rules/test.yaml: D99: implementation: unknown code rule "
+                              "'no_such_rule' (registered: ")
+    assert WIDE in problem  # the registered names are listed (shipped ones too)
     _cat, problems = check_catalog(_write_catalog(tmp_path / "ok", _code_rule_entry()))
     assert problems == []
+
+
+def test_code_rule_with_an_aggregate_block_is_rejected(tmp_path, wide_registered):
+    """The function owns a code rule's logic: an `aggregate` block beside it would be
+    dead data that reads as if it configured something."""
+    rule = _code_rule_entry(aggregate={"mode": "count", "over": "model.column"})
+    _cat, problems = check_catalog(_write_catalog(tmp_path, rule))
+    assert problems == [
+        "rules/test.yaml: D99: aggregate: a code rule (code:synthetic_wide_model) owns its "
+        "logic — remove the aggregate block"]
+
+
+def unused_code_rules(cat: Catalog) -> List[str]:
+    """Registered code rules no rule in `cat` names. Only functions defined in the
+    ts_cli package count: the synthetic rules these tests register come from test
+    modules (and are unregistered after each test)."""
+    used = {code_rules.code_rule_name(r.implementation) for r in cat.rules.values()
+            if r.implementation != "declarative"}
+    shipped = {name for name, fn in code_rules.REGISTRY.items()
+               if fn.__module__.startswith("ts_cli.")}
+    return sorted(shipped - used)
+
+
+def test_every_registered_code_rule_is_used_by_a_shipped_rule():
+    """A function left behind after its catalog entry is removed fails here."""
+    assert _SHIPPED is not None
+    assert unused_code_rules(_SHIPPED) == []
+
+
+def test_a_code_rule_left_behind_is_detected(monkeypatch):
+    def left_behind(rule, ctx, profile):
+        return []
+    left_behind.__module__ = "ts_cli.audit.engine.code_rules"
+    monkeypatch.setitem(code_rules.REGISTRY, "left_behind", left_behind)
+    assert unused_code_rules(_SHIPPED) == ["left_behind"]
 
 
 def test_code_rule_dispatch(tmp_path, wide_registered):

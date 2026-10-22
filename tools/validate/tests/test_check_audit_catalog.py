@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "tools" / "validate" / "check_audit_catalog.py"
 AUDIT_REL = Path("tools/ts-cli/ts_cli/audit")
@@ -44,15 +46,25 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py", "r
                 "engine/predicates.py", "engine/messages.py")
 
 
-def _copy_repo(tmp_path: Path) -> Path:
-    """GATE_MODULES and the shipped catalog — nothing else of ts_cli."""
+def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
+    """GATE_MODULES and the shipped catalog — nothing else of ts_cli. With
+    `clear_rules`, every shipped rule file is emptied, so a test counts only the
+    rules it writes."""
     root = tmp_path / "repo"
     dst = root / AUDIT_REL
     (dst / "engine").mkdir(parents=True)
     for name in GATE_MODULES:
         shutil.copy(REPO / AUDIT_REL / name, dst / name)
     shutil.copytree(REPO / AUDIT_REL / "catalog", dst / "catalog")
+    if clear_rules:
+        for path in (dst / "catalog" / "rules").glob("*.yaml"):
+            path.write_text("[]\n")
     return root
+
+
+def _shipped_rule_count() -> int:
+    rules_dir = REPO / AUDIT_REL / "catalog" / "rules"
+    return sum(len(yaml.safe_load(p.read_text()) or []) for p in rules_dir.glob("*.yaml"))
 
 
 def test_real_repo_passes():
@@ -75,7 +87,7 @@ def test_needs_only_the_catalog_modules(tmp_path):
     # No ts_cli/__init__.py, no other modules: the gate must still load the catalog.
     res = _run(_copy_repo(tmp_path))
     assert res.returncode == 0, res.stdout + res.stderr
-    assert "0 rule(s), 5 categories" in res.stdout
+    assert f"{_shipped_rule_count()} rule(s), 5 categories" in res.stdout
 
 
 GOOD_EACH_RULE = """\
@@ -147,7 +159,7 @@ def _demo_rule(rule, ctx, profile):
 def test_code_rule_names_checked_in_isolation(tmp_path):
     # The gate learns code-rule names from engine/code_rules.py without the rest of
     # ts_cli: an unregistered name fails by name, a registered one passes.
-    root = _copy_repo(tmp_path)
+    root = _copy_repo(tmp_path, clear_rules=True)
     rules = root / AUDIT_REL / "catalog" / "rules" / "data.yaml"
     rules.write_text(CODE_RULE.format(name="demo_rule"))
     res = _run(root)

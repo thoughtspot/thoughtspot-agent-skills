@@ -330,6 +330,19 @@ def test_rule_skips_object_when_required_data_absent():
     assert [f.object_name for f in found] == ["Looked Up"]
 
 
+def test_scopes_available_applies_requires_for_any_rule():
+    """The public helper code rules iterate with: the rule's scope, minus the objects
+    whose required data the context lacks — the same filter the modes apply."""
+    cat = _catalog(_rule("A3", requires=["model_tml", "ai_instructions"], scope="model",
+                         aggregate={"mode": "each"}, severity="HIGH", message="x"),
+                   _rule("A4", requires=["model_tml"], scope="model",
+                         aggregate={"mode": "each"}, severity="HIGH", message="x"))
+    ctx = fx.models_with_and_without_ai_instructions()
+    assert [i["name"] for i in scopes.available(ctx, cat.rules["A3"])] == ["Looked Up"]
+    assert [i["name"] for i in scopes.available(ctx, cat.rules["A4"])] == [
+        "Looked Up", "Not Fetched"]
+
+
 def test_model_table_scope_keyed_by_alias():
     ctx = fx.model_role_playing_dimension()
     assert [i["name"] for i in scopes.iterate(ctx, "model.table")] == [

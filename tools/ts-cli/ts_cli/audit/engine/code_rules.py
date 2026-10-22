@@ -15,9 +15,9 @@ The contract (`run.run_rules` dispatches; `check_findings` enforces it):
               remediation) already applied. Grade with `bands.classify(value,
               rule.bands)`, word with `rule.message`; never read the profile's block.
     ctx       the AuditContext. The runner does not apply `rule.requires` for a code
-              rule (it never sees the items): skip an object whose required data the
-              context lacks, as the modes do — `scopes.iterate(ctx, rule.scope)` and
-              `all(scopes.has_data(item, ctx, r) for r in rule.requires)`.
+              rule (it never sees the items): iterate with `scopes.available(ctx,
+              rule)`, which yields only the scope's objects whose required data the
+              context holds — the same filter the modes use.
     profile   the profile id. It is the profile — never read `ctx.assessment`, which a
               replayed snapshot carries from its capture.
     returns   a list of Finding, each with `check_id == rule.id` and a known severity.

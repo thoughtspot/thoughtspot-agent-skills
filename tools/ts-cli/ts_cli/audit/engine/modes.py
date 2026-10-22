@@ -1,7 +1,7 @@
 """The aggregation modes: one function per mode, each turning one rule into findings.
 
 Every mode skips an item the rule `requires` data for that the context does not hold
-(scopes.has_data), and renders the rule's `message` with its own placeholders
+(it iterates with scopes.available, as code rules do), and renders the rule's `message` with its own placeholders
 (catalog_expr.MODE_PLACEHOLDERS). The `aggregate` keys each mode reads are listed in
 catalog_expr.AGGREGATE_KEYS; what a mode puts in `metric`:
 
@@ -30,19 +30,10 @@ Mode = Callable[[Rule, Any, str], List[Finding]]
 
 # ── shared ──────────────────────────────────────────────────────────────────
 
-def _available(rule: Rule, item: dict, ctx) -> bool:
-    return all(scopes.has_data(item, ctx, req) for req in rule.requires)
-
-
-def _scope_items(rule: Rule, ctx) -> Iterator[dict]:
-    """The rule's scope items whose required data is present."""
-    return (i for i in scopes.iterate(ctx, rule.scope) if _available(rule, i, ctx))
-
-
 def _filtered(rule: Rule, ctx) -> Iterator[dict]:
     """Scope items with their data present that pass the aggregate's `where`."""
     where = rule.aggregate.get("where")
-    return (i for i in _scope_items(rule, ctx) if predicates.passes(where, i, ctx))
+    return (i for i in scopes.available(ctx, rule) if predicates.passes(where, i, ctx))
 
 
 def _children(rule: Rule, item: dict, ctx) -> List[dict]:
@@ -118,7 +109,7 @@ def ratio(rule: Rule, ctx, profile: str) -> List[Finding]:
     their unit is `ratio`.
     """
     out: List[Finding] = []
-    for item in _scope_items(rule, ctx):
+    for item in scopes.available(ctx, rule):
         population = _children(rule, item, ctx)
         if not population:
             continue
@@ -142,7 +133,7 @@ def ratio(rule: Rule, ctx, profile: str) -> List[Finding]:
 def count(rule: Rule, ctx, profile: str) -> List[Finding]:
     """How many of the item's `over` children pass `where`, graded by bands."""
     out: List[Finding] = []
-    for item in _scope_items(rule, ctx):
+    for item in scopes.available(ctx, rule):
         children = list(scopes.iterate(ctx, rule.aggregate["over"], parent=item))
         where = rule.aggregate.get("where")
         n = sum(1 for c in children if predicates.passes(where, c, ctx))
