@@ -1,170 +1,180 @@
 # Audit Check Catalog
 
-Single source of truth for all audit checks. Each check is a Python function
-(`check_XX`) in the corresponding module under `tools/ts-cli/ts_cli/audit/`.
-
-The check function **is** the rule — thresholds, patterns, conditions, and
-severity mapping are all in the function body. There is no separate rules file.
-
----
-
-## How checks work
-
-Each check function receives an `AuditContext` (the exported TML data for one
-model) and returns a list of `Finding` objects. The engine auto-discovers checks
-via the `ALL_CHECKS` list in each module.
-
-```
-checks_ai.py      → ALL_CHECKS = [check_a1, check_a2, ...]   → AI Readiness angle
-checks_data.py    → ALL_CHECKS = [check_d1, check_d2, ...]   → Data Modeling angle
-checks_human.py   → ALL_CHECKS = [check_h1, check_h2, ...]   → Human Readiness angle
-checks_perf.py    → ALL_CHECKS = [check_p1, check_p2, ...]   → Performance angle
-checks_security.py → ALL_CHECKS = [check_s1, check_s2, ...]  → Security angle
-```
+Every check `ts audit run` makes is a **rule** in the rule catalog — YAML under
+`tools/ts-cli/ts_cli/audit/catalog/` (`categories.yaml`, `profiles.yaml`, `rules/*.yaml`),
+read by a small rule engine (`ts_cli/audit/engine/`). The catalog is the single source of
+truth: the tables below, the report's category tabs, labels and recommendations, and the
+audit JSON's `check_meta` are all generated from it.
 
 ---
 
-## Adding a check
+## How rules work
 
-1. **Write the function** in the appropriate `checks_*.py` module. Follow the
-   existing pattern — receive `AuditContext`, return `list[Finding]`:
+A rule names the object it reports on (`scope`: a Model, a column, a join, an RLS rule,
+an Answer formula, …), how to judge it (`aggregate`: a ratio, a count, each matching item,
+a group, a pair of Models, a composite score), and how to grade the result — `bands`
+(e.g. `HIGH < 25%, MEDIUM < 50%`) or a fixed or mapped `severity`. A few rules whose logic
+no declarative form expresses are **code rules** (`implementation: code:<name>`), a
+registered function in `ts_cli/audit/engine/code_rules*.py`; they are described in the
+catalog like any other rule.
 
-   ```python
-   def check_a6(ctx: AuditContext) -> list:
-       # Your rule logic — thresholds, conditions, severity
-       total = len(ctx.columns)
-       with_token_limit = sum(1 for c in ctx.columns if ...)
-       ratio = with_token_limit / total if total else 1.0
-       severity = "RED" if ratio < 0.5 else "YELLOW" if ratio < 0.8 else "GREEN"
-       return [Finding(check_id="A6", severity=severity, score=ratio, ...)]
-   ```
+Rules belong to one or more **categories** (`A` AI Readiness, `D` Data Modeling,
+`H` Human Readiness, `P` Performance, `S` Security). `ts audit run --angles A,D` runs every
+rule in any of the named categories. Each rule declares the data it reads (`requires`,
+`uses`), and the audit fetches exactly that — a rule that needs Answer TML gets it
+whichever category selected it.
 
-2. **Add the function to `ALL_CHECKS`** at the bottom of the same file:
+Rules are measured against an **assessment profile** (`ts audit run --assessment
+spotter|general`, default `general`). A profile may override a rule's `status`, `bands`,
+`severity`, `message` and `remediation` — never what the rule means.
 
-   ```python
-   ALL_CHECKS = [check_a1, check_a2, check_a3, check_a4, check_a5, check_a6]
-   ```
+## Changing a rule
 
-3. **Add a unit test** in `tools/ts-cli/tests/` — test the function in isolation
-   with a mock `AuditContext`.
+Edit the rule's YAML entry, then:
 
-4. **Add a row** to the check table below (this file) under the correct angle.
+1. `python3 tools/validate/check_audit_catalog.py --root .` — vocabulary, ids, overrides,
+   band order, examples, declared data reads, and that this file is current.
+2. `python -m ts_cli.audit.generate` (from `tools/ts-cli/`) — regenerates the tables
+   below. Never edit them by hand.
+3. `pytest tools/ts-cli/tests/` — every rule's `fires` / `silent` examples run as tests.
 
-5. **Bump version** in both `ts_cli/__init__.py` and `pyproject.toml`.
-
-6. **Validate**: `pytest tools/ts-cli/tests/ && python tools/validate/check_version_sync.py`
-
-## Modifying a check
-
-Edit the function directly — change thresholds, conditions, severity logic.
-Update the severity logic column in the table below if it changed. Bump version
-(PATCH for threshold tweaks, MINOR for new detection logic).
-
-## Removing a check
-
-Delete the function, remove it from `ALL_CHECKS`, remove its row from the table
-below, delete its tests. Bump version (MAJOR — consumers may depend on the
-check ID appearing in reports).
+A rule's id is permanent. To remove a rule, set `status: retired` (it stays listed under
+"Retired rules"); never delete the entry or reuse its id — CI's catalog gate
+(`check_audit_catalog.py --base origin/main`) fails either.
 
 ---
 
-## AI Readiness — `checks_ai.py`
+## Rules
 
-A1-A4 and A6 are measured against the assessment profile (`ts audit run --assessment
-spotter|general`, default `general`). The thresholds are one table in
-`tools/ts-cli/ts_cli/audit/assessment.py`; the rows below describe it.
+<!-- BEGIN GENERATED -->
+<!-- Generated from tools/ts-cli/ts_cli/audit/catalog/ by `python -m ts_cli.audit.generate`. Do not edit by hand: the catalog gate fails when this block is stale. -->
 
-| ID | What it detects | Severity logic |
+Assessment profiles: `spotter` (Spotter-ready), `general` (General, default). Where a rule grades or words a finding differently per profile, each profile is shown.
+
+### AI Readiness (A)
+
+Description/synonym coverage, AI context, Spotter readiness score.
+
+| ID | What it detects | Severity | Finding text | Remediation |
+|---|---|---|---|---|
+| A1 | **Description coverage below threshold.** Share of a Model's columns with a non-blank description, against the profile's pass mark (Spotter-ready 95%, General 50%). | Spotter-ready: HIGH < 47.5%, MEDIUM < 95% · General: HIGH < 25%, MEDIUM < 50% | “{matched}/{total} columns have descriptions ({pct:.0f}%)” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+| A2 | **Synonym coverage below threshold.** Share of a Model's columns carrying synonyms (under `properties:`, where Model TML keeps them, or at the column root), against the profile's pass mark (Spotter-ready 80%, General 25%). | Spotter-ready: HIGH < 40%, MEDIUM < 80% · General: HIGH < 12.5%, MEDIUM < 25% | “{matched}/{total} columns have synonyms ({pct:.0f}%)” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+| A3 | **No AI instructions configured.** A Model with no Spotter coaching — no instruction in its ai/instructions response and no `model_instructions.data_model_instructions` in its TML. A Model whose instructions lookup failed is skipped, not reported. | Spotter-ready: HIGH · General: MEDIUM | “No AI/Spotter coaching instructions configured” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+| A4 | **Missing Spotter config.** A Model with no (or a blank) description. | Spotter-ready: HIGH · General: MEDIUM | “Model has no description” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+| A5 | **Spotter readiness composite score.** A weighted readiness score per Model — descriptions 30%, coaching 25%, synonyms 15%, Model description 15%, column-name quality 15% — graded HIGH below 50 and MEDIUM below 80. Not profile-aware. A code rule (code:spotter_readiness, scored by engine/code_rules.py readiness_score) because its column shares use their own denominator (a Model without columns counts as one column, so its score is still defined) and its name-quality share its own regexes: a composite rule would need a single-use derived field per component. | HIGH < 50, MEDIUM < 80 | “Spotter readiness score {score:.0f}/100 (Ready >= 80)” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+| A6 | **Measure AI context coverage below threshold.** Share of a Model's visible MEASURE columns with a non-blank `properties.ai_context`. Attributes are not counted: the coach's ai_context schema requires it on every measure (additivity, time basis, grain keys) and leaves it empty, correctly, on most attributes such as surrogate keys. Hidden columns are not searched, so they are not counted. A Model without visible measures is skipped. | Spotter-ready: HIGH < 40%, MEDIUM < 80% · General: LOW < 80% | “{matched}/{total} measures have AI context ({pct:.0f}%) — missing: {unmatched_names}” | Run /ts-object-model-coach to improve descriptions, synonyms, AI context |
+
+### Data Modeling (D)
+
+Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables.
+
+| ID | What it detects | Severity | Finding text | Remediation |
+|---|---|---|---|---|
+| D1 | **Model complexity exceeds threshold.** Five size measures per Model, each reported on its own when over its MEDIUM line and graded HIGH over its HIGH line: tables (10 / 15), columns (50 / 75), joins (8 / 12), join depth (3 / 5) and formulas (30 / 50). A code rule (code:model_complexity, grading table D1_MEASURES in engine/code_rules.py) because one rule grades five measures against five pairs of lines and reports each with its own legacy threshold — the catalog holds one set of bands and one threshold per rule. | graded in code:model_complexity — HIGH, MEDIUM | “{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)” | — |
+| D2 | **VARCHAR join keys detected.** Per join (inline, or referencing a Table's `joins_with`): HIGH when its key columns are string-typed on their Table TML (P6's test — a key whose Table TML is not in scope has an unknown type and is not reported), and, separately, MEDIUM when it joins on more than one key pair. The Table TMLs are optional enrichment: the multi-key finding needs none. A code rule (code:join_keys) because one join yields up to two independent findings. | graded in code:join_keys — HIGH, MEDIUM | HIGH: “VARCHAR join key(s): {varchar_keys:all}”; MEDIUM: “Multi-column join ({key_pairs} keys)” | — |
+| D3 | **Join type analysis (FULL OUTER, LEFT/RIGHT).** An outer join (inline, or referencing a Table's `joins_with`; the model's own type wins): HIGH for a full outer join (ThoughtSpot's `OUTER`), INFO for LEFT_OUTER and RIGHT_OUTER. The type is read case-insensitively. | HIGH when @join_type is OUTER; otherwise INFO | HIGH: “FULL OUTER join causes performance issues”; INFO: “{@join_type} join — may indicate data discrepancies” | — |
+| D4 | **Progressive joins disabled on large models.** A Model with more than 5 tables and `join_progressive` off joins every table on every query. Counted as the Model's tables when join_progressive is not set, so the count is 0 — and silent — on a progressive Model. Same rule as P4. | HIGH > 5 | “join_progressive is false on model with {count} tables (>5)” | — |
+| D5 | **Orphan tables in model (Cartesian risk).** A table of a multi-table Model that is on neither side of any join — keyed by its alias, else its name, on the declaring side and by the join's `with` on the other. | HIGH | “Table '{name}' has no joins — Cartesian product risk” | — |
+| D6 | **Grain consistency — fact tables with >40% attributes.** A fact table (more than 3 MEASURE columns) more than 40% of whose model columns are ATTRIBUTEs, its columns found by its alias, else its name. The metric is that share as a percentage, rounded to one place. | LOW | “Fact table '{name}' has {@attribute_count}/{@table_column_count} ATTRIBUTE columns (>40%)” | — |
+| D7 | **High model overlap detected.** Two Models whose table sets (each table's fqn, else its name) share tables, graded by Jaccard similarity: HIGH when identical, MEDIUM above 0.5. Reported once per pair, on the first Model's guid. | HIGH ≥ 1, MEDIUM > 0.5 | HIGH: “Identical table sets ({union} tables) — likely duplicate models”; MEDIUM: “High overlap: {shared}/{union} tables shared (Jaccard {similarity:.2f})” | Run /ts-dependency-manager (Repoint mode) to consolidate overlapping models |
+| D8 | **Duplicate table objects found.** Two or more Table objects (ONE_TO_ONE_LOGICAL or SQL_VIEW in the metadata) on one physical table — the same connection, database, schema and table name. Reported once per physical table, on the first object's guid. | HIGH > 1 | “{size} ThoughtSpot objects point to the same physical table” | Run /ts-dependency-manager (Remove mode) to remove duplicate table objects |
+| D9 | **SQL pass-through function usage (>20% formulas).** More than 20% of a Model's formulas call sql_int_aggregate_op, sql_string_aggregate_op or sql_bool_aggregate_op (any case). | LOW > 20% | “{matched}/{total} formulas use sql_*_aggregate_op ({pct:.0f}%)” | — |
+| D10 | **Zero-column tables (bridge vs leaf).** A model table no model column comes from: INFO when it is on either side of a join (a bridge), MEDIUM when not (a leaf). Looked up — and reported — by the table's `name`, so an aliased table always reads zero-column (BL-305, kept). A code rule (code:zero_column_tables) because the finding names the table by its `name`, where the model.table scope names it by alias. | INFO when @zero_column_role is bridge; otherwise MEDIUM | “Zero-column {role} table '{name}'” | — |
+| D11 | **Fan-out join risk (row multiplication).** A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. Both ends are looked up by name — the declaring model table's `name` and the join's `with` — so an aliased end reads as unknown (BL-305, kept), and the INFO wording says ONE_TO_MANY whatever the cardinality (kept). | MEDIUM when @is_fact_to_fact_join is true; otherwise INFO | MEDIUM: “Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}”; INFO: “ONE_TO_MANY join '{@join_from_name}' -> '{obj.with}'” | — |
+| D12 | **Conformed dimension divergence.** A column (by `db_column_name`, else `name`) whose column type differs between Models. Each Model contributes one type per column name — a later column, or a later Model of the same name, overwrites an earlier one — and the detail lists every Model with its type. A code rule (code:column_type_divergence) because it groups columns across Models and reports one type per Model, which the group mode's per-item values cannot express. | MEDIUM | “Column '{name}' classified differently across models: {models}” | — |
+
+### Human Readiness (H)
+
+Name quality, hidden columns, orphans, direct table connections, formula promotion candidates.
+
+| ID | What it detects | Severity | Finding text | Remediation |
+|---|---|---|---|---|
+| H1 | **Column name quality (anti-pattern regexes).** The share of a Model's columns whose names a person would not search for: col1, field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse names. One finding per Model over 10%, listing the first five such names. The same two patterns A5 scores name quality with. | MEDIUM > 10% | “{matched}/{total} columns have anti-pattern names ({pct:.0f}%): {matched_names:head5}” | — |
+| H2 | **Description quality (too-short, boilerplate).** Column descriptions that are too short (under 20 characters, stripped), too long (over 400) or open with boilerplate ("This is a", "Column for", "Field for", "The ", "A "); a blank or absent description is A1's remit, not this rule's. One finding per Model, its metric the number of columns with an issue, listing the first three. A code rule (code:description_quality) because each column's issue is worded by its own kind and the Model's finding joins them — no mode words its children one by one; the lengths and the boilerplate pattern are in engine/code_rules_human.py. | LOW | “{count} description quality issues: {issues}” | — |
+| H3 | **Unnecessary hidden columns.** A hidden Model column that no formula references by `[<name>]` — nor, when it surfaces a formula, by that formula's `[<display name>]` (an id reference is not seen). Excused when it is the last carrier of a joined table: its `column_id` prefix names a table that declares or receives a join (by `name`, not alias) and no other visible column has that prefix. | MEDIUM | “Hidden column '{name}' not referenced by any formula” | Remove unnecessary hidden columns via TML reimport |
+| H4 | **Orphan model with no dependents.** A Model with no dependents but Sets — no Answer or Liveboard (a Set is a column on the Model, so anything using it is a Model dependent already; ruling R15). A Model the dependents lookup did not list has none. | MEDIUM | “Orphan model — zero dependents (no answers or liveboards)” | Run /ts-dependency-manager (Remove mode) if confirmed unused |
+| H5 | **Orphan sets (zero consumers).** A Set (once, however many dependents lists name it) whose consumer lookup came back clean and empty. A Set whose lookup failed, was partial or was never made is skipped (`requires: [sets]`): absence means "not looked up", never "no consumers" (BL-302, R14). | MEDIUM | “Orphan set '{name}' — zero consuming answers or liveboards” | — |
+| H7 | **Direct table connections (bypasses semantic layer).** An Answer built straight off a Table: one finding per table reference whose `fqn` is a Table's guid — a model table's `fqn` in any Model, or a Table TML in the context. An Answer on a Model carries the Model's guid; an fqn matching nothing known is unresolved, not a bypass (BL-301). The Model and Table TMLs are what the guids are known from, not a requirement: an Answer is judged against whatever the context holds. | MEDIUM | “Answer connects directly to table '{obj.fqn}', bypassing the model layer” | — |
+| H8 | **Formula promotion candidate.** The same Answer formula — compared lower-cased, stripped, whitespace collapsed; blank ones ignored — in two Answer formulas or more, and on no Model. Counted per formula, so one Answer holding it twice counts twice. The finding is named by that count, with no guid, listing the first three Answers. | HIGH ≥ 2 | “Formula duplicated in {size} answers but not in model: {members:head3}” | Run /ts-object-answer-promote to promote formula to model |
+| H9 | **Redundant answer formulas (duplicating model formula).** An Answer formula whose expression (normalised as H8's) equals a Model formula's — a blank one included — named with the last such Model formula. | LOW | “Answer formula '{name}' duplicates model formula '{@matched_model_formula_name}'” | — |
+| H10 | **Stale / temporary objects (name pattern match).** A Model name, column name or column description that reads as stale or temporary (do not use, deprecated, test, tmp, copy of, (2), backup, old, …; a name on the safe list — test_results, test_suite, … — never does). Each match is its own finding, a description quoted to 60 characters. A code rule (code:stale_names) because one rule reports on two scopes, the Model and its columns, with three wordings; the patterns are in engine/code_rules_human.py. Always LOW: nothing reads H4's result. | LOW | “{what} matches stale pattern: '{value}'” | — |
+
+### Performance (P)
+
+SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl.
+
+| ID | What it detects | Severity | Finding text | Remediation |
+|---|---|---|---|---|
+| P1 | **SQL View used as model source.** A SQL_VIEW Table in the metadata blocks filter pushdown into the warehouse. | MEDIUM | “SQL_VIEW data source blocks filter pushdown” | — |
+| P2 | **Scalar formula density (run at query time).** How many of a Model's formulas are scalar — no `columns[]` entry surfacing the formula (by `formula_id`) declares an `aggregation` — graded MEDIUM above 5 and HIGH above 10. Scalar formulas run at query time in the ThoughtSpot engine. | HIGH > 10, MEDIUM > 5 | “{count} scalar formulas (run at query time in TS engine)” | — |
+| P3 | **Model filters lacking apply_on_tables.** A Model filter with no `apply_on_tables` is always applied — on every query, whichever tables it touches. | MEDIUM > 0 | “{count}/{total} filters lack apply_on_tables (run on every query)” | — |
+| P4 | **Apply-all-joins anti-pattern (join_progressive:false).** A Model with more than 5 tables and `join_progressive` off joins every table on every query. Counted as the Model's tables when join_progressive is not set, so the count is 0 — and silent — on a progressive Model. Same rule as D4. | HIGH > 5 | “join_progressive: false on {count}-table model — every query joins ALL tables” | — |
+| P5 | **No date constraints on fact tables.** A Model with fact tables (a `model_tables` entry with more than 3 MEASURE columns, matched by its `name` — rules.fact_tables) but no `date_range_condition` in its `constraints`, so every query scans all history. | MEDIUM | “No date constraints on model with fact tables: {@fact_tables:head3}” | — |
+| P6 | **VARCHAR join keys (performance framing of D2).** A join (inline, or referencing a Table's `joins_with`) whose key columns are string-typed on their Table TML; string keys join 2-5x slower than integers. A key whose Table TML is not in scope has an unknown type and is not reported. Same keys as D2's HIGH half. | HIGH | “VARCHAR join key(s) — 2-5x slower than integer: {@varchar_join_keys:all}” | — |
+| P7 | **Join depth exceeding thresholds.** The longest join chain across a Model's tables (the same depth D1 grades), MEDIUM above 3 hops and HIGH above 5. | HIGH > 5, MEDIUM > 3 | “Join depth {value} (>5 HIGH, >3 MEDIUM) — complex query plans” | — |
+| P8 | **Column sprawl (>75 columns).** A Model with more than 75 columns (the column ceiling D1 grades against). | MEDIUM > 75 | “{count} columns — wider GROUP BY, more complex query plans” | — |
+| P9 | **High-cardinality ID column indexed as ATTRIBUTE.** An ATTRIBUTE column that is text-search indexed (no `index_type: DONT_INDEX`) and whose name ends like an identifier (`_id`, `_guid`, `_uuid`, `transaction_id`, `row_id`, `surrogate_key`; any case). | MEDIUM | “High-cardinality ID column '{name}' indexed as ATTRIBUTE” | — |
+| P11 | **Excessive indexed columns on Spotter-enabled model.** More than 30 text-search indexed columns on a Model with Spotter enabled (`properties.spotter_config.is_spotter_enabled`). Counted as the indexed columns of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter. | INFO > 30 | “{count} indexed columns on Spotter-enabled model” | — |
+| P13 | **High RLS rule count (cost compounds per query).** A Table's RLS rule count, MEDIUM above 3 and HIGH above 6; each rule adds to every query's cost. | HIGH > 6, MEDIUM > 3 | “{count} RLS rules — cost compounds linearly per query” | — |
+| P14 | **RLS expression uses functions (prevents index pruning).** An RLS rule expression that calls UPPER, LOWER, TRIM, CAST, CONCAT, CONTAINS or IF (any case), defeating index and partition pruning. The detail quotes the first 80 characters of the expression. Same trigger as S9. | MEDIUM | “RLS expression uses functions — prevents index/partition pruning: {obj.expr:.80}” | — |
+| P15 | **VARCHAR RLS column without value_casing.** A column an RLS rule references (resolved by name on the Table TML's own `columns[]`) whose warehouse type is a string type and which sets no `value_casing`. An unresolved reference has an unknown type and is not reported. S8 is the same walk without the `value_casing` guard. | MEDIUM | “VARCHAR RLS column '{name}' without value_casing” | — |
+| P16 | **Deeply nested if() in formulas.** A Model formula making more than 3 `if (` calls (INFO), or more than 5 (LOW). | LOW > 5, INFO > 3 | “Formula has {value} if() calls” | — |
+| P17 | **Formula cross-reference chain depth.** The longest chain of formula-to-formula references starting at a formula (by id or display name, BL-300), INFO above 2 and LOW above 3. Formulas sharing a name are one node and report once. | LOW > 3, INFO > 2 | “Formula reference chain depth {value}” | — |
+| P18 | **COUNT_DISTINCT aggregation (most expensive).** A Model column aggregated with COUNT_DISTINCT, which is expensive to compute. | INFO | “COUNT_DISTINCT aggregation on '{name}'” | — |
+
+### Security (S)
+
+PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics.
+
+| ID | What it detects | Severity | Finding text | Remediation |
+|---|---|---|---|---|
+| S1 | **PII column detection (heuristic regex).** A Model column whose name reads as personal data — email, phone, national id, date of birth, financial account, person name or street address (the first matching pattern names the category). Always INFO: the pattern's confidence is reported in the detail, never graded. | INFO | “PII detected ({@pii_category}, {@pii_confidence} confidence): '{name}'” | Review security settings via ThoughtSpot UI or TML reimport |
+| S2 | **PII indexed without RLS (exposes in autocomplete).** A PII column (see S1) that is text-search indexed (no `index_type: DONT_INDEX`), so its values surface in search suggestions. HIGH when the Table its `column_id` prefix names (through `model_tables`, alias first) has no RLS rules on its Table TML — or that Table TML is not in scope — and INFO when it has. The detail says which, so the message is worded per severity. | INFO when @owning_table_has_rls is true; otherwise HIGH | HIGH: “PII column '{name}' is indexed WITHOUT table RLS”; INFO: “PII column '{name}' is indexed (table has RLS)” | Review security settings via ThoughtSpot UI or TML reimport |
+| S3 | **PII without CLS or masking formula.** A PII column (see S1) that no masking formula covers: some Model formula calls `is_group_member` and the column's name appears anywhere in the Model's formula expressions (@named_in_masking_formula — a heuristic over all formulas at once, not per formula). The detail says "no CLS", but column-level security is never read: that wording is the legacy text, kept until the check is fixed. | HIGH | “PII column '{name}' ({@pii_category}) has no CLS or masking formula” | Review security settings via ThoughtSpot UI or TML reimport |
+| S4 | **RLS bypass + PII columns in model.** A Model with `properties.is_bypass_rls` set that also holds PII columns (see S1). Counted as the PII columns of a bypassing Model, so the count is 0 — and silent — without the bypass. | HIGH > 0 | “RLS bypass enabled AND model contains {count} PII column(s)” | Review security settings via ThoughtSpot UI or TML reimport |
+| S5 | **Credentials in analytics.** A Model column named like a credential — password, passwd, secret key, api key or token as a whole word, any case. CRITICAL, except HIGH for `token`. | HIGH when @credential_term is token; otherwise CRITICAL | “Credential column '{name}' in analytics model” | Review security settings via ThoughtSpot UI or TML reimport |
+| S8 | **VARCHAR column used in an RLS rule.** A column an RLS rule references (resolved by name on the Table TML's own `columns[]`) whose warehouse type is a string type. An unresolved reference has an unknown type and is not reported. P15 is the same walk with a `value_casing` guard. | MEDIUM | “VARCHAR RLS column '{name}'” | — |
+| S9 | **Function call in an RLS rule expression.** An RLS rule expression that calls UPPER, LOWER, TRIM, CAST, CONCAT, CONTAINS or IF (any case), which prevents filter pushdown. The detail quotes the first 80 characters of the expression. Same trigger as P14. | HIGH | “Function in RLS expression prevents filter pushdown: {obj.expr:.80}” | — |
+| S10 | **RLS bypass enabled (disables row-level security).** A Model with `properties.is_bypass_rls` set, so every user sees every row. | MEDIUM | “is_bypass_rls: true — all users see all rows regardless of RLS rules” | — |
+
+### Legacy `threshold` payloads
+
+The `threshold` dict each finding has always carried, kept for readers of older audit JSON (the uniform `bands` payload supersedes it).
+
+| ID | `threshold` |
+|---|---|
+| A1 | Spotter-ready: green=95, assessment=Spotter-ready, yellow=47.5 · General: green=50, assessment=General, yellow=25 |
+| A2 | Spotter-ready: green=80, assessment=Spotter-ready, yellow=40 · General: green=25, assessment=General, yellow=12.5 |
+| A5 | ready=80, needs_work=50 |
+| A6 | Spotter-ready: green=80, assessment=Spotter-ready, yellow=40 · General: green=80, assessment=General |
+| D1 | set per finding by code:model_complexity |
+| D4 | min_tables_for_flag=5 |
+| D6 | max_attribute_pct=40 |
+| D7 | MEDIUM: high_overlap=0.5 |
+| D9 | max_pct=20 |
+| H1 | max_pct=10 |
+| P2 | green=5, yellow=10 |
+| P7 | green=3, yellow=5 |
+| P8 | max=75 |
+| P11 | info=30 |
+| P13 | medium=3, high=6 |
+| P16 | info=3, low=5 |
+| P17 | info=2, low=3 |
+
+### Retired rules
+
+A retired rule keeps its id, which is never reused.
+
+| ID | Title | Why |
 |---|---|---|
-| A1 | Description coverage below threshold | Spotter-ready: pass ≥ 95%, HIGH < 47.5%. General: pass ≥ 50%, HIGH < 25%. MEDIUM between |
-| A2 | Synonym coverage below threshold — read from `properties.synonyms`, where Model TML keeps them (before ts-cli 0.177.0 it read the column root and scored every Model 0%) | Spotter-ready: pass ≥ 80%, HIGH < 40%. General: pass ≥ 25%, HIGH < 12.5%. MEDIUM between |
-| A3 | No AI instructions configured | HIGH (Spotter-ready) / MEDIUM (General) |
-| A4 | Missing Spotter config (no Model description) | HIGH (Spotter-ready) / MEDIUM (General) |
-| A5 | Spotter readiness composite score | Weighted score → severity |
-| A6 | Measure AI context coverage — share of visible `MEASURE` columns with a non-empty `properties.ai_context`. Attributes are not counted: the coach's ai_context schema requires it on every measure (`additivity`, `time_basis`, `grain_keys`) and leaves it empty, correctly, on most attributes such as surrogate keys | ≥ 80% clean under both profiles. Spotter-ready (AI context required): HIGH < 40%, otherwise MEDIUM. General (recommended): LOW at any depth. The finding lists the uncovered measures |
+| H6 | Duplicate sets | Deferred — requires deep set comparison. Retired with no logic: the id stays allocated so it is never reused, and the rule never runs (no profile may revive it). |
+<!-- END GENERATED -->
 
 ---
 
-## Data Modeling — `checks_data.py`
-
-| ID | What it detects | Severity logic |
-|---|---|---|
-| D1 | Model complexity (tables, joins, columns, depth) | Thresholds in reference file |
-| D2 | VARCHAR join keys (2–5x slower) | HIGH per occurrence |
-| D3 | Join type analysis (FULL OUTER, LEFT/RIGHT) | HIGH for FULL OUTER, INFO for others |
-| D4 | Progressive joins disabled on large models | HIGH if >5 tables + join_progressive:false |
-| D5 | Orphan tables in model (Cartesian risk) | MEDIUM per orphan table |
-| D6 | Grain consistency — fact tables with >40% attributes | MEDIUM per model |
-| D7 | Model overlap & duplication | Severity by Jaccard and classification |
-| D8 | Duplicate table objects (same physical table, multiple TS objects) | HIGH per duplicate group |
-| D9 | SQL pass-through function usage (>20% formulas) | MEDIUM / HIGH by percentage |
-| D10 | Zero-column tables (bridge vs leaf) | INFO (bridge) / MEDIUM (leaf) |
-| D11 | Fan-out join risk (row multiplication) | HIGH with mitigation reduction |
-| D12 | Conformed dimension divergence (same column, different type) | MEDIUM per divergence |
-
----
-
-## Human Readiness — `checks_human.py`
-
-| ID | What it detects | Severity logic |
-|---|---|---|
-| H1 | Column name quality (anti-pattern regexes) | LOW per bad name |
-| H2 | Description quality (too-short, boilerplate) | LOW per violation |
-| H3 | Unnecessary hidden columns (not referenced by formulas) | MEDIUM per column |
-| H4 | Orphan models (zero dependents other than Sets — a Set's consumers are already Model dependents) | MEDIUM per model |
-| H5 | Orphan sets (zero consumers). Sets discovered via `ts_cli.sets.discover` (not Model dependents — BL-324); a Set whose consumer lookup fails, hides dependents, or is consumed only by another Set is not reported (warning instead) | MEDIUM per set |
-| H7 | Direct table connections (bypasses semantic layer) | MEDIUM per answer |
-| H8 | Formula promotion candidates (duplicated in 2+ answers) | HIGH — link to /ts-object-answer-promote |
-| H9 | Redundant answer formulas (duplicating model formula) | LOW per formula |
-| H10 | Stale / temporary objects (name pattern match) | LOW (name only), MEDIUM if also orphan |
-
----
-
-## Performance — `checks_perf.py`
-
-| ID | What it detects | Severity logic |
-|---|---|---|
-| P1 | SQL View data source (blocks filter pushdown) | MEDIUM per view |
-| P2 | Scalar formula density (run at query time) | MEDIUM >5, HIGH >10 |
-| P3 | Model filters lacking apply_on_tables | MEDIUM per non-progressive filter |
-| P4 | Apply-all-joins anti-pattern (join_progressive:false) | HIGH if >5 tables |
-| P5 | No date constraints on fact tables | MEDIUM per model |
-| P6 | VARCHAR join keys (performance framing of D2) | HIGH per key |
-| P7 | Join depth exceeding thresholds | MEDIUM >3, HIGH >5 |
-| P8 | Column sprawl (>75 columns) | MEDIUM per model |
-| P9 | High-cardinality ID column indexed as ATTRIBUTE | MEDIUM per column |
-| P11 | Excessive indexed columns on Spotter-enabled model | INFO >30 |
-| P13 | High RLS rule count (cost compounds per query) | MEDIUM >3, HIGH >6 |
-| P14 | RLS expression uses functions (prevents index pruning) | MEDIUM per expression |
-| P15 | VARCHAR RLS column without value_casing | MEDIUM per column |
-| P16 | Deeply nested if() in formulas | INFO >3, LOW >5 |
-| P17 | Formula cross-reference chain depth | INFO >2, LOW >3 |
-| P18 | COUNT_DISTINCT aggregation (most expensive) | INFO per column |
-
----
-
-## Security — `checks_security.py`
-
-| ID | What it detects | Severity logic |
-|---|---|---|
-| S1 | PII column detection (heuristic regex) | MEDIUM per column |
-| S2 | PII indexed without RLS (exposes in autocomplete) | HIGH per column |
-| S3 | PII without CLS or masking formula | MEDIUM per column |
-| S4 | RLS bypass + PII columns in model | HIGH per model |
-| S5 | Credentials in analytics | CRITICAL per column |
-| S8 | VARCHAR column used in an RLS rule | MEDIUM per column |
-| S9 | Function call in an RLS rule expression | HIGH per rule |
-| S10 | RLS bypass enabled (disables row-level security) | MEDIUM per model |
-
----
-
-## Check ID gaps
-
-Some IDs are intentionally absent — either consolidated into other checks or
-deferred to Phase 2 (usage analysis):
+## Unassigned ids
 
 | ID | Status |
 |---|---|
-| H6 | Duplicate sets — deferred (requires deep set comparison) |
 | P10, P12 | Not assigned |
 | S6, S7 | Not assigned |

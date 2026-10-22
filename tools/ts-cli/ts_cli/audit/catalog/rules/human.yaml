@@ -135,9 +135,9 @@
 - id: H6
   title: Duplicate sets
   description: >-
-    Deferred — requires deep set comparison (check-catalog.md, "Deferred / Not
-    assigned"). Retired with no logic: the id stays allocated so it is never reused,
-    and the rule never runs (no profile may revive it).
+    Deferred — requires deep set comparison. Retired with no logic: the id stays
+    allocated so it is never reused, and the rule never runs (no profile may revive
+    it).
   status: retired
   categories: [H]
   scope: set

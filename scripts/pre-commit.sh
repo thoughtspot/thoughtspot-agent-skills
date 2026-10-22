@@ -308,7 +308,7 @@ fi
 # or category id fails silently (the rule just never fires). Validates the whole
 # catalog (unknown keys/vocabulary, duplicate ids, profile overrides, band order,
 # missing examples) when anything under ts_cli/audit/ or the validator changes.
-if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py)'; then
+if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py|^agents/cli/ts-audit/references/check-catalog\.md)'; then
   run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root ."
 fi
 

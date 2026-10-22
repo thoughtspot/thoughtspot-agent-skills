@@ -47,6 +47,7 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
+                "generate.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")
@@ -130,6 +131,35 @@ def test_shape_error_is_a_fail_not_a_traceback(tmp_path):
     assert res.returncode == 1
     assert "Traceback" not in res.stderr
     assert "rules/ai.yaml" in res.stdout
+
+
+DOC_REL = Path("agents/cli/ts-audit/references/check-catalog.md")
+
+
+def _with_doc(root: Path) -> Path:
+    (root / DOC_REL).parent.mkdir(parents=True)
+    shutil.copy(REPO / DOC_REL, root / DOC_REL)
+    return root
+
+
+def test_generated_doc_checked_under_the_gates_python(tmp_path):
+    """The gate runs `generate --check` (catalog-only copies, with no skill dir, skip it)."""
+    root = _with_doc(_copy_repo(tmp_path))
+    res = _run(root)
+    assert res.returncode == 0, res.stdout + res.stderr
+    rules = root / AUDIT_REL / "catalog" / "rules" / "perf.yaml"
+    rules.write_text(rules.read_text().replace("title: Column sprawl (>75 columns)",
+                                               "title: Column sprawl (wide)"))
+    res = _run(root)
+    assert res.returncode == 1 and "check-catalog.md is stale" in res.stdout, res.stdout
+    assert "Traceback" not in res.stderr
+
+
+def test_missing_doc_fails_where_the_skill_exists(tmp_path):
+    root = _with_doc(_copy_repo(tmp_path))
+    (root / DOC_REL).unlink()
+    res = _run(root)
+    assert res.returncode == 1 and "check-catalog.md" in res.stdout, res.stdout
 
 
 def test_missing_catalog_fails(tmp_path):
