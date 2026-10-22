@@ -343,6 +343,16 @@ def test_corpus_records_whether_the_ai_instructions_lookup_succeeded(fail, read)
     assert compact_payload(out)["C"]["m"][0]["ai"]["rd"] is read
 
 
+def test_a_failed_ai_instructions_lookup_warns_with_its_reason(capsys):
+    """The report's "could not be read" note says `ts audit run` printed the reason:
+    the warning must carry it (12b re-review N4)."""
+    from ts_cli.audit import run_audit
+    model = {"guid": "m1", "model": {"name": "Sales", "model_tables": [], "columns": []}}
+    run_audit(_ai_failing_client(model), ["m1"], ["A"])
+    err = capsys.readouterr().err
+    assert "AI instructions fetch failed for model m1: 500 from ai/instructions/get" in err
+
+
 def test_instructions_read_is_left_out_when_the_caller_does_not_know_what_was_fetched():
     """A supplied context with no fetched record (no snapshot manifest): unknown, so the
     corpus says nothing rather than guess."""

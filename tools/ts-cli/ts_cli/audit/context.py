@@ -199,8 +199,8 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
                 "data_source_identifier": guid,
             })
             out[guid] = resp.json()
-        except Exception:
-            msg = f"AI instructions fetch failed for model {guid}"
+        except Exception as exc:  # the reason goes into the warning (the report cites it)
+            msg = f"AI instructions fetch failed for model {guid}: {exc}"
             _log(f"Warning: {msg}")
             warnings.append(msg)
 
