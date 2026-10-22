@@ -359,7 +359,7 @@ def run_audit(
     from ts_cli.audit.engine.run import resolve_profile, run_rules, selected_rules
     from ts_cli.audit.generate import report_meta
     catalog = catalog_model.load_catalog()
-    angles = angles or list(catalog.categories)
+    angles = list(dict.fromkeys(angles or catalog.categories))  # each category once
     if ctx is None:
         profile = resolve_profile(catalog, assessment_name)
         needs = data_needs(angles, [profile])

@@ -37,7 +37,8 @@ from typing import Any, Dict, List, Optional
 from ts_cli.audit.catalog_code import CODE_IMPL, code_rule_declaration
 from ts_cli.audit.catalog_forms import BY_SEVERITY
 from ts_cli.audit.catalog_model import (
-    CATALOG_DIR, Bands, Catalog, Rule, load_catalog, parse_bands, profile_override,
+    CATALOG_DIR, Bands, Catalog, CatalogError, Rule, load_catalog, parse_bands,
+    profile_override,
 )
 
 DOC_REL = Path("agents/cli/ts-audit/references/check-catalog.md")
@@ -254,7 +255,7 @@ def check(root: Path) -> List[str]:
         cat = load_catalog(Path(root) / CATALOG_REL)
         doc = doc_path.read_text(encoding="utf-8")
         current = render_doc(doc, cat)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, CatalogError) as exc:  # a malformed catalog included
         return [str(exc)]
     if current != doc:
         return [f"{DOC_REL} is stale: run `python -m ts_cli.audit.generate`"]

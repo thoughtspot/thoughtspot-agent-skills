@@ -141,3 +141,15 @@ def test_cli_check_exit_codes(tmp_path):
     doc.write_text(doc.read_text().replace("| P8 | **", "| P8 | **Edited. "))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode == 1 and "stale" in res.stdout
+
+
+def test_check_reports_a_malformed_catalog_without_a_traceback(tmp_path):
+    root = _repo_copy(tmp_path)
+    (root / generate.CATALOG_REL / "rules" / "perf.yaml").write_text("- id: P1\n  title: [\n")
+    problems = generate.check(root)
+    assert problems and "perf.yaml" in problems[0]
+    cmd = [sys.executable, "-m", "ts_cli.audit.generate", "--root", str(root), "--check"]
+    env = {**os.environ, "PYTHONPATH": str(REPO / "tools" / "ts-cli")}
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert res.returncode == 1 and "Traceback" not in res.stderr, res.stderr
+    assert "FAIL" in res.stdout and "perf.yaml" in res.stdout

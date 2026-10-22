@@ -21,18 +21,22 @@ def _catalog():
 
 
 def _parse_angles(angles: Optional[str]) -> Optional[list]:
-    """`--angles A,d` -> ["A", "D"], each a category id of the rule catalog; a name the
-    catalog does not know is an error, not silently nothing."""
-    if not angles:
+    """`--angles A,d` -> ["A", "D"], each a category id of the rule catalog, each once;
+    a name the catalog does not know, or a selection naming nothing (`","`), is a usage
+    error — not silently nothing, nor silently everything."""
+    if angles is None:
         return None
-    letters = [a.strip().upper() for a in angles.split(",") if a.strip()]
+    letters = list(dict.fromkeys(a.strip().upper() for a in angles.split(",") if a.strip()))
+    if not letters:
+        raise typer.BadParameter("no category given (use e.g. A,D, or omit --angles "
+                                 "for all)", param_hint="--angles")
     known = list(_catalog().categories)
     unknown = [a for a in letters if a not in known]
     if unknown:
         raise typer.BadParameter(f"unknown categor{'y' if len(unknown) == 1 else 'ies'} "
                                  f"{', '.join(unknown)} (known: {', '.join(known)})",
                                  param_hint="--angles")
-    return letters or None
+    return letters
 
 
 def _assessment(name: Optional[str]) -> str:

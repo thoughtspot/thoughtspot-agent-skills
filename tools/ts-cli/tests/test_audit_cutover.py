@@ -391,3 +391,32 @@ def test_cli_rejects_an_unknown_category_and_assessment(tmp_path):
     data = json.loads(out.read_text())
     assert data["corpus"]["angles_run"] == ["A", "P"]
     assert data["corpus"]["assessment"] == "Spotter-ready"
+
+
+# ── review fix round 1: degenerate --angles ─────────────────────────────────
+
+def test_cli_empty_angle_selection_is_a_usage_error(tmp_path):
+    from typer.testing import CliRunner
+
+    from ts_cli.cli import app
+    snap = _snap(tmp_path, ["A", "D"], needs={"ai_instructions"})
+    for value in (",", " , ,"):
+        res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap),
+                                       "--angles", value])
+        assert res.exit_code == 2 and "no category given" in res.output, res.output
+
+
+def test_duplicate_angles_run_once_and_are_listed_once(tmp_path):
+    from typer.testing import CliRunner
+
+    from ts_cli.audit import run_audit
+    from ts_cli.cli import app
+    snap = _snap(tmp_path, ["A", "D"], needs={"ai_instructions"})
+    out = tmp_path / "o.json"
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap),
+                                   "--angles", "A,a,A", "-o", str(out)])
+    assert res.exit_code == 0, res.output
+    data = json.loads(out.read_text())
+    assert data["corpus"]["angles_run"] == ["A"] and data["summary"]["checks_run"] == 6
+    direct = run_audit(None, [], ["D", "A", "D"], ctx=fx.registry_populated_context())
+    assert direct["corpus"]["angles_run"] == ["D", "A"]

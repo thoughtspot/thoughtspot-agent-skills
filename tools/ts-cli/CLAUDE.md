@@ -168,15 +168,18 @@ ts_cli/
     aggregate.py  — ts aggregate (signatures, recommend, profile, history, generate) — aggregate-model advisor engine
     aggregate_rls.py — RLS command-layer wiring for `ts aggregate` (Task 23): _attach_rls_conflicts (recommend advisory surfacing) + _propagate_rls_or_fail_closed (generate security gate — fails closed on incomplete tables-dir or grain missing an RLS filter column) over the pure aggregate/rls.py engine; split out of aggregate.py to stay under the file-size gate, imported lazily from recommend/generate
   audit/
-    __init__.py       — run_audit() entry point, angle module registry
+    __init__.py       — run_audit(): selects catalog rules by category/profile, fetches what they declare, runs the engine; build_corpus; REPORT_NEEDS
+    catalog/          — THE RULES: categories.yaml, profiles.yaml, rules/*.yaml (one entry per rule; edit thresholds/severities/wording here)
+    catalog_model.py  — catalog loader + dataclasses (gate-safe, Python 3.9 + PyYAML)
+    catalog_validate.py, catalog_expr.py, catalog_code.py, catalog_forms.py, catalog_uses.py, catalog_reads.py — the catalog gate's checks (tools/validate/check_audit_catalog.py)
+    catalog_history.py — rule-id history: an id is retired, never removed or reused (--base / --merge-base-with)
+    engine/           — rule engine: run.py (run_rules, needs_for, profiles), scopes, modes, bands, fields*.py (derived fields), code_rules*.py, memo.py (per-run lookups)
+    generate.py       — generates check-catalog.md's rule tables and report_meta / check_meta (`python -m ts_cli.audit.generate [--check]`)
     context.py        — AuditContext dataclass + build_context()
-    findings.py       — Finding dataclass + build_summary()
-    checks_ai.py      — AI readiness checks (A1-A6); A1-A4/A6 read their bar from assessment.py
-    assessment.py     — the Spotter-ready / General assessment table (pass marks, HIGH below half, presence severities) behind `ts audit run --assessment` (BL-399); change thresholds here, not in the checks
-    checks_data.py    — Data modeling checks (D1-D12)
-    checks_human.py   — Human readiness checks (H1-H10)
-    checks_perf.py    — Performance checks (P1-P18)
-    checks_security.py — Security checks (S1-S10)
+    snapshot.py       — --snapshot-out / --snapshot-in capture and replay (manifest records the fetched needs)
+    findings.py       — Finding dataclass + build_summary() (by_category); CHECK_META built from the catalog
+    equivalence.py    — legacy checks vs catalog comparison (last user of the legacy modules below)
+    checks_*.py, assessment.py — LEGACY check functions and assessment table, no longer run by `ts audit run`; kept for the equivalence comparison and their own tests until they are deleted — do not edit thresholds here
     report.py         — HTML report renderer (compact payload + template injection)
     report_template.html — Self-contained HTML template with CSS/JS
     erd.py            — ERD data generation for audit reports (parses Model+Table TML)
