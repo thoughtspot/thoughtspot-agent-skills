@@ -30,7 +30,9 @@ spotter|general`, default `general`). A profile may override a rule's `status`, 
 
 ## Changing a rule
 
-Edit the rule's YAML entry, then:
+The full procedure — confirming the rule with the user, the syntax, the gates, the
+pinned findings and the snapshot check — is [rule-authoring.md](rule-authoring.md).
+In short, edit the rule's YAML entry, then:
 
 1. `python3 tools/validate/check_audit_catalog.py --root .` — vocabulary, ids, overrides,
    band order, examples, declared data reads, and that this file is current.

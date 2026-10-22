@@ -4642,9 +4642,12 @@ are queried as `LOGICAL_COLUMN`; the default `LOGICAL_TABLE` returns nothing for
 
 ## `ts audit` — environment health audit
 
-`ts audit run` runs the deterministic checks behind the `ts-audit` skill against one or more
+`ts audit run` runs the deterministic rules behind the `ts-audit` skill against one or more
 Models and prints a JSON report; `ts audit report` renders that JSON as a self-contained
-HTML page. The check catalog is `agents/cli/ts-audit/references/check-catalog.md`.
+HTML page. The rules are data — a YAML catalog in `ts_cli/audit/catalog/` run by a small
+rule engine. What each rule detects is in `agents/cli/ts-audit/references/check-catalog.md`
+(generated from the catalog); how to add, change or retire one is
+`agents/cli/ts-audit/references/rule-authoring.md`.
 
 ```bash
 ts audit run --models <guid> --angles A,D --assessment spotter --profile myprofile -o audit.json
@@ -4654,11 +4657,19 @@ ts audit report audit.json -o report.html
 | Flag | Default | Description |
 |---|---|---|
 | `--models`, `-m` | required | Model GUID to audit (repeatable). Not needed, and ignored, with `--snapshot-in` |
-| `--angles`, `-a` | all | Comma-separated subset of `A,D,H,P,S` |
+| `--angles`, `-a` | all | Comma-separated catalog categories, a subset of `A,D,H,P,S`; a rule runs when any of its categories is selected. A repeated letter counts once; an unknown letter, or a value naming none (`""`, `","`), is a usage error — omit the flag for all |
 | `--assessment` | `general` | The bar the AI-readiness checks (A1–A4, A6) measure against. `spotter` (Spotter-ready): descriptions ≥ 95%, synonyms ≥ 80%, measure AI context required, missing AI instructions or Model description HIGH. `general`: ≥ 50%, ≥ 25%, AI context recommended (a gap is LOW), missing instructions or description MEDIUM. Coverage checks are HIGH below half their pass mark. The bars live in the rule catalog (`ts_cli/audit/catalog/`: `profiles.yaml` and each A rule's `profiles:` block); the report header names the assessment used. With `--snapshot-in` the default is the assessment the snapshot was captured with; passing the flag overrides it (noted on stderr) |
 | `--output`, `-o` | stdout | Write the JSON report to a file |
 | `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `files`). Refused if the data would not read back unchanged |
 | `--snapshot-in` | — | Audit a `--snapshot-out` directory instead of fetching: no profile, no network. `--angles` defaults to the captured angles; asking for an angle that was not captured is an error, because an audit fetches AI instructions, Answers and Sets only when a selected angle's rules declare them (`requires`/`uses` in the rule catalog). Cannot be combined with `--snapshot-out` |
+
+**What is fetched.** Model TML with its associated Table TML, metadata headers and
+dependents, always; AI instructions, Answer TML and Sets only when a selected rule
+declares them (`requires`/`uses`), so a narrow `--angles` fetches less. The JSON records
+what was fetched as `corpus.fetched_needs`. A failed AI-instructions lookup on one Model
+(403, 404, or a 5xx after the client's retries) skips that Model's AI-instruction rules
+with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
+report); a 401 that survives the client's one re-authentication aborts the run.
 
 A snapshot holds exported TML from the cluster it was captured on. Keep it outside the
 repository — this repo is public.

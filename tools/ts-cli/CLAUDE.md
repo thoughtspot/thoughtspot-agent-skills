@@ -175,7 +175,7 @@ ts_cli/
     catalog_history.py — rule-id history: an id is retired, never removed or reused (--base / --merge-base-with)
     engine/           — rule engine: run.py (run_rules, needs_for, profiles), scopes, modes, bands, fields*.py (derived fields), code_rules*.py, memo.py (per-run lookups), tml.py (shared Model/Table TML helpers — formerly audit/rules.py)
     generate.py       — generates check-catalog.md's rule tables and report_meta / check_meta (`python -m ts_cli.audit.generate [--check]`)
-    context.py        — AuditContext dataclass + build_context()
+    context.py        — AuditContext dataclass + build_context(): always Model/Table TML, metadata, dependents; AI instructions, Answers and Sets only when the selected rules declare them (requires ∪ uses)
     snapshot.py       — --snapshot-out / --snapshot-in capture and replay (manifest records the fetched needs)
     findings.py       — Finding dataclass + build_summary() (by_category); CHECK_META built from the catalog
     equivalence.py    — compare_findings: the strict finding-list comparator (exact types, multiset); the legacy check functions it compared the catalog with were deleted in Task 12b, and their answers are pinned in tests/audit_rule_fixtures/legacy_findings.json.gz
@@ -261,36 +261,37 @@ A defect found and fixed inside the same unmerged branch has **no** "fixed in
 vX" — it never shipped. Say so rather than citing a version that implies users
 were exposed to it.
 
-## Adding an audit check
+## Adding an audit rule
 
 `ts audit run` runs the rule catalog (`ts_cli/audit/catalog/rules/*.yaml`) through the
-rule engine (`ts_cli/audit/engine/`) — a check is a YAML rule, not a function.
+rule engine (`ts_cli/audit/engine/`). **A check is a YAML rule, never a `check_*`
+function.** The full procedure — the rule syntax, `requires` vs `uses`, profiles, the
+gates and their limits, and the steps for adding, changing or retiring a rule, adding a
+category or a derived field, and when a code rule is justified — is
+`agents/cli/ts-audit/references/rule-authoring.md`. In short:
 
-1. Add the rule entry (id, title, description, categories, requires/uses, scope,
-   aggregate, bands or severity, message, remediation, `fires`/`silent` examples) to the
-   category's `rules/*.yaml`; add the example fixtures to `tests/audit_rule_fixtures/`.
-   Only when no declarative form fits, register a code rule in `engine/code_rules*.py`.
-2. `python3 tools/validate/check_audit_catalog.py --root .` — vocabulary, overrides,
-   declared data reads, examples, the generated doc, rule-id history (`--base <ref>`).
-3. `python -m ts_cli.audit.generate` — regenerates the rule tables in
-   `agents/cli/ts-audit/references/check-catalog.md` (never edit them by hand).
-4. **Changing one of the 51 rules the legacy checks ran** (threshold, severity, wording,
-   a defect fixed, its `status` at base or under a profile) or a committed input builder
-   in `tests/audit_rule_fixtures/`: `tests/test_audit_pinned_findings.py` holds those
-   rules to the findings pinned in `tests/audit_rule_fixtures/legacy_findings.json.gz`,
-   and fails until the pin moves. Every pinned rule is compared whatever its status; one
-   not active under a profile must be pinned to [] there. Re-pin only what you changed,
-   from the current catalog:
+1. Write the rule entry in its category's `rules/*.yaml`, with `fires` / `silent`
+   examples whose fixtures are synthetic builders in `tests/audit_rule_fixtures/<category>.py`.
+   Only when no mode, operator or derived field can express it, register a code rule
+   (`@code_rule` in `engine/code_rules*.py`); a new derived field is `@register` in
+   `engine/fields*.py` plus a unit test. Both declare the conditional data they read
+   (`uses=`), which the gate checks against the code.
+2. `python3 tools/validate/check_audit_catalog.py --root . --base origin/main` —
+   vocabulary, overrides, declared data reads, examples, the generated doc, and rule-id
+   history.
+3. `python -m ts_cli.audit.generate` (from `tools/ts-cli/`) — regenerates the rule tables
+   in `agents/cli/ts-audit/references/check-catalog.md` (never edit them by hand;
+   `--check` fails when stale).
+4. **Changing one of the 51 pinned rules** (threshold, severity, wording, a defect fixed,
+   its `status` at base or under a profile) or a committed input builder fails
+   `tests/test_audit_pinned_findings.py` until the pin moves. Re-pin only what you
+   changed, from the current catalog:
    `PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule P8`
-   (or `--input <name>`, or both; `--dry-run` to preview; a rule not active under a
-   profile is written as [] for it). It prints the before/after of every entry it
-   rewrites — paste that into the PR, since the gzip diff is unreadable. The frozen rule
-   set is the pin file's own `rules` list (mirrored by `PINNED_RULE_IDS` in
-   `tests/audit_pinned.py`; a test fails if they differ): a rule leaves it only through
-   `--drop-rule <id>`, which refuses a rule still active under any profile (retire it
-   first), a removed input only through `--drop-input <name>`, each printing
-   every entry it removes. A NEW rule is not pinned; its `fires`/`silent` examples are
-   its regression net.
+   (or `--input <name>`; `--dry-run` to preview). Paste its printed before/after into the
+   PR — the gzip diff is unreadable. A rule leaves the pinned set only through
+   `--drop-rule <id>`, refused until the rule is retired (and `PINNED_RULE_IDS` in
+   `tests/audit_pinned.py` must match the pin file's `rules`). A NEW rule is not pinned;
+   its examples are its regression net.
 5. Bump version in both `__init__.py` and `pyproject.toml`, to an unreleased number (see Version sync).
 6. Run `pytest tools/ts-cli/tests/` and `python tools/validate/check_version_sync.py`.
 
