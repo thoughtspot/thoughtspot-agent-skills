@@ -8,7 +8,6 @@ and missing examples — and that the package ships the catalog files.
 from __future__ import annotations
 
 import copy
-import fnmatch
 import shutil
 from pathlib import Path
 
@@ -130,11 +129,14 @@ def test_package_ships_catalog():
     pyproject = PKG_CATALOG.parents[2] / "pyproject.toml"
     globs = _package_data_globs(pyproject.read_text())
     pkg_root = PKG_CATALOG.parents[1]  # ts_cli/
-    shipped = [p.relative_to(pkg_root).as_posix() for p in PKG_CATALOG.rglob("*.yaml")]
+    # Path.glob, not fnmatch: fnmatch's `*` crosses `/`, so `audit/catalog/*.yaml` would
+    # appear to cover rules/ai.yaml while setuptools would not ship it.
+    covered = {p for g in globs for p in pkg_root.glob(g)}
+    shipped = sorted(PKG_CATALOG.rglob("*.yaml"))
     assert shipped, "catalog has no YAML files"
-    for rel in shipped:
-        assert any(fnmatch.fnmatch(rel, g) for g in globs), f"{rel} not in package-data"
-    assert {Path(p).name for p in shipped} >= {
+    for path in shipped:
+        assert path in covered, f"{path.relative_to(pkg_root)} not in package-data"
+    assert {p.name for p in shipped} >= {
         "categories.yaml", "profiles.yaml", "ai.yaml", "data.yaml", "human.yaml",
         "perf.yaml", "security.yaml"}
 
@@ -345,3 +347,123 @@ def test_check_catalog_reports_loader_errors_as_problems(tmp_path):
     cat, problems = check_catalog(root)
     assert cat is None
     assert len(problems) == 1 and problems[0].startswith("rules/ai.yaml:")
+
+
+# ── review round 1: typos must fail, never silently alter a rule ─────────────
+
+@pytest.mark.parametrize("typo", ["wher", "mach", "ovr"])
+def test_unknown_aggregate_key_rejected(tmp_path, typo):
+    rule = _good_rule()
+    rule["aggregate"][typo] = rule["aggregate"].pop(
+        {"wher": "where", "mach": "match", "ovr": "over"}[typo])
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(p.startswith("rules/ai.yaml: A6:") and f"aggregate: unknown key '{typo}'" in p
+               for p in problems), problems
+
+
+@pytest.mark.parametrize("mode", ["ratio", "count"])
+def test_ratio_and_count_need_over(tmp_path, mode):
+    rule = _good_rule()
+    rule["aggregate"]["mode"] = mode
+    del rule["aggregate"]["over"]
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any("aggregate.over is required" in p and mode in p for p in problems), problems
+
+
+def test_each_mode_needs_no_over(tmp_path):
+    rule = _good_rule(aggregate={"mode": "each",
+                                 "where": {"field": "join_type", "eq": "OUTER"}})
+    assert _problems(tmp_path, {"data": [rule]}) == []
+
+
+def _sev_map(**overrides):
+    sev = {"field": "join_type", "map": {"OUTER": "HIGH", "LEFT_OUTER": "INFO"},
+           "default": "MEDIUM"}
+    sev.update(overrides)
+    return sev
+
+
+def test_mapping_severity_shape_accepted(tmp_path):
+    rule = _good_rule(bands=None, severity=_sev_map(),
+                      aggregate={"mode": "each", "where": {"field": "x", "exists": True}})
+    rule["profiles"] = {"general": {"severity": _sev_map(default="LOW")}}
+    assert _problems(tmp_path, {"data": [rule]}) == []
+
+
+@pytest.mark.parametrize("sev, needle", [
+    (_sev_map(feild="x"), "unknown key 'feild'"),
+    (_sev_map(map={"OUTER": "HIHG"}), "unknown severity 'HIHG'"),
+    (_sev_map(default="MED"), "unknown severity 'MED'"),
+    ({"map": {"OUTER": "HIGH"}, "default": "LOW"}, "severity.field"),
+    ({"field": "x", "default": "LOW"}, "severity.map"),
+    ({"field": "x", "map": {"OUTER": "HIGH"}}, "severity.default"),
+    (_sev_map(map=[]), "severity.map"),
+])
+def test_mapping_severity_shape_enforced(tmp_path, sev, needle):
+    rule = _good_rule(bands=None, severity=sev,
+                      aggregate={"mode": "each", "where": {"field": "x", "exists": True}})
+    problems = _problems(tmp_path, {"data": [rule]})
+    assert any(p.startswith("rules/data.yaml: A6:") and needle in p for p in problems), problems
+
+
+def test_profile_mapping_severity_is_checked(tmp_path):
+    rule = _good_rule(profiles={"general": {"severity": _sev_map(wat=1)}})
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any("profiles.general.severity" in p and "unknown key 'wat'" in p
+               for p in problems), problems
+
+
+def test_missing_rules_dir_is_an_error(tmp_path):
+    root = _catalog_dir(tmp_path, {})
+    (root / "rules").rmdir()
+    with pytest.raises(CatalogError) as exc:
+        load_catalog(root)
+    assert exc.value.file == "rules"
+
+
+@pytest.mark.parametrize("name", ["ai.yml", "ai.YAML", "notes.txt"])
+def test_non_yaml_file_in_rules_is_an_error(tmp_path, name):
+    root = _catalog_dir(tmp_path, {})
+    (root / "rules" / name).write_text(yaml.safe_dump([_good_rule()]))
+    with pytest.raises(CatalogError) as exc:
+        load_catalog(root)
+    assert exc.value.file == f"rules/{name}"
+    assert ".yaml" in exc.value.message
+
+
+def test_dotfiles_in_rules_are_ignored(tmp_path):
+    root = _catalog_dir(tmp_path, {"ai": [_good_rule()]})
+    (root / "rules" / ".DS_Store").write_bytes(b"\x00")
+    assert list(load_catalog(root).rules) == ["A6"]
+
+
+@pytest.mark.parametrize("expr, needle", [
+    ({"field": "x", "in": "MEASURE"}, "'in' needs a list"),
+    ({"field": "x", "regex": "["}, "does not compile"),
+    ({"field": "x", "not_regex": "(?P<"}, "does not compile"),
+    ({"field": "x", "regex": 5}, "does not compile"),
+    ({"field": "x", "gt": "10"}, "'gt' needs a number"),
+    ({"field": "x", "lte": True}, "'lte' needs a number"),
+    ({"field": "x", "len_lt": None}, "'len_lt' needs a number"),
+    ({"field": "x", "exists": "yes"}, "'exists' needs true or false"),
+    ({"field": "x", "truthy": 1}, "'truthy' needs true or false"),
+    ({"count": "model.column", "where": {"field": "x", "nonblank": True}, "gte": "2"},
+     "'gte' needs a number"),
+])
+def test_operand_values_checked(tmp_path, expr, needle):
+    rule = _good_rule()
+    rule["aggregate"]["match"] = expr
+    problems = _problems(tmp_path, {"ai": [rule]})
+    assert any(p.startswith("rules/ai.yaml: A6:") and "aggregate.match" in p and needle in p
+               for p in problems), problems
+
+
+def test_valid_operands_accepted(tmp_path):
+    rule = _good_rule()
+    rule["aggregate"]["match"] = {"all": [
+        {"field": "name", "regex": "^id$|_id$", "not_regex": "(?i)valid"},
+        {"field": "type", "in": ["INT64", "INT32"]},
+        {"field": "n", "gt": 1, "lte": 2.5, "len_gt": 0},
+        {"field": "y", "exists": False, "eq": "x", "contains": "a"},
+    ]}
+    assert _problems(tmp_path, {"ai": [rule]}) == []

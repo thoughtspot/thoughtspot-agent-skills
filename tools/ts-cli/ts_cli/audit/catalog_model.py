@@ -156,10 +156,24 @@ def load_raw(root: Optional[Path] = None) -> Dict[str, List[Dict[str, Any]]]:
     raw = {}
     for rel in (CATEGORIES_FILE, PROFILES_FILE):
         raw[rel] = _read_list(root / rel, rel)
-    for path in sorted((root / RULES_DIR).glob("*.yaml")):
+    for path in _rule_files(root / RULES_DIR):
         rel = f"{RULES_DIR}/{path.name}"
         raw[rel] = _read_list(path, rel)
     return raw
+
+
+def _rule_files(rules_dir: Path) -> List[Path]:
+    """Every `*.yaml` in rules/. Anything else there is an error, not silently skipped:
+    a `rules/ai.yml` would otherwise drop its rules and still PASS. Dotfiles (editor and
+    Finder litter such as .DS_Store) are ignored."""
+    if not rules_dir.is_dir():
+        raise CatalogError(RULES_DIR, None, "rules directory not found")
+    paths = sorted(p for p in rules_dir.iterdir() if not p.name.startswith("."))
+    for path in paths:
+        if not path.is_file() or path.suffix != ".yaml":
+            raise CatalogError(f"{RULES_DIR}/{path.name}", None,
+                               "only .yaml rule files belong in rules/ (rename or remove it)")
+    return paths
 
 
 # ── dataclasses ─────────────────────────────────────────────────────────────

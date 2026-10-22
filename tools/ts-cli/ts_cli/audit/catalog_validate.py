@@ -4,7 +4,10 @@
 message starts `<file>: <id>:` — the file relative to the catalog root and the rule,
 category or profile it is about — so a failing gate points at the line to fix.
 
-What it rejects: unknown keys; unknown scopes, modes, operators, data requirements,
+What it rejects: unknown keys (rule, aggregate, bands, severity mapping, examples);
+operand values of the wrong type (`in` without a list, a regex that does not compile,
+a non-numeric comparison, a non-boolean exists/nonblank/truthy); a ratio/count rule
+without `over`; unknown scopes, modes, operators, data requirements,
 categories, profiles, views, band ops/directions/units, severities; ids repeated across
 files; a profile override of a key that defines what a rule *means* (anything outside
 OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and in every
@@ -72,6 +75,14 @@ BANDS_KEYS = {"direction", "unit", "levels"}
 LEVEL_KEYS = {"op", "value", "severity"}
 EXAMPLE_KINDS = ("fires", "silent")
 EXAMPLE_KEYS = {"fixture", "profile", "severity"}
+# Keys an `aggregate` block may carry. One constant so Task 4 can widen it (per mode)
+# when a mode gains parameters; anything else is a typo and fails validation.
+AGGREGATE_KEYS = {"mode", "over", "where", "match"}
+# Modes that measure a parent's children, so must say which children (`over`).
+MODES_NEEDING_OVER = {"ratio", "count"}
+# A mapping-valued severity: chosen from an item field, e.g.
+#   {field: join_type, map: {OUTER: HIGH, LEFT_OUTER: INFO}, default: MEDIUM}
+SEVERITY_MAP_KEYS = {"field", "map", "default"}
 
 _COMBINATORS = {"all", "any", "not", "count"}
 LEAF_OPERATORS = [op for op in OPERATORS if op not in _COMBINATORS]
@@ -135,6 +146,41 @@ def _where_problems(expr: dict, value: Any, path: str) -> List[str]:
     return expr_problems(value, path)
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _compiles(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        re.compile(value)
+    except re.error:
+        return False
+    return True
+
+
+# Operand checks for leaf operators; `eq` and `contains` take any scalar.
+_NUMERIC_OPS = ("gt", "gte", "lt", "lte", "len_gt", "len_lt")
+_BOOL_OPS = ("exists", "nonblank", "truthy")
+_OPERAND_CHECKS: Dict[str, Tuple[Callable[[Any], bool], str]] = {
+    "in": (lambda v: isinstance(v, list), "needs a list"),
+    "regex": (_compiles, "does not compile as a regular expression"),
+    "not_regex": (_compiles, "does not compile as a regular expression"),
+    **{op: (_is_number, "needs a number") for op in _NUMERIC_OPS},
+    **{op: (lambda v: isinstance(v, bool), "needs true or false") for op in _BOOL_OPS},
+}
+
+
+def _operand_problems(expr: dict, path: str) -> List[str]:
+    out: List[str] = []
+    for key, value in expr.items():
+        check = _OPERAND_CHECKS.get(key)
+        if check is not None and not check[0](value):
+            out.append(f"{path}: '{key}' {check[1]} (got {value!r})")
+    return out
+
+
 _EXPR_KEYS: Dict[str, Callable[[dict, Any, str], List[str]]] = {
     "field": _field_problems,
     "all": _list_problems,
@@ -165,7 +211,7 @@ def expr_problems(expr: Any, path: str) -> List[str]:
         handler = _EXPR_KEYS.get(key)
         if handler is not None:
             out += handler(expr, value, f"{path}.{key}")
-    return out + _pairing_problems(expr, path, unknown)
+    return out + _operand_problems(expr, path) + _pairing_problems(expr, path, unknown)
 
 
 def scan_expressions(obj: Any, path: str) -> List[str]:
@@ -252,8 +298,32 @@ def _severity_problems(value: Any, key: str) -> List[str]:
         return [] if value in SEVERITIES else \
             [f"{key}: unknown severity '{value}' (known: {_known(SEVERITIES)})"]
     if isinstance(value, dict):
-        return scan_expressions(value, key)
+        return _severity_map_problems(value, key)
     return [f"{key}: must be a severity name or a mapping"]
+
+
+def _severity_name_problems(value: Any, key: str) -> List[str]:
+    if isinstance(value, str) and value in SEVERITIES:
+        return []
+    return [f"{key}: unknown severity '{value}' (known: {_known(SEVERITIES)})"]
+
+
+def _severity_map_problems(sev: dict, key: str) -> List[str]:
+    """`{field: <path>, map: {<value>: <SEVERITY>}, default: <SEVERITY>}`."""
+    out = [f"{key}: unknown key '{k}' (known: {_known(sorted(SEVERITY_MAP_KEYS))})"
+           for k in sorted(map(str, set(sev) - SEVERITY_MAP_KEYS))]
+    out += [f"{key}.{k}: required" for k in sorted(SEVERITY_MAP_KEYS - set(sev))]
+    if "field" in sev:
+        out += _field_problems(sev, sev["field"], f"{key}.field")
+    mapping = sev.get("map")
+    if "map" in sev and (not isinstance(mapping, dict) or not mapping):
+        out.append(f"{key}.map: must be a non-empty mapping of value -> severity")
+    elif isinstance(mapping, dict):
+        for value, name in mapping.items():
+            out += _severity_name_problems(name, f"{key}.map.{value}")
+    if "default" in sev:
+        out += _severity_name_problems(sev["default"], f"{key}.default")
+    return out
 
 
 # ── one rule ────────────────────────────────────────────────────────────────
@@ -301,10 +371,21 @@ def _aggregate_problems(rule: Rule) -> List[str]:
             out.append("aggregate.mode is required for a declarative rule")
     elif mode not in MODES:
         out.append(f"aggregate.mode: unknown mode '{mode}' (known: {_known(MODES)})")
+    return out + _over_problems(agg, mode) + scan_expressions(agg, "aggregate")
+
+
+def _over_problems(agg: dict, mode: Any) -> List[str]:
+    """Unknown aggregate keys (a typo'd `wher:` would otherwise filter nothing) and the
+    children scope a ratio/count rule measures."""
+    out = [f"aggregate: unknown key '{k}' (known: {_known(sorted(AGGREGATE_KEYS))})"
+           for k in sorted(map(str, set(agg) - AGGREGATE_KEYS))]
     over = agg.get("over")
-    if over is not None and over not in SCOPES:
+    if over is None:
+        if mode in MODES_NEEDING_OVER:
+            out.append(f"aggregate.over is required for mode {mode} (the children it measures)")
+    elif over not in SCOPES:
         out.append(f"aggregate.over: unknown scope '{over}' (known: {_known(SCOPES)})")
-    return out + scan_expressions(agg, "aggregate")
+    return out
 
 
 def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> List[str]:
