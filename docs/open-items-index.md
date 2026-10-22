@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**214 total items** across 24 skills — **72 open**, 126 verified, 16 deferred
+**213 total items** across 24 skills — **71 open**, 126 verified, 16 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -13,8 +13,8 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
 | ts-dependency-manager | 16 | **7** | 8 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
-| ts-audit | 16 | **6** | 10 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
+| ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
@@ -33,7 +33,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (72 items)
+### Untagged (71 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -44,7 +44,6 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-audit | #11 | User Action enum | UNVERIFIED |
 | ts-audit | #12 | Query Text column parsability | UNVERIFIED |
 | ts-audit | #13 | Liveboard viz fingerprinting | UNVERIFIED |
-| ts-audit | #16 | `ai/instructions/get` status for a Model the caller may not read | OPEN |
 | ts-convert-from-looker | #1 | `type: number` cross-measure SQL inlining edge cases | OPEN |
 | ts-convert-from-looker | #3 | Multiple explores that share views: one model or separate models | OPEN |
 | ts-convert-from-looker | #4 | `sql_always_where:` → ThoughtSpot RLS | OPEN |

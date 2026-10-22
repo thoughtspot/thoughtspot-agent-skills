@@ -187,31 +187,6 @@ covers the TML path. This API would add coverage for instructions set only via t
 
 ---
 
-### #16 — `ai/instructions/get` status for a Model the caller may not read — OPEN (DEFERRED)
-
-**Question.** Since ts-audit 3.0.0 the AI-instructions lookup treats a final **401** as
-about the run (the credential is bad: abort once) and a **403/404** as about one Model
-(skip it, "Could not be read"). That split assumes the server answers a valid token
-that lacks permission on ONE Model with 403 (or 404), never 401. Unverified: if it
-answers 401 there, one unreadable Model aborts the whole audit.
-
-**Not a regression.** Before 3.0.0 any 4xx on this call aborted the run, so the worst
-case is today's behaviour on every status.
-
-**To verify, in this order** (`.claude/rules/api-research.md`):
-1. SpotterCode MCP: `get-rest-api-reference` for the AI-instructions get operation
-   (search `query: "ai instructions get"` for its operation id) — which status codes the
-   spec documents for a missing object privilege.
-2. Live, read-only: as a user with Spotter coaching privileges but no access to one
-   Model, call `POST /api/rest/2.0/ai/instructions/get` for that Model's guid and record
-   the status and body. Record both results here.
-
-**If it is 401:** tell a per-object refusal from a bad credential (for example by the
-body's error code), and skip the Model instead of aborting. Deferred: no audit has
-been seen to hit it.
-
----
-
 ## Phase 2 — Usage Analysis (future)
 
 ### #9 — searchdata against BI Server — UNVERIFIED

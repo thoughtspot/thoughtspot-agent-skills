@@ -14532,3 +14532,30 @@ coverage) plus: every rule id exists, and a revival of a retired rule is an erro
 loudly, naming the layer and key. Unit-test each refusal.
 
 **Target:** before admin overrides ship; review by 2027-03-31.
+
+## BL-409 — does `ai/instructions/get` answer 401 or 403 for a Model the caller may not read? `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 final review (deferred item 12).
+Filed here rather than as a ts-audit open item: any edit to
+`agents/cli/ts-audit/references/open-items.md` puts its ten pre-existing UNVERIFIED
+items in the PR-scoped open-items gate's hard-fail scope.
+
+**What.** Since ts-audit 3.0.0 the AI-instructions lookup treats a final **401** as about
+the run (the credential is bad: abort once) and a **403/404** as about one Model (skip
+it, "Could not be read"). That split assumes the server answers a valid token that lacks
+permission on ONE Model with 403 (or 404), never 401. Unverified: if it answers 401
+there, one unreadable Model aborts the whole audit. Not a regression — before 3.0.0 any
+4xx on this call aborted the run.
+
+**Do**, in this order (`.claude/rules/api-research.md`):
+1. SpotterCode MCP: `get-rest-api-reference` for the AI-instructions get operation
+   (`query: "ai instructions get"` finds its operation id) — which status codes the spec
+   documents for a missing object privilege.
+2. Live, read-only: as a user with Spotter coaching privileges but no access to one
+   Model, call `POST /api/rest/2.0/ai/instructions/get` for that Model's guid; record the
+   status and body.
+3. If it is 401: tell a per-object refusal from a bad credential (for example by the
+   body's error code) in `context._fetch_ai_instructions`, skip the Model instead of
+   aborting, and add the case to `test_audit_ai_lookup_failures.py`.
+
+**Target:** 2027-01-31.
