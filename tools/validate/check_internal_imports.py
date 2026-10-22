@@ -73,7 +73,13 @@ SCAN_ROOT = Path("tools/ts-cli/ts_cli")
 # referenced fix merges — this is scaffolding for landing the gate now, not a permanent
 # exemption. Format: (repo-relative path, import lineno, target module, imported name).
 # --------------------------------------------------------------------------------------
-ALLOWLIST: set[tuple[str, int, str, str]] = set()
+ALLOWLIST: set[tuple[str, int, str, Optional[str]]] = {
+    # 2026-10-22, feat/audit-rule-catalog: the equivalence comparator (plan Task 3) imports
+    # the rule engine lazily, and plan Task 4 creates ts_cli/audit/engine/run.py on the same
+    # branch. REMOVE this entry in Task 4, once run.py defines run_rules. (name is None:
+    # the finding is "module does not exist", which carries no imported name.)
+    ("tools/ts-cli/ts_cli/audit/equivalence.py", 169, "ts_cli.audit.engine.run", None),
+}
 
 
 @dataclass
