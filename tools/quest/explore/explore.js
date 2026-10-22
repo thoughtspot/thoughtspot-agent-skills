@@ -80,6 +80,7 @@
   function show() {
     $("dialog-title").textContent = state.screen !== "map" && realms[state.realm] ? realms[state.realm].name : pack.title;
     $("screen").innerHTML = screens.draw(state.screen);
+    portrait();
     if (state.screen === "battle" && state.step === 0 && !state.flash) {      // what you face it with
       const line = document.createElement("p");
       line.className = "dim"; line.textContent = S("explore_face_foe", { weapon: itemName(fun.weapon) });
@@ -87,6 +88,18 @@
     }
     Sound.music(screens.MUSIC_FOR[state.screen] || "map");
     $("screen").querySelector(".choices button")?.focus({ preventScroll: true });
+  }
+  // Who you're talking to, drawn from the map's own art beside the question.
+  let sheet = null;                      // the atlas and its columns, once loaded
+  function portrait() {
+    const who = world && world.objects.find(o => (dialogStep === "portal" ? o.type === "portal" && realms[state.realm] && o.to === realms[state.realm].id : o.step === dialogStep));
+    const c = $("portrait");
+    c.hidden = !(who && sheet);
+    if (c.hidden) return;
+    const f = who.sprite.frame.name, g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, TILE, TILE);
+    g.drawImage(sheet.atlas, (f % sheet.columns) * TILE, Math.floor(f / sheet.columns) * TILE, TILE, TILE, 0, 0, TILE, TILE);
   }
   function openDialog(step) {
     dialogStep = step;
@@ -457,8 +470,22 @@
     say(t);
   }
   // `from`: the realm just left, so the overworld puts the player beside that realm's door.
+  // The view: the whole map where the screen allows it, at no less than 1.25 screen pixels a game
+  // pixel (and no taller than most of the window); otherwise as much of it as fits, and the camera
+  // follows. Never smaller than 20x8 tiles, the size the realms are drawn for.
+  const MIN_SCALE = 1.25;
+  function fitView(doc) {
+    const box = $("world").clientWidth || 960;
+    const cols = Math.min(doc.width, Math.max(20, Math.floor(box / (MIN_SCALE * TILE))));
+    const scale = box / (cols * TILE);
+    const rows = Math.min(doc.height, Math.max(8, Math.floor(window.innerHeight * 0.7 / (scale * TILE))));
+    $("world").style.aspectRatio = `${cols} / ${rows}`;
+    game.resize(cols * TILE, rows * TILE);
+  }
+  window.addEventListener("resize", () => { if (world) fitView(world.doc); });
   function goTo(mapId, from = null) {
     world = null;
+    fitView(MAPS[mapId]);
     game.start(api => {
       const w = new World(api, mapId, MAPS[mapId], from);
       w.create();
@@ -479,6 +506,7 @@
     const ids = ["overworld", ...explorable];
     const [atlas, ...docs] = await Promise.all([image("tiles/tiles.png"), ...ids.map(id => fetch(`maps/${id}.tmj`).then(r => r.json()))]);
     MAPS = Object.fromEntries(ids.map((id, i) => [id, docs[i]]));
+    sheet = { atlas, columns: MAPS.overworld.tilesets[0].columns };
     game = Quest.engine.create({
       parent: $("world"), width: 320, height: 128, background: "#16131f", atlas, columns: MAPS.overworld.tilesets[0].columns,
       keyTarget: $("world"),
@@ -706,6 +734,9 @@
         // A question in a realm offers the way back to the realm (Esc) and out to the world map.
         talk(world.nearby());
         if ($("leave").hidden || $("close").textContent !== S("explore_close_realm")) throw new Error("a realm's dialog doesn't offer the way back and out");
+        const art = [...$("screen").querySelectorAll(".art")];
+        if ($("portrait").hidden || art.some(a => getComputedStyle(a).display !== "none"))
+          throw new Error("the dialog doesn't show who you talk to, or shows the classic page's art");
         $("leave").click();
         await until(() => world && world.mapId === "overworld");
         if (dialog.open || state.screen !== "map") throw new Error("leaving for the world map left a dialog or a realm open");

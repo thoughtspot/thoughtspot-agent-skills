@@ -266,7 +266,11 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
   `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
   person looks; the build checks it.
-- **The overworld** is a small world the camera scrolls (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
+- **The view** fits the whole map where the screen allows (no less than 1.25 screen pixels a game
+  pixel, and no taller than most of the window), so on a laptop the whole overworld shows at once;
+  on a narrow screen it shows as much as fits and the camera follows. **Dialogs** show who you're
+  talking to, drawn from the map's art, and not the classic page's ASCII art.
+- **The overworld** is a small world (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
   door for each realm in its own scene, each with a guard beside it who says in one line what the
   realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
   (`explore/#from=<realm>`), puts you back beside its door. The scenes: a

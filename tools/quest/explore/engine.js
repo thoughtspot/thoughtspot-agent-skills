@@ -154,7 +154,14 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     keyTarget.addEventListener("keyup", onKey(false));
     keyTarget.addEventListener("blur", () => input.resetKeys());
 
-    const game = { loop: { frame: 0 }, canvas, input };
+    const game = { loop: { frame: 0 }, canvas, input,
+      // A new size for the view, in game pixels (the page scales the canvas to fit).
+      resize(w, h) {
+        if (w === width && h === height) return;
+        width = w; height = h; canvas.width = w; canvas.height = h;
+        ctx.imageSmoothingEnabled = false;      // a resized canvas forgets it
+        camera.w = w; camera.h = h; camera.snap();
+      } };
     let scene = null, now = 0;
     const timers = [], tweens = [];
     const time = {
