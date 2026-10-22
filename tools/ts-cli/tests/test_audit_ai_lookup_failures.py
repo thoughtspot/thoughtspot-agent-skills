@@ -84,6 +84,13 @@ FAILURES = {
             "ThoughtSpot API 500 on POST " + AI_PATH + " — internal failure 42"),
     "non-JSON 200": (lambda url: _response(url, 200, b"<html>not json</html>"),
                      "Expecting value"),
+    # A final 1xx or 3xx is not an answer even with a JSON body (`resp.ok` is true for
+    # both: it is false only for 4xx/5xx) — skipped like any other non-2xx.
+    "302 with JSON": (lambda url: _response(url, 302, {"nl_instructions_info": [
+        {"instructions": ["Use net revenue"], "scope": "GLOBAL"}]}),
+                      "ThoughtSpot API 302 on POST " + AI_PATH),
+    "101 with JSON": (lambda url: _response(url, 101, {"nl_instructions_info": []}),
+                      "ThoughtSpot API 101 on POST " + AI_PATH),
 }
 
 

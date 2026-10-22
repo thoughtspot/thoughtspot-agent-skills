@@ -240,8 +240,8 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
     * A final 401 (it survived the client's one re-authentication: the credential is
       bad) or a 429 (rate limited; the client does not retry it) aborts the run once
       with one line, `SystemExit(1)`.
-    * Any other non-2xx (403, 404, a 5xx after the client's 502/503/504 retries, ...) is
-      about this Model: skip it, the reason being `format_http_error`'s secret-free line
+    * Any other non-2xx (403, 404, a 5xx after the client's 502/503/504 retries, a final
+      1xx or 3xx — whatever its body, ...) is about this Model: skip it, the reason being `format_http_error`'s secret-free line
       on the path.
     * A 2xx whose body is not JSON (`ValueError` from `resp.json()`) skips this Model."""
     import requests
@@ -257,7 +257,7 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
             print(f"{format_http_error('POST', _AI_INSTRUCTIONS_PATH, resp)} — "
                   f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
             raise SystemExit(1)
-        if not resp.ok:
+        if not 200 <= resp.status_code < 300:  # `resp.ok` passes a final 1xx/3xx
             reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
         else:
             try:
