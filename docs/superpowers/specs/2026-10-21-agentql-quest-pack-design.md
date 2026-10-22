@@ -149,7 +149,7 @@ lexicon:                               # the roles the engine knows, named the p
   reward: hoard
   currency: gold
 explore:
-  realms: [mines]                      # realms with a map; others are played in classic mode
+  realms: [law, mines]                 # realms with a map; others are played in classic mode
 ```
 
 The build refuses two packs that share an `id`, a `publish_path` or a `storage_key`. Every pack is
@@ -510,6 +510,8 @@ kept, and the character can be asked again.
 8. **A world for the doors:** Tiny Town and Tiny Battle (CC0) join the atlas; the overworld becomes
    a scrolling world with a scene per realm (a mountain tunnel, a library over a moat, a pier, a
    tree tunnel, a boat) and a guard per realm, dressed for it, with one short line each.
+9. **Law explorable:** a library of four reading rooms, a throne per hall, a gate between rooms
+   that opens when the hall before it is done, and the decree at the end.
 
 **Then:** you play it, and the remaining realms get maps.
 

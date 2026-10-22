@@ -271,6 +271,10 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
   (the Lake, a fisherman), a tunnel of golden trees (the
   Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
+- **Law** is a library of four reading rooms in a row, its bookshelves along the walls. Each room
+  holds a hall's throne; talking to it opens the hall's questions, and the gate to the next room
+  stays shut until that hall is done. After the last one the realm's decree is shown before you
+  leave.
 - **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
   roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
   `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your

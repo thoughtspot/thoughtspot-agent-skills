@@ -121,6 +121,7 @@
       closeDialog(); return goTo(realms[state.realm].id);
     }
     hud();
+    if (state.screen === "decree") return show();          // a realm of halls ends with its decree: read it first
     if (machine.expected(state) !== dialogStep) { closeDialog(); if (world) world.refresh(); return; }
     show();
   }
@@ -523,11 +524,12 @@
           if (goal.has([tx, ty].join())) { end = [tx, ty]; break; }
           for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const n = [tx + dx, ty + dy];
+            if (n[0] < 0 || n[1] < 0 || n[0] >= world.doc.width || n[1] >= world.doc.height) continue;   // the map, not beyond it
             if (n.join() in from || blockedTile(...n)) continue;
             from[n.join()] = [tx, ty]; todo.push(n);
           }
         }
-        if (!end) throw new Error(`no path to ${obj.step || obj.type}`);
+        if (!end) throw new Error(`no path to ${obj.step || obj.type} at (${Math.floor(obj.x / TILE)}, ${Math.floor(obj.y / TILE)}) from (${start})`);
         const path = [];
         for (let t = end; t; t = from[t.join()]) path.unshift(t);
         for (const [tx, ty] of path) {
@@ -681,8 +683,8 @@
         try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
       }
-      if (!reduced) {                        // the living breathe
-        const someone = world.objects.find(o => ["merchant", "guide", "foe"].includes(o.type));
+      const someone = world.objects.find(o => ["merchant", "guide", "foe", "npc"].includes(o.type));
+      if (!reduced && someone) {             // the living breathe (a realm of halls has only thrones)
         const ys = new Set();
         for (let i = 0; i < 30; i++) { ys.add(someone.sprite.oy); await wait(100); }
         if (ys.size < 2) throw new Error("nobody breathes");
@@ -690,9 +692,14 @@
       {                                      // facing the exit, it answers, whoever else is close
         const exit = world.objects.find(o => o.type === "exit"), want = machine.expected(state);
         const step = world.objects.find(o => o.step === want);
-        world.player.setPosition(exit.x, exit.y - TILE); world.facing = [0, 1];
+        // stand on a free tile beside it, facing it
+        const face = obj => {
+          const side = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx, dy]) => !blockedTile(Math.floor(obj.x / TILE) + dx, Math.floor(obj.y / TILE) + dy));
+          world.player.setPosition(obj.x + side[0] * TILE, obj.y + side[1] * TILE); world.facing = [-side[0], -side[1]];
+        };
+        face(exit);
         if (world.nearby() !== exit) throw new Error("facing the exit, something else answered");
-        world.player.setPosition(step.x, step.y - TILE); world.facing = [0, 1];
+        face(step);
         if (world.nearby() !== step) throw new Error("facing the step the game waits on, it didn't answer");
       }
       {                                      // solid things stop the player: the shut gate, and someone
@@ -763,5 +770,5 @@
       return steps;
     }
   };
-  if (SMOKE) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message}`));
+  if (SMOKE) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message} @ ${String(e.stack || "").split("\n").slice(1, 3).join(" | ")}`));
 })();
