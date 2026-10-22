@@ -19,10 +19,10 @@
   "hoard": 66,
   "hoard_empty": 66,
   "portals": {
-    "law": 234,
-    "mines": 9,
+    "law": 494,
+    "mines": 490,
     "lake": 230,
-    "forests": 218,
+    "forests": 498,
     "isles": 417
   },
   "weapon": "sword",

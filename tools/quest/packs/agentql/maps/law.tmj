@@ -563,10 +563,10 @@
    "name": "tiles",
    "image": "../tiles/tiles.png",
    "imagewidth": 192,
-   "imageheight": 640,
+   "imageheight": 672,
    "tilewidth": 16,
    "tileheight": 16,
-   "tilecount": 480,
+   "tilecount": 504,
    "columns": 12,
    "margin": 0,
    "spacing": 0

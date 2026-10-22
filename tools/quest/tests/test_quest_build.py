@@ -3342,7 +3342,7 @@ def test_the_packs_tiles_name_every_frame_the_explore_page_draws():
 
 @pytest.mark.parametrize("edit,needle", [
     (lambda f: f.pop("gate"), "needs 'gate'"),
-    (lambda f: f.update(gate=480), "'gate' must be a frame of tiles.png, 0 to 479"),
+    (lambda f: f.update(gate=504), "'gate' must be a frame of tiles.png, 0 to 503"),
     (lambda f: f.update(gate="28"), "'gate' must be a frame"),
     (lambda f: f.update(gate=True), "'gate' must be a frame"),
     (lambda f: f.update(gate=-1), "'gate' must be a frame"),
@@ -3359,12 +3359,12 @@ def test_a_broken_tile_index_fails_the_build(tmp_path, monkeypatch, edit, needle
 
 
 @pytest.mark.parametrize("edit,needle", [
-    (lambda m: m["tilesets"][0].update(imagewidth=176), "says its image is 176x640, but ../tiles/tiles.png is 192x640"),
-    (lambda m: m["tilesets"][0].update(tilecount=200), "must have tilecount 480 and columns 12"),
-    (lambda m: m["tilesets"][0].update(columns=11), "must have tilecount 480 and columns 12"),
+    (lambda m: m["tilesets"][0].update(imagewidth=176), "says its image is 176x672, but ../tiles/tiles.png is 192x672"),
+    (lambda m: m["tilesets"][0].update(tilecount=200), "must have tilecount 504 and columns 12"),
+    (lambda m: m["tilesets"][0].update(columns=11), "must have tilecount 504 and columns 12"),
     (lambda m: m["tilesets"][0].update(firstgid=2), "needs firstgid 1"),
     (lambda m: m["tilesets"][0].update(image="../maps/mines.tmj"), "is not in the pack"),
-    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 481), "uses a tile past t"),
+    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 505), "uses a tile past t"),
 ])
 def test_a_map_must_match_its_tileset(tmp_path, monkeypatch, edit, needle):
     packs = _copy_packs(tmp_path)
@@ -4286,3 +4286,25 @@ def test_a_classic_folder_that_is_not_the_builds_survives_a_build_without_home(t
         keep = target / B.EXPLORE_MARK
     _agentql_with(tmp_path, monkeypatch, ("  home: true ", "  home: false "))
     assert keep.exists() and (site / "classic").exists()
+
+# ---- art: a mountain for the Mines, an ornate library for Law, a canopy for the Forests ------------
+
+def test_the_scenes_use_their_new_art_and_it_is_licensed():
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    assert (frames["portals"]["mines"], frames["portals"]["law"], frames["portals"]["forests"]) == (490, 494, 498)
+    licence = (PACK_DIR / "tiles/LICENSE-adventure-awaits.txt").read_text(encoding="utf-8")
+    assert "Creative Commons Zero, CC0" in licence and "Frames 480-490" in licence
+    atlas = (PACK_DIR / "tiles/make_atlas.py").read_text(encoding="utf-8")
+    assert "877ef33819d9271e07bbaecf282ebdac3656df51066e43de28956ebca0c6691b" in atlas   # the zip the slices came from
+    world = json.loads((PACK_DIR / "maps/overworld.tmj").read_text(encoding="utf-8"))
+    layer = lambda name: next(l for l in world["layers"] if l["name"] == name)["data"]
+    walls, floor, w = layer("walls"), layer("floor"), world["width"]
+    at = {(o["type"], (o["properties"][0]["value"] if o["properties"] else None)): (o["x"] // TILE, o["y"] // TILE)
+          for o in _layer(world, "objectgroup")["objects"]}
+    lx, ly = at[("portal", "law")]
+    assert walls[ly * w + lx - 1] == walls[ly * w + lx + 1] == 491 + 1           # a column either side of Law's door
+    assert walls[(ly - 1) * w + lx] == 492 + 1                                    # its pediment over it
+    fx, fy = at[("portal", "forests")]
+    assert all(floor[fy * w + x] == 499 + 1 for x in range(fx - 12, fx))          # the canopy lane up to the arch
+    mx, my = at[("portal", "mines")]
+    assert my == 1 and walls[mx] in (480 + 1, 481 + 1, 482 + 1)                   # the tunnel in the cliff, grass above

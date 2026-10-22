@@ -271,13 +271,16 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
   tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
   turned out to bundle GPL-3.0 code; design decision 5.)
-- **Tiles** are three of Kenney's CC0 packs in one atlas (`tiles/LICENSE-kenney.txt`): Tiny
-  Dungeon (frames 0-131), Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473:
-  water, rock, boats), plus a row of ours (132: a wall's top; 133-137: the realm guards, Tiny
-  Dungeon characters recoloured; 138: the dragon and 139: the Forge, drawn pixel by pixel in
-  `make_atlas.py`, since none of the packs has either). `tiles/make_atlas.py` rebuilds
-  `tiles.png` from the packs' zips (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
-  tests check. The tests can't rebuild it themselves (they don't have Kenney's zips), so after
+- **Tiles** are four CC0 packs in one atlas of 504 frames: Kenney's Tiny Dungeon (frames 0-131),
+  Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473: water, rock, boats)
+  (`tiles/LICENSE-kenney.txt`), and eleven slices of Ishtar Pixels' Adventure Awaits (480-490: a
+  cliff face with a tunnel; `tiles/LICENSE-adventure-awaits.txt`). The rest are ours, drawn or
+  recoloured in `make_atlas.py`: 132, a wall's top; 133-137, the realm guards; 138, the dragon;
+  139, the Forge; 491-497, Law's library (a gold-capped column, a pediment, a frieze, an ornate
+  door, a lamp, a balustrade either side); 498-499, the Golden Forests' arch of leaves and the
+  lane under their canopy. `tiles/make_atlas.py` rebuilds `tiles.png` from the packs' zips
+  (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
+  tests check. The tests can't rebuild it themselves (they don't have the zips), so after
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
   `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
   person looks; the build checks it.
@@ -290,10 +293,11 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   door for each realm in its own scene, each with a guard beside it who says in one line what the
   realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
   (`#from=<realm>`), puts you back beside its door. The scenes: a
-  tunnel into a rocky cliff, with rails (the Mines, a dwarf), a library with bookshelves at its door,
-  over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
-  (the Lake, a fisherman), a tunnel of golden trees (the
-  Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
+  tunnel into a mountainside, with rails running into it (the Mines, a dwarf), an ornate library
+  (a pediment over a gilded door between gold-capped columns) over a moat, reached by a bridge with
+  a gold balustrade between two lamps (Law, a wizard), a pier to a small town in the lake (the
+  Lake, a fisherman), a lane under a golden canopy to an arch of leaves (the Golden Forests, an elf
+  in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
 - **The Mines** read west to east: a hall where the merchant and the guide wait, a forge hall
   with the Forge (the compiler) on the north wall between two anvils and torches, mine track
   running east to a barred door with a torch over it, and behind it the dragon's den.
