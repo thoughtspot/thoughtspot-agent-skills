@@ -4138,3 +4138,39 @@ def test_every_realm_puts_its_forge_before_its_door_and_the_dragon_behind(realm)
     at = {o["type"]: (o["x"] // TILE, o["y"] // TILE) for o in _layer(doc, "objectgroup")["objects"]}
     assert at["merchant"][0] < at["compiler"][0] < at["gate"][0] < at["foe"][0], at       # west to east
     assert at["gate"][0] < at["reward"][0]
+
+
+_NEAR = ((0, 1), (0, -1), (1, 0), (-1, 0))
+
+
+@pytest.mark.parametrize("realm", ["mines", "lake", "forests", "isles"])
+def test_nothing_crowds_a_step_or_the_way_in(realm):
+    # A chest, barrel or hoard beside a step (or a barrel that rolls there) can take the talk from
+    # it; an exit right in front of the spawn takes a second Enter as "leave".
+    doc = json.loads((PACK_DIR / f"maps/{realm}.tmj").read_text(encoding="utf-8"))
+    objs = [(o["type"], o["x"] // TILE, o["y"] // TILE, {p["name"]: p["value"] for p in o.get("properties", [])})
+            for o in _layer(doc, "objectgroup")["objects"]]
+    steps = {(x, y) for t, x, y, _ in objs if t in MAPS.ROLES}
+    near = lambda x, y: {(x + dx, y + dy) for dx, dy in _NEAR}
+    for t, x, y, p in objs:
+        tiles = {(x, y)}
+        if t == "barrel":
+            dx, dy = MAPS.ROLLS[p["roll"]]
+            tiles.add((x + dx, y + dy))
+        if t in ("chest", "barrel", "hoard"):
+            assert not any(near(*tile) & steps for tile in tiles), (t, x, y)
+    (sx, sy), = [(x, y) for t, x, y, _ in objs if t == "spawn"]
+    (ex, ey), = [(x, y) for t, x, y, _ in objs if t == "exit"]
+    assert (ex, ey) not in near(sx, sy)
+
+
+WATER = {276 + f + 1 for f in (18, 19, 20, 36, 37, 38, 54, 55, 56)}     # gids of Tiny Battle's water
+
+
+@pytest.mark.parametrize("realm", ["lake", "isles"])
+def test_walkable_water_is_always_bridged(realm):
+    doc = json.loads((PACK_DIR / f"maps/{realm}.tmj").read_text(encoding="utf-8"))
+    layer = lambda name: next(l for l in doc["layers"] if l["name"] == name)["data"]
+    floor, walls, decor = layer("floor"), layer("walls"), layer("decor")
+    open_water = [i for i, g in enumerate(floor) if g in WATER and not walls[i]]
+    assert open_water and all(decor[i] for i in open_water)

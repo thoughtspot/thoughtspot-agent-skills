@@ -163,12 +163,12 @@ guard_forests: "Golden elf: The Golden Forests. Total each store, then average t
 guard_isles: "Sailor: The Shifting Isles. Rank within each region with a window function."
 npc_miner_gate: "Old miner: The Forge glows on the north wall. Follow the track east: that door opens once it has worked."
 npc_miner_barrel: "Old miner: A barrel past that door never sat right. Give it a shove."
-npc_smith_forge: "Smith: The Forge burns in my workshop, between the anvils. Bring your scroll there."
+npc_smith_forge: "Smith: The Forge burns by my workshop, between the anvils. Bring your scroll there."
 npc_smith_pier: "Smith: Then take the pier east. The barred door at its end opens on the dragon's isle."
 npc_forester_forge: "Forester: The Forge stands in the clearing, between its anvils. Take your scroll there first."
 npc_forester_gate: "Forester: The path runs east to a barred door in the trees. Past it, the dragon's glade."
-npc_islander_forge: "Islander: The Forge is on this isle, by the anvils. It works your scroll."
-npc_islander_gate: "Islander: Then cross the bridge east. The barred door at its end opens on the dragon's isle."
+npc_islander_forge: "Sailor: The Forge is on this isle, by the anvils. It works your scroll."
+npc_islander_gate: "Sailor: Then cross the bridge east. Past its barred door, the dragon keeps the far isle."
 item_sword: sword
 item_dagger: dagger
 item_axe: axe

@@ -39,4 +39,4 @@ lexicon:
   currency: gold
 
 explore:
-  realms: [law, mines, lake, forests, isles]   # realms with a map (maps/<id>.tmj); the rest open in classic mode
+  realms: [law, mines, lake, forests, isles]   # realms with a map (maps/<id>.tmj); any other opens in classic mode

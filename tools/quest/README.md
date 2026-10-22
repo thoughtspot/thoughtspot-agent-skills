@@ -252,7 +252,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   refuses, before writing anything, an `explore/` it didn't write (or a link), and any output in
   `tools/quest/` other than `dist/`.
 - **Everything is ours and local:** no third-party code, no outside requests, and under 3 MB
-  (about 199 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
+  (about 310 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
   draws the map's tile layers and one-tile sprites from the atlas on a 2D canvas, moves the
   player's 12x12 body against solid tiles and solid sprites (one axis at a time, so it slides along
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
@@ -287,7 +287,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **The Lake, the Golden Forests and the Shifting Isles** read the same way: the merchant and the
   guide in the west, the Forge between two anvils, a barred door east, and the dragon beyond it.
   The Lake is a craftsmen's town with a pier out to the dragon's isle; the Forests a path through
-  golden trees to a glade; the Isles three isles joined by plank bridges. Someone in each (a smith,
+  golden trees to a glade; the Isles three isles joined by stone bridges. Someone in each (a smith,
   a forester, an islander) points the way.
 - **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
   A petitioner stands before each throne (a throne's optional `look`, from `tiles.json`'s npcs);

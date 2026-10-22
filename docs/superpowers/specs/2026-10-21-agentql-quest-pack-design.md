@@ -385,7 +385,7 @@ Dwarven Mines, about 2–3 minutes:
 - **The same rule in both front ends.** The shared `unlock` rule applies to both, so a new player
   must finish Law first.
 - **A realm without a map opens in classic mode** at its gate (`/agentql-quest/#realm=<id>`),
-  with a "back to the map" link (PR 5). Until PR 9 that was Law too.
+  with a "back to the map" link (PR 5). Since PR 11 every AgentQL realm has a map.
 - **Saves are shared.** Classic (`/agentql-quest/`) and explore (`/agentql-quest/explore/`) share
   an origin and the `aqq` saves. Explore re-reads them on `pageshow` and before every portal
   check, so returning with Back from a realm played in classic shows it as done.
@@ -430,7 +430,7 @@ kept, and the character can be asked again.
   local loop is how the manual checklist (§6) is done.
 - **No outside requests.**
 - **Budget:** 3 MB for the explore folder. The engine is about 10 KB, the fonts are 48 KB, and maps
-  and tiles are small (about 199 KB in all).
+  and tiles are small (about 310 KB in all).
 
 ## 5. Testing
 
@@ -519,10 +519,10 @@ kept, and the character can be asked again.
     out, and the foe looked like a red crab, not a dragon). The map reads west to east to a torch-lit barred door;
     the Forge and the dragon get their own frames, used in every realm.
 
-11. **Every realm explorable:** the Lake (a craftsmen's town on the shore, a pier east to the
+11. **Every realm explorable:** the Lake (a craftsmen's town in the lake, a pier east to the
     dragon's isle), the Golden Forests (a path through golden trees, a clearing with the Forge, a
     barred door in the trees before the dragon's glade) and the Shifting Isles (isles joined by
-    plank bridges, the last bridge barred). Each reads west to east, as the Mines do.
+    stone bridges, the last bridge barred). Each reads west to east, as the Mines do.
 
 **Then:** you play it.
 

@@ -357,7 +357,9 @@
       // Something that isn't a step (the exit, a door, a chest, someone to talk to) answers when you
       // face it squarely, so you can always leave; otherwise the step the game waits on answers first.
       const faced = close.find(o => !o.step && this.ahead(o) > 0.8);     // squarely: not across a diagonal
-      return faced || close.find(o => o.step && o.step === want) || close[0] || null;
+      const next = close.find(o => o.step && o.step === want);
+      if (faced && next && this.ahead(next) > this.ahead(faced)) return next;   // but not over the step you face more squarely
+      return faced || next || close[0] || null;
     }
     // A shut gate the player stands beside, if any (gates aren't objects: nothing to talk to).
     shutGate() {
@@ -705,9 +707,12 @@
           throw new Error("the player you see isn't where its body is");
         // Back from the classic page with gold won there: the bar shows it at once.
         const before = $("hud-gold").textContent;
-        progress.finish([...realms].reverse().find(r => r.id !== realmId && r.id !== realms[0].id).id, 10);   // another realm, not this one
-        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
-        if ($("hud-gold").textContent === before) throw new Error("the gold bar didn't catch up after Back");
+        const other = [...realms].reverse().find(r => r.id !== realmId && r.id !== realms[0].id);   // another realm, not this one
+        if (other) {                         // (a pack of one or two realms has none to spare)
+          progress.finish(other.id, 10);
+          window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+          if ($("hud-gold").textContent === before) throw new Error("the gold bar didn't catch up after Back");
+        }
       }
       // Back from the classic page with a gate left open: the page closes it and returns to the map.
       talk(portal);
