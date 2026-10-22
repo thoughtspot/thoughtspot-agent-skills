@@ -185,7 +185,7 @@ are roughly ordered by value÷effort.
 | BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
 | BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
 | BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
-| BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: `checks_ai` returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
+| BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: the audit's coaching read (`@is_coached`, `audit/engine/fields.py`; `checks_ai` before the rule-catalog cut-over) returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
 | ~~BL-289~~ | ~~CSR is retrievable (`ts security column-rules export`) but **not walked** — `ts metadata report` declares `csr_hits` at `report/__init__.py:203`, passes it at `:307`, and never appends to it, so the dependency walk reports CSR as "Not Checked" by construction~~ | DONE (2026-10-02, PR #506) — the report fetches CSR on the source's owning table, resolved from a column GUID's header `owner`; live-verified detecting a rule on embed-1 staging |
 | BL-290 | four `open-item #N` citations in `tools/ts-cli/` docstrings point at ts-dependency-manager items deleted in 2026-06 (`dependency/mutate.py:448` #12, `report/tml_probes.py:14` #7, `:44` #6, `:75` #10 — the last self-annotates "resolved 2026-05-28"); `check_open_item_citations` scans skill dirs only, so nothing sees them | next validator pass |
 | BL-291 | `ts-object-model-coach`'s Step 8e gate defers the keyword-bearing reference-question tiers as unverified, but the verification happened (2026-04-27) and `references/question-taxonomy.md` marks `t1.top_n`, `t2.this_vs_last` and `t3.year_filter` ✅ Importable — the gate and a reference file in the same directory disagree about what the generator should emit | next model-coach pass |
@@ -1322,8 +1322,10 @@ On `nebula-ts-semview` (DBX Org), Model `3fee09f8-35a8-49cd-8a84-777b83d694a6`:
 | `POST ai/instructions/set` `{data_source_identifier, nl_instructions_info:[{instructions:[text], scope:"GLOBAL"}]}` | `{"success":true}` HTTP 200; `get` returns the text |
 | TML export after a successful API `set` | `model_instructions` **absent** — TML is neither a write nor a read path on this build |
 
-Consequences: `tml_probes.py:129` and `audit/checks_ai.py` read a TML field that does not
-carry the value here — only `audit/context.py:231` (API `get`) sees it. Whether `set`
+Consequences: `tml_probes.py:129` and the audit's coaching read (`@is_coached` in
+`audit/engine/fields.py`; `audit/checks_ai.py` until the rule-catalog cut-over) read a TML
+field that does not carry the value here — only the API `get` (`audit/context.py`
+`_fetch_ai_instructions`, which `@is_coached` also reads) sees it. Whether `set`
 replaces or appends is **unverified** — assume replace, so any writer must `get` and merge first.
 
 ### Scope widened: converters and `ts-link-*` also need the write
@@ -11640,7 +11642,8 @@ collision candidate; investigating it found the collision half already covered a
 different, live gap underneath.
 
 **Affects:** `agents/cli/ts-audit/references/check-catalog.md`,
-`tools/ts-cli/ts_cli/audit/checks_*.py`.
+`tools/ts-cli/ts_cli/audit/catalog/rules/*.yaml` and `tools/ts-cli/ts_cli/audit/generate.py`
+(the `checks_*.py` functions this was filed against were replaced by the rule catalog).
 
 **The collision half is already closed, and this is not it.** Two branches each adding
 `def check_a6(...)` is caught by `check_python_redefinitions.py` (shipped 2026-09-22):
@@ -11654,8 +11657,8 @@ is invisible to the skill that reads the catalog.
 
 **Why a naive comparison is wrong.** The one current discrepancy, `H6`, is *correct*: it sits
 in the catalog's "Deferred / Not assigned" table (`| H6 | Duplicate sets — deferred (requires
-deep set comparison) |`) and has a stub `def check_h6` at `checks_human.py:171` that emits
-nothing. Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
+deep set comparison) |`) and had a stub `def check_h6` at `checks_human.py:171` that emitted
+nothing (now a retired catalog rule in `rules/human.yaml`). Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
 single-id regex silently skips, so the exemption is accidental rather than expressed. Any
 rule must read the main catalog table and the deferred table as different things.
 

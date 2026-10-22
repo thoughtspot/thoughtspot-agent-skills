@@ -142,7 +142,7 @@ def test_d10_model_where_every_table_contributes_columns_returns_nothing():
     "alias prefixes its column_id with the ALIAS (model-tml schema, `alias` row). "
     "AuditContext.column_types (context.py:44) already does `alias or name`; the "
     "check does not, so a fully-populated aliased table is reported zero-column. "
-    "D6 (checks_data.py:184) and D11 (via _table_role, legacy) are blind the same way — "
+    "D6 (legacy checks_data.py:184) and D11 (via the legacy _table_role) are blind the same way — "
     "there they cause a silent miss rather than a false positive."))
 def test_d10_aliased_table_is_not_zero_column():
     assert run_rule(fx.data_model_aliased_table_with_columns(), "D10") == []
@@ -175,7 +175,7 @@ def test_d11_many_to_one_join_returns_nothing():
 @pytest.mark.xfail(strict=True, reason=(
     "D11's else branch (legacy checks_data.py:340; the catalog reproduces it) hardcodes 'ONE_TO_MANY join' into the "
     "detail, so a MANY_TO_MANY join — the worse of the two, and the one the check "
-    "explicitly admits at checks_data.py:322 — is reported to the user as "
+    "explicitly admits at legacy checks_data.py:322 — is reported to the user as "
     "ONE_TO_MANY. The MEDIUM branch interpolates `cardinality` correctly; only the "
     "INFO branch lies."))
 def test_d11_many_to_many_detail_names_the_actual_cardinality():
