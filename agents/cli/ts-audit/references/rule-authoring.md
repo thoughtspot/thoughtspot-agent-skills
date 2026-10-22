@@ -38,6 +38,11 @@ EOF
 
 It must print a path inside this checkout's `tools/ts-cli/`.
 
+`python` and `pytest` below mean the environment ts-cli is installed in (activate it):
+the generator and the re-pin helper import `ts_cli`, which needs its dependencies, and a
+bare system `python3` may be too old or lack them (`ModuleNotFoundError: typer`). Only
+`tools/validate/*.py` are written to run under any `python3` with PyYAML.
+
 ---
 
 ## Rule syntax
@@ -293,18 +298,19 @@ pinned; its examples are its regression net. A pinned rule changed on purpose mo
 pin with the re-pin helper:
 
 ```bash
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3 --dry-run 2>/dev/null
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --rule D3 2>/dev/null
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --input <fixture name> 2>/dev/null
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --drop-rule D3      # retired rules only
-PYTHONPATH=tools/ts-cli python3 tools/ts-cli/tests/repin_findings.py --drop-input <name> # a removed/renamed input
+PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule D3 --dry-run 2>/dev/null
+PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --rule D3 2>/dev/null
+PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --input <fixture name> 2>/dev/null
+PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --drop-rule D3      # retired rules only
+PYTHONPATH=tools/ts-cli python tools/ts-cli/tests/repin_findings.py --drop-input <name> # a removed/renamed input
 ```
 
 It rewrites only the named entries, from the current catalog. A rule not active under a
 profile pins to `[]` there. It prints a before/after for every entry it changes, and the
 gzip shows in a PR only as "Binary files differ", so **paste that output into the PR
 description**. The before/after is on stdout; stderr carries progress lines, hence
-`2>/dev/null`. `--drop-rule` is refused while the rule is active under any profile.
+`2>/dev/null`. Redirect it to a file to paste from (`> repin-D3.txt`): piping it into
+`head` closes the pipe and kills the helper before it writes the pin. `--drop-rule` is refused while the rule is active under any profile.
 `--drop-input` takes out a committed input you removed or renamed (refused while the
 builder is still committed); re-pin the new name with `--input`.
 
@@ -341,7 +347,7 @@ builder is still committed); re-pin the new name with `--input`.
    `pytest tools/ts-cli/tests/test_audit_rule_examples.py -k <ID> -q`. Then add boundary
    tests if the rule has bands or a mapping: one input just inside and one just outside
    each level, under each profile it differs in.
-6. **Generate:** `(cd tools/ts-cli && python3 -m ts_cli.audit.generate)`. The subshell
+6. **Generate:** `(cd tools/ts-cli && python -m ts_cli.audit.generate)`. The subshell
    keeps you at the repo root for the next step.
 7. **Show the user the generated row:**
    `grep -n "^| <ID> |" agents/cli/ts-audit/references/check-catalog.md`. This is how the
@@ -401,6 +407,14 @@ Follow procedure 1 with these differences.
   until the pin moves. Re-pin it (`repin_findings.py --rule <ID> 2>/dev/null`, `--dry-run`
   first), check that the printed before/after is exactly the change the user approved,
   and paste it into the PR.
+- **A rule that shares a threshold or logic with another moves with it.**
+  `test_shared_rule_pairs_stay_in_step` (`test_checks_registry.py`) deliberately holds
+  the pairs the data/perf split created to one value (BL-304): D4/P4, S9/P14, S8/P15,
+  and P8's column ceiling and P7's depth bands, which equal D1's constants in
+  `engine/tml.py` (`MAX_MODEL_COLUMNS`, `JOIN_DEPTH_*`), together with their
+  `legacy_threshold`s. Change both sides in the same edit. Changing P8's 75 means
+  changing `MAX_MODEL_COLUMNS`, which changes D1's findings too, so re-pin both
+  (`--rule P8`, then `--rule D1`).
 - **The rule's own behaviour tests** assert what it did before, on purpose: list them with
   `grep -rln "\"<ID>\"" tools/ts-cli/tests --include='test_*.py'` and update each one
   that pins the old threshold, severity or wording (`test_checks_<category>*.py`, the
@@ -427,7 +441,7 @@ Follow procedure 1 with these differences.
    proves it stays silent. Only if it should leave the pinned set,
    `repin_findings.py --drop-rule <ID>`, and remove it from `PINNED_RULE_IDS` in the same
    change.
-5. Regenerate (`(cd tools/ts-cli && python3 -m ts_cli.audit.generate)`): it moves to
+5. Regenerate (`(cd tools/ts-cli && python -m ts_cli.audit.generate)`): it moves to
    "Retired rules", with its `description` as the reason. There is no other list of
    retired rules to update: the tests read `status: retired` from the catalog.
 6. **The rule's own behaviour tests** expect it to fire. List them with
