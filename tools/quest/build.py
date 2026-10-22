@@ -935,6 +935,9 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     (ex / "core.js").write_text(core, encoding="utf-8")
     (ex / "quest.css").write_text(CORE_CSS.read_text(encoding="utf-8"), encoding="utf-8")
     (ex / "fonts.css").write_text(fonts_css, encoding="utf-8")
+    (ex / "fonts").mkdir(exist_ok=True)
+    for f in sorted(FONT_DIR.glob("LICENSE-*.txt")):           # the OFL's text, with the fonts it covers
+        (ex / "fonts" / f.name).write_bytes(f.read_bytes())
     (ex / "engine.js").write_text((EXPLORE_DIR / "engine.js").read_text(encoding="utf-8"), encoding="utf-8")
     (ex / "art.json").write_text(json.dumps(art, ensure_ascii=False), encoding="utf-8")
     (ex / "tiles.json").write_text((pack.dir / "tiles" / "tiles.json").read_text(encoding="utf-8"), encoding="utf-8")

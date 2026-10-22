@@ -3030,7 +3030,7 @@ def test_a_spawn_on_the_edge_leaves_it_open(tmp_path):
 
 EXPLORE_FILES = ["index.html", "explore.js", "engine.js", "core.js", "quest.css", "fonts.css", "art.json",
                  "tiles.json", "tiles/tiles.png", "tiles/LICENSE-kenney.txt", "maps/overworld.tmj", "maps/mines.tmj",
-                 B.EXPLORE_MARK]
+                 B.EXPLORE_MARK, "fonts/LICENSE-vt323.txt", "fonts/LICENSE-ibm-plex-mono.txt"]
 
 
 def test_the_explore_folder_is_built_local_and_in_budget(tmp_path):
@@ -3506,6 +3506,11 @@ out.slide = E.move(box(1 * T + 8, 2 * T + 8), 8, -40, block);                // 
 out.pillar = E.move(box(2 * T + 8, 1 * T + 8), 40, 0, block);               // the pillar at (3,1)
 out.fast = E.move(box(1 * T + 8, 2 * T + 8), 5000, 0, block);               // no tunnelling at any speed
 out.touching = block(4 * T, 1 * T, 4 * T + 12, 1 * T + 12) === null;        // edges touching the pillar don't count
+// 4px into a solid (it moved onto the player): pushing on goes nowhere, backing away works
+const gate = new E.Sprite(3 * T + 8, 2 * T + 8, 0, true);
+const through = E.blocker(walls, () => [gate]);
+out.deeper = E.move({ x: 3 * T - 6 + 4, y: 2 * T + 8, w: 12, h: 12 }, 40, 0, through).x;
+out.back = E.move({ x: 3 * T - 6 + 4, y: 2 * T + 8, w: 12, h: 12 }, -10, 0, through).x;
 out.tile = [walls.getTileAt(0, 0) && walls.getTileAt(0, 0).index, walls.getTileAt(1, 1), walls.getTileAtWorldXY(3 * T + 1, T + 1).x];
 console.log(JSON.stringify(out));
 """
@@ -3524,6 +3529,7 @@ def test_the_engine_stops_the_player_at_walls_and_solids():
     assert got["fast"]["x"] == 4 * 16 - 6 or got["fast"]["x"] == 5 * 16 - 6
     assert got["touching"] is True
     assert got["tile"] == [1, None, 3]
+    assert got["deeper"] == 3 * 16 - 6 + 4 and got["back"] == 3 * 16 - 6 + 4 - 10
 
 
 

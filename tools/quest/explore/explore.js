@@ -194,8 +194,15 @@
   });
   for (const b of document.querySelectorAll("#pad button")) {
     const k = b.dataset.key;
-    if (k === "talk") { b.addEventListener("click", () => { Sound.unlock(); if (world && !dialog.open) talk(world.nearby()); }); continue; }
-    if (k === "weapon") { b.addEventListener("click", () => { Sound.unlock(); if (!dialog.open) switchWeapon(); }); continue; }
+    // Talk and Weapon act on pointerdown, so a second finger works while another holds a direction
+    // (a click needs the first finger off the screen); Enter or Space on the button still clicks.
+    const act = k === "talk" ? () => { if (world && !dialog.open) talk(world.nearby()); }
+              : k === "weapon" ? () => { if (!dialog.open) switchWeapon(); } : null;
+    if (act) {
+      b.addEventListener("pointerdown", e => { e.preventDefault(); Sound.unlock(); act(); });
+      b.addEventListener("click", e => { if (e.detail === 0) { Sound.unlock(); act(); } });   // the keyboard
+      continue;
+    }
     b.addEventListener("pointerdown", e => { e.preventDefault(); Sound.unlock(); pad[k] = true; });
     for (const ev of ["pointerup", "pointerleave", "pointercancel"]) b.addEventListener(ev, () => { pad[k] = false; });
   }
@@ -285,7 +292,7 @@
     }
     refresh() {
       for (const g of this.gates) {
-        const open = g.requires.every(done);
+        const open = g.opened = g.opened || g.requires.every(done);   // once open, open for this visit
         g.setVisible(!open); g.body.enable = !open;
       }
       for (const o of this.objects)       // the quest's chest is open only while it is being claimed
@@ -388,7 +395,8 @@
         if (Math.abs(p.x - x) < TILE / 2 + p.w / 2 && Math.abs(p.y - y) < TILE / 2 + p.h / 2) return toast(S("explore_barrel_blocked"));
         fun.done[obj.key] = true; saveFun();
         this.place(obj, x, y);
-        if (!reduced) { obj.sprite.setPosition(from.x, from.y); this.tweens.add({ targets: obj.sprite, x, y, angle: 360, duration: 320 }); }
+        // The body is where it lands at once (checked clear of the player above); the picture rolls there.
+        if (!reduced) { obj.sprite.setOffsetX(from.x - x).setOffsetY(from.y - y); this.tweens.add({ targets: obj.sprite, ox: 0, oy: 0, angle: 360, duration: 320 }); }
         const hoard = this.objects.find(o => o.type === "hoard" && o.x === from.x && o.y === from.y);
         if (hoard) this.hide(hoard, false);
         Sound.play("blip");
@@ -662,6 +670,25 @@
         if (world.nearby() !== exit) throw new Error("facing the exit, something else answered");
         world.player.setPosition(step.x, step.y - TILE); world.facing = [0, 1];
         if (world.nearby() !== step) throw new Error("facing the step the game waits on, it didn't answer");
+      }
+      {                                      // solid things stop the player: the shut gate, and someone
+        const push = async (obj, axis, dir) => {
+          const [k, code] = ARROWS[axis === "x" ? (dir > 0 ? "right" : "left") : (dir > 0 ? "down" : "up")];
+          key("keydown", k, code); await wait(500); key("keyup", k, code); await wait(30);
+          const reach = Math.abs((axis === "x" ? world.player.x : world.player.y) - (axis === "x" ? obj.x : obj.y));
+          if (reach < TILE / 2 + 6 - 0.5) throw new Error(`walked into the ${obj.type || "gate"} (${reach.toFixed(1)}px from its centre)`);
+        };
+        const gate = world.gates.find(g => g.body.enable);
+        if (gate) {
+          const gateTile = { type: "gate", x: gate.x, y: gate.y };
+          await walk(gateTile);
+          const dx = gate.x - world.player.x, dy = gate.y - world.player.y;
+          await push(gateTile, Math.abs(dx) > Math.abs(dy) ? "x" : "y", Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : Math.sign(dy));
+        }
+        const someone = world.objects.find(o => o.step === machine.expected(state));
+        await walk(someone);
+        const dx = someone.x - world.player.x, dy = someone.y - world.player.y;
+        await push(someone, Math.abs(dx) > Math.abs(dy) ? "x" : "y", Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : Math.sign(dy));
       }
       const chest = world.objects.find(o => o.type === "reward");
       const steps = [];

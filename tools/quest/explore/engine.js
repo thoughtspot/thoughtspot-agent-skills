@@ -48,25 +48,32 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       if (sx) {
         const nx = x + sx, hit = solid(nx - hw, y - hh, nx + hw, y + hh, [x - hw, y - hh, x + hw, y + hh]);
         if (!hit) x = nx;
-        else x = sx > 0 ? hit.x0 - hw : hit.x1 + hw;          // flush against what it hit
+        else if (!hit.already) x = sx > 0 ? hit.x0 - hw : hit.x1 + hw;   // flush against what it hit (else: stay)
       }
       if (sy) {
         const ny = y + sy, hit = solid(x - hw, ny - hh, x + hw, ny + hh, [x - hw, y - hh, x + hw, y + hh]);
         if (!hit) y = ny;
-        else y = sy > 0 ? hit.y0 - hh : hit.y1 + hh;
+        else if (!hit.already) y = sy > 0 ? hit.y0 - hh : hit.y1 + hh;
       }
     }
     return { x, y };
   }
 
   // What blocks a box: solid tiles of a layer and enabled sprite bodies (each one tile, centred).
-  // Returns the first rectangle it overlaps that `from` (a box, [x0, y0, x1, y1]) doesn't already
-  // overlap, or null. Touching edges don't count.
+  // Returns the first rectangle it overlaps, or null. Touching edges don't count. A rectangle that
+  // `from` (where the box stands, [x0, y0, x1, y1]) already overlaps blocks only a move deeper into
+  // it: the box can always get out, and never through.
   function blocker(layer, bodies) {
     const e = 1e-6;
     const over = (r, a0, b0, a1, b1) => a0 < r.x1 - e && a1 > r.x0 + e && b0 < r.y1 - e && b1 > r.y0 + e;
+    const area = (r, a0, b0, a1, b1) => Math.max(0, Math.min(a1, r.x1) - Math.max(a0, r.x0)) * Math.max(0, Math.min(b1, r.y1) - Math.max(b0, r.y0));
     return (x0, y0, x1, y1, from) => {
-      const hit = r => over(r, x0, y0, x1, y1) && !(from && over(r, ...from));
+      const hit = r => {
+        if (!over(r, x0, y0, x1, y1)) return false;
+        if (!(from && over(r, ...from))) return true;
+        r.already = true;                                    // overlapped where it stands: only deeper is blocked
+        return area(r, x0, y0, x1, y1) > area(r, ...from) + e;
+      };
       for (let ty = Math.floor(y0 / TILE); ty <= Math.floor((y1 - e) / TILE); ty++)
         for (let tx = Math.floor(x0 / TILE); tx <= Math.floor((x1 - e) / TILE); tx++) {
           const t = layer && layer.getTileAt(tx, ty), r = { x0: tx * TILE, y0: ty * TILE, x1: tx * TILE + TILE, y1: ty * TILE + TILE };
@@ -83,7 +90,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
   // A one-tile picture from the atlas. A solid one has a body that blocks the player while enabled.
   class Sprite {
     constructor(x, y, frame, solid) {
-      this.x = x; this.y = y; this.frame = { name: frame }; this.oy = 0;   // oy: drawn this far below its body
+      this.x = x; this.y = y; this.frame = { name: frame }; this.ox = 0; this.oy = 0;   // drawn this far from its body
       this.visible = true; this.flipX = false; this.depth = 0; this.scale = 1; this.angle = 0;
       this.body = solid ? { enable: true } : null;
     }
@@ -92,6 +99,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     setPosition(x, y) { this.x = x; this.y = y; return this; }
     setY(y) { this.y = y; return this; }
     setOffsetY(oy) { this.oy = oy; return this; }    // moves the picture, never the body
+    setOffsetX(ox) { this.ox = ox; return this; }
     setFlipX(f) { this.flipX = f; return this; }
     setDepth(d) { this.depth = d; return this; }
     setScale(s) { this.scale = s; return this; }
@@ -203,7 +211,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
             if (t.index > 0) frame(ctx, t.index - 1, tx * TILE + TILE / 2 - ox, ty * TILE + TILE / 2 - oy, false, 1, 0);
           }
       const sprites = scene.sprites.filter(s => s.visible).sort((a, b) => a.depth - b.depth);
-      for (const s of sprites) frame(ctx, s.frame.name, s.x - ox, s.y + s.oy - oy, s.flipX, s.scale, s.angle);
+      for (const s of sprites) frame(ctx, s.frame.name, s.x + s.ox - ox, s.y + s.oy - oy, s.flipX, s.scale, s.angle);
       if (camera.fade > 0) { ctx.globalAlpha = camera.fade; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); ctx.globalAlpha = 1; }
     }
     // Fixed steps of 1/60 s, as many as real time has passed (so speed is the same at 30, 60 or
@@ -219,7 +227,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         let n = 0;
         while (owed >= STEP && n++ < 15) { step(STEP); owed -= STEP; }
         draw();
-      } catch (e) { (game.onerror || (() => {}))(e); }
+      } catch (e) { owed = 0; (game.onerror || (() => {}))(e); }   // no backlog of failed steps to replay
       schedule();
     };
     const schedule = () => (timeouts || typeof requestAnimationFrame !== "function" ? setTimeout(tick, STEP) : requestAnimationFrame(tick));
