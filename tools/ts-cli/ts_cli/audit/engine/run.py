@@ -11,6 +11,11 @@ The finding contract (what the equivalence gate compares with the legacy checks)
     categories   every category id of the rule (additive)
     bands        {direction, unit, levels, profile, provenance} (additive; bands.py)
 
+A code rule (`implementation: code:<name>`) is dispatched to its registered function
+(code_rules.py), which returns the finding fields above `categories`; the runner checks
+its contract and stamps angle, categories, bands and threshold exactly as for a
+declarative rule.
+
 The profile is the `profile` argument and nothing else — never `ctx.assessment`, which
 a replayed snapshot carries from its capture.
 """
@@ -20,7 +25,7 @@ import copy
 from typing import Any, Dict, List, Optional
 
 from ts_cli.audit.catalog_model import Catalog, Rule
-from ts_cli.audit.engine import bands
+from ts_cli.audit.engine import bands, code_rules
 from ts_cli.audit.engine.modes import MODES
 from ts_cli.audit.findings import Finding
 
@@ -41,6 +46,16 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
             continue
         findings += _run_rule(ctx, catalog, rule, profile, layers or [])
     return findings
+
+
+def run_rule(ctx, catalog: Catalog, rule_id: str, profile: str,
+             layers: Optional[List[Dict[str, Any]]] = None) -> List[Finding]:
+    """Findings of the one rule `rule_id` under `profile` (none if it is retired) —
+    what a rule's catalog examples are checked against."""
+    _check_selection(catalog, [], profile)
+    if rule_id not in catalog.rules:
+        raise KeyError(f"unknown rule '{rule_id}'")
+    return _run_rule(ctx, catalog, catalog.rules[rule_id], profile, layers or [])
 
 
 def _check_selection(catalog: Catalog, categories: List[str], profile: str) -> None:
@@ -79,8 +94,7 @@ def _run_rule(ctx, catalog: Catalog, rule: Rule, profile: str,
 
 def _dispatch(rule: Rule, ctx, profile: str) -> List[Finding]:
     if rule.implementation != "declarative":
-        raise NotImplementedError(
-            f"{rule.id}: '{rule.implementation}' has no registered code rule")
+        return code_rules.run_code_rule(rule, ctx, profile)
     return MODES[rule.aggregate["mode"]](rule, ctx, profile)
 
 

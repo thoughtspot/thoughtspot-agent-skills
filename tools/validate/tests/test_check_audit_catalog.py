@@ -34,11 +34,14 @@ def _run(root: Path) -> subprocess.CompletedProcess:
                           capture_output=True, text=True)
 
 
-# What the gate may import: the catalog modules, and the engine's derived-field
-# registry (catalog_expr.known_derived_fields) with the one module it needs. Nothing
-# that pulls in typer or requests.
+# What the gate may import: the catalog modules, the engine's derived-field registry
+# (catalog_expr.known_derived_fields) and code-rule registry
+# (catalog_validate.known_code_rules), and the modules those need. Nothing that pulls
+# in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py", "rules.py",
-                "engine/__init__.py", "engine/fields.py")
+                "findings.py", "engine/__init__.py", "engine/fields.py",
+                "engine/code_rules.py", "engine/bands.py", "engine/scopes.py",
+                "engine/predicates.py", "engine/messages.py")
 
 
 def _copy_repo(tmp_path: Path) -> Path:
@@ -115,3 +118,43 @@ def test_missing_catalog_fails(tmp_path):
     res = _run(tmp_path)
     assert res.returncode == 1
     assert "FAIL" in res.stdout
+
+
+CODE_RULE = """\
+- id: D99
+  title: A code rule
+  categories: [D]
+  scope: model
+  implementation: code:{name}
+  severity: LOW
+  examples:
+    fires: {{fixture: x, severity: LOW}}
+    silent: {{fixture: y}}
+"""
+
+# Uses every module a code rule may import at module level (code_rules.py docstring),
+# so a permitted module that stops being gate-safe fails here, under the gate's Python.
+DEMO_REGISTRATION = """
+from ts_cli.audit.engine import bands, fields, messages, predicates, scopes  # noqa
+
+
+@code_rule("demo_rule")
+def _demo_rule(rule, ctx, profile):
+    return []
+"""
+
+
+def test_code_rule_names_checked_in_isolation(tmp_path):
+    # The gate learns code-rule names from engine/code_rules.py without the rest of
+    # ts_cli: an unregistered name fails by name, a registered one passes.
+    root = _copy_repo(tmp_path)
+    rules = root / AUDIT_REL / "catalog" / "rules" / "data.yaml"
+    rules.write_text(CODE_RULE.format(name="demo_rule"))
+    res = _run(root)
+    assert res.returncode == 1 and "unknown code rule 'demo_rule'" in res.stdout
+    assert "Traceback" not in res.stderr
+    with (root / AUDIT_REL / "engine" / "code_rules.py").open("a") as fh:
+        fh.write(DEMO_REGISTRATION)
+    res = _run(root)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "1 rule(s)" in res.stdout

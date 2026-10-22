@@ -7,17 +7,20 @@ read by a small rule engine. Data fails silently where code fails loudly — a m
 operator, scope or category id would simply never match, and the rule would report
 nothing on every Model forever. This gate makes those mistakes fail the commit:
 unknown keys, unknown scopes/modes/operators/data requirements/categories/profiles,
-duplicate ids, a profile override of a key that defines what a rule means, band levels
-not ordered worst first, and an active rule without a `fires` and a `silent` example.
+code-rule names that nothing registers, duplicate ids, a profile override of a key that
+defines what a rule means, band levels not ordered worst first, and an active rule
+without a `fires` and a `silent` example.
 
 The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementation,
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
 
 It imports the catalog modules (catalog_model, catalog_validate, catalog_expr) and,
-to learn the derived-field names rules may use, the engine's field registry
-(engine/fields.py, which needs only audit/rules.py) — WITHOUT executing the `ts_cli`
-package __init__, which pulls in typer, requests and the whole CLI. So it runs under
-any python3 with PyYAML, including the EOL system interpreter.
+to learn the names rules may use, two engine registries: derived fields
+(engine/fields.py, which needs only audit/rules.py) and code rules
+(engine/code_rules.py, which needs findings.py; see its docstring for what else it
+may import) — WITHOUT executing the `ts_cli` package __init__, which pulls in typer,
+requests and the whole CLI. So it runs under any python3 with PyYAML, including the
+EOL system interpreter.
 
 Usage:
     python3 tools/validate/check_audit_catalog.py --root .

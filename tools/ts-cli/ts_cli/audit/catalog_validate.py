@@ -15,17 +15,19 @@ on a grading mode, neither severity nor bands on each/group, bands on an each ru
 no `measure`; a `severity` that bands override, catalog or profile); an expression
 mapping that mixes forms or lacks a comparison; a `count:` over a scope that is not
 the item's (or an enclosing item's) child; unknown scopes, modes, operators, derived
-fields (`@name`, also as a step inside a path), message
-placeholders, data requirements, categories, profiles, views, band ops/directions/
-units, severities; ids repeated across files; a category without a unique
+fields (`@name`, also as a step inside a path), code-rule names (`code:<name>`
+not registered), message placeholders, data requirements, categories, profiles,
+views, band ops/directions/units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
 example.
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
-live in `catalog_expr.py` and are re-exported here. One registry is still a hook
-returning None ("not checked"): code-rule names (`implementation: code:<name>`, Task 5).
+live in `catalog_expr.py` and are re-exported here. Two names come from engine
+registries, each imported lazily so the gate stays free of typer/requests: derived
+fields (`engine/fields.py`, via `known_derived_fields`) and code rules
+(`implementation: code:<name>`, `engine/code_rules.py`, via `known_code_rules`).
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """
@@ -100,12 +102,19 @@ SEVERITY_MAP_KEYS = {"field", "map", "default"}
 
 _BAND_OPS_FOR = {"higher_is_better": {"lt", "lte", "eq"},
                  "lower_is_better": {"gt", "gte", "eq"}}
-_CODE_IMPL = re.compile(r"^code:([a-z_][a-z0-9_]*)$")
+# `implementation: code:<name>` — also the name check engine/code_rules.py registers by.
+CODE_IMPL = re.compile(r"^code:([a-z_][a-z0-9_]*)$")
 
 
-def known_code_rules() -> Optional[Set[str]]:
-    """Names usable as `implementation: code:<name>`. None = not checked yet (Task 5)."""
-    return None
+def known_code_rules() -> Set[str]:
+    """Names usable as `implementation: code:<name>` — the engine's code-rule registry.
+
+    Imported lazily, like `known_derived_fields`: the catalog gate loads
+    `engine/code_rules.py` (and the gate-safe modules it imports) without the rest of
+    ts_cli. See that module's docstring for what it may import.
+    """
+    from ts_cli.audit.engine.code_rules import REGISTRY
+    return set(REGISTRY)
 
 
 def _known(values: Iterable[str]) -> str:
@@ -241,13 +250,14 @@ def _basic_problems(rule: Rule, cat: Catalog) -> List[str]:
 def _implementation_problems(rule: Rule) -> List[str]:
     if rule.implementation == "declarative":
         return []
-    m = _CODE_IMPL.match(rule.implementation)
+    m = CODE_IMPL.match(rule.implementation)
     if not m:
         return [f"implementation: '{rule.implementation}' must be 'declarative' "
                 "or 'code:<name>'"]
     registered = known_code_rules()
-    if registered is not None and m.group(1) not in registered:
-        return [f"implementation: unknown code rule '{m.group(1)}'"]
+    if m.group(1) not in registered:
+        return [f"implementation: unknown code rule '{m.group(1)}' "
+                f"(registered: {_known(sorted(registered)) or 'none'})"]
     return []
 
 
