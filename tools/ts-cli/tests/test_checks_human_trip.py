@@ -99,7 +99,7 @@ def test_h5_labels_a_set_as_object_type_table():
 
 def test_h6_is_a_deliberate_stub_and_returns_nothing_by_design():
     assert catalog().rules["H6"].status == "retired", (
-        "H6 is deliberately retired — see DEFERRED in test_checks_registry.py"
+        "H6 is deliberately retired (rules/human.yaml) — see test_every_inactive_rule_is_retired_on_purpose_and_listed"
     )
     assert "H6" not in active_rule_ids("H")
     assert run_rule(fx.human_rich_context(), "H6") == []

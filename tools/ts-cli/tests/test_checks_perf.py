@@ -2,7 +2,7 @@
 Task 12b) exercised them. Their inputs are named builders in audit_rule_fixtures
 (perf.py), whose legacy answers test_audit_pinned_findings.py pins."""
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, run_rule
+from audit_run_rule import run_rule
 
 
 def test_p1_flags_sql_view():
@@ -43,7 +43,3 @@ def test_p16_flags_deep_nesting():
 def test_p18_flags_count_distinct():
     findings = run_rule(fx.perf_column_count_distinct(), "P18")
     assert any(f.check_id == "P18" for f in findings)
-
-
-def test_all_checks_has_sixteen_entries():
-    assert len(active_rule_ids("P")) == 16

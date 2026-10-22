@@ -1,5 +1,5 @@
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, run_rule
+from audit_run_rule import run_rule
 
 # The D rules (rules/data.yaml), as the legacy D-check tests (checks_data.py, deleted in
 # Task 12b) exercised them. The contexts are named builders in audit_rule_fixtures
@@ -52,7 +52,3 @@ def test_d7_passes_disjoint_models():
 def test_d9_flags_high_sql_ratio():
     findings = run_rule(fx.data_model_half_sql_passthrough(), "D9")
     assert any(f.check_id == "D9" for f in findings)
-
-
-def test_all_checks_has_twelve_entries():
-    assert len(active_rule_ids("D")) == 12

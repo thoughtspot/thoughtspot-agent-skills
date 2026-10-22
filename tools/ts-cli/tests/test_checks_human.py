@@ -1,5 +1,5 @@
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, run_rule
+from audit_run_rule import run_rule
 
 
 # The H rules (rules/human.yaml), as the legacy H-check tests (checks_human.py, deleted
@@ -41,7 +41,3 @@ def test_h10_flags_stale_column():
 
 def test_h10_passes_clean_names():
     assert run_rule(fx.human_clean_names(), "H10") == []
-
-
-def test_all_checks_has_nine_entries():
-    assert len(active_rule_ids("H")) == 9

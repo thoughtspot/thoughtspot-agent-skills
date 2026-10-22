@@ -69,26 +69,42 @@ def test_every_check_id_is_unique():
     assert len(seen) == len(catalog().rules)
 
 
-#: Rules defined but deliberately NOT active, with the reason.
-#: Adding to this needs a catalog entry saying the rule is deferred.
-DEFERRED = {
-    "H6": "H6 duplicate sets — deferred in check-catalog.md "
-          "(requires deep set comparison); retired, keeping the id allocated",
-}
+def test_every_inactive_rule_is_retired_on_purpose_and_listed():
+    """A rule that exists but does not run says nothing, so not running must be
+    deliberate and visible.
 
-
-def test_every_defined_check_is_registered():
-    """A rule that exists but is not active never runs, and says nothing.
-
-    Found by counting the legacy checks: 51 functions were defined, 50 registered.
-    The one gap is deliberate and declared; any other is a rule silently switched off.
+    The catalog's own `status: retired` is the declaration (there is no second,
+    hand-kept list to update): every rule that is not active must be retired, carry a
+    description saying why, and appear under "Retired rules" in the generated
+    check-catalog.md — never be deleted (the history gate fails that). Found by counting
+    the legacy checks: 51 functions were defined, 50 registered, and the one gap (H6) is
+    deliberate.
     """
-    inactive = sorted(r.id for r in catalog().rules.values() if r.status != "active")
-    unregistered = [rid for rid in inactive if rid not in DEFERRED]
-    assert unregistered == [], (
-        f"defined but never run: {unregistered}. Make them active, delete them, or "
-        f"add them to DEFERRED with a check-catalog entry saying why.")
-    assert sorted(DEFERRED) == inactive, "a DEFERRED rule is active again: drop it here"
+    inactive = [r for r in catalog().rules.values() if r.status != "active"]
+    assert all(r.status == "retired" for r in inactive), \
+        [f"{r.id}: {r.status}" for r in inactive if r.status != "retired"]
+    undocumented = [r.id for r in inactive if not (r.description or "").strip()]
+    assert undocumented == [], f"retired without saying why: {undocumented}"
+    from ts_cli.audit.generate import catalog_markdown
+    doc = catalog_markdown(catalog())
+    retired_section = doc[doc.index("Retired rules"):] if "Retired rules" in doc else ""
+    missing = [r.id for r in inactive if f"| {r.id} |" not in retired_section]
+    assert missing == [], f"retired but not listed under Retired rules: {missing}"
+
+
+def test_selecting_a_category_runs_its_active_rules():
+    """`--angles X` runs exactly the catalog's active rules in category X, under each
+    profile (derived from the catalog — adding or retiring a rule moves both sides)."""
+    from ts_cli.audit.catalog_model import profile_override
+    from ts_cli.audit.engine.run import selected_rules
+    cat = catalog()
+    for profile in cat.profiles:
+        for category in CATEGORIES:
+            expected = [r.id for r in cat.rules.values() if category in r.categories
+                        and r.status == "active"
+                        and (profile_override(r, profile).get("status") or "active") == "active"]
+            got = [r.id for r in selected_rules(cat, [category], profile)]
+            assert sorted(got) == sorted(expected), (profile, category)
 
 
 def test_registries_are_not_empty():

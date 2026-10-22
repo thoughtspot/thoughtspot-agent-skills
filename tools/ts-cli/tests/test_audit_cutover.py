@@ -401,7 +401,11 @@ def test_replay_of_a_legacy_letter_keyed_manifest(tmp_path):
     snap_h = tmp_path / "h"
     from ts_cli.audit.snapshot import write_snapshot
     write_snapshot(fx.registry_populated_context(), snap_h, ["H"])
-    assert _replay(snap_h, ["H"], None)["summary"]["checks_run"] == 9
+    # checks_run counts the rules the selection runs: read from the catalog, so adding
+    # or retiring an H rule moves both sides together.
+    from ts_cli.audit.engine.run import selected_rules
+    assert _replay(snap_h, ["H"], None)["summary"]["checks_run"] == \
+        len(selected_rules(load_catalog(), ["H"], "general"))
 
 
 def test_replay_records_what_the_snapshot_captured(tmp_path):
@@ -462,6 +466,8 @@ def test_duplicate_angles_run_once_and_are_listed_once(tmp_path):
                                    "--angles", "A,a,A", "-o", str(out)])
     assert res.exit_code == 0, res.output
     data = json.loads(out.read_text())
-    assert data["corpus"]["angles_run"] == ["A"] and data["summary"]["checks_run"] == 6
+    from ts_cli.audit.engine.run import selected_rules
+    assert data["corpus"]["angles_run"] == ["A"]
+    assert data["summary"]["checks_run"] == len(selected_rules(load_catalog(), ["A"], "general"))
     direct = run_audit(None, [], ["D", "A", "D"], ctx=fx.registry_populated_context())
     assert direct["corpus"]["angles_run"] == ["D", "A"]

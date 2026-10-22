@@ -6,7 +6,7 @@ The legacy checks read the profile from `ctx.assessment` (default "general"; the
 `build_tml_ctx` inputs are built under "spotter"); `run_rule` takes it as an argument,
 so each call below names the profile its legacy test ran under."""
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, catalog, run_rule
+from audit_run_rule import catalog, run_rule
 from ts_cli.audit.context import make_context
 
 
@@ -68,10 +68,6 @@ def test_a5_flags_not_ready():
 def test_a5_passes_ready():
     findings = run_rule(fx.ai_model_ready(), "A5")
     assert findings == [] or findings[0].severity == "INFO"
-
-
-def test_all_checks_has_six_entries():
-    assert len(active_rule_ids("A")) == 6
 
 
 # --- Columns written as exported Model TML writes them -----------------------------

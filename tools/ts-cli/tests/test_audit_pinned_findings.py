@@ -373,13 +373,22 @@ def _pinned_entries(doc, exclude=()):
             for r, v in rs.items() if r not in exclude}
 
 
+def _a_pinned_finding(doc):
+    """`(input, profile, rule id)` of the first pinned entry holding at least one
+    finding — chosen from the pin itself, so these helper tests never depend on what
+    any one shipped rule reports (rule-authoring.md uses P8 and D3 as its examples)."""
+    return next(k for k, v in sorted(_pinned_entries(doc).items())
+                if v != ap.RAISES and v)
+
+
 def test_repin_refuses_unknown_names(pin_copy, capsys):
     import repin_findings
     original = pin_copy.read_bytes()
-    assert repin_findings.main(["--rule", "P19"]) == 1
+    committed = next(iter(ap.committed_inputs()))
+    assert repin_findings.main(["--rule", "Z99"]) == 1
     assert repin_findings.main(["--input", "no_such_input"]) == 1
-    assert repin_findings.main(["--drop-rule", "P19"]) == 1
-    assert repin_findings.main(["--drop-input", "perf_model_80_columns"]) == 1  # committed
+    assert repin_findings.main(["--drop-rule", "Z99"]) == 1
+    assert repin_findings.main(["--drop-input", committed]) == 1  # still committed
     assert repin_findings.main([]) == 1
     err = capsys.readouterr().err
     assert "frozen rule set" in err and "unknown input" in err and "still a committed" in err
@@ -410,24 +419,25 @@ def test_write_refuses_entries_outside_the_frozen_sets(pin_copy):
 
 
 def test_repin_rewrites_only_the_named_entries(pin_copy, monkeypatch, capsys):
-    """Re-pinning P8 from a catalog that reports nothing removes exactly its entries
+    """Re-pinning a rule from a catalog that reports nothing removes exactly its entries
     and prints them; re-pinning from the original answers restores the bytes."""
     import repin_findings
     original, before = pin_copy.read_bytes(), ap.load()
-    names = {build: name for name, build in ap.committed_inputs().items()}
-    monkeypatch.setattr(ap, "current", lambda build, rule_id, profile: [])
-    assert repin_findings.main(["--rule", "P8", "--dry-run"]) == 0
+    name, profile, rule_id = _a_pinned_finding(before)
+    names = {build: n for n, build in ap.committed_inputs().items()}
+    monkeypatch.setattr(ap, "current", lambda build, rid, prof: [])
+    assert repin_findings.main(["--rule", rule_id, "--dry-run"]) == 0
     assert pin_copy.read_bytes() == original                    # a dry run writes nothing
-    assert repin_findings.main(["--rule", "P8"]) == 0
+    assert repin_findings.main(["--rule", rule_id]) == 0
     out = capsys.readouterr().out
-    assert "P8 / perf_model_80_columns / spotter:" in out and "    - ('P8'," in out
+    assert f"{rule_id} / {name} / {profile}:" in out and f"    - ('{rule_id}'," in out
     after = ap.load()
-    assert _pinned_entries(after, exclude=()) == _pinned_entries(before, exclude=("P8",))
-    assert after["rules"] == before["rules"]                   # P8 stays pinned, as []
+    assert _pinned_entries(after, exclude=()) == _pinned_entries(before, exclude=(rule_id,))
+    assert after["rules"] == before["rules"]                   # it stays pinned, as []
 
-    monkeypatch.setattr(ap, "current", lambda build, rule_id, profile:
-                        ap.entry(before, names[build], profile, rule_id))
-    assert repin_findings.main(["--rule", "P8"]) == 0
+    monkeypatch.setattr(ap, "current", lambda build, rid, prof:
+                        ap.entry(before, names[build], prof, rid))
+    assert repin_findings.main(["--rule", rule_id]) == 0
     assert pin_copy.read_bytes() == original
 
 
@@ -435,29 +445,32 @@ def test_drop_rule_refuses_a_rule_still_active_under_a_profile(pin_copy, capsys,
     """Every legitimate change to an active rule is a re-pin; dropping one would take
     it out of the regression net. Retire it in the catalog first (12b re-review N5)."""
     import repin_findings
-    active = copy.deepcopy(catalog().rules["D5"])
+    rule_id = _a_pinned_finding(ap.load())[2]
+    active = copy.deepcopy(catalog().rules[rule_id])
     active.status, active.profiles = "active", {}
-    monkeypatch.setitem(catalog().rules, "D5", active)   # whatever the catalog says today
+    monkeypatch.setitem(catalog().rules, rule_id, active)  # whatever the catalog says today
     original = pin_copy.read_bytes()
-    assert repin_findings.main(["--drop-rule", "D5"]) == 1
-    assert "D5 is still active under spotter, general: retire it first" in \
+    assert repin_findings.main(["--drop-rule", rule_id]) == 1
+    assert f"{rule_id} is still active under spotter, general: retire it first" in \
         capsys.readouterr().err
     assert pin_copy.read_bytes() == original
 
 
 def test_drop_rule_is_the_only_way_out_and_prints_every_entry(pin_copy, capsys, monkeypatch):
     import repin_findings
-    retired = copy.deepcopy(catalog().rules["D3"])
-    retired.status = "retired"
-    monkeypatch.setitem(catalog().rules, "D3", retired)   # retired in the catalog first
     before = ap.load()
-    d3 = {k: v for k, v in _pinned_entries(before).items() if k[2] == "D3"}
-    assert repin_findings.main(["--drop-rule", "D3"]) == 0
+    rule_id = _a_pinned_finding(before)[2]
+    retired = copy.deepcopy(catalog().rules[rule_id])
+    retired.status = "retired"
+    monkeypatch.setitem(catalog().rules, rule_id, retired)   # retired in the catalog first
+    dropped = {k: v for k, v in _pinned_entries(before).items() if k[2] == rule_id}
+    assert repin_findings.main(["--drop-rule", rule_id]) == 0
     out = capsys.readouterr().out
     after = ap.load()
-    assert "D3" not in after["rules"]
+    assert rule_id not in after["rules"]
     assert _pinned_entries(after) == {k: v for k, v in _pinned_entries(before).items()
-                                      if k[2] != "D3"}
-    for (name, profile, _), value in d3.items():
-        assert f"D3 / {name} / {profile}: REMOVED ({len(value)} finding(s))" in out
-    assert "rule D3: REMOVED from the pinned rule set" in out
+                                      if k[2] != rule_id}
+    for (name, profile, _), value in dropped.items():
+        shown = value if value == ap.RAISES else f"{len(value)} finding(s)"
+        assert f"{rule_id} / {name} / {profile}: REMOVED ({shown})" in out
+    assert f"rule {rule_id}: REMOVED from the pinned rule set" in out

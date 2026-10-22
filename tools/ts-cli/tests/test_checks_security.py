@@ -3,7 +3,7 @@ deleted in Task 12b) exercised them. The contexts are named builders in
 audit_rule_fixtures (security.py), whose legacy answers test_audit_pinned_findings.py
 pins."""
 import audit_rule_fixtures as fx
-from audit_run_rule import active_rule_ids, run_rule
+from audit_run_rule import run_rule
 from ts_cli.audit.context import make_context
 
 
@@ -47,7 +47,3 @@ def test_s10_flags_bypass():
 
 def test_s10_passes_no_bypass():
     assert run_rule(fx.sec_model_without_bypass(), "S10") == []
-
-
-def test_all_checks_has_eight_entries():
-    assert len(active_rule_ids("S")) == 8
