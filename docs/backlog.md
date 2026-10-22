@@ -14481,6 +14481,12 @@ re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rul
    `CHECK_CATALOG`, and the name anti-pattern regex kept twice (H1's `regex:` in
    `rules/human.yaml` and A5's `_NAME_ANTI` in `engine/code_rules.py`). The spec's
    "`rules` shadowing in `checks_perf.py:241` (main@982c2010)" item is dropped: that module was deleted.
+10. **Malformed TML under a `parent.` condition.** The engine's path walker maps over a
+    list, so a `parent.` condition on a malformed `spotter_config` or `properties` (a list
+    where a mapping belongs) is evaluated, and can fire, where the legacy check aborted
+    the whole run. Malformed input only, and pinned (`LEGACY_RAISES` / `ENGINE_RAISES` in
+    `test_audit_pinned_findings.py`), but the semantics were inherited, not chosen:
+    decide whether such a value reads as absent, and pin that.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
@@ -14505,3 +14511,24 @@ follow-ups instead. Decide with the user; update the skill's step numbering and
 changelog.
 
 **Target:** 2026-12-15.
+
+## BL-408 — validate audit override layers before admin overrides ship `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 final review (deferred item 3).
+
+**What.** The rule engine folds override layers onto a catalog rule after its profile
+(`engine/bands.py` `effective(rule, layers)`; `run_rules(..., layers=...)`), which is how
+the design's option 2 — an admin's per-estate overrides — would plug in. The catalog gate
+validates the catalog and its two profiles, but nothing validates an extra layer: a layer
+naming an unknown rule id is silently dropped, a `status` typo, an unknown severity or
+misordered bands are applied as given, and a layer reviving a retired rule is dropped
+without a word. No production caller passes layers today, so nothing is wrong yet; the
+first one that does would inherit all of it.
+
+**Do.** Before any command or file format accepts override layers, run each layer
+through the same checks the gate applies to a profile block (`catalog_validate`'s
+override checks: overridable keys only, known severities, ordered bands, `by_severity`
+coverage) plus: every rule id exists, and a revival of a retired rule is an error. Fail
+loudly, naming the layer and key. Unit-test each refusal.
+
+**Target:** before admin overrides ship; review by 2027-03-31.
