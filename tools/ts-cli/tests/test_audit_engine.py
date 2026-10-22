@@ -563,13 +563,14 @@ def test_fact_tables_and_date_constraint():
 
 
 def test_register_adds_a_derived_field():
-    @fields.register("_test_upper_name")
+    @fields.register("_test_upper_name", uses=())
     def _upper(item, ctx):
         return item["name"].upper()
     try:
         assert fields.get(_item({"name": "abc"}), "@_test_upper_name", make_context()) == "ABC"
     finally:
         del fields.FIELDS["_test_upper_name"]
+        del fields.FIELD_USES["_test_upper_name"]
 
 
 # ── predicates ──────────────────────────────────────────────────────────────

@@ -14,6 +14,8 @@ A rule entry (every key but `id`, `title`, `categories`, `scope` is optional):
       status: active                # active | retired
       categories: [A]               # the first one's angle_key is the finding's `angle`
       requires: [model_tml]         # data the rule reads; an object lacking it is skipped
+      uses: [ai_instructions]       # conditional data it reads WITHOUT skipping an object
+                                    # lacking it: fetched, never gates (catalog_uses.py)
       implementation: declarative   # or code:<name>
       scope: model                  # the object a finding is about
       aggregate: {mode: ratio, over: model.column, where: {...}, match: {...}}
@@ -83,6 +85,7 @@ class Rule:
     status: str = "active"
     categories: List[str] = field(default_factory=list)
     requires: List[str] = field(default_factory=list)
+    uses: List[str] = field(default_factory=list)
     implementation: str = "declarative"
     scope: str = ""
     aggregate: Dict[str, Any] = field(default_factory=dict)
@@ -236,6 +239,7 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
         status=get("status", str, "active"),
         categories=list(get("categories", list, [])),
         requires=list(get("requires", list, [])),
+        uses=list(get("uses", list, [])),
         implementation=get("implementation", str, "declarative"),
         scope=get("scope", str, ""),
         aggregate=dict(get("aggregate", dict, {})),

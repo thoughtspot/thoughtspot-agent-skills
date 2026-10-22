@@ -157,6 +157,13 @@ _CHILDREN: Dict[str, Callable[[Item, Any], Iterator[Item]]] = {
     "answer.formula": lambda p, ctx: _answer_formulas(p),
 }
 ITERATORS = {**_TOP, **_CHILDREN}
+# Top-level scope -> the conditional data (catalog_expr.CONDITIONAL_DATA) iterating it
+# reads; its child scopes read the same. A Set's rows come from Model/Table dependents
+# and from Set discovery. Read by the catalog gate (catalog_uses.py).
+SCOPE_USES: Dict[str, frozenset] = {
+    "answer": frozenset({"answers"}),
+    "set": frozenset({"dependents", "sets"}),
+}
 
 
 def iterate(ctx, scope: str, parent: Optional[Item] = None) -> Iterator[Item]:

@@ -260,6 +260,9 @@ def build_context(
     ai_instructions = {}
     answers = []
 
+    # Model TML (with associated Table TML), metadata and dependents below are fetched
+    # for every audit and must stay so: rules read Model and Table TML without declaring
+    # them (D2/D3/D11/P6 resolve referencing joins from Table TML, S2 and H7 read it too).
     _log(f"Exporting TML for {len(model_guids)} model(s)...")
     warnings = []
     model_batch = 50
@@ -336,12 +339,15 @@ def build_context(
                 src = row["source_guid"]
                 dependents.setdefault(src, []).append(row)
 
+    # Conditional data: only what a selected rule declares (requires/uses). Answers
+    # strictly before Sets — Set discovery adds each Set's consumers to `dependents`,
+    # which `_export_answers` walks, so the reverse order would export Answers that use
+    # only a Set and widen H7-H9 (test_set_consumers_do_not_widen_the_answer_export).
     if "ai_instructions" in needs:
         _fetch_ai_instructions(client, model_guids, ai_instructions, warnings)
     if "answers" in needs:
         answers = _export_answers(client, dependents)
     if "sets" in needs:
-        # After the answer export, so Set consumers do not widen the answer set.
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
 

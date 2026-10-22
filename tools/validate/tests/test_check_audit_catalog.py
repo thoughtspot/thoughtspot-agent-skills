@@ -41,7 +41,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # (catalog_code.known_code_rules), and the modules those need. Nothing that pulls
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
-                "catalog_code.py", "catalog_forms.py", "rules.py",
+                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "rules.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
@@ -152,7 +152,7 @@ DEMO_REGISTRATION = """
 from ts_cli.audit.engine import bands, fields, messages, predicates, scopes  # noqa
 
 
-@code_rule("demo_rule", severity="severity")
+@code_rule("demo_rule", severity="severity", uses=())
 def _demo_rule(rule, ctx, profile):
     return []
 """
@@ -185,4 +185,18 @@ def test_shipped_code_rule_message_typo_fails(tmp_path):
     res = _run(root)
     assert res.returncode == 1, res.stdout
     assert "A5: message: unknown placeholder 'scroe' (known: score)" in res.stdout
+    assert "Traceback" not in res.stderr
+
+
+def test_undeclared_conditional_read_fails(tmp_path):
+    # The gate holds a rule's requires/uses to what its code reads, from the registries'
+    # declarations: A5 reads ai_instructions (via @is_coached) and declares it in uses.
+    root = _copy_repo(tmp_path)
+    ai = root / AUDIT_REL / "catalog" / "rules" / "ai.yaml"
+    text = ai.read_text()
+    assert text.count("  uses: [ai_instructions]\n") == 1
+    ai.write_text(text.replace("  uses: [ai_instructions]\n", ""))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert "A5: reads 'ai_instructions' (via code:spotter_readiness)" in res.stdout
     assert "Traceback" not in res.stderr

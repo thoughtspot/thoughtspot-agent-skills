@@ -187,7 +187,7 @@ def test_incomplete_discovery_is_a_warning_and_invents_no_set_rows(disc, cons):
 
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
-def test_set_discovery_only_runs_for_the_h_angle(disc, cons):
+def test_set_discovery_runs_only_when_a_selected_rule_requires_sets(disc, cons):
     _build_with_one_model("m1", angles=["A", "D", "P", "S"])
     disc.assert_not_called()
     cons.assert_not_called()

@@ -132,6 +132,9 @@
     component.
   categories: [A]
   requires: [model_tml]
+  # Reads ai_instructions (readiness_score -> @is_coached) but must not skip a Model whose
+  # lookup failed — it scores it uncoached — so it is a `uses`, not a `requires`.
+  uses: [ai_instructions]
   implementation: code:spotter_readiness
   scope: model
   bands:

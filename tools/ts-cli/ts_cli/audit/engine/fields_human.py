@@ -52,7 +52,7 @@ def _is_hidden(column: Any) -> bool:
     return bool(props.get("is_hidden")) if isinstance(props, dict) else False
 
 
-@register("is_sole_join_carrier")
+@register("is_sole_join_carrier", uses=())
 def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
     """Model column: its `column_id` prefix ("" without `::`) names a joined table
     (by NAME — see the module docstring) and no OTHER visible column of the Model
@@ -69,7 +69,7 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
                    if cc is not column and not _is_hidden(cc))
 
 
-@register("referenced_by_formula")
+@register("referenced_by_formula", uses=())
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     """Model column: `[<its name>]` appears in the Model's formula expressions joined by
     spaces — or it surfaces a formula (`formula_id`) whose `[<display name>]` does."""
@@ -85,7 +85,7 @@ def _referenced_by_formula(item: dict, ctx: Any) -> bool:
 
 # ── H4 / H5: dependents ─────────────────────────────────────────────────────
 
-@register("dependent_count")
+@register("dependent_count", uses={"dependents"})
 def _dependent_count(item: dict, ctx: Any) -> int:
     """Model: how many `ctx.dependents` rows under its guid are not Sets. A Set is a
     column on the Model, so whatever uses it is already a Model dependent: a SET row
@@ -94,7 +94,7 @@ def _dependent_count(item: dict, ctx: Any) -> int:
     return sum(1 for d in rows if d.get("type") != "SET")
 
 
-@register("set_consumers")
+@register("set_consumers", uses={"dependents", "sets"})
 def _set_consumers(item: dict, ctx: Any) -> Any:
     """Set: the consumers its lookup returned (`ctx.dependents[<set guid>]`); None when
     it was not looked up — which a rule declaring `requires: [sets]` never sees."""
@@ -115,7 +115,7 @@ def _known_table_guids(ctx: Any) -> set:
     return guids | set(ctx.tables)
 
 
-@register("is_table_reference")
+@register("is_table_reference", uses=())
 def _is_table_reference(item: dict, ctx: Any) -> bool:
     """Answer table reference: its `fqn` is set and is a Table's guid (see
     _known_table_guids). An Answer built on a Model carries the Model's guid there; an
@@ -147,13 +147,13 @@ def _model_formula_names(ctx: Any) -> Dict[str, Any]:
     return names
 
 
-@register("normalized_expr")
+@register("normalized_expr", uses=())
 def _normalized_expr(item: dict, ctx: Any) -> Optional[str]:
     """Answer formula: its `expr` normalised (see _normalize; absent reads as "")."""
     return _normalize((item.get("obj") or {}).get("expr", ""))
 
 
-@register("matches_model_formula")
+@register("matches_model_formula", uses=())
 def _matches_model_formula(item: dict, ctx: Any) -> bool:
     """Answer formula: a Model formula has the same normalised expression — a blank one
     included (legacy H9 has no blank guard; H8 excludes blanks itself)."""
@@ -161,14 +161,14 @@ def _matches_model_formula(item: dict, ctx: Any) -> bool:
     return expr is not None and expr in _model_formula_names(ctx)
 
 
-@register("matched_model_formula_name")
+@register("matched_model_formula_name", uses=())
 def _matched_model_formula_name(item: dict, ctx: Any) -> Any:
     """Answer formula: the name of the Model formula it duplicates (the last one with
     that expression), or None."""
     return _model_formula_names(ctx).get(_normalized_expr(item, ctx))
 
 
-@register("answer_name")
+@register("answer_name", uses=())
 def _answer_name(item: dict, ctx: Any) -> Any:
     """Answer formula: the name of its Answer, as an Answer finding reports it ("" when
     the Answer has no `name`)."""

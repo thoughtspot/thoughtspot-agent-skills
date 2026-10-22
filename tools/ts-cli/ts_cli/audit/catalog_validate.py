@@ -18,6 +18,7 @@ the item's (or an enclosing item's) child; unknown scopes, modes, operators, der
 fields (`@name`, also as a step inside a path), code-rule names (`code:<name>`
 not registered), an `aggregate` block on a code rule (the function owns its logic),
 message placeholders (a code rule's: those its function declares), data requirements,
+`uses` values and reads neither declares (catalog_uses.py),
 categories, profiles, views, band ops/directions/units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
@@ -74,6 +75,7 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     known_code_rules,
     rule_message_problems,
 )
+from ts_cli.audit.catalog_uses import data_declaration_problems
 from ts_cli.audit.catalog_forms import (  # noqa: F401  (re-exported)
     BY_SEVERITY,
     form_coverage_problems,
@@ -109,7 +111,7 @@ UNITS = ["percent", "count", "depth", "ratio", "score"]
 VIEWS = ["duplicates", "cleanup"]
 
 RULE_KEYS = {
-    "id", "title", "description", "status", "categories", "requires", "implementation",
+    "id", "title", "description", "status", "categories", "requires", "uses", "implementation",
     "scope", "aggregate", "bands", "severity", "profiles", "message", "legacy_threshold",
     "remediation", "examples", "views",
 }
@@ -252,6 +254,7 @@ def _basic_problems(rule: Rule, cat: Catalog) -> List[str]:
             for c in rule.categories if not _is_id_in(c, cat.categories)]
     out += [f"requires: unknown requires value '{r}' (known: {_known(REQUIRES)})"
             for r in rule.requires if r not in REQUIRES]
+    out += data_declaration_problems(rule, REQUIRES)
     out += [f"views: unknown view '{v}' (known: {_known(VIEWS)})"
             for v in rule.views if v not in VIEWS]
     return out

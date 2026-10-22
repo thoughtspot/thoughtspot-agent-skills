@@ -6,9 +6,10 @@ A snapshot is a directory holding one JSON file per ``AuditContext`` field plus
     {"format": 1, "ts_cli_version": "...", "created": "...",
      "angles": ["A", "D", ...], "files": ["answers.json", ...]}
 
-``angles`` records what the capture fetched — the A angle fetches AI
-instructions and the H angle fetches Answer TML and Sets — so a replay can
-refuse an angle whose data was never collected rather than report it clean.
+``angles`` records what the capture was asked for. The conditional data (AI
+instructions, Answer TML, Sets) is fetched when a selected rule declares it in
+``requires`` or ``uses`` (``engine.run.needs_for``), under every profile, so a
+replay can refuse an angle that was not captured rather than report it clean.
 
 Replaying a snapshot runs the checks over exactly the data a live run saw.
 That is what lets two audit engines be compared on identical input, so a

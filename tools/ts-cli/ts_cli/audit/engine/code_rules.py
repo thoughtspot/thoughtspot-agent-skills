@@ -5,7 +5,7 @@ not a clever expression) keeps its full catalog entry — id, categories, requir
 message, remediation, bands where they apply, legacy_threshold, examples — and names a
 function here with `implementation: code:<name>`:
 
-    @code_rule("model_width", placeholders={"count"}, severity="bands")
+    @code_rule("model_width", placeholders={"count"}, severity="bands", uses=())
     def model_width(rule: Rule, ctx: AuditContext, profile: str) -> List[Finding]:
         ...
 
@@ -27,6 +27,10 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
                    the entry must — and must not — carry.
     own_threshold  True when it sets each finding's legacy threshold itself (D1); the
                    entry must then carry no `legacy_threshold`
+    uses           (required) the conditional data (catalog_expr.CONDITIONAL_DATA) it
+                   reads from the context, through a derived field included — `()` for
+                   none. The gate fails an entry whose `requires`/`uses` do not cover
+                   it (catalog_uses.py): A5 reads `ai_instructions` via `@is_coached`
 
 The contract (`run.run_rules` dispatches; `check_findings` enforces it):
 
@@ -60,7 +64,8 @@ Imports — read before adding one. The catalog gate (tools/validate/check_audit
 imports this module to learn the registered names, under the system Python 3.9 with
 only PyYAML, without executing the `ts_cli` package __init__ (typer, requests). So a
 module-level import here must stay within: catalog_model, catalog_validate (and
-catalog_expr, catalog_code, catalog_forms, which it imports), rules, findings, and
+catalog_expr, catalog_code, catalog_forms, catalog_uses, which it imports), rules,
+findings, and
 engine.{fields (and fields_data / fields_human, which it imports), scopes, predicates,
 messages, bands} — and code_rules_human, imported at the end of this module, holds to
 the same list. Anything else (context, commands, the legacy checks_* modules) is imported
@@ -88,6 +93,7 @@ REGISTRY: Dict[str, CodeRule] = {}
 PLACEHOLDERS: Dict[str, FrozenSet[str]] = {}
 SEVERITY_SOURCES: Dict[str, Any] = {}   # "bands" | "severity" | "severity_name" | frozenset
 OWN_THRESHOLD: Set[str] = set()
+CODE_USES: Dict[str, FrozenSet[str]] = {}   # conditional data it reads (catalog_uses.py)
 CATALOG_SEVERITY_SOURCES = ("bands", "severity", "severity_name")
 _PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -107,9 +113,11 @@ def _severity_source(name: str, severity: Any) -> Any:
 
 
 def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = None,
-              own_threshold: bool = False) -> Callable[[CodeRule], CodeRule]:
+              uses: Any = None, own_threshold: bool = False
+              ) -> Callable[[CodeRule], CodeRule]:
     """Register the decorated function as `implementation: code:<name>`, rendering its
-    message with `placeholders`, its severity from `severity`, and — with
+    message with `placeholders`, its severity from `severity`, reading the conditional
+    data `uses` from the context (itself or through a derived field), and — with
     `own_threshold` — setting each finding's legacy threshold itself."""
     if not isinstance(name, str) or not CODE_IMPL.match(f"code:{name}"):
         raise ValueError(f"'{name}' is not a valid code rule name "
@@ -122,6 +130,7 @@ def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = No
         raise ValueError(f"code rule '{name}': own_threshold must be true or false")
     declared = frozenset(placeholders)
     source = _severity_source(name, severity)
+    data = fields._declared_uses(f"code rule '{name}'", uses)
 
     def register(fn: CodeRule) -> CodeRule:
         if name in REGISTRY:
@@ -130,6 +139,7 @@ def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = No
         REGISTRY[name] = fn
         PLACEHOLDERS[name] = declared
         SEVERITY_SOURCES[name] = source
+        CODE_USES[name] = data
         if own_threshold:
             OWN_THRESHOLD.add(name)
         return fn
@@ -232,7 +242,8 @@ def readiness_score(item: dict, ctx: Any) -> float:
             + name_quality * 0.15)
 
 
-@code_rule("spotter_readiness", placeholders={"score"}, severity="bands")
+@code_rule("spotter_readiness", placeholders={"score"}, severity="bands",
+           uses={"ai_instructions"})  # readiness_score -> @is_coached
 def spotter_readiness(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """A5 — one finding per model whose readiness score the bands grade."""
     out: List[Finding] = []
@@ -278,7 +289,7 @@ D1_MEASURES = (
 
 
 @code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"},
-           severity={"HIGH", "MEDIUM"}, own_threshold=True)
+           severity={"HIGH", "MEDIUM"}, uses=(), own_threshold=True)
 def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D1 — up to five findings per Model, one per measure over its MEDIUM line."""
     out: List[Finding] = []
@@ -295,7 +306,7 @@ def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
 
 
 @code_rule("join_keys", placeholders={"varchar_keys", "key_pairs"},
-           severity={"HIGH", "MEDIUM"})
+           severity={"HIGH", "MEDIUM"}, uses=())
 def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D2 — per join, up to two findings: HIGH for string-typed keys (P6's test,
     @varchar_join_keys), MEDIUM for a composite key (more than one operand pair)."""
@@ -312,7 +323,8 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     return out
 
 
-@code_rule("zero_column_tables", placeholders={"name", "role"}, severity="severity")
+@code_rule("zero_column_tables", placeholders={"name", "role"}, severity="severity",
+           uses=())
 def zero_column_tables(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D10 — a model table no model column comes from, named by its `name`."""
     out: List[Finding] = []
@@ -350,7 +362,7 @@ def _named_severity(rule: "Rule") -> str:
 
 
 @code_rule("column_type_divergence", placeholders={"name", "models"},
-           severity="severity_name")
+           severity="severity_name", uses=())
 def column_type_divergence(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D12 — a db column name classified differently across Models. Like legacy D12,
     it reads no column at all unless the context holds two Models or more (one Model

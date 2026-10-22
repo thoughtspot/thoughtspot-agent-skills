@@ -51,19 +51,22 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
 
 def needs_for(catalog: Catalog, categories: List[str], profile: str,
               layers: Optional[List[Dict[str, Any]]] = None) -> Set[str]:
-    """The data `run_rules(ctx, catalog, categories, profile, layers)` reads: the union
-    of `requires` over the rules it would run — selected, active in the catalog, and
-    still active once the profile and `layers` are applied (`status` is overridable).
-    A retired rule, or one a profile or layer switches off, contributes nothing.
+    """The data the rules `run_rules(ctx, catalog, categories, profile, layers)` would
+    run DECLARE: the union of `requires` and `uses` over the rules selected, active in
+    the catalog, and still active once the profile and `layers` are applied (`status`
+    is overridable; `requires` and `uses` are not). A retired rule, or one a profile or
+    layer switches off, contributes nothing.
 
-    `build_context` fetches the optional data (`ai_instructions`, `answers`, `sets`)
-    only when it is in here."""
+    `build_context` fetches the conditional data (`ai_instructions`, `answers`, `sets`)
+    only when it is in here. Rules also read data they do not declare — Model and Table
+    TML, which are fetched unconditionally for that reason; the catalog gate holds every
+    rule's conditional reads to its declarations (catalog_uses.py)."""
     _check_selection(catalog, categories, profile)
     needs: Set[str] = set()
     for rule in _selected(catalog, categories):
         merged, _ = bands.effective(rule, layers_for(rule, profile, layers or []))
         if merged.status == "active":
-            needs.update(rule.requires)
+            needs.update(rule.requires, rule.uses)
     return needs
 
 
