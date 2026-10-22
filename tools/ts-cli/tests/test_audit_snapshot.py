@@ -65,6 +65,22 @@ def test_snapshot_round_trips_yaml_dates(tmp_path):
     assert got == ctx
 
 
+def test_snapshot_preserves_mapping_order(tmp_path):
+    """Checks iterate ctx dicts in insertion order (H5 walks ``dependents``), so
+    finding order is part of what a replay must reproduce. Sorting keys on write
+    reordered 45 of 5,091 H5 findings on a real 351-Model capture while ``==``
+    — which ignores dict order — still called the round trip exact."""
+    from ts_cli.audit.checks_human import check_h5
+    deps = {"m1": [{"guid": g, "name": g, "type": "SET"} for g in ("s-z", "s-a", "s-m")]}
+    deps.update({"s-z": [], "s-a": [], "s-m": []})
+    ctx = make_context(dependents=deps, tables={"zz": {}, "aa": {"b": 1, "a": 2}})
+    write_snapshot(ctx, tmp_path / "snap", ALL)
+    got, _ = read_snapshot(tmp_path / "snap")
+    assert list(got.dependents) == ["m1", "s-z", "s-a", "s-m"]
+    assert list(got.tables) == ["zz", "aa"] and list(got.tables["aa"]) == ["b", "a"]
+    assert [f.object_guid for f in check_h5(got)] == [f.object_guid for f in check_h5(ctx)]
+
+
 def test_snapshot_refuses_data_it_cannot_reproduce(tmp_path):
     """Non-string dict keys would come back as strings — refuse, never corrupt."""
     ctx = make_context(models=[{"guid": "m1", "model": {1: "a", 2: "b"}}])

@@ -16,6 +16,10 @@ snapshot that does not reproduce its context exactly is worse than none:
 ``write_snapshot`` reads its own output back and refuses to leave a snapshot
 that differs from what it was given.
 
+Keys are written in insertion order, NOT sorted. The checks iterate the
+context's dicts (H5 walks ``dependents``), so dict order decides finding
+order; sorting keys reordered 45 of 5,091 findings on a real capture.
+
 The manifest is written last. A capture interrupted part-way leaves no
 manifest, which ``read_snapshot`` reports, never a half-written snapshot that
 reads as complete.
@@ -67,7 +71,7 @@ def _decode_extra(obj: dict):
 
 def _dumps(value, what: str) -> str:
     try:
-        return json.dumps(value, sort_keys=True, indent=1, default=_encode_extra)
+        return json.dumps(value, indent=1, default=_encode_extra)
     except (TypeError, ValueError) as exc:
         raise SnapshotError(f"cannot write {what} to a snapshot: {exc}") from exc
 
@@ -104,9 +108,24 @@ def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str]) -> None:
     manifest_path.write_text(_dumps(manifest, MANIFEST), encoding="utf-8")
 
 
+def _same(a, b) -> bool:
+    """Equal, including dict key ORDER and exact types.
+
+    ``==`` ignores dict order and calls 1 == 1.0 == True; a replay that differs
+    in either can change what the checks emit, or the order they emit it in.
+    """
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return list(a) == list(b) and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def _check_round_trip(ctx: AuditContext, out_dir: Path) -> None:
     for field in _FIELDS:
-        if _load(out_dir / _file_for(field)) != getattr(ctx, field):
+        if not _same(_load(out_dir / _file_for(field)), getattr(ctx, field)):
             raise SnapshotError(
                 f"snapshot of {field} does not read back unchanged; "
                 "it holds data JSON cannot reproduce (e.g. non-string keys)")
