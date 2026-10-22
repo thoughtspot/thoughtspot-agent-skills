@@ -1618,11 +1618,17 @@ filter classes are now caught pre-import.
 Parse the JSON output to report results to the user:
 
 See [references/step-7-review-templates.md](references/step-7-review-templates.md) "Phase 2 — `build-model --existing-guid` JSON output shape" for the exact
-field list (`formulas_translated`/`skipped`/`filtered`/`added`, `formulas_dropped_on_import`
-with `name`/`expr`/`error`/`original_tableau`, `validation_warnings`, `updated_model_guid`).
+field list (`import_status`, `formulas_translated`/`skipped`/`filtered`/`added`,
+`formulas_dropped_on_import` with `name`/`expr`/`error`/`original_tableau`,
+`validation_warnings`, `updated_model_guid`).
 
-**If `formulas_dropped_on_import` is empty (or absent):** Report success. Proceed to
-Step 7.5 regardless of migration pace.
+**Check `import_status` first — an empty `formulas_dropped_on_import` alone isn't success.**
+A hard failure not attributable to one formula exits non-zero with `import_status: ERROR`
+and an empty `formulas_dropped_on_import` too. If `import_status` isn't `"OK"`, report
+`import_error` and stop.
+
+**If `import_status == "OK"` and `formulas_dropped_on_import` is empty (or absent):**
+Report success. Proceed to Step 7.5 regardless of migration pace.
 
 **If `formulas_dropped_on_import` is non-empty — behaviour depends on `{migration_pace}`:**
 
@@ -1962,6 +1968,10 @@ in the description — never fall back to TABLE_MODE as a lazy alternative.
 See [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
 "Mark class → chart type (Step 10a)" for the full Tableau mark-class → `chart.type` mapping
 table (bar/line/circle/square/pie/area/text/map/KPI-block/dual-axis combo).
+
+**Apply the confirmed chart/structure upgrades upfront** — see
+[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
+"Confirmed chart/structure upgrades (Step 10a)".
 
 **Combo / dual-axis rule (Muze path only).** A Tableau **dual-axis** worksheet (two `<pane>`
 marks with different mark classes, typically `Bar` + `Line`, on a secondary/synchronized
@@ -2503,8 +2513,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` detection checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open on a bad status/formula drop. Parameter types: `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc fixes + optional MCP liveboard step. Backlog BL-402/403/404 |
-| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
-| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
+| 1.47.0 | 2026-10-19 | **Parser false positives, nested `group_aggregate`, LOD brace-scanning fixed (ts-cli v0.182.0).** Function-name scans mask literals/`[ref]`s first. Nested-`group_aggregate` checks span containment, not match-count. LOD scanning is a single-pass stack scanner skipping `[ref]` spans. `convert_string_concat` gated on `datatype == "string"`. Import-retry no longer fails open or reports success on an unattributable failure. Parameter types `INT64`/`DATE`; `range_config` → `range_min`/`range_max`. Mapping-doc and chart-type fixes, optional MCP step. Backlog BL-402/403/404 |
 
-**Older entries (v1.0.0–v1.44.4):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.46.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

@@ -64,7 +64,13 @@ RATCHET: dict[str, tuple[int, str]] = {
     # pattern (its v1.39.1 entry documents doing exactly that). A ratchet should come
     # down as the file shrinks; raising it for a mandatory changelog row would have
     # been the "licence to grow" this gate warns about.
-    "agents/cli/ts-convert-from-tableau/SKILL.md": (34_649, "BL-128"),
+    # 34700 as of ts-cli v0.176.0 resubmission — RAISED by 51 tokens after already
+    # archiving two more changelog rows and moving the new chart/structure-upgrade
+    # table to references/step-10-liveboard-generation.md: the remaining growth is
+    # a confirmed import_status success-reporting fix (SKILL.md:1624 could report
+    # success on a hard failure formulas_dropped_on_import never saw) plus a short
+    # pointer to the moved content. Disclose in the PR description.
+    "agents/cli/ts-convert-from-tableau/SKILL.md": (34_700, "BL-128"),
 }
 
 

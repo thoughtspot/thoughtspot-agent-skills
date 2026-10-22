@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.tableau.literals import _REF_RE
-
 
 def _find_matching_end(text: str) -> int | None:
     """Find the END that closes the current CASE block, respecting nesting.
@@ -135,17 +133,6 @@ def _find_matching_brace(expr: str, open_pos: int) -> int:
     """Find the closing } that matches the { at open_pos, respecting nesting.
 
     Returns the index of the matching }, or -1 if unbalanced.
-
-    A `[ref]` can itself contain a literal, unescaped `[` (only a literal `]`
-    needs the `]]` escape — see `_REF_RE`), e.g. a field named "Ratio [x" is
-    written `[Ratio [x]`. Tracking bracket depth with a naive per-character
-    counter miscounts that — it has no way to know a `]` it sees is the one
-    real ref-closing bracket versus a nested-looking one inside the name — and
-    can leave the scan still "inside a bracket" well past the ref's actual
-    end, skipping real `{`/`}` LOD syntax that follows. Matching `_REF_RE`
-    at each `[` and jumping straight to its end sidesteps the whole problem:
-    it is the same grammar `mask_refs`/`mask_literals` use everywhere else,
-    so a ref is always consumed as one atomic unit, never char-by-char.
     """
     depth = 1
     pos = open_pos + 1
@@ -157,11 +144,6 @@ def _find_matching_brace(expr: str, open_pos: int) -> int:
             in_single = not in_single
         elif c == '"' and not in_single:
             in_double = not in_double
-        elif not in_single and not in_double and c == "[":
-            m = _REF_RE.match(expr, pos)
-            if m:
-                pos = m.end()
-                continue
         elif not in_single and not in_double:
             if c == "{":
                 depth += 1

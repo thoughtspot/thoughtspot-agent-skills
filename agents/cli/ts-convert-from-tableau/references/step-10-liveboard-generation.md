@@ -67,6 +67,31 @@ Summary** that it was a floating overlay flattened into the flow.
 | "Measure Names / Measure Values" KPI block | `KPI` — **one tile per measure** (see KPI rule in SKILL.md Step 10a) |
 | **dual-axis combo** (two mark classes, e.g. `Bar` + `Line`, on a synchronized/secondary axis) | `ADVANCED_LINE_COLUMN` (Muze) — see the combo rule in SKILL.md Step 10a |
 
+## Confirmed chart/structure upgrades (Step 10a)
+
+Upgrades over the plain mark-class mapping above, confirmed by user edits after a first pass
+on a real migration — apply these as the default, not something to wait to be asked for:
+
+| Tableau worksheet shape | The table's plain default | Upgrade to |
+|---|---|---|
+| Per-entity dot/strip plot — one measure + a categorical grouping + a size/color dimension (mark=circle, many points, no aggregation) | A flat BAR of the measure aggregated by the grouping dimension | **ADVANCED_BUBBLE** — keep the per-entity rows (e.g. one point per order/ticket/unit) and size by the magnitude measure; don't collapse to a group-level average |
+| Lat/long path or point map (Rows=Latitude, Columns=Longitude, any mark class) | A plain LINE chart of Longitude vs Latitude | **GEO_BUBBLE** — any worksheet using Tableau's built-in lat/long shelves is a map, not a generic XY line, regardless of mark class |
+| Multi-measure trend/comparison (e.g. Actual vs. Plan vs. Variance over a time axis) | A GRID_TABLE/placeholder fallback (especially if a needed measure was initially missing) | **ADVANCED_LINE**, once every measure it needs exists — a proper multi-series line, not a table fallback |
+
+Two structural defaults beyond individual tiles (confirmed preferences, not optional polish
+once a tab has more than ~6-8 tiles):
+- **Group tiles into named sections by theme** (e.g. "Summary KPIs", "Trends", "Breakdown by
+  Category") rather than leaving a flat list.
+- **Proactively add a liveboard filter whenever a source dashboard's title/subtitle displays
+  per-record identifying attributes** (e.g. "Order ID: 10248 | Customer: Acme Corp | Region:
+  West") — even with no Tableau dashboard action parsed for it. That subtitle pattern is
+  itself the signal the dashboard is meant to be scoped to one record, and ThoughtSpot has no
+  equivalent to a Tableau click-through filter action, so a filter chip is the correct
+  substitute — don't wait to be asked "why are there so many data points."
+
+In general, prefer keeping the original per-record granularity over collapsing to a coarser
+aggregate whenever a size/color encoding is available to carry that detail.
+
 ## KPI viz template (Step 10a)
 
 Full KPI viz template (substitute column names, UUIDs, and colors). Requires
