@@ -19,11 +19,11 @@
   "hoard": 66,
   "hoard_empty": 66,
   "portals": {
-    "law": 45,
+    "law": 234,
     "mines": 9,
-    "lake": 32,
-    "forests": 46,
-    "isles": 11
+    "lake": 230,
+    "forests": 218,
+    "isles": 417
   },
   "weapon": "sword",
   "items": {
@@ -64,6 +64,11 @@
     "elder": 100,
     "villager": 99,
     "ranger": 112,
-    "miner": 86
+    "miner": 86,
+    "dwarf_guard": 133,
+    "fisherman": 134,
+    "sailor": 135,
+    "golden_elf": 136,
+    "wizard_guard": 137
   }
 }

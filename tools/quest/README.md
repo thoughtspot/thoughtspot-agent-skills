@@ -254,11 +254,17 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
   tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
   turned out to bundle GPL-3.0 code; design decision 5.)
-- **Tiles** are Kenney's Tiny Dungeon (CC0, `tiles/LICENSE-kenney.txt`): `tiles/tiles.png` is its
-  `tilemap_packed.png` (12x11 frames of 16px) with one row added, of which frame 132, the top of a
-  wall, is ours. `tiles/tiles.json` names the frame for everything the page draws (the wall and its
-  top, the player, the five roles, the open chest, exit, gate, portal); the build checks it. A
-  realm's look is its map's own floor and decoration.
+- **Tiles** are three of Kenney's CC0 packs in one atlas (`tiles/LICENSE-kenney.txt`): Tiny
+  Dungeon (frames 0-131), Tiny Town (144-275: trees, houses, planks) and Tiny Battle (276-473:
+  water, rock, boats), plus a row of ours (132: a wall's top; 133-137: the realm guards, Tiny
+  Dungeon characters recoloured). `tiles/make_atlas.py` rebuilds `tiles.png` from the packs.
+  `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
+  person looks; the build checks it.
+- **The overworld** is a small world the camera scrolls (40x14): a plaza with Elder Wren, and a
+  door for each realm in its own scene, each with a guard who says what the realm is for: a
+  tunnel into the mountain (the Mines, a dwarf), a library over a moat and an ornate bridge (Law,
+  a wizard), a pier to a town in the lake (the Lake, a fisherman), a tunnel of golden trees (the
+  Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
 - **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
   roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
   `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your

@@ -545,6 +545,16 @@
         const px = game.canvas.getContext("2d").getImageData(1 * TILE + 8 - Math.round(0), 8, 1, 1).data;
         if (px[0] === 0x16 && px[1] === 0x13 && px[2] === 0x1f) throw new Error("the canvas drew no walls");
       }
+      // A wall over floor shows its brick face, over wall its dark top (strict: the map must have both).
+      const wallsLook = strict => {
+          const W = world.walls, at = (x, y) => W.getTileAt(x, y);
+          let faces = 0, tops = 0;
+          W.forEachTile(t => {
+            if (t.index - 1 === FRAMES.wall) { faces++; if (at(t.x, t.y + 1) && at(t.x, t.y + 1).index - 1 === FRAMES.wall) throw new Error(`a brick face at (${t.x}, ${t.y}) has wall below`); }
+            if (t.index - 1 === FRAMES.wall_top) { tops++; const b = at(t.x, t.y + 1); if (t.y + 1 < W.layer.height && !(b && (b.index - 1 === FRAMES.wall || b.index - 1 === FRAMES.wall_top))) throw new Error(`a wall top at (${t.x}, ${t.y}) has floor below`); }
+          });
+          if (strict && (!faces || !tops)) throw new Error(`walls drew ${faces} faces and ${tops} tops`);
+      };
       const playFun = async () => {
           // The fun: a chest's loot, a mimic's teeth, a barrel rolled off a hoard, a weapon switched.
           const of = t => world.objects.filter(o => o.type === t);
@@ -604,13 +614,7 @@
       // The art: a wall over floor shows its face, a wall over wall its top; decoration is drawn and
       // never blocks; walls stop a real walk; what you see is where the body is.
       {
-        const W = world.walls, at = (x, y) => W.getTileAt(x, y);
-        let faces = 0, tops = 0;
-        W.forEachTile(t => {
-          if (t.index - 1 === FRAMES.wall) { faces++; if (at(t.x, t.y + 1) && at(t.x, t.y + 1).index - 1 === FRAMES.wall) throw new Error(`a brick face at (${t.x}, ${t.y}) has wall below`); }
-          if (t.index - 1 === FRAMES.wall_top) { tops++; const b = at(t.x, t.y + 1); if (t.y + 1 < W.layer.height && !(b && (b.index - 1 === FRAMES.wall || b.index - 1 === FRAMES.wall_top))) throw new Error(`a wall top at (${t.x}, ${t.y}) has floor below`); }
-        });
-        if (!faces || !tops) throw new Error(`walls drew ${faces} faces and ${tops} tops`);
+        wallsLook(false);
         if (world.decor && (!world.decor.layer.data.flat().some(t => t.index > 0) || world.decor.layer.data.flat().some(t => t.collides)))
           throw new Error("decoration isn't drawn, or blocks");
         world.player.setPosition(world.spawn.x, world.spawn.y);
@@ -722,6 +726,7 @@
       if (!dialog.open || state.screen !== "realm") throw new Error(`the ${realmId} door didn't open`);
       dispatch({ type: "enter" });
       await until(() => world && world.mapId === realmId);
+      wallsLook(true);
       await playFun();
       const exit = world.objects.find(o => o.type === "exit");
       await walk(exit); talk(world.nearby());

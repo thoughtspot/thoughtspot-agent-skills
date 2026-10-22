@@ -507,6 +507,9 @@ kept, and the character can be asked again.
    tops, a `decor` layer, motion (none with reduced motion), the gold bar, no tint.
 7. **Fun:** chests, a rolling barrel over a hoard, weapons, a door per realm, and people to talk
    to (`npc`), none of them a step, all checked never to block the quest.
+8. **A world for the doors:** Tiny Town and Tiny Battle (CC0) join the atlas; the overworld becomes
+   a scrolling world with a scene per realm (a mountain tunnel, a library over a moat, a pier, a
+   tree tunnel, a boat) and a guard per realm, dressed for it, with one short line each.
 
 **Then:** you play it, and the remaining realms get maps.
 

@@ -3279,7 +3279,7 @@ def test_the_packs_tiles_name_every_frame_the_explore_page_draws():
 
 @pytest.mark.parametrize("edit,needle", [
     (lambda f: f.pop("gate"), "needs 'gate'"),
-    (lambda f: f.update(gate=144), "'gate' must be a frame of tiles.png, 0 to 143"),
+    (lambda f: f.update(gate=480), "'gate' must be a frame of tiles.png, 0 to 479"),
     (lambda f: f.update(gate="28"), "'gate' must be a frame"),
     (lambda f: f.update(gate=True), "'gate' must be a frame"),
     (lambda f: f.update(gate=-1), "'gate' must be a frame"),
@@ -3296,12 +3296,12 @@ def test_a_broken_tile_index_fails_the_build(tmp_path, monkeypatch, edit, needle
 
 
 @pytest.mark.parametrize("edit,needle", [
-    (lambda m: m["tilesets"][0].update(imagewidth=176), "says its image is 176x192, but ../tiles/tiles.png is 192x192"),
-    (lambda m: m["tilesets"][0].update(tilecount=200), "must have tilecount 144 and columns 12"),
-    (lambda m: m["tilesets"][0].update(columns=11), "must have tilecount 144 and columns 12"),
+    (lambda m: m["tilesets"][0].update(imagewidth=176), "says its image is 176x640, but ../tiles/tiles.png is 192x640"),
+    (lambda m: m["tilesets"][0].update(tilecount=200), "must have tilecount 480 and columns 12"),
+    (lambda m: m["tilesets"][0].update(columns=11), "must have tilecount 480 and columns 12"),
     (lambda m: m["tilesets"][0].update(firstgid=2), "needs firstgid 1"),
     (lambda m: m["tilesets"][0].update(image="../maps/mines.tmj"), "is not in the pack"),
-    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 145), "uses a tile past t"),
+    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 481), "uses a tile past t"),
 ])
 def test_a_map_must_match_its_tileset(tmp_path, monkeypatch, edit, needle):
     packs = _copy_packs(tmp_path)
@@ -3664,3 +3664,43 @@ def test_the_engine_walks_at_the_same_speed_at_any_refresh_rate():
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
     assert all(80 <= v <= 95 for v in got.values()), got      # 90 px/s, give or take a frame
+
+
+
+# ---- PR 8: a door for every realm, and a guard who says what it's for ------------------------------
+
+def _overworld_npcs():
+    doc = json.loads((PACK_DIR / "maps/overworld.tmj").read_text(encoding="utf-8"))
+    objs = [o for l in doc["layers"] if l["type"] == "objectgroup" for o in l["objects"]]
+    prop = lambda o, n: next((p["value"] for p in o.get("properties", []) if p["name"] == n), None)
+    return [(prop(o, "look"), prop(o, "says")) for o in objs if o["type"] == "npc"], doc
+
+
+def test_every_realm_has_its_own_door_and_guard():
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    frames = json.loads((PACK_DIR / "tiles/tiles.json").read_text(encoding="utf-8"))
+    ids = [r["id"] for r in data["realms"]]
+    assert set(frames["portals"]) == set(ids) and len(set(frames["portals"].values())) == len(ids)
+    npcs, _ = _overworld_npcs()
+    said = {says for _, says in npcs}
+    for rid in ids:
+        assert f"guard_{rid}" in said, rid                       # one guard per realm, by its door
+    looks = [look for look, says in npcs if says and says.startswith("guard_")]
+    assert len(set(looks)) == len(ids)                           # each dressed for its realm
+
+
+def test_the_people_speak_briefly():
+    strings = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
+    for k, v in strings.items():
+        if k.startswith(("guard_", "npc_elder_")):
+            assert len(v) <= 110, (k, len(v))
+
+
+def test_the_atlas_is_built_from_kenneys_three_packs():
+    script = (PACK_DIR / "tiles/make_atlas.py").read_text(encoding="utf-8")
+    for pack in ("Tiny Dungeon", "Tiny Town", "Tiny Battle"):
+        assert pack in script
+    licence = (PACK_DIR / "tiles/LICENSE-kenney.txt").read_text(encoding="utf-8")
+    for pack in ("Tiny Dungeon (1.0)", "Tiny Town (1.1)", "Tiny Battle (1.0)"):
+        assert pack in licence
+    assert licence.count("Creative Commons Zero") == 3
