@@ -4669,7 +4669,7 @@ declares them (`requires`/`uses`), so a narrow `--angles` fetches less. The JSON
 what was fetched as `corpus.fetched_needs`. On the AI-instructions lookup, a final 401 (after
 the client's one re-authentication), a 429, or any `requests` exception raised by the
 request or its re-authentication aborts the run once. Any other non-2xx (403, 404, a 5xx
-after the client's retries, …) or a non-JSON 2xx skips that Model's AI-instruction rules
+after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips that Model's AI-instruction rules
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
 report). Any other exception is a bug and propagates unchanged.
 
