@@ -71,9 +71,8 @@ def test_snapshot_preserves_mapping_order(tmp_path):
     reordered 45 of 5,091 H5 findings on a real 351-Model capture while ``==``
     — which ignores dict order — still called the round trip exact."""
     from ts_cli.audit.checks_human import check_h5
-    deps = {"m1": [{"guid": g, "name": g, "type": "SET"} for g in ("s-z", "s-a", "s-m")]}
-    deps.update({"s-z": [], "s-a": [], "s-m": []})
-    ctx = make_context(dependents=deps, tables={"zz": {}, "aa": {"b": 1, "a": 2}})
+    import audit_rule_fixtures as fx
+    ctx = fx.h5_sets_in_capture_order()   # three orphan Sets, in a non-sorted order
     write_snapshot(ctx, tmp_path / "snap", ALL)
     got, _ = read_snapshot(tmp_path / "snap")
     assert list(got.dependents) == ["m1", "s-z", "s-a", "s-m"]

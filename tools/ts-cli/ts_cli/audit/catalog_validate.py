@@ -22,7 +22,8 @@ categories, profiles, views, band ops/directions/units, severities; ids repeated
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
-example; a `{by_severity: ...}` message or legacy threshold with an unknown severity, a
+example (a retired rule may also carry no logic at all — no aggregate, no
+implementation — when no profile revives it); a `{by_severity: ...}` message or legacy threshold with an unknown severity, a
 non-template value, a severity nothing uses it for (a profile's own entry: one that
 profile never emits; a catalog-level entry: one no profile using it emits), or (a
 message) no template for one the rule can emit under a profile; a code rule's entry that does not carry exactly the
@@ -34,9 +35,10 @@ live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
 `catalog_code.py`, and those of the per-severity forms of `message` and
 `legacy_threshold` in `catalog_forms.py`. Two names come from engine
 registries, each imported lazily so the gate stays free of typer/requests: derived
-fields (`engine/fields.py` and the `engine/fields_data.py` it imports, via
-`known_derived_fields`) and code rules
-(`implementation: code:<name>`, `engine/code_rules.py`, via `known_code_rules`).
+fields (`engine/fields.py` and the `engine/fields_data.py` / `engine/fields_human.py`
+it imports, via `known_derived_fields`) and code rules (`implementation: code:<name>`,
+`engine/code_rules.py` and the `engine/code_rules_human.py` it imports, via
+`known_code_rules`).
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """
@@ -328,9 +330,26 @@ def _examples_problems(rule: Rule, cat: Catalog) -> List[str]:
     return out
 
 
+def has_no_logic(rule: Rule) -> bool:
+    """A declarative rule with no `aggregate`: nothing the engine could run. Allowed
+    only for a retired rule that keeps an id allocated (H6, deferred)."""
+    return rule.implementation == "declarative" and not rule.aggregate
+
+
+def _revival_problems(rule: Rule) -> List[str]:
+    """A retired rule with no logic must stay retired under every profile."""
+    return [f"profiles.{pid}.status: a retired rule with no logic (no aggregate, no "
+            "implementation) cannot be revived — give it its logic first"
+            for pid, override in rule.profiles.items()
+            if isinstance(override, dict) and override.get("status") == "active"]
+
+
 def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     """What the engine interprets: the aggregate block, the message's placeholders,
-    the legacy threshold's placeholders, and where severity comes from."""
+    the legacy threshold's placeholders, and where severity comes from. A retired rule
+    with no logic has none of these; it may only never be revived."""
+    if rule.status == "retired" and has_no_logic(rule):
+        return _revival_problems(rule)
     out = code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
     out += message_problems_any(rule, rule.message, "message")

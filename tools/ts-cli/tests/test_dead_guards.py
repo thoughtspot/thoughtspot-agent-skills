@@ -16,7 +16,6 @@ happened.
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_human import check_h5
 from ts_cli.audit.checks_perf import check_p5
-from ts_cli.audit.context import make_context
 
 # The P5 contexts are named builders in audit_rule_fixtures (perf.py), so the P5 catalog
 # rule's equivalence test runs over exactly these inputs.
@@ -44,30 +43,20 @@ def test_p5_is_not_suppressed_by_an_unrelated_constraint():
 
 # ── H5 — only speak about sets whose dependents were actually fetched ──────
 
-SET_GUID = "set-1"
-
-
-def _set_dep():
-    return {"guid": SET_GUID, "type": "SET", "name": "FY24 Top Accounts"}
-
+# The H5 contexts are named builders in audit_rule_fixtures (human.py, guard_set_*).
 
 def test_h5_is_silent_when_the_sets_dependents_were_never_fetched():
     """`build_context` does not query dependents for sets, so absence of a key
     means "not looked up" — not "no consumers". Reporting an orphan from that
     is an assertion the check never earned."""
-    ctx = make_context(dependents={"m-1": [_set_dep()]})
-    assert check_h5(ctx) == []
+    assert check_h5(fx.guard_set_never_looked_up()) == []
 
 
 def test_h5_reports_a_set_fetched_and_found_to_have_no_consumers():
-    ctx = make_context(dependents={"m-1": [_set_dep()], SET_GUID: []})
-    findings = check_h5(ctx)
+    findings = check_h5(fx.guard_set_looked_up_no_consumers())
     assert len(findings) == 1
-    assert findings[0].object_guid == SET_GUID
+    assert findings[0].object_guid == "set-1"
 
 
 def test_h5_stays_silent_on_a_set_with_consumers():
-    ctx = make_context(dependents={
-        "m-1": [_set_dep()],
-        SET_GUID: [{"guid": "a-1", "type": "ANSWER", "name": "Uses the set"}]})
-    assert check_h5(ctx) == []
+    assert check_h5(fx.guard_set_looked_up_with_consumers()) == []

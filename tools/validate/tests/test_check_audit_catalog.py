@@ -43,8 +43,8 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "catalog_code.py", "catalog_forms.py", "rules.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
-                "engine/fields_data.py",
-                "engine/code_rules.py", "engine/bands.py", "engine/scopes.py",
+                "engine/fields_data.py", "engine/fields_human.py",
+                "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py")
 
 

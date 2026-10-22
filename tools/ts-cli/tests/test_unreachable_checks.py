@@ -15,7 +15,6 @@ exists to find — was silently excused.
 import audit_rule_fixtures as fx
 from ts_cli.audit.checks_human import check_h7
 from ts_cli.audit.checks_perf import check_p17
-from ts_cli.audit.context import make_context
 
 
 # ── P17 — cross-references are by id ───────────────────────────────────────
@@ -45,34 +44,25 @@ def test_p17_does_not_count_a_self_reference():
 
 # ── H7 — a Table guid is the bypass, a Model guid is healthy ───────────────
 
-TABLE_GUID, MODEL_GUID = "tbl-1", "mdl-1"
-
-
-def _ctx(answer_fqn):
-    model = {"guid": MODEL_GUID, "model": {
-        "name": "Sales", "model_tables": [{"name": "ORDERS", "fqn": TABLE_GUID}]}}
-    answer = {"guid": "a-1", "answer": {"name": "A", "tables": [{"fqn": answer_fqn}]}}
-    return make_context(models=[model], answers=[answer],
-                        tables={TABLE_GUID: {"table": {"name": "ORDERS"}}})
-
+# The H7 contexts are named builders in audit_rule_fixtures (human.py: Model `mdl-1`
+# on Table `tbl-1`, one Answer on the given fqn).
 
 def test_h7_flags_an_answer_built_straight_off_a_table():
     """The object the check exists to find."""
-    findings = check_h7(_ctx(TABLE_GUID))
+    findings = check_h7(fx.answer_on_table())
     assert len(findings) == 1
     assert "bypassing the model layer" in findings[0].detail
 
 
 def test_h7_leaves_a_healthy_answer_alone():
     """Built on the Model — the whole point of having a model layer."""
-    assert check_h7(_ctx(MODEL_GUID)) == []
+    assert check_h7(fx.answer_on_model()) == []
 
 
 def test_h7_is_silent_on_an_object_it_cannot_resolve():
     """Unknown is not the same as bypassing."""
-    assert check_h7(_ctx("something-else")) == []
+    assert check_h7(fx.answer_on_unknown_object()) == []
 
 
 def test_h7_ignores_an_answer_with_no_table_refs():
-    ctx = make_context(models=[], answers=[{"guid": "a-1", "answer": {"name": "A"}}])
-    assert check_h7(ctx) == []
+    assert check_h7(fx.answer_without_table_refs()) == []

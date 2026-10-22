@@ -99,6 +99,10 @@ def _run_rule(ctx, catalog: Catalog, rule: Rule, profile: str,
 def _dispatch(rule: Rule, ctx, profile: str) -> List[Finding]:
     if rule.implementation != "declarative":
         return code_rules.run_code_rule(rule, ctx, profile)
+    if not rule.aggregate:
+        # A retired placeholder (H6) revived by an override layer: loud, never silent.
+        raise ValueError(f"{rule.id}: has no logic (no aggregate, no implementation) — "
+                         "a retired placeholder cannot run")
     return MODES[rule.aggregate["mode"]](rule, ctx, profile)
 
 

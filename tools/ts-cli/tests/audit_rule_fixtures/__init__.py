@@ -20,6 +20,8 @@ and a rule's `fixture:` name resolve without knowing the module:
     perf.py      P — the legacy P-check tests' inputs, and P_INPUTS
     security.py  S — the legacy S-check tests' inputs, and S_INPUTS
     data.py      D — the legacy D-check tests' inputs, and D_INPUTS
+    human.py     H — the legacy H-check tests' inputs (contexts `build_context`
+                 assembles with Set lookups patched among them), and H_INPUTS
 
 Each category module keeps its builders beside its explicit input list (the
 equivalence test's inputs, `<CAT>_INPUTS`). Builders deep-copy any shared constant they
@@ -34,3 +36,4 @@ from .rls import *  # noqa: F401,F403
 from .perf import *  # noqa: F401,F403
 from .security import *  # noqa: F401,F403
 from .data import *  # noqa: F401,F403
+from .human import *  # noqa: F401,F403

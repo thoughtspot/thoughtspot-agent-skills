@@ -642,3 +642,162 @@ def test_d_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
     old, new = collect_both(build(), profile, D_RULES, categories=["D"])
     assert any(probe(f) for f in old), "the input must exercise the case"
     assert compare_findings(old, new)["identical"] is True
+
+
+H_RULES = ["H1", "H2", "H3", "H4", "H5", "H7", "H8", "H9", "H10"]
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_h_rules_equivalent_on_the_check_tests_inputs(profile):
+    """The H catalog rules (rules/human.yaml, the default engine runner) reproduce
+    checks_human.py exactly over every input its tests use (audit_rule_fixtures.
+    H_INPUTS: test_checks_human*.py's contexts, the H halves of the dead-guard,
+    unreachable-check, context and snapshot tests — contexts `build_context`
+    assembles with Set lookups failing, empty, partial and clean among them — the H1
+    name shapes and H2 lengths swept across their lines, join/formula/dependents/
+    answer edges, raw None/absent names, None where lists are expected, the registry
+    contexts and the demo corpus)."""
+    import audit_rule_fixtures as fx
+
+    differing, fired = {}, dict.fromkeys(H_RULES, 0)
+    for name, build in fx.H_INPUTS.items():
+        old, new = collect_both(build(), profile, H_RULES, categories=["H"])
+        res = compare_findings(old, new)
+        if not res["identical"]:
+            differing[name] = res
+        for f in old:
+            fired[f["check_id"]] += 1
+    assert differing == {}
+    # Not vacuous: every rule fires somewhere in these inputs.
+    assert all(fired.values()), fired
+
+
+def _legacy_h_raises(ctx) -> bool:
+    from ts_cli.audit import checks_human
+    try:
+        for check in checks_human.ALL_CHECKS:
+            check(copy.deepcopy(ctx))
+    except Exception:  # noqa: BLE001 - any legacy failure makes the input incomparable
+        return True
+    return False
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_h_rules_equivalent_wherever_legacy_h_runs(profile):
+    """Every other committed audit input (AI_INPUTS, P_INPUTS, S_INPUTS, D_INPUTS) on
+    which the legacy H checks run cleanly: the engine must neither raise nor differ."""
+    import audit_rule_fixtures as fx
+
+    differing, compared, legacy_raised = {}, 0, []
+    for name, build in {**fx.AI_INPUTS, **fx.P_INPUTS, **fx.S_INPUTS,
+                        **fx.D_INPUTS}.items():
+        ctx = build()
+        if _legacy_h_raises(ctx):
+            legacy_raised.append(name)
+            continue
+        compared += 1
+        res = run_both(ctx, profile, H_RULES, categories=["H"])
+        if not res["identical"]:
+            differing[name] = res
+    assert differing == {}
+    assert compared > 550, (compared, legacy_raised)
+    # A None column or Model name (H1/H10 regexes) and a list-valued column
+    # `properties` (H3) abort legacy H; the rule-by-rule test below covers them.
+    assert sorted(legacy_raised) == sorted(H_LEGACY_RAISES), legacy_raised
+
+
+#: Inputs on which some legacy H check raises, and which ones.
+H_LEGACY_RAISES = {
+    "ai_model_name_none": {"H10"}, "tml_value_shapes": {"H3"},
+    "perf_names_none": {"H1", "H10"}, "sec_names_none": {"H10"},
+    "data_names_none": {"H1", "H10"}, "data_single_model_malformed_column": {"H3"},
+}
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("name", sorted(H_LEGACY_RAISES))
+def test_h_rules_equivalent_rule_by_rule_where_a_legacy_h_check_raises(profile, name):
+    """Where one legacy H check raises (aborting the category), every OTHER H rule
+    still matches its own legacy check exactly, and the engine raises on none."""
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import checks_human
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.run import run_rule
+
+    ctx = {**fx.AI_INPUTS, **fx.P_INPUTS, **fx.S_INPUTS, **fx.D_INPUTS}[name]()
+    raised, catalog = set(), load_catalog()
+    for check in checks_human.ALL_CHECKS:
+        rule_id = check.__name__.replace("check_", "").upper()
+        try:
+            old = [f.to_dict() for f in check(copy.deepcopy(ctx))]
+        except Exception:  # noqa: BLE001 - the legacy check aborts on this input
+            raised.add(rule_id)
+            run_rule(copy.deepcopy(ctx), catalog, rule_id, profile)  # must not raise
+            continue
+        new = [f.to_dict() for f in run_rule(copy.deepcopy(ctx), catalog, rule_id, profile)]
+        assert compare_findings(old, new)["identical"] is True, (rule_id, old, new)
+    assert raised == H_LEGACY_RAISES[name]
+
+
+def test_every_h_input_runs_cleanly_on_the_legacy_checks():
+    """An H_INPUTS entry the legacy checks raise on would compare nothing."""
+    import audit_rule_fixtures as fx
+
+    assert [n for n, build in fx.H_INPUTS.items() if _legacy_h_raises(build())] == []
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("fixture,probe", [
+    # H1: one finding per Model, the first five names, the legacy threshold dict
+    ("human_h1_all_anti_patterns", lambda f: f["check_id"] == "H1"
+     and f["detail"] == "7/7 columns have anti-pattern names (100%): col1, col2, val, "
+     "tmp_a, 9b" and f["threshold"] == {"max_pct": 10} and f["metric"] == 100.0),
+    # H2: one finding per Model, three issues listed, "; "-joined
+    ("human_h2_many_issues", lambda f: f["check_id"] == "H2" and f["metric"] == 4
+     and f["detail"] == "4 description quality issues: 'C0' too short (5 chars); "
+     "'C1' too short (4 chars); '' uses boilerplate pattern"),
+    # H3 looks a table up by NAME: a hidden column of an aliased table is reported
+    ("human_h3_join_edges", lambda f: f["check_id"] == "H3" and f["object_name"] == "K1"),
+    # H4: a Model whose only dependents are Sets is an orphan
+    ("human_h4_dependent_shapes", lambda f: f["check_id"] == "H4"
+     and f["object_guid"] == "m-sets"),
+    # H5: a Set consumed by a Set is not an orphan; that consumer, looked up, is
+    ("human_h5_set_shapes", lambda f: f["check_id"] == "H5" and f["object_guid"] == "s2"),
+    # H5: a failed consumer lookup is silent; a clean empty one reports
+    ("built_set_without_consumers", lambda f: f["check_id"] == "H5"
+     and f["object_type"] == "set" and f["object_guid"] == "s1"),
+    # H7: one finding per table reference, the same reference twice included
+    ("human_h7_reference_shapes", lambda f: f["check_id"] == "H7"
+     and f["object_name"] == "Twice"),
+    # H8: object named by a count, no guid, metric the size, three answers listed
+    ("human_h8_group_shapes", lambda f: f["check_id"] == "H8"
+     and f["object_name"] == "shared in 4 answers" and f["object_guid"] == ""
+     and f["metric"] == 4 and f["detail"].endswith(": Q1, Q2, Q3")),
+    ("human_h8_group_shapes", lambda f: f["check_id"] == "H8" and f["detail"]
+     == "Formula duplicated in 2 answers but not in model: Q0, Q0"),
+    # H9: a blank Answer expression matches a blank Model one; the later Model wins
+    ("human_h9_match_shapes", lambda f: f["check_id"] == "H9"
+     and f["detail"] == "Answer formula 'NoExpr' duplicates model formula 'Empty'"),
+    ("human_h9_match_shapes", lambda f: f["check_id"] == "H9"
+     and f["detail"] == "Answer formula '' duplicates model formula 'Second'"),
+    # H10: Model and column findings; a description cut at 60 characters
+    ("human_h10_name_shapes", lambda f: f["check_id"] == "H10" and f["object_type"] == "model"
+     and f["detail"] == "Model name matches stale pattern: 'Sales (Backup)'"),
+    ("human_h10_name_shapes", lambda f: f["check_id"] == "H10" and f["object_name"] == "Plain"
+     and f["detail"] == "Column description matches stale pattern: 'Deprecated: this "
+     "column will be removed once the new ledger '"),
+    # raw None names and guids reach the finding as None
+    ("human_names_none", lambda f: f["check_id"] == "H4" and f["object_guid"] is None),
+    ("human_names_none", lambda f: f["check_id"] == "H5" and f["object_name"] is None
+     and f["object_guid"] is None),
+    ("human_names_none", lambda f: f["check_id"] == "H7" and f["object_name"] is None),
+    ("human_names_none", lambda f: f["check_id"] == "H9" and f["object_name"] is None
+     and f["detail"] == "Answer formula 'None' duplicates model formula 'None'"),
+])
+def test_h_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
+    import audit_rule_fixtures as fx
+
+    build = getattr(fx, fixture, None) or fx.H_INPUTS[fixture]
+    old, new = collect_both(build(), profile, H_RULES, categories=["H"])
+    assert any(probe(f) for f in old), "the input must exercise the case"
+    assert compare_findings(old, new)["identical"] is True

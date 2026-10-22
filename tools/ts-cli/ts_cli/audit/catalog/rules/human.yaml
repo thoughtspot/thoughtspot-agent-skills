@@ -1,4 +1,231 @@
 # Rules whose primary category is H (Human Readiness). One list entry per rule;
 # the shape is documented in ts_cli/audit/catalog_model.py and checked by
 # tools/validate/check_audit_catalog.py.
-[]
+#
+# None of these is profile-aware: the catalog default holds under both profiles.
+# Titles are the legacy CHECK_META descriptions; H3, H4 and H8 carry the report's
+# existing remediation text, the others have never had one. H4, H5 and H10 feed the
+# report's cleanup view. The derived fields are in engine/fields_human.py, the code
+# rules (H2, H10) in engine/code_rules_human.py.
+#
+# Known legacy defects reproduced here, not fixed (the equivalence gate holds the
+# rules to them; the spec's follow-up list owns the fixes): H3 decides which tables
+# are joined by a model table's `name` where its columns carry its alias, and tests a
+# formula-backed column by the formula's display name where real TML references it by
+# id; CHECK_META grades H1 and H2 "per bad name" / "per violation" and H10 "MEDIUM if
+# also orphan", but the checks report once per Model (H1, H2) and LOW only (H10).
+
+- id: H1
+  title: Column name quality (anti-pattern regexes)
+  description: >-
+    The share of a Model's columns whose names a person would not search for: col1,
+    field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse
+    names. One finding per Model over 10%, listing the first five such names. The
+    same two patterns A5 scores name quality with.
+  categories: [H]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    match:
+      any:
+        - {field: name, regex: '(?i)^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d'}
+        - {field: name, regex: '^[A-Z][A-Z0-9]*_[A-Z0-9_]+$'}
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 10, severity: MEDIUM}
+  message: "{matched}/{total} columns have anti-pattern names ({pct:.0f}%): {matched_names:head5}"
+  legacy_threshold: {max_pct: 10}
+  examples:
+    fires: {fixture: human_generic_names, severity: MEDIUM}
+    silent: {fixture: human_good_names}
+
+- id: H2
+  title: Description quality (too-short, boilerplate)
+  description: >-
+    Column descriptions that are too short (under 20 characters, stripped), too long
+    (over 400) or open with boilerplate ("This is a", "Column for", "Field for",
+    "The ", "A "); a blank or absent description is A1's remit, not this rule's. One
+    finding per Model, its metric the number of columns with an issue, listing the
+    first three. A code rule (code:description_quality) because each column's issue
+    is worded by its own kind and the Model's finding joins them — no mode words its
+    children one by one; the lengths and the boilerplate pattern are in
+    engine/code_rules_human.py.
+  categories: [H]
+  requires: [model_tml]
+  implementation: code:description_quality
+  scope: model
+  severity: LOW
+  message: "{count} description quality issues: {issues}"
+  examples:
+    fires: {fixture: human_description_short, severity: LOW}
+    silent: {fixture: human_description_clean}
+
+- id: H3
+  title: Unnecessary hidden columns
+  description: >-
+    A hidden Model column that no formula references by `[<name>]` — nor, when it
+    surfaces a formula, by that formula's `[<display name>]` (an id reference is not
+    seen). Excused when it is the last carrier of a joined table: its `column_id`
+    prefix names a table that declares or receives a join (by `name`, not alias) and
+    no other visible column has that prefix.
+  categories: [H]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: properties.is_hidden, truthy: true}
+        - {field: "@is_sole_join_carrier", truthy: false}
+        - {field: "@referenced_by_formula", truthy: false}
+  severity: MEDIUM
+  message: "Hidden column '{name}' not referenced by any formula"
+  remediation: Remove unnecessary hidden columns via TML reimport
+  examples:
+    fires: {fixture: human_hidden_unreferenced, severity: MEDIUM}
+    silent: {fixture: human_hidden_referenced}
+
+- id: H4
+  title: Orphan model with no dependents
+  description: >-
+    A Model with no dependents but Sets — no Answer or Liveboard (a Set is a column
+    on the Model, so anything using it is a Model dependent already; ruling R15). A
+    Model the dependents lookup did not list has none.
+  categories: [H]
+  requires: [model_tml, dependents]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@dependent_count", eq: 0}
+  severity: MEDIUM
+  message: "Orphan model — zero dependents (no answers or liveboards)"
+  remediation: Run /ts-dependency-manager (Remove mode) if confirmed unused
+  views: [cleanup]
+  examples:
+    fires: {fixture: human_model_no_dependents, severity: MEDIUM}
+    silent: {fixture: human_model_with_dependents}
+
+- id: H5
+  title: Orphan sets (zero consumers)
+  description: >-
+    A Set (once, however many dependents lists name it) whose consumer lookup came
+    back clean and empty. A Set whose lookup failed, was partial or was never made is
+    skipped (`requires: [sets]`): absence means "not looked up", never "no consumers"
+    (BL-302, R14).
+  categories: [H]
+  requires: [dependents, sets]
+  scope: set
+  aggregate:
+    mode: each
+    where: {field: "@set_consumers", truthy: false}
+  severity: MEDIUM
+  message: "Orphan set '{name}' — zero consuming answers or liveboards"
+  views: [cleanup]
+  examples:
+    fires: {fixture: human_set_without_consumers, severity: MEDIUM}
+    silent: {fixture: guard_set_never_looked_up}
+
+- id: H6
+  title: Duplicate sets
+  description: >-
+    Deferred — requires deep set comparison (check-catalog.md, "Deferred / Not
+    assigned"). Retired with no logic: the id stays allocated so it is never reused,
+    and the rule never runs (no profile may revive it).
+  status: retired
+  categories: [H]
+  scope: set
+
+- id: H7
+  title: Direct table connections (bypasses semantic layer)
+  description: >-
+    An Answer built straight off a Table: one finding per table reference whose `fqn`
+    is a Table's guid — a model table's `fqn` in any Model, or a Table TML in the
+    context. An Answer on a Model carries the Model's guid; an fqn matching nothing
+    known is unresolved, not a bypass (BL-301). The Model and Table TMLs are what
+    the guids are known from, not a requirement: an Answer is judged against
+    whatever the context holds.
+  categories: [H]
+  requires: [answers]
+  scope: answer.table_ref
+  aggregate:
+    mode: each
+    where: {field: "@is_table_reference", truthy: true}
+  severity: MEDIUM
+  message: "Answer connects directly to table '{obj.fqn}', bypassing the model layer"
+  examples:
+    fires: {fixture: answer_on_table, severity: MEDIUM}
+    silent: {fixture: answer_on_model}
+
+- id: H8
+  title: Formula promotion candidate
+  description: >-
+    The same Answer formula — compared lower-cased, stripped, whitespace collapsed;
+    blank ones ignored — in two Answer formulas or more, and on no Model. Counted per
+    formula, so one Answer holding it twice counts twice. The finding is named by
+    that count, with no guid, listing the first three Answers.
+  categories: [H]
+  requires: [answers]
+  scope: answer.formula
+  aggregate:
+    mode: group
+    where:
+      all:
+        - {field: "@normalized_expr", truthy: true}
+        - {field: "@matches_model_formula", truthy: false}
+    key: "@normalized_expr"
+    kind: duplicates
+    member: "@answer_name"
+    name: "shared in {size} answers"
+    guid: none
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gte, value: 2, severity: HIGH}
+  message: "Formula duplicated in {size} answers but not in model: {members:head3}"
+  remediation: Run /ts-object-answer-promote to promote formula to model
+  examples:
+    fires: {fixture: human_formula_in_two_answers, severity: HIGH}
+    silent: {fixture: human_formula_on_model_and_two_answers}
+
+- id: H9
+  title: Redundant answer formulas (duplicating model formula)
+  description: >-
+    An Answer formula whose expression (normalised as H8's) equals a Model formula's
+    — a blank one included — named with the last such Model formula.
+  categories: [H]
+  requires: [answers]
+  scope: answer.formula
+  aggregate:
+    mode: each
+    where: {field: "@matches_model_formula", truthy: true}
+  severity: LOW
+  message: "Answer formula '{name}' duplicates model formula '{@matched_model_formula_name}'"
+  examples:
+    fires: {fixture: human_answer_formula_duplicates_model, severity: LOW}
+    silent: {fixture: human_answer_formula_new}
+
+- id: H10
+  title: Stale / temporary objects (name pattern match)
+  description: >-
+    A Model name, column name or column description that reads as stale or
+    temporary (do not use, deprecated, test, tmp, copy of, (2), backup, old, …; a
+    name on the safe list — test_results, test_suite, … — never does). Each match is
+    its own finding, a description quoted to 60 characters. A code rule
+    (code:stale_names) because one rule reports on two scopes, the Model and its
+    columns, with three wordings; the patterns are in engine/code_rules_human.py.
+    Always LOW: nothing reads H4's result.
+  categories: [H]
+  requires: [model_tml]
+  implementation: code:stale_names
+  scope: model
+  severity: LOW
+  message: "{what} matches stale pattern: '{value}'"
+  views: [cleanup]
+  examples:
+    fires: {fixture: human_stale_column, severity: LOW}
+    silent: {fixture: human_clean_names}

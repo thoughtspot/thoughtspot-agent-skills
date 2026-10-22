@@ -61,8 +61,9 @@ imports this module to learn the registered names, under the system Python 3.9 w
 only PyYAML, without executing the `ts_cli` package __init__ (typer, requests). So a
 module-level import here must stay within: catalog_model, catalog_validate (and
 catalog_expr, catalog_code, catalog_forms, which it imports), rules, findings, and
-engine.{fields (and fields_data, which it imports), scopes, predicates, messages,
-bands}. Anything else (context, commands, the legacy checks_* modules) is imported
+engine.{fields (and fields_data / fields_human, which it imports), scopes, predicates,
+messages, bands} — and code_rules_human, imported at the end of this module, holds to
+the same list. Anything else (context, commands, the legacy checks_* modules) is imported
 inside the rule function. tools/validate/tests/test_check_audit_catalog.py copies
 only the permitted modules and fails if this one needs more.
 """
@@ -368,3 +369,8 @@ def column_type_divergence(rule: "Rule", ctx: Any, profile: str) -> List[Finding
                            detail=render(template(rule, severity),
                                          {"name": db_name, "models": listed})))
     return out
+
+
+# The H (Human Readiness) code rules live in their own module; importing it here
+# registers them wherever REGISTRY is read (the engine, and the catalog gate).
+from ts_cli.audit.engine import code_rules_human  # noqa: E402,F401

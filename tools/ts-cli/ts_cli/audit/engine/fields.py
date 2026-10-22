@@ -363,6 +363,8 @@ def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
     return "is_group_member" in lowered and name.lower() in lowered
 
 
-# The D (Data Modeling) fields live in their own module; importing it here registers
-# them wherever FIELDS is read (the engine, and the catalog gate's known names).
+# The D (Data Modeling) and H (Human Readiness) fields live in their own modules;
+# importing them here registers them wherever FIELDS is read (the engine, and the
+# catalog gate's known names).
 from ts_cli.audit.engine import fields_data  # noqa: E402,F401
+from ts_cli.audit.engine import fields_human  # noqa: E402,F401
