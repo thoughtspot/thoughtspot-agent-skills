@@ -1,4 +1,285 @@
 # Rules whose primary category is D (Data Modeling). One list entry per rule;
 # the shape is documented in ts_cli/audit/catalog_model.py and checked by
 # tools/validate/check_audit_catalog.py.
-[]
+#
+# None of these is profile-aware: the catalog default holds under both profiles.
+# D4 repeats P4 and the HIGH half of D2 repeats P6 — each angle reports the shared
+# rule under its own id and wording (rules.py, BL-304). Titles are the legacy
+# CHECK_META descriptions; D7 and D8 carry the report's existing remediation text, the
+# others have never had one. Where a rule words its findings differently by severity
+# (D2, D3, D7, D11), the message is `{by_severity: ...}` (catalog_forms.py).
+#
+# Known legacy defects reproduced here, not fixed (the equivalence gate holds the
+# rules to them; the spec's follow-up list owns the fixes): D10 and D11 look a model
+# table up by its `name` where its columns carry its alias (BL-305); D11 words every
+# INFO finding "ONE_TO_MANY", a MANY_TO_MANY join included.
+
+- id: D1
+  title: Model complexity exceeds threshold
+  description: >-
+    Five size measures per Model, each reported on its own when over its MEDIUM line
+    and graded HIGH over its HIGH line: tables (10 / 15), columns (50 / 75), joins
+    (8 / 12), join depth (3 / 5) and formulas (30 / 50). A code rule
+    (code:model_complexity, grading table D1_MEASURES in engine/code_rules.py) because
+    one rule grades five measures against five pairs of lines and reports each with
+    its own legacy threshold — the catalog holds one set of bands and one threshold
+    per rule.
+  categories: [D]
+  requires: [model_tml]
+  implementation: code:model_complexity
+  scope: model
+  message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
+  examples:
+    fires: {fixture: data_model_sixteen_tables, severity: HIGH}
+    silent: {fixture: data_model_small}
+
+- id: D2
+  title: VARCHAR join keys detected
+  description: >-
+    Per join (inline, or referencing a Table's `joins_with`): HIGH when its key
+    columns are string-typed on their Table TML (P6's test — a key whose Table TML is
+    not in scope has an unknown type and is not reported), and, separately, MEDIUM
+    when it joins on more than one key pair. The Table TMLs are optional enrichment:
+    the multi-key finding needs none. A code rule (code:join_keys) because one join
+    yields up to two independent findings.
+  categories: [D]
+  requires: [model_tml]
+  implementation: code:join_keys
+  scope: join
+  message:
+    by_severity:
+      HIGH: "VARCHAR join key(s): {varchar_keys:all}"
+      MEDIUM: "Multi-column join ({key_pairs} keys)"
+  examples:
+    fires: {fixture: join_keys_varchar, severity: HIGH}
+    silent: {fixture: join_keys_integer}
+
+- id: D3
+  title: Join type analysis (FULL OUTER, LEFT/RIGHT)
+  description: >-
+    An outer join (inline, or referencing a Table's `joins_with`; the model's own type
+    wins): HIGH for a full outer join (ThoughtSpot's `OUTER`), INFO for LEFT_OUTER and
+    RIGHT_OUTER. The type is read case-insensitively.
+  categories: [D]
+  requires: [model_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@join_type", in: [OUTER, LEFT_OUTER, RIGHT_OUTER]}
+  severity: {field: "@join_type", map: {OUTER: HIGH}, default: INFO}
+  message:
+    by_severity:
+      HIGH: FULL OUTER join causes performance issues
+      INFO: "{@join_type} join — may indicate data discrepancies"
+  examples:
+    fires: {fixture: data_join_full_outer, severity: HIGH}
+    silent: {fixture: data_join_inner}
+
+- id: D4
+  title: Progressive joins disabled on large models
+  description: >-
+    A Model with more than 5 tables and `join_progressive` off joins every table on
+    every query. Counted as the Model's tables when join_progressive is not set, so
+    the count is 0 — and silent — on a progressive Model. Same rule as P4.
+  categories: [D]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.table
+    where: {field: parent.properties.join_progressive, truthy: false}
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 5, severity: HIGH}
+  message: "join_progressive is false on model with {count} tables (>5)"
+  legacy_threshold: {min_tables_for_flag: 5}
+  examples:
+    fires: {fixture: data_model_six_tables_not_progressive, severity: HIGH}
+    silent: {fixture: data_model_six_tables_progressive}
+
+- id: D5
+  title: Orphan tables in model (Cartesian risk)
+  description: >-
+    A table of a multi-table Model that is on neither side of any join — keyed by its
+    alias, else its name, on the declaring side and by the join's `with` on the other.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.table
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: parent.model_tables, len_gt: 1}
+        - {field: "@is_joined", truthy: false}
+  severity: HIGH
+  message: "Table '{name}' has no joins — Cartesian product risk"
+  examples:
+    fires: {fixture: data_model_unjoined_table, severity: HIGH}
+    silent: {fixture: data_model_all_joined}
+
+- id: D6
+  title: Grain consistency — fact tables with >40% attributes
+  description: >-
+    A fact table (more than 3 MEASURE columns) more than 40% of whose model columns
+    are ATTRIBUTEs, its columns found by its alias, else its name. The metric is that
+    share as a percentage, rounded to one place.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.table
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@table_role", eq: fact}
+        - {field: "@attribute_share", gt: 0.4}
+    measure: "@attribute_pct"
+  severity: LOW
+  message: "Fact table '{name}' has {@attribute_count}/{@table_column_count} ATTRIBUTE columns (>40%)"
+  legacy_threshold: {max_attribute_pct: 40}
+  examples:
+    fires: {fixture: data_fact_table_mostly_attributes, severity: LOW}
+    silent: {fixture: data_fact_table_mostly_measures}
+
+- id: D7
+  title: High model overlap detected
+  description: >-
+    Two Models whose table sets (each table's fqn, else its name) share tables, graded
+    by Jaccard similarity: HIGH when identical, MEDIUM above 0.5. Reported once per
+    pair, on the first Model's guid.
+  categories: [D]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: pairwise
+    set: "@table_set"
+  bands:
+    direction: lower_is_better
+    unit: ratio
+    levels:
+      - {op: gte, value: 1, severity: HIGH}
+      - {op: gt, value: 0.5, severity: MEDIUM}
+  message:
+    by_severity:
+      HIGH: "Identical table sets ({union} tables) — likely duplicate models"
+      MEDIUM: "High overlap: {shared}/{union} tables shared (Jaccard {similarity:.2f})"
+  legacy_threshold:
+    by_severity:
+      MEDIUM: {high_overlap: 0.5}
+  remediation: Run /ts-dependency-manager (Repoint mode) to consolidate overlapping models
+  examples:
+    fires: {fixture: data_models_identical_tables, severity: HIGH}
+    silent: {fixture: data_models_disjoint_tables}
+
+- id: D8
+  title: Duplicate table objects found
+  description: >-
+    Two or more Table objects (ONE_TO_ONE_LOGICAL or SQL_VIEW in the metadata) on one
+    physical table — the same connection, database, schema and table name. Reported
+    once per physical table, on the first object's guid.
+  categories: [D]
+  requires: [metadata]
+  scope: metadata
+  aggregate:
+    mode: group
+    kind: duplicates
+    where: {field: type, in: [ONE_TO_ONE_LOGICAL, SQL_VIEW]}
+    key: "@physical_table_key"
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 1, severity: HIGH}
+  message: "{size} ThoughtSpot objects point to the same physical table"
+  remediation: Run /ts-dependency-manager (Remove mode) to remove duplicate table objects
+  views: [duplicates]
+  examples:
+    fires: {fixture: data_metadata_duplicate_table, severity: HIGH}
+    silent: {fixture: data_metadata_same_name_other_schema}
+
+- id: D9
+  title: SQL pass-through function usage (>20% formulas)
+  description: >-
+    More than 20% of a Model's formulas call sql_int_aggregate_op,
+    sql_string_aggregate_op or sql_bool_aggregate_op (any case).
+  categories: [D]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.formula
+    match: {field: expr, regex: '(?i)sql_(int|string|bool)_aggregate_op'}
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 20, severity: LOW}
+  message: "{matched}/{total} formulas use sql_*_aggregate_op ({pct:.0f}%)"
+  legacy_threshold: {max_pct: 20}
+  examples:
+    fires: {fixture: data_model_half_sql_passthrough, severity: LOW}
+    silent: {fixture: data_model_one_in_five_sql_passthrough}
+
+- id: D10
+  title: Zero-column tables (bridge vs leaf)
+  description: >-
+    A model table no model column comes from: INFO when it is on either side of a
+    join (a bridge), MEDIUM when not (a leaf). Looked up — and reported — by the
+    table's `name`, so an aliased table always reads zero-column (BL-305, kept). A
+    code rule (code:zero_column_tables) because the finding names the table by its
+    `name`, where the model.table scope names it by alias.
+  categories: [D]
+  requires: [model_tml]
+  implementation: code:zero_column_tables
+  scope: model.table
+  severity: {field: "@zero_column_role", map: {bridge: INFO}, default: MEDIUM}
+  message: "Zero-column {role} table '{name}'"
+  examples:
+    fires: {fixture: data_model_zero_column_leaf, severity: MEDIUM}
+    silent: {fixture: data_model_every_table_has_columns}
+
+- id: D11
+  title: Fan-out join risk (row multiplication)
+  description: >-
+    A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
+    ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. Both ends
+    are looked up by name — the declaring model table's `name` and the join's `with` —
+    so an aliased end reads as unknown (BL-305, kept), and the INFO wording says
+    ONE_TO_MANY whatever the cardinality (kept).
+  categories: [D]
+  requires: [model_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where:
+      any:
+        - {field: "@join_cardinality", contains: ONE_TO_MANY}
+        - {field: "@join_cardinality", contains: MANY_TO_MANY}
+  severity: {field: "@is_fact_to_fact_join", map: {true: MEDIUM}, default: INFO}
+  message:
+    by_severity:
+      MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
+      INFO: "ONE_TO_MANY join '{@join_from_name}' -> '{obj.with}'"
+  examples:
+    fires: {fixture: data_fanout_fact_to_fact, severity: MEDIUM}
+    silent: {fixture: data_fanout_many_to_one}
+
+- id: D12
+  title: Conformed dimension divergence
+  description: >-
+    A column (by `db_column_name`, else `name`) whose column type differs between
+    Models. Each Model contributes one type per column name — a later column, or a
+    later Model of the same name, overwrites an earlier one — and the detail lists
+    every Model with its type. A code rule (code:column_type_divergence) because it
+    groups columns across Models and reports one type per Model, which the group
+    mode's per-item values cannot express.
+  categories: [D]
+  requires: [model_tml]
+  implementation: code:column_type_divergence
+  scope: model
+  severity: MEDIUM
+  message: "Column '{name}' classified differently across models: {models}"
+  examples:
+    fires: {fixture: data_models_divergent_column_type, severity: MEDIUM}
+    silent: {fixture: data_models_consistent_column_type}

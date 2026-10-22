@@ -58,6 +58,7 @@ PARENT_SCOPE = {
     "answer.table_ref": "answer", "answer.formula": "answer",
 }
 MODES = ["each", "ratio", "count", "group", "pairwise", "composite"]
+SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 OPERATORS = [
     "eq", "in", "regex", "not_regex", "exists", "nonblank", "truthy",
     "gt", "gte", "lt", "lte", "len_gt", "len_lt", "contains",

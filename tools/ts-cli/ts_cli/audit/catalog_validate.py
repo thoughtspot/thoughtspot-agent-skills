@@ -22,13 +22,17 @@ categories, profiles, views, band ops/directions/units, severities; ids repeated
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
-example.
+example; a `{by_severity: ...}` message or legacy threshold with an unknown severity, a
+non-template value, or — for a declarative rule — no template for a severity the rule
+can emit under some profile.
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
 live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
-`catalog_code.py`. Two names come from engine
+`catalog_code.py`, and those of the per-severity forms of `message` and
+`legacy_threshold` in `catalog_forms.py`. Two names come from engine
 registries, each imported lazily so the gate stays free of typer/requests: derived
-fields (`engine/fields.py`, via `known_derived_fields`) and code rules
+fields (`engine/fields.py` and the `engine/fields_data.py` it imports, via
+`known_derived_fields`) and code rules
 (`implementation: code:<name>`, `engine/code_rules.py`, via `known_code_rules`).
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
@@ -46,6 +50,7 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
     OPERATORS,
     PARENT_SCOPE,
     SCOPES,
+    SEVERITIES,
     aggregate_problems,
     expr_problems,
     field_path_problems,
@@ -62,6 +67,12 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     implementation_problems,
     known_code_rules,
     rule_message_problems,
+)
+from ts_cli.audit.catalog_forms import (  # noqa: F401  (re-exported)
+    BY_SEVERITY,
+    legacy_threshold_form_problems,
+    message_coverage_problems,
+    message_problems_any,
 )
 from ts_cli.audit.catalog_model import (
     CATEGORIES_FILE,
@@ -80,7 +91,6 @@ from ts_cli.audit.catalog_model import (
 
 REQUIRES = ["model_tml", "table_tml", "metadata", "dependents", "ai_instructions",
             "answers", "sets"]
-SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 OVERRIDABLE = {"status", "bands", "severity", "message", "remediation"}
 # Accepted in a profile block but not a general override: it reproduces the legacy
 # per-profile `threshold` dict (A1/A2/A6) and goes when the legacy dict does.
@@ -252,12 +262,12 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
             return [exc.message]
         return _bands_key_problems(value, path) + bands_problems(parsed, path)
     if key == "legacy_threshold":
-        return legacy_threshold_problems(value, path) if isinstance(value, dict) \
+        return legacy_threshold_form_problems(value, path) if isinstance(value, dict) \
             else [f"{path}: must be a mapping"]
+    if key == "message":
+        return message_problems_any(rule, value, path)
     if not isinstance(value, str):
         return [f"{path}: must be a string"]
-    if key == "message":
-        return rule_message_problems(rule, value, path)
     return []
 
 
@@ -318,11 +328,12 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     the legacy threshold's placeholders, and where severity comes from."""
     out = code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
-    out += rule_message_problems(rule, rule.message, "message")
-    out += legacy_threshold_problems(rule.legacy_threshold, "legacy_threshold")
+    out += message_problems_any(rule, rule.message, "message")
+    out += legacy_threshold_form_problems(rule.legacy_threshold, "legacy_threshold")
     if rule.implementation != "declarative":
         return out
-    return out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
+    return (out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
+            + message_coverage_problems(rule, cat.profiles or [""]))
 
 
 def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:

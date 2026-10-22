@@ -15,8 +15,9 @@ The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementa
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
 
 It imports the catalog modules (catalog_model, catalog_validate, catalog_expr,
-catalog_code) and, to learn the names rules may use, two engine registries: derived fields
-(engine/fields.py, which needs only audit/rules.py) and code rules
+catalog_code, catalog_forms) and, to learn the names rules may use, two engine registries:
+derived fields (engine/fields.py and engine/fields_data.py, which need only
+audit/rules.py) and code rules
 (engine/code_rules.py, which needs findings.py; see its docstring for what else it
 may import) — WITHOUT executing the `ts_cli` package __init__, which pulls in typer,
 requests and the whole CLI. So it runs under any python3 with PyYAML, including the

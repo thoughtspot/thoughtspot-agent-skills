@@ -523,3 +523,118 @@ def test_s_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
     old, new = collect_both(build(), profile, S_RULES, categories=["S"])
     assert any(probe(f) for f in old), "the input must exercise the case"
     assert compare_findings(old, new)["identical"] is True
+
+
+D_RULES = ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12"]
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_d_rules_equivalent_on_the_check_tests_inputs(profile):
+    """The D catalog rules (rules/data.yaml, the default engine runner) reproduce
+    checks_data.py exactly over every input its tests use (audit_rule_fixtures.
+    D_INPUTS: test_checks_data*.py's contexts and the D halves of the alias, join-key,
+    referencing-join and registry tests, the D1 lines and D3/D11 vocabularies swept
+    across their boundaries, the grain and pass-through shares, raw None/absent names
+    and guids, None where lists are expected, multi-Model overlap and divergence edges,
+    and the demo corpus models)."""
+    import audit_rule_fixtures as fx
+
+    differing, fired = {}, dict.fromkeys(D_RULES, 0)
+    for name, build in fx.D_INPUTS.items():
+        old, new = collect_both(build(), profile, D_RULES, categories=["D"])
+        res = compare_findings(old, new)
+        if not res["identical"]:
+            differing[name] = res
+        for f in old:
+            fired[f["check_id"]] += 1
+    assert differing == {}
+    # Not vacuous: every rule fires somewhere in these inputs.
+    assert all(fired.values()), fired
+
+
+def _legacy_d_raises(ctx) -> bool:
+    from ts_cli.audit import checks_data
+    try:
+        for check in checks_data.ALL_CHECKS:
+            check(copy.deepcopy(ctx))
+    except Exception:  # noqa: BLE001 - any legacy failure makes the input incomparable
+        return True
+    return False
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_d_rules_equivalent_wherever_legacy_d_runs(profile):
+    """Every other committed audit input (AI_INPUTS, P_INPUTS, S_INPUTS) on which the
+    legacy D checks run cleanly: the engine must neither raise nor differ there."""
+    import audit_rule_fixtures as fx
+
+    differing, compared, legacy_raised = {}, 0, []
+    for name, build in {**fx.AI_INPUTS, **fx.P_INPUTS, **fx.S_INPUTS}.items():
+        ctx = build()
+        if _legacy_d_raises(ctx):
+            legacy_raised.append(name)
+            continue
+        compared += 1
+        res = run_both(ctx, profile, D_RULES, categories=["D"])
+        if not res["identical"]:
+            differing[name] = res
+    assert differing == {}
+    assert compared > 450, (compared, legacy_raised)
+    assert legacy_raised == []
+
+
+def test_every_d_input_runs_cleanly_on_the_legacy_checks():
+    """A D_INPUTS entry the legacy checks raise on would compare nothing."""
+    import audit_rule_fixtures as fx
+
+    assert [n for n, build in fx.D_INPUTS.items() if _legacy_d_raises(build())] == []
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+@pytest.mark.parametrize("fixture,probe", [
+    # `name: None` / `guid: None` reach the finding as None, not ""
+    ("data_names_none", lambda f: f["check_id"] == "D1" and f["object_name"] is None
+     and f["object_guid"] is None),
+    ("data_names_none", lambda f: f["check_id"] == "D10" and f["object_name"] is None
+     and f["detail"] == "Zero-column bridge table 'None'"),
+    ("data_names_none", lambda f: f["check_id"] == "D7" and f["object_name"] == "None / Twin"
+     and f["object_guid"] is None),
+    ("data_names_none", lambda f: f["check_id"] == "D8" and f["object_name"] == "...None"
+     and f["object_guid"] is None),
+    ("data_names_none", lambda f: f["check_id"] == "D12" and f["object_name"] is None
+     and f["object_guid"] == ""),
+    # absent keys reach it as ""
+    ("data_names_absent", lambda f: f["check_id"] == "D9" and f["object_name"] == ""
+     and f["object_guid"] == ""),
+    ("data_names_absent", lambda f: f["check_id"] == "D8" and f["object_name"] == "..."),
+    # D1: one finding per measure, each with its own legacy threshold
+    ("data_names_absent", lambda f: f["check_id"] == "D1"
+     and f["threshold"] == {"green": 10, "yellow": 15} and f["metric"] == 16),
+    # D7: the MEDIUM finding carries a threshold, the HIGH one none
+    ("models_overlapping_tables", lambda f: f["check_id"] == "D7" and f["severity"] == "MEDIUM"
+     and f["threshold"] == {"high_overlap": 0.5}),
+    ("data_models_identical_tables", lambda f: f["check_id"] == "D7" and f["threshold"] is None),
+    # D7: an explicit `fqn: None` is an element; an absent fqn falls back to the name
+    ("data_models_overlap_edges", lambda f: f["check_id"] == "D7"
+     and f["object_name"] == "NoneFqn / NoneToo"),
+    ("data_models_overlap_edges", lambda f: f["check_id"] == "D7"
+     and f["object_name"] == "ByName / ByFqn"),
+    # D8: an absent stripe groups with an explicit "", never with None
+    ("data_metadata_edges", lambda f: f["check_id"] == "D8" and f["object_name"] == "...LINES"),
+    # D10 / D11 look a table up by name, not alias (BL-305, kept)
+    ("data_model_aliased_fact", lambda f: f["check_id"] == "D10" and f["object_name"] == "ORDERS"),
+    ("data_model_aliased_fact", lambda f: f["check_id"] == "D11" and f["severity"] == "INFO"
+     and f["detail"] == "ONE_TO_MANY join 'SHIPMENTS' -> 'O'"),
+    # D11 words a MANY_TO_MANY INFO finding "ONE_TO_MANY" (kept)
+    ("data_fanout_many_to_many_dimension", lambda f: f["check_id"] == "D11"
+     and f["detail"].startswith("ONE_TO_MANY join")),
+    # D12: a later column overwrites an earlier one's type within a Model
+    ("data_models_column_type_edges", lambda f: f["check_id"] == "D12"
+     and f["detail"].endswith("A=MEASURE, B=ATTRIBUTE")),
+])
+def test_d_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
+    import audit_rule_fixtures as fx
+
+    old, new = collect_both(getattr(fx, fixture)(), profile, D_RULES, categories=["D"])
+    assert any(probe(f) for f in old), "the input must exercise the case"
+    assert compare_findings(old, new)["identical"] is True

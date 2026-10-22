@@ -1,7 +1,8 @@
 """Severity bands, and the override layering that picks a rule's effective values.
 
 `classify(value, bands)` walks the levels in order (worst first) and returns the first
-matching level's severity, or None — no finding.
+matching level's severity, or None — no finding. `fixed_severity(rule, item, ctx)` is
+the severity of a rule without bands (a name, or a mapping looked up on the item).
 
 `effective(rule, layers)` folds override layers onto a catalog rule:
 
@@ -25,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.catalog_model import Bands, Rule, parse_bands
 from ts_cli.audit.catalog_validate import OVERRIDABLE, PROFILE_ONLY
+from ts_cli.audit.engine import fields, predicates
 
 _OPS = {"lt": operator.lt, "lte": operator.le, "gt": operator.gt, "gte": operator.ge,
         "eq": operator.eq}
@@ -37,6 +39,17 @@ def classify(value: float, b: Bands) -> Optional[str]:
         if _OPS[level.op](value, level.value):
             return level.severity
     return None
+
+
+def fixed_severity(rule: Rule, item: dict, ctx: Any) -> Optional[str]:
+    """A rule's severity without bands: `severity: HIGH`, or `{field, map, default}`
+    looked up on the item (exact, type-sensitive — predicates.equals)."""
+    sev = rule.severity
+    if not isinstance(sev, dict):
+        return sev
+    value = fields.get(item, sev["field"], ctx)
+    return next((s for k, s in sev["map"].items() if predicates.equals(k, value)),
+                sev["default"])
 
 
 def effective(rule: Rule, layers: List[Dict[str, Any]]) -> Tuple[Rule, Dict[str, Any]]:

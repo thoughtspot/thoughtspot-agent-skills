@@ -6,6 +6,10 @@ the item: `{obj.<path>}` — a field of the object itself (`{obj.properties.colu
 `{obj.name}`) — and `{@name}`, a derived field. Any other name raises KeyError: a typo
 must never render as "None". Indexing a supplied value works (`{key[0]}`).
 
+A rule's `message` is one template, or one per severity (`{by_severity: {SEVERITY:
+template}}`, catalog_forms.py): `template(rule, severity)` picks the one a finding
+renders, and raises — naming the rule — when its severity has none.
+
 Lists of names render through `NameList`'s format spec:
 
     {names}          first 5, then " (+N more)"     — the default
@@ -70,6 +74,19 @@ class _Formatter(string.Formatter):
 
     def get_value(self, key, args, kwargs):
         return self.values[key]
+
+
+def template(rule: Any, severity: str) -> str:
+    """The message template for a finding of `severity` under `rule`'s (effective)
+    message: the message itself, or its `by_severity` entry for that severity."""
+    message = rule.message
+    if not isinstance(message, dict):
+        return message
+    templates = message.get("by_severity") or {}
+    if severity not in templates:
+        raise ValueError(f"{rule.id}: no message for severity {severity} "
+                         f"(by_severity has {', '.join(templates) or 'none'})")
+    return templates[severity]
 
 
 def render(template: str, values: Dict[str, Any], item: Optional[dict] = None,

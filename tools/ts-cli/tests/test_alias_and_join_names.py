@@ -12,27 +12,16 @@ no `name` key — none of the 493 joins in the 2026-07-30 census has one — so
 `j.get("name", "")` was always `""` and the report could not identify which join
 a finding was about.
 """
+import audit_rule_fixtures as fx
 from ts_cli.audit import rules
 from ts_cli.audit.checks_data import check_d6, check_d10
-from ts_cli.audit.context import make_context
 
 
 def _aliased_model():
-    """One physical table joined twice, the second under an alias."""
-    return {"guid": "m-1", "model": {
-        "name": "Sales",
-        "columns": (
-            [{"name": f"M{i}", "column_id": f"ORDERS::M{i}",
-              "properties": {"column_type": "MEASURE"}} for i in range(4)]
-            + [{"name": f"A{i}", "column_id": f"SHIP_TO::A{i}",
-                "properties": {"column_type": "ATTRIBUTE"}} for i in range(3)]
-        ),
-        "model_tables": [
-            {"name": "ORDERS", "joins": [{"with": "SHIP_TO", "on": "[ORDERS::M0] = [SHIP_TO::A0]",
-                                          "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
-            {"name": "CUSTOMERS", "alias": "SHIP_TO"},
-        ],
-    }}
+    """One physical table joined twice, the second under an alias (the model document
+    of the named builder audit_rule_fixtures.data_model_aliased_role_playing, so the D
+    catalog rules' equivalence test runs over it)."""
+    return fx.data_model_aliased_role_playing().models[0]
 
 
 # ── the shared key ─────────────────────────────────────────────────────────
@@ -54,7 +43,7 @@ def test_table_role_resolves_an_aliased_table():
 # ── D10 must not call a populated aliased table a zero-column leaf ─────────
 
 def test_d10_does_not_call_an_aliased_table_a_zero_column_leaf():
-    findings = check_d10(make_context(models=[_aliased_model()]))
+    findings = check_d10(fx.data_model_aliased_role_playing())
     leaf = [f for f in findings if "leaf" in f.detail.lower() and "SHIP_TO" in f.detail]
     assert leaf == [], f"SHIP_TO has three columns: {[f.detail for f in findings]}"
 
@@ -63,7 +52,7 @@ def test_d6_sees_the_columns_of_an_aliased_table():
     """Not asserting a finding — asserting the table is no longer 'unknown'."""
     m = _aliased_model()["model"]
     assert rules.table_role(m["columns"], "SHIP_TO") != "unknown"
-    check_d6(make_context(models=[_aliased_model()]))  # must not raise
+    check_d6(fx.data_model_aliased_role_playing())  # must not raise
 
 
 # ── a join finding must identify its join ──────────────────────────────────
@@ -85,10 +74,8 @@ def test_join_label_uses_the_alias_side():
 
 def test_a_join_finding_is_not_anonymous():
     """D3 flags an OUTER join; the report must say which one."""
-    model = {"guid": "m-1", "model": {"name": "S", "columns": [], "model_tables": [
-        {"name": "ORDERS", "joins": [{"with": "RETURNS", "type": "OUTER"}]}]}}
     from ts_cli.audit.checks_data import check_d3
-    findings = check_d3(make_context(models=[model]))
+    findings = check_d3(fx.data_model_anonymous_outer_join())
     assert findings
     assert all(f.object_name for f in findings), "a join finding must name its join"
     assert "ORDERS" in findings[0].object_name and "RETURNS" in findings[0].object_name

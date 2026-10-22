@@ -21,8 +21,9 @@ A rule entry (every key but `id`, `title`, `categories`, `scope` is optional):
               levels: [{op: lt, value: 40, severity: HIGH}, ...]}   # worst first
       severity: HIGH                # fixed severity, or a mapping, for presence rules
       profiles: {general: {bands: ...}}   # per-profile overrides (overridable keys only)
-      message: "{matched}/{total} ..."
+      message: "{matched}/{total} ..."   # or {by_severity: {SEVERITY: template}}
       legacy_threshold: {...}       # reproduction of the pre-catalog `threshold` dict
+                                    # (or {by_severity: {SEVERITY: {...}}}; catalog_forms.py)
       remediation: ...
       examples: {fires: {fixture, profile, severity}, silent: {fixture, profile}}
       views: [cleanup]              # report views the rule feeds (duplicates | cleanup)
@@ -88,7 +89,7 @@ class Rule:
     bands: Optional[Bands] = None
     severity: Union[Dict[str, Any], str, None] = None
     profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    message: str = ""
+    message: Union[str, Dict[str, Any]] = ""   # a template, or {by_severity: {...}}
     legacy_threshold: Optional[Dict[str, Any]] = None
     remediation: str = ""
     examples: Dict[str, Any] = field(default_factory=dict)
@@ -232,7 +233,7 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
         bands=parse_bands(d.get("bands"), file, rid),
         severity=_expect(d.get("severity"), (str, dict), None, file, rid, "severity"),
         profiles=dict(get("profiles", dict, {})),
-        message=get("message", str, ""),
+        message=_expect(d.get("message"), (str, dict), "", file, rid, "message"),
         legacy_threshold=get("legacy_threshold", dict, None),
         remediation=get("remediation", str, ""),
         examples=dict(get("examples", dict, {})),

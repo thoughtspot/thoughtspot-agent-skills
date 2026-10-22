@@ -354,6 +354,72 @@ def test_code_rule_findings_have_the_declarative_shape(tmp_path, wide_registered
     assert set(code.bands["provenance"]) == set(declarative.bands["provenance"])
 
 
+OWN = "synthetic_own_threshold"
+
+
+def _own_threshold(rule, ctx, profile) -> List[Finding]:
+    """A code rule whose legacy threshold varies per finding (as D1's does per measure)."""
+    from ts_cli.audit.engine.messages import render, template
+    out = []
+    for item in scopes.available(ctx, rule):
+        count = len(item["obj"].get("columns") or [])
+        severity = "HIGH" if count > 75 else "INFO"
+        out.append(Finding(check_id=rule.id, angle="", severity=severity,
+                           object_type="model", object_name=item["name"],
+                           object_guid=item["guid"],
+                           detail=render(template(rule, severity), {"count": count}),
+                           metric=count, threshold={"max": 75, "seen": count}))
+    return out
+
+
+@pytest.fixture
+def own_registered():
+    code_rules.code_rule(OWN, placeholders={"count"})(_own_threshold)
+    yield
+    code_rules.REGISTRY.pop(OWN, None)
+    code_rules.PLACEHOLDERS.pop(OWN, None)
+
+
+def _own_entry(**body) -> dict:
+    rule = _code_rule_entry(implementation=f"code:{OWN}", profiles={},
+                            message={"by_severity": {"HIGH": "{count} columns",
+                                                     "INFO": "only {count}"}})
+    del rule["legacy_threshold"], rule["bands"]
+    rule.update(body)
+    return rule
+
+
+def test_code_rule_may_set_its_own_threshold_and_word_by_severity(tmp_path, own_registered):
+    cat, problems = check_catalog(_write_catalog(tmp_path, _own_entry()))
+    assert problems == []
+    [wide] = run_rule(fx.model_76_columns(), cat, "D99", "general")
+    assert (wide.severity, wide.detail, wide.threshold) == (
+        "HIGH", "76 columns", {"max": 75, "seen": 76})
+    [narrow] = run_rule(fx.model_75_columns(), cat, "D99", "general")
+    assert (narrow.severity, narrow.detail, narrow.threshold) == (
+        "INFO", "only 75", {"max": 75, "seen": 75})
+
+
+@pytest.mark.parametrize("body", [
+    {"legacy_threshold": {"max": 75}},
+    {"profiles": {"spotter": {"legacy_threshold": {"max": 75}}}},
+])
+def test_code_rule_threshold_beside_a_catalog_legacy_threshold_raises(
+        tmp_path, own_registered, body):
+    cat, problems = check_catalog(_write_catalog(tmp_path, _own_entry(**body)))
+    assert problems == []
+    with pytest.raises(ValueError, match="declares legacy_threshold"):
+        run_rule(fx.model_76_columns(), cat, "D99", "general")
+
+
+def test_code_rule_with_no_template_for_its_severity_raises(tmp_path, own_registered):
+    entry = _own_entry(message={"by_severity": {"HIGH": "{count} columns"}})
+    cat, problems = check_catalog(_write_catalog(tmp_path, entry))
+    assert problems == []  # a code rule's severities are its function's: checked at run time
+    with pytest.raises(ValueError, match="D99: no message for severity INFO"):
+        run_rule(fx.model_75_columns(), cat, "D99", "general")
+
+
 def _bad_return(value):
     def rule(_rule, _ctx, _profile):
         return value

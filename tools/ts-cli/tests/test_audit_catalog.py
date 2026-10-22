@@ -814,3 +814,75 @@ def test_unnamed_label_is_a_ratio_key_only(tmp_path):
     rule = _good_rule(aggregate={"mode": "count", "over": "model.column", "unnamed_label": "?"})
     problems = _problems(tmp_path, {"ai": [rule]})
     assert any("unknown key 'unnamed_label' for mode count" in p for p in problems), problems
+
+
+# ── per-severity forms (`{by_severity: {...}}`) ─────────────────────────────
+
+def _join_type_rule(**overrides) -> dict:
+    rule = {
+        "id": "D3", "title": "Join types", "categories": ["D"], "requires": ["model_tml"],
+        "scope": "join",
+        "aggregate": {"mode": "each", "where": {"field": "type", "in": ["OUTER", "LEFT_OUTER"]}},
+        "severity": {"field": "type", "map": {"OUTER": "HIGH"}, "default": "INFO"},
+        "message": {"by_severity": {"HIGH": "full outer {name}", "INFO": "{obj.type} join"}},
+        "examples": {"fires": {"fixture": "f", "severity": "HIGH"}, "silent": {"fixture": "s"}},
+    }
+    rule.update(overrides)
+    return rule
+
+
+def test_message_by_severity_accepted(tmp_path):
+    assert _problems(tmp_path, {"data": [_join_type_rule()]}) == []
+
+
+@pytest.mark.parametrize("message,word", [
+    ({"by_severity": {"HIGH": "x"}},
+     "message.by_severity: no template for severity INFO, which the rule can emit"),
+    ({"by_severity": {"HIGH": "x", "INFO": "y", "SEVERE": "z"}},
+     "message.by_severity.SEVERE: unknown severity 'SEVERE'"),
+    ({"by_severity": {"HIGH": "x", "INFO": 5}}, "message.by_severity.INFO: must be a string"),
+    ({"by_severity": {"HIGH": "{nmae}", "INFO": "y"}},
+     "message.by_severity.HIGH: unknown placeholder 'nmae'"),
+    ({"by_severity": {}}, "message.by_severity: must be a non-empty mapping"),
+    ({"by_sevrity": {"HIGH": "x"}}, "message: must be a template string or {by_severity:"),
+    ({"by_severity": {"HIGH": "x", "INFO": "y"}, "extra": 1},
+     "message: must be a template string or {by_severity:"),
+])
+def test_message_by_severity_rejects_typos_and_gaps(tmp_path, message, word):
+    problems = _problems(tmp_path, {"data": [_join_type_rule(message=message)]})
+    assert any(word in p for p in problems), problems
+
+
+def test_message_by_severity_must_cover_every_profiles_severities(tmp_path):
+    """A profile that changes the severities must not leave one unworded."""
+    rule = _join_type_rule(profiles={"spotter": {
+        "severity": {"field": "type", "map": {"OUTER": "CRITICAL"}, "default": "INFO"}}})
+    problems = _problems(tmp_path, {"data": [rule]})
+    assert any("no template for severity CRITICAL" in p and "spotter" in p
+               for p in problems), problems
+
+
+def test_profile_message_override_may_be_by_severity(tmp_path):
+    ok = _join_type_rule(profiles={"spotter": {
+        "message": {"by_severity": {"HIGH": "h", "INFO": "i"}}}})
+    assert _problems(tmp_path / "ok", {"data": [ok]}) == []
+    bad = _join_type_rule(profiles={"spotter": {"message": {"by_severity": {"HIGH": "{x}"}}}})
+    problems = _problems(tmp_path / "bad", {"data": [bad]})
+    assert any("profiles.spotter.message.by_severity.HIGH: unknown placeholder 'x'" in p
+               for p in problems), problems
+    assert any("profiles.spotter.message.by_severity: no template for severity INFO" in p
+               for p in problems), problems
+
+
+def test_legacy_threshold_by_severity(tmp_path):
+    ok = _join_type_rule(legacy_threshold={"by_severity": {"INFO": {"a": 1}}})
+    assert _problems(tmp_path / "ok", {"data": [ok]}) == []
+    for i, (value, word) in enumerate([
+            ({"by_severity": {"SEVERE": {"a": 1}}},
+             "legacy_threshold.by_severity.SEVERE: unknown severity"),
+            ({"by_severity": {"INFO": 3}},
+             "legacy_threshold.by_severity.INFO: must be a mapping"),
+            ({"by_severity": {"INFO": {"a": "{nope}"}}},
+             "legacy_threshold.by_severity.INFO.a: unknown placeholder 'nope'")]):
+        problems = _problems(tmp_path / str(i), {"data": [_join_type_rule(legacy_threshold=value)]})
+        assert any(word in p for p in problems), problems

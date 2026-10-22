@@ -2,7 +2,8 @@
 
 Every mode skips an item the rule `requires` data for that the context does not hold
 (it iterates with scopes.available, as code rules do), and renders the rule's
-`message` with its own placeholders (catalog_expr.MODE_PLACEHOLDERS). The `aggregate` keys each mode reads are listed in
+`message` — its template for the finding's severity (messages.template) — with its own
+placeholders (catalog_expr.MODE_PLACEHOLDERS). The `aggregate` keys each mode reads are listed in
 catalog_expr.AGGREGATE_KEYS; what a mode puts in `metric`:
 
     each       the `measure` value (None without a measure)
@@ -22,7 +23,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from ts_cli.audit.catalog_model import Rule
 from ts_cli.audit.engine import bands, fields, predicates, scopes
-from ts_cli.audit.engine.messages import Key, NameList, render
+from ts_cli.audit.engine.messages import Key, NameList, render, template
 from ts_cli.audit.findings import Finding
 
 Mode = Callable[[Rule, Any, str], List[Finding]]
@@ -49,16 +50,6 @@ def _is_number(v: Any) -> bool:
 def _graded(rule: Rule, value: Any) -> Optional[str]:
     """The banded severity for `value`; None for no finding (or a non-number)."""
     return bands.classify(value, rule.bands) if _is_number(value) else None
-
-
-def _fixed_severity(rule: Rule, item: dict, ctx) -> Optional[str]:
-    """`severity: HIGH`, or `{field, map, default}` looked up on the item."""
-    sev = rule.severity
-    if not isinstance(sev, dict):
-        return sev
-    value = fields.get(item, sev["field"], ctx)
-    return next((s for k, s in sev["map"].items() if predicates.equals(k, value)),
-                sev["default"])
 
 
 def _finding(rule: Rule, item: dict, severity: str, detail: str, metric: Any = None,
@@ -95,10 +86,11 @@ def each(rule: Rule, ctx, profile: str) -> List[Finding]:
     for item in _filtered(rule, ctx):
         value = fields.get(item, measure, ctx) if measure else None
         severity = _graded(rule, value) if rule.bands is not None \
-            else _fixed_severity(rule, item, ctx)
+            else bands.fixed_severity(rule, item, ctx)
         if severity is None:
             continue
-        detail = render(rule.message, {"name": item["name"], "value": value}, item, ctx)
+        detail = render(template(rule, severity), {"name": item["name"], "value": value}, item,
+                        ctx)
         out.append(_finding(rule, item, severity, detail, metric=value if measure else None))
     return out
 
@@ -131,7 +123,7 @@ def ratio(rule: Rule, ctx, profile: str) -> List[Finding]:
                   "matched_names": _names(matched, unnamed),
                   "unmatched_names": _names([c for c in population if id(c) not in hit],
                                             unnamed)}
-        out.append(_finding(rule, item, severity, render(rule.message, values),
+        out.append(_finding(rule, item, severity, render(template(rule, severity), values),
                             metric=round(pct, 1)))
     return out
 
@@ -147,7 +139,8 @@ def count(rule: Rule, ctx, profile: str) -> List[Finding]:
         if severity is None:
             continue
         values = {"name": item["name"], "value": n, "count": n, "total": len(children)}
-        out.append(_finding(rule, item, severity, render(rule.message, values), metric=n))
+        out.append(_finding(rule, item, severity, render(template(rule, severity), values),
+                            metric=n))
     return out
 
 
@@ -189,7 +182,7 @@ def _groups(rule: Rule, ctx) -> Dict[Any, tuple]:
 def _group_severity(rule: Rule, first: dict, value: int, ctx) -> Optional[str]:
     if rule.bands is not None:
         return _graded(rule, value)
-    return _fixed_severity(rule, first, ctx) if value > 1 else None
+    return bands.fixed_severity(rule, first, ctx) if value > 1 else None
 
 
 def _labels(agg: dict, members: List[dict], ctx) -> NameList:
@@ -215,7 +208,8 @@ def group(rule: Rule, ctx, profile: str) -> List[Finding]:
                   "values": distinct, "value": value}
         name = render(agg.get("name", "{key}"), values)
         guid = first["guid"] if agg.get("guid", "first") == "first" else ""
-        out.append(_finding(rule, first, severity, render(rule.message, dict(values, name=name)),
+        out.append(_finding(rule, first, severity,
+                            render(template(rule, severity), dict(values, name=name)),
                             metric=value if rule.bands is not None else None,
                             name=name, guid=guid))
     return out
@@ -224,10 +218,13 @@ def group(rule: Rule, ctx, profile: str) -> List[Finding]:
 # ── pairwise ────────────────────────────────────────────────────────────────
 
 def _as_set(value: Any) -> set:
-    """The collection at a pairwise `set` path; None elements (absent keys) dropped."""
+    """The collection at a pairwise `set` path. None is an element like any other
+    (legacy D7 counts an explicit `fqn: None`); a path mapped over a list reads an
+    absent key as None too, so a rule that needs a default supplies it in a derived
+    field (D7's @table_set does)."""
     if not isinstance(value, (list, tuple, set)):
         return set()
-    return {_hashable(v) for v in value if v is not None}
+    return {_hashable(v) for v in value}
 
 
 def pairwise(rule: Rule, ctx, profile: str) -> List[Finding]:
@@ -247,7 +244,7 @@ def pairwise(rule: Rule, ctx, profile: str) -> List[Finding]:
         name = f"{a['name']} / {b['name']}"
         values = {"name": name, "value": similarity, "a": a["name"], "b": b["name"],
                   "similarity": similarity, "shared": len(shared), "union": len(union)}
-        out.append(_finding(rule, a, severity, render(rule.message, values),
+        out.append(_finding(rule, a, severity, render(template(rule, severity), values),
                             metric=round(similarity, 2), name=name))
     return out
 
@@ -274,7 +271,7 @@ def composite(rule: Rule, ctx, profile: str) -> List[Finding]:
         if severity is None:
             continue
         values = {**parts, "name": item["name"], "value": score, "score": score}
-        out.append(_finding(rule, item, severity, render(rule.message, values),
+        out.append(_finding(rule, item, severity, render(template(rule, severity), values),
                             metric=round(score, 1)))
     return out
 

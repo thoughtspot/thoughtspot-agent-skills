@@ -857,3 +857,140 @@ def test_named_in_masking_formula_is_false_for_a_non_string_name(name):
         "formulas": [{"expr": "if is_group_member('hr') then [None] + [5] + [ssn] else 0"}]}}])
     [col] = _children_of(ctx, "model.column")
     assert fields.get(col, "@named_in_masking_formula", ctx) is False
+
+
+# ── per-severity forms: message and legacy threshold by severity ────────────
+# A rule whose wording (or legacy threshold) differs per severity — D3's FULL OUTER
+# vs one-sided joins, D7's identical vs overlapping table sets — keeps every wording
+# in the catalog as `{by_severity: {SEVERITY: ...}}`.
+
+_JOIN_TYPE_RULE = _rule(
+    "D3", categories=["D"], scope="join",
+    aggregate={"mode": "each",
+               "where": {"field": "@join_type", "in": ["OUTER", "LEFT_OUTER", "RIGHT_OUTER"]}},
+    severity={"field": "@join_type", "map": {"OUTER": "HIGH"}, "default": "INFO"},
+    message={"by_severity": {"HIGH": "FULL OUTER join causes performance issues",
+                             "INFO": "{@join_type} join — may indicate data discrepancies"}},
+)
+
+
+def _joins_of_types(*types) -> object:
+    tables = [{"name": "F", "joins": [{"with": f"T{i}", "type": t}
+                                      for i, t in enumerate(types)]}]
+    return make_context(models=[{"guid": "m-1", "model": {"name": "M",
+                                                          "model_tables": tables}}])
+
+
+def test_message_by_severity_words_each_finding_by_its_severity():
+    found = _run(_joins_of_types("OUTER", "left_outer", "INNER"), _JOIN_TYPE_RULE)
+    assert [(f.severity, f.detail) for f in found] == [
+        ("HIGH", "FULL OUTER join causes performance issues"),
+        ("INFO", "LEFT_OUTER join — may indicate data discrepancies")]
+
+
+def test_message_without_a_template_for_the_severity_raises():
+    from ts_cli.audit.catalog_model import Rule
+    rule = Rule(id="X1", title="t", message={"by_severity": {"HIGH": "h"}})
+    assert messages.template(rule, "HIGH") == "h"
+    with pytest.raises(ValueError, match="X1.*no message for severity INFO"):
+        messages.template(rule, "INFO")
+    assert messages.template(Rule(id="X2", title="t", message="plain"), "INFO") == "plain"
+
+
+_OVERLAP_RULE = _rule(
+    "D7", categories=["D"], scope="model",
+    aggregate={"mode": "pairwise", "set": "model_tables.fqn"},
+    bands={"direction": "lower_is_better", "unit": "ratio",
+           "levels": [{"op": "gte", "value": 1, "severity": "HIGH"},
+                      {"op": "gt", "value": 0.5, "severity": "MEDIUM"}]},
+    message={"by_severity": {"HIGH": "Identical table sets ({union} tables)",
+                             "MEDIUM": "{shared}/{union} tables shared"}},
+    legacy_threshold={"by_severity": {"MEDIUM": {"high_overlap": 0.5}}},
+)
+
+
+def test_legacy_threshold_by_severity_is_chosen_per_finding():
+    ctx = make_context(models=[
+        {"guid": "g-a", "model": {"name": "A", "model_tables": [{"fqn": "t1"}, {"fqn": "t2"}]}},
+        {"guid": "g-b", "model": {"name": "B", "model_tables": [{"fqn": "t1"}, {"fqn": "t2"}]}},
+        {"guid": "g-c", "model": {"name": "C", "model_tables": [
+            {"fqn": "t1"}, {"fqn": "t2"}, {"fqn": "t3"}]}},
+    ])
+    found = {f.object_name: (f.severity, f.detail, f.threshold)
+             for f in _run(ctx, _OVERLAP_RULE)}
+    assert found == {
+        "A / B": ("HIGH", "Identical table sets (2 tables)", None),
+        "A / C": ("MEDIUM", "2/3 tables shared", {"high_overlap": 0.5}),
+        "B / C": ("MEDIUM", "2/3 tables shared", {"high_overlap": 0.5}),
+    }
+
+
+def test_pairwise_keeps_a_none_element():
+    """A set element that is None counts like any other (legacy D7 keeps an explicit
+    `fqn: None`): {t1, None} vs {t1} is 1/2, not 1/1."""
+    ctx = make_context(models=[
+        {"guid": "g-a", "model": {"name": "A", "model_tables": [{"fqn": "t1"}, {"fqn": None}]}},
+        {"guid": "g-b", "model": {"name": "B", "model_tables": [{"fqn": "t1"}]}},
+    ])
+    rule = copy.deepcopy(_OVERLAP_RULE)
+    rule["bands"]["levels"][1]["op"] = "gte"
+    [f] = _run(ctx, rule)
+    assert (f.severity, f.metric) == ("MEDIUM", 0.5)
+
+
+# ── D derived fields (engine/fields_data.py) ────────────────────────────────
+
+def _field_values(ctx, scope, *names):
+    return [tuple(fields.get(i, n, ctx) for n in names) for i in _children_of(ctx, scope)]
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("OUTER", "OUTER"), ("left_outer", "LEFT_OUTER"), ("", ""), (None, ""), (5, None)])
+def test_join_type_and_cardinality_are_upper_cased_or_none(value, expected):
+    ctx = make_context(models=[{"guid": "m", "model": {"name": "M", "model_tables": [
+        {"name": "A", "joins": [{"with": "B", "type": value, "cardinality": value}]}]}}])
+    assert _field_values(ctx, "join", "@join_type", "@join_cardinality") == [
+        (expected, expected)]
+
+
+def test_join_ends_are_looked_up_by_name_not_alias():
+    """BL-305 kept: SHIPMENTS (alias SHIP) has four MEASURE columns under SHIP::, so
+    by name it reads unknown and the fact-to-fact join reads as not."""
+    ctx = fx.data_model_aliased_fact()
+    assert _field_values(ctx, "join", "@join_from_name", "@is_fact_to_fact_join") == [
+        ("SHIPMENTS", False)]
+    assert _field_values(fx.data_fanout_fact_to_fact(), "join", "@is_fact_to_fact_join") == [
+        (True,)]
+
+
+def test_model_table_join_and_column_fields():
+    ctx = fx.data_model_join_edges()
+    got = {i["name"]: (fields.get(i, "@is_joined", ctx), fields.get(i, "@zero_column_role", ctx))
+           for i in _children_of(ctx, "model.table")}
+    # ORDERS (alias ORD) is joined by alias but zero-column by NAME; the table named
+    # ORD owns the ORD:: columns; DATES joins a table the model does not list.
+    assert got == {"ORD": (True, None), "CUST": (True, "leaf"), "GEO": (False, "leaf"),
+                   "DATES": (True, "bridge")}
+
+
+def test_table_grain_fields_key_by_alias():
+    """D6 finds a table's columns by its key (alias, else name) — unlike D10/D11."""
+    ctx = fx.data_model_aliased_fact()
+    rows = {i["name"]: tuple(fields.get(i, f, ctx) for f in (
+        "@table_role", "@table_column_count", "@attribute_count", "@attribute_share",
+        "@attribute_pct")) for i in _children_of(ctx, "model.table")}
+    assert rows == {"SHIP": ("fact", 4, 0, 0.0, 0.0), "O": ("fact", 8, 4, 0.5, 50.0)}
+    no_columns = _field_values(fx.data_lists_none(), "model.table",
+                               "@table_role", "@attribute_share", "@attribute_pct")
+    assert set(no_columns) == {("unknown", None, None)}
+
+
+def test_table_set_and_physical_table_key():
+    ctx = fx.data_models_overlap_edges()
+    sets = {i["name"]: fields.get(i, "@table_set", ctx) for i in _children_of(ctx, "model")}
+    assert sets["ByName"] == ["T1", "f2"] and sets["NoneFqn"] == [None, "f2"]
+    assert sets["Blank"] == ["", "f2"] and sets["Empty"] == []
+    meta = fx.data_metadata_edges()
+    keys = [fields.get(i, "@physical_table_key", meta) for i in _children_of(meta, "metadata")]
+    assert keys[3] == ("", "", "", "LINES") and keys[5] == (None, "", "", "ITEMS")
+    assert format(keys[0], "") == "SF.DB.S.ORDERS"

@@ -19,6 +19,7 @@ and a rule's `fixture:` name resolve without knowing the module:
                  clones, and the index-type shapes of P9/P11 and S2
     perf.py      P — the legacy P-check tests' inputs, and P_INPUTS
     security.py  S — the legacy S-check tests' inputs, and S_INPUTS
+    data.py      D — the legacy D-check tests' inputs, and D_INPUTS
 
 Each category module keeps its builders beside its explicit input list (the
 equivalence test's inputs, `<CAT>_INPUTS`). Builders deep-copy any shared constant they
@@ -32,3 +33,4 @@ from .ai import *  # noqa: F401,F403
 from .rls import *  # noqa: F401,F403
 from .perf import *  # noqa: F401,F403
 from .security import *  # noqa: F401,F403
+from .data import *  # noqa: F401,F403

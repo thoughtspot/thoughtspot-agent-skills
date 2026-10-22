@@ -5,9 +5,12 @@ The finding contract (what the equivalence gate compares with the legacy checks)
     check_id     the rule id
     angle        the `angle_key` of the rule's FIRST category ("ai", "data_modeling", …)
     severity, object_type/name/guid, detail, metric   from the rule's mode (modes.py)
-    threshold    the rule's `legacy_threshold` — the profile's own when it sets one —
+    threshold    the rule's `legacy_threshold` — the profile's own when it sets one;
+                 in its `by_severity` form, the entry for the finding's severity —
                  with `{profile_label}` rendered; key order and number types as written
-                 in YAML; None when the rule has none
+                 in YAML; None when the rule has none. A code rule whose catalog entry
+                 has no legacy threshold may set one per finding itself (D1: one per
+                 measure); the runner keeps it
     categories   every category id of the rule (additive)
     bands        {direction, unit, levels, profile, provenance} (additive; bands.py)
 
@@ -24,6 +27,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional
 
+from ts_cli.audit.catalog_forms import BY_SEVERITY
 from ts_cli.audit.catalog_model import Catalog, Rule
 from ts_cli.audit.engine import bands, code_rules
 from ts_cli.audit.engine.modes import MODES
@@ -80,15 +84,15 @@ def _run_rule(ctx, catalog: Catalog, rule: Rule, profile: str,
     if merged.status != "active":
         return []
     found = _dispatch(merged, ctx, profile)
-    stamp = {
-        "angle": catalog.categories[rule.categories[0]].angle_key,
-        "categories": list(rule.categories),
-        "bands": bands.payload(merged, profile, provenance),
-        "threshold": legacy_threshold(rule, profile, catalog.profiles[profile].label),
-    }
+    angle = catalog.categories[rule.categories[0]].angle_key
+    payload = bands.payload(merged, profile, provenance)
+    label = catalog.profiles[profile].label
     for f in found:
-        f.angle, f.categories = stamp["angle"], list(stamp["categories"])
-        f.bands, f.threshold = copy.deepcopy(stamp["bands"]), copy.deepcopy(stamp["threshold"])
+        own = f.threshold  # set only by a code rule (code_rules.check_findings)
+        f.angle, f.categories = angle, list(rule.categories)
+        f.bands = copy.deepcopy(payload)
+        f.threshold = own if own is not None else \
+            legacy_threshold(rule, profile, label, f.severity)
     return found
 
 
@@ -98,10 +102,14 @@ def _dispatch(rule: Rule, ctx, profile: str) -> List[Finding]:
     return MODES[rule.aggregate["mode"]](rule, ctx, profile)
 
 
-def legacy_threshold(rule: Rule, profile: str, profile_label: str) -> Optional[dict]:
+def legacy_threshold(rule: Rule, profile: str, profile_label: str,
+                     severity: Optional[str] = None) -> Optional[dict]:
     """The pre-catalog `threshold` dict: the profile's `legacy_threshold`, else the
-    rule's, with `{profile_label}` rendered in string values (order/types kept)."""
+    rule's — in the `by_severity` form, its entry for `severity` (none: None) — with
+    `{profile_label}` rendered in string values (order/types kept)."""
     source = (rule.profiles.get(profile) or {}).get("legacy_threshold", rule.legacy_threshold)
+    if isinstance(source, dict) and BY_SEVERITY in source:
+        source = source[BY_SEVERITY].get(severity)
     if source is None:
         return None
     return {k: v.format_map({"profile_label": profile_label}) if isinstance(v, str) else
