@@ -192,66 +192,66 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
 
 
-def _abort_if_request_failure(exc: Exception, guid: str) -> None:
-    """Exit the run when `exc` is a `requests` failure that escaped the client.
+def _abort_on_request_failure(exc: Exception, guid: str) -> None:
+    """Exit the run: the `ai/instructions/get` REQUEST raised, as opposed to answering.
 
-    The client turns its own HTTP and network failures into a response or a
-    `SystemExit`; what escapes as a `requests.RequestException` is the re-authentication
-    after a 401 raising (a token exchange answering 500 — an OIDC account's bad password —
-    or the network dropping during it). Every later call would fail the same way, so it
+    The client turns its own per-request HTTP and network failures into a response or a
+    `SystemExit`, so whatever else escapes `client.post` came from the request path
+    itself — in practice the re-authentication after a 401 raising: a token exchange
+    answering 500 (an OIDC account's bad password), a non-JSON page (an SSO or proxy
+    HTML login: requests' `JSONDecodeError`), a JSON body without `token` (`KeyError`),
+    or the network dropping during it. Every later call would fail the same way, so it
     is fatal once, never one swallowed failure and one re-authentication per Model. The
     line names the exception type and, for an HTTP error, its status and path — never
-    the URL's host or any header."""
-    import requests
-    if not isinstance(exc, requests.RequestException):
-        return
+    the URL's host, a header or the exception text (which can carry a URL)."""
     resp = getattr(exc, "response", None)
     where = ""
-    if resp is not None:
+    if resp is not None and getattr(resp, "status_code", None) is not None:
         from urllib.parse import urlparse
-        where = f" ({resp.status_code} on {urlparse(resp.url or '').path or '?'})"
-    print(f"Error: AI instructions lookup for model {guid} failed while re-authenticating: "
-          f"{type(exc).__name__}{where} — aborting the audit", file=sys.stderr)
+        where = f" ({resp.status_code} on {urlparse(getattr(resp, 'url', '') or '').path or '?'})"
+    print(f"Error: AI instructions lookup for model {guid} failed in the request itself "
+          f"(re-authentication or transport): {type(exc).__name__}{where} — aborting the audit",
+          file=sys.stderr)
     raise SystemExit(1) from exc
 
 
 def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
                            warnings: list) -> None:
-    """`ai/instructions/get` per Model, into `out[guid]`; a failure leaves no entry
-    (the Model reads as "could not be read"; A3 skips it) and a warning with the reason.
+    """`ai/instructions/get` per Model, into `out[guid]`; a per-Model failure leaves no
+    entry (the Model reads as "could not be read"; A3 skips it) and a warning with the
+    reason.
 
-    `raise_for_status=False`, as the Answer and Model exports here: with the default the
-    real client turns a 4xx/5xx into `SystemExit(1)`, which no `except Exception`
-    catches, so one Model's failed lookup aborted the whole audit. A non-2xx reason is
-    `format_http_error`'s secret-free line (never the request headers), on the path
-    rather than the full URL; any other failure (a body that is not JSON) is caught
-    as before.
+    The request and the decoding of its answer are handled apart:
 
-    A FINAL 401 is the exception: it survived the client's one re-authentication, so
-    the credential itself is bad and every later call would fail the same way. It
-    aborts the run (one line, `SystemExit(1)`) as before the fix, rather than
-    re-authenticating and warning once per Model. A 403/404/5xx (after the client's
-    own 502/503/504 retries) is per Model and only skips that Model. So does a
-    re-authentication that raises rather than exits (`_abort_if_request_failure`)."""
+    * The request (`client.post`, with any re-authentication inside it) uses
+      `raise_for_status=False`, as the Answer and Model exports here: with the default
+      the real client turns a 4xx/5xx into `SystemExit(1)`, so one Model's failed lookup
+      aborted the whole audit. Anything the request RAISES is not about one Model — it
+      aborts once (`_abort_on_request_failure`).
+    * A FINAL 401 survived the client's one re-authentication, so the credential itself
+      is bad: it aborts the run (one line, `SystemExit(1)`), as before the fix.
+    * A 403/404/5xx (after the client's own 502/503/504 retries) is about this Model:
+      skip it, the reason being `format_http_error`'s secret-free line on the path.
+    * A 2xx whose body is not JSON (`ValueError` from `resp.json()`) skips this Model."""
     from ts_cli.client import format_http_error
     _log("Fetching AI instructions...")
     for guid in model_guids:
         try:
             resp = client.post(_AI_INSTRUCTIONS_PATH, json={"data_source_identifier": guid},
                                raise_for_status=False)
-            if resp.status_code == 401:
-                print(format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp), file=sys.stderr)
-                raise SystemExit(1)
-            if not resp.ok:
-                reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
-            else:
+        except Exception as exc:  # SystemExit (a BaseException) passes through untouched
+            _abort_on_request_failure(exc, guid)
+        if resp.status_code == 401:
+            print(format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp), file=sys.stderr)
+            raise SystemExit(1)
+        if not resp.ok:
+            reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
+        else:
+            try:
                 out[guid] = resp.json()
                 continue
-        except ValueError as exc:  # a body that is not JSON (requests' JSONDecodeError too)
-            reason = str(exc)
-        except Exception as exc:  # the reason goes into the warning (the report cites it)
-            _abort_if_request_failure(exc, guid)
-            reason = str(exc)
+            except ValueError as exc:  # this Model's answer is not JSON
+                reason = str(exc)
         msg = f"AI instructions fetch failed for model {guid}: {reason}"
         _log(f"Warning: {msg}")
         warnings.append(msg)

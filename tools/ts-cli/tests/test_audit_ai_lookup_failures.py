@@ -207,10 +207,15 @@ def _reauth_failure(kind: str) -> Exception:
         resp = _response("https://example.thoughtspot.cloud/api/rest/2.0/auth/token/full",
                          500, {"debug": "10000"})
         return requests.HTTPError("500 Server Error", response=resp)
+    if kind == "JSONDecodeError":   # an SSO/proxy HTML page from the token exchange:
+        # requests' JSONDecodeError is BOTH a ValueError and a RequestException
+        return requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+    if kind == "KeyError":          # a JSON body without `token`
+        return KeyError("token")
     return requests.ConnectionError("connection reset")
 
 
-@pytest.mark.parametrize("kind", ["HTTPError", "ConnectionError"])
+@pytest.mark.parametrize("kind", ["HTTPError", "ConnectionError", "JSONDecodeError", "KeyError"])
 def test_a_401_whose_reauthentication_raises_aborts_once(kind, tmp_path, capsys):
     """The re-authentication after a 401 can itself raise (not exit). That is still a
     credential/transport failure every later call would repeat: abort the run after ONE
