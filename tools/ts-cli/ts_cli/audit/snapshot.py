@@ -102,10 +102,21 @@ def _git_work_tree(path: Path):
     return None
 
 
+def _is_earlier_snapshot(out_dir: Path) -> bool:
+    """`out_dir` holds a manifest that reads as one `write_snapshot` wrote — format,
+    ts_cli_version, created, angles, files — not merely a file named manifest.json (a
+    web app's, say)."""
+    try:
+        manifest = _read_manifest(out_dir)
+    except SnapshotError:
+        return False
+    return all(isinstance(manifest.get(k), str) for k in ("ts_cli_version", "created"))
+
+
 def prepare_snapshot_dir(out_dir: Path) -> Path:
     """Resolve and create `out_dir` for a snapshot, refusing — with ``SnapshotError``,
     before anything is fetched — a directory inside a git work tree, or a non-empty one
-    that is not an earlier snapshot (no ``manifest.json``)."""
+    that is not an earlier snapshot (``_is_earlier_snapshot``)."""
     out_dir = Path(out_dir).expanduser().resolve()
     tree = _git_work_tree(out_dir)
     if tree is not None:
@@ -114,10 +125,11 @@ def prepare_snapshot_dir(out_dir: Path) -> Path:
             "exported TML: write it outside any repository (e.g. ~/audit-snapshots/<name>)")
     if out_dir.exists() and not out_dir.is_dir():
         raise SnapshotError(f"{out_dir} exists and is not a directory")
-    if out_dir.is_dir() and any(out_dir.iterdir()) and not (out_dir / MANIFEST).is_file():
+    if out_dir.is_dir() and any(out_dir.iterdir()) and not _is_earlier_snapshot(out_dir):
         raise SnapshotError(
-            f"{out_dir} is not empty and holds no snapshot ({MANIFEST}); a snapshot "
-            "overwrites files by generic names — choose an empty or new directory")
+            f"{out_dir} is not empty and holds no earlier snapshot (a {MANIFEST} as "
+            "--snapshot-out writes it); a snapshot overwrites files by generic names — "
+            "choose an empty or new directory")
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

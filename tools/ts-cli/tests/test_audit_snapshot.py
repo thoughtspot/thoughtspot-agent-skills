@@ -335,9 +335,29 @@ def test_snapshot_refuses_a_non_empty_directory_that_is_not_a_snapshot(tmp_path)
     target = tmp_path / "work"
     target.mkdir()
     (target / "models.json").write_text("my own file")
-    with pytest.raises(SnapshotError, match="not empty and holds no snapshot"):
+    with pytest.raises(SnapshotError, match="not empty and holds no earlier snapshot"):
         write_snapshot(_full_context(), target, ALL)
     assert (target / "models.json").read_text() == "my own file"
+
+
+@pytest.mark.parametrize("manifest", [
+    '{"name": "My App", "short_name": "app", "start_url": "/", "icons": []}',  # web app
+    '{"format": 1, "angles": ["A"], "files": []}',          # no version / created
+    'not json at all',
+    '[1, 2, 3]',
+])
+def test_snapshot_refuses_a_directory_whose_manifest_is_not_a_snapshots(tmp_path, manifest):
+    """A file named manifest.json is not proof of an earlier snapshot (re-review N1): a
+    web app's beside a models.json must be refused, both files left as they were."""
+    target = tmp_path / "webapp"
+    target.mkdir()
+    (target / "manifest.json").write_text(manifest)
+    (target / "models.json").write_text('{"mine": true}')
+    with pytest.raises(SnapshotError, match="holds no earlier snapshot"):
+        write_snapshot(_full_context(), target, ALL)
+    assert (target / "manifest.json").read_text() == manifest
+    assert (target / "models.json").read_text() == '{"mine": true}'
+    assert sorted(p.name for p in target.iterdir()) == ["manifest.json", "models.json"]
 
 
 def test_snapshot_refuses_a_file_path(tmp_path):
