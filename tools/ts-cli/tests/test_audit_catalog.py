@@ -40,6 +40,8 @@ from audit_catalog_helpers import PKG_CATALOG, _catalog_dir, _good_rule, _proble
 # ── shipped catalog ──────────────────────────────────────────────────────────
 
 def test_loads_categories_and_profiles():
+    """THE deliberate pin of the category list (ids, labels, order — what audit JSON
+    readers key on): adding a category updates this test and no other."""
     cat = load_catalog(PKG_CATALOG)
     assert isinstance(cat, Catalog)
     assert list(cat.categories) == ["A", "D", "H", "P", "S"]
@@ -56,12 +58,12 @@ def test_loads_categories_and_profiles():
 def test_shipped_catalog_is_valid():
     cat, problems = check_catalog()
     assert problems == []
-    assert set(cat.categories) == {"A", "D", "H", "P", "S"}
+    assert {"A", "D", "H", "P", "S"} <= set(cat.categories)  # fixed; more may be added
 
 
 def test_package_ships_catalog():
     cat = load_catalog()  # no args: the package's own catalog/
-    assert list(cat.categories) == ["A", "D", "H", "P", "S"]
+    assert list(cat.categories) == list(load_catalog(PKG_CATALOG).categories)
     # …and every catalog file is declared as package data, so a wheel install has it.
     pyproject = PKG_CATALOG.parents[2] / "pyproject.toml"
     globs = _package_data_globs(pyproject.read_text())
@@ -500,7 +502,9 @@ def test_valid_operands_accepted(tmp_path):
 
 def test_shipped_categories_carry_legacy_angle_keys():
     cat = load_catalog(PKG_CATALOG)
-    assert {c.id: c.angle_key for c in cat.categories.values()} == {
+    keys = {c.id: c.angle_key for c in cat.categories.values()}
+    # The five original categories keep their legacy keys for ever; a new one has its own.
+    assert {cid: keys.get(cid) for cid in "ADHPS"} == {
         "A": "ai", "D": "data_modeling", "H": "human", "P": "performance", "S": "security"}
 
 

@@ -114,7 +114,8 @@ def test_pre_cutover_payload_derives_categories_and_reads_the_catalog():
     data = json.loads((FIXTURES / "pre_cutover_audit.json").read_text())
     payload = compact_payload(copy.deepcopy(data))
     labels = [c["label"] for c in payload["G"]["categories"]]
-    assert labels == LABELS
+    assert labels == [c.label for c in load_catalog().categories.values()]
+    assert set(LABELS) <= set(labels)
     # categories derived from the legacy angle when the finding has none
     assert [f["c"] for f in payload["F"]] == [["A"], ["P"], ["D"], ["H"]]
     # the run's own check text is kept; remediation and views come from the catalog

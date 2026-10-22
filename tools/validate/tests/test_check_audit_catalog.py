@@ -76,6 +76,10 @@ def _shipped_rule_count() -> int:
     return sum(len(yaml.safe_load(p.read_text()) or []) for p in rules_dir.glob("*.yaml"))
 
 
+def _shipped_category_count() -> int:
+    return len(yaml.safe_load((REPO / AUDIT_REL / "catalog" / "categories.yaml").read_text()))
+
+
 def test_real_repo_passes():
     res = _run(REPO)
     assert res.returncode == 0, res.stdout + res.stderr
@@ -96,7 +100,8 @@ def test_needs_only_the_catalog_modules(tmp_path):
     # No ts_cli/__init__.py, no other modules: the gate must still load the catalog.
     res = _run(_copy_repo(tmp_path))
     assert res.returncode == 0, res.stdout + res.stderr
-    assert f"{_shipped_rule_count()} rule(s), 5 categories" in res.stdout
+    assert f"{_shipped_rule_count()} rule(s), {_shipped_category_count()} categories" \
+        in res.stdout
 
 
 GOOD_EACH_RULE = """\

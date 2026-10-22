@@ -449,7 +449,11 @@ Follow procedure 1 with these differences.
    profile it still runs under (`profile: spotter` when you retire it under the default,
    `general`), or the example test fails.
 3. Leave the logic in place, or remove `aggregate` / `implementation` if no profile revives
-   it. Rewrite `description` to say the rule is retired and why ("Retired 2026-11: …"). It
+   it. For a code rule (`implementation: code:<name>`) removing `implementation` orphans
+   its registered function: delete the `@code_rule` function and its unit tests in the
+   same change (`test_every_registered_code_rule_is_used_by_a_shipped_rule` and
+   `test_a_code_rule_left_behind_is_detected` fail on a registration no rule names), or
+   keep the `implementation`. Rewrite `description` to say the rule is retired and why ("Retired 2026-11: …"). It
    is the "Why" column under "Retired rules", and a test requires the word "retired" in
    it, so a detection description left unchanged fails.
 4. If it is pinned, `repin_findings.py --rule <ID>` re-pins it to `[]`. Keeping it pinned
@@ -478,7 +482,9 @@ Categories are data, but a new one reaches further than a rule:
    the rules file of its primary category, or add `rules/<name>.yaml`.
 3. Update the one test that deliberately pins the category list,
    `test_loads_categories_and_profiles` in `test_audit_catalog.py` (a regression net:
-   ids, labels and order are what audit JSON readers key on). Then update the ts-audit
+   ids, labels and order are what audit JSON readers key on). Every other test reads the
+   categories from the catalog, or checks only that the five fixed ones are still there;
+   if another fails, treat it as a finding. Then update the ts-audit
    skill everywhere it lists categories: the "Audit angles" table at the top, Step 0's
    "B. Available angles" list, the Step 2a menu including its "X  All angles (A, D, H, P,
    S)" line and the `--angles` examples, and the Step 5 catalog table.
