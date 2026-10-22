@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, NoReturn, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine.tml import BRACKET_REF
@@ -192,27 +192,35 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
 
 
-def _abort_on_request_failure(exc: Exception, guid: str) -> None:
-    """Exit the run: the `ai/instructions/get` REQUEST raised, as opposed to answering.
+def _abort_on_request_failure(exc: Exception, guid: str) -> NoReturn:
+    """Exit the run: the `ai/instructions/get` request raised a `requests` exception.
 
     The client turns its own per-request HTTP and network failures into a response or a
-    `SystemExit`, so whatever else escapes `client.post` came from the request path
-    itself — in practice the re-authentication after a 401 raising: a token exchange
-    answering 500 (an OIDC account's bad password), a non-JSON page (an SSO or proxy
-    HTML login: requests' `JSONDecodeError`), a JSON body without `token` (`KeyError`),
-    or the network dropping during it. Every later call would fail the same way, so it
-    is fatal once, never one swallowed failure and one re-authentication per Model. The
-    line names the exception type and, for an HTTP error, its status and path — never
-    the URL's host, a header or the exception text (which can carry a URL)."""
+    `SystemExit`, so a `requests.RequestException` that escapes `client.post` came from
+    the request path itself — in practice the re-authentication after a 401 raising: a
+    token exchange answering 500 (an OIDC account's bad password), a non-JSON page (an
+    SSO or proxy HTML login: requests' `JSONDecodeError`), or the network dropping
+    during it — or a transport error the client does not retry. Every later call would
+    fail the same way, so it is fatal once, never one swallowed failure and one
+    re-authentication per Model. The line names the exception type and, for an HTTP
+    error, its status and path — never the URL's host, a header or the exception text
+    (a requests message can carry a URL)."""
     resp = getattr(exc, "response", None)
     where = ""
     if resp is not None and getattr(resp, "status_code", None) is not None:
         from urllib.parse import urlparse
-        where = f" ({resp.status_code} on {urlparse(getattr(resp, 'url', '') or '').path or '?'})"
+        path = urlparse(getattr(resp, "url", "") or "").path or "?"
+        where = f" ({resp.status_code} on {path})"
     print(f"Error: AI instructions lookup for model {guid} failed in the request itself "
           f"(re-authentication or transport): {type(exc).__name__}{where} — aborting the audit",
           file=sys.stderr)
     raise SystemExit(1) from exc
+
+
+#: Answers to `ai/instructions/get` that are about the run, not one Model: every later
+#: lookup would get the same, so the run stops once (the client retries neither).
+_FATAL_STATUSES = {401: "the credential was refused after re-authentication",
+                   429: "rate limited — retry later"}
 
 
 def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
@@ -226,23 +234,28 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
     * The request (`client.post`, with any re-authentication inside it) uses
       `raise_for_status=False`, as the Answer and Model exports here: with the default
       the real client turns a 4xx/5xx into `SystemExit(1)`, so one Model's failed lookup
-      aborted the whole audit. Anything the request RAISES is not about one Model — it
-      aborts once (`_abort_on_request_failure`).
-    * A FINAL 401 survived the client's one re-authentication, so the credential itself
-      is bad: it aborts the run (one line, `SystemExit(1)`), as before the fix.
-    * A 403/404/5xx (after the client's own 502/503/504 retries) is about this Model:
-      skip it, the reason being `format_http_error`'s secret-free line on the path.
+      aborted the whole audit. A `requests` exception it RAISES is not about one Model:
+      it aborts once (`_abort_on_request_failure`). Any other exception is a bug, not a
+      transport failure, and propagates unchanged, traceback intact.
+    * A final 401 (it survived the client's one re-authentication: the credential is
+      bad) or a 429 (rate limited; the client does not retry it) aborts the run once
+      with one line, `SystemExit(1)`.
+    * Any other non-2xx (403, 404, a 5xx after the client's 502/503/504 retries, ...) is
+      about this Model: skip it, the reason being `format_http_error`'s secret-free line
+      on the path.
     * A 2xx whose body is not JSON (`ValueError` from `resp.json()`) skips this Model."""
+    import requests
     from ts_cli.client import format_http_error
     _log("Fetching AI instructions...")
     for guid in model_guids:
         try:
             resp = client.post(_AI_INSTRUCTIONS_PATH, json={"data_source_identifier": guid},
                                raise_for_status=False)
-        except Exception as exc:  # SystemExit (a BaseException) passes through untouched
+        except requests.RequestException as exc:
             _abort_on_request_failure(exc, guid)
-        if resp.status_code == 401:
-            print(format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp), file=sys.stderr)
+        if resp.status_code in _FATAL_STATUSES:
+            print(f"{format_http_error('POST', _AI_INSTRUCTIONS_PATH, resp)} — "
+                  f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
             raise SystemExit(1)
         if not resp.ok:
             reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)

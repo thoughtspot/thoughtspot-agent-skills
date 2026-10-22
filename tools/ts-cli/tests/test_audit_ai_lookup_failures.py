@@ -212,14 +212,17 @@ def _reauth_failure(kind: str) -> Exception:
         return requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
     if kind == "KeyError":          # a JSON body without `token`
         return KeyError("token")
+    if kind == "RuntimeError":      # a bug, not a transport failure
+        return RuntimeError("oops: a bug in the request path")
     return requests.ConnectionError("connection reset")
 
 
-@pytest.mark.parametrize("kind", ["HTTPError", "ConnectionError", "JSONDecodeError", "KeyError"])
+@pytest.mark.parametrize("kind", ["HTTPError", "ConnectionError", "JSONDecodeError"])
 def test_a_401_whose_reauthentication_raises_aborts_once(kind, tmp_path, capsys):
-    """The re-authentication after a 401 can itself raise (not exit). That is still a
-    credential/transport failure every later call would repeat: abort the run after ONE
-    token exchange, never swallow it as one Model's failure and re-try per Model."""
+    """The re-authentication after a 401 can itself raise a `requests` exception (not
+    exit). That is a credential/transport failure every later call would repeat: abort
+    the run after ONE token exchange, never swallow it as one Model's failure and re-try
+    per Model. The line names the type only — a requests message can carry a URL."""
     client, calls, reauth = _counting_client(tmp_path, 401)
     reauth.side_effect = _reauth_failure(kind)
     with pytest.raises(SystemExit) as exc:
@@ -232,6 +235,38 @@ def test_a_401_whose_reauthentication_raises_aborts_once(kind, tmp_path, capsys)
     abort = [ln for ln in err.splitlines() if "aborting" in ln]
     assert len(abort) == 1 and kind in abort[0]
     assert "example.thoughtspot.cloud" not in abort[0] and TOKEN not in err
+
+
+@pytest.mark.parametrize("kind", ["KeyError", "RuntimeError"])
+def test_a_non_requests_exception_in_the_request_path_reraises_unchanged(kind, tmp_path, capsys):
+    """Anything that is not a `requests` exception is not a transport failure: it is
+    re-raised as it is (type, message, traceback intact), never disguised as one, and
+    never swallowed per Model. It still happens once — the run stops at the first."""
+    client, calls, reauth = _counting_client(tmp_path, 401)
+    failure = _reauth_failure(kind)
+    reauth.side_effect = failure
+    with pytest.raises(type(failure)) as exc:
+        run_audit(client, ["m-ok", "m-bad"], ["A"], "spotter")
+    assert exc.value is failure
+    assert reauth.call_count == 1 and calls == {"m-ok": 1}
+    err = capsys.readouterr().err
+    assert "AI instructions fetch failed for model" not in err and "aborting" not in err
+
+
+def test_a_429_aborts_the_run_once(tmp_path, capsys):
+    """Rate limited: every later lookup would be refused too, and the client does not
+    retry 429 — so stop once with a clear message, never mark Model after Model as
+    "could not be read"."""
+    client, calls, reauth = _counting_client(tmp_path, 429)
+    with pytest.raises(SystemExit) as exc:
+        run_audit(client, ["m-ok", "m-bad"], ["A"], "spotter")
+    assert exc.value.code not in (0, None)
+    assert calls == {"m-ok": 1} and reauth.call_count == 0
+    err = capsys.readouterr().err
+    assert "ThoughtSpot API 429 on POST " + AI_PATH in err
+    assert "rate limited — retry later" in err
+    assert "AI instructions fetch failed for model" not in err
+    assert TOKEN not in err and "Authorization" not in err
 
 
 def test_a_404_skips_only_that_model(tmp_path, capsys):
