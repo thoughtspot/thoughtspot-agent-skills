@@ -311,6 +311,59 @@ def test_report_without_a_fetched_record_renders_as_before(tmp_path):
     assert "Business Questions" not in out["text"]  # empty questions: no section, as before
 
 
+# ── a failed AI-instructions lookup is "could not be read", not "None" ──────
+# (12a re-review Minor 1): `_fetch_ai_instructions` leaves no entry for a Model whose
+# lookup failed, so its questions are [] exactly as for a Model with none. The corpus
+# records per Model whether the lookup succeeded, and the report says which.
+
+def _ai_failing_client(model, fail=True):
+    client = _p_only_client(model)
+    ok = client.post.side_effect
+
+    def post(url, json=None, **kw):
+        if fail and url.endswith("/ai/instructions/get"):
+            raise RuntimeError("500 from ai/instructions/get")
+        return ok(url, json=json, **kw)
+    client.post.side_effect = post
+    return client
+
+
+@pytest.mark.parametrize("fail,read", [(True, False), (False, True)])
+def test_corpus_records_whether_the_ai_instructions_lookup_succeeded(fail, read):
+    from ts_cli.audit import run_audit
+    model = {"guid": "m1", "model": {"name": "Sales", "model_tables": [
+        {"name": "ORDERS", "fqn": "t1"}], "columns": [], "formulas": []}}
+    out = run_audit(_ai_failing_client(model, fail), ["m1"], ["A"])
+    ai = out["corpus"]["models"][0]["ai_analysis"]
+    assert "ai_instructions" in out["corpus"]["fetched_needs"]
+    assert ai["instructions_read"] is read
+    assert ai["questions"] == ([] if fail else ["Revenue means net revenue"])
+    assert compact_payload(out)["C"]["m"][0]["ai"]["rd"] is read
+
+
+def _with_read_flag(read):
+    data = json.loads((FIXTURES / "pre_cutover_audit.json").read_text())
+    data["corpus"]["fetched_needs"] = sorted(_ALWAYS | {"ai_instructions", "sets"})
+    data["corpus"]["models"][0]["ai_analysis"]["instructions_read"] = read
+    return render_report(data)
+
+
+@needs_chrome
+def test_report_says_could_not_be_read_for_a_failed_lookup(tmp_path):
+    out = report_browser.render(_with_read_flag(False), tmp_path, _MODEL_1)
+    assert out["errors"] == []
+    assert "Could not be read" in out["text"]
+    assert "None — no AI instructions on this Model." not in out["text"]
+
+
+@needs_chrome
+def test_report_says_none_for_a_lookup_that_succeeded_empty(tmp_path):
+    out = report_browser.render(_with_read_flag(True), tmp_path, _MODEL_1)
+    assert out["errors"] == []
+    assert "None — no AI instructions on this Model." in out["text"]
+    assert "Could not be read" not in out["text"]
+
+
 # ── snapshots record what they fetched; replay refuses what is missing ──────
 
 def _snap(tmp_path, angles, needs=None, ctx=None):

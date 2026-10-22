@@ -209,6 +209,10 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         for info in (ai_data.get("nl_instructions_info") or []):
             instructions.extend(info.get("instructions") or [])
         entry["ai_analysis"] = _build_ai_analysis(instructions, m)
+        # Whether this Model's `ai/instructions/get` lookup succeeded: a failure leaves
+        # no entry, so its questions are [] exactly as for a Model with none. Only
+        # meaningful when ai_instructions was fetched (corpus.fetched_needs); additive.
+        entry["ai_analysis"]["instructions_read"] = guid in ctx.ai_instructions
         models_out.append(entry)
 
     table_reuse = _build_table_reuse_from_ctx(models_out)

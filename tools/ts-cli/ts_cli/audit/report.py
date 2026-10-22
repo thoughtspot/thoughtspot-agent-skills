@@ -199,6 +199,8 @@ def compact_payload(data: dict) -> dict:
                     "pe": ai.get("personas", []),
                     "qu": ai.get("questions", []),
                 }
+                if "instructions_read" in ai:   # absent in JSON from before 12b
+                    cm["ai"]["rd"] = ai["instructions_read"]
             erd = m.get("erd")
             if erd:
                 cm["ed"] = erd

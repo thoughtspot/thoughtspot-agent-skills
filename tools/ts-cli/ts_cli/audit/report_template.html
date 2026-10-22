@@ -1182,8 +1182,9 @@ function buildScorecard(D, guid, filterAngle){
     if(recorded() && !(cm.ai.qu && cm.ai.qu.length > 0)){
       var qNone = el("div","ai-sub");
       qNone.innerHTML = '<h4>Business Questions</h4>';
-      qNone.appendChild(mutedNote(collected("ai_instructions") ? "None — no AI instructions on this Model."
-                                                             : NOT_COLLECTED, "questions-status"));
+      qNone.appendChild(mutedNote(!collected("ai_instructions") ? NOT_COLLECTED
+        : cm.ai.rd === false ? "Could not be read — the AI-instructions lookup for this Model failed (see the run's warnings)."
+        : "None — no AI instructions on this Model.", "questions-status"));
       aiBody.appendChild(qNone);
     }
     if(cm.ai.qu && cm.ai.qu.length > 0){
