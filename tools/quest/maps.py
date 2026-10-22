@@ -198,16 +198,13 @@ class Map:
             if not isinstance(ts, dict):
                 errors.append(f"{self.name}: a tileset is not a JSON object")
             elif "source" in ts:
-                errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (Phaser reads embedded tilesets only)")
+                errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (the explore page reads embedded tilesets only)")
             elif (ts.get("tilewidth"), ts.get("tileheight")) != (TILE, TILE) or not (
                     isinstance(ts.get("tilecount"), int) and not isinstance(ts.get("tilecount"), bool) and ts["tilecount"] > 0):
                 errors.append(f"{self.name}: tileset {ts.get('name')!r} needs {TILE}x{TILE} tiles and a tilecount")
             elif any(isinstance(g, int) and (g & GID) > ts["tilecount"] for l in tiles for g in (l.get("data") or [])
                      if isinstance(l.get("data"), list)):
                 errors.append(f"{self.name}: a tile layer uses a tile past the tileset's {ts['tilecount']}")
-
-
-                errors.append(f"{self.name}: tileset {ts.get('source')!r} is external; embed it (the explore page reads embedded tilesets only)")
             elif "tiles" in ts and not (isinstance(ts["tiles"], list) and all(
                     isinstance(t, dict) and isinstance(t.get("properties", []), list) for t in ts["tiles"])):
                 errors.append(f"{self.name}: tileset {ts.get('name')!r} has per-tile data that isn't a list of properties")

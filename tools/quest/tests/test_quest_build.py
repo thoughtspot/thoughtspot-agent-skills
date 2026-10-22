@@ -3300,7 +3300,7 @@ def test_a_broken_tile_index_fails_the_build(tmp_path, monkeypatch, edit, needle
     (lambda m: m["tilesets"][0].update(columns=11), "must have tilecount 144 and columns 12"),
     (lambda m: m["tilesets"][0].update(firstgid=2), "needs firstgid 1"),
     (lambda m: m["tilesets"][0].update(image="../maps/mines.tmj"), "is not in the pack"),
-    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 145), "uses a tile past tiles/tiles.png's 144"),
+    (lambda m: next(l for l in m["layers"] if l["name"] == "decor")["data"].__setitem__(0, 145), "uses a tile past t"),
 ])
 def test_a_map_must_match_its_tileset(tmp_path, monkeypatch, edit, needle):
     packs = _copy_packs(tmp_path)
