@@ -136,17 +136,32 @@ def test_needs_for_is_the_union_of_the_selected_rules_requires():
     assert needs_for(cat, [], "general") == set()
 
 
+#: What the shipped catalog fetches for each category on its own, under either profile.
+#: Until Task 12b this was checked against the legacy letter logic (`"A" in angles`
+#: fetches AI instructions, `"H" in angles` Answers and Sets) — the same answer, which
+#: the table below keeps. A change to what a selection fetches is a deliberate catalog
+#: change (a rule's `requires`/`uses`, or a profile switching a rule off): update the
+#: table with it.
+SHIPPED_NEEDS = {
+    "A": {"model_tml", "ai_instructions"},
+    "D": {"model_tml", "metadata"},
+    "H": {"model_tml", "dependents", "sets", "answers"},
+    "P": {"model_tml", "metadata", "table_tml"},
+    "S": {"model_tml", "table_tml"},
+}
+
+
 @pytest.mark.parametrize("profile", ["spotter", "general"])
-def test_shipped_catalog_fetches_what_the_category_letters_did(profile):
-    """No behaviour change today: for every one of the 31 category selections, the
-    optional fetches are exactly the old `"A" in angles` / `"H" in angles` ones."""
+def test_shipped_catalog_fetches_the_pinned_needs_per_selection(profile):
+    """Every one of the 31 category selections fetches exactly the union of its
+    categories' pinned needs — nothing a narrow selection does not need, and nothing
+    missing from a wide one."""
     from itertools import combinations
     cat = load_catalog()
     for n in range(1, 6):
         for sel in combinations("ADHPS", n):
-            needs = needs_for(cat, list(sel), profile)
-            got = ("ai_instructions" in needs, "answers" in needs, "sets" in needs)
-            assert got == ("A" in sel, "H" in sel, "H" in sel), sel
+            expected = set().union(*(SHIPPED_NEEDS[c] for c in sel))
+            assert needs_for(cat, list(sel), profile) == expected, sel
 
 
 # The rules that read Set data: H5 (requires sets) and H4 (uses sets — @dependent_count
