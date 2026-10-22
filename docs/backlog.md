@@ -261,6 +261,7 @@ are roughly ordered by value÷effort.
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
 | BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
 | BL-407 | ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own | 2026-12-15 |
+| BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -319,6 +320,7 @@ are roughly ordered by value÷effort.
 | BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
+| BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
