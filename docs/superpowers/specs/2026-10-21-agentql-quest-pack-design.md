@@ -524,6 +524,10 @@ kept, and the character can be asked again.
     barred door in the trees before the dragon's glade) and the Shifting Isles (isles joined by
     stone bridges, the last bridge barred). Each reads west to east, as the Mines do.
 
+12. **Explore is home:** `explore.home` makes the explore page the pack's home page and moves the
+    classic page to `classic/`; each links to the other, old classic realm links are forwarded,
+    and finishing every realm shows a course-complete notice once.
+
 **Then:** you play it.
 
 ## 7. A second game

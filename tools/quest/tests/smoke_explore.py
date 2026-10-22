@@ -1,5 +1,5 @@
 """Smoke-play the explore page in a real headless Chrome: build the site into a temporary folder,
-serve it, open explore/#smoke=<realm> and read the page's log. The run must show the realm locked
+serve it, open the explore page (the home page, when it is one) at #smoke=<realm> and read the page's log. The run must show the realm locked
 for a fresh player (when the pack's unlock rule asks it), load its map, talk to every step's object
 in order with each gate drawn and solid exactly until its own steps are done (and pushed against
 as soon as it can be reached), the decree of a realm of halls shown, kept by Esc and shown again, and
@@ -37,7 +37,9 @@ def find_chrome() -> str | None:
 
 
 def run(realm: str, site: pathlib.Path, port: int, chrome: str, profile: pathlib.Path) -> list[str]:
-    url = f"http://127.0.0.1:{port}/{B.Pack(B.DEFAULT_PACK).publish_path}/explore/#smoke={realm}"
+    pack = B.Pack(B.DEFAULT_PACK)
+    home = (pack.manifest.get("explore") or {}).get("home") is True     # then the home page is the explore page
+    url = f"http://127.0.0.1:{port}/{pack.publish_path}/{'' if home else 'explore/'}#smoke={realm}"
     # CI's Ubuntu runners don't allow Chrome's sandbox (user namespaces); the page is our own local build.
     ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
     out = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", *ci, f"--user-data-dir={profile}",
@@ -83,6 +85,8 @@ def check(realm: str, log: list[str], data: dict) -> list[str]:
         problems.append(f"the decree of {realm} wasn't shown, kept by Esc and shown again")
     if not (json.loads(saved) or {}).get("done"):
         problems.append(f"{realm} was not saved as finished")
+    if f"ALLDONE {realm}" not in log:
+        problems.append("finishing every realm didn't show the course-complete notice once")
     if f"EXIT {realm}" not in log:
         problems.append(f"the exit of {realm} didn't take the player back to the overworld"
                         + ("" if any(line.startswith("ERROR") for line in log) else " (or the play outran Chrome's virtual time budget)"))

@@ -8,10 +8,13 @@
   const log = t => { $("log").textContent += t + "\n"; };
   window.addEventListener("error", e => log(`ERROR ${e.message}`));
   window.addEventListener("unhandledrejection", e => log(`ERROR ${e.reason}`));
+  // A link to a realm of the classic page (#realm=<id>), from before this page was the home page:
+  // on to the classic page, which opens that realm.
+  if (/^#realm=[a-z0-9_]+(&from=explore)?$/.test(location.hash)) return location.replace($("classic").href + location.hash);
 
   const [quest, art] = await Promise.all([fetch("../quest.json").then(r => r.json()), fetch("art.json").then(r => r.json())]);
   const pack = quest.pack, realms = quest.realms;
-  const { S } = Quest.wording(pack.strings);
+  const { S, H } = Quest.wording(pack.strings);
   const progress = Quest.progress(realms, pack.storage_key), machine = Quest.machine(quest);
   const Sound = Quest.sound(pack.storage_key, S);
   const explorable = new Set(pack.explore_realms);
@@ -40,7 +43,8 @@
     const items = Array.isArray(f.items) ? f.items.filter(i => ITEMS[i]) : [];
     if (!items.includes(FRAMES.weapon)) items.unshift(FRAMES.weapon);    // you start with this one
     return { items, weapon: ITEMS[f.weapon] && items.includes(f.weapon) ? f.weapon : FRAMES.weapon,
-             done: f.done && typeof f.done === "object" ? f.done : {} };
+             done: f.done && typeof f.done === "object" ? f.done : {},
+             celebrated: f.celebrated === true };            // the course-complete notice, shown once
   })();
   const saveFun = () => { try { localStorage.setItem(FUN_KEY, JSON.stringify(fun)); } catch {} };
   const itemName = id => S(`item_${id}`);
@@ -92,7 +96,9 @@
   // Who you're talking to, drawn from the map's own art beside the question.
   let sheet = null;                      // the atlas and its columns, once loaded
   function portrait() {
-    const who = world && world.objects.find(o => (dialogStep === "portal" ? o.type === "portal" && realms[state.realm] && o.to === realms[state.realm].id : o.step === dialogStep));
+    portraitOf(world && world.objects.find(o => (dialogStep === "portal" ? o.type === "portal" && realms[state.realm] && o.to === realms[state.realm].id : o.step === dialogStep)));
+  }
+  function portraitOf(who) {
     const c = $("portrait");
     c.hidden = !(who && sheet);
     if (c.hidden) return;
@@ -156,7 +162,7 @@
   });
   const toClassic = id => {
     if (SMOKE) return log(`ERROR the scripted play left for the classic page (${id})`);   // keep the log
-    location.href = `../#realm=${encodeURIComponent(id)}&from=explore`;
+    location.href = `${$("classic").getAttribute("href")}#realm=${encodeURIComponent(id)}&from=explore`;
   };
 
   // Talk to an object the player stands next to.
@@ -486,6 +492,22 @@
     game.resize(cols * TILE, rows * TILE);
   }
   window.addEventListener("resize", () => { if (world) fitView(world.doc); });
+  // Every open realm done: say so, once, on the overworld (Elder Wren's portrait, the course score).
+  function celebrate() {
+    if (fun.celebrated || !progress.courseDone() || !world || world.mapId !== "overworld") return;
+    fun.celebrated = true; saveFun();
+    dialogStep = "celebrate";
+    world.freeze(true);
+    if (!dialog.open) dialog.showModal();
+    $("dialog-title").textContent = S("explore_all_done_title");
+    $("close").textContent = S("explore_close"); $("leave").hidden = true;
+    const elder = world.objects.find(o => o.type === "npc" && o.look === "elder");
+    portraitOf(elder);
+    $("screen").innerHTML = `<h2>${H("explore_all_done_title")}</h2>
+      <p class="hot">${H("course_complete", { score: progress.treasury(), max: open.reduce((n, x) => n + maxGold(x), 0) })}</p>
+      <p>${H("explore_all_done")}</p>`;
+    Sound.play("coin");
+  }
   function goTo(mapId, from = null) {
     world = null;
     fitView(MAPS[mapId]);
@@ -495,6 +517,7 @@
       return { update: () => w.update(), postupdate: () => w.follow() };
     });
     Sound.music(mapId === "overworld" ? "map" : "battle");
+    if (mapId === "overworld") celebrate();
   }
 
   // The scripted play (tests/smoke_explore.py) writes saves, so it runs only on a local server.
@@ -901,6 +924,15 @@
       await until(() => world && world.mapId === "overworld");
       besideDoor("the exit");
       log(`EXIT ${realmId}`);
+      // Every realm done: the course-complete notice on the overworld, once.
+      for (const r of open) if (!(progress.load()[r.id] || {}).done) progress.finish(r.id, 0);
+      goTo("overworld");
+      if (!dialog.open || !$("screen").textContent.includes(S("explore_all_done_title")) || $("portrait").hidden)
+        throw new Error("finishing every realm said nothing");
+      closeDialog();
+      goTo("overworld");
+      if (dialog.open) throw new Error("the course-complete notice came back");
+      log(`ALLDONE ${realmId}`);
       game.halt();                           // done: headless Chrome needn't run frames to the end of its budget
       return steps;
     }

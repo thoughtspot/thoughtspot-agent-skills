@@ -40,3 +40,4 @@ lexicon:
 
 explore:
   realms: [law, mines, lake, forests, isles]   # realms with a map (maps/<id>.tmj); any other opens in classic mode
+  home: true                          # the explore page is the home page; the classic page is at classic/

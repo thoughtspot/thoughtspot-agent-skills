@@ -306,6 +306,12 @@ def test_every_path_plays_through_headlessly(doc, capture, tmp_path):
 
 # ---- the data contract (quest.json / quest.schema.json) -----------------------------------------
 
+def _classic(page: pathlib.Path) -> pathlib.Path:
+    """Where a build to `page` put the classic page: classic/ when explore is the home page."""
+    moved = page.parent / "classic" / "index.html"
+    return moved if moved.is_file() else page
+
+
 def _embedded(page: pathlib.Path) -> dict:
     html = page.read_text(encoding="utf-8")
     m = re.search(r'<script id="quest-data" type="application/json">(.*?)</script>', html, re.S)
@@ -637,7 +643,7 @@ def test_main_writes_quest_json_beside_the_page(tmp_path):
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
     data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
-    assert data == _embedded(page)
+    assert data == _embedded(_classic(page))
     assert json.loads((tmp_path / "quest.schema.json").read_text(encoding="utf-8")) == B.pack_schema(B.Pack("agentql"))
     assert data["meta"]["agentql_capture"]["model"] == MODEL
 
@@ -667,8 +673,11 @@ def test_pages_workflow_builds_home_page_and_game_in_its_folder(tmp_path):
     assert home.is_file() and game.is_file()
     assert "<title>ThoughtSpot Agent Skills</title>" in home.read_text(encoding="utf-8")
     assert "<title>AgentQL Quest</title>" in game.read_text(encoding="utf-8")
-    # The data contract is published beside the game, identical to what the page embeds.
-    assert json.loads((game.parent / "quest.json").read_text(encoding="utf-8")) == _embedded(game)
+    # The explore page is the game's home page; the classic page is in classic/, a link away each way.
+    assert '<base href="explore/">' in game.read_text(encoding="utf-8")
+    assert (game.parent / "explore/index.html").is_file()
+    # The data contract is published beside the game, identical to what the classic page embeds.
+    assert json.loads((game.parent / "quest.json").read_text(encoding="utf-8")) == _embedded(_classic(game))
     # ...with the schema its $id names, at that same path.
     published = json.loads((game.parent / "quest.schema.json").read_text(encoding="utf-8"))
     assert published["$id"].endswith("/agentql-quest/quest.schema.json")
@@ -1313,6 +1322,8 @@ def test_routes_name_only_realms(doc, capture):
     ("{id: sql,    from: agentql_capture,", "{id: scroll, from: agentql_capture,", "id must be unique"),
     ("caption: pane_sql_caption}", "caption: no_such_caption}", "caption 'no_such_caption' is not in strings.yaml"),
     ("name: pane_sql_name,", "name: pane_sql_name, colour: red,", "needs exactly id, from, match, label, name, caption"),
+    ("  home: true ", "  home: yes-please ", "explore.home must be true or false"),
+    ("  realms: [law, mines, lake, forests, isles]", "  realms: []", "explore.home needs explorable realms"),
 ])
 def test_every_manifest_rule_is_checked(tmp_path, old, new, needle):
     packs = _copy_packs(tmp_path)
@@ -1794,6 +1805,7 @@ def test_a_second_game_renders_and_plays_on_its_own_wording_and_art(tmp_path):
 def test_the_agentql_page_smoke_plays_every_realm(tmp_path):
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
+    page = _classic(page)
     r = subprocess.run(["node", str(HERE / "smoke_page.js"), str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.count("victory") == 4 and "decree" in r.stdout
@@ -2165,6 +2177,7 @@ def test_the_page_draws_exactly_what_the_machine_accepts(tmp_path, variant):
     # Every state x save, and a gate drawn under one save then pressed under another (a second tab).
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
+    page = _classic(page)
     r = subprocess.run(["node", str(HERE / "drawn_vs_accepted.js"), str(page), variant], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr[-3000:]
 
@@ -2221,6 +2234,7 @@ def test_a_returning_player_can_take_a_later_quest(tmp_path):
     # The page must pass the saved progress to the machine: with {} every later gate is locked.
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
+    page = _classic(page)
     r = subprocess.run(["node", "-e", RETURNING, str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == ["map", "realm", 1, "quest"]
@@ -2355,6 +2369,7 @@ console.log(JSON.stringify({ mapHtml, focusedOnDraw: after > before, still: scre
 def test_the_map_marks_and_focus_follow_the_save(tmp_path, save):
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
+    page = _classic(page)
     r = subprocess.run(["node", "-e", MAP_AND_FOCUS, str(page), save], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
@@ -3127,30 +3142,31 @@ console.log(JSON.stringify({ screen: st.screen, realm: st.realm, back: !back.hid
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
-@pytest.mark.parametrize("hash,want", [
-    ("#realm=mines&from=explore", {"screen": "realm", "realm": 1, "back": True}),
-    ("#realm=mines", {"screen": "realm", "realm": 1, "back": False}),
-    ("#realm=nowhere&from=explore", {"screen": "title", "back": False}),
-    ("#realm=mines&from=explore&x=1", {"screen": "title", "back": False}),
-    ("", {"screen": "title", "back": False}),
-    ("none", {"screen": "title", "back": False}),         # no location at all (as in node)
+@pytest.mark.parametrize("hash,want,beside", [
+    ("#realm=mines&from=explore", {"screen": "realm", "realm": 1}, True),
+    ("#realm=mines", {"screen": "realm", "realm": 1}, False),
+    ("#realm=nowhere&from=explore", {"screen": "title"}, False),
+    ("#realm=mines&from=explore&x=1", {"screen": "title"}, False),
+    ("", {"screen": "title"}, False),
+    ("none", {"screen": "title"}, False),         # no location at all (as in node)
 ])
-def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, want):
+def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, want, beside):
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
-    r = subprocess.run(["node", "-e", DEEP_LINK, str(page), hash], capture_output=True, text=True)
+    r = subprocess.run(["node", "-e", DEEP_LINK, str(_classic(page)), hash], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
     assert {k: got[k] for k in want} == want
     data = json.loads((tmp_path / "quest.json").read_text(encoding="utf-8"))
-    assert got["label"] == (data["pack"]["strings"]["explore_back"] if want["back"] else "")
-    assert got["href"] == ("explore/#from=mines" if want["back"] else "explore/")   # back beside the Mines' door
+    # the explore map is always a link away (the home page, one folder up); from it, back beside the Mines' door
+    assert got["back"] and got["label"] == data["pack"]["strings"]["explore_back"]
+    assert got["href"] == ("../#from=mines" if beside else "../")
 
 
-GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
+GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld", "ALLDONE mines",
               "SMOKE mines west_sales:merchant[gates:1] west_sales:guide[gates:1] west_sales:compiler[gates:1] "
               "west_sales:foe[gates:0] west_sales:reward[gates:0] | {\"done\":true,\"best\":0}", "EXIT mines"]
-GOOD_LAW_SMOKE = ["MAP overworld", "MAP law", "DECREE law", "MAP overworld",
+GOOD_LAW_SMOKE = ["MAP overworld", "MAP law", "DECREE law", "MAP overworld", "ALLDONE law",
                   "SMOKE law hall:two_paths[gates:111] hall:checking[gates:011] hall:forge[gates:001] "
                   "hall:third_engine[gates:000] | {\"done\":true,\"best\":0}", "EXIT law"]
 
@@ -3162,6 +3178,7 @@ GOOD_LAW_SMOKE = ["MAP overworld", "MAP law", "DECREE law", "MAP overworld",
     (lambda log: log + ["ERROR smoke: timed out"], "ERROR smoke"),
     (lambda log: log[:-2] + log[-1:], "no SMOKE line"),
     (lambda log: log[:-1], "the exit of mines didn't take the player back"),
+    (lambda log: [x for x in log if not x.startswith("ALLDONE")], "didn't show the course-complete notice"),
     (lambda log: log[:-2] + [log[-2].replace("west_sales:foe[gates:0] ", ""), log[-1]], "steps"),
     (lambda log: log[:-2] + [log[-2].replace("foe[gates:0]", "foe[gates:1]"), log[-1]], "at west_sales:foe gate 1 is shut"),
     (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler[gates:0]"), log[-1]], "at west_sales:compiler gate 1 is open"),
@@ -3307,6 +3324,7 @@ def test_the_classic_page_holds_back_held_enter_only(tmp_path):
     # Held Enter mustn't keep "clicking" the focused button; held Space still scrolls the page.
     page = tmp_path / "index.html"
     assert B.main(["--out", str(page)]) == 0
+    page = _classic(page)
     r = subprocess.run(["node", "-e", HELD_KEYS, str(page)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout) == {"enter": True, "space": False, "digit": [False, "title"], "first": [True, "map"]}
@@ -4174,3 +4192,24 @@ def test_walkable_water_is_always_bridged(realm):
     floor, walls, decor = layer("floor"), layer("walls"), layer("decor")
     open_water = [i for i, g in enumerate(floor) if g in WATER and not walls[i]]
     assert open_water and all(decor[i] for i in open_water)
+
+
+# ---- PR 12: explore is home ------------------------------------------------------------------------
+
+def test_explore_is_home_and_classic_moves_to_its_folder(tmp_path):
+    page = tmp_path / "index.html"
+    assert B.main(["--out", str(page)]) == 0
+    home = page.read_text(encoding="utf-8")
+    assert '<base href="explore/">' in home and 'id="classic" href="../classic/"' in home
+    assert home.replace('\n<base href="explore/">', "", 1) == (tmp_path / "explore/index.html").read_text(encoding="utf-8")
+    classic = (tmp_path / "classic/index.html").read_text(encoding="utf-8")
+    assert '<script id="quest-data"' in classic and (tmp_path / "classic" / B.EXPLORE_MARK).is_file()
+    assert B.main(["--out", str(page)]) == 0                       # and again, over its own folders
+
+
+def test_a_classic_folder_the_build_did_not_write_is_left_alone(tmp_path):
+    (tmp_path / "classic").mkdir()
+    (tmp_path / "classic/notes.txt").write_text("mine", encoding="utf-8")
+    assert B.main(["--out", str(tmp_path / "index.html")]) == 1
+    assert (tmp_path / "classic/notes.txt").read_text(encoding="utf-8") == "mine"
+    assert not (tmp_path / "index.html").exists()

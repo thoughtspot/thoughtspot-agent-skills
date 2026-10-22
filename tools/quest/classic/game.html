@@ -18,7 +18,7 @@
     <button type="button" id="sound-sfx" aria-pressed="true"></button>
     <button type="button" id="sound-music" aria-pressed="false"></button>
   </div>
-  <p class="back-explore" id="back-explore" hidden><a href="explore/"></a></p></div>
+  <p class="back-explore" id="back-explore" hidden><a href=""></a></p></div>
 
 <!-- Written by build.py from the pack (content.yaml) + the captured lesson SQL. Do not edit here. -->
 <script id="quest-data" type="application/json">__QUEST_DATA__</script>
@@ -100,14 +100,20 @@ state = machine.fresh();
 // Opened from the explore map at #realm=<id>: start at that realm's gate, with a way back to the map.
 const deep = typeof location === "undefined" ? null : /^#realm=([a-z0-9_]+)(&from=explore)?$/.exec(location.hash || "");
 const deepRealm = deep ? REALMS.findIndex(r => r.id === deep[1]) : -1;
+// The explore map is always a link away (it is the home page when explore_home, this page then in classic/).
+const exploreHref = QUEST.pack.explore_home ? "../" : "explore/";
+const back = typeof document === "undefined" ? null : document.getElementById("back-explore");
+if (QUEST.pack.explore_realms.length && back && back.querySelector && back.querySelector("a")) {
+  const a = back.querySelector("a");
+  a.textContent = S("explore_back");
+  if (a.setAttribute) a.setAttribute("href", exploreHref);
+  back.hidden = false;
+}
 if (deepRealm >= 0 && QUEST.pack.explore_realms.length) {
   for (const a of [{ type: "map" }, { type: "realm", realm: deepRealm }]) state = machine.act(state, a, loadProgress()).state;
-  const back = document.getElementById("back-explore");
-  if (deep[2] && back && back.querySelector) {
+  if (deep[2] && back && back.querySelector && back.querySelector("a")) {
     const a = back.querySelector("a");
-    a.textContent = S("explore_back");
-    if (a.setAttribute) a.setAttribute("href", `explore/#from=${deep[1]}`);   // back beside this realm's door
-    back.hidden = false;
+    if (a.setAttribute) a.setAttribute("href", `${exploreHref}#from=${deep[1]}`);   // back beside this realm's door
   }
 }
 Sound.label();

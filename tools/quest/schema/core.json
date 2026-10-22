@@ -42,13 +42,14 @@
       "description": "The pack's settings, from its pack.yaml and strings.yaml.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "title", "storage_key", "unlock", "explore_realms", "lexicon", "rule_tags", "strings"],
+      "required": ["id", "title", "storage_key", "unlock", "explore_realms", "explore_home", "lexicon", "rule_tags", "strings"],
       "properties": {
         "id": {"type": "string"},
         "title": {"type": "string"},
         "storage_key": {"description": "Saves are <storage_key>-progress and <storage_key>-sound.", "type": "string"},
         "unlock": {"description": "first_realm_first: every other realm waits until the first is done.", "enum": ["first_realm_first"]},
         "explore_realms": {"description": "Realms that have a map.", "$ref": "#/$defs/texts"},
+        "explore_home": {"description": "The explore page is the pack's home page; the classic page moves to classic/.", "type": "boolean"},
         "lexicon": {
           "type": "object",
           "additionalProperties": false,

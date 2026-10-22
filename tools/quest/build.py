@@ -92,6 +92,7 @@ CSS_PLACEHOLDER = "/*__QUEST_CSS__*/"
 CORE_CSS = HERE / "core" / "quest.css"   # the look, shared by the classic and explore pages
 CORE_DIR = HERE / "core"   # shared front-end code: plain scripts, inlined into the classic page in name order
 TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER = "__PAGE_TITLE__", "__PAGE_DESCRIPTION__"
+CLASSIC_HREF_PLACEHOLDER = "__CLASSIC_HREF__"   # the explore page's link to the classic page
 PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
 
 # (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
@@ -189,6 +190,11 @@ class Pack:
                 err(f"pack.yaml: rule tag {tag!r} needs a label and a group ({'/'.join(GROUPS)})")
         if not isinstance((m.get("explore") or {}).get("realms", []), list):
             err("pack.yaml: explore.realms must be a list of realm ids")
+        home = (m.get("explore") or {}).get("home", False)
+        if not isinstance(home, bool):
+            err("pack.yaml: explore.home must be true or false")
+        elif home and not (m.get("explore") or {}).get("realms"):
+            err("pack.yaml: explore.home needs explorable realms (explore.realms)")
         for k, v in (self.strings if isinstance(self.strings, dict) else {}).items():
             if not ID.fullmatch(str(k)) or not isinstance(v, str):
                 err(f"strings.yaml: {k!r} must be a lowercase key with a text value")
@@ -564,6 +570,7 @@ class Compiler:
         m = self.pack.manifest
         return {"id": self.pack.id, "title": self.pack.title, "storage_key": self.pack.storage_key,
                 "unlock": m.get("unlock"), "explore_realms": list((m.get("explore") or {}).get("realms") or []),
+                "explore_home": (m.get("explore") or {}).get("home") is True,
                 "lexicon": dict(m.get("lexicon") or {}), "rule_tags": self.pack.rule_tags, "strings": self.pack.strings}
 
 
@@ -970,15 +977,36 @@ def _inside(path: pathlib.Path, folder: pathlib.Path) -> bool:
     return False
 
 
-def out_problems(out: pathlib.Path, explorable: bool) -> list[str]:
+def out_problems(out: pathlib.Path, explorable: bool, home: bool = False) -> list[str]:
     """Before anything is written: the page's folder isn't one of the engine's own (tools/quest/
-    except its dist/), and an explore/ already there is one this build wrote, not a link."""
+    except its dist/), and an explore/ (or, when explore is the home page, a classic/) already there
+    is one this build wrote, not a link."""
     if _inside(out.parent, HERE) and not _inside(out.parent, HERE / "dist"):
         return [f"--out: {out.parent} is inside tools/quest/; build into tools/quest/dist/ or somewhere outside"]
-    ex = out.parent / "explore"
-    if explorable and (ex.is_symlink() or (ex.exists() and not (ex / EXPLORE_MARK).is_file())):
-        return [f"explore/: {ex} is already there and isn't a folder this build wrote; move it, or build somewhere else"]
+    for name, wanted in (("explore", explorable), ("classic", home)):
+        d = out.parent / name
+        if wanted and (d.is_symlink() or (d.exists() and not (d / EXPLORE_MARK).is_file())):
+            return [f"{name}/: {d} is already there and isn't a folder this build wrote; move it, or build somewhere else"]
     return []
+
+
+def home_page(explore_page: str) -> str:
+    """The explore page as the pack's home page, one folder up from explore/: every relative URL
+    in it (its script, the engine, the tiles, ../quest.json) still resolves from explore/."""
+    head = "<head>"
+    assert head in explore_page, "the explore page has no <head>"
+    return explore_page.replace(head, head + '\n<base href="explore/">', 1)
+
+
+def write_classic(out_dir: pathlib.Path, html: str) -> None:
+    """The classic page in <page folder>/classic/, when explore is the home page."""
+    d = out_dir / "classic"
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    (d / EXPLORE_MARK).write_text("Written by tools/quest/build.py, which replaces this folder on every build.\n",
+                                  encoding="utf-8")
+    (d / "index.html").write_text(html, encoding="utf-8")
 
 
 def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fonts_css: str, core: str) -> list[str]:
@@ -994,7 +1022,8 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     (ex / "tiles").mkdir(parents=True, exist_ok=True)
     page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
     values = {TITLE_PLACEHOLDER: _html_text(pack.title),
-              DESCRIPTION_PLACEHOLDER: _html_text(pack.strings.get("page_description", ""))}
+              DESCRIPTION_PLACEHOLDER: _html_text(pack.strings.get("page_description", "")),
+              CLASSIC_HREF_PLACEHOLDER: "../classic/" if data["pack"]["explore_home"] else "../"}   # from explore/
     (ex / "index.html").write_text(re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], page),
                                    encoding="utf-8")
     (ex / "explore.js").write_text((EXPLORE_DIR / "explore.js").read_text(encoding="utf-8"), encoding="utf-8")
@@ -1161,13 +1190,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: OK ({summary})")
         return 0
     out = pathlib.Path(args.out)
-    problems = out_problems(out, bool(data["pack"]["explore_realms"]))
+    home = data["pack"]["explore_home"]
+    problems = out_problems(out, bool(data["pack"]["explore_realms"]), home)
     if problems:
         for e in problems:
             print(f"{name}: {e}", file=sys.stderr)
         return 1
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    if home:                       # explore is the home page; the classic page moves to classic/
+        write_classic(out.parent, html)
+    else:
+        out.write_text(html, encoding="utf-8")
     out.with_name("quest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     out.with_name("quest.schema.json").write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if data["pack"]["explore_realms"]:
@@ -1176,6 +1209,8 @@ def main(argv: list[str] | None = None) -> int:
             for e in problems:
                 print(f"  - {e}", file=sys.stderr)
             return 1
+        if home:
+            out.write_text(home_page((out.parent / "explore" / "index.html").read_text(encoding="utf-8")), encoding="utf-8")
     print(f"{name}: wrote {out}, quest.json and quest.schema.json ({summary})")
     return 0
 

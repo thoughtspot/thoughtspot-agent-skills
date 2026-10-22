@@ -137,6 +137,8 @@ explore_no_canvas: This map couldn't start in this browser. The classic version 
 explore_hud_map: THE REALMS
 explore_hud_gold: "GOLD {gold}/{max}"
 explore_back: Back to the explore map
+explore_all_done_title: Every realm complete!
+explore_all_done: "You have crossed every realm. Replay any of them to raise your score, or try the classic version."
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
 explore_near_sealed: "{name}{mark}."
 explore_pad_weapon: Weapon

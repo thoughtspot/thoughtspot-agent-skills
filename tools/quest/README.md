@@ -233,14 +233,23 @@ explore page would read differently from the check:
 finished, every out-of-order interaction is refused, and a test pins that the machine asks for the
 steps in exactly the order `maps.py` walks.
 
-## The explore front end (prototype)
+## The explore front end
 
 When a pack lists `explore.realms`, the build also writes `<page folder>/explore/`: a page where
 you walk the overworld and a realm's map and talk to whoever you stand next to. Every question
 opens in a dialog drawn by the same `core/60-screens.js` as the classic page, and the same
 `Quest.machine` decides what happens, so the two pages keep one save. A portal to a realm without a
-map opens that realm in the classic page (`../#realm=<id>&from=explore`, which starts at its gate
-and shows a link back to the map).
+map opens that realm in the classic page (`#realm=<id>&from=explore`, which starts at its gate
+and shows a link back beside its door).
+
+**The home page.** With `explore: {home: true}` (AgentQL Quest has it, now that every realm has a
+map) the explore page is the pack's home page: the build writes it as `<page folder>/index.html`
+(the same page, with `<base href="explore/">` so its files still load from `explore/`) and moves
+the classic page to `<page folder>/classic/`. Each links to the other ("Play the classic version",
+"Back to the explore map"), and an old link to a classic realm (`#realm=<id>`) at the home page is
+forwarded to `classic/`. Without `home`, the classic page stays the home page and explore lives at
+`explore/`. Once every open realm is done, the overworld says so once ("Every realm complete!",
+with the course score and Elder Wren's portrait).
 
 ```
 explore/index.html, explore.js, engine.js ─┐                 ┌─► explore/index.html, explore.js, engine.js
@@ -248,9 +257,9 @@ core/*.js, core/quest.css, fonts/          ─┼─► build.py ─────
 packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
 ```
 
-- **The build owns `explore/`:** it marks the folder it writes and replaces only a marked one. It
-  refuses, before writing anything, an `explore/` it didn't write (or a link), and any output in
-  `tools/quest/` other than `dist/`.
+- **The build owns `explore/` (and `classic/` when explore is home):** it marks each folder it
+  writes and replaces only a marked one. It refuses, before writing anything, one it didn't write
+  (or a link), and any output in `tools/quest/` other than `dist/`.
 - **Everything is ours and local:** no third-party code, no outside requests, and under 3 MB
   (about 310 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
   draws the map's tile layers and one-tile sprites from the atlas on a 2D canvas, moves the
