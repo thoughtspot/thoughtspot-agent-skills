@@ -126,6 +126,15 @@ class Catalog:
         return next((p.id for p in self.profiles.values() if p.default), None)
 
 
+def profile_override(rule: Rule, pid: str) -> Dict[str, Any]:
+    """The profile's overrides as the engine applies them: a null value is skipped
+    (bands.effective — it removes nothing), so it is dropped here too. The one reading
+    every validator check that asks "what holds under this profile" uses."""
+    override = rule.profiles.get(pid)
+    return {k: v for k, v in override.items() if v is not None} \
+        if isinstance(override, dict) else {}
+
+
 # ── raw YAML ────────────────────────────────────────────────────────────────
 
 def _read_list(path: Path, rel: str) -> List[Dict[str, Any]]:

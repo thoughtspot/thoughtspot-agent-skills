@@ -631,10 +631,14 @@ def test_every_d_input_runs_cleanly_on_the_legacy_checks():
     # D12: a later column overwrites an earlier one's type within a Model
     ("data_models_column_type_edges", lambda f: f["check_id"] == "D12"
      and f["detail"].endswith("A=MEASURE, B=ATTRIBUTE")),
+    # D7 / D8 compare as Python does: 1 and True are one table, 0 and False one schema
+    ("overlap_scalars_1_True", lambda f: f["check_id"] == "D7" and f["severity"] == "HIGH"),
+    ("duplicate_schemaStripe_0_False", lambda f: f["check_id"] == "D8" and f["metric"] == 2),
 ])
 def test_d_rules_keep_legacy_names_guids_and_edges(profile, fixture, probe):
     import audit_rule_fixtures as fx
 
-    old, new = collect_both(getattr(fx, fixture)(), profile, D_RULES, categories=["D"])
+    build = getattr(fx, fixture, None) or fx.D_INPUTS[fixture]
+    old, new = collect_both(build(), profile, D_RULES, categories=["D"])
     assert any(probe(f) for f in old), "the input must exercise the case"
     assert compare_findings(old, new)["identical"] is True

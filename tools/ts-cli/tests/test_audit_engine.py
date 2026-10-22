@@ -965,12 +965,15 @@ def test_join_ends_are_looked_up_by_name_not_alias():
 
 def test_model_table_join_and_column_fields():
     ctx = fx.data_model_join_edges()
-    got = {i["name"]: (fields.get(i, "@is_joined", ctx), fields.get(i, "@zero_column_role", ctx))
-           for i in _children_of(ctx, "model.table")}
-    # ORDERS (alias ORD) is joined by alias but zero-column by NAME; the table named
-    # ORD owns the ORD:: columns; DATES joins a table the model does not list.
-    assert got == {"ORD": (True, None), "CUST": (True, "leaf"), "GEO": (False, "leaf"),
-                   "DATES": (True, "bridge")}
+    got = [(i["name"], i["obj"].get("name"), fields.get(i, "@is_joined", ctx),
+            fields.get(i, "@zero_column_role", ctx))
+           for i in _children_of(ctx, "model.table")]
+    # ORDERS (alias ORD) is joined by alias but zero-column by NAME — a leaf, though
+    # it is on a join; the table NAMED ORD owns the ORD:: columns; DATES joins a table
+    # the model does not list.
+    assert got == [("ORD", "ORDERS", True, "leaf"), ("CUST", "CUSTOMER", True, "leaf"),
+                   ("GEO", "GEO", False, "leaf"), ("DATES", "DATES", True, "bridge"),
+                   ("ORD", "ORD", True, None)]
 
 
 def test_table_grain_fields_key_by_alias():
@@ -994,3 +997,13 @@ def test_table_set_and_physical_table_key():
     keys = [fields.get(i, "@physical_table_key", meta) for i in _children_of(meta, "metadata")]
     assert keys[3] == ("", "", "", "LINES") and keys[5] == (None, "", "", "ITEMS")
     assert format(keys[0], "") == "SF.DB.S.ORDERS"
+
+
+def test_set_and_group_keys_compare_as_python_does():
+    """1, 1.0 and True are one key (legacy D7's sets and D8's dicts merge them); only
+    unhashable values are wrapped, and a wrapped list never meets a scalar."""
+    from ts_cli.audit.engine.modes import _as_set, _hashable
+    assert _hashable(1) == _hashable(True) == _hashable(1.0) and _hashable(0) == _hashable(False)
+    assert _hashable("1") != _hashable(1)
+    assert _as_set([1, True, 1.0, "s"]) == {1, "s"}
+    assert _hashable(["a"]) != _hashable("a") and _hashable({"a": 1}) == _hashable({"a": 1})

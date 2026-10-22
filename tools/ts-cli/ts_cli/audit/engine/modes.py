@@ -147,12 +147,18 @@ def count(rule: Rule, ctx, profile: str) -> List[Finding]:
 # ── group ───────────────────────────────────────────────────────────────────
 
 def _hashable(v: Any) -> Any:
-    """A grouping key that keeps types apart (True vs 1) and accepts lists/dicts."""
+    """A grouping / set key comparing as Python does — 1, 1.0 and True are one key, as
+    they are in the legacy checks' sets and dicts (D7, D8) — with lists, tuples and
+    mappings (where legacy would raise) wrapped so they can be keys at all."""
     if isinstance(v, (list, tuple)):
         return ("seq", tuple(_hashable(x) for x in v))
     if isinstance(v, dict):
         return ("map", repr(v))
-    return (type(v).__name__, v)
+    try:
+        hash(v)
+    except TypeError:
+        return ("unhashable", repr(v))
+    return v
 
 
 def _group_key(key_spec: Any, item: dict, ctx) -> Any:

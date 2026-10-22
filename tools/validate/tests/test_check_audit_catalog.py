@@ -152,7 +152,7 @@ DEMO_REGISTRATION = """
 from ts_cli.audit.engine import bands, fields, messages, predicates, scopes  # noqa
 
 
-@code_rule("demo_rule")
+@code_rule("demo_rule", severity="severity")
 def _demo_rule(rule, ctx, profile):
     return []
 """

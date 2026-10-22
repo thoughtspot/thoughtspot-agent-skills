@@ -611,6 +611,29 @@ def data_single_model_malformed_column() -> AuditContext:
             {"name": "list_props", "column_id": "T::list_props", "properties": ["MEASURE"]}]}}])
 
 
+#: Scalar pairs Python treats as equal though their types differ: legacy D7's set
+#: intersection and D8's dict grouping merge them, so the engine must too.
+EQUAL_SCALARS = [(1, True), (1, 1.0), (0, False)]
+
+
+def build_overlap_scalar_pair(a, b) -> AuditContext:
+    """D7: two Models whose table sets are {a, "s"} and {b, "s"}."""
+    return make_context(models=[
+        build_trip_data_model(name="A", guid="g-a", model_tables=[{"fqn": a}, {"fqn": "s"}]),
+        build_trip_data_model(name="B", guid="g-b", model_tables=[{"fqn": b}, {"fqn": "s"}])])
+
+
+def build_duplicate_scalar_pair(key, a, b) -> AuditContext:
+    """D8: two Table headers equal but for `key`, which is `a` on one and `b` on the
+    other."""
+    def row(guid, value):
+        header = {"id": guid, "name": "ORDERS", "type": "ONE_TO_ONE_LOGICAL",
+                  "dataSourceName": "SF", "databaseStripe": "DB", "schemaStripe": "S"}
+        header[key] = value
+        return {"metadata_header": header}
+    return make_context(metadata=[row("t-1", a), row("t-2", b)])
+
+
 # Every D input, for the equivalence test — listed by hand (see AI_INPUTS).
 D_INPUTS = {fn.__name__: fn for fn in (
     data_model_sixteen_tables, data_model_small, data_model_six_tables_not_progressive,
@@ -661,3 +684,9 @@ D_INPUTS.update({f"sized_formulas_{n}": (lambda n=n: build_sized_model(formulas=
 D_INPUTS.update({f"star_{k}": (lambda k=k: build_star_model(k)) for k in (8, 9, 12, 13)})
 D_INPUTS.update({f"chain_{n}_tables": (lambda n=n: build_join_chain(
                  [chr(ord("A") + i) for i in range(n)])) for n in (4, 5, 6, 7)})
+D_INPUTS.update({f"overlap_scalars_{a!r}_{b!r}":
+                 (lambda a=a, b=b: build_overlap_scalar_pair(a, b)) for a, b in EQUAL_SCALARS})
+D_INPUTS.update({f"duplicate_{key}_{a!r}_{b!r}":
+                 (lambda key=key, a=a, b=b: build_duplicate_scalar_pair(key, a, b))
+                 for key, (a, b) in (("name", (1, True)), ("name", (1, 1.0)),
+                                     ("schemaStripe", (0, False)))})

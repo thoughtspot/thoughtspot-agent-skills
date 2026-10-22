@@ -23,8 +23,10 @@ categories, profiles, views, band ops/directions/units, severities; ids repeated
 outside OVERRIDABLE); band levels not ordered worst first, in the catalog's bands and
 in every profile's replacement bands; an active rule without a `fires` and a `silent`
 example; a `{by_severity: ...}` message or legacy threshold with an unknown severity, a
-non-template value, or — for a declarative rule — no template for a severity the rule
-can emit under some profile.
+non-template value, a severity the rule never emits under some profile, or (a message)
+no template for one it can; a code rule's entry that does not carry exactly the
+severity source its function declares it reads (bands, a severity — a plain name where
+required — or neither), or a `legacy_threshold` beside a function that sets its own.
 
 Expression, aggregate and message checks — and the scope/mode/operator vocabulary —
 live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
@@ -64,14 +66,15 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
 from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     CODE_IMPL,
     code_rule_aggregate_problems,
+    code_rule_problems,
     implementation_problems,
     known_code_rules,
     rule_message_problems,
 )
 from ts_cli.audit.catalog_forms import (  # noqa: F401  (re-exported)
     BY_SEVERITY,
+    form_coverage_problems,
     legacy_threshold_form_problems,
-    message_coverage_problems,
     message_problems_any,
 )
 from ts_cli.audit.catalog_model import (
@@ -85,6 +88,7 @@ from ts_cli.audit.catalog_model import (
     build_catalog,
     load_raw,
     parse_bands,
+    profile_override,
 )
 
 # ── vocabulary ──────────────────────────────────────────────────────────────
@@ -330,10 +334,14 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
     out += message_problems_any(rule, rule.message, "message")
     out += legacy_threshold_form_problems(rule.legacy_threshold, "legacy_threshold")
-    if rule.implementation != "declarative":
+    profiles = list(cat.profiles) or [""]
+    if CODE_IMPL.match(rule.implementation):
+        out += code_rule_problems(rule, profiles)
+    elif rule.implementation == "declarative":
+        out += _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
+    else:
         return out
-    return (out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
-            + message_coverage_problems(rule, cat.profiles or [""]))
+    return out + form_coverage_problems(rule, profiles)
 
 
 def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
@@ -341,21 +349,13 @@ def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
     replaces bands/severity but cannot supply them for the others."""
     by_problem: Dict[str, List[str]] = {}
     for pid in cat.profiles or [""]:
-        override = _profile_override(rule, pid)
+        override = profile_override(rule, pid)
         has_bands = override.get("bands", rule.bands) is not None
         has_severity = override.get("severity", rule.severity) is not None
         for problem in severity_source_problems(rule.aggregate, has_bands, has_severity):
             by_problem.setdefault(problem, []).append(pid)
     return [f"{problem} (profile: {_known(pids)})" if pids != [""] else problem
             for problem, pids in by_problem.items()]
-
-
-def _profile_override(rule: Rule, pid: str) -> Dict[str, Any]:
-    """The profile's overrides as the engine applies them: a null value is skipped
-    (bands.effective — it removes nothing), so it is dropped here too."""
-    override = rule.profiles.get(pid)
-    return {k: v for k, v in override.items() if v is not None} \
-        if isinstance(override, dict) else {}
 
 
 def _shadowed_severity_problems(rule: Rule, cat: Catalog) -> List[str]:
@@ -365,7 +365,7 @@ def _shadowed_severity_problems(rule: Rule, cat: Catalog) -> List[str]:
     out: List[str] = []
     banded_everywhere = bool(cat.profiles)
     for pid in cat.profiles:
-        override = _profile_override(rule, pid)
+        override = profile_override(rule, pid)
         banded = override.get("bands", rule.bands) is not None
         banded_everywhere = banded_everywhere and banded
         if banded and "severity" in override:

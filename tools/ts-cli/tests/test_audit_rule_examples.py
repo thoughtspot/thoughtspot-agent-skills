@@ -122,10 +122,11 @@ def _wide_model(rule, ctx, profile) -> List[Finding]:
 @pytest.fixture
 def wide_registered():
     """`_wide_model` registered through the decorator, unregistered afterwards."""
-    code_rules.code_rule(WIDE, placeholders={"count", "profile"})(_wide_model)
+    code_rules.code_rule(WIDE, placeholders={"count", "profile"}, severity="bands")(_wide_model)
     yield
     code_rules.REGISTRY.pop(WIDE, None)
     code_rules.PLACEHOLDERS.pop(WIDE, None)
+    code_rules.SEVERITY_SOURCES.pop(WIDE, None)
 
 
 def _code_rule_entry(**body) -> dict:
@@ -374,10 +375,13 @@ def _own_threshold(rule, ctx, profile) -> List[Finding]:
 
 @pytest.fixture
 def own_registered():
-    code_rules.code_rule(OWN, placeholders={"count"})(_own_threshold)
+    code_rules.code_rule(OWN, placeholders={"count"}, severity={"HIGH", "INFO"},
+                          own_threshold=True)(_own_threshold)
     yield
     code_rules.REGISTRY.pop(OWN, None)
     code_rules.PLACEHOLDERS.pop(OWN, None)
+    code_rules.SEVERITY_SOURCES.pop(OWN, None)
+    code_rules.OWN_THRESHOLD.discard(OWN)
 
 
 def _own_entry(**body) -> dict:
@@ -400,24 +404,66 @@ def test_code_rule_may_set_its_own_threshold_and_word_by_severity(tmp_path, own_
         "INFO", "only 75", {"max": 75, "seen": 75})
 
 
-@pytest.mark.parametrize("body", [
-    {"legacy_threshold": {"max": 75}},
-    {"profiles": {"spotter": {"legacy_threshold": {"max": 75}}}},
+@pytest.mark.parametrize("body,profiles", [
+    ({"legacy_threshold": {"max": 75}}, "spotter, general"),
+    ({"profiles": {"spotter": {"legacy_threshold": {"max": 75}}}}, "spotter"),
 ])
-def test_code_rule_threshold_beside_a_catalog_legacy_threshold_raises(
-        tmp_path, own_registered, body):
+def test_code_rule_threshold_beside_a_catalog_legacy_threshold_fails_the_gate(
+        tmp_path, own_registered, body, profiles):
     cat, problems = check_catalog(_write_catalog(tmp_path, _own_entry(**body)))
-    assert problems == []
+    assert problems == [
+        f"rules/test.yaml: D99: legacy_threshold: code:{OWN} sets each finding's legacy "
+        f"threshold itself (own_threshold) — remove it from the entry (profile: {profiles})"]
+    # …and the runner backstops it, should a catalog ever be built past the gate.
     with pytest.raises(ValueError, match="declares legacy_threshold"):
-        run_rule(fx.model_76_columns(), cat, "D99", "general")
+        run_rule(fx.model_76_columns(), cat, "D99", "spotter")
 
 
-def test_code_rule_with_no_template_for_its_severity_raises(tmp_path, own_registered):
+def test_code_rule_with_no_template_for_its_severity_fails_the_gate(tmp_path, own_registered):
     entry = _own_entry(message={"by_severity": {"HIGH": "{count} columns"}})
     cat, problems = check_catalog(_write_catalog(tmp_path, entry))
-    assert problems == []  # a code rule's severities are its function's: checked at run time
+    assert problems == [
+        "rules/test.yaml: D99: message.by_severity: no template for severity INFO, which "
+        "the rule can emit (profile: spotter, general)"]
     with pytest.raises(ValueError, match="D99: no message for severity INFO"):
         run_rule(fx.model_75_columns(), cat, "D99", "general")
+
+
+@pytest.mark.parametrize("kwargs", [
+    {}, {"severity": "band"}, {"severity": ["HIGH", "SEVERE"]}, {"severity": []},
+    {"severity": "bands", "own_threshold": "yes"},
+])
+def test_code_rule_registration_declares_a_valid_severity_source(kwargs):
+    with pytest.raises(ValueError, match="severity must be|own_threshold must be"):
+        code_rules.code_rule("synthetic_undeclared", **kwargs)
+    assert "synthetic_undeclared" not in code_rules.REGISTRY
+
+
+def test_shipped_code_rules_declare_what_they_read():
+    assert {n: code_rules.SEVERITY_SOURCES[n] for n in (
+        "spotter_readiness", "model_complexity", "join_keys", "zero_column_tables",
+        "column_type_divergence")} == {
+        "spotter_readiness": "bands", "model_complexity": frozenset({"HIGH", "MEDIUM"}),
+        "join_keys": frozenset({"HIGH", "MEDIUM"}), "zero_column_tables": "severity",
+        "column_type_divergence": "severity_name"}
+    assert code_rules.OWN_THRESHOLD >= {"model_complexity"}
+    assert "join_keys" not in code_rules.OWN_THRESHOLD
+
+
+def test_runner_backstops_what_the_registration_declared(tmp_path, own_registered):
+    """Built past the gate: a severity outside the declared set, or a threshold from a
+    function that did not declare own_threshold, raises rather than reports."""
+    cat, problems = check_catalog(_write_catalog(tmp_path, _own_entry()))
+    assert problems == []
+    code_rules.SEVERITY_SOURCES[OWN] = frozenset({"HIGH"})
+    try:
+        with pytest.raises(ValueError, match="emitted INFO, outside its declared"):
+            run_rule(fx.model_75_columns(), cat, "D99", "general")
+    finally:
+        code_rules.SEVERITY_SOURCES[OWN] = frozenset({"HIGH", "INFO"})
+    code_rules.OWN_THRESHOLD.discard(OWN)
+    with pytest.raises(ValueError, match="without declaring own_threshold"):
+        run_rule(fx.model_76_columns(), cat, "D99", "general")
 
 
 def _bad_return(value):
@@ -457,7 +503,7 @@ def test_unregistered_code_rule_raises_at_run_time(tmp_path, wide_registered):
 
 def test_code_rule_registration_rejects_duplicates_and_bad_names(wide_registered):
     with pytest.raises(ValueError, match="already registered"):
-        code_rules.code_rule(WIDE)(_wide_model)
+        code_rules.code_rule(WIDE, severity="bands")(_wide_model)
     for bad in ("Wide", "wide-model", "1wide", ""):
         with pytest.raises(ValueError, match="not a valid code rule name"):
             code_rules.code_rule(bad)

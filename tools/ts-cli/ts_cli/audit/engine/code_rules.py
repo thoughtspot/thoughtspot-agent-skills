@@ -5,13 +5,28 @@ not a clever expression) keeps its full catalog entry — id, categories, requir
 message, remediation, bands where they apply, legacy_threshold, examples — and names a
 function here with `implementation: code:<name>`:
 
-    @code_rule("model_width", placeholders={"count"})
+    @code_rule("model_width", placeholders={"count"}, severity="bands")
     def model_width(rule: Rule, ctx: AuditContext, profile: str) -> List[Finding]:
         ...
 
-`placeholders` are the names the function renders `rule.message` with; the catalog
-validator holds the rule's message and every profile's message to them, as it holds a
-declarative rule's to its mode's.
+The registration declares what the function reads from its catalog entry and emits, so
+the catalog gate can hold the entry to it exactly as it holds a declarative rule to its
+mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the run):
+
+    placeholders   the names it renders `rule.message` with — the rule's message and
+                   every profile's are held to them
+    severity       where a finding's severity comes from (required):
+                     "bands"          graded by the rule's `bands` (A5)
+                     "severity"       the catalog `severity`, a name or a mapping (D10)
+                     "severity_name"  the catalog `severity`, a plain name only (D12:
+                                      its findings are not about one item, so it has
+                                      nothing to look a mapping up on)
+                     {"HIGH", ...}    fixed in the function: these severities (D1, D2)
+                   It fixes which severities the rule can emit (a by-severity message
+                   must word each, and only those) and which of `bands` / `severity`
+                   the entry must — and must not — carry.
+    own_threshold  True when it sets each finding's legacy threshold itself (D1); the
+                   entry must then carry no `legacy_threshold`
 
 The contract (`run.run_rules` dispatches; `check_findings` enforces it):
 
@@ -31,8 +46,9 @@ The contract (`run.run_rules` dispatches; `check_findings` enforces it):
               the runner stamps them exactly as it does for a declarative rule, so the
               two are indistinguishable in shape. One exception: a rule whose legacy
               threshold varies per finding in a way the catalog cannot say (D1's, one
-              per measure) sets `threshold` itself, and its catalog entry then has no
-              `legacy_threshold` (the runner rejects both).
+              per measure) declares `own_threshold=True` and sets `threshold` itself;
+              its catalog entry then has no `legacy_threshold` (the gate rejects
+              both, and so does the runner).
 
 A rule that breaks the contract raises ValueError at run time; nothing is dropped.
 
@@ -53,7 +69,7 @@ only the permitted modules and fails if this one needs more.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List
+from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List, Set
 
 from ts_cli.audit import rules
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
@@ -67,14 +83,33 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only
 CodeRule = Callable[["Rule", Any, str], List[Finding]]
 
 REGISTRY: Dict[str, CodeRule] = {}
-# name -> the message placeholders the function renders (declared at registration).
+# name -> what the function declared at registration (see the module docstring).
 PLACEHOLDERS: Dict[str, FrozenSet[str]] = {}
+SEVERITY_SOURCES: Dict[str, Any] = {}   # "bands" | "severity" | "severity_name" | frozenset
+OWN_THRESHOLD: Set[str] = set()
+CATALOG_SEVERITY_SOURCES = ("bands", "severity", "severity_name")
 _PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def code_rule(name: str, placeholders: Iterable[str] = ()) -> Callable[[CodeRule], CodeRule]:
+def _severity_source(name: str, severity: Any) -> Any:
+    """The declared severity source, checked: a catalog source, or a fixed set."""
+    if isinstance(severity, str):
+        if severity in CATALOG_SEVERITY_SOURCES:
+            return severity
+    elif severity is not None:
+        fixed = frozenset(severity)
+        if fixed and fixed <= set(SEVERITIES):
+            return fixed
+    raise ValueError(f"code rule '{name}': severity must be one of "
+                     f"{', '.join(CATALOG_SEVERITY_SOURCES)} or a collection of severities "
+                     f"({', '.join(SEVERITIES)}), got {severity!r}")
+
+
+def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = None,
+              own_threshold: bool = False) -> Callable[[CodeRule], CodeRule]:
     """Register the decorated function as `implementation: code:<name>`, rendering its
-    message with `placeholders`."""
+    message with `placeholders`, its severity from `severity`, and — with
+    `own_threshold` — setting each finding's legacy threshold itself."""
     if not isinstance(name, str) or not CODE_IMPL.match(f"code:{name}"):
         raise ValueError(f"'{name}' is not a valid code rule name "
                          "(lower case letters, digits and '_', not starting with a digit)")
@@ -82,7 +117,10 @@ def code_rule(name: str, placeholders: Iterable[str] = ()) -> Callable[[CodeRule
             not all(isinstance(p, str) and _PLACEHOLDER.match(p) for p in placeholders):
         raise ValueError(f"code rule '{name}': placeholders must be a collection of "
                          f"names, got {placeholders!r}")
+    if not isinstance(own_threshold, bool):
+        raise ValueError(f"code rule '{name}': own_threshold must be true or false")
     declared = frozenset(placeholders)
+    source = _severity_source(name, severity)
 
     def register(fn: CodeRule) -> CodeRule:
         if name in REGISTRY:
@@ -90,6 +128,9 @@ def code_rule(name: str, placeholders: Iterable[str] = ()) -> Callable[[CodeRule
                              f"({REGISTRY[name].__module__}.{REGISTRY[name].__qualname__})")
         REGISTRY[name] = fn
         PLACEHOLDERS[name] = declared
+        SEVERITY_SOURCES[name] = source
+        if own_threshold:
+            OWN_THRESHOLD.add(name)
         return fn
 
     return register
@@ -125,10 +166,24 @@ def check_findings(rule: "Rule", found: Any) -> List[Finding]:
         if f.severity not in SEVERITIES:
             raise ValueError(f"{where}: unknown severity '{f.severity}' "
                              f"(known: {', '.join(SEVERITIES)})")
-        if f.threshold is not None and _declares_legacy_threshold(rule):
-            raise ValueError(f"{where}: set a finding's threshold although the catalog "
-                             "entry declares legacy_threshold — one source, not both")
+        _check_declared(rule, f, where)
     return found
+
+
+def _check_declared(rule: "Rule", f: Finding, where: str) -> None:
+    """Run-time backstop for what the registration declared (the gate checks the
+    catalog side): a fixed severity outside the set, an undeclared own threshold."""
+    name = code_rule_name(rule.implementation)
+    source = SEVERITY_SOURCES.get(name)
+    if isinstance(source, frozenset) and f.severity not in source:
+        raise ValueError(f"{where}: emitted {f.severity}, outside its declared "
+                         f"severities ({', '.join(sorted(source))})")
+    if f.threshold is not None and name not in OWN_THRESHOLD:
+        raise ValueError(f"{where}: set a finding's threshold without declaring "
+                         "own_threshold=True")
+    if f.threshold is not None and _declares_legacy_threshold(rule):
+        raise ValueError(f"{where}: set a finding's threshold although the catalog "
+                         "entry declares legacy_threshold — one source, not both")
 
 
 def _declares_legacy_threshold(rule: "Rule") -> bool:
@@ -176,7 +231,7 @@ def readiness_score(item: dict, ctx: Any) -> float:
             + name_quality * 0.15)
 
 
-@code_rule("spotter_readiness", placeholders={"score"})
+@code_rule("spotter_readiness", placeholders={"score"}, severity="bands")
 def spotter_readiness(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """A5 — one finding per model whose readiness score the bands grade."""
     out: List[Finding] = []
@@ -221,7 +276,8 @@ D1_MEASURES = (
 )
 
 
-@code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"})
+@code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"},
+           severity={"HIGH", "MEDIUM"}, own_threshold=True)
 def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D1 — up to five findings per Model, one per measure over its MEDIUM line."""
     out: List[Finding] = []
@@ -237,7 +293,8 @@ def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     return out
 
 
-@code_rule("join_keys", placeholders={"varchar_keys", "key_pairs"})
+@code_rule("join_keys", placeholders={"varchar_keys", "key_pairs"},
+           severity={"HIGH", "MEDIUM"})
 def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D2 — per join, up to two findings: HIGH for string-typed keys (P6's test,
     @varchar_join_keys), MEDIUM for a composite key (more than one operand pair)."""
@@ -254,7 +311,7 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     return out
 
 
-@code_rule("zero_column_tables", placeholders={"name", "role"})
+@code_rule("zero_column_tables", placeholders={"name", "role"}, severity="severity")
 def zero_column_tables(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D10 — a model table no model column comes from, named by its `name`."""
     out: List[Finding] = []
@@ -291,7 +348,8 @@ def _named_severity(rule: "Rule") -> str:
     return rule.severity
 
 
-@code_rule("column_type_divergence", placeholders={"name", "models"})
+@code_rule("column_type_divergence", placeholders={"name", "models"},
+           severity="severity_name")
 def column_type_divergence(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D12 — a db column name classified differently across Models. Like legacy D12,
     it reads no column at all unless the context holds two Models or more (one Model
