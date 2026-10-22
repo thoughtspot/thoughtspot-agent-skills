@@ -161,6 +161,7 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         width = w; height = h; canvas.width = w; canvas.height = h;
         ctx.imageSmoothingEnabled = false;      // a resized canvas forgets it
         camera.w = w; camera.h = h; camera.snap();
+        draw();                                 // and it is blank until drawn again
       } };
     let scene = null, now = 0;
     const timers = [], tweens = [];

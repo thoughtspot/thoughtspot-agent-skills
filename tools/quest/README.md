@@ -267,9 +267,10 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
   `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
   person looks; the build checks it.
-- **The view** fits the whole map where the screen allows (no less than 1.25 screen pixels a game
-  pixel, and no taller than most of the window), so on a laptop the whole overworld shows at once;
-  on a narrow screen it shows as much as fits and the camera follows. **Dialogs** show who you're
+- **The view** shows as much of the map as fits at 1.25 screen pixels a game pixel or more, and as
+  many rows as fit in 70% of the window at that size, so on a laptop the whole overworld shows at
+  once; the camera follows the player over the rest. It is never fewer than 20x8 tiles, so on a
+  phone the scale goes below 1.25, and a map smaller than that sits in a 20x8 view. **Dialogs** show who you're
   talking to, drawn from the map's art, and not the classic page's ASCII art.
 - **The overworld** is a small world (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
   door for each realm in its own scene, each with a guard beside it who says in one line what the

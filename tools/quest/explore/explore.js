@@ -470,15 +470,16 @@
     say(t);
   }
   // `from`: the realm just left, so the overworld puts the player beside that realm's door.
-  // The view: the whole map where the screen allows it, at no less than 1.25 screen pixels a game
-  // pixel (and no taller than most of the window); otherwise as much of it as fits, and the camera
-  // follows. Never smaller than 20x8 tiles, the size the realms are drawn for.
+  // The view: as much of the map as fits at 1.25 screen pixels a game pixel or more (the whole map
+  // on a laptop), and as many rows as fit in 70% of the window at that size; the camera follows
+  // the player over the rest. Never fewer than 20x8 tiles, the size the realms are drawn for (so a
+  // narrow screen goes below 1.25, and a map smaller than that sits in a 20x8 view, as it always did).
   const MIN_SCALE = 1.25;
   function fitView(doc) {
     const box = $("world").clientWidth || 960;
-    const cols = Math.min(doc.width, Math.max(20, Math.floor(box / (MIN_SCALE * TILE))));
+    const cols = Math.max(20, Math.min(doc.width, Math.floor(box / (MIN_SCALE * TILE))));
     const scale = box / (cols * TILE);
-    const rows = Math.min(doc.height, Math.max(8, Math.floor(window.innerHeight * 0.7 / (scale * TILE))));
+    const rows = Math.max(8, Math.min(doc.height, Math.floor(window.innerHeight * 0.7 / (scale * TILE))));
     $("world").style.aspectRatio = `${cols} / ${rows}`;
     game.resize(cols * TILE, rows * TILE);
   }
@@ -535,6 +536,16 @@
       const wait = (ms = 50) => new Promise(r => setTimeout(r, ms));
       const until = async test => { for (let i = 0; i < 200 && !test(); i++) await wait(); if (!test()) throw new Error(`timed out on map ${world ? world.mapId : "(none)"} at frame ${game.loop.frame}`); };
       await until(() => world && world.mapId === "overworld");
+      {                                      // the view fits the map, and is drawn to its edges
+        const doc = world.doc, box = $("world").clientWidth, cols = game.canvas.width / TILE, rows = game.canvas.height / TILE;
+        const want = Math.max(20, Math.min(doc.width, Math.floor(box / (1.25 * TILE))));
+        if (cols !== want || rows < 8 || rows > doc.height) throw new Error(`the view is ${cols}x${rows} tiles; ${want} columns fit a ${box}px box`);
+        if (Math.abs(box / $("world").clientHeight - cols / rows) > 0.02) throw new Error("the map's box isn't the view's shape");
+        if (game.loop.frame === 0) await wait(100);
+        const px = game.canvas.getContext("2d").getImageData(game.canvas.width - 4, game.canvas.height - 4, 1, 1).data;
+        if (px[0] === 0x16 && px[1] === 0x13 && px[2] === 0x1f) throw new Error("the view isn't drawn to its corner");
+        log(`VIEW ${cols}x${rows} in ${box}px`);
+      }
       // Enter on a link keeps its meaning: the map must not take it.
       $("classic").focus();
       const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
@@ -735,6 +746,7 @@
         for (const o of world.objects.filter(x => x.type === "throne" && x.look))      // a petitioner is drawn, not the throne
           if (o.sprite.frame.name !== FRAMES.npcs[o.look]) throw new Error(`the petitioner ${o.look} isn't drawn`);
         // Beside a step the game doesn't wait on yet, no hint (only where one can be stood beside alone).
+        let checkedHint = 0;
         for (const o of world.objects.filter(x => x.step && x.step !== machine.expected(state))) {
           const tx = Math.floor(o.x / TILE), ty = Math.floor(o.y / TILE);
           const spot = [[0, 1], [0, -1], [1, 0], [-1, 0]].map(([dx, dy]) => [tx + dx, ty + dy]).find(([x, y]) => x > 0 && y > 0 && x < world.doc.width && y < world.doc.height && !blockedTile(x, y));
@@ -743,8 +755,9 @@
           if (world.nearby() !== o) continue;
           world.near = undefined; await wait(80);
           if ([S("explore_near_step"), S("explore_near_petitioner")].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
-          break;
+          checkedHint++;
         }
+        if (!checkedHint) throw new Error("no step the game doesn't wait on could be stood beside alone, to check it gives no hint");
         world.player.setPosition(first.x - 14, first.y); world.near = undefined; await wait(80);
         // A question in a realm offers the way back to the realm (Esc) and out to the world map.
         talk(world.nearby());

@@ -29,8 +29,8 @@ a flood-fill from the spawn with only the gates whose required steps are all don
 that step's object. The exit must be reachable from the start, so a player can always leave.
 Every gate must guard something: at some point of play while it is shut, opening it alone must
 let the player reach an object they couldn't (a gate off its doorway, or a wall with a way round
-it, would not). Barrels are played: rolled once reachable, freeing their tile unless a hoard is
-under it, and blocking the tile they land on.
+it, would not). Barrels are played: each may be rolled once reachable, freeing its tile unless a
+hoard is under it, and blocking the tile it lands on; every set of rolls is tried.
 """
 from __future__ import annotations
 
@@ -342,36 +342,44 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
         done.add(s)
     # A gate guards something: at some point of play while it is shut, opening it alone lets the
     # player reach an object they can't reach with it shut. Barrels are played, not assumed: each
-    # stands where it is until the player can reach it, then may be rolled (its tile frees unless a
-    # hoard is under it, which is solid; the tile it lands on blocks), and the walk counts every
-    # tile seen in any of those states.
+    # stands where it is until the player can reach it, then may or may not be rolled (its tile
+    # frees unless a hoard is under it, which is solid; the tile it lands on blocks). The walk
+    # counts every tile seen in every set of rolls the player could make.
     if not errors:
         objs = [o for o in m.objects if o["type"] not in ("spawn", "gate")]
         barrels = m.of("barrel")
         fixed = {o["tile"] for o in objs if o["type"] != "barrel"}      # people, chests, hoards...
 
-        def seen_with(done: set[str], also: dict | None = None) -> set[int]:
+        def flood(blocked: set) -> set[tuple[int, int]]:
+            seen, todo = {start}, [start]
+            while todo:
+                for n in _near(todo.pop()):
+                    if m.inside(n) and n not in seen and n not in blocked:
+                        seen.add(n)
+                        todo.append(n)
+            return seen
+
+        def seen_with(done: set[str], also: dict | None = None) -> frozenset[int]:
             shut = {t for g, needs in gates if g is not also and not set(needs) <= done for t in g["rect"]}
-            rolled_now: list[dict] = []
             seen_all: set[tuple[int, int]] = set()
-            while True:
-                blocked = m.wall | fixed | shut | {b["tile"] for b in barrels if b not in rolled_now} | {rolled(b) for b in rolled_now}
-                seen, todo = {start}, [start]
-                while todo:
-                    for n in _near(todo.pop()):
-                        if m.inside(n) and n not in seen and n not in blocked:
-                            seen.add(n)
-                            todo.append(n)
+            states, todo = {frozenset()}, [frozenset()]          # which barrels are rolled
+            while todo:
+                rolled_now = todo.pop()
+                blocked = (m.wall | fixed | shut | {b["tile"] for i, b in enumerate(barrels) if i not in rolled_now}
+                           | {rolled(barrels[i]) for i in rolled_now})
+                seen = flood(blocked)
                 seen_all |= seen
-                more = [b for b in barrels if b not in rolled_now and any(n in seen for n in _near(b["tile"]))]
-                if not more:
-                    break
-                rolled_now += more
-            return {i for i, o in enumerate(objs) if any(n in seen_all for n in _near(o["tile"]))}
+                for i, b in enumerate(barrels):                   # roll any one more the player can reach
+                    nxt = rolled_now | {i}
+                    if i not in rolled_now and nxt not in states and any(n in seen for n in _near(b["tile"])):
+                        states.add(nxt)
+                        todo.append(nxt)
+            return frozenset(i for i, o in enumerate(objs) if any(n in seen_all for n in _near(o["tile"])))
 
         points = [set((steps or [])[:i]) for i in range(len(steps or []) + 1)]
+        shut_at = {i: seen_with(done) for i, done in enumerate(points)}
         for g, needs in gates:
-            if not any(seen_with(done, g) - seen_with(done) for done in points if not set(needs) <= done):
+            if not any(seen_with(done, g) - shut_at[i] for i, done in enumerate(points) if not set(needs) <= done):
                 errors.append(f"{g['where']}: guards nothing (opening it alone, while it is shut, lets the player reach nothing new)")
     # Every bit of fun can be found by the end: chests and barrels where they stand, a hoard once its
     # barrel has rolled off it (with every gate open).

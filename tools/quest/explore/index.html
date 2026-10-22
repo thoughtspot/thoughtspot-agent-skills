@@ -32,6 +32,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 .dialog-head .gap { flex: 1; }
 #close, #leave { font: inherit; background: none; color: var(--dim); border: 1px solid var(--rule); cursor: pointer; }
 #portrait { width: 64px; height: 64px; margin-left: 24px; image-rendering: pixelated; }
+@media (max-width: 520px) { #portrait { margin-left: 14px; } }   /* in line with the screen's padding */
 /* The map is the picture here: the classic page's ASCII art stays on the classic page. */
 #dialog .art { display: none; }
 #nogl { display: none; }

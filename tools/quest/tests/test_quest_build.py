@@ -3984,7 +3984,7 @@ def test_every_law_hall_has_a_petitioner_and_elder_wren_points_the_way():
 
 
 @pytest.mark.parametrize("edits,roll,round_it", [
-    # rolled down into a niche, the barrel frees a hole in the wall: a way round the gate to the reward
+    # rolled down, the barrel frees a hole in the wall: a way round the gate to the reward
     ([(8, 1, "b"), (8, 2, "."), (10, 3, ".")], "down", True),
     # rolled right, it lands on the hole's only way on: still no way round
     ([(8, 1, "b"), (10, 3, ".")], "right", False),
@@ -4020,3 +4020,67 @@ def test_a_law_gate_off_its_doorway_guards_nothing(tmp_path):
     shutil.copytree(PACK_DIR, pack)
     (pack / "maps/law.tmj").write_text(json.dumps(law), encoding="utf-8")
     assert any(f"object {gates[1]['id']} (gate): guards nothing" in e for e in MAPS.check_maps(pack, data))
+
+
+# Two barrels: the player may roll either, both or neither (the engine agrees on each map).
+TWO_BARRELS = dict(CAVE_OBJECTS, A=("barrel", {"roll": "right"}), B=("barrel", {"roll": "right"}), c=("chest", {"loot": "gem"}))
+
+
+@pytest.mark.parametrize("rows,gates,guards", [
+    # A rolled alone opens a way round the gate; rolling B as well would block it
+    (["############", "#S.M.....G.#", "#X...B.#.C.#", "##.###A.####", "#......#...#", "#...F.R....#", "############"],
+     [("the_rune:compiler", [(2, 3)])], False),
+    # A rolled alone reaches the chest only through the gate; rolling B as well would open a way round
+    (["############", "#S.M.G.C.F.#", "#X.........#", "#...B.#.R..#", "##.##A.#####", "#.....######", "#.c.########", "############"],
+     [("the_rune:merchant", [(4, 5)]), ("the_rune:reward", [(2, 4)])], True),
+])
+def test_every_set_of_barrel_rolls_is_tried(tmp_path, rows, gates, guards):
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, TWO_BARRELS, gates))
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert any("guards nothing" in e for e in errors) != guards, errors
+
+
+def test_a_hoard_under_a_rolled_barrel_still_blocks(tmp_path):
+    # the barrel's way round, with a hoard under the barrel: rolled, it leaves the hoard, which is solid
+    m = _tmj(_rows((8, 1, "b"), (8, 2, "."), (10, 3, ".")), dict(CAVE_OBJECTS, b=("barrel", {"roll": "down"})), CAVE_GATE)
+    m = _with_objects(m, [("hoard", 8, 1, {"loot": "gem"})])
+    pack, data = _explorable(tmp_path, cave=m)
+    (pack.dir / "tiles/tiles.json").write_text(json.dumps({"items": FUN_ITEMS, "npcs": FUN_NPCS}), encoding="utf-8")
+    errors = MAPS.check_maps(pack.dir, data)
+    assert not any("guards nothing" in e for e in errors), errors
+
+
+ENGINE_RESIZE = r"""
+const fs = require("fs"); globalThis.Quest = {};
+let now = 0, queued = null, drawn = 0;
+globalThis.performance = { now: () => now };
+globalThis.requestAnimationFrame = f => { queued = f; };
+const ctx = new Proxy({}, { get: (t, k) => (k === "drawImage" ? () => { drawn++; } : k in t ? t[k] : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+const canvas = { getContext: () => ctx, width: 0, height: 0 };
+globalThis.document = { createElement: () => canvas };
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const game = Quest.engine.create({ parent: { appendChild() {} }, width: 320, height: 128, background: "#000", atlas: {}, columns: 12,
+                                   keyTarget: { addEventListener() {} } });
+let api;
+game.start(a => { api = a; a.addLayer({ name: "floor", width: 40, height: 14, data: new Array(560).fill(1) });
+                  const p = a.addPlayer(600, 200); a.cameras.main.setBounds(0, 0, 640, 224); a.cameras.main.startFollow(p, true, 1); return {}; });
+const step = () => { now += 1000 / 60; const f = queued; queued = null; f && f(); };
+step(); step();
+const before = { x: api.cameras.main.x, drawn };
+drawn = 0;
+game.resize(640, 224);
+const atResize = drawn;
+drawn = 0; step();
+console.log(JSON.stringify({ before: before.x, canvas: [canvas.width, canvas.height], camera: [api.cameras.main.w, api.cameras.main.h, api.cameras.main.x, api.cameras.main.y], atResize, frame: drawn }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_view_can_grow_to_the_whole_map():
+    r = subprocess.run(["node", "-e", ENGINE_RESIZE, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["before"] > 0                                     # 20x8 of a 40x14 map: the camera followed
+    assert got["canvas"] == [640, 224] and got["camera"] == [640, 224, 0, 0]
+    assert got["atResize"] >= 560 and got["frame"] >= 560        # every tile drawn, at once and after
