@@ -74,3 +74,43 @@ def test_base_mode_no_significant_change_passes(tmp_path):
     lines = src.get_staged_files(repo, base=base)
     changes = src.detect_significant_changes(lines, repo, new_ref="HEAD:", old_ref=f"{base}:")
     assert changes == []
+
+
+def _ts_cli_repo(tmp_path: Path) -> Path:
+    repo = _init_repo(tmp_path)
+    pkg = repo / "tools" / "ts-cli" / "ts_cli"
+    pkg.mkdir(parents=True)
+    (repo / "tools" / "ts-cli" / "pyproject.toml").write_text(
+        '[project]\nname = "ts-cli"\nversion = "0.1.0"\n\n'
+        '[tool.setuptools.package-data]\n"ts_cli" = ["a.html"]\n')
+    (pkg / "__init__.py").write_text('__version__ = "0.1.0"\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "ts-cli")
+    return repo
+
+
+def _changes_since(repo: Path, base: str) -> list:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "change")
+    lines = src.get_staged_files(repo, base=base)
+    return src.detect_significant_changes(lines, repo, new_ref="HEAD:", old_ref=f"{base}:")
+
+
+def test_pyproject_edit_without_version_change_is_not_a_bump(tmp_path):
+    # A package-data edit is not a release: it must not demand a CHANGELOG entry.
+    repo = _ts_cli_repo(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+    toml = repo / "tools" / "ts-cli" / "pyproject.toml"
+    toml.write_text(toml.read_text().replace('["a.html"]', '["a.html", "b/*.yaml"]'))
+    assert _changes_since(repo, base) == []
+
+
+def test_version_change_is_a_bump(tmp_path):
+    repo = _ts_cli_repo(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+    toml = repo / "tools" / "ts-cli" / "pyproject.toml"
+    toml.write_text(toml.read_text().replace('version = "0.1.0"', 'version = "0.2.0"'))
+    init = repo / "tools" / "ts-cli" / "ts_cli" / "__init__.py"
+    init.write_text('__version__ = "0.2.0"\n')
+    changes = _changes_since(repo, base)
+    assert changes == [("ts-cli-bump", "chore: bump ts-cli to v0.2.0")] * 2, changes

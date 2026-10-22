@@ -83,6 +83,15 @@ def _skill_changelog_version(text: str) -> tuple[int, int, int] | None:
     return None
 
 
+_VERSION_LINE = re.compile(r'^\s*(?:__version__|version)\s*=\s*["\']([^"\']+)["\']', re.M)
+
+
+def _ts_cli_version(text: str) -> str | None:
+    """The `version = "x"` (pyproject.toml) or `__version__ = "x"` (__init__.py) value."""
+    m = _VERSION_LINE.search(text or "")
+    return m.group(1) if m else None
+
+
 def detect_significant_changes(
     staged_lines: list[tuple[str, str]], repo_root: Path,
     new_ref: str = ":", old_ref: str = "HEAD:"
@@ -113,15 +122,16 @@ def detect_significant_changes(
                 nv = ".".join(map(str, new_v))
                 changes.append(("skill-bump", f"feat: update {skill_name} to v{nv}"))
 
-        # ts-cli version bump
+        # ts-cli version bump — only when the version string actually changed. Any other
+        # edit to these files (package-data, a new import) is not a release and must not
+        # demand a CHANGELOG entry.
         elif status == "M" and path in (
             "tools/ts-cli/pyproject.toml",
             "tools/ts-cli/ts_cli/__init__.py",
         ):
-            # Read the new version from the staged file
-            m = re.search(r'version\s*=\s*["\']([^"\']+)["\']', _git_show(f"{new_ref}{path}", repo_root))
-            ver = m.group(1) if m else "?"
-            changes.append(("ts-cli-bump", f"chore: bump ts-cli to v{ver}"))
+            ver = _ts_cli_version(_git_show(f"{new_ref}{path}", repo_root))
+            if ver != _ts_cli_version(_git_show(f"{old_ref}{path}", repo_root)):
+                changes.append(("ts-cli-bump", f"chore: bump ts-cli to v{ver or '?'}"))
 
         # New shared reference file
         elif status == "A" and path.startswith("agents/shared/"):
