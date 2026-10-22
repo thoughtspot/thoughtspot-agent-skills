@@ -252,6 +252,11 @@ def compact_payload(data: dict) -> dict:
             "mo": compact_overlaps,
             "dp": compact_deps,
         }
+        # What the run fetched (absent in JSON written before it was recorded, which
+        # then renders as before): a section whose data is not in it says
+        # "not collected for this selection".
+        if isinstance(corpus.get("fetched_needs"), list):
+            result["C"]["fn"] = corpus["fetched_needs"]
     else:
         result["C"] = None
 

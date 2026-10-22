@@ -1,24 +1,27 @@
 """`ts audit` — run the rule catalog over an AuditContext and assemble the audit JSON.
 
 The rules are data (`catalog/`, run by `engine/`); `run_audit` selects them by category
-(`--angles`) and profile (`--assessment`), fetches what they and the report declare
-(`data_needs` ∪ `REPORT_NEEDS`), and returns `{findings, summary, corpus, check_meta}`.
+(`--angles`) and profile (`--assessment`), fetches what those rules declare
+(`data_needs`: requires ∪ uses — nothing more), and returns `{findings, summary, corpus,
+check_meta}`. `corpus.fetched_needs` records what was fetched, so the report can tell a
+section "not collected for this selection" from "collected, none".
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from ts_cli.audit.context import AuditContext, build_context
+from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 
-#: What the report reads from the context that no rule need declare: the AI
-#: instructions behind each Model's "questions" (`build_corpus`) and its ERD's
+#: The conditional data the report reads that no rule need declare: the AI
+#: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
 #: instruction list (`erd.build_erd_for_audit`), and the dependents — Set rows
 #: included, which Set discovery writes — behind each Model's "Downstream Consumers"
-#: panel (`corpus.dependents`). Same vocabulary as a rule's `uses`; unioned into what
-#: `ts audit run` fetches (and a snapshot captures), so a report section is never
-#: empty only because no selected rule happened to need its data.
+#: panel (`corpus.dependents`). Same vocabulary as a rule's `uses`. NOT fetched for
+#: the report's sake: `ts audit run` fetches only what the selected rules need, and
+#: the report says "not collected for this selection" for a section whose data is
+#: missing from `corpus.fetched_needs`.
 REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets"})
 
 
@@ -334,6 +337,7 @@ def run_audit(
     angles: Optional[list] = None,
     assessment_name: Optional[str] = None,
     ctx: Optional[AuditContext] = None,
+    fetched_needs: Optional[set] = None,
 ) -> dict:
     """Run the catalog rules of the categories ``angles`` (default: all) and return
     findings, summary, corpus and check_meta. A category the catalog does not know
@@ -346,6 +350,10 @@ def run_audit(
     and thresholds, so falling back to the default would make a replay
     disagree with the live run it recorded. A fetched ``ctx`` gets
     ``assessment_name``, or the catalog's default profile when it is None.
+
+    ``corpus.fetched_needs`` (sorted) records what the context holds: for a fetched
+    ``ctx``, what was fetched; for a supplied one, ``fetched_needs`` when the caller
+    knows it (a snapshot's manifest) — omitted when it does not.
     """
     from ts_cli.audit import catalog_model
     from ts_cli.audit.engine.run import resolve_profile, run_rules, selected_rules
@@ -354,8 +362,9 @@ def run_audit(
     angles = angles or list(catalog.categories)
     if ctx is None:
         profile = resolve_profile(catalog, assessment_name)
-        ctx = build_context(client, model_guids,
-                            data_needs(angles, [profile]) | REPORT_NEEDS)
+        needs = data_needs(angles, [profile])
+        ctx = build_context(client, model_guids, needs)
+        fetched_needs = set(needs) | ALWAYS_FETCHED
     else:
         profile = resolve_profile(catalog, assessment_name if assessment_name is not None
                                   else ctx.assessment)
@@ -372,6 +381,8 @@ def run_audit(
         angles=angles,
     )
     corpus["assessment"] = catalog.profiles[profile].label
+    if fetched_needs is not None:
+        corpus["fetched_needs"] = sorted(fetched_needs)
 
     _inject_findings_into_erd(corpus, findings, check_meta)
 

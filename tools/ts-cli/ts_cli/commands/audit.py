@@ -69,10 +69,10 @@ def _replay(snapshot_in: Path, angle_list: Optional[list],
 
     The captured assessment is used unless ``--assessment`` is given explicitly. The
     selection must read only data the snapshot captured (its manifest's `needs`, or —
-    for a snapshot written before needs were recorded — what its angles fetched); the
-    report's own data (`REPORT_NEEDS`) missing only warns.
+    for a snapshot written before needs were recorded — what its angles fetched), which
+    the audit JSON records as `corpus.fetched_needs`.
     """
-    from ts_cli.audit import REPORT_NEEDS, run_audit
+    from ts_cli.audit import run_audit
     from ts_cli.audit.snapshot import SnapshotError, read_snapshot_needs
 
     try:
@@ -84,27 +84,25 @@ def _replay(snapshot_in: Path, angle_list: Optional[list],
     why = _uncaptured(selection, profile, needs)
     if why:
         raise SystemExit(f"{why} (snapshot: {snapshot_in})")
-    report_gap = sorted(REPORT_NEEDS - needs)
-    if report_gap:
-        typer.echo(f"Note: the snapshot did not capture {', '.join(report_gap)}; the "
-                   "report's sections that show them will be empty.", err=True)
     if assessment_name is not None and profile != _assessment(ctx.assessment):
         typer.echo(f"Note: --assessment {profile} overrides the "
                    f"snapshot's captured assessment ({ctx.assessment}).", err=True)
-    return run_audit(None, ctx.model_guids, selection, assessment_name, ctx=ctx)
+    return run_audit(None, ctx.model_guids, selection, assessment_name, ctx=ctx,
+                     fetched_needs=needs)
 
 
 def _capture(client, models: list, angle_list: Optional[list], assessment_name: Optional[str],
              snapshot_out: Path) -> dict:
     """Fetch the audit data, write it to ``snapshot_out``, then audit it as normal."""
-    from ts_cli.audit import REPORT_NEEDS, data_needs, run_audit
+    from ts_cli.audit import data_needs, run_audit
+    from ts_cli.audit.context import ALWAYS_FETCHED
     from ts_cli.audit.context import build_context
     from ts_cli.audit.snapshot import SnapshotError, write_snapshot
 
     angles = angle_list or list(_catalog().categories)
-    # Every profile's needs (a replay may pass a different --assessment), and the
-    # report's; the manifest records them so a replay can refuse what is missing.
-    needs = data_needs(angles) | REPORT_NEEDS
+    # Every profile's needs (a replay may pass a different --assessment); the manifest
+    # records them so a replay can refuse what is missing.
+    needs = data_needs(angles)
     ctx = build_context(client, models, needs)
     ctx.assessment = _assessment(assessment_name)
     try:
@@ -112,7 +110,8 @@ def _capture(client, models: list, angle_list: Optional[list], assessment_name: 
     except SnapshotError as exc:
         raise SystemExit(f"Cannot write snapshot: {exc}") from exc
     typer.echo(f"Snapshot written to {snapshot_out}", err=True)
-    return run_audit(client, models, angles, assessment_name, ctx=ctx)
+    return run_audit(client, models, angles, assessment_name, ctx=ctx,
+                     fetched_needs=set(needs) | ALWAYS_FETCHED)
 
 
 @app.command("run")

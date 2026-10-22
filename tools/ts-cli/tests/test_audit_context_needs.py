@@ -264,32 +264,12 @@ def h5_off_for_spotter(monkeypatch):
     monkeypatch.setattr(cm, "load_catalog", lambda root=None: cat)
 
 
-@pytest.fixture
-def answers_off_for_spotter(monkeypatch):
-    """The catalog every `data_needs` call loads: the Answer readers (H7, H8, H9)
-    retired under spotter only."""
-    import ts_cli.audit.catalog_model as cm
-
-    def off(rules):
-        for rid in ("H7", "H8", "H9"):
-            rules[rid].setdefault("profiles", {})["spotter"] = {"status": "retired"}
-    cat = _catalog_with(off)
-    monkeypatch.setattr(cm, "load_catalog", lambda root=None: cat)
-
-
-# Task 12a: this observed Set discovery (H4/H5 off under spotter). Since the cut-over
-# `ts audit run` always fetches the report's own data (audit.REPORT_NEEDS, which
-# includes sets), so Set discovery no longer depends on the profile; the same property
-# — run_audit fetches for ITS profile only — is held through the Answer export, which
-# only rules read.
-@pytest.mark.parametrize("assessment,exports", [("spotter", False), ("general", True)])
-def test_run_audit_fetches_for_its_own_profile_only(answers_off_for_spotter, assessment,
-                                                    exports):
+@pytest.mark.parametrize("assessment,discovers", [("spotter", False), ("general", True)])
+def test_run_audit_fetches_for_its_own_profile_only(h5_off_for_spotter, assessment, discovers):
     from ts_cli.audit import run_audit
-    client = RecordingClient()
-    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
-        run_audit(client, ["m1"], ["H"], assessment)
-    assert bool(client.answer_exports()) is exports
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)) as disc:
+        run_audit(RecordingClient(), ["m1"], ["H"], assessment)
+    assert disc.called is discovers
 
 
 def test_snapshot_capture_fetches_for_every_profile(h5_off_for_spotter, tmp_path):
@@ -303,19 +283,14 @@ def test_snapshot_capture_fetches_for_every_profile(h5_off_for_spotter, tmp_path
 
 # ── run_audit selects by the catalog ────────────────────────────────────────
 
-# Task 12a: was `..._makes_no_ai_or_answer_calls` (no AI call, no Set discovery). The
-# report now declares its own needs (audit.REPORT_NEEDS: AI instructions for the
-# Model questions/ERD, Sets for the consumers panel), fetched whatever the rules need,
-# so a D-only run makes those two calls; it still exports no Answers, which only rules
-# read.
-def test_run_audit_d_only_makes_no_answer_calls_but_fetches_the_reports_data():
+def test_run_audit_d_only_makes_no_ai_or_answer_calls():
     from ts_cli.audit import run_audit
     client = RecordingClient()
     with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)) as disc:
         run_audit(client, ["m1"], ["D"])
+    assert not any(u.endswith(_AI) for u in client.urls())
     assert client.answer_exports() == []
-    assert any(u.endswith(_AI) for u in client.urls())
-    disc.assert_called_once()
+    disc.assert_not_called()
 
 
 def test_run_audit_ignores_an_unknown_angle_as_before():

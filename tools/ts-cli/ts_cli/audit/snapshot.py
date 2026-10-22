@@ -10,8 +10,7 @@ A snapshot is a directory holding one JSON file per ``AuditContext`` field plus
 ``angles`` records what the capture was asked for, ``needs`` what it fetched: the
 data always fetched (``context.ALWAYS_FETCHED``) and the conditional data (AI
 instructions, Answer TML, Sets) a selected rule declares in ``requires`` or ``uses``
-(``engine.run.needs_for``, under every profile) or the report reads
-(``audit.REPORT_NEEDS``). A replay refuses a selection whose rules read data the
+(``engine.run.needs_for``, under every profile). A replay refuses a selection whose rules read data the
 snapshot did not capture, rather than report it clean. A manifest written before
 ``needs`` was recorded is read by what its angles fetched then
 (``LEGACY_ANGLE_NEEDS``).
