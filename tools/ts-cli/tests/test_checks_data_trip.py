@@ -34,13 +34,12 @@ the marker must be deleted, not the assertion, when the check is corrected.
 import pytest
 
 import audit_rule_fixtures as fx
-from ts_cli.audit.checks_data import (
-    check_d3, check_d6, check_d8, check_d10, check_d11, check_d12,
-)
+from audit_run_rule import run_rule
 
 
-# The TML-shaped contexts are named builders in audit_rule_fixtures (data.py), so the
-# D catalog rules' equivalence test runs over exactly these inputs. Note what those
+# The TML-shaped contexts are named builders in audit_rule_fixtures (data.py), whose
+# legacy answers test_audit_pinned_findings.py pins. The legacy checks named below
+# (checks_data.py) were deleted in Task 12b; the D catalog rules reproduce them. Note what those
 # shapes deliberately leave out: joins have no `name`, model columns have no
 # `data_type` and no `db_column_name`.
 
@@ -51,7 +50,7 @@ from ts_cli.audit.checks_data import (
 
 def test_d3_flags_full_outer_join_as_high():
     """`OUTER` is ThoughtSpot's name for a full outer join (model-tml schema)."""
-    findings = check_d3(fx.data_join_full_outer())
+    findings = run_rule(fx.data_join_full_outer(), "D3")
     assert len(findings) == 1
     assert findings[0].check_id == "D3"
     assert findings[0].severity == "HIGH"
@@ -60,7 +59,7 @@ def test_d3_flags_full_outer_join_as_high():
 
 @pytest.mark.parametrize("jtype", ["LEFT_OUTER", "RIGHT_OUTER"])
 def test_d3_flags_one_sided_outer_joins_as_info(jtype):
-    findings = check_d3(fx.build_join_type_ctx(jtype))
+    findings = run_rule(fx.build_join_type_ctx(jtype), "D3")
     assert len(findings) == 1
     assert findings[0].check_id == "D3"
     assert findings[0].severity == "INFO"
@@ -69,7 +68,7 @@ def test_d3_flags_one_sided_outer_joins_as_info(jtype):
 
 def test_d3_clean_model_returns_nothing():
     """An all-INNER model — the overwhelmingly common real shape — must be silent."""
-    assert check_d3(fx.data_join_inner()) == []
+    assert run_rule(fx.data_join_inner(), "D3") == []
 
 
 # --------------------------------------------------------------------------
@@ -79,7 +78,7 @@ def test_d3_clean_model_returns_nothing():
 
 def test_d6_flags_fact_table_that_is_mostly_attributes():
     """4 MEASURE + 3 ATTRIBUTE = fact (4 > 3) and 42.9% attributes (> 40%)."""
-    findings = check_d6(fx.data_fact_table_mostly_attributes())
+    findings = run_rule(fx.data_fact_table_mostly_attributes(), "D6")
     assert len(findings) == 1
     assert findings[0].check_id == "D6"
     assert findings[0].object_name == "ORDERS"
@@ -88,12 +87,12 @@ def test_d6_flags_fact_table_that_is_mostly_attributes():
 
 def test_d6_clean_fact_table_returns_nothing():
     """4 MEASURE + 2 ATTRIBUTE = 33% attributes, under the 40% line."""
-    assert check_d6(fx.data_fact_table_mostly_measures()) == []
+    assert run_rule(fx.data_fact_table_mostly_measures(), "D6") == []
 
 
 def test_d6_ignores_dimension_tables():
     """A dimension (<=3 measures) is allowed to be nearly all attributes."""
-    assert check_d6(fx.data_dimension_mostly_attributes()) == []
+    assert run_rule(fx.data_dimension_mostly_attributes(), "D6") == []
 
 
 # --------------------------------------------------------------------------
@@ -101,7 +100,7 @@ def test_d6_ignores_dimension_tables():
 # --------------------------------------------------------------------------
 
 def test_d8_flags_two_table_objects_on_one_physical_table():
-    findings = check_d8(fx.data_metadata_duplicate_table())
+    findings = run_rule(fx.data_metadata_duplicate_table(), "D8")
     assert len(findings) == 1
     assert findings[0].check_id == "D8"
     assert findings[0].severity == "HIGH"
@@ -111,12 +110,12 @@ def test_d8_flags_two_table_objects_on_one_physical_table():
 
 
 def test_d8_same_name_in_a_different_schema_is_not_a_duplicate():
-    assert check_d8(fx.data_metadata_same_name_other_schema()) == []
+    assert run_rule(fx.data_metadata_same_name_other_schema(), "D8") == []
 
 
 def test_d8_ignores_models():
     """Two Models over the same tables are D7's business, not D8's."""
-    assert check_d8(fx.data_metadata_duplicate_models()) == []
+    assert run_rule(fx.data_metadata_duplicate_models(), "D8") == []
 
 
 # --------------------------------------------------------------------------
@@ -124,7 +123,7 @@ def test_d8_ignores_models():
 # --------------------------------------------------------------------------
 
 def test_d10_flags_zero_column_bridge_and_leaf_tables():
-    findings = check_d10(fx.data_model_zero_column_bridge_and_leaf())
+    findings = run_rule(fx.data_model_zero_column_bridge_and_leaf(), "D10")
     by_name = {f.object_name: f for f in findings}
     assert set(by_name) == {"BRIDGE", "ORPHAN"}
     assert all(f.check_id == "D10" for f in findings)
@@ -135,18 +134,18 @@ def test_d10_flags_zero_column_bridge_and_leaf_tables():
 
 
 def test_d10_model_where_every_table_contributes_columns_returns_nothing():
-    assert check_d10(fx.data_model_every_table_has_columns()) == []
+    assert run_rule(fx.data_model_every_table_has_columns(), "D10") == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "D10 (checks_data.py:301) keys on model_tables[].name, but a table with an "
+    "D10 (legacy checks_data.py:301; the catalog reproduces it) keys on model_tables[].name, but a table with an "
     "alias prefixes its column_id with the ALIAS (model-tml schema, `alias` row). "
     "AuditContext.column_types (context.py:44) already does `alias or name`; the "
     "check does not, so a fully-populated aliased table is reported zero-column. "
-    "D6 (checks_data.py:184) and D11 (via _table_role) are blind the same way — "
+    "D6 (checks_data.py:184) and D11 (via _table_role, legacy) are blind the same way — "
     "there they cause a silent miss rather than a false positive."))
 def test_d10_aliased_table_is_not_zero_column():
-    assert check_d10(fx.data_model_aliased_table_with_columns()) == []
+    assert run_rule(fx.data_model_aliased_table_with_columns(), "D10") == []
 
 
 # --------------------------------------------------------------------------
@@ -154,7 +153,7 @@ def test_d10_aliased_table_is_not_zero_column():
 # --------------------------------------------------------------------------
 
 def test_d11_flags_fact_to_fact_one_to_many_join():
-    findings = check_d11(fx.data_fanout_fact_to_fact())
+    findings = run_rule(fx.data_fanout_fact_to_fact(), "D11")
     assert len(findings) == 1
     assert findings[0].check_id == "D11"
     assert findings[0].severity == "MEDIUM"
@@ -163,24 +162,24 @@ def test_d11_flags_fact_to_fact_one_to_many_join():
 
 
 def test_d11_reports_fact_to_dimension_one_to_many_as_info():
-    findings = check_d11(fx.data_fanout_fact_to_dimension())
+    findings = run_rule(fx.data_fanout_fact_to_dimension(), "D11")
     assert len(findings) == 1
     assert findings[0].severity == "INFO"
 
 
 def test_d11_many_to_one_join_returns_nothing():
     """MANY_TO_ONE is 223 of 233 real inline joins and cannot fan out."""
-    assert check_d11(fx.data_fanout_many_to_one()) == []
+    assert run_rule(fx.data_fanout_many_to_one(), "D11") == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "D11's else branch (checks_data.py:340) hardcodes 'ONE_TO_MANY join' into the "
+    "D11's else branch (legacy checks_data.py:340; the catalog reproduces it) hardcodes 'ONE_TO_MANY join' into the "
     "detail, so a MANY_TO_MANY join — the worse of the two, and the one the check "
     "explicitly admits at checks_data.py:322 — is reported to the user as "
     "ONE_TO_MANY. The MEDIUM branch interpolates `cardinality` correctly; only the "
     "INFO branch lies."))
 def test_d11_many_to_many_detail_names_the_actual_cardinality():
-    findings = check_d11(fx.data_fanout_many_to_many_dimension())
+    findings = run_rule(fx.data_fanout_many_to_many_dimension(), "D11")
     assert len(findings) == 1
     assert "MANY_TO_MANY" in findings[0].detail
 
@@ -190,7 +189,7 @@ def test_d11_many_to_many_detail_names_the_actual_cardinality():
 # --------------------------------------------------------------------------
 
 def test_d12_flags_column_classified_differently_across_models():
-    findings = check_d12(fx.data_models_divergent_column_type())
+    findings = run_rule(fx.data_models_divergent_column_type(), "D12")
     assert len(findings) == 1
     assert findings[0].check_id == "D12"
     assert findings[0].severity == "MEDIUM"
@@ -200,8 +199,8 @@ def test_d12_flags_column_classified_differently_across_models():
 
 
 def test_d12_consistent_classification_returns_nothing():
-    assert check_d12(fx.data_models_consistent_column_type()) == []
+    assert run_rule(fx.data_models_consistent_column_type(), "D12") == []
 
 
 def test_d12_single_model_returns_nothing():
-    assert check_d12(fx.data_model_single_discount()) == []
+    assert run_rule(fx.data_model_single_discount(), "D12") == []

@@ -20,12 +20,11 @@ exist to report. The audit reported zero.
 Fixtures below use the real shapes from that export.
 """
 import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 from ts_cli.audit import rules
-from ts_cli.audit.checks_data import check_d2, check_d3
-from ts_cli.audit.checks_perf import check_p6
 
 # The contexts are named builders in audit_rule_fixtures (perf.py; the shapes from that
-# export), so the P6 catalog rule's equivalence test runs over exactly these inputs.
+# export), whose legacy P6 answers test_audit_pinned_findings.py pins.
 
 
 # ── the resolver ───────────────────────────────────────────────────────────
@@ -67,26 +66,26 @@ def test_a_referencing_join_with_no_matching_table_yields_no_condition():
 
 def test_p6_reports_the_varchar_key_of_a_referencing_join():
     """The exact finding the live audit missed."""
-    findings = check_p6(fx.referencing_join_varchar())
+    findings = run_rule(fx.referencing_join_varchar(), "P6")
     assert len(findings) == 1, "a VARCHAR join key must be reported"
     assert "PROMOTION_KEY" in findings[0].detail
 
 
 def test_d2_reports_it_too():
-    assert len(check_d2(fx.referencing_join_varchar())) == 1
+    assert len(run_rule(fx.referencing_join_varchar(), "D2")) == 1
 
 
 def test_an_integer_referencing_join_is_not_reported():
-    assert check_p6(fx.referencing_join_integer()) == []
-    assert check_d2(fx.referencing_join_integer()) == []
+    assert run_rule(fx.referencing_join_integer(), "P6") == []
+    assert run_rule(fx.referencing_join_integer(), "D2") == []
 
 
 def test_d3_sees_a_referencing_joins_type():
-    findings = check_d3(fx.referencing_join_outer())
+    findings = run_rule(fx.referencing_join_outer(), "D3")
     assert findings, "an OUTER join defined in the table must be seen"
 
 
 def test_join_findings_use_the_declared_name():
     """`joins_with[]` carries a real name — better than a synthesised one."""
-    f = check_p6(fx.referencing_join_varchar())[0]
+    f = run_rule(fx.referencing_join_varchar(), "P6")[0]
     assert f.object_name == "FK_BASKETFACT_TO_PROMOTIONDIM"

@@ -70,14 +70,14 @@ def test_snapshot_preserves_mapping_order(tmp_path):
     finding order is part of what a replay must reproduce. Sorting keys on write
     reordered 45 of 5,091 H5 findings on a real 351-Model capture while ``==``
     — which ignores dict order — still called the round trip exact."""
-    from ts_cli.audit.checks_human import check_h5
     import audit_rule_fixtures as fx
+    from audit_run_rule import run_rule
     ctx = fx.h5_sets_in_capture_order()   # three orphan Sets, in a non-sorted order
     write_snapshot(ctx, tmp_path / "snap", ALL)
     got, _ = read_snapshot(tmp_path / "snap")
     assert list(got.dependents) == ["m1", "s-z", "s-a", "s-m"]
     assert list(got.tables) == ["zz", "aa"] and list(got.tables["aa"]) == ["b", "a"]
-    assert [f.object_guid for f in check_h5(got)] == [f.object_guid for f in check_h5(ctx)]
+    assert [f.object_guid for f in run_rule(got, "H5")] == [f.object_guid for f in run_rule(ctx, "H5")]
 
 
 def test_snapshot_refuses_data_it_cannot_reproduce(tmp_path):

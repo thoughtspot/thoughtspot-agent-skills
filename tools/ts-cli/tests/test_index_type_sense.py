@@ -16,62 +16,61 @@ model made S2 a pure false-positive generator.
 import pytest
 
 import audit_rule_fixtures as fx
-from ts_cli.audit.checks_perf import check_p9, check_p11
-from ts_cli.audit.checks_security import check_s2
+from audit_run_rule import run_rule
 
 #: Every value the schema documents, and whether it means "this column is indexed".
 INDEXED = ["DEFAULT", "PREFIX_ONLY", "PREFIX_AND_SUBSTRING", "PREFIX_AND_WORD_SUBSTRING"]
 NOT_INDEXED = ["DONT_INDEX"]
 
 # Builders live in audit_rule_fixtures; the P9/P11 contexts are named builders there
-# and the S2 ones are its `build_index_pii_ctx` family (S_INPUTS' `index_pii_*`), so
-# the P and S catalog rules' equivalence tests run over exactly these inputs.
+# and the S2 ones are its `build_index_pii_ctx` family (S_INPUTS' `index_pii_*`), whose
+# legacy answers test_audit_pinned_findings.py pins.
 
 
 # ── S2: PII indexed without table RLS ──────────────────────────────────────
 
 def test_s2_flags_pii_indexed_by_default():
     """The commonest shape in exported TML, and the one S2 exists for."""
-    assert len(check_s2(fx.build_index_pii_ctx(None))) == 1
+    assert len(run_rule(fx.build_index_pii_ctx(None), "S2")) == 1
 
 
 @pytest.mark.parametrize("idx", INDEXED)
 def test_s2_flags_pii_with_an_explicit_index_strategy(idx):
-    assert len(check_s2(fx.build_index_pii_ctx(idx))) == 1
+    assert len(run_rule(fx.build_index_pii_ctx(idx), "S2")) == 1
 
 
 @pytest.mark.parametrize("idx", NOT_INDEXED)
 def test_s2_does_not_flag_pii_with_indexing_suppressed(idx):
     """DONT_INDEX is the mitigation, not the risk — and the only value we emit."""
-    assert check_s2(fx.build_index_pii_ctx(idx)) == []
+    assert run_rule(fx.build_index_pii_ctx(idx), "S2") == []
 
 
 # ── P9: indexed ATTRIBUTE id columns ───────────────────────────────────────
 
 def test_p9_flags_a_default_indexed_id_column():
-    assert len(check_p9(fx.index_id_default_indexed())) == 1
+    assert len(run_rule(fx.index_id_default_indexed(), "P9")) == 1
 
 
 def test_p9_does_not_flag_an_id_column_with_indexing_suppressed():
-    assert check_p9(fx.index_id_not_indexed()) == []
+    assert run_rule(fx.index_id_not_indexed(), "P9") == []
 
 
 def test_p9_ignores_a_measure():
-    assert check_p9(fx.index_id_measure()) == []
+    assert run_rule(fx.index_id_measure(), "P9") == []
 
 
 # ── P11: indexed-column count on a Spotter model ───────────────────────────
 
 def test_p11_counts_default_indexed_columns():
-    findings = check_p11(fx.index_spotter_31_default())
+    findings = run_rule(fx.index_spotter_31_default(), "P11")
     assert len(findings) == 1 and findings[0].metric == 31
 
 
 def test_p11_does_not_count_dont_index_columns():
     """31 suppressed columns are 0 indexed columns, not 31."""
-    assert check_p11(fx.index_spotter_31_not_indexed()) == []
+    assert run_rule(fx.index_spotter_31_not_indexed(), "P11") == []
 
 
 def test_p11_counts_a_mixed_model_correctly():
-    findings = check_p11(fx.index_spotter_mixed())
+    findings = run_rule(fx.index_spotter_mixed(), "P11")
     assert len(findings) == 1 and findings[0].metric == 31

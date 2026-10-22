@@ -13,14 +13,14 @@ no `name` key — none of the 493 joins in the 2026-07-30 census has one — so
 a finding was about.
 """
 import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 from ts_cli.audit import rules
-from ts_cli.audit.checks_data import check_d6, check_d10
 
 
 def _aliased_model():
     """One physical table joined twice, the second under an alias (the model document
-    of the named builder audit_rule_fixtures.data_model_aliased_role_playing, so the D
-    catalog rules' equivalence test runs over it)."""
+    of the named builder audit_rule_fixtures.data_model_aliased_role_playing, whose legacy D
+    answers test_audit_pinned_findings.py pins)."""
     return fx.data_model_aliased_role_playing().models[0]
 
 
@@ -43,7 +43,7 @@ def test_table_role_resolves_an_aliased_table():
 # ── D10 must not call a populated aliased table a zero-column leaf ─────────
 
 def test_d10_does_not_call_an_aliased_table_a_zero_column_leaf():
-    findings = check_d10(fx.data_model_aliased_role_playing())
+    findings = run_rule(fx.data_model_aliased_role_playing(), "D10")
     leaf = [f for f in findings if "leaf" in f.detail.lower() and "SHIP_TO" in f.detail]
     assert leaf == [], f"SHIP_TO has three columns: {[f.detail for f in findings]}"
 
@@ -52,7 +52,7 @@ def test_d6_sees_the_columns_of_an_aliased_table():
     """Not asserting a finding — asserting the table is no longer 'unknown'."""
     m = _aliased_model()["model"]
     assert rules.table_role(m["columns"], "SHIP_TO") != "unknown"
-    check_d6(fx.data_model_aliased_role_playing())  # must not raise
+    run_rule(fx.data_model_aliased_role_playing(), "D6")  # must not raise
 
 
 # ── a join finding must identify its join ──────────────────────────────────
@@ -74,8 +74,7 @@ def test_join_label_uses_the_alias_side():
 
 def test_a_join_finding_is_not_anonymous():
     """D3 flags an OUTER join; the report must say which one."""
-    from ts_cli.audit.checks_data import check_d3
-    findings = check_d3(fx.data_model_anonymous_outer_join())
+    findings = run_rule(fx.data_model_anonymous_outer_join(), "D3")
     assert findings
     assert all(f.object_name for f in findings), "a join finding must name its join"
     assert "ORDERS" in findings[0].object_name and "RETURNS" in findings[0].object_name
@@ -86,14 +85,12 @@ def test_a_join_finding_is_not_anonymous():
 def test_s2_sees_table_rls_through_an_alias():
     """A role-playing dimension with RLS must not be reported as unprotected."""
     import audit_rule_fixtures as fx
-    from ts_cli.audit.checks_security import check_s2
-    findings = check_s2(fx.sec_alias_table_with_rls())
+    findings = run_rule(fx.sec_alias_table_with_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].severity == "INFO", "RLS is present — this is not a HIGH"
 
 
 def test_s2_still_reports_a_table_with_no_rls():
     import audit_rule_fixtures as fx
-    from ts_cli.audit.checks_security import check_s2
-    findings = check_s2(fx.sec_alias_table_without_rls())
+    findings = run_rule(fx.sec_alias_table_without_rls(), "S2")
     assert len(findings) == 1 and findings[0].severity == "HIGH"

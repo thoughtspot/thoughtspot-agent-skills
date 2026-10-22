@@ -1,78 +1,77 @@
-"""The legacy A-checks (checks_ai.py). Their inputs are named builders in
-audit_rule_fixtures (ai.py), so the A catalog rules' equivalence test runs over exactly
-these contexts."""
+"""The A rules (rules/ai.yaml), as the legacy A-check tests (checks_ai.py, deleted in
+Task 12b) exercised them, now through `run_rule`. Their inputs are named builders in
+audit_rule_fixtures (ai.py), whose legacy answers test_audit_pinned_findings.py pins.
+
+The legacy checks read the profile from `ctx.assessment` (default "general"; the
+`build_tml_ctx` inputs are built under "spotter"); `run_rule` takes it as an argument,
+so each call below names the profile its legacy test ran under."""
 import audit_rule_fixtures as fx
-from ts_cli.audit.checks_ai import check_a1, check_a2, check_a3, check_a4, check_a5, check_a6, ALL_CHECKS
+from audit_run_rule import active_rule_ids, catalog, run_rule
 from ts_cli.audit.context import make_context
 
 
-def _under(profile, ctx):
-    ctx.assessment = profile
-    return ctx
-
-
 def test_a1_flags_low_coverage():
-    findings = check_a1(_under("spotter", fx.ai_model_one_of_three_described()))
+    findings = run_rule(fx.ai_model_one_of_three_described(), "A1", "spotter")
     assert len(findings) == 1
     assert findings[0].severity == "HIGH"
     assert findings[0].check_id == "A1"
 
 
 def test_a1_passes_high_coverage():
-    assert check_a1(fx.ai_model_all_described()) == []
+    assert run_rule(fx.ai_model_all_described(), "A1") == []
 
 
 def test_a1_empty_columns():
-    assert check_a1(fx.ai_model_without_columns()) == []
+    assert run_rule(fx.ai_model_without_columns(), "A1") == []
 
 
 def test_a2_flags_low_coverage():
-    findings = check_a2(_under("spotter", fx.ai_model_one_of_three_with_synonyms()))
+    findings = run_rule(fx.ai_model_one_of_three_with_synonyms(), "A2", "spotter")
     assert len(findings) == 1
     assert findings[0].check_id == "A2"
 
 
 def test_a2_passes_high_coverage():
-    assert check_a2(fx.ai_model_all_with_synonyms()) == []
+    assert run_rule(fx.ai_model_all_with_synonyms(), "A2") == []
 
 
 def test_a3_flags_missing_instructions():
-    findings = check_a3(_under("spotter", fx.ai_model_uncoached()))
+    findings = run_rule(fx.ai_model_uncoached(), "A3", "spotter")
     assert len(findings) == 1
     assert findings[0].severity == "HIGH"
 
 
 def test_a3_passes_with_instructions():
-    assert check_a3(fx.ai_model_coached()) == []
+    assert run_rule(fx.ai_model_coached(), "A3") == []
 
 
 def test_a3_skips_model_when_fetch_failed():
-    assert check_a3(fx.ai_model_instructions_not_fetched()) == []
+    assert run_rule(fx.ai_model_instructions_not_fetched(), "A3") == []
 
 
 def test_a4_flags_missing_description():
-    findings = check_a4(fx.ai_model_without_description())
+    findings = run_rule(fx.ai_model_without_description(), "A4")
     assert len(findings) == 1
     assert findings[0].severity == "MEDIUM"
 
 
 def test_a4_passes_with_description():
-    assert check_a4(fx.ai_model_described()) == []
+    assert run_rule(fx.ai_model_described(), "A4") == []
 
 
 def test_a5_flags_not_ready():
-    findings = check_a5(fx.ai_model_bare_columns())
+    findings = run_rule(fx.ai_model_bare_columns(), "A5")
     assert len(findings) == 1
     assert findings[0].check_id == "A5"
 
 
 def test_a5_passes_ready():
-    findings = check_a5(fx.ai_model_ready())
+    findings = run_rule(fx.ai_model_ready(), "A5")
     assert findings == [] or findings[0].severity == "INFO"
 
 
 def test_all_checks_has_six_entries():
-    assert len(ALL_CHECKS) == 6
+    assert len(active_rule_ids("A")) == 6
 
 
 # --- Columns written as exported Model TML writes them -----------------------------
@@ -84,63 +83,64 @@ def test_all_checks_has_six_entries():
 
 class TestA6MeasureAiContext:
     def test_full_coverage_is_clean(self):
-        assert check_a6(fx.tml_measures_full_ai_context()) == []
+        assert run_rule(fx.tml_measures_full_ai_context(), "A6", "spotter") == []
 
     def test_no_coverage_is_high_and_names_the_measures(self):
-        f = check_a6(fx.tml_measures_no_ai_context())
+        f = run_rule(fx.tml_measures_no_ai_context(), "A6", "spotter")
         assert len(f) == 1 and f[0].check_id == "A6" and f[0].severity == "HIGH"
         assert "0/2 measures" in f[0].detail and "Revenue" in f[0].detail and "Qty" in f[0].detail
 
     def test_partial_coverage_is_medium(self):
-        f = check_a6(fx.tml_measures_partial_ai_context())
+        f = run_rule(fx.tml_measures_partial_ai_context(), "A6", "spotter")
         assert f[0].severity == "MEDIUM" and f[0].metric == 60.0
 
     def test_attributes_are_not_counted(self):
         """An ID or label column with no ai_context is often correct (the coach schema:
         a surrogate key carries none), so attributes never lower the score."""
-        assert check_a6(fx.tml_measure_and_ten_ids()) == []
+        assert run_rule(fx.tml_measure_and_ten_ids(), "A6", "spotter") == []
 
     def test_hidden_measures_are_not_counted(self):
-        assert check_a6(fx.tml_hidden_measure_uncovered()) == []
+        assert run_rule(fx.tml_hidden_measure_uncovered(), "A6", "spotter") == []
 
     def test_blank_ai_context_counts_as_missing(self):
-        f = check_a6(fx.tml_measure_blank_ai_context())
+        f = run_rule(fx.tml_measure_blank_ai_context(), "A6", "spotter")
         assert len(f) == 1
 
     def test_model_without_measures_is_skipped(self):
-        assert check_a6(fx.tml_attribute_only()) == []
+        assert run_rule(fx.tml_attribute_only(), "A6", "spotter") == []
 
     def test_long_missing_list_is_truncated(self):
-        f = check_a6(fx.tml_eight_measures_uncovered())
+        f = run_rule(fx.tml_eight_measures_uncovered(), "A6", "spotter")
         assert "(+3 more)" in f[0].detail
 
 
 class TestSynonymsUnderProperties:
     def test_a2_reads_properties_synonyms(self):
-        assert check_a2(fx.tml_four_columns_with_synonyms()) == []
+        assert run_rule(fx.tml_four_columns_with_synonyms(), "A2", "spotter") == []
 
     def test_a2_still_flags_missing_synonyms(self):
-        f = check_a2(fx.tml_four_columns_without_synonyms())
+        f = run_rule(fx.tml_four_columns_without_synonyms(), "A2", "spotter")
         assert len(f) == 1 and "0/4" in f[0].detail
 
     def test_a2_root_synonyms_still_count(self):
-        assert check_a2(fx.tml_root_synonyms_column()) == []
+        assert run_rule(fx.tml_root_synonyms_column(), "A2", "spotter") == []
 
     def test_a5_counts_properties_synonyms(self):
         """Same Model, synonyms present vs absent: the readiness score must differ by
         the synonym weight (15 points at 100% coverage)."""
-        with_syn = check_a5(fx.tml_described_column_with_synonyms())
-        without = check_a5(fx.tml_described_column())
+        with_syn = run_rule(fx.tml_described_column_with_synonyms(), "A5", "spotter")
+        without = run_rule(fx.tml_described_column(), "A5", "spotter")
         assert with_syn and without
         assert round(with_syn[0].metric - without[0].metric) == 15
 
 
 # --- Assessment profiles (BL-399) ---------------------------------------------------
 # One row per (check, profile): the pass mark, and HIGH below half of it. The table lives
-# in ts_cli/audit/assessment.py; these pin each profile's promise from SKILL Step 2b.
+# in the catalog (profiles.yaml and each A rule's `profiles:` block; assessment.py until
+# Task 12b); these pin each profile's promise from SKILL Step 2b.
 import pytest  # noqa: E402
 
-from ts_cli.audit import assessment  # noqa: E402
+from ts_cli.audit.engine.run import resolve_profile  # noqa: E402
 
 
 @pytest.mark.parametrize("profile,n_described,expected", [
@@ -150,7 +150,7 @@ from ts_cli.audit import assessment  # noqa: E402
     ("general", 24, "HIGH"),
 ])
 def test_a1_by_profile(profile, n_described, expected):
-    f = check_a1(_under(profile, fx.build_described_columns(n_described)))
+    f = run_rule(fx.build_described_columns(n_described), "A1", profile)
     assert (f[0].severity if f else None) == expected
 
 
@@ -159,15 +159,15 @@ def test_a1_by_profile(profile, n_described, expected):
     ("general", 25, None), ("general", 24, "MEDIUM"), ("general", 12, "HIGH"),
 ])
 def test_a2_by_profile(profile, n_syn, expected):
-    f = check_a2(_under(profile, fx.build_synonym_columns(n_syn)))
+    f = run_rule(fx.build_synonym_columns(n_syn), "A2", profile)
     assert (f[0].severity if f else None) == expected
 
 
 @pytest.mark.parametrize("profile,expected", [("spotter", "HIGH"), ("general", "MEDIUM")])
 def test_a3_a4_presence_by_profile(profile, expected):
-    ctx = _under(profile, fx.ai_model_uncoached())
-    assert [f.severity for f in check_a3(ctx)] == [expected]
-    assert [f.severity for f in check_a4(ctx)] == [expected]
+    ctx = fx.ai_model_uncoached()
+    assert [f.severity for f in run_rule(ctx, "A3", profile)] == [expected]
+    assert [f.severity for f in run_rule(ctx, "A4", profile)] == [expected]
 
 
 @pytest.mark.parametrize("profile,covered,expected", [
@@ -177,30 +177,30 @@ def test_a3_a4_presence_by_profile(profile, expected):
 def test_a6_by_profile(profile, covered, expected):
     """AI context is required for Spotter-ready (graded) and recommended for General
     (a gap is LOW, however deep)."""
-    f = check_a6(_under(profile, fx.build_tml_measures(covered)))
+    f = run_rule(fx.build_tml_measures(covered), "A6", profile)
     assert (f[0].severity if f else None) == expected
 
 
 def test_default_profile_is_general():
-    assert make_context().assessment == "general" == assessment.DEFAULT
+    assert make_context().assessment == "general" == catalog().default_profile()
 
 
 def test_threshold_payload_carries_the_profile_pass_mark():
-    f = check_a1(_under("spotter", fx.build_described_columns(10)))
+    f = run_rule(fx.build_described_columns(10), "A1", "spotter")
     assert f[0].threshold == {"green": 95, "yellow": 47.5, "assessment": "Spotter-ready"}
-    f = check_a6(_under("general", fx.build_tml_measures(0, 1)))
+    f = run_rule(fx.build_tml_measures(0, 1), "A6", "general")
     assert f[0].threshold == {"green": 80, "assessment": "General"}
 
 
 @pytest.mark.parametrize("name,key", [("spotter", "spotter"), ("Spotter-ready", "spotter"),
                                       ("GENERAL", "general"), (None, "general")])
 def test_normalise_accepts_the_skill_labels(name, key):
-    assert assessment.normalise(name) == key
+    assert resolve_profile(catalog(), name) == key
 
 
 def test_unknown_profile_is_refused():
     with pytest.raises(ValueError):
-        assessment.normalise("strict")
+        resolve_profile(catalog(), "strict")
 
 
 def test_cli_refuses_an_unknown_assessment():

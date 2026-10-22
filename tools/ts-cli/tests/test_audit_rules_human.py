@@ -1,6 +1,6 @@
 """The H (Human Readiness) rules' engine parts: the derived fields (engine/
 fields_human.py), the code rules (engine/code_rules_human.py) and H6, the retired rule
-with no logic. Equivalence with checks_human.py is tested in test_audit_equivalence.py;
+with no logic. The H rules' legacy answers are pinned in test_audit_pinned_findings.py;
 the rules' catalog examples in test_audit_rule_examples.py."""
 from __future__ import annotations
 

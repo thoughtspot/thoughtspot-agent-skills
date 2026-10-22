@@ -114,7 +114,7 @@ def test_model_tml_names_match_primary_exactly_and_spotter_enabled():
     # (`props["spotter_config"] = {"is_spotter_enabled": ...}`) — the flag lives
     # nested under `properties.spotter_config`, never flat under `properties`.
     # A flat `is_spotter_enabled` would be inert: nothing else in this repo
-    # (e.g. audit/checks_perf.py's spotter-enabled check) reads that path.
+    # (e.g. the audit's P11 rule, rules/perf.yaml) reads that path.
     assert m["properties"]["spotter_config"]["is_spotter_enabled"] is True
     col_names = [c["name"] for c in m["columns"]]
     assert "Category" in col_names and "Order Date" in col_names

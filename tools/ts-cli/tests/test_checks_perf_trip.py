@@ -33,13 +33,12 @@ from __future__ import annotations
 import pytest
 
 import audit_rule_fixtures as fx
-from ts_cli.audit.checks_perf import (
-    check_p2, check_p3, check_p5, check_p7, check_p9, check_p11,
-    check_p14, check_p15, check_p17,
-)
+from audit_run_rule import run_rule
 
 # Every context below is a named builder in audit_rule_fixtures (perf.py and rls.py),
-# so the P catalog rules' equivalence test runs over exactly these inputs.
+# whose legacy answers test_audit_pinned_findings.py pins. The `checks_perf.py:N`
+# references below are to the legacy module (deleted in Task 12b), which the P catalog
+# rules reproduce.
 
 
 # --------------------------------------------------------------------------
@@ -49,7 +48,7 @@ from ts_cli.audit.checks_perf import (
 # aggregation. Six trips MEDIUM, eleven trips HIGH.
 
 def test_p2_trips_on_six_unaggregated_formulas():
-    findings = check_p2(fx.perf_six_scalar_formulas())
+    findings = run_rule(fx.perf_six_scalar_formulas(), "P2")
     assert len(findings) == 1
     assert findings[0].check_id == "P2"
     assert findings[0].severity == "MEDIUM"
@@ -57,16 +56,16 @@ def test_p2_trips_on_six_unaggregated_formulas():
 
 
 def test_p2_escalates_past_ten():
-    assert check_p2(fx.perf_eleven_scalar_formulas())[0].severity == "HIGH"
+    assert run_rule(fx.perf_eleven_scalar_formulas(), "P2")[0].severity == "HIGH"
 
 
 def test_p2_clean_when_formulas_are_aggregated():
     """Same six formulas, each surfaced by an aggregating column: nothing to flag."""
-    assert check_p2(fx.perf_six_aggregated_formulas()) == []
+    assert run_rule(fx.perf_six_aggregated_formulas(), "P2") == []
 
 
 def test_p2_clean_under_threshold():
-    assert check_p2(fx.perf_five_scalar_formulas()) == []
+    assert run_rule(fx.perf_five_scalar_formulas(), "P2") == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -78,9 +77,9 @@ def test_p2_clean_under_threshold():
     "query time in TS engine)', and six genuinely row-level ones are excluded "
     "whenever their column declares an aggregation. Reported, not fixed."))
 def test_p2_metric_counts_the_wrong_formulas():
-    assert check_p2(fx.perf_aggregate_expr_formulas()) == [], \
+    assert run_rule(fx.perf_aggregate_expr_formulas(), "P2") == [], \
         "sum ( ... ) is not a scalar formula"
-    assert len(check_p2(fx.perf_six_aggregated_formulas())) == 1, \
+    assert len(run_rule(fx.perf_six_aggregated_formulas(), "P2")) == 1, \
         "[A] - [B] is scalar whether or not the column rolls it up"
 
 
@@ -91,7 +90,7 @@ def test_p2_metric_counts_the_wrong_formulas():
 # applied (mandatory)." That absence is what P3 reports.
 
 def test_p3_trips_on_a_filter_without_apply_on_tables():
-    findings = check_p3(fx.perf_filters_one_mandatory())
+    findings = run_rule(fx.perf_filters_one_mandatory(), "P3")
     assert len(findings) == 1
     assert findings[0].check_id == "P3"
     assert findings[0].metric == 1
@@ -99,11 +98,11 @@ def test_p3_trips_on_a_filter_without_apply_on_tables():
 
 
 def test_p3_clean_when_every_filter_is_table_scoped():
-    assert check_p3(fx.perf_filters_all_scoped()) == []
+    assert run_rule(fx.perf_filters_all_scoped(), "P3") == []
 
 
 def test_p3_clean_when_model_has_no_filters():
-    assert check_p3(fx.perf_model_without_filters()) == []
+    assert run_rule(fx.perf_model_without_filters(), "P3") == []
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +112,7 @@ def test_p3_clean_when_model_has_no_filters():
 # prefix matches its name.
 
 def test_p5_trips_on_an_unconstrained_fact_model():
-    findings = check_p5(fx.perf_fact_model_unconstrained())
+    findings = run_rule(fx.perf_fact_model_unconstrained(), "P5")
     assert len(findings) == 1
     assert findings[0].check_id == "P5"
     assert "ORDERS" in findings[0].detail
@@ -121,21 +120,21 @@ def test_p5_trips_on_an_unconstrained_fact_model():
 
 def test_p5_clean_when_no_table_looks_like_a_fact():
     """Three measures is not >3, so no fact table, so nothing to constrain."""
-    assert check_p5(fx.perf_thin_fact_model()) == []
+    assert run_rule(fx.perf_thin_fact_model(), "P5") == []
 
 
 def test_p5_clean_when_the_model_has_no_tables():
-    assert check_p5(fx.perf_fact_columns_without_tables()) == []
+    assert run_rule(fx.perf_fact_columns_without_tables(), "P5") == []
 
 
 def test_p5_a_real_date_constraint_should_suppress_the_finding():
-    assert check_p5(fx.perf_fact_model_date_window()) == []
+    assert run_rule(fx.perf_fact_model_date_window(), "P5") == []
 
 
 def test_p5_suppression_only_works_on_a_shape_no_export_produces():
     """Pinning the above: flatten the mapping by hand and the guard starts working."""
     # the constraint list without its mapping, which TML never is
-    assert check_p5(fx.perf_fact_model_flattened_window()) == []
+    assert run_rule(fx.perf_fact_model_flattened_window(), "P5") == []
 
 
 # --------------------------------------------------------------------------
@@ -145,7 +144,7 @@ def test_p5_suppression_only_works_on_a_shape_no_export_produces():
 # entry. A->B->C->D->E is depth 4.
 
 def test_p7_trips_on_a_four_hop_chain():
-    findings = check_p7(fx.perf_join_chain_four_hops())
+    findings = run_rule(fx.perf_join_chain_four_hops(), "P7")
     assert len(findings) == 1
     assert findings[0].check_id == "P7"
     assert findings[0].severity == "MEDIUM"
@@ -153,18 +152,18 @@ def test_p7_trips_on_a_four_hop_chain():
 
 
 def test_p7_escalates_past_five_hops():
-    findings = check_p7(fx.perf_join_chain_six_hops())
+    findings = run_rule(fx.perf_join_chain_six_hops(), "P7")
     assert findings[0].severity == "HIGH"
     assert findings[0].metric == 6
 
 
 def test_p7_clean_on_a_star_schema():
     """One fact joined to two dimensions is depth 1 — the shape we want people to use."""
-    assert check_p7(fx.perf_star_schema()) == []
+    assert run_rule(fx.perf_star_schema(), "P7") == []
 
 
 def test_p7_clean_when_the_model_has_no_joins():
-    assert check_p7(fx.perf_single_table()) == []
+    assert run_rule(fx.perf_single_table(), "P7") == []
 
 
 # --------------------------------------------------------------------------
@@ -174,7 +173,7 @@ def test_p7_clean_when_the_model_has_no_joins():
 # matches a model whose column display names are the physical names.
 
 def test_p9_trips_on_an_indexed_id_attribute():
-    findings = check_p9(fx.perf_indexed_id_attribute())
+    findings = run_rule(fx.perf_indexed_id_attribute(), "P9")
     assert len(findings) == 1
     assert findings[0].check_id == "P9"
     assert findings[0].object_name == "CUSTOMER_ID"
@@ -182,15 +181,15 @@ def test_p9_trips_on_an_indexed_id_attribute():
 
 @pytest.mark.parametrize("name", fx.P9_ID_SUFFIXES)
 def test_p9_trips_on_every_id_suffix_in_the_pattern(name):
-    assert len(check_p9(fx.build_id_column(name, "PREFIX_ONLY"))) == 1
+    assert len(run_rule(fx.build_id_column(name, "PREFIX_ONLY"), "P9")) == 1
 
 
 def test_p9_clean_on_a_measure():
-    assert check_p9(fx.perf_id_measure()) == []
+    assert run_rule(fx.perf_id_measure(), "P9") == []
 
 
 def test_p9_clean_on_a_non_id_attribute():
-    assert check_p9(fx.perf_non_id_attribute()) == []
+    assert run_rule(fx.perf_non_id_attribute(), "P9") == []
 
 
 def test_p9_misses_a_friendly_display_name():
@@ -200,14 +199,14 @@ def test_p9_misses_a_friendly_display_name():
     name. A model built with friendly names -- the common case for anything a
     converter produced -- never matches, however the column is indexed.
     """
-    assert check_p9(fx.perf_friendly_id_name()) == []
+    assert run_rule(fx.perf_friendly_id_name(), "P9") == []
 
 
 def test_p9_index_type_sense_is_inverted():
     """`index_type` absent means indexed; P9 used to test presence (BL-299, fixed)."""
-    assert check_p9(fx.perf_id_attribute_not_indexed()) == [], \
+    assert run_rule(fx.perf_id_attribute_not_indexed(), "P9") == [], \
         "DONT_INDEX means NOT indexed"
-    assert len(check_p9(fx.perf_id_attribute_default_indexed())) == 1, \
+    assert len(run_rule(fx.perf_id_attribute_default_indexed(), "P9")) == 1, \
         "an omitted index_type IS the indexed default"
 
 
@@ -216,7 +215,7 @@ def test_p9_index_type_sense_is_inverted():
 # --------------------------------------------------------------------------
 
 def test_p11_trips_past_thirty_indexed_columns():
-    findings = check_p11(fx.perf_spotter_31_indexed())
+    findings = run_rule(fx.perf_spotter_31_indexed(), "P11")
     assert len(findings) == 1
     assert findings[0].check_id == "P11"
     assert findings[0].severity == "INFO"
@@ -224,22 +223,22 @@ def test_p11_trips_past_thirty_indexed_columns():
 
 
 def test_p11_clean_at_the_threshold():
-    assert check_p11(fx.perf_spotter_30_indexed()) == []
+    assert run_rule(fx.perf_spotter_30_indexed(), "P11") == []
 
 
 def test_p11_clean_when_spotter_is_disabled():
-    assert check_p11(fx.perf_spotter_disabled_31_indexed()) == []
+    assert run_rule(fx.perf_spotter_disabled_31_indexed(), "P11") == []
 
 
 def test_p11_clean_when_spotter_config_is_absent():
-    assert check_p11(fx.perf_spotter_config_absent()) == []
+    assert run_rule(fx.perf_spotter_config_absent(), "P11") == []
 
 
 def test_p11_index_type_sense_is_inverted():
     """P11 counted columns carrying the key, not indexed ones (BL-299, fixed)."""
-    assert check_p11(fx.perf_spotter_31_not_indexed()) == [], \
+    assert run_rule(fx.perf_spotter_31_not_indexed(), "P11") == [], \
         "DONT_INDEX means NOT indexed"
-    assert len(check_p11(fx.perf_spotter_31_default_indexed())) == 1, \
+    assert len(run_rule(fx.perf_spotter_31_default_indexed(), "P11")) == 1, \
         "an omitted index_type IS the indexed default"
 
 
@@ -250,7 +249,7 @@ def test_p11_index_type_sense_is_inverted():
 # schema). Wrapping either side in upper()/trim()/cast() is what P14 reports.
 
 def test_p14_trips_on_a_function_wrapped_rls_expression():
-    findings = check_p14(fx.perf_rls_function_rule())
+    findings = run_rule(fx.perf_rls_function_rule(), "P14")
     assert len(findings) == 1
     assert findings[0].check_id == "P14"
     assert findings[0].object_name == "BANK_EMPLOYEES"
@@ -259,15 +258,15 @@ def test_p14_trips_on_a_function_wrapped_rls_expression():
 
 @pytest.mark.parametrize("expr", fx.P14_FUNCTION_EXPRS)
 def test_p14_trips_on_each_function_in_the_pattern(expr):
-    assert len(check_p14(fx.build_rls_expr(expr))) == 1
+    assert len(run_rule(fx.build_rls_expr(expr), "P14")) == 1
 
 
 def test_p14_clean_on_a_bare_column_comparison():
-    assert check_p14(fx.perf_rls_plain_rule()) == []
+    assert run_rule(fx.perf_rls_plain_rule(), "P14") == []
 
 
 def test_p14_clean_when_the_table_has_no_rls():
-    assert check_p14(fx.perf_table_without_rls()) == []
+    assert run_rule(fx.perf_table_without_rls(), "P14") == []
 
 
 # --------------------------------------------------------------------------
@@ -279,22 +278,22 @@ def test_p14_clean_when_the_table_has_no_rls():
 # tests below pin that: a model-side data_type must not influence the result.
 
 def test_p15_trips_on_an_uncased_varchar_rls_column():
-    findings = check_p15(fx.perf_rls_plain_rule())
+    findings = run_rule(fx.perf_rls_plain_rule(), "P15")
     assert len(findings) == 1
     assert findings[0].check_id == "P15"
     assert findings[0].object_name == "COUNTRY"
 
 
 def test_p15_clean_when_value_casing_is_set():
-    assert check_p15(fx.perf_rls_cased_varchar()) == []
+    assert run_rule(fx.perf_rls_cased_varchar(), "P15") == []
 
 
 def test_p15_clean_on_an_integer_rls_column():
-    assert check_p15(fx.perf_rls_integer_column()) == []
+    assert run_rule(fx.perf_rls_integer_column(), "P15") == []
 
 
 def test_p15_clean_when_the_table_has_no_rls():
-    assert check_p15(fx.perf_table_without_rls()) == []
+    assert run_rule(fx.perf_table_without_rls(), "P15") == []
 
 
 def test_p15_reads_the_type_off_the_table_not_a_model():
@@ -305,7 +304,7 @@ def test_p15_reads_the_type_off_the_table_not_a_model():
     `ctx.tables`, so it reads the key on the object that actually carries it.
     """
     # the model column claims INT64 — a lie, and ignored
-    assert len(check_p15(fx.perf_rls_type_on_model_ignored())) == 1, \
+    assert len(run_rule(fx.perf_rls_type_on_model_ignored(), "P15")) == 1, \
         "the TABLE's VARCHAR is what counts"
 
 
@@ -317,7 +316,7 @@ def test_p15_misses_a_column_whose_display_name_differs_from_the_physical_one():
     schema requires `db_column_name` precisely because the two can differ; when
     they do, the lookup misses and the column is silently passed.
     """
-    assert check_p15(fx.perf_rls_friendly_column_name()) == []
+    assert run_rule(fx.perf_rls_friendly_column_name(), "P15") == []
 
 
 # --------------------------------------------------------------------------
@@ -338,7 +337,7 @@ def test_p15_misses_a_column_whose_display_name_differs_from_the_physical_one():
 
 def test_p17_returns_nothing_for_a_real_exported_cross_reference():
     """Minimal reproduction against TML copied out of a live export."""
-    assert check_p17(fx.perf_formulas_real_export()) == []
+    assert run_rule(fx.perf_formulas_real_export(), "P17") == []
 
 
 def test_p17_only_fires_on_the_shape_that_fails_import():
@@ -348,12 +347,12 @@ def test_p17_only_fires_on_the_shape_that_fails_import():
     input shape it recognises is the shape ThoughtSpot rejects, so no exported
     model can ever carry it.
     """
-    findings = check_p17(fx.perf_display_ref_chain())
+    findings = run_rule(fx.perf_display_ref_chain(), "P17")
     assert [(f.object_name, f.metric) for f in findings] == [("A", 4), ("B", 3)]
 
 
 def test_p17_should_see_the_chain_a_real_model_actually_carries():
-    findings = check_p17(fx.perf_id_ref_chain())
+    findings = run_rule(fx.perf_id_ref_chain(), "P17")
     assert [(f.object_name, f.metric) for f in findings] == [("A", 4), ("B", 3)]
 
 # NOTE: the H7/P17 defect-characterization tests that lived here were removed

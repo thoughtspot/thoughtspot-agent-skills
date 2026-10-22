@@ -26,13 +26,14 @@ TML shapes follow the repo's own schemas, consulted for this file:
 import pytest
 
 import audit_rule_fixtures as fx
-from ts_cli.audit.checks_perf import check_p14, check_p15
-from ts_cli.audit.checks_security import check_s2, check_s3, check_s8, check_s9
+from audit_run_rule import run_rule
 from ts_cli.audit.findings import CHECK_META
 
 # Every context below is a named builder in audit_rule_fixtures (rls.py and
-# security.py), so the S catalog rules' equivalence test — and the P one, for the
-# P14/P15 clones — runs over exactly these inputs.
+# security.py), whose legacy S answers — and P answers, for the P14/P15 clones —
+# test_audit_pinned_findings.py pins. The `checks_security.py:N` / `checks_perf.py:N`
+# references below are to the legacy modules (deleted in Task 12b), which the catalog
+# rules reproduce.
 
 
 # --------------------------------------------------------------------------
@@ -41,7 +42,7 @@ from ts_cli.audit.findings import CHECK_META
 
 def test_s2_trips_on_an_indexed_pii_column_with_no_table_rls():
     """First assertion ever made that S2 can return a Finding."""
-    findings = check_s2(fx.sec_pii_indexed_without_rls())
+    findings = run_rule(fx.sec_pii_indexed_without_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].check_id == "S2"
     assert findings[0].severity == "HIGH"
@@ -49,7 +50,7 @@ def test_s2_trips_on_an_indexed_pii_column_with_no_table_rls():
 
 
 def test_s2_downgrades_to_info_when_the_owning_table_has_rls():
-    findings = check_s2(fx.sec_pii_indexed_with_rls())
+    findings = run_rule(fx.sec_pii_indexed_with_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].severity == "INFO"
     assert "table has RLS" in findings[0].detail
@@ -57,19 +58,19 @@ def test_s2_downgrades_to_info_when_the_owning_table_has_rls():
 
 def test_s2_clean_model_returns_nothing():
     """Indexed, but nothing that reads as PII."""
-    assert check_s2(fx.sec_indexed_without_pii()) == []
+    assert run_rule(fx.sec_indexed_without_pii(), "S2") == []
 
 
 def test_s2_should_flag_a_default_indexed_pii_column():
     """A PII column with no `index_type` is indexed by DEFAULT — the risk S2
     exists to report, and the shape it used to skip (BL-299, fixed)."""
-    assert len(check_s2(fx.sec_pii_default_indexed())) == 1
+    assert len(run_rule(fx.sec_pii_default_indexed(), "S2")) == 1
 
 
 def test_s2_should_not_flag_a_dont_index_pii_column():
     """`DONT_INDEX` is the mitigation. S2 used to report it as the risk, and it
     is the only value this repo writes (BL-299, fixed)."""
-    assert check_s2(fx.sec_pii_not_indexed()) == []
+    assert run_rule(fx.sec_pii_not_indexed(), "S2") == []
 
 
 # NOTE: the S2 alias-blindness characterization test was removed when BL-305
@@ -81,7 +82,7 @@ def test_s2_should_not_flag_a_dont_index_pii_column():
 # --------------------------------------------------------------------------
 
 def test_s3_trips_on_pii_with_no_masking_formula():
-    findings = check_s3(fx.sec_pii_unmasked())
+    findings = run_rule(fx.sec_pii_unmasked(), "S3")
     assert len(findings) == 1
     assert findings[0].check_id == "S3"
     assert findings[0].severity == "HIGH"
@@ -92,11 +93,11 @@ def test_s3_trips_on_pii_with_no_masking_formula():
 
 
 def test_s3_clean_model_returns_nothing():
-    assert check_s3(fx.sec_non_pii_columns()) == []
+    assert run_rule(fx.sec_non_pii_columns(), "S3") == []
 
 
 def test_s3_masking_formula_suppresses_the_finding():
-    assert check_s3(fx.sec_pii_masked()) == []
+    assert run_rule(fx.sec_pii_masked(), "S3") == []
 
 
 def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
@@ -107,7 +108,7 @@ def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
     column whose name is a substring of that same blob. Here the masking guards
     Salary and the email is projected raw — S3 still says nothing.
     """
-    assert check_s3(fx.sec_mask_elsewhere_raw_projection()) == [], \
+    assert run_rule(fx.sec_mask_elsewhere_raw_projection(), "S3") == [], \
         "the email is not masked, yet S3 is silent"
 
 
@@ -117,7 +118,7 @@ def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
 
 def test_s8_trips_on_a_varchar_rls_column():
     """Expr shape is the live example from thoughtspot-table-tml.md:129."""
-    findings = check_s8(fx.sec_rls_uncased_varchar())
+    findings = run_rule(fx.sec_rls_uncased_varchar(), "S8")
     assert len(findings) == 1
     assert findings[0].check_id == "S8"
     assert findings[0].severity == "MEDIUM"
@@ -134,16 +135,16 @@ def test_s8_reads_the_type_from_the_table_and_needs_no_model_at_all():
     and a lying type on a model column cannot influence it.
     """
     # a model column with no db_column_properties anywhere, beside the Table
-    assert len(check_s8(fx.sec_rls_varchar_beside_a_model())) == 1
-    assert len(check_s8(fx.sec_rls_uncased_varchar())) == 1  # no models at all
+    assert len(run_rule(fx.sec_rls_varchar_beside_a_model(), "S8")) == 1
+    assert len(run_rule(fx.sec_rls_uncased_varchar(), "S8")) == 1  # no models at all
 
 
 def test_s8_integer_rls_column_returns_nothing():
-    assert check_s8(fx.sec_rls_integer_column()) == []
+    assert run_rule(fx.sec_rls_integer_column(), "S8") == []
 
 
 def test_s8_table_without_rls_returns_nothing():
-    assert check_s8(fx.sec_table_without_rls()) == []
+    assert run_rule(fx.sec_table_without_rls(), "S8") == []
 
 
 def test_s8_unresolvable_ref_is_silently_treated_as_not_a_string():
@@ -155,7 +156,7 @@ def test_s8_unresolvable_ref_is_silently_treated_as_not_a_string():
     as "not a string" — the same hazard test_checks_varchar_join_keys.py:111
     guards for P6/D2.
     """
-    assert check_s8(fx.sec_rls_unresolved_ref()) == []
+    assert run_rule(fx.sec_rls_unresolved_ref(), "S8") == []
 
 
 def test_s8_is_p15_minus_the_value_casing_guard():
@@ -166,11 +167,11 @@ def test_s8_is_p15_minus_the_value_casing_guard():
     column.
     """
     ctx = fx.sec_rls_cased_varchar()
-    assert len(check_s8(ctx)) == 1
-    assert check_p15(ctx) == []
+    assert len(run_rule(ctx, "S8")) == 1
+    assert run_rule(ctx, "P15") == []
 
     uncased = fx.sec_rls_uncased_varchar()
-    assert len(check_s8(uncased)) == 1 and len(check_p15(uncased)) == 1
+    assert len(run_rule(uncased, "S8")) == 1 and len(run_rule(uncased, "P15")) == 1
 
 
 # --------------------------------------------------------------------------
@@ -179,7 +180,7 @@ def test_s8_is_p15_minus_the_value_casing_guard():
 
 @pytest.mark.parametrize("expr", fx.S9_TRIP_EXPRS)
 def test_s9_trips_on_a_function_in_the_rls_expression(expr):
-    findings = check_s9(fx.build_sec_rls_expr(expr))
+    findings = run_rule(fx.build_sec_rls_expr(expr), "S9")
     assert len(findings) == 1
     assert findings[0].check_id == "S9"
     assert findings[0].severity == "HIGH"
@@ -189,11 +190,11 @@ def test_s9_trips_on_a_function_in_the_rls_expression(expr):
 
 
 def test_s9_plain_comparison_returns_nothing():
-    assert check_s9(fx.sec_rls_uncased_varchar()) == []
+    assert run_rule(fx.sec_rls_uncased_varchar(), "S9") == []
 
 
 def test_s9_table_without_rls_returns_nothing():
-    assert check_s9(fx.sec_table_without_rls()) == []
+    assert run_rule(fx.sec_table_without_rls(), "S9") == []
 
 
 def test_s9_is_a_verbatim_clone_of_p14():
@@ -204,7 +205,7 @@ def test_s9_is_a_verbatim_clone_of_p14():
     (security) and once MEDIUM (performance).
     """
     ctx = fx.sec_rls_upper_function()
-    s9, p14 = check_s9(ctx), check_p14(ctx)
+    s9, p14 = run_rule(ctx, "S9"), run_rule(ctx, "P14")
     assert len(s9) == len(p14) == 1
     assert (s9[0].object_name, s9[0].object_guid) == (p14[0].object_name, p14[0].object_guid)
 
