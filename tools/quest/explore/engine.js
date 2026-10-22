@@ -256,8 +256,10 @@ var Quest = (typeof Quest === "object" && Quest) || {};
         while (owed >= STEP && n++ < 15) { step(STEP); owed -= STEP; }
         draw();
       } catch (e) { owed = 0; (game.onerror || (() => {}))(e); }   // no backlog of failed steps to replay
-      schedule();
+      if (!game.halted) schedule();
     };
+    // Stop the loop for good (a scripted run that has finished, so headless time isn't spent on frames).
+    game.halt = () => { game.halted = true; };
     const schedule = () => (timeouts || typeof requestAnimationFrame !== "function" ? setTimeout(tick, STEP) : requestAnimationFrame(tick));
 
     // A scene: the layers it draws, its sprites, the player's body and what blocks it.

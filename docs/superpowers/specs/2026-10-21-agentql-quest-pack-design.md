@@ -366,9 +366,9 @@ Dwarven Mines, about 2–3 minutes:
 1. You enter at the mine mouth. A **merchant** asks the business question and offers the three
    engines. The keyword path is blocked in this realm, as today: choosing it explains why and
    costs nothing.
-2. Deeper in, the **Wizard** writes the scroll (the AgentQL pane), and a gate opens.
-3. You carry it to the **Forge** at the end of the tunnel. The SQL pane appears and the
-   **dragon** wakes.
+2. Deeper in, the **Wizard** writes the scroll (the AgentQL pane).
+3. You carry it to the **Forge** in the forge hall. The SQL pane appears, the barred door east
+   opens, and behind it the **dragon** wakes.
 4. Each **scale** is a question from today's encounter, unchanged. Most highlight one or more SQL
    lines and ask who put them there; one is a choice. A right answer breaks a scale and plays the
    effect.
@@ -516,7 +516,7 @@ kept, and the character can be asked again.
    and "Leave for the world map", and Elder Wren says which way each realm's door lies.
 
 10. **The Mines, clearer:** asked for in play (the gate was hard to find, the Forge didn't stand
-    out, and the dragon had no picture). The map reads west to east to a torch-lit barred door;
+    out, and the foe looked like a red crab, not a dragon). The map reads west to east to a torch-lit barred door;
     the Forge and the dragon get their own frames, used in every realm.
 
 **Then:** you play it, and the remaining realms get maps.

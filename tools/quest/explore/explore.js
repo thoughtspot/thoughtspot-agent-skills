@@ -894,8 +894,9 @@
       await until(() => world && world.mapId === "overworld");
       besideDoor("the exit");
       log(`EXIT ${realmId}`);
+      game.halt();                           // done: headless Chrome needn't run frames to the end of its budget
       return steps;
     }
   };
-  if (SMOKE) Quest.explore.smoke(location.hash.slice(7)).catch(e => log(`ERROR smoke: ${e.message} @ ${String(e.stack || "").split("\n").slice(1, 3).join(" | ")}`));
+  if (SMOKE) Quest.explore.smoke(location.hash.slice(7)).catch(e => { log(`ERROR smoke: ${e.message} @ ${String(e.stack || "").split("\n").slice(1, 3).join(" | ")}`); game.halt(); });
 })();

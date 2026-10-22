@@ -29,10 +29,10 @@ GUARDS = [   # (frame, from Tiny Dungeon frame, how it is recoloured)
 
 # Drawn here, pixel by pixel: the left half of each, mirrored. Letters are colours; "." is clear.
 DRAWN = {
-    138: ({"a": (63, 38, 49), "b": (232, 69, 55), "c": (255, 112, 109), "d": (118, 59, 54), "e": (247, 194, 130),
-           "w": (255, 255, 255)},
-          ["........", ".aa.....", "adda..e.", "addda.ac", "adddaaab", "adddabbb", "addabwab", "addabbbb",
-           ".adabcbb", "..aaabba", "...abeee", "..abbeee", "..abbeee", "..abaaee", "..aa.abb", ".....aaa"]),
+    138: ({"a": (63, 38, 49), "b": (232, 69, 55), "c": (255, 112, 109), "e": (247, 194, 130),
+           "w": (255, 255, 255), "f": (189, 108, 74)},
+          ["........", ".aa.....", "affa..e.", "afffa.ac", "afffaaab", "afffabbb", "affabwab", "affabbbb",
+           ".afabcbb", "..aaabba", "...abeee", "..abbeee", "..abbeee", "..abaaee", "..aa.abb", ".....aaa"]),
     139: ({"o": (38, 43, 68), "l": (192, 203, 220), "m": (139, 155, 180), "k": (82, 96, 124), "r": (232, 69, 55),
            "n": (255, 150, 60), "y": (255, 214, 92), "w": (255, 246, 196), "d": (63, 38, 49)},
           ["....oooo", "....olll", "....ommm", "..oooooo", ".ollllll", ".ommmmmm", ".ommoooo", ".omodddd",

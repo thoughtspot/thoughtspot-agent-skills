@@ -55,7 +55,8 @@ def check(realm: str, log: list[str], data: dict) -> list[str]:
         problems.append(f"{realm} was not locked for a fresh player")
     smoke = next((line for line in log if line.startswith(f"SMOKE {realm} ")), None)
     if not smoke:
-        return problems + [f"no SMOKE line for {realm}"]
+        return problems + [f"no SMOKE line for {realm}"
+                           + ("" if any(line.startswith("ERROR") for line in log) else " (or the play outran Chrome's virtual time budget)")]
     steps, saved = smoke[len(f"SMOKE {realm} "):].split(" | ")
     want = [f"hall:{h['id']}" for h in r["halls"]] + [f"{e['id']}:{x}" for e in r["encounters"]
                                                        for x in ("merchant", "guide", "compiler", "foe", "reward")]

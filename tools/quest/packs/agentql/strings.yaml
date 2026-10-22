@@ -161,8 +161,8 @@ guard_mines: "Dwarf guard: The Dwarven Mines of Silver Ore. Read the SQL behind 
 guard_lake: "Fisherman: The Craftsmen of the Lake. Ask what keywords can't: every product, sold or not."
 guard_forests: "Golden elf: The Golden Forests. Total each store, then average the totals."
 guard_isles: "Sailor: The Shifting Isles. Rank within each region with a window function."
-npc_miner_gate: "Old miner: The Forge glows on the north wall. Follow the rails east: that door opens once it has worked."
-npc_miner_barrel: "Old miner: A barrel in the dragon's den never sat right. Give it a shove."
+npc_miner_gate: "Old miner: The Forge glows on the north wall. Follow the track east: that door opens once it has worked."
+npc_miner_barrel: "Old miner: A barrel past that door never sat right. Give it a shove."
 item_sword: sword
 item_dagger: dagger
 item_axe: axe
