@@ -110,7 +110,7 @@ the skill's own migration report.
 
 - **A generated filter literal's casing may not match the formula's actual output.** When
   a tile's filter is built from a plain-English label in the instructions (e.g. "filter to
-  the Takeoff and Landing category"), SpotterViz may lowercase or otherwise reformat the
+  the North Region category"), SpotterViz may lowercase or otherwise reformat the
   literal it writes into the underlying Answer. If a filtered tile returns the same
   unfiltered value regardless of which filter is selected, check the filter literal's exact
   casing against the formula/column's actual output — don't assume the instructions' casing

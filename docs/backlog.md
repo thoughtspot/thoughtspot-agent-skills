@@ -14476,6 +14476,7 @@ resubmission should start from current `main` and answer each item below.
    two-thirds unrelated backlog, session and validator changes.
 
 **Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
+
 ## BL-403 — Correct Step 7's "rerun when formulas are filtered" explanation
 
 **Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.

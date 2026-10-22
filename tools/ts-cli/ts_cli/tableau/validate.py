@@ -147,7 +147,7 @@ def validate_output(expr: str) -> list[str]:
     # The unmapped/table-calc/geo/analytics-extension/rank checks below scan
     # for a bare function-call token (`NAME(`). A column, formula or parameter
     # reference is always written `[...]`, and a field legitimately named e.g.
-    # "Airborne Duration Elapsed Difference (min)" contains the literal
+    # "Elapsed Duration Difference (min)" contains the literal
     # substring "Difference (" — matching the DIFFERENCE() spatial-function
     # regex even though no function call is present. `mask_for_fn_scan` masks
     # string/date literals (in case one holds an unmatched bracket character,

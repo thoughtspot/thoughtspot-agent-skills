@@ -46,8 +46,8 @@ def _translatable_tier(expr: str) -> str:
         return "lod"
     # Scan for a bare function-call token (`NAME(`) only in the parts of the
     # expression that are neither a string/date literal nor a [ref] — a
-    # column, formula or parameter legitimately named e.g. "Airborne Duration
-    # Elapsed Difference (min)" contains the literal substring "Difference ("
+    # column, formula or parameter legitimately named e.g. "Elapsed Duration
+    # Difference (min)" contains the literal substring "Difference ("
     # (matching a spatial-function regex in _untranslatable_tier below) even
     # though no function call is present. `mask_for_fn_scan` masks literals
     # before refs specifically so a literal holding an unmatched bracket

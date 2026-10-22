@@ -583,8 +583,8 @@ A column/formula reference resolved by exact name against the model's schema (no
 query-time `=`/`!=` operators, which are case-insensitive — see
 `thoughtspot-formula-patterns.md`) produces the same *"Search did not find '<name>'"* error
 as a genuinely missing field when the casing doesn't match character-for-character. Synthetic
-example: a model column named `Preferred Weight Uom` referenced by a formula written against
-the TWB's own caption `Preferred Weight UOM` fails this way. Before concluding a referenced
+example: a model column named `Order Channel Id` referenced by a formula written against
+the TWB's own caption `Order Channel ID` fails this way. Before concluding a referenced
 field doesn't exist or is untranslatable, diff the **exact casing** against the live model's
 column/formula list (`ts tml export … | grep -i` to find the candidate, then compare
 character-for-character) — a case-insensitive substring match in your own search can hide the
