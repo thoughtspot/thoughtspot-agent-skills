@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__PAGE_TITLE__</title>
 <meta name="description" content="__PAGE_DESCRIPTION__">
-<!-- Written by build.py into <page folder>/explore/. Everything is local: no outside requests. -->
+<!-- Written by build.py into <page folder>/explore/ (and, as the home page, into <page folder>/ with a <base>). Everything is local: no outside requests. -->
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="quest.css">
 <style>
@@ -43,7 +43,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 <body>
 <p class="sr-only" id="live" aria-live="polite"></p>
 <main class="monitor"><div class="screen">
-  <div class="bar-top"><span id="help"></span><a id="classic" href="__CLASSIC_HREF__"></a></div>
+  <p id="intro">__EXPLORE_INTRO__</p>
+  <div class="bar-top"><span id="help"></span><a id="classic" href="__CLASSIC_HREF__">__CLASSIC_TEXT__</a></div>
   <div class="hud" aria-hidden="true"><span id="hud-place"></span><span id="hud-kit"></span><span id="hud-gold"></span></div>
   <div id="world" tabindex="0" aria-label=""></div>
   <p id="toast" role="status"></p>
@@ -57,6 +58,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
     <button type="button" id="sound-sfx" aria-pressed="true"></button>
     <button type="button" id="sound-music" aria-pressed="false"></button>
   </div>
+  <p class="foot" id="about"></p>
 </div></main>
 <dialog id="dialog" aria-labelledby="dialog-title">
   <h2 class="sr-only" id="dialog-title"></h2>

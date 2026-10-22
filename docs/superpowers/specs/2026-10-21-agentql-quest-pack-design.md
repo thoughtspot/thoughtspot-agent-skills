@@ -384,9 +384,10 @@ Dwarven Mines, about 2–3 minutes:
 **Unlocking in the prototype:**
 - **The same rule in both front ends.** The shared `unlock` rule applies to both, so a new player
   must finish Law first.
-- **A realm without a map opens in classic mode** at its gate (`/agentql-quest/#realm=<id>`),
-  with a "back to the map" link (PR 5). Since PR 11 every AgentQL realm has a map.
-- **Saves are shared.** Classic (`/agentql-quest/`) and explore (`/agentql-quest/explore/`) share
+- **A realm without a map opens in classic mode** at its gate (`classic/#realm=<id>` since PR
+  12), with a "back to the map" link (PR 5). Since PR 11 every AgentQL realm has a map.
+- **Saves are shared.** Classic (`/agentql-quest/classic/` since PR 12) and explore
+  (`/agentql-quest/`, also at `/agentql-quest/explore/`) share
   an origin and the `aqq` saves. Explore re-reads them on `pageshow` and before every portal
   check, so returning with Back from a realm played in classic shows it as done.
 
@@ -422,7 +423,8 @@ kept, and the character can be asked again.
   self-contained file that still runs from a double-click. Explore is published at
   `/agentql-quest/explore/` as several files (page, scripts, engine, maps, tiles) and fetches
   `../quest.json`. Explore becomes the default only when all five realms are explorable, with
-  classic linked.
+  classic linked. That happened in PR 12: explore is at `/agentql-quest/`, classic at
+  `/agentql-quest/classic/` (still self-contained), and old classic realm links are forwarded.
 - **Explore needs HTTP.** Browsers block `fetch` and XHR from `file://`, and the page uses
   `fetch`, so explore doesn't run from a double-click. To work locally, build into a folder and serve
   it with `python3 -m http.server`. To test on a phone, use the same server, reached by the

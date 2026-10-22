@@ -48,6 +48,26 @@ def run(realm: str, site: pathlib.Path, port: int, chrome: str, profile: pathlib
     return html.unescape(m.group(1)).splitlines() if m else [f"ERROR no log in the page ({out.stderr[-300:]!r})"]
 
 
+def old_link_problems(port: int, chrome: str, profile: pathlib.Path, data: dict) -> list[str]:
+    """When explore is the home page, an old link to a classic realm at the game's address still
+    opens that realm in the classic page (now in classic/), with the way back beside its door."""
+    pack = B.Pack(B.DEFAULT_PACK)
+    if not (pack.manifest.get("explore") or {}).get("home"):
+        return []
+    realm = data["realms"][1]["id"]
+    url = f"http://127.0.0.1:{port}/{pack.publish_path}/#realm={realm}&from=explore"
+    ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
+    out = subprocess.run([chrome, "--headless=new", *ci, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
+                          "--dump-dom", url], capture_output=True, text=True, timeout=120)
+    dom = out.stdout
+    problems = []
+    if 'id="quest-data"' not in dom:
+        problems.append(f"#realm={realm} at the home page didn't open the classic page")
+    elif f'href="../#from={realm}"' not in dom:
+        problems.append(f"#realm={realm} opened the classic page without the way back beside its door")
+    return problems
+
+
 def check(realm: str, log: list[str], data: dict) -> list[str]:
     problems = [line for line in log if line.startswith(("ERROR", "NOGL"))]
     r = next(x for x in data["realms"] if x["id"] == realm)
@@ -116,6 +136,12 @@ def main(argv: list[str]) -> int:
                 log = run(realm, tmp / "site", server.server_address[1], chrome, tmp / f"profile-{realm}")
                 problems = check(realm, log, data)
                 print(f"{realm}: {'OK' if not problems else 'FAIL'}  " + " / ".join(log))
+                for p in problems:
+                    print(f"  - {p}", file=sys.stderr)
+                failed += bool(problems)
+            if not argv:
+                problems = old_link_problems(server.server_address[1], chrome, tmp / "profile-old-link", data)
+                print(f"old link: {'OK' if not problems else 'FAIL'}")
                 for p in problems:
                     print(f"  - {p}", file=sys.stderr)
                 failed += bool(problems)

@@ -4213,3 +4213,41 @@ def test_a_classic_folder_the_build_did_not_write_is_left_alone(tmp_path):
     assert B.main(["--out", str(tmp_path / "index.html")]) == 1
     assert (tmp_path / "classic/notes.txt").read_text(encoding="utf-8") == "mine"
     assert not (tmp_path / "index.html").exists()
+
+
+def _agentql_with(tmp_path, monkeypatch, *edits):
+    packs = _copy_packs(tmp_path)
+    manifest = packs / "agentql/pack.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    for old, new in edits:
+        assert old in text, old
+        text = text.replace(old, new)
+    manifest.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    out = tmp_path / "site" / "index.html"
+    assert B.main(["--out", str(out)]) == 0
+    return out
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_without_home_the_classic_page_stays_home(tmp_path, monkeypatch):
+    out = _agentql_with(tmp_path, monkeypatch, ("  home: true ", "  home: false "))
+    assert '<script id="quest-data"' in out.read_text(encoding="utf-8") and not (out.parent / "classic").exists()
+    assert 'id="classic" href="../"' in (out.parent / "explore/index.html").read_text(encoding="utf-8")
+    for hash, href in (("", "explore/"), ("#realm=mines&from=explore", "explore/#from=mines")):
+        r = subprocess.run(["node", "-e", DEEP_LINK, str(out), hash], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        got = json.loads(r.stdout)
+        assert got["back"] and got["href"] == href, got
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_a_pack_with_no_maps_shows_no_way_to_them(tmp_path):
+    data, errors = B.compile_pack(B.Pack("agentql"))
+    assert errors == []
+    data["pack"].update(explore_realms=[], explore_home=False)     # a pack with no maps (only the link is under test)
+    page = tmp_path / "index.html"
+    page.write_text(B.render(B.TEMPLATE.read_text(encoding="utf-8"), data, B.font_faces(), ART), encoding="utf-8")
+    r = subprocess.run(["node", "-e", DEEP_LINK, str(page), ""], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["back"] is False

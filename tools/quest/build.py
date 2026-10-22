@@ -93,6 +93,9 @@ CORE_CSS = HERE / "core" / "quest.css"   # the look, shared by the classic and e
 CORE_DIR = HERE / "core"   # shared front-end code: plain scripts, inlined into the classic page in name order
 TITLE_PLACEHOLDER, DESCRIPTION_PLACEHOLDER = "__PAGE_TITLE__", "__PAGE_DESCRIPTION__"
 CLASSIC_HREF_PLACEHOLDER = "__CLASSIC_HREF__"   # the explore page's link to the classic page
+# Written at build time, so the home page has words and a way to the classic page before (or
+# without) its script: opened from a file, its fetches fail.
+CLASSIC_TEXT_PLACEHOLDER, EXPLORE_INTRO_PLACEHOLDER = "__CLASSIC_TEXT__", "__EXPLORE_INTRO__"
 PAGES = "https://thoughtspot.github.io/thoughtspot-agent-skills"
 
 # (family, weight, file in fonts/) — Latin subsets from Fontsource 5.3.0, SIL OFL 1.1.
@@ -994,7 +997,8 @@ def home_page(explore_page: str) -> str:
     """The explore page as the pack's home page, one folder up from explore/: every relative URL
     in it (its script, the engine, the tiles, ../quest.json) still resolves from explore/."""
     head = "<head>"
-    assert head in explore_page, "the explore page has no <head>"
+    if head not in explore_page:
+        raise ValueError("the explore page has no <head>")
     return explore_page.replace(head, head + '\n<base href="explore/">', 1)
 
 
@@ -1023,7 +1027,9 @@ def write_explore(out_dir: pathlib.Path, pack: "Pack", data: dict, art: dict, fo
     page = (EXPLORE_DIR / "index.html").read_text(encoding="utf-8")
     values = {TITLE_PLACEHOLDER: _html_text(pack.title),
               DESCRIPTION_PLACEHOLDER: _html_text(pack.strings.get("page_description", "")),
-              CLASSIC_HREF_PLACEHOLDER: "../classic/" if data["pack"]["explore_home"] else "../"}   # from explore/
+              CLASSIC_HREF_PLACEHOLDER: "../classic/" if data["pack"]["explore_home"] else "../",   # from explore/
+              CLASSIC_TEXT_PLACEHOLDER: _html_text(pack.strings.get("explore_classic", "")),
+              EXPLORE_INTRO_PLACEHOLDER: _html_text(pack.strings.get("explore_intro", ""))}
     (ex / "index.html").write_text(re.sub("|".join(re.escape(m) for m in values), lambda m: values[m.group(0)], page),
                                    encoding="utf-8")
     (ex / "explore.js").write_text((EXPLORE_DIR / "explore.js").read_text(encoding="utf-8"), encoding="utf-8")

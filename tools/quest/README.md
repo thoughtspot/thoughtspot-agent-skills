@@ -74,7 +74,7 @@ packs/agentql/{pack,content,strings}.yaml ─┐
 packs/agentql/art/classic/*.txt           ─┤
 lesson-sql.md, learning-path.md (sources) ─┤                   ┌─► quest.json         (the checked data)
 classic/game.html, core/*.js, fonts/      ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
-schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► index.html         (self-contained, quest.json inside)
+schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► the classic page   (self-contained, quest.json inside)
 ```
 
 - **`packs/agentql/pack.yaml`**, the manifest: the id, title, Pages folder (`agentql-quest`), save
@@ -131,7 +131,7 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   their SIL Open Font License files.
 
 ```bash
-python3 tools/quest/build.py                             # → tools/quest/dist/{index.html,quest.json,quest.schema.json}
+python3 tools/quest/build.py                             # → tools/quest/dist/: index.html (explore, when it's home), classic/, explore/, quest.json, quest.schema.json
 python3 tools/quest/build.py --check                     # validate only
 python3 tools/validate/check_agentql_quest.py --root .   # the same, as pre-commit and CI run it
 pytest tools/quest/tests -q                              # includes a headless play-through (needs node)
@@ -285,7 +285,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **The overworld** is a small world (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
   door for each realm in its own scene, each with a guard beside it who says in one line what the
   realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
-  (`explore/#from=<realm>`), puts you back beside its door. The scenes: a
+  (`#from=<realm>`), puts you back beside its door. The scenes: a
   tunnel into a rocky cliff, with rails (the Mines, a dwarf), a library with bookshelves at its door,
   over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
   (the Lake, a fisherman), a tunnel of golden trees (the
@@ -326,7 +326,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
 - **Checks:** the build checks the maps (above) and the tile index; `tests/play_map.js` walks
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
-  explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
+  explorable realm in headless Chrome (`#smoke=<realm>`, on the home page when explore is home): locked for a fresh player, the
   map loads, every step talked to in order, each gate drawn and solid exactly until its own steps
   are done and pushed against while shut, the locked and talk hints only where they belong, a
   petitioner drawn for each throne with a look, the dialog's portrait (and no ASCII art), "Leave

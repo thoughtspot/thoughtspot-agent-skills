@@ -14,7 +14,7 @@ pane_sql_caption: Captured from generate-sql on {model}, {captured}. Lesson {les
 # ---- The classic page (classic/game.html). Markup: *word* is highlighted, **word** is bold,
 # [text](https://…) is a link; everything else is shown as written. {name} is filled by the page.
 
-page_description: A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.
+page_description: A retro adventure game about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.
 sound_sfx: "[S] Sound effects: {state}"
 sound_music: "[M] Music: {state}"
 sound_on: "on"
@@ -138,7 +138,8 @@ explore_hud_map: THE REALMS
 explore_hud_gold: "GOLD {gold}/{max}"
 explore_back: Back to the explore map
 explore_all_done_title: Every realm complete!
-explore_all_done: "You have crossed every realm. Replay any of them to raise your score, or try the classic version."
+explore_intro: "A game about one idea: the AI writes your question as AgentQL, and ThoughtSpot compiles it into governed SQL, the same way every time."
+explore_all_done: You have crossed every realm. Replay any of them to raise your score.
 explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
 explore_near_sealed: "{name}{mark}."
 explore_pad_weapon: Weapon
