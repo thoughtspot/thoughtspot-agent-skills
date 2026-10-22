@@ -111,7 +111,7 @@ def test_shared_rules_are_imported_not_re_implemented():
     still agree, and no engine module carries its own copy of a shared pattern.
     """
     import re as _re
-    from ts_cli.audit import rules
+    from ts_cli.audit.engine import tml
 
     cat = catalog().rules
     offenders = []
@@ -130,15 +130,17 @@ def test_shared_rules_are_imported_not_re_implemented():
                                                 {"field": "value_casing", "truthy": False}]}:
         offenders.append("S8/P15: P15 is no longer S8 plus the value_casing guard")
     # D1 grades with the shared constants; P8 and P7 carry them as catalog bands.
-    if levels("P8") != [("gt", float(rules.MAX_MODEL_COLUMNS), "MEDIUM")]:
+    if levels("P8") != [("gt", float(tml.MAX_MODEL_COLUMNS), "MEDIUM")]:
         offenders.append("P8: the 75-column ceiling differs from D1's")
-    if levels("P7") != [("gt", float(rules.JOIN_DEPTH_YELLOW), "HIGH"),
-                        ("gt", float(rules.JOIN_DEPTH_GREEN), "MEDIUM")]:
+    if levels("P7") != [("gt", float(tml.JOIN_DEPTH_YELLOW), "HIGH"),
+                        ("gt", float(tml.JOIN_DEPTH_GREEN), "MEDIUM")]:
         offenders.append("P7: the join-depth bands differ from D1's")
 
     # The shared regexes are declared once, in the helpers module.
     engine = Path(__file__).resolve().parents[1] / "ts_cli" / "audit" / "engine"
     for path in sorted(engine.glob("*.py")):
+        if path.name == "tml.py":   # the one declaration
+            continue
         text = path.read_text()
         for name in ("FUNC_IN_EXPR", "BRACKET_REF"):
             if _re.search(rf"\b_?{name}\s*=\s*re\.compile", text):

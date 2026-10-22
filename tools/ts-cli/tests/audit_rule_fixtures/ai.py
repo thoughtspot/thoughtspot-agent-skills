@@ -12,7 +12,8 @@ from .common import (model_measures_no_ai_context, model_measures_with_ai_contex
 # ── A: AI readiness ─────────────────────────────────────────────────────────
 # The inputs tests/test_checks_ai.py and tests/test_checks_ai_instructions_shape.py
 # exercise the legacy A-checks with, named here so the A rules' examples and the
-# equivalence test (tests/test_audit_equivalence.py) run over the very same contexts.
+# pinned-findings test (tests/test_audit_pinned_findings.py) run over the very same
+# contexts.
 # `build_*` functions take arguments: they build families of inputs and are never
 # named by a rule's example.
 
@@ -278,7 +279,7 @@ def ai_document_guid_none() -> AuditContext:
                         ai_instructions={None: {}})
 
 
-# Every A input, for the equivalence test — listed by hand so another category's
+# Every A input, for the pinned-findings test — listed by hand so another category's
 # fixtures cannot join and a renamed one cannot drop out silently; the profile-bar
 # families are swept across every value their legacy tests probe (and the boundaries).
 AI_INPUTS = {fn.__name__: fn for fn in (

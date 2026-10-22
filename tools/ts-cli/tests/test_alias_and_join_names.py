@@ -14,7 +14,7 @@ a finding was about.
 """
 import audit_rule_fixtures as fx
 from audit_run_rule import run_rule
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 
 
 def _aliased_model():
@@ -27,17 +27,17 @@ def _aliased_model():
 # ── the shared key ─────────────────────────────────────────────────────────
 
 def test_table_key_prefers_the_alias():
-    assert rules.table_key({"name": "CUSTOMERS", "alias": "SHIP_TO"}) == "SHIP_TO"
-    assert rules.table_key({"name": "ORDERS"}) == "ORDERS"
-    assert rules.table_key({}) == ""
+    assert tml.table_key({"name": "CUSTOMERS", "alias": "SHIP_TO"}) == "SHIP_TO"
+    assert tml.table_key({"name": "ORDERS"}) == "ORDERS"
+    assert tml.table_key({}) == ""
 
 
 def test_table_role_resolves_an_aliased_table():
     m = _aliased_model()["model"]
     cols, mts = m["columns"], m["model_tables"]
-    assert rules.table_role(cols, rules.table_key(mts[1])) == "dimension"
+    assert tml.table_role(cols, tml.table_key(mts[1])) == "dimension"
     # Keying on the physical name is what made it invisible.
-    assert rules.table_role(cols, mts[1]["name"]) == "unknown"
+    assert tml.table_role(cols, mts[1]["name"]) == "unknown"
 
 
 # ── D10 must not call a populated aliased table a zero-column leaf ─────────
@@ -51,7 +51,7 @@ def test_d10_does_not_call_an_aliased_table_a_zero_column_leaf():
 def test_d6_sees_the_columns_of_an_aliased_table():
     """Not asserting a finding — asserting the table is no longer 'unknown'."""
     m = _aliased_model()["model"]
-    assert rules.table_role(m["columns"], "SHIP_TO") != "unknown"
+    assert tml.table_role(m["columns"], "SHIP_TO") != "unknown"
     run_rule(fx.data_model_aliased_role_playing(), "D6")  # must not raise
 
 
@@ -59,17 +59,17 @@ def test_d6_sees_the_columns_of_an_aliased_table():
 
 def test_join_label_names_both_sides():
     mt = {"name": "ORDERS"}
-    assert rules.join_label(mt, {"with": "CUSTOMERS"}) == "ORDERS -> CUSTOMERS"
+    assert tml.join_label(mt, {"with": "CUSTOMERS"}) == "ORDERS -> CUSTOMERS"
 
 
 def test_join_label_prefers_a_declared_name_when_one_exists():
     mt = {"name": "ORDERS"}
-    assert rules.join_label(mt, {"name": "orders_to_cust", "with": "CUSTOMERS"}) == "orders_to_cust"
+    assert tml.join_label(mt, {"name": "orders_to_cust", "with": "CUSTOMERS"}) == "orders_to_cust"
 
 
 def test_join_label_uses_the_alias_side():
     mt = {"name": "CUSTOMERS", "alias": "SHIP_TO"}
-    assert rules.join_label(mt, {"with": "ORDERS"}) == "SHIP_TO -> ORDERS"
+    assert tml.join_label(mt, {"with": "ORDERS"}) == "SHIP_TO -> ORDERS"
 
 
 def test_a_join_finding_is_not_anonymous():

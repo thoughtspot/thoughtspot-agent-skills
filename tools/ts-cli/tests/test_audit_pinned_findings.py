@@ -1,7 +1,8 @@
 """The catalog against the legacy checks' own answers, after the legacy checks are gone.
 
 Task 12b deleted `ts_cli/audit/checks_*.py`. Before it did, `pin_legacy_findings.py`
-ran every legacy check over every committed audit input (`AI_INPUTS`, `P_INPUTS`,
+(commit 1ddb3185; removed with the legacy checks, since it imported them) ran every
+legacy check over every committed audit input (`AI_INPUTS`, `P_INPUTS`,
 `S_INPUTS`, `D_INPUTS`, `H_INPUTS` in `audit_rule_fixtures`) under both profiles and
 pinned what each check reported in `audit_rule_fixtures/legacy_findings.json.gz`.
 These tests hold the catalog to those answers with the same strict comparator the

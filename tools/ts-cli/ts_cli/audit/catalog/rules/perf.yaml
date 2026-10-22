@@ -4,7 +4,7 @@
 #
 # None of these is profile-aware: the catalog default holds under both profiles.
 # P4 repeats D4 and P6 the VARCHAR half of D2 — each angle reports the shared rule
-# under its own id and wording (rules.py, BL-304). Titles are the legacy CHECK_META
+# under its own id and wording (engine/tml.py, BL-304). Titles are the legacy CHECK_META
 # descriptions; the report has never carried a remediation for a P finding, so none
 # is set here.
 
@@ -97,7 +97,7 @@
   title: No date constraints on fact tables
   description: >-
     A Model with fact tables (a `model_tables` entry with more than 3 MEASURE columns,
-    matched by its `name` — rules.fact_tables) but no `date_range_condition` in its
+    matched by its `name` — engine/tml.py fact_tables) but no `date_range_condition` in its
     `constraints`, so every query scans all history.
   categories: [P]
   requires: [model_tml]

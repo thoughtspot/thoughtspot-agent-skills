@@ -1,7 +1,8 @@
 """Tests for the audit rule engine (ts_cli/audit/engine/).
 
-The engine turns catalog rules (YAML data) into findings. Its output contract is what
-the equivalence gate compares against the legacy check functions, so these tests pin
+The engine turns catalog rules (YAML data) into findings. Its output contract is the
+legacy check functions' (their answers are pinned for test_audit_pinned_findings.py
+since Task 12b deleted them), so these tests pin
 the contract exactly: detail text, metric type, legacy threshold dict (key order and
 number types), severity, the object a finding names, and the additive `categories` /
 `bands` payload.

@@ -6,7 +6,7 @@
 # The PII and credential name heuristics are derived fields (@pii_category,
 # @pii_confidence, @credential_term in engine/fields.py), one copy shared by S1-S5.
 # S8 repeats P15 without the value_casing guard, S9 repeats P14 — each angle reports
-# the shared rule under its own id and wording (rules.py, BL-304). Titles are the
+# the shared rule under its own id and wording (engine/tml.py, BL-304). Titles are the
 # legacy CHECK_META descriptions; S1-S5 carry the report's existing remediation
 # text, S8-S10 have never had one.
 

@@ -21,7 +21,7 @@ Fixtures below use the real shapes from that export.
 """
 import audit_rule_fixtures as fx
 from audit_run_rule import run_rule
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 
 # The contexts are named builders in audit_rule_fixtures (perf.py; the shapes from that
 # export), whose legacy P6 answers test_audit_pinned_findings.py pins.
@@ -31,7 +31,7 @@ from ts_cli.audit import rules
 
 def test_resolver_finds_a_referencing_join_definition():
     ctx = fx.referencing_join_varchar()
-    joins = list(rules.model_joins(ctx.models[0]["model"], ctx.tables))
+    joins = list(tml.model_joins(ctx.models[0]["model"], ctx.tables))
     assert len(joins) == 1
     j = joins[0]
     assert j["name"] == "FK_BASKETFACT_TO_PROMOTIONDIM"
@@ -43,7 +43,7 @@ def test_resolver_finds_a_referencing_join_definition():
 def test_the_models_inline_type_overrides_the_tables():
     """Observed live: the model said LEFT_OUTER over a table that says INNER."""
     ctx = fx.referencing_join_model_type_override()
-    j = list(rules.model_joins(ctx.models[0]["model"], ctx.tables))[0]
+    j = list(tml.model_joins(ctx.models[0]["model"], ctx.tables))[0]
     assert j["type"] == "LEFT_OUTER"
 
 
@@ -51,14 +51,14 @@ def test_an_inline_join_still_resolves():
     model = {"guid": "m-1", "model": {"name": "M", "columns": [], "model_tables": [
         {"name": "A", "joins": [{"with": "B", "on": "[A::K] = [B::K]",
                                  "type": "INNER", "cardinality": "MANY_TO_ONE"}]}]}}
-    j = list(rules.model_joins(model["model"], {}))[0]
+    j = list(tml.model_joins(model["model"], {}))[0]
     assert j["on"] == "[A::K] = [B::K]" and j["type"] == "INNER"
 
 
 def test_a_referencing_join_with_no_matching_table_yields_no_condition():
     """Unknown is not the same as 'no keys' — callers must not read it as clean."""
     ctx = fx.referencing_join_table_missing()
-    j = list(rules.model_joins(ctx.models[0]["model"], ctx.tables))[0]
+    j = list(tml.model_joins(ctx.models[0]["model"], ctx.tables))[0]
     assert j["on"] == ""
 
 

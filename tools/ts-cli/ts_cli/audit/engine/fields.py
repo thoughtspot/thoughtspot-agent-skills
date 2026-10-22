@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
 from ts_cli.audit.engine.memo import cached
 
@@ -128,7 +128,7 @@ def _step(value: Any, step: str) -> Any:
 @register("is_indexed", uses=(), values=(False, True))
 def _is_indexed(item: dict, ctx: Any) -> bool:
     """Column: text-search indexed (absent `index_type` means indexed by default)."""
-    return rules.is_indexed(item.get("obj") or {})
+    return tml.is_indexed(item.get("obj") or {})
 
 
 @register("has_synonyms", uses=())
@@ -142,8 +142,8 @@ def _has_synonyms(item: dict, ctx: Any) -> bool:
 
 @register("join_depth", uses=())
 def _join_depth(item: dict, ctx: Any) -> int:
-    """Model: longest join chain across `model_tables` (rules.join_depth)."""
-    return rules.join_depth((item.get("obj") or {}).get("model_tables") or [])
+    """Model: longest join chain across `model_tables` (tml.join_depth)."""
+    return tml.join_depth((item.get("obj") or {}).get("model_tables") or [])
 
 
 @register("is_coached", uses={"ai_instructions"})
@@ -189,14 +189,14 @@ def _has_date_constraint(item: dict, ctx: Any) -> bool:
 
 def _fact_table_names(item: dict) -> set:
     model = item.get("obj") or {}
-    return cached("fact_table_names", model, rules.fact_tables,
+    return cached("fact_table_names", model, tml.fact_tables,
                   model.get("columns") or [], model.get("model_tables") or [])
 
 
 @register("fact_tables", uses=())
 def _fact_tables(item: dict, ctx: Any) -> List[str]:
     """Model: the distinct `model_tables[].name`s that read as fact tables
-    (rules.fact_tables — keyed by name, not alias), sorted; a name list in messages."""
+    (tml.fact_tables — keyed by name, not alias), sorted; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports this module
     return NameList(sorted(_fact_table_names(item)))
 
@@ -216,15 +216,15 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     from ts_cli.audit.engine.messages import NameList
     col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
     return NameList(k for k in join_key_ids((item.get("obj") or {}).get("on"))
-                    if col_types.get(k, "").upper() in rules.STRING_TYPES)
+                    if col_types.get(k, "").upper() in tml.STRING_TYPES)
 
 
 @register("is_string_type", uses=())
 def _is_string_type(item: dict, ctx: Any) -> bool:
     """RLS column reference: its warehouse `data_type` is a string type
-    (rules.is_string_type — `.upper()` against VARCHAR/CHAR/STRING/TEXT, exactly; an
+    (tml.is_string_type — `.upper()` against VARCHAR/CHAR/STRING/TEXT, exactly; an
     unknown "" type is not a string)."""
-    return rules.is_string_type((item.get("obj") or {}).get("data_type"))
+    return tml.is_string_type((item.get("obj") or {}).get("data_type"))
 
 
 @register("varchar_join_key_count", uses=())
@@ -265,7 +265,7 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):
         fname = f.get("name", "")
-        refs = rules.BRACKET_REF.findall(f.get("expr", ""))
+        refs = tml.BRACKET_REF.findall(f.get("expr", ""))
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
@@ -305,8 +305,10 @@ def _reference_chain_depth(item: dict, ctx: Any):
 
 
 # ── S: PII, credentials, masking and owning-table RLS ───────────────────────
-# The name heuristics are checks_security.py's, copied verbatim (that module stays
-# the legacy source until the cut-over); the equivalence gate proves the copies agree.
+# The name heuristics, copied verbatim from the legacy checks_security.py; since Task 12b
+# deleted that module this is their single source (the smoke test's own list is BL-112).
+# The legacy answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold
+# the rules that read them to the legacy findings.
 
 #: (pattern, category, confidence) — a column's FIRST matching pattern names it.
 PII_PATTERNS = [
@@ -397,7 +399,7 @@ def _rls_by_table_key(model: dict, ctx: Any) -> Dict[Any, bool]:
         if not table:
             continue
         rls = table.get("table", {}).get("rls_rules") or {}
-        has_rls[rules.table_key(mt)] = bool(rls.get("rules"))
+        has_rls[tml.table_key(mt)] = bool(rls.get("rules"))
     return has_rls
 
 

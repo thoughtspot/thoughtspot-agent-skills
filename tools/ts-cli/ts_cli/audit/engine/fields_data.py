@@ -2,14 +2,15 @@
 
 Registered into the same registry as engine/fields.py (which imports this module at its
 end, so `fields.FIELDS` — and the catalog gate's list of known names — always includes
-them). Each reproduces what a legacy check in checks_data.py reads, step for step,
-including the readings that are known to be wrong (the equivalence gate holds them to
-it; fixing them is the follow-up work the spec lists):
+them). Each reproduces what a legacy check in checks_data.py (deleted in Task 12b) read,
+step for step, including the readings that are known to be wrong (the legacy answers
+pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it; fixing
+them is the follow-up work the spec lists):
 
 - D10 and D11 look a model table up by its `name`, where its columns' `column_id`s
   carry the `alias` when it has one (BL-305) — @zero_column_role, @join_from_name and
   @is_fact_to_fact_join keep that.
-- D6 keys by alias, else name (rules.table_key) — the model.table scope's own name.
+- D6 keys by alias, else name (tml.table_key) — the model.table scope's own name.
 
 Same import constraint as fields.py: Python 3.9, no third-party imports at module level.
 """
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
 from ts_cli.audit.engine.memo import cached
 
@@ -36,7 +37,7 @@ def _upper(value: Any) -> Optional[str]:
 def _join_type(item: dict, ctx: Any) -> Optional[str]:
     """Join: its type upper-cased ("" when unset) — INNER, LEFT_OUTER, RIGHT_OUTER or
     OUTER (ThoughtSpot's full outer join). A referencing join's type comes from the
-    Table's `joins_with` unless the model overrides it (rules.model_joins)."""
+    Table's `joins_with` unless the model overrides it (tml.model_joins)."""
     return _upper((item.get("obj") or {}).get("type"))
 
 
@@ -64,8 +65,8 @@ def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
     `with` (legacy D11; an aliased end therefore reads as "unknown", BL-305)."""
     cols = _model_of(item).get("columns") or []
     to_table = (item.get("obj") or {}).get("with", "")
-    return (rules.table_role(cols, _join_from_name(item, ctx)) == "fact"
-            and rules.table_role(cols, to_table) == "fact")
+    return (tml.table_role(cols, _join_from_name(item, ctx)) == "fact"
+            and tml.table_role(cols, to_table) == "fact")
 
 
 # ── model tables (D5, D6, D10) ──────────────────────────────────────────────
@@ -81,7 +82,7 @@ def _build_joined_keys(model: dict) -> set:
     joined: set = set()
     for t in model.get("model_tables") or []:
         for j in (t.get("joins") or []):
-            joined.add(rules.table_key(t))
+            joined.add(tml.table_key(t))
             joined.add(j.get("with", ""))
     return joined
 
@@ -125,9 +126,9 @@ def _attribute_count(table_cols: List[dict]) -> int:
 @register("table_role", uses=())
 def _table_role(item: dict, ctx: Any) -> str:
     """Model table: "fact" (more than 3 MEASURE columns), "dimension", or "unknown"
-    (no columns), its columns found by its key — alias, else name (rules.table_role)."""
+    (no columns), its columns found by its key — alias, else name (tml.table_role)."""
     cols, _ = _table_columns(item)
-    return rules.table_role(cols, item.get("name"))
+    return tml.table_role(cols, item.get("name"))
 
 
 @register("table_column_count", uses=())

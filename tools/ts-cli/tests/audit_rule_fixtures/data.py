@@ -18,12 +18,12 @@ from .perf import (build_join_chain, join_keys_composite, join_keys_integer,
 
 
 # ── D: Data Modeling ────────────────────────────────────────────────────────
-# The inputs the legacy D-check tests exercise checks_data.py with:
+# The inputs the legacy D-check tests exercised checks_data.py (deleted in Task 12b) with:
 # test_checks_data.py, test_checks_data_trip.py, and the D halves of
 # test_alias_and_join_names.py, test_checks_varchar_join_keys.py,
 # test_referencing_joins.py and test_checks_registry.py (the last three build theirs in
 # perf.py and common.py, shared with P). Those tests build their contexts here, so the
-# D rules' examples and the equivalence test (tests/test_audit_equivalence.py) run over
+# D rules' examples and the pinned-findings test (tests/test_audit_pinned_findings.py) run over
 # the very same inputs.
 
 # test_checks_data.py's shapes
@@ -634,7 +634,7 @@ def build_duplicate_scalar_pair(key, a, b) -> AuditContext:
     return make_context(metadata=[row("t-1", a), row("t-2", b)])
 
 
-# Every D input, for the equivalence test — listed by hand (see AI_INPUTS).
+# Every D input, for the pinned-findings test — listed by hand (see AI_INPUTS).
 D_INPUTS = {fn.__name__: fn for fn in (
     data_model_sixteen_tables, data_model_small, data_model_six_tables_not_progressive,
     data_model_six_tables_progressive, data_model_three_tables_not_progressive,

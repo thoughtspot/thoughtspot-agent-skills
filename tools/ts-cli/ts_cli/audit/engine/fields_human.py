@@ -2,9 +2,10 @@
 
 Registered into the same registry as engine/fields.py (which imports this module at its
 end, so `fields.FIELDS` — and the catalog gate's list of known names — always includes
-them). Each reproduces what a legacy check in checks_human.py reads, step for step,
-including the readings that are known to be wrong (the equivalence gate holds them to
-it; fixing them is the follow-up work the spec lists):
+them). Each reproduces what a legacy check in checks_human.py (deleted in Task 12b)
+read, step for step, including the readings that are known to be wrong (the legacy
+answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it;
+fixing them is the follow-up work the spec lists):
 
 - H3 decides which tables are "joined" by a model table's `name` (and a join's
   `with`), where its columns' `column_id`s carry the `alias` when it has one — so a

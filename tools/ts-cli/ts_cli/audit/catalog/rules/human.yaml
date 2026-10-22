@@ -8,8 +8,8 @@
 # report's cleanup view. The derived fields are in engine/fields_human.py, the code
 # rules (H2, H10) in engine/code_rules_human.py.
 #
-# Known legacy defects reproduced here, not fixed (the equivalence gate holds the
-# rules to them; the spec's follow-up list owns the fixes): H3 decides which tables
+# Known legacy defects reproduced here, not fixed (the pinned legacy answers hold the
+# rules to them — tests/test_audit_pinned_findings.py; the spec's follow-up list owns the fixes): H3 decides which tables
 # are joined by a model table's `name` where its columns carry its alias, and tests a
 # formula-backed column by the formula's display name where real TML references it by
 # id; CHECK_META grades H1 and H2 "per bad name" / "per violation" and H10 "MEDIUM if

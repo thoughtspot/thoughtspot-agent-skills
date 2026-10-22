@@ -2,9 +2,10 @@
 (engine/code_rules.py imports this module at its end, so the registry, and the catalog
 gate's list of known names, always include them).
 
-Each reproduces its legacy check in checks_human.py exactly. The thresholds, regexes
-and per-item wordings below are copied verbatim from there; the equivalence gate proves
-the copies agree. Where the legacy check would raise on a malformed value (a
+Each reproduces its legacy check in checks_human.py (deleted in Task 12b) exactly. The
+thresholds, regexes and per-item wordings below were copied verbatim from there; the
+legacy answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them
+to it. Where the legacy check would raise on a malformed value (a
 non-string name or description), these skip it instead: a raising legacy check aborts
 the whole H category, so there is nothing to reproduce.
 

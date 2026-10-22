@@ -168,8 +168,8 @@ Enter 1 or 2:
 Store the choice and pass it to `ts audit run` as `--assessment spotter` (1) or
 `--assessment general` (2) in Step 5. It sets the AI-readiness checks' bar — A1, A2 and
 A6 pass marks (coverage HIGH below half the mark), and whether a missing AI instruction
-set or Model description (A3, A4) is HIGH or MEDIUM. The table is
-`tools/ts-cli/ts_cli/audit/assessment.py`; the catalog rows are in
+set or Model description (A3, A4) is HIGH or MEDIUM. The bars are profile overrides in
+the rule catalog (`tools/ts-cli/ts_cli/audit/catalog/`); the catalog rows are in
 [references/check-catalog.md](references/check-catalog.md). Omitted, it defaults to
 `general`, and the report header names the assessment used.
 

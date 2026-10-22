@@ -1,6 +1,7 @@
 """`run_rules` — run the catalog's rules over an AuditContext.
 
-The finding contract (what the equivalence gate compares with the legacy checks):
+The finding contract (the legacy checks' findings, field for field; their answers are
+pinned in tests/audit_rule_fixtures/legacy_findings.json.gz):
 
     check_id     the rule id
     angle        the `angle_key` of the rule's FIRST category ("ai", "data_modeling", …)

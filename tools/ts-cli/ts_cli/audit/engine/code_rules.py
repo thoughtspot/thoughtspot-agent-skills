@@ -65,11 +65,10 @@ imports this module to learn the registered names, under the system Python 3.9 w
 only PyYAML, without executing the `ts_cli` package __init__ (typer, requests). So a
 module-level import here must stay within: catalog_model, catalog_validate (and
 catalog_expr, catalog_code, catalog_forms, catalog_uses, catalog_reads, which it
-imports), rules,
-findings, and
-engine.{fields (and fields_data / fields_human, which it imports), scopes, predicates,
+imports), findings, and
+engine.{tml, fields (and fields_data / fields_human, which it imports), scopes, predicates,
 messages, bands} — and code_rules_human, imported at the end of this module, holds to
-the same list. Anything else (context, commands, the legacy checks_* modules) is imported
+the same list. Anything else (context, commands) is imported
 inside the rule function. tools/validate/tests/test_check_audit_catalog.py copies
 only the permitted modules and fails if this one needs more.
 """
@@ -78,7 +77,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List, Set
 
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
 from ts_cli.audit.engine import bands, fields, scopes
 from ts_cli.audit.engine.messages import render, template
@@ -278,13 +277,13 @@ def _join_count(model: dict) -> int:
 
 #: D1's grading table, in the legacy order: (measure, value of a Model, above this is
 #: MEDIUM, above this HIGH). The columns and join-depth lines are the ceilings P8 and
-#: P7 report on (rules.py, BL-304).
+#: P7 report on (engine/tml.py, BL-304).
 D1_MEASURES = (
     ("tables", lambda m: len(m.get("model_tables") or []), 10, 15),
-    ("columns", lambda m: len(m.get("columns") or []), 50, rules.MAX_MODEL_COLUMNS),
+    ("columns", lambda m: len(m.get("columns") or []), 50, tml.MAX_MODEL_COLUMNS),
     ("joins", _join_count, 8, 12),
-    ("join depth", lambda m: rules.join_depth(m.get("model_tables") or []),
-     rules.JOIN_DEPTH_GREEN, rules.JOIN_DEPTH_YELLOW),
+    ("join depth", lambda m: tml.join_depth(m.get("model_tables") or []),
+     tml.JOIN_DEPTH_GREEN, tml.JOIN_DEPTH_YELLOW),
     ("formulas", lambda m: len(m.get("formulas") or []), 30, 50),
 )
 

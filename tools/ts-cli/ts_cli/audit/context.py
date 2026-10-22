@@ -21,7 +21,9 @@ class AuditContext:
     answers: list = field(default_factory=list)
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
-    # Which bar the AI-readiness checks measure against (audit/assessment.py, BL-399).
+    # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
+    # (catalog/profiles.yaml). The engine takes the profile as an argument and never
+    # reads this; it records what a run or a snapshot capture was made under.
     assessment: str = "general"
 
     def guid_for(self, tml: dict) -> str:
@@ -73,9 +75,9 @@ def nl_instructions(ai_data: dict) -> list:
 
     The response is ``{"nl_instructions_info": [{"instructions": [...],
     "scope": "GLOBAL"}]}`` — there is no top-level ``instructions`` key.
-    ``checks_ai`` read one anyway, so the API half of A3/A5 never fired and a
-    Model coached through the UI reported HIGH "no coaching configured"
-    (BL-292). Its unit fixtures passed a shape the API never returns, which is
+    The legacy A checks (``checks_ai``, since removed) read one anyway, so the
+    API half of A3/A5 never fired and a Model coached through the UI reported
+    HIGH "no coaching configured" (BL-292). Its unit fixtures passed a shape the API never returns, which is
     what kept it invisible.
     """
     out: list = []

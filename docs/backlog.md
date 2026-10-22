@@ -1895,7 +1895,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 ## BL-059 — ts-audit: set (cohort) usage analysis checks `Tier 3`
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
-**Affects:** `tools/ts-cli/ts_cli/audit/checks_data.py` (new checks), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
+**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
 **Status:** Open — research complete, implementation deferred
 **Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
 
@@ -3417,12 +3417,13 @@ column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" tr
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.2.
-**Affects:** `tools/smoke-tests/smoke_ts_audit.py`; `tools/ts-cli/ts_cli/audit/checks_security.py` (`_PII_PATTERNS`).
+**Affects:** `tools/smoke-tests/smoke_ts_audit.py`; `tools/ts-cli/ts_cli/audit/engine/fields.py` (`PII_PATTERNS` — the single source since the rule-catalog cut-over removed `checks_security.py` and its `_PII_PATTERNS` copy).
 **Status:** OPEN.
 
 The smoke test predates the ts_cli audit engine: it never invokes `ts audit
 run`/`report`, and its Step 8 duplicates a local `PII_PATTERNS` list ("mirrors the
-skill logic") that can silently diverge from `_PII_PATTERNS` in checks_security.py.
+skill logic") that can silently diverge from the audit's own list (now `PII_PATTERNS` in
+`ts_cli/audit/engine/fields.py`).
 Point the smoke test at `ts audit run` live; import or delete the duplicated list.
 Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 

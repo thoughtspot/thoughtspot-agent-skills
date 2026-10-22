@@ -240,8 +240,9 @@ def build_aggregate_model_tml(candidate: dict, plans: dict, model_tml: dict,
     # agents/shared/schemas/thoughtspot-model-tml.md (top-level field-reference
     # table: "spotter_config.is_spotter_enabled") and the live precedent in
     # ts_cli/databricks/mv_build_model.py:build_model_tml_dbx
-    # (`props["spotter_config"] = {"is_spotter_enabled": ...}`), which
-    # ts_cli/audit/checks_perf.py also reads back from that same nested path.
+    # (`props["spotter_config"] = {"is_spotter_enabled": ...}`), which the
+    # audit's P11 rule (ts_cli/audit/catalog/rules/perf.yaml) also reads back
+    # from that same nested path.
     # A flat `properties.is_spotter_enabled` (as in the task-6 brief's
     # illustrative Step 3 code/test) would be inert TML noise, not an actual
     # Spotter-enable — corrected here and in the test.

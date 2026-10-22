@@ -1,30 +1,26 @@
-"""Predicates, thresholds and patterns shared by more than one audit angle.
+"""Model and Table TML helpers the rules share — joins, table keys and roles, RLS
+column references, indexing, string types — and the constants they grade by.
 
-The data and performance check sets were split by **copying**, not by extracting
-(2026-09-22 audit, BL-304). Six rules existed twice:
+Moved here from `ts_cli/audit/rules.py` when the legacy check functions were deleted
+(Task 12b; Ruling R1): every name left is read by a derived field (fields.py,
+fields_data.py), a scope (scopes.py) or a code rule (code_rules.py). The helpers only
+the deleted checks used (`is_wide_and_not_progressive`, `FUNC_IN_EXPR`,
+`MIN_TABLES_FOR_JOIN_PROGRESSIVE`) went with them: D4/P4 and P14/S9 now carry that
+logic as catalog data, and `test_checks_registry.py` holds each such pair together.
 
-===========================  ==================================================
-Rule                         Where it was duplicated
-===========================  ==================================================
-join_progressive on a wide   ``check_d4`` / ``check_p4`` — byte-identical bodies
-model                        apart from the id and the wording
-Function call in an RLS      ``check_s9`` / ``check_p14`` — likewise
-expression
-String column in an RLS      ``check_s8`` / ``check_p15`` — s8 is p15 without
-rule                         the ``value_casing`` guard
-Join-graph depth             ``_join_depth`` / the inline copy in ``check_p7``
-Fact-table detection         ``_table_role`` / the inline copy in ``check_p5``
-Model column ceiling (75)    ``check_d1``'s threshold table / ``check_p8``
-===========================  ==================================================
-
-That is not a cosmetic problem. A threshold tuned in one angle silently left the
-other on the old value, and `check_d2`/`check_p6` — the same shape — shipped with
-the *same* two defects and had to be fixed twice in PR #528.
+Why one module (BL-304, 2026-09-22 audit): the data and performance check sets were
+split by **copying**, and six rules existed twice — join_progressive on a wide model
+(D4/P4), a function call in an RLS expression (S9/P14), a string column in an RLS rule
+(S8/P15), join-graph depth (D1/P7), fact-table detection (D11/P5) and the 75-column
+ceiling (D1/P8). A threshold tuned in one angle silently left the other on the old
+value, and D2/P6 shipped the *same* two defects and had to be fixed twice in PR #528.
 
 **Findings are still emitted per angle.** A wide un-progressive model genuinely is
-both a modelling and a performance concern, and the report's angles are different
-lenses on one environment. What is unified here is the *rule*, not the reporting:
-both checks keep their id, severity and wording.
+both a modelling and a performance concern; what is shared is the rule, not the
+reporting — each rule keeps its id, severity and wording.
+
+Kept importable on Python 3.9 with no third-party imports: the catalog gate loads the
+engine modules that import it.
 """
 from __future__ import annotations
 
@@ -35,13 +31,9 @@ import re
 STRING_TYPES = ("VARCHAR", "CHAR", "STRING", "TEXT")
 
 #: A model wider than this makes for a wider GROUP BY and heavier query plans.
-#: `check_d1` grades against it as its "columns" yellow band; `check_p8` reports
-#: crossing it outright. One number, two presentations.
+#: D1 (code rule) grades against it as its "columns" yellow band; P8 (rules/perf.yaml)
+#: reports crossing it outright. One number, two presentations.
 MAX_MODEL_COLUMNS = 75
-
-#: Above this many tables, `join_progressive: false` means every query joins all
-#: of them. Shared by D4 and P4.
-MIN_TABLES_FOR_JOIN_PROGRESSIVE = 5
 
 #: A table with more than this many MEASURE columns is treated as a fact table.
 FACT_MEASURE_THRESHOLD = 3
@@ -49,11 +41,6 @@ FACT_MEASURE_THRESHOLD = 3
 #: Join-graph depth bands, shared by D1's grading table and P7's severity split.
 JOIN_DEPTH_GREEN = 3
 JOIN_DEPTH_YELLOW = 5
-
-#: A function call around an RLS operand. Defeats index/partition pruning, and
-#: is a correctness smell besides. Was declared identically in two modules.
-FUNC_IN_EXPR = re.compile(
-    r"\b(UPPER|LOWER|TRIM|CAST|CONCAT|CONTAINS|IF)\s*\(", re.IGNORECASE)
 
 #: A bracketed column reference inside a TML expression: ``[TABLE::COL]``.
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
@@ -186,17 +173,6 @@ def fact_tables(columns: list, model_tables: list) -> set:
     """Names of the model's tables that read as fact tables."""
     return {mt.get("name", "") for mt in (model_tables or [])
             if table_role(columns, mt.get("name", "")) == "fact"}
-
-
-def is_wide_and_not_progressive(model: dict) -> bool:
-    """A model with many tables and ``join_progressive`` off.
-
-    Every query then joins all of them. Shared by D4 (modelling) and P4
-    (performance); both report it, under their own id and wording.
-    """
-    tables = model.get("model_tables") or []
-    progressive = (model.get("properties") or {}).get("join_progressive", False)
-    return len(tables) > MIN_TABLES_FOR_JOIN_PROGRESSIVE and not progressive
 
 
 def rls_column_refs(table: dict):

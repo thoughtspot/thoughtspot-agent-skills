@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterator, Optional
 
-from ts_cli.audit import rules
+from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import PARENT_SCOPE
 
 Item = Dict[str, Any]
@@ -110,12 +110,12 @@ def _model_filters(p: Item) -> Iterator[Item]:
 def _model_tables(p: Item) -> Iterator[Item]:
     """Keyed by alias, else name — the prefix its columns' `column_id`s carry (BL-305)."""
     for mt in p["obj"].get("model_tables") or []:
-        yield _item("model.table", mt, p, p["guid"], rules.table_key(mt), "table", p["doc"])
+        yield _item("model.table", mt, p, p["guid"], tml.table_key(mt), "table", p["doc"])
 
 
 def _joins(p: Item, ctx) -> Iterator[Item]:
-    """Every join, inline or referencing, resolved to one shape (rules.model_joins)."""
-    for j in rules.model_joins(p["obj"], ctx.tables):
+    """Every join, inline or referencing, resolved to one shape (tml.model_joins)."""
+    for j in tml.model_joins(p["obj"], ctx.tables):
         yield _item("join", j, p, p["guid"], j["name"], "join", p["doc"])
 
 
@@ -126,7 +126,7 @@ def _rls_rules(p: Item) -> Iterator[Item]:
 
 def _rls_column_refs(p: Item) -> Iterator[Item]:
     """`obj` is {rule, column, data_type, value_casing}; type/casing "" when unknown."""
-    for rule, col, dt, vc in rules.rls_column_refs(p["doc"]):
+    for rule, col, dt, vc in tml.rls_column_refs(p["doc"]):
         obj = {"rule": rule, "column": col, "data_type": dt, "value_casing": vc}
         yield _item("rls_column_ref", obj, p, p["guid"], col, "column", p["doc"])
 

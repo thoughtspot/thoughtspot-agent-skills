@@ -17,11 +17,11 @@ from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, SEC_TABLE_FQN, TRIP_FUN
 
 
 # ── S: Security ─────────────────────────────────────────────────────────────
-# The inputs the legacy S-check tests exercise checks_security.py with:
+# The inputs the legacy S-check tests exercised checks_security.py (deleted in Task 12b) with:
 # test_checks_security.py, test_checks_security_trip.py, and the S halves of
 # test_alias_and_join_names.py, test_index_type_sense.py and test_checks_registry.py.
-# Those tests build their contexts here, so the S rules' examples and the equivalence
-# test (tests/test_audit_equivalence.py) run over the very same inputs.
+# Those tests build their contexts here, so the S rules' examples and the pinned-findings
+# test (tests/test_audit_pinned_findings.py) run over the very same inputs.
 
 # test_checks_security.py's shapes
 
@@ -391,7 +391,7 @@ S9_EDGE_EXPRS = ["UPPER ([C]) = x", "lower(  [C]) = x", "endif ([C])", "Cast([C]
                  "concat_ws([C])", "CONTAINS ([C], 'x')", "uppercase([C])", "[C] = 'IF('"]
 
 
-# Every S input, for the equivalence test — listed by hand (see AI_INPUTS).
+# Every S input, for the pinned-findings test — listed by hand (see AI_INPUTS).
 S_INPUTS = {fn.__name__: fn for fn in (
     sec_model_email_column, sec_model_without_pii, sec_password_column,
     sec_bypass_with_pii, sec_bypass_without_pii, sec_model_without_bypass,

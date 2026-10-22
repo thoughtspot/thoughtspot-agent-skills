@@ -1,12 +1,12 @@
 """H (Human Readiness): the inputs the legacy H-check tests use, and H_INPUTS.
 
-The legacy H checks (checks_human.py) are exercised by test_checks_human.py,
-test_checks_human_trip.py, and the H halves of test_dead_guards.py (H5),
-test_unreachable_checks.py (H7), test_audit_context.py (H4/H5 over contexts
+The legacy H checks (checks_human.py, deleted in Task 12b) were exercised by
+test_checks_human.py, test_checks_human_trip.py, and the H halves of test_dead_guards.py
+(H5), test_unreachable_checks.py (H7), test_audit_context.py (H4/H5 over contexts
 `build_context` assembles, Set lookups failing included) and test_audit_snapshot.py
 (H5's order over a replayed context). Those tests build their contexts here, so the H
-rules' examples and the equivalence test (tests/test_audit_equivalence.py) run over the
-very same inputs.
+rules' examples and the pinned-findings test (tests/test_audit_pinned_findings.py) run
+over the very same inputs.
 """
 from __future__ import annotations
 
@@ -751,7 +751,7 @@ def human_lists_none() -> AuditContext:
         dependents={"g-1": []})
 
 
-# Every H input, for the equivalence test — listed by hand (see AI_INPUTS).
+# Every H input, for the pinned-findings test — listed by hand (see AI_INPUTS).
 H_INPUTS = {fn.__name__: fn for fn in (
     human_generic_names, human_good_names, human_hidden_unreferenced,
     human_hidden_referenced, human_model_no_dependents, human_model_with_dependents,

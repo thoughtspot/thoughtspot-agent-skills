@@ -4,13 +4,13 @@
 #
 # None of these is profile-aware: the catalog default holds under both profiles.
 # D4 repeats P4 and the HIGH half of D2 repeats P6 — each angle reports the shared
-# rule under its own id and wording (rules.py, BL-304). Titles are the legacy
+# rule under its own id and wording (engine/tml.py, BL-304). Titles are the legacy
 # CHECK_META descriptions; D7 and D8 carry the report's existing remediation text, the
 # others have never had one. Where a rule words its findings differently by severity
 # (D2, D3, D7, D11), the message is `{by_severity: ...}` (catalog_forms.py).
 #
-# Known legacy defects reproduced here, not fixed (the equivalence gate holds the
-# rules to them; the spec's follow-up list owns the fixes): D10 and D11 look a model
+# Known legacy defects reproduced here, not fixed (the pinned legacy answers hold the
+# rules to them — tests/test_audit_pinned_findings.py; the spec's follow-up list owns the fixes): D10 and D11 look a model
 # table up by its `name` where its columns carry its alias (BL-305); D11 words every
 # INFO finding "ONE_TO_MANY", a MANY_TO_MANY join included.
 

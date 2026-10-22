@@ -43,7 +43,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # (catalog_code.known_code_rules), and the modules those need. Nothing that pulls
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
-                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py", "rules.py",
+                "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py", "engine/tml.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",

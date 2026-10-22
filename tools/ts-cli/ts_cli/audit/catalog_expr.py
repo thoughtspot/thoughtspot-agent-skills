@@ -35,7 +35,7 @@ Operand semantics, checked here and implemented in `engine/predicates.py`:
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py). The one engine
 import, `known_derived_fields`, is lazy and pulls in only `engine/fields.py` and
-`audit/rules.py`, which hold to the same constraint.
+`engine/tml.py`, which hold to the same constraint.
 """
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def known_derived_fields() -> Set[str]:
     """Names usable as `field: '@name'` — the engine's derived-field registry.
 
     Imported lazily so the catalog gate (tools/validate/check_audit_catalog.py) loads
-    only `engine/fields.py` and `audit/rules.py`, never typer or requests.
+    only `engine/fields.py` and `engine/tml.py`, never typer or requests.
     """
     from ts_cli.audit.engine.fields import FIELDS
     return set(FIELDS)

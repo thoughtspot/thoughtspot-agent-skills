@@ -19,12 +19,12 @@ from .rls import (P14_FUNCTION_EXPRS, P15_UNICODE_TYPES, TRIP_FUNC_RULE, TRIP_PL
 
 
 # ── P: Performance ──────────────────────────────────────────────────────────
-# The inputs the legacy P-check tests exercise checks_perf.py with: test_checks_perf.py,
+# The inputs the legacy P-check tests exercised checks_perf.py (deleted in Task 12b) with: test_checks_perf.py,
 # test_checks_perf_trip.py, and the P halves of test_checks_varchar_join_keys.py,
 # test_referencing_joins.py, test_dead_guards.py, test_index_type_sense.py,
 # test_unreachable_checks.py, test_checks_registry.py and test_checks_security_trip.py.
-# Those tests build their contexts here, so the P rules' examples and the equivalence
-# test (tests/test_audit_equivalence.py) run over the very same inputs.
+# Those tests build their contexts here, so the P rules' examples and the pinned-findings
+# test (tests/test_audit_pinned_findings.py) run over the very same inputs.
 
 # test_checks_perf.py's shapes
 
@@ -727,7 +727,7 @@ def perf_unnamed_formulas_with_references() -> AuditContext:
     ])])
 
 
-# Every P input, for the equivalence test — listed by hand (see AI_INPUTS).
+# Every P input, for the pinned-findings test — listed by hand (see AI_INPUTS).
 P_INPUTS = {fn.__name__: fn for fn in (
     perf_metadata_sql_view, perf_metadata_logical_only, perf_model_wide_not_progressive,
     perf_model_wide_progressive, perf_fact_alias_prefixed, perf_fact_name_prefixed,

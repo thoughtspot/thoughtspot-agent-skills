@@ -24,7 +24,7 @@ and a rule's `fixture:` name resolve without knowing the module:
                  assembles with Set lookups patched among them), and H_INPUTS
 
 Each category module keeps its builders beside its explicit input list (the
-equivalence test's inputs, `<CAT>_INPUTS`). Builders deep-copy any shared constant they
+pinned-findings test's inputs, `<CAT>_INPUTS`). Builders deep-copy any shared constant they
 place in a context, so no test can mutate another's input through it. A module imports
 only from modules above it in the list, never back.
 """

@@ -16,7 +16,9 @@ Both append `check_a6` to `ALL_CHECKS`, an identical edit that also merges
 silently. The merged module defines the name twice, `ALL_CHECKS` holds one
 function, `len(ALL_CHECKS) == 6` looks correct, the full suite passes, and one of
 the audit's five-angle checks has become dead code that never runs. Constructed
-and confirmed, 2026-09-22, during the BL-274/BL-279 collision sweep.
+and confirmed, 2026-09-22, during the BL-274/BL-279 collision sweep. (The audit's
+check functions have since moved into a YAML rule catalog and `checks_ai.py` is gone;
+the merge shape holds for any module.)
 
 Scope: **direct children of the module body only**. A name rebound inside `try`,
 `if` or a function is out of scope and deliberately so — the `try: import tomllib

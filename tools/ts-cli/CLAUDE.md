@@ -173,13 +173,12 @@ ts_cli/
     catalog_model.py  — catalog loader + dataclasses (gate-safe, Python 3.9 + PyYAML)
     catalog_validate.py, catalog_expr.py, catalog_code.py, catalog_forms.py, catalog_uses.py, catalog_reads.py — the catalog gate's checks (tools/validate/check_audit_catalog.py)
     catalog_history.py — rule-id history: an id is retired, never removed or reused (--base / --merge-base-with)
-    engine/           — rule engine: run.py (run_rules, needs_for, profiles), scopes, modes, bands, fields*.py (derived fields), code_rules*.py, memo.py (per-run lookups)
+    engine/           — rule engine: run.py (run_rules, needs_for, profiles), scopes, modes, bands, fields*.py (derived fields), code_rules*.py, memo.py (per-run lookups), tml.py (shared Model/Table TML helpers — formerly audit/rules.py)
     generate.py       — generates check-catalog.md's rule tables and report_meta / check_meta (`python -m ts_cli.audit.generate [--check]`)
     context.py        — AuditContext dataclass + build_context()
     snapshot.py       — --snapshot-out / --snapshot-in capture and replay (manifest records the fetched needs)
     findings.py       — Finding dataclass + build_summary() (by_category); CHECK_META built from the catalog
-    equivalence.py    — legacy checks vs catalog comparison (last user of the legacy modules below)
-    checks_*.py, assessment.py — LEGACY check functions and assessment table, no longer run by `ts audit run`; kept for the equivalence comparison and their own tests until they are deleted — do not edit thresholds here
+    equivalence.py    — compare_findings: the strict finding-list comparator (exact types, multiset); the legacy check functions it compared the catalog with were deleted in Task 12b, and their answers are pinned in tests/audit_rule_fixtures/legacy_findings.json.gz
     report.py         — HTML report renderer (compact payload + template injection)
     report_template.html — Self-contained HTML template with CSS/JS
     erd.py            — ERD data generation for audit reports (parses Model+Table TML)
