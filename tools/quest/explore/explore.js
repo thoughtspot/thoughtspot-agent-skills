@@ -121,7 +121,7 @@
       closeDialog(); return goTo(realms[state.realm].id);
     }
     hud();
-    if (state.screen === "decree") return show();          // a realm of halls ends with its decree: read it first
+    if (state.screen === "decree") { if (world) world.refresh(); return show(); }   // a realm of halls ends with its decree: read it first
     if (machine.expected(state) !== dialogStep) { closeDialog(); if (world) world.refresh(); return; }
     show();
   }
@@ -158,6 +158,7 @@
       Sound.play("blip");
       return goTo("overworld", left);
     }
+    if (state.screen === "decree" && obj.type === "throne") return openDialog(obj.step);   // closed with Esc: a throne reads it again
     const out = machine.act(state, { type: "interact", step: obj.step }, progress.load());
     if (out.refused) return toast(S("explore_not_yet"));
     openDialog(obj.step);
@@ -694,7 +695,10 @@
         const step = world.objects.find(o => o.step === want);
         // stand on a free tile beside it, facing it
         const face = obj => {
-          const side = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx, dy]) => !blockedTile(Math.floor(obj.x / TILE) + dx, Math.floor(obj.y / TILE) + dy));
+          const side = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx, dy]) => {
+            const tx = Math.floor(obj.x / TILE) + dx, ty = Math.floor(obj.y / TILE) + dy;
+            return tx >= 0 && ty >= 0 && tx < world.doc.width && ty < world.doc.height && !blockedTile(tx, ty);
+          });
           world.player.setPosition(obj.x + side[0] * TILE, obj.y + side[1] * TILE); world.facing = [-side[0], -side[1]];
         };
         face(exit);
@@ -723,6 +727,7 @@
       }
       const chest = world.objects.find(o => o.type === "reward");
       const steps = [];
+      let decreeSeen = false;
       for (let n = 0; n < 50; n++) {
         const want = machine.expected(state);
         if (want === null) break;
@@ -733,8 +738,19 @@
         talk(world.nearby());
         if (!dialog.open) throw new Error(`talking at ${want} opened no dialog`);
         if (want.endsWith(":reward") && chest.sprite.frame.name !== FRAMES.reward_open) throw new Error("the chest didn't open as you claimed it");
-        steps.push(want + (world.gates.some(g => g.body.enable) ? "[gate-shut]" : ""));
+        steps.push(want + (world.gates.length ? `[gates:${world.gates.map(g => (g.body.enable ? 1 : 0)).join("")}]` : ""));
         for (let d = 0; d < 60 && dialog.open; d++) {
+          if (state.screen === "decree" && !decreeSeen) {   // the decree: shown, kept by Esc, read again at a throne
+            decreeSeen = true;
+            if (!$("screen").textContent.includes(S("decree_title"))) throw new Error("the decree wasn't shown");
+            dialog.close();
+            try { await until(() => !world.frozen); } catch {}
+            if (state.screen !== "decree" || dialog.open) throw new Error("closing the decree lost it");
+            talk(world.nearby());
+            if (!dialog.open || !$("screen").textContent.includes(S("decree_title"))) throw new Error("the throne didn't show the decree again");
+            log(`DECREE ${realmId}`);
+            continue;
+          }
           const last = actions[actions.length - 1];
           dispatch(state.flash ? actions[0] : (last && last.type === "magic" ? last : actions[0]));
           await wait(20);

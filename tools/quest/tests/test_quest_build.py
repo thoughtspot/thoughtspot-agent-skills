@@ -2897,6 +2897,17 @@ def test_a_map_plays_one_realm_shape(tmp_path):
 
 # ---- third review of PR 4 -----------------------------------------------------------------------
 
+@pytest.mark.parametrize("rows,gate", [
+    # a way round the gate: over the top of its wall and down to the reward
+    (["############", "#S.M.G.....#", "#.......#F.#", "#.C........#", "#X......#R.#", "############"], CAVE_GATE),
+    # the gate stands in the open, not in its doorway at (8, 3)
+    (CAVE_ROWS, [("the_rune:compiler", [(5, 2)])]),
+])
+def test_a_gate_that_guards_nothing_fails(tmp_path, rows, gate):
+    pack, data = _explorable(tmp_path, cave=_tmj(rows, CAVE_OBJECTS, gate))
+    assert any("guards nothing" in e for e in MAPS.check_maps(pack.dir, data))
+
+
 def test_the_exit_behind_a_gate_map_is_fine_without_the_gate(tmp_path):
     # So the exit-behind-a-gate test fails for the gate, not for the walls.
     rows = ["############", "#S.M.G..#F.#", "#.......#..#", "#.C.......X#", "#.......#R.#", "############"]
@@ -3137,8 +3148,11 @@ def test_the_classic_page_opens_at_a_realm_from_the_explore_map(tmp_path, hash, 
 
 
 GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
-              "SMOKE mines west_sales:merchant[gate-shut] west_sales:guide[gate-shut] west_sales:compiler[gate-shut] "
-              "west_sales:foe west_sales:reward | {\"done\":true,\"best\":0}", "EXIT mines"]
+              "SMOKE mines west_sales:merchant[gates:1] west_sales:guide[gates:1] west_sales:compiler[gates:1] "
+              "west_sales:foe[gates:0] west_sales:reward[gates:0] | {\"done\":true,\"best\":0}", "EXIT mines"]
+GOOD_LAW_SMOKE = ["MAP overworld", "MAP law", "DECREE law", "MAP overworld",
+                  "SMOKE law hall:two_paths[gates:111] hall:checking[gates:011] hall:forge[gates:001] "
+                  "hall:third_engine[gates:000] | {\"done\":true,\"best\":0}", "EXIT law"]
 
 
 @pytest.mark.parametrize("edit,needle", [
@@ -3148,9 +3162,10 @@ GOOD_SMOKE = ["MAP overworld", "LOCKED mines", "MAP mines", "MAP overworld",
     (lambda log: log + ["ERROR smoke: timed out"], "ERROR smoke"),
     (lambda log: log[:-2] + log[-1:], "no SMOKE line"),
     (lambda log: log[:-1], "the exit of mines didn't take the player back"),
-    (lambda log: log[:-2] + [log[-2].replace("west_sales:foe ", ""), log[-1]], "steps"),
-    (lambda log: log[:-2] + [log[-2].replace("west_sales:foe", "west_sales:foe[gate-shut]"), log[-1]], "at west_sales:foe the gate is shut"),
-    (lambda log: log[:-2] + [log[-2].replace("compiler[gate-shut]", "compiler"), log[-1]], "at west_sales:compiler the gate is open"),
+    (lambda log: log[:-2] + [log[-2].replace("west_sales:foe[gates:0] ", ""), log[-1]], "steps"),
+    (lambda log: log[:-2] + [log[-2].replace("foe[gates:0]", "foe[gates:1]"), log[-1]], "at west_sales:foe gate 1 is shut"),
+    (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler[gates:0]"), log[-1]], "at west_sales:compiler gate 1 is open"),
+    (lambda log: log[:-2] + [log[-2].replace("compiler[gates:1]", "compiler"), log[-1]], "the page logged 0 gates, the map has 1"),
     (lambda log: log[:-2] + [log[-2].replace('{"done":true,"best":0}', "null"), log[-1]], "was not saved as finished"),
 ])
 def test_the_explore_smoke_reads_the_page_log(edit, needle):
@@ -3158,6 +3173,21 @@ def test_the_explore_smoke_reads_the_page_log(edit, needle):
     import smoke_explore as SX
     data, _ = B.compile_pack(B.Pack("agentql"))
     problems = SX.check("mines", edit(list(GOOD_SMOKE)) if edit else list(GOOD_SMOKE), data)
+    assert (problems == []) if needle is None else any(needle in p for p in problems), problems
+
+
+@pytest.mark.parametrize("edit,needle", [
+    (None, None),
+    # each gate is read on its own: the middle one open a hall early
+    (lambda log: [x.replace("two_paths[gates:111]", "two_paths[gates:101]") for x in log], "at hall:two_paths gate 2 is open"),
+    (lambda log: [x.replace("forge[gates:001]", "forge[gates:011]") for x in log], "at hall:forge gate 2 is shut"),
+    (lambda log: [x for x in log if x != "DECREE law"], "the decree of law wasn't shown"),
+])
+def test_the_explore_smoke_reads_each_gate_and_the_decree(edit, needle):
+    sys.path.insert(0, str(HERE))
+    import smoke_explore as SX
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    problems = SX.check("law", edit(list(GOOD_LAW_SMOKE)) if edit else list(GOOD_LAW_SMOKE), data)
     assert (problems == []) if needle is None else any(needle in p for p in problems), problems
 
 

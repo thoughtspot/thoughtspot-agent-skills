@@ -219,8 +219,10 @@ explore page would read differently from the check:
   each encounter's merchant, guide, compiler, foe, reward). Before each step, a flood-fill from the
   spawn, with only the gates whose required steps are all **done** open, must reach that step's
   object; the exit must be reachable from the start. A gate that only opens after a step behind it,
-  or a first step behind a gate, fails. Objects are solid; reaching one means standing on a
-  walkable tile next to it.
+  or a first step behind a gate, fails, and so does a gate that guards nothing: shut alone, with
+  every other gate open, it must cut some object off (a gate beside its doorway, or a wall with a
+  way round it, would not). Objects are solid; reaching one means standing on a walkable tile next
+  to it.
 - **No Tiled templates,** which the explore page doesn't resolve.
 
 `Quest.machine` accepts `interact {step}` only for the step the current screen waits on
@@ -271,10 +273,10 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   over a moat and a plank bridge between pillars (Law, a wizard), a pier to a small town in the lake
   (the Lake, a fisherman), a tunnel of golden trees (the
   Golden Forests, an elf in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
-- **Law** is a library of four reading rooms in a row, its bookshelves along the walls. Each room
-  holds a hall's throne; talking to it opens the hall's questions, and the gate to the next room
-  stays shut until that hall is done. After the last one the realm's decree is shown before you
-  leave.
+- **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
+  Each room's throne opens its hall's questions, and the gate to the next room stays shut until
+  that hall is done. After the last hall the realm's decree is shown; Esc closes it like any
+  dialog, and talking to a throne shows it again until you leave.
 - **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
   roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
   `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your
@@ -296,7 +298,7 @@ packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► expl
   each map through the machine with no canvas. In a real browser,
   `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
   explorable realm in headless Chrome (`explore/#smoke=<realm>`): locked for a fresh player, the
-  map loads, every step talked to in order, the gate shut exactly until its steps are done, the
+  map loads, every step talked to in order, each gate shut exactly until its own steps are done, the decree of a realm of halls shown, kept by Esc and shown again, the
   realm saved, Enter on a link left alone, no request outside the site, and the fun and the people
   (all with page-script events, not the browser's own input). pytest runs it wherever
   Chrome is installed, CI included. The scripted play writes saves, so it runs only on a local

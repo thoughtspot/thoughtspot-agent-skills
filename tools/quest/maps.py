@@ -27,6 +27,8 @@ next to it (up, down, left or right). The game plays a realm's steps in one orde
 which tests pin to Quest.machine's expected()), so the check walks that order: before each step,
 a flood-fill from the spawn with only the gates whose required steps are all done open must reach
 that step's object. The exit must be reachable from the start, so a player can always leave.
+Every gate must guard something: shut alone, with every other gate open, it cuts some object off
+(a gate beside its doorway, or a wall with a hole, would not).
 """
 from __future__ import annotations
 
@@ -306,8 +308,9 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
         if start in g["rect"]:
             return [f"{g['where']}: covers the spawn"]
 
-    def walk(done: set[str]) -> set[tuple[int, int]]:
-        blocked = m.wall | solid | {t for g, needs in gates if not set(needs) <= done for t in g["rect"]}
+    def walk(done: set[str], only: dict | None = None) -> set[tuple[int, int]]:
+        # `only`: that gate alone is shut, whatever is done
+        blocked = m.wall | solid | {t for g, needs in gates if (g is only if only else not set(needs) <= done) for t in g["rect"]}
         seen, todo = {start}, [start]
         while todo:
             for n in _near(todo.pop()):
@@ -333,6 +336,12 @@ def reachability(m: Map, steps: list[str] | None = None) -> list[str]:
                           + (f" (still shut: {'; '.join(shut)})" if shut else ""))
             break       # every later step waits on this one
         done.add(s)
+    # A gate guards something: shut alone, with every other gate open, it cuts an object off.
+    if not errors:
+        objs = [o for o in m.objects if o["type"] not in ("spawn", "gate")]
+        for g, _ in gates:
+            if all(reach(o, walk(set(), only=g)) for o in objs):
+                errors.append(f"{g['where']}: guards nothing (shut, with every other gate open, every object can still be reached)")
     # Every bit of fun can be found by the end: chests and barrels where they stand, a hoard once its
     # barrel has rolled off it (with every gate open).
     every = {x for g, needs in gates for x in needs}
