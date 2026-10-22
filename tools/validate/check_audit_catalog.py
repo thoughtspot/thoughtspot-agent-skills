@@ -10,7 +10,9 @@ unknown keys, unknown scopes/modes/operators/data requirements/categories/profil
 conditional data a rule reads (its scope, derived fields or code, as their registries
 declare) that its `requires`/`uses` do not declare — it would silently not be fetched —
 and a registered field, code rule or scope whose code reads conditional data its
-registration omits (a static scan of the compiled code; limits in catalog_reads.py),
+registration omits, or reaches code the scan cannot follow (a static scan of the
+compiled code, function-local imports included — context.py is read as source, never
+imported; what it covers and its evasions are in catalog_reads.py),
 code-rule names that nothing registers, duplicate ids, a profile override of a key that
 defines what a rule means, band levels not ordered worst first, and an active rule
 without a `fires` and a `silent` example.

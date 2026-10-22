@@ -46,7 +46,10 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
-                "engine/predicates.py", "engine/messages.py")
+                "engine/predicates.py", "engine/messages.py",
+                # Read as SOURCE, never imported (it needs typer): the read check follows
+                # the engine's function-local imports of it (catalog_reads.load_module).
+                "context.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
@@ -228,6 +231,70 @@ def test_read_declaration_mutations_fail_the_gate(tmp_path, rel, old, new, expec
     text = path.read_text()
     assert text.count(old) == 1, old
     path.write_text(text.replace(old, new))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert expect in res.stdout, res.stdout
+    assert "Traceback" not in res.stderr
+
+
+# Fix round 3: the re-review's round-2 probes, each a mutation that read conditional
+# data past the scan. Every one must FAIL the gate, under the gate's own Python — which
+# cannot import context.py and so reads it from source.
+_IDX = '@register("is_indexed", uses=())\n'
+_IDX_BODY = '    """Column: text-search indexed (absent `index_type` means indexed by default)."""\n'
+_D1 = '@code_rule("model_complexity"'
+_D1_BODY = ('    """D1 — up to five findings per Model, one per measure over its MEDIUM line."""\n'
+            '    out: List[Finding] = []\n    for item in scopes.available(ctx, rule):\n')
+
+
+@pytest.mark.parametrize("edits,expect", [
+    ([("context.py", None, "\n\ndef _probe_answers(ctx):\n    return ctx.answers\n"),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    from ts_cli.audit.context import "
+                                                  "_probe_answers\n    _probe_answers(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in ts_cli.audit.context._probe_answers)"),
+    ([("engine/fields.py", _IDX_BODY, _IDX_BODY + "    from ts_cli.audit.context import _nope\n")],
+     "imports '_nope' from 'ts_cli.audit.context' inside the function, which the scan "
+     "cannot resolve"),
+    ([("engine/fields.py", _IDX, "import functools\n\n@functools.lru_cache(maxsize=None)\n"
+       "def _probe(ctx):\n    return ctx.answers\n\n\n" + _IDX),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    _probe(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in _probe)"),
+    ([("engine/fields.py", _IDX, "import functools\n\ndef _deco(fn):\n"
+       "    @functools.wraps(fn)\n    def inner(*a):\n        return fn(*a)\n    return inner\n\n"
+       "@_deco\ndef _probe(ctx):\n    return ctx.answers\n\n\n" + _IDX),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    _probe(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in _probe)"),
+    ([("engine/fields.py", _IDX, "class _Probe:\n    @staticmethod\n    def read(ctx):\n"
+       "        return ctx.answers\n\n\n" + _IDX),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    _Probe.read(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in _Probe.read)"),
+    ([("engine/code_rules.py", _D1, "_PROBE_SCOPE = \"answer\"\n\n\n" + _D1),
+      ("engine/code_rules.py", _D1_BODY, _D1_BODY.replace(
+          "    for item", "    list(scopes.iterate(ctx, _PROBE_SCOPE))\n    for item", 1))],
+     "code rule 'model_complexity' reads 'answers'"),
+    ([("engine/code_rules.py", _D1_BODY, _D1_BODY.replace(
+        "    for item", "    list(scopes.iterate(ctx, rule.id))\n    for item", 1))],
+     "calls iterate with a scope the scan cannot read"),
+    ([("engine/fields.py", _IDX_BODY, _IDX_BODY + "    getattr(ctx, \"answers\")\n")],
+     "(getattr(ctx, 'answers') in _is_indexed)"),
+    ([("context.py", "    def tables_for_model(self, model: dict) -> list:\n",
+       "    def probe(self):\n        return self.answers\n\n"
+       "    def tables_for_model(self, model: dict) -> list:\n"),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    ctx.probe()\n")],
+     "(ctx.answers in AuditContext.probe)"),
+], ids=["local_import", "local_import_unresolvable", "lru_cache", "wraps", "staticmethod",
+        "scope_constant", "scope_dynamic", "getattr", "context_method"])
+def test_scan_evasion_probes_fail_the_gate(tmp_path, edits, expect):
+    root = _copy_repo(tmp_path)
+    for rel, old, new in edits:
+        path = root / AUDIT_REL / rel
+        text = path.read_text()
+        if old is None:
+            text += new
+        else:
+            assert text.count(old) == 1, old
+            text = text.replace(old, new)
+        path.write_text(text)
     res = _run(root)
     assert res.returncode == 1, res.stdout
     assert expect in res.stdout, res.stdout

@@ -59,8 +59,8 @@ def uses_problems(rule: Rule, requires_vocabulary: List[str]) -> List[str]:
                            "it) — declare it once")
         elif value in requires_vocabulary:
             out.append(f"uses: '{value}' is not conditional data — model_tml, table_tml "
-                       "and metadata are fetched for every audit and are never declared "
-                       f"them in uses (uses takes: {', '.join(CONDITIONAL_DATA)})")
+                       "and metadata are fetched for every audit, so they are never declared "
+                       f"in uses (uses takes: {', '.join(CONDITIONAL_DATA)})")
         else:
             out.append(f"uses: unknown uses value '{value}' "
                        f"(known: {', '.join(CONDITIONAL_DATA)})")

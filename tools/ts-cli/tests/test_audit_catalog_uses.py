@@ -75,7 +75,8 @@ def test_data_reads_names_each_source():
 def test_uses_rejects_unconditional_data_and_says_why(value):
     problems = _shipped_with(lambda rules: rules["A5"].update(uses=["ai_instructions", value]))
     [p] = problems
-    assert f"'{value}'" in p and "fetched for every audit" in p
+    assert f"'{value}'" in p
+    assert "fetched for every audit, so they are never declared in uses (uses takes:" in p
 
 
 def test_uses_rejects_an_unknown_value():
@@ -236,3 +237,111 @@ def test_a_scope_reading_undeclared_data_fails(monkeypatch):
     monkeypatch.setitem(scopes.SCOPE_USES, "answer", frozenset())
     problems = registry_read_problems()
     assert any("scope 'answer' reads 'answers'" in p for p in problems)
+
+
+# ── fix round 3: what the scan follows, and where it fails closed ───────────
+
+import functools
+
+from ts_cli.audit import catalog_reads
+from ts_cli.audit.context import AuditContext
+
+
+def _scan(fn):
+    walker = catalog_reads._scan([fn])
+    return set(walker.reads), walker.problems
+
+
+@functools.lru_cache(maxsize=None)
+def _cached_reader(ctx):
+    return ctx.answers
+
+
+def _deco(fn):
+    @functools.wraps(fn)
+    def inner(*a):
+        return fn(*a)
+    return inner
+
+
+@_deco
+def _wrapped_reader(ctx):
+    return ctx.answers
+
+
+class _Holder:
+    @staticmethod
+    def read(ctx):
+        return ctx.answers
+
+    @classmethod
+    def read_cls(cls, ctx):
+        return ctx.ai_instructions
+
+
+_SCOPE_CONSTANT = "answer"
+
+
+def _local_import_ok(item, ctx):
+    from ts_cli.audit.context import nl_instructions
+    return nl_instructions({})
+
+
+def _local_import_missing(item, ctx):
+    from ts_cli.audit.context import _no_such_helper  # noqa: F401
+
+
+def _local_import_outside(item, ctx):
+    from ts_cli.sets.discover import discover_sets  # noqa: F401
+
+
+def _local_import_stdlib(item, ctx):
+    import json  # noqa: F401
+    return 0
+
+
+@pytest.mark.parametrize("fn,expected", [
+    (lambda item, ctx: _cached_reader(ctx), {"answers"}),           # lru_cache
+    (lambda item, ctx: _wrapped_reader(ctx), {"answers"}),          # functools.wraps
+    (lambda item, ctx: _Holder.read(ctx), {"answers"}),             # staticmethod
+    (lambda item, ctx: _Holder.read_cls(ctx), {"ai_instructions"}),  # classmethod
+    (lambda item, ctx: getattr(ctx, "dependents"), {"dependents", "sets"}),
+    (lambda item, ctx: list(scopes.iterate(ctx, _SCOPE_CONSTANT)), {"answers"}),
+    (_local_import_ok, set()),
+    (_local_import_stdlib, set()),
+])
+def test_scan_follows_wrappers_members_getattr_constants_and_local_imports(fn, expected):
+    reads, problems = _scan(fn)
+    assert (reads, problems) == (expected, [])
+
+
+@pytest.mark.parametrize("fn,message", [
+    (_local_import_missing, "imports '_no_such_helper' from 'ts_cli.audit.context' inside "
+                            "the function, which the scan cannot resolve"),
+    (_local_import_outside, "imports 'discover_sets' from 'ts_cli.sets.discover' inside the "
+                            "function, which the scan cannot follow"),
+    (lambda item, ctx: list(scopes.iterate(ctx, item["scope"])),
+     "calls iterate with a scope the scan cannot read"),
+])
+def test_scan_fails_closed_on_what_it_cannot_follow(fn, message):
+    _, problems = _scan(fn)
+    assert len(problems) == 1 and message in problems[0], problems
+
+
+def test_context_methods_are_followed_by_name(monkeypatch):
+    monkeypatch.setattr(AuditContext, "t11_probe", lambda self: self.answers, raising=False)
+    reads, _ = _scan(lambda item, ctx: ctx.t11_probe())
+    assert reads == {"answers"}
+
+
+def test_a_module_the_gate_cannot_import_is_read_from_source():
+    """context.py needs typer, so the gate compiles it without executing it. The
+    compiled view must see what the runtime module defines."""
+    import ts_cli.audit.context as runtime
+    compiled = catalog_reads._compile("ts_cli.audit.context")
+    assert {"nl_instructions", "join_key_ids", "build_context"} <= set(compiled.defs)
+    assert "AuditContext" in compiled.classes
+    assert {name for name, obj in vars(runtime).items()
+            if getattr(obj, "__module__", None) == runtime.__name__
+            and callable(obj) and not isinstance(obj, type)} <= set(compiled.defs)
+    assert compiled.imports["parse_edoc"][0] == "ts_cli.commands.tml"

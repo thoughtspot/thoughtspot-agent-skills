@@ -179,6 +179,76 @@ def test_retired_rule_revived_by_a_layer_still_contributes_nothing():
     assert "sets" not in needs_for(cat, ["H"], "general", layers=revive)
 
 
+def test_rule_disabled_under_the_profile_contributes_nothing_under_it():
+    def answers_off_for_spotter(rules):
+        for rid in ("H7", "H8", "H9"):
+            rules[rid].setdefault("profiles", {})["spotter"] = {"status": "retired"}
+    cat = _catalog_with(answers_off_for_spotter)
+    assert "answers" not in needs_for(cat, ["H"], "spotter")
+    assert "answers" in needs_for(cat, ["H"], "general")
+
+
+def test_rule_disabled_by_a_layer_contributes_nothing():
+    off = [{rid: {"status": "retired"} for rid in ("H7", "H8", "H9")}]
+    assert "answers" not in needs_for(load_catalog(), ["H"], "general", layers=off)
+
+
+def test_needs_for_rejects_unknown_category_and_profile():
+    cat = load_catalog()
+    with pytest.raises(ValueError, match="unknown categories"):
+        needs_for(cat, ["X"], "general")
+    with pytest.raises(ValueError, match="unknown profile"):
+        needs_for(cat, ["A"], "nope")
+
+
+def _a3_retired_under_spotter(rules):
+    rules["A3"].setdefault("profiles", {})["spotter"] = {"status": "retired"}
+
+
+def test_a5_gets_ai_instructions_when_a3_is_retired_by_a_profile():
+    """A5 declares `uses: [ai_instructions]`, so its data no longer rides on A3's
+    `requires`: with A3 off, an A-only selection still fetches the instructions."""
+    cat = _catalog_with(_a3_retired_under_spotter)
+    assert "ai_instructions" in needs_for(cat, ["A"], "spotter")
+    client, _, _ = _build(needs_for(cat, ["A"], "spotter"))
+    assert any(u.endswith(_AI) for u in client.urls())
+
+
+def test_a5_gets_ai_instructions_when_a3_is_retired_by_a_layer():
+    off = [{"A3": {"status": "retired"}}]
+    assert "ai_instructions" in needs_for(load_catalog(), ["A"], "general", layers=off)
+
+
+def test_with_a3_and_a5_off_nothing_needs_ai_instructions():
+    off = [{"A3": {"status": "retired"}, "A5": {"status": "retired"}}]
+    assert "ai_instructions" not in needs_for(load_catalog(), ["A"], "general", layers=off)
+
+
+def test_a_layer_cannot_add_uses():
+    """`uses` is not overridable: a layer setting it is ignored, as for `requires`."""
+    layer = [{"D1": {"uses": ["answers"], "requires": ["answers"]}}]
+    assert "answers" not in needs_for(load_catalog(), ["D"], "general", layers=layer)
+
+
+# ── fetch order: Answers before Sets ────────────────────────────────────────
+
+def test_set_consumers_do_not_widen_the_answer_export():
+    """Set discovery writes each Set's consumers into `dependents`, which the Answer
+    export walks; run after it, an Answer that uses only a Set would be exported and
+    judged by H7-H9. Answers come only from the Models' and Tables' own dependents."""
+    sets = {"sets": {"m1": [{"guid": "s1", "name": "B"}]}, "incomplete": [], "notes": []}
+    consumers = {"dependents": [{"guid": "a9", "name": "Uses B", "type": "ANSWER"}],
+                 "liveboards": {}, "unreadable": [], "other_types": [], "error": None}
+    client = RecordingClient()
+    with patch("ts_cli.audit.context.discover_sets", return_value=sets), \
+            patch("ts_cli.audit.context.fetch_consumers", return_value=consumers):
+        ctx = build_context(client, ["m1"], {"answers", "sets"})
+    exported = [m["identifier"] for u, j in client.calls if u.endswith(_EXPORT)
+                for m in j["metadata"]]
+    assert "a9" not in exported and "a1" in exported
+    assert ctx.dependents["s1"][0]["guid"] == "a9"  # the Set consumer was recorded
+
+
 # ── profile handling at the two production call sites ──────────────────────
 
 @pytest.fixture
