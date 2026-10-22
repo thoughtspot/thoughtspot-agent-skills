@@ -634,7 +634,15 @@ SpotterViz build instructions below — not a literal grid/TML conversion.
    enable it, set it `true`, and re-import in place (existing `guid`/`obj_id` at the
    document root, `--no-create-new`) before proceeding. If they decline, liveboard
    generation cannot proceed.
-2. **Compose build instructions** from the Step 10a extraction: describe, per tile, what it
+2. **Check which fields actually survived model-build before describing any tile.** The
+   dashboard/tile extraction (10a) reflects the *source* LookML, not what Step 4-7 actually
+   succeeded in translating and importing — a measure/dimension can be unclassifiable or
+   dropped during migration-gaps review (Step 7.5) without 10a's own data knowing.
+   Cross-check every `view.field` a tile would reference against the live model's export
+   from Step 9: for anything missing, drop that specific tile and record it as not
+   migrated — never describe a tile to SpotterViz referencing a field that isn't in the
+   model.
+3. **Compose build instructions** from the Step 10a extraction: describe, per tile, what it
    should show (fields, chart intent in plain words — use
    `../../shared/schemas/thoughtspot-chart-types.md`'s analytical-intent vocabulary),
    embed any tile-level `filters:` as part of that tile's description, and describe the
@@ -642,12 +650,19 @@ SpotterViz build instructions below — not a literal grid/TML conversion.
    `listen:` map. Preserve the dashboard's relative layout (row/column grouping) in the
    description — SpotterViz doesn't need literal 24-column coordinates, but a clear
    description of what's grouped together.
-3. **Call `create_dashboard`** with a `title`, the composed `instructions`, and
+4. **Call `create_dashboard`** with a `title`, the composed `instructions`, and
    `data_source_id` set to the model's `obj_id` (from Step 9).
-4. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
+5. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
    guid/URL), `needs_input` (relay the question to the user verbatim, get an answer,
    resubmit), or `failed` (report plainly — never treat as success).
-5. **Display the result:**
+6. **Verify every answer on the liveboard actually runs and returns data** — export the
+   completed liveboard and, for each tile, run its search/query and confirm it succeeds
+   **and** returns at least one row. For any tile that errors or comes back empty, retry
+   once (a transient failure, or ask SpotterViz via `modify_dashboard` to rebuild that
+   specific tile). **If it still fails after the retry**, call `modify_dashboard` once more
+   asking it to note that tile's name and failure detail in `migration_details.md` (Step
+   10h) rather than leaving it unexplained.
+7. **Display the result:**
    ```
    {liveboard_url} = {base_url}/#/insights/pinboard/{liveboard_guid}
    ```

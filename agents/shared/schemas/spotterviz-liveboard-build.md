@@ -72,7 +72,19 @@ structured description — not a vague one-liner — covering, per tab/section:
   assignment itself from the instructions, so clear, consistent intent words matter more
   than literal shelf/encoding detail.
 - **Grouping and tab structure**: which tiles belong together and under what tab/section
-  name, mirroring the source dashboard's own structure.
+  name, mirroring the source dashboard's own structure. Once a tab has more than ~6-8
+  tiles, ask for named sections by theme rather than a flat list — confirmed preference,
+  apply upfront rather than waiting to be asked.
+- **Per-record filters**: if the source dashboard's title/subtitle shows per-record
+  identifying attributes (e.g. "Order ID: 10248 | Customer: Acme Corp"), ask for a liveboard
+  filter on that basis even with no explicit source filter action — that pattern itself
+  signals a per-record-scoped dashboard.
+- **Chart-intent wording for specific shapes, confirmed over a generic description**: a
+  per-entity dot/strip-style source visual (one measure + a categorical grouping + a
+  size/color dimension, no aggregation) → ask for a bubble chart sized by the measure, not
+  an aggregated bar; a geographic lat/long source visual → ask for a map, not a line of
+  coordinates; a multi-measure trend/comparison → ask for a multi-series line once every
+  needed measure exists, not a table placeholder.
 - **A final summary tab**, if the skill's own migration-summary convention calls for one —
   ask for it explicitly in the same instructions (e.g. "add a final tab summarizing what was
   migrated, what was skipped, and why").
@@ -82,6 +94,17 @@ built this session). It returns a `task_id`; poll `get_dashboard_status` until:
 - `completed` — capture the returned Liveboard guid/URL.
 - `needs_input` — relay the question to the user verbatim, get an answer, resubmit.
 - `failed` — report the failure plainly; never treat it as success.
+
+## Verifying the build
+
+`completed` means SpotterViz finished building, not that every tile necessarily runs —
+export the liveboard and run each tile's search/query (e.g. `ts agentql fetch-data`),
+confirming it both succeeds and returns at least one row. A tile that errors or comes back
+empty gets one retry (either the fetch itself, if transient, or a `modify_dashboard` call
+asking SpotterViz to rebuild that specific tile). If it's still broken after the retry,
+don't ship it unexplained — call `modify_dashboard` once more asking it to record that
+tile's name and failure detail in the migration summary tab, and carry the same detail into
+the skill's own migration report.
 
 ## Known gotchas
 

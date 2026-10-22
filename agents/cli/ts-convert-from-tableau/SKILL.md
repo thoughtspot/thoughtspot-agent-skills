@@ -176,7 +176,7 @@ When the user picks **M**, immediately ask **what to migrate** — this decides 
   9.  Parse dashboard layout and map to grid ............... auto         [scope 1,3]
   9d. Orphan worksheets (not on a dashboard) — add as tiles? you choose   [scope 1,3]
  10.  Build liveboard via SpotterViz (is_spotter_enabled gate,
-      build instructions, poll to completion) ............ you confirm   [scope 1,3]
+      build instructions, poll, verify every tile runs) ... you confirm   [scope 1,3]
  11.5 Formula coverage answers (every formula testable) ... auto         [scope 1,2,4]
  12.  Migration report (outcomes + links + formula map) ... auto         [scope 1,2,3,4,5]
  12.5 Resume prompt — fix parked formulas? .............. you choose    [scope 1,2,4; if parked]
@@ -1953,23 +1953,43 @@ composition, polling, and known gotchas). The condensed steps:
    specific property regardless), set it `true`, and re-import in place (existing
    `guid`/`obj_id` at the document root, `--no-create-new`) before proceeding. If they
    decline, liveboard generation cannot proceed for that model.
-2. **Compose build instructions**, one per dashboard (or one per tab, if Step 8 chose
+2. **Check which Tableau fields actually survived model-build before describing any
+   tile.** The dashboard/tile extraction (Step 9) reflects the *source* TWB, not what Step
+   5/7 actually succeeded in translating and importing — a formula can be skipped,
+   filtered, or dropped on import (Step 7) without Step 9's own data knowing. Cross-check
+   every column/formula a tile would reference against the live model's export from Step
+   1 (or a fresh `ts tml export {model_guid} --parse` if it's been a while): for anything
+   missing, either substitute a reasonable fallback (e.g. the dynamic-grain-default
+   substitute pattern in `tableau-formula-translation.md` for a dropped dynamic-parameter
+   date field) or drop that specific tile and record it as not migrated — never describe a
+   tile to SpotterViz referencing something that isn't in the model, which just trades a
+   clear "not migrated" for an opaque `needs_input` or a silently wrong tile.
+3. **Compose build instructions**, one per dashboard (or one per tab, if Step 8 chose
    **T**). Use Step 9's zone classification, worksheet shelves, and relative layout to
    describe — in plain language — what each tile should show and how tiles group together;
    use `thoughtspot-chart-types.md`'s analytical-intent vocabulary for chart-intent wording.
    Append any Step 9d orphan worksheets the user chose to add. Ask for a final **Migration
    Summary** tab in the same instructions, covering: items migrated (and how), decisions
-   made, partial/placeholder items (what's missing, why), and items not migrated (and why)
-   — see [references/migration-report-format.md](references/migration-report-format.md)
+   made, partial/placeholder items (what's missing, why), and items not migrated (and why,
+   including anything dropped in step 2 above) — see
+   [references/migration-report-format.md](references/migration-report-format.md)
    "Migration Summary content" for the exact four-section shape; keep it consistent with
    the Step 12 report.
-3. **Call `create_dashboard`** (new liveboard) or `modify_dashboard` (iterating on one
+4. **Call `create_dashboard`** (new liveboard) or `modify_dashboard` (iterating on one
    already built this session) with a `title`, the composed `instructions`, and
    `data_source_id` set to the model's `{model_obj_id}` (captured in Step 7).
-4. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
+5. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
    guid/URL), `needs_input` (relay the question to the user verbatim, get an answer,
    resubmit), or `failed` (report plainly — never treat as success).
-5. **Display the result:**
+6. **Verify every answer on the liveboard actually runs and returns data** — export the
+   completed liveboard and, for each tile, run its search/query (e.g. `ts agentql
+   fetch-data`) and confirm it succeeds **and** returns at least one row. For any tile that
+   errors or comes back empty, retry once (a transient failure, or ask SpotterViz via
+   `modify_dashboard` to rebuild that specific tile). **If it still fails after the
+   retry**, don't silently ship a broken tile: call `modify_dashboard` once more asking it
+   to record that tile's name and failure detail in the Migration Summary tab (and include
+   the same detail in the Step 12 report) rather than leaving it unexplained.
+7. **Display the result:**
    ```
    {base_url}/#/pinboard/{liveboard_guid}
    ```
@@ -2170,6 +2190,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 2.0.0 | 2026-10-22 | **BREAKING — liveboard generation moves to SpotterViz, dropping the hand-authored-TML path entirely; plus Model/formula-engine fixes (ts-cli v0.182.0).** Parser false positives (function-name scans now mask literals/`[ref]`s first), nested-`group_aggregate` detection (checks span containment, not match-count), LOD brace-scanning (single-pass stack scanner skipping `[ref]` spans), `convert_string_concat` gated on `datatype == "string"`, import-retry no longer fails open or reports success on an unattributable failure, parameter types `INT64`/`DATE`, `range_config` → `range_min`/`range_max`, and mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`) — backlog BL-403/404. **Liveboard generation:** new Step 1.6 confirms SpotterViz MCP connectivity before any parsing work (scope 1/3), with setup instructions if it's missing and a clear "liveboards can't be built this session, Model/Table work is unaffected" message if the user proceeds without it. Step 10 checks which Tableau fields actually survived model-build before describing any tile, re-confirms `is_spotter_enabled`, composes natural-language build instructions from Step 9's zone/shelf/layout extraction, calls `create_dashboard`/`modify_dashboard`, polls to completion, **then verifies every tile actually runs and returns data** — retry once, and record any still-failing tile in the Migration Summary and Step 12 report. Removed: the charting-library choice (Legacy/Muze), hand-authored chart-type/search-query/layout-beautify/grouping rules, parameter header chips, and the 6-theme styling pass — none apply to a SpotterViz-built liveboard. See `../../shared/schemas/spotterviz-liveboard-build.md` for the full procedure and known gotchas. Step 11 (hand-authored TML import) removed; Step 11.5's coverage answers still hand-author a single-tile Answer TML (unaffected) and absorbed the top-level `guid`/`obj_id` re-import rule Step 11 used to carry. |
+| 2.0.0 | 2026-10-22 | **BREAKING — liveboard generation moves to SpotterViz, dropping the hand-authored-TML path entirely; plus Model/formula-engine fixes (ts-cli v0.182.0).** Parser false positives (function-name scans now mask literals/`[ref]`s first), nested-`group_aggregate` detection (checks span containment, not match-count), LOD brace-scanning (single-pass stack scanner skipping `[ref]` spans), `convert_string_concat` gated on `datatype == "string"`, import-retry no longer fails open or reports success on an unattributable failure, parameter types `INT64`/`DATE`, `range_config` → `range_min`/`range_max`, and mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`) — backlog BL-403/404. **Liveboard generation:** new Step 1.6 confirms SpotterViz MCP connectivity before any parsing work (scope 1/3), with setup instructions if it's missing and a clear "liveboards can't be built this session, Model/Table work is unaffected" message if the user proceeds without it. Step 10 checks which Tableau fields actually survived model-build before describing any tile (never reference a dropped formula to SpotterViz), re-confirms `is_spotter_enabled`, composes natural-language build instructions from Step 9's zone/shelf/layout extraction, calls `create_dashboard`/`modify_dashboard`, polls to completion, **then verifies every tile actually runs and returns data** — retry once, and record any still-failing tile in the Migration Summary and Step 12 report rather than shipping it unexplained. Removed: the charting-library choice (Legacy/Muze), hand-authored chart-type/search-query/layout-beautify/grouping rules, parameter header chips, and the 6-theme styling pass — none apply to a SpotterViz-built liveboard. Confirmed chart/structure upgrades (per-entity bubble plots, geo paths, multi-measure trends, named sections, per-record filters) carried over from the hand-authored path. See `../../shared/schemas/spotterviz-liveboard-build.md` for the full procedure and known gotchas. Step 11 (hand-authored TML import) removed; Step 11.5's coverage answers still hand-author a single-tile Answer TML (unaffected) and absorbed the top-level `guid`/`obj_id` re-import rule Step 11 used to carry. |
 
 **Older entries (v1.0.0–v1.46.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
