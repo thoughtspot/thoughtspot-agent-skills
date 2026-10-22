@@ -163,11 +163,11 @@ _NO_SETS = {"sets": {}, "incomplete": [], "notes": []}
 
 @patch("ts_cli.audit.context.discover_sets", return_value=_NO_SETS)
 def test_run_audit_from_snapshot_matches_live(_disc, tmp_path):
-    from ts_cli.audit import run_audit
+    from ts_cli.audit import data_needs, run_audit
     live = run_audit(_fake_client(), ["m1"])
     assert live["findings"], "fixture must produce findings or the comparison is vacuous"
 
-    write_snapshot(build_context(_fake_client(), ["m1"], ALL), tmp_path / "snap", ALL)
+    write_snapshot(build_context(_fake_client(), ["m1"], data_needs(ALL)), tmp_path / "snap", ALL)
     ctx, angles = read_snapshot(tmp_path / "snap")
     replay = run_audit(None, ["ignored"], angles, ctx=ctx)
 

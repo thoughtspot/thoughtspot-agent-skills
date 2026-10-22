@@ -84,8 +84,10 @@ import audit_rule_fixtures as fx
 
 
 def _build_with_one_model(guid, angles, name="Sales"):
+    """`angles` are categories: the context fetches what their rules require."""
+    from ts_cli.audit import data_needs
     from ts_cli.audit.context import build_context
-    return build_context(fx.build_client_with_one_model(guid, name), [guid], angles)
+    return build_context(fx.build_client_with_one_model(guid, name), [guid], data_needs(angles))
 
 
 @patch("ts_cli.audit.context.fetch_consumers")
@@ -155,9 +157,11 @@ def test_h5_records_sets_whose_hidden_dependents_were_returned(disc, dep_rows, o
     """R17 end to end through the real fetch_consumers: has+returned is a clean lookup,
     so the Set is recorded and H5 decides on what was returned."""
     from ts_cli.audit.checks_human import check_h5
+    from ts_cli.audit import data_needs
     from ts_cli.audit.context import build_context
     disc.return_value = fx.SETS_ONE
-    ctx = build_context(fx.build_client_with_set_dependents("m1", dep_rows), ["m1"], ["H"])
+    ctx = build_context(fx.build_client_with_set_dependents("m1", dep_rows), ["m1"],
+                        data_needs(["H"]))
     assert "s1" in ctx.dependents
     assert not any("s1" in w for w in ctx.warnings)
     assert [f.object_guid for f in check_h5(ctx)] == (["s1"] if orphan else [])

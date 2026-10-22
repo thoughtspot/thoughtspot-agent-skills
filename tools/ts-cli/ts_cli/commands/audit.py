@@ -47,12 +47,13 @@ def _replay(snapshot_in: Path, angle_list: Optional[list],
 def _capture(client, models: list, angle_list: Optional[list], assessment_name: Optional[str],
              snapshot_out: Path) -> dict:
     """Fetch the audit data, write it to ``snapshot_out``, then audit it as normal."""
-    from ts_cli.audit import ANGLE_MODULES, assessment, run_audit
+    from ts_cli.audit import ANGLE_MODULES, assessment, data_needs, run_audit
     from ts_cli.audit.context import build_context
     from ts_cli.audit.snapshot import SnapshotError, write_snapshot
 
     angles = angle_list or list(ANGLE_MODULES.keys())
-    ctx = build_context(client, models, angles)
+    # Every profile's needs: a replay may pass a different --assessment.
+    ctx = build_context(client, models, data_needs(angles))
     ctx.assessment = assessment.normalise(assessment_name)
     try:
         write_snapshot(ctx, snapshot_out, angles)

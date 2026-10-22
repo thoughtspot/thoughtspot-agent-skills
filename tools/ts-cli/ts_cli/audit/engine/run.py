@@ -25,7 +25,7 @@ a replayed snapshot carries from its capture.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Set
 
 from ts_cli.audit.catalog_forms import BY_SEVERITY
 from ts_cli.audit.catalog_model import Catalog, Rule
@@ -43,13 +43,36 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
     catalog is layer 0, the profile layer 1).
     """
     _check_selection(catalog, categories, profile)
-    wanted = set(categories)
     findings: List[Finding] = []
-    for rule in catalog.rules.values():
-        if rule.status != "active" or not wanted.intersection(rule.categories):
-            continue
+    for rule in _selected(catalog, categories):
         findings += _run_rule(ctx, catalog, rule, profile, layers or [])
     return findings
+
+
+def needs_for(catalog: Catalog, categories: List[str], profile: str,
+              layers: Optional[List[Dict[str, Any]]] = None) -> Set[str]:
+    """The data `run_rules(ctx, catalog, categories, profile, layers)` reads: the union
+    of `requires` over the rules it would run — selected, active in the catalog, and
+    still active once the profile and `layers` are applied (`status` is overridable).
+    A retired rule, or one a profile or layer switches off, contributes nothing.
+
+    `build_context` fetches the optional data (`ai_instructions`, `answers`, `sets`)
+    only when it is in here."""
+    _check_selection(catalog, categories, profile)
+    needs: Set[str] = set()
+    for rule in _selected(catalog, categories):
+        merged, _ = bands.effective(rule, layers_for(rule, profile, layers or []))
+        if merged.status == "active":
+            needs.update(rule.requires)
+    return needs
+
+
+def _selected(catalog: Catalog, categories: List[str]) -> Iterator[Rule]:
+    """The catalog-active rules in any of `categories`. A layer cannot revive a rule
+    retired in the catalog here (only `run_rule`, run singly, can)."""
+    wanted = set(categories)
+    return (r for r in catalog.rules.values()
+            if r.status == "active" and wanted.intersection(r.categories))
 
 
 def run_rule(ctx, catalog: Catalog, rule_id: str, profile: str,

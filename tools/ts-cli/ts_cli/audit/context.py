@@ -3,8 +3,9 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
+from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -188,11 +189,71 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         warnings.append(msg)
 
 
+def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
+                           warnings: list) -> None:
+    """`ai/instructions/get` per Model, into `out[guid]`; a failure leaves no entry."""
+    _log("Fetching AI instructions...")
+    for guid in model_guids:
+        try:
+            resp = client.post("/api/rest/2.0/ai/instructions/get", json={
+                "data_source_identifier": guid,
+            })
+            out[guid] = resp.json()
+        except Exception:
+            msg = f"AI instructions fetch failed for model {guid}"
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
+
+
+def _export_answers(client: Any, dependents: dict) -> list:
+    """Answer TML for every ANSWER among `dependents`; a failed batch is skipped."""
+    answers: list = []
+    answer_guids = set()
+    for deps in dependents.values():
+        for d in deps:
+            if d.get("type") == "ANSWER" and d.get("guid"):
+                answer_guids.add(d["guid"])
+    if not answer_guids:
+        return answers
+    _log(f"Exporting {len(answer_guids)} answer TML(s)...")
+    guid_list = list(answer_guids)
+    ans_batch = 50
+    for i in range(0, len(guid_list), ans_batch):
+        batch = guid_list[i:i + ans_batch]
+        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": g} for g in batch],
+            "export_fqn": True,
+            "formattype": "YAML",
+        }, timeout=300, raise_for_status=False)
+        if not resp.ok:
+            _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
+            continue
+        for item in resp.json():
+            edoc = item.get("edoc", "")
+            parsed = parse_edoc(edoc, "YAML")
+            if parsed and detect_tml_type(parsed) == "answer":
+                answers.append(parsed)
+    return answers
+
+
 def build_context(
     client: Any,
     model_guids: list,
-    angles: list,
+    needs: Iterable[str],
 ) -> AuditContext:
+    """Fetch what an audit reads for `model_guids`.
+
+    Model TML (with associated Table TML), metadata and dependents are always fetched.
+    The optional data is fetched only when it is in `needs` — the `requires` values of
+    the rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers`
+    (Answer TML of the dependents' Answers) and `sets` (Set discovery and each Set's
+    consumers). Anything that is not a `requires` value — a category letter from a
+    caller still passing angles — is rejected, not silently ignored.
+    """
+    needs = set(needs)
+    unknown = sorted(needs - set(REQUIRES))
+    if unknown:
+        raise ValueError(f"build_context: unknown needs {unknown} (known: {', '.join(REQUIRES)})")
     models = []
     tables = {}
     dependents = {}
@@ -275,44 +336,11 @@ def build_context(
                 src = row["source_guid"]
                 dependents.setdefault(src, []).append(row)
 
-    if "A" in angles:
-        _log("Fetching AI instructions...")
-        for guid in model_guids:
-            try:
-                resp = client.post("/api/rest/2.0/ai/instructions/get", json={
-                    "data_source_identifier": guid,
-                })
-                ai_instructions[guid] = resp.json()
-            except Exception:
-                msg = f"AI instructions fetch failed for model {guid}"
-                _log(f"Warning: {msg}")
-                warnings.append(msg)
-
-    if "H" in angles:
-        answer_guids = set()
-        for deps in dependents.values():
-            for d in deps:
-                if d.get("type") == "ANSWER" and d.get("guid"):
-                    answer_guids.add(d["guid"])
-        if answer_guids:
-            _log(f"Exporting {len(answer_guids)} answer TML(s)...")
-            guid_list = list(answer_guids)
-            ans_batch = 50
-            for i in range(0, len(guid_list), ans_batch):
-                batch = guid_list[i:i + ans_batch]
-                resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                    "metadata": [{"identifier": g} for g in batch],
-                    "export_fqn": True,
-                    "formattype": "YAML",
-                }, timeout=300, raise_for_status=False)
-                if not resp.ok:
-                    _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
-                    continue
-                for item in resp.json():
-                    edoc = item.get("edoc", "")
-                    parsed = parse_edoc(edoc, "YAML")
-                    if parsed and detect_tml_type(parsed) == "answer":
-                        answers.append(parsed)
+    if "ai_instructions" in needs:
+        _fetch_ai_instructions(client, model_guids, ai_instructions, warnings)
+    if "answers" in needs:
+        answers = _export_answers(client, dependents)
+    if "sets" in needs:
         # After the answer export, so Set consumers do not widen the answer set.
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)

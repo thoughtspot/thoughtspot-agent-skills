@@ -398,17 +398,19 @@ def build_consumers(dependents=None, other_types=None, error=None) -> dict:
 
 
 def build_h_context(discovered, consumers=None, client=None) -> AuditContext:
-    """`build_context(client, ["m1"], ["H"])` with `discover_sets` returning
+    """`build_context` for `["m1"]` fetching what the H rules require, with `discover_sets` returning
     `discovered` and — unless None, which runs the real lookup — `fetch_consumers`
     returning `consumers`."""
+    from ts_cli.audit import data_needs
     from ts_cli.audit.context import build_context
     client = client or build_client_with_one_model("m1")
+    needs = data_needs(["H"])
     with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(discovered)):
         if consumers is None:
-            return build_context(client, ["m1"], ["H"])
+            return build_context(client, ["m1"], needs)
         with patch("ts_cli.audit.context.fetch_consumers",
                    return_value=copy.deepcopy(consumers)):
-            return build_context(client, ["m1"], ["H"])
+            return build_context(client, ["m1"], needs)
 
 
 def built_set_without_consumers() -> AuditContext:

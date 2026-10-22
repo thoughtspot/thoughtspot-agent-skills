@@ -305,6 +305,21 @@ def _build_overlaps_from_ctx(models: list) -> list:
     return overlaps
 
 
+def data_needs(angles: list, profiles: Optional[list] = None) -> set:
+    """What `build_context` must fetch for `angles`: the `requires` of the catalog rules
+    those categories select that are active under any of `profiles` (default: every
+    catalog profile — what a snapshot, replayable under either, captures). An angle the
+    catalog does not know selects nothing, as it runs nothing."""
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.run import needs_for
+    catalog = load_catalog()
+    known = [a for a in angles if a in catalog.categories]
+    needs: set = set()
+    for profile in (list(catalog.profiles) if profiles is None else profiles):
+        needs |= needs_for(catalog, known, profile)
+    return needs
+
+
 def run_audit(
     client,
     model_guids: list,
@@ -325,8 +340,9 @@ def run_audit(
     from ts_cli.audit import assessment
     angles = angles or list(ANGLE_MODULES.keys())
     if ctx is None:
-        ctx = build_context(client, model_guids, angles)
-        ctx.assessment = assessment.normalise(assessment_name)
+        profile = assessment.normalise(assessment_name)
+        ctx = build_context(client, model_guids, data_needs(angles, [profile]))
+        ctx.assessment = profile
     elif assessment_name is not None:
         ctx.assessment = assessment.normalise(assessment_name)
     else:
