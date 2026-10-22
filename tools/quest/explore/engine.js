@@ -59,6 +59,23 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     return { x, y };
   }
 
+  // Corner assist: walking straight into a corner a few pixels off a one-tile opening, slide
+  // towards the opening (by at most a step) instead of stopping, as top-down games do. Returns the
+  // new centre, or null when there is no opening within 7px.
+  function assist(box, dx, dy, solid) {
+    const hw = box.w / 2, hh = box.h / 2, step = Math.abs(dx || dy);
+    const free = (x, y) => !solid(x - hw, y - hh, x + hw, y + hh);
+    for (let off = 1; off <= 7; off++)
+      for (const sign of [-1, 1]) {
+        const px = dx ? box.x : box.x + sign * off, py = dx ? box.y + sign * off : box.y;
+        if (free(px, py) && free(px + Math.sign(dx) * 1, py + Math.sign(dy) * 1)) {
+          const nudge = sign * Math.min(off, step);
+          return move(box, dx ? 0 : nudge, dx ? nudge : 0, solid);
+        }
+      }
+    return null;
+  }
+
   // What blocks a box: solid tiles of a layer and enabled sprite bodies (each one tile, centred).
   // Returns the first rectangle it overlaps, or null. Touching edges don't count. A rectangle that
   // `from` (where the box stands, [x0, y0, x1, y1]) already overlaps blocks only a move deeper into
@@ -179,7 +196,10 @@ var Quest = (typeof Quest === "object" && Quest) || {};
       scene.update && scene.update();
       const p = scene.player;
       if (p) {
-        const to = move(p, p.vx * ms / 1000, p.vy * ms / 1000, scene.blocks);
+        const dx = p.vx * ms / 1000, dy = p.vy * ms / 1000;
+        let to = move(p, dx, dy, scene.blocks);
+        if ((dx && !dy && Math.abs(to.x - p.x) < Math.abs(dx) / 2) || (dy && !dx && Math.abs(to.y - p.y) < Math.abs(dy) / 2))
+          to = assist(p, dx, dy, scene.blocks) || to;
         p.dx = to.x - p.x; p.dy = to.y - p.y; p.x = to.x; p.y = to.y;
       }
       scene.postupdate && scene.postupdate();
@@ -250,5 +270,5 @@ var Quest = (typeof Quest === "object" && Quest) || {};
     return game;
   }
 
-  Q.engine = { TILE, Layer, Sprite, Body, move, blocker, create };
+  Q.engine = { TILE, Layer, Sprite, Body, move, assist, blocker, create };
 })(Quest);

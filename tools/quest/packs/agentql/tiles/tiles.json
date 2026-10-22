@@ -62,8 +62,6 @@
   },
   "npcs": {
     "elder": 100,
-    "villager": 99,
-    "ranger": 112,
     "miner": 86,
     "dwarf_guard": 133,
     "fisherman": 134,

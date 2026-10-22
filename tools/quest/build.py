@@ -838,6 +838,43 @@ TILE_NAMES = {"wall", "wall_top", "player", *maps.ROLES, "reward_open", "exit", 
 TILE_TABLES = {"portals", "items", "weapon", "npcs"}   # a door per realm, the loot, the first weapon, who npcs look like
 
 
+def _png_alpha(path: pathlib.Path) -> tuple[int, int, bytes] | None:
+    """An 8-bit RGBA PNG's width, height and alpha channel (as make_atlas.py writes it), or None for
+    any other kind of PNG. Enough to tell an empty frame from a drawn one, without Pillow."""
+    import struct
+    import zlib
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos, idat, w, h = 8, b"", 0, 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, colour, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if (depth, colour, interlace) != (8, 6, 0):
+                return None
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * 4, [], bytearray(w * 4)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - 4] if i >= 4 else 0
+            up, ul = prev[i], (prev[i - 4] if i >= 4 else 0)
+            if f == 1: line[i] = (line[i] + a) & 255
+            elif f == 2: line[i] = (line[i] + up) & 255
+            elif f == 3: line[i] = (line[i] + (a + up) // 2) & 255
+            elif f == 4:
+                p = a + up - ul
+                pa, pb, pc = abs(p - a), abs(p - up), abs(p - ul)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else up if pb <= pc else ul)) & 255
+        rows.append(bytes(line[3::4]))
+        prev = line
+    return w, h, b"".join(rows)
+
+
 def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
     """tiles/tiles.json names a frame of tiles/tiles.png (16px, left to right, top to bottom) for
     everything the explore page draws."""
@@ -870,6 +907,16 @@ def check_tiles(pack: "Pack", data: dict | None = None) -> list[str]:
         errors.append("tiles/tiles.json: weapon names the weapon item you start with")
     if isinstance(items, dict) and "mimic" in items:
         errors.append("tiles/tiles.json: 'mimic' is a chest, not an item")
+    # Every frame it names is drawn: an empty one would be an invisible door, person or item.
+    alpha = _png_alpha(folder / "tiles.png")
+    if alpha and not errors:
+        w = alpha[0]
+        empty = lambda f: not any(alpha[2][(f // (w // 16) * 16 + y) * w + (f % (w // 16)) * 16:][:16].strip(b"\0") for y in range(16))
+        named = {k: v for k, v in frames.items() if k in TILE_NAMES}
+        named |= {f"portals.{k}": v for k, v in (portals or {}).items()}
+        named |= {f"npcs.{k}": v for k, v in (frames.get("npcs") or {}).items()}
+        named |= {f"items.{k}": v["frame"] for k, v in (items or {}).items()}
+        errors += [f"tiles/tiles.json: {k} is frame {v}, which tiles.png leaves empty" for k, v in named.items() if empty(v)]
     ids = {r["id"] for r in (data or {}).get("realms") or []}
     if data and isinstance(portals, dict):
         errors += [f"tiles/tiles.json: portals names {k!r}, which is not a realm" for k in sorted(set(portals) - ids)]

@@ -3691,9 +3691,46 @@ def test_every_realm_has_its_own_door_and_guard():
 
 def test_the_people_speak_briefly():
     strings = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
-    for k, v in strings.items():
-        if k.startswith(("guard_", "npc_elder_")):
-            assert len(v) <= 110, (k, len(v))
+    for k in MAPS.npc_lines(PACK_DIR) | {"explore_npc_about"}:
+        assert len(strings[k]) <= 110, (k, len(strings[k]))
+
+
+def test_each_guard_names_its_realm_and_stands_by_its_door():
+    data, _ = B.compile_pack(B.Pack("agentql"))
+    strings = yaml.safe_load((PACK_DIR / "strings.yaml").read_text(encoding="utf-8"))
+    for r in data["realms"]:
+        assert r["name"] in strings[f"guard_{r['id']}"], r["id"]
+    doc = json.loads((PACK_DIR / "maps/overworld.tmj").read_text(encoding="utf-8"))
+    objs = [o for l in doc["layers"] if l["type"] == "objectgroup" for o in l["objects"]]
+    prop = lambda o, n: next((p["value"] for p in o.get("properties", []) if p["name"] == n), None)
+    doors = {prop(o, "to"): (o["x"], o["y"]) for o in objs if o["type"] == "portal"}
+    for o in objs:
+        says = prop(o, "says") or ""
+        if o["type"] == "npc" and says.startswith("guard_"):
+            near = min(doors, key=lambda rid: abs(doors[rid][0] - o["x"]) + abs(doors[rid][1] - o["y"]))
+            assert near == says[len("guard_"):], (says, near)
+
+
+def test_the_atlas_is_the_one_recorded():
+    import hashlib
+    want = (PACK_DIR / "tiles/tiles.sha256").read_text(encoding="utf-8").split()[0]
+    assert hashlib.sha256((PACK_DIR / "tiles/tiles.png").read_bytes()).hexdigest() == want, \
+        "tiles.png changed: rebuild it with tiles/make_atlas.py and record its sha256 in tiles/tiles.sha256"
+
+
+@pytest.mark.parametrize("edit", [
+    lambda f: f["portals"].update(forests=140),          # an invisible door
+    lambda f: f["npcs"].update(golden_elf=139),          # an invisible guard
+    lambda f: f.update(chest=141),
+])
+def test_a_name_pointing_at_an_empty_frame_fails_the_build(tmp_path, monkeypatch, edit):
+    packs = _copy_packs(tmp_path)
+    f = packs / "agentql/tiles/tiles.json"
+    frames = json.loads(f.read_text(encoding="utf-8"))
+    edit(frames)
+    f.write_text(json.dumps(frames), encoding="utf-8")
+    monkeypatch.setattr(B, "PACKS", packs)
+    assert any("which tiles.png leaves empty" in e for e in B.build(check=True)[3])
 
 
 def test_the_atlas_is_built_from_kenneys_three_packs():
@@ -3704,3 +3741,34 @@ def test_the_atlas_is_built_from_kenneys_three_packs():
     for pack in ("Tiny Dungeon (1.0)", "Tiny Town (1.1)", "Tiny Battle (1.0)"):
         assert pack in licence
     assert licence.count("Creative Commons Zero") == 3
+
+
+
+ENGINE_ASSIST = r"""
+const fs = require("fs"); globalThis.Quest = {};
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const E = Quest.engine, T = 16;
+// a wall with a one-tile opening at x 3: "###.###"
+const rows = ["#######", "###.###", "#.....#", "#######"];
+const walls = new E.Layer({ name: "walls", width: 7, height: 4, data: rows.join("").split("").map(c => c === "#" ? 1 : 0) });
+walls.setCollisionByExclusion();
+const block = E.blocker(walls, () => []);
+const out = {};
+for (const off of [-6, -3, 0, 3, 6]) {
+  let b = { x: 3 * T + 8 + off, y: 2 * T + 8, w: 12, h: 12 };
+  for (let i = 0; i < 40; i++) {                          // hold Up: plain move, then assist when blocked
+    let to = E.move(b, 0, -1.5, block);
+    if (Math.abs(to.y - b.y) < 0.75) to = E.assist(b, 0, -1.5, block) || to;
+    Object.assign(b, to);
+  }
+  out[off] = b.y < 2 * T;                                 // got into the opening
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_engine_slides_the_player_into_a_one_tile_opening():
+    r = subprocess.run(["node", "-e", ENGINE_ASSIST, str(B.EXPLORE_DIR / "engine.js")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"-6": True, "-3": True, "0": True, "3": True, "6": True}

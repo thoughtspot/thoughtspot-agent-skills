@@ -5,6 +5,10 @@ Tiny Battle 1.0) plus our own row. Frames, 16px, 12 to a row:
     133-137  ours               the realm guards: Tiny Dungeon characters, recoloured
     144-275  Tiny Town          tilemap_packed.png frame f is 144 + f
     276-473  Tiny Battle        tilemap_packed.png (18 to a row) frame f is 276 + f
+The zips used (sha256): kenney_tiny-dungeon.zip c109438ab06f65fd80f9b2686a4cf9c7c11dc64444b47333ec71d602f8bb5fc7,
+kenney_tiny-town.zip 9768692dccff1d706408a5aedd6ca4f6cd1409506cbc84cb2f862919764be977,
+kenney_tiny-battle.zip 7751ec7d9a07e57baa9fa1174d6f78fcd779a050377227afee77993c73cb5f9e.
+tiles.sha256 records the result; the tests check tiles.png against it.
 Needs Pillow; not run by the build (tiles.png is committed).
     python3 make_atlas.py <tiny-dungeon packed png> <tiny-town packed png> <tiny-battle packed png> <out png>"""
 import colorsys
@@ -17,7 +21,7 @@ GUARDS = [   # (frame, from Tiny Dungeon frame, how it is recoloured)
     (133, 87, ("tint", 0.60)),   # the Mines: a dwarf, his helmet and mail steel blue
     (134, 112, ("hue", 0.52)),   # the Lake: a fisherman, in sea green
     (135, 98, ("tint", 0.63)),   # the Isles: a sailor, in navy
-    (136, 96, ("tint", 0.12)),   # the Golden Forests: an elf in golden armour
+    (136, 97, ("tint", 0.12)),   # the Golden Forests: an elf in golden armour (not 96, the player)
     (137, 84, ("hue", 0.56)),    # Law: a wizard, in blue
 ]
 

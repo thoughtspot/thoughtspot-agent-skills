@@ -115,7 +115,7 @@
       if (fx.type === "sound") Sound.play(fx.name);
       else if (fx.type === "save") progress.finish(fx.realm, fx.gold);
     }
-    if (state.screen === "map") { closeDialog(); if (!world || world.mapId !== "overworld") goTo("overworld"); return; }
+    if (state.screen === "map") { closeDialog(); if (!world || world.mapId !== "overworld") goTo("overworld", world && world.mapId); return; }
     if (dialogStep === "portal") {
       if (state.screen === "realm") return show();                  // still at the gate: locked or sealed
       closeDialog(); return goTo(realms[state.realm].id);
@@ -152,9 +152,10 @@
     }
     if (obj.type === "chest" || obj.type === "barrel" || obj.type === "hoard" || obj.type === "npc") return world.play(obj);
     if (obj.type === "exit") {               // leave the realm; a quest left unfinished is not saved
+      const left = world.mapId;
       state = Object.assign(machine.fresh(), { screen: "map", firstDone: state.firstDone });
       Sound.play("blip");
-      return goTo("overworld");
+      return goTo("overworld", left);
     }
     const out = machine.act(state, { type: "interact", step: obj.step }, progress.load());
     if (out.refused) return toast(S("explore_not_yet"));
@@ -227,7 +228,7 @@
   };
 
   class World {
-    constructor(api, mapId, doc) { Object.assign(this, api); this.mapId = mapId; this.doc = doc; }
+    constructor(api, mapId, doc, from) { Object.assign(this, api); this.mapId = mapId; this.doc = doc; this.from = from; }
     create() {
       const doc = this.doc, map = { height: doc.height };
       const layer = name => doc.layers.find(l => l.type === "tilelayer" && l.name === name);
@@ -276,7 +277,16 @@
         this.hide(h, !!b && !fun.done[b.key]);
       }
       // The player's body moves; what you see follows it, facing the way it walks, with a step bob.
-      this.player = this.addPlayer(this.spawn.x, this.spawn.y);          // a 12x12 body
+      // Back from a realm, beside its door (the first open floor next to it); else at the spawn.
+      let start = this.spawn;
+      const door = this.from && this.objects.find(o => o.type === "portal" && o.to === this.from);
+      if (door) {
+        const open = ([dx, dy]) => { const tx = Math.floor(door.x / TILE) + dx, ty = Math.floor(door.y / TILE) + dy, t = walls.getTileAt(tx, ty);
+          return !(t && t.collides) && !this.objects.some(o => Math.floor(o.x / TILE) === tx && Math.floor(o.y / TILE) === ty); };
+        const side = [[0, 1], [0, -1], [-1, 0], [1, 0]].find(open);
+        if (side) start = { x: door.x + side[0] * TILE, y: door.y + side[1] * TILE };
+      }
+      this.player = this.addPlayer(start.x, start.y);                   // a 12x12 body
       this.look = this.addSprite(this.spawn.x, this.spawn.y, FRAMES.player, false).setDepth(10);
       this.facing = [0, 1];
       this.held = this.addSprite(this.spawn.x, this.spawn.y, ITEMS[fun.weapon].frame, false).setDepth(11).setScale(0.75);
@@ -426,10 +436,11 @@
     toast(t);                    // #toast is a status region: read once, not twice
     portalText = t;
   }
-  function goTo(mapId) {
+  // `from`: the realm just left, so the overworld puts the player beside that realm's door.
+  function goTo(mapId, from = null) {
     world = null;
     game.start(api => {
-      const w = new World(api, mapId, MAPS[mapId]);
+      const w = new World(api, mapId, MAPS[mapId], from);
       w.create();
       return { update: () => w.update(), postupdate: () => w.follow() };
     });
@@ -617,9 +628,15 @@
         wallsLook(false);
         if (world.decor && (!world.decor.layer.data.flat().some(t => t.index > 0) || world.decor.layer.data.flat().some(t => t.collides)))
           throw new Error("decoration isn't drawn, or blocks");
+        // From the spawn, straight up into the first solid thing above it, held long enough to cross
+        // the whole map: the player stops flush beneath it.
         world.player.setPosition(world.spawn.x, world.spawn.y);
-        key("keydown", "ArrowUp", 38); await wait(900); key("keyup", "ArrowUp", 38); await wait(80);
-        if (world.player.y < TILE + 6 - 0.5) throw new Error(`walked into the top wall (y ${world.player.y})`);
+        const sx = Math.floor(world.spawn.x / TILE);
+        let wy = Math.floor(world.spawn.y / TILE) - 1;
+        while (wy >= 0 && !blockedTile(sx, wy)) wy--;
+        if (wy < 0) throw new Error("nothing solid above the spawn to walk into");
+        key("keydown", "ArrowUp", 38); await wait(Math.ceil(world.doc.height * TILE / 90 * 1000) + 300); key("keyup", "ArrowUp", 38); await wait(80);
+        if (world.player.y < (wy + 1) * TILE + 6 - 0.5) throw new Error(`walked into the wall above the spawn (y ${world.player.y.toFixed(1)})`);
         if (Math.abs(world.look.x - Math.round(world.player.x)) > 1 || Math.abs(world.look.y - Math.round(world.player.y)) > 1)
           throw new Error("the player you see isn't where its body is");
         // Back from the classic page with gold won there: the bar shows it at once.
@@ -731,6 +748,9 @@
       const exit = world.objects.find(o => o.type === "exit");
       await walk(exit); talk(world.nearby());
       await until(() => world && world.mapId === "overworld");
+      const back = world.objects.find(o => o.type === "portal" && o.to === realmId);
+      if (Math.abs(world.player.x - back.x) + Math.abs(world.player.y - back.y) > TILE * 1.5)
+        throw new Error(`leaving ${realmId}, the player wasn't put back beside its door`);
       log(`EXIT ${realmId}`);
       return steps;
     }
