@@ -106,3 +106,17 @@ def _has_synonyms(item: dict, ctx: Any) -> bool:
 def _join_depth(item: dict, ctx: Any) -> int:
     """Model: longest join chain across `model_tables` (rules.join_depth)."""
     return rules.join_depth((item.get("obj") or {}).get("model_tables") or [])
+
+
+@register("has_ai_instructions")
+def _has_ai_instructions(item: dict, ctx: Any) -> bool:
+    """Model: coached — its ai/instructions response carries an instruction, or its TML
+    has `model_instructions.data_model_instructions`. A model whose lookup failed (no
+    entry in `ctx.ai_instructions`) reads as uncoached here; a rule that must skip it
+    instead declares `requires: [ai_instructions]` (A3 does, A5 does not)."""
+    from ts_cli.audit.context import nl_instructions  # not gate-safe: import on use
+    model = item.get("obj") or {}
+    return bool(
+        nl_instructions(ctx.ai_instructions.get(item.get("guid")))
+        or ((model.get("model_instructions") or {}).get("data_model_instructions")
+            or "").strip())

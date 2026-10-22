@@ -42,9 +42,12 @@ only the permitted modules and fails if this one needs more.
 """
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, List
 
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
+from ts_cli.audit.engine import bands, fields, scopes
+from ts_cli.audit.engine.messages import render
 from ts_cli.audit.findings import Finding
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
@@ -102,3 +105,59 @@ def check_findings(rule: "Rule", found: Any) -> List[Finding]:
             raise ValueError(f"{where}: unknown severity '{f.severity}' "
                              f"(known: {', '.join(SEVERITIES)})")
     return found
+
+
+# ── the code rules ──────────────────────────────────────────────────────────
+
+def _nonblank(value: Any) -> bool:
+    """The legacy text test: `(value or "").strip()` is non-empty."""
+    return bool((value or "").strip())
+
+
+# A5: column names a person would not search for (col1, field_2, val, tmp_x, 9lives)
+# and SHOUTING_SNAKE warehouse names.
+_NAME_ANTI = re.compile(r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d", re.IGNORECASE)
+_NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
+
+
+def _poor_name(name: str) -> bool:
+    return bool(_NAME_ANTI.match(name) or _NAME_ANTI_UPPER.match(name))
+
+
+def readiness_score(item: dict, ctx: Any) -> float:
+    """A5's weighted score for one model item, 0-100: descriptions 30%, coaching 25%,
+    synonyms 15%, model description 15%, column-name quality 15%. Every column share
+    is over ALL columns, and a model without columns counts as one, so its score is
+    defined (its shares are 0% and its name quality 100%)."""
+    model = item["obj"]
+    cols = model.get("columns") or []
+    total = len(cols) if cols else 1
+    desc_pct = (sum(1 for c in cols if _nonblank(c.get("description"))) / total) * 100
+    syn_pct = (sum(1 for c in scopes.iterate(ctx, "model.column", parent=item)
+                   if fields.get(c, "@has_synonyms", ctx)) / total) * 100
+    has_ai = bool(fields.get(item, "@has_ai_instructions", ctx))
+    has_desc = _nonblank(model.get("description"))
+    anti = sum(1 for c in cols if _poor_name(c.get("name", "")))
+    name_quality = ((total - anti) / total) * 100 if total else 100
+    return (desc_pct * 0.30
+            + (100 if has_ai else 0) * 0.25
+            + syn_pct * 0.15
+            + (100 if has_desc else 0) * 0.15
+            + name_quality * 0.15)
+
+
+@code_rule("spotter_readiness")
+def spotter_readiness(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
+    """A5 — one finding per model whose readiness score the bands grade."""
+    out: List[Finding] = []
+    for item in scopes.available(ctx, rule):
+        score = readiness_score(item, ctx)
+        severity = bands.classify(score, rule.bands)
+        if severity is None:
+            continue
+        out.append(Finding(check_id=rule.id, angle="", severity=severity,
+                           object_type=item["object_type"], object_name=item["name"],
+                           object_guid=item["guid"],
+                           detail=render(rule.message, {"score": score}),
+                           metric=round(score, 1)))
+    return out

@@ -9,7 +9,7 @@ import pytest
 from ts_cli.audit import ANGLE_MODULES
 from ts_cli.audit.context import AuditContext
 from ts_cli.audit.equivalence import (
-    compare_findings, legacy_rule_ids, main, per_rule_rows, run_both)
+    collect_both, compare_findings, legacy_rule_ids, main, per_rule_rows, run_both)
 from ts_cli.audit.findings import Finding
 
 
@@ -331,3 +331,29 @@ def test_cli_bad_snapshot_exits_2(tmp_path, capsys):
                 new_runner=_legacy_runner())
     assert code == 2
     assert "manifest" in capsys.readouterr().err
+
+
+# ── catalog rules vs legacy checks, over the legacy checks' own test inputs ─
+
+A_RULES = ["A1", "A2", "A3", "A4", "A5", "A6"]
+
+
+@pytest.mark.parametrize("profile", ["spotter", "general"])
+def test_a_rules_equivalent_on_the_check_tests_inputs(profile):
+    """The A catalog rules (rules/ai.yaml, the default engine runner) reproduce
+    checks_ai.py exactly over every input its tests use (audit_rule_fixtures.AI_INPUTS:
+    test_checks_ai*.py's contexts, the profile-bar families swept end to end, the A6
+    example fixtures and the demo corpus models)."""
+    import audit_rule_fixtures as fx
+
+    differing, fired = {}, dict.fromkeys(A_RULES, 0)
+    for name, build in fx.AI_INPUTS.items():
+        old, new = collect_both(build(), profile, A_RULES, categories=["A"])
+        res = compare_findings(old, new)
+        if not res["identical"]:
+            differing[name] = res
+        for f in old:
+            fired[f["check_id"]] += 1
+    assert differing == {}
+    # Not vacuous: every rule fires somewhere in these inputs.
+    assert all(fired.values()), fired
