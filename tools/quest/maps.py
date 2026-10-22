@@ -27,6 +27,9 @@ next to it (up, down, left or right). The game plays a realm's steps in one orde
 which tests pin to Quest.machine's expected()), so the check walks that order: before each step,
 a flood-fill from the spawn with only the gates whose required steps are all done open must reach
 that step's object. The exit must be reachable from the start, so a player can always leave.
+Nothing that isn't a step (a chest, barrel, hoard, someone to talk to, the exit) may stand beside
+a step, nor a barrel roll there, and the exit may not stand beside the spawn: talking goes to
+what you face, and it would take the talk.
 Every gate must guard something: at some point of play while it is shut, opening it alone must
 let the player reach an object they couldn't (a gate off its doorway, or a wall with a way round
 it, would not). Barrels are played: each may be rolled once reachable, freeing its tile unless a
@@ -494,14 +497,17 @@ def check_realm_map(m: Map, realm: dict) -> list[str]:
 
 
 def _uncrowded(m: Map, errors: list[str]) -> None:
-    """Talking goes to what you stand beside: a chest, barrel or hoard beside a step (or a barrel
-    that rolls there) could take the talk from it, and an exit beside the spawn takes a second
-    Enter on arrival as "leave"."""
-    steps = {o["tile"] for o in m.objects if step_of(o)}
-    for o in m.of("chest") + m.of("barrel") + m.of("hoard"):
+    """Talking goes to what you face: anything that isn't a step (a chest, barrel, hoard, someone
+    to talk to, the exit) beside a step, or a barrel that rolls there, could take the talk from it,
+    and an exit beside the spawn takes a second Enter on arrival as "leave"."""
+    steps = {o["tile"]: step_of(o) for o in m.objects if step_of(o)}
+    for o in m.of("chest") + m.of("barrel") + m.of("hoard") + m.of("npc") + m.of("exit"):
         tiles = {o["tile"]} | ({rolled(o)} if o["type"] == "barrel" else set())
-        if any(n in steps for t in tiles for n in _near(t)):
-            errors.append(f"{o['where']}: stands (or rolls) beside a step, which it could take the talk from; move it a tile further")
+        beside = sorted({steps[n] for t in tiles for n in _near(t) if n in steps})
+        if beside:
+            how = "rolls to beside" if o["type"] == "barrel" and o["tile"] not in {n for s in steps for n in _near(s)} else "stands beside"
+            errors.append(f"{o['where']}: {how} {', '.join(beside)}, and could take the talk from it; "
+                          "put it where no step is up, down, left or right of it (a diagonal is fine)")
     for s in m.of("spawn"):
         for e in m.of("exit"):
             if e["tile"] in _near(s["tile"]):

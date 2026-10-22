@@ -68,6 +68,25 @@ def old_link_problems(port: int, chrome: str, profile: pathlib.Path, data: dict)
     return problems
 
 
+def touch_problems(port: int, chrome: str, profile: pathlib.Path, data: dict) -> list[str]:
+    """On a touch screen the page's words say to tap, not to press keys. Headless Chrome is told
+    its pointer is coarse (a finger), which (pointer: coarse) then matches."""
+    pack = B.Pack(B.DEFAULT_PACK)
+    home = (pack.manifest.get("explore") or {}).get("home") is True
+    url = f"http://127.0.0.1:{port}/{pack.publish_path}/{'' if home else 'explore/'}"
+    ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
+    coarse = "--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=1,availableHoverTypes=1"
+    out = subprocess.run([chrome, "--headless=new", *ci, coarse, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
+                          "--dump-dom", url], capture_output=True, text=True, timeout=120)
+    words = data["pack"]["strings"]
+    want = html.escape(words["explore_help_touch"], quote=False)
+    if want not in out.stdout:
+        return ["on a touch screen the help line doesn't say to tap"]
+    if html.escape(words["explore_help"], quote=False) in out.stdout:
+        return ["on a touch screen the help line still names keys"]
+    return []
+
+
 def check(realm: str, log: list[str], data: dict) -> list[str]:
     problems = [line for line in log if line.startswith(("ERROR", "NOGL"))]
     r = next(x for x in data["realms"] if x["id"] == realm)
@@ -141,7 +160,8 @@ def main(argv: list[str]) -> int:
                 failed += bool(problems)
             if not argv:
                 problems = old_link_problems(server.server_address[1], chrome, tmp / "profile-old-link", data)
-                print(f"old link: {'OK' if not problems else 'FAIL'}")
+                problems += touch_problems(server.server_address[1], chrome, tmp / "profile-touch", data)
+                print(f"old link, touch: {'OK' if not problems else 'FAIL'}")
                 for p in problems:
                     print(f"  - {p}", file=sys.stderr)
                 failed += bool(problems)

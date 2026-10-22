@@ -118,11 +118,14 @@ empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
 
 # ---- The explore page (explore/), and classic mode's way back to it. ----
 explore_help: Arrow keys walk. Enter or Space talks to whoever, or whatever, you stand next to. X switches weapon. S and M switch sound effects and music.
-explore_help_touch: The arrows walk. Talk talks to whoever, or whatever, you stand next to. Weapon switches weapon.
+explore_help_touch: The arrows walk. Tap Talk beside whoever, or whatever, you want to talk to; tap Weapon to switch weapon.
 explore_classic: Play the classic version
 explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
+explore_world_touch: The map. Walk with the arrows; talk with Talk.
 explore_close: Close (Esc)
+explore_close_touch: Close
 explore_close_realm: Back to the realm (Esc)
+explore_close_realm_touch: Back to the realm
 explore_leave: Leave for the world map
 explore_gate_locked: This door is locked. Answer the questions on this side to open it.
 explore_near_petitioner: A petitioner waits for your judgement. Press Enter or Space to hear them.
@@ -159,10 +162,12 @@ explore_face_foe: "You face it with your {weapon}."
 explore_hud_kit: "{weapon} · LOOT {n}"
 explore_npc_about: "A traveller: Through that door lies {realm}. {covers}"
 npc_elder_walk: "Elder Wren: Arrows walk. Enter or Space talks to whoever is beside you."
+npc_elder_walk_touch: "Elder Wren: The arrows walk. Talk talks to whoever is beside you."
 npc_elder_order: "Elder Wren: Start at Law, the library north over the bridge. The other realms open after it."
 npc_elder_west: "Elder Wren: Northwest, up the rails: the Mines. Southwest, over the pier: the Lake town."
 npc_elder_east: "Elder Wren: Northeast, down the golden path: the Forests. Southeast, along the dock: the Isles."
 npc_elder_fun: "Elder Wren: X switches weapon. Chests and barrels hide things; none of it costs gold."
+npc_elder_fun_touch: "Elder Wren: Weapon switches weapon. Chests and barrels hide things; none of it costs gold."
 guard_law: "Wizard guard: The Elven Kingdom of Law. Learn who writes the query, and why the answer stays governed."
 guard_mines: "Dwarf guard: The Dwarven Mines of Silver Ore. Read the SQL behind one simple question."
 guard_lake: "Fisherman: The Craftsmen of the Lake. Ask what keywords can't: every product, sold or not."

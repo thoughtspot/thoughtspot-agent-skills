@@ -4258,10 +4258,31 @@ def test_a_pack_with_no_maps_shows_no_way_to_them(tmp_path):
 # ---- polish: nothing crowds a step or the way in (a build rule now, for every map) -------------------
 
 @pytest.mark.parametrize("edits,extra,needle", [
-    ([(3, 2, "c")], {"c": ("chest", {"loot": "gem"})}, "beside a step"),                     # under the merchant
-    ([(5, 3, "b")], {"b": ("barrel", {"roll": "up"})}, "beside a step"),                     # rolls to under the guide
+    ([(3, 2, "c")], {"c": ("chest", {"loot": "gem"})}, "stands beside the_rune:merchant"),                     # under the merchant
+    ([(5, 3, "b")], {"b": ("barrel", {"roll": "up"})}, "rolls to beside the_rune:guide"),                     # rolls to under the guide
     ([(1, 4, "."), (1, 2, "X")], {}, "beside the spawn"),                                     # the exit under the spawn
+    ([(4, 1, "n")], {"n": ("npc", {"look": "elder", "says": "claim_true"})}, "the_rune:merchant, and could take the talk"),
+    ([(1, 4, "."), (2, 4, "X")], {}, "stands beside the_rune:compiler"),                     # the exit under the compiler
 ])
 def test_a_map_crowding_a_step_or_the_spawn_fails(tmp_path, edits, extra, needle):
     errors = _fun_cave(tmp_path, extra, _rows(*edits))
     assert any(needle in e for e in errors), errors
+
+
+
+@pytest.mark.parametrize("make", ["unmarked", "symlink"])
+def test_a_classic_folder_that_is_not_the_builds_survives_a_build_without_home(tmp_path, monkeypatch, make):
+    site = tmp_path / "site"
+    site.mkdir()
+    if make == "unmarked":
+        (site / "classic").mkdir()
+        (site / "classic/notes.txt").write_text("mine", encoding="utf-8")
+        keep = site / "classic/notes.txt"
+    else:
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (target / B.EXPLORE_MARK).write_text("", encoding="utf-8")   # even marked, a link is never followed
+        (site / "classic").symlink_to(target, target_is_directory=True)
+        keep = target / B.EXPLORE_MARK
+    _agentql_with(tmp_path, monkeypatch, ("  home: true ", "  home: false "))
+    assert keep.exists() and (site / "classic").exists()

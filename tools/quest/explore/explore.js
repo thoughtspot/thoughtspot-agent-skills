@@ -24,13 +24,23 @@
 
   // ---- the page's words ----------------------------------------------------------------------
   // On a touch screen (where the pad shows) the words say "tap Talk", not "press Enter or Space".
-  const TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-  $("help").textContent = S(TOUCH ? "explore_help_touch" : "explore_help");
+  // Asked each time, since a two-in-one can change between the two.
+  const COARSE = window.matchMedia ? window.matchMedia("(pointer: coarse)") : null;
+  const touch = () => !!(COARSE && COARSE.matches);
+  // Words that name keys, and how they read on a touch screen.
+  const KEYED = {                         // [with keys, on a touch screen]
+    explore_help: [S("explore_help"), S("explore_help_touch")], explore_world: [S("explore_world"), S("explore_world_touch")],
+    explore_close: [S("explore_close"), S("explore_close_touch")],
+    explore_close_realm: [S("explore_close_realm"), S("explore_close_realm_touch")],
+    npc_elder_walk: [S("npc_elder_walk"), S("npc_elder_walk_touch")], npc_elder_fun: [S("npc_elder_fun"), S("npc_elder_fun_touch")] };
+  const words = (k, v) => (Object.hasOwn(KEYED, k) ? KEYED[k][touch() ? 1 : 0] : S(k, v));
+  const label = () => { $("help").textContent = words("explore_help"); $("world").setAttribute("aria-label", words("explore_world")); };
+  label();
+  if (COARSE && COARSE.addEventListener) COARSE.addEventListener("change", label);
   $("classic").textContent = S("explore_classic");
   $("intro").textContent = S("explore_intro");
   $("about").innerHTML = H("title_links");
-  $("world").setAttribute("aria-label", S("explore_world"));
-  $("close").textContent = S("explore_close");
+  $("close").textContent = words("explore_close");
   $("leave").textContent = S("explore_leave");
 
   const PAD = { left: S("explore_pad_left"), up: S("explore_pad_up"), down: S("explore_pad_down"),
@@ -41,28 +51,41 @@
   // ---- the fun, which never touches the quest: loot found, chests opened, barrels rolled, the
   // weapon in hand. Saved apart from progress, under <storage key>-explore. ----------------------
   const ITEMS = FRAMES.items, FUN_KEY = `${pack.storage_key}-explore`, MIMIC = "mimic";
+  // Loot is kept by what gave it (`got`: chest or hoard key -> its items), so two tabs' saves join
+  // by key and the same item found twice is kept twice. A save from before `got` keeps its list.
+  const isItem = i => typeof i === "string" && Object.hasOwn(ITEMS, i);
+  const isObject = v => !!v && typeof v === "object" && !Array.isArray(v);
   const readFun = () => {
     let f = {};
     try { f = JSON.parse(localStorage.getItem(FUN_KEY) || "{}") || {}; } catch { f = {}; }
-    const items = Array.isArray(f.items) ? f.items.filter(i => ITEMS[i]) : [];
-    if (!items.includes(FRAMES.weapon)) items.unshift(FRAMES.weapon);    // you start with this one
-    return { items, weapon: ITEMS[f.weapon] && items.includes(f.weapon) ? f.weapon : FRAMES.weapon,
-             done: f.done && typeof f.done === "object" ? f.done : {},
-             celebrated: f.celebrated === true };            // the course-complete notice, shown once
+    if (!isObject(f)) f = {};
+    const got = {};
+    for (const [k, v] of Object.entries(isObject(f.got) ? f.got : {})) if (Array.isArray(v)) got[k] = v.filter(isItem);
+    const legacy = Array.isArray(f.legacy) ? f.legacy.filter(isItem)
+      : Array.isArray(f.items) && !isObject(f.got) ? f.items.filter(isItem).filter((i, n, all) => !(i === FRAMES.weapon && all.indexOf(i) === n)) : [];
+    const out = { got, legacy, weapon: FRAMES.weapon, done: isObject(f.done) ? Object.assign({}, f.done) : {},
+                  celebrated: f.celebrated === true };            // the course-complete notice, shown once
+    Object.defineProperty(out, "items", {                          // you start with one weapon; the rest you find
+      get() { return [FRAMES.weapon, ...this.legacy, ...Object.values(this.got).flat()]; } });
+    if (isItem(f.weapon) && out.items.includes(f.weapon)) out.weapon = f.weapon;
+    return out;
   };
   const fun = readFun();
-  // Saved over what another tab may have saved since: loot, opened things and the notice only add up.
-  const saveFun = () => {
+  // Take in what another tab saved since: loot, opened things and the notice only add up.
+  const syncFun = () => {
     const there = readFun();
-    for (const i of there.items) if (!fun.items.includes(i)) fun.items.push(i);
+    fun.got = Object.assign({}, there.got, fun.got);
     fun.done = Object.assign({}, there.done, fun.done);
     fun.celebrated = fun.celebrated || there.celebrated;
+  };
+  const saveFun = () => {
+    syncFun();
     try { localStorage.setItem(FUN_KEY, JSON.stringify(fun)); } catch {}
   };
   const itemName = id => S(`item_${id}`);
-  const weapons = () => fun.items.filter(i => ITEMS[i].kind === "weapon");
-  function gain(ids) {
-    for (const id of ids) fun.items.push(id);
+  const weapons = () => [...new Set(fun.items.filter(i => ITEMS[i].kind === "weapon"))];
+  function gain(key, ids) {
+    fun.got[key] = ids.slice();
     saveFun(); hud();
   }
   // The gold bar: where you are, and your gold (this quest's, in a realm; every realm's, on the map).
@@ -102,10 +125,11 @@
       line.className = "dim"; line.textContent = S("explore_face_foe", { weapon: itemName(fun.weapon) });
       $("screen").prepend(line);
     }
-    // One way out of each screen: mid-realm, "Leave for the world map" (so the screen's own "Back to
-    // the map", always its last choice, goes); at the end (the decree, a victory), the screen's own.
+    // One way out of each screen in a realm: mid-realm, "Leave for the world map", so a screen whose
+    // last choice is "Back to the map" (a hall's) loses it; at the end (the decree, a victory, whose
+    // own way back is its only or first choice), that choice, so Leave hides.
     const inRealm = !!world && world.mapId !== "overworld";
-    if (inRealm && actions.length > 1 && actions[actions.length - 1].type === "map" && !["decree", "victory"].includes(state.screen)) {
+    if (inRealm && actions.length > 1 && actions[actions.length - 1].type === "map") {
       actions.pop();
       $("screen").querySelector(".choices li:last-child")?.remove();
     }
@@ -132,8 +156,7 @@
   function openDialog(step) {
     dialogStep = step;
     const inRealm = !!world && world.mapId !== "overworld";
-    $("close").textContent = S(inRealm ? "explore_close_realm" : "explore_close");
-
+    $("close").textContent = words(inRealm ? "explore_close_realm" : "explore_close");
     if (world && /:reward$/.test(step)) world.openChest(step);    // the hoard's chest opens as you claim it
     if (world) world.freeze(true);
     if (!dialog.open) dialog.showModal();
@@ -444,18 +467,19 @@
       if (obj.hidden) return toast(S("explore_nobody"));
       if (obj.type === "npc") {              // the next of its lines, round and round
         const lines = obj.about ? [(r => S("explore_npc_about", { realm: r.name, covers: r.covers }))(realms.find(r => r.id === obj.about))]
-                                : String(obj.says).split(",").map(k => S(k.trim()));
+                                : String(obj.says).split(",").map(k => words(k.trim()));
         const line = lines[obj.said++ % lines.length];
         Sound.play("blip");
         return toast(line);
       }
+      syncFun();                             // opened in another tab already: empty here too
       const first = !fun.done[obj.key];
       if (obj.type === "chest") {
         if (!first) return toast(S(obj.loot === MIMIC ? "explore_mimic" : "explore_chest_empty"));
         fun.done[obj.key] = true;
         if (obj.loot === MIMIC) { obj.sprite.setFrame(FRAMES.mimic); Sound.play("steal"); saveFun(); return toast(S("explore_mimic")); }
         obj.sprite.setFrame(FRAMES.chest_open); Sound.play("coin");
-        gain([obj.loot]);
+        gain(obj.key, [obj.loot]);
         return toast(S("explore_found", { item: itemName(obj.loot) }));
       }
       if (obj.type === "barrel") {
@@ -476,7 +500,7 @@
       fun.done[obj.key] = true;
       const loot = String(obj.loot || "").split(",").map(s => s.trim()).filter(id => ITEMS[id]);
       obj.sprite.setFrame(FRAMES.hoard_empty); Sound.play("fanfare");
-      gain(loot);
+      gain(obj.key, loot);
       return toast(S("explore_hoard", { items: loot.map(itemName).join(", ") }));
     }
   }
@@ -486,8 +510,8 @@
   let portalText = "";
   // How to talk to the step beside you: a petitioner is heard, anyone else talked to.
   const nearHint = obj => (obj.type === "throne" && obj.look
-    ? S(TOUCH ? "explore_near_petitioner_touch" : "explore_near_petitioner")
-    : S(TOUCH ? "explore_near_step_touch" : "explore_near_step"));
+    ? S(touch() ? "explore_near_petitioner_touch" : "explore_near_petitioner")
+    : S(touch() ? "explore_near_step_touch" : "explore_near_step"));
   function describe(obj) {
     const say = t => { toast(t); portalText = t; };   // #toast is a status region: read once, not twice
     if (obj && obj.requires) return say(S("explore_gate_locked"));
@@ -501,7 +525,7 @@
     const i = realms.findIndex(r => r.id === obj.to), r = realms[i], d = progress.load()[r.id];
     const mark = d && d.done ? S("mark_best", { best: d.best, max: Quest.rules.maxGold(r) }) : r.sealed ? S("mark_sealed")
       : i === 0 ? S("mark_start") : !machine.firstDone(state, progress.load()) ? S("mark_after_first") : "";
-    const t = S(r.sealed ? "explore_near_sealed" : TOUCH ? "explore_near_portal_touch" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
+    const t = S(r.sealed ? "explore_near_sealed" : touch() ? "explore_near_portal_touch" : "explore_near_portal", { name: r.name, mark: mark.trim() ? ` ${mark.trim()}` : "" });
     say(t);
   }
   // `from`: the realm just left, so the overworld puts the player beside that realm's door.
@@ -521,11 +545,12 @@
   window.addEventListener("resize", () => { if (world) fitView(world.doc); });
   // Every open realm done: say so, once, on the overworld (Elder Wren's portrait, the course score).
   function celebrate() {
+    syncFun();                               // shown in another tab already: not again here
     if (fun.celebrated || !progress.courseDone() || !world || world.mapId !== "overworld") return;
     fun.celebrated = true; saveFun();
     dialogStep = "celebrate";
     world.freeze(true);
-    $("close").textContent = S("explore_close"); $("leave").hidden = true;   // before showModal, which focuses the first button
+    $("close").textContent = words("explore_close"); $("leave").hidden = true;   // before showModal, which focuses the first button
     $("dialog-title").textContent = pack.title;                              // the heading below says the rest, once
     if (!dialog.open) dialog.showModal();
     $("close").focus();
@@ -716,6 +741,16 @@
           key("keydown", "x", 88); key("keyup", "x", 88);
           if (weapons().length > 1 && (fun.weapon === w0 || world.held.frame.name !== ITEMS[fun.weapon].frame))
             throw new Error("X didn't switch the weapon in hand");
+          {                                  // another tab's loot joins this tab's on save, a repeat kept as a repeat
+            const before = fun.items.length, again = fun.items[fun.items.length - 1];
+            const there = JSON.parse(localStorage.getItem(FUN_KEY));
+            there.got["another-tab:1"] = [again, again]; there.done["another-tab:1"] = true;
+            localStorage.setItem(FUN_KEY, JSON.stringify(there));
+            saveFun();
+            const saved = JSON.parse(localStorage.getItem(FUN_KEY));
+            if (fun.items.length !== before + 2 || !saved.done["another-tab:1"] || readFun().items.length !== fun.items.length)
+              throw new Error("a save lost loot another tab had saved");
+          }
           log(`FUN ${fun.items.join(",")} | ${fun.weapon}`);
           await npcs();
       };
@@ -802,7 +837,8 @@
         try { await until(() => !world.frozen); } catch {}   // the close event comes a task later
         if (dialog.open || world.frozen || document.activeElement !== $("world")) throw new Error(`closing the dialog didn't hand back the map (open ${dialog.open}, frozen ${world.frozen}, focus ${document.activeElement && document.activeElement.id})`);
         // Beside the step the game waits on, the page says how to talk to it.
-        const hint = nearHint;
+        if (touch()) throw new Error("headless Chrome took itself for a touch screen");
+        const hint = o => (o.type === "throne" && o.look ? S("explore_near_petitioner") : S("explore_near_step"));   // the desktop words
         world.near = undefined; await wait(80);
         if ($("toast").textContent !== hint(first)) throw new Error(`beside the step, not its hint (${$("toast").textContent})`);
         for (const o of world.objects.filter(x => x.type === "throne" && x.look))      // a petitioner is drawn, not the throne
@@ -816,7 +852,7 @@
           world.player.setPosition(spot[0] * TILE + TILE / 2, spot[1] * TILE + TILE / 2); world.facing = [tx - spot[0], ty - spot[1]];
           if (world.nearby() !== o) continue;
           world.near = undefined; await wait(80);
-          if ([nearHint({}), nearHint({ type: "throne", look: true })].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
+          if ([S("explore_near_step"), S("explore_near_petitioner")].includes($("toast").textContent)) throw new Error(`beside ${o.step}, which the game doesn't wait on, a hint to talk`);
           checkedHint++;
         }
         if (!checkedHint) throw new Error("no step the game doesn't wait on could be stood beside alone, to check it gives no hint");
@@ -922,6 +958,8 @@
             log(`DECREE ${realmId}`);
             continue;
           }
+          if (state.screen === "victory" && (!$("leave").hidden || actions[0].type !== "map"))
+            throw new Error("a victory's way out isn't its own button alone");
           const last = actions[actions.length - 1];
           dispatch(state.flash ? actions[0] : (last && last.type === "magic" ? last : actions[0]));
           await wait(20);

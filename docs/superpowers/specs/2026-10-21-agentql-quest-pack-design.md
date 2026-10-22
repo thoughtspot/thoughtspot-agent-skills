@@ -188,7 +188,9 @@ Under `unlock: first_realm_first` the core requires the first realm to be open (
 other realm stays locked forever). That the first realm has *halls* is AgentQL's rule, so it lives
 in `agentql_rules`.
 
-### 3.4 `quest.json` version 2
+### 3.4 `quest.json` version 2 (now 3)
+
+Version 3 (PR 13) adds `pack.explore_home`; the rest of this section is version 2 as designed.
 
 **What changes:**
 - **IDs:** every hall and encounter gets an `id` in the content, matching `^[a-z][a-z0-9_]*$`.
