@@ -437,6 +437,64 @@ def test_mapping_severity_shape_enforced(tmp_path, sev, needle):
     assert any(p.startswith("rules/data.yaml: A6:") and needle in p for p in problems), problems
 
 
+def _derived_sev_rule(sev):
+    return _good_rule(bands=None, severity=sev, message="{name}", profiles={},
+                      aggregate={"mode": "each", "where": {"field": "x", "exists": True}})
+
+
+@pytest.mark.parametrize("field, mapping", [
+    ("@join_type", {"OUTER": "HIGH"}),
+    ("@zero_column_role", {"bridge": "INFO"}),
+    ("@is_fact_to_fact_join", {True: "MEDIUM"}),
+    ("@owning_table_has_rls", {True: "INFO"}),
+    ("@credential_term", {"token": "HIGH"}),
+])
+def test_mapping_severity_keys_in_the_fields_values_pass(tmp_path, field, mapping):
+    rule = _derived_sev_rule({"field": field, "map": mapping, "default": "LOW"})
+    assert _problems(tmp_path, {"data": [rule]}) == []
+
+
+@pytest.mark.parametrize("field, mapping, needle", [
+    # a typo: the key can never equal a value the field returns, so it never maps
+    ("@join_type", {"OUTR": "HIGH"}, "map key 'OUTR'"),
+    ("@credential_term", {"tokn": "HIGH"}, "map key 'tokn'"),
+    # YAML `"true"` is a string; a boolean field never equals it (predicates.equals)
+    ("@is_fact_to_fact_join", {"true": "MEDIUM"}, "map key 'true'"),
+    # a number never equals a boolean either
+    ("@owning_table_has_rls", {1: "INFO"}, "map key '1'"),
+    # a derived field with no declared value vocabulary cannot be checked: fail closed
+    ("@join_depth", {3: "HIGH"}, "declares no values"),
+])
+def test_mapping_severity_keys_are_checked_against_the_fields_values(tmp_path, field, mapping,
+                                                                     needle):
+    rule = _derived_sev_rule({"field": field, "map": mapping, "default": "LOW"})
+    problems = _problems(tmp_path, {"data": [rule]})
+    assert any("severity.map" in p and needle in p for p in problems), problems
+
+
+def test_profile_mapping_severity_keys_are_checked(tmp_path):
+    rule = _derived_sev_rule({"field": "@join_type", "map": {"OUTER": "HIGH"},
+                              "default": "LOW"})
+    rule["profiles"] = {"general": {"severity": {"field": "@join_type",
+                                                 "map": {"FULL": "HIGH"}, "default": "LOW"}}}
+    problems = _problems(tmp_path, {"data": [rule]})
+    assert any("profiles.general.severity.map" in p and "map key 'FULL'" in p
+               for p in problems), problems
+
+
+def test_every_declared_field_value_is_what_the_field_can_return():
+    """The vocabulary is only as good as its declaration: each declared value is a
+    plain scalar, a boolean field declares exactly (False, True), and every declared
+    credential term is one the credential pattern matches whole."""
+    from ts_cli.audit.engine.fields import CREDENTIAL_PATTERN, FIELD_VALUES
+    assert FIELD_VALUES, "no derived field declares values"
+    for name, values in FIELD_VALUES.items():
+        assert all(v is None or isinstance(v, (str, bool, int, float)) for v in values), name
+    assert set(FIELD_VALUES["is_fact_to_fact_join"]) == {False, True}
+    for term in FIELD_VALUES["credential_term"]:
+        assert term is None or CREDENTIAL_PATTERN.fullmatch(term), term
+
+
 def test_profile_mapping_severity_is_checked(tmp_path):
     rule = _good_rule(profiles={"general": {"severity": _sev_map(wat=1)}})
     problems = _problems(tmp_path, {"ai": [rule]})

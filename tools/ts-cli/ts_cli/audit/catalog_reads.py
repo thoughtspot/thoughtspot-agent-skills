@@ -26,8 +26,11 @@ What counts as a read — detection, concretely:
         top level, a relative or star import, or a module of `ts_cli` outside
         `ts_cli.audit` — FAILS the gate. Stdlib and third-party local imports are not
         followed (they cannot touch the context's conditional attributes by name);
-      - wrappers unwrapped: staticmethod/classmethod (`__func__`) and the
-        `__wrapped__` chain (`functools.wraps`, `lru_cache`) — wrapper and wrapped;
+      - wrappers unwrapped: staticmethod/classmethod (`__func__`), the `__wrapped__`
+        chain (`functools.wraps`, `lru_cache`) and `functools.partial` (`.func`) —
+        wrapper and wrapped; and the function objects in a function's closure (a
+        decorator without `functools.wraps` registers its inner function, which runs
+        the decorated one only through its closure);
       - a derived field named by a string constant `"@name"`
         (`fields.get(item, "@is_coached", ctx)`);
       - a scope named to `iterate` by a string literal or a module-level string
@@ -63,6 +66,10 @@ layer may catch an executed one):
   * In a module the gate can only compile (not import): a module-level name bound by
     anything but `def`/`class`/`import` (`helper = lru_cache()(impl)`) is not followed;
     a decorated `def` there is still seen (its body is scanned, the decorator is not).
+    A name defined by more than one top-level `def` (under `if`/`else`, or redefined)
+    has every one scanned, since the scan cannot know which the module binds.
+  * A module imported by computed name — `importlib.import_module("ts_cli.audit.x")`,
+    `__import__` — and anything reached through it: only `import` statements are read.
   * Code outside `ts_cli.audit` reached through a module-level (not function-local)
     import, e.g. `ts_cli.sets` from context.py.
   * It over-approximates: an `.answers` attribute on something other than the context,
@@ -79,6 +86,7 @@ imported lazily, as in catalog_uses.
 from __future__ import annotations
 
 import dis
+import functools
 import importlib.util
 import sys
 import types
@@ -154,11 +162,17 @@ class _Compiled:
 
     def __init__(self, name: str, code: types.CodeType):
         self.name = name
-        self.defs: Dict[str, types.CodeType] = {}
+        # Every top-level def of a name (one per `if` branch, or redefined): which the
+        # module binds is decided at run time, so the scan reads them all.
+        self.defs: Dict[str, List[types.CodeType]] = {}
         self.classes: Dict[str, types.CodeType] = {}
         for c in code.co_consts:
-            if isinstance(c, types.CodeType):
-                (self.defs if c.co_flags & _IS_FUNCTION else self.classes)[c.co_name] = c
+            if not isinstance(c, types.CodeType):
+                continue
+            if c.co_flags & _IS_FUNCTION:
+                self.defs.setdefault(c.co_name, []).append(c)
+            else:
+                self.classes[c.co_name] = c
         self.imports = {bound: (mod, lvl, frm) for mod, lvl, frm, bound in _imports(code)}
         self.strings: Dict[str, str] = {}
         self.assigned: Set[str] = set()
@@ -209,8 +223,31 @@ def _unwrapped(obj: Any) -> List[Any]:
         if isinstance(obj, (staticmethod, classmethod)):
             obj = obj.__func__
         out.append(obj)
-        obj = getattr(obj, "__wrapped__", None)
+        obj = obj.func if isinstance(obj, functools.partial) else \
+            getattr(obj, "__wrapped__", None)
     return out
+
+
+def _closure_functions(fn: types.FunctionType) -> List[Any]:
+    """Function-like objects held in `fn`'s closure cells (an empty cell is skipped)."""
+    out: List[Any] = []
+    for cell in fn.__closure__ or ():
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            continue
+        if _callable_like(value):
+            out.append(value)
+    return out
+
+
+def _owner_module(obj: Any) -> Any:
+    """The module whose code `obj` runs: a wrapper's (a `partial` reports
+    'functools') is its wrapped function's."""
+    for o in _unwrapped(obj):
+        if isinstance(o, types.FunctionType):
+            return o.__module__
+    return getattr(obj, "__module__", None)
 
 
 def _callable_like(obj: Any) -> bool:
@@ -222,6 +259,7 @@ class _Walker:
                  parents: Dict[str, str]):
         self.fields, self.iterators, self.parents = fields, iterators, parents
         self.seen: Set[int] = set()
+        self.seen_functions: Set[int] = set()
         self.reads: Dict[str, str] = {}   # data -> "ctx.<attr> in <function>"
         self.problems: List[str] = []
         self.ctx_methods: Optional[Dict[str, Any]] = None
@@ -229,8 +267,12 @@ class _Walker:
     # entry points
     def function(self, fn: Any) -> None:
         for obj in _unwrapped(fn):
-            if isinstance(obj, types.FunctionType):
-                self.code(obj.__code__, _Runtime(obj.__globals__), obj.__qualname__)
+            if not isinstance(obj, types.FunctionType) or id(obj) in self.seen_functions:
+                continue
+            self.seen_functions.add(id(obj))
+            self.code(obj.__code__, _Runtime(obj.__globals__), obj.__qualname__)
+            for inner in _closure_functions(obj):
+                self.function(inner)
 
     def code(self, code: types.CodeType, where_: "Any", where: str) -> None:
         if id(code) in self.seen:
@@ -335,7 +377,7 @@ class _Runtime:
 
 
 def _runtime_targets(obj: Any, names: Set[str], module: str) -> List[Any]:
-    owner = getattr(obj, "__module__", None)
+    owner = _owner_module(obj)
     if isinstance(obj, types.ModuleType):
         if not _in_package(obj.__name__):
             return []
@@ -365,7 +407,7 @@ def _compiled_targets(mod: _Compiled, name: str, names: Set[str]) -> Optional[Li
     """What `name` at `mod`'s top level runs; None if it is not defined there."""
     scope = _CompiledScope(mod)
     if name in mod.defs:
-        return [(mod.defs[name], scope, f"{mod.name}.{name}")]
+        return [(c, scope, f"{mod.name}.{name}") for c in mod.defs[name]]
     if name in mod.classes:
         return [(c, scope, f"{mod.name}.{name}.{c.co_name}")
                 for c in mod.classes[name].co_consts

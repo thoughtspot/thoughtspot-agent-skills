@@ -34,11 +34,16 @@ from ts_cli.audit.engine.memo import cached
 DerivedField = Callable[[dict, Any], Any]
 FIELDS: Dict[str, DerivedField] = {}
 FIELD_USES: Dict[str, FrozenSet[str]] = {}   # name -> conditional data it reads
+# name -> every value the field can return, for the fields that declare them: what a
+# severity `map:` keyed on the field is checked against (a key no value equals never
+# maps — a typo, or YAML `"true"` for a boolean field).
+FIELD_VALUES: Dict[str, Tuple[Any, ...]] = {}
 
 _PARENT = "parent."
 
 
-def register(name: str, *, uses: Any = None) -> Callable[[DerivedField], DerivedField]:
+def register(name: str, *, uses: Any = None,
+             values: Optional[Iterable[Any]] = None) -> Callable[[DerivedField], DerivedField]:
     """Decorator: make `fn(item, ctx)` available to rules as `@name`.
 
     `uses` is the conditional data (catalog_expr.CONDITIONAL_DATA) the function reads
@@ -46,14 +51,20 @@ def register(name: str, *, uses: Any = None) -> Callable[[DerivedField], Derived
     and metadata are always fetched and never declared. Required (omitting it raises
     ValueError, so no field is registered undeclared): the catalog gate
     fails a rule naming `@name` whose `requires`/`uses` do not cover it
-    (catalog_uses.py), so a rule cannot be starved of data by a category move."""
+    (catalog_uses.py), so a rule cannot be starved of data by a category move.
+
+    `values`, optional, is every value the field can return — required of a field a
+    severity `map:` is keyed on (the catalog gate fails one that declares none)."""
     declared = _declared_uses(f"derived field '@{name}'", uses)
+    vocabulary = None if values is None else tuple(values)
 
     def deco(fn: DerivedField) -> DerivedField:
         if name in FIELDS:
             raise ValueError(f"derived field '@{name}' is already registered")
         FIELDS[name] = fn
         FIELD_USES[name] = declared
+        if vocabulary is not None:
+            FIELD_VALUES[name] = vocabulary
         return fn
     return deco
 
@@ -114,7 +125,7 @@ def _step(value: Any, step: str) -> Any:
 
 # ── derived fields ──────────────────────────────────────────────────────────
 
-@register("is_indexed", uses=())
+@register("is_indexed", uses=(), values=(False, True))
 def _is_indexed(item: dict, ctx: Any) -> bool:
     """Column: text-search indexed (absent `index_type` means indexed by default)."""
     return rules.is_indexed(item.get("obj") or {})
@@ -315,6 +326,9 @@ CREDENTIAL_PATTERN = re.compile(
     r"\bpassword\b|\bpasswd\b|\bsecret[-_]?key\b|\bapi[-_]?key\b|\btoken\b",
     re.IGNORECASE,
 )
+#: Every term CREDENTIAL_PATTERN can match, lower-cased — @credential_term's values.
+CREDENTIAL_TERMS = ("password", "passwd", "secretkey", "secret-key", "secret_key",
+                    "apikey", "api-key", "api_key", "token")
 
 
 def _column_name(item: dict) -> Any:
@@ -349,7 +363,7 @@ def _pii_confidence(item: dict, ctx: Any):
     return match[1] if match else None
 
 
-@register("credential_term", uses=())
+@register("credential_term", uses=(), values=(None,) + CREDENTIAL_TERMS)
 def _credential_term(item: dict, ctx: Any):
     """Column: the credential word its name contains (password, passwd, secret key, api
     key, token — whole words, any case), lower-cased as matched; None when none."""
@@ -358,7 +372,7 @@ def _credential_term(item: dict, ctx: Any):
     return match.group().lower() if match else None
 
 
-@register("owning_table_has_rls", uses=())
+@register("owning_table_has_rls", uses=(), values=(False, True))
 def _owning_table_has_rls(item: dict, ctx: Any) -> bool:
     """Model column: the Table its `column_id` prefix names (through the model's
     `model_tables`, alias first) has RLS rules on its Table TML. False when that

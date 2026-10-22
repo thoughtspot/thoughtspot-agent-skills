@@ -142,6 +142,13 @@ def known_derived_fields() -> Set[str]:
     return set(FIELDS)
 
 
+def known_field_values(name: str) -> Optional[tuple]:
+    """Every value derived field `@name` can return, when it declares them
+    (`register(..., values=...)`); None when it does not. Imported lazily, as above."""
+    from ts_cli.audit.engine.fields import FIELD_VALUES
+    return FIELD_VALUES.get(name)
+
+
 def _known(values) -> str:
     return ", ".join(values)
 

@@ -31,7 +31,8 @@ def _upper(value: Any) -> Optional[str]:
 
 # ── joins (D3, D11) ─────────────────────────────────────────────────────────
 
-@register("join_type", uses=())
+@register("join_type", uses=(),
+          values=("", "INNER", "LEFT_OUTER", "RIGHT_OUTER", "OUTER", None))
 def _join_type(item: dict, ctx: Any) -> Optional[str]:
     """Join: its type upper-cased ("" when unset) — INNER, LEFT_OUTER, RIGHT_OUTER or
     OUTER (ThoughtSpot's full outer join). A referencing join's type comes from the
@@ -56,7 +57,7 @@ def _join_from_name(item: dict, ctx: Any) -> Any:
     return _join_from_table(item).get("name", "")
 
 
-@register("is_fact_to_fact_join", uses=())
+@register("is_fact_to_fact_join", uses=(), values=(False, True))
 def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
     """Join: both ends read as fact tables (more than 3 MEASURE columns — rules.
     table_role), each end looked up by NAME: the model table's `name` and the join's
@@ -91,7 +92,7 @@ def _is_joined(item: dict, ctx: Any) -> bool:
     return item.get("name") in _joined_keys(_model_of(item))
 
 
-@register("zero_column_role", uses=())
+@register("zero_column_role", uses=(), values=(None, "bridge", "leaf"))
 def _zero_column_role(item: dict, ctx: Any) -> Optional[str]:
     """Model table, legacy D10: None when its `name` prefixes some model column's
     `column_id`; otherwise "bridge" when that name is on either side of a join, "leaf"

@@ -240,7 +240,7 @@ def test_read_declaration_mutations_fail_the_gate(tmp_path, rel, old, new, expec
 # Fix round 3: the re-review's round-2 probes, each a mutation that read conditional
 # data past the scan. Every one must FAIL the gate, under the gate's own Python — which
 # cannot import context.py and so reads it from source.
-_IDX = '@register("is_indexed", uses=())\n'
+_IDX = '@register("is_indexed", uses=(), values=(False, True))\n'
 _IDX_BODY = '    """Column: text-search indexed (absent `index_type` means indexed by default)."""\n'
 _D1 = '@code_rule("model_complexity"'
 _D1_BODY = ('    """D1 — up to five findings per Model, one per measure over its MEDIUM line."""\n'
@@ -282,8 +282,19 @@ _D1_BODY = ('    """D1 — up to five findings per Model, one per measure over i
        "    def tables_for_model(self, model: dict) -> list:\n"),
       ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    ctx.probe()\n")],
      "(ctx.answers in AuditContext.probe)"),
+    # task 12a: a decorator without functools.wraps, and functools.partial
+    ([("engine/fields.py", _IDX, "def _deco(fn):\n    def inner(*a):\n"
+       "        return fn(*a)\n    return inner\n\n"
+       "@_deco\ndef _probe(ctx):\n    return ctx.answers\n\n\n" + _IDX),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    _probe(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in _probe)"),
+    ([("engine/fields.py", _IDX, "import functools\n\ndef _impl(ctx, x):\n"
+       "    return ctx.answers\n\n_probe = functools.partial(_impl, x=1)\n\n\n" + _IDX),
+      ("engine/fields.py", _IDX_BODY, _IDX_BODY + "    _probe(ctx)\n")],
+     "'@is_indexed' reads 'answers' (ctx.answers in _impl)"),
 ], ids=["local_import", "local_import_unresolvable", "lru_cache", "wraps", "staticmethod",
-        "scope_constant", "scope_dynamic", "getattr", "context_method"])
+        "scope_constant", "scope_dynamic", "getattr", "context_method", "closure_no_wraps",
+        "partial"])
 def test_scan_evasion_probes_fail_the_gate(tmp_path, edits, expect):
     root = _copy_repo(tmp_path)
     for rel, old, new in edits:

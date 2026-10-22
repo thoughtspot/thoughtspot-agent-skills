@@ -61,6 +61,7 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
     expr_problems,
     field_path_problems,
     known_derived_fields,
+    known_field_values,
     legacy_threshold_problems,
     message_placeholders,
     message_problems,
@@ -231,9 +232,30 @@ def _severity_map_problems(sev: dict, key: str) -> List[str]:
     elif isinstance(mapping, dict):
         for value, name in mapping.items():
             out += _severity_name_problems(name, f"{key}.map.{value}")
+        out += _severity_map_key_problems(sev.get("field"), mapping, key)
     if "default" in sev:
         out += _severity_name_problems(sev["default"], f"{key}.default")
     return out
+
+
+def _severity_map_key_problems(field: Any, mapping: dict, key: str) -> List[str]:
+    """A severity map keyed on a derived field: every key is a value the field can
+    return (engine/fields.py FIELD_VALUES), compared as the engine compares them
+    (predicates.equals — a boolean never equals a number or a string). A key nothing
+    equals never maps: a typo (`tokn`), or YAML `"true"` for a boolean field. A
+    derived field that declares no values fails closed; a plain path has no declared
+    vocabulary and is not checked."""
+    if not (isinstance(field, str) and field.startswith("@")
+            and field[1:] in known_derived_fields()):
+        return []
+    from ts_cli.audit.engine.predicates import equals
+    values = known_field_values(field[1:])
+    if values is None:
+        return [f"{key}.map: derived field '{field}' declares no values "
+                "(register(..., values=...)), so its map keys cannot be checked"]
+    return [f"{key}.map: map key '{k}' is not a value {field} can return "
+            f"(its values: {', '.join(repr(v) for v in values)}) — it would never match"
+            for k in mapping if not any(equals(k, v) for v in values)]
 
 
 # ── one rule ────────────────────────────────────────────────────────────────

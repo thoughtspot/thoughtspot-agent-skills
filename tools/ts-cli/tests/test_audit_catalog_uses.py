@@ -328,6 +328,73 @@ def test_scan_fails_closed_on_what_it_cannot_follow(fn, message):
     assert len(problems) == 1 and message in problems[0], problems
 
 
+# ── task 12a: closures, partials, same-named defs ───────────────────────────
+
+def _no_wraps(fn):
+    """A decorator without functools.wraps: the registered function is `inner`, and
+    what it runs is only in its closure."""
+    def inner(*a):
+        return fn(*a)
+    return inner
+
+
+@_no_wraps
+def _closure_reader(ctx):
+    return ctx.answers
+
+
+def _partial_impl(ctx, attr):
+    return ctx.ai_instructions
+
+
+_partial_reader = functools.partial(_partial_impl, attr="x")
+
+
+@pytest.mark.parametrize("fn,expected", [
+    (_closure_reader, {"answers"}),                                  # closure, no wraps
+    (lambda item, ctx: _closure_reader(ctx), {"answers"}),           # reached by name
+    (_partial_reader, {"ai_instructions"}),                          # partial itself
+    (lambda item, ctx: _partial_reader(ctx), {"ai_instructions"}),   # partial by name
+])
+def test_scan_follows_closures_and_partials(fn, expected):
+    reads, problems = _scan(fn)
+    assert (reads, problems) == (expected, [])
+
+
+def test_compiled_view_keeps_every_same_named_top_level_def(tmp_path, monkeypatch):
+    """`def f` twice at top level (one under `if`, say): the module runs whichever was
+    bound last, which the scan cannot know — so it scans both."""
+    pkg = tmp_path / "ts_cli" / "audit"
+    pkg.mkdir(parents=True)
+    (pkg / "t12_twice.py").write_text(
+        "import sys\n"
+        "if sys.version_info >= (3,):\n"
+        "    def helper(ctx):\n"
+        "        return ctx.answers\n"
+        "else:\n"
+        "    def helper(ctx):\n"
+        "        return ctx.ai_instructions\n"
+        "def helper2(ctx):\n"
+        "    return ctx.answers\n"
+        "def helper2(ctx):\n"
+        "    return ctx.ai_instructions\n")
+    import ts_cli.audit as audit_pkg
+    monkeypatch.setattr(audit_pkg, "__path__", list(audit_pkg.__path__) + [str(pkg)])
+    monkeypatch.setattr(catalog_reads, "_MODULES", {})
+    compiled = catalog_reads._compile("ts_cli.audit.t12_twice")
+    assert len(compiled.defs["helper2"]) == 2
+
+    def reader(item, ctx):
+        from ts_cli.audit.t12_twice import helper2
+        return helper2(ctx)
+    reads, problems = _scan(reader)
+    assert (reads, problems) == ({"answers", "ai_instructions"}, [])
+
+
+def test_importlib_is_a_documented_evasion():
+    assert "importlib.import_module" in catalog_reads.__doc__
+
+
 def test_context_methods_are_followed_by_name(monkeypatch):
     monkeypatch.setattr(AuditContext, "t11_probe", lambda self: self.answers, raising=False)
     reads, _ = _scan(lambda item, ctx: ctx.t11_probe())
