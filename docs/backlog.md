@@ -258,6 +258,7 @@ are roughly ordered by value÷effort.
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
+| BL-400 | Customer-name check: no CI backstop now that the private list stays local, so binary/UTF-16 blobs and accented spellings of a listed name go unchecked | 2026-12-31 |
 | BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
 
 ### Tier 3 — Opportunistic
@@ -14393,6 +14394,43 @@ the check catalog rows from the table.
 **Target:** 2026-11-30.
 
 **Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.
+
+## BL-400 — The private-name check has no backstop for blobs and spellings `Tier 2`
+
+**Filed:** 2026-10-22. **Source:** refute review of `scripts/check-pr.sh`.
+
+**Why now.** BL-385 and BL-387 lean on CI's `--all` tree scan as the backstop for what
+`--range` misses. That holds for LINKS. It does not hold for customer NAMES: the private
+list deliberately never goes into CI (see the checker's docstring), so the only name check
+on a PR is the maintainer's `check-pr.sh`, which reads diffs and PR text, not trees.
+
+**Gaps, each reproduced in the review:**
+1. **Binary and UTF-16 blobs.** Git diffs them as "Binary files differ", so a listed name
+   in a UTF-16LE CSV (Windows PowerShell 5.1's `>` default) is never read. `check-pr.sh`
+   lists such files and exits 3 for a manual look; that is a stopgap.
+2. **Accents.** `_norm` does not fold them: list "Mueller Quux" misses text "Müller Quux",
+   list "Quuxlé Foods" misses "Quuxle Foods".
+3. **Names split across lines, or in decomposed Unicode, inside file content.** `--range`
+   matches per added line, after no normalisation: a hard-wrapped "Zorblax\nIndustries" or
+   an NFD "Société" in a file passes. (`check-pr.sh` covers both for PR text, paths and
+   commit objects by scanning those itself; it cannot for diffs without a checker change.)
+4. **Non-Latin names cannot be listed.** `_norm` keeps ASCII letters and digits only, so a
+   Cyrillic, Greek or CJK name normalises to nothing. `check-pr.sh` refuses such a list
+   rather than ignore entries silently.
+5. **No plain-text mode.** `check-pr.sh` carries its own small scanner for PR text, because
+   `--message-file` applies commit-message scissors handling that lets one line hide the
+   rest. A `--text-file` mode (whole text, no truncation, lines also joined) would let it
+   drop that copy.
+
+**Do.** (1) A checker mode that, for every path changed in a range, reads the blob at each
+commit with `git cat-file` (no filters, no textconv) and decodes it through the existing
+UTF-16-aware decoder; have `check-pr.sh` call it and drop the exit-3 list. (2) NFKD-normalise
+and strip combining marks in `_norm` on both sides, plus ß→ss, æ→ae, ø→o. (3) Match
+names across a hunk's joined added lines. (4) Keep non-ASCII letters in `_norm` (with
+casefold). (5) `--text-file`.
+Tests for each, with synthetic names only.
+
+**Target:** 2026-12-31.
 
 ## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
 

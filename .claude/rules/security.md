@@ -144,6 +144,13 @@ its own, so the rule above still applies to everything it cannot see; the PR tem
 carries a checkbox for it. Maintainers can close part of that gap with an **opt-in
 private name list** kept outside the repo (`$TS_CUSTOMER_DENYLIST`, or
 `~/.config/thoughtspot-agent-skills/customer-denylist.txt`; one name per line). With no
-file it is skipped silently; a hit reports the entry number, never the name. The
-validator's docstring describes wiring it into CI from a repository secret. If something slips through, removing it from the tip is not
+file it is skipped silently; a hit reports the entry number, never the name. The list
+deliberately never goes into CI (the validator's docstring says why): **before reviewing
+any PR, run main's copy of `scripts/check-pr.sh`** — never a PR checkout's, which the PR
+controls; the script's header gives the exact command. It checks the PR's commits, merge
+resolutions, title, branch name, description, comments, reviews, paths and raw commit
+objects against the list, fork PRs included. Binary files are listed for a manual look,
+and what it cannot see is listed in its header and tracked as BL-400.
+
+If something slips through, removing it from the tip is not
 enough to un-publish it — tell a maintainer, who decides whether history needs action.
