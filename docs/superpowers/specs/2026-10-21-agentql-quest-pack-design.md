@@ -190,7 +190,7 @@ in `agentql_rules`.
 
 ### 3.4 `quest.json` version 2 (now 3)
 
-Version 3 (PR 13) adds `pack.explore_home`; the rest of this section is version 2 as designed.
+Version 3 (the polish after PR 12, #659) adds `pack.explore_home`; the rest of this section is version 2 as designed.
 
 **What changes:**
 - **IDs:** every hall and encounter gets an `id` in the content, matching `^[a-z][a-z0-9_]*$`.
