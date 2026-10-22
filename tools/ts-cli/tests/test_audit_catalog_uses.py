@@ -328,6 +328,53 @@ def test_scan_fails_closed_on_what_it_cannot_follow(fn, message):
     assert len(problems) == 1 and message in problems[0], problems
 
 
+# ── the import reader across interpreter bytecode shapes ────────────────────
+# Python 3.14 loads an import's `level` with LOAD_SMALL_INT where 3.9-3.13 use
+# LOAD_CONST. Reading only LOAD_CONST made `from .context import helper` look absolute
+# (so it was skipped as stdlib instead of failing the gate) and kept only the first name
+# of `from m import a, b as o`. Both shapes are fed in here, so every interpreter checks
+# both, whichever one runs the suite.
+
+class _Ins:
+    def __init__(self, opname, argval=None):
+        self.opname, self.argval = opname, argval
+
+
+def _body(level_load):
+    """`from .context import helper; from m import a, b as o; import x.y as z`"""
+    return [
+        _Ins("RESUME", 0),
+        _Ins(level_load, 1), _Ins("LOAD_CONST", ("helper",)), _Ins("IMPORT_NAME", "context"),
+        _Ins("IMPORT_FROM", "helper"), _Ins("STORE_FAST", "helper"), _Ins("POP_TOP"),
+        _Ins(level_load, 0), _Ins("LOAD_CONST", ("a", "b")), _Ins("IMPORT_NAME", "m"),
+        _Ins("IMPORT_FROM", "a"), _Ins("STORE_FAST", "a"),
+        _Ins("IMPORT_FROM", "b"), _Ins("STORE_FAST", "o"), _Ins("POP_TOP"),
+        _Ins(level_load, 0), _Ins("LOAD_CONST", None), _Ins("IMPORT_NAME", "x.y"),
+        _Ins("IMPORT_FROM", "y"), _Ins("STORE_FAST", "z"),
+        _Ins("LOAD_CONST", None), _Ins("RETURN_VALUE"),
+    ]
+
+
+@pytest.mark.parametrize("level_load", ["LOAD_CONST", "LOAD_SMALL_INT"])
+def test_imports_read_level_and_fromlist_on_every_bytecode_shape(level_load):
+    from ts_cli.audit.catalog_reads import imports_in
+    assert list(imports_in(_body(level_load))) == [
+        ("context", 1, "helper", "helper"),
+        ("m", 0, "a", "a"),
+        ("m", 0, "b", "o"),
+        ("x.y", 0, None, "z"),
+    ]
+
+
+def test_running_interpreter_reads_a_relative_local_import_as_relative():
+    """The real bytecode of whatever interpreter runs the suite, not a synthesised one."""
+    from ts_cli.audit.catalog_reads import _imports
+    src = "def f():\n    from .context import helper\n    from m import a, b as o\n"
+    fn = next(c for c in compile(src, "<probe>", "exec").co_consts if hasattr(c, "co_code"))
+    assert list(_imports(fn)) == [("context", 1, "helper", "helper"),
+                                  ("m", 0, "a", "a"), ("m", 0, "b", "o")]
+
+
 # ── task 12a: closures, partials, same-named defs ───────────────────────────
 
 def _no_wraps(fn):

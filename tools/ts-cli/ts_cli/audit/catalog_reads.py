@@ -102,8 +102,11 @@ _SCOPES_MODULE = "ts_cli.audit.engine.scopes"
 _CONTEXT = ("ts_cli.audit.context", "AuditContext")
 _STORES = {"STORE_FAST", "STORE_NAME", "STORE_GLOBAL", "STORE_DEREF"}
 _IS_FUNCTION = 0x2  # CO_NEWLOCALS: a def/lambda body, not a class body
-# Instructions that may sit inside one import statement (3.9 and 3.12 spellings).
-_IMPORT_GLUE = {"POP_TOP", "ROT_TWO", "SWAP", "LOAD_CONST", "CACHE", "RESUME"}
+# How an import's `level` and `fromlist` are loaded: LOAD_CONST through 3.13; 3.14
+# loads a small int (the level) with LOAD_SMALL_INT.
+_CONST_LOADS = {"LOAD_CONST", "LOAD_SMALL_INT"}
+# Instructions that may sit inside one import statement (3.9 to 3.14 spellings).
+_IMPORT_GLUE = {"POP_TOP", "ROT_TWO", "SWAP", "CACHE", "RESUME"} | _CONST_LOADS
 
 
 def _in_package(module_name: Any) -> bool:
@@ -139,8 +142,14 @@ class _ImportState:
 def _imports(code: types.CodeType) -> Iterator[Tuple[str, int, Optional[str], str]]:
     """(module, level, imported name — None when the module itself is bound, as by
     `import a.b` or `import a.b as m` — bound name), from the code's own instructions."""
+    return imports_in(dis.get_instructions(code))
+
+
+def imports_in(instructions: Iterable[Any]) -> Iterator[Tuple[str, int, Optional[str], str]]:
+    """`_imports` over any instruction stream (anything with `opname` and `argval`), so
+    a test can feed it the bytecode shape of an interpreter it is not running on."""
     st = _ImportState()
-    for ins in dis.get_instructions(code):
+    for ins in instructions:
         op = ins.opname
         if op == "IMPORT_NAME":
             st.start(ins.argval)
@@ -153,7 +162,7 @@ def _imports(code: types.CodeType) -> Iterator[Tuple[str, int, Optional[str], st
             yield st.store(ins.argval)
         elif op not in _IMPORT_GLUE:
             st.current = None
-        st.consts = (st.consts + [ins.argval])[-2:] if op == "LOAD_CONST" else []
+        st.consts = (st.consts + [ins.argval])[-2:] if op in _CONST_LOADS else []
 
 
 class _Compiled:
