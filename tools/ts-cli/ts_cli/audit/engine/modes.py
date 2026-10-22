@@ -88,7 +88,14 @@ def _names(items: List[dict]) -> NameList:
 # ── each ────────────────────────────────────────────────────────────────────
 
 def each(rule: Rule, ctx, profile: str) -> List[Finding]:
-    """One finding per scope item passing `where`."""
+    """One finding per scope item passing `where`.
+
+    Message placeholders: `{name}` is the FINDING's object name (scopes.py) — which
+    shadows the object's own name where they differ: an RLS rule reports its Table, a
+    model table its alias, an Answer's table reference its Answer. `{value}` is the
+    `measure` value. Read the object itself with `{obj.<path>}` (`{obj.name}`,
+    `{obj.properties.column_type}`) and a derived field with `{@name}`.
+    """
     measure = rule.aggregate.get("measure")
     out: List[Finding] = []
     for item in _filtered(rule, ctx):

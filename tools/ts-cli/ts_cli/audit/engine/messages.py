@@ -1,9 +1,10 @@
 """Message templates: a rule's `message` (and a group's `name`) rendered per finding.
 
 Python `str.format` syntax. Each mode supplies its placeholder values (see
-catalog_expr.MODE_PLACEHOLDERS); a name the mode does not supply is resolved as a
-field path on the item (`{properties.column_type}`, `{@is_indexed}`), which is how an
-`each` message reads any field. Indexing a supplied value works (`{key[0]}`).
+catalog_expr.MODE_PLACEHOLDERS). Given an `item` (mode `each`), two more forms read
+the item: `{obj.<path>}` — a field of the object itself (`{obj.properties.column_type}`,
+`{obj.name}`) — and `{@name}`, a derived field. Any other name raises KeyError: a typo
+must never render as "None". Indexing a supplied value works (`{key[0]}`).
 
 Lists of names render through `NameList`'s format spec:
 
@@ -57,11 +58,15 @@ class _Formatter(string.Formatter):
         self.values, self.item, self.ctx = values, item, ctx
 
     def get_field(self, field_name, args, kwargs):
-        if _FIRST.match(field_name).group(0) in self.values:
+        head = _FIRST.match(field_name).group(0)
+        if head in self.values:
             return super().get_field(field_name, args, kwargs)
-        if self.item is None:
-            raise KeyError(f"unknown placeholder '{field_name}'")
-        return fields.get(self.item, field_name, self.ctx), field_name
+        if self.item is not None and head == "obj":
+            rest = field_name[len("obj"):].lstrip(".")
+            return fields.walk(self.item.get("obj"), rest), field_name
+        if self.item is not None and head.startswith("@"):
+            return fields.get(self.item, field_name, self.ctx), field_name
+        raise KeyError(f"unknown placeholder '{field_name}'")
 
     def get_value(self, key, args, kwargs):
         return self.values[key]

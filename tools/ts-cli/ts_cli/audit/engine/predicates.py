@@ -1,9 +1,11 @@
 """`where` / `match` expressions.
 
+Exactly one form per mapping (catalog_expr validates the same; anything else raises):
+
+    {all: [expr, ...]}  {any: [expr, ...]}  {not: expr}   a combinator, alone
     {field: <path>, <op>: <operand>, ...}    every listed operator must hold (AND)
-    {all: [expr, ...]}  {any: [expr, ...]}  {not: expr}
-    {count: <scope>, where: expr, gt: n}    how many `scope` items under this item
-                                            pass `where`, compared like a field
+    {count: <scope>, [where: expr], <op>: n, ...}   how many `scope` items under this
+                                            item pass `where`, compared like a field
 
 Operator semantics are documented (and their operands validated) in
 `ts_cli/audit/catalog_expr.py`; this module implements exactly that table.
@@ -84,21 +86,41 @@ LEAF: Dict[str, Callable[[Any, Any], bool]] = {
     "len_lt": _compare_len(lambda a, b: a < b),
     "contains": _contains,
 }
-_STRUCTURE = {"field", "count", "where"}
+_COMBINATORS = ("all", "any", "not")
+_SUBJECT_KEYS = {"count": {"count", "where"}, "field": {"field"}}
+
+
+def form(expr: dict) -> str:
+    """Which of the five forms `expr` is; ValueError for any other mapping."""
+    combinators = [k for k in _COMBINATORS if k in expr]
+    if combinators:
+        if len(expr) != 1:
+            raise ValueError(f"'{combinators[0]}' must stand alone in {expr!r}")
+        return combinators[0]
+    subject = "count" if "count" in expr else "field" if "field" in expr else None
+    if subject is None:
+        raise ValueError(f"expression has no 'field' or 'count': {expr!r}")
+    _check_subject(expr, subject)
+    return subject
+
+
+def _check_subject(expr: dict, subject: str) -> None:
+    stray = [k for k in expr if k not in LEAF and k not in _SUBJECT_KEYS[subject]]
+    if stray or not any(k in LEAF for k in expr):
+        raise ValueError(f"invalid '{subject}' expression (stray {stray or 'none'}, "
+                         f"needs a comparison operator): {expr!r}")
 
 
 def evaluate(expr: dict, item: dict, ctx) -> bool:
     """Whether `item` satisfies `expr`."""
-    if "all" in expr:
+    kind = form(expr)
+    if kind == "all":
         return all(evaluate(e, item, ctx) for e in expr["all"])
-    if "any" in expr:
+    if kind == "any":
         return any(evaluate(e, item, ctx) for e in expr["any"])
-    if "not" in expr:
+    if kind == "not":
         return not evaluate(expr["not"], item, ctx)
-    unknown = [k for k in expr if k not in LEAF and k not in _STRUCTURE]
-    if unknown:
-        raise ValueError(f"unknown operator(s) {unknown} in {expr!r}")
-    value = _count(expr, item, ctx) if "count" in expr else fields.get(item, expr["field"], ctx)
+    value = _count(expr, item, ctx) if kind == "count" else fields.get(item, expr["field"], ctx)
     return all(LEAF[op](value, operand) for op, operand in expr.items() if op in LEAF)
 
 

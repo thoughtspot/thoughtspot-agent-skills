@@ -59,8 +59,15 @@ def get(item: dict | None, path: str, ctx: Any) -> Any:
 
 
 def walk(value: Any, path: str) -> Any:
-    """Follow a dotted path through mappings and lists (lists map or index)."""
+    """Follow a dotted path through mappings and lists (lists map or index).
+
+    A derived `@name` is only ever a whole path (handled by `get`); as a step inside
+    one it would silently read None, so it raises.
+    """
     for step in path.split(".") if path else []:
+        if step.startswith("@"):
+            raise KeyError(f"derived field '{step}' must be the whole path, "
+                           f"not a step in '{path}'")
         value = _step(value, step)
         if value is None:
             return None

@@ -92,7 +92,7 @@ def test_each_mode_one_finding_per_item():
             {"field": "@is_indexed", "truthy": True},
             {"field": "name", "regex": "(?i)_id$"}]}},
         severity="MEDIUM",
-        message="High-cardinality ID column '{name}' indexed as {properties.column_type}",
+        message="High-cardinality ID column '{name}' indexed as {obj.properties.column_type}",
     )
     found = _run(fx.model_id_columns(), rule)
     assert [(f.check_id, f.object_type, f.object_name, f.object_guid, f.severity)
@@ -555,3 +555,124 @@ def test_name_list_formatting(spec, expected):
 
 def test_short_name_list_has_no_suffix():
     assert format(messages.NameList(["a", "b"]), "") == "a, b"
+
+
+# ── fix round 1 ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("expr", [
+    {"all": [{"field": "n", "gt": 1}], "not": {"field": "flag", "truthy": True}},
+    {"field": "n", "eq": 999, "not": {"field": "flag", "truthy": True}},
+    {"count": "model.column"},
+    {"count": "model.column", "where": {"field": "name", "exists": True}},
+    {"count": "model.column", "field": "n", "gt": 0},
+    {"field": "n"},
+    {"gt": 1},
+    {"field": "n", "gt": 1, "where": {"field": "n", "gt": 0}},
+])
+def test_mixed_or_incomplete_expression_raises(expr):
+    with pytest.raises(ValueError):
+        predicates.evaluate(expr, _item(_OBJ), make_context())
+
+
+def test_derived_field_inside_a_path_raises():
+    item = _item({"properties": {}})
+    for path in ("properties.@is_indexed", "properties.@no_such_field"):
+        with pytest.raises(KeyError, match="whole path"):
+            fields.get(item, path, make_context())
+    assert fields.get(item, "@is_indexed", make_context()) is True
+
+
+def test_iterate_with_an_unrelated_parent_raises():
+    ctx = make_context(
+        models=[{"guid": "gm", "model": {"name": "M", "columns": [{"name": "C"}]}}],
+        answers=[{"guid": "ga", "answer": {"name": "A", "formulas": [{"name": "F"}]}}])
+    [column] = scopes.iterate(ctx, "model.column")
+    [model] = scopes.iterate(ctx, "model")
+    with pytest.raises(ValueError, match="do not belong"):
+        list(scopes.iterate(ctx, "answer.formula", parent=column))
+    with pytest.raises(ValueError, match="do not belong"):
+        list(scopes.iterate(ctx, "model", parent=model))
+    # A sibling scope resolves through the shared ancestor.
+    assert list(scopes.iterate(ctx, "model.formula", parent=column)) == []
+
+
+def test_each_message_reads_the_object_and_derived_fields():
+    rule = _rule("D5", categories=["D"], scope="model.table",
+                 aggregate={"mode": "each", "where": {"field": "name", "eq": "DIM_DATE"}},
+                 severity="LOW", message="{name} is {obj.name} via {obj.fqn}")
+    found = _run(fx.model_role_playing_dimension(), rule)
+    assert [f.detail for f in found] == ["ORDER_DATE is DIM_DATE via t-date",
+                                         "SHIP_DATE is DIM_DATE via t-date"]
+    indexed = _rule("P9", categories=["P"], scope="model.column",
+                    aggregate={"mode": "each", "where": {"field": "name", "eq": "row_id"}},
+                    severity="LOW", message="{name} indexed={@is_indexed}")
+    assert [f.detail for f in _run(fx.model_id_columns(), indexed)] == ["row_id indexed=False"]
+
+
+def test_unknown_placeholder_raises_instead_of_rendering_none():
+    item = _item({"name": "C"})
+    with pytest.raises(KeyError, match="nme"):
+        messages.render("{nme}", {"name": "C"}, item, make_context())
+    with pytest.raises(KeyError, match="properties"):
+        messages.render("{properties.x}", {"name": "C"}, item, make_context())
+
+
+# ── parity: the engine supplies exactly the vocabulary the validator accepts ──
+
+def test_engine_modes_match_validator_modes():
+    from ts_cli.audit.catalog_validate import MODES
+    from ts_cli.audit.engine.modes import MODES as ENGINE_MODES
+    assert set(ENGINE_MODES) == set(MODES)
+
+
+def test_engine_leaf_operators_match_validator():
+    from ts_cli.audit.catalog_validate import LEAF_OPERATORS
+    assert set(predicates.LEAF) == set(LEAF_OPERATORS)
+
+
+def test_engine_availability_covers_every_requirement():
+    from ts_cli.audit.catalog_validate import REQUIRES
+    assert set(scopes.AVAILABILITY) == set(REQUIRES)
+
+
+_PARITY_RULES = {
+    "each": (_rule("X1", scope="model.column", aggregate={"mode": "each"},
+                   severity="LOW", message="m"), fx.model_id_columns),
+    "ratio": (A6, fx.model_measures_no_ai_context),
+    "count": (P8, fx.model_76_columns),
+    "group": (_rule("X2", requires=["metadata"], scope="metadata",
+                    aggregate={"mode": "group", "kind": "divergence", "key": "name",
+                               "value": "dataSourceName"},
+                    severity="LOW", message="m"), fx.metadata_duplicate_tables),
+    "pairwise": (_rule("X3", scope="model", aggregate={"mode": "pairwise",
+                                                       "set": "model_tables.fqn"},
+                       bands={"direction": "lower_is_better", "unit": "ratio",
+                              "levels": [{"op": "gt", "value": 0, "severity": "LOW"}]},
+                       message="m"), fx.models_overlapping_tables),
+    "composite": (_rule("X4", scope="model",
+                        aggregate={"mode": "composite",
+                                   "components": {"coverage": "properties.coverage"},
+                                   "weights": {"coverage": 1}},
+                        bands={"direction": "higher_is_better", "unit": "score",
+                               "levels": [{"op": "lt", "value": 100, "severity": "LOW"}]},
+                        message="m"), fx.models_for_readiness_score),
+}
+
+
+@pytest.mark.parametrize("mode", sorted(_PARITY_RULES))
+def test_mode_supplies_exactly_its_declared_placeholders(mode, monkeypatch):
+    from ts_cli.audit.catalog_validate import MODE_PLACEHOLDERS
+    from ts_cli.audit.engine import modes
+    supplied: set = set()
+    real = modes.render
+
+    def spy(template, values, *args):
+        supplied.update(values)
+        return real(template, values, *args)
+
+    monkeypatch.setattr(modes, "render", spy)
+    rule, fixture = _PARITY_RULES[mode]
+    assert _run(fixture(), rule), "parity rule must fire"
+    components = set(rule["aggregate"].get("components", {}))
+    item_reads = {"obj"} if mode == "each" else set()
+    assert (supplied - components) | item_reads == MODE_PLACEHOLDERS[mode]

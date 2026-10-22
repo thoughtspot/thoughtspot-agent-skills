@@ -12,7 +12,10 @@ without its required aggregate keys (`over` for ratio/count, which must be a chi
 scope of the rule's scope; `key`/`kind` for group; `set` for pairwise;
 `components`/`weights` for composite); a severity the mode cannot produce (no bands
 on a grading mode, neither severity nor bands on each/group, bands on an each rule with
-no `measure`); unknown scopes, modes, operators, derived fields (`@name`), message
+no `measure`; a `severity` that bands override, catalog or profile); an expression
+mapping that mixes forms or lacks a comparison; a `count:` over a scope that is not
+the item's (or an enclosing item's) child; unknown scopes, modes, operators, derived
+fields (`@name`, also as a step inside a path), message
 placeholders, data requirements, categories, profiles, views, band ops/directions/
 units, severities; ids repeated across files; a category without a unique
 `angle_key`; a profile override of a key that defines what a rule *means* (anything
@@ -46,8 +49,8 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
     known_derived_fields,
     legacy_threshold_problems,
     message_placeholders,
+    message_problems,
     placeholder_problems,
-    scan_expressions,
     severity_source_problems,
 )
 from ts_cli.audit.catalog_model import (
@@ -265,7 +268,7 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
     if not isinstance(value, str):
         return [f"{path}: must be a string"]
     if key == "message":
-        return placeholder_problems(value, message_placeholders(rule.aggregate), path)
+        return message_problems(value, rule.aggregate, path)
     return []
 
 
@@ -320,11 +323,11 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     """What the engine interprets: the aggregate block, the message's placeholders,
     the legacy threshold's placeholders, and where severity comes from."""
     out = aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
-    out += placeholder_problems(rule.message, message_placeholders(rule.aggregate), "message")
+    out += message_problems(rule.message, rule.aggregate, "message")
     out += legacy_threshold_problems(rule.legacy_threshold, "legacy_threshold")
     if rule.implementation != "declarative":
         return out
-    return out + _severity_source_by_profile(rule, cat)
+    return out + _severity_source_by_profile(rule, cat) + _shadowed_severity_problems(rule, cat)
 
 
 def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
@@ -332,14 +335,36 @@ def _severity_source_by_profile(rule: Rule, cat: Catalog) -> List[str]:
     replaces bands/severity but cannot supply them for the others."""
     by_problem: Dict[str, List[str]] = {}
     for pid in cat.profiles or [""]:
-        override = rule.profiles.get(pid)
-        override = override if isinstance(override, dict) else {}
+        override = _profile_override(rule, pid)
         has_bands = override.get("bands", rule.bands) is not None
         has_severity = override.get("severity", rule.severity) is not None
         for problem in severity_source_problems(rule.aggregate, has_bands, has_severity):
             by_problem.setdefault(problem, []).append(pid)
     return [f"{problem} (profile: {_known(pids)})" if pids != [""] else problem
             for problem, pids in by_problem.items()]
+
+
+def _profile_override(rule: Rule, pid: str) -> Dict[str, Any]:
+    override = rule.profiles.get(pid)
+    return override if isinstance(override, dict) else {}
+
+
+def _shadowed_severity_problems(rule: Rule, cat: Catalog) -> List[str]:
+    """A `severity` that bands override would be silently dropped: where bands are in
+    force, they alone set the severity. A catalog `severity` is legitimate while at least
+    one profile runs without bands; a profile's `severity` only where it does."""
+    out: List[str] = []
+    banded_everywhere = bool(cat.profiles)
+    for pid in cat.profiles:
+        override = _profile_override(rule, pid)
+        banded = override.get("bands", rule.bands) is not None
+        banded_everywhere = banded_everywhere and banded
+        if banded and "severity" in override:
+            out.append(f"profiles.{pid}.severity has no effect: bands set the severity "
+                       f"under profile {pid}")
+    if rule.severity is not None and banded_everywhere:
+        out.append("severity has no effect: bands set the severity under every profile")
+    return out
 
 
 def rule_problems(rule: Rule, cat: Catalog) -> List[str]:

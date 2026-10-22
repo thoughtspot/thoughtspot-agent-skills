@@ -9,8 +9,17 @@ the validator and the runtime cannot disagree about what a key means.
 Field paths (`field:`, `measure:`, `key:`, `value:`, `member:`, `set:`, components):
 a dotted path into the item (`properties.column_type`; a numeric step indexes a list,
 any other step on a list maps over it), optionally prefixed `parent.` (repeatable) to
-read the enclosing item, or ending in a derived field `@name` registered in
-`engine/fields.py`.
+read the enclosing item; or a derived field `@name` registered in `engine/fields.py`,
+which is always the WHOLE path after any `parent.` — never a step inside one.
+
+An expression mapping takes exactly ONE form — anything else is rejected, never
+half-evaluated:
+  {all: [expr, ...]}  {any: [expr, ...]}  {not: expr}      a combinator, alone
+  {field: <path>, <op>: <operand>, ...}                    one or more operators, ANDed
+  {count: <scope>, [where: expr], <op>: <operand>, ...}    how many `scope` items pass
+            `where`; `scope` must be a child of the item's scope or of a scope enclosing
+            it, and at least one comparison is required
+To combine a combinator with anything else, wrap both in `all`.
 
 Operand semantics, checked here and implemented in `engine/predicates.py`:
   eq        scalar equality (string, number, true/false or null). A boolean never
@@ -93,10 +102,13 @@ GROUP_GUIDS = ["first", "none"]
 MODES_NEEDING_BANDS = {"ratio", "count", "pairwise", "composite"}
 _FIELD_KEYS = ("measure", "value", "member", "set")
 
-# Placeholders a message may use, per mode. `each` may also name any field path of the
-# item (`{properties.column_type}`), so its messages are not checked. `composite` adds
-# one placeholder per component name.
+# Placeholders a message may use, per mode — supplied by engine/modes.py (a parity test
+# holds the two together). `composite` adds one per component name. `each` also reads
+# the item: `{obj.<path>}` is a field of the object itself, `{@name}` a derived field.
+# In every mode `{name}` is the FINDING's object name, which is not always the object's
+# own (an RLS rule reports its Table, a model table its alias): use `{obj.name}` for that.
 MODE_PLACEHOLDERS: Dict[str, Set[str]] = {
+    "each": {"name", "value", "obj"},
     "ratio": {"name", "value", "matched", "total", "pct", "unmatched_names", "matched_names"},
     "count": {"name", "value", "count", "total"},
     "group": {"name", "value", "key", "size", "members", "values"},
@@ -107,7 +119,7 @@ LEGACY_THRESHOLD_PLACEHOLDERS = {"profile_label"}
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def known_derived_fields() -> Optional[Set[str]]:
+def known_derived_fields() -> Set[str]:
     """Names usable as `field: '@name'` — the engine's derived-field registry.
 
     Imported lazily so the catalog gate (tools/validate/check_audit_catalog.py) loads
@@ -132,42 +144,55 @@ def field_path_problems(value: Any, path: str) -> List[str]:
         rest = rest[len("parent."):]
     if not rest:
         return [f"{path}: '{value}' names no field after 'parent.'"]
-    derived = known_derived_fields()
-    if rest.startswith("@") and derived is not None and rest[1:] not in derived:
-        return [f"{path}: unknown derived field '{rest}' "
-                f"(known: {_known(sorted('@' + d for d in derived))})"]
+    if any(step.startswith("@") for step in rest.split(".")[1:]):
+        return [f"{path}: '{value}' — a derived '@name' must be the whole path "
+                "(after any 'parent.'), not a step inside one"]
+    if rest.startswith("@"):
+        return derived_name_problems(rest, path)
     return []
+
+
+def derived_name_problems(name: str, path: str) -> List[str]:
+    """`@name` must be registered in engine/fields.py."""
+    derived = known_derived_fields()
+    if name[1:] in derived:
+        return []
+    return [f"{path}: unknown derived field '{name}' "
+            f"(known: {_known(sorted('@' + d for d in derived))})"]
 
 
 # ── predicate expressions (`where` / `match`) ───────────────────────────────
 
-def _field_problems(expr: dict, value: Any, path: str) -> List[str]:
-    return field_path_problems(value, path)
-
-
-def _list_problems(expr: dict, value: Any, path: str) -> List[str]:
+def _list_problems(value: Any, path: str, scope: Optional[str]) -> List[str]:
     if not isinstance(value, list) or not value:
         return [f"{path}: must be a non-empty list of expressions"]
     out: List[str] = []
     for i, sub in enumerate(value):
-        out += expr_problems(sub, f"{path}[{i}]")
+        out += expr_problems(sub, f"{path}[{i}]", scope)
     return out
 
 
-def _not_problems(expr: dict, value: Any, path: str) -> List[str]:
-    return expr_problems(value, path)
+def _scope_chain(scope: Optional[str]) -> List[str]:
+    """`scope` and every scope enclosing it."""
+    chain: List[str] = []
+    while scope:
+        chain.append(scope)
+        scope = PARENT_SCOPE.get(scope)
+    return chain
 
 
-def _count_problems(expr: dict, value: Any, path: str) -> List[str]:
+def _count_problems(value: Any, path: str, scope: Optional[str]) -> List[str]:
+    """A counted scope must belong to the item (or an item enclosing it): counting a
+    top-level or unrelated scope would silently count the whole context."""
     if value not in SCOPES:
         return [f"{path}: unknown scope '{value}' (known: {_known(SCOPES)})"]
+    owner = PARENT_SCOPE.get(value)
+    if owner is None:
+        return [f"{path}: '{value}' is a top-level scope; count needs a child scope of the item"]
+    if scope is not None and owner not in _scope_chain(scope):
+        return [f"{path}: '{value}' items are not children of '{scope}' "
+                "or of a scope enclosing it"]
     return []
-
-
-def _where_problems(expr: dict, value: Any, path: str) -> List[str]:
-    if "count" not in expr:
-        return [f"{path}: 'where' inside an expression is only valid beside 'count'"]
-    return expr_problems(value, path)
 
 
 def _is_number(value: Any) -> bool:
@@ -212,51 +237,67 @@ def _operand_problems(expr: dict, path: str) -> List[str]:
     return out
 
 
-_EXPR_KEYS: Dict[str, Callable[[dict, Any, str], List[str]]] = {
-    "field": _field_problems,
-    "all": _list_problems,
-    "any": _list_problems,
-    "not": _not_problems,
-    "count": _count_problems,
-    "where": _where_problems,
-}
+_COMBINATOR_FORMS = ("all", "any", "not")
 
 
-def _pairing_problems(expr: dict, path: str, unknown: List[str]) -> List[str]:
-    """A comparison needs something to compare, and a field needs a comparison."""
+def _combinator_problems(expr: dict, path: str, scope: Optional[str]) -> List[str]:
+    key = next(k for k in _COMBINATOR_FORMS if k in expr)
+    others = sorted(map(str, set(expr) - {key}))
+    if others:
+        return [f"{path}: '{key}' must stand alone in its mapping (also found: "
+                f"{_known(others)}) — wrap the siblings together in 'all'"]
+    if key == "not":
+        return expr_problems(expr[key], f"{path}.not", scope)
+    return _list_problems(expr[key], f"{path}.{key}", scope)
+
+
+def _stray_problems(expr: dict, path: str, subject: Optional[str]) -> List[str]:
+    """Keys that do not belong in a `{field, ...}` / `{count, ...}` mapping."""
+    allowed = set(LEAF_OPERATORS) | ({"count", "where"} if subject == "count" else {"field"})
+    out: List[str] = []
+    for k in expr:
+        if k in allowed:
+            continue
+        if k in OPERATORS or k in ("field", "where"):
+            out.append(f"{path}: '{k}' cannot be combined with '{subject or k}' in one mapping")
+        else:
+            out.append(f"{path}: unknown operator '{k}' (known: {_known(OPERATORS)})")
+    return out
+
+
+def _count_subject_problems(expr: dict, path: str, scope: Optional[str]) -> List[str]:
+    out = _count_problems(expr["count"], f"{path}.count", scope)
+    if "where" in expr:
+        counted = expr["count"] if expr["count"] in SCOPES else None
+        out += expr_problems(expr["where"], f"{path}.where", counted)
+    return out
+
+
+def _subject_problems(expr: dict, path: str, scope: Optional[str]) -> List[str]:
+    """`{field, op...}` or `{count, [where], op...}`: one subject, at least one op."""
+    subject = "count" if "count" in expr else "field" if "field" in expr else None
+    out = _stray_problems(expr, path, subject)
     leaves = [k for k in expr if k in LEAF_OPERATORS]
-    if leaves and "field" not in expr and "count" not in expr:
-        return [f"{path}: '{leaves[0]}' needs a 'field' (or 'count') to compare"]
-    if "field" in expr and not leaves and not unknown:
-        return [f"{path}: 'field' given with no operator"]
-    return []
+    if subject is None:
+        return out + ([f"{path}: '{leaves[0]}' needs a 'field' (or 'count') to compare"]
+                      if leaves else [])
+    if not leaves:
+        out.append(f"{path}: '{subject}' given with no comparison operator")
+    if subject == "field":
+        out += field_path_problems(expr["field"], f"{path}.field")
+    else:
+        out += _count_subject_problems(expr, path, scope)
+    return out + _operand_problems(expr, path)
 
 
-def expr_problems(expr: Any, path: str) -> List[str]:
-    """Problems in one `where`/`match` expression, recursing through all/any/not/count."""
+def expr_problems(expr: Any, path: str, scope: Optional[str] = None) -> List[str]:
+    """Problems in one `where`/`match` expression evaluated against items of `scope`
+    (None = unknown, e.g. a code rule's block: the count-scope relation is unchecked)."""
     if not isinstance(expr, dict) or not expr:
         return [f"{path}: expected a non-empty mapping"]
-    unknown = [k for k in expr if k not in _EXPR_KEYS and k not in LEAF_OPERATORS]
-    out = [f"{path}: unknown operator '{k}' (known: {_known(OPERATORS)})" for k in unknown]
-    for key, value in expr.items():
-        handler = _EXPR_KEYS.get(key)
-        if handler is not None:
-            out += handler(expr, value, f"{path}.{key}")
-    return out + _operand_problems(expr, path) + _pairing_problems(expr, path, unknown)
-
-
-def scan_expressions(obj: Any, path: str) -> List[str]:
-    """Validate every `where` / `match` value found anywhere inside `obj`."""
-    out: List[str] = []
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            sub = f"{path}.{key}" if path else str(key)
-            out += expr_problems(value, sub) if key in ("where", "match") \
-                else scan_expressions(value, sub)
-    elif isinstance(obj, list):
-        for i, value in enumerate(obj):
-            out += scan_expressions(value, f"{path}[{i}]")
-    return out
+    if any(k in expr for k in _COMBINATOR_FORMS):
+        return _combinator_problems(expr, path, scope)
+    return _subject_problems(expr, path, scope)
 
 
 # ── aggregate ───────────────────────────────────────────────────────────────
@@ -273,7 +314,12 @@ def aggregate_problems(agg: dict, scope: str, implementation: str) -> List[str]:
     out += _key_problems(agg, mode)
     out += _over_problems(agg.get("over"), scope)
     out += _mode_value_problems(agg)
-    return out + scan_expressions(agg, "aggregate")
+    item_scope = agg.get("over") if mode in ("ratio", "count") else scope
+    item_scope = item_scope if item_scope in SCOPES else None
+    for key in ("where", "match"):
+        if key in agg:
+            out += expr_problems(agg[key], f"aggregate.{key}", item_scope)
+    return out
 
 
 def _key_problems(agg: dict, mode: Any) -> List[str]:
@@ -355,8 +401,10 @@ def _composite_problems(agg: dict) -> List[str]:
 
 # ── messages and severity source ────────────────────────────────────────────
 
-def placeholder_problems(template: Any, allowed: Optional[Set[str]], path: str) -> List[str]:
-    """`{name}` placeholders in a template: well-formed, and in `allowed` (None = any)."""
+def placeholder_problems(template: Any, allowed: Optional[Set[str]], path: str,
+                         derived: bool = False) -> List[str]:
+    """`{name}` placeholders in a template: well-formed, and in `allowed` (None = any);
+    with `derived`, `{@name}` placeholders naming a registered derived field too."""
     if not isinstance(template, str):
         return []
     try:
@@ -370,6 +418,8 @@ def placeholder_problems(template: Any, allowed: Optional[Set[str]], path: str) 
         head = re.match(r"[^.\[]*", fname).group(0)
         if not head:
             out.append(f"{path}: placeholders must be named ('{{}}' is positional)")
+        elif head.startswith("@") and derived:
+            out += derived_name_problems(head, path)
         elif allowed is not None and head not in allowed:
             out.append(f"{path}: unknown placeholder '{head}' "
                        f"(known: {_known(sorted(allowed))})")
@@ -385,6 +435,12 @@ def message_placeholders(agg: dict) -> Optional[Set[str]]:
     if mode == "composite" and isinstance(agg.get("components"), dict):
         allowed |= {str(n) for n in agg["components"]}
     return allowed
+
+
+def message_problems(template: Any, agg: dict, path: str) -> List[str]:
+    """A rule message under this aggregate (an `each` message may name derived fields)."""
+    return placeholder_problems(template, message_placeholders(agg), path,
+                                derived=agg.get("mode") == "each")
 
 
 def legacy_threshold_problems(value: Any, path: str) -> List[str]:

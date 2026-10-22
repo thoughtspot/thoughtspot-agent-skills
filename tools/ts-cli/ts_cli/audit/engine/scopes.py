@@ -14,8 +14,10 @@
 follow those, not the item's own identity. A model's children report the Model's guid;
 an RLS rule reports its Table; an Answer's table reference reports the Answer.
 
-Top-level scopes ignore `parent`. A child scope with a `parent` item yields that
-item's children only; with none, every parent's children in turn.
+Without `parent`, every item of the scope (a child scope: every parent's children in
+turn). With `parent`, the children belonging to `parent` or to the nearest item
+enclosing it of the child scope's parent type; a `parent` with no such item, or a
+top-level scope, raises rather than silently counting the whole context.
 
 `has_data(item, ctx, requirement)` answers the data-availability rule: an object whose
 rule `requires` data the context does not hold for it is skipped, not judged.
@@ -147,13 +149,19 @@ ITERATORS = {**_TOP, **_CHILDREN}
 
 def iterate(ctx, scope: str, parent: Optional[Item] = None) -> Iterator[Item]:
     """Items of `scope`: all of them, or (child scope) those under `parent`."""
-    if scope in _TOP:
+    if scope not in ITERATORS:
+        raise ValueError(f"unknown scope '{scope}'")
+    if parent is None:
+        parents = None if scope in _TOP else _TOP[PARENT_SCOPE[scope]](ctx)
+    else:
+        owner = ancestor(parent, PARENT_SCOPE.get(scope, ""))
+        if owner is None:
+            raise ValueError(f"'{scope}' items do not belong to a '{parent.get('scope')}' "
+                             "item or any item enclosing it")
+        parents = [owner]
+    if parents is None:
         yield from _TOP[scope](ctx)
         return
-    if scope not in _CHILDREN:
-        raise ValueError(f"unknown scope '{scope}'")
-    owner = ancestor(parent, PARENT_SCOPE[scope]) if parent is not None else None
-    parents = [owner] if owner is not None else _TOP[PARENT_SCOPE[scope]](ctx)
     for p in parents:
         yield from _CHILDREN[scope](p, ctx)
 
