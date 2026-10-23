@@ -742,8 +742,8 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
     ``{index, type, name, findings}``.
     """
     from ts_cli.tml_lint import (
-        lint_cross_references, lint_model_table_aggregation, lint_referencing_joins, lint_tml,
-        table_join_names,
+        lint_cross_references, lint_model_table_aggregation, lint_referencing_joins,
+        lint_rls_join_cycles, lint_tml, table_join_names,
     )
 
     if i in parse_errors:
@@ -753,6 +753,7 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
         findings = findings + lint_cross_references(data, tables)
         findings = findings + lint_model_table_aggregation(data, table_aggs or {})
         findings = findings + lint_referencing_joins(data, table_join_names(table_bodies or {}))
+        findings = findings + lint_rls_join_cycles(data, table_bodies or {})
     inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
     return {
         "index": i,

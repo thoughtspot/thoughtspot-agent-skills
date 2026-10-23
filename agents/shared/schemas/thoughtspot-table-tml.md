@@ -125,6 +125,8 @@ table:
 | `rls_rules.table_paths[].id` | Yes | Alias used in rule expressions — `[T_1::COL]` |
 | `rls_rules.table_paths[].table` | Yes | The table this path starts from |
 | `rls_rules.table_paths[].column` | Yes | **A list of bare column names** — `column: ["COUNTRY"]`. **Corrected 2026-07-30:** this reference previously documented it as a *string with the brackets inside the value* (`column: "[COL_NAME]"`). The single live sighting (`BANK_EMPLOYEES`, in a 275-Table census) is a list of bare names, so a generator following the old shape emitted the wrong YAML type. The brackets belong in the **rule `expr`**, not in this value. |
+| `rls_rules.joins[]` | When a path crosses tables | The joins the rule's paths may use: `{name, source, destination, type, is_one_to_one}`. `name` is one of this Table's `joins_with[]` joins; there is no cardinality. **Live sighting 2026-10-23** (a support case's exported TML). |
+| `rls_rules.table_paths[].join_path` | When `table` is not the owning table | Ordered segments `[{join: [<rls_rules.joins name>, ...]}]` from the owning table to `table`. Walk it outward from the owning table: that is the direction the rule adds to the query (see I22 in `ts-model-conversion-invariants.md` — such a join can close a cycle with the Model's joins). |
 | `rls_rules.rules[].name` | Yes | Rule display name |
 | `rls_rules.rules[].expr` | Yes | Bracket refs use the `table_paths` aliases. Live examples: `ts_groups = [BANK_EMPLOYEES_1::COUNTRY]`, `ts_groups != "katrina's group"` |
 

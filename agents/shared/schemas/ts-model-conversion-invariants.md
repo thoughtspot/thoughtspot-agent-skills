@@ -1,11 +1,11 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504; I22 2026-10-23 — RLS join cycle, from a support case's exported TML) -->
 
 # ThoughtSpot Model Conversion Invariants
 
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I21, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I22, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -774,6 +774,28 @@ declaring table and fails under its destination).
 linted in the same batch (`--dir`, or `--file table.tml --file model.tml`). A Model linted
 alone has no ground truth for what its Tables declare. The CoCo pre-import checklist's
 `referencing_join` row checks the name; this adds which table must own it.
+
+
+### I22 — An RLS rule's joins do not close a cycle with the Model's joins
+
+**Rule:** take the Model's join graph (I17: arrows MANY -> ONE) and add each join an RLS
+rule on one of its Tables actually uses — a join on a `rls_rules.table_paths[].join_path`
+that a rule's `expr` references — pointing away from the secured table. The result must
+have no directed cycle.
+
+**Failure mode:** the Model imports (I17 sees only its own joins), then queries fail
+with "Guid Mismatch" (BACH 12325): query generation sees one table with two roots — the
+Model's root, and itself via the RLS path. Seen on a support case: the Model joined
+`bridge -> users` MANY_TO_ONE and the rule on `users` joined out to `bridge`; Liveboard
+filtering broke for every user under the rule. Two joins with opposite cardinalities
+between one pair once RLS applies are the same shape (a two-table cycle).
+
+**Fix:** drop one of the two joins, or point the Model at a copy of the table without
+the RLS rule (or move the rule).
+
+**Enforced by:** `ts tml lint`, cross-file like I21 — only when the secured Table's TML
+is linted in the same batch; and `ts audit` S11. Graph mechanics: `ts_cli/tml_rls_graph.py`.
+A second route (diamond) through an RLS join is not checked: nothing shows it failing.
 
 ---
 
