@@ -149,8 +149,11 @@ def _combined_adjacency(graph: JoinGraph, edges: list[RlsEdge]) -> dict[str, lis
 
 def _model_joins_on(graph: JoinGraph, cycle: list[str]) -> list[str]:
     pairs = set(zip(cycle[1:], cycle[2:]))
+    # An inline join often has no `name` (JoinGraph labels it "(unnamed)"): the cycle's
+    # table path already says where it runs, so only named joins are listed.
     return sorted({e.name for e in graph.edges
-                   if not graph.is_self_join(e) and e.arrow in pairs})
+                   if not graph.is_self_join(e) and e.arrow in pairs
+                   and (e.join.get("name") or e.join.get("referencing_join"))})
 
 
 def rls_join_cycles(model_tables: list, tables: dict) -> list[dict]:

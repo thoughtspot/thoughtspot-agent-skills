@@ -326,6 +326,7 @@ are roughly ordered by value÷effort.
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 | BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
+| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -14709,3 +14710,22 @@ there, one unreadable Model aborts the whole audit. Not a regression — before 
 
 **Target:** 2027-01-31.
 
+## BL-410 — does a second route through an RLS join fail at query time? `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the RLS join-cycle design
+(`docs/superpowers/specs/2026-10-23-rls-join-cycles-design.md`), builder check Q2.
+
+**What.** Lint I22 and audit S11 flag a Model whose joins plus its Tables' RLS joins form
+a directed **cycle** — the shape a support case root-caused ("Guid Mismatch", one table
+with two roots). They deliberately do not flag a **second route** (a diamond) through an
+RLS join: nothing shows one failing, and the healthy star (fact -> users, fact -> orgs,
+RLS on users joining users -> orgs) has one. Flagging it unprobed would be a false alarm
+on a common shape.
+
+**Do.** On a scratch Model over existing tables: a star with an RLS rule whose join forms
+a diamond with the Model's joins. Query as a user under the rule (filters, search, a
+Liveboard filter). If it fails like the cycle case, extend `ts_cli/tml_rls_graph.py` to
+report it (via the existing `ambiguous_paths`) at the severity the probe shows; if it
+works, record the result in the module docstring and close this.
+
+**Target:** 2027-01-31.

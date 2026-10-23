@@ -163,3 +163,14 @@ def test_two_rls_edges_in_one_cycle_are_reported_in_stable_order():
     assert [(f["rls_edge"].table, f["rls_edge"].join) for f in found] == [
         ("b", "b_to_c"), ("d", "d_to_a")]
     assert found == rls_join_cycles(model, {"b": b, "d": d})
+
+
+def test_unnamed_model_joins_are_left_out_of_model_joins():
+    """Exported Model joins are often inline with no `name`; the cycle still names the
+    tables, and `model_joins` lists only joins that have a name."""
+    model = [mt("fact", join("users"), join("bridge")),
+             mt("bridge", {"with": "users", "cardinality": "MANY_TO_ONE", "on": "x"}),
+             mt("users")]
+    found = rls_join_cycles(model, {"users": case_users()})
+    assert [f["cycle"] for f in found] == [["users", "bridge", "users"]]
+    assert found[0]["model_joins"] == []
