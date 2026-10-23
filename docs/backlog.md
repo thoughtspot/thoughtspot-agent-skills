@@ -14729,3 +14729,25 @@ report it (via the existing `ambiguous_paths`) at the severity the probe shows; 
 works, record the result in the module docstring and close this.
 
 **Target:** 2027-01-31.
+
+## BL-411 — Settle `dependency/purge` scope before any purge returns to `ts-dependency-cleanup` `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** PR #505 review (finding 3). **Owner:** the
+`ts-dependency-cleanup` author.
+
+**Why it matters.** `POST /callosum/v1/dependency/purge` takes no parameters. It may act
+on every soft-deleted object on the instance, on a session-scoped set, or on an ordinary
+trash tier that `delete-with-dependents` never populates — the last being useless for the
+skill's own deletes *and* destructive to other users'. Operation 9 was cut from 1.0.0
+because a typed confirmation over a bounded list cannot bound an unbounded call.
+Detail: `agents/cli/ts-dependency-cleanup/references/open-items.md` #7, #8.
+
+**Do.**
+1. `get-rest-api-reference` / `get-developer-docs-reference` for purge (zero risk).
+   Never answer the question by calling the endpoint.
+2. If the spec cannot answer it, ask ThoughtSpot, with the 403 `Cannot Delete System
+   Objects` observation from 2026-09-03.
+3. Only with a scope answer: design a bounded call (or per-GUID loop), a templated
+   confirmation listing exactly what it affects, and post-purge verification.
+
+**Target:** 2026-12-15.

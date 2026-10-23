@@ -61,6 +61,7 @@ SMOKE_TIMEOUT_SECONDS = 1200
 REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-audit":                                   ["--model-guid"],
     "ts-dependency-manager":                    ["--model-guid"],
+    "ts-dependency-cleanup":                    ["--column-guid"],
     "ts-object-model-aggregates":               ["--model-guid"],
     "ts-object-model-coach":                    ["--model-guid"],
     "ts-object-set-manager":                    ["--model-guid"],
@@ -73,6 +74,22 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-recipe-formula-business-days-snowflake": ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-recipe-formula-hms-display-snowflake":   ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
 }
+
+# Flags that make a smoke test perform an IRREVERSIBLE action. The runner is a
+# pre-push gate fed from a gitignored config file, so a flag parked there would fire
+# silently on every push (PR #505 review, finding 2). These are refused outright: a
+# destructive leg is run by hand or not at all.
+DESTRUCTIVE_FLAGS: dict[str, frozenset[str]] = {
+    "ts-dependency-cleanup": frozenset({"--run-delete"}),
+}
+
+
+def destructive_args(skill: str, extra_args: list[str]) -> list[str]:
+    """Return any of `skill`'s destructive flags present in `extra_args`
+    (either as `--flag` or `--flag=value`)."""
+    banned = DESTRUCTIVE_FLAGS.get(skill, frozenset())
+    return [a for a in extra_args if a.split("=", 1)[0] in banned]
+
 
 PASS = "\033[32mPASS\033[0m"
 FAIL = "\033[31mFAIL\033[0m"
@@ -184,6 +201,13 @@ def run(skills: list[str]) -> int:
             print(f"{label:<{col}} {SKIP}  (needs {', '.join(missing)} — "
                   f"add to tools/smoke-tests/smoke-config.local.json)")
             skipped.append(skill)
+            continue
+
+        refused = destructive_args(skill, extra_args)
+        if refused:
+            print(f"{label:<{col}} {FAIL}  (refusing destructive flag(s) "
+                  f"{', '.join(refused)} — run that leg by hand, never from the runner)")
+            failures.append(skill)
             continue
 
         quoted_args = " ".join(shlex.quote(a) for a in extra_args)
