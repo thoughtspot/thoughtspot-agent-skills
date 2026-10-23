@@ -326,7 +326,9 @@ are roughly ordered by value÷effort.
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 | BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
-| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
+| BL-410 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
+| BL-411 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
+| BL-412 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -14710,7 +14712,63 @@ there, one unreadable Model aborts the whole audit. Not a regression — before 
 
 **Target:** 2027-01-31.
 
-## BL-410 — does a second route through an RLS join fail at query time? `Tier 3`
+## BL-410 — AgentQL Quest: a sailing galley at a wooden pier for the Shifting Isles `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the maintainer, from play.
+
+**Now.** On the world map the Isles' door is a small boat (Tiny Battle frame 417) at the end of a
+dock drawn with Tiny Dungeon's grey stone bridge tiles (frames 37-39). Inside the realm the isles
+are joined by the same grey stone. It reads as ordinary.
+
+**Want.**
+- The boat: a sailing ship, an old pirate-style galley with **no cannons**, or a Roman or Greek
+  war galley (oars, a single square sail, a ram). Several tiles long, moored beside the pier, the
+  door on its deck or gangplank.
+- The pier: wooden planks on piles driven into the sea, poles showing in the water beside and
+  under it. The same wood for the bridges inside the realm.
+
+**Notes for whoever picks it up.**
+- No CC0 pack found in the art search for #661 has a ship or a wooden pier in Kenney's Tiny
+  style (the rejected list is in #661). Expect to draw them in `tiles/make_atlas.py` (`DRAWN`,
+  full-width rows; `MIRRORED` for the other side), in Tiny Dungeon's outline and palette.
+- The engine draws one-tile sprites, so a ship several tiles long is tiles on the walls layer
+  (solid, over water) with the door as the one portal object; the build now refuses a map frame
+  that is empty, and `maps.py` that anything not a step stands beside one.
+- Water stays walls; pier and bridge tiles are water floor with a plank decor and no wall (the
+  `test_walkable_water_is_always_bridged` rule).
+- The atlas has slots 500-503 free, and grows a row at a time (every map's tileset follows).
+
+**Target:** 2027-03-31.
+
+## BL-411 — AgentQL Quest: the Craftsmen of the Lake as a town on stilts `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the maintainer, from play.
+
+**Now.** The Lake realm (`maps/lake.tmj`) is a town on a grass island: two red-roofed workshops,
+a well, trees, the Forge by the second workshop, and a pier east to the dragon's isle. On the
+world map the Lake's scene is two houses and a well on an island reached by a pier.
+
+**Want.**
+- A medieval town built on wooden stumps (stilts) over the water: wooden walkways between the
+  houses, the piles showing in the water beneath them, the houses' walls and roofs in the same
+  Tiny style.
+- Small punts (flat boats) moored around it for the fishermen, as props on the water.
+- The same look for the Lake's scene on the world map.
+
+**Notes for whoever picks it up.**
+- Tiny Town has houses and roofs but no stilts, walkways on piles or punts; the art search for
+  #661 found no CC0 pack with them in this style. Expect drawn frames (see BL-410's notes: the
+  same piles and planks would serve both).
+- Walkways over water are water floor with a plank decor and no wall; houses and punts are walls
+  (solid). Keep the realm's west-to-east order (merchant and guide, the Forge between anvils, a
+  barred door, the dragon beyond), which `test_every_realm_puts_its_forge_before_its_door...`
+  pins, and keep chests, barrels and people off the tiles beside a step (`maps.py` refuses them).
+- The smith's lines (`npc_smith_*` in `strings.yaml`) name the workshop and the pier: update them
+  if the layout changes.
+
+**Target:** 2027-03-31.
+
+## BL-412 — does a second route through an RLS join fail at query time? `Tier 3`
 
 **Filed:** 2026-10-23. **Source:** the RLS join-cycle design
 (`docs/superpowers/specs/2026-10-23-rls-join-cycles-design.md`), builder check Q2.
