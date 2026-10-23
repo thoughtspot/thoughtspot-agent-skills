@@ -282,7 +282,7 @@ Driving the compile step would couple the skill to whichever dbt tooling,
 connection type and warehouse credentials the user happens to have.
 
 **The hand-off branches by connection type — it is not one universal "zip and
-upload".** `ZIP_FILE`: run `dbt docs generate` yourself, then point
+upload".** `ZIP_FILE`: write the artifacts yourself (`dbt docs generate` on Core, `dbt compile --write-catalog` on Fusion, where `docs generate` leaves a stale catalog — verified 2026-10-23), then point
 `ts dbt create --import-type ZIP_FILE --file <target dir>` at the result (the
 CLI builds the archive — `ts-convert-from-dbt` #4). `DBT_CLOUD`: no artifact
 changes hands locally at all — commit the files and let a dbt Cloud job run.

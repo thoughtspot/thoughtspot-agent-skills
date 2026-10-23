@@ -3660,16 +3660,17 @@ ts dbt create \
 ```
 
 ```bash
-# dbt Core: point --file at the target/ dir that `dbt docs generate` wrote.
-# manifest.json + catalog.json are zipped for you.
+# dbt Core / Fusion: point --file at the target/ dir dbt wrote (`dbt docs generate`
+# on Core, `dbt compile --write-catalog` on Fusion). manifest.json + catalog.json
+# are zipped for you. --project-name is required for ZIP_FILE.
 ts dbt create \
   --connection-name "Snowflake Prod" --database-name ANALYTICS \
-  --import-type ZIP_FILE --file ./my_dbt_project/target
+  --import-type ZIP_FILE --project-name my_dbt_project --file ./my_dbt_project/target
 
 # a ready-made archive still works verbatim
 ts dbt create \
   --connection-name "Snowflake Prod" --database-name ANALYTICS \
-  --import-type ZIP_FILE --file dbt_artifacts.zip
+  --import-type ZIP_FILE --project-name my_dbt_project --file dbt_artifacts.zip
 ```
 
 | Option | Required | Meaning |
@@ -3677,7 +3678,8 @@ ts dbt create \
 | `--connection-name` | yes | Display name of the EXISTING ThoughtSpot warehouse connection the dbt project builds into (e.g. `My Snowflake`) — not a label for the dbt connection object. The response's `connection_id` is that connection's GUID. `ts connections list` shows the candidates. |
 | `--database-name` | yes | Database on that connection that the dbt models are materialised in |
 | `--import-type` | no (default `DBT_CLOUD`) | `DBT_CLOUD` or `ZIP_FILE` |
-| `--dbt-url` / `--account-id` / `--project-id` / `--dbt-env-id` / `--project-name` | `DBT_CLOUD` only | dbt Cloud project coordinates |
+| `--dbt-url` / `--account-id` / `--project-id` / `--dbt-env-id` | `DBT_CLOUD` only | dbt Cloud project coordinates |
+| `--project-name` | **required** for `ZIP_FILE`; optional for `DBT_CLOUD` | Name of the dbt project. ThoughtSpot rejects a `ZIP_FILE` create without it (`Project Name should not be empty`), so the CLI checks first |
 | `--dbt-cloud-profile` | `DBT_CLOUD` only (preferred) | Profile name — reads token from OS credential store |
 | `--access-token-env` | `DBT_CLOUD` only (alternative) | Env var holding the dbt Cloud API token |
 | `--file` | `ZIP_FILE` only | The dbt Core artifacts (see **`--file` accepts a directory** below) |
@@ -3742,8 +3744,11 @@ the dbt models and tables named in `--model-tables`.
 ts dbt generate-tml --connection-id <dbt_connection_identifier> \
   --model-tables '[{"model_name": "orders", "model_path": "models/orders.sql", "tables": ["orders"]}]'
 
-# ZIP_FILE connections re-upload the manifest+catalog on every call:
-ts dbt generate-tml --connection-id <id> --file dbt_artifacts.zip \
+# ZIP_FILE connections keep no archive: pass --file on EVERY call.
+# The command that writes target/manifest.json + target/catalog.json depends on
+# the engine: `dbt docs generate` (dbt Core), `dbt compile --write-catalog`
+# (dbt Fusion — there `dbt docs generate` leaves catalog.json stale).
+ts dbt generate-tml --connection-id <id> --file ./target \
   --model-tables '[...]'
 
 # Select specific worksheets instead of all/none:
@@ -3757,14 +3762,15 @@ ts dbt generate-tml --connection-id <id> --model-tables '[...]' \
 | `--model-tables` | yes | JSON array of `{model_name, model_path, tables[]}` — the dbt models (and their tables) to import |
 | `--import-worksheets` | no (default `ALL`) | `ALL`, `NONE`, or `SELECTED` |
 | `--worksheets` | `SELECTED` only | JSON array of worksheet names |
-| `--file` | `ZIP_FILE` connections only | Manifest+catalog ZIP |
+| `--file` | **required** for `ZIP_FILE` connections, on every call | The `target/` directory (or project root, either artifact, or a ready-made ZIP). Without it the CLI refuses before sending — ThoughtSpot would answer a misleading `400 "Error with the uploaded ZIP file."`. Leave it off for `DBT_CLOUD` |
 | `--include-semantic-report` / `--no-include-semantic-report` | no | Per-model import/skip breakdown — Snowflake and Databricks connections only |
 
 ### `ts dbt generate-sync-tml`
 
 Resync TML generation — resynchronizes the existing Table/Model/Worksheet
 TML for the connection against the current state of the dbt project. Same
-options as `generate-tml`.
+options as `generate-tml` (including `--file`, required for `ZIP_FILE`
+connections); it takes no `--model-tables` or `--import-worksheets`.
 
 ---
 
