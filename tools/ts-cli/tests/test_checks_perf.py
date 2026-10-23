@@ -21,9 +21,25 @@ def test_p4_flags_non_progressive():
     assert findings[0].severity == "HIGH"
 
 
-def test_p8_flags_excess_columns():
-    findings = run_rule(fx.perf_model_80_columns(), "P8")
-    assert any(f.check_id == "P8" for f in findings)
+def test_p8_general_lines_are_500_and_1500():
+    """Above 500 columns Search Data gets awkward; above 1,500 performance suffers
+    (field experience; 0.57% / 0.06% of production Models, 2026-10 call-home data)."""
+    sev = lambda n: [f.severity for f in run_rule(fx.perf_model_columns(n), "P8", "general")]
+    assert sev(80) == [] and sev(500) == []
+    assert sev(501) == ["MEDIUM"] and sev(1500) == ["MEDIUM"]
+    assert sev(1501) == ["HIGH"]
+
+
+def test_p8_spotter_lines_are_250_and_500():
+    sev = lambda n: [f.severity for f in run_rule(fx.perf_model_columns(n), "P8", "spotter")]
+    assert sev(250) == []
+    assert sev(251) == ["MEDIUM"] and sev(500) == ["MEDIUM"]
+    assert sev(501) == ["HIGH"]
+
+
+def test_p8_wording_names_search_and_performance_not_group_by():
+    detail = run_rule(fx.perf_model_1600_columns(), "P8")[0].detail
+    assert "GROUP BY" not in detail and "1600 columns" in detail
 
 
 def test_p8_passes_under_threshold():

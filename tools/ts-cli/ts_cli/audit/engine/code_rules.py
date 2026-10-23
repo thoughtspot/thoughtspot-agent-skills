@@ -285,23 +285,23 @@ def _join_count(model: dict) -> int:
     return sum(len(t.get("joins") or []) for t in model.get("model_tables") or [])
 
 
-#: D1's grading table, in the legacy order: (measure, value of a Model, above this is
-#: MEDIUM, above this HIGH). The columns and join-depth lines are the ceilings P8 and
-#: P7 report on (engine/tml.py, BL-304).
+#: D1's grading table: (measure, value of a Model, above this is MEDIUM, above this
+#: HIGH). Lines set 2026-10-23 from production call-home data (268k Models: tables p99
+#: 35, 0.18% above 40) — the earlier 10/15 tables and 8/12 joins flagged ~15-30% of
+#: production Models. Columns are P8's (per-profile bands in rules/perf.yaml) and join
+#: depth P7's, so D1 no longer grades either. Still code, not catalog data: moving
+#: these lines into bands is a BL-406 item.
 D1_MEASURES = (
-    ("tables", lambda m: len(m.get("model_tables") or []), 10, 15),
-    ("columns", lambda m: len(m.get("columns") or []), 50, tml.MAX_MODEL_COLUMNS),
-    ("joins", _join_count, 8, 12),
-    ("join depth", lambda m: tml.join_depth(m.get("model_tables") or []),
-     tml.JOIN_DEPTH_GREEN, tml.JOIN_DEPTH_YELLOW),
+    ("tables", lambda m: len(m.get("model_tables") or []), 30, 50),
+    ("joins", _join_count, 30, 50),
     ("formulas", lambda m: len(m.get("formulas") or []), 30, 50),
 )
 
 
 @code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"},
            severity={"HIGH", "MEDIUM"}, uses=(), own_threshold=True,
-           label="graded per size measure (tables, columns, joins, join depth, "
-                 "formulas), each against its own lines")
+           label="graded per size measure (tables, joins, formulas), each against "
+                 "its own lines")
 def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D1 — up to five findings per Model, one per measure over its MEDIUM line."""
     out: List[Finding] = []

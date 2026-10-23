@@ -17,20 +17,21 @@
 - id: D1
   title: Model complexity exceeds threshold
   description: >-
-    Five size measures per Model, each reported on its own when over its MEDIUM line
-    and graded HIGH over its HIGH line: tables (10 / 15), columns (50 / 75), joins
-    (8 / 12), join depth (3 / 5) and formulas (30 / 50).
+    Three size measures per Model, each reported on its own when over its MEDIUM line
+    and graded HIGH over its HIGH line: tables (30 / 50), joins (30 / 50) and formulas
+    (30 / 50). Column count is P8's and join depth P7's. The table and join lines come
+    from production call-home data (2026-10: 268k Models, 99th percentile 35 tables).
   # A code rule (code:model_complexity, grading table D1_MEASURES in
-  # engine/code_rules.py) because one rule grades five measures against five pairs of
-  # lines and reports each with its own legacy threshold — the catalog holds one set
-  # of bands and one threshold per rule.
+  # engine/code_rules.py) because one rule grades three measures against three pairs
+  # of lines and reports each with its own legacy threshold — the catalog holds one set
+  # of bands and one threshold per rule. Moving the lines into bands: BL-406.
   categories: [D]
   requires: [model_tml]
   implementation: code:model_complexity
   scope: model
   message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
   examples:
-    fires: {fixture: data_model_sixteen_tables, severity: HIGH}
+    fires: {fixture: data_model_fifty_one_tables, severity: HIGH}
     silent: {fixture: data_model_small}
 
 - id: D2

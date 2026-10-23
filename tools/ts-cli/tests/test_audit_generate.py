@@ -192,8 +192,7 @@ def test_legacy_threshold_by_severity_and_per_profile(toy_doc):
                           "yellow=47.5 · General: green=50, assessment=General, yellow=25 |")
     # a code rule that sets its own threshold per finding
     assert rows["T5"] == ("| T5 | set per finding — graded per size measure (tables, "
-                          "columns, joins, join depth, formulas), each against its own "
-                          "lines |")
+                          "joins, formulas), each against its own lines |")
 
 
 def test_profile_overrides_render_per_profile(toy_meta):
@@ -209,8 +208,8 @@ def test_severity_maps_and_code_rules_render_as_text(toy_meta):
     assert toy_meta["checks"]["T7"]["thresholds"] == \
         "MEDIUM when the name is token; otherwise CRITICAL"
     assert toy_meta["checks"]["T5"]["thresholds"] == (
-        "graded per size measure (tables, columns, joins, join depth, formulas), each "
-        "against its own lines — HIGH, MEDIUM")
+        "graded per size measure (tables, joins, formulas), each against its own "
+        "lines — HIGH, MEDIUM")
     assert toy_meta["checks"]["T6"]["thresholds"] == "HIGH < 50, MEDIUM < 80"
 
 

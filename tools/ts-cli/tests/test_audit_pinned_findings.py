@@ -267,8 +267,6 @@ S_PROBES = [
 
 D_PROBES = [
     # `name: None` / `guid: None` reach the finding as None, not ""
-    ("data_names_none", lambda f: f["check_id"] == "D1" and f["object_name"] is None
-     and f["object_guid"] is None),
     ("data_names_none", lambda f: f["check_id"] == "D10" and f["object_name"] is None
      and f["detail"] == "Zero-column bridge table 'None'"),
     ("data_names_none", lambda f: f["check_id"] == "D7" and f["object_name"] == "None / Twin"
@@ -281,9 +279,8 @@ D_PROBES = [
     ("data_names_absent", lambda f: f["check_id"] == "D9" and f["object_name"] == ""
      and f["object_guid"] == ""),
     ("data_names_absent", lambda f: f["check_id"] == "D8" and f["object_name"] == "..."),
-    # D1: one finding per measure, each with its own legacy threshold
-    ("data_names_absent", lambda f: f["check_id"] == "D1"
-     and f["threshold"] == {"green": 10, "yellow": 15} and f["metric"] == 16),
+    # D1's None names and per-measure thresholds: test_checks_data.py (its 2026-10 lines
+    # sit above every pinned input's size)
     # D7: the MEDIUM finding carries a threshold, the HIGH one none
     ("models_overlapping_tables", lambda f: f["check_id"] == "D7" and f["severity"] == "MEDIUM"
      and f["threshold"] == {"high_overlap": 0.5}),

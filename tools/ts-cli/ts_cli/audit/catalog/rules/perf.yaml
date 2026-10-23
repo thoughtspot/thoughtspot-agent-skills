@@ -160,8 +160,14 @@
     silent: {fixture: perf_star_schema}
 
 - id: P8
-  title: Column sprawl (>75 columns)
-  description: A Model with more than 75 columns (the column ceiling D1 grades against).
+  title: Column sprawl
+  description: >-
+    A Model's column count. Above 500 columns Search Data gets hard to use, and above
+    1,500 query performance suffers (field experience; 0.57% and 0.06% of production
+    Models in the 2026-10 call-home data, where the 99th percentile is 390). The
+    Spotter-ready profile draws the lines lower, at 250 and 500 — PROVISIONAL: more
+    columns give Spotter more names to confuse, but no measurement sets these numbers
+    yet.
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -172,11 +178,22 @@
     direction: lower_is_better
     unit: count
     levels:
-      - {op: gt, value: 75, severity: MEDIUM}
-  message: "{count} columns — wider GROUP BY, more complex query plans"
-  legacy_threshold: {max: 75}
+      - {op: gt, value: 1500, severity: HIGH}
+      - {op: gt, value: 500, severity: MEDIUM}
+  message: "{count} columns — above 500 Search Data gets hard to use; above 1,500 queries slow down"
+  legacy_threshold: {max: 500}
+  profiles:
+    spotter:
+      bands:
+        direction: lower_is_better
+        unit: count
+        levels:
+          - {op: gt, value: 500, severity: HIGH}
+          - {op: gt, value: 250, severity: MEDIUM}
+      message: "{count} columns — above 250 Spotter has more names to confuse (provisional line); above 500 Search Data gets hard to use"
+      legacy_threshold: {max: 250}
   examples:
-    fires: {fixture: perf_model_80_columns, severity: MEDIUM}
+    fires: {fixture: perf_model_1600_columns, severity: HIGH}
     silent: {fixture: perf_model_50_columns}
 
 - id: P9
