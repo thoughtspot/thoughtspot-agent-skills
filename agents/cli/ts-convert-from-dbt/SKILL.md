@@ -57,9 +57,14 @@ choice is dependent: it follows from what `ts dbt inspect` reports, so ask it al
 Two source types:
 - **DBT_CLOUD:** a dbt Cloud project, identified by URL + account ID + project ID
   (+ optional environment ID), authenticated with a dbt Cloud API token.
-- **ZIP_FILE:** a dbt Core project's `manifest.json` + `catalog.json` (produced
-  by `dbt docs generate`). Point `--file` at the `target/` directory — the
-  archive is built for you.
+- **ZIP_FILE:** a local dbt project's `manifest.json` + `catalog.json` (written
+  by `dbt docs generate` on dbt Core, `dbt compile --write-catalog` on dbt
+  Fusion — see Prerequisites). Point `--file` at the `target/` directory — the
+  archive is built for you. **Pass `--file` on every `generate-tml` /
+  `generate-sync-tml` call, not just `create`:** the API requires the archive
+  on every generate call for a ZIP_FILE connection, and without one ThoughtSpot answers with a
+  misleading 400 `Error with the uploaded ZIP file.` (the CLI now refuses
+  the call before sending it).
 
 **Certified warehouses only:** ThoughtSpot's dbt integration is certified for
 Amazon Redshift, Databricks, Google BigQuery, and Snowflake connections. If the
@@ -111,13 +116,22 @@ with the user before running either (Step 7).
   pattern as `/ts-profile-thoughtspot`.
 
 **ZIP_FILE:**
-- A local dbt Core project you can run `dbt docs generate` against (produces
-  `target/manifest.json` and `target/catalog.json`)
+- A local dbt project you can run dbt in, to produce `target/manifest.json` and
+  `target/catalog.json`. **The command that writes both depends on the engine**
+  (`dbt --version` tells you which):
 
-`dbt docs generate`, not `dbt compile` — the latter writes only
-`manifest.json`, and ThoughtSpot types the generated Table columns from
-`catalog.json`. You do **not** need to zip anything yourself: every `--file`
-flag accepts the `target/` directory and builds the archive.
+  | Engine | Run | What the other commands do |
+  |---|---|---|
+  | dbt Core (1.x) | `dbt docs generate` | `dbt compile` writes only `manifest.json` |
+  | dbt Fusion (2.x) | `dbt compile --write-catalog` | `dbt docs generate` refreshes only `manifest.json` and leaves any old `catalog.json` in place — **do not use it on Fusion** |
+
+  Verified 2026-10-23 on dbt Core 1.12.5 and dbt Fusion 2.0.6 (Snowflake). The
+  wrong command produces no error: the upload goes through with a stale or
+  missing catalog, and ThoughtSpot types the generated Table columns from
+  `catalog.json`, so a stale one means wrong column types.
+
+You do **not** need to zip anything yourself: every `--file` flag accepts the
+`target/` directory and builds the archive.
 
 ---
 
@@ -203,15 +217,16 @@ ts profiles list --dbt-cloud --json
   step — store it, don't ask the user to type it again.
 
 **ZIP_FILE path:** ask for the path to the dbt Core project's **`target/`
-directory** — the one `dbt docs generate` writes `manifest.json` and
+directory** — the one dbt writes `manifest.json` and
 `catalog.json` into. Do not ask the user to zip anything: `--file` accepts
 that directory (or the project root above it, or either artifact) and packs
 the two files into the archive ThoughtSpot uploads. A ready-made `.zip` is
 still accepted verbatim if they already have one.
 
-If they have not run `dbt docs generate` yet, have them run it first — the
-command refuses with that instruction when `catalog.json` is absent, which is
-what a `dbt compile`-only project looks like. It refuses rather than uploading
+If they have not generated the artifacts yet, have them run the command for
+their engine (Prerequisites table) first — the CLI refuses, naming that command,
+when `catalog.json` is absent, which is what a `dbt compile`-only Core project
+looks like. It refuses rather than uploading
 the manifest alone because ThoughtSpot types the generated Table columns from
 `catalog.json`: a manifest-only archive imports *successfully*, with no column
 types.
@@ -341,11 +356,13 @@ or, for ZIP_FILE:
 ```bash
 ts dbt create \
   --connection-name "{connection_name}" --database-name "{database_name}" \
-  --import-type ZIP_FILE --file {path/to/dbt_project}/target \
+  --import-type ZIP_FILE --project-name "{project_name}" \
+  --file {path/to/dbt_project}/target \
   --profile {profile}
 ```
 
-`--file` takes the `target/` directory and zips `manifest.json` +
+`--project-name` is required for ZIP_FILE — ThoughtSpot rejects the create
+without it. `--file` takes the `target/` directory and zips `manifest.json` +
 `catalog.json` into the archive ThoughtSpot uploads. A path to either artifact,
 the project root, or an existing `.zip` all work too.
 
@@ -720,9 +737,15 @@ ts dbt generate-tml \
   --connection-id {dbt_connection_identifier} \
   --model-tables '{model_tables_json}' \
   --import-worksheets ALL \
+  [--file {path/to/dbt_project}/target] \
   [--include-semantic-report] \
   --profile {profile}
 ```
+
+**ZIP_FILE connections: `--file` is required on every generate call** (drop the
+brackets); leave it off for DBT_CLOUD. Without it ThoughtSpot returns
+`400 "Error with the uploaded ZIP file."` — which looks like a bad archive but
+means no archive was sent.
 
 `worksheet_tmls.{model_path}` should hold exactly the number of Models
 `inspect` predicted in `path_n_model_count`:
@@ -751,9 +774,12 @@ artifacts" (dbt-fusion/manifest v12 projects — see
 ```bash
 ts dbt generate-sync-tml \
   --connection-id {dbt_connection_identifier} \
+  [--file {path/to/dbt_project}/target] \
   [--include-semantic-report] \
   --profile {profile}
 ```
+
+(`--file`: required for ZIP_FILE connections, as above.)
 
 `generate-sync-tml` imports ALL models in the project (no per-directory scope).
 If it also returns multiple models for the target directory, delete the split
@@ -799,8 +825,11 @@ ts dbt generate-tml \
   --connection-id {dbt_connection_identifier} \
   --model-tables '{model_tables_json}' \
   --import-worksheets NONE \
+  [--file {path/to/dbt_project}/target] \
   --profile {profile}
 ```
+
+(`--file`: required for ZIP_FILE connections.)
 
 **Step 8b — Build and import the unified Model:**
 
@@ -824,7 +853,8 @@ every metric would appear twice (open-items #19). Build a new Model instead, or 
 
 For a **dbt Core (ZIP_FILE)** project, pass `--manifest {path}` instead of
 `--dbt-cloud-profile` — the `target/` directory, the project ZIP, or
-`manifest.json` (with `catalog.json` beside it; `dbt docs generate` writes both).
+`manifest.json` (with `catalog.json` beside it — the Prerequisites table says
+which dbt command writes both).
 Same Model assembly and metric translation, no dbt Cloud call.
 
 Ask the user whether they want **pretty display names** (`--pretty-names`:
@@ -1014,6 +1044,9 @@ ts dbt generate-sync-tml \
   --profile {profile}
 ```
 
+**For a ZIP_FILE connection, `--file` is required here** (drop the brackets) —
+the API requires the archive on every call, so every resync uploads the current one.
+
 Unlike `generate-tml`, `generate-sync-tml` does **not** take `--model-tables` or
 `--import-worksheets` — it resynchronizes the existing model/table/Model
 selection already on the connection object.
@@ -1115,4 +1148,5 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-10-23 | ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (the CLI now refuses without it instead of sending a request ThoughtSpot rejects with a misleading 400); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (the server rejects it without). |
 | 1.0.0 | 2026-09-10 | Initial release — dbt (Cloud or Core) → ThoughtSpot Tables + Model, first import and resync. Path N (server-side `generate-tml`) and Path Y (`ts dbt build-model`, for `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics), with `ts dbt list-models` / `ts dbt inspect` choosing between them. |
