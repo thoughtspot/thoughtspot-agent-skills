@@ -275,7 +275,7 @@ def test_check_fails_when_the_catalog_changes(tmp_path):
     rules = root / generate.CATALOG_REL / "rules" / "perf.yaml"
     rules.write_text(re.sub(r"(?m)^  title: ", "  title: Edited ", rules.read_text(), count=1))
     assert generate.check(root) and "stale" in generate.check(root)[0]
-    assert generate.write(root) is True and generate.check(root) == []
+    assert generate.write(root) == [generate.DOC_REL] and generate.check(root) == []
 
 
 def test_cli_check_exit_codes(tmp_path):

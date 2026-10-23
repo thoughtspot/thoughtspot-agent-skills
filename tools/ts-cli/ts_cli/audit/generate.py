@@ -46,6 +46,9 @@ from ts_cli.audit.catalog_model import (
 )
 
 DOC_REL = Path("agents/cli/ts-audit/references/check-catalog.md")
+#: The skill file whose catalog-derived sections are named GENERATED blocks
+#: (ts_cli.audit.generate_skill). Checked when it exists: a catalog-only copy has none.
+SKILL_REL = Path("agents/cli/ts-audit/SKILL.md")
 CATALOG_REL = Path("tools/ts-cli/ts_cli/audit/catalog")
 BEGIN = "<!-- BEGIN GENERATED -->"
 END = "<!-- END GENERATED -->"
@@ -300,28 +303,50 @@ def render_doc(doc: str, cat: Catalog) -> str:
     return doc[:start + len(BEGIN)] + "\n" + catalog_markdown(cat) + doc[end:]
 
 
+def render_skill(doc: str, cat: Catalog) -> str:
+    """SKILL.md with its named GENERATED blocks re-rendered; ValueError on a missing one."""
+    from ts_cli.audit.generate_skill import render_named_blocks, skill_blocks
+    try:
+        return render_named_blocks(doc, skill_blocks(cat))
+    except ValueError as exc:
+        raise ValueError(f"{SKILL_REL}: {exc}") from exc
+
+
+def _targets(root: Path) -> List[tuple]:
+    """(path relative to root, renderer) for each generated doc: check-catalog.md always,
+    SKILL.md when present."""
+    targets = [(DOC_REL, render_doc)]
+    if (Path(root) / SKILL_REL).is_file():
+        targets.append((SKILL_REL, render_skill))
+    return targets
+
+
 def check(root: Path) -> List[str]:
-    """Problems with the generated doc under repo `root` (empty: current)."""
-    doc_path = Path(root) / DOC_REL
+    """Problems with the generated docs under repo `root` (empty: current)."""
+    problems: List[str] = []
     try:
         cat = load_catalog(Path(root) / CATALOG_REL)
-        doc = doc_path.read_text(encoding="utf-8")
-        current = render_doc(doc, cat)
+        for rel, render in _targets(root):
+            doc = (Path(root) / rel).read_text(encoding="utf-8")
+            if render(doc, cat) != doc:
+                problems.append(f"{rel} is stale: run `python -m ts_cli.audit.generate`")
     except (OSError, ValueError, CatalogError) as exc:  # a malformed catalog included
         return [str(exc)]
-    if current != doc:
-        return [f"{DOC_REL} is stale: run `python -m ts_cli.audit.generate`"]
-    return []
+    return problems
 
 
-def write(root: Path) -> bool:
-    """Regenerate the doc under `root`; True when it changed."""
-    doc_path = Path(root) / DOC_REL
-    doc = doc_path.read_text(encoding="utf-8")
-    new = render_doc(doc, load_catalog(Path(root) / CATALOG_REL))
-    if new != doc:
-        doc_path.write_text(new, encoding="utf-8")
-    return new != doc
+def write(root: Path) -> List[Path]:
+    """Regenerate the docs under `root`; the ones that changed."""
+    cat = load_catalog(Path(root) / CATALOG_REL)
+    changed = []
+    for rel, render in _targets(root):
+        path = Path(root) / rel
+        doc = path.read_text(encoding="utf-8")
+        new = render(doc, cat)
+        if new != doc:
+            path.write_text(new, encoding="utf-8")
+            changed.append(rel)
+    return changed
 
 
 def _default_root() -> Path:
@@ -330,7 +355,8 @@ def _default_root() -> Path:
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="python -m ts_cli.audit.generate",
-                                description="Generate check-catalog.md's rule tables.")
+                                description="Generate check-catalog.md's rule tables and "
+                                            "the ts-audit skill's catalog-derived blocks.")
     p.add_argument("--root", type=Path, default=_default_root(), help="repository root")
     p.add_argument("--check", action="store_true", help="exit 1 when the doc is stale")
     args = p.parse_args(argv)
@@ -339,10 +365,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         for problem in problems:
             print(f"FAIL  {problem}")
         if not problems:
-            print(f"PASS  {DOC_REL} is current")
+            print("PASS  " + ", ".join(str(rel) for rel, _ in _targets(args.root))
+                  + " current")
         return 1 if problems else 0
     changed = write(args.root)
-    print(f"{'Wrote' if changed else 'Unchanged:'} {DOC_REL}")
+    print("Wrote " + ", ".join(map(str, changed)) if changed else "Unchanged")
     return 0
 
 
