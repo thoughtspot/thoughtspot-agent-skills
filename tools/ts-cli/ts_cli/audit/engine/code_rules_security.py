@@ -18,16 +18,15 @@ if TYPE_CHECKING:
     from ts_cli.audit.catalog_model import Rule
 
 
-def _tables_by_name(model: dict, tables: Dict[str, dict]) -> Dict[str, dict]:
-    """physical table name -> Table TML body, found through each entry's `fqn` (the
-    audit keys Table TML by guid). An entry whose Table TML is not in scope adds none."""
-    out: Dict[str, dict] = {}
-    for mt in model.get("model_tables") or []:
-        if isinstance(mt, dict) and mt.get("name"):
-            body = (tables or {}).get(mt.get("fqn", ""))
-            if isinstance(body, dict):
-                out.setdefault(str(mt["name"]), body)
-    return out
+def _table_of(ctx_tables: Dict[str, dict]):
+    """A Model entry -> its Table TML `table:` body, through the entry's `fqn`. The audit
+    keeps each Table TML as the whole parsed document (`{guid, table}`), keyed by guid;
+    an entry whose Table TML is not in scope resolves to None."""
+    def resolve(entry: dict):
+        doc = (ctx_tables or {}).get(entry.get("fqn") or "")
+        body = doc.get("table") if isinstance(doc, dict) else None
+        return body if isinstance(body, dict) else None
+    return resolve
 
 
 @code_rule("rls_join_cycles", placeholders={"table", "join", "target", "back"},
@@ -39,14 +38,16 @@ def rls_join_cycle_rule(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
         model = item["obj"]
-        for hit in rls_join_cycles(model.get("model_tables") or [],
-                                   _tables_by_name(model, ctx.tables)):
+        notes: list = []
+        for hit in rls_join_cycles(model.get("model_tables") or [], {},
+                                   table_of=_table_of(ctx.tables), notes=notes):
             e, cycle = hit["rls_edge"], hit["cycle"]
-            via = f" ({', '.join(hit['model_joins'])})" if hit["model_joins"] else ""
+            via = f" (Model joins: {', '.join(hit['model_joins'])})" if hit["model_joins"] else ""
             values = {"table": e.table, "join": e.join, "target": cycle[1],
                       "back": " -> ".join(cycle[1:]) + via}
             out.append(Finding(check_id=rule.id, angle="", severity=rule.severity,
                                object_type=item["object_type"], object_name=item["name"],
                                object_guid=item["guid"],
                                detail=render(template(rule, rule.severity), values)))
+        ctx.warnings.extend(f"S11: {item['name']}: {n}" for n in notes)
     return out

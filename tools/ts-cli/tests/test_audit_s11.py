@@ -20,7 +20,7 @@ def test_s11_silent_same_direction():
 def test_s11_maps_tables_by_fqn():
     """The users Table TML is found through model_tables[].fqn, not by its name: filed
     under another guid, the same body is not this Model's users table."""
-    ctx = fx.build_rls_cycle_ctx(fx.sec_rls_join_cycle().tables["g-users"],
+    ctx = fx.build_rls_cycle_ctx(fx.sec_rls_join_cycle().tables["g-users"]["table"],
                                  users_fqn="g-someone-else")
     assert run_rule(ctx, "S11") == []
 
@@ -28,3 +28,19 @@ def test_s11_maps_tables_by_fqn():
 def test_s11_message_has_no_engine_ids():
     for f in run_rule(fx.sec_rls_join_cycle(), "S11"):
         assert "@" not in f.detail and "code:" not in f.detail
+
+
+def test_s11_reads_the_audit_s_table_documents():
+    """ctx.tables holds whole parsed documents ({guid, table}), as `build_context`
+    stores them — S11 must read the `table:` body inside."""
+    ctx = fx.sec_rls_join_cycle()
+    assert set(ctx.tables["g-users"]) == {"guid", "table"}
+    assert len(run_rule(ctx, "S11")) == 1
+
+
+def test_s11_unwalkable_path_is_a_warning_not_a_finding():
+    ctx = fx.build_rls_cycle_ctx(fx.build_rls_cycle_table(
+        "users", [("x", "orgs", "bridge")], [("bridge_1", "bridge", "x")],
+        ["[bridge_1::c] = 1"]))
+    assert run_rule(ctx, "S11") == []
+    assert any("bridge_1" in w for w in ctx.warnings)

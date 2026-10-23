@@ -195,9 +195,8 @@
   scope: model
   severity: HIGH
   message: >-
-    RLS on '{table}' joins out to '{target}' ('{join}'), and the Model joins back
-    {back} — a loop query generation cannot resolve (queries fail with "Guid
-    Mismatch")
+    RLS on '{table}' joins out to '{target}' ('{join}'), and joins lead back {back}
+    — a loop query generation cannot resolve (queries fail with "Guid Mismatch")
   remediation: >-
     Drop one of the two joins, or point the Model at a copy of the table without this
     RLS rule (or move the rule to another table).

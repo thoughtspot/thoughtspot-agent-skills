@@ -446,8 +446,8 @@ def build_rls_cycle_table(name, joins, paths, exprs) -> dict:
 
 
 def build_rls_cycle_ctx(users_rls: dict, users_fqn="g-users") -> AuditContext:
-    """Activity over fact, bridge and users; `bridge -> users` MANY_TO_ONE; the users
-    Table TML (with `users_rls`) under `users_fqn`."""
+    """Activity over fact, bridge and users (fact -> bridge -> users, MANY_TO_ONE); the
+    users Table TML (with `users_rls`) filed under `users_fqn`."""
     def mt(name, *targets):
         return {"name": name, "fqn": f"g-{name}",
                 "joins": [{"with": t, "name": f"{name}_{t}", "cardinality": "MANY_TO_ONE",
@@ -455,8 +455,10 @@ def build_rls_cycle_ctx(users_rls: dict, users_fqn="g-users") -> AuditContext:
                           for t in targets]}
     model = {"guid": "m-rls", "model": {
         "name": "Activity", "columns": [],
-        "model_tables": [mt("fact", "users", "bridge"), mt("bridge", "users"), mt("users")]}}
-    return make_context(models=[model], tables={users_fqn: copy.deepcopy(users_rls)})
+        "model_tables": [mt("fact", "bridge"), mt("bridge", "users"), mt("users")]}}
+    # The audit keeps each Table TML as the whole parsed document, keyed by its guid.
+    return make_context(models=[model], tables={users_fqn: {
+        "guid": users_fqn, "table": copy.deepcopy(users_rls)}})
 
 
 def sec_rls_join_cycle() -> AuditContext:

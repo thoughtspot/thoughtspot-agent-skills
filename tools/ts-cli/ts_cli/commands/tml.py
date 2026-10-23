@@ -753,7 +753,10 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
         findings = findings + lint_cross_references(data, tables)
         findings = findings + lint_model_table_aggregation(data, table_aggs or {})
         findings = findings + lint_referencing_joins(data, table_join_names(table_bodies or {}))
-        findings = findings + lint_rls_join_cycles(data, table_bodies or {})
+        rls_notes: list = []
+        findings = findings + lint_rls_join_cycles(data, table_bodies or {}, notes=rls_notes)
+        for note in rls_notes:  # a path I22 could not walk: diagnostics, never a finding
+            print(f"I22 note: {note}", file=sys.stderr)
     inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
     return {
         "index": i,

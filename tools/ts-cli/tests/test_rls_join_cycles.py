@@ -41,8 +41,10 @@ def rls_table(secured, joins, paths, exprs):
     }
 
 
+# fact -> bridge -> users only: a fact -> users join as well would be a diamond, which
+# ThoughtSpot rejects at import (I17), so the fixture would not be a real Model.
 CASE_MODEL = [
-    mt("fact", join("users", "fact_users"), join("bridge", "fact_bridge")),
+    mt("fact", join("bridge", "fact_bridge")),
     mt("bridge", join("users", "bridge_users")),
     mt("users"),
 ]
@@ -119,7 +121,7 @@ def test_aliased_role_playing_is_silent():
 
 
 def test_aliased_case_shape_fires():
-    model = [mt("fact", join("users_a"), join("bridge")),
+    model = [mt("fact", join("bridge")),
              mt("bridge", join("users_a", "bridge_users")), mt("users", alias="users_a")]
     found = rls_join_cycles(model, {"users": case_users()})
     assert [f["cycle"] for f in found] == [["users_a", "bridge", "users_a"]]
@@ -168,9 +170,62 @@ def test_two_rls_edges_in_one_cycle_are_reported_in_stable_order():
 def test_unnamed_model_joins_are_left_out_of_model_joins():
     """Exported Model joins are often inline with no `name`; the cycle still names the
     tables, and `model_joins` lists only joins that have a name."""
-    model = [mt("fact", join("users"), join("bridge")),
+    model = [mt("fact", join("bridge")),
              mt("bridge", {"with": "users", "cardinality": "MANY_TO_ONE", "on": "x"}),
              mt("users")]
     found = rls_join_cycles(model, {"users": case_users()})
     assert [f["cycle"] for f in found] == [["users", "bridge", "users"]]
     assert found[0]["model_joins"] == []
+
+
+def test_self_referencing_rls_join_on_aliased_table_is_silent():
+    """A rule's join from a table to itself adds no edge: with two aliases of the table
+    it must not invent a loop out of RLS joins alone."""
+    model = [mt("fact", join("users_a"), join("users_b")),
+             mt("users", alias="users_a"), mt("users", alias="users_b")]
+    users = rls_table("users", [("users_self", "users", "users")],
+                      [("users_2", "users", [["users_self"]])], ["[users_2::c] = 1"])
+    assert rls_join_cycles(model, {"users": users}) == []
+
+
+def test_rls_follows_the_entry_not_every_table_of_that_name():
+    """Two Model entries named `users` that are different tables (resolved per entry by
+    `table_of`): the rule on one must not start from the other."""
+    model = [mt("fact", join("bridge")),
+             mt("bridge", join("users_other", "bridge_users")),
+             mt("users", alias="users_secured"), mt("users", alias="users_other")]
+    secured = case_users()
+    plain = {"name": "users"}
+    def table_of(entry):
+        return secured if entry.get("alias") == "users_secured" else (
+            plain if entry.get("alias") == "users_other" else None)
+    assert rls_join_cycles(model, {}, table_of=table_of) == []
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("rls", [
+    {"joins": 5, "table_paths": [], "rules": []},
+    {"joins": [], "table_paths": True, "rules": []},
+    {"joins": [], "table_paths": [], "rules": 5},
+    {"joins": [{"name": ["x"], "source": "users", "destination": "bridge"}],
+     "table_paths": [{"id": "b", "table": "bridge", "join_path": [{"join": [["x"]]}]}],
+     "rules": [{"expr": "[b::c] = 1"}]},
+    {"joins": [], "table_paths": [{"id": {"x": 1}, "table": "bridge"}],
+     "rules": [{"expr": "[b::c] = 1"}]},
+    {"joins": [], "table_paths": [{"id": "b", "table": "bridge", "join_path": 7}],
+     "rules": [{"expr": "[b::c] = 1"}]},
+    {"joins": [], "table_paths": [{"id": "b", "table": "bridge",
+                                   "join_path": [{"join": 3}]}],
+     "rules": [{"expr": "[b::c] = 1"}]},
+])
+def test_malformed_rls_shapes_do_not_crash(rls):
+    rls_join_cycles(CASE_MODEL, {"users": {"name": "users", "rls_rules": rls}})
+
+
+def test_a_join_given_as_a_string_is_one_join():
+    users = case_users()
+    users["rls_rules"]["table_paths"][0]["join_path"] = [{"join": "users_to_bridge"}]
+    assert [f["cycle"] for f in rls_join_cycles(CASE_MODEL, {"users": users})] == [
+        ["users", "bridge", "users"]]

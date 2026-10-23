@@ -58,3 +58,14 @@ def test_i22_cli_batch(tmp_path):
     alone = CliRunner().invoke(app, ["tml", "lint", "--file", str(tmp_path / "m.model.tml")])
     assert not any(f.startswith("I22:") for r in json.loads(alone.stdout)["results"]
                    for f in r["findings"])
+
+
+def test_i22_wording_does_not_call_rls_joins_model_joins():
+    """A loop made only of RLS joins: the message must not say the Model joins back."""
+    model = _model([{"name": "users", "joins": []}, {"name": "orgs", "joins": []}])
+    users = rls_table("users", [("u_o", "users", "orgs")], [("o_1", "orgs", [["u_o"]])],
+                      ["[o_1::c] = 1"])
+    orgs = rls_table("orgs", [("o_u", "orgs", "users")], [("u_1", "users", [["o_u"]])],
+                     ["[u_1::c] = 1"])
+    found = lint_rls_join_cycles(model, {"users": users, "orgs": orgs})
+    assert found and all("Model joins back" not in f for f in found)
