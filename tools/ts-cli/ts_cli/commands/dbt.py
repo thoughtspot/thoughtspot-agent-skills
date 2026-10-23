@@ -155,7 +155,8 @@ def create_connection(
     account_id: Optional[str] = typer.Option(None, "--account-id", help="dbt Cloud account ID (required for DBT_CLOUD)."),
     project_id: Optional[str] = typer.Option(None, "--project-id", help="dbt Cloud project ID (required for DBT_CLOUD)."),
     dbt_env_id: Optional[str] = typer.Option(None, "--dbt-env-id", help="dbt Cloud environment ID."),
-    project_name: Optional[str] = typer.Option(None, "--project-name", help="Name of the dbt project."),
+    project_name: Optional[str] = typer.Option(
+        None, "--project-name", help="Name of the dbt project. Required for --import-type ZIP_FILE."),
     access_token_env: Optional[str] = typer.Option(
         None, "--access-token-env",
         help="Env var holding the dbt Cloud API token (required for DBT_CLOUD). "
@@ -180,6 +181,10 @@ def create_connection(
         )
     if import_type == "ZIP_FILE" and not zip_path:
         raise SystemExit("--file is required when --import-type is ZIP_FILE.")
+    if import_type == "ZIP_FILE" and not project_name:
+        raise SystemExit(
+            "--project-name is required when --import-type is ZIP_FILE "
+            "(ThoughtSpot rejects the create with 'Project Name should not be empty').")
 
     form = _multipart_fields({
         "connection_name": connection_name,
@@ -265,6 +270,32 @@ def delete_connection(
     client.post(f"/api/rest/2.0/dbt/{connection_id}/delete", json={})
 
 
+def _require_archive_for_zip_file(client: ThoughtSpotClient, connection_id: str) -> None:
+    """Refuse a generate call with no `--file` when the connection is ZIP_FILE.
+
+    The API requires the artifact archive on every generate call for a ZIP_FILE
+    connection (intended), so every call must upload one. Without it ThoughtSpot answers 400 "Error with the
+    uploaded ZIP file.", which reads as a bad archive and sends people
+    regenerating artifacts that were fine. Best effort: if the connection
+    list cannot be read or does not include this connection, do nothing and
+    let the server decide.
+    """
+    try:
+        connections = client.post("/api/rest/2.0/dbt/search", json={}).json()
+    except Exception:
+        return
+    if not isinstance(connections, list):
+        return
+    for connection in connections:
+        if (isinstance(connection, dict)
+                and connection.get("dbt_connection_identifier") == connection_id
+                and str(connection.get("import_type", "")).upper() == "ZIP_FILE"):
+            raise SystemExit(
+                f"Connection {connection_id} is a ZIP_FILE connection: pass --file on every "
+                "generate call (the `target/` directory, or a .zip of manifest.json + catalog.json). "
+                "Without it ThoughtSpot returns a misleading 400 'Error with the uploaded ZIP file.'")
+
+
 def _generate(
     path: str,
     connection_id: str,
@@ -274,6 +305,9 @@ def _generate(
     extra_fields: Optional[Dict[str, Optional[str]]] = None,
 ) -> None:
     zip_path = _read_zip_file(file)
+    client = ThoughtSpotClient(resolve_profile(profile))
+    if not zip_path:
+        _require_archive_for_zip_file(client, connection_id)
     fields: Dict[str, Optional[str]] = {"dbt_connection_identifier": connection_id}
     if extra_fields:
         fields.update(extra_fields)
@@ -281,7 +315,6 @@ def _generate(
         ("true" if include_semantic_report else "false") if include_semantic_report is not None else None
     )
     form: Dict[str, Any] = _multipart_fields(fields)
-    client = ThoughtSpotClient(resolve_profile(profile))
     _attach_zip(form, zip_path)
     resp = client.post(path, files=form)
     print(json.dumps(resp.json()))

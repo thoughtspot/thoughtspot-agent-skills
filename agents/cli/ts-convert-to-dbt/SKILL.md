@@ -587,12 +587,13 @@ token handling (`.claude/rules/ts-cli.md`).
 Next steps:
   1. Copy/merge the generated files into your real dbt project
      (or run dbt directly against this scaffold if it's new).
-  2. Run `dbt run` (or `dbt compile`) + `dbt docs generate` — this
-     produces target/manifest.json + target/catalog.json.
-  3. Zip those two files together.
-  4. Use /ts-convert-from-dbt (Step 4, create/update) with
-     --import-type ZIP_FILE --file {the zip}, then Step 8
-     (generate-tml) or Step 10 (resync) to bring it into ThoughtSpot.
+  2. Produce target/manifest.json + target/catalog.json. dbt Core:
+     `dbt docs generate`. dbt Fusion: `dbt compile --write-catalog`
+     (there `dbt docs generate` leaves catalog.json stale).
+  3. Use /ts-convert-from-dbt (Step 4, create/update) with
+     --import-type ZIP_FILE --file {the target/ directory} — the CLI
+     zips the two files for you — then Step 8 (generate-tml) or
+     Step 10 (resync), passing the same --file on every call.
 ```
 
 **DBT_CLOUD** (if the job run in Step 8b succeeded):
@@ -641,4 +642,5 @@ tags) is still all ThoughtSpot's dbt integration needs.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-10-23 | ZIP_FILE hand-off: the artifact-generating command depends on the engine (`dbt docs generate` on Core, `dbt compile --write-catalog` on Fusion), and `--file` takes the `target/` directory — no manual zipping. |
 | 1.0.0 | 2026-09-10 | Initial release — ThoughtSpot Model TML → dbt project. Case A scaffolds a new project (staging models aliased to their ThoughtSpot Table names so the return leg preserves identity); Case B diffs and syncs into an existing project. `ts dbt-export build-model` assembles a unified Model TML back from a project's `schema.yml`. |

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 import zipfile
@@ -112,6 +113,51 @@ def write_private_file(dest: Path, write: Callable[[IO[bytes]], None]) -> Path:
     return dest
 
 
+def _dbt_major_version(manifest: Optional[Path]) -> Optional[int]:
+    """The major dbt version that wrote `manifest`, or None if it cannot be read.
+
+    `metadata` is the manifest's first key, so a regex over the first few KB
+    finds `dbt_version` without parsing a file that can run to hundreds of MB.
+    Best effort by design: any failure returns None and callers name both
+    engines' commands instead of guessing.
+    """
+    if manifest is None:
+        return None
+    try:
+        with open(manifest, "rb") as fh:
+            head = fh.read(65536).decode("utf-8", "replace")
+    except OSError:
+        return None
+    match = re.search(r'"dbt_version"\s*:\s*"(\d+)\.', head)
+    return int(match.group(1)) if match else None
+
+
+def _how_to_write_catalog(manifest: Optional[Path] = None) -> str:
+    """The command that writes `catalog.json` for the engine that wrote `manifest`.
+
+    Verified 2026-10-23, same Snowflake project layout on each engine:
+
+    | dbt                | `docs generate`            | `compile`           | `compile --write-catalog` |
+    |--------------------|----------------------------|---------------------|---------------------------|
+    | Core 1.12.5        | manifest + catalog         | manifest only       | n/a                       |
+    | Fusion 2.0.6       | manifest only (stale cat.) | manifest only       | manifest + catalog        |
+
+    So the right command depends on the engine, and on Fusion `docs generate`
+    is the one that silently leaves an old catalog behind. Fusion reports a 2.x
+    version; Core is 1.x.
+    """
+    major = _dbt_major_version(manifest)
+    if major is not None and major >= 2:
+        return ("This manifest was written by dbt Fusion: run `dbt compile --write-catalog` "
+                "to write catalog.json. Do not use `dbt docs generate` on Fusion — it "
+                "refreshes only manifest.json and leaves any old catalog.json in place.")
+    if major is not None:
+        return ("This manifest was written by dbt Core: run `dbt docs generate`, which "
+                "writes both files (`dbt compile` writes only manifest.json).")
+    return ("Run `dbt docs generate` (dbt Core) or `dbt compile --write-catalog` "
+            "(dbt Fusion — there `dbt docs generate` leaves catalog.json stale).")
+
+
 def _candidate_dirs(path: Path) -> list:
     """Where to look for the artifacts, given a directory the user named.
 
@@ -149,7 +195,7 @@ def find_artifacts(path: Path) -> tuple:
 
     raise SystemExit(
         f"No {MANIFEST} or {CATALOG} under {path} (looked in ./ and ./target/). "
-        "Run `dbt docs generate` in the dbt project first — it writes both.")
+        f"{_how_to_write_catalog()} Run it in the dbt project first.")
 
 
 def _require_both(found: dict, where: Path) -> tuple:
@@ -158,14 +204,15 @@ def _require_both(found: dict, where: Path) -> tuple:
     ThoughtSpot types the generated Table columns from `catalog.json`, so a
     manifest-only archive imports with no column types rather than failing —
     a silent degradation, which is why this refuses instead of proceeding.
-    `dbt docs generate` writes both; `dbt compile` writes only the manifest,
-    which is the usual reason one is absent.
+    Which command writes both depends on the engine — see
+    :func:`_how_to_write_catalog`. Running the wrong one is the usual reason
+    the catalog is absent.
     """
     missing = [n for n in (MANIFEST, CATALOG) if n not in found]
     if missing:
         raise SystemExit(
-            f"{', '.join(missing)} not found in {where}. `dbt compile` writes only "
-            f"{MANIFEST} — run `dbt docs generate` to produce {CATALOG} too. "
+            f"{', '.join(missing)} not found in {where}. "
+            f"{_how_to_write_catalog(found.get(MANIFEST))} "
             "(To upload an archive without it anyway, zip the files yourself and "
             "pass the .zip.)")
     return found[MANIFEST], found[CATALOG]
@@ -178,8 +225,11 @@ def pack_artifacts(manifest: Path, catalog: Path, dest: "Path | None" = None) ->
     `manifest.json` and `catalog.json` — the literal reading of ThoughtSpot's
     "a ZIP containing manifest.json and catalog.json", and what a user doing
     this by hand (`cd target && zip a.zip manifest.json catalog.json`) would
-    produce. Not verified against a live ZIP_FILE connection — see
-    ts-convert-from-dbt coverage-matrix L6.
+    produce. Verified against a live ZIP_FILE connection: passing `--file target` with
+    flat `manifest.json` + `catalog.json` is accepted by `generate-tml` and
+    `build-model` (dbt Fusion 2.0.6, manifest schema v12, 2026-10-22) and by
+    `generate-tml` from dbt Core 1.12.5 (2026-10-23) — see ts-convert-from-dbt
+    coverage-matrix L6.
 
     `dest` defaults to a per-source-directory path in the per-user
     :func:`private_cache_dir`, so the three uploads of one session (`create`,

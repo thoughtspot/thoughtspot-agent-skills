@@ -66,6 +66,52 @@ class TestFindArtifacts:
         msg = str(ei.value)
         assert "catalog.json" in msg and "dbt docs generate" in msg
 
+    def _manifest_only(self, tmp_path, dbt_version):
+        """A target/ holding a manifest stamped by the given dbt version."""
+        _, target = _project(tmp_path, catalog=False)
+        manifest = dict(_MANIFEST)
+        if dbt_version is not None:
+            manifest["metadata"] = {"dbt_version": dbt_version}
+        (target / "manifest.json").write_text(json.dumps(manifest))
+        return target
+
+    def test_core_manifest_names_docs_generate_only(self, tmp_path):
+        """dbt Core 1.12.5 (verified 2026-10-23): `dbt docs generate` writes both
+        artifacts; plain `dbt compile` writes only the manifest."""
+        target = self._manifest_only(tmp_path, "1.12.5")
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg
+        assert "--write-catalog" not in msg
+
+    def test_fusion_manifest_names_compile_write_catalog_and_warns_off_docs_generate(self, tmp_path):
+        """dbt Fusion 2.0.6 (verified 2026-10-23): `dbt compile --write-catalog`
+        writes catalog.json; `dbt docs generate` refreshes only the manifest and
+        leaves a stale catalog, so it must not be recommended there."""
+        target = self._manifest_only(tmp_path, "2.0.6")
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt compile --write-catalog" in msg
+        assert "dbt docs generate" in msg and "not" in msg.lower()  # named only as the one to avoid
+
+    @pytest.mark.parametrize("version", [None, "not-a-version", ""])
+    def test_unknown_engine_names_both_commands(self, tmp_path, version):
+        target = self._manifest_only(tmp_path, version)
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+
+    def test_no_artifacts_at_all_names_both_commands(self, tmp_path):
+        empty = tmp_path / "nothing"
+        empty.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(empty)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+
     def test_refusal_names_the_manual_escape_hatch(self, tmp_path):
         _, target = _project(tmp_path, catalog=False)
         with pytest.raises(SystemExit) as ei:

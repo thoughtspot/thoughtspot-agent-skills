@@ -216,6 +216,23 @@ class TestCreateConnection:
         assert "--file is required" in result.output
         assert calls == []
 
+    def test_zip_file_requires_project_name(self, monkeypatch, tmp_path):
+        """ThoughtSpot rejects a ZIP_FILE create with no project name
+        (400 / 10002 "Project Name should not be empty." — seen live 2026-10-23),
+        so the CLI says so before sending anything."""
+        calls = []
+        _patch(monkeypatch, calls)
+        zip_path = tmp_path / "artifacts.zip"
+        zip_path.write_bytes(b"PK\x03\x04")
+        result = runner.invoke(app, [
+            "dbt", "create",
+            "--connection-name", "my_conn", "--database-name", "MY_DB",
+            "--import-type", "ZIP_FILE", "--file", str(zip_path),
+        ])
+        assert result.exit_code != 0
+        assert "--project-name" in result.output
+        assert calls == []
+
     def test_zip_file_success_uploads_file_content(self, monkeypatch, tmp_path):
         calls = []
         _patch(monkeypatch, calls)
@@ -224,7 +241,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(zip_path),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(zip_path),
         ])
         assert result.exit_code == 0, result.output
         path, kwargs = calls[0]
@@ -250,7 +267,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(target),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(target),
         ])
         assert result.exit_code == 0, result.output
         _path, kwargs = calls[0]
@@ -273,7 +290,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(tmp_path / "proj"),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(tmp_path / "proj"),
         ])
         assert result.exit_code == 0, result.output
         assert calls
@@ -357,7 +374,7 @@ class TestGenerateTml:
             "dbt", "generate-tml", "--connection-id", "conn-1", "--model-tables", self._MODEL_TABLES,
         ])
         assert result.exit_code == 0, result.output
-        path, kwargs = calls[0]
+        path, kwargs = calls[-1]
         assert path == "/api/rest/2.0/dbt/generate-tml"
         form = kwargs["files"]
         assert form["dbt_connection_identifier"] == (None, "conn-1")
@@ -375,7 +392,7 @@ class TestGenerateTml:
             "--include-semantic-report",
         ])
         assert result.exit_code == 0, result.output
-        _, kwargs = calls[0]
+        _, kwargs = calls[-1]
         assert kwargs["files"]["include_semantic_report"] == (None, "true")
 
     def test_generate_tml_requires_model_tables(self, monkeypatch):
@@ -415,7 +432,7 @@ class TestGenerateTml:
             "--import-worksheets", "selected", "--worksheets", '["orders_worksheet"]',
         ])
         assert result.exit_code == 0, result.output
-        _, kwargs = calls[0]
+        _, kwargs = calls[-1]
         form = kwargs["files"]
         assert form["import_worksheets"] == (None, "SELECTED")
         assert form["worksheets"] == (None, '["orders_worksheet"]')
@@ -1541,3 +1558,92 @@ def test_rls_out_of_path_ignored_when_in_path_model_has_no_rules():
     }}
     for order in (list(manifest["nodes"].items()), list(reversed(manifest["nodes"].items()))):
         assert extract_model_rls_from_manifest({"nodes": dict(order)}, "models/staging", {"CUSTOMERS"}) == {}
+
+
+class TestGenerateRefusesZipFileWithoutArchive:
+    """A ZIP_FILE connection stores no archive: every generate call must carry
+    one via --file. Without it ThoughtSpot answers 400 "Error with the uploaded
+    ZIP file.", which reads as a bad archive and sends people debugging
+    artifacts that were fine. Refuse locally and say what is missing.
+    """
+    _MODEL_TABLES = '[{"model_name": "orders", "model_path": "models/orders", "tables": ["ORDERS"]}]'
+
+    @staticmethod
+    def _patch_routed(monkeypatch, calls, connections):
+        """Answer dbt/search with `connections` (or raise if it is an Exception)."""
+        class FakeClient:
+            def __init__(self, profile_name):
+                pass
+
+            def post(self, path, **kwargs):
+                calls.append((path, kwargs))
+                if path == "/api/rest/2.0/dbt/search":
+                    if isinstance(connections, Exception):
+                        raise connections
+                    return _FakeResp(connections)
+                return _FakeResp({"ok": True})
+
+        monkeypatch.setattr(dbt_mod, "ThoughtSpotClient", FakeClient)
+        monkeypatch.setattr(dbt_mod, "resolve_profile", lambda p: "test-profile")
+
+    @staticmethod
+    def _generate_calls(calls):
+        return [c for c in calls if "/dbt/generate" in c[0]]
+
+    def test_generate_tml_zip_file_without_file_is_refused(self, monkeypatch):
+        calls = []
+        self._patch_routed(monkeypatch, calls, [
+            {"dbt_connection_identifier": "conn-zip", "import_type": "ZIP_FILE"}])
+        result = runner.invoke(app, [
+            "dbt", "generate-tml", "--connection-id", "conn-zip",
+            "--model-tables", self._MODEL_TABLES,
+        ])
+        assert result.exit_code != 0
+        assert "--file" in result.output
+        assert "ZIP_FILE" in result.output
+        assert self._generate_calls(calls) == []  # nothing was sent
+
+    def test_generate_sync_tml_zip_file_without_file_is_refused(self, monkeypatch):
+        calls = []
+        self._patch_routed(monkeypatch, calls, [
+            {"dbt_connection_identifier": "conn-zip", "import_type": "ZIP_FILE"}])
+        result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-zip"])
+        assert result.exit_code != 0
+        assert "--file" in result.output
+        assert self._generate_calls(calls) == []
+
+    def test_dbt_cloud_connection_without_file_still_generates(self, monkeypatch):
+        calls = []
+        self._patch_routed(monkeypatch, calls, [
+            {"dbt_connection_identifier": "conn-cloud", "import_type": "DBT_CLOUD"},
+            {"dbt_connection_identifier": "conn-zip", "import_type": "ZIP_FILE"}])
+        result = runner.invoke(app, [
+            "dbt", "generate-tml", "--connection-id", "conn-cloud",
+            "--model-tables", self._MODEL_TABLES,
+        ])
+        assert result.exit_code == 0, result.output
+        assert len(self._generate_calls(calls)) == 1
+
+    def test_unreadable_connection_list_does_not_block_generate(self, monkeypatch):
+        """The lookup is a convenience. If dbt/search fails or does not list
+        the connection, the generate call goes ahead and the server decides."""
+        for connections in (RuntimeError("boom"), [], {"unexpected": "shape"}):
+            calls = []
+            self._patch_routed(monkeypatch, calls, connections)
+            result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-x"])
+            assert result.exit_code == 0, result.output
+            assert len(self._generate_calls(calls)) == 1
+
+    def test_with_file_no_lookup_is_made(self, monkeypatch, tmp_path):
+        """--file present means nothing to guard: no extra dbt/search round trip."""
+        calls = []
+        self._patch_routed(monkeypatch, calls, [
+            {"dbt_connection_identifier": "conn-zip", "import_type": "ZIP_FILE"}])
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "manifest.json").write_text("{}")
+        (target / "catalog.json").write_text("{}")
+        result = runner.invoke(app, [
+            "dbt", "generate-sync-tml", "--connection-id", "conn-zip", "--file", str(target)])
+        assert result.exit_code == 0, result.output
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/generate-sync-tml"]
