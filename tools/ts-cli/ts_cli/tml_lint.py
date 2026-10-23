@@ -18,7 +18,7 @@ rejected with clear messages, but only at import — after a converter has finis
 Rules mirror the invariants in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
-CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19/I20/I21
+CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19/I20/I21/I22
     The one authoritative enumeration of what this module checks, gated by
     tools/validate/check_lint_invariant_list.py against the findings the code
     actually emits. Do not restate this set anywhere else — name the concept
@@ -760,6 +760,40 @@ def lint_referencing_joins(model_tml: dict, join_names: dict[str, set]) -> list[
             f"I21: '{node_id(t)}' references join '{ref}', which its Table TML "
             f"('{t.get('name')}') does not declare{_declared_on(ref, model, join_names)}. "
             f"ThoughtSpot rejects this (error 14504, 'Relationships do not exist')."
+        )
+    return findings
+
+
+def lint_rls_join_cycles(model_tml: dict, table_bodies: dict, notes: list = None) -> list[str]:
+    """I22 — an RLS rule's join must not close a cycle with the Model's joins.
+
+    ThoughtSpot checks a Model's joins for cycles at import (I17), but applies an RLS
+    rule's joins only when a query runs. When the rule on a table walks back into the
+    Model's graph, query generation sees one table with two roots and fails with
+    "Guid Mismatch" (BACH 12325) — on a support case it broke Liveboard filtering for
+    every user under the rule. Graph mechanics: `tml_rls_graph`. Cross-file, as I21 is —
+    only Tables linted in the same batch (`table_bodies`, physical name -> `table:`
+    body) contribute RLS joins, so a Model linted alone is silent, not passed. A path
+    that cannot be walked is not a finding (it would fail lint for a gap in our reading
+    of the TML); pass a list as `notes` to collect it — `ts tml lint` prints those to
+    stderr.
+    """
+    from ts_cli.tml_rls_graph import rls_join_cycles
+
+    model = (model_tml or {}).get("model")
+    if not isinstance(model, dict):
+        return []
+    findings: list[str] = []
+    for hit in rls_join_cycles(model.get("model_tables") or [], table_bodies or {},
+                               notes=notes):
+        e, cycle = hit["rls_edge"], hit["cycle"]
+        back = " -> ".join(cycle[1:])
+        via = f" (Model joins: {', '.join(hit['model_joins'])})" if hit["model_joins"] else ""
+        findings.append(
+            f"I22: RLS on '{e.table}' joins out to '{cycle[1]}' ('{e.join}'), and joins "
+            f"lead back {back}{via} — a loop query generation cannot resolve (it "
+            f"fails with \"Guid Mismatch\"). Drop one of the two joins, or point the Model "
+            f"at a copy of '{e.table}' without this RLS rule."
         )
     return findings
 

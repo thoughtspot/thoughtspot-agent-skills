@@ -742,8 +742,8 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
     ``{index, type, name, findings}``.
     """
     from ts_cli.tml_lint import (
-        lint_cross_references, lint_model_table_aggregation, lint_referencing_joins, lint_tml,
-        table_join_names,
+        lint_cross_references, lint_model_table_aggregation, lint_referencing_joins,
+        lint_rls_join_cycles, lint_tml, table_join_names,
     )
 
     if i in parse_errors:
@@ -753,6 +753,10 @@ def _lint_one_doc(i: int, data, parse_errors: dict[int, str], tables: dict[str, 
         findings = findings + lint_cross_references(data, tables)
         findings = findings + lint_model_table_aggregation(data, table_aggs or {})
         findings = findings + lint_referencing_joins(data, table_join_names(table_bodies or {}))
+        rls_notes: list = []
+        findings = findings + lint_rls_join_cycles(data, table_bodies or {}, notes=rls_notes)
+        for note in rls_notes:  # a path I22 could not walk: diagnostics, never a finding
+            print(f"I22 note: {note}", file=sys.stderr)
     inner = data.get("model") or data.get("table") or {} if isinstance(data, dict) else {}
     return {
         "index": i,

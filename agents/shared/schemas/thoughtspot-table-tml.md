@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-30: corrected joins_with[].type — FULL_OUTER is invalid and OUTER was missing, live-verified on se-thoughtspot. Also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 275 Tables: rls_rules.table_paths[].column corrected to a list of bare names; joins_with[].cardinality de-required (0 of 165 exported joins carry it); four column properties added (format_pattern, is_hidden, currency_type, calendar); dataset_id documented; connection block noted as absent on Falcon tables; 2026-07-23: added rls_rules structure; prior: validated in 2026-07-11 external sweep) -->
+<!-- currency: thoughtspot — 2026-10 (2026-10-23: rls_rules.joins and table_paths[].join_path, from a support case's exported Table TML. 2026-07-30: corrected joins_with[].type — FULL_OUTER is invalid and OUTER was missing, live-verified on se-thoughtspot. Also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 275 Tables: rls_rules.table_paths[].column corrected to a list of bare names; joins_with[].cardinality de-required (0 of 165 exported joins carry it); four column properties added (format_pattern, is_hidden, currency_type, calendar); dataset_id documented; connection block noted as absent on Falcon tables; 2026-07-23: added rls_rules structure; prior: validated in 2026-07-11 external sweep) -->
 
 # ThoughtSpot Table TML — Construction Reference
 
@@ -59,6 +59,13 @@ table:
         table: TABLE_NAME
         column:                    # a LIST of BARE column names — not "[COL_NAME]"
           - COL_NAME
+      # A rule that reaches another table adds the join it uses (only when it does):
+      # - id: OTHER_1
+      #   table: OTHER_TABLE
+      #   join_path: [{join: [TABLE_TO_OTHER]}]   # names from rls_rules.joins below
+      #   column: [OTHER_COL]
+    # joins:                         # only when a path crosses tables
+    #   - {name: TABLE_TO_OTHER, source: TABLE_NAME, destination: OTHER_TABLE, type: INNER}
     rules:
       - name: RULE_NAME
         expr: "[T_1::COL_NAME] = ts_groups_int"  # bracket refs use table_paths aliases
@@ -83,7 +90,7 @@ table:
 | `table.connection.name` | Yes, for warehouse-backed tables | ThoughtSpot connection name (case-sensitive) — NOT a GUID. `name` is the **only** key ever seen in a connection block (313 of 313 in the 2026-07-30 census, across Tables and SQL Views) — never `fqn:`. **But the block is not universally present:** 2 of 275 census Tables have no `connection` block at all — `MetricsMonitoring` (`db: thoughtspot_internal_stats`) and `sav_dim_unit` (`db: falcon_default_schema`), both Falcon / in-memory tables. A reader that assumes a connection block exists will crash on those; a *generator* still always emits it. |
 | `table.columns` | Yes | At least one column required |
 | `table.joins_with` | No | Only include on tables that have FK relationships to other tables |
-| `table.rls_rules` | No | Row-level security rules. Contains `tables` (self-reference), `table_paths` (aliases for bracket refs), and `rules` (name + expr). Import all related Table TMLs together when `rls_rules` reference other tables. |
+| `table.rls_rules` | No | Row-level security rules. Contains `tables` (self-reference), `table_paths` (aliases for bracket refs), `joins` (only when a rule reaches another table — see I22) and `rules` (name + expr). Import all related Table TMLs together when `rls_rules` reference other tables. |
 | `table.dataset_id` | No | A 12-hex-character identifier (`28ede9b627ab`) observed at the Table root on uploaded/derived tables — 4 of 275 in the 2026-07-30 census (`cbre_fact_revenue`, `doordash_report_by_data_usage`, `silvia___test_1`, `gerdau_procurement`). **Instance-local: never carry it into a portable document** and never re-emit a value copied from another instance. Pass through only on a same-instance round trip. Undocumented by ThoughtSpot; recorded here because a converter that carries it unknowingly makes its output non-portable |
 
 ### `columns[]` fields
@@ -123,8 +130,10 @@ table:
 |---|---|---|
 | `rls_rules.tables[].name` | Yes | Self-reference to the owning table (and any other table the rules reach) |
 | `rls_rules.table_paths[].id` | Yes | Alias used in rule expressions — `[T_1::COL]` |
-| `rls_rules.table_paths[].table` | Yes | The table this path starts from |
+| `rls_rules.table_paths[].table` | Yes | The table whose column the path id (`[T_1::COL]`) refers to: the owning table for a single-table rule, or the far end of the path's `join_path` when the rule reaches another table (live sighting 2026-10-23: `table: BRIDGE` with a `join_path` from the owning table) |
 | `rls_rules.table_paths[].column` | Yes | **A list of bare column names** — `column: ["COUNTRY"]`. **Corrected 2026-07-30:** this reference previously documented it as a *string with the brackets inside the value* (`column: "[COL_NAME]"`). The single live sighting (`BANK_EMPLOYEES`, in a 275-Table census) is a list of bare names, so a generator following the old shape emitted the wrong YAML type. The brackets belong in the **rule `expr`**, not in this value. |
+| `rls_rules.joins[]` | When a path crosses tables | The joins the rule's paths may use: `{name, source, destination, type, is_one_to_one}`, with no cardinality. In the one live sighting (2026-10-23, a support case's export) `name` was a `joins_with[]` join declared on the owning table, `source` the owning table; whether a join declared on the far table appears here with `source`/`destination` reversed is unverified, so read direction from the path walk below, not from these labels. |
+| `rls_rules.table_paths[].join_path` | When `table` is not the owning table | Ordered segments `[{join: [<rls_rules.joins name>, ...]}]` from the owning table to `table`. Walk it outward from the owning table: that is the direction the rule adds to the query (see I22 in `ts-model-conversion-invariants.md` — such a join can close a cycle with the Model's joins). |
 | `rls_rules.rules[].name` | Yes | Rule display name |
 | `rls_rules.rules[].expr` | Yes | Bracket refs use the `table_paths` aliases. Live examples: `ts_groups = [BANK_EMPLOYEES_1::COUNTRY]`, `ts_groups != "katrina's group"` |
 

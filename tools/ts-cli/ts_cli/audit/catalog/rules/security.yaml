@@ -177,6 +177,33 @@
     fires: {fixture: sec_bypass_without_pii, severity: MEDIUM}
     silent: {fixture: sec_model_without_pii}
 
+- id: S11
+  title: RLS join closes a loop with the Model's joins
+  description: >-
+    The Model's join graph plus the joins an RLS rule on one of its Tables uses (a
+    join on a path some rule expression references, walked outward from the secured
+    table). ThoughtSpot checks only the Model's own joins at import, so a rule that
+    joins back into the Model's graph imports cleanly and then fails every query it
+    applies to with "Guid Mismatch" — query generation sees one table with two roots.
+    One finding per RLS join that closes such a loop. Second routes (diamonds) through
+    an RLS join are not reported: nothing shows them failing.
+  # A code rule (code:rls_join_cycles) because it is a graph search over the Model's
+  # joins and its Tables' RLS rules (ts_cli/tml_rls_graph.py, shared with lint I22).
+  categories: [S]
+  requires: [model_tml]
+  implementation: code:rls_join_cycles
+  scope: model
+  severity: HIGH
+  message: >-
+    RLS on '{table}' joins out to '{target}' ('{join}'), and joins lead back {back}
+    — a loop query generation cannot resolve (queries fail with "Guid Mismatch")
+  remediation: >-
+    Drop one of the two joins, or point the Model at a copy of the table without this
+    RLS rule (or move the rule to another table).
+  examples:
+    fires: {fixture: sec_rls_join_cycle, severity: HIGH}
+    silent: {fixture: sec_rls_same_direction}
+
 # Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
 # reused.
 - id: S6
