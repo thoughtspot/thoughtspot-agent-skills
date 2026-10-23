@@ -12,6 +12,9 @@ findings and actionable recommendations, but makes no changes.
 
 **Audit angles (user selects which to run):**
 
+<!-- BEGIN GENERATED: categories-table -->
+<!-- Generated from tools/ts-cli/ts_cli/audit/catalog/ by `python -m ts_cli.audit.generate`; do not edit by hand. -->
+
 | Code | Angle | What it finds |
 |---|---|---|
 | **A** | AI Readiness | Description/synonym coverage, AI context, Spotter readiness score |
@@ -19,6 +22,7 @@ findings and actionable recommendations, but makes no changes.
 | **H** | Human Readiness | Name quality, hidden columns, orphans, direct table connections, formula promotion candidates |
 | **P** | Performance | SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl |
 | **S** | Security | PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics |
+<!-- END GENERATED: categories-table -->
 
 **When to use this skill:**
 
@@ -92,13 +96,15 @@ Auto-executed: Steps 1, 4, 5, 6
 
 ### B. Available angles
 
-  A  AI Readiness ........ descriptions, synonyms, AI context, Spotter readiness score
-  D  Data Modeling ....... complexity, joins, duplicates, grain, SQL pass-through, zero-column tables
-  H  Human Readiness ..... names, hidden columns, orphans, formulas, direct connections
-  P  Performance ......... SQL Views, scalar formulas, progressive joins/filters, sprawl
-  S  Security ............ PII, indexing, RLS, RLS join loops, CLS, credentials
+<!-- BEGIN GENERATED: angles-overview -->
+  A  AI Readiness ...... Description/synonym coverage, AI context, Spotter readiness score
+  D  Data Modeling ..... Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables
+  H  Human Readiness ... Name quality, hidden columns, orphans, direct table connections, formula promotion candidates
+  P  Performance ....... SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl
+  S  Security .......... PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics
 
   X  All angles (A, D, H, P, S)
+<!-- END GENERATED: angles-overview -->
 
 Ready to start? [Y / N]
 ---
@@ -139,6 +145,7 @@ Three sub-decisions, asked sequentially.
 
 ### 2a. Angle selection
 
+<!-- BEGIN GENERATED: angles-select -->
 ```
 Which angles would you like to audit?
 
@@ -152,28 +159,38 @@ Which angles would you like to audit?
 
 Enter letters (e.g. "A,D,S" or "X"):
 ```
+<!-- END GENERATED: angles-select -->
 
 Store the selected angles for Step 5 branching.
 
 ### 2b. Assessment profile
 
+<!-- BEGIN GENERATED: profiles -->
+<!-- Generated from tools/ts-cli/ts_cli/audit/catalog/ by `python -m ts_cli.audit.generate`; do not edit by hand. -->
+
 ```
 Assessment profile — sets pass/fail thresholds:
 
-  1. Spotter-ready  — aggressive (descriptions >= 95%, synonyms >= 80%, AI context required)
-  2. General        — lighter (descriptions >= 50%, synonyms >= 25%, AI context recommended)
+  1. Spotter-ready
+  2. General (default)
 
 Enter 1 or 2:
 ```
 
-Store the choice and pass it to `ts audit run` as `--assessment spotter` (1) or
-`--assessment general` (2) in Step 5. It sets the AI-readiness checks' bar — A1, A2 and
-A6 pass marks (coverage HIGH below half the mark), and whether a missing AI instruction
-set or Model description (A3, A4) is HIGH or MEDIUM, and P8's column-count lines
-(General 500 / 1,500; Spotter-ready 250 / 500, provisional). A profile is a named override
-layer in the rule catalog (`tools/ts-cli/ts_cli/audit/catalog/profiles.yaml`, and a
-rule's `profiles:` block): it may change a rule's bands, severity, wording, remediation
-or on/off status, never what the rule checks. The rules that differ by profile show each
+Pass the choice to `ts audit run` as `--assessment spotter` (1) or `--assessment general` (2) in Step 5. What the profile changes:
+
+- **A1 — Description coverage below threshold:** Spotter-ready: HIGH < 47.5%, MEDIUM < 95% · General: HIGH < 25%, MEDIUM < 50%
+- **A2 — Synonym coverage below threshold:** Spotter-ready: HIGH < 40%, MEDIUM < 80% · General: HIGH < 12.5%, MEDIUM < 25%
+- **A3 — No AI instructions configured:** Spotter-ready: HIGH · General: MEDIUM
+- **A4 — Missing Spotter config:** Spotter-ready: HIGH · General: MEDIUM
+- **A6 — Measure AI context coverage below threshold:** Spotter-ready: HIGH < 40%, MEDIUM < 80% · General: LOW < 80%
+- **P8 — Column sprawl:** Spotter-ready: HIGH > 500, MEDIUM > 250 · General: HIGH > 1500, MEDIUM > 500
+<!-- END GENERATED: profiles -->
+
+A profile is a named override layer in the rule catalog
+(`tools/ts-cli/ts_cli/audit/catalog/profiles.yaml`, and a rule's `profiles:` block): it
+may change a rule's bands, severity, wording, remediation or on/off status, never what
+the rule checks. The rules that differ by profile show each
 profile's grading in [references/check-catalog.md](references/check-catalog.md).
 Omitted, it defaults to `general`, and the report header names the assessment used.
 
@@ -358,13 +375,17 @@ the audit fetches exactly the union for the selected rules (see Step 3). The rul
 thresholds, severities and wording, and the `--assessment` profile's overrides of them,
 are in its catalog entry.
 
+<!-- BEGIN GENERATED: rules-files -->
+<!-- Generated from tools/ts-cli/ts_cli/audit/catalog/ by `python -m ts_cli.audit.generate`; do not edit by hand. -->
+
 | Catalog file | Category | Rules |
 |---|---|---|
 | `rules/ai.yaml` | A — AI Readiness | A1–A6 |
 | `rules/data.yaml` | D — Data Modeling | D1–D12 |
 | `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H10 (H6 retired) |
-| `rules/perf.yaml` | P — Performance | P1–P9, P11, P13–P18 |
-| `rules/security.yaml` | S — Security | S1–S5, S8–S11 |
+| `rules/perf.yaml` | P — Performance | P1–P9, P11, P13–P18 (P10, P12 retired) |
+| `rules/security.yaml` | S — Security | S1–S5, S8–S11 (S6–S7 retired) |
+<!-- END GENERATED: rules-files -->
 
 See [references/check-catalog.md](references/check-catalog.md) for every rule — what it
 detects, its severity per profile, its finding text and remediation (generated from the
@@ -450,6 +471,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.2.1 | 2026-10-23 | **No hand-written rule facts left in this file.** The category table, the Step 0 and Step 2a category lists, the Step 2b profile prompt with what each profile changes, and the catalog-file table of rule ids are now generated from the rule catalog (`python -m ts_cli.audit.generate`) and checked by the catalog gate, so a rule change can no longer leave them stale. |
 | 3.2.0 | 2026-10-23 | **Model size lines from production data; S11 is CRITICAL.** The size lines flagged a quarter of production Models (2026-10 call-home data, 268k Models: 21% over the old 75-column HIGH line). P8 now owns column count: General MEDIUM above 500 (Search Data gets hard to use) and HIGH above 1,500 (queries slow down); Spotter-ready 250 / 500, provisional. Its "wider GROUP BY" rationale was wrong — a query groups only by the columns it selects — and is gone. D1 grades tables and joins at 30 / 50 (formulas unchanged at 30 / 50) and no longer reports columns (P8's) or join depth (P7's, same lines). S11 (an RLS join that closes a loop with the Model's joins) is CRITICAL: the Model is broken for every user under the rule, not merely at risk. On the SE demo snapshot D1 goes 204 → 6 findings and P8 15 → 0; nothing else changes. |
 | 3.1.0 | 2026-10-23 | **S11 — RLS join cycles.** A Model whose joins plus the joins its Tables' RLS rules use form a directed cycle imports cleanly, then fails every query the rule applies to with "Guid Mismatch". S11 (Security, HIGH) reports each RLS join that closes such a loop, with the joins that lead back (a path it cannot walk is a warning, not a finding); `ts tml lint` I22 catches the same shape before import. Second routes through an RLS join are not flagged (BL-410). |
 | 3.0.0 | 2026-10-23 | **Rules are data.** The Python check modules (`checks_*.py`) are gone: every check is a rule in a YAML catalog (`tools/ts-cli/ts_cli/audit/catalog/`) run by a small rule engine, and categories and assessment profiles are catalog data too. `check-catalog.md`, the report's labels and recommendations and the audit JSON's `check_meta` are generated from it, and a catalog gate checks every rule in pre-commit and CI. New [references/rule-authoring.md](references/rule-authoring.md) is the procedure for adding, changing or retiring a rule. **Findings are unchanged**: on every committed test input under both profiles, and on a local 351-Model snapshot, the catalog reports exactly what the old checks did (H6, a stub that never ran, is recorded as retired). **Deliberate behaviour changes:** (a) on one Model's AI-instructions lookup, any non-2xx other than 401 or 429 (403, 404, a 5xx after the client's retries, a final 1xx or 3xx, …) skips that Model with a warning instead of aborting the run (a non-JSON 2xx skipped it before and still does), while a final 401 (after re-authentication), a 429, or any `requests` exception raised by the request or its re-authentication aborts the run once; (b) `--angles ""` or `","` is a usage error (omit the flag for all), so is an unknown letter (`--angles A,X` silently ran only A before), and a repeated letter counts once; (c) `check_meta.thresholds` and the ERD's recommendation text are generated from the catalog, in words (the ERD's "Fix." line is the rule's remediation where it has one); (d) additive JSON: `categories` and `bands` on each finding, `summary.by_category`, `corpus.fetched_needs`, `instructions_read` per Model, and the report shows "Not collected" or "Could not be read" where AI instructions were not fetched or failed; (e) H8 and H9 are fast on large estates; (f) a `requests` exception on the AI-instructions lookup now aborts the run, and any other exception there propagates (both were skipped per Model before); (g) the report's per-finding metric bar reads the finding's bands and their direction, labelled "limit" or "target" in the measure's unit: a lower-is-better measure over its limit (P8's 90 columns against 75) now shows as over it, where it drew as a green "ok" bar against a default 80. Which data is fetched is now decided by the selected rules' `requires`/`uses` rather than by category letter — for every selection today, exactly what was fetched before. `ts audit run --snapshot-out` / `--snapshot-in` capture an audit's data and replay it offline (`--snapshot-out` refuses a directory inside a git work tree, or a non-empty one that is not an earlier snapshot). The pre-catalog ids P10, P12, S6 and S7 are recorded as retired, never reused. |
