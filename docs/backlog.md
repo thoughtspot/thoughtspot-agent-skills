@@ -185,7 +185,7 @@ are roughly ordered by value÷effort.
 | BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
 | BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
 | BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
-| BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: `checks_ai` returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
+| BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: the audit's coaching read (`@is_coached`, `audit/engine/fields.py`; `checks_ai` before the rule-catalog cut-over) returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
 | ~~BL-289~~ | ~~CSR is retrievable (`ts security column-rules export`) but **not walked** — `ts metadata report` declares `csr_hits` at `report/__init__.py:203`, passes it at `:307`, and never appends to it, so the dependency walk reports CSR as "Not Checked" by construction~~ | DONE (2026-10-02, PR #506) — the report fetches CSR on the source's owning table, resolved from a column GUID's header `owner`; live-verified detecting a rule on embed-1 staging |
 | BL-290 | four `open-item #N` citations in `tools/ts-cli/` docstrings point at ts-dependency-manager items deleted in 2026-06 (`dependency/mutate.py:448` #12, `report/tml_probes.py:14` #7, `:44` #6, `:75` #10 — the last self-annotates "resolved 2026-05-28"); `check_open_item_citations` scans skill dirs only, so nothing sees them | next validator pass |
 | BL-291 | `ts-object-model-coach`'s Step 8e gate defers the keyword-bearing reference-question tiers as unverified, but the verification happened (2026-04-27) and `references/question-taxonomy.md` marks `t1.top_n`, `t2.this_vs_last` and `t3.year_filter` ✅ Importable — the gate and a reference file in the same directory disagree about what the generator should emit | next model-coach pass |
@@ -210,7 +210,7 @@ are roughly ordered by value÷effort.
 | ~~BL-303~~ | ~~`check_p5`'s date-constraint suppression is dead on real TML — `constraints` exports as a mapping, so iterating yields the key string~~ | DONE (2026-09-23) |
 | ~~BL-304~~ | ~~the data/perf check split was made by copying, not extracting: `d4`≡`p4`, `s9`≡`p14` verbatim, `s8` ⊇ `p15`, `_join_depth`≡`p7`, `_table_role` twice, `d1`'s column rule ≡ `p8`~~ | DONE (2026-09-22) |
 | ~~BL-305~~ | ~~alias blindness in `d6`/`d10`/`d11`/`s2`, and join findings reported with an empty `object_name`~~ | DONE (2026-09-23) |
-| BL-283 | `check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong | next validator pass |
+| ~~BL-283~~ | ~~`check-catalog.md` and the audit `check_id`s can drift with nothing to notice — 51 documented vs 50 emitted today, and the deferred-id table means a naive comparison is wrong~~ | DONE (2026-10-23 — the rules are a catalog the doc is generated from, `generate --check` in the catalog gate; ts-cli v0.182.0, ts-audit 3.0.0) |
 | ~~BL-316~~ | ~~from-Databricks translator gaps found converting a 136-measure budget/forecast MV — 88 needed hand authoring; two ThoughtSpot window limits to document~~ | DONE (2026-09-28) |
 | BL-317 | `IN`/`NOT IN` and share-of-total have 2–3 ThoughtSpot spellings across converters; the DBX to-direction `in(…)` row is one the catalog says fails import | next converter-parity pass |
 | BL-318 | Re-running a converter (or `ts-link-*`) discards ThoughtSpot-side edits — detect existing objects, diff TS-side changes, prompt keep/discard | next converter pass |
@@ -258,7 +258,15 @@ are roughly ordered by value÷effort.
 | ~~BL-397~~ | ~~Two join shapes import rejects that `ts tml lint` does not check: `MANY_TO_MANY` (14528, and the Power BI converter emits it) and a referencing join under its destination (14504)~~ | DONE (2026-10-22 — ts-cli v0.180.0) |
 | ~~BL-398~~ | ~~Sisense picks each join's direction by a tie-broken sort over a `set`: the emitted join graph varies by hash seed, so I17 passes or fails between runs~~ | DONE (2026-10-21 — ts-cli v0.179.0) |
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
+| BL-400 | Customer-name check: no CI backstop now that the private list stays local, so binary/UTF-16 blobs and accented spellings of a listed name go unchecked | 2026-12-31 |
 | BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
+| BL-402 | pre-commit's staged-file gates: `echo \| grep -q` under pipefail skips on a large staged set, quoted paths and a rename's old path never match, quest's JS/CSS runs no quest tests, ossie-roundtrip never runs | 2026-12-31 |
+| BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
+| BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
+| BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
+| BL-407 | ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own | 2026-12-15 |
+| BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -317,6 +325,7 @@ are roughly ordered by value÷effort.
 | BL-313 | MERGE mode skips SQL View disambiguation, so merging into a model that GENERATE built with this CLI emits the bare name where the target expects the qualified one | next Tableau converter pass |
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
+| BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -1323,8 +1332,10 @@ On `nebula-ts-semview` (DBX Org), Model `3fee09f8-35a8-49cd-8a84-777b83d694a6`:
 | `POST ai/instructions/set` `{data_source_identifier, nl_instructions_info:[{instructions:[text], scope:"GLOBAL"}]}` | `{"success":true}` HTTP 200; `get` returns the text |
 | TML export after a successful API `set` | `model_instructions` **absent** — TML is neither a write nor a read path on this build |
 
-Consequences: `tml_probes.py:129` and `audit/checks_ai.py` read a TML field that does not
-carry the value here — only `audit/context.py:231` (API `get`) sees it. Whether `set`
+Consequences: `tml_probes.py:129` and the audit's coaching read (`@is_coached` in
+`audit/engine/fields.py`; `audit/checks_ai.py` until the rule-catalog cut-over) read a TML
+field that does not carry the value here — only the API `get` (`audit/context.py`
+`_fetch_ai_instructions`, which `@is_coached` also reads) sees it. Whether `set`
 replaces or appends is **unverified** — assume replace, so any writer must `get` and merge first.
 
 ### Scope widened: converters and `ts-link-*` also need the write
@@ -1896,7 +1907,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 ## BL-059 — ts-audit: set (cohort) usage analysis checks `Tier 3`
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
-**Affects:** `tools/ts-cli/ts_cli/audit/checks_data.py` (new checks), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
+**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
 **Status:** Open — research complete, implementation deferred
 **Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
 
@@ -3418,12 +3429,13 @@ column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" tr
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.2.
-**Affects:** `tools/smoke-tests/smoke_ts_audit.py`; `tools/ts-cli/ts_cli/audit/checks_security.py` (`_PII_PATTERNS`).
+**Affects:** `tools/smoke-tests/smoke_ts_audit.py`; `tools/ts-cli/ts_cli/audit/engine/fields.py` (`PII_PATTERNS` — the single source since the rule-catalog cut-over removed `checks_security.py` and its `_PII_PATTERNS` copy).
 **Status:** OPEN.
 
 The smoke test predates the ts_cli audit engine: it never invokes `ts audit
 run`/`report`, and its Step 8 duplicates a local `PII_PATTERNS` list ("mirrors the
-skill logic") that can silently diverge from `_PII_PATTERNS` in checks_security.py.
+skill logic") that can silently diverge from the audit's own list (now `PII_PATTERNS` in
+`ts_cli/audit/engine/fields.py`).
 Point the smoke test at `ts audit run` live; import or delete the duplicated list.
 Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 
@@ -11640,7 +11652,8 @@ collision candidate; investigating it found the collision half already covered a
 different, live gap underneath.
 
 **Affects:** `agents/cli/ts-audit/references/check-catalog.md`,
-`tools/ts-cli/ts_cli/audit/checks_*.py`.
+`tools/ts-cli/ts_cli/audit/catalog/rules/*.yaml` and `tools/ts-cli/ts_cli/audit/generate.py`
+(the `checks_*.py` functions this was filed against were replaced by the rule catalog).
 
 **The collision half is already closed, and this is not it.** Two branches each adding
 `def check_a6(...)` is caught by `check_python_redefinitions.py` (shipped 2026-09-22):
@@ -11654,8 +11667,8 @@ is invisible to the skill that reads the catalog.
 
 **Why a naive comparison is wrong.** The one current discrepancy, `H6`, is *correct*: it sits
 in the catalog's "Deferred / Not assigned" table (`| H6 | Duplicate sets — deferred (requires
-deep set comparison) |`) and has a stub `def check_h6` at `checks_human.py:171` that emits
-nothing. Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
+deep set comparison) |`) and had a stub `def check_h6` at `checks_human.py:171` (main@982c2010) that emitted
+nothing (now a retired catalog rule in `rules/human.yaml`). Sibling rows there hold comma-separated ids (`P10, P12`; `S6, S7`) which a
 single-id regex silently skips, so the exemption is accidental rather than expressed. Any
 rule must read the main catalog table and the deferred table as different things.
 
@@ -11668,6 +11681,17 @@ sets, and exempt the deferred table explicitly rather than by regex accident. No
 so it runs on every commit.
 
 **Target:** next validator pass.
+
+**Resolved 2026-10-23 (ts-cli v0.182.0, ts-audit 3.0.0; the audit rule catalog change,
+"generate check-catalog.md and the report meta from the rule catalog"):** resolved by construction
+rather than by the comparison proposed above. The checks are now rules in one catalog
+(`ts_cli/audit/catalog/rules/*.yaml`); a finding's `check_id` can only be its rule's id
+(`code_rules.check_findings` rejects any other), and `check-catalog.md`'s rule tables are
+generated from that catalog by `python -m ts_cli.audit.generate`. `--check`, run by the
+catalog gate (`tools/validate/check_audit_catalog.py`) in pre-commit and CI, fails when the
+doc differs from the catalog. H6 is expressed explicitly as a retired rule, listed under
+"Retired rules", not exempted by accident; deleting or reusing an id fails the gate's
+`--base origin/main` history check.
 
 
 ---
@@ -14394,6 +14418,45 @@ the check catalog rows from the table.
 
 **Resolved 2026-10-22:** wired, not removed. `ts audit run --assessment spotter|general` (default general) carries the choice on `AuditContext`; A1, A2, A3, A4 and A6 read their bar from one table in `ts_cli/audit/assessment.py` — the skill's promised pass marks, HIGH below half the mark (the one rule added; user-approved), A6 graded for Spotter-ready and LOW for General. Both SKILL run commands pass it and the report header shows it. Tests per profile per check at the boundaries.
 
+## BL-400 — The private-name check has no backstop for blobs and spellings `Tier 2`
+
+**Filed:** 2026-10-22. **Source:** refute review of `scripts/check-pr.sh`.
+
+**Why now.** BL-385 and BL-387 lean on CI's `--all` tree scan as the backstop for what
+`--range` misses. That holds for LINKS. It does not hold for customer NAMES: the private
+list deliberately never goes into CI (see the checker's docstring), so the only name check
+on a PR is the maintainer's `check-pr.sh`, which reads diffs and PR text, not trees.
+
+**Gaps, each reproduced in the review:**
+1. **Binary and UTF-16 blobs.** Git diffs them as "Binary files differ", so a listed name
+   in a UTF-16LE CSV (Windows PowerShell 5.1's `>` default) is never read. `check-pr.sh`
+   lists such files and exits 3 for a manual look; that is a stopgap.
+2. **Accents.** `_norm` does not fold them: list "Mueller Quux" misses text "Müller Quux",
+   list "Quuxlé Foods" misses "Quuxle Foods".
+3. **Names split across lines, by an invisible separator, or in decomposed Unicode,
+   inside file content.** `--range` matches per added line after `splitlines()` (which also
+   breaks on U+2028, `\f`, `\v` and others) with no normalisation, so a hard-wrapped
+   "Zorblax\nIndustries" or an NFD "Société" passes it. `check-pr.sh` closes this for PRs by
+   re-scanning added lines itself (raw, NFC and NFKC forms, joined; per commit and the PR's
+   net diff); the commit hooks do not.
+4. **Non-Latin names cannot be listed.** `_norm` keeps ASCII letters and digits only, so a
+   Cyrillic, Greek or CJK name normalises to nothing. `check-pr.sh` refuses such a list
+   rather than ignore entries silently.
+5. **No plain-text mode.** `check-pr.sh` carries its own small scanner for PR text, because
+   `--message-file` applies commit-message scissors handling that lets one line hide the
+   rest. A `--text-file` mode (whole text, no truncation, lines also joined) would let it
+   drop that copy.
+
+**Do.** (1) A checker mode that, for every path changed in a range, reads the blob at each
+commit with `git cat-file` (no filters, no textconv) and decodes it through the existing
+UTF-16-aware decoder; have `check-pr.sh` call it and drop the exit-3 list. (2) NFKD-normalise
+and strip combining marks in `_norm` on both sides, plus ß→ss, æ→ae, ø→o. (3) Match
+names across a hunk's joined added lines. (4) Keep non-ASCII letters in `_norm` (with
+casefold). (5) `--text-file`.
+Tests for each, with synthetic names only.
+
+**Target:** 2026-12-31.
+
 ## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
 
 **Filed:** 2026-10-22. **Source:** the 2026-09-14 review of PR #505, closed unmerged on
@@ -14436,3 +14499,213 @@ resubmission should start from current `main` and answer each item below.
    two-thirds unrelated backlog, session and validator changes.
 
 **Target:** on resubmission. Close as won't-do if nobody picks it up by 2027-03-31.
+
+## BL-402 — pre-commit's staged-file gates have four silent gaps `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the refute reviews of #660 (see BL-403).
+
+**Gaps, each measured in the review:**
+1. **SIGPIPE skip.** Every other gate tests `echo "$STAGED" | grep -q …` under
+   `set -euo pipefail`. When STAGED outgrows the pipe buffer, `grep -q` exits on its first
+   match, `echo` dies of SIGPIPE, and the pipeline's status fails the `if`: the gate is skipped,
+   silently. 1,000 staged paths skipped 1 run in 5; 1,400 paths, 5 in 5.
+2. **Quoted paths, and renames.** Git quotes a path with non-ASCII or a tab, so `\.py$` never
+   matches it; and STAGED shows a rename only by its new path, so a gate keyed to the old one
+   stays silent.
+3. **Non-Python sources.** A change to `tools/quest/explore/*.js`, `core/*.js` or `quest.css`
+   runs no quest tests (only the build check), nor does any non-Python change run erd's.
+4. **ossie-roundtrip** has tests that CI runs and pre-commit never does.
+
+**Do.** (1) Replace every `echo "$STAGED" | grep -q` with a here-string, as the unit-test block
+does. (2) Build STAGED with `-z` (or `core.quotePath=false`) and read it NUL-separated.
+(3) Let the quest suite's trigger include `tools/quest/` JS, CSS and HTML. (4) Give
+ossie-roundtrip a trigger, or record why it is CI-only.
+
+**Target:** 2026-12-31.
+
+## BL-403 — pre-commit's unit tests: select suites from a derived map, not a hand-written one `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** #660, which tried a hand-written suite-selection map and
+dropped it after three refute reviews each found a new class of miss.
+
+**The problem.** Any staged `.py` runs all seven suites (ts-cli, validate, formula-fidelity,
+agentql-retest, quest, erd, databricks): about 150 s against the hook's 15 s budget, on every
+commit that touches Python. CI runs every suite on every PR regardless, so the cost is local.
+
+**What a selection map has to cover (each found by a review, with a reproduced miss):** what a
+suite's tests import by path literal (ts-cli reads agents/databricks; validate reads
+tools/smoke-tests); what the code under test reads (ts-cli reads agents/shared/erd through
+ts_cli/audit); a renamed file's old path; and non-Python reads: 118 tracked files across ts-cli
+(function maps, the ts-audit catalog, calendar-builder SQL, tools/fixtures, its own fixtures),
+quest (README.md, the hook, pages.yml, its own JS/YAML/TMJ), erd (its examples, which must match
+a fresh render) and formula-fidelity (cases, runs). validate reads the whole repo.
+
+**Do.** Derive the map rather than write it: run each suite under an audit hook (a sitecustomize
+that records every tracked file opened, as the reviews did), commit the result as data, and
+select a suite when any staged path (by both names of a rename) is one it read, or Python
+outside every traced area is staged. Regenerate the data in CI and fail when it drifts. Keep
+"never weaker than main" as the test: replay the last few hundred commits through both hooks.
+
+**Target:** 2027-01-31.
+
+## BL-404 — `check_open_items` has no in-tree uniqueness rule `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the third refute review of #660.
+
+Two branches that each add a different `## #4` to the same open-items file both pass once the
+second updates from main: the novelty rule (`_novelty`) can't fire after an update, and unlike
+check_backlog_integrity this checker has no rule that an item number appears once in a tree.
+
+**Do.** Fail a file with the same item number twice.
+
+**Target:** 2026-12-31.
+
+## BL-405 — one failed metadata or dependents batch aborts `ts audit run` `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the rule-catalog work (ts-audit 3.0.0), review finding
+PE-1. Pre-existing: the calls date from #145 and #167; the catalog work did not change them.
+
+**What.** `build_context` (`tools/ts-cli/ts_cli/audit/context.py`) makes two always-on
+fetches through the client's default `raise_for_status=True`: the `metadata/search` header
+lookup (batches of 50) and the dependents search (batches of 15). A 4xx, or a 5xx that
+outlasts the client's 502/503/504 retries, on any one batch becomes `SystemExit(1)`, and
+the whole audit, which may be minutes into a large estate, ends with nothing written. The
+other fetches in the same function already degrade per object: a failed Model or Answer
+export batch is skipped with a warning, and since 3.0.0 a 403/404/5xx on one Model's
+AI-instructions lookup skips that Model. A final 401 is a bad credential and should still
+abort.
+
+**Do.** Pass `raise_for_status=False` on both searches. Abort on a final 401, as the
+AI-instructions fetch does. On any other failure, skip the batch, record a warning naming
+the GUIDs it covered, and make the report say which objects' metadata or dependents were
+not read. Then decide per rule what a missing header or dependents list means. H4 must
+not read "no dependents" as orphan; the `requires`/`instructions_read` pattern is the
+model. Test it the way `test_audit_ai_lookup_failures.py` does, through the real
+`ThoughtSpotClient.request` over a fake transport.
+
+**Target:** 2026-12-15.
+
+## BL-406 — ts-audit behaviour fixes deferred by the rule-catalog reproduction `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the rule-catalog design
+(`docs/superpowers/specs/2026-10-22-audit-rule-catalog-design.md`, "Migration: reproduce
+first, fix after", step 4) and its build reviews.
+
+**What.** ts-audit 3.0.0 moved every check into the rule catalog under one constraint:
+reproduce the old findings exactly, defects included. The pinned legacy findings
+(`tools/ts-cli/tests/audit_rule_fixtures/legacy_findings.json.gz`) now hold the rules to
+those defects. Each fix below is a deliberate rule edit with before/after findings and a
+re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rule-authoring.md`
+"Change a rule" describes:
+
+1. **The 16 catalog-vs-code contradictions:** D1, D2, D5, D6, D7, D9, D11, H1, H2, H10, S1,
+   S2, S3, S5, the A4 title, and A5 not being profile-aware. For each one, the user decides
+   which side is right: the documented behaviour or the coded one. The "documented" side
+   was the hand-written check catalog this work replaced with a generated one; read it at
+   `git show 982c2010:agents/cli/ts-audit/references/check-catalog.md` (the last commit
+   before the catalog work) and compare with the rule's current description.
+2. **H10 never emits MEDIUM.** Its documentation says "MEDIUM if also orphan", but the
+   code reports LOW only and never reads H4's result. H1 and H2 are documented "per bad
+   name" / "per violation" but report once per Model.
+3. **Grading still in code, so not profile-overridable:** D1's grading table
+   (`D1_MEASURES`), D2's two severities, and H2's and H10's limits and wording, all in
+   `engine/code_rules*.py`. The spec's intent is that thresholds are data.
+4. **Alias vs name.** D10, D11, P5 (`fact_tables`) and H3 look a model table up by its
+   `name` where its columns carry its alias, so an aliased table reads as zero-column,
+   unknown or unjoined. H3 also tests a formula-backed column by display name where TML
+   references it by id.
+5. **D11 wording and reach.** Every INFO finding says "ONE_TO_MANY", a MANY_TO_MANY join
+   included, and cardinality is read only from inline joins, so referencing joins are
+   ignored.
+6. **S3** claims to check column-level security, but column-security data is never
+   loaded.
+7. **A5 crashes on a column whose `name` is null**: `c.get("name", "")` returns `None`
+   for a present-but-null key, and the name-quality regex raises `TypeError`, ending the
+   run.
+8. **P2** decides "scalar" from whether the column carries `aggregation:` rather than from
+   the formula's expression (strict xfail in `test_checks_perf_trip.py`).
+9. **Housekeeping:** unused constants left from the check modules (find them with
+   `vulture tools/ts-cli/ts_cli/audit --min-confidence 80`); the stale titles in
+   `ts_cli/audit/test_fixtures.py`'s
+   `CHECK_CATALOG`, and the name anti-pattern regex kept twice (H1's `regex:` in
+   `rules/human.yaml` and A5's `_NAME_ANTI` in `engine/code_rules.py`). The spec's
+   "`rules` shadowing in `checks_perf.py:241` (main@982c2010)" item is dropped: that module was deleted.
+10. **Malformed TML under a `parent.` condition.** The engine's path walker maps over a
+    list, so a `parent.` condition on a malformed `spotter_config` or `properties` (a list
+    where a mapping belongs) is evaluated, and can fire, where the legacy check aborted
+    the whole run. Malformed input only, and pinned (`LEGACY_RAISES` / `ENGINE_RAISES` in
+    `test_audit_pinned_findings.py`), but the semantics were inherited, not chosen:
+    decide whether such a value reads as absent, and pin that.
+
+**Do.** One PR per item, or per closely related group. Each needs the user's ruling where
+the item is a contradiction, a test that fails first, the re-pin output pasted into the
+PR, and a ts-audit changelog row saying which findings change.
+
+**Target:** 2027-01-31.
+
+## BL-407 — ts-audit Step 4 exports TML that nothing reads `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 review (minor 7).
+
+**What.** `agents/cli/ts-audit/SKILL.md` Step 4 has the agent export every enumerated
+object's TML (and each Model's associated Tables) 4-way parallel into
+`~/.cache/ts-audit/tml-corpus/`, a 1–5 minute step on a large estate. `ts audit run`
+(Step 5) exports the TML it audits itself and never reads that cache, so the step costs
+time and API calls for nothing. Pre-existing; 3.0.0 only made the skill say so.
+
+**Do.** Either drop Step 4 (keep the inventory confirmation from Step 3), or give the
+cache a reader: `ts audit run --snapshot-out` already captures exactly what an audit
+reads, so the skill could capture once and replay (`--snapshot-in`) for re-runs and
+follow-ups instead. Decide with the user; update the skill's step numbering and
+changelog.
+
+**Target:** 2026-12-15.
+
+## BL-408 — validate audit override layers before admin overrides ship `Tier 2`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 final review (deferred item 3).
+
+**What.** The rule engine folds override layers onto a catalog rule after its profile
+(`engine/bands.py` `effective(rule, layers)`; `run_rules(..., layers=...)`), which is how
+the design's option 2 — an admin's per-estate overrides — would plug in. The catalog gate
+validates the catalog and its two profiles, but nothing validates an extra layer: a layer
+naming an unknown rule id is silently dropped, a `status` typo, an unknown severity or
+misordered bands are applied as given, and a layer reviving a retired rule is dropped
+without a word. No production caller passes layers today, so nothing is wrong yet; the
+first one that does would inherit all of it.
+
+**Do.** Before any command or file format accepts override layers, run each layer
+through the same checks the gate applies to a profile block (`catalog_validate`'s
+override checks: overridable keys only, known severities, ordered bands, `by_severity`
+coverage) plus: every rule id exists, and a revival of a retired rule is an error. Fail
+loudly, naming the layer and key. Unit-test each refusal.
+
+**Target:** before admin overrides ship; review by 2027-03-31.
+
+## BL-409 — does `ai/instructions/get` answer 401 or 403 for a Model the caller may not read? `Tier 3`
+
+**Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 final review (deferred item 12).
+Filed here rather than as a ts-audit open item: any edit to
+`agents/cli/ts-audit/references/open-items.md` puts its ten pre-existing UNVERIFIED
+items in the PR-scoped open-items gate's hard-fail scope.
+
+**What.** Since ts-audit 3.0.0 the AI-instructions lookup treats a final **401** as about
+the run (the credential is bad: abort once) and a **403/404** as about one Model (skip
+it, "Could not be read"). That split assumes the server answers a valid token that lacks
+permission on ONE Model with 403 (or 404), never 401. Unverified: if it answers 401
+there, one unreadable Model aborts the whole audit. Not a regression — before 3.0.0 any
+4xx on this call aborted the run.
+
+**Do**, in this order (`.claude/rules/api-research.md`):
+1. SpotterCode MCP: `get-rest-api-reference` for the AI-instructions get operation
+   (`query: "ai instructions get"` finds its operation id) — which status codes the spec
+   documents for a missing object privilege.
+2. Live, read-only: as a user with Spotter coaching privileges but no access to one
+   Model, call `POST /api/rest/2.0/ai/instructions/get` for that Model's guid; record the
+   status and body.
+3. If it is 401: tell a per-object refusal from a bad credential (for example by the
+   body's error code) in `context._fetch_ai_instructions`, skip the Model instead of
+   aborting, and add the case to `test_audit_ai_lookup_failures.py`.
+
+**Target:** 2027-01-31.
+

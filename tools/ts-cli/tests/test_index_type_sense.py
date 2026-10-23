@@ -15,86 +15,62 @@ model made S2 a pure false-positive generator.
 """
 import pytest
 
-from ts_cli.audit.checks_perf import check_p9, check_p11
-from ts_cli.audit.checks_security import check_s2
-from ts_cli.audit.context import make_context
+import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 
 #: Every value the schema documents, and whether it means "this column is indexed".
 INDEXED = ["DEFAULT", "PREFIX_ONLY", "PREFIX_AND_SUBSTRING", "PREFIX_AND_WORD_SUBSTRING"]
 NOT_INDEXED = ["DONT_INDEX"]
 
-
-def _col(name, ctype, index_type, column_id=None):
-    props = {"column_type": ctype}
-    if index_type is not None:
-        props["index_type"] = index_type
-    return {"name": name, "column_id": column_id or f"T::{name}", "properties": props}
-
-
-def _model(cols, **model):
-    base = {"name": "M", "columns": cols}
-    base.update(model)
-    return {"guid": "m-1", "model": base}
+# Builders live in audit_rule_fixtures; the P9/P11 contexts are named builders there
+# and the S2 ones are its `build_index_pii_ctx` family (S_INPUTS' `index_pii_*`), whose
+# legacy answers test_audit_pinned_findings.py pins.
 
 
 # ── S2: PII indexed without table RLS ──────────────────────────────────────
 
 def test_s2_flags_pii_indexed_by_default():
     """The commonest shape in exported TML, and the one S2 exists for."""
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", None)])])
-    assert len(check_s2(ctx)) == 1
+    assert len(run_rule(fx.build_index_pii_ctx(None), "S2")) == 1
 
 
 @pytest.mark.parametrize("idx", INDEXED)
 def test_s2_flags_pii_with_an_explicit_index_strategy(idx):
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", idx)])])
-    assert len(check_s2(ctx)) == 1
+    assert len(run_rule(fx.build_index_pii_ctx(idx), "S2")) == 1
 
 
 @pytest.mark.parametrize("idx", NOT_INDEXED)
 def test_s2_does_not_flag_pii_with_indexing_suppressed(idx):
     """DONT_INDEX is the mitigation, not the risk — and the only value we emit."""
-    ctx = make_context(models=[_model([_col("customer_email", "ATTRIBUTE", idx)])])
-    assert check_s2(ctx) == []
+    assert run_rule(fx.build_index_pii_ctx(idx), "S2") == []
 
 
 # ── P9: indexed ATTRIBUTE id columns ───────────────────────────────────────
 
 def test_p9_flags_a_default_indexed_id_column():
-    ctx = make_context(models=[_model([_col("CUSTOMER_ID", "ATTRIBUTE", None)])])
-    assert len(check_p9(ctx)) == 1
+    assert len(run_rule(fx.index_id_default_indexed(), "P9")) == 1
 
 
 def test_p9_does_not_flag_an_id_column_with_indexing_suppressed():
-    ctx = make_context(models=[_model([_col("CUSTOMER_ID", "ATTRIBUTE", "DONT_INDEX")])])
-    assert check_p9(ctx) == []
+    assert run_rule(fx.index_id_not_indexed(), "P9") == []
 
 
 def test_p9_ignores_a_measure():
-    ctx = make_context(models=[_model([_col("CUSTOMER_ID", "MEASURE", None)])])
-    assert check_p9(ctx) == []
+    assert run_rule(fx.index_id_measure(), "P9") == []
 
 
 # ── P11: indexed-column count on a Spotter model ───────────────────────────
 
-def _spotter_model(cols):
-    return _model(cols, properties={"spotter_config": {"is_spotter_enabled": True}})
-
-
 def test_p11_counts_default_indexed_columns():
-    cols = [_col(f"C{i}", "ATTRIBUTE", None) for i in range(31)]
-    findings = check_p11(make_context(models=[_spotter_model(cols)]))
+    findings = run_rule(fx.index_spotter_31_default(), "P11")
     assert len(findings) == 1 and findings[0].metric == 31
 
 
 def test_p11_does_not_count_dont_index_columns():
     """31 suppressed columns are 0 indexed columns, not 31."""
-    cols = [_col(f"C{i}", "ATTRIBUTE", "DONT_INDEX") for i in range(31)]
-    assert check_p11(make_context(models=[_spotter_model(cols)])) == []
+    assert run_rule(fx.index_spotter_31_not_indexed(), "P11") == []
 
 
 def test_p11_counts_a_mixed_model_correctly():
-    cols = ([_col(f"A{i}", "ATTRIBUTE", None) for i in range(31)]
-            + [_col(f"B{i}", "ATTRIBUTE", "DONT_INDEX") for i in range(10)])
-    findings = check_p11(make_context(models=[_spotter_model(cols)]))
+    findings = run_rule(fx.index_spotter_mixed(), "P11")
     assert len(findings) == 1 and findings[0].metric == 31

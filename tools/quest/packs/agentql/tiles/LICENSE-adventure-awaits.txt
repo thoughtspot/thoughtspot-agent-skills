@@ -1,0 +1,20 @@
+Adventure Awaits Asset Pack (1.0)
+
+Created/distributed by Ishtar Pixels
+Creation date: 20-10-2023
+Source: https://opengameart.org/content/adventure-awaits-asset-pack-10
+
+------------------------------
+
+License: (Creative Commons Zero, CC0)
+http://creativecommons.org/publicdomain/zero/1.0/
+
+This content is free to use in personal, educational and commercial projects.
+Support us by crediting Ishtar Pixels (this is not mandatory)
+
+------------------------------
+
+Frames 480-490 of tiles.png are this pack's Tiles/Slice 86, 93, 92, 87, 104, 104, 103, 106,
+107, 108 and 113 (a cliff face with a tunnel). Their grass is recoloured to Kenney's, and the
+sand of the cliff's foot (Slice 106, 107, 108) too (make_atlas.py, GRASS_TO_KENNEY and
+SAND_TO_KENNEY).

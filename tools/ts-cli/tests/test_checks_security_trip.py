@@ -1,8 +1,8 @@
 """S2 / S3 / S8 / S9 — the four security checks that no test ever called.
 
 2026-09-22 audit finding 6.1: 27 of 51 checks are *imported* by a test and never
-invoked. `tests/test_checks_security.py:1-4` imports `check_s2`, `check_s3`,
-`check_s8` and `check_s9` and calls none of them, so nothing had ever shown that
+invoked. `tests/test_checks_security.py` imported `check_s2`, `check_s3`,
+`check_s8` and `check_s9` and called none of them, so nothing had ever shown that
 any of the four can return a `Finding`. For a security check that is the worst
 class of defect — a check that cannot fire reports "no problem" about PII and
 RLS. `check_p6`/`check_d2` shipped in exactly that state for months
@@ -25,60 +25,15 @@ TML shapes follow the repo's own schemas, consulted for this file:
 """
 import pytest
 
-from ts_cli.audit.checks_perf import check_p14, check_p15
-from ts_cli.audit.checks_security import check_s2, check_s3, check_s8, check_s9
-from ts_cli.audit.context import make_context
+import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 from ts_cli.audit.findings import CHECK_META
 
-TABLE_FQN = "AGENT_SKILLS.PUBLIC.CUSTOMERS"
-
-# A table column carries its warehouse type; a model column does not.
-TABLE_COLS = [
-    {"name": "COUNTRY", "db_column_name": "COUNTRY",
-     "properties": {"column_type": "ATTRIBUTE"},
-     "db_column_properties": {"data_type": "VARCHAR"}},
-    {"name": "REGION_ID", "db_column_name": "REGION_ID",
-     "properties": {"column_type": "ATTRIBUTE"},
-     "db_column_properties": {"data_type": "INT64"}},
-]
-
-
-def _rls(expr, path_column="COUNTRY"):
-    """`rls_rules` in the nested mapping form the table schema documents."""
-    return {
-        "tables": [{"name": "CUSTOMERS"}],
-        "table_paths": [{"id": "T_1", "table": "CUSTOMERS", "column": [path_column]}],
-        "rules": [{"name": "tenant filter", "expr": expr}],
-    }
-
-
-def _table(rls_rules=None, columns=None, name="CUSTOMERS", guid="t-1"):
-    t = {
-        "name": name, "db": "AGENT_SKILLS", "schema": "PUBLIC",
-        "db_table": "CUSTOMERS", "connection": {"name": "se-snowflake"},
-        "columns": TABLE_COLS if columns is None else columns,
-    }
-    if rls_rules:
-        t["rls_rules"] = rls_rules
-    return {"guid": guid, "table": t}
-
-
-def _mcol(name, column_id=None, index_type=None):
-    props = {"column_type": "ATTRIBUTE"}
-    if index_type:
-        props["index_type"] = index_type
-    return {"name": name, "column_id": column_id or f"CUSTOMERS::{name}",
-            "properties": props}
-
-
-def _model(columns, formulas=None, alias=None):
-    mt = {"name": "CUSTOMERS", "fqn": TABLE_FQN}
-    if alias:
-        mt["alias"] = alias
-    return {"guid": "m-1", "model": {
-        "name": "Customer 360", "model_tables": [mt],
-        "columns": columns, "formulas": formulas or [],
-    }}
+# Every context below is a named builder in audit_rule_fixtures (rls.py and
+# security.py), whose legacy S answers — and P answers, for the P14/P15 clones —
+# test_audit_pinned_findings.py pins. The `checks_security.py:N` / `checks_perf.py:N`
+# references below are to the legacy modules (deleted when the rule catalog replaced them), which the catalog
+# rules reproduce.
 
 
 # --------------------------------------------------------------------------
@@ -87,11 +42,7 @@ def _model(columns, formulas=None, alias=None):
 
 def test_s2_trips_on_an_indexed_pii_column_with_no_table_rls():
     """First assertion ever made that S2 can return a Finding."""
-    ctx = make_context(
-        models=[_model([_mcol("customer_email", index_type="PREFIX_AND_SUBSTRING")])],
-        tables={TABLE_FQN: _table()},
-    )
-    findings = check_s2(ctx)
+    findings = run_rule(fx.sec_pii_indexed_without_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].check_id == "S2"
     assert findings[0].severity == "HIGH"
@@ -99,11 +50,7 @@ def test_s2_trips_on_an_indexed_pii_column_with_no_table_rls():
 
 
 def test_s2_downgrades_to_info_when_the_owning_table_has_rls():
-    ctx = make_context(
-        models=[_model([_mcol("customer_email", index_type="PREFIX_AND_SUBSTRING")])],
-        tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))},
-    )
-    findings = check_s2(ctx)
+    findings = run_rule(fx.sec_pii_indexed_with_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].severity == "INFO"
     assert "table has RLS" in findings[0].detail
@@ -111,26 +58,19 @@ def test_s2_downgrades_to_info_when_the_owning_table_has_rls():
 
 def test_s2_clean_model_returns_nothing():
     """Indexed, but nothing that reads as PII."""
-    cols = [_mcol("Revenue", index_type="DEFAULT"),
-            _mcol("Order Count", index_type="DEFAULT")]
-    ctx = make_context(models=[_model(cols)], tables={TABLE_FQN: _table()})
-    assert check_s2(ctx) == []
+    assert run_rule(fx.sec_indexed_without_pii(), "S2") == []
 
 
 def test_s2_should_flag_a_default_indexed_pii_column():
     """A PII column with no `index_type` is indexed by DEFAULT — the risk S2
     exists to report, and the shape it used to skip (BL-299, fixed)."""
-    ctx = make_context(models=[_model([_mcol("customer_email")])],
-                       tables={TABLE_FQN: _table()})
-    assert len(check_s2(ctx)) == 1
+    assert len(run_rule(fx.sec_pii_default_indexed(), "S2")) == 1
 
 
 def test_s2_should_not_flag_a_dont_index_pii_column():
     """`DONT_INDEX` is the mitigation. S2 used to report it as the risk, and it
     is the only value this repo writes (BL-299, fixed)."""
-    ctx = make_context(models=[_model([_mcol("customer_email", index_type="DONT_INDEX")])],
-                       tables={TABLE_FQN: _table()})
-    assert check_s2(ctx) == []
+    assert run_rule(fx.sec_pii_not_indexed(), "S2") == []
 
 
 # NOTE: the S2 alias-blindness characterization test was removed when BL-305
@@ -142,9 +82,7 @@ def test_s2_should_not_flag_a_dont_index_pii_column():
 # --------------------------------------------------------------------------
 
 def test_s3_trips_on_pii_with_no_masking_formula():
-    ctx = make_context(models=[_model([_mcol("customer_email"), _mcol("Revenue")])],
-                       tables={TABLE_FQN: _table()})
-    findings = check_s3(ctx)
+    findings = run_rule(fx.sec_pii_unmasked(), "S3")
     assert len(findings) == 1
     assert findings[0].check_id == "S3"
     assert findings[0].severity == "HIGH"
@@ -155,18 +93,11 @@ def test_s3_trips_on_pii_with_no_masking_formula():
 
 
 def test_s3_clean_model_returns_nothing():
-    ctx = make_context(models=[_model([_mcol("Revenue"), _mcol("Order Count")])],
-                       tables={TABLE_FQN: _table()})
-    assert check_s3(ctx) == []
+    assert run_rule(fx.sec_non_pii_columns(), "S3") == []
 
 
 def test_s3_masking_formula_suppresses_the_finding():
-    formulas = [{"id": "f1", "name": "Masked Email",
-                 "expr": "if (is_group_member('PII_VIEWERS')) then [customer_email] "
-                         "else 'REDACTED'"}]
-    ctx = make_context(models=[_model([_mcol("customer_email")], formulas=formulas)],
-                       tables={TABLE_FQN: _table()})
-    assert check_s3(ctx) == []
+    assert run_rule(fx.sec_pii_masked(), "S3") == []
 
 
 def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
@@ -177,14 +108,8 @@ def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
     column whose name is a substring of that same blob. Here the masking guards
     Salary and the email is projected raw — S3 still says nothing.
     """
-    formulas = [
-        {"id": "f1", "name": "Masked Salary",
-         "expr": "if (is_group_member('HR')) then [Salary] else 0"},
-        {"id": "f2", "name": "Contact", "expr": "[customer_email]"},
-    ]
-    ctx = make_context(models=[_model([_mcol("customer_email")], formulas=formulas)],
-                       tables={TABLE_FQN: _table()})
-    assert check_s3(ctx) == [], "the email is not masked, yet S3 is silent"
+    assert run_rule(fx.sec_mask_elsewhere_raw_projection(), "S3") == [], \
+        "the email is not masked, yet S3 is silent"
 
 
 # --------------------------------------------------------------------------
@@ -193,8 +118,7 @@ def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
 
 def test_s8_trips_on_a_varchar_rls_column():
     """Expr shape is the live example from thoughtspot-table-tml.md:129."""
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))})
-    findings = check_s8(ctx)
+    findings = run_rule(fx.sec_rls_uncased_varchar(), "S8")
     assert len(findings) == 1
     assert findings[0].check_id == "S8"
     assert findings[0].severity == "MEDIUM"
@@ -210,23 +134,17 @@ def test_s8_reads_the_type_from_the_table_and_needs_no_model_at_all():
     the schema makes it required — so it still fires with no models in context,
     and a lying type on a model column cannot influence it.
     """
-    ctx = make_context(
-        models=[_model([_mcol("Country")])],   # no db_column_properties anywhere
-        tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))},
-    )
-    assert len(check_s8(ctx)) == 1
-    no_models = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))})
-    assert len(check_s8(no_models)) == 1
+    # a model column with no db_column_properties anywhere, beside the Table
+    assert len(run_rule(fx.sec_rls_varchar_beside_a_model(), "S8")) == 1
+    assert len(run_rule(fx.sec_rls_uncased_varchar(), "S8")) == 1  # no models at all
 
 
 def test_s8_integer_rls_column_returns_nothing():
-    ctx = make_context(tables={TABLE_FQN: _table(
-        _rls("ts_groups_int = [T_1::REGION_ID]", path_column="REGION_ID"))})
-    assert check_s8(ctx) == []
+    assert run_rule(fx.sec_rls_integer_column(), "S8") == []
 
 
 def test_s8_table_without_rls_returns_nothing():
-    assert check_s8(make_context(tables={TABLE_FQN: _table()})) == []
+    assert run_rule(fx.sec_table_without_rls(), "S8") == []
 
 
 def test_s8_unresolvable_ref_is_silently_treated_as_not_a_string():
@@ -238,8 +156,7 @@ def test_s8_unresolvable_ref_is_silently_treated_as_not_a_string():
     as "not a string" — the same hazard test_checks_varchar_join_keys.py:111
     guards for P6/D2.
     """
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_2::TENANT_NAME]"))})
-    assert check_s8(ctx) == []
+    assert run_rule(fx.sec_rls_unresolved_ref(), "S8") == []
 
 
 def test_s8_is_p15_minus_the_value_casing_guard():
@@ -249,30 +166,21 @@ def test_s8_is_p15_minus_the_value_casing_guard():
     and P15 does not, and on an uncased one the estate gets two findings for one
     column.
     """
-    cased = [{"name": "COUNTRY", "db_column_name": "COUNTRY",
-              "properties": {"column_type": "ATTRIBUTE", "value_casing": "UPPER"},
-              "db_column_properties": {"data_type": "VARCHAR"}}]
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"),
-                                                 columns=cased)})
-    assert len(check_s8(ctx)) == 1
-    assert check_p15(ctx) == []
+    ctx = fx.sec_rls_cased_varchar()
+    assert len(run_rule(ctx, "S8")) == 1
+    assert run_rule(ctx, "P15") == []
 
-    uncased = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))})
-    assert len(check_s8(uncased)) == 1 and len(check_p15(uncased)) == 1
+    uncased = fx.sec_rls_uncased_varchar()
+    assert len(run_rule(uncased, "S8")) == 1 and len(run_rule(uncased, "P15")) == 1
 
 
 # --------------------------------------------------------------------------
 # S9 — function in an RLS expression
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("expr", [
-    "UPPER([T_1::COUNTRY]) = ts_groups",
-    "trim([T_1::COUNTRY]) = ts_groups",
-    "if ([T_1::COUNTRY] = 'AU') then true else false",
-    "contains([T_1::COUNTRY], ts_groups)",
-])
+@pytest.mark.parametrize("expr", fx.S9_TRIP_EXPRS)
 def test_s9_trips_on_a_function_in_the_rls_expression(expr):
-    findings = check_s9(make_context(tables={TABLE_FQN: _table(_rls(expr))}))
+    findings = run_rule(fx.build_sec_rls_expr(expr), "S9")
     assert len(findings) == 1
     assert findings[0].check_id == "S9"
     assert findings[0].severity == "HIGH"
@@ -282,12 +190,11 @@ def test_s9_trips_on_a_function_in_the_rls_expression(expr):
 
 
 def test_s9_plain_comparison_returns_nothing():
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("ts_groups = [T_1::COUNTRY]"))})
-    assert check_s9(ctx) == []
+    assert run_rule(fx.sec_rls_uncased_varchar(), "S9") == []
 
 
 def test_s9_table_without_rls_returns_nothing():
-    assert check_s9(make_context(tables={TABLE_FQN: _table()})) == []
+    assert run_rule(fx.sec_table_without_rls(), "S9") == []
 
 
 def test_s9_is_a_verbatim_clone_of_p14():
@@ -297,8 +204,8 @@ def test_s9_is_a_verbatim_clone_of_p14():
     differ. Every such RLS expression is counted twice in the report, once HIGH
     (security) and once MEDIUM (performance).
     """
-    ctx = make_context(tables={TABLE_FQN: _table(_rls("UPPER([T_1::COUNTRY]) = ts_groups"))})
-    s9, p14 = check_s9(ctx), check_p14(ctx)
+    ctx = fx.sec_rls_upper_function()
+    s9, p14 = run_rule(ctx, "S9"), run_rule(ctx, "P14")
     assert len(s9) == len(p14) == 1
     assert (s9[0].object_name, s9[0].object_guid) == (p14[0].object_name, p14[0].object_guid)
 

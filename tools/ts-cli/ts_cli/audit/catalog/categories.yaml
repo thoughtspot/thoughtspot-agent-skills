@@ -1,0 +1,30 @@
+# Audit categories ("angles"). The report's tabs, heatmap columns and labels come from
+# here; `ts audit run --angles` selects categories by id, and a rule runs when any of
+# its `categories` is selected. Ids are stable: never rename or reuse one.
+# `angle_key` is the `angle` a finding carries when this is its rule's first category —
+# the value audit JSON has always used, kept so existing readers see no change.
+- id: A
+  angle_key: ai
+  label: AI Readiness
+  order: 1
+  description: Description/synonym coverage, AI context, Spotter readiness score.
+- id: D
+  angle_key: data_modeling
+  label: Data Modeling
+  order: 2
+  description: Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables.
+- id: H
+  angle_key: human
+  label: Human Readiness
+  order: 3
+  description: Name quality, hidden columns, orphans, direct table connections, formula promotion candidates.
+- id: P
+  angle_key: performance
+  label: Performance
+  order: 4
+  description: SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl.
+- id: S
+  angle_key: security
+  label: Security
+  order: 5
+  description: PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics.

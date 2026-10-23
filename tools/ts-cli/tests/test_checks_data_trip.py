@@ -33,93 +33,24 @@ the marker must be deleted, not the assertion, when the check is corrected.
 """
 import pytest
 
-from ts_cli.audit.checks_data import (
-    check_d3, check_d6, check_d8, check_d10, check_d11, check_d12,
-)
-from ts_cli.audit.context import make_context
+import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 
 
-# --------------------------------------------------------------------------
-# TML-shaped builders. Note what is deliberately absent: joins have no `name`,
-# model columns have no `data_type` and no `db_column_name`.
-# --------------------------------------------------------------------------
-
-def _col(display, table, col, column_type):
-    """A model `columns[]` entry: name + column_id + properties.column_type."""
-    return {
-        "name": display,
-        "column_id": f"{table}::{col}",
-        "properties": {"column_type": column_type},
-    }
-
-
-def _fact_columns(table, measures=4, attributes=3):
-    """`measures` MEASURE + `attributes` ATTRIBUTE columns on one table.
-
-    `_table_role` calls anything with more than 3 MEASURE columns a fact table.
-    """
-    cols = [_col(f"{table} M{i}", table, f"M{i}", "MEASURE") for i in range(measures)]
-    cols += [_col(f"{table} A{i}", table, f"A{i}", "ATTRIBUTE") for i in range(attributes)]
-    return cols
-
-
-def _inline_join(with_table, on, jtype="INNER", cardinality="MANY_TO_ONE"):
-    """Scenario B join — exactly the four keys real inline joins carry."""
-    return {"with": with_table, "on": on, "type": jtype, "cardinality": cardinality}
-
-
-def _model(name="Sales", guid="m-1", model_tables=None, columns=None):
-    return {"guid": guid, "model": {
-        "name": name,
-        "model_tables": model_tables or [],
-        "columns": columns or [],
-        "formulas": [],
-        "properties": {"join_progressive": True},
-    }}
-
-
-def _table_entry(name, fqn, joins=None, alias=None):
-    entry = {"name": name, "fqn": fqn}
-    if alias:
-        entry["alias"] = alias
-    if joins:
-        entry["joins"] = joins
-    return entry
-
-
-def _search_row(guid, name, subtype="ONE_TO_ONE_LOGICAL", connection="Snowflake Prod",
-                db="AGENT_SKILLS", schema="PUBLIC"):
-    """A `/metadata/search` row with `include_headers` (what build_context stores)."""
-    return {
-        "metadata_id": guid,
-        "metadata_name": name,
-        "metadata_type": "LOGICAL_TABLE",
-        "metadata_header": {
-            "id": guid,
-            "name": name,
-            "type": subtype,
-            "dataSourceName": connection,
-            "databaseStripe": db,
-            "schemaStripe": schema,
-        },
-    }
+# The TML-shaped contexts are named builders in audit_rule_fixtures (data.py), whose
+# legacy answers test_audit_pinned_findings.py pins. The legacy checks named below
+# (checks_data.py) were deleted when the rule catalog replaced them; the D catalog rules reproduce them. Note what those
+# shapes deliberately leave out: joins have no `name`, model columns have no
+# `data_type` and no `db_column_name`.
 
 
 # --------------------------------------------------------------------------
 # D3 — join type analysis. Trips on `joins[].type`.
 # --------------------------------------------------------------------------
 
-def _model_with_join_type(jtype):
-    return _model(model_tables=[
-        _table_entry("ORDERS", "tbl-orders", joins=[_inline_join(
-            "CUSTOMER", "[ORDERS::CUST_ID] = [CUSTOMER::ID]", jtype=jtype)]),
-        _table_entry("CUSTOMER", "tbl-customer"),
-    ])
-
-
 def test_d3_flags_full_outer_join_as_high():
     """`OUTER` is ThoughtSpot's name for a full outer join (model-tml schema)."""
-    findings = check_d3(make_context(models=[_model_with_join_type("OUTER")]))
+    findings = run_rule(fx.data_join_full_outer(), "D3")
     assert len(findings) == 1
     assert findings[0].check_id == "D3"
     assert findings[0].severity == "HIGH"
@@ -128,7 +59,7 @@ def test_d3_flags_full_outer_join_as_high():
 
 @pytest.mark.parametrize("jtype", ["LEFT_OUTER", "RIGHT_OUTER"])
 def test_d3_flags_one_sided_outer_joins_as_info(jtype):
-    findings = check_d3(make_context(models=[_model_with_join_type(jtype)]))
+    findings = run_rule(fx.build_join_type_ctx(jtype), "D3")
     assert len(findings) == 1
     assert findings[0].check_id == "D3"
     assert findings[0].severity == "INFO"
@@ -137,7 +68,7 @@ def test_d3_flags_one_sided_outer_joins_as_info(jtype):
 
 def test_d3_clean_model_returns_nothing():
     """An all-INNER model — the overwhelmingly common real shape — must be silent."""
-    assert check_d3(make_context(models=[_model_with_join_type("INNER")])) == []
+    assert run_rule(fx.data_join_inner(), "D3") == []
 
 
 # --------------------------------------------------------------------------
@@ -145,15 +76,9 @@ def test_d3_clean_model_returns_nothing():
 # columns) and >40% ATTRIBUTE columns.
 # --------------------------------------------------------------------------
 
-def _grain_ctx(measures, attributes):
-    cols = _fact_columns("ORDERS", measures=measures, attributes=attributes)
-    return make_context(models=[_model(
-        model_tables=[_table_entry("ORDERS", "tbl-orders")], columns=cols)])
-
-
 def test_d6_flags_fact_table_that_is_mostly_attributes():
     """4 MEASURE + 3 ATTRIBUTE = fact (4 > 3) and 42.9% attributes (> 40%)."""
-    findings = check_d6(_grain_ctx(measures=4, attributes=3))
+    findings = run_rule(fx.data_fact_table_mostly_attributes(), "D6")
     assert len(findings) == 1
     assert findings[0].check_id == "D6"
     assert findings[0].object_name == "ORDERS"
@@ -162,12 +87,12 @@ def test_d6_flags_fact_table_that_is_mostly_attributes():
 
 def test_d6_clean_fact_table_returns_nothing():
     """4 MEASURE + 2 ATTRIBUTE = 33% attributes, under the 40% line."""
-    assert check_d6(_grain_ctx(measures=4, attributes=2)) == []
+    assert run_rule(fx.data_fact_table_mostly_measures(), "D6") == []
 
 
 def test_d6_ignores_dimension_tables():
     """A dimension (<=3 measures) is allowed to be nearly all attributes."""
-    assert check_d6(_grain_ctx(measures=1, attributes=8)) == []
+    assert run_rule(fx.data_dimension_mostly_attributes(), "D6") == []
 
 
 # --------------------------------------------------------------------------
@@ -175,11 +100,7 @@ def test_d6_ignores_dimension_tables():
 # --------------------------------------------------------------------------
 
 def test_d8_flags_two_table_objects_on_one_physical_table():
-    ctx = make_context(metadata=[
-        _search_row("tbl-1", "ORDERS"),
-        _search_row("tbl-2", "ORDERS"),
-    ])
-    findings = check_d8(ctx)
+    findings = run_rule(fx.data_metadata_duplicate_table(), "D8")
     assert len(findings) == 1
     assert findings[0].check_id == "D8"
     assert findings[0].severity == "HIGH"
@@ -189,41 +110,20 @@ def test_d8_flags_two_table_objects_on_one_physical_table():
 
 
 def test_d8_same_name_in_a_different_schema_is_not_a_duplicate():
-    ctx = make_context(metadata=[
-        _search_row("tbl-1", "ORDERS", schema="PUBLIC"),
-        _search_row("tbl-2", "ORDERS", schema="STAGING"),
-    ])
-    assert check_d8(ctx) == []
+    assert run_rule(fx.data_metadata_same_name_other_schema(), "D8") == []
 
 
 def test_d8_ignores_models():
     """Two Models over the same tables are D7's business, not D8's."""
-    ctx = make_context(metadata=[
-        _search_row("m-1", "Sales", subtype="WORKSHEET"),
-        _search_row("m-2", "Sales", subtype="WORKSHEET"),
-    ])
-    assert check_d8(ctx) == []
+    assert run_rule(fx.data_metadata_duplicate_models(), "D8") == []
 
 
 # --------------------------------------------------------------------------
 # D10 — zero-column tables, split bridge (INFO) vs leaf (MEDIUM).
 # --------------------------------------------------------------------------
 
-def _zero_column_ctx():
-    """ORDERS has columns and joins to BRIDGE; ORPHAN has neither."""
-    return make_context(models=[_model(
-        model_tables=[
-            _table_entry("ORDERS", "tbl-orders", joins=[_inline_join(
-                "BRIDGE", "[ORDERS::CUST_ID] = [BRIDGE::CUST_ID]")]),
-            _table_entry("BRIDGE", "tbl-bridge"),
-            _table_entry("ORPHAN", "tbl-orphan"),
-        ],
-        columns=_fact_columns("ORDERS", measures=2, attributes=2))]
-    )
-
-
 def test_d10_flags_zero_column_bridge_and_leaf_tables():
-    findings = check_d10(_zero_column_ctx())
+    findings = run_rule(fx.data_model_zero_column_bridge_and_leaf(), "D10")
     by_name = {f.object_name: f for f in findings}
     assert set(by_name) == {"BRIDGE", "ORPHAN"}
     assert all(f.check_id == "D10" for f in findings)
@@ -234,51 +134,26 @@ def test_d10_flags_zero_column_bridge_and_leaf_tables():
 
 
 def test_d10_model_where_every_table_contributes_columns_returns_nothing():
-    ctx = make_context(models=[_model(
-        model_tables=[
-            _table_entry("ORDERS", "tbl-orders", joins=[_inline_join(
-                "CUSTOMER", "[ORDERS::CUST_ID] = [CUSTOMER::ID]")]),
-            _table_entry("CUSTOMER", "tbl-customer"),
-        ],
-        columns=(_fact_columns("ORDERS", measures=2, attributes=2)
-                 + _fact_columns("CUSTOMER", measures=0, attributes=3)))])
-    assert check_d10(ctx) == []
+    assert run_rule(fx.data_model_every_table_has_columns(), "D10") == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "D10 (checks_data.py:301) keys on model_tables[].name, but a table with an "
+    "D10 (legacy checks_data.py at main@982c2010; the catalog reproduces it) keys on model_tables[].name, but a table with an "
     "alias prefixes its column_id with the ALIAS (model-tml schema, `alias` row). "
     "AuditContext.column_types (context.py:44) already does `alias or name`; the "
     "check does not, so a fully-populated aliased table is reported zero-column. "
-    "D6 (checks_data.py:184) and D11 (via _table_role) are blind the same way — "
+    "D6 (legacy checks_data.py at main@982c2010) and D11 (via the legacy _table_role) are blind the same way — "
     "there they cause a silent miss rather than a false positive."))
 def test_d10_aliased_table_is_not_zero_column():
-    ctx = make_context(models=[_model(
-        model_tables=[
-            _table_entry("LOT_DRUGS", "tbl-lot", alias="LOT_DRUGS_1"),
-        ],
-        columns=[_col("Molecule", "LOT_DRUGS_1", "MOLECULE", "ATTRIBUTE")])])
-    assert check_d10(ctx) == []
+    assert run_rule(fx.data_model_aliased_table_with_columns(), "D10") == []
 
 
 # --------------------------------------------------------------------------
 # D11 — fan-out risk. Trips on cardinality ONE_TO_MANY / MANY_TO_MANY.
 # --------------------------------------------------------------------------
 
-def _fanout_ctx(target, target_columns, cardinality="ONE_TO_MANY"):
-    return make_context(models=[_model(
-        model_tables=[
-            _table_entry("ORDERS", "tbl-orders", joins=[_inline_join(
-                target, f"[ORDERS::ID] = [{target}::ORDER_ID]",
-                jtype="INNER", cardinality=cardinality)]),
-            _table_entry(target, "tbl-target"),
-        ],
-        columns=_fact_columns("ORDERS") + target_columns)])
-
-
 def test_d11_flags_fact_to_fact_one_to_many_join():
-    ctx = _fanout_ctx("SHIPMENTS", _fact_columns("SHIPMENTS"))
-    findings = check_d11(ctx)
+    findings = run_rule(fx.data_fanout_fact_to_fact(), "D11")
     assert len(findings) == 1
     assert findings[0].check_id == "D11"
     assert findings[0].severity == "MEDIUM"
@@ -287,28 +162,24 @@ def test_d11_flags_fact_to_fact_one_to_many_join():
 
 
 def test_d11_reports_fact_to_dimension_one_to_many_as_info():
-    dim = [_col(f"Cust A{i}", "CUSTOMER", f"A{i}", "ATTRIBUTE") for i in range(4)]
-    findings = check_d11(_fanout_ctx("CUSTOMER", dim))
+    findings = run_rule(fx.data_fanout_fact_to_dimension(), "D11")
     assert len(findings) == 1
     assert findings[0].severity == "INFO"
 
 
 def test_d11_many_to_one_join_returns_nothing():
     """MANY_TO_ONE is 223 of 233 real inline joins and cannot fan out."""
-    ctx = _fanout_ctx("CUSTOMER", _fact_columns("CUSTOMER"),
-                      cardinality="MANY_TO_ONE")
-    assert check_d11(ctx) == []
+    assert run_rule(fx.data_fanout_many_to_one(), "D11") == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "D11's else branch (checks_data.py:340) hardcodes 'ONE_TO_MANY join' into the "
+    "D11's else branch (legacy checks_data.py at main@982c2010; the catalog reproduces it) hardcodes 'ONE_TO_MANY join' into the "
     "detail, so a MANY_TO_MANY join — the worse of the two, and the one the check "
-    "explicitly admits at checks_data.py:322 — is reported to the user as "
+    "explicitly admits at legacy checks_data.py at main@982c2010 — is reported to the user as "
     "ONE_TO_MANY. The MEDIUM branch interpolates `cardinality` correctly; only the "
     "INFO branch lies."))
 def test_d11_many_to_many_detail_names_the_actual_cardinality():
-    dim = [_col(f"Cust A{i}", "CUSTOMER", f"A{i}", "ATTRIBUTE") for i in range(4)]
-    findings = check_d11(_fanout_ctx("CUSTOMER", dim, cardinality="MANY_TO_MANY"))
+    findings = run_rule(fx.data_fanout_many_to_many_dimension(), "D11")
     assert len(findings) == 1
     assert "MANY_TO_MANY" in findings[0].detail
 
@@ -317,19 +188,8 @@ def test_d11_many_to_many_detail_names_the_actual_cardinality():
 # D12 — conformed dimension divergence across models.
 # --------------------------------------------------------------------------
 
-def _two_models(type_a, type_b):
-    return make_context(models=[
-        _model(name="Sales", guid="m-1",
-               model_tables=[_table_entry("ORDERS", "tbl-orders")],
-               columns=[_col("Discount", "ORDERS", "DISCOUNT", type_a)]),
-        _model(name="Returns", guid="m-2",
-               model_tables=[_table_entry("RETURNS", "tbl-returns")],
-               columns=[_col("Discount", "RETURNS", "DISCOUNT", type_b)]),
-    ])
-
-
 def test_d12_flags_column_classified_differently_across_models():
-    findings = check_d12(_two_models("MEASURE", "ATTRIBUTE"))
+    findings = run_rule(fx.data_models_divergent_column_type(), "D12")
     assert len(findings) == 1
     assert findings[0].check_id == "D12"
     assert findings[0].severity == "MEDIUM"
@@ -339,11 +199,8 @@ def test_d12_flags_column_classified_differently_across_models():
 
 
 def test_d12_consistent_classification_returns_nothing():
-    assert check_d12(_two_models("MEASURE", "MEASURE")) == []
+    assert run_rule(fx.data_models_consistent_column_type(), "D12") == []
 
 
 def test_d12_single_model_returns_nothing():
-    ctx = make_context(models=[_model(
-        model_tables=[_table_entry("ORDERS", "tbl-orders")],
-        columns=[_col("Discount", "ORDERS", "DISCOUNT", "MEASURE")])])
-    assert check_d12(ctx) == []
+    assert run_rule(fx.data_model_single_discount(), "D12") == []

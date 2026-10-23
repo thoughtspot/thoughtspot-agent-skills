@@ -183,3 +183,26 @@ def test_build_erd_for_audit():
     assert len(results) == 1
     assert results[0]["model"]["name"] == "TestModel"
     assert len(results[0]["tables"]) == 1
+
+
+# ── the ERD's "Fix." line (final review I2) ─────────────────────────────────
+
+def test_erd_fix_line_is_the_remediation_else_the_grading_never_an_engine_id():
+    """The ERD renderer prints a finding's `rec` as "Fix. …": a rule's remediation where
+    it has one, else its grading in words — never `@join_type` or `code:<name>`."""
+    import re
+    from ts_cli.audit import _inject_findings_into_erd
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.findings import Finding
+    from ts_cli.audit.generate import report_meta
+
+    checks = report_meta(load_catalog())["checks"]
+    corpus = {"models": [{"guid": "m-1", "erd": {"tables": [], "findings": []}}]}
+    found = [Finding(cid, "x", "HIGH", "MODEL", "M", "m-1", "d") for cid in checks]
+    _inject_findings_into_erd(corpus, found, checks)
+    recs = {f["check"]: f["rec"] for f in corpus["models"][0]["erd"]["findings"]}
+    assert recs["S1"] == checks["S1"]["remediation"]
+    assert recs["D3"] == "HIGH when the join type is OUTER; otherwise INFO"
+    assert recs["D1"].startswith("graded per size measure")
+    leaks = {cid: r for cid, r in recs.items() if re.search(r"@\w|\bcode:\w", r)}
+    assert leaks == {}

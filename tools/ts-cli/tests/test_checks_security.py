@@ -1,85 +1,49 @@
-from ts_cli.audit.checks_security import (
-    check_s1, check_s2, check_s3, check_s4, check_s5,
-    check_s8, check_s9, check_s10, ALL_CHECKS,
-)
+"""The S rules (rules/security.yaml), as the legacy S-check tests (checks_security.py,
+deleted when the rule catalog replaced them) exercised them. The contexts are named builders in
+audit_rule_fixtures (security.py), whose legacy answers test_audit_pinned_findings.py
+pins."""
+import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 from ts_cli.audit.context import make_context
 
 
-def _model(name="Sales", guid="m-1", columns=None, formulas=None, properties=None):
-    return {
-        "guid": guid,
-        "model": {
-            "name": name,
-            "model_tables": [{"name": "T1"}],
-            "columns": columns or [],
-            "formulas": formulas or [],
-            "properties": properties or {},
-        },
-    }
-
-
-def _col(name="Amount", column_id=None, index_type=None):
-    c = {
-        "name": name,
-        "column_id": column_id or f"T1::{name}",
-        "properties": {},
-        "db_column_properties": {"data_type": "VARCHAR"},
-    }
-    if index_type:
-        c["properties"]["index_type"] = index_type
-    return c
-
-
-def _table_tml(name="ORDERS", guid="t-1", rls_rules=None):
-    t = {"guid": guid, "table": {"name": name, "columns": []}}
-    if rls_rules:
-        t["table"]["rls_rules"] = rls_rules
-    return t
-
-
 def test_s1_flags_email():
-    cols = [_col("customer_email"), _col("Amount")]
-    ctx = make_context(models=[_model(columns=cols)])
-    findings = check_s1(ctx)
+    findings = run_rule(fx.sec_model_email_column(), "S1")
     assert any(f.check_id == "S1" and "email" in f.detail.lower() for f in findings)
 
 
 def test_s1_passes_non_pii():
-    cols = [_col("Amount"), _col("Revenue")]
-    ctx = make_context(models=[_model(columns=cols)])
-    assert check_s1(ctx) == []
+    assert run_rule(fx.sec_model_without_pii(), "S1") == []
 
 
 def test_s5_flags_password_column():
-    cols = [_col("password"), _col("Amount")]
-    ctx = make_context(models=[_model(columns=cols)])
-    findings = check_s5(ctx)
+    findings = run_rule(fx.sec_password_column(), "S5")
     assert any(f.check_id == "S5" and f.severity == "CRITICAL" for f in findings)
 
 
+def test_s5_token_is_high():
+    """S5's one non-CRITICAL branch: a column named for a `token` (a whole word, any
+    case) is HIGH, beside a password column that stays CRITICAL."""
+    ctx = make_context(models=[fx.build_sec_model(columns=[
+        fx.build_sec_col("Access Token"), fx.build_sec_col("password"),
+        fx.build_sec_col("token_id")])])   # `token_id` is not the whole word
+    by_name = {f.object_name: f.severity for f in run_rule(ctx, "S5")}
+    assert by_name == {"Access Token": "HIGH", "password": "CRITICAL"}
+
+
 def test_s5_passes_no_credentials():
-    cols = [_col("Amount"), _col("Revenue")]
-    ctx = make_context(models=[_model(columns=cols)])
-    assert check_s5(ctx) == []
+    assert run_rule(fx.sec_model_without_pii(), "S5") == []
 
 
 def test_s4_flags_bypass_with_pii():
-    cols = [_col("customer_email")]
-    ctx = make_context(models=[_model(columns=cols, properties={"is_bypass_rls": True})])
-    findings = check_s4(ctx)
+    findings = run_rule(fx.sec_bypass_with_pii(), "S4")
     assert any(f.check_id == "S4" and f.severity == "HIGH" for f in findings)
 
 
 def test_s10_flags_bypass():
-    ctx = make_context(models=[_model(properties={"is_bypass_rls": True})])
-    findings = check_s10(ctx)
+    findings = run_rule(fx.sec_bypass_without_pii(), "S10")
     assert any(f.check_id == "S10" for f in findings)
 
 
 def test_s10_passes_no_bypass():
-    ctx = make_context(models=[_model(properties={})])
-    assert check_s10(ctx) == []
-
-
-def test_all_checks_has_eight_entries():
-    assert len(ALL_CHECKS) == 8
+    assert run_rule(fx.sec_model_without_bypass(), "S10") == []

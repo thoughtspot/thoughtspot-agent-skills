@@ -110,6 +110,10 @@ jobs:
           python3 tools/validate/generate_parity.py --check || rc=1
           # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
           python3 tools/validate/check_internal_imports.py --root . || rc=1
+          # `ts audit` rule catalog (YAML) — vocabulary, ids, overrides, band order, examples,
+          # the generated check-catalog.md, and rule-id history: an id on main may be
+          # retired, never deleted or reused (fetch-depth: 0 above makes origin/main local).
+          python3 tools/validate/check_audit_catalog.py --root . --base origin/main || rc=1
           python3 tools/validate/check_repo_hygiene.py --root . || rc=1
           python3 tools/validate/check_backlog_integrity.py --root . --base origin/main || rc=1
           # Quality gates catalog — soft baseline check here (the catalog includes

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Iterable, NoReturn, Optional
 
+from ts_cli.audit.catalog_validate import REQUIRES
+from ts_cli.audit.engine.tml import BRACKET_REF
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -20,7 +21,9 @@ class AuditContext:
     answers: list = field(default_factory=list)
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
-    # Which bar the AI-readiness checks measure against (audit/assessment.py, BL-399).
+    # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
+    # (catalog/profiles.yaml). The engine takes the profile as an argument and never
+    # reads this; it records what a run or a snapshot capture was made under.
     assessment: str = "general"
 
     def guid_for(self, tml: dict) -> str:
@@ -63,18 +66,14 @@ class AuditContext:
         return result
 
 
-#: TML writes join operands bracketed: `[ORDERS::CUST_ID] = [CUST::ID]`.
-_BRACKETED = re.compile(r"\[([^\]]+)\]")
-
-
 def nl_instructions(ai_data: dict) -> list:
     """Instruction strings from an ``ai/instructions/get`` response.
 
     The response is ``{"nl_instructions_info": [{"instructions": [...],
     "scope": "GLOBAL"}]}`` — there is no top-level ``instructions`` key.
-    ``checks_ai`` read one anyway, so the API half of A3/A5 never fired and a
-    Model coached through the UI reported HIGH "no coaching configured"
-    (BL-292). Its unit fixtures passed a shape the API never returns, which is
+    The legacy A checks (``checks_ai``, since removed) read one anyway, so the
+    API half of A3/A5 never fired and a Model coached through the UI reported
+    HIGH "no coaching configured" (BL-292). Its unit fixtures passed a shape the API never returns, which is
     what kept it invisible.
     """
     out: list = []
@@ -92,7 +91,9 @@ def join_key_ids(on_str: str) -> list:
     An unbracketed clause is tolerated so a hand-built fixture still parses.
     """
     text = on_str or ""
-    bracketed = [m.strip() for m in _BRACKETED.findall(text) if m.strip()]
+    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: engine/tml.py's
+    # BRACKET_REF, the one declaration of that pattern (BL-304).
+    bracketed = [m.strip() for m in BRACKET_REF.findall(text) if m.strip()]
     if bracketed:
         return bracketed
     parts = text.replace("=", ",").replace(" and ", ",").split(",")
@@ -188,17 +189,151 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         warnings.append(msg)
 
 
+_AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
+
+
+def _abort_on_request_failure(exc: Exception, guid: str) -> NoReturn:
+    """Exit the run: the `ai/instructions/get` request raised a `requests` exception.
+
+    The client turns its own per-request HTTP and network failures into a response or a
+    `SystemExit`, so a `requests.RequestException` that escapes `client.post` came from
+    the request path itself — in practice the re-authentication after a 401 raising: a
+    token exchange answering 500 (an OIDC account's bad password), a non-JSON page (an
+    SSO or proxy HTML login: requests' `JSONDecodeError`), or the network dropping
+    during it — or a transport error the client does not retry. Every later call would
+    fail the same way, so it is fatal once, never one swallowed failure and one
+    re-authentication per Model. The line names the exception type and, for an HTTP
+    error, its status and path — never the URL's host, a header or the exception text
+    (a requests message can carry a URL)."""
+    resp = getattr(exc, "response", None)
+    where = ""
+    if resp is not None and getattr(resp, "status_code", None) is not None:
+        from urllib.parse import urlparse
+        path = urlparse(getattr(resp, "url", "") or "").path or "?"
+        where = f" ({resp.status_code} on {path})"
+    print(f"Error: AI instructions lookup for model {guid} failed in the request itself "
+          f"(re-authentication or transport): {type(exc).__name__}{where} — aborting the audit",
+          file=sys.stderr)
+    raise SystemExit(1) from exc
+
+
+#: Answers to `ai/instructions/get` that are about the run, not one Model: every later
+#: lookup would get the same, so the run stops once (the client retries neither).
+_FATAL_STATUSES = {401: "the credential was refused after re-authentication",
+                   429: "rate limited — retry later"}
+
+
+def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
+                           warnings: list) -> None:
+    """`ai/instructions/get` per Model, into `out[guid]`; a per-Model failure leaves no
+    entry (the Model reads as "could not be read"; A3 skips it) and a warning with the
+    reason.
+
+    The request and the decoding of its answer are handled apart:
+
+    * The request (`client.post`, with any re-authentication inside it) uses
+      `raise_for_status=False`, as the Answer and Model exports here: with the default
+      the real client turns a 4xx/5xx into `SystemExit(1)`, so one Model's failed lookup
+      aborted the whole audit. A `requests` exception it RAISES is not about one Model:
+      it aborts once (`_abort_on_request_failure`). Any other exception is a bug, not a
+      transport failure, and propagates unchanged, traceback intact.
+    * A final 401 (it survived the client's one re-authentication: the credential is
+      bad) or a 429 (rate limited; the client does not retry it) aborts the run once
+      with one line, `SystemExit(1)`.
+    * Any other non-2xx (403, 404, a 5xx after the client's 502/503/504 retries, a final
+      1xx or 3xx — whatever its body, ...) is about this Model: skip it, the reason being `format_http_error`'s secret-free line
+      on the path.
+    * A 2xx whose body is not JSON (`ValueError` from `resp.json()`) skips this Model."""
+    import requests
+    from ts_cli.client import format_http_error
+    _log("Fetching AI instructions...")
+    for guid in model_guids:
+        try:
+            resp = client.post(_AI_INSTRUCTIONS_PATH, json={"data_source_identifier": guid},
+                               raise_for_status=False)
+        except requests.RequestException as exc:
+            _abort_on_request_failure(exc, guid)
+        if resp.status_code in _FATAL_STATUSES:
+            print(f"{format_http_error('POST', _AI_INSTRUCTIONS_PATH, resp)} — "
+                  f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
+            raise SystemExit(1)
+        if not 200 <= resp.status_code < 300:  # `resp.ok` passes a final 1xx/3xx
+            reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
+        else:
+            try:
+                out[guid] = resp.json()
+                continue
+            except ValueError as exc:  # this Model's answer is not JSON
+                reason = str(exc)
+        msg = f"AI instructions fetch failed for model {guid}: {reason}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+
+
+def _export_answers(client: Any, dependents: dict) -> list:
+    """Answer TML for every ANSWER among `dependents`; a failed batch is skipped."""
+    answers: list = []
+    answer_guids = set()
+    for deps in dependents.values():
+        for d in deps:
+            if d.get("type") == "ANSWER" and d.get("guid"):
+                answer_guids.add(d["guid"])
+    if not answer_guids:
+        return answers
+    _log(f"Exporting {len(answer_guids)} answer TML(s)...")
+    guid_list = list(answer_guids)
+    ans_batch = 50
+    for i in range(0, len(guid_list), ans_batch):
+        batch = guid_list[i:i + ans_batch]
+        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
+            "metadata": [{"identifier": g} for g in batch],
+            "export_fqn": True,
+            "formattype": "YAML",
+        }, timeout=300, raise_for_status=False)
+        if not resp.ok:
+            _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
+            continue
+        for item in resp.json():
+            edoc = item.get("edoc", "")
+            parsed = parse_edoc(edoc, "YAML")
+            if parsed and detect_tml_type(parsed) == "answer":
+                answers.append(parsed)
+    return answers
+
+
+#: Data `build_context` fetches for every audit, whatever the needs: Model TML (with
+#: its associated Table TML), metadata headers and dependents.
+ALWAYS_FETCHED = frozenset({"model_tml", "table_tml", "metadata", "dependents"})
+
+
 def build_context(
     client: Any,
     model_guids: list,
-    angles: list,
+    needs: Iterable[str],
 ) -> AuditContext:
+    """Fetch what an audit reads for `model_guids`.
+
+    Model TML (with associated Table TML), metadata and dependents are always fetched.
+    The optional data is fetched only when it is in `needs` — `requires ∪ uses` of the
+    rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers` (Answer
+    TML of the dependents' Answers) and `sets` (Set discovery and each Set's consumers).
+    `dependents` may be in `needs` but is fetched regardless. Anything that is not a
+    `requires` value — a category letter from a caller still passing angles — is
+    rejected, not silently ignored.
+    """
+    needs = set(needs)
+    unknown = sorted(needs - set(REQUIRES))
+    if unknown:
+        raise ValueError(f"build_context: unknown needs {unknown} (known: {', '.join(REQUIRES)})")
     models = []
     tables = {}
     dependents = {}
     ai_instructions = {}
     answers = []
 
+    # Model TML (with associated Table TML), metadata and dependents below are fetched
+    # for every audit and must stay so: rules read Model and Table TML without declaring
+    # them (D2/D3/D11/P6 resolve referencing joins from Table TML, S2 and H7 read it too).
     _log(f"Exporting TML for {len(model_guids)} model(s)...")
     warnings = []
     model_batch = 50
@@ -275,45 +410,15 @@ def build_context(
                 src = row["source_guid"]
                 dependents.setdefault(src, []).append(row)
 
-    if "A" in angles:
-        _log("Fetching AI instructions...")
-        for guid in model_guids:
-            try:
-                resp = client.post("/api/rest/2.0/ai/instructions/get", json={
-                    "data_source_identifier": guid,
-                })
-                ai_instructions[guid] = resp.json()
-            except Exception:
-                msg = f"AI instructions fetch failed for model {guid}"
-                _log(f"Warning: {msg}")
-                warnings.append(msg)
-
-    if "H" in angles:
-        answer_guids = set()
-        for deps in dependents.values():
-            for d in deps:
-                if d.get("type") == "ANSWER" and d.get("guid"):
-                    answer_guids.add(d["guid"])
-        if answer_guids:
-            _log(f"Exporting {len(answer_guids)} answer TML(s)...")
-            guid_list = list(answer_guids)
-            ans_batch = 50
-            for i in range(0, len(guid_list), ans_batch):
-                batch = guid_list[i:i + ans_batch]
-                resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-                    "metadata": [{"identifier": g} for g in batch],
-                    "export_fqn": True,
-                    "formattype": "YAML",
-                }, timeout=300, raise_for_status=False)
-                if not resp.ok:
-                    _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
-                    continue
-                for item in resp.json():
-                    edoc = item.get("edoc", "")
-                    parsed = parse_edoc(edoc, "YAML")
-                    if parsed and detect_tml_type(parsed) == "answer":
-                        answers.append(parsed)
-        # After the answer export, so Set consumers do not widen the answer set.
+    # Conditional data: only what a selected rule declares (requires/uses). Answers
+    # strictly before Sets — Set discovery adds each Set's consumers to `dependents`,
+    # which `_export_answers` walks, so the reverse order would export Answers that use
+    # only a Set and widen H7-H9 (test_set_consumers_do_not_widen_the_answer_export).
+    if "ai_instructions" in needs:
+        _fetch_ai_instructions(client, model_guids, ai_instructions, warnings)
+    if "answers" in needs:
+        answers = _export_answers(client, dependents)
+    if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
 

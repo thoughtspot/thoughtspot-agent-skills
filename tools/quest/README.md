@@ -74,7 +74,7 @@ packs/agentql/{pack,content,strings}.yaml ─┐
 packs/agentql/art/classic/*.txt           ─┤
 lesson-sql.md, learning-path.md (sources) ─┤                   ┌─► quest.json         (the checked data)
 classic/game.html, core/*.js, fonts/      ─┼─► build.py ───────┼─► quest.schema.json  (generated for this pack)
-schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► index.html         (self-contained, quest.json inside)
+schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► the classic page   (self-contained, quest.json inside)
 ```
 
 - **`packs/agentql/pack.yaml`**, the manifest: the id, title, Pages folder (`agentql-quest`), save
@@ -131,7 +131,7 @@ schema/core.json, denylist.txt            ─┤   + checks/*.py   └─► ind
   their SIL Open Font License files.
 
 ```bash
-python3 tools/quest/build.py                             # → tools/quest/dist/{index.html,quest.json,quest.schema.json}
+python3 tools/quest/build.py                             # → tools/quest/dist/: index.html (explore, when it's home), classic/, explore/, quest.json, quest.schema.json
 python3 tools/quest/build.py --check                     # validate only
 python3 tools/validate/check_agentql_quest.py --root .   # the same, as pre-commit and CI run it
 pytest tools/quest/tests -q                              # includes a headless play-through (needs node)
@@ -139,10 +139,10 @@ pytest tools/quest/tests -q                              # includes a headless p
 
 ## The data contract
 
-`quest.json` (version 2) is everything a front end needs to play the quest, already checked:
+`quest.json` (version 3) is everything a front end needs to play the quest, already checked:
 
-- `pack`: the pack's id, title, save key, unlock rule, explorable realms, lexicon, rule tags and
-  strings;
+- `pack`: the pack's id, title, save key, unlock rule, explorable realms, whether explore is the
+  home page (`explore_home`, new in version 3), lexicon, rule tags and strings;
 - `meta`: what each plugin records about the whole quest (here, the capture's Model and date);
 - `realms` in map order, each hall's teaching and questions, and each encounter's business
   question, path choice, code panes (one string per line, with a label and caption), points and
@@ -181,6 +181,173 @@ that supports 2020-12 (4.0 or later) is installed, and skips otherwise.
 So a question is edited in the pack's `content.yaml`, never in a front end, and a second front
 end (for example an explorable map) plays the same content by loading `quest.json`.
 
+## Maps for the explore front end
+
+A pack whose `explore.realms` lists realms has a Tiled map for each, plus an overworld:
+`maps/overworld.tmj` and `maps/<realm id>.tmj`, saved by Tiled 1.10 or later as JSON (CSV tile
+data). `maps.py` checks them in the build (design §4.2), and refuses anything a tile engine or the
+explore page would read differently from the check:
+
+- **Shape:** orthogonal and finite; layers at the top level, unoffset: tile layers `floor`,
+  `walls` and, if you like, `decor` (each the map's size) and one object layer `objects`; one
+  embedded tileset named `tiles` whose `.png` is in the pack, at the size the map says; 16px tiles;
+  objects are unrotated rectangles (not tile objects or points), each exactly one tile on the grid
+  (snap to grid in Tiled), because the explore page gives each a 16px body at its centre; a wall,
+  or someone solid, all round the edge, because the page doesn't stop the player at the map's edge.
+- **Collision** is the `walls` layer: any non-empty tile blocks. Paint walls with the wall tile
+  (`tiles.json`'s `wall`): the page shows its brick face where floor is below and its dark top
+  elsewhere. Any other tile on `walls` (a crate, a barrel) is drawn as it is, and blocks.
+- **Decoration** that you can walk past (torches on a wall face, rails, rubble) goes on `decor`.
+- **Objects** have a `type` and string properties only:
+  - `spawn`, where the player appears (one per map);
+  - `portal to=<realm id>`, overworld only, one per realm;
+  - `exit`, realm maps only, one per map;
+  - `merchant`, `guide`, `compiler`, `foe`, `reward` with `encounter=<encounter id>`;
+  - `throne hall=<hall id>`;
+  - `gate requires=<step id>,…`;
+  - for fun, never a step (realm maps and the overworld): `chest loot=<item>` (or `loot=mimic`),
+    `barrel roll=left|right|up|down`, and `hoard loot=<item>,…` on the same tile as a barrel,
+    hidden until it rolls. Items are `tiles.json`'s `items`; a barrel rolls one tile, onto open
+    floor. The walk treats a barrel as solid where it stands and where it rolls to, so the quest
+    never depends on it, and every chest, barrel and hoard must be reachable once the quest is done;
+  - someone to talk to, also never a step: `npc look=<who>` (`tiles.json`'s `npcs`) with either
+    `says=<line>,…` (keys in `strings.yaml`) or `about=<realm id>` (the realm told from its own
+    name and `covers`, so it stays true as the content changes).
+- **Steps:** a step id is `<encounter id>:<merchant|guide|compiler|foe|reward>` or
+  `hall:<hall id>`. Every step of a realm has exactly one object on its map.
+- **Reachability, in the game's order:** the game plays a realm's steps in one order (halls, then
+  each encounter's merchant, guide, compiler, foe, reward). Before each step, a flood-fill from the
+  spawn, with only the gates whose required steps are all **done** open, must reach that step's
+  object; the exit must be reachable from the start. A gate that only opens after a step behind it,
+  or a first step behind a gate, fails, and so does a gate that guards nothing:
+  at some point of play while it is shut, opening it alone must let the player reach an object
+  they couldn't (a gate off its doorway, or a wall with a way round it, would not). Here a barrel
+  is played: rolled once it can be reached, it frees its tile (unless a hoard is under it) and
+  blocks the one it lands on. Objects are solid; reaching one means standing on a walkable tile
+  next to it.
+- **Nothing crowds a step or the way in:** talking goes to what you face, so anything that isn't
+  a step (a chest, barrel, hoard, someone to talk to, the exit) beside a step, or a barrel that
+  rolls there, could take the talk from it, and an exit beside the spawn takes a second Enter on
+  arrival as "leave"; both fail the build (a diagonal is fine).
+- **No Tiled templates,** which the explore page doesn't resolve.
+
+`Quest.machine` accepts `interact {step}` only for the step the current screen waits on
+(`expected(state)`), and changes nothing on it, so walking to the foe first does nothing.
+`tests/play_map.js` plays a realm's steps through the machine with no canvas: every step is
+finished, every out-of-order interaction is refused, and a test pins that the machine asks for the
+steps in exactly the order `maps.py` walks.
+
+## The explore front end
+
+When a pack lists `explore.realms`, the build also writes `<page folder>/explore/`: a page where
+you walk the overworld and a realm's map and talk to whoever you stand next to. Every question
+opens in a dialog drawn by the same `core/60-screens.js` as the classic page, and the same
+`Quest.machine` decides what happens, so the two pages keep one save. A portal to a realm without a
+map opens that realm in the classic page (`#realm=<id>&from=explore`, which starts at its gate
+and shows a link back beside its door).
+
+**The home page.** With `explore: {home: true}` (AgentQL Quest has it, now that every realm has a
+map) the explore page is the pack's home page: the build writes it as `<page folder>/index.html`
+(the same page, with `<base href="explore/">` so its files still load from `explore/`) and moves
+the classic page to `<page folder>/classic/`. Each links to the other ("Play the classic version",
+"Back to the explore map"), and an old link to a classic realm (`#realm=<id>`) at the home page is
+forwarded to `classic/`. Without `home`, the classic page stays the home page and explore lives at
+`explore/`. Once every open realm is done, the overworld says so once ("Every realm complete!",
+with the course score and Elder Wren's portrait).
+
+```
+explore/index.html, explore.js, engine.js ─┐                 ┌─► explore/index.html, explore.js, engine.js
+core/*.js, core/quest.css, fonts/          ─┼─► build.py ─────┼─► explore/core.js, quest.css, fonts.css
+packs/agentql/tiles/, maps/*.tmj           ─┘                 └─► explore/art.json, tiles.json, tiles/, maps/
+```
+
+- **The build owns `explore/` (and `classic/` when explore is home):** it marks each folder it
+  writes and replaces only a marked one. It refuses, before writing anything, one it didn't write
+  (or a link), and any output in `tools/quest/` other than `dist/`.
+- **Everything is ours and local:** no third-party code, no outside requests, and under 3 MB
+  (about 310 KB today). The page runs on `engine.js` (`Quest.engine`), a small tile engine: it
+  draws the map's tile layers and one-tile sprites from the atlas on a 2D canvas, moves the
+  player's 12x12 body against solid tiles and solid sprites (one axis at a time, so it slides along
+  walls), reads the arrow keys on the map, follows the player with the camera, and runs timers,
+  tweens and a fade. Its geometry has no DOM, so node tests drive it. (Phaser was used until it
+  turned out to bundle GPL-3.0 code; design decision 5.)
+- **Tiles** are four CC0 packs in one atlas of 504 slots (490 drawn): Kenney's Tiny Dungeon (frames 0-131),
+  Tiny Town (144-275: trees, houses, a well) and Tiny Battle (276-473: water, rock, boats)
+  (`tiles/LICENSE-kenney.txt`), and ten slices of Ishtar Pixels' Adventure Awaits in eleven frames (480-490:
+  a cliff face with a tunnel, their grass and the foot's sand recoloured to Kenney's; `tiles/LICENSE-adventure-awaits.txt`). The others drawn are ours, drawn or
+  recoloured in `make_atlas.py`: 132, a wall's top; 133-137, the realm guards; 138, the dragon;
+  139, the Forge; 491-497, Law's library (a gold-capped column, a pediment, a frieze, an ornate
+  door, a lamp, a balustrade either side); 498-499, the Golden Forests' arch of leaves and the
+  lane fringed with their leaves. `tiles/make_atlas.py` rebuilds `tiles.png` from the packs' zips
+  (their hashes are in its docstring) and `tiles/tiles.sha256` records the result, which the
+  tests check. The tests can't rebuild it themselves (they don't have the zips), so after
+  editing `make_atlas.py`, rebuild `tiles.png` and record its new hash.
+  `tiles/tiles.json` names the frame for everything the page draws, a door per realm and how each
+  person looks; the build checks it.
+- **The view** shows as much of the map as fits at 1.25 screen pixels a game pixel or more, and as
+  many rows as fit in 70% of the window at that size, so on a laptop the whole overworld shows at
+  once; the camera follows the player over the rest. It is never fewer than 20x8 tiles, so on a
+  phone the scale goes below 1.25, and a map smaller than that sits in a 20x8 view. **Dialogs** show who you're
+  talking to, drawn from the map's art, and not the classic page's ASCII art.
+- **The overworld** is a small world (40x14): a plaza with Elder Wren (who says which way each realm's door lies), and a
+  door for each realm in its own scene, each with a guard beside it who says in one line what the
+  realm is for. Leaving a realm, by its exit, by finishing it, or by the classic page's link back
+  (`#from=<realm>`), puts you back beside its door. The scenes: a
+  tunnel into a mountainside, with rails running into it (the Mines, a dwarf), an ornate library
+  (a pediment over a gilded door between gold-capped columns) over a moat, reached by a bridge with
+  a gold balustrade between two lamps (Law, a wizard), a pier to a small town in the lake (the
+  Lake, a fisherman), a shaded lane fringed with golden leaves to an arch of leaves (the Golden Forests, an elf
+  in golden armour), and a dock with a boat out to sea (the Isles, a sailor).
+- **The Mines** read west to east: a hall where the merchant and the guide wait, a forge hall
+  with the Forge (the compiler) on the north wall between two anvils and torches, mine track
+  running east to a barred door with a torch over it, and behind it the dragon's den.
+- **The Lake, the Golden Forests and the Shifting Isles** read the same way: the merchant and the
+  guide in the west, the Forge between two anvils, a barred door east, and the dragon beyond it.
+  The Lake is a craftsmen's town with a pier out to the dragon's isle; the Forests a path through
+  golden trees to a glade; the Isles three isles joined by stone bridges. Someone in each (a smith,
+  a forester, an islander) points the way.
+- **Law** is a library of four reading rooms in a row, a bookshelf either side of each throne.
+  A petitioner stands before each throne (a throne's optional `look`, from `tiles.json`'s npcs);
+  talking to them opens the hall's questions, and the gate to the next room stays shut until
+  that hall is done. After the last hall the realm's decree is shown; Esc closes it like any
+  dialog, and talking to a throne shows it again until you leave.
+- **Fun:** talk to a chest to open it (its loot is yours, or a mimic snaps at you), to a barrel to
+  roll it aside, and to the troll's hoard it uncovers to claim it. You start with the weapon
+  `tiles.json` names; others come as loot, and X (or the pad's Weapon) switches the one in your
+  hand, which the foe's first question mentions. Loot never touches gold or the quest: it is saved
+  apart, under `<storage key>-explore`. Each realm's portal is its own door (`tiles.json`'s
+  `portals`), and every item's name is `item_<id>` in `strings.yaml`. Talk to an npc to hear its
+  next line (in the toast, which screen readers read); a tie between two things beside you goes to
+  the one you face.
+- **Motion:** the player faces the way it walks and bobs a pixel each step; the merchant, guide, people
+  and foe breathe; maps fade in. With reduced motion on, none of it.
+- **Screenshots:** `python3 tools/quest/tests/shoot_maps.py <folder>` saves every map as a player
+  first sees it (`explore/#look=<map>`, local only), for reviewing art and map changes.
+- **Play:** arrow keys or the touch pad walk; Enter, Space or the pad's talk button talks to whoever
+  is next to you (up, down, left or right; the one the game waits on first), but only while the
+  map has focus, so links and buttons keep Enter and Space; number keys pick in a dialog; Esc
+  (or "Back to the realm") closes it ("not now"; the step waits), and in a realm "Leave for the
+  world map" goes back out beside its door (a quest left unfinished is not saved, as by the exit).
+  In a realm each screen has one way out to the map: mid-realm that button (a hall's own "Back to
+  the map" is dropped), at the end (the decree, a victory) the screen's own. On a touch screen
+  every word that names a key says to tap instead (the help, the hints, Elder Wren, the map's
+  label, the dialog's buttons), and it follows the screen if it changes. Standing by a portal
+  names its realm and how you did there; by the step the game waits on, how to talk to it; by a shut gate, that it is locked until the questions on this side are answered
+  (a barred door). S and M switch sound.
+- **Checks:** the build checks the maps (above) and the tile index; `tests/play_map.js` walks
+  each map through the machine with no canvas. In a real browser,
+  `python3 tools/quest/tests/smoke_explore.py` builds the site, serves it, and plays each
+  explorable realm in headless Chrome (`#smoke=<realm>`, on the home page when explore is home): locked for a fresh player, the
+  map loads, every step talked to in order, each gate drawn and solid exactly until its own steps
+  are done and pushed against while shut, the locked and talk hints only where they belong, a
+  petitioner drawn for each throne with a look, the dialog's portrait (and no ASCII art), "Leave
+  for the world map" handing back the map beside the realm's door, the decree of a realm of halls
+  shown, kept by Esc and shown again, the realm saved, Enter on a link left alone, no request outside the site, and the fun and the people
+  (all with page-script events, not the browser's own input). pytest runs it wherever
+  Chrome is installed, CI included. The scripted play writes saves, so it runs only on a local
+  server (`127.0.0.1` or `localhost`). Touch, screen reader and cross-browser checks are a manual
+  list in the PR.
+
 ## When the build fails
 
 `build.py` refuses to build when the pack no longer holds together, or no longer matches its
@@ -200,6 +367,9 @@ sources:
 | `strings.yaml: the classic page needs '…'` or `art/classic/….txt: the classic page needs it` | the page reads a string or art piece the pack lacks | add it to the pack |
 | `art/classic/….txt: not used` | an art file the page never reads, or a scene for a realm that doesn't exist or has halls (a realm of halls shows its crown) | remove it, or fix its name |
 | `strings.yaml: '…' is not used by the page, the engine or a plugin` | a string nothing reads (often a typo, or one a plugin reads without listing it in `STRINGS`) | remove it, or list it in the plugin's `STRINGS` |
+| `maps/….tmj: …` (for example `can't be reached when the game waits on …`, `must be exactly one tile on the grid`, `the map's edge must all be wall`, `step … needs exactly one object`, `is external; embed it`) | a map doesn't bind to the content, or something on it can't be reached | fix the map in Tiled; the message names the object |
+| `explore/: … bytes is over the 3,000,000-byte budget` | the explore folder grew too big (usually art or maps) | shrink the tiles or maps |
+| `tiles/tiles.json: an explorable pack names its tile frames here` | a pack lists `explore.realms` but has no tile index | add `tiles/tiles.json` |
 | `realm …: the classic page plays either halls or one encounter per realm` | a realm with halls and an encounter, or two encounters | split it into realms |
 | `pack.yaml: …` (for example `unknown key`, `unlock must be one of`, `pane …: label '…' is not in strings.yaml`, `pane id '…' is also a content key`) | the manifest is malformed | fix `pack.yaml`; the message names the rule |
 | `packs … and … share storage_key '…'` (or `id`, `publish_path`) | two games would overwrite each other's saves or Pages folder | give each pack its own |

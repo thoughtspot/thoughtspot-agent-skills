@@ -87,6 +87,8 @@ run_check() {
   if output=$("$PYTHON_BIN" "${args[@]}" 2>&1); then
     printf "PASS "
     _record_duration "$label" "$t0"
+    # A passing check may still say what it did not check (a `NOTE  ...` line).
+    echo "$output" | grep -E '^NOTE ' | sed 's/^/    /' || true
   else
     printf "FAIL "
     _record_duration "$label" "$t0"
@@ -302,6 +304,18 @@ fi
 # Python source or the validator itself changes.
 if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_internal_imports\.py)'; then
   run_check "internal imports"   "tools/validate/check_internal_imports.py --root ."
+fi
+
+# Audit rule catalog — `ts audit`'s rules are YAML data, and a mistyped scope, operator
+# or category id fails silently (the rule just never fires). Validates the whole
+# catalog (unknown keys/vocabulary, duplicate ids, profile overrides, band order,
+# missing examples, a stale generated check-catalog.md) when anything under ts_cli/audit/,
+# the validator or that doc changes. Rule ids are held to their history against the
+# merge base with the LOCAL origin/main (offline; an id only this branch added may still
+# be dropped) — skipped with a notice when there is no local origin/main; CI checks
+# against origin/main.
+if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py|^agents/cli/ts-audit/references/check-catalog\.md)'; then
+  run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root . --merge-base-with origin/main"
 fi
 
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,

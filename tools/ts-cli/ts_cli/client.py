@@ -297,6 +297,21 @@ class ThoughtSpotClient:
             "then reload your shell (macOS/Linux: source ~/.zshenv | Windows: restart terminal)."
         )
 
+    def _token_from(self, resp: requests.Response) -> Tuple[str, Optional[int]]:
+        """(token, expiry_ms) from a 2xx `auth/token/full` answer; a clean exit, like a
+        401/403, when it carries no token — never a KeyError traceback."""
+        try:
+            data = resp.json()
+        except ValueError:  # not JSON: no token either
+            data = None
+        token = data.get("token") if isinstance(data, dict) else None
+        if not isinstance(token, str) or not token:
+            raise SystemExit(
+                f"Authentication failed for profile '{self._profile_name}': the token "
+                f"endpoint answered {resp.status_code} without a token.\nCheck the profile's "
+                "base URL, then run /ts-profile-thoughtspot → U → Refresh credential.")
+        return token, data.get("expiration_time_in_millis")
+
     def _authenticate(self) -> Tuple[str, Optional[int]]:
         """Authenticate and return (bearer_token, expiry_ms)."""
         p = self._profile
@@ -322,8 +337,7 @@ class ThoughtSpotClient:
                     "Run /ts-profile-thoughtspot → U → Refresh credential."
                 )
             resp.raise_for_status()
-            data = resp.json()
-            return data["token"], data.get("expiration_time_in_millis")
+            return self._token_from(resp)
 
         if p.get("secret_key_env"):
             secret_key = self._get_credential(p["secret_key_env"])
@@ -342,8 +356,7 @@ class ThoughtSpotClient:
                     "Run /ts-profile-thoughtspot → U → Refresh credential."
                 )
             resp.raise_for_status()
-            data = resp.json()
-            return data["token"], data.get("expiration_time_in_millis")
+            return self._token_from(resp)
 
         raise SystemExit(
             f"Profile '{self._profile_name}' has no auth credential configured "

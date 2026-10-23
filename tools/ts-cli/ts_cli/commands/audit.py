@@ -15,32 +15,164 @@ _profile_option = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE",
                                help="Profile name (default: first profile or TS_PROFILE env var)")
 
 
-@app.command("run")
-def run(
-    models: List[str] = typer.Option(..., "--models", "-m",
-                                     help="One or more model GUIDs to audit"),
-    profile: Optional[str] = _profile_option,
-    angles: Optional[str] = typer.Option(None, "--angles", "-a",
-                                          help="Comma-separated angle filter: A,D,H,P,S (default: all)"),
-    assessment_name: str = typer.Option(
-        "general", "--assessment",
-        help="Bar the AI-readiness checks measure against: spotter (descriptions >= 95%, "
-             "synonyms >= 80%, AI context required) or general (>= 50%, >= 25%, "
-             "AI context recommended). Default: general"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o",
-                                           help="Write JSON report to file instead of stdout"),
-) -> None:
-    """Run audit checks against one or more ThoughtSpot models."""
-    from ts_cli.audit import assessment, run_audit
+def _catalog():
+    from ts_cli.audit.catalog_model import load_catalog
+    return load_catalog()
 
+
+def _parse_angles(angles: Optional[str]) -> Optional[list]:
+    """`--angles A,d` -> ["A", "D"], each a category id of the rule catalog, each once;
+    a name the catalog does not know, or a selection naming nothing (`","`), is a usage
+    error — not silently nothing, nor silently everything."""
+    if angles is None:
+        return None
+    letters = list(dict.fromkeys(a.strip().upper() for a in angles.split(",") if a.strip()))
+    if not letters:
+        raise typer.BadParameter("no category given (use e.g. A,D, or omit --angles "
+                                 "for all)", param_hint="--angles")
+    known = list(_catalog().categories)
+    unknown = [a for a in letters if a not in known]
+    if unknown:
+        raise typer.BadParameter(f"unknown categor{'y' if len(unknown) == 1 else 'ies'} "
+                                 f"{', '.join(unknown)} (known: {', '.join(known)})",
+                                 param_hint="--angles")
+    return letters
+
+
+def _assessment(name: Optional[str]) -> str:
+    """The catalog profile `--assessment` names (None: the default); exits on an
+    unknown one."""
+    from ts_cli.audit.engine.run import resolve_profile as resolve_assessment
     try:
-        assessment.normalise(assessment_name)
+        return resolve_assessment(_catalog(), name)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
-    angle_list = [a.strip().upper() for a in angles.split(",")] if angles else None
-    client = ThoughtSpotClient(resolve_profile(profile))
-    result = run_audit(client, models, angle_list, assessment_name)
+
+def _uncaptured(selection: list, profile: str, captured: set) -> Optional[str]:
+    """Why a replay of `selection` under `profile` cannot run on data `captured`, or
+    None. What the selected rules read (`requires ∪ uses`) must all have been fetched."""
+    from ts_cli.audit import data_needs
+    from ts_cli.audit.engine.run import selected_rules
+    missing = sorted(data_needs(selection, [profile]) - captured)
+    if not missing:
+        return None
+    catalog = _catalog()
+    known = [a for a in selection if a in catalog.categories]
+    readers = [r for r in selected_rules(catalog, known, profile)
+               if set(missing) & (set(r.requires) | set(r.uses))]
+    cats = list(dict.fromkeys(c for r in readers for c in r.categories if c in known))
+    return (f"Angle(s) {', '.join(cats)} read data not captured in this snapshot: "
+            f"{', '.join(missing)} (rules {', '.join(r.id for r in readers)}). "
+            "Re-capture with those angles, or drop them from --angles.")
+
+
+def _replay(snapshot_in: Path, angle_list: Optional[list],
+            assessment_name: Optional[str]) -> dict:
+    """Audit a captured snapshot: no profile, no client, no network.
+
+    The captured assessment is used unless ``--assessment`` is given explicitly. The
+    selection must read only data the snapshot captured (its manifest's `needs`, or —
+    for a snapshot written before needs were recorded — what its angles fetched), which
+    the audit JSON records as `corpus.fetched_needs`.
+    """
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.snapshot import SnapshotError, read_snapshot_needs
+
+    try:
+        ctx, captured, needs = read_snapshot_needs(snapshot_in)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot replay snapshot: {exc}") from exc
+    selection = angle_list or captured
+    profile = _assessment(assessment_name if assessment_name is not None else ctx.assessment)
+    why = _uncaptured(selection, profile, needs)
+    if why:
+        raise SystemExit(f"{why} (snapshot: {snapshot_in})")
+    if assessment_name is not None and profile != _assessment(ctx.assessment):
+        typer.echo(f"Note: --assessment {profile} overrides the "
+                   f"snapshot's captured assessment ({ctx.assessment}).", err=True)
+    return run_audit(None, ctx.model_guids, selection, assessment_name, ctx=ctx,
+                     fetched_needs=needs)
+
+
+def _capture(client, models: list, angle_list: Optional[list], assessment_name: Optional[str],
+             snapshot_out: Path) -> dict:
+    """Fetch the audit data, write it to ``snapshot_out``, then audit it as normal."""
+    from ts_cli.audit import data_needs, run_audit
+    from ts_cli.audit.context import ALWAYS_FETCHED
+    from ts_cli.audit.context import build_context
+    from ts_cli.audit.snapshot import SnapshotError, prepare_snapshot_dir, write_snapshot
+
+    try:  # before the fetch: a refused directory must not cost a full capture
+        snapshot_out = prepare_snapshot_dir(snapshot_out)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot write snapshot: {exc}") from exc
+    angles = angle_list or list(_catalog().categories)
+    # Every profile's needs (a replay may pass a different --assessment); the manifest
+    # records them so a replay can refuse what is missing.
+    needs = data_needs(angles)
+    ctx = build_context(client, models, needs)
+    ctx.assessment = _assessment(assessment_name)
+    try:
+        write_snapshot(ctx, snapshot_out, angles, needs=needs)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot write snapshot: {exc}") from exc
+    typer.echo(f"Snapshot written to {snapshot_out}", err=True)
+    return run_audit(client, models, angles, assessment_name, ctx=ctx,
+                     fetched_needs=set(needs) | ALWAYS_FETCHED)
+
+
+@app.command("run")
+def run(
+    models: Optional[List[str]] = typer.Option(
+        None, "--models", "-m",
+        help="One or more model GUIDs to audit (required unless --snapshot-in)"),
+    profile: Optional[str] = _profile_option,
+    angles: Optional[str] = typer.Option(
+        None, "--angles", "-a",
+        help="Comma-separated categories of the rule catalog: A,D,H,P,S (default: all)"),
+    assessment_name: Optional[str] = typer.Option(
+        None, "--assessment",
+        help="Assessment profile of the rule catalog the rules measure against: spotter "
+             "(descriptions >= 95%, synonyms >= 80%, AI context required) or general "
+             "(>= 50%, >= 25%, AI context recommended). Default: general; with "
+             "--snapshot-in, the assessment the snapshot was captured with"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o",
+                                           help="Write JSON report to file instead of stdout"),
+    snapshot_out: Optional[Path] = typer.Option(
+        None, "--snapshot-out",
+        help="Also write the fetched audit data to this directory, for later replay. "
+             "Refused inside a git work tree, or when the directory is non-empty and "
+             "not an earlier snapshot"),
+    snapshot_in: Optional[Path] = typer.Option(
+        None, "--snapshot-in",
+        help="Audit a directory written by --snapshot-out instead of fetching: needs no "
+             "profile, ignores --models, and --angles defaults to the captured angles"),
+) -> None:
+    """Run the audit rule catalog against one or more ThoughtSpot models."""
+    from ts_cli.audit import run_audit
+
+    if assessment_name is not None:
+        _assessment(assessment_name)
+    if snapshot_in and snapshot_out:
+        raise typer.BadParameter("--snapshot-in and --snapshot-out cannot be used together",
+                                 param_hint="--snapshot-in / --snapshot-out")
+    if not snapshot_in and not models:
+        raise typer.BadParameter("required unless --snapshot-in is given",
+                                 param_hint="--models")
+
+    angle_list = _parse_angles(angles)
+    if snapshot_in:
+        if models:
+            typer.echo("Note: --models is ignored with --snapshot-in; "
+                       "the snapshot's models are audited.", err=True)
+        result = _replay(snapshot_in, angle_list, assessment_name)
+    else:
+        client = ThoughtSpotClient(resolve_profile(profile))
+        if snapshot_out:
+            result = _capture(client, models, angle_list, assessment_name, snapshot_out)
+        else:
+            result = run_audit(client, models, angle_list, assessment_name)
     json_str = json.dumps(result, indent=2)
 
     if output:

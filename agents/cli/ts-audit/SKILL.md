@@ -47,7 +47,8 @@ into a single prompt to cut round-trips.
 
 | File | Purpose |
 |---|---|
-| [references/check-catalog.md](references/check-catalog.md) | All audit checks: what they detect, severity logic, and how to add/modify/remove checks |
+| [references/check-catalog.md](references/check-catalog.md) | Every audit rule: what it detects, its severity per assessment profile, finding text and remediation — generated from the rule catalog |
+| [references/rule-authoring.md](references/rule-authoring.md) | How to add, change or retire a rule (and add a category or derived field): the rule syntax, the gates, and the step-by-step procedures |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth, profile config |
 | [../ts-dependency-manager/SKILL.md](../ts-dependency-manager/SKILL.md) | Action skill for audit findings (remove/repoint) |
 | [../ts-object-answer-promote/SKILL.md](../ts-object-answer-promote/SKILL.md) | Formula promotion from answer to model |
@@ -168,10 +169,12 @@ Enter 1 or 2:
 Store the choice and pass it to `ts audit run` as `--assessment spotter` (1) or
 `--assessment general` (2) in Step 5. It sets the AI-readiness checks' bar — A1, A2 and
 A6 pass marks (coverage HIGH below half the mark), and whether a missing AI instruction
-set or Model description (A3, A4) is HIGH or MEDIUM. The table is
-`tools/ts-cli/ts_cli/audit/assessment.py`; the catalog rows are in
-[references/check-catalog.md](references/check-catalog.md). Omitted, it defaults to
-`general`, and the report header names the assessment used.
+set or Model description (A3, A4) is HIGH or MEDIUM. A profile is a named override
+layer in the rule catalog (`tools/ts-cli/ts_cli/audit/catalog/profiles.yaml`, and a
+rule's `profiles:` block): it may change a rule's bands, severity, wording, remediation
+or on/off status, never what the rule checks. The rules that differ by profile show each
+profile's grading in [references/check-catalog.md](references/check-catalog.md).
+Omitted, it defaults to `general`, and the report header names the assessment used.
 
 ### 2c. Connection scope
 
@@ -198,36 +201,49 @@ Store the selected connection names. In Steps 3-4, filter objects by
 
 ## Step 3 — Enumerate Objects
 
-Run parallel metadata searches to build the object inventory. Only fetch object
-types needed by the selected angles.
+This step picks the Models to audit and shows the user an inventory. It does **not**
+collect the audit's data: `ts audit run` (Step 5) fetches that itself.
 
-**Always needed (any angle):**
+**The Models (always):**
 
 ```bash
 ts metadata search --subtype WORKSHEET --all --profile "{profile_name}"
 ```
 
 Filter to actual Models (not legacy Worksheets) using `metadata_header.type` or
-the presence of `worksheetVersion` in the response.
+the presence of `worksheetVersion` in the response. Their GUIDs are what Step 5 passes
+as `--models`.
 
-**For D angle — also enumerate tables:**
+**What `ts audit run` fetches, and why it is not chosen here.** Each rule in the rule
+catalog (`tools/ts-cli/ts_cli/audit/catalog/`) declares the data it reads, as `requires`
+or `uses` (see [references/rule-authoring.md](references/rule-authoring.md)). The audit
+fetches the union of what the selected rules declare, whichever category selected
+them:
+
+| Data | Fetched |
+|---|---|
+| Model TML with its associated Table TML, metadata headers, dependents | Every audit |
+| AI instructions (`ai/instructions/get`, one call per Model) | When a selected rule declares `ai_instructions` (A3, A5) |
+| Answer TML (the Answers among the Models' dependents) | When a selected rule declares `answers` (H7, H8, H9) |
+| Sets and each Set's consumers | When a selected rule declares `sets` (H4, H5) |
+
+So narrowing `--angles` also narrows the fetch. On the AI-instructions lookup, a final 401
+(after re-authentication), a 429, or any `requests` exception raised by the request or
+its re-authentication aborts the run once, because every later call would fail the same
+way. Any other non-2xx (403, 404, a 5xx after the client's retries, …) or a non-JSON
+2xx skips that Model's AI-instruction rules with a warning, and the report shows "Could
+not be read".
+
+**Optional, for the inventory summary only** (the audit does not read these results):
 
 ```bash
 ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile "{profile_name}"
+ts metadata search --type ANSWER --all --profile "{profile_name}"
 ```
-
-**For D or H angle — query dependents for each model:**
-
-```bash
-ts metadata dependents "{model_guid}" --profile "{profile_name}"
-```
-
-Store the full response in `corpus.dependents[model_guid]`. H angle uses
-dependents for H4 (orphan model detection) and H8 (formula promotion candidates).
 
 Sets are **not** in a Model's dependents (BL-324); `ts audit run` discovers them
-directly when H is selected (one cohort listing per Model), adds each Set to its
-Model's dependents, and looks up each Set's own consumers for H5. A Set whose
+directly when a selected rule declares `sets` (one cohort listing per Model), adds each
+Set to its Model's dependents, and looks up each Set's own consumers for H5. A Set whose
 consumer lookup fails, hides dependents from this user, or is consumed only by
 another Set is **not** reported as an orphan — the audit records a warning instead.
 A Model whose Set listing is incomplete contributes no Set rows, only a warning.
@@ -235,12 +251,6 @@ H4 ignores Set rows: a Model whose only dependents are Sets is still an orphan.
 The Set discovery and the consumer lookup are the shared `tools/ts-cli/ts_cli/sets/`
 modules (`discover.py`, `consumers.py`), the same code behind `/ts-object-set-manager` and
 the `/ts-migrate-orgs` Set gate. That skill's "How it works" section describes the API steps.
-
-**For H angle (formula checks) — also enumerate answers:**
-
-```bash
-ts metadata search --type ANSWER --all --profile "{profile_name}"
-```
 
 **If connection scope was set in Step 2c**, filter each result set to only include
 objects whose `metadata_header.dataSourceName` matches a selected connection.
@@ -302,9 +312,7 @@ Run 4-way parallel exports. For each object:
 ts tml export "{guid}" --fqn --profile "{profile_name}"
 ```
 
-**For models when D, P, or S angles are selected**, also export associated tables
-to get `db_column_properties.data_type` for join quality and `rls_rules` for
-security checks:
+**For models**, also export the associated tables:
 
 ```bash
 ts tml export "{model_guid}" --fqn --associated --profile "{profile_name}"
@@ -321,7 +329,9 @@ write `{guid}-FORBIDDEN.json` with timestamp. Do not retry within 24h.
 Exporting TML: [=====>          ] 34/87  (12 cached, 2 FORBIDDEN)
 ```
 
-Store all exported TML in memory for Step 5 analysis.
+`ts audit run` (Step 5) exports the TML it audits itself, and does not read this
+cache: this step currently costs time without feeding the audit (BL-407). Skip it when
+the user only wants the audit report.
 
 ---
 
@@ -338,20 +348,28 @@ ts audit run \
   --output ~/Dev/audit-runs/{profile_name}-{date}/audit.json
 ```
 
-The engine runs each selected angle's checks as deterministic Python functions.
-Check definitions, thresholds, and severity logic are implemented in:
+The checks are **rules in a catalog**, not code: YAML under
+`tools/ts-cli/ts_cli/audit/catalog/` (`categories.yaml`, `profiles.yaml`,
+`rules/{ai,data,human,perf,security}.yaml`), run by a small deterministic rule engine
+(`ts_cli/audit/engine/`). `--angles` selects categories, and a rule runs when any of its
+categories is selected. Each rule declares the data it reads (`requires`/`uses`), and
+the audit fetches exactly the union for the selected rules (see Step 3). The rule's
+thresholds, severities and wording, and the `--assessment` profile's overrides of them,
+are in its catalog entry.
 
-| Module | Angle | Checks |
+| Catalog file | Category | Rules |
 |---|---|---|
-| `checks_ai.py` | AI Readiness | A1–A6 |
-| `checks_data.py` | Data Modeling | D1–D12 |
-| `checks_human.py` | Human Readiness | H1–H5, H7–H10 |
-| `checks_perf.py` | Performance | P1–P9, P11, P13–P18 |
-| `checks_security.py` | Security | S1–S5, S8–S10 |
+| `rules/ai.yaml` | A — AI Readiness | A1–A6 |
+| `rules/data.yaml` | D — Data Modeling | D1–D12 |
+| `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H10 (H6 retired) |
+| `rules/perf.yaml` | P — Performance | P1–P9, P11, P13–P18 |
+| `rules/security.yaml` | S — Security | S1–S5, S8–S10 |
 
-See [references/check-catalog.md](references/check-catalog.md) for the full catalog
-with severity logic per check, and instructions for adding, modifying, or
-removing checks.
+See [references/check-catalog.md](references/check-catalog.md) for every rule — what it
+detects, its severity per profile, its finding text and remediation (generated from the
+catalog). To add, change or retire a rule, follow
+[references/rule-authoring.md](references/rule-authoring.md); never add a Python check
+function.
 
 ### Phase 2 — Usage Analysis (future)
 
@@ -431,6 +449,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.0.0 | 2026-10-23 | **Rules are data.** The Python check modules (`checks_*.py`) are gone: every check is a rule in a YAML catalog (`tools/ts-cli/ts_cli/audit/catalog/`) run by a small rule engine, and categories and assessment profiles are catalog data too. `check-catalog.md`, the report's labels and recommendations and the audit JSON's `check_meta` are generated from it, and a catalog gate checks every rule in pre-commit and CI. New [references/rule-authoring.md](references/rule-authoring.md) is the procedure for adding, changing or retiring a rule. **Findings are unchanged**: on every committed test input under both profiles, and on a local 351-Model snapshot, the catalog reports exactly what the old checks did (H6, a stub that never ran, is recorded as retired). **Deliberate behaviour changes:** (a) on one Model's AI-instructions lookup, any non-2xx other than 401 or 429 (403, 404, a 5xx after the client's retries, a final 1xx or 3xx, …) skips that Model with a warning instead of aborting the run (a non-JSON 2xx skipped it before and still does), while a final 401 (after re-authentication), a 429, or any `requests` exception raised by the request or its re-authentication aborts the run once; (b) `--angles ""` or `","` is a usage error (omit the flag for all), so is an unknown letter (`--angles A,X` silently ran only A before), and a repeated letter counts once; (c) `check_meta.thresholds` and the ERD's recommendation text are generated from the catalog, in words (the ERD's "Fix." line is the rule's remediation where it has one); (d) additive JSON: `categories` and `bands` on each finding, `summary.by_category`, `corpus.fetched_needs`, `instructions_read` per Model, and the report shows "Not collected" or "Could not be read" where AI instructions were not fetched or failed; (e) H8 and H9 are fast on large estates; (f) a `requests` exception on the AI-instructions lookup now aborts the run, and any other exception there propagates (both were skipped per Model before); (g) the report's per-finding metric bar reads the finding's bands and their direction, labelled "limit" or "target" in the measure's unit: a lower-is-better measure over its limit (P8's 90 columns against 75) now shows as over it, where it drew as a green "ok" bar against a default 80. Which data is fetched is now decided by the selected rules' `requires`/`uses` rather than by category letter — for every selection today, exactly what was fetched before. `ts audit run --snapshot-out` / `--snapshot-in` capture an audit's data and replay it offline (`--snapshot-out` refuses a directory inside a git work tree, or a non-empty one that is not an earlier snapshot). The pre-catalog ids P10, P12, S6 and S7 are recorded as retired, never reused. |
 | 2.6.0 | 2026-10-22 | **The assessment profile now does something (BL-399).** Step 2b has always asked for Spotter-ready or General and promised different thresholds, but nothing passed the choice on: every check ran one fixed bar, so a Spotter-ready audit passed descriptions at 80% against a promised 95%. `ts audit run --assessment spotter|general` now carries it: A1 95% / 50%, A2 80% / 25%, A6 required (graded) / recommended (LOW), A3-A4 HIGH / MEDIUM; coverage is HIGH below half the pass mark. Both run commands pass it, and the report header shows it. Default `general`. |
 | 2.5.0 | 2026-10-21 | **A6 — measure AI context coverage**: the share of visible measures carrying `properties.ai_context`, which the Spotter-ready profile has promised ("AI context required") with no check behind it; the finding names the uncovered measures. **A2 fix:** synonyms are read from `properties.synonyms`, where Model TML keeps them. A2 read the column root, so it reported 0% synonym coverage for every Model and A5's readiness score always lost its synonym weight — on 599 Models from the SE demo cluster, A2 flagged all 599 before the fix and 278 after. |
 | 2.4.3 | 2026-10-02 | H5 orphan-Set check now fires: Sets discovered directly rather than from Model dependents (BL-302, BL-324). A Set whose consumer lookup fails, hides dependents, or is consumed only by another Set stays unreported with a warning. H4 ignores Set rows, so a Model with only Sets is still an orphan. |

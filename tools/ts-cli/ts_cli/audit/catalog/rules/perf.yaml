@@ -1,0 +1,375 @@
+# Rules whose primary category is P (Performance). One list entry per rule;
+# the shape is documented in ts_cli/audit/catalog_model.py and checked by
+# tools/validate/check_audit_catalog.py.
+#
+# None of these is profile-aware: the catalog default holds under both profiles.
+# P4 repeats D4 and P6 the VARCHAR half of D2 — each angle reports the shared rule
+# under its own id and wording (engine/tml.py, BL-304). Titles are the legacy CHECK_META
+# descriptions; the report has never carried a remediation for a P finding, so none
+# is set here.
+
+- id: P1
+  title: SQL View used as model source
+  description: A SQL_VIEW Table in the metadata blocks filter pushdown into the warehouse.
+  categories: [P]
+  requires: [metadata]
+  scope: metadata
+  aggregate:
+    mode: each
+    where: {field: type, eq: SQL_VIEW}
+  severity: MEDIUM
+  message: SQL_VIEW data source blocks filter pushdown
+  examples:
+    fires: {fixture: perf_metadata_sql_view, severity: MEDIUM}
+    silent: {fixture: perf_metadata_logical_only}
+
+- id: P2
+  title: Scalar formula density (run at query time)
+  description: >-
+    How many of a Model's formulas are scalar — no `columns[]` entry surfacing the
+    formula (by `formula_id`) declares an `aggregation` — graded MEDIUM above 5 and
+    HIGH above 10. Scalar formulas run at query time in the ThoughtSpot engine.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.formula
+    where: {field: "@is_scalar_formula", truthy: true}
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 10, severity: HIGH}
+      - {op: gt, value: 5, severity: MEDIUM}
+  message: "{count} scalar formulas (run at query time in TS engine)"
+  legacy_threshold: {green: 5, yellow: 10}
+  examples:
+    fires: {fixture: perf_eleven_scalar_formulas, severity: HIGH}
+    silent: {fixture: perf_six_aggregated_formulas}
+
+- id: P3
+  title: Model filters lacking apply_on_tables
+  description: >-
+    A Model filter with no `apply_on_tables` is always applied — on every query,
+    whichever tables it touches.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.filter
+    where: {field: apply_on_tables, truthy: false}
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 0, severity: MEDIUM}
+  message: "{count}/{total} filters lack apply_on_tables (run on every query)"
+  examples:
+    fires: {fixture: perf_filters_one_mandatory, severity: MEDIUM}
+    silent: {fixture: perf_filters_all_scoped}
+
+- id: P4
+  title: "Apply-all-joins anti-pattern (join_progressive:false)"
+  description: >-
+    A Model with more than 5 tables and `join_progressive` off joins every table on
+    every query. Counted as the Model's tables when join_progressive is not set, so
+    the count is 0 — and silent — on a progressive Model. Same rule as D4.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.table
+    where: {field: parent.properties.join_progressive, truthy: false}
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 5, severity: HIGH}
+  message: "join_progressive: false on {count}-table model — every query joins ALL tables"
+  examples:
+    fires: {fixture: perf_model_wide_not_progressive, severity: HIGH}
+    silent: {fixture: perf_model_wide_progressive}
+
+- id: P5
+  title: No date constraints on fact tables
+  description: >-
+    A Model with fact tables (a `model_tables` entry with more than 3 MEASURE columns,
+    matched by its `name`) but no `date_range_condition` in its `constraints`, so every
+    query scans all history.
+  # Fact tables are found by engine/tml.py fact_tables.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@has_date_constraint", truthy: false}
+        - {field: "@fact_table_count", gt: 0}
+    measure: "@fact_table_count"
+  severity: MEDIUM
+  message: "No date constraints on model with fact tables: {@fact_tables:head3}"
+  examples:
+    fires: {fixture: perf_fact_model_unconstrained, severity: MEDIUM}
+    silent: {fixture: perf_fact_model_date_window}
+
+- id: P6
+  title: VARCHAR join keys (performance framing of D2)
+  description: >-
+    A join (inline, or referencing a Table's `joins_with`) whose key columns are
+    string-typed on their Table TML; string keys join 2-5x slower than integers. A
+    key whose Table TML is not in scope has an unknown type and is not reported.
+    Same keys as D2's HIGH half.
+  categories: [P]
+  requires: [model_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@varchar_join_key_count", gt: 0}
+    measure: "@varchar_join_key_count"
+  severity: HIGH
+  message: "VARCHAR join key(s) — 2-5x slower than integer: {@varchar_join_keys:all}"
+  examples:
+    fires: {fixture: join_keys_varchar, severity: HIGH}
+    silent: {fixture: join_keys_integer}
+
+- id: P7
+  title: Join depth exceeding thresholds
+  description: >-
+    The longest join chain across a Model's tables (the same depth D1 grades),
+    MEDIUM above 3 hops and HIGH above 5.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    measure: "@join_depth"
+  bands:
+    direction: lower_is_better
+    unit: depth
+    levels:
+      - {op: gt, value: 5, severity: HIGH}
+      - {op: gt, value: 3, severity: MEDIUM}
+  message: "Join depth {value} (>5 HIGH, >3 MEDIUM) — complex query plans"
+  legacy_threshold: {green: 3, yellow: 5}
+  examples:
+    fires: {fixture: perf_join_chain_six_hops, severity: HIGH}
+    silent: {fixture: perf_star_schema}
+
+- id: P8
+  title: Column sprawl (>75 columns)
+  description: A Model with more than 75 columns (the column ceiling D1 grades against).
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.column
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 75, severity: MEDIUM}
+  message: "{count} columns — wider GROUP BY, more complex query plans"
+  legacy_threshold: {max: 75}
+  examples:
+    fires: {fixture: perf_model_80_columns, severity: MEDIUM}
+    silent: {fixture: perf_model_50_columns}
+
+- id: P9
+  title: High-cardinality ID column indexed as ATTRIBUTE
+  description: >-
+    An ATTRIBUTE column that is text-search indexed (no `index_type: DONT_INDEX`)
+    and whose name ends like an identifier (`_id`, `_guid`, `_uuid`,
+    `transaction_id`, `row_id`, `surrogate_key`; any case).
+  categories: [P]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: properties.column_type, eq: ATTRIBUTE}
+        - {field: "@is_indexed", truthy: true}
+        - {field: name, regex: '(?i)(_id|_guid|_uuid|transaction_id|row_id|surrogate_key)$'}
+  severity: MEDIUM
+  message: "High-cardinality ID column '{name}' indexed as ATTRIBUTE"
+  examples:
+    fires: {fixture: perf_indexed_id_attribute, severity: MEDIUM}
+    silent: {fixture: perf_id_attribute_not_indexed}
+
+- id: P11
+  title: Excessive indexed columns on Spotter-enabled model
+  description: >-
+    More than 30 text-search indexed columns on a Model with Spotter enabled
+    (`properties.spotter_config.is_spotter_enabled`). Counted as the indexed columns
+    of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: count
+    over: model.column
+    where:
+      all:
+        - {field: parent.properties.spotter_config.is_spotter_enabled, truthy: true}
+        - {field: "@is_indexed", truthy: true}
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 30, severity: INFO}
+  message: "{count} indexed columns on Spotter-enabled model"
+  legacy_threshold: {info: 30}
+  examples:
+    fires: {fixture: perf_spotter_31_indexed, severity: INFO}
+    silent: {fixture: perf_spotter_30_indexed}
+
+- id: P13
+  title: High RLS rule count (cost compounds per query)
+  description: >-
+    A Table's RLS rule count, MEDIUM above 3 and HIGH above 6; each rule adds to
+    every query's cost.
+  categories: [P]
+  requires: [table_tml]
+  scope: table
+  aggregate:
+    mode: count
+    over: table.rls_rule
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 6, severity: HIGH}
+      - {op: gt, value: 3, severity: MEDIUM}
+  message: "{count} RLS rules — cost compounds linearly per query"
+  legacy_threshold: {medium: 3, high: 6}
+  examples:
+    fires: {fixture: perf_table_seven_rls_rules, severity: HIGH}
+    silent: {fixture: perf_rls_plain_rule}
+
+- id: P14
+  title: RLS expression uses functions (prevents index pruning)
+  description: >-
+    An RLS rule expression that calls UPPER, LOWER, TRIM, CAST, CONCAT, CONTAINS or
+    IF (any case), defeating index and partition pruning. The detail quotes the
+    first 80 characters of the expression. Same trigger as S9.
+  categories: [P]
+  requires: [table_tml]
+  scope: table.rls_rule
+  aggregate:
+    mode: each
+    where: {field: expr, regex: '(?i)\b(UPPER|LOWER|TRIM|CAST|CONCAT|CONTAINS|IF)\s*\('}
+  severity: MEDIUM
+  message: "RLS expression uses functions — prevents index/partition pruning: {obj.expr:.80}"
+  examples:
+    fires: {fixture: perf_rls_function_rule, severity: MEDIUM}
+    silent: {fixture: perf_rls_plain_rule}
+
+- id: P15
+  title: VARCHAR RLS column without value_casing
+  description: >-
+    A column an RLS rule references (resolved by name on the Table TML's own
+    `columns[]`) whose warehouse type is a string type and which sets no
+    `value_casing`. An unresolved reference has an unknown type and is not
+    reported. S8 is the same walk without the `value_casing` guard.
+  categories: [P]
+  requires: [table_tml]
+  scope: rls_column_ref
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@is_string_type", truthy: true}
+        - {field: value_casing, truthy: false}
+  severity: MEDIUM
+  message: "VARCHAR RLS column '{name}' without value_casing"
+  examples:
+    fires: {fixture: perf_rls_plain_rule, severity: MEDIUM}
+    silent: {fixture: perf_rls_cased_varchar}
+
+- id: P16
+  title: Deeply nested if() in formulas
+  description: >-
+    A Model formula making more than 3 `if (` calls (INFO), or more than 5 (LOW).
+  categories: [P]
+  requires: [model_tml]
+  scope: model.formula
+  aggregate:
+    mode: each
+    measure: "@if_call_count"
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 5, severity: LOW}
+      - {op: gt, value: 3, severity: INFO}
+  message: "Formula has {value} if() calls"
+  legacy_threshold: {info: 3, low: 5}
+  examples:
+    fires: {fixture: perf_formula_six_nested_ifs, severity: LOW}
+    silent: {fixture: perf_six_scalar_formulas}
+
+- id: P17
+  title: Formula cross-reference chain depth
+  description: >-
+    The longest chain of formula-to-formula references starting at a formula (by id
+    or display name, BL-300), INFO above 2 and LOW above 3. Formulas sharing a name
+    are one node and report once.
+  categories: [P]
+  requires: [model_tml]
+  scope: model.formula
+  aggregate:
+    mode: each
+    measure: "@reference_chain_depth"
+  bands:
+    direction: lower_is_better
+    unit: depth
+    levels:
+      - {op: gt, value: 3, severity: LOW}
+      - {op: gt, value: 2, severity: INFO}
+  message: "Formula reference chain depth {value}"
+  legacy_threshold: {info: 2, low: 3}
+  examples:
+    fires: {fixture: refs_id_chain_four, severity: INFO}
+    silent: {fixture: perf_formulas_real_export}
+
+- id: P18
+  title: COUNT_DISTINCT aggregation (most expensive)
+  description: A Model column aggregated with COUNT_DISTINCT, which is expensive to compute.
+  categories: [P]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where: {field: properties.aggregation, eq: COUNT_DISTINCT}
+  severity: INFO
+  message: "COUNT_DISTINCT aggregation on '{name}'"
+  examples:
+    fires: {fixture: perf_column_count_distinct, severity: INFO}
+    silent: {fixture: perf_model_80_columns}
+
+# Ids used before the catalog existed. Recorded as retired so the history gate holds
+# them: the gate reads only catalog history, and "the next free number" would hand
+# them out again.
+- id: P10
+  title: RLS bypass as exception
+  description: >-
+    Retired before the rule catalog: flagged `is_bypass_rls: true` until ts-audit's
+    check overhaul (#131) removed it. S10 and S4 report RLS bypass now. Recorded as
+    retired so the id is never reused.
+  status: retired
+  categories: [P]
+  scope: model
+
+- id: P12
+  title: Reserved (never assigned)
+  description: >-
+    Retired without ever running: the id was left unassigned when the checks were
+    renumbered (#131). Recorded as retired so it is never handed out by accident.
+  status: retired
+  categories: [P]
+  scope: model

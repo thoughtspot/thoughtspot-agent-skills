@@ -1,0 +1,193 @@
+# Rules whose primary category is A (AI Readiness). One list entry per rule;
+# the shape is documented in ts_cli/audit/catalog_model.py and checked by
+# tools/validate/check_audit_catalog.py.
+#
+# The catalog's own bands/severity/legacy_threshold are the default profile's
+# (general); `profiles.spotter` replaces them for a Spotter-ready audit. A coverage
+# rule is HIGH below half its pass mark and MEDIUM between that and the pass mark
+# (the BL-399 promise of ts-audit SKILL Step 2b).
+#
+# Text tests pair `nonblank: true` with `truthy: true`: the legacy checks read
+# `(value or "").strip()`, under which a falsy non-string (0, false) is blank too.
+
+- id: A1
+  title: Description coverage below threshold
+  description: >-
+    Share of a Model's columns with a non-blank description, against the profile's
+    pass mark (Spotter-ready 95%, General 50%).
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    match: {field: description, nonblank: true, truthy: true}
+  bands:
+    direction: higher_is_better
+    unit: percent
+    levels:
+      - {op: lt, value: 25.0, severity: HIGH}
+      - {op: lt, value: 50, severity: MEDIUM}
+  profiles:
+    spotter:
+      bands:
+        direction: higher_is_better
+        unit: percent
+        levels:
+          - {op: lt, value: 47.5, severity: HIGH}
+          - {op: lt, value: 95, severity: MEDIUM}
+      legacy_threshold: {green: 95, assessment: "{profile_label}", yellow: 47.5}
+  message: "{matched}/{total} columns have descriptions ({pct:.0f}%)"
+  legacy_threshold: {green: 50, assessment: "{profile_label}", yellow: 25.0}
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: ai_model_one_of_three_described, profile: spotter, severity: HIGH}
+    silent: {fixture: ai_model_all_described, profile: spotter}
+
+- id: A2
+  title: Synonym coverage below threshold
+  description: >-
+    Share of a Model's columns carrying synonyms (under `properties:`, where Model TML
+    keeps them, or at the column root), against the profile's pass mark
+    (Spotter-ready 80%, General 25%).
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    match: {field: "@has_synonyms", truthy: true}
+  bands:
+    direction: higher_is_better
+    unit: percent
+    levels:
+      - {op: lt, value: 12.5, severity: HIGH}
+      - {op: lt, value: 25, severity: MEDIUM}
+  profiles:
+    spotter:
+      bands:
+        direction: higher_is_better
+        unit: percent
+        levels:
+          - {op: lt, value: 40.0, severity: HIGH}
+          - {op: lt, value: 80, severity: MEDIUM}
+      legacy_threshold: {green: 80, assessment: "{profile_label}", yellow: 40.0}
+  message: "{matched}/{total} columns have synonyms ({pct:.0f}%)"
+  legacy_threshold: {green: 25, assessment: "{profile_label}", yellow: 12.5}
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: ai_model_one_of_three_with_synonyms, profile: spotter, severity: HIGH}
+    silent: {fixture: ai_model_all_with_synonyms, profile: spotter}
+
+- id: A3
+  title: No AI instructions configured
+  description: >-
+    A Model with no Spotter coaching — no instruction in its ai/instructions response
+    and no `model_instructions.data_model_instructions` in its TML. A Model whose
+    instructions lookup failed is skipped, not reported.
+  categories: [A]
+  requires: [model_tml, ai_instructions]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@is_coached", truthy: false}
+  severity: MEDIUM
+  profiles:
+    spotter:
+      severity: HIGH
+  message: No AI/Spotter coaching instructions configured
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: models_with_and_without_ai_instructions, profile: spotter, severity: HIGH}
+    silent: {fixture: ai_model_coached, profile: spotter}
+
+- id: A4
+  title: Missing Spotter config
+  description: A Model with no (or a blank) description.
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {not: {field: description, nonblank: true, truthy: true}}
+  severity: MEDIUM
+  profiles:
+    spotter:
+      severity: HIGH
+  message: Model has no description
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: ai_model_without_description, severity: MEDIUM}
+    silent: {fixture: ai_model_described}
+
+- id: A5
+  title: Spotter readiness composite score
+  description: >-
+    A weighted readiness score per Model — descriptions 30%, coaching 25%, synonyms
+    15%, Model description 15%, column-name quality 15% — graded HIGH below 50 and
+    MEDIUM below 80. Not profile-aware. A Model without columns counts as one column,
+    so its score is still defined.
+  # A code rule (code:spotter_readiness, scored by engine/code_rules.py
+  # readiness_score) because its column shares use their own denominator and its
+  # name-quality share its own regexes: a composite rule would need a single-use
+  # derived field per component.
+  categories: [A]
+  requires: [model_tml]
+  # Reads ai_instructions (readiness_score -> @is_coached) but must not skip a Model whose
+  # lookup failed — it scores it uncoached — so it is a `uses`, not a `requires`.
+  uses: [ai_instructions]
+  implementation: code:spotter_readiness
+  scope: model
+  bands:
+    direction: higher_is_better
+    unit: score
+    levels:
+      - {op: lt, value: 50, severity: HIGH}
+      - {op: lt, value: 80, severity: MEDIUM}
+  message: "Spotter readiness score {score:.0f}/100 (Ready >= 80)"
+  legacy_threshold: {ready: 80, needs_work: 50}
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: ai_model_bare_columns, severity: HIGH}
+    silent: {fixture: ai_model_ready}
+
+- id: A6
+  title: Measure AI context coverage below threshold
+  description: >-
+    Share of a Model's visible MEASURE columns with a non-blank
+    `properties.ai_context`. Attributes are not counted: the coach's ai_context schema
+    requires it on every measure (additivity, time basis, grain keys) and leaves it
+    empty, correctly, on most attributes such as surrogate keys. Hidden columns are
+    not searched, so they are not counted. A Model without visible measures is skipped.
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where:
+      all:
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - {not: {field: properties.is_hidden, truthy: true}}
+    match: {field: properties.ai_context, nonblank: true, truthy: true}
+    unnamed_label: "?"  # the legacy check lists a measure with no name as "?"
+  bands:
+    direction: higher_is_better
+    unit: percent
+    levels:
+      - {op: lt, value: 80, severity: LOW}
+  profiles:
+    spotter:
+      bands:
+        direction: higher_is_better
+        unit: percent
+        levels:
+          - {op: lt, value: 40.0, severity: HIGH}
+          - {op: lt, value: 80, severity: MEDIUM}
+      legacy_threshold: {green: 80, assessment: "{profile_label}", yellow: 40.0}
+  message: "{matched}/{total} measures have AI context ({pct:.0f}%) — missing: {unmatched_names}"
+  legacy_threshold: {green: 80, assessment: "{profile_label}"}
+  remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
+  examples:
+    fires: {fixture: model_measures_no_ai_context, profile: spotter, severity: HIGH}
+    silent: {fixture: model_measures_with_ai_context, profile: spotter}

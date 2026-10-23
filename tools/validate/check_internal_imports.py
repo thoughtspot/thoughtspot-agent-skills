@@ -73,7 +73,7 @@ SCAN_ROOT = Path("tools/ts-cli/ts_cli")
 # referenced fix merges — this is scaffolding for landing the gate now, not a permanent
 # exemption. Format: (repo-relative path, import lineno, target module, imported name).
 # --------------------------------------------------------------------------------------
-ALLOWLIST: set[tuple[str, int, str, str]] = set()
+ALLOWLIST: set[tuple[str, int, str, Optional[str]]] = set()
 
 
 @dataclass

@@ -1,25 +1,34 @@
+"""`ts audit` — run the rule catalog over an AuditContext and assemble the audit JSON.
+
+The rules are data (`catalog/`, run by `engine/`); `run_audit` selects them by category
+(`--angles`) and profile (`--assessment`), fetches what those rules declare
+(`data_needs`: requires ∪ uses — nothing more), and returns `{findings, summary, corpus,
+check_meta}`. `corpus.fetched_needs` records what was fetched, so the report can tell a
+section "not collected for this selection" from "collected, none".
+"""
 from __future__ import annotations
 
 from typing import Optional
 
-from ts_cli.audit import checks_ai, checks_data, checks_human, checks_perf, checks_security
-from ts_cli.audit.context import build_context
+from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
 from ts_cli.audit.erd import build_erd_for_audit
-from ts_cli.audit.findings import CHECK_META, Finding, build_summary
+from ts_cli.audit.findings import Finding, build_summary
 
-ANGLE_MODULES = {
-    "A": checks_ai,
-    "D": checks_data,
-    "H": checks_human,
-    "P": checks_perf,
-    "S": checks_security,
-}
+#: The conditional data the report reads that no rule need declare: the AI
+#: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
+#: instruction list (`erd.build_erd_for_audit`), and the dependents — Set rows
+#: included, which Set discovery writes — behind each Model's "Downstream Consumers"
+#: panel (`corpus.dependents`). Same vocabulary as a rule's `uses`. NOT fetched for
+#: the report's sake: `ts audit run` fetches only what the selected rules need, and
+#: the report says "not collected for this selection" for a section whose data is
+#: missing from `corpus.fetched_needs`.
+REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets"})
 
 
 _SEV_MAP = {"CRITICAL": "crit", "HIGH": "warn", "MEDIUM": "warn", "LOW": "info", "INFO": "info"}
 
 
-def _inject_findings_into_erd(corpus: dict, findings: list) -> None:
+def _inject_findings_into_erd(corpus: dict, findings: list, check_meta: dict) -> None:
     """Inject audit findings into ERD model data so the ERD renderer can display them."""
     models = corpus.get("models") or []
     guid_to_model = {m["guid"]: m for m in models}
@@ -41,11 +50,13 @@ def _inject_findings_into_erd(corpus: dict, findings: list) -> None:
         erd_finding = {
             "sev": _SEV_MAP.get(f.severity, "info"),
             "check": f.check_id,
-            "title": CHECK_META.get(f.check_id, {}).get("desc", f.check_id),
+            "title": check_meta.get(f.check_id, {}).get("desc", f.check_id),
             "where": f.object_name,
             "target": target,
             "detail": f.detail,
-            "rec": CHECK_META.get(f.check_id, {}).get("thresholds", ""),
+            # What the ERD shows as "Fix.": the rule's remediation, else its grading.
+            "rec": (check_meta.get(f.check_id, {}).get("remediation")
+                    or check_meta.get(f.check_id, {}).get("thresholds", "")),
         }
         erd["findings"].append(erd_finding)
 
@@ -171,9 +182,29 @@ def _build_ai_analysis(instructions: list, model_data: dict) -> dict:
     }
 
 
+def _model_ai_analysis(ctx, guid: str, model: dict, ai_fetched: Optional[bool]) -> dict:
+    """`_build_ai_analysis` over the Model's fetched instructions, plus — when the
+    caller knows whether ai_instructions was fetched — `instructions_read`: whether this
+    Model's `ai/instructions/get` lookup succeeded (a failure leaves no entry, so its
+    questions are [] exactly as for a Model with none), or None when none was made."""
+    instructions = []
+    for info in (ctx.ai_instructions.get(guid, {}).get("nl_instructions_info") or []):
+        instructions.extend(info.get("instructions") or [])
+    analysis = _build_ai_analysis(instructions, model)
+    if ai_fetched is not None:
+        analysis["instructions_read"] = guid in ctx.ai_instructions if ai_fetched else None
+    return analysis
+
+
 def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
-                 angles: Optional[list] = None) -> dict:
-    angles = angles or list(ANGLE_MODULES.keys())
+                 angles: Optional[list] = None, ai_fetched: Optional[bool] = None) -> dict:
+    """The report's corpus. ``ai_fetched`` says whether ai_instructions was fetched for
+    this context: True records each Model's ``ai_analysis.instructions_read`` (whether
+    its lookup succeeded), False records it as None (not looked up), and None — the
+    caller does not know — leaves it out."""
+    if not angles:
+        from ts_cli.audit import catalog_model
+        angles = list(catalog_model.load_catalog().categories)
     models_out = []
     for model in ctx.models:
         m = model.get("model", {})
@@ -193,11 +224,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
                 for mt in model_tables
             ],
         }
-        ai_data = ctx.ai_instructions.get(guid, {})
-        instructions = []
-        for info in (ai_data.get("nl_instructions_info") or []):
-            instructions.extend(info.get("instructions") or [])
-        entry["ai_analysis"] = _build_ai_analysis(instructions, m)
+        entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
         models_out.append(entry)
 
     table_reuse = _build_table_reuse_from_ctx(models_out)
@@ -305,45 +332,81 @@ def _build_overlaps_from_ctx(models: list) -> list:
     return overlaps
 
 
+def data_needs(angles: list, profiles: Optional[list] = None) -> set:
+    """What `build_context` must fetch for `angles`: `requires ∪ uses` of the catalog
+    rules those categories select that are active under any of `profiles` (default: every
+    catalog profile — what a snapshot, replayable under either, captures). An angle the
+    catalog does not know selects nothing, as it runs nothing."""
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.run import needs_for
+    catalog = load_catalog()
+    known = [a for a in angles if a in catalog.categories]
+    needs: set = set()
+    for profile in (list(catalog.profiles) if profiles is None else profiles):
+        needs |= needs_for(catalog, known, profile)
+    return needs
+
+
 def run_audit(
     client,
     model_guids: list,
     angles: Optional[list] = None,
     assessment_name: Optional[str] = None,
+    ctx: Optional[AuditContext] = None,
+    fetched_needs: Optional[set] = None,
 ) -> dict:
-    from ts_cli.audit import assessment
-    angles = angles or list(ANGLE_MODULES.keys())
-    ctx = build_context(client, model_guids, angles)
-    ctx.assessment = assessment.normalise(assessment_name)
-    findings: list[Finding] = []
-    checks_run = 0
-    all_check_ids: list[str] = []
-    for angle_key in angles:
-        module = ANGLE_MODULES.get(angle_key)
-        if not module:
-            continue
-        for check_fn in module.ALL_CHECKS:
-            pre_len = len(findings)
-            findings.extend(check_fn(ctx))
-            checks_run += 1
-            fn_name = check_fn.__name__
-            check_id = fn_name.replace("check_", "").upper()
-            all_check_ids.append(check_id)
+    """Run the catalog rules of the categories ``angles`` (default: all) and return
+    findings, summary, corpus and check_meta. A category the catalog does not know
+    selects nothing (the CLI rejects one before it gets here).
+
+    ``ctx`` replays captured data (``audit/snapshot.py``) instead of fetching:
+    ``client`` and ``model_guids`` are then unused for data and ``client`` may
+    be None. A supplied ``ctx`` keeps the assessment it was captured with
+    unless ``assessment_name`` is given — the profile decides rule ids, severities
+    and thresholds, so falling back to the default would make a replay
+    disagree with the live run it recorded. A fetched ``ctx`` gets
+    ``assessment_name``, or the catalog's default profile when it is None.
+
+    ``corpus.fetched_needs`` (sorted) records what the context holds: for a fetched
+    ``ctx``, what was fetched; for a supplied one, ``fetched_needs`` when the caller
+    knows it (a snapshot's manifest) — omitted when it does not.
+    """
+    from ts_cli.audit import catalog_model
+    from ts_cli.audit.engine.run import resolve_profile, run_rules, selected_rules
+    from ts_cli.audit.generate import report_meta
+    catalog = catalog_model.load_catalog()
+    angles = list(dict.fromkeys(angles or catalog.categories))  # each category once
+    if ctx is None:
+        profile = resolve_profile(catalog, assessment_name)
+        needs = data_needs(angles, [profile])
+        ctx = build_context(client, model_guids, needs)
+        fetched_needs = set(needs) | ALWAYS_FETCHED
+    else:
+        profile = resolve_profile(catalog, assessment_name if assessment_name is not None
+                                  else ctx.assessment)
+    ctx.assessment = profile
+    known = [a for a in angles if a in catalog.categories]
+    findings: list[Finding] = run_rules(ctx, catalog, known, profile)
+    run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]
+    check_meta = report_meta(catalog)["checks"]
 
     corpus = build_corpus(
         ctx,
-        cluster_url=client.base_url,
-        profile_name=client._profile_name,
+        cluster_url=getattr(client, "base_url", ""),
+        profile_name=getattr(client, "_profile_name", ""),
         angles=angles,
+        ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
     )
-    corpus["assessment"] = assessment.label(ctx.assessment)
+    corpus["assessment"] = catalog.profiles[profile].label
+    if fetched_needs is not None:
+        corpus["fetched_needs"] = sorted(fetched_needs)
 
-    _inject_findings_into_erd(corpus, findings)
+    _inject_findings_into_erd(corpus, findings, check_meta)
 
     return {
         "findings": [f.to_dict() for f in findings],
-        "summary": build_summary(findings, checks_run, len(ctx.models), len(ctx.tables),
-                                 all_check_ids=all_check_ids),
+        "summary": build_summary(findings, len(run_ids), len(ctx.models), len(ctx.tables),
+                                 all_check_ids=run_ids, categories=list(catalog.categories)),
         "corpus": corpus,
-        "check_meta": CHECK_META,
+        "check_meta": check_meta,
     }

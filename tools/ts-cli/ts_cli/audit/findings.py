@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 
@@ -15,6 +15,11 @@ class Finding:
     detail: str
     metric: Optional[Union[int, float]] = None
     threshold: Optional[dict] = None
+    # Additive (rule catalog): every category the rule belongs to — `angle` stays the
+    # first one's legacy key — and the uniform band payload
+    # {direction, unit, levels: [{op, value, severity}], profile, provenance}.
+    categories: list[str] = field(default_factory=list)
+    bands: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -27,69 +32,23 @@ class Finding:
             "detail": self.detail,
             "metric": self.metric,
             "threshold": self.threshold,
+            "categories": list(self.categories),
+            "bands": self.bands,
         }
 
 
 _SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 _ANGLES = ["ai", "data_modeling", "human", "performance", "security"]
 
-CHECK_META: dict[str, dict[str, str]] = {
-    "A1": {"desc": "Description coverage below threshold", "thresholds": "Spotter-ready >= 95% / General >= 50%; HIGH below half"},
-    "A2": {"desc": "Synonym coverage below threshold", "thresholds": "Spotter-ready >= 80% / General >= 25%; HIGH below half"},
-    "A3": {"desc": "No AI instructions configured", "thresholds": "HIGH (Spotter-ready) / MEDIUM (General)"},
-    "A4": {"desc": "Missing Spotter config", "thresholds": "HIGH (Spotter) / MEDIUM (General)"},
-    "A5": {"desc": "Spotter readiness composite score", "thresholds": "Weighted score -> severity"},
-    "A6": {"desc": "Measure AI context coverage below threshold", "thresholds": ">= 80% of visible measures; Spotter-ready HIGH below 40%, General LOW"},
-    "D1": {"desc": "Model complexity exceeds threshold", "thresholds": "Tables >15 RED, Columns >75 RED"},
-    "D2": {"desc": "VARCHAR join keys detected", "thresholds": "HIGH per occurrence"},
-    "D3": {"desc": "Join type analysis (FULL OUTER, LEFT/RIGHT)", "thresholds": "HIGH for FULL OUTER, INFO for others"},
-    "D4": {"desc": "Progressive joins disabled on large models", "thresholds": "HIGH if >5 tables + join_progressive:false"},
-    "D5": {"desc": "Orphan tables in model (Cartesian risk)", "thresholds": "MEDIUM per orphan table"},
-    "D6": {"desc": "Grain consistency — fact tables with >40% attributes", "thresholds": "MEDIUM per model"},
-    "D7": {"desc": "High model overlap detected", "thresholds": "Jaccard >= 0.5 with shared facts"},
-    "D8": {"desc": "Duplicate table objects found", "thresholds": "HIGH per duplicate group"},
-    "D9": {"desc": "SQL pass-through function usage (>20% formulas)", "thresholds": "MEDIUM / HIGH by percentage"},
-    "D10": {"desc": "Zero-column tables (bridge vs leaf)", "thresholds": "INFO (bridge) / MEDIUM (leaf)"},
-    "D11": {"desc": "Fan-out join risk (row multiplication)", "thresholds": "HIGH with mitigation reduction"},
-    "D12": {"desc": "Conformed dimension divergence", "thresholds": "MEDIUM per divergence"},
-    "H1": {"desc": "Column name quality (anti-pattern regexes)", "thresholds": "LOW per bad name"},
-    "H2": {"desc": "Description quality (too-short, boilerplate)", "thresholds": "LOW per violation"},
-    "H3": {"desc": "Unnecessary hidden columns", "thresholds": "MEDIUM per column"},
-    "H4": {"desc": "Orphan model with no dependents", "thresholds": "MEDIUM per model"},
-    "H5": {"desc": "Orphan sets (zero consumers)", "thresholds": "MEDIUM per set"},
-    "H7": {"desc": "Direct table connections (bypasses semantic layer)", "thresholds": "MEDIUM per answer"},
-    "H8": {"desc": "Formula promotion candidate", "thresholds": "HIGH if duplicated in 2+ answers"},
-    "H9": {"desc": "Redundant answer formulas (duplicating model formula)", "thresholds": "LOW per formula"},
-    "H10": {"desc": "Stale / temporary objects (name pattern match)", "thresholds": "LOW (name only), MEDIUM if also orphan"},
-    "P1": {"desc": "SQL View used as model source", "thresholds": "MEDIUM per view"},
-    "P2": {"desc": "Scalar formula density (run at query time)", "thresholds": "MEDIUM >5, HIGH >10"},
-    "P3": {"desc": "Model filters lacking apply_on_tables", "thresholds": "MEDIUM per non-progressive filter"},
-    "P4": {"desc": "Apply-all-joins anti-pattern (join_progressive:false)", "thresholds": "HIGH if >5 tables"},
-    "P5": {"desc": "No date constraints on fact tables", "thresholds": "MEDIUM per model"},
-    "P6": {"desc": "VARCHAR join keys (performance framing of D2)", "thresholds": "HIGH per key"},
-    "P7": {"desc": "Join depth exceeding thresholds", "thresholds": "MEDIUM >3, HIGH >5"},
-    "P8": {"desc": "Column sprawl (>75 columns)", "thresholds": "MEDIUM per model"},
-    "P9": {"desc": "High-cardinality ID column indexed as ATTRIBUTE", "thresholds": "MEDIUM per column"},
-    "P11": {"desc": "Excessive indexed columns on Spotter-enabled model", "thresholds": "INFO >30"},
-    "P13": {"desc": "High RLS rule count (cost compounds per query)", "thresholds": "MEDIUM >3, HIGH >6"},
-    "P14": {"desc": "RLS expression uses functions (prevents index pruning)", "thresholds": "MEDIUM per expression"},
-    "P15": {"desc": "VARCHAR RLS column without value_casing", "thresholds": "MEDIUM per column"},
-    "P16": {"desc": "Deeply nested if() in formulas", "thresholds": "INFO >3, LOW >5"},
-    "P17": {"desc": "Formula cross-reference chain depth", "thresholds": "INFO >2, LOW >3"},
-    "P18": {"desc": "COUNT_DISTINCT aggregation (most expensive)", "thresholds": "INFO per column"},
-    "S1": {"desc": "PII column detection (heuristic regex)", "thresholds": "MEDIUM per column"},
-    "S2": {"desc": "PII indexed without RLS (exposes in autocomplete)", "thresholds": "HIGH per column"},
-    "S3": {"desc": "PII without CLS or masking formula", "thresholds": "MEDIUM per column"},
-    "S4": {"desc": "RLS bypass + PII columns in model", "thresholds": "HIGH per model"},
-    "S5": {"desc": "Credentials in analytics", "thresholds": "CRITICAL per column"},
-    # S8/S9 described sharing checks that do not exist anywhere in this module —
-    # `desc` is rendered as the finding TITLE, so every delivered report headlined
-    # an RLS finding as a sharing one, and implied a sharing audit had run. BL-298
-    # carries the unimplemented checks; these now say what the code does.
-    "S8": {"desc": "VARCHAR column used in an RLS rule", "thresholds": "MEDIUM per column"},
-    "S9": {"desc": "Function call in an RLS rule expression", "thresholds": "HIGH per rule"},
-    "S10": {"desc": "RLS bypass enabled (disables row-level security)", "thresholds": "MEDIUM per model"},
-}
+def __getattr__(name: str):
+    """`CHECK_META` — `{rule id: {desc, thresholds, ...}}` for the active catalog rules —
+    is built from the rule catalog (generate.report_meta) on first use, not written by
+    hand: the hand-kept table described checks that did not exist (S8/S9, BL-298)."""
+    if name == "CHECK_META":
+        from ts_cli.audit.catalog_model import load_catalog
+        from ts_cli.audit.generate import report_meta
+        return report_meta(load_catalog())["checks"]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_summary(
@@ -98,14 +57,23 @@ def build_summary(
     models_count: int,
     tables_count: int,
     all_check_ids: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> dict:
+    """Counts for the report header. A finding counts ONCE in `by_severity` and
+    `by_angle` (its first category's angle) and once under EVERY category it belongs
+    to in `by_category` — so the categories may sum to more than the total.
+    `categories` lists the category ids to report (each starts at 0); a finding's
+    category outside it is added."""
     by_severity = {s: 0 for s in _SEVERITIES}
     by_angle = {a: 0 for a in _ANGLES}
+    by_category = {c: 0 for c in (categories or [])}
     for f in findings:
         if f.severity in by_severity:
             by_severity[f.severity] += 1
         if f.angle in by_angle:
             by_angle[f.angle] += 1
+        for cat in dict.fromkeys(f.categories):
+            by_category[cat] = by_category.get(cat, 0) + 1
     if all_check_ids is not None:
         check_ids = sorted(set(all_check_ids))
     else:
@@ -113,6 +81,7 @@ def build_summary(
     return {
         "by_severity": by_severity,
         "by_angle": by_angle,
+        "by_category": by_category,
         "objects_scanned": {"models": models_count, "tables": tables_count},
         "checks_run": checks_run,
         "all_check_ids": check_ids,

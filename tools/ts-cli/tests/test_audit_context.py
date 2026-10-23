@@ -74,55 +74,32 @@ def test_tables_for_model_missing_fqn():
 
 # ── build_context: Set discovery for H5 (BL-302, BL-324) ───────────────────
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import yaml
+import audit_rule_fixtures as fx
+from audit_run_rule import run_rule
 
-
-def _resp(body, ok=True, status=200):
-    r = MagicMock()
-    r.ok, r.status_code = ok, status
-    r.json.return_value = body
-    return r
-
-
-def _client_with_one_model(guid, name="Sales"):
-    """A client whose export returns one Model TML; every search returns []."""
-    edoc = yaml.safe_dump(_sample_model(name=name, guid=guid))
-
-    def post(url, json=None, **_kw):
-        if url.endswith("/metadata/tml/export"):
-            return _resp([{"edoc": edoc}])
-        return _resp([])
-
-    client = MagicMock()
-    client.post.side_effect = post
-    return client
+# The fake client, consumer results and Set discovery are builders in
+# audit_rule_fixtures (human.py), whose built_* contexts run build_context the same way
+# for the H inputs test_audit_pinned_findings.py pins.
 
 
 def _build_with_one_model(guid, angles, name="Sales"):
+    """`angles` are categories: the context fetches what their rules require."""
+    from ts_cli.audit import data_needs
     from ts_cli.audit.context import build_context
-    return build_context(_client_with_one_model(guid, name), [guid], angles)
-
-
-def _cons(dependents=None, other_types=None, error=None):
-    return {"dependents": dependents or [], "liveboards": {}, "unreadable": [],
-            "other_types": other_types or [], "error": error}
-
-
-_ONE_SET = {"sets": {"m1": [{"guid": "s1", "name": "B"}]}, "incomplete": [], "notes": []}
+    return build_context(fx.build_client_with_one_model(guid, name), [guid], data_needs(angles))
 
 
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
 def test_h_angle_records_sets_and_their_dependents(disc, cons):
-    from ts_cli.audit.checks_human import check_h5
-    disc.return_value = _ONE_SET
-    cons.return_value = _cons()
+    disc.return_value = fx.SETS_ONE
+    cons.return_value = fx.build_consumers()
     ctx = _build_with_one_model("m1", angles=["H"])
     assert {"type": "SET", "guid": "s1", "name": "B"}.items() <= ctx.dependents["m1"][-1].items()
     assert ctx.dependents["s1"] == []
-    assert [f.object_guid for f in check_h5(ctx)] == ["s1"]
+    assert [f.object_guid for f in run_rule(ctx, "H5")] == ["s1"]
 
 
 @patch("ts_cli.audit.context.fetch_consumers")
@@ -137,24 +114,22 @@ def test_discovery_uses_the_model_name_from_the_exported_tml(disc, cons):
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
 def test_set_with_consumers_is_not_an_orphan(disc, cons):
-    from ts_cli.audit.checks_human import check_h5
-    disc.return_value = _ONE_SET
-    cons.return_value = _cons(dependents=[
+    disc.return_value = fx.SETS_ONE
+    cons.return_value = fx.build_consumers(dependents=[
         {"guid": "a1", "name": "Uses B", "type": "ANSWER", "author_id": "u"}])
     ctx = _build_with_one_model("m1", angles=["H"])
     assert ctx.dependents["s1"][0]["guid"] == "a1"
     assert ctx.dependents["s1"][0]["source_guid"] == "s1"
-    assert check_h5(ctx) == []
+    assert run_rule(ctx, "H5") == []
 
 
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
 def test_failed_set_dependents_keep_h5_silent(disc, cons):
-    from ts_cli.audit.checks_human import check_h5
-    disc.return_value = _ONE_SET
-    cons.return_value = _cons(error="x")
+    disc.return_value = fx.SETS_ONE
+    cons.return_value = fx.build_consumers(error="x")
     ctx = _build_with_one_model("m1", angles=["H"])
-    assert "s1" not in ctx.dependents and check_h5(ctx) == []
+    assert "s1" not in ctx.dependents and run_rule(ctx, "H5") == []
     assert any("B" in w and "s1" in w for w in ctx.warnings)
 
 
@@ -163,33 +138,11 @@ def test_failed_set_dependents_keep_h5_silent(disc, cons):
 def test_set_whose_only_dependent_is_another_set_keeps_h5_silent(disc, cons):
     """R14: a Set consumed only by another Set is not an orphan. `other_types` rows
     are not in `dependents`, so recording `[]` would report it as one."""
-    from ts_cli.audit.checks_human import check_h5
-    disc.return_value = _ONE_SET
-    cons.return_value = _cons(other_types=[{"guid": "s2", "name": "C", "type": "SET"}])
+    disc.return_value = fx.SETS_ONE
+    cons.return_value = fx.build_consumers(other_types=[{"guid": "s2", "name": "C", "type": "SET"}])
     ctx = _build_with_one_model("m1", angles=["H"])
-    assert "s1" not in ctx.dependents and check_h5(ctx) == []
+    assert "s1" not in ctx.dependents and run_rule(ctx, "H5") == []
     assert any("s1" in w for w in ctx.warnings)
-
-
-def _client_with_set_dependents(guid, dep_rows):
-    """Model export + a Set dependents lookup carrying BOTH inaccessible flags true —
-    the admin shape observed live on se-thoughtspot 2026-10-02 (ruling R17)."""
-    edoc = yaml.safe_dump(_sample_model(name="Sales", guid=guid))
-
-    def post(url, json=None, **_kw):
-        if url.endswith("/metadata/tml/export"):
-            return _resp([{"edoc": edoc}])
-        md = (json or {}).get("metadata") or [{}]
-        if url.endswith("/metadata/search") and md[0].get("type") == "LOGICAL_COLUMN":
-            return _resp([{"metadata_id": "s1", "dependent_objects": {
-                "hasInaccessibleDependents": True,
-                "areInaccessibleDependentsReturned": True,
-                "dependents": {"s1": dep_rows}}}])
-        return _resp([])
-
-    client = MagicMock()
-    client.post.side_effect = post
-    return client
 
 
 @pytest.mark.parametrize("dep_rows,orphan", [
@@ -200,23 +153,20 @@ def _client_with_set_dependents(guid, dep_rows):
 def test_h5_records_sets_whose_hidden_dependents_were_returned(disc, dep_rows, orphan):
     """R17 end to end through the real fetch_consumers: has+returned is a clean lookup,
     so the Set is recorded and H5 decides on what was returned."""
-    from ts_cli.audit.checks_human import check_h5
+    from ts_cli.audit import data_needs
     from ts_cli.audit.context import build_context
-    disc.return_value = _ONE_SET
-    ctx = build_context(_client_with_set_dependents("m1", dep_rows), ["m1"], ["H"])
+    disc.return_value = fx.SETS_ONE
+    ctx = build_context(fx.build_client_with_set_dependents("m1", dep_rows), ["m1"],
+                        data_needs(["H"]))
     assert "s1" in ctx.dependents
     assert not any("s1" in w for w in ctx.warnings)
-    assert [f.object_guid for f in check_h5(ctx)] == (["s1"] if orphan else [])
+    assert [f.object_guid for f in run_rule(ctx, "H5")] == (["s1"] if orphan else [])
 
 
 def test_h5_emits_one_finding_per_set_listed_by_several_sources():
     """R18: the same Set appears under the Model AND each underlying Table's COHORT
     bucket. One finding per Set, not one per source."""
-    from ts_cli.audit.checks_human import check_h5
-    row = {"type": "SET", "guid": "s1", "name": "B"}
-    ctx = make_context(models=[], tables={})
-    ctx.dependents = {"m1": [dict(row)], "t1": [dict(row)], "t2": [dict(row)], "s1": []}
-    assert [f.object_guid for f in check_h5(ctx)] == ["s1"]
+    assert [f.object_guid for f in run_rule(fx.h5_set_listed_by_several_sources(), "H5")] == ["s1"]
 
 
 @patch("ts_cli.audit.context.fetch_consumers")
@@ -232,7 +182,7 @@ def test_incomplete_discovery_is_a_warning_and_invents_no_set_rows(disc, cons):
 
 @patch("ts_cli.audit.context.fetch_consumers")
 @patch("ts_cli.audit.context.discover_sets")
-def test_set_discovery_only_runs_for_the_h_angle(disc, cons):
+def test_set_discovery_runs_only_when_a_selected_rule_requires_sets(disc, cons):
     _build_with_one_model("m1", angles=["A", "D", "P", "S"])
     disc.assert_not_called()
     cons.assert_not_called()
@@ -246,29 +196,23 @@ def test_set_discovery_only_runs_for_the_h_angle(disc, cons):
 def test_h4_fires_for_a_model_whose_only_dependents_are_sets(disc, cons, error):
     """A Set is a column on the Model, so anything using it is already a Model
     dependent. A SET row alone must not clear an orphan Model — clean or failed lookup."""
-    from ts_cli.audit.checks_human import check_h4
-    disc.return_value = _ONE_SET
-    cons.return_value = _cons(error=error)
+    disc.return_value = fx.SETS_ONE
+    cons.return_value = fx.build_consumers(error=error)
     ctx = _build_with_one_model("m1", angles=["H"])
     assert any(d.get("type") == "SET" for d in ctx.dependents["m1"])  # kept for H5
-    assert [f.object_guid for f in check_h4(ctx)] == ["m1"]
-    assert check_h4(ctx)[0].detail == "Orphan model — zero dependents (no answers or liveboards)"
+    assert [f.object_guid for f in run_rule(ctx, "H4")] == ["m1"]
+    assert run_rule(ctx, "H4")[0].detail == "Orphan model — zero dependents (no answers or liveboards)"
 
 
 def test_h4_is_silent_when_a_model_has_an_answer_beside_its_sets():
-    from ts_cli.audit.checks_human import check_h4
-    ctx = make_context(models=[_sample_model(guid="m1")], dependents={"m1": [
-        {"guid": "s1", "type": "SET", "name": "B"},
-        {"guid": "a1", "type": "ANSWER", "name": "Q"}]})
-    assert check_h4(ctx) == []
+    assert run_rule(fx.h4_model_with_answer_beside_sets(), "H4") == []
 
 
 @patch("ts_cli.audit.context.discover_sets")
 def test_h5_is_silent_when_the_set_dependents_response_is_empty(disc):
     """Final review must-fix 1 + R14: a `[]` dependents body is not "zero consumers".
     The real fetch_consumers errors, so the Set is not recorded and H5 stays silent."""
-    from ts_cli.audit.checks_human import check_h5
-    disc.return_value = _ONE_SET
+    disc.return_value = fx.SETS_ONE
     ctx = _build_with_one_model("m1", angles=["H"])   # every search returns []
-    assert "s1" not in ctx.dependents and check_h5(ctx) == []
+    assert "s1" not in ctx.dependents and run_rule(ctx, "H5") == []
     assert any("s1" in w and "did not include this Set" in w for w in ctx.warnings)

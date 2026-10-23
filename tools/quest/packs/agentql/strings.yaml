@@ -14,7 +14,7 @@ pane_sql_caption: Captured from generate-sql on {model}, {captured}. Lesson {les
 # ---- The classic page (classic/game.html). Markup: *word* is highlighted, **word** is bold,
 # [text](https://…) is a link; everything else is shown as written. {name} is filled by the page.
 
-page_description: A retro text adventure about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.
+page_description: A retro adventure game about how ThoughtSpot compiles AgentQL into deterministic, governed SQL.
 sound_sfx: "[S] Sound effects: {state}"
 sound_music: "[M] Music: {state}"
 sound_on: "on"
@@ -115,3 +115,77 @@ fine_court: THE COURT FINES YOU {amount} GOLD
 fine_foe: THE DRAGON TAKES {amount} GOLD
 empty_court: THE COURT FINDS YOUR PURSE EMPTY
 empty_foe: THE DRAGON FINDS YOUR PURSE EMPTY
+
+# ---- The explore page (explore/), and classic mode's way back to it. ----
+explore_help: Arrow keys walk. Enter or Space talks to whoever, or whatever, you stand next to. X switches weapon. S and M switch sound effects and music.
+explore_help_touch: The arrows walk. Tap Talk beside whoever, or whatever, you want to talk to; tap Weapon to switch weapon.
+explore_classic: Play the classic version
+explore_world: The map. Walk with the arrow keys; talk with Enter or Space.
+explore_world_touch: The map. Walk with the arrows; talk with Talk.
+explore_close: Close (Esc)
+explore_close_touch: Close
+explore_close_realm: Back to the realm (Esc)
+explore_close_realm_touch: Back to the realm
+explore_leave: Leave for the world map
+explore_gate_locked: This door is locked. Answer the questions on this side to open it.
+explore_near_petitioner: A petitioner waits for your judgement. Press Enter or Space to hear them.
+explore_near_petitioner_touch: A petitioner waits for your judgement. Tap Talk to hear them.
+explore_near_step: Press Enter or Space to talk.
+explore_near_step_touch: Tap Talk to talk.
+explore_pad_left: ←
+explore_pad_up: ↑
+explore_pad_down: ↓
+explore_pad_right: →
+explore_pad_talk: Talk
+explore_nobody: There is nobody close enough to talk to.
+explore_not_yet: Not yet. Someone else has something for you first.
+explore_no_canvas: This map couldn't start in this browser. The classic version plays the same quests.
+explore_hud_map: THE REALMS
+explore_hud_gold: "GOLD {gold}/{max}"
+explore_back: Back to the explore map
+explore_all_done_title: Every realm complete!
+explore_intro: "A game about one idea: the AI writes your question as AgentQL, and ThoughtSpot compiles it into governed SQL, the same way every time."
+explore_all_done: You have crossed every realm. Replay any of them to raise your score.
+explore_near_portal: "{name}{mark}. Press Enter or Space to go in."
+explore_near_portal_touch: "{name}{mark}. Tap Talk to go in."
+explore_near_sealed: "{name}{mark}."
+explore_pad_weapon: Weapon
+explore_found: "You open the chest: {item}!"
+explore_mimic: "The chest snaps at you. A mimic! Nothing inside but teeth."
+explore_chest_empty: The chest is empty.
+explore_barrel: You roll the barrel aside. Something glints underneath.
+explore_barrel_blocked: The barrel won't roll while you stand where it would go.
+explore_hoard: "A troll's hoard: {items}!"
+explore_hoard_empty: The troll's hoard is empty now.
+explore_weapon: "You ready the {weapon}."
+explore_face_foe: "You face it with your {weapon}."
+explore_hud_kit: "{weapon} · LOOT {n}"
+explore_npc_about: "A traveller: Through that door lies {realm}. {covers}"
+npc_elder_walk: "Elder Wren: Arrows walk. Enter or Space talks to whoever is beside you."
+npc_elder_walk_touch: "Elder Wren: The arrows walk. Talk talks to whoever is beside you."
+npc_elder_order: "Elder Wren: Start at Law, the library north over the bridge. The other realms open after it."
+npc_elder_west: "Elder Wren: Northwest, up the rails: the Mines. Southwest, over the pier: the Lake town."
+npc_elder_east: "Elder Wren: Northeast, down the golden path: the Forests. Southeast, along the dock: the Isles."
+npc_elder_fun: "Elder Wren: X switches weapon. Chests and barrels hide things; none of it costs gold."
+npc_elder_fun_touch: "Elder Wren: Weapon switches weapon. Chests and barrels hide things; none of it costs gold."
+guard_law: "Wizard guard: The Elven Kingdom of Law. Learn who writes the query, and why the answer stays governed."
+guard_mines: "Dwarf guard: The Dwarven Mines of Silver Ore. Read the SQL behind one simple question."
+guard_lake: "Fisherman: The Craftsmen of the Lake. Ask what keywords can't: every product, sold or not."
+guard_forests: "Golden elf: The Golden Forests. Total each store, then average the totals."
+guard_isles: "Sailor: The Shifting Isles. Rank within each region with a window function."
+npc_miner_gate: "Old miner: The Forge glows on the north wall. Follow the track east: that door opens once it has worked."
+npc_miner_barrel: "Old miner: A barrel past that door never sat right. Give it a shove."
+npc_smith_forge: "Smith: The Forge burns by my workshop, between the anvils. Bring your scroll there."
+npc_smith_pier: "Smith: Then take the pier east. The barred door at its end opens on the dragon's isle."
+npc_forester_forge: "Forester: The Forge stands in the clearing, between its anvils. Take your scroll there first."
+npc_forester_gate: "Forester: The path runs east to a barred door in the trees. Past it, the dragon's glade."
+npc_islander_forge: "Sailor: The Forge is on this isle, by the anvils. It works your scroll."
+npc_islander_gate: "Sailor: Then cross the bridge east. Past its barred door, the dragon keeps the far isle."
+item_sword: sword
+item_dagger: dagger
+item_axe: axe
+item_staff: staff
+item_red_potion: red potion
+item_blue_potion: blue potion
+item_green_potion: green potion
+item_shield: shield
