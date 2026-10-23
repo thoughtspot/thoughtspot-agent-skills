@@ -425,3 +425,52 @@ S_INPUTS.update({
     "pii_names_not_indexed": lambda: build_named_columns(PII_NAMES, "DONT_INDEX"),
     "credential_names": lambda: build_named_columns(CREDENTIAL_NAMES),
 })
+
+
+# S11 — an RLS rule's join closes a cycle with the Model's joins. Synthetic shapes; not
+# in S_INPUTS (S11 is new, so it has no legacy findings to pin).
+
+def build_rls_cycle_table(name, joins, paths, exprs) -> dict:
+    """A Table body with `rls_rules`: `joins` (name, source, destination); `paths`
+    (id, table, join name or None); `exprs` the rule expressions."""
+    return {"name": name, "joins_with": [{"name": n, "destination": {"name": d}}
+                                         for n, _s, d in joins],
+            "rls_rules": {
+                "tables": [{"name": name}],
+                "joins": [{"name": n, "source": s, "destination": d, "type": "INNER"}
+                          for n, s, d in joins],
+                "table_paths": [{"id": pid, "table": tbl, "column": ["c"],
+                                 **({"join_path": [{"join": [j]}]} if j else {})}
+                                for pid, tbl, j in paths],
+                "rules": [{"name": f"r{i}", "expr": e} for i, e in enumerate(exprs)]}}
+
+
+def build_rls_cycle_ctx(users_rls: dict, users_fqn="g-users") -> AuditContext:
+    """Activity over fact, bridge and users; `bridge -> users` MANY_TO_ONE; the users
+    Table TML (with `users_rls`) under `users_fqn`."""
+    def mt(name, *targets):
+        return {"name": name, "fqn": f"g-{name}",
+                "joins": [{"with": t, "name": f"{name}_{t}", "cardinality": "MANY_TO_ONE",
+                           "type": "LEFT_OUTER", "on": f"[{name}::k] = [{t}::k]"}
+                          for t in targets]}
+    model = {"guid": "m-rls", "model": {
+        "name": "Activity", "columns": [],
+        "model_tables": [mt("fact", "users", "bridge"), mt("bridge", "users"), mt("users")]}}
+    return make_context(models=[model], tables={users_fqn: copy.deepcopy(users_rls)})
+
+
+def sec_rls_join_cycle() -> AuditContext:
+    """The rule on users joins out to bridge, which the Model joins back to users: S11."""
+    return build_rls_cycle_ctx(build_rls_cycle_table(
+        "users", [("users_to_bridge", "users", "bridge")],
+        [("bridge_1", "bridge", "users_to_bridge"), ("users_1", "users", None)],
+        ["[users_1::c] in ts_var(a) and [bridge_1::c] in ts_var(b)"]))
+
+
+def sec_rls_same_direction() -> AuditContext:
+    """The rule on bridge walks bridge -> users, the same way the Model joins them: a
+    path, not a loop — no S11."""
+    return build_rls_cycle_ctx(build_rls_cycle_table(
+        "bridge", [("bridge_to_users", "bridge", "users")],
+        [("users_1", "users", "bridge_to_users")], ["[users_1::c] = 1"]),
+        users_fqn="g-bridge")

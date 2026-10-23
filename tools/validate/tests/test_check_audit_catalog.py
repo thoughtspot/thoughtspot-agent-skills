@@ -47,12 +47,16 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "catalog_consistency.py", "engine/tml.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
-                "engine/code_rules.py", "engine/code_rules_human.py", "engine/bands.py", "engine/scopes.py",
+                "engine/code_rules.py", "engine/code_rules_human.py",
+                "engine/code_rules_security.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
                 "generate.py", "catalog_history.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")
+# Pure ts_cli modules outside the audit package that a code rule imports at module
+# level (S11's join-graph search), copied beside it: stdlib only, so gate-safe.
+GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
@@ -64,6 +68,8 @@ def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
     (dst / "engine").mkdir(parents=True)
     for name in GATE_MODULES:
         shutil.copy(REPO / AUDIT_REL / name, dst / name)
+    for name in GATE_SHARED_MODULES:
+        shutil.copy(REPO / AUDIT_REL.parent / name, dst.parent / name)
     shutil.copytree(REPO / AUDIT_REL / "catalog", dst / "catalog")
     if clear_rules:
         for path in (dst / "catalog" / "rules").glob("*.yaml"):

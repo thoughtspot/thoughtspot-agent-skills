@@ -401,3 +401,4 @@ def column_type_divergence(rule: "Rule", ctx: Any, profile: str) -> List[Finding
 # The H (Human Readiness) code rules live in their own module; importing it here
 # registers them wherever REGISTRY is read (the engine, and the catalog gate).
 from ts_cli.audit.engine import code_rules_human  # noqa: E402,F401
+from ts_cli.audit.engine import code_rules_security  # noqa: E402,F401
