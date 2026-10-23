@@ -21,7 +21,7 @@ Two hand-maintained accounts of one ruleset, in two repositories:
 
 * `docs/ossie/ts-ossie-function-mapping.md` here — the internal review artifact,
   written before the converter existed and still cited by this repo's own work.
-* `converters/thoughtspot/docs/expression-mapping.md` in apache/ossie — generated
+* `thoughtspot/docs/expression-mapping.md` in apache/ossie-converters — generated
   from `expressions/catalog.py`, the code that actually ships.
 
 Nothing compared them. The converter was donated to the ASF, so the two can now
@@ -59,10 +59,42 @@ from pathlib import Path
 
 #: This repo's account of the mapping.
 OURS = "docs/ossie/ts-ossie-function-mapping.md"
-#: The shipped converter's, relative to an apache/ossie checkout.
-UPSTREAM = "converters/thoughtspot/docs/expression-mapping.md"
+#: The shipped converter's, relative to a checkout root. The converters left
+#: apache/ossie for apache/ossie-converters on 2026-10-21 (ossie#523), which
+#: flattened `converters/thoughtspot/` to `thoughtspot/`. Both layouts are
+#: tried: the old one still resolves against a checkout that predates the
+#: move, and silently finding nothing is the failure this check exists to
+#: avoid -- it returns 0 when the upstream doc is missing, so a stale path
+#: would read as a pass that compared nothing.
+UPSTREAM_CANDIDATES = (
+    "thoughtspot/docs/expression-mapping.md",              # apache/ossie-converters
+    "converters/thoughtspot/docs/expression-mapping.md",   # apache/ossie, pre-2026-10-21
+)
 #: Where to look for that checkout when neither --ossie-root nor OSSIE_ROOT says.
-CONVENTIONAL = ("../ossie", "../../ossie", "~/Dev/ts/ossie")
+CONVENTIONAL = (
+    "../ossie-converters", "../../ossie-converters", "~/Dev/ts/ossie-converters",
+    "../ossie", "../../ossie", "~/Dev/ts/ossie",
+)
+
+#: Constructs this repo classifies differently from the shipped converter **on
+#: purpose**, each with the reason and the evidence. Everything else that
+#: disagrees is a finding.
+#:
+#: Without this, a deliberate divergence makes the check cry wolf on every run
+#: until upstream catches up, which is how a gate stops being read. With it,
+#: the gate still fires on any *new* disagreement -- and an entry whose
+#: divergence upstream has since adopted is reported as stale, so the
+#: exemption cannot outlive its reason.
+KNOWN_DIVERGENCES = {
+    # BL-333, live-probed on se-thoughtspot 2026-10-06. ThoughtSpot lowercases
+    # both sides of a string comparison at compile time (`contains(x,'eng')` ->
+    # `LOWER(x) LIKE '%eng%'`), so its native compositions are case-INsensitive.
+    # SQL LIKE is case-sensitive and ILIKE is not, so the native shapes are an
+    # exact fit for ILIKE and a silent semantic change for LIKE. The shipped
+    # converter still has them the other way round.
+    "str LIKE pattern": ("passthrough", "direct"),
+    "str ILIKE pattern": ("direct", "passthrough"),
+}
 
 #: `| `SUM(expr)` | direct | ... |` — the construct name and its classification,
 #: which both documents happen to put in the same two leading columns.
@@ -91,9 +123,10 @@ def find_upstream(explicit: str | None) -> Path | None:
         candidates.append(Path(os.environ["OSSIE_ROOT"]).expanduser())
     candidates.extend(Path(c).expanduser() for c in CONVENTIONAL)
     for root in candidates:
-        doc = root / UPSTREAM
-        if doc.is_file():
-            return doc
+        for relative in UPSTREAM_CANDIDATES:
+            doc = root / relative
+            if doc.is_file():
+                return doc
     return None
 
 
@@ -121,7 +154,13 @@ def main() -> int:
     ours = classifications(ours_path)
     upstream = classifications(upstream_path)
     shared = sorted(set(ours) & set(upstream))
-    disagree = [(k, ours[k], upstream[k]) for k in shared if ours[k] != upstream[k]]
+    differing = [(k, ours[k], upstream[k]) for k in shared if ours[k] != upstream[k]]
+    disagree = [d for d in differing if KNOWN_DIVERGENCES.get(d[0]) != (d[1], d[2])]
+    accepted = [d for d in differing if KNOWN_DIVERGENCES.get(d[0]) == (d[1], d[2])]
+    #: An exemption upstream has since adopted (or re-decided) is no longer
+    #: describing anything. Reported so it gets removed rather than quietly
+    #: shielding a pair that now agrees, or one that disagrees some new way.
+    stale = sorted(set(KNOWN_DIVERGENCES) - {d[0] for d in accepted})
 
     if disagree:
         print(f"  Ossie mapping disagrees with the shipped converter on "
@@ -129,10 +168,20 @@ def main() -> int:
         for name, mine, theirs in disagree:
             print(f"    • `{name}`: {OURS} says {mine}, the converter says {theirs}")
         print(f"    The converter is what ships. Correct {OURS}, or open an issue "
-              f"upstream if the converter is the one that is wrong.")
+              f"upstream if the converter is the one that is wrong. If the "
+              f"divergence is deliberate and evidenced, add it to "
+              f"KNOWN_DIVERGENCES with its reason.")
     else:
         print(f"  Ossie mapping agrees with the shipped converter on all "
-              f"{len(shared)} construct(s) both describe.")
+              f"{len(shared) - len(accepted)} construct(s) both describe, "
+              f"outside {len(accepted)} known divergence(s).")
+
+    for name, mine, theirs in accepted:
+        print(f"  Known divergence: `{name}` is {mine} here, {theirs} upstream "
+              f"— deliberate, see KNOWN_DIVERGENCES.")
+    if stale:
+        print(f"  {len(stale)} KNOWN_DIVERGENCES entr(y/ies) no longer describe a "
+              f"live divergence and should be removed: {', '.join(stale)}")
 
     only_ours, only_theirs = set(ours) - set(upstream), set(upstream) - set(ours)
     if only_ours or only_theirs:

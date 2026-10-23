@@ -52,8 +52,12 @@ class TestClassifications:
 
 
 class TestFindUpstream:
-    def test_an_explicit_root_wins(self, tmp_path):
-        doc = tmp_path / mod.UPSTREAM
+    @pytest.mark.parametrize("layout", mod.UPSTREAM_CANDIDATES)
+    def test_an_explicit_root_wins_in_either_repo_layout(self, tmp_path, layout):
+        # Both are live: `thoughtspot/docs/...` is apache/ossie-converters as
+        # of the 2026-10-21 split, and `converters/thoughtspot/docs/...` still
+        # resolves against a checkout that predates it.
+        doc = tmp_path / layout
         doc.parent.mkdir(parents=True)
         doc.write_text(HEADER, encoding="utf-8")
         assert mod.find_upstream(str(tmp_path)) == doc
@@ -73,8 +77,9 @@ class TestMain:
     @staticmethod
     def _upstream(tmp_path, rows):
         root = tmp_path / "ossie"
-        (root / mod.UPSTREAM).parent.mkdir(parents=True)
-        _doc((root / mod.UPSTREAM).parent, "expression-mapping.md", rows)
+        relative = mod.UPSTREAM_CANDIDATES[0]
+        (root / relative).parent.mkdir(parents=True)
+        _doc((root / relative).parent, "expression-mapping.md", rows)
         return root
 
     def _run(self, monkeypatch, repo, ossie, check):
@@ -121,3 +126,78 @@ class TestMain:
         up = self._upstream(tmp_path, [("!=", "direct")])
         assert self._run(monkeypatch, repo, up, True) == 0
         assert "only here" in capsys.readouterr().out
+
+
+class TestKnownDivergences:
+    """A deliberate, evidenced divergence must not make the gate cry wolf on
+    every run -- that is how a gate stops being read. But an allowlist that
+    silences anything beyond its entries is worse than no gate at all, so each
+    of these pins one half of that bargain.
+    """
+
+    _run = TestMain._run
+    _repo = staticmethod(TestMain._repo)
+    _upstream = staticmethod(TestMain._upstream)
+
+    def test_a_listed_divergence_passes_and_is_reported(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        monkeypatch.setattr(
+            mod, "KNOWN_DIVERGENCES", {"str LIKE pattern": ("passthrough", "direct")}
+        )
+        repo = self._repo(tmp_path, [("str LIKE pattern", "passthrough")])
+        up = self._upstream(tmp_path, [("str LIKE pattern", "direct")])
+        assert self._run(monkeypatch, repo, up, True) == 0
+        out = capsys.readouterr().out
+        assert "Known divergence" in out and "str LIKE pattern" in out
+        assert "disagrees" not in out
+
+    def test_an_unlisted_disagreement_still_fails(self, tmp_path, monkeypatch, capsys):
+        # The allowlist must exempt its entries and nothing else.
+        monkeypatch.setattr(
+            mod, "KNOWN_DIVERGENCES", {"str LIKE pattern": ("passthrough", "direct")}
+        )
+        repo = self._repo(
+            tmp_path, [("str LIKE pattern", "passthrough"), ("SUM(expr)", "direct")]
+        )
+        up = self._upstream(
+            tmp_path, [("str LIKE pattern", "direct"), ("SUM(expr)", "passthrough")]
+        )
+        assert self._run(monkeypatch, repo, up, True) == 1
+        assert "SUM(expr)" in capsys.readouterr().out
+
+    def test_a_divergence_listed_the_wrong_way_round_still_fails(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        # An entry exempts one specific (ours, theirs) pair. If upstream
+        # re-decides and the pair inverts, that is a new fact, not the one
+        # that was signed off.
+        monkeypatch.setattr(
+            mod, "KNOWN_DIVERGENCES", {"str LIKE pattern": ("passthrough", "direct")}
+        )
+        repo = self._repo(tmp_path, [("str LIKE pattern", "direct")])
+        up = self._upstream(tmp_path, [("str LIKE pattern", "passthrough")])
+        assert self._run(monkeypatch, repo, up, True) == 1
+        assert "disagrees" in capsys.readouterr().out
+
+    def test_an_entry_that_no_longer_diverges_is_reported_as_stale(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        # Upstream adopted our reading. The exemption now shields nothing and
+        # should go, or it will silently cover some future disagreement.
+        monkeypatch.setattr(
+            mod, "KNOWN_DIVERGENCES", {"str LIKE pattern": ("passthrough", "direct")}
+        )
+        repo = self._repo(tmp_path, [("str LIKE pattern", "passthrough")])
+        up = self._upstream(tmp_path, [("str LIKE pattern", "passthrough")])
+        assert self._run(monkeypatch, repo, up, True) == 0
+        assert "no longer describe" in capsys.readouterr().out
+
+    def test_the_shipped_entries_name_real_constructs(self):
+        # A typo in a construct name would make an entry exempt nothing while
+        # looking like it does. Every key must appear in our own mapping doc.
+        ours = mod.classifications(
+            pathlib.Path(__file__).resolve().parents[3] / mod.OURS
+        )
+        unknown = sorted(set(mod.KNOWN_DIVERGENCES) - set(ours))
+        assert not unknown, f"KNOWN_DIVERGENCES names constructs {mod.OURS} does not: {unknown}"

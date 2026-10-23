@@ -17,7 +17,7 @@ converter revision, which is what makes it useful as a regression gate.
 
 Usage:
     roundtrip.py export --profile se-thoughtspot --corpus ./corpus [--limit 30]
-    roundtrip.py check  --corpus ./corpus --converter ~/src/ossie/converters/thoughtspot
+    roundtrip.py check  --corpus ./corpus --converter ~/src/ossie-converters/thoughtspot
     roundtrip.py check  --corpus ./corpus --converter ... --baseline prev.json
 
 Exits non-zero if any model loses structure, fails Apache's validator, or (with
@@ -275,16 +275,35 @@ def check_corpus(corpus: pathlib.Path, converter: pathlib.Path, work: pathlib.Pa
         print(f"no converter venv at {python}\n"
               f"  run: cd {converter} && uv sync", file=sys.stderr)
         return 2
-    # Apache's validator normally sits two levels up, at <ossie>/validation. A
-    # relocated or copied converter breaks that assumption, and an earlier
-    # revision then recorded "validator FAILED" for every model when the file
-    # was simply absent -- a false failure that looks exactly like a real one.
-    # Refuse to guess instead.
+    # Where the validator sits depends on which checkout the converter is in.
+    # The converters left apache/ossie for apache/ossie-converters on
+    # 2026-10-21 (ossie#523), and the new repo carries the spec as a submodule,
+    # so the two layouts put it in different places:
+    #
+    #   apache/ossie-converters   thoughtspot/            -> ../ossie/validation
+    #   apache/ossie (pre-move)   converters/thoughtspot/ -> ../../validation
+    #
+    # Both are tried. A relocated or copied converter still matches neither,
+    # and an earlier revision then recorded "validator FAILED" for every model
+    # when the file was simply absent -- a false failure that looks exactly
+    # like a real one. Refuse to guess instead.
     if validator is None:
-        validator = converter.parent.parent / "validation/validate.py"
-    if not validator.exists():
-        print(f"Apache's validator not found at {validator}\n"
-              f"  pass --validator <path to ossie>/validation/validate.py",
+        for candidate in (
+            converter.parent / "ossie/validation/validate.py",   # ossie-converters
+            converter.parent.parent / "validation/validate.py",  # apache/ossie
+        ):
+            if candidate.exists():
+                validator = candidate
+                break
+    if validator is None or not validator.exists():
+        tried = validator or (
+            f"{converter.parent / 'ossie/validation/validate.py'} or "
+            f"{converter.parent.parent / 'validation/validate.py'}"
+        )
+        print(f"Apache's validator not found at {tried}\n"
+              f"  pass --validator <path to ossie>/validation/validate.py\n"
+              f"  (in apache/ossie-converters it is in the `ossie` submodule --\n"
+              f"   run `git submodule update --init` if that directory is empty)",
               file=sys.stderr)
         return 2
     ossie_root = validator.parent.parent
@@ -435,13 +454,14 @@ def main() -> int:
     checker = sub.add_parser("check", help="convert an existing corpus and report")
     checker.add_argument("--corpus", type=pathlib.Path, required=True)
     checker.add_argument("--converter", type=pathlib.Path, required=True,
-                         help="path to apache/ossie converters/thoughtspot")
+                         help="path to apache/ossie-converters thoughtspot/")
     checker.add_argument("--work", type=pathlib.Path, default=pathlib.Path("./roundtrip-out"))
     checker.add_argument("--baseline", type=pathlib.Path,
                          help="a previous summary.json to compare against")
     checker.add_argument("--validator", type=pathlib.Path,
-                         help="path to apache/ossie validation/validate.py "
-                              "(default: two levels up from --converter)")
+                         help="path to Apache's validation/validate.py (default: "
+                              "the `ossie` submodule beside --converter, else two "
+                              "levels up, covering both repo layouts)")
 
     args = parser.parse_args()
     if args.mode == "export":

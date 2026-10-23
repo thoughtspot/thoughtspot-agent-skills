@@ -30,7 +30,7 @@ python3 roundtrip.py export --profile se-thoughtspot --corpus ./corpus --limit 3
 
 # thereafter, offline, against any converter revision
 python3 roundtrip.py check --corpus ./corpus \
-    --converter ~/src/ossie/converters/thoughtspot
+    --converter ~/src/ossie-converters/thoughtspot
 ```
 
 `check` needs no cluster, so it is the rerunnable half — point it at a converter working
@@ -104,7 +104,7 @@ output already reported as valid. The verdict is now three-state — `PASSED`, `
 ## Requirements
 
 `export` needs the `ts` CLI and a ThoughtSpot profile. `check` needs a converter working
-tree with its venv built (`cd converters/thoughtspot && uv sync`) and PyYAML available to
+tree with its venv built (`cd thoughtspot && uv sync`) and PyYAML available to
 the interpreter running this script.
 
 The converter's venv is also the interpreter Apache's validator runs under, so it needs
