@@ -16,9 +16,11 @@
 | ts-link-semantic-layer | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |
 | ts-migrate-orgs | Y | — | — | — |
+| ts-object-answer-chart-builder | Y | — | — | — |
 | ts-object-answer-promote | Y | — | — | — |
 | ts-object-calendar-builder | Y | — | — | — |
 | ts-object-formula-translate | Y | — | — | — |
+| ts-object-liveboard-chart-builder | Y | — | — | — |
 | ts-object-model-agentql-query | Y | — | — | — |
 | ts-object-model-aggregates | Y | — | — | — |
 | ts-object-model-alias | Y | — | — | — |

@@ -206,6 +206,52 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
   `responsiveLayoutPreference` and trims some `kpiColumnProperties`/`systemSeriesColors`
   defaults) — these are cosmetic defaults, not required for a valid import.
 
+## Custom chart (BYOC) answers — `MUZE_STUDIO` carrying its own code
+
+A custom chart tile is an answer whose `chart.type` is `MUZE_STUDIO` and whose
+`chart.custom_visual_props` carries the tile's HTML, CSS and JS. It is not one of the
+Muze shelf types above. `ts-object-answer-chart-builder` (`helpers/answer-patch.js`) and
+`ts-object-liveboard-chart-builder` (`scripts/patch.js`) write it; those two files are
+the codified source for this shape, and both import `VALIDATE_ONLY` first and export the
+result back to check that the code arrived unchanged.
+
+```yaml
+answer:
+  name: <title>
+  tables:
+  - id: <model name>
+    name: <model name>
+    fqn: <model guid>
+  search_query: <search>
+  answer_columns: [{ name: <resolved column> }, ...]
+  chart:
+    type: MUZE_STUDIO
+    chart_columns: [{ column_id: <resolved column> }, ...]
+    custom_chart_config:
+    - key: basic
+      dimensions:
+      - key: fields
+        columns: [<attributes first>, ..., <measures>]   # resolved names, not GUIDs
+        mode: COLUMN_DRIVEN
+    custom_visual_props: '<JSON string>'   # see below
+  display_mode: CHART_MODE
+```
+
+`custom_visual_props` is a JSON string whose `clientState` is itself a JSON string:
+`{ version: 1, playground: { version: 'v1', code: { jsCodeBase64, cssCodeBase64,
+htmlCodeBase64 }, splitSizes: [55], editorConsoleSplitSizes: [99] } }`, beside empty
+`axisVisualProps`, `columnVisualProps`, `dataLabelVisualProps`, `tooltipVisualProps`,
+`legendVisualProps` and `displayVisualProps` objects. Each `*CodeBase64` is the file's
+UTF-8 text, base64-encoded.
+
+- The `fields` dimension with `COLUMN_DRIVEN` lists resolved column **names**, so it is
+  the one `custom_chart_config` that is authored rather than captured: the GUID
+  capture-and-replay rule above applies to the `ADVANCED_*` shelves.
+- Bind the model by guid (`fqn`), never by name: two models in one org can share a name.
+- The tile code runs in a sandboxed iframe that blocks `fetch()`; CDN `<script>` loads
+  work. The skills pin each CDN URL to an exact version and give it a sha384
+  `integrity`.
+
 ## Analytical intent → chart type (recommendation mapping)
 
 Used by the liveboard-builder recommendation engine and the Tableau skill's Step 10a.
