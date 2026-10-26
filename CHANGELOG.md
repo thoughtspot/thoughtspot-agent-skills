@@ -85,6 +85,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - fix: ts-audit 3.2.2 — the report's per-Model join count and join depth read a Model-level `joins` key that Model TML does not have, so every Model showed 0 / 0; they now count the joins under `model_tables[]`, with the helpers D1 and P7 use. PR 1.2 of the ts-audit v2 roadmap.
 - chore: bump ts-cli to v0.185.1
 
+## 2026-10-26
+- feat: add **ts-object-answer-chart-builder** and **ts-object-liveboard-chart-builder** skills (Claude Code only). The first builds a ThoughtSpot custom chart (BYOC) tile as paste-ready `chart.html` / `chart.css` / `chart.js`, iterating in a local browser against a faithful `viz` stub and critiquing each screenshot, can save the result as a ThoughtSpot answer, and ships a library of 58 live-data charts with a shared core. MayaCharts (MIT) is the default chart library; every CDN script is pinned to an exact version and carries its sha384 integrity. The second builds a storytelling Liveboard of those tiles on a real Model through the ThoughtSpot MCP and screenshots every tab. Both start with an intake that checks the prerequisites and asks what to build as pick-from-a-list questions, and both take the Model by guid. Both are CLI-only (`EXPECTED_DIVERGENCES` in `check_runtime_coverage.py`): they need a local browser and touch no warehouse. The examples and screenshots use ThoughtSpot sample data and public football results.
+
 ## 2026-10-23
 - feat: ts-audit 3.2.1 — the skill's catalog-derived sections (categories, the profile prompt and what each profile changes, the rule-id table) are generated from the rule catalog by `python -m ts_cli.audit.generate` and checked by the catalog gate, like `check-catalog.md`; the ts-cli README's `--assessment` row points at them instead of restating pass marks. First PR of the ts-audit v2 roadmap (`docs/superpowers/specs/2026-10-23-audit-v2-roadmap.md`).
 - chore: bump ts-cli to v0.185.0

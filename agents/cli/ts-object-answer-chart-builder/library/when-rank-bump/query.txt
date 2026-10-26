@@ -1,0 +1,1 @@
+[sales] [item type] [date].yearly
