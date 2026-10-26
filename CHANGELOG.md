@@ -12,6 +12,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 - chore: bump ts-cli to v0.204.0
 
 ## 2026-11-04
+- feat: ts-convert-from-sisense 1.1.0 / ts-cli — **Bind a Sisense dashboard to an existing Model** (`ts sisense build-liveboard --target-model`). Fields resolve by table instance + column through role-playing copies (by name, else by the relation's foreign-key column), Sisense `count` is a distinct count (bound to a Model `unique count` formula over a hidden key), widget filters become search filters (repeated `=` ORed, repeated `!=` ANDed — never `in (...)`, which search silently ignores), tab sets keep their active tab, titles become `custom_name`, rich text becomes note tiles, the layout becomes the grid, `--drill` dashboards become details tables, and dashboard filters become chips with `excluded_visualizations`. What only the Model's author can decide is NEEDS REVIEW, resolved through `field_map` / `filter_map`. Verified tile-for-tile against a hand-built rebuild of a 31-widget dashboard. Fixes along the way: filter chips use the verified `oper: in` / `not in` shape in both build modes; a derived viz `obj_id` drops parentheses and commas as the server does (every converter); `ts tml verify-render` lists suspect tiles (0, empty, one all-NULL group) and gains `--strict-data`.
+- chore: bump ts-cli to v0.204.0
 - feat(audit): S14 and S15, LOW "review" RLS checks (ts-audit 3.17.0, BL-512)
 - chore: bump ts-cli to v0.203.0
 - feat(validate): the file-size gate covers the audit report's own JS parts, with a function-length ratchet (BL-503)

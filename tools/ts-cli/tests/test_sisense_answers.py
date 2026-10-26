@@ -97,14 +97,16 @@ def test_filter_member_in():
     assert len(chips) == 1
     c = chips[0]
     assert c["column"] == ["Country"]
-    assert c["generic_filter"] == {"oper": "IN", "values": ["US", "CA"]}
+    assert (c["oper"], c["values"]) == ("in", ["US", "CA"])   # exported-Liveboard shape
+    assert "generic_filter" not in c
 
 
 def test_filter_exclude_not_in():
     inv = _dash([{"kind": "exclude", "dim": "[country.Country]", "operator": "exclude",
                   "values": ["XX"], "raw": {"exclude": {"members": ["XX"]}}}])
     chips = extract_liveboard_filters(inv)
-    assert chips[0]["generic_filter"] == {"oper": "NOT_IN", "values": ["XX"]}
+    assert (chips[0]["oper"], chips[0]["values"]) == ("not in", ["XX"])
+    assert "generic_filter" not in chips[0]
 
 
 def test_filter_range_presets():

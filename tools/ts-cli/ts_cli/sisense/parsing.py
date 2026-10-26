@@ -82,6 +82,7 @@ def _parse_table(t: dict, tables: list, col_by_oid: dict, table_by_oid: dict) ->
     tables.append({
         "id": t_id,
         "name": t.get("displayName") or t.get("name") or t_id,
+        "jaql_name": t.get("name") or t_id,   # the table name JAQL dims use ([name.column])
         "columns": _parse_columns(t, col_by_oid, t_id),
         "sql_expression": t.get("expression") if t.get("type") == "custom" else None,
     })
@@ -241,7 +242,7 @@ def parse_widget(widget: dict, warnings: list) -> dict:
                     filters.append(sf)
     except Exception as e:  # never let one malformed widget abort the parse
         warnings.append(f"Could not fully parse widget {widget.get('oid', '?')}: {e}")
-    return {
+    out = {
         "oid": widget.get("oid") or "",
         "title": widget.get("title") or "",
         "wtype": widget.get("type") or "",
@@ -249,6 +250,41 @@ def parse_widget(widget: dict, warnings: list) -> dict:
         "fields": fields,
         "filters": filters,
     }
+    out.update(_widget_extras(widget))
+    return out
+
+
+def _widget_extras(widget: dict) -> dict:
+    """Presentation keys the liveboard layer needs: tab-set config, rich-text content and
+    jump-to-dashboard drill targets. Only present when the widget carries them."""
+    wtype, style = widget.get("type") or "", widget.get("style") or {}
+    extras: dict = {}
+    if wtype == "WidgetsTabber":
+        extras["tabber"] = _tabber(style)
+    if wtype == "richtexteditor":
+        content = style.get("content") or {}
+        extras["richtext"] = {"html": content.get("html") or "", "bg_color": content.get("bgColor") or ""}
+    targets = _drill_targets(widget.get("drillToDashboardConfig") or {})
+    if targets:
+        extras["drill_targets"] = targets
+    return extras
+
+
+def _tabber(style: dict) -> dict:
+    tabs = [{"title": t.get("title") or "", "show": list(t.get("displayWidgetIds") or [])}
+            for t in style.get("tabs") or []]
+    try:
+        active = int(style.get("activeTab") or 0)
+    except (TypeError, ValueError):
+        active = 0
+    return {"tabs": tabs, "active": active if 0 <= active < len(tabs) else 0}
+
+
+def _drill_targets(drill: dict) -> list:
+    if drill.get("enabled", True) is False:
+        return []
+    return [t for t in (d.get("dashboardTitle") or d.get("caption") or ""
+                        for d in drill.get("dashboardIds") or [] if isinstance(d, dict)) if t]
 
 
 def parse_dashboard(raw: dict, warnings: list) -> dict:
@@ -262,7 +298,39 @@ def parse_dashboard(raw: dict, warnings: list) -> dict:
         "title": raw.get("title") or "",
         "datasource": (raw.get("datasource") or {}).get("title") or "",
         "filters": dash_filters,
+        "layout": _parse_layout(raw.get("layout") or {}),
     }
+
+
+def _px(h) -> int:
+    """Sisense element height ('140px' or 140) -> pixels; 0 when unreadable."""
+    try:
+        return int(float(str(h).replace("px", "").strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_layout(layout: dict) -> list:
+    """Sisense columnar layout -> rows of placed widgets, top to bottom.
+
+    Each row is ``[{"oid", "width_pct", "height_px", "col_pct"}]`` where ``width_pct`` is the
+    subcell width within its layout column and ``col_pct`` the layout column's own width; a
+    multi-column dashboard lists each column's rows in turn (``col`` index on each row).
+    """
+    rows = []
+    for ci, col in enumerate(layout.get("columns") or []):
+        col_pct = float(col.get("width") or 100)
+        for cell in col.get("cells") or []:
+            row = []
+            for sub in cell.get("subcells") or []:
+                width = float(sub.get("width") or 100)
+                for el in sub.get("elements") or []:
+                    if el.get("widgetid"):
+                        row.append({"oid": el["widgetid"], "width_pct": width,
+                                    "height_px": _px(el.get("height")), "col_pct": col_pct})
+            if row:
+                rows.append({"col": ci, "items": row})
+    return rows
 
 
 def parse_inventory(bundle: dict) -> dict:
