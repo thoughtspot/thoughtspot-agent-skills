@@ -1,0 +1,1 @@
+[sales] [quantity purchased] [store] [date].quarterly

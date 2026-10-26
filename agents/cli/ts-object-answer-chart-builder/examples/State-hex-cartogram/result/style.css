@@ -1,0 +1,107 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  width:100%;height:100%;
+  background:#FFFFFF;
+  font-family:"Inter",system-ui,sans-serif;
+  color:#1f2937;
+  overflow:hidden;
+}
+#chart{width:100%;height:100%}
+
+.wrapper{
+  width:100%;height:100%;
+  display:flex;flex-direction:column;
+  padding:10px 12px 36px;
+  background:#FFFFFF;
+  position:relative;
+}
+
+/* MAP STAGE — gets all remaining space; white through and through */
+.map-wrap{
+  position:relative;flex:1;min-height:0;min-width:0;
+  display:flex;align-items:center;justify-content:center;
+  background:#FFFFFF;
+}
+
+#hex{
+  width:100%;height:100%;display:block;
+  opacity:0;
+  transform-origin:50% 50%;
+  overflow:visible;
+}
+#hex.is-loaded{
+  animation:hex-in 480ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+@keyframes hex-in{
+  from{opacity:0;transform:scale(0.96)}
+  to  {opacity:1;transform:scale(1)}
+}
+
+/* Hex cells */
+.hexcell{cursor:default}
+.hexcell .hex{
+  transition:transform .12s ease, filter .12s ease, stroke-width .12s ease;
+  transform-box:fill-box;
+  transform-origin:center;
+}
+.hexcell:hover .hex{
+  transform:scale(1.06);
+  filter:brightness(1.06);
+  stroke:#111827;
+  stroke-width:1.6;
+}
+.hexcell text.lab{
+  font-family:"Inter",system-ui,sans-serif;
+  font-weight:600;
+  pointer-events:none;
+  user-select:none;
+}
+.hexcell text.val{
+  font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-weight:500;
+  pointer-events:none;
+  user-select:none;
+}
+
+/* Floating tooltip */
+.tip{
+  position:absolute;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .1s;
+  background:#1f2937;
+  color:#ffffff;
+  font-size:12px;
+  padding:7px 10px;
+  border-radius:8px;
+  white-space:nowrap;
+  transform:translate(-50%,-130%);
+  z-index:5;
+  font-family:"Inter",system-ui,sans-serif;
+  box-shadow:0 4px 12px rgba(0,0,0,0.15);
+}
+.tip .tip-name{font-weight:600}
+.tip .tip-val{font-family:"JetBrains Mono",ui-monospace,monospace;opacity:.9;margin-left:6px}
+.tip .tip-tag{
+  font-size:10px;opacity:.6;text-transform:uppercase;letter-spacing:0.08em;
+  display:block;margin-top:2px;
+}
+
+/* Bottom color-scale pill */
+.scale-pill{
+  position:absolute;
+  left:50%;bottom:8px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;
+  background:rgba(255,255,255,0.92);
+  padding:6px 12px;border-radius:999px;
+  border:1px solid rgba(0,0,0,0.08);
+  font-size:11px;color:#6b7280;
+  font-family:"JetBrains Mono",ui-monospace,monospace;
+  pointer-events:none;
+  min-height:24px;
+}
+.scale-label{white-space:nowrap}
+.scale-bar{
+  height:10px;width:200px;border-radius:5px;
+  border:1px solid rgba(0,0,0,0.06);
+}

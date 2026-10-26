@@ -1,0 +1,12 @@
+{
+  "schema": [
+    { "name": "REGION",  "type": "dimension" },
+    { "name": "REVENUE", "type": "measure", "defAggFn": "sum" }
+  ],
+  "rows": [
+    { "REGION": "EMEA", "REVENUE": 1240 },
+    { "REGION": "AMER", "REVENUE": 2180 },
+    { "REGION": "APAC", "REVENUE": 960 },
+    { "REGION": "LATAM", "REVENUE": 430 }
+  ]
+}

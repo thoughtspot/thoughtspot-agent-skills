@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>International Football Head-to-Head</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Roboto+Condensed:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="chart">
+  <div class="wrapper">
+    <div class="inner">
+
+      <p class="intro">
+        <strong>Pick any two nations using the dropdowns</strong> and see their all-time record vs each other in a classic scoreboard style with goals, wins, draws.
+        <strong>Use the buttons</strong> below to switch tournament filters.
+        Make your own predictions for World Cup 2026, or <strong>ask Spotter</strong> to help predict!
+      </p>
+
+      <div class="selectors">
+        <div class="team-select-wrap" id="wrap1">
+          <input type="text" id="input1" placeholder="Team 1" autocomplete="off" readonly>
+          <div class="dropdown" id="dd1">
+            <div class="dd-search"><input type="text" id="search1" placeholder="Search team..."></div>
+            <div class="dd-list" id="list1"></div>
+          </div>
+        </div>
+        <div class="vs-badge">VS</div>
+        <div class="team-select-wrap" id="wrap2">
+          <input type="text" id="input2" placeholder="Team 2" autocomplete="off" readonly>
+          <div class="dropdown" id="dd2">
+            <div class="dd-search"><input type="text" id="search2" placeholder="Search team..."></div>
+            <div class="dd-list" id="list2"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="filters">
+        <button class="filter-pill active" data-filter="wc">World Cup</button>
+        <button class="filter-pill" data-filter="qual">Qualifiers</button>
+      </div>
+
+      <div class="scoreboard" id="scoreboard">
+        <div class="no-data">Select two teams above</div>
+      </div>
+
+      <div class="footer" id="footer">&nbsp;</div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+html, body { height: 100%; margin: 0; background: #fff; }
+#chart {
+  display: block; height: 100%; color-scheme: light;
+  /* The theme: --maya-<token in kebab case>, on #chart itself (on :root or body it is ignored). */
+  --maya-font: Geist, system-ui, sans-serif; --maya-fg: #1E1E24; --maya-fg-muted: #8A8A94; --maya-accent: #1E1E24;
+  --maya-series-1: #1E1E24; --maya-radius: 2px; --maya-bg: #FFFFFF; --maya-title-size: 14px;
+}
