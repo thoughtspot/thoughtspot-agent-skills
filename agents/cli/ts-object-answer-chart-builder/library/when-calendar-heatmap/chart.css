@@ -1,0 +1,3 @@
+html, body { height: 100%; margin: 0; }
+#chart { display: block; height: 100%; --maya-font: Geist, system-ui, sans-serif; --maya-bg: transparent; --maya-tooltip-bg: light-dark(#fff, #2b2f36); --maya-radius: 2px; --maya-title-size: 14px; }
+#chart { --maya-accent: light-dark(#1E293B, #E6EDF3); }

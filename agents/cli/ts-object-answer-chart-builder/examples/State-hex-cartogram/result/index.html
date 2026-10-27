@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>US State Hex Cartogram</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="chart">
+  <div class="wrapper">
+    <div class="map-wrap">
+      <svg id="hex" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="US state hex tile cartogram"></svg>
+      <div id="tip" class="tip" aria-hidden="true"></div>
+    </div>
+    <div class="scale-pill" id="legend">
+      <span class="scale-label" id="lmin">low</span>
+      <div class="scale-bar" id="bar"></div>
+      <span class="scale-label" id="lmax">high</span>
+    </div>
+  </div>
+</div>
+<script src="script.js"></script>
+</body>
+</html>

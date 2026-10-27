@@ -1,0 +1,15 @@
+// Search: [sales] [region] [item type]. Region width by share of sales, family height within it; click a block to select.
+document.getElementById('chart')?.style.setProperty('color-scheme', (([r, g, b]) => r * .299 + g * .587 + b * .114 > 140)(getComputedStyle(document.body).color.match(/\d+/g)) ? 'dark' : 'light');
+const FAM = { Jackets: 'Outerwear', Vests: 'Outerwear', Sweatshirts: 'Outerwear', Sweaters: 'Outerwear', Shirts: 'Tops and dresses', Dresses: 'Tops and dresses', Pants: 'Bottoms', Jeans: 'Bottoms', Shorts: 'Bottoms', Skirts: 'Bottoms', Swimwear: 'Swim and basics', Underwear: 'Swim and basics', Socks: 'Swim and basics', Bags: 'Accessories', Headwear: 'Accessories' }, COL = { Outerwear: '#D1543A', 'Tops and dresses': '#2A6FD0', Bottoms: '#0F9D8A', 'Swim and basics': '#D99A00', Accessories: '#C2477A' }, u = (c) => c?.value?.() ?? c?.value ?? c; const MAYA = 'https://cdn.jsdelivr.net/npm/mayacharts@0.18.1/dist/maya.global.js'; const SRI = 'sha384-Z7INdXfgP1H/WUINrm44nlLrtN58MLpFXLi52fr7HiGOGg/J4FAvjgXQM2Wnd9AK';
+const pct = (x) => Math.round(x * 100) + '%';
+const derive = (d, ix = (re) => d?.schema?.findIndex((c) => re.test(c.name))) => {
+  const [g, i, v] = [ix(/region/i), ix(/item/i), ix(/sales/i)], rows = (d?.data ?? []).map((r) => r.map(u)).filter((r) => r[v] > 0), sum = (a, f) => a.reduce((m, r) => m + r[v] * f(r), 0);
+  if (!rows.length) return { table: d };
+  const by = rows.reduce((m, r) => m.set(r[g], (m.get(r[g]) || 0) + r[v]), new Map()), lead = [...by].reduce((a, b) => (b[1] > a[1] ? b : a)), lr = rows.filter((r) => r[g] === lead[0]);
+  const top = Object.keys(COL).map((f) => [f, sum(lr, (r) => (FAM[r[i]] === f ? 1 : 0))]).reduce((a, b) => (b[1] > a[1] ? b : a));
+  return { table: { schema: [...d.schema, { name: 'Family' }], data: rows.map((r) => [...r, FAM[r[i]] ?? 'Other']).sort((a, b) => by.get(b[g]) - by.get(a[g]) || Object.keys(COL).indexOf(a[a.length - 1]) - Object.keys(COL).indexOf(b[b.length - 1])) },
+    spec: { subtitle: "Column width follows each region's weight; block height follows each family's weight within it." } };
+};
+const SPEC = { type: 'marimekko', x: 'region', series: 'Family', y: 'Total sales', select: true, colors: COL, titles: { region: 'Region', 'Total sales': 'Sales' }, format: { 'Total sales': { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 } }, text: { noData: 'No rows yet: bind [sales] [region] [item type]' } };
+const go = () => { const d = derive(viz?.getDataFromSearchQuery?.()?.getData()); maya.host.thoughtspot({ events: viz?.events, getDataFromSearchQuery: () => ({ getData: () => d.table }) }, { ...SPEC, ...d.spec }); };
+if (window.maya?.host) go(); else { const s = document.querySelector('script[src="' + MAYA + '"]') ?? document.head.appendChild(Object.assign(document.createElement('script'), { src: MAYA, integrity: SRI, crossOrigin: 'anonymous' })); s.addEventListener('load', go); s.addEventListener('error', () => { (document.getElementById('chart') ?? document.body).textContent = 'MayaCharts could not load from ' + MAYA; viz?.events?.emitRenderCompletedEvent?.(); }); }
