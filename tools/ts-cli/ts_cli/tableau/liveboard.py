@@ -118,10 +118,30 @@ def _bucket_label(token: Optional[str]) -> Optional[str]:
     return _BUCKET_LABEL.get(m.group(1).lower()) if m else None
 
 
+# `<keyword> [X]` -> the output column ThoughtSpot names it (live-verified 26.9). Longest first
+# so `unique count` wins over `count`.
+_AGG_OUTPUT_PREFIX = (("unique count", "Unique Number of"), ("count", "Number of"), ("sum", "Total"),
+                      ("average", "Average"), ("min", "Minimum"), ("max", "Maximum"))
+
+
+def _agg_label(token: Optional[str]) -> Optional[str]:
+    """`unique count [X]` -> `Unique Number of`; None if the token carries no aggregation keyword."""
+    t = (token or "").strip().lower()
+    for kw, prefix in _AGG_OUTPUT_PREFIX:
+        if t.startswith(kw + " ["):
+            return prefix
+    return None
+
+
 def _output_name(col: str, bucket_tokens: dict) -> str:
-    """Resolved output-column name: `Month(Order Date)` for a bucketed date, else the raw name."""
-    lbl = _bucket_label(bucket_tokens.get(col))
-    return f"{lbl}({col})" if lbl else col
+    """Resolved output-column name: `Month(Order Date)` for a bucketed date, `Unique Number of X`
+    for an aggregation-keyword token, else the raw name."""
+    token = bucket_tokens.get(col)
+    lbl = _bucket_label(token)
+    if lbl:
+        return f"{lbl}({col})"
+    agg = _agg_label(token)
+    return f"{agg} {col}" if agg else col
 
 
 _GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"

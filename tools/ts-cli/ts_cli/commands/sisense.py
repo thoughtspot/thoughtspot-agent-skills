@@ -128,8 +128,15 @@ def _model_names(inv, ov, connection, database, schema, join_type, lower_db_tabl
 def build_liveboard_cmd(
     input_file: str = typer.Option(..., "--input", "-i",
                                    help="Path to the offline Sisense bundle JSON"),
-    model_name: str = typer.Option(..., "--model-name",
-                                   help="Model name the answers bind to (must match `build-model`)"),
+    model_name: str = typer.Option(None, "--model-name",
+                                   help="Model name the answers bind to (must match `build-model`); "
+                                        "defaults to the --target-model's name"),
+    target_model: str = typer.Option(None, "--target-model",
+                                     help="Exported TML (YAML or JSON) of an EXISTING Model to bind to, "
+                                          "instead of the model build-model would generate"),
+    drill: list[str] = typer.Option(None, "--drill",
+                                    help="A jump-to-dashboard target's .dash / bundle JSON (repeatable); "
+                                         "each becomes a details table (with --target-model)"),
     out: str = typer.Option(None, "--out", "-o",
                             help="Output dir for the emitted .tml (required once the emitter lands)"),
     model_fqn: str = typer.Option(None, "--model-fqn", help="Model GUID to bind to (optional; more robust)"),
@@ -161,6 +168,16 @@ def build_liveboard_cmd(
     ov = json.loads(Path(overrides).read_text(encoding="utf-8")) if overrides else {}
     if report_name:
         ov["report_name"] = report_name
+    if not out:
+        typer.echo("Provide --out to write the emitted TML.", err=True)
+        raise SystemExit(1)
+
+    if target_model:
+        _target_liveboard(inv, target_model, model_fqn, ov, drill or [], out)
+        return
+    if not model_name:
+        typer.echo("Provide --model-name (or --target-model).", err=True)
+        raise SystemExit(1)
 
     column_names, measure_names = _model_names(inv, ov, connection, database, schema,
                                                join_type, lower_db_table, model_name)
@@ -174,9 +191,6 @@ def build_liveboard_cmd(
     if lb_tml and chips:  # inject the Sisense dashboard filter bar as cross-viz chips
         lb_tml["liveboard"]["filters"] = chips
 
-    if not out:
-        typer.echo("Provide --out to write the emitted TML.", err=True)
-        raise SystemExit(1)
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
     for a in result.get("answers", []):
@@ -195,3 +209,59 @@ def build_liveboard_cmd(
         "visuals_migrated": _c(vr, "Migrated"), "approximated": _c(vr, "Approximated"),
         "needs_review": _c(vr, "NEEDS REVIEW"), "filter_chips": len(chips),
         "liveboard": bool(lb_tml)}))
+
+
+def _load_tml(path: str) -> dict:
+    """--target-model file -> Model TML dict. Accepts a raw TML file (YAML or JSON) or the
+    JSON array `ts tml export` prints (edoc string, or parsed dict with --parse)."""
+    import yaml
+    from ts_cli.commands.tml import parse_edoc
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+        doc = json.loads(text) if text.lstrip()[:1] in ("[", "{") else parse_edoc(text)
+        if isinstance(doc, list) and doc:
+            doc = doc[0].get("edoc", doc[0]) if isinstance(doc[0], dict) else doc[0]
+        if isinstance(doc, str):
+            doc = parse_edoc(doc)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        typer.echo(f"Cannot read --target-model {path}: {exc}", err=True)
+        raise SystemExit(1)
+    if not isinstance(doc, dict) or not (doc.get("model") or doc.get("worksheet")):
+        typer.echo(f"--target-model {path} is not a Model TML", err=True)
+        raise SystemExit(1)
+    return doc
+
+
+def _target_liveboard(inv, target_model, model_fqn, ov, drill_files, out) -> None:
+    """--target-model path: bind to an existing Model (ts_cli.sisense.target_answers)."""
+    from ts_cli.sisense.parsing import parse_inventory
+    from ts_cli.sisense.target_answers import build_target_liveboard
+    from ts_cli.sisense.tables import _slug
+    from ts_cli.tml_common import dump_tml_yaml
+
+    drills = []
+    for f in drill_files:
+        doc = _load_bundle(f)          # a raw .dash export is the dashboard itself, not a bundle
+        drills.append(parse_inventory(doc if "dashboard" in doc else {"dashboard": doc}))
+    result = build_target_liveboard(inv, _load_tml(target_model), model_fqn, ov, drills)
+    for w in inv.get("warnings", []):
+        typer.echo(f"warning: {w}", err=True)
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lb = result.get("liveboard")
+    if lb:
+        (out_dir / f"{_slug(result['report_name'])}.liveboard.tml").write_text(dump_tml_yaml(lb), encoding="utf-8")
+    (out_dir / "migration-report.json").write_text(
+        json.dumps({"report_name": result["report_name"], "visuals": result["visual_rows"]}, indent=2), encoding="utf-8")
+    vr = result["visual_rows"]
+
+    def _c(s):
+        return sum(1 for r in vr if r.get("status") == s)
+    typer.echo(json.dumps({
+        "report_name": result["report_name"], "answers": len(result["answers"]),
+        "visuals_migrated": _c("Migrated"), "approximated": _c("Approximated"),
+        "merged_tabs": _c("Merged"), "needs_review": _c("NEEDS REVIEW"),
+        "filter_chips": result["filter_chips"], "liveboard": bool(lb)}))
+    for r in vr:
+        if r.get("status") == "NEEDS REVIEW":
+            typer.echo(f"NEEDS REVIEW: {r['visual']}: {r.get('note', '')}", err=True)

@@ -99,8 +99,8 @@ Widgets become Answers on the tabbed Liveboard: the Sisense widget type picks th
 (`chart/column`→COLUMN, `indicator`→KPI, `pivot`→PIVOT_TABLE, …); JAQL panels map to roles
 (Categories→x, Break-by→color, Values→y); a date `level` becomes a matching date bucket
 (`months`→MONTHLY) so it sorts chronologically; a per-attribute top-N is baked into the
-widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→IN,
-exclude→NOT_IN, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
+widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→`in`,
+exclude→`not in`, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
 
 Each Answer is emitted via the shared emitter's `build_answer` using the Sisense-resolved
 chart type directly, so the widget-type mapping wins and the Approximated / NEEDS REVIEW
@@ -118,6 +118,57 @@ ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; ex
 > `axis_configs`, so nothing is expected to fire; the gate is here so a future change to
 > the shared emitter cannot ship blank boards unnoticed.
 
+### Step 3 (alternative) — Bind to an EXISTING Model
+
+Use this instead of Steps 1–3 when the Model already exists — designed by hand, or built
+earlier from the same warehouse — and the dashboards must land on it. Export the Model WITH its
+`obj_id` (the only exact viz binding: a Model can carry a custom obj_id no name derivation
+reproduces), then build against it:
+
+```bash
+ts tml export <model-guid> --include-obj-id --profile <name> > target-model.json
+ts sisense build-liveboard --input <bundle.json> --target-model target-model.json --out out/ \
+  [--drill <drill-dashboard>.dash ...] [--overrides overrides.json] [--report-name "<name>"]
+```
+
+What it does, all deterministic:
+
+| Sisense | ThoughtSpot |
+|---|---|
+| `[Table.column]` | The Model column exposing exactly that table instance + column. A role-playing copy (two date tables, two copies of one dimension) resolves by name, else by the **foreign-key column** the Sisense relation uses — never by bare column name |
+| `count` (a DISTINCT count) | `unique count [X]`; over a key the Model hides, the Model formula `unique count ( [inst::col] )` |
+| Widget-level filter | Search filter: members `[X] = 'a' [X] = 'b'` (ORed), excludes `[X] != 'a'` (ANDed), ranges `>= > <= <`. Never `in (...)` / `not in (...)` — search ignores both silently |
+| WidgetsTabber (daily/weekly/… tabs) | The active tab's widget only, grain suffix dropped from its title; the other grains are the chart's own date-bucket control. Reported `Merged` |
+| Value / axis titles | `custom_name` |
+| Rich-text widget, tab-set title | Section-header note tile |
+| Columnar layout | Tile grid (rows fill 12 columns; a merged tab's width goes to the kept one) |
+| Jump-to-dashboard drill | A details table from the drill dashboard's widget (pass it with `--drill`), carrying the filters every source widget shares; users narrow it with right-click → Filter |
+| Dashboard filter | Chip (`oper: in` / `not in`, top-level `values`). A chip on a column a tile filters itself lists that tile in `excluded_visualizations` (a chip REPLACES a tile's own filter; Sisense ANDs them). A dimension with several role copies binds to the copy reaching the most tiles, then the shortest join path |
+
+Anything only the Model's author can decide is **NEEDS REVIEW** in `out/migration-report.json`
+with the reason, and is resolved in `overrides.json` — never guessed:
+
+```json
+{"field_map":  {"[legacy_events.event_id]": "Event Count"},
+ "filter_map": {"[Start_Date.id_]": "[Visit Started?] = true"}}
+```
+
+`field_map` binds a Sisense dim to a Model column (a source table the connection cannot see, a
+formula field); `filter_map` replaces a Sisense filter with a search fragment (a filter on a key
+the Model hides). Typical causes: a Sisense table missing from the Model, a hidden key, a filter
+the Model expresses as a flag. Then lint, import and verify:
+
+```bash
+ts tml lint --dir out/
+ts tml import --dir out/ --policy ALL_OR_NONE --profile <name>
+ts tml verify-render <liveboard-guid> --profile <name>     # add --strict-data to gate on suspect tiles
+```
+
+`verify-render` lists `suspect_tiles`: a tile answering 0, nothing, or one all-NULL group. That is
+the shape of a query that could not combine two facts — a measure filter on one fact with an
+attribute from another returns no error, just a wrong 0. A real zero is possible, so read each one
+against the source before accepting it.
+
 ### Step 4 — Migration report
 `mapping.json` accounts for every table, measure, and widget with a status (Migrated /
 Approximated / NEEDS REVIEW / Skipped), plus `warnings`. Hand it to the user as the
@@ -130,6 +181,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-10-27 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Verified tile-for-tile against a hand-built rebuild of a 31-widget dashboard |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
 | 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |
 | 1.0.3 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A literal with a quote is emitted double-quoted (read SQL-standard: `''` is one quote), a backslash doubled, and every product under a division bracketed |

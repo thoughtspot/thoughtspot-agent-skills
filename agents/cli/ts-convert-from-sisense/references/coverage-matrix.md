@@ -1,4 +1,4 @@
-<!-- coverage-matrix last-reviewed: 2026-10-21 -->
+<!-- coverage-matrix last-reviewed: 2026-10-27 -->
 # Coverage matrix — Sisense → ThoughtSpot
 
 Every Sisense construct and its conversion status. Cite in the migration report. Within
@@ -63,9 +63,30 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | JAQL panels → roles | Mapped | Categories/x-axis→Category, Break-by→Series(color), Values/y-axis→Values, Rows/Columns→pivot axes |
 | Date `level` → date bucket | Mapped | `hours/days/weeks/months/quarters/years` → `HOURLY…YEARLY` (worked example) |
 | Per-attribute top/bottom N | Mapped | baked into the widget answer as `top N` |
-| Dashboard filter bar → Liveboard chips | Mapped | member→`IN`, exclude→`NOT_IN` |
+| Dashboard filter bar → Liveboard chips | Mapped | member→`oper: in`, exclude→`oper: not in`, top-level `values` (the exported-Liveboard shape, verified to filter — open-item #5) |
 | Numeric-range dashboard filter → chip preset | Mapped | single-sided from/to→`GE`/`LE`, fromNotEqual/toNotEqual→`GT`/`LT`; two-sided keeps BOTH bounds→`BW_INC`/`BW` (incl. mixed inclusive/exclusive — never collapses to one bound); equals→`EQ` (worked example) |
 | Dashboard → tabbed Liveboard | Mapped | one Liveboard; widgets become Answers |
+
+### Binding to an existing Model (`build-liveboard --target-model`)
+
+Verified tile-for-tile on a live cluster (open-item #6).
+
+| Sisense construct | Status | ThoughtSpot target |
+|---|---|---|
+| `[Table.column]` on a role-playing copy | Mapped | the Model instance named like the table, else the one joined on the FK column the Sisense relation uses; ambiguous → NEEDS REVIEW |
+| `count` on a key the Model hides | Mapped | the Model formula `unique count ( [inst::col] )`; none → NEEDS REVIEW naming the measure to add |
+| `count` / `countduplicates` / `sum` / `avg` / `min` / `max` on a column | Mapped | `unique count` / `count` / `sum` / `average` / `min` / `max` keyword with ThoughtSpot's output name |
+| Sisense calculated column | Mapped | the Model formula of the same (normalised) name, when unique and on the same table |
+| Widget-level member / exclude / range filter | Mapped | `[X] = 'a' [X] = 'b'` (OR) / `[X] != 'a'` (AND) / `>= > <= <` in the search |
+| Filter on a key the Model hides, table the Model lacks | Flagged | NEEDS REVIEW → `filter_map` / `field_map` in overrides.json |
+| `WidgetsTabber` (time-grain tabs) | Mapped | the active tab's widget only; others `Merged` (grain is the chart's date-bucket control) |
+| Value / axis title | Mapped | `custom_name` |
+| `richtexteditor`, tab-set title | Mapped | section-header note tile |
+| Columnar layout | Mapped | tile grid, rows filling 12 columns |
+| Jump-to-dashboard drill | Approximated | details table from the drill dashboard (`--drill`) with the source widgets' shared filters; narrowed by right-click → Filter, not a pop-up |
+| Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip (ThoughtSpot replaces, Sisense ANDs) |
+| Dashboard filter on a dimension with several role copies | Mapped | copy reaching the most tiles, then the shortest join path; still tied → flagged |
+| Chip that cannot reach a tile's facts | Flagged | NEEDS REVIEW naming the tiles |
 
 ## Unmapped Constructs (Limitations)
 
@@ -88,5 +109,5 @@ the original Sisense expression preserved.
 | Two-sided range with mixed inclusive/exclusive bounds | Partial | both bounds retained via `BW_INC`/`BW`; exact boundary inclusivity is approximate (verify live — open-item #5) |
 | Measure-range dashboard filter (filter on a formula/measure not exposed as a column) | Dropped | dropped when the column is not on the model |
 | Cyclic date parts (day-of-week, month-of-year as a `level`) | Dropped | no clean date-bucket equivalent |
-| `richtexteditor` / text widget | Dropped | not a data visual — no Answer emitted |
+| `richtexteditor` / text widget | Dropped | not a data visual — no Answer emitted (the `--target-model` path emits a note tile) |
 | Live Sisense REST fetch | Not implemented | offline bundle only (open-item #3) |

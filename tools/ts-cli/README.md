@@ -771,9 +771,15 @@ ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
 | `liveboard` (arg) | required | GUID or name of the imported Liveboard |
 | `--profile`, `-p` | first profile | Profile to use |
 | `--org` | profile/env org | Org id or name the Liveboard lives in |
+| `--strict-data` | off | Also fail when a tile is suspect (see below) |
+
+It also lists **suspect tiles**: a tile that returns no rows, a single row of zeros, or one
+all-NULL group. That is the shape of a query that could not combine two facts — a measure filter
+on one fact with an attribute from another answers 0 with no error. A real zero is possible, so
+this is advisory unless `--strict-data` is passed.
 
 **Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}],
-"blank_chart_tiles": [{visual, chart_type}]}`.
+"blank_chart_tiles": [{visual, chart_type}], "suspect_tiles": [{visual, reason}]}`.
 **Exit code** is `0` only if the board returns data **and** has no blank chart tiles, `1`
 otherwise — so a conversion skill can gate its import step on it
 (`ts tml import ... && ts tml verify-render <guid>`).
@@ -2840,6 +2846,43 @@ output directory; prints a counts summary JSON to stdout.
 
 ---
 
+
+## `ts sisense` — Sisense → ThoughtSpot converter
+
+Offline: every subcommand reads a Sisense bundle JSON (`{dashboard, widgets, datamodel}`) from
+disk. `parse` prints the inventory; `build-model` emits Table + Model TML and `mapping.json`;
+`build-liveboard` emits the Liveboard. Skill: `agents/cli/ts-convert-from-sisense`.
+
+### `ts sisense build-liveboard`
+
+Two binding modes. Default: bind to the Model `build-model` generates (`--model-name`, the same
+connection/database/schema options). `--target-model`: bind to an EXISTING Model through its
+exported TML — fields resolve by table instance + column (role copies by name or by the
+relation's foreign-key column), Sisense `count` becomes `unique count`, widget filters become
+search filters, tab sets keep their active tab, titles become `custom_name`, rich text and
+tab-set titles become note tiles, the layout becomes the tile grid, `--drill` dashboards become
+details tables, and dashboard filters become chips with `excluded_visualizations`.
+
+```bash
+ts tml export <model-guid> --include-obj-id --profile myprofile > target-model.json
+ts sisense build-liveboard --input bundle.json --target-model target-model.json --out out/ \
+  --drill _drill_case_list.dash --overrides overrides.json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input`, `-i` | required | Sisense bundle JSON |
+| `--out`, `-o` | required | Output dir: `<name>.liveboard.tml` (+ `.answer.tml` per widget in default mode, `migration-report.json` in `--target-model` mode) |
+| `--model-name` | — | Model the answers bind to; required without `--target-model` |
+| `--target-model` | — | Model TML file — raw YAML/JSON, or the JSON `ts tml export` prints. Its root `obj_id` (`--include-obj-id`) is used for the viz binding |
+| `--drill` | — | A jump-to-dashboard target's `.dash` or bundle JSON; repeatable |
+| `--model-fqn` | — | Model GUID (default mode; the target mode reads it from the TML) |
+| `--report-name` | dashboard title | Liveboard name |
+| `--overrides` | — | JSON: `report_name`, and in `--target-model` mode `field_map` (`{"[Table.col]": "Model Column"}`) and `filter_map` (`{"[Table.col]": "<search fragment>"}`) |
+
+**Output:** JSON summary on stdout (`answers`, `visuals_migrated`, `approximated`,
+`merged_tabs`, `needs_review`, `filter_chips`, `liveboard`); each NEEDS REVIEW row is echoed to
+stderr with its reason.
 
 ## Piping and scripting
 

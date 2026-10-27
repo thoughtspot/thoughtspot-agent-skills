@@ -213,8 +213,13 @@ tables:
   obj_id: ModelNameNoSpaces-{guid8}   # e.g. AmazonSalesdata-fdea93b4
 ```
 
-`obj_id` format = the model's display name with spaces removed, `-`, then the first
-segment of its GUID (`fdea93b4` from `fdea93b4-a80f-...`). The liveboard document itself
+`obj_id` format = the model's display name with spaces, parentheses and commas removed, `-`,
+then the first segment of its GUID (`fdea93b4` from `fdea93b4-a80f-...`):
+"Sample ECommerce (Sisense)" → `SampleECommerceSisense-94a65744` (live-verified 2026-10-27).
+Other punctuation is unverified, and a Model created with a **custom** obj_id cannot be derived
+at all — when the Model's TML is available, export it with `ts tml export --include-obj-id` and
+use its root `obj_id`. A mismatched obj_id fails the import with
+`No table with object_id … found for table_id …`. The liveboard document itself
 also carries a root `obj_id` (`{LiveboardNameNoSpaces}-{guid8}`) alongside the root
 `guid`.
 

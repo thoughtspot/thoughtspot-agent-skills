@@ -72,8 +72,45 @@ def classify_render(status_code: int, body: Any) -> dict:
     return {"rendered": False, "tiles": 0, "error": extract_error(body)}
 
 
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _suspect_reason(rows: list) -> Optional[str]:
+    """One tile's data rows -> 'empty' / 'all_zero' / 'single_null_group', or None."""
+    if not rows:
+        return "empty"
+    if len(rows) != 1:
+        return None
+    attrs = [v for v in rows[0] if not _is_number(v)]
+    if attrs and all(v is None for v in attrs):
+        return "single_null_group"
+    if not attrs and all(v in (0, None) for v in rows[0]):
+        return "all_zero"
+    return None
+
+
+def suspect_tiles(body: Any) -> list:
+    """Tiles whose data has the shape of a SILENT wrong answer, from a 200 `liveboard/data` body.
+
+    A query that cannot combine two facts (a measure filter on one fact with an attribute from
+    another) returns no error: it answers 0, or one group whose attributes are all NULL. Each is
+    sometimes legitimate, so this is advisory — a list for a human or a `--strict-data` gate:
+    ``empty`` (no rows), ``all_zero`` (one row, every number 0/NULL), ``single_null_group``
+    (one row, every attribute NULL) — ``[{"visual", "reason"}]``."""
+    contents = body.get("contents") if isinstance(body, dict) else None
+    out = []
+    for c in contents or []:
+        rows = c.get("data_rows")
+        reason = _suspect_reason(rows) if isinstance(rows, list) else None
+        if reason:
+            out.append({"visual": c.get("visualization_name") or c.get("visualization_id") or "?", "reason": reason})
+    return out
+
+
 def render_summary(board_guid: str, board: dict, per_viz: Optional[list] = None,
-                   blank_tiles: Optional[list] = None) -> dict:
+                   blank_tiles: Optional[list] = None, suspect: Optional[list] = None,
+                   strict_data: bool = False) -> dict:
     """Assemble the command's stdout JSON contract.
 
     ``per_viz`` is a list of ``{"visual": name, ...classify_render()}`` probed only when
@@ -85,11 +122,13 @@ def render_summary(board_guid: str, board: dict, per_viz: Optional[list] = None,
     return data (200) yet be visually empty, which the data check alone would pass."""
     failing = [v for v in (per_viz or []) if not v.get("rendered")]
     blanks = blank_tiles or []
+    suspect = suspect or []
     return {
-        "ok": bool(board.get("rendered")) and not blanks,
+        "ok": bool(board.get("rendered")) and not blanks and not (strict_data and suspect),
         "board": board_guid,
         "tiles_rendered": board.get("tiles", 0),
         "error": board.get("error"),
         "failing_tiles": [{"visual": v.get("visual"), "error": v.get("error")} for v in failing],
         "blank_chart_tiles": [{"visual": t.get("visual"), "chart_type": t.get("chart_type")} for t in blanks],
+        "suspect_tiles": suspect,
     }

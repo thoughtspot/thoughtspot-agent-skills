@@ -291,10 +291,12 @@ def _chip_from_filter(sf: dict, col: str) -> dict:
             "is_single_value": False, "display_name": ""}
     kind = sf.get("kind")
     values = sf.get("values") or []
+    # member/exclude use the exported-Liveboard shape (top-level `oper` + `values`), live-verified
+    # to filter every tile; ranges keep generic_filter until verified (open-items #5)
     if kind == "member" and values:
-        chip["generic_filter"] = {"oper": "IN", "values": [str(v) for v in values]}
+        chip.update(oper="in", values=[str(v) for v in values])
     elif kind == "exclude" and values:
-        chip["generic_filter"] = {"oper": "NOT_IN", "values": [str(v) for v in values]}
+        chip.update(oper="not in", values=[str(v) for v in values])
     elif kind == "range":
         gf = _range_generic_filter(sf.get("raw"))
         if gf:
