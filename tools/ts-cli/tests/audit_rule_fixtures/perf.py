@@ -92,6 +92,17 @@ def perf_model_80_columns() -> AuditContext:
         columns=[build_perf_col(f"C{i}") for i in range(80)])])
 
 
+def perf_model_columns(n: int) -> AuditContext:
+    """A Model with `n` columns (P8's measure)."""
+    return make_context(models=[build_perf_model(
+        columns=[build_perf_col(f"C{i}") for i in range(n)])])
+
+
+def perf_model_1600_columns() -> AuditContext:
+    """1,600 columns: P8 HIGH under both profiles (> 1,500 general, > 500 spotter)."""
+    return perf_model_columns(1600)
+
+
 def perf_model_50_columns() -> AuditContext:
     return make_context(models=[build_perf_model(
         columns=[build_perf_col(f"C{i}") for i in range(50)])])
@@ -729,6 +740,7 @@ def perf_unnamed_formulas_with_references() -> AuditContext:
 
 # Every P input, for the pinned-findings test — listed by hand (see AI_INPUTS).
 P_INPUTS = {fn.__name__: fn for fn in (
+    perf_model_1600_columns,
     perf_metadata_sql_view, perf_metadata_logical_only, perf_model_wide_not_progressive,
     perf_model_wide_progressive, perf_fact_alias_prefixed, perf_fact_name_prefixed,
     perf_formula_listed_twice, perf_filter_scalar_column,

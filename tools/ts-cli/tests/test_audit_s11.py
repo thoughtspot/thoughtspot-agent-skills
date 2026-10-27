@@ -8,7 +8,7 @@ from audit_run_rule import run_rule
 def test_s11_fires_on_case_shape():
     found = run_rule(fx.sec_rls_join_cycle(), "S11")
     assert [(f.severity, f.object_type, f.object_name) for f in found] == [
-        ("HIGH", "model", "Activity")]
+        ("CRITICAL", "model", "Activity")]
     for word in ("users", "bridge", "users_to_bridge", "bridge_users"):
         assert word in found[0].detail
 

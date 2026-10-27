@@ -6,10 +6,24 @@ from audit_run_rule import run_rule
 # (data.py), whose legacy answers test_audit_pinned_findings.py pins.
 
 
-def test_d1_flags_excess_tables():
-    findings = run_rule(fx.data_model_sixteen_tables(), "D1")
-    assert any(f.check_id == "D1" and f.severity == "HIGH" and "table" in f.detail.lower()
-               for f in findings)
+def test_d1_table_lines_are_30_and_50():
+    """Production estates (2026-10 call-home data: p99 35 tables, 0.18% above 40)."""
+    assert run_rule(fx.data_model_tables(30), "D1") == []
+    assert [f.severity for f in run_rule(fx.data_model_tables(31), "D1")] == ["MEDIUM"]
+    assert [f.severity for f in run_rule(fx.data_model_fifty_one_tables(), "D1")] == ["HIGH"]
+    assert run_rule(fx.data_model_sixteen_tables(), "D1") == []
+
+
+def test_d1_keeps_none_names_and_sets_each_measures_threshold():
+    from ts_cli.audit.context import make_context
+    model = fx.build_data_model(name=None, guid=None, model_tables=fx.build_data_tables(51))
+    [f] = run_rule(make_context(models=[model]), "D1")
+    assert (f.object_name, f.object_guid) == (None, None)
+    assert f.threshold == {"green": 30, "yellow": 50} and f.metric == 51
+
+
+def test_d1_no_longer_grades_columns_or_join_depth():
+    assert run_rule(fx.data_model_wide_and_deep(), "D1") == []
 
 
 def test_d1_passes_small_model():

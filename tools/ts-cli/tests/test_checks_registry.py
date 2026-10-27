@@ -125,14 +125,13 @@ def test_shared_rule_pairs_stay_in_step():
     A threshold tuned in one angle silently left the other on the old value, and
     `check_d2`/`check_p6` shipped the *same* two defects and had to be fixed twice
     (#528). Before the rule catalog this read checks_perf.py and checks_data.py for re-declared
-    regexes and inlined thresholds. The pairs now live as catalog entries (and, for
-    D1, a code rule's shared constants in engine/tml.py), so this holds each pair to
+    regexes and inlined thresholds. The pairs now live as catalog entries, so this
+    holds each pair to
     the same logic — scope, data, aggregation and bands — holds the `legacy_threshold`
     literals that restate a shared number to that number, and checks that the shared
     bracketed-reference pattern is declared once in the audit code.
     """
     import re as _re
-    from ts_cli.audit.engine import tml
 
     cat = catalog().rules
     offenders = []
@@ -156,20 +155,9 @@ def test_shared_rule_pairs_stay_in_step():
             p15[4]["where"] != {"all": [s8[4]["where"],
                                         {"field": "value_casing", "truthy": False}]}:
         offenders.append("S8/P15: P15 is no longer S8 plus the value_casing guard")
-    # D1 grades with the shared constants; P8 and P7 carry them as catalog bands.
-    if levels("P8") != [("gt", float(tml.MAX_MODEL_COLUMNS), "MEDIUM")]:
-        offenders.append("P8: the 75-column ceiling differs from D1's")
-    if levels("P7") != [("gt", float(tml.JOIN_DEPTH_YELLOW), "HIGH"),
-                        ("gt", float(tml.JOIN_DEPTH_GREEN), "MEDIUM")]:
-        offenders.append("P7: the join-depth bands differ from D1's")
     # The legacy threshold payloads restate those numbers: they must say the same.
     if cat["D4"].legacy_threshold != {"min_tables_for_flag": levels("D4")[0][1]}:
         offenders.append("D4: legacy_threshold disagrees with its band")
-    if cat["P8"].legacy_threshold != {"max": tml.MAX_MODEL_COLUMNS}:
-        offenders.append("P8: legacy_threshold disagrees with the 75-column ceiling")
-    if cat["P7"].legacy_threshold != {"green": tml.JOIN_DEPTH_GREEN,
-                                      "yellow": tml.JOIN_DEPTH_YELLOW}:
-        offenders.append("P7: legacy_threshold disagrees with the join-depth bands")
 
     # The bracketed-reference pattern is declared once (engine/tml.py BRACKET_REF): a
     # copy under any name is found by its pattern text, not its name.

@@ -83,6 +83,26 @@ def data_model_sixteen_tables() -> AuditContext:
     return make_context(models=[build_data_model(model_tables=build_data_tables(16))])
 
 
+def data_model_tables(n: int) -> AuditContext:
+    """A Model with `n` tables and nothing else over a line (D1's tables measure)."""
+    return make_context(models=[build_data_model(model_tables=build_data_tables(n))])
+
+
+def data_model_fifty_one_tables() -> AuditContext:
+    """51 tables: D1's tables measure is HIGH (> 50)."""
+    return data_model_tables(51)
+
+
+def data_model_wide_and_deep() -> AuditContext:
+    """2,000 columns and a six-hop join chain: neither is D1's (P8 grades columns,
+    P7 join depth)."""
+    chain = [{"name": f"T{i}", "id": f"T{i}",
+              "joins": [{"with": f"T{i + 1}", "cardinality": "MANY_TO_ONE"}] if i < 6 else []}
+             for i in range(7)]
+    return make_context(models=[build_data_model(
+        model_tables=chain, columns=[build_data_col(f"C{i}") for i in range(2000)])])
+
+
 def data_model_small() -> AuditContext:
     """5 tables, 10 columns: under every D1 line."""
     return make_context(models=[build_data_model(

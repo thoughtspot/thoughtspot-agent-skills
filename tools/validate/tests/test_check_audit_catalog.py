@@ -161,8 +161,8 @@ def test_generated_doc_checked_under_the_gates_python(tmp_path):
     res = _run(root)
     assert res.returncode == 0, res.stdout + res.stderr
     rules = root / AUDIT_REL / "catalog" / "rules" / "perf.yaml"
-    rules.write_text(rules.read_text().replace("title: Column sprawl (>75 columns)",
-                                               "title: Column sprawl (wide)"))
+    rules.write_text(rules.read_text().replace("title: Column sprawl\n",
+                                               "title: Column sprawl (wide)\n"))
     res = _run(root)
     assert res.returncode == 1 and "check-catalog.md is stale" in res.stdout, res.stdout
     assert "Traceback" not in res.stderr

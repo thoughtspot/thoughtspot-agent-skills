@@ -30,17 +30,8 @@ import re
 #: markedly slower than an integer one and is what several checks look for.
 STRING_TYPES = ("VARCHAR", "CHAR", "STRING", "TEXT")
 
-#: A model wider than this makes for a wider GROUP BY and heavier query plans.
-#: D1 (code rule) grades against it as its "columns" yellow band; P8 (rules/perf.yaml)
-#: reports crossing it outright. One number, two presentations.
-MAX_MODEL_COLUMNS = 75
-
 #: A table with more than this many MEASURE columns is treated as a fact table.
 FACT_MEASURE_THRESHOLD = 3
-
-#: Join-graph depth bands, shared by D1's grading table and P7's severity split.
-JOIN_DEPTH_GREEN = 3
-JOIN_DEPTH_YELLOW = 5
 
 #: A bracketed column reference inside a TML expression: ``[TABLE::COL]``.
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
