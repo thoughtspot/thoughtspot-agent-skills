@@ -153,3 +153,111 @@ class TestRenamesFailTheRun:
         out = capsys.readouterr().out
         assert status == 1, "a rename must fail the run — counts alone cannot see it"
         assert "date" in out and "renaming Model columns" in out
+
+
+class TestAdditionsFailTheRun:
+    """Both structure checks here used to look one way only — the name set
+    difference computed `source - returned`, and the count comparison tested
+    `<`. A round trip that ADDED user-visible Model columns passed both, while
+    printing "losing structure 0" and "renaming Model columns 0".
+
+    Not hypothetical. The planned fix for apache/ossie-converters#30 surfaces a
+    ThoughtSpot MEASURE column as an Ossie field so a metric can reference it
+    as `dataset.field` (core-spec#486); a field becomes a Model column on the
+    way back, so done naively it adds one spurious column per MEASURE column —
+    348 across the 31-model corpus, measured — and every check in this harness
+    would still have called the trip clean.
+    """
+
+    @staticmethod
+    def _results(**overrides):
+        row = {
+            "model": "m", "validator": "PASSED",
+            "source": {"tables": 1, "columns": 1, "formulas": 0, "joins": 0},
+            "returned": {"tables": 1, "columns": 1, "formulas": 0, "joins": 0},
+            "portability": {},
+        }
+        row.update(overrides)
+        return [row]
+
+    def _report(self, results, tmp_path, capsys):
+        import collections
+        status = roundtrip.report(results, collections.Counter(),
+                                  collections.Counter(), tmp_path, None)
+        return status, capsys.readouterr().out
+
+    def test_an_added_column_is_reported_and_fails(self, tmp_path, capsys):
+        status, out = self._report(
+            self._results(added_columns=["backing_field"]), tmp_path, capsys)
+        assert status == 1, "an added column must fail — counts alone cannot see it"
+        assert "backing_field" in out and "adding Model columns" in out
+
+    def test_a_clean_run_still_passes(self, tmp_path, capsys):
+        # The gate must distinguish, not just fire.
+        status, out = self._report(self._results(), tmp_path, capsys)
+        assert status == 0, out
+        assert "adding Model columns      0" in out
+
+    def test_gained_structure_is_reported_but_does_not_fail(self, tmp_path, capsys):
+        """Deliberate, and the reason is in `report()`.
+
+        A metric over a physical column returns as a FORMULA column rather
+        than the `column_id` + `aggregation` pair it left as, so `formulas`
+        rises on all 31 real models. The column survives under its own name
+        and the numbers are unchanged, so this is a shape change rather than a
+        loss — and failing every model on it would make the harness something
+        nobody reads. It is surfaced so the question can be asked separately.
+        """
+        status, out = self._report(
+            self._results(returned={"tables": 1, "columns": 1, "formulas": 10, "joins": 0}),
+            tmp_path, capsys)
+        assert status == 0, "gaining structure is reported, not gated"
+        assert "gaining structure         1" in out
+
+    def test_a_loss_still_fails_now_that_the_check_is_symmetric(self, tmp_path, capsys):
+        # Making the comparison two-way must not cost the original direction.
+        status, out = self._report(
+            self._results(returned={"tables": 1, "columns": 0, "formulas": 0, "joins": 0}),
+            tmp_path, capsys)
+        assert status == 1, out
+        assert "losing structure          1" in out
+
+
+class TestColumnDeltaSeesBothDirections:
+    """Drives the detection against real documents rather than handing
+    `report()` a ready-made answer. Without this, reverting the added-column
+    detection entirely left all sixteen tests green — the gate's own tests
+    were supplying the finding it was supposed to make.
+    """
+
+    @staticmethod
+    def _model(tmp_path, name, columns):
+        import yaml
+        path = tmp_path / f"{name}.model.tml"
+        path.write_text(yaml.safe_dump(
+            {"model": {"name": "m", "columns": [{"name": c} for c in columns]}}),
+            encoding="utf-8")
+        return path
+
+    def test_an_added_column_is_found(self, tmp_path):
+        returned = self._model(tmp_path, "back", ["amount", "backing_field"])
+        lost, added = roundtrip.column_delta({"amount"}, [returned])
+        assert added == ["backing_field"], added
+        assert lost == []
+
+    def test_a_lost_column_is_still_found(self, tmp_path):
+        returned = self._model(tmp_path, "back", ["amount"])
+        lost, added = roundtrip.column_delta({"amount", "date"}, [returned])
+        assert lost == ["date"], lost
+        assert added == []
+
+    def test_both_at_once_is_a_rename(self, tmp_path):
+        # What a rename actually looks like to a set comparison, and the shape
+        # that motivated the original one-directional check.
+        returned = self._model(tmp_path, "back", ["Date2"])
+        lost, added = roundtrip.column_delta({"date"}, [returned])
+        assert lost == ["date"] and added == ["Date2"]
+
+    def test_an_identical_set_is_clean(self, tmp_path):
+        returned = self._model(tmp_path, "back", ["amount", "date"])
+        assert roundtrip.column_delta({"amount", "date"}, [returned]) == ([], [])

@@ -158,6 +158,25 @@ def model_column_names(paths) -> set[str]:
     return names
 
 
+def column_delta(source_columns: set[str], returned_paths) -> tuple[list[str], list[str]]:
+    """`(lost, added)` Model column names, comparing both directions.
+
+    Separate from `check()` so a test can drive it against real documents.
+    It was inline, and the tests passed a ready-made `added_columns` into
+    `report()` -- so reverting the detection entirely left every test green.
+    A gate whose own test supplies the finding is not testing the gate.
+
+    The added direction is the one that was missing. `source - returned`
+    alone, and the `<` in `report()`, both read one way: a trip that handed
+    back MORE user-visible columns than it was given passed every check here.
+    """
+    returned_columns = model_column_names(returned_paths)
+    return (
+        sorted(source_columns - returned_columns),
+        sorted(returned_columns - source_columns),
+    )
+
+
 def tml_shape(paths) -> dict:
     """Structural census of a TML document set, for in-vs-out comparison."""
     import yaml
@@ -343,9 +362,24 @@ def check_corpus(corpus: pathlib.Path, converter: pathlib.Path, work: pathlib.Pa
         if back.exists():
             returned_paths = sorted(back.glob("*.tml"))
             row["returned"] = tml_shape(returned_paths)
-            lost_names = sorted(source_columns - model_column_names(returned_paths))
+            lost_names, added_names = column_delta(source_columns, returned_paths)
             if lost_names:
                 row["renamed_columns"] = lost_names
+            # The other direction. Both of this harness's structure checks used
+            # to look one way only -- this set difference, and the count
+            # comparison in `report()`, which tests `<` -- so a round trip that
+            # ADDED user-visible columns passed both while reporting "losing
+            # structure 0" and "renaming Model columns 0".
+            #
+            # Not hypothetical, and not cheap to discover later: the planned
+            # fix for apache/ossie-converters#30 surfaces a ThoughtSpot MEASURE
+            # column as an Ossie field so a metric can reference it as
+            # `dataset.field` (core-spec#486). A field becomes a Model column
+            # on the way back, so done naively that adds one spurious column
+            # per MEASURE column -- 348 across this corpus, measured -- and
+            # every check here would still have said the trip was clean.
+            if added_names:
+                row["added_columns"] = added_names
         else:
             row["failed"] = "to-tml produced nothing"
 
@@ -363,10 +397,35 @@ def report(results, codes, totals, work, baseline) -> int:
         r["model"] for r in results
         if "returned" in r and any(r["returned"][k] < r["source"][k] for k in r["source"])
     ]
+    # Symmetric to `lost`. `<` alone cannot see a trip that returns MORE than
+    # it was given, and "more tables than you started with" is no more correct
+    # than fewer.
+    #
+    # REPORTED, NOT GATED, and the reason is the finding that adding it
+    # produced. It fires on 31 of 31 models, every one on `formulas`, because
+    # a metric over a physical column returns as a FORMULA column rather than
+    # the `column_id` + `aggregation` pair it left as:
+    #
+    #   source  column_id: T::POINTS        properties: {aggregation: SUM}
+    #   return  formula_id: formula_points  properties: {aggregation: SUM}
+    #           formulas: [{id: formula_points, expr: "sum ( [T::POINTS] )"}]
+    #
+    # The column survives under its own name -- `added_columns` and
+    # `renamed_columns` are both 0 -- and the numbers are unchanged: the
+    # converter records a live-cluster check that `sum([X])` carrying
+    # `aggregation: SUM` answers identically. So this is a shape change, not a
+    # loss, and failing every model on it would make this harness something
+    # nobody reads. It is surfaced so the question can be asked separately
+    # rather than staying invisible, which is what `<` made it.
+    gained = [
+        r["model"] for r in results
+        if "returned" in r and any(r["returned"][k] > r["source"][k] for k in r["source"])
+    ]
     failed = [r["model"] for r in results if "failed" in r]
     invalid = [r["model"] for r in results if r.get("validator") == "FAILED"]
     skipped = [r["model"] for r in results if r.get("validator") == "SKIPPED"]
     renamed = [(r["model"], r["renamed_columns"]) for r in results if r.get("renamed_columns")]
+    added = [(r["model"], r["added_columns"]) for r in results if r.get("added_columns")]
 
     print(f"\nmodels checked            {len(results)}")
     print(f"Apache validator passed   {sum(1 for r in results if r.get('validator') == 'PASSED')}"
@@ -376,6 +435,10 @@ def report(results, codes, totals, work, baseline) -> int:
     print(f"losing structure          {len(lost)}  {lost or ''}")
     print(f"renaming Model columns    {len(renamed)}"
           + ("".join(f"\n    {m}: {', '.join(n)}" for m, n in renamed) if renamed else ""))
+    print(f"adding Model columns      {len(added)}"
+          + ("".join(f"\n    {m}: {', '.join(n)}" for m, n in added) if added else ""))
+    print(f"gaining structure         {len(gained)}"
+          + ("  (reported, not failed -- see `gained` in report())" if gained else ""))
     print(f"failed to convert         {len(failed)}  {failed or ''}")
     print("\ncross-vendor portability (invisible to the validator):")
     refs, bad = totals["qualified_refs"], totals["unresolvable_refs"]
@@ -390,7 +453,9 @@ def report(results, codes, totals, work, baseline) -> int:
     summary = {
         "models": len(results), "lost_structure": lost, "failed": failed,
         "invalid": invalid, "skipped_checks": skipped,
-        "renamed_columns": {m: n for m, n in renamed}, "portability": dict(totals),
+        "renamed_columns": {m: n for m, n in renamed},
+        "gained_structure": gained, "added_columns": {m: n for m, n in added},
+        "portability": dict(totals),
         "codes": {k: v for k, v in sorted(codes.items())},
     }
     (work / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -411,9 +476,9 @@ def report(results, codes, totals, work, baseline) -> int:
             f"  PASSED' anyway, which is why this is failed rather than warned."
         )
         status = 1
-    if lost or failed or invalid or renamed:
-        print("\nFAIL: structure lost, a column was renamed, conversion failed, or the "
-              "validator rejected a document")
+    if lost or failed or invalid or renamed or added:
+        print("\nFAIL: structure lost, a column was renamed or added, conversion "
+              "failed, or the validator rejected a document")
         status = 1
     if baseline and baseline.exists():
         status = max(status, compare(json.loads(baseline.read_text(encoding="utf-8")), summary))
