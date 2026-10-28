@@ -79,6 +79,13 @@ sources per call with a 300 s timeout, as `context.py` does; hidden Tables are s
 Views cut off by the depth cap are reported (`views_not_followed`); repeated rows from
 offset paging are dropped; `--dry-run` honours `--output` and refuses `--snapshot-out`.
 
+## Left for later
+
+`agents/cli/ts-audit/references/open-items.md` still names the old step numbers (#2 "Step 4"
+export throttling, now moot; #3 "Step 5" dependents, now Step 4). Not edited here: the PR
+open-items gate fails any PR touching that file while its nine older UNVERIFIED items
+(#1, #3, #4, #8–#13) stay open.
+
 ## Out of scope
 
 - Scoping by tag, owner or folder (not asked for).

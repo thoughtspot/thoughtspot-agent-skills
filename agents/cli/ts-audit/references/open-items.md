@@ -27,8 +27,8 @@ Tested on champ-staging (2026-06-18). Sequential export of 8 models:
 - No failures, no throttling at sequential pace
 
 **Projected at 4-way parallel:** 1855 models × 3s / 4 workers ≈ 23 minutes.
-(The skill's separate export step, once "Step 4", was dropped 2026-10-28 (BL-407): `ts
-audit run` exports in batches itself, and `--snapshot-out` / `--snapshot-in` cover re-runs.) 4-way concurrent throttling NOT yet tested (needs a parallel harness).
+The caching layer (Step 4) is essential — subsequent runs only re-export changed
+objects. 4-way concurrent throttling NOT yet tested (needs a parallel harness).
 
 **Remaining:** Test 4-way parallel to confirm no 429 or connection pooling issues.
 
@@ -78,10 +78,9 @@ and measure elapsed time and response completeness.
 
 ---
 
-### #2 — Bulk TML export throttling — WONT-FIX 2026-10-28
+### #2 — Bulk TML export throttling — UNVERIFIED
 
-Moot: the skill's 4-way parallel export step was dropped (BL-407); `ts audit run` exports
-sequentially in batches. Kept for the record — the old step exported TML at 4-way parallel concurrency. Need to verify:
+Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 - Does the ThoughtSpot API throttle or 429 on concurrent TML exports?
 - What is the latency per export on a typical model (10-50 columns)?
 - Does `--associated` significantly increase export time?
@@ -92,7 +91,7 @@ sequentially in batches. Kept for the record — the old step exported TML at 4-
 
 ### #3 — Dependent counts for orphan detection — UNVERIFIED
 
-Step 4 (`ts audit run`) uses the dependents lookup to detect orphan models (H4) and sets (H5).
+Step 5 uses `ts metadata dependents` to detect orphan models (H4) and sets (H5).
 Need to verify:
 - Does the dependents API return empty results (not errors) for objects with no dependents?
 - Can we batch this, or must it be one call per object?
