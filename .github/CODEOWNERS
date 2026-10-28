@@ -32,6 +32,7 @@
 # The pr-ready skill and the reviewer it dispatches: the brief decides what a
 # review looks for, so trimming it removes review areas without touching a gate.
 /.claude/agents/pr-reviewer.md                               @djwaldo
+/.claude/agents/pr-reviewer-readonly.md                      @djwaldo
 /.claude/skills/pr-ready/                                    @djwaldo
 
 # The SessionStart hook that warns when the git hooks are missing.

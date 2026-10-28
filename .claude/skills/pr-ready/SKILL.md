@@ -35,46 +35,122 @@ hooks, so its copy of these instructions is not evidence of anything.
 
 ## Someone else's branch
 
-Work from a checkout of **main**, never the PR's: start the session there, so the
-`pr-reviewer` agent definition loaded is main's, not the PR's.
+Nothing in this procedure checks out, builds or runs the PR's code. The PR head is
+fetched as git objects, its files are extracted with `git archive` for reading, and
+the reviewer is `pr-reviewer-readonly`, which has no Bash.
 
-1. Run main's `scripts/check-pr.sh` first — main's copy, never a PR checkout's
-   (`.claude/rules/security.md`). The invocation is the script header's own; in a
-   fork clone, use the remote that points at the canonical repo in place of
-   `origin`:
+**Start a new Claude Code session in a checkout of main.** This skill cannot detect
+where the session started, and it matters: the agent definitions and the
+`.claude/settings.json` SessionStart hooks load from the checkout the session started
+in, so a session started in the PR's checkout runs the PR's copies of both before
+anything here is read. The check below confirms the current directory is a clean
+checkout of upstream main; it cannot vouch for where the session began, so if you are
+not sure, stop and start a new session from main's checkout.
 
-```bash
-( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
-  git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
-```
-
-   No `check-pr: PR #N ...` verdict line means it did not run. Stop on findings
-   (exit 1) and tell the user; exit 3 means binary files need a manual look first.
-
-2. Fetch the PR head as data — no checkout, no new ref — and confirm it is the head
-   GitHub shows:
+1. Confirm this is a clean checkout of upstream main, and record the PR head that is
+   about to be scanned. `check-pr.sh` reads `origin` itself, so `origin` must be the
+   canonical repo: in a fork clone (where `origin` is the fork) it cannot run, and
+   this procedure stops.
 
 ```bash
 set -eo pipefail
 N=<pr-number>
-UP="$(git remote -v | awk '$2 ~ /github\.com[:\/]thoughtspot\/thoughtspot-agent-skills(\.git)?$/ && $3 == "(fetch)" {print $1; exit}')"
-test -n "$UP" || { echo "no remote points at thoughtspot/thoughtspot-agent-skills"; exit 1; }
-git fetch --no-tags --quiet "$UP" main
-BASE_SHA="$(git rev-parse FETCH_HEAD)"
-git fetch --no-tags --quiet "$UP" "refs/pull/$N/head"
-HEAD_SHA="$(git rev-parse FETCH_HEAD)"
-PR_HEAD="$(gh pr view "$N" --repo thoughtspot/thoughtspot-agent-skills --json headRefOid --jq .headRefOid)"
-test "$HEAD_SHA" = "$PR_HEAD" || { echo "fetched $HEAD_SHA but the PR head is $PR_HEAD"; exit 1; }
-echo "range: $BASE_SHA...$HEAD_SHA"
+git remote get-url origin | grep -Eq '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)thoughtspot/thoughtspot-agent-skills(\.git)?/?$' \
+  || { echo "STOP: origin is not thoughtspot/thoughtspot-agent-skills; check-pr.sh needs it"; exit 1; }
+git fetch --no-tags --quiet origin main
+MAIN_SHA="$(git rev-parse FETCH_HEAD)"
+test -z "$(git status --porcelain)" || { echo "STOP: the work tree has changes"; exit 1; }
+HERE="$(git rev-parse HEAD)"
+if [ "$HERE" != "$MAIN_SHA" ]; then
+  BRANCH="$(git symbolic-ref --quiet --short HEAD || true)"
+  { [ "$BRANCH" = main ] && git merge-base --is-ancestor "$HERE" "$MAIN_SHA"; } \
+    || { echo "STOP: not a checkout of upstream main ($MAIN_SHA)"; exit 1; }
+fi
+SCANNED="$(gh pr view "$N" --repo thoughtspot/thoughtspot-agent-skills --json headRefOid --jq .headRefOid)"
+echo "scanned head: $SCANNED"
 ```
 
-3. Dispatch main's `pr-reviewer` **read-only** with `trusted: no`, the printed range,
-   and the PR number. There is no evidence block: nothing ran. With `trusted: no`
-   the reviewer executes none of the branch's code. If the diff touches converter
-   paths (the Step 4 pattern), also dispatch `conversion-consistency-auditor` on the
-   same range, telling it the code is untrusted and must be read, not run.
+   A local `main` that is behind upstream passes (its copies are still main's); one
+   carrying commits upstream lacks does not. On any STOP, tell the user and stop.
 
-4. Give the findings to the user. Do not post them; posting is the user's decision.
+2. Run main's `scripts/check-pr.sh` — main's copy, never a PR checkout's
+   (`.claude/rules/security.md`) — with the script header's own invocation:
+
+```bash
+( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
+  git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
+echo "check-pr exit: $?"
+```
+
+   Continue **only on exit 0**. Any other exit — 1 (findings), 2 (usage or setup
+   error, which includes a fork clone), 3 (binary files need a manual look), or no
+   `check-pr: PR #N ...` verdict line at all — stops here: give the user the
+   script's output.
+
+3. Fetch the inputs into a scratch directory, confirming the PR head is still the
+   one step 1 recorded (a push between the scan and the review would otherwise send
+   unscanned commits to the reviewer):
+
+```bash
+set -eo pipefail
+N=<pr-number>
+SCANNED_HEAD=<the scanned head printed in step 1>
+REPO=thoughtspot/thoughtspot-agent-skills
+git fetch --no-tags --quiet origin main
+BASE_SHA="$(git rev-parse FETCH_HEAD)"
+git fetch --no-tags --quiet origin "refs/pull/$N/head"
+HEAD_SHA="$(git rev-parse FETCH_HEAD)"
+PR_HEAD="$(gh pr view "$N" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+{ [ "$HEAD_SHA" = "$PR_HEAD" ] && [ "$PR_HEAD" = "$SCANNED_HEAD" ]; } \
+  || { echo "STOP: the PR head moved since check-pr scanned it; start again at step 1"; exit 1; }
+DIR="$(mktemp -d)"
+git diff "$BASE_SHA...$HEAD_SHA" > "$DIR/diff.patch"
+git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$DIR/files.txt"
+git log --format='commit %H%n%B' "$BASE_SHA..$HEAD_SHA" > "$DIR/log.txt"
+mkdir "$DIR/tree"
+git archive "$HEAD_SHA" | tar -x -C "$DIR/tree"
+find "$DIR/tree" -type l -print -delete > "$DIR/symlinks-removed.txt"
+gh pr view "$N" --repo "$REPO" --json number,title,body,baseRefName,headRefOid > "$DIR/pr.json"
+gh api --paginate "repos/$REPO/pulls/$N/reviews" > "$DIR/reviews.json"
+gh api --paginate "repos/$REPO/pulls/$N/comments" > "$DIR/review-comments.json"
+gh api --paginate "repos/$REPO/issues/$N/comments" > "$DIR/issue-comments.json"
+CONVERTER_RE='^agents/(cli|coco-snowsight|databricks/skills)/ts-convert-|^agents/shared/(mappings|schemas)/|^tools/ts-cli/ts_cli/'
+if grep -Eq "$CONVERTER_RE" "$DIR/files.txt"; then echo "converter paths touched: angle-9 auditor not run (untrusted branch)"; fi
+echo "range: $BASE_SHA...$HEAD_SHA"
+echo "inputs: $DIR"
+echo "repo root: $(git rev-parse --show-toplevel)"
+```
+
+   Symbolic links in the PR's tree are deleted after extraction, so nothing the
+   reviewer reads under `tree/` can point outside it.
+
+4. Dispatch `pr-reviewer-readonly` (`.claude/agents/pr-reviewer-readonly.md`) with
+   `trusted: no`, the printed range, the input directory, the repo root and the PR
+   number, written out literally in the prompt. **Do not dispatch
+   `conversion-consistency-auditor` here**: it runs commands, and this branch is
+   untrusted. When step 3 printed the converter line, the findings must say
+   "angle-9 auditor not run (untrusted branch)".
+
+   If the reviewer reports an earlier PR's threads as not fetched, fetch them and
+   dispatch it again:
+
+```bash
+set -eo pipefail
+DIR=<the input directory printed in step 3>
+M=<the earlier pr-number>
+REPO=thoughtspot/thoughtspot-agent-skills
+mkdir -p "$DIR/earlier-$M"
+gh api --paginate "repos/$REPO/pulls/$M/reviews" > "$DIR/earlier-$M/reviews.json"
+gh api --paginate "repos/$REPO/pulls/$M/comments" > "$DIR/earlier-$M/review-comments.json"
+gh api --paginate "repos/$REPO/issues/$M/comments" > "$DIR/earlier-$M/issue-comments.json"
+```
+
+5. Scan the findings before showing them, as Step 6 does (they are derived from text
+   someone else wrote): write them to a file in the input directory and run
+   `python3 tools/validate/check_customer_references.py --message-file <that file>`.
+   On exit 1, remove the hit before sharing. Then give the findings to the user,
+   saying they came from a read-only review of an untrusted branch. Do not post
+   them; posting is the user's decision.
 
 ## Step 1: run the checks
 
@@ -154,8 +230,9 @@ set -o pipefail
 RANGE="$(python3 tools/validate/evidence.py range)" || exit 1
 EVIDENCE="$(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
 CONVERTER_RE='^agents/(cli|coco-snowsight|databricks/skills)/ts-convert-|^agents/shared/(mappings|schemas)/|^tools/ts-cli/ts_cli/'
-git diff --name-only "$RANGE" | grep -E "$CONVERTER_RE"
-echo "match exit: $? (0 = converter change, 1 = none, anything else = error: stop)"
+FILES="$(git diff --name-only "$RANGE")" || { echo "STOP: git diff failed"; exit 1; }
+printf '%s\n' "$FILES" | grep -E "$CONVERTER_RE"
+echo "match exit: $? (0 = converter change, 1 = none)"
 grep -F '`converter-parity`' "$EVIDENCE"
 ```
 

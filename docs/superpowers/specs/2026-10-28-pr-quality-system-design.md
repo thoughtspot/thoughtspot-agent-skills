@@ -163,10 +163,20 @@ and spot checks, not on finding validator failures or building the first repro.
   controls the skill, the reviewer brief, `pr-ready.sh` and `.claude/settings.json`
   hooks. So it runs only on a branch the person running it wrote or has read, and the
   reviewer executes branch code only when the skill passes `trusted: yes`. For anyone
-  else's PR the procedure is: run main's `scripts/check-pr.sh` first (main's copy,
-  never the PR's); never run the skill or `pr-ready.sh` from the PR checkout; from a
-  checkout of main, dispatch main's `pr-reviewer` read-only (`trusted: no`) on
-  `git diff <base>...<fetched PR head SHA>`.
+  else's PR the procedure is, from a new session started in a clean checkout of main
+  (agent definitions and SessionStart hooks load from the starting checkout): run
+  main's `scripts/check-pr.sh` first (main's copy, never the PR's), and continue only
+  on exit 0; never run the skill or `pr-ready.sh` from the PR checkout; pre-fetch the
+  inputs into a scratch directory (the diff `<base>...<fetched PR head SHA>`, the PR's
+  text and review threads by read-only `gh`, and the head's files by `git archive`,
+  extracted and never executed), refusing if the head moved after the scan; and
+  dispatch **`pr-reviewer-readonly`** (`trusted: no`) on them. That agent's grant is
+  Read, Grep and Glob — no Bash — which is the local equivalent of the CI constraint
+  below (`--disallowedTools Bash,...` for any job reading untrusted text): the repo's
+  settings pre-approve `Bash(git:*)`, `python3`, `pip`, `pytest` and `ts`, so a
+  reviewer with Bash that followed one injected instruction would run it unprompted.
+  The `conversion-consistency-auditor` runs commands, so it is not run on an
+  untrusted branch; the findings say "angle-9 auditor not run (untrusted branch)".
 - **Maintainer PRs (§8.2).** The maintainer runs the same skill before every self-merge
   and reads the output. This is **advisory**. It is not a required check and not a
   GitHub review, so F1's metric (PRs with a GitHub review) does not move. Success for
@@ -262,8 +272,13 @@ real consumers. §8.1 records the revised choice:
   The collision cost is cut, not removed:
   - `pr-ready` warns early when the branch is behind
   - a `scripts/rebump.sh` updates the branch from upstream main and re-applies the bump
-    in one step, so the maintainer can run it on a contributor branch at merge ("allow
-    edits by maintainers")
+    in one step, so the maintainer can fix a contributor branch at merge ("allow edits
+    by maintainers"). Doing so commits on a branch the maintainer did not write, so:
+    run **main's copy** of the script (`git show <upstream>/main:scripts/rebump.sh`),
+    never the branch's; commit with that branch's hooks disabled for that commit
+    (`git -c core.hooksPath=<an empty directory> commit ...`), because the installed
+    hook dispatchers run the branch's own `scripts/pre-commit.sh` and
+    `scripts/commit-msg.sh`; and let CI re-validate the pushed result
 - **Rule files to update in the C5 PR:**
   - `versioning.md`
   - root `CLAUDE.md` (change-impact map; conflict-resolution section)
@@ -332,7 +347,12 @@ real consumers. §8.1 records the revised choice:
 - **Backtest: the acceptance test for C2, kept private.**
   - **n is about 16, not 29.** 13 of the 29 PRs were force-pushed and their first heads
     can't be recovered from GitHub.
-  - **Run** C1 and the reviewer agent on each recoverable first head.
+  - **Run** only the read-only reviewer (`pr-reviewer-readonly`, `trusted: no`) on each
+    recoverable first head, with inputs pre-fetched as in §5 C2. Never C1 /
+    `pr-ready.sh` on a contributor's head: it executes that head's code. The one
+    exception is a disposable environment with no credentials (no tokens in the
+    environment, no Keychain, no `ts` token cache, no `gh` auth), discarded after
+    the run.
   - **Judge** today's rules separately from rules that existed at the time.
   - **Compare** against the real review findings.
   - **Adjudicate** every finding only the AI raised: the maintainer decides real vs false
@@ -395,8 +415,9 @@ gate steps merge **one at a time**, not in parallel.
    head SHA in it makes a stale block visible. The maintainer does **not** re-run the
    skill on a contributor's PR head (that would execute the PR's code, and the PR's own
    copy of the skill, with the maintainer's credentials in the environment). Instead:
-   main's `scripts/check-pr.sh` first, then main's `pr-reviewer`, from a checkout of
-   main, read-only (`trusted: no`) on `git diff <base>...<fetched PR head SHA>` (§5 C2).
+   from a new session in a clean checkout of main, main's `scripts/check-pr.sh` first
+   (continue only on exit 0), then `pr-reviewer-readonly` (no Bash, `trusted: no`) on
+   pre-fetched inputs for `<base>...<fetched PR head SHA>` (§5 C2).
 
 ## 9. Left to the builder
 

@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 AGENT = ROOT / ".claude" / "agents" / "pr-reviewer.md"
+READONLY = ROOT / ".claude" / "agents" / "pr-reviewer-readonly.md"
 SKILL = ROOT / ".claude" / "skills" / "pr-ready" / "SKILL.md"
 CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
 
@@ -227,7 +228,7 @@ def test_gate_edits_cover_the_hooks_settings_lint_and_the_review_itself():
     for path in (".claude/settings.json", "scripts/install-hooks.sh", "scripts/pre-push.sh",
                  "scripts/check-pr.sh", "scripts/lib/python-bin.sh", "tml_lint.py",
                  ".github/pull_request_template.md", ".claude/agents/pr-reviewer.md",
-                 ".claude/skills/pr-ready/"):
+                 ".claude/agents/pr-reviewer-readonly.md", ".claude/skills/pr-ready/"):
         assert path in section, path
 
 
@@ -249,7 +250,7 @@ def test_someone_elses_branch_is_the_default_stop_and_never_runs_the_branch():
     assert "the default" in decide and "Do not run this skill" in decide
     other = _section(text, "## Someone else's branch")
     assert "git show origin/main:scripts/check-pr.sh" in other
-    assert "never the PR's" in other and "checkout of **main**" in other
+    assert "never a PR checkout's" in other and "checkout of main" in other
     assert "`trusted: no`" in other
     # Nothing in that procedure runs the branch: no pr-ready, no checkout, no tests.
     code = "\n".join(_blocks(other))
@@ -265,9 +266,11 @@ def test_skill_passes_trusted_explicitly():
 
 
 def _converter_re():
-    m = re.search(r"CONVERTER_RE='([^']+)'", SKILL.read_text(encoding="utf-8"))
-    assert m, "Step 4 defines CONVERTER_RE"
-    return re.compile(m.group(1))
+    found = re.findall(r"CONVERTER_RE='([^']+)'", SKILL.read_text(encoding="utf-8"))
+    assert found, "Step 4 defines CONVERTER_RE"
+    # Both modes test the same pattern: two copies that drift would audit different sets.
+    assert len(set(found)) == 1, found
+    return re.compile(found[0])
 
 
 def test_converter_trigger_matches_converter_code_wherever_it_lives():
@@ -324,4 +327,105 @@ def test_skill_scans_the_review_before_it_is_shared():
     step6 = _section(text, "## Step 6: scan it, then tell the user")
     assert "check_customer_references.py --message-file" in step6
     assert "stop" in step6.lower()
-    assert text.find("append-review") < text.find("check_customer_references.py")
+    own = text.split("## Step 1", 1)[1]      # the own-branch procedure
+    assert own.find("append-review") < own.find("check_customer_references.py")
+
+
+
+# ------------------------------- untrusted branches: the read-only reviewer ---
+#
+# An untrusted branch is reviewed with no Bash at all: prose saying "read only" is not
+# a control when the repo's settings pre-approve git, python3, pip, pytest and ts.
+
+def _flat(text):
+    return " ".join(text.split())
+
+
+def test_readonly_frontmatter_has_no_bash():
+    block = _frontmatter(READONLY)
+    keys = {line.split(":", 1)[0].strip(): line.split(":", 1)[1].strip()
+            for line in block if ":" in line and not line.lstrip().startswith("#")}
+    assert keys.get("name") == "pr-reviewer-readonly"
+    assert [t.strip() for t in keys["tools"].split(",")] == ["Read", "Grep", "Glob"]
+    assert keys.get("effort") == "max"
+    assert not any(line.startswith("model:") for line in block)
+
+
+def test_readonly_applies_the_brief_instead_of_copying_it():
+    text = READONLY.read_text(encoding="utf-8")
+    assert ".claude/agents/pr-reviewer.md" in text and "reading mode" in text
+    lines = text.splitlines()
+    for heading in SECTIONS:
+        assert heading not in lines, f"{heading} restated: it would drift from the brief"
+
+
+def test_readonly_reads_only_its_inputs_and_flags_what_it_cannot_cover():
+    text = _flat(READONLY.read_text(encoding="utf-8"))
+    assert "Read only inside the input directory and the repo root" in text
+    assert "`tree/`" in text and "export-ignore" in text
+    assert "angle-9 auditor not run (untrusted branch)" in text
+
+
+def test_someone_else_mode_dispatches_the_readonly_reviewer_and_never_the_auditor():
+    other = _section(SKILL.read_text(encoding="utf-8"), "## Someone else's branch")
+    flat = _flat(other)
+    assert "Dispatch `pr-reviewer-readonly`" in flat and "`trusted: no`" in flat
+    assert "`pr-reviewer`" not in other, "the Bash-holding reviewer is never sent here"
+    assert "Do not dispatch `conversion-consistency-auditor` here" in flat
+    assert other.count("conversion-consistency-auditor") == 1
+    assert "angle-9 auditor not run (untrusted branch)" in flat
+
+
+def test_someone_else_mode_checks_it_is_in_a_clean_main_checkout():
+    other = _section(SKILL.read_text(encoding="utf-8"), "## Someone else's branch")
+    flat = _flat(other)
+    assert "cannot detect where the session started" in flat
+    assert "new Claude Code session" in flat.replace("New Claude Code session", "new Claude Code session")
+    code = "\n".join(_blocks(other))
+    assert "git status --porcelain" in code and "merge-base --is-ancestor" in code
+    assert "STOP" in code
+
+
+def test_someone_else_mode_continues_only_when_check_pr_exits_0():
+    other = _section(SKILL.read_text(encoding="utf-8"), "## Someone else's branch")
+    assert "only on exit 0" in _flat(other)
+    assert 'echo "check-pr exit: $?"' in "\n".join(_blocks(other))
+    assert "in place of `origin`" not in other, "check-pr.sh reads origin itself"
+
+
+def test_someone_else_mode_reviews_the_head_check_pr_scanned():
+    other = _section(SKILL.read_text(encoding="utf-8"), "## Someone else's branch")
+    recorded = other.find("SCANNED=")
+    scanned = other.find("scripts/check-pr.sh >|")
+    compared = other.find('"$PR_HEAD" = "$SCANNED_HEAD"')
+    assert 0 <= recorded < scanned < compared, (recorded, scanned, compared)
+
+
+def test_someone_else_mode_prefetches_inputs_without_executing_them():
+    code = "\n".join(_blocks(_section(SKILL.read_text(encoding="utf-8"),
+                                      "## Someone else's branch")))
+    assert 'git archive "$HEAD_SHA" | tar -x -C "$DIR/tree"' in code
+    assert 'find "$DIR/tree" -type l -print -delete' in code
+    for endpoint in ("pulls/$N/reviews", "pulls/$N/comments", "issues/$N/comments"):
+        assert f'gh api --paginate "repos/$REPO/{endpoint}"' in code, endpoint
+    assert 'DIR="$(mktemp -d)"' in code
+
+
+def test_step_4_lists_the_files_before_grepping_them():
+    # Under pipefail a failing `git diff | grep` reports git's status, not grep's, so the
+    # exit legend would misread it; the list is captured, and its failure stops.
+    step4 = "\n".join(_blocks(_section(SKILL.read_text(encoding="utf-8"),
+                                       "## Step 4: converters also get the converter audit")))
+    assert 'FILES="$(git diff --name-only "$RANGE")" || {' in step4
+    assert "git diff --name-only \"$RANGE\" |" not in step4
+
+
+def test_reviewer_runs_the_branch_cli_from_the_repo_root_not_pwd():
+    text = AGENT.read_text(encoding="utf-8")
+    assert 'PYTHONPATH="$PWD' not in text
+    assert 'ROOT="$(git rev-parse --show-toplevel)"' in text and 'PYTHONPATH="$ROOT/tools/ts-cli"' in text
+
+
+def test_codeowners_covers_the_readonly_reviewer():
+    owners = CODEOWNERS.read_text(encoding="utf-8")
+    assert re.search(r"^/\.claude/agents/pr-reviewer-readonly\.md\s+@", owners, re.M)
