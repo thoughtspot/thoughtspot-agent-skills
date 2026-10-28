@@ -360,6 +360,31 @@ def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
     assert "python3 -m pip" in err, err
 
 
+def test_the_install_remedy_offers_the_virtual_environment_route():
+    # A uv- or Homebrew-managed Python refuses `pip install`; the remedy must not be a
+    # dead end there (BL-436).
+    text = "\n".join(pr_ready._install_remedy("/somewhere/bin/python3.12"))
+    assert "CHECKS_PYTHON" in text and ".github/CONTRIBUTING.md" in text, text
+    assert "uv pip install --python" in text, text
+    assert "/somewhere" not in text, "the interpreter's path can name a home directory"
+
+
+def test_a_missing_pyyaml_names_the_virtual_environment_route(monkeypatch, tmp_path):
+    import builtins
+    real_import = builtins.__import__
+
+    def no_yaml(name, *args, **kwargs):
+        if name == "yaml":
+            raise ImportError("No module named 'yaml'")
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", no_yaml)
+    with pytest.raises(RuntimeError) as caught:
+        pr_ready._workflow(tmp_path)
+    message = str(caught.value)
+    assert "pip install pyyaml" in message
+    assert "CHECKS_PYTHON" in message and ".github/CONTRIBUTING.md" in message, message
+
+
 def test_no_install_remedy_without_a_missing_module(env, capsys):
     env.commands.answers = {"pytest agents/databricks/tests/": (
         0, "..s\nSKIPPED [1] tools/b/test_y.py:20: $DATA not set\n2 passed, 1 skipped in 0.1s\n")}

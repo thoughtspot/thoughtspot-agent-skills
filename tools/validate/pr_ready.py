@@ -160,6 +160,8 @@ EVERY_PR_CHECKS: Tuple[Check, ...] = (
     _gate("audit-workflow-permissions", "check_audit_workflow_permissions.py", "--root", "."),
 )
 QUALITY_GATES_PR = _gate("quality-gates-pr", "generate_quality_gates.py", "--root", ".", "--check")
+#: Where the one-time setup (a virtual environment, CHECKS_PYTHON) is written down.
+CONTRIBUTING_GUIDE = ".github/CONTRIBUTING.md"
 #: A check that exits 0 but prints a line starting with this is WARN, not PASS.
 _WARN_LINES = {"pr-size": "LARGE PR:"}
 
@@ -171,7 +173,11 @@ def _workflow(repo_root: Path) -> dict:
         import yaml
     except ImportError as exc:
         raise RuntimeError("PyYAML is needed to read the CI workflow "
-                           "(pip install pyyaml, as CI does)") from exc
+                           "(pip install pyyaml, as CI does). If this Python refuses "
+                           "`pip install`, create a virtual environment, install CI's lines "
+                           "into it with `uv pip install --python <venv>/bin/python` (or "
+                           "`<venv>/bin/pip install`), and set CHECKS_PYTHON to its python: "
+                           f"see {CONTRIBUTING_GUIDE}") from exc
     path = repo_root / WORKFLOW
     try:
         wf = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -456,7 +462,12 @@ def _install_remedy(python: str) -> List[str]:
     return ([f"  Install what CI's suite job installs, from the repo root, for the "
              f"interpreter this run used (`{name} -m pip install ...` if `pip` is "
              f"another interpreter's):"]
-            + [f"    {line}" for line in SUITE_PIP_INSTALLS])
+            + [f"    {line}" for line in SUITE_PIP_INSTALLS]
+            + ["  If that Python refuses `pip install` (externally-managed-environment), "
+               "create a virtual environment, run the same lines with "
+               "`uv pip install --python <venv>/bin/python` (or `<venv>/bin/pip install`) "
+               "in place of `pip install`, and set CHECKS_PYTHON to that python: see "
+               f"{CONTRIBUTING_GUIDE}."])
 
 
 def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result]:

@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-29
+- feat: `CHECKS_PYTHON` names the interpreter `scripts/pre-commit.sh` and `scripts/pr-ready.sh` run the checks with (`scripts/lib/python-bin.sh`), honoured before the newest-`python3.1x`-with-pytest search, so a CI-equivalent virtual environment is no longer bypassed by a newer Python on `PATH`. It fails closed: a value that is not an executable importing pytest stops the run with an error naming the variable, never falling back to the search. Unset, the selection is unchanged. The bare-`python3` fallback warning, pr-ready's PyYAML message and its missing-module remedy now give the virtual-environment route and point at `.github/CONTRIBUTING.md` (BL-436)
 - docs: `.github/CONTRIBUTING.md` — the routine for every pull request, the one-time setup of an environment with CI's packages (including the virtual-environment route for a Python that refuses `pip install`), running `pr-ready` in a terminal or through the Claude Code skill, and how someone else's PR is reviewed; the README and the PR template point to it
 
 ## 2026-10-28
