@@ -20,7 +20,8 @@
 # set (a path, or a command name looked up on PATH), it must be an executable that
 # imports pytest; anything else stops the caller here. It never falls back to the
 # search: that would run the checks on an interpreter the user just said not to use.
-# `exit`, not `return`: both callers must stop, whatever their `set` options.
+# `exit`, not `return`: both callers must stop, whatever their `set` options. Status 2,
+# pr-ready's "the run could not start": no evidence block was written by this run.
 PYTHON_BIN=""
 if [ -n "${CHECKS_PYTHON+set}" ]; then
   _checks_python="$(command -v "$CHECKS_PYTHON" 2>/dev/null || true)"
@@ -28,13 +29,13 @@ if [ -n "${CHECKS_PYTHON+set}" ]; then
     echo "Error: CHECKS_PYTHON='$CHECKS_PYTHON' is not an executable file or a command on PATH." >&2
     echo "  Point it at the interpreter to run the checks with (see .github/CONTRIBUTING.md)," >&2
     echo "  or unset it to use the newest python3.1x with pytest on PATH." >&2
-    exit 1
+    exit 2
   fi
   if ! "$_checks_python" -c "import pytest" >/dev/null 2>&1; then
     echo "Error: CHECKS_PYTHON='$CHECKS_PYTHON' ($_checks_python) cannot import pytest." >&2
     echo "  Install CI's packages into it (see .github/CONTRIBUTING.md), point CHECKS_PYTHON" >&2
     echo "  at an interpreter that has them, or unset it to search PATH." >&2
-    exit 1
+    exit 2
   fi
   PYTHON_BIN="$_checks_python"
   unset _checks_python

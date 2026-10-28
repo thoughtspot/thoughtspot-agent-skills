@@ -82,7 +82,9 @@ def test_override_by_command_name_resolves_on_path(tmp_path):
 
 
 def _assert_fails_closed(result):
-    assert result.returncode != 0, result.stdout
+    # 2, pr-ready's "could not start": exit 1 would send the skill to read FAIL rows
+    # from an evidence block this run never wrote.
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
     assert "PYTHON_BIN=" not in result.stdout, "the caller carried on after the error"
     assert "CHECKS_PYTHON" in result.stderr, result.stderr
 
@@ -128,7 +130,7 @@ def test_pr_ready_sh_stops_on_a_bad_override_and_runs_nothing(tmp_path):
            "CHECKS_PYTHON": str(tmp_path / "missing" / "python3.12")}
     result = subprocess.run(["/bin/bash", str(PR_READY_SH), "--help"], cwd=REPO, env=env,
                             capture_output=True, text=True)
-    assert result.returncode != 0
+    assert result.returncode == 2, (result.returncode, result.stderr)
     assert "RAN" not in result.stdout + result.stderr, "fell back to the search"
     assert "CHECKS_PYTHON" in result.stderr
 

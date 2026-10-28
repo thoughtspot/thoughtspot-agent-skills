@@ -25,9 +25,9 @@ anywhere.
    **Supersedes #N** with every earlier review point mapped to the diff.
 
 **Size.** Keep a PR to one change. A large PR is not refused, but it is slower to review
-and more likely to need several rounds. Today the PR-size gate warns only on very many
-added files or large binary assets; a warning on changed lines is planned (BL-420 in
-[`docs/backlog.md`](../docs/backlog.md)).
+and more likely to need several rounds. Today the PR-size gate warns only above 150 added
+files or 2 MB of added or modified non-code assets; a warning on changed lines is planned
+(BL-420 in [`docs/backlog.md`](../docs/backlog.md)).
 
 ## What `pr-ready` is
 
@@ -38,10 +38,23 @@ upstream by URL, so a fork clone works; it adds a remote named `upstream` if it 
 
 It reports **READY** when nothing FAILs and the branch is not behind upstream `main`. A
 required check skipped for a missing tool, and a test skipped for a missing module, count
-as FAIL. **WARN** and **NOT RUN** rows do not block READY: they are listed in the block with
-their reasons, so read them. Some CI checks cannot be reproduced locally (the other
-Python versions in CI's test matrix, and `pip-audit`, which is a warning here and a hard
-gate in CI); the block lists them under "Not reproduced locally".
+as FAIL. Everything else is reported but does not block READY:
+
+- **WARN**: a soft check that failed, a PR-size warning, or a `pip-audit` finding. Its
+  reason is printed in the terminal as the run goes; the block's results table shows only
+  the status (a soft check skipped for a missing tool is the exception: it is listed with
+  its reason). Read the terminal output: a `pip-audit` WARN here can be a failure in CI,
+  where `pip-audit` is a hard gate.
+- **SKIP** (a check or smoke suite that ran but checked nothing, such as a smoke whose
+  fixture is missing) and **NOT RUN** (an opt-in check whose prerequisite is absent, or a
+  scoped gate the branch does not trigger): listed in the block with their reasons, under
+  "NOT RUN and SKIP".
+- **Tests skipped** for anything other than a missing module (data that is not present, a
+  tool such as node or Chrome): listed there too, with their reasons.
+
+Some CI checks cannot be reproduced locally (the other Python versions in CI's test
+matrix, and CI's own `pip-audit` run); the block lists them under "Not reproduced
+locally".
 
 It writes an **evidence block** recording the base and head commits, every result, and
 what it could not reproduce, to:
@@ -54,37 +67,36 @@ Run it on a clean tree: uncommitted changes mark the block DIRTY.
 
 ## One-time setup: an environment with CI's packages
 
-`pr-ready` uses the newest `python3.1x` on your `PATH` that has pytest, and that
-interpreter needs exactly what CI installs. The install lines are quoted, and kept in step
-with CI by a test, under "Before your first run" in
-[`.claude/skills/pr-ready/SKILL.md`](../.claude/skills/pr-ready/SKILL.md). Copy them from
-there rather than from anywhere else.
+`pr-ready` runs the checks with one Python, and that interpreter needs exactly what CI
+installs. The install lines are quoted, and kept in step with CI by a test, under "Before
+your first run" in [`.claude/skills/pr-ready/SKILL.md`](../.claude/skills/pr-ready/SKILL.md).
+Copy them from there rather than from anywhere else.
+
+Which Python it uses: the one named by the `CHECKS_PYTHON` environment variable (a path, or
+a command name on your `PATH`) when that is set; otherwise the newest `python3.1x` on your
+`PATH` that has pytest. A `CHECKS_PYTHON` that does not exist or cannot import pytest stops
+the run with an error; it never falls back to the search. The pre-commit hook picks its
+Python the same way.
 
 If your Python accepts `pip install`, run those lines with it. If it refuses
 ("externally-managed-environment": a Python managed by uv or Homebrew), use a dedicated
-virtual environment:
+virtual environment. From the repo root:
 
-1. Create it: `uv venv ~/.venvs/tas-ci --python 3.12` (or
-   `python3.12 -m venv ~/.venvs/tas-ci` without uv).
-2. From the repo root, run each line quoted in the skill with
-   `uv pip install --python ~/.venvs/tas-ci/bin/python` (or `~/.venvs/tas-ci/bin/pip install`)
-   in place of `pip install`.
-3. Check which interpreter `pr-ready` will pick. Because it takes the newest Python with
-   pytest, a newer Python elsewhere on your `PATH` wins over the environment even when the
-   environment comes first (an override is planned: BL-436). This should print the
-   environment's `python3.12`:
-
-   ```bash
-   PATH=~/.venvs/tas-ci/bin:$PATH bash -c 'source scripts/lib/python-bin.sh; command -v "$PYTHON_BIN"'
-   ```
-
-   If it prints another interpreter, build the environment from that newer Python instead.
+1. Create it and install the lines into it, one of two ways:
+   - **with uv:** `uv venv ~/.venvs/tas-ci --python 3.12`, then run each line quoted in the
+     skill with `uv pip install --python ~/.venvs/tas-ci/bin/python` in place of
+     `pip install` (`uv venv` creates no `pip` in the environment);
+   - **without uv:** `python3.12 -m venv ~/.venvs/tas-ci`, then run each line with
+     `~/.venvs/tas-ci/bin/pip install` in place of `pip install`.
+2. Run `pr-ready` with `CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12` (below). Putting the
+   environment first on your `PATH` is not enough: a newer Python with pytest anywhere on
+   `PATH` would be picked instead.
 
 Optionally, add an alias to `~/.zshrc` (or `~/.bashrc`) that works from any directory in
 the checkout:
 
 ```bash
-alias pr-ready='PATH=~/.venvs/tas-ci/bin:$PATH bash "$(git rev-parse --show-toplevel)/scripts/pr-ready.sh"'
+alias pr-ready='CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12 bash "$(git rev-parse --show-toplevel)/scripts/pr-ready.sh"'
 ```
 
 Open a new terminal, or run `source ~/.zshrc`, for it to take effect. The alias runs the
@@ -97,15 +109,15 @@ Open a new terminal, or run `source ~/.zshrc`, for it to take effect. The alias 
 In your own branch's checkout:
 
 ```bash
-pr-ready                                                    # with the alias
-PATH=~/.venvs/tas-ci/bin:$PATH bash scripts/pr-ready.sh     # without it, from the checkout's root
+pr-ready                                                              # with the alias
+CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12 bash scripts/pr-ready.sh # without it, from the checkout's root
 ```
 
 It takes a few minutes. It ends with `pr-ready: READY` or `pr-ready: NOT READY` (the
 failing rows are printed above), the path of the evidence file, and a reminder that the
 Claude Code skill adds the review (`--no-review` drops the reminder). A run that cannot
-start (no upstream remote reachable, a failed fetch) exits with status 2 and neither
-verdict.
+start (no upstream remote reachable, a failed fetch, a `CHECKS_PYTHON` that is missing or
+has no pytest) exits with status 2 and neither verdict.
 
 `--post N` comments the block on PR N for you, but only when the run is READY, the tree
 is clean, PR N's head is your HEAD, and the block passes the secrets and
@@ -143,12 +155,22 @@ own-branch question is not a safeguard there: in such a checkout the skill, the 
 agent's instructions and `scripts/pr-ready.sh` are that branch's copies, so they can be
 changed not to ask.
 
+A checkout of someone else's branch runs its code even if you run nothing yourself. With
+this repo's git hooks installed, a commit in it runs that branch's own
+`scripts/pre-commit.sh` and `scripts/commit-msg.sh`, and a merge runs at least its
+`scripts/commit-msg.sh`. Starting a Claude Code session in it runs the `SessionStart` hook
+in that branch's `.claude/settings.json`. So read another person's PR with
+`gh pr diff <N>` or in GitHub's web view, or, if you need the files, in a throwaway clone
+with no hooks installed and no Claude Code session started in it. Never commit or merge in
+a checkout of someone else's branch.
+
 For another person's PR, maintainers use `main`'s copy of `scripts/check-pr.sh`, which
-scans the PR for customer data without executing any of its code, and then review it by
-reading. Run it from a clone whose `origin` is `thoughtspot/thoughtspot-agent-skills`
-(in a fork clone, `origin/main` is the fork's copy), with the invocation in the header of
-`scripts/check-pr.sh`; it needs the maintainer's private name list unless run with
-`--links-only`. An automated reviewer for other people's PRs is a separate design that is
+scans the PR for customer references (tenant links, and the names on the maintainer's
+private list; it does not detect customer data in general) without executing any of its
+code, and then review it by reading. Run it from a clone whose `origin` is
+`thoughtspot/thoughtspot-agent-skills` (in a fork clone, `origin/main` is the fork's copy),
+with the invocation in the header of `scripts/check-pr.sh`; it needs the maintainer's
+private name list unless run with `--links-only`. An automated reviewer for other people's PRs is a separate design that is
 not built yet (BL-416 in [`docs/backlog.md`](../docs/backlog.md)).
 
 ## Why it works this way

@@ -72,7 +72,8 @@ followed by a human review of the PR.
 
 ## Before your first run
 
-The checks run with the interpreter `scripts/pr-ready.sh` picks (the newest Python
+The checks run with the interpreter `scripts/pr-ready.sh` picks (the one the
+`CHECKS_PYTHON` environment variable names, when set; otherwise the newest Python
 3.10+ on `PATH` that has pytest), and a test skipped for a module CI installs is a
 FAIL, not a pass. So that interpreter needs what CI's suite job installs, exactly
 these lines of `.github/workflows/validate.yml`, run from the repo root (as
@@ -90,14 +91,16 @@ module (`pr-ready.sh` then prints the same lines); do not install them yourself:
 goes into the user's environment is their decision.
 
 If `pip install` is refused ("externally-managed-environment": a Python managed by uv
-or Homebrew), the same lines go into a dedicated virtual environment instead: create it
-with `uv venv ~/.venvs/tas-ci --python 3.12` (or `python3.12 -m venv ~/.venvs/tas-ci`)
-and run each line above with `uv pip install --python ~/.venvs/tas-ci/bin/python`
-(or `~/.venvs/tas-ci/bin/pip install`) in place of `pip install`.
-`.github/CONTRIBUTING.md` gives the full setup. `pr-ready.sh` uses the newest
-`python3.1x` on `PATH` that has pytest, so that environment must be the newest such
-Python on `PATH`, not merely the first; when it exists, put its `bin` first on `PATH`
-for Step 1.
+or Homebrew), the same lines go into a dedicated virtual environment instead. With uv:
+create it with `uv venv ~/.venvs/tas-ci --python 3.12` and run each line above with
+`uv pip install --python ~/.venvs/tas-ci/bin/python` in place of `pip install` (`uv venv`
+creates no `pip`). Without uv: `python3.12 -m venv ~/.venvs/tas-ci`, then each line with
+`~/.venvs/tas-ci/bin/pip install`. `.github/CONTRIBUTING.md` gives the full setup.
+`pr-ready.sh` then needs `CHECKS_PYTHON` set to that environment's interpreter: putting
+its `bin` first on `PATH` is not enough, because without the variable the newest Python
+with pytest anywhere on `PATH` wins. Step 1 sets it when the environment exists. A
+`CHECKS_PYTHON` that does not exist or cannot import pytest stops the run (exit 2, an
+error naming the variable) rather than falling back to another interpreter.
 
 ## Step 1: run the checks
 
@@ -112,8 +115,15 @@ and fetches its `main`: that is the base, never your fork's `main`. If a remote 
 The run takes about five minutes: give the Bash call a 600000 ms timeout, or run it
 in the background and wait for it to finish.
 
+The block sets `CHECKS_PYTHON` when the virtual environment from "Before your first
+run" exists. If the user named a different environment or interpreter, put its path in
+`VENV_PY` instead. When it does not exist, the block leaves `CHECKS_PYTHON` as the
+user's shell has it (unset, `pr-ready.sh` searches `PATH`).
+
 ```bash
 set -o pipefail
+VENV_PY=~/.venvs/tas-ci/bin/python3.12
+if [ -x "$VENV_PY" ]; then export CHECKS_PYTHON="$VENV_PY"; fi
 bash scripts/pr-ready.sh --no-review
 echo "pr-ready exit: $?"
 echo "evidence: $(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
@@ -129,7 +139,8 @@ Report to the user:
 
 - the evidence path;
 - exit 2: the run could not start (no upstream remote, a failed fetch, an unreadable
-  workflow) — quote the script's stderr;
+  workflow, a `CHECKS_PYTHON` that is missing or has no pytest) — quote the script's
+  stderr;
 - exit 1: every FAIL row and the behind count, read from the evidence:
 
 ```bash
@@ -308,5 +319,5 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (the same quoted lines, no second copy), and Step 1 runs with that environment first on `PATH` when it exists; link to `.github/CONTRIBUTING.md` |
+| 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 sets `CHECKS_PYTHON` when `~/.venvs/tas-ci/bin/python3.12`, or the environment the user named, exists; link to `.github/CONTRIBUTING.md` |
 | 1.0.0 | 2026-10-28 | Initial release: on your own branch only (asks first), the CI-superset run, then the `pr-reviewer` agent (plus the conversion-consistency auditor on converter changes), both scanned and appended to one evidence block |
