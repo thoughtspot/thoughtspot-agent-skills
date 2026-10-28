@@ -1,6 +1,8 @@
 """Tests for generate_quality_gates.py parsing logic."""
 from __future__ import annotations
 
+import re
+import shutil
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -9,7 +11,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import checks
 from generate_quality_gates import (
+    collect_gates,
     strip_volatile,
     _collect_comment,
     _extract_docstring,
@@ -251,6 +255,168 @@ class TestParseCi:
         '''))
         modes = {e["validator"]: e["mode"] for e in _parse_ci(f)}
         assert modes == {"check_pr_size.py": "soft", "check_secrets.py": "gate"}
+
+
+
+# ---------------------------------------------------------------------------
+# _parse_ci reading the check list through run_checks.py
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+RUNNER_CI_CALL = "python3 tools/validate/run_checks.py --context ci --base origin/main"
+RUNNER_SMOKES_CALL = "python3 tools/validate/run_checks.py --smokes"
+
+# The catalog's (validator, mode) pairs as rendered from the explicit-lines
+# workflow (one `python3 tools/validate/X.py ... || rc=1` per validator), captured
+# 2026-10-28 immediately before CI switched to run_checks.py. Switching CI to read
+# checks.CHECKS must not add, drop or re-mode a single gate. A deliberate gate
+# change after this point updates the literal in the same PR.
+CATALOG_BEFORE_RUNNER_SWITCH = {
+    ("_pip_audit", "gate"),
+    ("_pytest_ci", "gate"),
+    ("check_agentql_quest.py", "gate"),
+    ("check_audit_catalog.py", "gate"),
+    ("check_audit_freshness.py", "soft"),
+    ("check_audit_workflow_permissions.py", "gate"),
+    ("check_backlog_integrity.py", "gate"),
+    ("check_ci_gate_coverage.py", "gate"),
+    ("check_consistency.py", "gate"),
+    ("check_converter_parity.py", "gate"),
+    ("check_coverage_matrix.py", "gate"),
+    ("check_customer_references.py", "gate"),
+    ("check_file_size.py", "gate"),
+    ("check_formula_catalog.py", "gate"),
+    ("check_harness_routing.py", "gate"),
+    ("check_i7_gate.py", "gate"),
+    ("check_internal_imports.py", "gate"),
+    ("check_lint_invariant_list.py", "gate"),
+    ("check_mapping_code_sync.py", "gate"),
+    ("check_mapping_currency.py", "soft"),
+    ("check_mirror_sync.py", "gate"),
+    ("check_module_health.py", "gate"),
+    ("check_no_inline_requests.py", "gate"),
+    ("check_no_inline_tml_gate.py", "gate"),
+    ("check_no_v1_endpoints.py", "gate"),
+    ("check_open_item_citations.py", "gate"),
+    ("check_open_items.py", "soft"),
+    ("check_orphan_references.py", "gate"),
+    ("check_ossie_mapping_sync.py", "gate"),
+    ("check_pagination_convention.py", "gate"),
+    ("check_patterns.py", "gate"),
+    ("check_pr_size.py", "soft"),
+    ("check_python_redefinitions.py", "gate"),
+    ("check_references.py", "gate"),
+    ("check_repo_hygiene.py", "gate"),
+    ("check_runtime_coverage.py", "gate"),
+    ("check_secrets.py", "gate"),
+    ("check_skill_cli_usage.py", "gate"),
+    ("check_skill_context_cost.py", "gate"),
+    ("check_skill_flag_usage.py", "gate"),
+    ("check_skill_naming.py", "gate"),
+    ("check_skill_versions.py", "gate"),
+    ("check_slash_command_refs.py", "gate"),
+    ("check_smoke_tests.py", "gate"),
+    ("check_sv_yaml.py", "gate"),
+    ("check_tml.py", "gate"),
+    ("check_version_sync.py", "gate"),
+    ("check_yaml.py", "gate"),
+    ("generate_agentql_offline.py", "gate"),
+    ("generate_open_items_index.py", "gate"),
+    ("generate_parity.py", "gate"),
+    ("generate_quality_gates.py", "gate"),
+    ("suggest_dependency_types.py", "soft"),
+    ("suggest_repo_changelog.py", "gate"),
+    ("suggest_skill_version.py", "soft"),
+    ("unit tests (databricks)", "gate"),
+    ("unit tests (erd)", "gate"),
+    ("unit tests (ts-cli)", "gate"),
+}
+
+
+def _replace_step(text: str, name: str, run_line: str) -> str:
+    """Swap the step called `name` for one whose whole body is `run_line`.
+
+    A step is its `- name:` line plus every following line that is blank or
+    indented deeper than the `-`. The step's `if:` is kept so the fixture differs
+    from the real workflow only in what the step runs.
+    """
+    lines = text.split("\n")
+    starts = [i for i, ln in enumerate(lines) if ln.strip() == f"- name: {name}"]
+    assert len(starts) == 1, f"expected one step named {name!r}, found {len(starts)}"
+    start = starts[0]
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) > indent):
+        end += 1
+    # Leave trailing blank lines (the gap before the next step or job) in place.
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    body = lines[start + 1:end]
+    guard = [ln for ln in body if ln.strip().startswith("if:")]
+    pad = " " * (indent + 2)
+    new = [lines[start], *guard, f"{pad}run: |", f"{pad}  {run_line}"]
+    return "\n".join(lines[:start] + new + lines[end:])
+
+
+def _runner_fixture_root(tmp_path: Path) -> Path:
+    """A repo root with the real pre-commit hook and the real workflow, except that
+    the full-repo and smoke steps call run_checks.py instead of listing scripts."""
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(REPO_ROOT / "scripts" / "pre-commit.sh", tmp_path / "scripts" / "pre-commit.sh")
+    wf = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
+    wf = _replace_step(wf, "Run validators (full-repo mode)", RUNNER_CI_CALL)
+    wf = _replace_step(wf, "Run credential-free smoke suites", RUNNER_SMOKES_CALL)
+    assert RUNNER_CI_CALL in wf and "|| rc=1" not in wf, "fixture still lists validators explicitly"
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "validate.yml").write_text(wf, encoding="utf-8")
+    return tmp_path
+
+
+def test_catalog_unchanged_by_runner_switch(tmp_path):
+    gates = collect_gates(_runner_fixture_root(tmp_path))
+    pairs = {(v, info["mode"]) for v, info in gates.items()}
+    assert pairs - CATALOG_BEFORE_RUNNER_SWITCH == set(), "runner form adds or re-modes gates"
+    assert CATALOG_BEFORE_RUNNER_SWITCH - pairs == set(), "runner form drops or re-modes gates"
+    # Every listed check is still recorded as running in CI, not just present via pre-commit.
+    not_ci = sorted(c.script for c in checks.CHECKS if not gates[c.script]["ci"])
+    assert not_ci == [], f"checks the runner form no longer marks as CI: {not_ci}"
+
+
+def test_committed_catalog_matches_the_snapshot():
+    """The real workflow, whichever form it is in, renders the same gate set."""
+    pairs = {(v, info["mode"]) for v, info in collect_gates(REPO_ROOT).items()}
+    assert pairs == CATALOG_BEFORE_RUNNER_SWITCH
+
+
+class TestParseCiRunner:
+    def _parse(self, tmp_path, run_line):
+        f = tmp_path / "validate.yml"
+        f.write_text(f"steps:\n  - run: |\n      {run_line}\n")
+        return _parse_ci(f)
+
+    def test_ci_runner_line_expands_to_one_entry_per_check(self, tmp_path):
+        entries = self._parse(tmp_path, RUNNER_CI_CALL)
+        assert [e["validator"] for e in entries] == [c.script for c in checks.CHECKS]
+        for e, c in zip(entries, checks.CHECKS):
+            assert set(e) == {"validator", "comment", "mode"}
+            assert e["mode"] == ("gate" if c.hard else "soft"), c.id
+
+    def test_soft_check_is_soft(self, tmp_path):
+        modes = {e["validator"]: e["mode"] for e in self._parse(tmp_path, RUNNER_CI_CALL)}
+        assert modes["generate_quality_gates.py"] == "soft"
+
+    def test_smoke_runner_line_is_not_a_catalog_row(self, tmp_path):
+        assert self._parse(tmp_path, RUNNER_SMOKES_CALL) == []
+
+    @pytest.mark.parametrize("line", [
+        "python3 tools/validate/run_checks.py --context local",
+        "python3 tools/validate/run_checks.py --context ci --base origin/main --only secrets",
+        "python3 tools/validate/run_checks.py --context ci --base origin/main || true",
+    ])
+    def test_unrecognised_runner_form_fails_loud(self, tmp_path, line):
+        # Expanding any other form to the full list would claim gates it does not run.
+        with pytest.raises(ValueError, match="run_checks.py"):
+            self._parse(tmp_path, line)
 
 
 class TestStripVolatile:
