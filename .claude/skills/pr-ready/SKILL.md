@@ -85,6 +85,19 @@ pip install -e tools/ts-cli
 pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"
 ```
 
+If `pip install` is refused ("externally-managed-environment": a Python managed by uv
+or Homebrew), the same packages go into a dedicated virtual environment that is put on
+`PATH` for the run (`.github/CONTRIBUTING.md` gives the full setup):
+
+```bash
+uv venv ~/.venvs/tas-ci --python 3.12
+uv pip install --python ~/.venvs/tas-ci/bin/python pytest pyyaml radon pip-audit jsonschema==4.25.1
+uv pip install --python ~/.venvs/tas-ci/bin/python -e "tools/ts-cli[snowflake,qlik,xlsx]"
+PATH=~/.venvs/tas-ci/bin:$PATH bash scripts/pr-ready.sh
+```
+
+When such an environment exists, put it first on `PATH` for Step 1.
+
 Tell the user about them before the first run, or when Step 1 FAILs on a missing
 module (`pr-ready.sh` then prints the same lines); do not install them yourself: what
 goes into the user's environment is their decision.
@@ -298,4 +311,5 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install`; link to `.github/CONTRIBUTING.md` |
 | 1.0.0 | 2026-10-28 | Initial release: on your own branch only (asks first), the CI-superset run, then the `pr-reviewer` agent (plus the conversion-consistency auditor on converter changes), both scanned and appended to one evidence block |

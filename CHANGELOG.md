@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-29
+- docs: `.github/CONTRIBUTING.md` — the routine for every pull request, the one-time setup of an environment with CI's packages (including the virtual-environment route for a Python that refuses `pip install`), running `pr-ready` in a terminal or through the Claude Code skill, and how someone else's PR is reviewed; linked from the README and the PR template
+
 ## 2026-10-28
 - feat: ts-audit 3.3.0 — `ts audit run --all-models [--connection …] [--dry-run]` resolves the audit's scope itself (Models only, legacy Worksheets skipped; a connection scope goes through the Tables, directly or through Views), so the skill no longer searches, filters or exports by hand. The skill's TML export step, whose cache nothing read, is dropped (BL-407), and the audit step saves a snapshot for re-runs. A Model the user may not export is now a warning instead of a crash of the whole audit. PR 1.3 of the ts-audit v2 roadmap.
 - chore: bump ts-cli to v0.186.0

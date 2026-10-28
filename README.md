@@ -219,6 +219,9 @@ thoughtspot-agent-skills/
 
 ## Contributing
 
+**Start with [the contributing guide](.github/CONTRIBUTING.md):** the routine for every pull
+request, the one-time setup, and how to run `pr-ready` in a terminal or in Claude Code.
+
 **Before your first commit, install the git hooks.** The pre-commit hook runs the same
 gates CI does, so a stale registry, a failing validator or a leaked customer link surfaces
 in seconds locally instead of minutes later in CI; the commit-msg hook checks the commit
