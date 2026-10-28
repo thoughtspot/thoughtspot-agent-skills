@@ -123,8 +123,9 @@ git diff --stat "$RANGE"
 Dispatch the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`) with, written out
 literally in the prompt (an agent does not share your shell):
 
-- `trusted: yes` — always stated explicitly; this step is reached only after the
-  user confirmed the branch is their own;
+- `trusted: yes` — always stated explicitly (without it the reviewer refuses and
+  reviews nothing); this step is reached only after the user confirmed the branch
+  is their own;
 - the printed range, and the base ref named in the evidence's first line;
 - the printed evidence path;
 - the PR number, if a PR already exists, so it can read the description.

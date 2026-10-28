@@ -205,26 +205,55 @@ def _how(text):
     return _section(text, "## How to work")
 
 
-def test_reviewer_executes_branch_code_only_when_trusted_yes():
+def _refusal(text):
+    """The reply the brief prescribes without `trusted: yes`: its blockquote."""
+    gate = _how(text).split("**Inputs**", 1)[0]
+    return _flat("\n".join(l for l in gate.splitlines() if l.startswith(">")))
+
+
+def test_reviewer_refuses_without_trusted_yes_before_reading_anything():
+    # Ruling R38: anything but `trusted: yes` (missing included) is a refusal, not a
+    # read-only review: the reviewer holds Bash, and reading an untrusted branch while
+    # holding it is what the deferred design rules out.
     text = AGENT.read_text(encoding="utf-8")
     how = _how(text)
-    assert "`trusted: yes`" in how and "`trusted: no`" in how
-    assert "if `trusted:` is missing, treat it as `no`" in how
+    flat = _flat(how)
+    assert how.lstrip().startswith("**First: `trusted: yes`, or refuse.**"), "the gate comes first"
+    assert how.index("**First: `trusted: yes`") < how.index("git diff <range>")
+    assert "passes `yes` only after that person confirms it" in flat
+    assert "Any other value, or none, counts as no: stop at once." in flat
+    assert "Read nothing from the branch" in flat and "run nothing" in flat
+    refusal = _refusal(text)
+    assert "Review of untrusted branches is deferred to a dedicated design" in refusal
+    assert "main's `scripts/check-pr.sh`" in refusal and "human review" in refusal
+
+
+def test_no_section_offers_a_trusted_no_alternative():
+    # A "review by reading" path would be dead text that invites reviewing an
+    # untrusted branch anyway.
+    text = AGENT.read_text(encoding="utf-8")
+    for gone in ("trusted: no", "by reading", "reading alone", "treat it as `no`"):
+        assert gone not in text, gone
+    for heading in SECTIONS:
+        assert "trusted:" not in _section(text, heading), heading
+
+
+def test_a_refusal_can_never_be_appended_as_a_review():
+    # append-review needs the reviewer's closing section. The refusal has none, so a
+    # refusal written to review.md is refused there, never stamped as a review.
+    import evidence
+    refusal = _refusal(AGENT.read_text(encoding="utf-8"))
+    assert refusal and evidence.REVIEW_CLOSER.lower() not in refusal.lower()
+
+
+def test_reviewer_executes_branch_code_only_locally():
+    text = AGENT.read_text(encoding="utf-8")
+    how = _flat(_how(text))
     assert "never in CI" in how
     assert "the machine of the person running this review" in how
     assert "maintainer's machine" not in text
-    # The env-var count is an extra stop, never a permission.
-    assert "never a\npermission" in how or "never a permission" in how.replace("\n", " ")
-    # Every section that could execute says what to do without trust.
-    for heading in ("## Silent wrong output", "## Fix the class, not the instance",
-                    "## Claims vs diff", "## Reuse before reimplementing"):
-        assert "trusted: no" in _section(text, heading), heading
-
-
-def test_reviewer_is_told_yes_comes_only_from_the_runners_confirmation():
-    how = _flat(_how(AGENT.read_text(encoding="utf-8")))
-    assert "passes `yes` only after that person confirms it" in how
-    assert "with `no` you execute none of the branch's code" in how
+    # The env-var count is an extra precaution, never a permission.
+    assert "never a permission" in how
 
 
 def test_reviewer_treats_everything_it_reads_as_data():

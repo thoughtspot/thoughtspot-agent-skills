@@ -166,12 +166,13 @@ and spot checks, not on finding validator failures or building the first repro.
   hooks. So the skill starts by saying that it executes the branch's code with the
   user's credentials, and asks the user to confirm the branch is their own: they
   wrote it, or have read all of it. Only on that confirmation does it run, and it
-  passes the reviewer `trusted: yes`; the reviewer executes branch code only then.
-  Without it, or for anyone else's PR, the skill stops and points to what is done
-  today: main's `scripts/check-pr.sh` (main's copy, run as its header says, never the
-  PR's) and a human review. The review text is scanned for secrets and customer
-  references before it is appended, and the finished block again before it is
-  shared.
+  passes the reviewer `trusted: yes`; without exactly that value the reviewer refuses,
+  reading nothing from the branch (decided 2026-10-28; there is no read-only mode).
+  Without the confirmation, or for anyone else's PR, the skill stops and points to
+  what is done today: main's `scripts/check-pr.sh` (main's copy, run as its header
+  says, never the PR's) and a human review. The review text is scanned for secrets
+  and customer references before it is appended, and the finished block again
+  before it is shared.
 - **Agent review of someone else's branch: deferred to a dedicated design (decided
   2026-10-28).** Three review rounds tried a read-only reviewer over pre-fetched copies
   of a PR's diff, text, threads and files, and each place the copies were moved to
