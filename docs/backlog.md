@@ -11004,10 +11004,10 @@ BL-219 does not fix them.
 
 | file | relationships | joins extracted |
 |---|---|---|
-| optimizely_production.tdsx | 9 | 0 |
-| gifting_dataset.tdsx | 1 | 0 |
-| Insights _ Campaign Data.tdsx | 1 | 0 |
-| cpg_lp_engagement.tdsx | 1 | 0 |
+| datasource A (.tdsx) | 9 | 0 |
+| datasource B (.tdsx) | 1 | 0 |
+| datasource C (.tdsx) | 1 | 0 |
+| datasource D (.tdsx) | 1 | 0 |
 | **total** | **12** | **0** |
 
 **Severity — which shape actually trips it.** A multi-table datasource reaching the model
