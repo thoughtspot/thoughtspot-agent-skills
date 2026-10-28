@@ -260,13 +260,18 @@ are roughly ordered by value÷effort.
 | ~~BL-399~~ | ~~ts-audit's assessment profile (Spotter-ready / General) is asked for, stored and never used: every check runs fixed thresholds~~ | DONE (2026-10-22 — ts-cli v0.181.0, ts-audit 2.6.0) |
 | BL-400 | Customer-name check: no CI backstop now that the private list stays local, so binary/UTF-16 blobs and accented spellings of a listed name go unchecked | 2026-12-31 |
 | BL-401 | `ts-dependency-cleanup` (closed PR #505): what a resubmission must fix before a cascade-delete skill can merge | On resubmission |
-| BL-402 | pre-commit's staged-file gates: `echo \| grep -q` under pipefail skips on a large staged set, quoted paths and a rename's old path never match, quest's JS/CSS runs no quest tests, ossie-roundtrip never runs | 2026-12-31 |
+| BL-402 | pre-commit's staged-file gates: ~~`echo \| grep -q` under pipefail skips on a large staged set~~ (gap 1 fixed 2026-10-28), quoted paths and a rename's old path never match, quest's JS/CSS runs no quest tests, ossie-roundtrip never runs | 2026-12-31 |
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
 | BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
+| BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
+| BL-416 | Agent review of someone else's branch, locally or in CI: the dedicated design spec §5 C2 defers to, against the requirements recorded there; the C7 backtest and any CI review job wait for it | 2026-12-31 |
+| BL-418 | `check_secrets.py` passes identifier-shaped quoted secrets (`ghp_…`, `sk_live_…`, a plain password): its exemption for a variable name also covers a quoted literal | 2026-11-30 |
+| BL-419 | In CI a required check that prints `SKIP` stays SKIP and passes the run, though CI installs every tool, so a broken install or import reads green; pr-ready already promotes it to FAIL | 2026-11-30 |
+| BL-421 | Eight validators fail open on bad input: an empty `--file ""` falls through to another mode (`check_tml`, `check_sv_yaml`), and a missing own input prints "Nothing to check" and exits 0 (converter parity, coverage matrix, mapping/code sync, runtime coverage, skill naming, internal imports) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -330,6 +335,10 @@ are roughly ordered by value÷effort.
 | BL-412 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
 | BL-413 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
 | BL-414 | the backlog novelty gate compares id sets only, so a merge that moves an id already on the base to a different item (a title swap) passes every gate; #664 did exactly that to BL-410 | 2027-01-31 |
+| BL-417 | `pr-ready.sh --post` re-runs the checks and posts a fresh block whose Review reads "Not run", replacing the reviewed block on disk; post the existing block when HEAD and the tree are unchanged | 2026-11-30 |
+| BL-420 | No changed-lines size warning: `check_pr_size.py` warns only at 150 added files or 2 MB of non-code assets, where spec C7 assumed about 1,500 changed lines | 2026-11-30 |
+| BL-422 | No subprocess timeout in `run_checks.py` or `pr_ready.py` (a hung check holds CI to the job limit, pr-ready forever), and two smoke runners with different SKIP rules | 2026-11-30 |
+| BL-423 | pr-ready's scoped quality-gates trigger reads `git diff --name-only` with `splitlines()` (quoted non-ASCII paths never match, odd separators split a path), and the evidence scrub misses `/users/<name>` and `c:/users/<name>` | 2026-11-30 |
 
 ### Tier 4 — Deferred
 
@@ -14525,6 +14534,11 @@ does. (2) Build STAGED with `-z` (or `core.quotePath=false`) and read it NUL-sep
 (3) Let the quest suite's trigger include `tools/quest/` JS, CSS and HTML. (4) Give
 ossie-roundtrip a trigger, or record why it is CI-only.
 
+**Update 2026-10-28: gap 1 fixed.** Every trigger in `scripts/pre-commit.sh` greps a
+here-string now; `tools/validate/tests/test_precommit_triggers.py` feeds each real trigger
+more than 1 MiB of staged paths under the hook's own shell options on /bin/bash. Gaps 2-4
+stay open (BL-423 is the same quoting gap in pr-ready's scoped quality-gates trigger).
+
 **Target:** 2026-12-31.
 
 ## BL-403 — pre-commit's unit tests: select suites from a derived map, not a hand-written one `Tier 2`
@@ -14812,3 +14826,163 @@ under another id (a swap rather than an edit). Add a test that replays the #664 
 proves the gate fires, and one where a plain title edit still passes.
 
 **Target:** 2027-01-31.
+
+## BL-415 — pre-commit reads the check list; the catalog stops regex-parsing the hook `Tier 2`
+
+**Filed:** 2026-10-28. **Source:** the PR-quality design, spec §5 C1
+(`docs/superpowers/specs/2026-10-28-pr-quality-system-design.md`), deferred by its plan.
+
+**What.** CI and `scripts/pr-ready.sh` run `tools/validate/checks.py` through
+`tools/validate/run_checks.py`. `scripts/pre-commit.sh` does not: it keeps its own `run_check`
+lines, each behind a staged-file trigger the list does not model, and
+`tools/validate/tests/test_checks_parity.py` pins those lines to the list one by one (labels,
+args, declared drift). `tools/validate/generate_quality_gates.py` expands CI's runner line from
+the list but still regex-parses the hook for pre-commit's gates and their triggers. So a check is
+still added in two places, and the catalog depends on the hook's text shape (the here-string
+triggers of 2026-10-28 needed a generator test to stay readable).
+
+**Do.** Add each check's pre-commit trigger (and pre-commit-only and unmanaged entries) to the
+list; have pre-commit run the list through the runner with a staged context, keeping SKIP and
+NOTE reporting and the timing budget; generate the catalog from the list alone; retire the parts
+of the parity test the list makes redundant, keeping the CI-call pins.
+
+**Target:** 2026-11-30.
+
+## BL-416 — agent review of someone else's branch: the deferred design `Tier 2`
+
+**Filed:** 2026-10-28. **Source:** spec §5 C2 (ruling R37 of the PR-quality build: three fix
+rounds of a read-only reviewer over pre-fetched copies each opened a new channel).
+
+**What.** The `pr-ready` skill and the `pr-reviewer` agent run only on the user's own branch
+(`trusted: yes`). Another person's PR gets main's `scripts/check-pr.sh` and a human review, as
+before. Reviewing someone else's branch with an agent, locally or in CI, needs its own design.
+Its requirements are recorded in spec §5 C2, under "Agent review of someone else's branch:
+deferred to a dedicated design", and its CI constraints under "Constraints for any future CI
+job": no Bash for the reviewer; inputs outside any git repository and outside the session's
+primary working directory; none of the PR's own control files honoured (`CLAUDE.md`,
+`.claude/**`, ignore files, `.gitattributes`); no secrets beside the inputs; path-scoped Read
+deny rules for credential files; the head pinned to the SHA `check-pr.sh` scanned; output
+scanning not treated as a complete control; PR threads treated as untrusted input.
+
+**Do.** Write the design against those requirements, put it through a refute-briefed review,
+and only then build it. The C7 backtest (spec §6 step 3) and any CI review job wait for it.
+
+**Target:** 2026-12-31 (a design and its review, ahead of the backtest).
+
+## BL-417 — `pr-ready.sh --post` posts a block without the review `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** ruling R27 of the PR-quality build.
+
+**What.** `--post N` re-runs the checks, rewrites `<git-dir>/pr-ready/evidence.md` and posts
+that: a block whose Review section reads "Not run", and the reviewed block on disk is replaced.
+The skill and the PR template therefore tell users to paste the block instead of posting it.
+
+**Do.** Let `--post` (or a separate mode) post the existing block as it is when it is READY, not
+DIRTY, names the current HEAD, the tree is clean and the PR's head matches, after the same two
+scans `--post` runs today; test that a reviewed block is posted with its review.
+
+**Target:** 2026-11-30.
+
+## BL-418 — `check_secrets.py` passes identifier-shaped quoted secrets `Tier 2`
+
+**Filed:** 2026-10-28. **Source:** the final review of the PR-quality build (spec §5 C2's
+scanning caveat).
+
+**What.** `_is_placeholder_value` in `tools/validate/check_secrets.py` exempts any value that
+looks like an identifier (letters, digits, underscore), so that `password=passphrase_bytes`, a
+variable, is not flagged. The capture drops the quotes, so the exemption also covers quoted
+literals: `token = "ghp_…"` (a GitHub token), `"sk_live_…"` (a Stripe key) and a plain
+`password = "Hunter2Hunter2"` all pass. The pr-ready skill and `--post` rely on this scanner for
+text bound for a public PR.
+
+**Do.** Apply the identifier exemption to unquoted values only; add the well-known token
+prefixes as their own rule; add known-bad fixtures for each to
+`tools/validate/tests/test_known_bad_fixtures.py`, and a test that a quoted variable-like word
+used as a value is still caught.
+
+**Target:** 2026-11-30.
+
+## BL-419 — a required check that SKIPs in CI passes the run `Tier 2`
+
+**Filed:** 2026-10-28. **Source:** the final review of the PR-quality build.
+
+**What.** `tools/validate/run_checks.py` promotes a required check's SKIP to FAIL only with
+`--context local`. In CI it stays SKIP and does not fail the step, as before the runner. CI
+installs every tool, so a SKIP there means an install or an import broke, and the run reads
+green: the fail-open shape spec §1 F4 counts.
+
+**Do.** List which checks print a column-0 `SKIP` in CI today (the opt-in ossie check does, by
+design). Then promote SKIP to FAIL in the CI context for every check without an
+`optional_prereq`, with a test, and say so in the runner's docstring and
+`docs/quality-gates.md`.
+
+**Target:** 2026-11-30.
+
+## BL-420 — no changed-lines warning for a large PR `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** spec §5 C7, corrected by the final review of the
+PR-quality build.
+
+**What.** Spec C7 has size warn "through the existing `check_pr_size.py` (threshold about 1,500
+changed lines)". `tools/validate/check_pr_size.py` measures something else: it warns when a PR
+adds more than 150 files or 2 MB of non-code assets (where customer data hides). The median
+external PR changed 1,329 lines and none of that triggers it.
+
+**Do.** Add a changed-lines measure, warn-only as the step is today, with the threshold set from
+`docs/reviews/2026-10-28-pr-metrics-baseline.md` rather than assumed; keep the files and assets
+rules as they are.
+
+**Target:** 2026-11-30.
+
+## BL-421 — eight validators fail open on an empty value or a missing input `Tier 2`
+
+**Filed:** 2026-10-28. **Source:** the final review of the PR-quality build (siblings of the
+empty-value fix in `check_secrets.py` and `check_customer_references.py`).
+
+**What.** Two shapes, the class spec §1 F4 counts:
+- **An empty value reads as absent.** `tools/validate/check_tml.py` and
+  `tools/validate/check_sv_yaml.py` test `if args.file:`, so `--file ""` falls through to the
+  whole-repo scan and reports that instead (measured: "All 17 TML block(s) valid", exit 0).
+- **A missing own input reads as nothing to check.** `check_converter_parity.py`,
+  `check_coverage_matrix.py`, `check_mapping_code_sync.py`, `check_runtime_coverage.py` and
+  `check_skill_naming.py` print "Nothing to check" and exit 0 when they find no skills to read,
+  and `check_internal_imports.py` does the same when its scan root is missing, so a wrong
+  `--root` or a moved directory passes.
+
+**Do.** Make an empty value a usage error (exit 2, testing `is not None`), as the two gates
+above now do, and a missing own input a FAIL; one test per validator for each shape.
+
+**Target:** 2026-11-30.
+
+## BL-422 — no subprocess timeouts; two smoke runners `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** the final review of the PR-quality build.
+
+**What.** `_execute` in `tools/validate/run_checks.py` and `_run_command` in
+`tools/validate/pr_ready.py` call `subprocess.run` with no timeout: one hung validator, smoke or
+pytest run holds CI until the job's time limit and a local pr-ready run indefinitely. And smokes
+run two ways: `tools/validate/run_smoke_tests.py` (pre-push, per skill, a missing config is a
+skip) and `run_checks.py --smokes` (CI's list, `classify` rules), which spec C4 extends.
+
+**Do.** Give each subprocess a timeout that reports FAIL with the check's name and the limit;
+then pick one smoke runner for both callers when C4 lands.
+
+**Target:** 2026-11-30.
+
+## BL-423 — quoted paths in pr-ready's scoped trigger; case in the evidence scrub `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** the final review of the PR-quality build.
+
+**What.** `_quality_gates_gate` in `tools/validate/pr_ready.py` reads `git diff --name-only`
+with `splitlines()`. Git quotes a path holding non-ASCII bytes, so the anchored pattern never
+matches it, and `splitlines()` also splits on characters a path may contain (form feed, U+2028
+and others). CI's step has the same quoting blind spot, so the two agree, but both skip the hard
+gate for such a path (BL-402 gap 2 is the pre-commit side). Separately, `scrub` in
+`tools/validate/evidence.py` matches `/Users/` and `/home/` case-sensitively and Windows homes
+only with backslashes, so `/users/<name>` and `c:/users/<name>` reach a block meant for a public
+PR.
+
+**Do.** Read the diff with `-z` and split on NUL, in pr-ready and in CI's step together; make
+the scrub case-insensitive and accept `/` in the Windows form; a test for each.
+
+**Target:** 2026-11-30.

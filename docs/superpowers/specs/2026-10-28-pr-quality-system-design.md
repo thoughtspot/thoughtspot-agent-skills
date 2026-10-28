@@ -22,7 +22,7 @@ raw data. These findings survived and are the basis for this design:
 | F4 | **Gates are a defect source, and PRs can edit the gates that judge them.** 26 fix PRs touched only gates, hooks or CI. Ratchets were raised in #311, #506 and #662. In `tools/validate/`, CODEOWNERS covers only the customer-reference gate and `_git.py`. Pre-commit prints PASS for a check that SKIPped. | `.github/CODEOWNERS`, `scripts/pre-commit.sh` `run_check` |
 | F5 | **No single local command runs what CI runs.** That caused the false "validators pass" claims in #440 and #505. | Refute pass, claim 7 |
 | F6 | **Version, BL-id and CHANGELOG collisions occurred in 9 external PRs.** The cause is structural: PRs claim numbers in append-only registries while main moves at a median of 5 merges per active day, and external PRs wait a median of 3 days. | Refute pass, claim 8 |
-| F7 | **Smoke tests don't run in CI for most skills.** CI runs a hardcoded list of 7 of the roughly 13 credential-free smokes (`validate.yml:251-254`). `check_smoke_tests.py` checks only that the file exists. | Spec review S3 |
+| F7 | **Smoke tests don't run in CI for most skills.** CI runs a hand-kept list of 7 of the roughly 13 credential-free smokes (a loop in `validate.yml` when this was written; `CI_SMOKES` in `tools/validate/checks.py` since step 1). `check_smoke_tests.py` checks only that the file exists. | Spec review S3 |
 | F8 | **Two named semantic blind spots in lint.** `[TABLE::COL]` references inside `formulas[].expr` are not checked (`tml_lint.py:633`). No join-operator check exists anywhere. | `tml_lint.py` |
 | F9 | **External review is multi-round, and fixes aim at the listed repro rather than the class.** #440 went 5+ rounds and #517 had 17/25 adversarial inputs still wrong. Resubmissions drop earlier review points (#671, #662). Design decisions surface only at review. Reimplementation instead of reuse recurs across four authors. | Three batch reports |
 | F10 | **External PRs are large.** Median 1,329 changed lines; 17 of 29 exceed 1,000. Two died open after 43 and 57 days. | `prs.tsv` |
@@ -66,7 +66,7 @@ and spot checks, not on finding validator failures or building the first repro.
 - **An AI review running in CI.** Deferred by maintainer decision (§8.3). §5 C2 records
   the security constraints a future CI job must meet, so they aren't lost.
 - **An agent review of someone else's branch, locally or in CI.** Deferred to a
-  dedicated design (§5 C2), which records the requirements it must meet.
+  dedicated design (§5 C2; BL-416), which records the requirements it must meet.
 
 **Anti-goals** (failure even if it works)
 - A gate people learn to ignore: noisy review output, or a blocking check with a high
@@ -111,9 +111,20 @@ and spot checks, not on finding validator failures or building the first repro.
   - its arguments per context (pre-commit staged / pr-ready / CI full / CI PR-only)
   - whether it is soft or hard
   - which tools it needs
-- `pre-commit.sh`, `pr-ready.sh` and `validate.yml` read from that list.
-  `generate_quality_gates.py` is rewritten **in the same PR** to read the list instead of
-  regex-parsing the scripts.
+- **What reads the list.** As designed, `pre-commit.sh`, `pr-ready.sh` and
+  `validate.yml` all read it, and `generate_quality_gates.py` reads it instead of
+  regex-parsing the scripts. **As built (step 1):**
+  - `validate.yml` reads it: its full-repo step is one `run_checks.py --context ci` call
+    and its smoke step one `run_checks.py --smokes` call.
+  - `pr-ready.sh` reads it, through the same runner.
+  - `pre-commit.sh` does not yet. Its `run_check` lines are pinned to the list, label
+    and args, by `tools/validate/tests/test_checks_parity.py`, because its staged-file
+    triggers are not modelled in the list.
+  - `generate_quality_gates.py` expands CI's runner line from the list, and still
+    regex-parses `pre-commit.sh`.
+
+  Pre-commit reading the list, with its triggers modelled, and the generator dropping
+  the regex parsing are the follow-up, BL-415.
 - **The 24 checks with context-dependent arguments are modelled explicitly**, not
   flattened.
 - **Upstream resolution.** `pr-ready` resolves the upstream remote by URL
@@ -177,7 +188,7 @@ and spot checks, not on finding validator failures or building the first repro.
   and customer references before it is appended, and the finished block again
   before it is shared.
 - **Agent review of someone else's branch: deferred to a dedicated design (decided
-  2026-10-28).** Three review rounds tried a read-only reviewer over pre-fetched copies
+  2026-10-28; BL-416).** Three review rounds tried a read-only reviewer over pre-fetched copies
   of a PR's diff, text, threads and files, and each place the copies were moved to
   opened a new channel. This spec's intent (§2) does not need it: whoever opens a PR
   runs the review on their own branch, before opening it, the maintainer included. So
@@ -205,7 +216,9 @@ and spot checks, not on finding validator failures or building the first repro.
   - **The head pinned** to the SHA `check-pr.sh` scanned, refusing if it moved.
   - **Scanning the output is not a complete control.** `check_secrets.py` and
     `check_customer_references.py` match line by line, so an encoded or split value
-    passes.
+    passes. And `check_secrets.py` misses an identifier-shaped quoted secret outright
+    (a `ghp_…` or `sk_live_…` token, a plain password): its exemption for a variable
+    name also covers a quoted literal (BL-418).
   - **PR threads are untrusted input, even on the author's own branch.** Anyone can
     comment on a PR, so this PR's and earlier PRs' comments and reviews are text a
     stranger may have written, and `check-pr.sh` does not scan an earlier PR's
@@ -260,10 +273,13 @@ and spot checks, not on finding validator failures or building the first repro.
     a visible control for external PRs. For maintainer PRs it is only a speed bump,
     because the maintainer applies the label (stated limit).
 - **CODEOWNERS.** Extend to:
-  - `tools/validate/**`
+  - `tools/validate/**` (shipped with steps 0–2: the whole directory, since a gate runs
+    from it with the directory first on `sys.path`, so a new module there can shadow
+    what an owned gate imports; the C1 list and runner are in it)
   - `tools/ts-cli/ts_cli/tml_lint.py`
-  - the C1 list and runner
-  - `.claude/agents/pr-reviewer.md` and `.claude/skills/pr-ready/**`
+  - the C1 list and runner (shipped with steps 0–2)
+  - `.claude/agents/pr-reviewer.md` and `.claude/skills/pr-ready/**` (shipped with
+    steps 0–2)
   - `.github/pull_request_template.md` and issue templates
 
   This binds external PRs. It does not bind the maintainer (sole owner and sole
@@ -279,9 +295,11 @@ and spot checks, not on finding validator failures or building the first repro.
   - Today about 13 smokes are credential-free and about 14 need a cluster.
   - No browser category for now: none needs Playwright, and the quest smoke already
     uses the CI runner's headless Chrome.
-- CI calls `run_smoke_tests.py --ci` for every `CI_RUNNABLE` smoke, replacing the
-  hardcoded list at `validate.yml:251-254`. Fix the stale comment at
-  `validate.yml:56` in the same PR.
+- CI runs every `CI_RUNNABLE` smoke. Its smoke step already calls
+  `run_checks.py --smokes` (step 1), which runs the hand-kept `CI_SMOKES` in
+  `tools/validate/checks.py`; the remaining work extends that runner to run the
+  `CI_RUNNABLE` set instead, rather than adding a `--ci` mode to `run_smoke_tests.py`
+  (which still serves pre-push; one runner for both is part of BL-422).
 - `check_smoke_tests.py` fails when a new smoke is neither `CI_RUNNABLE` nor listed as
   needing a cluster with a reason.
 - **Cache isolation, scoped.** Credential-free smokes run with an isolated cache
@@ -363,10 +381,12 @@ real consumers. §8.1 records the revised choice:
   - add a third-party runtime dependency (with provenance)
   - need a repo-rule exception
 
-  Size alone **warns** through the existing `check_pr_size.py` (threshold about 1,500
-  changed lines) instead of requiring an issue. 14 of 29 past external PRs exceeded
-  that, and requiring pre-approval for half of all contributions would hit the
-  "raising the barrier" anti-goal.
+  Size alone **warns** instead of requiring an issue, at about 1,500 changed lines. 14
+  of 29 past external PRs exceeded that, and requiring pre-approval for half of all
+  contributions would hit the "raising the barrier" anti-goal. That warning is **new
+  work** (BL-420): the existing `check_pr_size.py` measures something else, warning
+  only when a PR adds more than 150 files or 2 MB of non-code assets (where customer
+  data hides), so no changed-lines count reaches it today.
 - **PR template additions:**
   - the evidence block (C1/C2)
   - live-evidence pointer (`open-items.md` entries, or N/A with a reason)
@@ -424,7 +444,7 @@ gate steps merge **one at a time**, not in parallel.
 | 0 | Baseline metrics script + numbers (C7) | — |
 | 1 | C1 list + `pr-ready.sh` + catalog generator rewrite; pre-commit shows SKIP / NOT RUN | 0 |
 | 2 | C2 reviewer agent + `pr-ready` skill | 1 |
-| 3 | C7 private backtest; maintainer adjudication | 2, and the untrusted-branch review design (§5 C2) |
+| 3 | C7 private backtest; maintainer adjudication | 2, and the untrusted-branch review design (§5 C2; BL-416) |
 | 4 | C3 known-bad meta-check + ratchet-by-value + CODEOWNERS | 1 |
 | 5 | C4 `CI_RUNNABLE` + CI runner call | 4 |
 | 6 | C7 CONTRIBUTING, issue and PR templates | 2 |
@@ -432,12 +452,19 @@ gate steps merge **one at a time**, not in parallel.
 | 8 | C6 formula-expr lint; per-converter join declaration; corpus convention; read-back rule | 4 |
 | 9 | Re-measure at the end of the window; decide on a CI review job | 3, window end |
 
+**As shipped.** Steps 0–2 went out as one PR (branch `feat/pr-quality-design`), not
+three. It also carried two pieces of later steps: step 6's PR-template fields (the
+evidence block, live evidence, new runtime dependencies, "Supersedes #N") and step 4's
+CODEOWNERS entries for `tools/validate/`, the reviewer and the skill (§5 C3). Step 1's
+catalog-generator rewrite and pre-commit reading the list are not in it (§5 C1;
+BL-415). Step 6's CONTRIBUTING and issue templates, and the rest of step 4, remain.
+
 ## 7. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Review output is noisy and gets ignored | The backtest measures precision first (once the untrusted-branch design it waits for exists); the brief requires evidence per finding |
-| The C1 list becomes a new hand-kept list | It replaces three lists and the catalog parser; a check asserts every gate is listed or allowlisted with a reason |
+| The C1 list becomes a new hand-kept list | It replaced CI's two hand-kept lists (validators, smokes) and is what pr-ready runs; pre-commit's copy is pinned to it by a parity test, and the catalog generator still parses pre-commit, until pre-commit reads the list (BL-415) |
 | `pr-ready` is too slow (CI's suite job takes about 10 minutes) | Run the ts-cli suite once on the local interpreter; the evidence block states that the CI matrix is not reproduced |
 | Contributors see more process | Design issue only for new skills, new dependencies and rule exceptions; size only warns |
 | Maintainer controls are advisory | Stated in §8.2; measured through post-merge escapes in C7, not assumed |
@@ -464,7 +491,7 @@ gate steps merge **one at a time**, not in parallel.
    skill on a contributor's PR head (that would execute the PR's code, and the PR's own
    copy of the skill, with the maintainer's credentials in the environment), and does
    not point the reviewer agent at it: agent review of someone else's branch is
-   deferred to a dedicated design (§5 C2). Instead, as before this spec: main's
+   deferred to a dedicated design (§5 C2; BL-416). Instead, as before this spec: main's
    `scripts/check-pr.sh` (run as its header says) and a human review.
 
 ## 9. Left to the builder
