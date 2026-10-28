@@ -35,6 +35,15 @@ class TestFindTrigger:
         ]
         assert _find_trigger(lines, 1) == "\\.py$"
 
+    def test_here_string_trigger(self):
+        # The hook's own form: a pipe-fed `grep -q` misfires under pipefail on a large
+        # staged list, so its triggers grep a here-string. The catalog reads the same pattern.
+        lines = [
+            'if grep -qE \'(^agents/|README\\.md)\' <<< "$STAGED"; then',
+            '  run_check "consistency" "tools/validate/check_consistency.py --root . --staged"',
+        ]
+        assert _find_trigger(lines, 1) == "(^agents/|README\\.md)"
+
     def test_no_enclosing_if(self):
         lines = [
             'run_check "secrets" "tools/validate/check_secrets.py"',

@@ -14,6 +14,11 @@ cd "$REPO_ROOT"
 
 # Only run if there are staged changes touching relevant files
 STAGED=$(git diff --cached --name-only)
+# Every trigger below greps a here-string (`grep -q PATTERN <<< "$STAGED"`), never
+# `echo "$STAGED" | grep -q`: grep -q exits at its first match, echo then takes
+# SIGPIPE once the list is over ~64 KiB, and pipefail turns the match into a false,
+# so the check would be skipped without a word. Pinned by
+# tools/validate/tests/test_precommit_triggers.py.
 
 if [ -z "$STAGED" ]; then
   exit 0
@@ -132,7 +137,7 @@ run_check "backlog integrity"    "tools/validate/check_backlog_integrity.py --ro
 # The audit workflow can only run unattended if every tool it tells a finder to use is
 # pre-approved (finding 18.1 — a 14-agent sweep stopped on one prompt per agent). Gated on
 # either file, since the invariant couples the workflow to the allow-list.
-if echo "$STAGED" | grep -qE '^(\.claude/(workflows/repo-audit\.js|settings\.json)|tools/validate/check_audit_workflow_permissions\.py)$'; then
+if grep -qE '^(\.claude/(workflows/repo-audit\.js|settings\.json)|tools/validate/check_audit_workflow_permissions\.py)$' <<< "$STAGED"; then
   run_check "audit workflow perms" "tools/validate/check_audit_workflow_permissions.py --root ."
 fi
 
@@ -142,36 +147,36 @@ fi
 # it could not act on).
 # The checker's own path is in the trigger too: editing a gate must re-run it, or a broken
 # gate lands green locally and only CI (which runs both unconditionally) catches it.
-if echo "$STAGED" | grep -qE '^(\.github/workflows/validate\.yml|tools/validate/check_ci_gate_coverage\.py)$'; then
+if grep -qE '^(\.github/workflows/validate\.yml|tools/validate/check_ci_gate_coverage\.py)$' <<< "$STAGED"; then
   run_check "CI gate coverage"   "tools/validate/check_ci_gate_coverage.py --root ."
 fi
 
 # Complexity ratchet on staged Python (soft-skips if radon isn't installed locally;
 # enforced fully in CI). Blocks new/worsening god-functions; legacy is baselined.
-if echo "$STAGED" | grep -q '\.py$'; then
+if grep -q '\.py$' <<< "$STAGED"; then
   run_check "module health"      "tools/validate/check_module_health.py --root . --staged"
 fi
 
 # Duplicate module-level bindings on staged Python. Python keeps the LAST binding
 # silently, and two branches adding the same name in different hunks merge clean —
 # see the module docstring for the audit-check case this was built from.
-if echo "$STAGED" | grep -q '\.py$'; then
+if grep -q '\.py$' <<< "$STAGED"; then
   run_check "py redefinitions"   "tools/validate/check_python_redefinitions.py --root . --staged"
 fi
 
 # Line-count gate on staged ts_cli modules (BL-070) — warn >500, fail >1000.
 # Complements the complexity ratchet: long-but-simple files slip past radon.
-if echo "$STAGED" | grep -q '^tools/ts-cli/ts_cli/.*\.py$'; then
+if grep -q '^tools/ts-cli/ts_cli/.*\.py$' <<< "$STAGED"; then
   run_check "file size"          "tools/validate/check_file_size.py --root . --staged"
 fi
 
 # Only run YAML check if .md files are staged — checks staged files only, not full repo
-if echo "$STAGED" | grep -q '\.md$'; then
+if grep -q '\.md$' <<< "$STAGED"; then
   run_check "YAML blocks"        "tools/validate/check_yaml.py --root . --staged"
 fi
 
 # Snowflake SV YAML structural validator — runs when schema or worked-example .md files are staged
-if echo "$STAGED" | grep -qE '(snowflake-schema|ts-to-snowflake|\.yaml$|\.yml$)'; then
+if grep -qE '(snowflake-schema|ts-to-snowflake|\.yaml$|\.yml$)' <<< "$STAGED"; then
   run_check "SV YAML structure"  "tools/validate/check_sv_yaml.py --root . --staged"
 fi
 
@@ -179,36 +184,36 @@ fi
 # check_tml self-filters: it only validates real Table/Model TML blocks and skips
 # templates, partial snippets, worksheets, and non-TML YAML. Narrow filename triggers
 # previously meant TML edits in other docs went unchecked.
-if echo "$STAGED" | grep -qE '\.md$'; then
+if grep -qE '\.md$' <<< "$STAGED"; then
   run_check "TML structure"      "tools/validate/check_tml.py --root . --staged"
 fi
 
 # Open-items tracking — warn only (don't block commits on pre-existing UNTESTED items)
-if echo "$STAGED" | grep -q 'open-items\.md'; then
+if grep -q 'open-items\.md' <<< "$STAGED"; then
   run_check "open items"         "tools/validate/check_open_items.py --root . --warn"
   run_check "open items index"   "tools/validate/generate_open_items_index.py --root . --check"
 fi
 
-if echo "$STAGED" | grep -q 'ts-object-model-agentql-query/'; then
+if grep -q 'ts-object-model-agentql-query/' <<< "$STAGED"; then
   run_check "agentql offline bundle" "tools/validate/generate_agentql_offline.py --root . --check"
 fi
 
 # AgentQL Quest is built from lesson-sql.md and names lessons in learning-path.md; a recapture
 # that moves the SQL, or a course renumbering, must not silently break the game.
-if echo "$STAGED" | grep -qE '^tools/quest/|ts-object-model-agentql-query/references/(lesson-sql|learning-path)\.md$'; then
+if grep -qE '^tools/quest/|ts-object-model-agentql-query/references/(lesson-sql|learning-path)\.md$' <<< "$STAGED"; then
   run_check "agentql quest"          "tools/validate/check_agentql_quest.py --root ."
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
 # Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
-if echo "$STAGED" | grep -qE '(^agents/|README\.md|SETUP\.md)'; then
+if grep -qE '(^agents/|README\.md|SETUP\.md)' <<< "$STAGED"; then
   run_check "consistency"        "tools/validate/check_consistency.py --root . --staged"
 fi
 
 # Skill versioning — runs when any SKILL.md is touched
 # Step 1: interactively suggest a changelog entry if one is missing (TTY only)
 # Step 2: validate that every staged skill has a changelog entry
-if echo "$STAGED" | grep -q 'SKILL\.md'; then
+if grep -q 'SKILL\.md' <<< "$STAGED"; then
   "$PYTHON_BIN" tools/validate/suggest_skill_version.py --root "$REPO_ROOT"
   run_check "skill versions"     "tools/validate/check_skill_versions.py --root ."
 fi
@@ -216,21 +221,21 @@ fi
 # Skill context cost — a SKILL.md is loaded into context on every invocation;
 # gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is
 # the remedy). Runs when a SKILL.md or the validator itself is touched.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)'; then
+if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)' <<< "$STAGED"; then
   run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root . --staged"
 fi
 
 # Smoke tests — every Claude skill (not on the allowlist) must have a smoke test,
 # and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3).
 # Runs when a SKILL.md, a smoke test, or the validator itself is touched.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate/check_smoke_tests\.py)'; then
+if grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate/check_smoke_tests\.py)' <<< "$STAGED"; then
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root . --staged"
 fi
 
 # Skill naming — every skill across all runtimes (Claude / CoCo) must
 # match a documented family pattern (see .claude/rules/skill-naming.md).
 # Runs when a SKILL.md, the rule itself, or the validator is added/renamed.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)'; then
+if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)' <<< "$STAGED"; then
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root ."
 fi
 
@@ -238,25 +243,25 @@ fi
 # (see .claude/rules/runtime-coverage.md).
 # Runs whenever a skill file is added or renamed in any runtime, or when the
 # rule/validator itself changes.
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)'; then
+if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)' <<< "$STAGED"; then
   run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root ."
 fi
 
 # Parity matrix — generated from the filesystem, must match committed PARITY.md
 # Runs when any skill file is added/renamed or PARITY.md itself changes
-if echo "$STAGED" | grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|agents/PARITY\.md)'; then
+if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|agents/PARITY\.md)' <<< "$STAGED"; then
   run_check "parity matrix"      "tools/validate/generate_parity.py --check"
 fi
 
 # Mirror sync — check synced-from markers against CLI source versions
 # Runs when any mirror file or SYNC-DEBT.md changes
-if echo "$STAGED" | grep -qE '(agents/coco-snowsight/|agents/SYNC-DEBT\.md)'; then
+if grep -qE '(agents/coco-snowsight/|agents/SYNC-DEBT\.md)' <<< "$STAGED"; then
   run_check "mirror sync"         "tools/validate/check_mirror_sync.py"
 fi
 
 # Coverage matrix — every ts-convert-* skill must have references/coverage-matrix.md
 # Runs when a converter skill is touched or the validator itself changes
-if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/validate/check_coverage_matrix\.py)'; then
+if grep -qE '(agents/cli/ts-convert-|tools/validate/check_coverage_matrix\.py)' <<< "$STAGED"; then
   run_check "coverage matrix"     "tools/validate/check_coverage_matrix.py --root ."
 fi
 
@@ -266,7 +271,7 @@ fi
 # definition, the routing rule, or the validator itself is touched. Nothing read
 # harness config at all before this; that is how a stale `model: haiku` pin sat in
 # the tree contradicting the rule until a manual sweep found it.
-if echo "$STAGED" | grep -qE '(\.claude/agents/|\.claude/rules/model-routing\.md|tools/validate/check_harness_routing\.py)'; then
+if grep -qE '(\.claude/agents/|\.claude/rules/model-routing\.md|tools/validate/check_harness_routing\.py)' <<< "$STAGED"; then
   run_check "harness routing"      "tools/validate/check_harness_routing.py --root ."
 fi
 
@@ -274,13 +279,13 @@ fi
 # does not exist, and must adopt the shared formula helpers. Runs when any converter
 # package, any converter skill, or the validator itself is touched. Scope is
 # discovered from agents/cli/ts-convert-*, so a NEW converter is covered with no edit.
-if echo "$STAGED" | grep -qE '(agents/cli/ts-convert-|tools/ts-cli/ts_cli/|tools/validate/check_converter_parity\.py)'; then
+if grep -qE '(agents/cli/ts-convert-|tools/ts-cli/ts_cli/|tools/validate/check_converter_parity\.py)' <<< "$STAGED"; then
   run_check "converter parity"    "tools/validate/check_converter_parity.py --root ."
 fi
 
 # Formula catalog cross-check — mapping files must only reference valid TS functions
 # from thoughtspot-formula-patterns.md. Runs when any mapping or the catalog is touched.
-if echo "$STAGED" | grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)'; then
+if grep -qE 'agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)' <<< "$STAGED"; then
   run_check "formula catalog"     "tools/validate/check_formula_catalog.py --root ."
 fi
 
@@ -292,14 +297,14 @@ fi
 # Triggered by the UNION of both sides' patterns, because either side can drift alone:
 # the translator Python, the mapping docs, the catalog itself, a converter skill (scope
 # is discovered from agents/cli/ts-convert-*), or this validator.
-if echo "$STAGED" | grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|docs/function-maps/ts-(excel|sheets)-function-mapping\.md|tools/validate/check_mapping_code_sync\.py)'; then
+if grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-formula-patterns\.md)|agents/cli/ts-convert-|docs/function-maps/ts-(excel|sheets)-function-mapping\.md|tools/validate/check_mapping_code_sync\.py)' <<< "$STAGED"; then
   run_check "mapping/code sync"   "tools/validate/check_mapping_code_sync.py --root ."
 fi
 
 # No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a
 # new /tspublic/v1/ call slipping into the CLI or Databricks client. Runs when any
 # Python source under tools/ or agents/ is staged, or the validator itself changes.
-if echo "$STAGED" | grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)'; then
+if grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)' <<< "$STAGED"; then
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root ."
 fi
 
@@ -308,7 +313,7 @@ fi
 # finding 4.2 / 17.1 — a function-local broken import that ImportErrors on first real
 # use, invisible to import-time checks and every existing test). Runs when ts_cli
 # Python source or the validator itself changes.
-if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_internal_imports\.py)'; then
+if grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_internal_imports\.py)' <<< "$STAGED"; then
   run_check "internal imports"   "tools/validate/check_internal_imports.py --root ."
 fi
 
@@ -320,18 +325,18 @@ fi
 # merge base with the LOCAL origin/main (offline; an id only this branch added may still
 # be dropped) — skipped with a notice when there is no local origin/main; CI checks
 # against origin/main.
-if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py|^agents/cli/ts-audit/references/check-catalog\.md|^agents/cli/ts-audit/SKILL\.md)'; then
+if grep -qE '(^tools/ts-cli/ts_cli/audit/|tools/validate/check_audit_catalog\.py|^agents/cli/ts-audit/references/check-catalog\.md|^agents/cli/ts-audit/SKILL\.md)' <<< "$STAGED"; then
   run_check "audit catalog"      "tools/validate/check_audit_catalog.py --root . --merge-base-with origin/main"
 fi
 
 # No inline TML-invariant gate — CLI convert skills must gate imports with `ts tml lint`,
 # not a hand-rolled grep gate (.claude/rules/ts-cli.md; audit angle 11). Runs when a
 # convert skill or the validator changes.
-if echo "$STAGED" | grep -qE '\.(md|py)$'; then
+if grep -qE '\.(md|py)$' <<< "$STAGED"; then
   run_check "lint invariant list" "tools/validate/check_lint_invariant_list.py --root ."
 fi
 
-if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline_tml_gate\.py)'; then
+if grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline_tml_gate\.py)' <<< "$STAGED"; then
   run_check "no inline tml gate" "tools/validate/check_no_inline_tml_gate.py --root ."
 fi
 
@@ -339,42 +344,42 @@ fi
 # formula-translation reference before calling an expression untranslatable. Covers
 # BOTH runtimes (CoCo executes the doc, so the gate matters there too). Runs when any
 # convert skill or the validator changes.
-if echo "$STAGED" | grep -qE '(^agents/(cli|coco-snowsight)/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)'; then
+if grep -qE '(^agents/(cli|coco-snowsight)/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)' <<< "$STAGED"; then
   run_check "i7 gate"            "tools/validate/check_i7_gate.py --root ."
 fi
 
 # Open-item citations must resolve. `check_open_items` grades the items; nothing
 # resolved a REFERENCE to one, so a citation could name an item that never existed
 # and stay silent (audit 5.3: five such citations in ts-dependency-manager alone).
-if echo "$STAGED" | grep -qE '(^agents/.*\.(md|py)$|tools/validate/check_open_item_citations\.py)'; then
+if grep -qE '(^agents/.*\.(md|py)$|tools/validate/check_open_item_citations\.py)' <<< "$STAGED"; then
   run_check "open-item citations" "tools/validate/check_open_item_citations.py --root ."
 fi
 
 # No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`,
 # not hand-rolled Python heredocs for formula import. Runs when a convert skill or the
 # validator changes.
-if echo "$STAGED" | grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_skill_cli_usage\.py)'; then
+if grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_skill_cli_usage\.py)' <<< "$STAGED"; then
   run_check "no inline tml assembly" "tools/validate/check_skill_cli_usage.py --root ."
 fi
 
 # No inline requests/urllib — Claude skills use the `ts` CLI, never direct
 # requests/urllib calls to a ThoughtSpot endpoint (.claude/rules/ts-cli.md; audit
 # finding 5.2). Runs when a CLI/Claude SKILL.md or the validator changes.
-if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*\.(md|py)$|tools/validate/check_no_inline_requests\.py)'; then
+if grep -qE '(^agents/(cli|claude)/.*\.(md|py)$|tools/validate/check_no_inline_requests\.py)' <<< "$STAGED"; then
   run_check "no inline requests" "tools/validate/check_no_inline_requests.py --root ."
 fi
 
 # Pagination convention — ts-cli.md promises auto-pagination on every search-style
 # command; guard against a new hard-capped record_size literal slipping back in
 # (audit finding 14.2). Runs when ts_cli Python source or the validator changes.
-if echo "$STAGED" | grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_pagination_convention\.py)'; then
+if grep -qE '(^tools/ts-cli/ts_cli/.*\.py$|tools/validate/check_pagination_convention\.py)' <<< "$STAGED"; then
   run_check "pagination convention" "tools/validate/check_pagination_convention.py --root ."
 fi
 
 # Slash-command references — every /ts-<skill> mention in agents/ docs must resolve
 # to a real skill directory, or be an explicitly justified planned-skill allowlist
 # entry (audit finding 1.1). Runs when any doc under agents/ or the validator changes.
-if echo "$STAGED" | grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)'; then
+if grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)' <<< "$STAGED"; then
   run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root ."
 fi
 
@@ -383,7 +388,7 @@ fi
 # open-items.md) — audit finding 1.1 (the two update-mode-spec.md Mode C design docs
 # that lingered "pending implementation" long after Mode C shipped). Runs when any
 # references/*.md file or the validator itself changes.
-if echo "$STAGED" | grep -qE '(^agents/.*references/.*\.md$|tools/validate/check_orphan_references\.py)'; then
+if grep -qE '(^agents/.*references/.*\.md$|tools/validate/check_orphan_references\.py)' <<< "$STAGED"; then
   run_check "orphan refs" "tools/validate/check_orphan_references.py --root ."
 fi
 
@@ -391,7 +396,7 @@ fi
 # instructs must be a real registered option (audit finding 11.1b). Runs when a
 # SKILL.md, a ts_cli command module, or the validator changes — a flag rename in
 # ts_cli with no matching doc update is exactly the bug class this closes.
-if echo "$STAGED" | grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|^tools/ts-cli/ts_cli/commands/.*\.py$|tools/validate/check_skill_flag_usage\.py)'; then
+if grep -qE '(^agents/(cli|claude)/.*/SKILL\.md|^tools/ts-cli/ts_cli/commands/.*\.py$|tools/validate/check_skill_flag_usage\.py)' <<< "$STAGED"; then
   run_check "flag cross-check" "tools/validate/check_skill_flag_usage.py --root ."
 fi
 
@@ -399,13 +404,13 @@ fi
 # commit) when a shared mapping OR schema file is edited. Presence is hard-gated in CI
 # (--check) so an anchorless new file fails the PR; staleness stays soft everywhere.
 # (.claude/rules/repo-audit.md, angle 13.)
-if echo "$STAGED" | grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-agentql-query/references/limitations\.md$'; then
+if grep -qE '^agents/shared/(mappings|schemas)/.*\.md$|^agents/cli/ts-object-model-agentql-query/references/limitations\.md$' <<< "$STAGED"; then
   "$PYTHON_BIN" tools/validate/check_mapping_currency.py --root "$REPO_ROOT" --staged || true
 fi
 
 # ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without
 # also staging references/dependency-types.md. Never blocks. (TTY only)
-if echo "$STAGED" | grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$'; then
+if grep -qE '^agents/cli/ts-dependency-manager/(SKILL\.md|references/open-items\.md)$' <<< "$STAGED"; then
   "$PYTHON_BIN" tools/validate/suggest_dependency_types.py --root "$REPO_ROOT"
 fi
 
@@ -423,7 +428,7 @@ run_check "repo changelog"     "tools/validate/suggest_repo_changelog.py --root 
 
 # Quality gates catalog — re-generated from pre-commit.sh + validate.yml +
 # validator docstrings. Staleness check when any source of truth changes.
-if echo "$STAGED" | grep -qE '(^scripts/pre-commit\.sh$|^\.github/workflows/validate\.yml$|^tools/validate/.*\.py$|^docs/quality-gates\.md$)'; then
+if grep -qE '(^scripts/pre-commit\.sh$|^\.github/workflows/validate\.yml$|^tools/validate/.*\.py$|^docs/quality-gates\.md$)' <<< "$STAGED"; then
   run_check "quality gates catalog" "tools/validate/generate_quality_gates.py --root . --check"
 fi
 
@@ -464,7 +469,7 @@ run_pytest() {
   fi
 }
 
-if echo "$STAGED" | grep -q '\.py$'; then
+if grep -q '\.py$' <<< "$STAGED"; then
   run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
   run_pytest "unit tests (databricks)"  agents/databricks/tests/
@@ -499,7 +504,7 @@ fi
 #  CLI/CoCo skill additions slipped through unaudited. Now spans all runtimes.)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/(cli|claude|coco-snowsight)/'; then
+if [ "$CURRENT_BRANCH" = "main" ] && grep -qE '^agents/(cli|claude|coco-snowsight)/' <<< "$STAGED"; then
   # What skill-level changes are in this commit? Names keep the runtime prefix
   # (e.g. cli/ts-dependency-manager) so the same skill name across runtimes is unambiguous.
   ADDING=$(git diff --cached --name-only --diff-filter=A \

@@ -754,7 +754,8 @@ def test_github_glob_follows_the_documented_forms_it_models():
 def test_pre_commit_runs_the_quest_gate_for_the_game_and_the_course():
     # A stale trigger never fails either: the gate just stops running locally.
     text = (B.ROOT / "scripts/pre-commit.sh").read_text(encoding="utf-8")
-    m = re.search(r"grep -qE '([^']+)'; then\n\s*run_check \"agentql quest\"", text)
+    # The hook's triggers grep a here-string (a pipe-fed `grep -q` misfires under pipefail).
+    m = re.search(r"grep -qE '([^']+)' <<< \"\$STAGED\"; then\n\s*run_check \"agentql quest\"", text)
     assert m, "the agentql quest trigger in pre-commit.sh has moved; update this test"
     trigger = re.compile(m.group(1))
     for path in (B.HERE / "build.py", CONTENT, PACK_DIR / "pack.yaml", B.TEMPLATE, LESSON_SQL, LEARNING_PATH):
