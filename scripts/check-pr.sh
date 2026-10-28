@@ -5,7 +5,7 @@
 # Run main's copy, NEVER a PR checkout's (a PR can change its own copy of this file):
 #
 #     ( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
-#       git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
+#       git show refs/remotes/origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
 #
 # Every run ends with a `check-pr: PR #N ...` verdict line. No verdict line: it did not run.
 #

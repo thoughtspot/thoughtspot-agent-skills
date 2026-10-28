@@ -493,12 +493,23 @@ def test_frontmatter_parses_as_strict_yaml():
 # what it got before this skill: main's check-pr.sh and a human review. An agent
 # review of an untrusted branch is deferred to its own design (spec §5 C2).
 
+#: Main's copy, named in full: the short `origin/main` resolves to a local branch or
+#: tag of that name first, so a stray `origin/main` branch would supply the script.
+FULL_REF_SHOW = "git show refs/remotes/origin/main:scripts/check-pr.sh"
+
+
 def _check_pr_invocation() -> str:
     """The safe invocation exactly as check-pr.sh's own header gives it."""
     lines = CHECK_PR.read_text(encoding="utf-8").splitlines()
-    i = next(n for n, line in enumerate(lines)
-             if "git show origin/main:scripts/check-pr.sh" in line)
+    i = next(n for n, line in enumerate(lines) if FULL_REF_SHOW in line)
     return "\n".join(re.sub(r"^#     ", "", line) for line in lines[i - 1:i + 1])
+
+
+def test_check_pr_pointer_names_mains_copy_by_its_full_ref():
+    for path in (SKILL, CHECK_PR):
+        text = path.read_text(encoding="utf-8")
+        assert FULL_REF_SHOW in text, path
+        assert "git show origin/main:" not in text, path
 
 
 def test_skill_asks_before_running_anything_and_stops_without_a_yes():
@@ -548,16 +559,38 @@ def test_reviewer_brief_has_no_readonly_twin_or_someone_else_mode():
     assert "reading mode" not in text
 
 
-def test_step_3_removes_the_last_review_before_anything_is_dispatched():
+TRUNCATE = ': > "$REVIEW_FILE"'
+
+
+def test_step_3_empties_the_last_review_before_anything_is_dispatched(tmp_path):
     # A review.md left by an earlier run would otherwise be appended to this head's
-    # block if no report was written this time.
+    # block if no report was written this time. It is emptied, not deleted (nothing
+    # is removed), and an empty review is one append-review refuses.
     text = SKILL.read_text(encoding="utf-8")
     step3 = _section(text, STEP_3)
     code = "\n".join(_blocks(step3))
     assign = 'REVIEW_FILE="$(git rev-parse --absolute-git-dir)/pr-ready/review.md"'
-    assert assign in code and 'rm -f "$REVIEW_FILE"' in code
+    assert assign in code and TRUNCATE in code
+    assert not re.search(r"(^|[\s;(])rm\s", code), "the review file is emptied, not removed"
     assert assign in "\n".join(_blocks(_section(text, STEP_5))), "the file Step 5 appends"
-    assert 0 <= step3.find('rm -f "$REVIEW_FILE"') < step3.find("Dispatch the `pr-reviewer` agent")
+    assert 0 <= step3.find(TRUNCATE) < step3.find("Dispatch the `pr-reviewer` agent")
+    # The guarantee the truncation relies on, run as the shell would leave the file.
+    import evidence
+    review = tmp_path / "review.md"
+    review.write_text("### Blocker\n- a stale review\n\nWhat I checked and found nothing: x\n",
+                      encoding="utf-8")
+    subprocess.run(["bash", "-c", TRUNCATE], check=True,
+                   env={"PATH": "/usr/bin:/bin", "REVIEW_FILE": str(review)})
+    assert review.read_bytes() == b""
+    block = evidence.render(base_ref="refs/remotes/upstream/main", base_sha="a" * 40,
+                            head_sha="b" * 40, dirty=False, behind=0, checks=[], smokes=[],
+                            pytest=[], not_reproduced=[], review=None)
+    try:
+        evidence.with_review(block, review.read_text(encoding="utf-8"), head_sha="b" * 40)
+    except ValueError as exc:
+        assert "empty" in str(exc)
+    else:
+        raise AssertionError("an emptied review.md was appended")
 
 
 def test_step_6_stops_on_a_warn_line_although_the_scanner_exits_0():
@@ -633,3 +666,67 @@ def test_check_pr_pointer_checks_origin_first_and_agrees_with_the_runner():
                 "https://example.com/thoughtspot/thoughtspot-agent-skills.git",
                 "git@github.com:acme-corp/thoughtspot-agent-skills.git"):
         assert bool(skill_re.search(url)) == bool(run_checks._CANONICAL_URL_RE.search(url)), url
+
+
+# ----------------------------------------------------- final review (R42-R44) ---
+
+FIRST_RUN = "## Before your first run"
+TEMPLATE = ROOT / ".github" / "pull_request_template.md"
+WORKFLOW = ROOT / ".github" / "workflows" / "validate.yml"
+
+
+def _suite_installs() -> list:
+    """The `pip install` lines of CI's suite job, in workflow order, read each time."""
+    import yaml
+    import pr_ready
+    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["suite"]["steps"]
+    return [line for step in steps for line in pr_ready._code_lines(step.get("run", ""))
+            if line.startswith("pip install")]
+
+
+def test_skill_quotes_cis_installs_before_the_first_run():
+    # Quoted, never paraphrased: a hand copy that drifted from the workflow would send
+    # a contributor to install the wrong thing, then FAIL them for it.
+    import pr_ready
+    text = SKILL.read_text(encoding="utf-8")
+    assert text.index(CONFIRM) < text.index(FIRST_RUN) < text.index("## Step 1")
+    section = _section(text, FIRST_RUN)
+    blocks = re.findall(r"```text\n(.*?)```", section, flags=re.S)
+    assert len(blocks) == 1, section
+    quoted = [line for line in blocks[0].splitlines() if line.strip()]
+    assert quoted == _suite_installs() == list(pr_ready.SUITE_PIP_INSTALLS)
+    flat = _flat(section)
+    # Installing is the user's decision, not a step the skill takes for them.
+    assert "do not install them yourself" in flat
+
+
+def test_skill_says_a_fork_clone_gets_an_upstream_remote():
+    flat = _flat(_section(SKILL.read_text(encoding="utf-8"), "## Step 1: run the checks"))
+    assert "adds a remote named `upstream`" in flat
+    assert "never your fork's `main`" in flat
+
+
+def test_skill_dispatches_the_reviewer_by_agent_type_only():
+    # `effort: max` and the `tools:` grant are frontmatter: they apply only when the
+    # agent is dispatched by its type. A general agent handed the brief as text runs
+    # with Edit and Write, at the default effort.
+    flat = _flat(_section(SKILL.read_text(encoding="utf-8"), STEP_3))
+    assert "by agent type" in flat
+    assert "never hand the brief's text to a general-purpose agent" in flat
+    assert "`effort: max`" in flat and "`tools:`" in flat
+
+
+def test_skill_has_a_changelog_as_its_last_section():
+    text = SKILL.read_text(encoding="utf-8")
+    headings = [line for line in text.splitlines() if line.startswith("## ")]
+    assert headings[-1] == "## Changelog", headings
+    section = _section(text, "## Changelog")
+    assert "| Version | Date | Summary |" in section
+    assert re.search(r"^\| 1\.0\.0 \| 2026-10-28 \| .+ \|$", section, re.M), section
+
+
+def test_template_points_at_the_prerequisites():
+    evidence_comment = TEMPLATE.read_text(encoding="utf-8").split("## Evidence", 1)[1] \
+                                                          .split("\n## ", 1)[0]
+    assert "Before your first run" in evidence_comment
+    assert ".claude/skills/pr-ready/SKILL.md" in evidence_comment

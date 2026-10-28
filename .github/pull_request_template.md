@@ -17,10 +17,15 @@ and whether the tree was dirty, so a block from an earlier head does not describ
 Both execute the branch's code with your credentials: for someone else's PR, use main's
 `scripts/check-pr.sh` and a human review instead.
 
+Before your first run, install what CI installs: the exact lines are under "Before your
+first run" in `.claude/skills/pr-ready/SKILL.md`, and `pr-ready.sh` prints them when a
+test is skipped for a missing module (that is a FAIL, not a pass).
+
 `bash scripts/pr-ready.sh --post N` comments a block on PR N for you (only when it is
-READY, the tree is clean and the PR's head is your HEAD), but it re-runs the checks and
-posts a fresh block whose Review section reads "Not run": to share a reviewed block,
-paste the file before any `--post` run, which replaces it.
+READY, the tree is clean, the PR's head is your HEAD and the block passes the secrets
+and customer-reference scans), but it re-runs the checks and posts a fresh block whose
+Review section reads "Not run": to share a reviewed block, paste the file before any
+`--post` run, which replaces it.
 -->
 
 ## Live evidence

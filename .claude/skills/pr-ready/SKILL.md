@@ -57,21 +57,47 @@ never a PR checkout's (`.claude/rules/security.md`) — with the invocation from
 script's own header. It reads `origin`, and "main's copy" means `origin/main`, which
 in a fork clone is the fork's copy. So the block first checks that `origin` is
 `thoughtspot/thoughtspot-agent-skills` (https or ssh) and stops otherwise; it is
-written as an `if`, so pasting it into an interactive shell never closes that shell:
+written as an `if`, so pasting it into an interactive shell never closes that shell.
+It names main in full, `refs/remotes/origin/main`: the short `origin/main` resolves
+to a local branch or tag of that name first.
 
 ```bash
 if git remote get-url origin | grep -Eiq '^(https://([^@/]+@)?github\.com/|ssh://git@github\.com(:22)?/|git@github\.com:)thoughtspot/thoughtspot-agent-skills(\.git)?/?$'; then
 ( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
-  git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
+  git show refs/remotes/origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
 else echo "STOP: origin is not thoughtspot/thoughtspot-agent-skills; run this from a clone of it"; fi
 ```
 
 followed by a human review of the PR.
 
+## Before your first run
+
+The checks run with the interpreter `scripts/pr-ready.sh` picks (the newest Python
+3.10+ on `PATH` that has pytest), and a test skipped for a module CI installs is a
+FAIL, not a pass. So that interpreter needs what CI's suite job installs, exactly
+these lines of `.github/workflows/validate.yml`, run from the repo root (as
+`python3.12 -m pip install ...`, for example, when `pip` on `PATH` belongs to another
+interpreter):
+
+```text
+pip install pytest pyyaml radon pip-audit jsonschema==4.25.1
+pip install -e tools/ts-cli
+pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"
+```
+
+Tell the user about them before the first run, or when Step 1 FAILs on a missing
+module (`pr-ready.sh` then prints the same lines); do not install them yourself: what
+goes into the user's environment is their decision.
+
 ## Step 1: run the checks
 
 Commit first. A dirty tree makes the evidence DIRTY, and a DIRTY block cannot carry
 a review (the reviewer reads committed history).
+
+The base is upstream main, found by URL. In a fork clone, where `origin` is your
+fork, the run adds a remote named `upstream` for `thoughtspot/thoughtspot-agent-skills`
+and fetches its `main`: that is the base, never your fork's `main`. If a remote called
+`upstream` already points somewhere else, the run stops with exit 2 and says so.
 
 The run takes about five minutes: give the Bash call a 600000 ms timeout, or run it
 in the background and wait for it to finish.
@@ -110,15 +136,16 @@ contains `DIRTY` even though the exit was 0.
 
 Read the diff range from the evidence — never re-derive the base. It is
 `<base_sha>...<head_sha>`, the exact commits the checks ran against. The same block
-deletes the last run's `review.md`, so the only review Step 5 can append is one
-written from this run's reports. Run it before dispatching anything:
+empties the last run's `review.md` (truncates it; nothing is deleted), and Step 5's
+append refuses an empty review, so the only review it can append is one written from
+this run's reports. Run it before dispatching anything:
 
 ```bash
 set -o pipefail
 RANGE="$(python3 tools/validate/evidence.py range)" || exit 1
 EVIDENCE="$(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
 REVIEW_FILE="$(git rev-parse --absolute-git-dir)/pr-ready/review.md"
-rm -f "$REVIEW_FILE"
+: > "$REVIEW_FILE"
 echo "range: $RANGE"
 echo "evidence: $EVIDENCE"
 git diff --stat "$RANGE"
@@ -133,8 +160,13 @@ pastes it, or writes it now. Do not fetch the earlier PR's comments or reviews, 
 do not ask the reviewer to: anyone can write them, and reading them is deferred
 with the untrusted-branch design (spec §5 C2).
 
-Dispatch the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`) with, written out
-literally in the prompt (an agent does not share your shell):
+Dispatch the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`) **by agent type**.
+Its `effort: max` and its `tools:` grant (no Edit, no Write) are frontmatter, which
+applies only when the agent is dispatched by its type: never hand the brief's text
+to a general-purpose agent instead, which would run with every tool at the default
+effort. If the `pr-reviewer` type is not available in this session, stop and tell
+the user. Give it, written out literally in the prompt (an agent does not share your
+shell):
 
 - `trusted: yes` — always stated explicitly (without it the reviewer refuses and
   reviews nothing); this step is reached only after the user confirmed the branch
@@ -178,9 +210,10 @@ Steps 3 and 4 are independent; run both blocks, then dispatch the agents togethe
 
 Write the reviewer's report — and, when Step 4 matched, the auditor's report and the
 parity row under their own `###` headings — to `review.md` next to the evidence (the
-file Step 3 deleted; the block below prints its path). The reviewer's report must
-end with its "What I checked and found nothing" section; the append refuses a review
-without it, and refuses an empty one. Scan it before it goes anywhere, then append:
+file Step 3 emptied; the block below prints its path), replacing its contents. The
+reviewer's report must end with its "What I checked and found nothing" section; the
+append refuses a review without it, and refuses an empty one, so a file nothing was
+written to this run is refused. Scan it before it goes anywhere, then append:
 
 ```bash
 set -o pipefail
@@ -258,3 +291,11 @@ made by running the script's post option themselves. Mention that it exists only
 they ask. Note for them that the post option re-runs the checks and posts a fresh
 block, whose Review section says "Not run": to share the review, paste the block
 written here before any post run, which replaces it.
+
+---
+
+## Changelog
+
+| Version | Date | Summary |
+|---|---|---|
+| 1.0.0 | 2026-10-28 | Initial release: on your own branch only (asks first), the CI-superset run, then the `pr-reviewer` agent (plus the conversion-consistency auditor on converter changes), both scanned and appended to one evidence block |
