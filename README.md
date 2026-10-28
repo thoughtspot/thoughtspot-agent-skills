@@ -211,6 +211,7 @@ thoughtspot-agent-skills/
     ├── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
     ├── formula-fidelity/ — Checks translated formulas return the source's values (oracle vs ThoughtSpot, live)
     ├── agentql-retest/ — Re-probes every documented AgentQL limitation and reports the rows whose behaviour moved (live)
+    ├── pr-metrics/ — Baseline PR metrics (count, days open, size, review rounds), maintainer and external PRs reported separately
     └── quest/      — AgentQL Quest, the Learn AgentQL course as a browser game, built from the captured lesson SQL and published to GitHub Pages
 ```
 
