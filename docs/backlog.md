@@ -94,6 +94,7 @@ are roughly ordered by value÷effort.
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
 | BL-322 | from-Databricks period comparisons (`range: current` + `offset:`) were translated to a row-lag that is right only at one grain and silently wrong elsewhere — now skipped by default; the correct date-shifted-join translation is not built | next DBX pass |
 | BL-323 | from-Snowflake window metrics: every framed window except the unbounded running total is mistranslated silently (frame size ignored; RANGE / FOLLOWING / default frames become grand totals), and no translated window can enforce the grain Snowflake requires | next SF formula pass, with BL-242 |
+| BL-425 | Spec C6: the named semantic blind spots — `[TABLE::COL]` references inside `formulas[].expr` are not checked by `lint_cross_references`; join operators are not declared per converter; review repros are not kept as a corpus; live evidence does not read back stored values. Silent wrong output is the largest behavioural defect class | 2026-12-15 |
 | ~~BL-340~~ | ~~`SUBSTR`/`SUBSTRING` copied the 1-based start into zero-based `substr` — every substring shifted one character (Snowflake; Databricks same shape)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | ~~BL-341~~ | ~~Snowflake `DATEDIFF(year, …)` emitted as `diff_days / 365`, not `diff_years` (the mapping doc already says `diff_years`)~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
 | ~~BL-342~~ | ~~`MONTHS_BETWEEN` → `diff_months` marked TRANSLATED with no trap, though fractional vs boundary count (mapping doc: "Not equivalent")~~ | DONE (2026-10-06 — ts-cli v0.160.0) |
@@ -272,6 +273,11 @@ are roughly ordered by value÷effort.
 | BL-418 | `check_secrets.py` passes identifier-shaped quoted secrets (`ghp_…`, `sk_live_…`, a plain password): its exemption for a variable name also covers a quoted literal | 2026-11-30 |
 | BL-419 | In CI a required check that prints `SKIP` stays SKIP and passes the run, though CI installs every tool, so a broken install or import reads green; pr-ready already promotes it to FAIL | 2026-11-30 |
 | BL-421 | Eight validators fail open on bad input: an empty `--file ""` falls through to another mode (`check_tml`, `check_sv_yaml`), and a missing own input prints "Nothing to check" and exits 0 (converter parity, coverage matrix, mapping/code sync, runtime coverage, skill naming, internal imports) | 2026-11-30 |
+| BL-426 | Spec C5: number collisions — CHANGELOG fragments folded by a maintainer step, backlog ids unique at PR open (`BL-<pr>.<n>`), `check_backlog_integrity` Rule 2 scope widened to `docs/`/CHANGELOG/CLAUDE.md/`.claude/`, and a the rebump script for ts-cli version collisions | 2026-12-15 |
+| BL-427 | Spec C3 remainder: every gate proven to fire (extend `test_known_bad_fixtures.py` to all gates CI runs, with a meta-check), ratchets compared by value against base instead of by key, and a warning when a PR changes a gate and product code together | 2026-12-31 |
+| BL-429 | Spec C7 remainder: a new CONTRIBUTING.md under .github/, a design-issue template (new skill, new runtime dependency, rule exception), and the step-9 re-measure against the baseline at the window's end (90 days or 15 external PRs); the backtest waits for BL-416 | 2027-01-31 |
+| BL-430 | The pr-reviewer scratch-copy recipe leaves the copy's `origin` pointing at the source work tree with `GIT_ALLOW_PROTOCOL=file`, so branch code run there can push refs into the repo under review; set `remote set-url --push origin no-push` | 2026-11-30 |
+| BL-431 | An unowned `conftest.py` (root or `tools/`) or root pytest config can deselect the tests that pin the gates (proven: a 2-line a conftest.py under tools/ made `test_known_bad_fixtures.py` collect nothing); own them in CODEOWNERS and name them in pr-reviewer's gate-edits list | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -340,6 +346,11 @@ are roughly ordered by value÷effort.
 | BL-422 | No subprocess timeout in `run_checks.py` or `pr_ready.py` (a hung check holds CI to the job limit, pr-ready forever), and two smoke runners with different SKIP rules | 2026-11-30 |
 | BL-423 | pr-ready's scoped quality-gates trigger reads `git diff --name-only` with `splitlines()` (quoted non-ASCII paths never match, odd separators split a path), and the evidence scrub misses `/users/<name>` and `c:/users/<name>` | 2026-11-30 |
 | BL-424 | pre-commit's main-branch skill audit aborts the commit with no message: under `set -euo pipefail` its `ADDING`/`REMOVING`/`UPDATING` assignments fail whenever their `grep` matches nothing, so the inventory and prompt are never reached | 2026-11-30 |
+| BL-428 | Spec C4: classify each smoke suite as CI-runnable or needs-cluster in `check_smoke_tests.py`, and have `run_checks.py --smokes` run every CI-runnable one (about 13 today; CI runs 7), with per-skill cache isolation | 2026-12-31 |
+| BL-432 | A new top-level module in `tools/ts-cli/` (unowned) can shadow imports such as `typer` for gates that put `tools/ts-cli` first on `sys.path` (`check_skill_flag_usage.py`, `check_mapping_code_sync.py`) and for pr-ready's pinned `PYTHONPATH` | 2026-12-31 |
+| BL-433 | pr-reviewer recipe test leaks a clone per run on macOS: `/usr/bin/mktemp -d` ignores `TMPDIR`, so `test_scratch_copy_recipe_copies_the_head_and_stubs_gh` leaves a directory in the system temp dir on every pre-commit with staged `.py` files | 2026-11-30 |
+| BL-434 | pr-ready docs say a `--post` run replaces the evidence block, but any `pr-ready.sh` invocation does (the placeholder is written before argument parsing), so `--help` or a typo also discards a reviewed block | 2026-11-30 |
+| BL-435 | The CODEOWNERS coverage test (`_owned()` in `test_pr_reviewer_brief.py`) treats a path as owned if any rule matches, while GitHub applies the last matching rule, so a future owner-less override line would still read as owned | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -15015,3 +15026,107 @@ the block on a `main` branch with a commit editing one existing skill and assert
 lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Target:** 2026-11-30.
+
+## BL-425 — spec C6 — close the named semantic blind spots `Tier 1`
+
+**Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C6 (F3, F8); deferred when PR #680 shipped steps 0–2.
+
+**What.** Silent wrong output — imports clean, lints clean, returns the wrong number — is the largest behavioural defect class in both maintainer and external PRs (spec §1 F3). Four gaps feed it:
+1. `lint_cross_references` in `tools/ts-cli/ts_cli/tml_lint.py` skips `formulas[].expr`, so a dangling `[TABLE::COL]` in a formula passes (the class behind #484, #529, #532).
+2. No converter declares which join operator shapes it may emit; the Snowflake ASOF `>=` is a documented wrong-number case (BL-240), so this is a declaration, not an exemption list.
+3. Review repros are thrown away instead of becoming a regression corpus.
+4. "Live-verified" open-items entries can say "import OK" without reading back the stored values (#499, #429).
+
+**Do.** As spec C6 describes: reuse `on_clause_refs` for (1), skipping `::`-less refs and string literals; declare emitted join shapes in each `ts_cli/<converter>/` and have `check_coverage_matrix` assert the matrix agrees, plus a converter test on emitted TML; add `tools/ts-cli/tests/corpus/<converter>/` (synthetic inputs only) seeded from #517's adversarial inputs; add a required "post-import read-back" line to the open-items live-verification format.
+
+**Target:** 2026-12-15.
+
+## BL-426 — spec C5 — remove version, backlog-id and CHANGELOG collisions `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C5 (F6); deferred when PR #680 shipped.
+
+**What.** 9 external PRs collided on ts-cli versions, BL ids or CHANGELOG lines (spec §1 F6) because PRs claim numbers in append-only registries while main moves at about 5 merges per active day.
+
+**Do.** As spec C5 (revised) describes: `changes/<pr-or-slug>.md` fragments folded by a new fold-changelog script under scripts/ in a maintainer PR; `BL-<pr>.<n>` ids accepted by `check_backlog_integrity` (and rejected when `<pr>` is not the introducing PR); Rule 2 scans `docs/`, `CHANGELOG.md`, `CLAUDE.md` and `.claude/`; ts-cli version stays bumped in the PR with a new rebump script under scripts/ to re-apply it after updating from main. Every git operation the rebump script runs on someone else's branch runs with hooks disabled and executes nothing from that work tree (spec C5 requirement). Update `versioning.md`, root and `tools/ts-cli` CLAUDE.md, and `.claude/rules/ts-cli.md` in the same PR.
+
+**Target:** 2026-12-15.
+
+## BL-427 — spec C3 remainder — gates proven to fire; ratchets by value `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C3 (F4); PR #680 shipped only the CODEOWNERS part.
+
+**What.** Gates are a defect source (spec §1 F4): 26 fix PRs touched only gates, ratchets were raised in #311, #506 and #662, and `test_known_bad_fixtures.py` proves only some gates fire.
+
+**Do.** As spec C3 describes: a meta-check that every gate in `tools/validate/checks.py` (and pr_ready's PR-only/every-PR gates) has a known-bad fixture, with the uncovered ones listed in one dated follow-up; `check_module_health` compares complexity values per function (refactors that move keys pass); `check_file_size` fails a raise against base unless labelled with a cited BL; `pr-ready` warns when a PR edits a gate and product code together.
+
+**Target:** 2026-12-31.
+
+## BL-428 — spec C4 — run every credential-free smoke suite in CI `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C4 (F7); PR #680 moved CI's 7 suites onto `run_checks.py --smokes` but did not add the classification.
+
+**Do.** Add a `CI_RUNNABLE` declaration beside `check_smoke_tests.py`'s `ALLOWLIST`, fail a new smoke that declares neither, feed `CI_SMOKES` from it (keeping `test_checks_parity.py`'s literal as the deliberate second copy), and isolate per-skill caches for credential-free suites. Pairs with BL-422 (two smoke runners).
+
+**Target:** 2026-12-31.
+
+## BL-429 — spec C7 remainder — contributor guide, design-issue template, re-measure `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C7 and §6 step 9; PR #680 shipped the PR-template fields and the baseline (`docs/reviews/2026-10-28-pr-metrics-baseline.md`).
+
+**Do.** Write a new CONTRIBUTING.md under .github/ (one page linking the rules); add an issue template for the three pre-approval cases (size only warns — see BL-420); at the end of the measurement window, re-run `tools/pr-metrics/collect.py` with defects attributed by introduction PR and date, compare with the baseline, and decide whether to move the review into CI. The backtest (spec C7, step 3) is blocked on BL-416.
+
+**Target:** 2027-01-31.
+
+## BL-430 — the reviewer's scratch copy can push into the repo under review `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (N1).
+
+**What.** `.claude/agents/pr-reviewer.md`'s execution recipe clones the branch into a scratch dir and runs offline with `GIT_ALLOW_PROTOCOL=file`. The clone's `origin` is the work tree, so `git push origin HEAD:refs/heads/x` from the copy succeeds into the source repo. The brief forbids the reviewer from pushing, but branch code (a test, a script) is not bound by the brief. Applies only under `trusted: yes` (the user's own branch).
+
+**Do.** Add `git -C "$S/repo" remote set-url --push origin no-push` to the recipe, and a test that a push from the copy fails.
+
+**Target:** 2026-11-30.
+
+## BL-431 — unowned conftest.py can switch off the gate-pinning tests `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (R1); same class as the shadow-package bypass PR #680 closed by owning `/tools/validate/`.
+
+**What.** CI's pytest collects from `tools/`, so a a conftest.py under tools/ or a root `conftest.py`/`pytest.ini`/`pyproject.toml` pytest section can deselect `tools/validate/tests/*` — the tests that pin the check list, the known-bad fixtures and the CODEOWNERS coverage — while the rest of the suite passes. None of those paths is code-owned. The gates themselves (run as subprocesses by `run_checks.py`) are unaffected.
+
+**Do.** Add `/conftest.py`, `/tools/conftest.py` and root pytest config files to `.github/CODEOWNERS` and to the gate-edits list in `.claude/agents/pr-reviewer.md`; consider a test that the gate-pinning test files collect a minimum number of tests.
+
+**Target:** 2026-11-30.
+
+## BL-432 — tools/ts-cli top-level modules can shadow gate imports `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (R2).
+
+**What.** `check_skill_flag_usage.py:93` and `check_mapping_code_sync.py:545` insert `tools/ts-cli` at the front of `sys.path`, and `pr_ready.py` pins `PYTHONPATH` to it, so a file such as a typer.py at the top of tools/ts-cli/ would be imported in place of the real package. Low added bypass power (those gates already judge unowned ts_cli code), but it is the same shadowing class as the one PR #680 closed.
+
+**Do.** Import ts_cli as a package without putting `tools/ts-cli` ahead of site-packages (append, or import by path), or own `tools/ts-cli/*.py` at the top level.
+
+**Target:** 2026-12-31.
+
+## BL-433 — the reviewer recipe test leaks temp directories on macOS `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (N2). Nine leaked directories were removed by hand on 2026-10-29.
+
+**Do.** Use an explicit template in the brief's recipe (`mktemp -d "${TMPDIR:-/tmp}/pr-review.XXXXXX"`) and have the test remove the directory it created.
+
+**Target:** 2026-11-30.
+
+## BL-434 — pr-ready docs understate when the evidence block is replaced `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (N3); the behaviour follows from writing the NOT READY placeholder first so a crash can never leave an old READY block.
+
+**Do.** Say "before any `pr-ready.sh` run" in `.github/pull_request_template.md` and the skill's Posting section, or keep a copy of the last reviewed block beside the evidence file. Pairs with BL-417.
+
+**Target:** 2026-11-30.
+
+## BL-435 — the CODEOWNERS coverage test uses any-match, not GitHub's last-match `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** scoped re-review of PR #680's final fix wave (N4). Latent: every rule has an owner today.
+
+**Do.** Evaluate CODEOWNERS with last-match-wins semantics in the test, and add a case with an owner-less override line.
+
+**Target:** 2026-12-31.
