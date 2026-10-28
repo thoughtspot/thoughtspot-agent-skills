@@ -1,0 +1,38 @@
+# Hand-kept review-round counts for tools/pr-metrics/collect.py.
+#
+# The GitHub reviews API sees only formal reviews. Between roughly 2026-07-10 and
+# 2026-09-14 many reviews were posted as ordinary PR conversation comments instead,
+# so the computed count undercounts those PRs. An entry here REPLACES the computed
+# count for its PR (it is the PR's whole review history, not an addition), and the
+# report marks the row.
+#
+# What counts as a round: a comment that reviews the work and asks for changes
+# (a review heading, blockers, requested fixes). What does not: CI heads-ups
+# ("Heads-up, not a review"), status or rebase notes, stale-PR nudges, closing
+# notes, and the maintainer pushing fixes to the branch themselves.
+#
+# Schema:
+#   - pr: 440        # PR number
+#     rounds: 6      # total review rounds, formal reviews and comment-posted ones
+#     note: why      # public repo: no people, customers or tenant URLs
+#
+# Seeded 2026-10-28 from the maintainer's conversation comments on the external
+# PRs in the 2026-07-01..2026-10-28 window.
+- pr: 242
+  rounds: 1
+  note: review posted as a conversation comment (premise check, re-scope requested)
+- pr: 252
+  rounds: 1
+  note: change requested in a conversation comment (rework against the existing converter); the later closing comment is not a round
+- pr: 254
+  rounds: 1
+  note: change requested in a conversation comment (align with existing repo logic)
+- pr: 356
+  rounds: 2
+  note: one formal COMMENTED review plus one review posted as a conversation comment; the approval is not a round
+- pr: 440
+  rounds: 6
+  note: rounds 1-3 and 6 posted as conversation comments, rounds 4-5 as formal reviews; status notes, the CI heads-up and the stale nudge are not rounds
+- pr: 506
+  rounds: 3
+  note: first review posted as a comment and later converted to a formal review (counted once), plus two formal re-reviews; the approval and CI heads-up are not rounds
