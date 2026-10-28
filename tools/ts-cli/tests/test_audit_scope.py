@@ -181,10 +181,20 @@ def _cli(monkeypatch, inv=None):
     (["--all-models", "--snapshot-in", "/nonexistent"], "--snapshot-in"),
 ])
 def test_scope_options_are_refused_in_bad_combinations(monkeypatch, args, hint):
+    # The CLI's usage box is width- and colour-dependent (CI truncates it at 80 columns),
+    # so the hint is checked on the validator and the CLI only for its exit code.
+    import typer
+    from ts_cli.commands.audit import _check_scope_options
+    flags = {"models": "--models" in args, "all_models": "--all-models" in args,
+             "connections": "--connection" in args, "dry_run": "--dry-run" in args,
+             "snapshot_in": "--snapshot-in" in args, "snapshot_out": None}
+    with pytest.raises(typer.BadParameter) as exc:
+        _check_scope_options(["m1"] if flags["models"] else None, flags["all_models"],
+                             ["X"] if flags["connections"] else None, flags["dry_run"],
+                             "/s" if flags["snapshot_in"] else None, None)
+    assert hint in exc.value.param_hint
     run, _ = _cli(monkeypatch)
-    res = run(*args)
-    assert res.exit_code == 2
-    assert hint in (res.output + (res.stderr if hasattr(res, "stderr") else ""))
+    assert run(*args).exit_code == 2
 
 
 def test_dry_run_prints_the_inventory_and_audits_nothing(monkeypatch):
