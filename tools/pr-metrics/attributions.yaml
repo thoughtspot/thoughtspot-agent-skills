@@ -1,0 +1,17 @@
+# Post-merge defect attributions for tools/pr-metrics/collect.py — hand-maintained.
+#
+# One entry per defect that reached main, added when the fix lands. A defect is
+# counted against the PR that INTRODUCED it (introduced_by_pr / introduced_on), not
+# the PR that fixed it, so the metric measures when defects entered rather than when
+# someone noticed them (spec §5 C7).
+#
+# Schema (all fields required except note):
+#
+#   - fix_pr: 450               # PR number that fixed the defect
+#     introduced_by_pr: 202     # PR number that introduced it
+#     introduced_on: 2026-07-10 # merge date of the introducing PR (YYYY-MM-DD)
+#     found_by: audit           # one of: audit | live | review | ci | self
+#     note: short, no names     # public repo: no people, customers or tenant URLs
+#
+# Seeded empty at the 2026-10-28 baseline.
+[]

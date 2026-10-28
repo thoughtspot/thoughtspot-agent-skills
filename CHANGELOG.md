@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-28
+- feat: `tools/pr-metrics/collect.py` — baseline PR metrics (PR count, merged, days open, changed lines, review rounds, post-merge defects attributed to the introducing PR), maintainer, external and bot PRs reported separately and keyed by PR number only. The 2026-07-01..2026-10-28 baseline is `docs/reviews/2026-10-28-pr-metrics-baseline.md`; defect attributions are hand-kept in `tools/pr-metrics/attributions.yaml`, empty at the baseline. Its tests run in pre-commit and CI. Step 0 of the PR-quality design (`docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C7).
 - fix: ts-audit 3.2.2 — the report's per-Model join count and join depth read a Model-level `joins` key that Model TML does not have, so every Model showed 0 / 0; they now count the joins under `model_tables[]`, with the helpers D1 and P7 use. PR 1.2 of the ts-audit v2 roadmap.
 - chore: bump ts-cli to v0.185.1
 
