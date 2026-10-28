@@ -44,9 +44,15 @@ _END = "`'\"|)"
 _HOME_PATH = re.compile(
     # POSIX homes: /Users/<name>, /home/<name>, and root's /root.
     r"(?:/Users|/home)/[^/\s" + _END + r"]+|/root\b"
-    # Windows, single or repr-doubled backslashes. A name may contain spaces when a
-    # separator follows it (C:\Users\Carol Ann\x); a trailing one stops at a space.
-    r"|[A-Za-z]:(\\{1,2})Users\1(?:[^\\\n" + _END + r"]+(?=\\)|[^\\\s" + _END + r"]+)")
+    # Windows, any case, single or repr-doubled backslashes. The name runs to the next
+    # separator or the end of the line, so a name with spaces never leaves a fragment
+    # (`C:\Users\Carol Ann` at the end of a line); over-scrubbing is the safe side.
+    r"|[A-Za-z]:(\\{1,2})(?i:users)\1[^\\\n" + _END + r"]+")
+
+
+#: Written before a run starts, so an unfinished run never leaves an old READY block.
+UNFINISHED = ("**pr-ready** did not finish: NOT READY. This file is replaced when a run "
+              "completes; until then it describes nothing.\n")
 
 
 def scrub(text: str) -> str:
@@ -80,11 +86,18 @@ def _not_run_or_skipped(results: Sequence[Result]) -> List[str]:
             reason = _first_line(tail, "SKIP") or "missing tool"
             counted = "FAIL" if status == "FAIL" else "WARN (a soft check)"
             lines.append(f"- `{r['id']}` — skipped (`{reason}`); counted as {counted}")
+        for problem in r.get("problems") or ():
+            lines.append(f"- `{r['id']}` — skips unverifiable: {problem}; counted as FAIL")
         missing = set(r.get("missing") or ())
         for skip in r.get("skips") or ():
             note = ("; a missing module CI installs, so counted as FAIL" if skip in missing
                     else "")
             lines.append(f"- `{r['id']}` — test skipped: {skip}{note}")
+    if any(set(r.get("skips") or ()) - set(r.get("missing") or ()) for r in results):
+        lines += ["", "Tests skipped for anything but a missing Python module (data that is "
+                  "not present, a non-Python tool such as node or Chrome) are listed, not "
+                  "failed. CI's `ubuntu-latest` runner has node and Chrome, so CI may run "
+                  "tests that were skipped here."]
     return lines
 
 

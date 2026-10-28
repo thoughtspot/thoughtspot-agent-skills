@@ -40,6 +40,8 @@ import run_checks as rc
 REPO = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO / ".github" / "workflows" / "validate.yml"
 BASE = "refs/remotes/upstream/main"
+#: The real gh runner, captured before any fixture replaces it.
+_REAL_GH = pr_ready._gh
 
 
 # ---------------------------------------------------------------- helpers ---
@@ -58,8 +60,9 @@ def _commit(work, name, text="x\n"):
 class Recorder:
     """Stands in for an executor: records argv, answers by a substring match."""
 
-    def __init__(self, answers=None):
+    def __init__(self, answers=None, default="ok\n"):
         self.answers = answers or {}   # substring of the joined argv -> (code, output)
+        self.default = default
         self.calls = []
 
     def answer(self, argv):
@@ -68,7 +71,7 @@ class Recorder:
         for key, (code, out) in self.answers.items():
             if key in joined:
                 return code, out, 0.01
-        return 0, "ok\n", 0.01
+        return 0, self.default, 0.01
 
 
 class FakeGh:
@@ -127,8 +130,9 @@ def env(tmp_path, monkeypatch):
     checks_run = Recorder()
     monkeypatch.setattr(rc, "_execute",
                         lambda python, script, args, root: checks_run.answer([script, *args]))
-    commands = Recorder()
-    monkeypatch.setattr(pr_ready, "_run_command", lambda argv, root: commands.answer(argv))
+    # pytest's real closing line: without one the skip count is unverifiable (FAIL).
+    commands = Recorder(default="..\n2 passed in 0.01s\n")
+    monkeypatch.setattr(pr_ready, "_run_command", lambda argv, root, env=None: commands.answer(argv))
     gh = FakeGh()
     monkeypatch.setattr(pr_ready, "_gh", gh)
 
@@ -241,7 +245,7 @@ def test_runs_the_check_list_smokes_and_workflow_pytest(env, capsys):
     assert {f"{s}.py" for s in checks.CI_SMOKES} <= scripts
     pytests = [c for c in env.commands.calls if " -m pytest " in c]
     assert len(pytests) == len(pr_ready.pytest_invocations(env.work)), pytests
-    assert all(c.endswith(" -rs") for c in pytests), pytests
+    assert all(c.endswith(" -rs --color=no") for c in pytests), pytests
 
 
 def test_pythonpath_is_pinned_to_this_checkout(env, capsys):
@@ -277,11 +281,93 @@ def test_a_skip_for_a_missing_module_is_fail_and_listed(env, capsys):
 
 def test_other_skips_are_listed_and_do_not_fail(env, capsys):
     env.commands.answers = {"pytest agents/databricks/tests/": (
-        0, "..s\nSKIPPED [2] tools/b/test_y.py:20: $DATA not set\n2 passed, 2 skipped\n")}
+        0, "..s\nSKIPPED [2] tools/b/test_y.py:20: $DATA not set\n2 passed, 2 skipped in 0.1s\n")}
     assert _main(env, "--no-review") == 0
     section = _evidence(env)[1].split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "tools/b/test_y.py:20: $DATA not set (x2)" in section, section
     assert "None." not in section
+
+
+_COLOURED = ("\x1b[33m..s\x1b[0m\n"
+             "\x1b[33mSKIPPED\x1b[0m [1] tools/a/test_x.py:10: No module named 'openpyxl'\n"
+             "\x1b[32m1 passed\x1b[0m, \x1b[33m1 skipped\x1b[0m in 0.10s\n")
+
+
+def test_coloured_skip_lines_are_still_read(env, capsys):
+    # FORCE_COLOR / PY_COLORS colour SKIPPED even when piped; --color=no is passed,
+    # and ANSI is stripped anyway, so a missing-module skip still FAILs.
+    env.commands.answers = {"pytest agents/databricks/tests/": (0, _COLOURED)}
+    assert _main(env, "--no-review") == 1
+    assert "No module named 'openpyxl'" in _evidence(env)[1]
+
+
+def test_skips_with_no_skip_report_are_unverifiable_not_zero(env, capsys):
+    # e.g. PYTEST_ADDOPTS=--no-summary: the stats line says 4 skipped, -rs lists none.
+    env.commands.answers = {"pytest agents/databricks/tests/": (0, "....ssss\n4 passed, 4 skipped in 0.2s\n")}
+    assert _main(env, "--no-review") == 1
+    section = _evidence(env)[1].split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "reported 4 skipped but its -rs report lists 0" in section, section
+
+
+def test_a_skip_count_mismatch_is_fail(env, capsys):
+    env.commands.answers = {"pytest agents/databricks/tests/": (
+        0, "SKIPPED [1] a.py:1: $D unset\n3 passed, 2 skipped in 0.2s\n")}
+    assert _main(env, "--no-review") == 1
+
+
+def test_a_missing_stats_line_is_unverifiable(env, capsys):
+    env.commands.answers = {"pytest agents/databricks/tests/": (0, "....\n")}
+    assert _main(env, "--no-review") == 1
+    assert "stats line was not found" in _evidence(env)[1]
+
+
+def test_pytest_runs_without_pytest_addopts(env, monkeypatch, capsys):
+    seen = []
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--no-summary -k nothing")
+    monkeypatch.setattr(pr_ready, "_run_command",
+                        lambda argv, root, env=None: seen.append(env) or (0, "1 passed in 0.1s\n", 0.0))
+    assert _main(env, "--no-review") == 0
+    pytest_envs = [e for e in seen if e is not None]
+    assert pytest_envs and all("PYTEST_ADDOPTS" not in e for e in pytest_envs)
+
+
+@pytest.mark.parametrize("reason, missing", [
+    ("could not import 'radon': No module named 'radon'", True),
+    ("""no 2020-12 jsonschema here: AttributeError("module 'jsonschema' has no attribute 'Draft202012Validator'")""", True),
+    ("""x: ImportError('cannot import name Y')""", True),
+    ("node is not installed", False),
+    ("no Chrome here", False),
+    ("$FORMULA_FIDELITY_DATA not set", False),
+])
+def test_which_skips_are_a_missing_tool(env, capsys, reason, missing):
+    env.commands.answers = {"pytest agents/databricks/tests/": (
+        0, f"SKIPPED [1] t.py:1: {reason}\n1 passed, 1 skipped in 0.1s\n")}
+    assert _main(env, "--no-review") == (1 if missing else 0)
+    text = _evidence(env)[1]
+    if not missing:
+        assert "CI's `ubuntu-latest` runner has node and Chrome" in text
+
+
+# -------------------------------------------------------- stale evidence ---
+
+def test_a_run_that_cannot_start_replaces_an_earlier_ready_block(env, capsys):
+    assert _main(env, "--no-review") == 0
+    assert "**READY**" in _evidence(env)[1]
+    wf = env.work / ".github" / "workflows" / "validate.yml"
+    wf.write_text(wf.read_text() + "\n  bad: [unclosed\n")
+    assert _main(env, "--no-review") == 2
+    text = _evidence(env)[1]
+    assert "**READY**" not in text and "NOT READY" in text, text
+
+
+def test_a_crash_mid_run_leaves_not_ready(env, monkeypatch, capsys):
+    assert _main(env, "--no-review") == 0
+    def boom(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(rc, "run_smokes", boom)
+    with pytest.raises(KeyboardInterrupt):
+        _main(env, "--no-review")
+    assert "NOT READY" in _evidence(env)[1]
 
 
 # ------------------------------------------------------------- --post ---
@@ -326,6 +412,52 @@ def test_a_failed_post_fails_the_run(env, capsys):
     env.gh.head = _git(env.work, "rev-parse", "HEAD")
     env.gh.comment_code = 1
     assert _main(env, "--no-review", "--post", "42") == 1
+
+
+def test_post_is_refused_when_gh_pr_view_fails(env, monkeypatch, capsys):
+    calls = []
+    def gh(args):
+        calls.append(list(args))
+        if args[:2] == ["pr", "view"]:
+            return 1, "", "GraphQL: Could not resolve to a PullRequest with the number of 42."
+        return 0, "posted", ""
+    monkeypatch.setattr(pr_ready, "_gh", gh)
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert [c for c in calls if c[:2] == ["pr", "comment"]] == []
+    assert "could not read PR #42" in capsys.readouterr().err
+
+
+def test_post_is_refused_when_gh_is_absent(env, monkeypatch, capsys):
+    # The real _gh, pointed at an executable that does not exist. (Not by emptying
+    # PATH: inside a git hook `which git` can be macOS's /usr/bin/git shim, which
+    # needs more of PATH than itself, and the pre-post re-check runs git.)
+    monkeypatch.setattr(pr_ready, "_gh", _REAL_GH)
+    monkeypatch.setattr(pr_ready, "GH", "gh-not-installed-for-this-test")
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert "gh is not installed" in capsys.readouterr().err
+
+
+def test_post_is_refused_when_head_moves_during_the_run(env, monkeypatch, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    original = rc.run_smokes
+    def commit_meanwhile(*a, **k):
+        _commit(env.work, "meanwhile.md")
+        return original(*a, **k)
+    monkeypatch.setattr(rc, "run_smokes", commit_meanwhile)
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.calls == []
+    assert "changed during the run" in capsys.readouterr().err
+
+
+def test_post_is_refused_when_the_tree_changes_during_the_run(env, monkeypatch, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    original = rc.run_smokes
+    def edit_meanwhile(*a, **k):
+        (env.work / "README.md").write_text("edited mid-run\n")
+        return original(*a, **k)
+    monkeypatch.setattr(rc, "run_smokes", edit_meanwhile)
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.calls == []
 
 
 # ------------------------------------------------ derived from validate.yml ---
@@ -401,6 +533,80 @@ def test_a_new_step_ci_runs_is_caught(tmp_path, which):
     orig = WORKFLOW.read_text(encoding="utf-8")
     assert _ANCHOR in orig
     assert _mutated(tmp_path, orig.replace(_ANCHOR, _MUTATIONS[which] + _ANCHOR, 1))
+
+
+_PYTEST_STEP_HEAD = "        if: ${{ !cancelled() }}\n        run: |\n          pytest tools/ts-cli/tests/"
+
+
+@pytest.mark.parametrize("key", [
+    "env:\n          PYTEST_ADDOPTS: \"-W error\"\n",
+    "working-directory: tools\n",
+    "shell: bash -c \"exit 0\" {0}\n",
+    "continue-on-error: true\n",
+])
+def test_a_step_key_that_changes_what_runs_is_caught(tmp_path, key):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    assert _PYTEST_STEP_HEAD in orig
+    text = orig.replace("        if: ${{ !cancelled() }}\n        run: |\n          pytest tools/ts-cli/tests/",
+                        "        if: ${{ !cancelled() }}\n        " + key
+                        + "        run: |\n          pytest tools/ts-cli/tests/", 1)
+    assert text != orig
+    assert _mutated(tmp_path, text)
+
+
+@pytest.mark.parametrize("snippet", [
+    "    uses: ./.github/workflows/extra-gates.yml\n",
+    "    env:\n      FOO: bar\n",
+    "    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n",
+    "    continue-on-error: true\n",
+])
+def test_a_job_key_that_changes_what_runs_is_caught(tmp_path, snippet):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    head = "  pytest-matrix:\n    if: github.event_name != 'schedule'\n"
+    assert head in orig
+    assert _mutated(tmp_path, orig.replace(head, head + snippet, 1))
+
+
+def test_a_workflow_level_env_is_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    assert _mutated(tmp_path, orig.replace("jobs:\n", "env:\n  FOO: bar\n\njobs:\n", 1))
+
+
+def test_the_quality_gates_gate_moved_into_else_is_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    line = ('            echo "No quality-gates source of truth changed in this PR — '
+            'skipping hard gate (soft-checked above)."\n')
+    assert line in orig
+    text = orig.replace(line, "            python3 tools/validate/generate_quality_gates.py --root . --check\n", 1)
+    assert _mutated(tmp_path, text)
+
+
+def test_else_and_fi_outside_the_quality_gates_step_are_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    anchor = "          python3 tools/validate/check_ci_gate_coverage.py --root .\n"
+    assert anchor in orig
+    assert _mutated(tmp_path, orig.replace(anchor, anchor + "          fi\n", 1))
+
+
+def test_a_new_conditional_exit_in_the_aggregate_job_is_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    text = orig.replace("      - name: All gates green\n",
+                        "      - name: Block drafts\n        if: github.event.pull_request.draft\n"
+                        "        run: exit 1\n\n      - name: All gates green\n", 1)
+    assert text != orig and _mutated(tmp_path, text)
+
+
+def test_a_changed_pip_install_is_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    text = orig.replace("pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
+                        "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 && ./x.sh", 1)
+    assert text != orig and _mutated(tmp_path, text)
+
+
+def test_a_malformed_workflow_is_a_clear_error(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    with pytest.raises(RuntimeError, match="cannot read"):
+        _mutated(tmp_path, orig + "\n  bad: [unclosed\n")
 
 
 def test_a_new_job_is_caught(tmp_path):

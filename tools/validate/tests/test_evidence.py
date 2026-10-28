@@ -10,6 +10,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import evidence
 
 HEAD = "a" * 40
@@ -156,3 +158,24 @@ def test_scrub_handles_windows_names_with_spaces_doubled_backslashes_and_root():
         text = _render(review=raw)
         assert name not in text, (raw, text.split("## Review", 1)[1])
     assert "/rootfs/x" in _render(review="/rootfs/x")
+
+
+@pytest.mark.parametrize("raw, name", [
+    ("c:\\users\\carol\\docs", "carol"),
+    ("built in C:\\Users\\Carol Ann", "Ann"),
+    ("C:\\USERS\\Dave Smith\\x", "Smith"),
+])
+def test_scrub_any_case_and_a_trailing_name_with_a_space(raw, name):
+    text = _render(review=raw)
+    assert name not in text, text.split("## Review", 1)[1]
+
+
+def test_unfinished_placeholder_is_not_ready():
+    assert "NOT READY" in evidence.UNFINISHED
+    assert "**READY**" not in evidence.UNFINISHED
+
+
+def test_unverifiable_skips_are_listed_as_fail():
+    r = _r("pytest a/ -q", "FAIL", problems=["pytest reported 4 skipped but its -rs report lists 0"])
+    section = _render(pytest=[r]).split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "skips unverifiable" in section and "counted as FAIL" in section, section

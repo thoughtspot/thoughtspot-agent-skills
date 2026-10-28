@@ -28,16 +28,26 @@ CI runs, the way CI runs it, and writes down what it ran:
      step greps for (`QUALITY_GATES_SOURCES`);
    - CI's credential-free smoke suites (`checks.CI_SMOKES`);
    - the pytest invocations, **read from the workflow's own step** each run
-     (`pytest_invocations`), never a hand copy, with `-rs` added so every skipped
-     test is reported with its reason. A skip for a module that cannot be imported
-     is a missing tool, so FAIL (CI installs it); other skips are listed.
-   Every code line of every job in the workflow is then classified
-   (`ci_lines_not_reproduced`): run here, known plumbing (checkout, installs,
-   fetches, the aggregate gate's result checks), or recorded in "Not reproduced
-   locally" (pip-audit). Anything else — a new job, a new step, a `python` instead
-   of `python3` — is a FAIL row (`ci-superset`), so the claim cannot go stale
-   silently; `tests/test_pr_ready.py` runs the same classifier on the committed
-   workflow.
+     (`pytest_invocations`), never a hand copy, with `-rs --color=no` added so every
+     skipped test is reported with its reason, and PYTEST_ADDOPTS dropped (CI sets
+     none). A skip for a module that cannot be imported, or that lacks an attribute
+     the test needs (too old), is a missing tool, so FAIL (CI installs it); other
+     skips are listed. If pytest's own skipped count cannot be read, or does not
+     match the reported skips, that is FAIL too: unverifiable is not zero.
+   The workflow is then classified (`ci_lines_not_reproduced`): every key of the
+   workflow, of each job and of each step must be one the classifier understands
+   (no `env`, `defaults`, `shell`, `working-directory`, job-level `uses`, ...); every
+   action must be checkout or setup-python; every code line must be run here or be
+   known plumbing (the PR-base fetch, CI's exact pip installs, print-only echoes,
+   `exit 1` under the aggregate gate's own condition); and the scoped quality-gates
+   step must match CI's shape line by line. Anything else — a new job, a new step,
+   a `python` instead of `python3` — is a FAIL row (`ci-superset`);
+   `tests/test_pr_ready.py` runs the same classifier on the committed workflow.
+   **What it does not see:** a step's `if:` condition (pr-ready runs every step
+   unconditionally, so a condition can only make CI run less than this), an
+   action's `with:` inputs (the suite's Python is read from them for "Not
+   reproduced locally", nothing more), and what the validators, scripts and tests
+   the lines call actually do.
 4. **pip-audit** runs when installed, as WARN: it audits this interpreter's
    environment, not the fresh install CI audits, so a hit here may be in a package
    the PR cannot affect and a pass here does not prove CI's.
@@ -101,8 +111,20 @@ _RUNNER_CALLS = ("python3 tools/validate/run_checks.py --context ci --base origi
                  "python3 tools/validate/run_checks.py --smokes")
 #: pytest reports `SKIPPED [n] path:line: reason` under -rs.
 _SKIP_LINE = re.compile(r"^SKIPPED \[(\d+)\] (.+?): (.*)$")
-#: Skip reasons that mean a module is missing: a missing tool, so FAIL.
-_MISSING_MODULE = ("could not import", "No module named")
+#: pytest's closing stats line under -q, e.g. `10 passed, 4 skipped in 1.2s (0:00:01)`.
+_STATS_LINE = re.compile(
+    r"^=*\s*(?=.*\b(?:passed|failed|skipped|error|errors|xfailed|xpassed|deselected|"
+    r"no tests ran)\b).* in [\d.]+s(?: \([\d:.]+\))?\s*=*$")
+_STATS_SKIPPED = re.compile(r"\b(\d+) skipped\b")
+#: SGR escape sequences: FORCE_COLOR / PY_COLORS colour pytest's output even when piped.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+#: Skip reasons that mean a Python module is missing or too old for the test (a module
+#: lacking an attribute: CI pins a version that has it). A missing tool, so FAIL.
+_MISSING_MODULE = re.compile(
+    r"could not import|No module named|ModuleNotFoundError|ImportError"
+    r"|module '[\w.]+' has no attribute")
+#: Environment variables that change what pytest runs or how it reports. CI sets none.
+_PYTEST_ENV_DROP = ("PYTEST_ADDOPTS",)
 
 Result = rc.Result
 
@@ -145,9 +167,12 @@ def _workflow(repo_root: Path) -> dict:
                            "(pip install pyyaml, as CI does)") from exc
     path = repo_root / WORKFLOW
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
-    except OSError as exc:
+        wf = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
         raise RuntimeError(f"cannot read {WORKFLOW}: {exc}") from exc
+    if not isinstance(wf, dict) or not isinstance(wf.get("jobs"), dict):
+        raise RuntimeError(f"{WORKFLOW} has no `jobs:` mapping")
+    return wf
 
 
 def _jobs(wf: dict) -> dict:
@@ -195,39 +220,59 @@ def pytest_invocations(repo_root: Path) -> List[List[str]]:
     return invocations
 
 
-# Shell lines that set up or route a step but check nothing.
-_PLUMBING = tuple(re.compile(p) for p in (
-    r"set -e",
-    r'git fetch --no-tags origin "\$\{\{ github\.base_ref \}\}"',
-    r"pip install [^;&|`$<>]+",
-    r"else",
-    r"fi",
-))
-_QG_PLUMBING = tuple(re.compile(p) for p in (
-    r'CHANGED=\$\(git diff --name-only "origin/\$\{\{ github\.base_ref \}\}"\.\.\.HEAD\)',
-    r"if echo \"\$CHANGED\" \| grep -qE '" + re.escape(QUALITY_GATES_SOURCES) + r"'; then",
-))
+_PR_FETCH = 'git fetch --no-tags origin "${{ github.base_ref }}"'
+#: Shell lines that set up a step but check nothing, anywhere in a run script.
+_PLUMBING = frozenset({"set -e", _PR_FETCH})
+#: The exact installs CI makes today (deliberate copies: a changed install changes
+#: what the checks run with, so it must be looked at, not waved through).
+_PIP_INSTALLS = frozenset({
+    "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
+    "pip install -e tools/ts-cli",
+    'pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"',
+    "pip install pytest pyyaml jsonschema==4.25.1",
+})
 #: An `echo` that only prints: no pipe, chaining, substitution or redirection.
 _ECHO = re.compile(r"echo [^|;&`<>]*")
 _USES_PLUMBING = ("actions/checkout@", "actions/setup-python@")
+#: The workflow, job and step keys the classifier understands. Anything else (`env`,
+#: `defaults`, `shell`, `working-directory`, `continue-on-error`, a job-level `uses`
+#: calling a reusable workflow, ...) can change what a line does, so it is unaccounted.
+_WORKFLOW_KEYS = frozenset({"name", "on", True, "jobs"})   # YAML 1.1 reads `on` as True
+_JOB_KEYS = frozenset({"if", "runs-on", "needs", "steps", "strategy"})
+_STEP_KEYS = frozenset({"name", "uses", "with", "if", "run"})
+#: The aggregate `validate` job's failure condition; `exit 1` is plumbing only under it.
+_AGGREGATE_IF = ("contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') "
+                 "|| contains(needs.*.result, 'skipped')")
+
+
+def _is_echo(line: str) -> bool:
+    return bool(_ECHO.fullmatch(line)) and "$(" not in line
+
+
+#: CI's scoped quality-gates step, line by line: the gate is hard ONLY when a source
+#: changed. Pinned whole, so moving the gate (into `else`, or out of the `if`) is caught.
+_QG_BODY = (
+    lambda l: l == _PR_FETCH,
+    lambda l: l == 'CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)',
+    lambda l: l == "if echo \"$CHANGED\" | grep -qE '" + QUALITY_GATES_SOURCES + "'; then",
+    _is_echo,
+    lambda l: l == "python3 tools/validate/" + QUALITY_GATES_PR.script + " "
+    + " ".join(QUALITY_GATES_PR.ci_args),
+    lambda l: l == "else",
+    _is_echo,
+    lambda l: l == "fi",
+)
 _VALIDATOR_CALL = re.compile(r"^python3 (tools/validate/[\w-]+\.py)(.*)$")
 
 
 def _line_reproduced(job: str, step: dict, line: str, pytest_args: List[List[str]]) -> bool:
-    """Whether pr-ready runs `line`, or `line` is plumbing that checks nothing."""
+    """Whether pr-ready runs `line`, or `line` is plumbing that checks nothing.
+    (The quality-gates step is matched whole, by `_qg_step_matches`.)"""
     name = step.get("name", "")
-    if any(p.fullmatch(line) for p in _PLUMBING):
+    if line in _PLUMBING or line in _PIP_INSTALLS or _is_echo(line):
         return True
-    if _ECHO.fullmatch(line) and "$(" not in line:
-        return True
-    if job == "validate" and line == "exit 1":
+    if job == "validate" and line == "exit 1" and str(step.get("if", "")).strip() == _AGGREGATE_IF:
         return True   # the aggregate gate failing on a dependency's result
-    if name == QUALITY_GATES_STEP:
-        if any(p.fullmatch(line) for p in _QG_PLUMBING):
-            return True
-        if line == "python3 tools/validate/" + QUALITY_GATES_PR.script + " " + \
-                " ".join(QUALITY_GATES_PR.ci_args):
-            return True
     if line in _RUNNER_CALLS:
         return True
     if line == "pip-audit":
@@ -248,23 +293,36 @@ def ci_lines_not_reproduced(repo_root: Path) -> List[str]:
     plumbing, as `job / step: line`. Empty means the CI-superset claim holds."""
     wf = _workflow(repo_root)
     pytest_args = pytest_invocations(repo_root)
-    missing = []
+    missing = [f"workflow key {k!r}" for k in wf if k not in _WORKFLOW_KEYS]
     for job_name, job in _jobs(wf).items():
-        job = job or {}
+        job = job if isinstance(job, dict) else {}
         if job_name not in KNOWN_JOBS:
             missing.append(f"job {job_name!r} (not one pr-ready knows)")
             continue
         if str(job.get("if", "")).strip() == SCHEDULE_ONLY:
             continue
+        missing += [f"{job_name}: job key {k!r}" for k in job if k not in _JOB_KEYS]
         for step in job.get("steps") or []:
+            step = step if isinstance(step, dict) else {}
             label = f"{job_name} / {step.get('name') or step.get('uses') or '?'}"
+            missing += [f"{label}: step key {k!r}" for k in step if k not in _STEP_KEYS]
             uses = step.get("uses")
             if uses and not str(uses).startswith(_USES_PLUMBING):
                 missing.append(f"{label}: uses {uses}")
-            for line in _code_lines(step.get("run", "")):
+            lines = _code_lines(step.get("run", ""))
+            if step.get("name") == QUALITY_GATES_STEP:
+                if not _qg_step_matches(lines):
+                    missing.append(f"{label}: the step is not CI's scoped gate as pr-ready runs "
+                                   f"it: {' / '.join(lines)}")
+                continue
+            for line in lines:
                 if not _line_reproduced(job_name, step, line, pytest_args):
                     missing.append(f"{label}: {line}")
     return missing
+
+
+def _qg_step_matches(lines: List[str]) -> bool:
+    return len(lines) == len(_QG_BODY) and all(match(l) for match, l in zip(_QG_BODY, lines))
 
 
 def _matrix_versions(wf: dict) -> List[str]:
@@ -286,11 +344,12 @@ def _suite_setting(wf: dict) -> Tuple[str, str]:
 
 # ---------------------------------------------------------------- execution ---
 
-def _run_command(argv: Sequence[str], repo_root: Path) -> Tuple[int, str, float]:
+def _run_command(argv: Sequence[str], repo_root: Path,
+                 env: Optional[dict] = None) -> Tuple[int, str, float]:
     """Run a non-validator command (pytest, pip-audit): (exit code, output, seconds)."""
     started = time.monotonic()
     proc = subprocess.run(list(argv), cwd=repo_root, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+                          encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, env=env)
     return proc.returncode, (proc.stdout or "") + (proc.stderr or ""), \
         round(time.monotonic() - started, 2)
 
@@ -346,33 +405,58 @@ def _pip_audit(python: str, repo_root: Path, report: rc.Reporter) -> Result:
     return result
 
 
-def _skips(output: str) -> List[str]:
-    skips = []
-    for line in output.splitlines():
+def _skips(clean: str) -> List[Tuple[int, str]]:
+    """(count, "path:line: reason") for each `SKIPPED [n] ...` line."""
+    found = []
+    for line in clean.splitlines():
         m = _SKIP_LINE.match(line.strip())
         if m:
-            count = int(m.group(1))
-            skips.append(f"{m.group(2)}: {m.group(3)}" + (f" (x{count})" if count > 1 else ""))
-    return skips
+            found.append((int(m.group(1)), f"{m.group(2)}: {m.group(3)}"))
+    return found
+
+
+def _skip_problems(clean: str, listed: int) -> List[str]:
+    """Why the skip list cannot be trusted, if it cannot. Fail closed: a missing
+    stats line, or a skipped count the -rs report does not add up to (colour, a
+    `--no-summary`, a reporting plugin), is unverifiable, never zero."""
+    stats = [l.strip() for l in clean.splitlines() if _STATS_LINE.match(l.strip())]
+    if not stats:
+        return ["pytest's closing stats line was not found, so skipped tests cannot be counted"]
+    m = _STATS_SKIPPED.search(stats[-1])
+    reported = int(m.group(1)) if m else 0
+    if reported != listed:
+        return [f"pytest reported {reported} skipped but its -rs report lists {listed}, so "
+                "skipped tests cannot be verified"]
+    return []
+
+
+def _pytest_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
 
 
 def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result]:
     results = []
     for args in pytest_invocations(repo_root):
-        # `-rs` only adds the skip report; what runs is CI's invocation.
-        code, output, seconds = _run_command([python, "-m", "pytest", *args, "-rs"], repo_root)
-        skips = _skips(output)
-        missing = [s for s in skips if any(m in s for m in _MISSING_MODULE)]
+        # `-rs --color=no` only change reporting (every skip, uncoloured even under
+        # FORCE_COLOR / PY_COLORS); PYTEST_ADDOPTS is dropped, as CI sets none.
+        code, output, seconds = _run_command(
+            [python, "-m", "pytest", *args, "-rs", "--color=no"], repo_root, env=_pytest_env())
+        clean = _ANSI.sub("", output)
+        found = _skips(clean)
+        skips = [text + (f" (x{n})" if n > 1 else "") for n, text in found]
+        missing = [s for s in skips if _MISSING_MODULE.search(s)]
+        problems = _skip_problems(clean, sum(n for n, _ in found))
         # Exit code, not the summary: a failing run's summary still contains "passed".
-        status = "PASS" if code == 0 and not missing else "FAIL"
+        status = "PASS" if code == 0 and not missing and not problems else "FAIL"
         result = {"id": "pytest " + " ".join(args), "status": status, "seconds": seconds,
-                  "output_tail": rc._tail(output, rc._KEEP_PREFIXES + ("SKIPPED",)),
-                  "skips": skips, "missing": missing}
+                  "output_tail": rc._tail(clean, rc._KEEP_PREFIXES + ("SKIPPED",)),
+                  "skips": skips, "missing": missing, "problems": problems}
         results.append(result)
-        if missing and code == 0:
-            output = ("FAIL  tests skipped for a missing module (CI installs it):\n"
-                      + "\n".join(f"  {s}" for s in missing) + "\n" + output)
-        report(result, output)
+        notes = [f"FAIL  {p}" for p in problems]
+        if missing:
+            notes.append("FAIL  tests skipped for a missing module (CI installs it):")
+            notes += [f"  {s}" for s in missing]
+        report(result, "\n".join(notes + [clean]) if notes else clean)
     return results
 
 
@@ -407,7 +491,8 @@ def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
     items += [
         "pytest ran as `python -m pytest`, which puts the repo root first on sys.path; CI "
         "runs the bare `pytest` script, which does not, so a test importing a top-level "
-        "name can pass here and fail there. `-rs` was added to report skips.",
+        "name can pass here and fail there. `-rs --color=no` was added to report every "
+        "skip, and PYTEST_ADDOPTS (if set) was dropped, as CI sets none.",
         "CI's fresh dependency install (`pip install -e tools/ts-cli[snowflake,qlik,xlsx]`): "
         "here the checks ran with this interpreter's packages, this checkout's "
         "`tools/ts-cli` first on PYTHONPATH.",
@@ -433,10 +518,14 @@ def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
 
 # ------------------------------------------------------------------- --post ---
 
+#: The gh executable (a constant so a test can name one that does not exist).
+GH = "gh"
+
+
 def _gh(args: Sequence[str]) -> Tuple[int, str, str]:
     """Run gh: (exit code, stdout, stderr). The only door to GitHub."""
     try:
-        proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+        proc = subprocess.run([GH, *args], capture_output=True, text=True)
     except FileNotFoundError:
         return 127, "", "gh is not installed"
     return proc.returncode, proc.stdout, proc.stderr
@@ -502,6 +591,9 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
     python = python or sys.executable or "python3"
 
     try:
+        # Replace any earlier block first: a run that stops early (exit 2, a crash,
+        # Ctrl-C) must not leave a previous READY block looking current.
+        evidence.write(evidence.UNFINISHED, repo_root)
         remote = rc.resolve_upstream(repo_root)
         # In full: a local branch or tag named `<remote>/main` shadows the short name.
         base_ref = f"refs/remotes/{remote}/main"
@@ -562,7 +654,15 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
         elif dirty:
             refusal = "the tree is dirty, so the head SHA does not describe what was checked"
         else:
-            refusal = _post(args.post, path, head_sha)
+            # The run takes minutes: a commit or an edit made meanwhile would make the
+            # block describe code that is no longer what is there.
+            now_head = rc._git(repo_root, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+            now_dirty = rc._git(repo_root, "status", "--porcelain").stdout.strip()
+            if now_head != head_sha or now_dirty:
+                refusal = ("the head or the work tree changed during the run; re-run on the "
+                           "final state")
+            else:
+                refusal = _post(args.post, path, head_sha)
         if refusal:
             print(f"pr-ready: not posting to PR #{args.post}: {refusal}", file=sys.stderr)
             code = 1
