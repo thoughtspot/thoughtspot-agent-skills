@@ -17,6 +17,12 @@
 
 # CI, where the gate is the backstop for --no-verify and uninstalled hooks.
 /.github/workflows/validate.yml                              @djwaldo
+# The single check list CI runs and the runner that runs it: dropping an entry, or
+# marking one soft, removes a CI gate without touching the workflow.
+/tools/validate/checks.py                                    @djwaldo
+/tools/validate/run_checks.py                                @djwaldo
+# The contributor's pre-PR run of the same list.
+/scripts/pr-ready.sh                                         @djwaldo
 
 # The SessionStart hook that warns when the git hooks are missing.
 /.claude/settings.json                                       @djwaldo

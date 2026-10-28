@@ -20,10 +20,12 @@ This module is data only. Each `Check` records:
 - `precommit_label` / `precommit_args` — the matching `run_check` in pre-commit,
   if there is one.
 
-`tools/validate/tests/test_checks_parity.py` reads the committed workflow and
-hook and fails on any line this list does not account for. Where pre-commit
-deliberately differs from CI (usually `--staged`, or no `--base` because the
-hook has no reliable `origin/main`), the difference is declared in `KNOWN_DRIFT`;
+CI's full-repo and smoke steps run this list through `run_checks.py`;
+`tools/validate/tests/test_checks_parity.py` pins each step to exactly that
+call, and reads the committed pre-commit hook and fails on any line this list
+does not account for. Where pre-commit deliberately differs from CI (usually
+`--staged`, or no `--base` because the hook has no reliable `origin/main`), the
+difference is declared in `KNOWN_DRIFT`;
 `run_check` calls that are not CI full-repo checks are in `PRECOMMIT_ONLY`, and
 validators the hook runs outside `run_check` are in `PRECOMMIT_UNMANAGED`. All
 three carry a one-line reason, and the parity test rejects entries that have

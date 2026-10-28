@@ -10,7 +10,7 @@ auditing coverage from the docs. There are three tiers, not two:
 
 | Tier | Needs | Runs in CI |
 |---|---|---|
-| **Pure** | nothing — plain Python | Yes, five of them (see `.github/workflows/validate.yml`) |
+| **Pure** | nothing — plain Python | Yes, the ones in `CI_SMOKES` (`tools/validate/checks.py`) |
 | **CLI-only** | `ts` on `PATH`, **no credentials** | No (could) |
 | **Live** | `ts` + a configured profile for the named platform(s) | No |
 

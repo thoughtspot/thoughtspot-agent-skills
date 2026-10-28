@@ -45,86 +45,21 @@ jobs:
         run: pip-audit
 
       - name: Run validators (full-repo mode)
+        # The validators are listed once, in tools/validate/checks.py (CHECKS, in run
+        # order). run_checks.py runs every one with CI's exact args (some import
+        # ts_cli, e.g. the flag cross-check, hence the install above), keeps going
+        # past a failure so one run reports them all (PR #505: three stale registries
+        # took three round trips under a `set -e` chain), and exits 1 at the end if
+        # any hard check failed. A soft check (the quality-gates catalog, hard-gated
+        # by the PR-scoped step below) prints WARN and never fails the step.
+        # Contributors run the same list locally with `--context local`.
+        # tools/validate/tests/test_checks_parity.py pins this step to exactly the
+        # call below. Credential-free smoke suites run in their own step at the end
+        # of this job; the ones needing live ThoughtSpot / Snowflake credentials run
+        # via scripts/pre-push.sh, not in CI.
         run: |
           set -e
-          # Every validator below appends `|| rc=1` rather than aborting: a single
-          # `set -e` chain reports only its FIRST failure, so a PR with three stale
-          # registries needed three round trips to discover all three (PR #505). The
-          # `|| rc=1` form is also why `set -e` stays — it exempts these lines only,
-          # so any future non-validator command still aborts as before.
-          rc=0
-          # Smoke tests are intentionally excluded — they need live ThoughtSpot /
-          # Snowflake credentials and run via scripts/pre-push.sh, not in CI.
-          python3 tools/validate/check_secrets.py --root . --all || rc=1
-          python3 tools/validate/check_customer_references.py --root . --all || rc=1
-          python3 tools/validate/check_references.py --root . || rc=1
-          python3 tools/validate/check_patterns.py --root . || rc=1
-          python3 tools/validate/check_version_sync.py --root . --base origin/main || rc=1
-          python3 tools/validate/check_module_health.py --root . || rc=1
-          python3 tools/validate/check_python_redefinitions.py --root . || rc=1
-          python3 tools/validate/check_file_size.py --root . || rc=1
-          python3 tools/validate/check_yaml.py --root . || rc=1
-          python3 tools/validate/check_sv_yaml.py --root . || rc=1
-          python3 tools/validate/check_tml.py --root . || rc=1
-          python3 tools/validate/check_consistency.py --root . || rc=1
-          python3 tools/validate/check_skill_versions.py --root . || rc=1
-          python3 tools/validate/check_smoke_tests.py --root . || rc=1
-          python3 tools/validate/check_skill_naming.py --root . || rc=1
-          python3 tools/validate/check_skill_context_cost.py --root . || rc=1
-          python3 tools/validate/check_runtime_coverage.py --root . || rc=1
-          python3 tools/validate/check_open_items.py --root . --warn || rc=1
-          # Filesystem-state gates that previously ran ONLY in pre-commit (bypassable
-          # via --no-verify with no server-side catch). They derive purely from repo
-          # contents, so they work in a clean CI checkout.
-          python3 tools/validate/check_coverage_matrix.py --root . --base origin/main || rc=1
-          python3 tools/validate/check_formula_catalog.py --root . || rc=1
-          python3 tools/validate/check_converter_parity.py --root . || rc=1
-          python3 tools/validate/check_mapping_code_sync.py --root . || rc=1
-          python3 tools/validate/check_harness_routing.py --root . || rc=1
-          python3 tools/validate/check_no_v1_endpoints.py --root . || rc=1
-          python3 tools/validate/check_lint_invariant_list.py --root . --base origin/main || rc=1
-          python3 tools/validate/check_no_inline_tml_gate.py --root . || rc=1
-          python3 tools/validate/check_i7_gate.py --root . || rc=1
-          python3 tools/validate/check_open_item_citations.py --root . || rc=1
-          python3 tools/validate/check_skill_cli_usage.py --root . || rc=1
-          # 2026-07-03 audit-harvest validators (see .claude/rules/repo-audit.md).
-          python3 tools/validate/check_no_inline_requests.py --root . || rc=1
-          python3 tools/validate/check_pagination_convention.py --root . || rc=1
-          python3 tools/validate/check_slash_command_refs.py --root . || rc=1
-          python3 tools/validate/check_orphan_references.py --root . || rc=1
-          # Needs ts_cli's own typer command tree (installed above) to cross-check
-          # SKILL.md `--flag` references against the real, registered CLI options.
-          python3 tools/validate/check_skill_flag_usage.py --root . || rc=1
-          # Presence gate: every shared mapping/schema must carry a currency anchor
-          # (staleness is soft and never fails — only missing/malformed anchors do).
-          python3 tools/validate/check_mapping_currency.py --root . --check || rc=1
-          # Cross-REPO: needs an apache/ossie checkout, which CI does not have, so
-          # this reports "skipping" and exits 0 there. It earns its keep locally and
-          # in the sweep; running it here keeps it from silently rotting.
-          python3 tools/validate/check_ossie_mapping_sync.py --root . --check || rc=1
-          python3 tools/validate/generate_open_items_index.py --root . --check || rc=1
-          python3 tools/validate/generate_agentql_offline.py --root . --check || rc=1
-          # AgentQL Quest must keep matching the captured lesson SQL it is built from.
-          python3 tools/validate/check_agentql_quest.py --root . || rc=1
-          python3 tools/validate/check_mirror_sync.py || rc=1
-          python3 tools/validate/generate_parity.py --check || rc=1
-          # Internal-import + repo-hygiene gates (2026-07-29 audit findings 4.2/1.1/1.2).
-          python3 tools/validate/check_internal_imports.py --root . || rc=1
-          # `ts audit` rule catalog (YAML) — vocabulary, ids, overrides, band order, examples,
-          # the generated check-catalog.md, and rule-id history: an id on main may be
-          # retired, never deleted or reused (fetch-depth: 0 above makes origin/main local).
-          python3 tools/validate/check_audit_catalog.py --root . --base origin/main || rc=1
-          python3 tools/validate/check_repo_hygiene.py --root . || rc=1
-          python3 tools/validate/check_backlog_integrity.py --root . --base origin/main || rc=1
-          # Quality gates catalog — soft baseline check here (the catalog includes
-          # git-log dates that shift when any validator is touched by a contributor
-          # PR, so a hard gate on every PR would force every contributor to
-          # regenerate it). The PR-scoped step below promotes this to a HARD gate
-          # when a PR actually touches the catalog's own sources of truth (audit
-          # finding 7.1) — see that step for why CI was previously weaker than
-          # pre-commit here.
-          python3 tools/validate/generate_quality_gates.py --root . --check || echo "WARN  quality-gates.md is stale (non-blocking in CI)"
-          exit $rc
+          python3 tools/validate/run_checks.py --context ci --base origin/main
 
       - name: Open-items gate (PR only)
         # Scoped hard mode: only fails on unresolved items in open-items.md files
@@ -184,9 +119,10 @@ jobs:
 
       - name: Quality gates catalog gate (PR only, scoped hard-fail)
         # 2026-07-29 audit finding 7.1: the catalog check above is the only gate where
-        # CI was WEAKER than the pre-commit hook (soft `|| echo WARN` in CI vs. a hard
-        # `run_check` locally) — inverting the design principle that CI is the
-        # server-side superset of pre-commit. Fixed with the same --base PR-scoping
+        # CI was WEAKER than the pre-commit hook (soft in CI — `|| echo WARN` then,
+        # `hard=False` in checks.py now — vs. a hard `run_check` locally) —
+        # inverting the design principle that CI is the server-side superset of
+        # pre-commit. Fixed with the same --base PR-scoping
         # pattern the changelog and open-items gates above already use: fetch the PR's
         # base ref, diff this PR's changes against it, and hard-fail ONLY when the PR
         # touched one of the catalog's own sources of truth (pre-commit.sh, this
@@ -246,15 +182,11 @@ jobs:
         # agents/(cli|claude)/<skill>/ paths. So a PR editing only ts_cli/publish_plan.py
         # — the exact engine they guard — ran none of them, anywhere (audit 6.x).
         # Invoked directly, not via pytest: they are scripts with their own runners.
+        # The suites are CI_SMOKES in tools/validate/checks.py; the runner runs every
+        # one even after a failure and exits 1 at the end if any failed.
         if: ${{ !cancelled() }}
         run: |
-          for s in smoke_ts_publish_orgs smoke_ts_security_columns \
-                   smoke_ts_setup_tenancy smoke_ts_migrate_orgs \
-                   smoke_ts_object_model_alias \
-                   smoke_ts_convert_from_dbt smoke_ts_convert_to_dbt; do
-            echo "--- $s"
-            python3 "tools/smoke-tests/$s.py"
-          done
+          python3 tools/validate/run_checks.py --smokes
 
   # Cross-version pytest matrix. The `suite` job above runs the full suite on 3.12; this
   # job re-runs ONLY the unit/validator tests on the rest of the declared support range
@@ -300,7 +232,7 @@ jobs:
   # `contains(needs.*.result, ...)` rather than naming each job: it covers any job added to
   # `needs:` later, which is the whole failure mode being fixed. (It is NOT because a
   # hyphenated name needs escaping — `needs.pytest-matrix.result` is perfectly valid; dot
-  # dereference allows `-`, as line 218's `matrix.python-version` demonstrates. An earlier
+  # dereference allows `-`, as `matrix.python-version` above demonstrates. An earlier
   # version of this comment claimed otherwise. The trade-off is real though: the wildcard
   # form over `needs` is undocumented, while the dot form is documented.)
   #

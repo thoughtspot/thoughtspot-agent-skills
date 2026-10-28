@@ -1,24 +1,27 @@
 """Parity tests pinning `checks.py` to the two places that actually run checks.
 
-`checks.CHECKS` is meant to be the list of validators CI's full-repo step runs on
-every PR. It only earns that title if it cannot drift from what CI and pre-commit
-really run, so these tests read the committed `.github/workflows/validate.yml` and
-`scripts/pre-commit.sh` and fail on any line the list does not account for:
+`checks.CHECKS` is the list of validators CI's full-repo step runs on every PR,
+and `checks.CI_SMOKES` the smoke suites its smoke step runs. CI reads both
+through `run_checks.py`, so on the workflow side these tests pin the CALL, not a
+list of lines: each step's shell body must be exactly the runner call (the
+full-repo step may open with `set -e`) — no `|| true`, no `exit 0`, no
+`set +e`, no `if false` wrapper, no extra args, no validator beside it — and
+nothing around the step (`continue-on-error`, a new `if:`, a custom `shell:`,
+`defaults`, the job's own `if:`) may stop it gating while the call stays put.
 
-- every `python3 tools/validate/X.py ARGS` in CI's full-repo step is exactly one
-  `Check` (script + args + hard/soft), and every `Check` is in that step;
+Pre-commit does not read the list yet, so it is pinned line by line:
+
 - every `run_check "LABEL" "tools/validate/X.py ARGS"` in pre-commit is a `Check`
   carrying that label and those args, or is in `PRECOMMIT_ONLY` with a reason;
 - every validator pre-commit runs OUTSIDE run_check is in `PRECOMMIT_UNMANAGED`;
 - pre-commit args that differ from CI's are declared in `KNOWN_DRIFT`, so a
-  difference is a recorded decision rather than an accident;
-- `CI_SMOKES` is the workflow's smoke loop.
+  difference is a recorded decision rather than an accident.
 
 Every guard fails loud on a line it cannot parse rather than skipping it: a test
 that silently ignores an unrecognised shape is exactly the drift it exists to
-catch. Once CI calls `run_checks.py` instead of listing validators, the workflow
-side switches to asserting that call — exactly, with nothing else beside it and
-nothing (`continue-on-error`, a new `if:`) able to neutralise the step.
+catch. There is deliberately no fallback for the old explicit-line workflow
+form: a validator listed inline in the workflow again would bypass the list, so
+that form now fails here rather than being compared against it.
 """
 from __future__ import annotations
 
@@ -37,16 +40,27 @@ PRECOMMIT = REPO_ROOT / "scripts" / "pre-commit.sh"
 VALIDATE_DIR = REPO_ROOT / "tools" / "validate"
 
 JOB = "suite"
+# The suite job's own guard, as it is today: skip only on the weekly cron. A wider
+# condition would skip every step below on PRs while each step still looks right.
+JOB_GUARD = "github.event_name != 'schedule'"
 FULL_REPO_STEP = "Run validators (full-repo mode)"
 SMOKE_STEP = "Run credential-free smoke suites"
 PYTEST_STEP = "Run unit + validator tests"
 RUNNER_CI_CALL = "python3 tools/validate/run_checks.py --context ci --base origin/main"
 RUNNER_SMOKES_CALL = "python3 tools/validate/run_checks.py --smokes"
+# Each step's whole shell body, comments and blanks aside. `set -e` is harmless
+# before a single command and is all the full-repo step may add.
+STEP_BODIES = {
+    FULL_REPO_STEP: ([RUNNER_CI_CALL], ["set -e", RUNNER_CI_CALL]),
+    SMOKE_STEP: ([RUNNER_SMOKES_CALL],),
+}
 # The only step-level guard each step may carry: what it has today. A new `if:` or
 # `continue-on-error` would let the step stop gating without any line changing.
 STEP_GUARDS = {FULL_REPO_STEP: None, SMOKE_STEP: "${{ !cancelled() }}"}
+# The only keys each step may have. `shell:` (e.g. `bash -c "exit 0" {0}`),
+# `env:` or `working-directory:` could each change what the call does.
+STEP_KEYS = {FULL_REPO_STEP: {"name", "run"}, SMOKE_STEP: {"name", "if", "run"}}
 
-_CI_LINE = re.compile(r"^python3 tools/validate/(?P<script>\S+\.py)(?P<rest>.*)$")
 _RUN_CHECK = re.compile(
     r'\brun_check\s+"(?P<label>[^"]+)"\s+"tools/validate/(?P<script>[^"\s]+\.py)(?P<args>[^"]*)"'
 )
@@ -57,9 +71,12 @@ _RUN_CHECK_DEF = re.compile(r"^\s*run_check\(\)")
 _VALIDATOR_PATH = re.compile(r"tools/validate/(?P<script>[\w-]+\.py)")
 
 
+def _workflow() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
 def _job() -> dict:
-    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return doc["jobs"][JOB]
+    return _workflow()["jobs"][JOB]
 
 
 def _step(name: str) -> dict:
@@ -76,48 +93,6 @@ def _code_lines(run: str) -> list[str]:
         line = raw.strip()
         if line and not line.startswith("#"):
             out.append(line)
-    return out
-
-
-def _uses_runner(lines: list[str]) -> bool:
-    return any("tools/validate/run_checks.py" in line for line in lines)
-
-
-def _assert_exact_runner_call(lines: list[str], expected: str, step: str) -> None:
-    """In runner form the step's ONLY tools/validate/ line must be `expected`, verbatim:
-    no `|| true`, no `--only`, no extra args, no unlisted validator beside it."""
-    validator_lines = [line for line in lines if "tools/validate/" in line]
-    assert validator_lines == [expected], (
-        f"{step!r} must call exactly {expected!r} and no other tools/validate/ script; "
-        f"found {validator_lines}"
-    )
-
-
-def _ci_validator_lines(lines: list[str]) -> list[tuple[str, tuple[str, ...], bool]]:
-    """(script, args, hard) for each `python3 tools/validate/...` line.
-
-    The trailing shell is not an argument. `|| rc=1` is a hard check (it fails the
-    step at the end); `|| echo ...` is a soft one (it never does). Any other shape —
-    no suffix, `|| true`, `|| :`, another interpreter spelling — fails, because the
-    test could not otherwise say whether the line gates.
-    """
-    out = []
-    for line in lines:
-        if "tools/validate/" not in line:
-            continue
-        m = _CI_LINE.match(line)
-        assert m, f"unrecognised validator line in {FULL_REPO_STEP!r}: {line}"
-        rest = m.group("rest")
-        assert "||" in rest, f"validator line must end `|| rc=1` (hard) or `|| echo ...` (soft): {line}"
-        rest, suffix = rest.split("||", 1)
-        suffix = suffix.strip()
-        if suffix == "rc=1":
-            hard = True
-        elif suffix.startswith("echo"):
-            hard = False
-        else:
-            raise AssertionError(f"validator line suffix must be `|| rc=1` or `|| echo ...`, got `|| {suffix}`: {line}")
-        out.append((m.group("script"), tuple(shlex.split(rest)), hard))
     return out
 
 
@@ -176,50 +151,31 @@ def test_step_cannot_be_neutralised(name):
     assert step.get("if") == STEP_GUARDS[name], (
         f"{name!r} has `if: {step.get('if')}`; expected {STEP_GUARDS[name]!r}"
     )
-    assert "continue-on-error" not in _job(), f"job {JOB!r} has continue-on-error"
+    assert set(step) == STEP_KEYS[name], (
+        f"{name!r} has keys {sorted(step)}; expected exactly {sorted(STEP_KEYS[name])}"
+    )
 
 
-def test_every_ci_validator_line_is_listed():
-    lines = _code_lines(_step(FULL_REPO_STEP)["run"])
-    if _uses_runner(lines):
-        # CI reads the list itself, so there is nothing left to compare line by line.
-        _assert_exact_runner_call(lines, RUNNER_CI_CALL, FULL_REPO_STEP)
-        return
-
-    ci_lines = _ci_validator_lines(lines)
-    assert ci_lines, f"no validator lines found in {FULL_REPO_STEP!r}"
-    # `|| rc=1` only gates because the step ends by exiting with it.
-    assert lines[-1] == "exit $rc", f"{FULL_REPO_STEP!r} must end with `exit $rc`, ends with {lines[-1]!r}"
-    listed = {(c.script, c.ci_args): c for c in checks.CHECKS}
-
-    missing = [(s, a) for s, a, _ in ci_lines if (s, a) not in listed]
-    assert not missing, f"CI runs validators that checks.CHECKS does not list: {missing}"
-
-    ci_keys = [(s, a) for s, a, _ in ci_lines]
-    dupes = sorted({k for k in ci_keys if ci_keys.count(k) > 1})
-    assert not dupes, f"CI runs the same validator line twice: {dupes}"
-
-    extra = [c.id for c in checks.CHECKS if (c.script, c.ci_args) not in set(ci_keys)]
-    assert not extra, f"checks.CHECKS lists validators CI's full-repo step does not run: {extra}"
-
-    wrong_hard = [
-        (s, hard) for s, a, hard in ci_lines if listed[(s, a)].hard != hard
-    ]
-    assert not wrong_hard, f"Check.hard disagrees with CI's `|| rc=1` / `|| echo` form: {wrong_hard}"
+def test_suite_job_cannot_be_neutralised():
+    job = _job()
+    assert "continue-on-error" not in job, f"job {JOB!r} has continue-on-error"
+    assert job.get("if") == JOB_GUARD, f"job {JOB!r} has `if: {job.get('if')}`; expected {JOB_GUARD!r}"
+    # A default `shell:` at either level applies to every `run:` step without
+    # appearing on the step itself.
+    assert "defaults" not in job, f"job {JOB!r} has `defaults:`"
+    assert "defaults" not in _workflow(), "the workflow has top-level `defaults:`"
 
 
-def test_ci_smokes_match_workflow():
-    run = _step(SMOKE_STEP)["run"]
-    lines = _code_lines(run)
-    if _uses_runner(lines):
-        _assert_exact_runner_call(lines, RUNNER_SMOKES_CALL, SMOKE_STEP)
-        return
-    joined = run.replace("\\\n", " ")
-    m = re.search(r"for s in (?P<suites>.*?);\s*do", joined, re.S)
-    assert m, f"no `for s in ...; do` loop in {SMOKE_STEP!r}"
-    workflow_suites = tuple(m.group("suites").split())
-    assert workflow_suites == checks.CI_SMOKES, (
-        f"CI_SMOKES {checks.CI_SMOKES} != workflow loop {workflow_suites}"
+@pytest.mark.parametrize("name", sorted(STEP_BODIES))
+def test_step_body_is_exactly_the_runner_call(name):
+    """CI reads the list through the runner, so there is nothing left to compare
+    line by line — but only if the call is the step's whole body. Anything beside
+    it (`|| true`, `exit 0`, `set +e`, an `if false; then` wrapper, an inline
+    validator, `--only`) could keep the call present while the step stops gating
+    or runs a different list."""
+    lines = _code_lines(_step(name)["run"])
+    assert lines in [list(b) for b in STEP_BODIES[name]], (
+        f"{name!r} must be exactly one of {list(STEP_BODIES[name])} (comments aside); found {lines}"
     )
 
 
