@@ -339,6 +339,7 @@ are roughly ordered by value÷effort.
 | BL-420 | No changed-lines size warning: `check_pr_size.py` warns only at 150 added files or 2 MB of non-code assets, where spec C7 assumed about 1,500 changed lines | 2026-11-30 |
 | BL-422 | No subprocess timeout in `run_checks.py` or `pr_ready.py` (a hung check holds CI to the job limit, pr-ready forever), and two smoke runners with different SKIP rules | 2026-11-30 |
 | BL-423 | pr-ready's scoped quality-gates trigger reads `git diff --name-only` with `splitlines()` (quoted non-ASCII paths never match, odd separators split a path), and the evidence scrub misses `/users/<name>` and `c:/users/<name>` | 2026-11-30 |
+| BL-424 | pre-commit's main-branch skill audit aborts the commit with no message: under `set -euo pipefail` its `ADDING`/`REMOVING`/`UPDATING` assignments fail whenever their `grep` matches nothing, so the inventory and prompt are never reached | 2026-11-30 |
 
 ### Tier 4 — Deferred
 
@@ -14984,5 +14985,33 @@ PR.
 
 **Do.** Read the diff with `-z` and split on NUL, in pr-ready and in CI's step together; make
 the scrub case-insensitive and accept `/` in the Windows form; a test for each.
+
+**Target:** 2026-11-30.
+
+## BL-424 — pre-commit's main-branch skill audit aborts silently under pipefail `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** found while fixing BL-402 gap 1 in the PR-quality build's
+final fix wave; pre-existing on `main`.
+
+**What.** On a commit to `main` that stages anything under `agents/(cli|claude|coco-snowsight)/`,
+`scripts/pre-commit.sh` builds the skill inventory with three assignments of the shape
+`ADDING=$(git diff --cached --name-only --diff-filter=A | grep -E '…SKILL\.md$' | sed … | sort)`.
+The hook runs under `set -euo pipefail`, so when a `grep` matches nothing the pipeline fails,
+the assignment fails, and `set -e` ends the hook with exit 1 before the inventory, the prompt or
+any message is printed. `ADDING` fails unless the commit adds a SKILL.md, `REMOVING` unless it
+deletes one, and `UPDATING` unless it touches a skill that is neither: the prompt is reached only
+by a commit that adds one SKILL.md, deletes another and edits a third. It fails closed (the
+commit to `main` is refused), but with no reason given, and the audit it exists for never shows.
+
+**Reproduction** (the hook's own pipeline, git's output replaced by `printf`), on /bin/bash 3.2:
+`set -euo pipefail; ADDING=$(printf 'agents/cli/ts-x/references/a.md\n' | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' | sed 's|agents/||;s|/SKILL\.md||' | sort); echo reached`
+exits 1 and never prints `reached`. With `|| true` after the assignment it prints `reached`,
+with `ADDING` empty.
+
+**Do.** End each of the three assignments with `|| true` (the variable keeps the substitution's
+output, empty here), or give each `grep` its own `|| true` inside the pipeline; the `-vxF`
+filters in `UPDATING` can read a here-string instead, as the triggers do. Add a test that drives
+the block on a `main` branch with a commit editing one existing skill and asserts the inventory
+lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Target:** 2026-11-30.
