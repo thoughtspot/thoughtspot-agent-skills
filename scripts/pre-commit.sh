@@ -23,6 +23,10 @@ echo "Running pre-commit checks..."
 echo ""
 
 FAILED=0
+# Skipped checks are counted separately so the final line never reads as an
+# unqualified pass when a check checked nothing (see run_check).
+SKIPPED=0
+SKIPPED_LABELS=""
 
 # ── Timing budget ────────────────────────────────────────────────────────────
 # Every check's duration is printed inline and the suite total is checked
@@ -94,6 +98,8 @@ run_check() {
       printf "SKIP "
       _record_duration "$label" "$t0"
       echo "$output" | grep -E '^SKIP' | sed 's/^/    /'
+      SKIPPED=$((SKIPPED + 1))
+      SKIPPED_LABELS="${SKIPPED_LABELS:+$SKIPPED_LABELS, }$label"
     else
       printf "PASS "
       _record_duration "$label" "$t0"
@@ -105,6 +111,15 @@ run_check() {
     _record_duration "$label" "$t0"
     echo "$output" | sed 's/^/    /'
     FAILED=$((FAILED + 1))
+  fi
+}
+
+# The closing line. A skip must stay visible here too, not only in its own row above.
+_summary_line() {
+  if [ "$SKIPPED" -gt 0 ]; then
+    echo "All checks passed ($SKIPPED skipped: $SKIPPED_LABELS)."
+  else
+    echo "All checks passed."
   fi
 }
 
@@ -567,4 +582,4 @@ if [ "$CURRENT_BRANCH" = "main" ] && echo "$STAGED" | grep -qE '^agents/(cli|cla
   echo ""
 fi
 
-echo "All checks passed."
+_summary_line

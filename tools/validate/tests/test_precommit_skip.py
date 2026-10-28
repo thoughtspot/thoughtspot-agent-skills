@@ -12,6 +12,7 @@ shipped function rather than a copy of it.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -23,18 +24,25 @@ _EXTRACT = (
     r"sed -n -e '/^_now_ms()/p' "
     r"-e '/^_record_duration() {/,/^}/p' "
     r"-e '/^run_check() {/,/^}/p' "
+    r"-e '/^_summary_line() {/,/^}/p' "
 )
 
 
-def _run(tmp_path: Path, stub_body: str) -> tuple[str, str]:
+def _run(tmp_path: Path, stub_body: str, labels: tuple[str, ...] = ("module health",),
+         ) -> tuple[str, str]:
     stub = tmp_path / "fake-python"
     stub.write_text("#!/bin/sh\n" + stub_body)
     stub.chmod(0o755)
+    calls = "".join(
+        f'run_check "{label}" "tools/validate/check_{i}.py --root ."\n'
+        for i, label in enumerate(labels)
+    )
     script = (
         f'eval "$({_EXTRACT} "$HOOK")"\n'
-        "SLOW_CHECK_S=3; SLOW_CHECKS=''; FAILED=0\n"
-        'run_check "module health" "tools/validate/check_x.py --root ."\n'
-        'echo "FAILED=$FAILED"\n'
+        "SLOW_CHECK_S=3; SLOW_CHECKS=''; FAILED=0; SKIPPED=0; SKIPPED_LABELS=''\n"
+        + calls
+        + 'echo "FAILED=$FAILED"\n'
+        "_summary_line\n"
     )
     result = subprocess.run(
         ["bash", "-c", script],
@@ -63,3 +71,24 @@ def test_pass_still_surfaces_note_lines(tmp_path):
     out, _ = _run(tmp_path, "echo 'NOTE  did not check y'\nexit 0\n")
     assert "PASS " in out, out
     assert "    NOTE  did not check y" in out, out
+
+
+def test_summary_names_skipped_checks(tmp_path):
+    # check_0 skips, check_1 passes, check_2 skips: both skips are counted and named.
+    body = 'case "$1" in *check_1.py) exit 0;; esac\necho "SKIP  tool missing"\nexit 0\n'
+    out, _ = _run(tmp_path, body, labels=("module health", "secrets", "py redefinitions"))
+    assert "All checks passed (2 skipped: module health, py redefinitions)." in out, out
+    assert "FAILED=0" in out, out
+
+
+def test_summary_unchanged_when_nothing_skipped(tmp_path):
+    out, _ = _run(tmp_path, "exit 0\n")
+    assert out.rstrip().endswith("All checks passed."), out
+    assert "skipped" not in out, out
+
+
+def test_hook_closes_with_the_summary_function():
+    # The bare string must not come back: the closing line is _summary_line's to print.
+    text = PRE_COMMIT.read_text()
+    assert re.search(r"^_summary_line$", text, re.M), "hook no longer calls _summary_line"
+    assert text.count('echo "All checks passed."') == 1, "a second unqualified pass line"
