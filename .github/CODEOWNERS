@@ -29,6 +29,11 @@
 /tools/validate/pr_ready.py                                  @djwaldo
 /tools/validate/evidence.py                                  @djwaldo
 
+# The pr-ready skill and the reviewer it dispatches: the brief decides what a
+# review looks for, so trimming it removes review areas without touching a gate.
+/.claude/agents/pr-reviewer.md                               @djwaldo
+/.claude/skills/pr-ready/                                    @djwaldo
+
 # The SessionStart hook that warns when the git hooks are missing.
 /.claude/settings.json                                       @djwaldo
 

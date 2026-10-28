@@ -179,3 +179,103 @@ def test_unverifiable_skips_are_listed_as_fail():
     r = _r("pytest a/ -q", "FAIL", problems=["pytest reported 4 skipped but its -rs report lists 0"])
     section = _render(pytest=[r]).split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "skips unverifiable" in section and "counted as FAIL" in section, section
+
+
+# ------------------------------------------------- the pr-ready skill's review ---
+#
+# The skill runs the reviewer after pr-ready.sh and puts its findings in the Review
+# section. Appending must not make the block lie: the review covers a diff, so it
+# belongs only on a block for the same head, and only on a block whose checks ran
+# on that head's committed code.
+
+def _repo(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "f").write_text("x\n")
+    subprocess.run(["git", "add", "f"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                    "commit", "-qm", "c"], cwd=tmp_path, check=True)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_header_reads_back_what_render_wrote():
+    head = evidence.header(_render(dirty=True))
+    assert head == {"head_sha": HEAD, "base_ref": "upstream/main", "base_sha": BASE,
+                    "dirty": True}
+    assert evidence.header(_render())["dirty"] is False
+    assert evidence.header(evidence.UNFINISHED) is None
+
+
+def test_with_review_replaces_the_placeholder_and_keeps_the_rest():
+    before = _render()
+    after = evidence.with_review(before, "### Blocker\n- none\n", head_sha=HEAD)
+    assert before.split("## Review", 1)[0] == after.split("## Review", 1)[0]
+    section = after.split("## Review", 1)[1]
+    assert "Not run." not in section and "### Blocker" in section, section
+    assert HEAD in section and "advisory" in section.lower(), section
+
+
+def test_with_review_twice_replaces_rather_than_stacks():
+    once = evidence.with_review(_render(), "first review", head_sha=HEAD)
+    twice = evidence.with_review(once, "second review", head_sha=HEAD)
+    assert "first review" not in twice and "second review" in twice
+    assert twice.count("## Review") == 1
+
+
+def test_with_review_refuses_another_head():
+    with pytest.raises(ValueError, match="head"):
+        evidence.with_review(_render(), "r", head_sha="c" * 40)
+
+
+def test_with_review_refuses_a_dirty_block():
+    # Its checks ran on uncommitted code the reviewer's diff does not contain.
+    with pytest.raises(ValueError, match="DIRTY"):
+        evidence.with_review(_render(dirty=True), "r", head_sha=HEAD)
+
+
+def test_with_review_refuses_an_unfinished_block():
+    with pytest.raises(ValueError, match="finish"):
+        evidence.with_review(evidence.UNFINISHED, "r", head_sha=HEAD)
+
+
+def test_with_review_scrubs_home_paths():
+    out = evidence.with_review(_render(), "see /Users/alice/x.py:3", head_sha=HEAD)
+    assert "/Users/" not in out and "alice" not in out
+
+
+def test_cli_range_prints_the_shas_the_evidence_names(tmp_path, capsys):
+    head = _repo(tmp_path)
+    evidence.write(_render(head_sha=head), tmp_path)
+    assert evidence.main(["range"], repo_root=tmp_path) == 0
+    assert capsys.readouterr().out.strip() == f"{BASE}...{head}"
+
+
+def test_cli_append_review_writes_into_the_evidence_file(tmp_path):
+    head = _repo(tmp_path)
+    path = evidence.write(_render(head_sha=head), tmp_path)
+    review = tmp_path.parent / f"{tmp_path.name}-review.md"
+    review.write_text("### Nit\n- f:1 something\n", encoding="utf-8")
+    assert evidence.main(["append-review", "--file", str(review)], repo_root=tmp_path) == 0
+    assert "### Nit" in path.read_text(encoding="utf-8").split("## Review", 1)[1]
+
+
+def test_cli_append_review_refuses_when_head_moved(tmp_path, capsys):
+    _repo(tmp_path)
+    path = evidence.write(_render(), tmp_path)        # names HEAD = "a" * 40
+    review = tmp_path.parent / f"{tmp_path.name}-review.md"
+    review.write_text("r\n", encoding="utf-8")
+    assert evidence.main(["append-review", "--file", str(review)], repo_root=tmp_path) == 1
+    assert "Not run." in path.read_text(encoding="utf-8")
+    assert "head" in capsys.readouterr().err
+
+
+def test_cli_append_review_can_target_a_copy(tmp_path):
+    head = _repo(tmp_path)
+    copy = tmp_path.parent / f"{tmp_path.name}-copy.md"
+    copy.write_text(_render(head_sha=head), encoding="utf-8")
+    review = tmp_path.parent / f"{tmp_path.name}-review.md"
+    review.write_text("sample\n", encoding="utf-8")
+    assert evidence.main(["append-review", "--file", str(review), "--evidence", str(copy)],
+                         repo_root=tmp_path) == 0
+    assert "sample" in copy.read_text(encoding="utf-8")
+    assert not evidence.evidence_path(tmp_path).exists()

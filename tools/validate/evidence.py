@@ -22,10 +22,26 @@ It is written to `<git-dir>/pr-ready/evidence.md`: inside the git dir, so never
 tracked and never seen by `check_repo_hygiene`; per worktree, since each worktree
 has its own git dir.
 
+The Review section is filled afterwards by the `pr-ready` skill
+(`.claude/skills/pr-ready/`), which a script cannot replace — it dispatches agents.
+Two entry points serve it, so the skill never parses or edits this file itself:
+
+    python3 tools/validate/evidence.py range
+        `<base_sha>...<head_sha>` from the block's header: the diff the reviewer
+        reads is the one the checks ran against, named by SHA so a fetch between
+        the run and the review cannot move the base.
+    python3 tools/validate/evidence.py append-review --file REVIEW.md [--evidence PATH]
+        replaces the Review section (re-running replaces, never stacks). Refused
+        (exit 1) unless HEAD is still the block's head and the block is neither
+        unfinished nor DIRTY: a DIRTY block's checks ran on uncommitted code the
+        reviewer's committed diff does not contain, so the two would describe
+        different code under one head SHA.
+
 Must import and run on Python 3.9 (the system interpreter).
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -178,3 +194,83 @@ def write(text: str, repo_root: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+# ------------------------------------------------- the review, after the run ---
+
+_HEADER = re.compile(r"^\*\*pr-ready\*\* head `(?P<head>[0-9a-f]+)` against "
+                     r"`(?P<base_ref>[^`]+)` at `(?P<base>[0-9a-f]+)`(?P<rest>.*)$")
+_REVIEW_HEADING = "## Review"
+
+
+def header(text: str) -> Optional[Dict[str, object]]:
+    """The first line `render` writes, read back; None for anything else (the
+    UNFINISHED placeholder, a hand-edited file)."""
+    m = _HEADER.match(text.splitlines()[0] if text else "")
+    if not m:
+        return None
+    return {"head_sha": m.group("head"), "base_ref": m.group("base_ref"),
+            "base_sha": m.group("base"), "dirty": "**DIRTY**" in m.group("rest")}
+
+
+def with_review(text: str, review: str, *, head_sha: str) -> str:
+    """`text` with its Review section replaced by `review`. Raises ValueError when
+    the review would not describe the code the block describes (see module doc)."""
+    head = header(text)
+    lines = text.splitlines()
+    if head is None or _REVIEW_HEADING not in lines:
+        raise ValueError("the evidence is not a finished pr-ready block; run "
+                         "`bash scripts/pr-ready.sh --no-review` first")
+    if head["head_sha"] != head_sha:
+        raise ValueError(f"the evidence describes head {head['head_sha']}, but HEAD is "
+                         f"{head_sha}; re-run pr-ready and the review on this head")
+    if head["dirty"]:
+        raise ValueError("the evidence is DIRTY: its checks ran on uncommitted changes the "
+                         "reviewed diff does not contain; commit, then re-run")
+    # The Review section is the last one render writes; earlier sections' lines are
+    # table rows or `- ` items, so the first exact heading line is the section.
+    kept = lines[:lines.index(_REVIEW_HEADING) + 1]
+    provenance = (f"Review of `{head['base_sha']}...{head_sha}` (base `{head['base_ref']}`), "
+                  "run by the `pr-ready` skill. Advisory: not a GitHub review and not a "
+                  "required check.")
+    return scrub("\n".join(kept + ["", provenance, "", review.strip("\n"), ""]))
+
+
+def main(argv: Optional[Sequence[str]] = None, *, repo_root: Optional[Path] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="tools/validate/evidence.py",
+        description="Read the diff range from, or append a review to, the pr-ready evidence.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("range", help="print <base_sha>...<head_sha> from the evidence header")
+    append = sub.add_parser("append-review", help="replace the Review section")
+    append.add_argument("--file", required=True, type=Path, help="the review text (markdown)")
+    append.add_argument("--evidence", type=Path,
+                        help="the evidence file (default: <git-dir>/pr-ready/evidence.md)")
+    args = parser.parse_args(argv)
+    root = repo_root or Path.cwd()
+
+    try:
+        path = getattr(args, "evidence", None) or evidence_path(root)
+        text = path.read_text(encoding="utf-8")
+        if args.cmd == "range":
+            head = header(text)
+            if head is None:
+                raise ValueError(f"{path} is not a finished pr-ready block")
+            print(f"{head['base_sha']}...{head['head_sha']}")
+            return 0
+        now = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=root,
+                             capture_output=True, text=True)
+        if now.returncode != 0:
+            raise RuntimeError(f"git rev-parse HEAD failed: {now.stderr.strip()}")
+        updated = with_review(text, args.file.read_text(encoding="utf-8"),
+                              head_sha=now.stdout.strip())
+        path.write_text(updated, encoding="utf-8")
+        print(f"evidence: review appended to {path}")
+        return 0
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"evidence: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
