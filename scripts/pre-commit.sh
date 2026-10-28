@@ -85,10 +85,21 @@ run_check() {
   printf "  %-30s " "$label"
   t0=$(_now_ms)
   if output=$("$PYTHON_BIN" "${args[@]}" 2>&1); then
-    printf "PASS "
-    _record_duration "$label" "$t0"
-    # A passing check may still say what it did not check (a `NOTE  ...` line).
-    echo "$output" | grep -E '^NOTE ' | sed 's/^/    /' || true
+    # Exit 0 with a line STARTING `SKIP` means the check could not run (e.g. a missing
+    # tool): it checked nothing, so it must not read as PASS. Same convention as
+    # run_checks.py's classify(); an indented per-item `  SKIP` line does not count.
+    # Not added to FAILED — pre-commit reports it; run_checks.py decides whether a
+    # skipped required check fails a PR.
+    if echo "$output" | grep -qE '^SKIP'; then
+      printf "SKIP "
+      _record_duration "$label" "$t0"
+      echo "$output" | grep -E '^SKIP' | sed 's/^/    /'
+    else
+      printf "PASS "
+      _record_duration "$label" "$t0"
+      # A passing check may still say what it did not check (a `NOTE  ...` line).
+      echo "$output" | grep -E '^NOTE ' | sed 's/^/    /' || true
+    fi
   else
     printf "FAIL "
     _record_duration "$label" "$t0"
