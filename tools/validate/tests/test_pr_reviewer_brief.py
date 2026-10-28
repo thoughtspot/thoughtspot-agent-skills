@@ -178,18 +178,52 @@ def test_skill_reads_the_diff_range_from_the_evidence():
     assert "tools/validate/evidence.py range" in _fenced(SKILL.read_text(encoding="utf-8"))
 
 
+def _owned(path: str) -> bool:
+    """Whether a CODEOWNERS rule with an owner matches `path` (repo-relative), read
+    the way GitHub does for the anchored forms this file uses: `/dir/` owns everything
+    under it, at any depth; `/a/b.py` owns that file; `*`, `?`, `[` glob."""
+    for line in CODEOWNERS.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        pattern, *owners = line.split()
+        assert pattern.startswith("/"), f"unanchored pattern; teach this test: {line}"
+        rule = pattern[1:]
+        if rule.endswith("/"):
+            hit = path.startswith(rule)
+        elif any(c in rule for c in "*?["):
+            hit = fnmatch.fnmatch(path, rule)
+        else:
+            hit = path == rule
+        if hit and owners:
+            return True
+    return False
+
+
 def test_codeowners_covers_the_reviewer_the_skill_and_both_scanners():
     # The two scanners decide whether review text may reach a public PR (Steps 5-6),
     # so weakening either, or the tests that pin what they catch, is a change to this
     # review too.
-    owners = CODEOWNERS.read_text(encoding="utf-8")
-    for path in (r"/\.claude/agents/pr-reviewer\.md", r"/\.claude/skills/pr-ready/",
-                 r"/tools/validate/check_secrets\.py",
-                 r"/tools/validate/tests/test_known_bad_fixtures\.py",
-                 r"/tools/validate/tests/test_check_secrets_placeholders\.py",
-                 r"/tools/validate/check_customer_references\.py",
-                 r"/tools/validate/tests/test_check_customer_references\.py"):
-        assert re.search(rf"^{path}\s+@", owners, re.M), path
+    for path in (".claude/agents/pr-reviewer.md", ".claude/skills/pr-ready/SKILL.md",
+                 "tools/validate/check_secrets.py",
+                 "tools/validate/tests/test_known_bad_fixtures.py",
+                 "tools/validate/tests/test_check_secrets_placeholders.py",
+                 "tools/validate/check_customer_references.py",
+                 "tools/validate/tests/test_check_customer_references.py",
+                 "scripts/check-pr.sh"):
+        assert _owned(path), path
+
+
+def test_codeowners_owns_all_of_tools_validate_new_files_included():
+    # A gate runs as `python3 tools/validate/<name>.py`, so that directory is first on
+    # sys.path: a NEW module there shadows what an owned gate imports without editing
+    # it. Owning a list of files leaves that open; owning the directory closes it.
+    for shadow in ("tools/validate/json.py", "tools/validate/yaml/__init__.py",
+                   "tools/validate/subprocess.py", "tools/validate/tests/conftest.py"):
+        assert _owned(shadow), shadow
+    unowned = sorted(t for t in _tracked() if t.startswith("tools/validate/") and not _owned(t))
+    assert not unowned, unowned
+    # A sibling directory is not swept in by a prefix that lacks its slash.
+    assert not _owned("tools/validate_extra/x.py")
 
 
 def _tracked() -> set:

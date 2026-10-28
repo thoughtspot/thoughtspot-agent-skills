@@ -1,39 +1,41 @@
-# Code owners for files whose changes can silently weaken a confidentiality gate.
+# Code owners for files whose changes can silently weaken a gate: the confidentiality
+# gates, every validator and the check list CI runs, the hooks, and the review that
+# judges a PR.
 #
 # Binding only when branch protection on `main` requires "Review from Code Owners"
 # (a repository admin setting, not something this file can turn on).
 
-# The customer-reference gate: its allowlists and grandfathered exemptions decide what
-# may be published in this public repo; its tests pin what it must catch.
-/tools/validate/check_customer_references.py                 @djwaldo
-/tools/validate/tests/test_check_customer_references.py      @djwaldo
-# The shared git helper the gate reads staged content and history through.
-/tools/validate/_git.py                                      @djwaldo
-# The secrets gate: CI's full-tree scan, and the scan the pr-ready skill runs on
-# review text (`--file`) before it is appended to the evidence or shared; its tests
-# pin what it must catch (the known-bad fixtures also cover other gates).
-/tools/validate/check_secrets.py                             @djwaldo
-/tools/validate/tests/test_known_bad_fixtures.py             @djwaldo
-/tools/validate/tests/test_check_secrets_placeholders.py     @djwaldo
+# All of tools/validate/, so all of what it holds:
+#   - every validator, the customer-reference and secrets gates among them, with
+#     their allowlists, grandfathered exemptions and baselines;
+#   - the check list CI runs (checks.py) and its runner (run_checks.py): dropping an
+#     entry, or marking one soft, removes a CI gate without touching the workflow;
+#   - pr-ready's logic and the evidence block it writes (pr_ready.py, evidence.py);
+#   - the shared helpers the gates import, such as _git.py, which the customer-
+#     reference gate reads staged content and history through;
+#   - the tests and known-bad fixtures that pin what each gate must catch.
+# The directory, not a list of files: a gate runs as `python3 tools/validate/<name>.py`,
+# so Python puts this directory first on sys.path, and a NEW module added here (a
+# `json.py`, a `yaml/` package) would replace what an owned gate imports without
+# editing any owned file.
+/tools/validate/                                             @djwaldo
 
 # Hooks and their installer: a change here can disable every local gate.
 /scripts/install-hooks.sh                                    @djwaldo
 /scripts/pre-commit.sh                                       @djwaldo
 /scripts/commit-msg.sh                                       @djwaldo
 
+# The maintainer's pre-review customer-name check. Main's copy is the one run on
+# every contributor PR, so a change to it changes every later PR's check.
+/scripts/check-pr.sh                                         @djwaldo
+
 # CI, where the gate is the backstop for --no-verify and uninstalled hooks.
 /.github/workflows/validate.yml                              @djwaldo
-# The single check list CI runs and the runner that runs it: dropping an entry, or
-# marking one soft, removes a CI gate without touching the workflow.
-/tools/validate/checks.py                                    @djwaldo
-/tools/validate/run_checks.py                                @djwaldo
-# The contributor's pre-PR run of the same list. The wrapper is thin: the logic and
-# the evidence it writes are in the two Python files, and the interpreter choice
-# (shared with pre-commit) is in the lib.
+
+# The contributor's pre-PR run of the check list: the wrapper, and the interpreter
+# choice it shares with pre-commit. Its logic is pr_ready.py, owned above.
 /scripts/pr-ready.sh                                         @djwaldo
 /scripts/lib/python-bin.sh                                   @djwaldo
-/tools/validate/pr_ready.py                                  @djwaldo
-/tools/validate/evidence.py                                  @djwaldo
 
 # The pr-ready skill and the reviewer it dispatches: the brief decides what a
 # review looks for, so trimming it removes review areas without touching a gate.
