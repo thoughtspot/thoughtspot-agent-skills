@@ -487,7 +487,7 @@ Categories are data, but a new one reaches further than a rule:
    if another fails, treat it as a finding. Then update the ts-audit
    skill everywhere it lists categories: the "Audit angles" table at the top, Step 0's
    "B. Available angles" list, the Step 2a menu including its "X  All angles (A, D, H, P,
-   S)" line and the `--angles` examples, and the Step 5 catalog table.
+   S)" line and the `--angles` examples, and the Step 4 catalog table.
 4. Regenerate, and render a report (`ts audit report`) to check the new tab and heatmap
    column.
 5. Known limit: the legacy `summary.by_angle` counts only the five original angle keys.

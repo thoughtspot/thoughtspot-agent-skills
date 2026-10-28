@@ -25,7 +25,7 @@ SKILL_BLOCKS = {
     "angles-overview": "Step 0's list of categories",
     "angles-select": "Step 2a's category prompt",
     "profiles": "Step 2b's profile prompt and what each profile changes",
-    "rules-files": "Step 5's table of catalog files and the rule ids they hold",
+    "rules-files": "Step 4's table of catalog files and the rule ids they hold",
 }
 
 _NOTE = ("<!-- Generated from tools/ts-cli/ts_cli/audit/catalog/ by "
@@ -120,7 +120,7 @@ def _profiles(cat: Catalog) -> str:
     menu += ["", f"Enter {' or '.join(str(i) for i in range(1, len(choices) + 1))}:", "```"]
     flags = " or ".join(f"`--assessment {p.id}` ({i})" for i, p in enumerate(choices, 1))
     lines = [_NOTE, ""] + menu + ["", f"Pass the choice to `ts audit run` as {flags} in "
-                                       "Step 5. What the profile changes:", ""]
+                                       "Step 4. What the profile changes:", ""]
     for rule in _profile_rules(cat):
         lines.append(f"- **{rule.id} — {rule.title}:** "
                      f"{per_profile(cat, lambda pid, r=rule: _graded(r, pid))}")

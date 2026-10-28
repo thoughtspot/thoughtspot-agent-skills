@@ -4652,12 +4652,17 @@ rule engine. What each rule detects is in `agents/cli/ts-audit/references/check-
 
 ```bash
 ts audit run --models <guid> --angles A,D --assessment spotter --profile myprofile -o audit.json
+ts audit run --all-models --connection "Snowflake Prod" --dry-run --profile myprofile
+ts audit run --all-models --connection "Snowflake Prod" --profile myprofile -o audit.json
 ts audit report audit.json -o report.html
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--models`, `-m` | required | Model GUID to audit (repeatable). Not needed, and ignored, with `--snapshot-in` |
+| `--models`, `-m` | — | Model GUID to audit (repeatable). One of `--models`, `--all-models` or `--snapshot-in` is required; ignored with `--snapshot-in` |
+| `--all-models` | off | Audit every Model the profile can see. A Model is a `WORKSHEET` search result with `worksheetVersion: V2`; legacy Worksheets are skipped and counted. Not with `--models` or `--snapshot-in` |
+| `--connection`, `-c` | — | With `--all-models`: keep only Models with a Table on this connection (display name, case-insensitive; repeatable). Goes through the Tables, since a Model's search result rarely names a connection: the Tables (and SQL Views) whose `dataSourceName` matches, then the Models depending on them directly or through Views (breadth-first, batched, depth 4). A Model with **any** Table on a chosen connection is in scope. Logic in `ts_cli/audit/scope.py` |
+| `--dry-run` | off | With `--all-models`: print the resolved scope (`models`, `model_count`, `legacy_worksheets_skipped`, `connections`, `tables_on_connections`) as JSON and stop. An empty scope exits 1, with or without `--dry-run` |
 | `--angles`, `-a` | all | Comma-separated catalog categories, a subset of `A,D,H,P,S`; a rule runs when any of its categories is selected. A repeated letter counts once; an unknown letter, or a value naming none (`""`, `","`), is a usage error — omit the flag for all |
 | `--assessment` | `general` | The assessment profile (`spotter` = Spotter-ready, `general`): which bar the profile-aware rules measure against. What each profile changes — pass marks, severities, lines — is generated from the rule catalog into `agents/cli/ts-audit/SKILL.md` (Step 2b) and `agents/cli/ts-audit/references/check-catalog.md`; it lives in `ts_cli/audit/catalog/` (`profiles.yaml` and each rule's `profiles:` block). The report header names the assessment used. With `--snapshot-in` the default is the assessment the snapshot was captured with; passing the flag overrides it (noted on stderr) |
 | `--output`, `-o` | stdout | Write the JSON report to a file |

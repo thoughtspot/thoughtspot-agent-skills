@@ -85,14 +85,13 @@ Read-only — produces a prioritised report with actionable recommendations.
 
   1.  Authenticate ......................................... auto
   2.  Choose scope (angles + profile + connections) ....... you choose
-  3.  Enumerate objects .................................... auto  (~10-30s)
-  4.  Export TML in parallel (cached) ...................... auto  (~1-5 min)
-  5.  Analyse per selected angle .......................... auto
-  6.  Generate audit report ............................... auto
-  7.  Review findings and recommendations ................. you review
+  3.  Confirm scope (Models to audit) ...................... you confirm  (~10-60s)
+  4.  Run the audit (fetch + analyse, snapshot saved) ...... auto
+  5.  Generate audit report ............................... auto
+  6.  Review findings and recommendations ................. you review
 
-Confirmation required: Steps 0, 2, 3 (before export), 7
-Auto-executed: Steps 1, 4, 5, 6
+Confirmation required: Steps 0, 2, 3, 6
+Auto-executed: Steps 1, 4, 5
 
 ### B. Available angles
 
@@ -161,7 +160,7 @@ Enter letters (e.g. "A,D,S" or "X"):
 ```
 <!-- END GENERATED: angles-select -->
 
-Store the selected angles for Step 5 branching.
+Store the selected angles; Step 4 passes them as `--angles`.
 
 ### 2b. Assessment profile
 
@@ -177,7 +176,7 @@ Assessment profile — sets pass/fail thresholds:
 Enter 1 or 2:
 ```
 
-Pass the choice to `ts audit run` as `--assessment spotter` (1) or `--assessment general` (2) in Step 5. What the profile changes:
+Pass the choice to `ts audit run` as `--assessment spotter` (1) or `--assessment general` (2) in Step 4. What the profile changes:
 
 - **A1 — Description coverage below threshold:** Spotter-ready: HIGH < 47.5%, MEDIUM < 95% · General: HIGH < 25%, MEDIUM < 50%
 - **A2 — Synonym coverage below threshold:** Spotter-ready: HIGH < 40%, MEDIUM < 80% · General: HIGH < 12.5%, MEDIUM < 25%
@@ -210,29 +209,84 @@ If **C**, list connections:
 ts connections list --profile "{profile_name}"
 ```
 
-Display as a numbered list and let the user pick.
-
-Store the selected connection names. In Steps 3-4, filter objects by
-`metadata_header.dataSourceName` or `table.connection.name`.
+Display as a numbered list and let the user pick. Each chosen connection becomes one
+`--connection "{name}"` flag in Steps 3 and 4 (display name; matched case-insensitively).
 
 ---
 
-## Step 3 — Enumerate Objects
+## Step 3 — Confirm Scope
 
-This step picks the Models to audit and shows the user an inventory. It does **not**
-collect the audit's data: `ts audit run` (Step 5) fetches that itself.
-
-**The Models (always):**
+`ts audit run` resolves the scope itself; this step only shows it and asks to proceed.
+Do **not** search for Models, filter them or export TML by hand.
 
 ```bash
-ts metadata search --subtype WORKSHEET --all --profile "{profile_name}"
+ts audit run --all-models [--connection "{name}" ...] --dry-run \
+  --profile "{profile_name}"
 ```
 
-Filter to actual Models (not legacy Worksheets) using `metadata_header.type` or
-the presence of `worksheetVersion` in the response. Their GUIDs are what Step 5 passes
-as `--models`.
+It prints the inventory as JSON and fetches nothing else:
 
-**What `ts audit run` fetches, and why it is not chosen here.** Each rule in the rule
+```json
+{"models": [{"guid": "…", "name": "…"}], "model_count": 12,
+ "legacy_worksheets_skipped": 3, "connections": ["Snowflake_Prod"],
+ "tables_on_connections": 87}
+```
+
+How the scope is decided (`tools/ts-cli/ts_cli/audit/scope.py`):
+
+- **Models only.** Legacy Worksheets are skipped and counted, never audited.
+- **A connection scope goes through the Tables.** A Model's own search result rarely
+  names a connection, so the audit finds the Tables on the chosen connections and the
+  Models that use them, directly or through a View. A Model is in scope when **any** of
+  its Tables is on a chosen connection, so a Model spanning connections is included.
+- **An empty scope is an error** (exit 1, with the reason), never an empty report.
+
+Show the user the inventory and confirm:
+
+```
+Audit scope:
+
+  Models:     12 (on: Snowflake_Prod; 87 Tables on that connection)
+  Skipped:    3 legacy Worksheets
+
+Proceed with the audit? [Y / N]
+```
+
+To audit specific Models instead, pass their GUIDs as `--models` in Step 4 and skip this
+step.
+
+---
+
+## Step 4 — Run the Audit
+
+Run the audit over the scope confirmed in Step 3 (the same `--all-models` /
+`--connection` flags, without `--dry-run`):
+
+```bash
+ts audit run \
+  --all-models [--connection "{name}" ...] \
+  --angles "{A,D,H,P,S}" \
+  --assessment "{spotter|general}" \
+  --profile "{profile_name}" \
+  --snapshot-out ~/Dev/audit-runs/{profile_name}-{date}/snapshot \
+  --output ~/Dev/audit-runs/{profile_name}-{date}/audit.json
+```
+
+`--snapshot-out` saves everything the audit fetched. A follow-up audit of the same scope
+(other angles, or the other assessment profile) replays it with no API calls and no
+`--profile`:
+
+```bash
+ts audit run --snapshot-in ~/Dev/audit-runs/{profile_name}-{date}/snapshot \
+  --angles "{…}" --assessment "{…}" \
+  --output ~/Dev/audit-runs/{profile_name}-{date}/audit-{variant}.json
+```
+
+A replay can only run rules whose data was captured, so capture with every angle the
+user may want (the default, all angles, captures everything). Re-run without
+`--snapshot-in` when the cluster has changed.
+
+**What it fetches.** Each rule in the rule
 catalog (`tools/ts-cli/ts_cli/audit/catalog/`) declares the data it reads, as `requires`
 or `uses` (see [references/rule-authoring.md](references/rule-authoring.md)). The audit
 fetches the union of what the selected rules declare, whichever category selected
@@ -252,13 +306,6 @@ way. Any other non-2xx (403, 404, a 5xx after the client's retries, …) or a no
 2xx skips that Model's AI-instruction rules with a warning, and the report shows "Could
 not be read".
 
-**Optional, for the inventory summary only** (the audit does not read these results):
-
-```bash
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --all --profile "{profile_name}"
-ts metadata search --type ANSWER --all --profile "{profile_name}"
-```
-
 Sets are **not** in a Model's dependents (BL-324); `ts audit run` discovers them
 directly when a selected rule declares `sets` (one cohort listing per Model), adds each
 Set to its Model's dependents, and looks up each Set's own consumers for H5. A Set whose
@@ -270,108 +317,13 @@ The Set discovery and the consumer lookup are the shared `tools/ts-cli/ts_cli/se
 modules (`discover.py`, `consumers.py`), the same code behind `/ts-object-set-manager` and
 the `/ts-migrate-orgs` Set gate. That skill's "How it works" section describes the API steps.
 
-**If connection scope was set in Step 2c**, filter each result set to only include
-objects whose `metadata_header.dataSourceName` matches a selected connection.
-
-> **Why this step does NOT use `ts metadata search --connection`** (finding 11.1,
-> 2026-08-26 — an earlier attempt at this change did, and was wrong). Two reasons, both
-> verified against `filter_by_connection` (`commands/metadata.py:35`):
->
-> 1. **The flag drops models and answers.** It keeps only rows with a matching
->   `metadata_header.dataSourceName`, and worksheets/models/answers do not carry that
->   field — so a connection-scoped audit would enumerate **zero** of them, while the
->   inventory summary below still prints `Models: N (scoped to: …)`. Step 2c is right to
->   scope models via `table.connection.name` instead.
-> 2. **The flag takes one connection.** It is `Optional[str]` and not repeatable, whereas
->   Step 2c explicitly offers *"Choose specific connections"* (plural).
->
-> Where a search really is table-only and single-connection — as in the `ts-convert-*`
-> skills — prefer the flag: it **casefolds** both sides, which a hand comparison does not.
-> Here, do the filtering yourself and **compare case-insensitively**.
-
-**Display inventory summary and confirm:**
-
-```
-Object inventory:
-
-  Models:     12 (scoped to: Snowflake_Prod)
-  Tables:     87
-  Sets:       8 (across 12 models)
-  Answers:    34
-
-Estimated export time: ~1 min (4-way parallel, cached)
-Proceed with TML export? [Y / N]
-```
-
----
-
-## Step 4 — Export TML (parallel, cached)
-
-Export TML for all enumerated objects. Use the same caching pattern as
-`ts-object-model-coach` Step 4.5.
-
-### Cache directory
-
-```
-~/.cache/ts-audit/tml-corpus/
-```
-
-### Cache key
-
-`{guid}-{modified_epoch}.json` — where `modified_epoch` is the
-`metadata_header.modified` timestamp from the search response. If the file
-already exists, skip the export.
-
-### Export strategy
-
-Run 4-way parallel exports. For each object:
-
-```bash
-ts tml export "{guid}" --fqn --profile "{profile_name}"
-```
-
-**For models**, also export the associated tables:
-
-```bash
-ts tml export "{model_guid}" --fqn --associated --profile "{profile_name}"
-```
-
-### FORBIDDEN handling
-
-If an export returns FORBIDDEN (403), cache the failure for 24 hours:
-write `{guid}-FORBIDDEN.json` with timestamp. Do not retry within 24h.
-
-### Progress reporting
-
-```
-Exporting TML: [=====>          ] 34/87  (12 cached, 2 FORBIDDEN)
-```
-
-`ts audit run` (Step 5) exports the TML it audits itself, and does not read this
-cache: this step currently costs time without feeding the audit (BL-407). Skip it when
-the user only wants the audit report.
-
----
-
-## Step 5 — Analysis Engine
-
-Run the audit via the `ts` CLI:
-
-```bash
-ts audit run \
-  --models "{guid1}" --models "{guid2}" \
-  --angles "{A,D,H,P,S}" \
-  --assessment "{spotter|general}" \
-  --profile "{profile_name}" \
-  --output ~/Dev/audit-runs/{profile_name}-{date}/audit.json
-```
 
 The checks are **rules in a catalog**, not code: YAML under
 `tools/ts-cli/ts_cli/audit/catalog/` (`categories.yaml`, `profiles.yaml`,
 `rules/{ai,data,human,perf,security}.yaml`), run by a small deterministic rule engine
 (`ts_cli/audit/engine/`). `--angles` selects categories, and a rule runs when any of its
 categories is selected. Each rule declares the data it reads (`requires`/`uses`), and
-the audit fetches exactly the union for the selected rules (see Step 3). The rule's
+the audit fetches exactly the union for the selected rules (see above). The rule's
 thresholds, severities and wording, and the `--assessment` profile's overrides of them,
 are in its catalog entry.
 
@@ -401,7 +353,7 @@ See open items #9 through #12 in the reference file.*
 
 ---
 
-## Step 6 — Generate Report
+## Step 5 — Generate Report
 
 Generate the unified HTML report from the JSON output:
 
@@ -410,11 +362,11 @@ ts audit report ~/Dev/audit-runs/{profile_name}-{date}/audit.json \
   --output ~/Dev/audit-runs/{profile_name}-{date}/report.html
 ```
 
-Or piped directly from Step 5:
+Or piped directly from Step 4:
 
 ```bash
 ts audit run \
-  --models "{guid1}" --models "{guid2}" \
+  --all-models [--connection "{name}" ...] \
   --angles "{A,D,H,P,S}" \
   --assessment "{spotter|general}" \
   --profile "{profile_name}" \
@@ -436,7 +388,7 @@ and can be shared directly via email or Slack.
 
 ---
 
-## Step 7 — Review & Act
+## Step 6 — Review & Act
 
 Display the summary:
 
@@ -471,6 +423,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.3.0 | 2026-10-28 | **`ts audit run` owns scope; the export step is gone (BL-407).** Step 3 runs `ts audit run --all-models [--connection …] --dry-run` and shows the inventory it prints, instead of the LLM searching for Models, telling them from legacy Worksheets and filtering them to connections by hand. A connection scope goes through the Tables (directly or through a View); a Model with any Table on a chosen connection is in scope. The old Step 4 (a 1–5 minute TML export into a cache nothing read) is dropped, so the steps are now 0–6; the audit step always saves a snapshot (`--snapshot-out`) so a follow-up audit with other angles or the other assessment replays from disk. Design: `docs/superpowers/specs/2026-10-28-audit-run-scope.md`. |
 | 3.2.1 | 2026-10-23 | **The catalog-derived sections are generated.** The category table, the Step 0 and Step 2a category lists, the Step 2b profile prompt with what each profile changes, and the catalog-file table of rule ids are now generated from the rule catalog (`python -m ts_cli.audit.generate`) and checked by the catalog gate, so a rule change can no longer leave them stale. |
 | 3.2.0 | 2026-10-23 | **Model size lines from production data; S11 is CRITICAL.** The size lines flagged a quarter of production Models (2026-10 call-home data, 268k Models: 21% over the old 75-column HIGH line). P8 now owns column count: General MEDIUM above 500 (Search Data gets hard to use) and HIGH above 1,500 (queries slow down); Spotter-ready 250 / 500, provisional. Its "wider GROUP BY" rationale was wrong — a query groups only by the columns it selects — and is gone. D1 grades tables and joins at 30 / 50 (formulas unchanged at 30 / 50) and no longer reports columns (P8's) or join depth (P7's, same lines). S11 (an RLS join that closes a loop with the Model's joins) is CRITICAL: the Model is broken for every user under the rule, not merely at risk. On the SE demo snapshot D1 goes 204 → 6 findings and P8 15 → 0; nothing else changes. |
 | 3.1.0 | 2026-10-23 | **S11 — RLS join cycles.** A Model whose joins plus the joins its Tables' RLS rules use form a directed cycle imports cleanly, then fails every query the rule applies to with "Guid Mismatch". S11 (Security, HIGH) reports each RLS join that closes such a loop, with the joins that lead back (a path it cannot walk is a warning, not a finding); `ts tml lint` I22 catches the same shape before import. Second routes through an RLS join are not flagged (BL-410). |

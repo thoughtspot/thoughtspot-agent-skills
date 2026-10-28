@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-28
+- feat: ts-audit 3.3.0 — `ts audit run --all-models [--connection …] [--dry-run]` resolves the audit's scope itself (Models only, legacy Worksheets skipped; a connection scope goes through the Tables, directly or through Views), so the skill no longer searches, filters or exports by hand. The skill's TML export step, whose cache nothing read, is dropped (BL-407), and the audit step saves a snapshot for re-runs. PR 1.3 of the ts-audit v2 roadmap.
+- chore: bump ts-cli to v0.186.0
+
 ## 2026-10-23
 - feat: ts-audit 3.2.1 — the skill's catalog-derived sections (categories, the profile prompt and what each profile changes, the rule-id table) are generated from the rule catalog by `python -m ts_cli.audit.generate` and checked by the catalog gate, like `check-catalog.md`; the ts-cli README's `--assessment` row points at them instead of restating pass marks. First PR of the ts-audit v2 roadmap (`docs/superpowers/specs/2026-10-23-audit-v2-roadmap.md`).
 - chore: bump ts-cli to v0.185.0

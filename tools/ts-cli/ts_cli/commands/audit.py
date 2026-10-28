@@ -122,11 +122,62 @@ def _capture(client, models: list, angle_list: Optional[list], assessment_name: 
                      fetched_needs=set(needs) | ALWAYS_FETCHED)
 
 
+def _check_scope_options(models, all_models: bool, connections, dry_run: bool,
+                         snapshot_in) -> None:
+    """Exactly one scope source; --connection and --dry-run only narrow --all-models."""
+    if models and all_models:
+        raise typer.BadParameter("give --models or --all-models, not both",
+                                 param_hint="--models / --all-models")
+    if (connections or dry_run) and not all_models:
+        raise typer.BadParameter("requires --all-models",
+                                 param_hint="--connection" if connections else "--dry-run")
+    if all_models and snapshot_in:
+        raise typer.BadParameter("--snapshot-in audits the snapshot's own Models",
+                                 param_hint="--all-models / --snapshot-in")
+    if not (snapshot_in or models or all_models):
+        raise typer.BadParameter("give --models, --all-models or --snapshot-in",
+                                 param_hint="--models")
+
+
+def _resolve_models(profile: Optional[str], connections: Optional[List[str]],
+                    dry_run: bool) -> List[str]:
+    """Resolve --all-models (narrowed by --connection) to Model GUIDs.
+
+    With --dry-run the inventory is printed to stdout; an empty scope exits non-zero
+    either way, so an empty audit is never run or reported as clean.
+    """
+    from ts_cli.audit.scope import resolve_scope
+
+    typer.echo("Resolving audit scope...", err=True)
+    inv = resolve_scope(ThoughtSpotClient(resolve_profile(profile)), connections)
+    if dry_run:
+        print(json.dumps(inv, indent=2))
+    if not inv["models"]:
+        where = (f" with a Table on {', '.join(inv['connections'])}"
+                 if inv["connections"] else "")
+        typer.echo(f"No Models found{where}.", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Scope: {inv['model_count']} Model(s)"
+               + (f" on {', '.join(inv['connections'])}" if inv["connections"] else "")
+               + f"; {inv['legacy_worksheets_skipped']} legacy Worksheet(s) skipped", err=True)
+    return [m["guid"] for m in inv["models"]]
+
+
 @app.command("run")
 def run(
     models: Optional[List[str]] = typer.Option(
         None, "--models", "-m",
-        help="One or more model GUIDs to audit (required unless --snapshot-in)"),
+        help="One or more model GUIDs to audit (or --all-models, or --snapshot-in)"),
+    all_models: bool = typer.Option(
+        False, "--all-models",
+        help="Audit every Model you can see (legacy Worksheets are skipped)"),
+    connections: Optional[List[str]] = typer.Option(
+        None, "--connection", "-c",
+        help="With --all-models: only Models with a Table on this connection, directly or "
+             "through a View (display name, case-insensitive; repeatable)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="With --all-models: print the resolved scope as JSON and stop, fetching nothing else"),
     profile: Optional[str] = _profile_option,
     angles: Optional[str] = typer.Option(
         None, "--angles", "-a",
@@ -157,11 +208,13 @@ def run(
     if snapshot_in and snapshot_out:
         raise typer.BadParameter("--snapshot-in and --snapshot-out cannot be used together",
                                  param_hint="--snapshot-in / --snapshot-out")
-    if not snapshot_in and not models:
-        raise typer.BadParameter("required unless --snapshot-in is given",
-                                 param_hint="--models")
+    _check_scope_options(models, all_models, connections, dry_run, snapshot_in)
 
     angle_list = _parse_angles(angles)
+    if all_models:
+        models = _resolve_models(profile, connections, dry_run)
+        if dry_run:
+            return
     if snapshot_in:
         if models:
             typer.echo("Note: --models is ignored with --snapshot-in; "
