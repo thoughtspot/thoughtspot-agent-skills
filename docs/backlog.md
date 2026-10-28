@@ -265,7 +265,7 @@ are roughly ordered by value÷effort.
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
 | BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
-| BL-407 | ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own | 2026-12-15 |
+| ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 
 ### Tier 3 — Opportunistic
@@ -14647,7 +14647,7 @@ PR, and a ts-audit changelog row saying which findings change.
 
 **Target:** 2027-01-31.
 
-## BL-407 — ts-audit Step 4 exports TML that nothing reads `Tier 2`
+## BL-407 — ts-audit Step 4 exports TML that nothing reads `Tier 2` — **RESOLVED 2026-10-28**
 
 **Filed:** 2026-10-23. **Source:** the ts-audit 3.0.0 review (minor 7).
 
@@ -14664,6 +14664,12 @@ follow-ups instead. Decide with the user; update the skill's step numbering and
 changelog.
 
 **Target:** 2026-12-15.
+
+**Resolution (2026-10-28, roadmap PR 1.3).** Step 4 is dropped, decided with the product
+owner. The skill's Steps 3–4 hand scope to the CLI: `ts audit run --all-models
+[--connection …] [--dry-run]` resolves the Models itself (`ts_cli/audit/scope.py`), and Step 4
+always passes `--snapshot-out`, so a re-run with other angles or the other assessment
+replays from disk. Design: `docs/superpowers/specs/2026-10-28-audit-run-scope.md`.
 
 ## BL-408 — validate audit override layers before admin overrides ship `Tier 2`
 

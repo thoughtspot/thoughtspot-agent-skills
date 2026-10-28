@@ -122,11 +122,84 @@ def _capture(client, models: list, angle_list: Optional[list], assessment_name: 
                      fetched_needs=set(needs) | ALWAYS_FETCHED)
 
 
+def _check_scope_options(models, all_models: bool, connections, dry_run: bool,
+                         snapshot_in, snapshot_out) -> None:
+    """Exactly one scope source; --connection and --dry-run only narrow --all-models."""
+    if models and all_models:
+        raise typer.BadParameter("give --models or --all-models, not both",
+                                 param_hint="--models / --all-models")
+    if (connections or dry_run) and not all_models:
+        raise typer.BadParameter("requires --all-models",
+                                 param_hint="--connection" if connections else "--dry-run")
+    if dry_run and snapshot_out:
+        raise typer.BadParameter("a dry run fetches nothing to snapshot",
+                                 param_hint="--dry-run / --snapshot-out")
+    if all_models and snapshot_in:
+        raise typer.BadParameter("--snapshot-in audits the snapshot's own Models",
+                                 param_hint="--all-models / --snapshot-in")
+    if not (snapshot_in or models or all_models):
+        raise typer.BadParameter("give --models, --all-models or --snapshot-in",
+                                 param_hint="--models")
+
+
+def _resolve_models(client, connections: Optional[List[str]], dry_run: bool,
+                    output: Optional[Path]) -> List[str]:
+    """Resolve --all-models (narrowed by --connection) to Model GUIDs.
+
+    With --dry-run the inventory goes to --output, or stdout. A connection name matching
+    no Table, or an empty scope, exits 1 either way: a typo beside a good name used to
+    narrow the audit silently, and an empty audit must never read as clean.
+    """
+    from ts_cli.audit import scope
+
+    typer.echo("Resolving audit scope...", err=True)
+    inv = scope.resolve_scope(client, connections)
+    if dry_run:
+        _emit(inv, output)
+    unmatched = scope.unmatched_connections(inv)
+    if unmatched:
+        typer.echo(f"No Tables on connection(s): {', '.join(unmatched)}. Check the name(s) "
+                   "with `ts connections list`.", err=True)
+        raise typer.Exit(1)
+    if inv["views_not_followed"]:
+        typer.echo(f"Warning: {inv['views_not_followed']} View(s) beyond the depth cap were "
+                   "not followed; Models built on them are not in scope.", err=True)
+    if not inv["models"]:
+        where = (f" with a Table on {', '.join(inv['connections'])}"
+                 if inv["connections"] else "")
+        typer.echo(f"No Models found{where}.", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Scope: {inv['model_count']} Model(s)"
+               + (f" on {', '.join(inv['connections'])}" if inv["connections"] else "")
+               + f"; {inv['legacy_worksheets_skipped']} legacy Worksheet(s) skipped", err=True)
+    return [m["guid"] for m in inv["models"]]
+
+
+def _emit(data: dict, output: Optional[Path]) -> None:
+    """JSON to --output, or stdout (the only thing a command writes there)."""
+    json_str = json.dumps(data, indent=2)
+    if output:
+        output.write_text(json_str)
+        typer.echo(f"Written to {output}", err=True)
+    else:
+        print(json_str)
+
+
 @app.command("run")
 def run(
     models: Optional[List[str]] = typer.Option(
         None, "--models", "-m",
-        help="One or more model GUIDs to audit (required unless --snapshot-in)"),
+        help="One or more model GUIDs to audit (or --all-models, or --snapshot-in)"),
+    all_models: bool = typer.Option(
+        False, "--all-models",
+        help="Audit every Model you can see (legacy Worksheets are skipped)"),
+    connections: Optional[List[str]] = typer.Option(
+        None, "--connection", "-c",
+        help="With --all-models: only Models with a Table on this connection, directly or "
+             "through a View (display name, case-insensitive; repeatable)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="With --all-models: print the resolved scope as JSON and stop, fetching nothing else"),
     profile: Optional[str] = _profile_option,
     angles: Optional[str] = typer.Option(
         None, "--angles", "-a",
@@ -157,29 +230,27 @@ def run(
     if snapshot_in and snapshot_out:
         raise typer.BadParameter("--snapshot-in and --snapshot-out cannot be used together",
                                  param_hint="--snapshot-in / --snapshot-out")
-    if not snapshot_in and not models:
-        raise typer.BadParameter("required unless --snapshot-in is given",
-                                 param_hint="--models")
+    _check_scope_options(models, all_models, connections, dry_run, snapshot_in, snapshot_out)
 
     angle_list = _parse_angles(angles)
+    client = None
+    if all_models:
+        client = ThoughtSpotClient(resolve_profile(profile))
+        models = _resolve_models(client, connections, dry_run, output)
+        if dry_run:
+            return
     if snapshot_in:
         if models:
             typer.echo("Note: --models is ignored with --snapshot-in; "
                        "the snapshot's models are audited.", err=True)
         result = _replay(snapshot_in, angle_list, assessment_name)
     else:
-        client = ThoughtSpotClient(resolve_profile(profile))
+        client = client or ThoughtSpotClient(resolve_profile(profile))
         if snapshot_out:
             result = _capture(client, models, angle_list, assessment_name, snapshot_out)
         else:
             result = run_audit(client, models, angle_list, assessment_name)
-    json_str = json.dumps(result, indent=2)
-
-    if output:
-        output.write_text(json_str)
-        typer.echo(f"Report written to {output}", err=True)
-    else:
-        print(json_str)
+    _emit(result, output)
 
     summary = result.get("summary", {})
     total = sum(summary.get("by_severity", {}).values())

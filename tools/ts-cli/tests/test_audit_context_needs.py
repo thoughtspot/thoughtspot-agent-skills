@@ -315,3 +315,42 @@ def test_run_audit_ignores_an_unknown_angle_as_before():
         out = run_audit(client, ["m1"], ["A", "X"])
     assert out["corpus"]["angles_run"] == ["A", "X"]
     assert any(u.endswith(_AI) for u in client.urls())
+
+
+# ── an object the user may not export ───────────────────────────────────────
+
+_FORBIDDEN = {"edoc": None, "info": {"name": "Locked", "status": {
+    "status_code": "ERROR", "error_message": "FORBIDDEN: no download access"}}}
+
+
+def test_a_model_that_cannot_be_exported_is_a_warning_not_a_crash():
+    """A FORBIDDEN object comes back inside an HTTP 200 with `edoc: null`; it crashed
+    the audit, which `--all-models` (every Model the user can search) made easy to hit."""
+    client = RecordingClient()
+    real_post = client.post
+
+    def post(url, json=None, **kw):
+        if url.endswith(_EXPORT) and [m["identifier"] for m in json["metadata"]] == ["m1", "m2"]:
+            client.calls.append((url, json))
+            return _response([{"edoc": yaml.safe_dump(client.model)}, _FORBIDDEN])
+        return real_post(url, json, **kw)
+    client.post = post
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
+        ctx = build_context(client, ["m1", "m2"], set())
+    assert [m["model"]["name"] for m in ctx.models] == ["Sales"]
+    assert any("Locked" in w and "FORBIDDEN" in w for w in ctx.warnings)
+
+
+def test_an_answer_that_cannot_be_exported_is_skipped():
+    client = RecordingClient()
+    real_post = client.post
+
+    def post(url, json=None, **kw):
+        if url.endswith(_EXPORT) and [m["identifier"] for m in json["metadata"]] == ["a1"]:
+            client.calls.append((url, json))
+            return _response([_FORBIDDEN])
+        return real_post(url, json, **kw)
+    client.post = post
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
+        ctx = build_context(client, ["m1"], {"answers"})
+    assert ctx.answers == []
