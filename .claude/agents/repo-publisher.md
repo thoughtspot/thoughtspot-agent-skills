@@ -69,15 +69,72 @@ Examples:
 - `add: ts-object-model-builder skill (Claude + CoCo)`
 - `update: formula translation reference — add safe_divide pattern`
 
-### Step 4: Push the branch and open a PR
+### Step 4: Build the PR body from the template, then push and open the PR
+
+The PR body is `.github/pull_request_template.md`, filled in. Never a hand-written
+`--body`: it drops the template's evidence block, live-evidence pointer, dependency
+and "Supersedes" sections and its confidentiality checkbox, which every PR is asked
+for.
+
+**4a. The evidence block for this head.** The template's Evidence section takes the
+block `bash scripts/pr-ready.sh` writes (or the `pr-ready` skill, which adds its
+review). It must describe the commit being published: the same head, READY, not
+DIRTY. Check, and scan it, before anything is pushed:
 
 ```bash
-git push -u origin <branch>
-gh pr create --title "<title>" --body "<summary + test plan>"
+set -o pipefail
+EVIDENCE="$(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
+RANGE="$(python3 tools/validate/evidence.py range)" || { echo "STOP: no finished pr-ready block"; exit 1; }
+[ "${RANGE##*...}" = "$(git rev-parse HEAD)" ] || { echo "STOP: the block describes another head"; exit 1; }
+grep -qxF '**READY**' "$EVIDENCE" || { echo "STOP: the block is NOT READY"; exit 1; }
+case "$(head -n 1 "$EVIDENCE")" in *DIRTY*) echo "STOP: the block is DIRTY"; exit 1;; esac
+python3 tools/validate/check_secrets.py --file "$EVIDENCE" || { echo "STOP: secrets scan"; exit 1; }
+REFS="$(python3 tools/validate/check_customer_references.py --text-file "$EVIDENCE")" || { echo "STOP: customer-reference scan"; exit 1; }
+printf '%s\n' "$REFS"
+if printf '%s\n' "$REFS" | grep -E '^WARN' >/dev/null; then echo "STOP: WARN line(s) above"; exit 1; fi
+echo "evidence: $EVIDENCE"
 ```
 
-The repo's `.github/pull_request_template.md` carries a confidentiality checkbox; tick it
-only after the Step 1 check passed.
+On a STOP, push nothing and open nothing. Tell the user to run the `pr-ready` skill
+on this head (after the Step 3 commit), then invoke this agent again: the skill asks
+the user to confirm the branch is their own before it executes anything, and this
+agent does not run it, or `scripts/pr-ready.sh`, on their behalf. A scan hit is
+fixed at its source, never by editing the block.
+
+**4b. Fill the template** in a file outside the repo:
+
+```bash
+BODY="$(mktemp)" && cp .github/pull_request_template.md "$BODY" && echo "body: $BODY"
+```
+
+Replace each section's `<!-- ... -->` comment with its content, keeping every heading
+in order:
+
+- **Summary** and **Test plan**: what changes and why; what was run, and against what
+  (no hostnames).
+- **Evidence**: the whole evidence file from 4a, pasted as it is, never edited.
+- **Live evidence**: the `references/open-items.md` entries that record live
+  behaviour, or "N/A" and why.
+- **New runtime dependencies**: each new third-party package with its provenance, or
+  "None".
+- **Supersedes #N — every earlier review point mapped**: the user's mapping, or
+  "None".
+- **Checklist**: tick a box only when it is true. The confidentiality box only after
+  the Step 1 check passed; the pr-ready box because 4a passed; the version box only
+  when every changed `SKILL.md` is bumped and `CHANGELOG.md` has the repo-level entry.
+
+The body is public too, so scan it the same way, then push and open the PR:
+
+```bash
+set -o pipefail
+BODY="<the printed body path>"
+python3 tools/validate/check_secrets.py --file "$BODY" || { echo "STOP: secrets scan"; exit 1; }
+REFS="$(python3 tools/validate/check_customer_references.py --text-file "$BODY")" || { echo "STOP: customer-reference scan"; exit 1; }
+printf '%s\n' "$REFS"
+if printf '%s\n' "$REFS" | grep -E '^WARN' >/dev/null; then echo "STOP: WARN line(s) above"; exit 1; fi
+git push -u origin <branch>
+gh pr create --title "<title>" --body-file "$BODY"
+```
 
 Report the PR URL to the user. **Do not merge it.** Merging is a separate, explicit
 decision — by the user, or by a follow-up instruction naming this PR — made once CI
@@ -132,6 +189,9 @@ Next steps (if applicable):
 - Never push to `main`, and never suggest `--admin` or any other bypass of branch protection
 - Never force-push
 - Never use `git add -A` — always add specific files
+- Never open a PR with `--body` or a hand-written body: the body is
+  `.github/pull_request_template.md`, filled, with the evidence block for the head
+  being published (Step 4)
 - Never merge the PR — that decision belongs to the user
 - Never run stage-sync before the PR has actually merged into `main`
 - If `./scripts/stage-sync.sh` fails, report the error and stop — do not mark publish as complete
