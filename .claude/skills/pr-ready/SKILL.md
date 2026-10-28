@@ -257,4 +257,4 @@ When both scans are clean, report:
 made by running the script's post option themselves. Mention that it exists only if
 they ask. Note for them that the post option re-runs the checks and posts a fresh
 block, whose Review section says "Not run": to share the review, paste the block
-written here.
+written here before any post run, which replaces it.
