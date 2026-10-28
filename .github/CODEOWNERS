@@ -21,8 +21,13 @@
 # marking one soft, removes a CI gate without touching the workflow.
 /tools/validate/checks.py                                    @djwaldo
 /tools/validate/run_checks.py                                @djwaldo
-# The contributor's pre-PR run of the same list.
+# The contributor's pre-PR run of the same list. The wrapper is thin: the logic and
+# the evidence it writes are in the two Python files, and the interpreter choice
+# (shared with pre-commit) is in the lib.
 /scripts/pr-ready.sh                                         @djwaldo
+/scripts/lib/python-bin.sh                                   @djwaldo
+/tools/validate/pr_ready.py                                  @djwaldo
+/tools/validate/evidence.py                                  @djwaldo
 
 # The SessionStart hook that warns when the git hooks are missing.
 /.claude/settings.json                                       @djwaldo

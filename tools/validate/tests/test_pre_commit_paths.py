@@ -16,6 +16,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 PRE_COMMIT = REPO / "scripts" / "pre-commit.sh"
+# Sourced by the hook (interpreter selection), so the throwaway repo needs it too —
+# which also proves the `source` survives a path with a space.
+PYTHON_BIN_LIB = REPO / "scripts" / "lib" / "python-bin.sh"
 
 STUB = '''import os, sys
 a = sys.argv[1:]
@@ -36,6 +39,8 @@ def test_pre_commit_runs_from_a_path_with_a_space(tmp_path):
     root = tmp_path / "dir with space" / "repo"
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(PRE_COMMIT, root / "scripts" / "pre-commit.sh")
+    (root / "scripts" / "lib").mkdir()
+    shutil.copy2(PYTHON_BIN_LIB, root / "scripts" / "lib" / "python-bin.sh")
     validators = set(re.findall(r"tools/validate/[A-Za-z0-9_]+\.py", PRE_COMMIT.read_text()))
     assert len(validators) > 20, "expected the real hook's validator list"
     for v in validators:
