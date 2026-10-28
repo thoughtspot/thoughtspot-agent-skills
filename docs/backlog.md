@@ -351,6 +351,7 @@ are roughly ordered by value÷effort.
 | BL-433 | pr-reviewer recipe test leaks a clone per run on macOS: `/usr/bin/mktemp -d` ignores `TMPDIR`, so `test_scratch_copy_recipe_copies_the_head_and_stubs_gh` leaves a directory in the system temp dir on every pre-commit with staged `.py` files | 2026-11-30 |
 | BL-434 | pr-ready docs say a `--post` run replaces the evidence block, but any `pr-ready.sh` invocation does (the placeholder is written before argument parsing), so `--help` or a typo also discards a reviewed block | 2026-11-30 |
 | BL-435 | The CODEOWNERS coverage test (`_owned()` in `test_pr_reviewer_brief.py`) treats a path as owned if any rule matches, while GitHub applies the last matching rule, so a future owner-less override line would still read as owned | 2026-12-31 |
+| BL-437 | `CHECKS_PYTHON` polish from the pr-reviewer's last pass on the contributor-guide branch: a quoted `~/…` interpreter path in the skill's Step 1 is not expanded (fails closed, confusing message); an unexported shell `CHECKS_PYTHON` counts as set; remedies print `"$CHECKS_PYTHON"`, empty in a terminal that lacks it; the unset PATH search still trusts an exit status (document as an accepted gap); Step 2 on a non-zero exit after the placeholder; per-validator `pip install X` remedies | 2026-11-30 |
 | ~~BL-436~~ | ~~`pr-ready` has no explicit interpreter override: `scripts/lib/python-bin.sh` takes the newest `python3.1x` with pytest anywhere on `PATH`, so a CI-equivalent virtual environment is bypassed by a newer system Python; and its failure messages (the `python3` fallback, the PyYAML and missing-module remedies) point only at `pip install`, never the virtual-environment route~~ | DONE (2026-10-29 — `CHECKS_PYTHON`, honoured before the search, fails closed) |
 
 ### Tier 4 — Deferred
@@ -15143,3 +15144,20 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 **Target:** 2026-11-30.
 
 **Resolved 2026-10-29:** `scripts/lib/python-bin.sh` honours `CHECKS_PYTHON` before the newest-`python3.1x` search: a path (relative to the checkout root) or a command name on `PATH`, which must run as Python 3.10+ and import pytest. The probe must print a token: an exit-status probe accepted `true`, `:` or `echo`, after which pre-commit read every check's exit 0 as PASS (found by the `pr-reviewer` pass, fixed before merge). Anything else (missing, not executable, empty, older than 3.10, no pytest, not a Python) prints an error naming the variable and exits 2, pr-ready's "could not start"; it never falls back to the search. Unset, the selection is unchanged. `scripts/pr-ready.sh` writes the NOT READY placeholder before choosing the interpreter, so that stop leaves no earlier READY block. The bare-`python3` fallback warning, the PyYAML message and the missing-module remedy in `tools/validate/pr_ready.py` give the virtual-environment route (create it, install CI's lines with `uv pip install --python …` or the environment's own pip, set `CHECKS_PYTHON`), or install into `"$CHECKS_PYTHON"` when it is set, and point at `.github/CONTRIBUTING.md`; the guide's alias and the `pr-ready` skill's Step 1 set the variable. Tests: `tools/validate/tests/test_python_bin.py` (the real library under `set -euo pipefail`, stub interpreters that run the real probe, and `pr-ready.sh` in a throwaway checkout), remedy tests in `test_pr_ready.py`, and Step 1's choice in `test_pr_reviewer_brief.py`.
+
+## BL-437 — `CHECKS_PYTHON` polish `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** the `pr-reviewer` agent's last pass on the contributor-guide branch (head 85c78cc2). All of these fail closed or only affect a message; none changes a verdict.
+
+**What.**
+- The skill's Step 1 fills `USER_PY="…"` in quotes, so a `~/…` path the user gives is not expanded and `scripts/lib/python-bin.sh` stops with "not an executable file" while showing a path that exists. A venv directory (rather than its interpreter) fails the same way.
+- Step 1's "already set" test (`${CHECKS_PYTHON+set}`) is true for an unexported shell variable, which the child process then does not see.
+- The install remedies in `tools/validate/pr_ready.py` print `"$CHECKS_PYTHON" -m pip install …`; the alias and the skill set the variable only for the run, so pasted into a terminal it expands to an empty command.
+- With `CHECKS_PYTHON` unset, the PATH search still trusts the exit status of `import pytest`; the header now explains why that is unsafe for the override. Planting an impostor requires write access to a PATH directory, so record it as an accepted gap in a comment, or reuse the token probe.
+- Skill Step 2 assumes a finished block on exit 1; an uncaught exception (or Ctrl-C) after the placeholder is written also exits non-zero.
+- Several validators' own remedies say a bare `pip install X` (`check_module_health.py`, `check_yaml.py`, `check_tml.py`, `check_sv_yaml.py`, `check_ci_gate_coverage.py`, `check_skill_flag_usage.py`), which installs into another interpreter under `CHECKS_PYTHON`.
+- The probe compares stdout to `ok` exactly; a Windows Python under Git Bash may print `ok\r`.
+
+**Do.** Expand a leading `~/` in Step 1 (and say "the interpreter's path"), `export CHECKS_PYTHON` on the set branch, print remedies with the value through `evidence.scrub`, add the accepted-gap comment (or the token probe) to the search loop, make Step 2 report stderr when the block is the placeholder, route validator remedies through one helper, and write the probe token without a newline. Tests for the tilde and unexported cases.
+
+**Target:** 2026-11-30.
