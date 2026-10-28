@@ -19,9 +19,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 PRE_COMMIT = REPO / "scripts" / "pre-commit.sh"
 
-# Function bodies close on a column-0 `}`; _now_ms is a one-liner.
+# Function bodies close on a column-0 `}`; _now_ms is a one-liner. The counter
+# initialisations come from the hook too, so a renamed counter breaks the test.
 _EXTRACT = (
-    r"sed -n -e '/^_now_ms()/p' "
+    r"sed -n -e '/^FAILED=0$/p' -e '/^SKIPPED=0$/p' -e '/^SKIPPED_LABELS=/p' "
+    r"-e '/^_now_ms()/p' "
     r"-e '/^_record_duration() {/,/^}/p' "
     r"-e '/^run_check() {/,/^}/p' "
     r"-e '/^_summary_line() {/,/^}/p' "
@@ -37,9 +39,12 @@ def _run(tmp_path: Path, stub_body: str, labels: tuple[str, ...] = ("module heal
         f'run_check "{label}" "tools/validate/check_{i}.py --root ."\n'
         for i, label in enumerate(labels)
     )
+    # The hook's own shell options: without pipefail a SIGPIPE'd `echo | grep -q`
+    # cannot misfire, so a test without them passes code the real hook breaks on.
     script = (
+        "set -euo pipefail\n"
         f'eval "$({_EXTRACT} "$HOOK")"\n'
-        "SLOW_CHECK_S=3; SLOW_CHECKS=''; FAILED=0; SKIPPED=0; SKIPPED_LABELS=''\n"
+        "SLOW_CHECK_S=3; SLOW_CHECKS=''\n"
         + calls
         + 'echo "FAILED=$FAILED"\n'
         "_summary_line\n"
@@ -59,6 +64,20 @@ def test_run_check_reports_skip(tmp_path):
     assert "    SKIP  x: tool missing" in out, out
     assert "PASS" not in out, out
     assert "FAILED=0" in out, out
+
+
+def test_skip_with_large_output_is_still_skip(tmp_path):
+    # > 64 KiB after the SKIP line: grep -q exits early and echo takes SIGPIPE.
+    body = "echo 'SKIP  x: tool missing'\nyes 'verbose line' | head -n 20000\nexit 0\n"
+    out, err = _run(tmp_path, body)
+    assert "PASS" not in out, out[:400]
+    assert "All checks passed (1 skipped: module health)." in out, out[-400:]
+
+
+def test_skip_keeps_note_lines(tmp_path):
+    out, _ = _run(tmp_path, "echo 'SKIP  x: tool missing'\necho 'NOTE  y not checked'\nexit 0\n")
+    assert "    SKIP  x: tool missing" in out, out
+    assert "    NOTE  y not checked" in out, out
 
 
 def test_indented_skip_line_is_not_a_whole_check_skip(tmp_path):
@@ -91,4 +110,8 @@ def test_hook_closes_with_the_summary_function():
     # The bare string must not come back: the closing line is _summary_line's to print.
     text = PRE_COMMIT.read_text()
     assert re.search(r"^_summary_line$", text, re.M), "hook no longer calls _summary_line"
+    # Last statement, after the FAILED exit: moved earlier, it would claim a pass
+    # before failures are counted or before the main-branch audit can cancel.
+    assert text.rstrip().endswith("\n_summary_line"), "_summary_line is not the hook's last line"
+    assert text.rindex("\n_summary_line") > text.index('if [ "$FAILED" -gt 0 ]; then')
     assert text.count('echo "All checks passed."') == 1, "a second unqualified pass line"

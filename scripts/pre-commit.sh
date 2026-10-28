@@ -94,10 +94,13 @@ run_check() {
     # run_checks.py's classify(); an indented per-item `  SKIP` line does not count.
     # Not added to FAILED — pre-commit reports it; run_checks.py decides whether a
     # skipped required check fails a PR.
-    if echo "$output" | grep -qE '^SKIP'; then
+    # Here-string, not `echo "$output" | grep -q`: grep -q exits at the first match,
+    # echo then takes SIGPIPE on output over ~64 KiB, and pipefail turns the match
+    # into a false — a SKIP read as PASS.
+    if grep -qE '^SKIP' <<< "$output"; then
       printf "SKIP "
       _record_duration "$label" "$t0"
-      echo "$output" | grep -E '^SKIP' | sed 's/^/    /'
+      grep -E '^(SKIP|NOTE )' <<< "$output" | sed 's/^/    /'
       SKIPPED=$((SKIPPED + 1))
       SKIPPED_LABELS="${SKIPPED_LABELS:+$SKIPPED_LABELS, }$label"
     else
