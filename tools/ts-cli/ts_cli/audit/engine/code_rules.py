@@ -282,7 +282,7 @@ def _d_finding(rule: "Rule", item: dict, severity: str, values: Dict[str, Any], 
 
 
 def _join_count(model: dict) -> int:
-    return sum(len(t.get("joins") or []) for t in model.get("model_tables") or [])
+    return tml.join_count(model.get("model_tables"))
 
 
 #: D1's grading table: (measure, value of a Model, above this is MEDIUM, above this

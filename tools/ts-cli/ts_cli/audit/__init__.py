@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
+from ts_cli.audit.engine import tml
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 
@@ -217,8 +218,8 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
             "table_count": len(model_tables),
             "column_count": len(m.get("columns") or []),
             "formula_count": len(m.get("formulas") or []),
-            "join_count": len(m.get("joins") or []),
-            "join_depth": _calc_join_depth(m),
+            "join_count": tml.join_count(model_tables),
+            "join_depth": tml.join_depth(model_tables),
             "model_tables": [
                 {"name": mt.get("name", ""), "fqn": mt.get("fqn", "")}
                 for mt in model_tables
@@ -248,36 +249,6 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         "model_overlaps": model_overlaps,
         "dependents": dict(ctx.dependents),
     }
-
-
-def _calc_join_depth(model_data: dict) -> int:
-    joins = model_data.get("joins") or []
-    if not joins:
-        return 0
-    tables = {mt.get("name", "") for mt in (model_data.get("model_tables") or [])}
-    graph = {}
-    for j in joins:
-        src = j.get("source", j.get("name", ""))
-        dest = j.get("destination", j.get("with", ""))
-        if src and dest:
-            graph.setdefault(src, []).append(dest)
-            graph.setdefault(dest, []).append(src)
-    if not graph:
-        return len(joins)
-    max_depth = 0
-    for start in tables:
-        if start not in graph:
-            continue
-        visited = {start}
-        queue = [(start, 0)]
-        while queue:
-            node, depth = queue.pop(0)
-            max_depth = max(max_depth, depth)
-            for neighbor in graph.get(node, []):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, depth + 1))
-    return max_depth
 
 
 def _build_table_reuse_from_ctx(models: list) -> list:

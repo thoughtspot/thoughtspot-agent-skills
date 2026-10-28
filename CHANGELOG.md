@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-28
+- fix: ts-audit 3.2.2 — the report's per-Model join count and join depth read a Model-level `joins` key that Model TML does not have, so every Model showed 0 / 0; they now count the joins under `model_tables[]`, with the helpers D1 and P7 use. PR 1.2 of the ts-audit v2 roadmap.
+- chore: bump ts-cli to v0.185.1
+
 ## 2026-10-23
 - feat: ts-audit 3.2.1 — the skill's catalog-derived sections (categories, the profile prompt and what each profile changes, the rule-id table) are generated from the rule catalog by `python -m ts_cli.audit.generate` and checked by the catalog gate, like `check-catalog.md`; the ts-cli README's `--assessment` row points at them instead of restating pass marks. First PR of the ts-audit v2 roadmap (`docs/superpowers/specs/2026-10-23-audit-v2-roadmap.md`).
 - chore: bump ts-cli to v0.185.0

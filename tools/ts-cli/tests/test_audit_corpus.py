@@ -43,10 +43,9 @@ def test_build_corpus_basic():
             "model": {
                 "name": "Test Model",
                 "model_tables": [
-                    {"name": "T1", "fqn": "DB.SCH.T1"},
+                    {"name": "T1", "fqn": "DB.SCH.T1", "joins": [{"with": "T2"}]},
                     {"name": "T2", "fqn": "DB.SCH.T2"},
                 ],
-                "joins": [{"name": "j1"}],
                 "columns": [{"name": "c1"}, {"name": "c2"}],
                 "formulas": [{"name": "f1"}],
             },
@@ -72,3 +71,27 @@ def test_build_corpus_basic():
     assert m["formula_count"] == 1
     assert corpus["angles_run"] == ["A", "D"]
     assert "m-1" in corpus["dependents"]
+
+
+def test_build_corpus_counts_joins_where_model_tml_keeps_them():
+    """Model TML has no Model-level `joins`: each join sits under its `model_tables[]`
+    entry. Reading the absent key reported 0 joins and depth 0 for every Model."""
+    models = [{
+        "guid": "m-2",
+        "model": {
+            "name": "Chain",
+            "model_tables": [
+                {"name": "FACT", "fqn": "DB.SCH.FACT",
+                 "joins": [{"with": "DIM_A", "on": "[FACT::A_ID] = [DIM_A::ID]"},
+                           {"with": "DIM_C", "on": "[FACT::C_ID] = [DIM_C::ID]"}]},
+                {"name": "DIM_A", "fqn": "DB.SCH.DIM_A",
+                 "joins": [{"with": "DIM_B", "on": "[DIM_A::B_ID] = [DIM_B::ID]"}]},
+                {"name": "DIM_B", "fqn": "DB.SCH.DIM_B"},
+                {"name": "DIM_C", "fqn": "DB.SCH.DIM_C"},
+            ],
+        },
+    }]
+    ctx = make_context(models=models, tables={}, dependents={}, model_guids=["m-2"])
+    m = build_corpus(ctx, angles=["D"])["models"][0]
+    assert m["join_count"] == 3
+    assert m["join_depth"] == 2

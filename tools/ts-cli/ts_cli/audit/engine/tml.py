@@ -37,6 +37,12 @@ FACT_MEASURE_THRESHOLD = 3
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
 
+def join_count(model_tables: list) -> int:
+    """Joins declared across the model's tables (each lives under its ``model_tables[]``
+    entry; Model TML has no Model-level ``joins``)."""
+    return sum(len(t.get("joins") or []) for t in model_tables or [])
+
+
 def join_depth(model_tables: list) -> int:
     """Longest join chain reachable from any table in the model.
 
