@@ -70,6 +70,8 @@ Modes:
   --root . --range A..B   every commit in A..B: added lines and the commit message (CI, PRs).
                           Needs no secrets, so it also runs on fork PRs.
   --message-file PATH     one commit message; what the commit-msg hook runs
+  --text-file PATH        every line of one text file, with no commit-message scissors
+                          handling; the pr-ready skill's review text and evidence block
 
 Private name list (opt-in). The patterns above recognise LINKS; they cannot tell that a
 bare word is a customer's name. A maintainer can supply names that live OUTSIDE this repo:

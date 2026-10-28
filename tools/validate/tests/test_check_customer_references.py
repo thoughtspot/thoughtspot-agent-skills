@@ -967,3 +967,14 @@ def test_text_file_mode_scans_every_line_with_no_scissors(tmp_path):
 def test_text_file_mode_fails_on_an_unreadable_file(tmp_path):
     result = _run(tmp_path, "--text-file", str(tmp_path / "missing.md"))
     assert result.returncode == 1 and "Refusing to report PASS" in result.stdout
+
+
+def test_text_file_mode_reports_a_personal_detail_on_a_warn_line_with_exit_0(tmp_path):
+    """The pr-ready skill's Step 6 stops on a line starting `WARN`, because the exit
+    code alone lets a personal detail through. Pin both halves of that contract."""
+    text = tmp_path / "evidence.md"
+    text.write_text("## Review\n" + _j("owner: jane.smithx", "@acme-corp.com\n"))
+    result = _run(tmp_path, "--text-file", str(text))
+    assert result.returncode == 0, result.stdout
+    warns = [l for l in result.stdout.splitlines() if l.startswith("WARN")]
+    assert len(warns) == 1 and "evidence.md:2" in warns[0], result.stdout

@@ -65,6 +65,8 @@ and spot checks, not on finding validator failures or building the first repro.
 - CoCo runtime changes.
 - **An AI review running in CI.** Deferred by maintainer decision (§8.3). §5 C2 records
   the security constraints a future CI job must meet, so they aren't lost.
+- **An agent review of someone else's branch, locally or in CI.** Deferred to a
+  dedicated design (§5 C2), which records the requirements it must meet.
 
 **Anti-goals** (failure even if it works)
 - A gate people learn to ignore: noisy review output, or a blocking check with a high
@@ -161,26 +163,50 @@ and spot checks, not on finding validator failures or building the first repro.
   runs the branch's own code (the runner, every validator, the smokes and the test
   suite) with the runner's full environment, and from a PR checkout the PR also
   controls the skill, the reviewer brief, `pr-ready.sh` and `.claude/settings.json`
-  hooks. So it runs only on a branch the person running it wrote or has read, and the
-  reviewer executes branch code only when the skill passes `trusted: yes`. For anyone
-  else's PR the procedure is, from a new session started in a clean checkout of main
-  (agent definitions and SessionStart hooks load from the starting checkout): run
-  main's `scripts/check-pr.sh` first (main's copy, never the PR's), and continue only
-  on exit 0; never run the skill or `pr-ready.sh` from the PR checkout; pre-fetch the
-  inputs into a directory inside the git dir (not `$TMPDIR`, whose parent holds the
-  `ts` token cache): the diff `<base>...<fetched PR head SHA>`, the PR's text and
-  review threads by read-only `gh`, the head's files written as raw blobs (so none of
-  the PR's `.gitattributes` applies) and never executed, and a copy of main's brief;
-  refuse if the head moved after the scan; and dispatch **`pr-reviewer-readonly`**
-  (`trusted: no`) on them, reading only that directory. If that agent type is not
-  available, stop: nothing else reads the inputs. Its findings, like the own-branch
-  review text, are scanned for secrets and customer references before they are shown. That agent's grant is
-  Read, Grep and Glob — no Bash — which is the local equivalent of the CI constraint
-  below (`--disallowedTools Bash,...` for any job reading untrusted text): the repo's
-  settings pre-approve `Bash(git:*)`, `python3`, `pip`, `pytest` and `ts`, so a
-  reviewer with Bash that followed one injected instruction would run it unprompted.
-  The `conversion-consistency-auditor` runs commands, so it is not run on an
-  untrusted branch; the findings say "angle-9 auditor not run (untrusted branch)".
+  hooks. So the skill starts by saying that it executes the branch's code with the
+  user's credentials, and asks the user to confirm the branch is their own: they
+  wrote it, or have read all of it. Only on that confirmation does it run, and it
+  passes the reviewer `trusted: yes`; the reviewer executes branch code only then.
+  Without it, or for anyone else's PR, the skill stops and points to what is done
+  today: main's `scripts/check-pr.sh` (main's copy, run as its header says, never the
+  PR's) and a human review. The review text is scanned for secrets and customer
+  references before it is appended, and the finished block again before it is
+  shared.
+- **Agent review of someone else's branch: deferred to a dedicated design (decided
+  2026-10-28).** Three review rounds tried a read-only reviewer over pre-fetched copies
+  of a PR's diff, text, threads and files, and each place the copies were moved to
+  opened a new channel. This spec's intent (§2) does not need it: whoever opens a PR
+  runs the review on their own branch, before opening it, the maintainer included. So
+  it gets its own design. What those rounds established, as that design's
+  requirements:
+  - **No Bash for the reviewer.** The repo's settings pre-approve `Bash(git:*)`,
+    `python3`, `pip`, `pytest` and `ts`, so a reviewer with Bash that followed one
+    injected instruction would run it unprompted; a brief that says "read only" is
+    not a control. This is the local counterpart of the CI constraint below.
+  - **Inputs outside any git repository and outside the session's primary working
+    directory.** Claude Code's loading of nested `CLAUDE.md` and `.claude/rules`
+    files applies to paths under the primary working directory (review round 3), so
+    a PR's own copies there become harness instructions. A worktree's git directory
+    lies outside its working directory, so "inside the git dir" is not a fixed place
+    either.
+  - **None of the PR's own control files honoured:** `CLAUDE.md`, `CLAUDE.local.md`
+    and `.claude/**` (instructions, agents, settings, hooks); `.gitignore`, `.ignore`
+    and `.rgignore` (they hide files from Grep and Glob); `.gitattributes` (filters,
+    smudging and re-encoding on archive or checkout).
+  - **No secrets beside the inputs.** `tempfile.gettempdir()` holds the `ts` token
+    cache (`ts_token_<slug>.txt`), so `$TMPDIR` is not a home for them.
+  - **Path-scoped Read deny rules for credential files** (profiles, key files, the
+    token cache, `settings.local.json`, which holds approved commands verbatim):
+    reads confined by the brief's wording are not confined.
+  - **The head pinned** to the SHA `check-pr.sh` scanned, refusing if it moved.
+  - **Scanning the output is not a complete control.** `check_secrets.py` and
+    `check_customer_references.py` match line by line, so an encoded or split value
+    passes.
+  - **`check-pr.sh` does not scan an earlier PR's threads**, which the brief's
+    "earlier review points" reads; that text needs its own scan.
+
+  Until that design lands, other people's PRs are verified as they were before this
+  spec: main's `check-pr.sh` and a human review. The C7 backtest depends on it.
 - **Maintainer PRs (§8.2).** The maintainer runs the same skill before every self-merge
   and reads the output. This is **advisory**. It is not a required check and not a
   GitHub review, so F1's metric (PRs with a GitHub review) does not move. Success for
@@ -203,6 +229,9 @@ and spot checks, not on finding validator failures or building the first repro.
   - **Enforcement.** It can't be a required check without blocking every fork PR (no
     secrets means skipped, and `validate` treats skipped as failed). A "review ran on
     this head" presence check is the only blocking shape, and it needs verifying first.
+  - **The deferred design comes first.** A CI job that reviews a contributor's PR is
+    an agent review of someone else's branch, so it waits for that design and meets
+    its requirements (above) as well as these.
 
 ### C3. Gate integrity
 
@@ -355,12 +384,14 @@ real consumers. §8.1 records the revised choice:
 - **Backtest: the acceptance test for C2, kept private.**
   - **n is about 16, not 29.** 13 of the 29 PRs were force-pushed and their first heads
     can't be recovered from GitHub.
-  - **Run** only the read-only reviewer (`pr-reviewer-readonly`, `trusted: no`) on each
-    recoverable first head, with inputs pre-fetched as in §5 C2. Never C1 /
-    `pr-ready.sh` on a contributor's head: it executes that head's code. The one
-    exception is a disposable environment with no credentials of any kind (e.g.
-    environment exports, Keychain, token caches, SSH keys and agents, `.p8` key files,
-    `~/.databrickscfg`, git credential helpers, `gh` auth), discarded after the run.
+  - **Run: waits for the deferred untrusted-branch design (§5 C2).** Every first head
+    in the backtest is a contributor's, so reviewing it is an agent review of someone
+    else's branch; the backtest runs once that design exists, and under it. Whatever
+    it settles, never C1 / `pr-ready.sh` on a contributor's head: it executes that
+    head's code. The one exception is a disposable environment with no credentials of
+    any kind (e.g. environment exports, Keychain, token caches, SSH keys and agents,
+    `.p8` key files, `~/.databrickscfg`, git credential helpers, `gh` auth),
+    discarded after the run.
   - **Judge** today's rules separately from rules that existed at the time.
   - **Compare** against the real review findings.
   - **Adjudicate** every finding only the AI raised: the maintainer decides real vs false
@@ -384,7 +415,7 @@ gate steps merge **one at a time**, not in parallel.
 | 0 | Baseline metrics script + numbers (C7) | — |
 | 1 | C1 list + `pr-ready.sh` + catalog generator rewrite; pre-commit shows SKIP / NOT RUN | 0 |
 | 2 | C2 reviewer agent + `pr-ready` skill | 1 |
-| 3 | C7 private backtest; maintainer adjudication | 2 |
+| 3 | C7 private backtest; maintainer adjudication | 2, and the untrusted-branch review design (§5 C2) |
 | 4 | C3 known-bad meta-check + ratchet-by-value + CODEOWNERS | 1 |
 | 5 | C4 `CI_RUNNABLE` + CI runner call | 4 |
 | 6 | C7 CONTRIBUTING, issue and PR templates | 2 |
@@ -396,7 +427,7 @@ gate steps merge **one at a time**, not in parallel.
 
 | Risk | Mitigation |
 |---|---|
-| Review output is noisy and gets ignored | The backtest measures precision first; the brief requires evidence per finding |
+| Review output is noisy and gets ignored | The backtest measures precision first (once the untrusted-branch design it waits for exists); the brief requires evidence per finding |
 | The C1 list becomes a new hand-kept list | It replaces three lists and the catalog parser; a check asserts every gate is listed or allowlisted with a reason |
 | `pr-ready` is too slow (CI's suite job takes about 10 minutes) | Run the ts-cli suite once on the local interpreter; the evidence block states that the CI matrix is not reproduced |
 | Contributors see more process | Design issue only for new skills, new dependencies and rule exceptions; size only warns |
@@ -422,10 +453,10 @@ gate steps merge **one at a time**, not in parallel.
    **Consequence:** a contributor's evidence block can't be verified to have run. The
    head SHA in it makes a stale block visible. The maintainer does **not** re-run the
    skill on a contributor's PR head (that would execute the PR's code, and the PR's own
-   copy of the skill, with the maintainer's credentials in the environment). Instead:
-   from a new session in a clean checkout of main, main's `scripts/check-pr.sh` first
-   (continue only on exit 0), then `pr-reviewer-readonly` (no Bash, `trusted: no`) on
-   pre-fetched inputs for `<base>...<fetched PR head SHA>` (§5 C2).
+   copy of the skill, with the maintainer's credentials in the environment), and does
+   not point the reviewer agent at it: agent review of someone else's branch is
+   deferred to a dedicated design (§5 C2). Instead, as before this spec: main's
+   `scripts/check-pr.sh` (run as its header says) and a human review.
 
 ## 9. Left to the builder
 

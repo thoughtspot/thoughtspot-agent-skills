@@ -9,6 +9,9 @@
 /tools/validate/tests/test_check_customer_references.py      @djwaldo
 # The shared git helper the gate reads staged content and history through.
 /tools/validate/_git.py                                      @djwaldo
+# The secrets gate: CI's full-tree scan, and the scan the pr-ready skill runs on
+# review text (`--file`) before it is appended to the evidence or shared.
+/tools/validate/check_secrets.py                             @djwaldo
 
 # Hooks and their installer: a change here can disable every local gate.
 /scripts/install-hooks.sh                                    @djwaldo
@@ -32,8 +35,6 @@
 # The pr-ready skill and the reviewer it dispatches: the brief decides what a
 # review looks for, so trimming it removes review areas without touching a gate.
 /.claude/agents/pr-reviewer.md                               @djwaldo
-/.claude/agents/pr-reviewer-readonly.md                      @djwaldo
-/tools/validate/pr_tree.py                                   @djwaldo
 /.claude/skills/pr-ready/                                    @djwaldo
 
 # The SessionStart hook that warns when the git hooks are missing.
