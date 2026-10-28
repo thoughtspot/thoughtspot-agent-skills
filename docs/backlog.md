@@ -275,7 +275,7 @@ are roughly ordered by value÷effort.
 | BL-421 | Eight validators fail open on bad input: an empty `--file ""` falls through to another mode (`check_tml`, `check_sv_yaml`), and a missing own input prints "Nothing to check" and exits 0 (converter parity, coverage matrix, mapping/code sync, runtime coverage, skill naming, internal imports) | 2026-11-30 |
 | BL-426 | Spec C5: number collisions — CHANGELOG fragments folded by a maintainer step, backlog ids unique at PR open (`BL-<pr>.<n>`), `check_backlog_integrity` Rule 2 scope widened to `docs/`/CHANGELOG/CLAUDE.md/`.claude/`, and a the rebump script for ts-cli version collisions | 2026-12-15 |
 | BL-427 | Spec C3 remainder: every gate proven to fire (extend `test_known_bad_fixtures.py` to all gates CI runs, with a meta-check), ratchets compared by value against base instead of by key, and a warning when a PR changes a gate and product code together | 2026-12-31 |
-| BL-429 | Spec C7 remainder: a new CONTRIBUTING.md under .github/, a design-issue template (new skill, new runtime dependency, rule exception), and the step-9 re-measure against the baseline at the window's end (90 days or 15 external PRs); the backtest waits for BL-416 | 2027-01-31 |
+| BL-429 | Spec C7 remainder (the contributor guide shipped as `.github/CONTRIBUTING.md`): a design-issue template (new skill, new runtime dependency, rule exception), and the step-9 re-measure against the baseline at the window's end (90 days or 15 external PRs); the backtest waits for BL-416 | 2027-01-31 |
 | BL-430 | The pr-reviewer scratch-copy recipe leaves the copy's `origin` pointing at the source work tree with `GIT_ALLOW_PROTOCOL=file`, so branch code run there can push refs into the repo under review; set `remote set-url --push origin no-push` | 2026-11-30 |
 | BL-431 | An unowned `conftest.py` (root or `tools/`) or root pytest config can deselect the tests that pin the gates (proven: a 2-line a conftest.py under tools/ made `test_known_bad_fixtures.py` collect nothing); own them in CODEOWNERS and name them in pr-reviewer's gate-edits list | 2026-11-30 |
 
@@ -351,6 +351,7 @@ are roughly ordered by value÷effort.
 | BL-433 | pr-reviewer recipe test leaks a clone per run on macOS: `/usr/bin/mktemp -d` ignores `TMPDIR`, so `test_scratch_copy_recipe_copies_the_head_and_stubs_gh` leaves a directory in the system temp dir on every pre-commit with staged `.py` files | 2026-11-30 |
 | BL-434 | pr-ready docs say a `--post` run replaces the evidence block, but any `pr-ready.sh` invocation does (the placeholder is written before argument parsing), so `--help` or a typo also discards a reviewed block | 2026-11-30 |
 | BL-435 | The CODEOWNERS coverage test (`_owned()` in `test_pr_reviewer_brief.py`) treats a path as owned if any rule matches, while GitHub applies the last matching rule, so a future owner-less override line would still read as owned | 2026-12-31 |
+| BL-436 | `pr-ready` has no explicit interpreter override: `scripts/lib/python-bin.sh` takes the newest `python3.1x` with pytest anywhere on `PATH`, so a CI-equivalent virtual environment is bypassed by a newer system Python; and its failure messages (the `python3` fallback, the PyYAML and missing-module remedies) point only at `pip install`, never the virtual-environment route | 2026-11-30 |
 
 ### Tier 4 — Deferred
 
@@ -15073,7 +15074,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C7 and §6 step 9; PR #680 shipped the PR-template fields and the baseline (`docs/reviews/2026-10-28-pr-metrics-baseline.md`).
 
-**Do.** Write a new CONTRIBUTING.md under .github/ (one page linking the rules); add an issue template for the three pre-approval cases (size only warns — see BL-420); at the end of the measurement window, re-run `tools/pr-metrics/collect.py` with defects attributed by introduction PR and date, compare with the baseline, and decide whether to move the review into CI. The backtest (spec C7, step 3) is blocked on BL-416.
+**Do.** (The contributor guide, `.github/CONTRIBUTING.md`, shipped 2026-10-29 with the size guidance as a pointer to BL-420.) Add an issue template for the three pre-approval cases (size only warns — see BL-420); at the end of the measurement window, re-run `tools/pr-metrics/collect.py` with defects attributed by introduction PR and date, compare with the baseline, and decide whether to move the review into CI. The backtest (spec C7, step 3) is blocked on BL-416.
 
 **Target:** 2027-01-31.
 
@@ -15130,3 +15131,13 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 **Do.** Evaluate CODEOWNERS with last-match-wins semantics in the test, and add a case with an owner-less override line.
 
 **Target:** 2026-12-31.
+
+## BL-436 — pr-ready has no interpreter override; its remedies ignore the virtual-environment route `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** the `pr-reviewer` agent's review of the contributor-guide PR.
+
+**What.** `scripts/lib/python-bin.sh` (shared by `pre-commit.sh` and `pr-ready.sh`) tries `python3.14`, `python3.13`, `python3.12` … and takes the first name on `PATH` that imports pytest. A CI-equivalent virtual environment built on 3.12 and put first on `PATH` is therefore bypassed when a newer Python with pytest is anywhere on `PATH`: `pr-ready` then runs on an interpreter the user did not set up and points its install remedy at it. The fallback to bare `python3`, the "pip install pyyaml" message in `tools/validate/pr_ready.py` and the missing-module remedy all name `pip install`, which a uv- or Homebrew-managed Python refuses.
+
+**Do.** Add an explicit override (an environment variable naming the interpreter, honoured before the search) for the alias and the skill to set, and have the remedies mention the virtual-environment route in `.github/CONTRIBUTING.md`. Test that the override wins over a newer Python on `PATH`.
+
+**Target:** 2026-11-30.

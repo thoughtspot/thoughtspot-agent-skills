@@ -17,8 +17,9 @@ and whether the tree was dirty, so a block from an earlier head does not describ
 Both execute the branch's code with your credentials: for someone else's PR, use main's
 `scripts/check-pr.sh` and a human review instead.
 
-The whole routine is in `.github/CONTRIBUTING.md`. Before your first run, install what CI installs: the exact lines are under "Before your
-first run" in `.claude/skills/pr-ready/SKILL.md`, and `pr-ready.sh` prints them when a
+The whole routine is in `.github/CONTRIBUTING.md`. Before your first run, install what
+CI installs: the exact lines are under "Before your first run" in
+`.claude/skills/pr-ready/SKILL.md`, and `pr-ready.sh` prints them when a
 test is skipped for a missing module (that is a FAIL, not a pass).
 
 `bash scripts/pr-ready.sh --post N` comments a block on PR N for you (only when it is
