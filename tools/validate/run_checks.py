@@ -213,8 +213,8 @@ def _run_one(check: Check, context: str, base: Optional[str], repo_root: Path,
     tail = _tail(output)
     if status == "SKIP" and context == "local" and check.optional_prereq is None:
         status = "FAIL"
-        output = f"{_PROMOTED}\n{output}"
         tail = f"{_PROMOTED}\n{_tail(output, _KEEP_PREFIXES + ('SKIP',))}"
+        output = f"{_PROMOTED}\n{output}"
     if status == "FAIL" and not check.hard:
         status = "WARN"
     return {"id": check.id, "status": status, "seconds": seconds, "output_tail": tail}, output

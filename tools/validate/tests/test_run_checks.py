@@ -67,11 +67,28 @@ def _by_id(results):
     return {r["id"]: r for r in results}
 
 
-_STATUS_LINE = re.compile(r"^(PASS|FAIL|WARN|SKIP|NOT RUN)\s")
+# The runner's exact `"{status:7} {id}"` line (NOT RUN adds its reason). A
+# validator's own `PASS  file 0` (two spaces, then a space inside) never matches.
+_STATUS_LINE = re.compile(
+    r"^(?:(?:PASS|FAIL|WARN|SKIP) {4}\S+|NOT RUN \S+(?: \(prerequisite absent: [^)]+\))?)$")
 
 
 def _status_lines(text):
     return [ln for ln in text.splitlines() if _STATUS_LINE.match(ln)]
+
+
+def test_status_line_helper_ignores_validator_output():
+    text = ("PASS    a\nPASS  file 0\nFAIL  x  ->  broken\nWARN    d\n"
+            "NOT RUN opt (prerequisite absent: ossie-checkout)\nSKIP  thing: missing\n")
+    assert _status_lines(text) == [
+        "PASS    a", "WARN    d", "NOT RUN opt (prerequisite absent: ossie-checkout)"]
+
+
+@pytest.fixture(autouse=True)
+def _not_in_github_actions(monkeypatch):
+    # main() formats for a CI log when GITHUB_ACTIONS=true, which is set in CI's
+    # own pytest step; every test states the environment it means instead.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
 
 def _git(cwd, *args):
@@ -274,7 +291,7 @@ def test_local_context_promotes_skip_to_fail_for_required_checks(monkeypatch, tm
     local = rc.run("local", "upstream/main", tmp_path, "py")[0]
     assert local["status"] == "FAIL"
     assert "radon not installed" in local["output_tail"]
-    assert "required" in local["output_tail"]
+    assert local["output_tail"].count("required on every PR") == 1
     assert rc.main(["--context", "local", "--base", "upstream/main"]) == 1
 
     ci = rc.run("ci", "origin/main", tmp_path, "py")[0]
@@ -360,6 +377,27 @@ def test_local_does_not_print_pass_output(monkeypatch, tmp_path, capsys):
     printed = capsys.readouterr()
     assert "chatter" not in printed.out + printed.err
     assert "::group::" not in printed.out
+
+
+def test_github_actions_formats_a_ci_log_even_without_ci_context(
+        monkeypatch, tmp_path, capsys):
+    # A bare `--smokes` in CI has no --context, so the Actions env decides: PASS
+    # output folded in ::group:: on stdout, so annotations still register.
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {f"{checks.CI_SMOKES[0]}.py": (0, "::warning::smoke note\n")})
+    assert rc.main(["--smokes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    group = f"::group::{checks.CI_SMOKES[0]}"
+    assert out.index(group) < out.index("::warning::smoke note") < out.index("::endgroup::")
+
+
+def test_without_github_actions_a_bare_smokes_run_is_local_style(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {f"{checks.CI_SMOKES[0]}.py": (0, "::warning::smoke note\n")})
+    assert rc.main(["--smokes"]) == 0
+    printed = capsys.readouterr()
+    assert "::group::" not in printed.out and "smoke note" not in printed.out + printed.err
 
 
 def test_a_promoted_skip_prints_its_skip_line_once(monkeypatch, tmp_path, capsys):
