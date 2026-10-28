@@ -21,6 +21,13 @@ Usage:
     python tools/validate/check_secrets.py           # scan staged files (pre-commit mode)
     python tools/validate/check_secrets.py --all     # scan all tracked files (full repo)
     python tools/validate/check_secrets.py --root .
+    python tools/validate/check_secrets.py --file PATH   # one file, tracked or not
+
+`--file` runs content checks 2-6 on one file anywhere on disk, with no git involved.
+The `pr-ready` skill uses it on review text before that text is written into an
+evidence block or offered for pasting into a public PR: the review quotes code and
+comments someone else wrote, and nothing else scans it. An unreadable file is a FAIL,
+never an empty pass.
 """
 from __future__ import annotations
 
@@ -257,6 +264,27 @@ def _scan_file_content(path: Path, repo_root: Path) -> list[str]:
     return hits
 
 
+def _scan_one_file(path: Path) -> int:
+    """`--file`: content checks on one file. Read it first so an unreadable file
+    fails, rather than reaching _scan_file_content's empty-on-OSError path."""
+    path = path.resolve()
+    try:
+        path.read_bytes()
+    except OSError as exc:
+        print(f"FAIL  could not read {path.name}: {exc.strerror or exc}")
+        print("      Refusing to report PASS on an unscanned file.")
+        return 1
+    hits = _scan_file_content(path, path.parent)
+    for msg in hits:
+        print(f"FAIL  {msg}")
+    print()
+    if hits:
+        print(f"{len(hits)} potential secret(s) found in {path.name}.")
+        return 1
+    print(f"No secrets detected in {path.name}.")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -268,7 +296,14 @@ def main() -> int:
         "--all", action="store_true",
         help="Scan all tracked files (default: staged files only)",
     )
+    parser.add_argument(
+        "--file", metavar="PATH",
+        help="Scan one file's content (checks 2-6), tracked or not; no git involved",
+    )
     args = parser.parse_args()
+
+    if args.file:
+        return _scan_one_file(Path(args.file))
 
     repo_root = Path(args.root).resolve()
 

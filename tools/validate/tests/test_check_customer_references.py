@@ -945,3 +945,25 @@ def test_gate_with_missing_explicit_denylist_notes_and_passes(tmp_path, monkeypa
     result = _run(repo)
     assert result.returncode == 0
     assert "NOTE" in result.stdout
+
+
+def test_text_file_mode_scans_every_line_with_no_scissors(tmp_path):
+    """--text-file is for text that is not a commit message (the pr-ready skill's review
+    text). A scissors line plus a `diff --git` line ends a --message-file scan; here it
+    must not, or planted text could hide the rest."""
+    text = tmp_path / "review.md"
+    scissors = "# ------------------------ >8 ------------------------\n"
+    text.write_text("### Blocker\nNone.\n" + scissors + "diff --git a/x b/x\n"
+                    + _j("see https://acme-corp.", "atlassian.net/wiki/x\n"))
+    result = _run(tmp_path, "--text-file", str(text))
+    assert result.returncode == 1 and "review.md:5: [atlassian]" in result.stdout
+    # The same text through --message-file stops at the scissors: the reason for the mode.
+    assert _run(tmp_path, "--message-file", str(text)).returncode == 0
+
+    text.write_text("### Blocker\nNone.\n")
+    assert _run(tmp_path, "--text-file", str(text)).returncode == 0
+
+
+def test_text_file_mode_fails_on_an_unreadable_file(tmp_path):
+    result = _run(tmp_path, "--text-file", str(tmp_path / "missing.md"))
+    assert result.returncode == 1 and "Refusing to report PASS" in result.stdout

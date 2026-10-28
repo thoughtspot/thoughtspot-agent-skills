@@ -887,13 +887,29 @@ def main(argv: Optional[list[str]] = None) -> int:
                       help="Scan the added lines and commit messages of every commit in A..B")
     mode.add_argument("--message-file", metavar="PATH",
                       help="Scan a commit message file (the commit-msg hook)")
+    mode.add_argument("--text-file", metavar="PATH",
+                      help="Scan every line of a text file; no commit-message handling")
     args = parser.parse_args(argv)
     repo_root = Path(args.root).resolve()
     denylist = load_denylist()
 
     findings: list[tuple[str, Hit]] = []
     try:
-        if args.message_file:
+        if args.text_file:
+            # Every line, as written: unlike --message-file there is no scissors cut-off,
+            # so planted text cannot hide what follows it (the reason check-pr.sh calls
+            # the scanner directly). For text that is not a commit message, such as the
+            # pr-ready skill's review text before it reaches a public PR.
+            try:
+                text = Path(args.text_file).read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                print(f"FAIL  could not read the file to scan: {exc.strerror or exc}")
+                print("      Refusing to report PASS on unscanned text.")
+                return 1
+            findings = [(f"{Path(args.text_file).name}:{h.line}", h)
+                        for h in scan_text(text, "", denylist, grandfathered=set())]
+            scanned = Path(args.text_file).name
+        elif args.message_file:
             text = commit_message_text(
                 Path(args.message_file).read_text(encoding="utf-8", errors="replace"),
                 git_config_get("core.commentChar", repo_root))

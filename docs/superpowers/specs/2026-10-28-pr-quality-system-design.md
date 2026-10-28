@@ -167,10 +167,14 @@ and spot checks, not on finding validator failures or building the first repro.
   (agent definitions and SessionStart hooks load from the starting checkout): run
   main's `scripts/check-pr.sh` first (main's copy, never the PR's), and continue only
   on exit 0; never run the skill or `pr-ready.sh` from the PR checkout; pre-fetch the
-  inputs into a scratch directory (the diff `<base>...<fetched PR head SHA>`, the PR's
-  text and review threads by read-only `gh`, and the head's files by `git archive`,
-  extracted and never executed), refusing if the head moved after the scan; and
-  dispatch **`pr-reviewer-readonly`** (`trusted: no`) on them. That agent's grant is
+  inputs into a directory inside the git dir (not `$TMPDIR`, whose parent holds the
+  `ts` token cache): the diff `<base>...<fetched PR head SHA>`, the PR's text and
+  review threads by read-only `gh`, the head's files written as raw blobs (so none of
+  the PR's `.gitattributes` applies) and never executed, and a copy of main's brief;
+  refuse if the head moved after the scan; and dispatch **`pr-reviewer-readonly`**
+  (`trusted: no`) on them, reading only that directory. If that agent type is not
+  available, stop: nothing else reads the inputs. Its findings, like the own-branch
+  review text, are scanned for secrets and customer references before they are shown. That agent's grant is
   Read, Grep and Glob — no Bash — which is the local equivalent of the CI constraint
   below (`--disallowedTools Bash,...` for any job reading untrusted text): the repo's
   settings pre-approve `Bash(git:*)`, `python3`, `pip`, `pytest` and `ts`, so a
@@ -273,12 +277,16 @@ real consumers. §8.1 records the revised choice:
   - `pr-ready` warns early when the branch is behind
   - a `scripts/rebump.sh` updates the branch from upstream main and re-applies the bump
     in one step, so the maintainer can fix a contributor branch at merge ("allow edits
-    by maintainers"). Doing so commits on a branch the maintainer did not write, so:
-    run **main's copy** of the script (`git show <upstream>/main:scripts/rebump.sh`),
-    never the branch's; commit with that branch's hooks disabled for that commit
-    (`git -c core.hooksPath=<an empty directory> commit ...`), because the installed
-    hook dispatchers run the branch's own `scripts/pre-commit.sh` and
-    `scripts/commit-msg.sh`; and let CI re-validate the pushed result
+    by maintainers"). That work tree belongs to someone else, so it is held to a
+    requirement, not a procedure: **every git operation on someone else's branch —
+    merge, commit, push — runs with hooks disabled**
+    (`git -c core.hooksPath=<an empty directory> ...`), because the installed hook
+    dispatchers run the branch's own scripts (`commit-msg` fires on a merge commit too,
+    reproduced 2026-10-28; `pre-push` on a push); and **nothing from that work tree is
+    executed or sourced**: main's copy of the script runs
+    (`git show <upstream>/main:scripts/rebump.sh`), and `rebump.sh` must not `source`
+    helpers from the work tree (as house-style scripts do with `scripts/lib/`) —
+    anything it needs comes from main too. CI re-validates the pushed result
 - **Rule files to update in the C5 PR:**
   - `versioning.md`
   - root `CLAUDE.md` (change-impact map; conflict-resolution section)
@@ -350,9 +358,9 @@ real consumers. §8.1 records the revised choice:
   - **Run** only the read-only reviewer (`pr-reviewer-readonly`, `trusted: no`) on each
     recoverable first head, with inputs pre-fetched as in §5 C2. Never C1 /
     `pr-ready.sh` on a contributor's head: it executes that head's code. The one
-    exception is a disposable environment with no credentials (no tokens in the
-    environment, no Keychain, no `ts` token cache, no `gh` auth), discarded after
-    the run.
+    exception is a disposable environment with no credentials of any kind (e.g.
+    environment exports, Keychain, token caches, SSH keys and agents, `.p8` key files,
+    `~/.databrickscfg`, git credential helpers, `gh` auth), discarded after the run.
   - **Judge** today's rules separately from rules that existed at the time.
   - **Compare** against the real review findings.
   - **Adjudicate** every finding only the AI raised: the maintainer decides real vs false

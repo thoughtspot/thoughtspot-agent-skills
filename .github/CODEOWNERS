@@ -33,6 +33,7 @@
 # review looks for, so trimming it removes review areas without touching a gate.
 /.claude/agents/pr-reviewer.md                               @djwaldo
 /.claude/agents/pr-reviewer-readonly.md                      @djwaldo
+/tools/validate/pr_tree.py                                   @djwaldo
 /.claude/skills/pr-ready/                                    @djwaldo
 
 # The SessionStart hook that warns when the git hooks are missing.

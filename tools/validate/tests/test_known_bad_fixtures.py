@@ -229,3 +229,24 @@ def test_check_secrets_flags_pem_header(tmp_path):
                    capture_output=True, check=True)
     res = _run([str(VALIDATE / "check_secrets.py"), "--root", str(tmp_path)])
     assert res.returncode != 0, res.stdout + res.stderr
+
+
+def test_check_secrets_file_mode_flags_a_jwt_outside_any_repo(tmp_path):
+    # --file scans one file with no git: the pr-ready skill's review text, which sits
+    # outside the work tree. The JWT is assembled at runtime so this test file does
+    # not trip check_secrets in pre-commit.
+    seg = "A" * 12
+    review = tmp_path / "review.md"
+    review.write_text(f"- `x.py:3` quotes {'eyJ' + seg}.{'eyJ' + seg}.{seg}\n")
+    res = _run([str(VALIDATE / "check_secrets.py"), "--file", str(review)])
+    assert res.returncode != 0, res.stdout + res.stderr
+    assert "JWT" in res.stdout
+
+    review.write_text("### Blocker\nNone.\n")
+    res = _run([str(VALIDATE / "check_secrets.py"), "--file", str(review)])
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_check_secrets_file_mode_fails_on_an_unreadable_file(tmp_path):
+    res = _run([str(VALIDATE / "check_secrets.py"), "--file", str(tmp_path / "missing.md")])
+    assert res.returncode != 0 and "Refusing to report PASS" in res.stdout

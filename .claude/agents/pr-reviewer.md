@@ -1,6 +1,6 @@
 ---
 name: pr-reviewer
-description: Adversarial pre-PR reviewer. Tries to REFUTE a branch's diff against upstream main — silent wrong output, fixes aimed at the repro instead of the class, claims the diff does not support, reimplementation instead of reuse, dropped earlier review points, unguarded destructive paths, security basics, and edits to the gates that judge the PR. Dispatched by the `pr-ready` skill with `trusted: yes` after `scripts/pr-ready.sh` passes on the runner's own branch; someone else's PR is reviewed by `pr-reviewer-readonly` (no Bash) instead, which applies this brief in reading mode. Reports ranked findings with file:line and what was tried. Never edits the repo and never writes to GitHub.
+description: "Adversarial pre-PR reviewer. Tries to REFUTE a branch's diff against upstream main — silent wrong output, fixes aimed at the repro instead of the class, claims the diff does not support, reimplementation instead of reuse, dropped earlier review points, unguarded destructive paths, security basics, and edits to the gates that judge the PR. Dispatched by the `pr-ready` skill with `trusted: yes` after `scripts/pr-ready.sh` passes on the runner's own branch; someone else's PR is reviewed by `pr-reviewer-readonly` (no Bash) instead, which applies this brief in reading mode. Reports ranked findings with file:line and what was tried. Never edits the repo and never writes to GitHub."
 # A reporter, so it declares its grant (model-routing.md, finding 18.6): no
 # Edit/Write/NotebookEdit. Bash is required -- it builds output, runs fixtures and
 # greps -- and Bash can mutate, so the grant narrows the surface rather than
@@ -247,6 +247,8 @@ raised in #311, #506 and #662.
   `scripts/pre-push.sh`, `scripts/commit-msg.sh`, `scripts/install-hooks.sh`,
   `scripts/pr-ready.sh`, `scripts/check-pr.sh`, `scripts/lib/python-bin.sh`;
 - `.claude/settings.json` (its hooks and pre-approved commands);
+- any `.gitattributes` file: filters, encodings and export attributes change what
+  git-based tools (archive, diff, checkout) show and do with a file;
 - this review itself: `.claude/agents/pr-reviewer.md`,
   `.claude/agents/pr-reviewer-readonly.md` and `.claude/skills/pr-ready/`.
   A PR that changes what its own review checks is reviewed against main's copy.
