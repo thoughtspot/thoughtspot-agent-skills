@@ -112,15 +112,20 @@ def test_review_placeholder_and_text():
     assert "found nothing" in _render(review="I checked X and found nothing").split("## Review", 1)[1]
 
 
+# The home-directory names below are the placeholders check_customer_references treats
+# as documentation (its _HOME_PLACEHOLDERS), so this file's own paths do not add
+# personal-path WARNs to CI's whole-tree scan. Any name proves the scrub as well: the
+# scrub matches the path shape, never the name.
+
 def test_evidence_has_no_absolute_home_paths():
     text = _render(
-        checks=[_r("references", "SKIP", "SKIP  /Users/alice/Dev/repo/x.md missing"),
-                _r("o", "NOT RUN", "/home/bob/ossie", 0.0)],
-        not_reproduced=["interpreter /Users/alice/.local/bin/python3.12"],
-        review="see /home/bob/notes.txt and C:\\Users\\carol\\x",
+        checks=[_r("references", "SKIP", "SKIP  /Users/jdoe/Dev/repo/x.md missing"),
+                _r("o", "NOT RUN", "/home/someone/ossie", 0.0)],
+        not_reproduced=["interpreter /Users/jdoe/.local/bin/python3.12"],
+        review="see /home/someone/notes.txt and C:\\Users\\guest\\x",
     )
     assert "/Users/" not in text and "/home/" not in text and "\\Users\\" not in text, text
-    assert "alice" not in text and "bob" not in text and "carol" not in text, text
+    assert "jdoe" not in text and "someone" not in text and "guest" not in text, text
 
 
 def test_write_goes_to_the_git_dir(tmp_path):
@@ -151,9 +156,9 @@ def test_skipped_tests_are_listed_with_missing_modules_marked():
 
 
 def test_scrub_handles_windows_names_with_spaces_doubled_backslashes_and_root():
-    for raw, name in (("C:\\Users\\Carol Ann\\Docs\\x", "Carol"),
-                      (repr("C:\\Users\\dave\\x"), "dave"),
-                      ("D:\\\\Users\\\\erin\\\\x", "erin"),
+    for raw, name in (("C:\\Users\\Your Name\\Docs\\x", "Your"),
+                      (repr("C:\\Users\\jdoe\\x"), "jdoe"),
+                      ("D:\\\\Users\\\\someone\\\\x", "someone"),
                       ("cache at /root/.cache/pip", "/root")):
         text = _render(review=raw)
         assert name not in text, (raw, text.split("## Review", 1)[1])
@@ -161,9 +166,9 @@ def test_scrub_handles_windows_names_with_spaces_doubled_backslashes_and_root():
 
 
 @pytest.mark.parametrize("raw, name", [
-    ("c:\\users\\carol\\docs", "carol"),
-    ("built in C:\\Users\\Carol Ann", "Ann"),
-    ("C:\\USERS\\Dave Smith\\x", "Smith"),
+    ("c:\\users\\guest\\docs", "guest"),
+    ("built in C:\\Users\\Your Name", "Name"),
+    ("C:\\USERS\\Guest User\\x", "User"),
 ])
 def test_scrub_any_case_and_a_trailing_name_with_a_space(raw, name):
     text = _render(review=raw)
@@ -243,8 +248,8 @@ def test_with_review_refuses_an_unfinished_block():
 
 
 def test_with_review_scrubs_home_paths():
-    out = evidence.with_review(_render(), "see /Users/alice/x.py:3" + DONE, head_sha=HEAD)
-    assert "/Users/" not in out and "alice" not in out
+    out = evidence.with_review(_render(), "see /Users/jdoe/x.py:3" + DONE, head_sha=HEAD)
+    assert "/Users/" not in out and "jdoe" not in out
 
 
 def test_cli_range_prints_the_shas_the_evidence_names(tmp_path, capsys):
@@ -318,10 +323,12 @@ def test_cli_append_review_refuses_a_blank_file(tmp_path, capsys):
 
 @pytest.mark.parametrize("raw,name", [
     # Claude Code's project and scratchpad folders: the path with `/` as `-`.
-    ("/private/tmp/claude-501/-Users-alice-Dev-x/scratchpad/a.md", "alice"),
-    ("~/.claude/projects/-home-bob-Dev-repo/memory.md", "bob"),
-    ("cited `-Users-carol-ann-Dev-repo` here", "carol"),
-    ("C--Users-dave-proj", "dave"),
+    ("/private/tmp/claude-501/-Users-jdoe-Dev-x/scratchpad/a.md", "jdoe"),
+    ("~/.claude/projects/-home-someone-Dev-repo/memory.md", "someone"),
+    # A name that itself contains `-`: both of its parts go.
+    ("cited `-Users-your-name-Dev-repo` here", "your"),
+    ("cited `-Users-your-name-Dev-repo` here", "name"),
+    ("C--Users-guest-proj", "guest"),
 ])
 def test_scrub_dash_encoded_home_paths(raw, name):
     assert name not in evidence.scrub(raw)
