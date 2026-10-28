@@ -26,9 +26,9 @@ Usage:
 `--file` runs content checks 2-6 on one file anywhere on disk, with no git involved,
 whatever the file's suffix. The `pr-ready` skill uses it on review text before that
 text is written into an evidence block or offered for pasting into a public PR: the
-review quotes code, pasted snippets and earlier PR comments others may have written,
-and nothing else scans it. An unreadable file is a FAIL, never an empty pass.
-`--file` and `--all` are mutually exclusive (a usage error, exit 2).
+review quotes code, pasted snippets and earlier reviewers' points, which others may
+have written, and nothing else scans it. An unreadable file is a FAIL, never an empty pass.
+`--file` with `--all`, or with an empty path, is a usage error (exit 2).
 """
 from __future__ import annotations
 
@@ -298,19 +298,23 @@ def main() -> int:
     # One mode per run. `--file` with `--all` used to scan only the one file and exit
     # 0, silently dropping the `--all` scan the caller asked for; argparse now refuses
     # the pair.
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--all", action="store_true",
         help="Scan all tracked files (default: staged files only)",
     )
-    mode.add_argument(
+    modes.add_argument(
         "--file", metavar="PATH",
         help="Scan one file's content (checks 2-6), tracked or not; no git involved "
              "(--root does not apply)",
     )
     args = parser.parse_args()
 
-    if args.file:
+    # `is not None`, not truthiness: `--file ""` used to read as "no --file" and fall
+    # through to the staged scan, a different mode from the one asked for.
+    if args.file is not None:
+        if not args.file:
+            parser.error("--file needs a path")
         return _scan_one_file(Path(args.file))
 
     repo_root = Path(args.root).resolve()

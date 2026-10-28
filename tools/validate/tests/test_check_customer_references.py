@@ -978,3 +978,16 @@ def test_text_file_mode_reports_a_personal_detail_on_a_warn_line_with_exit_0(tmp
     assert result.returncode == 0, result.stdout
     warns = [l for l in result.stdout.splitlines() if l.startswith("WARN")]
     assert len(warns) == 1 and "evidence.md:2" in warns[0], result.stdout
+
+
+@pytest.mark.parametrize("option", ["--text-file", "--message-file", "--range"])
+def test_an_empty_mode_value_is_a_usage_error_not_the_staged_scan(tmp_path, option):
+    """An empty value was falsy, so the mode it named was skipped and the staged
+    scan ran instead. With a staged hit, that fall-through shows as exit 1; a usage
+    error is exit 2."""
+    _init_repo(tmp_path)
+    (tmp_path / "example.js").write_text(LINK)
+    _git(["add", "-A"], tmp_path)
+    result = _run(tmp_path, option, "")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"{option} needs a value" in result.stderr, result.stderr

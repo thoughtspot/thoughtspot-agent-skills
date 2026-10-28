@@ -271,3 +271,18 @@ def test_check_secrets_file_mode_scans_a_file_whatever_its_suffix(tmp_path):
     named.write_text(f"<text>{'eyJ' + seg}.{'eyJ' + seg}.{seg}</text>\n")
     res = _run([str(VALIDATE / "check_secrets.py"), "--file", str(named)])
     assert res.returncode != 0 and "JWT" in res.stdout, res.stdout + res.stderr
+
+
+def test_check_secrets_file_mode_refuses_an_empty_path(tmp_path):
+    # `--file ""` was falsy, so it fell through to the staged scan: a different mode
+    # from the one asked for. Run inside a repo with a staged key, where that
+    # fall-through would show as exit 1; a usage error is exit 2.
+    _init_git(tmp_path)
+    pem = "-----BEGIN " + "RSA PRIVATE KEY-----"
+    (tmp_path / "leak.py").write_text(f'key = """{pem}"""\n')
+    subprocess.run(["git", "-C", str(tmp_path), "add", "leak.py"],
+                   capture_output=True, check=True)
+    res = subprocess.run([sys.executable, str(VALIDATE / "check_secrets.py"), "--file", ""],
+                         capture_output=True, text=True, cwd=tmp_path)
+    assert res.returncode == 2, res.stdout + res.stderr
+    assert "--file needs a path" in res.stderr, res.stderr

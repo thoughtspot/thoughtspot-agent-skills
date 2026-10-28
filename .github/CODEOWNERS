@@ -10,8 +10,11 @@
 # The shared git helper the gate reads staged content and history through.
 /tools/validate/_git.py                                      @djwaldo
 # The secrets gate: CI's full-tree scan, and the scan the pr-ready skill runs on
-# review text (`--file`) before it is appended to the evidence or shared.
+# review text (`--file`) before it is appended to the evidence or shared; its tests
+# pin what it must catch (the known-bad fixtures also cover other gates).
 /tools/validate/check_secrets.py                             @djwaldo
+/tools/validate/tests/test_known_bad_fixtures.py             @djwaldo
+/tools/validate/tests/test_check_secrets_placeholders.py     @djwaldo
 
 # Hooks and their installer: a change here can disable every local gate.
 /scripts/install-hooks.sh                                    @djwaldo

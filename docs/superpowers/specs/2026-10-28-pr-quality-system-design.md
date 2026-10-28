@@ -146,7 +146,9 @@ and spot checks, not on finding validator failures or building the first repro.
   - claims vs diff: every statement in the PR body, CHANGELOG, `--help` and docs must be
     true of the diff
   - reuse: `formula_common`, the existing pipelines, ts-cli rather than raw REST
-  - earlier review points: if the PR supersedes another, map every point
+  - earlier review points: if the PR supersedes another, check the author's own
+    mapping of every earlier point (C7's "Supersedes #N" section) against the diff;
+    the reviewer reads no PR threads (see the deferred design below)
   - destructive paths need a backup, re-check and rollback
   - security basics: TLS, path traversal, secrets in argv
   - gate edits: flag any change to `tools/validate/`, baselines, the C1 list or CI
@@ -159,12 +161,13 @@ and spot checks, not on finding validator failures or building the first repro.
 - **Local skill.** `.claude/skills/pr-ready/` runs C1, then the reviewer agent on the
   diff against upstream main, and appends the findings to the evidence block. The
   evidence block records the head SHA reviewed, so a stale block is visible.
-- **Only on your own branch (revised 2026-10-28 after review).** The skill's first step
-  runs the branch's own code (the runner, every validator, the smokes and the test
-  suite) with the runner's full environment, and from a PR checkout the PR also
-  controls the skill, the reviewer brief, `pr-ready.sh` and `.claude/settings.json`
-  hooks. So the skill starts by saying that it executes the branch's code with the
-  user's credentials, and asks the user to confirm the branch is their own: they
+- **Only on your own branch (revised 2026-10-28 after review).** The skill's checks
+  (`pr-ready.sh`, its first step after the confirmation below) run the branch's own
+  code (the runner, every validator, the smokes and the test suite) with the
+  runner's full environment, and from a PR checkout the PR also controls the skill,
+  the reviewer brief, `pr-ready.sh` and `.claude/settings.json` hooks. So before
+  anything runs, the skill says that it executes the branch's code with the user's
+  credentials, and asks the user, every run, to confirm the branch is their own: they
   wrote it, or have read all of it. Only on that confirmation does it run, and it
   passes the reviewer `trusted: yes`; without exactly that value the reviewer refuses,
   reading nothing from the branch (decided 2026-10-28; there is no read-only mode).
@@ -203,8 +206,13 @@ and spot checks, not on finding validator failures or building the first repro.
   - **Scanning the output is not a complete control.** `check_secrets.py` and
     `check_customer_references.py` match line by line, so an encoded or split value
     passes.
-  - **`check-pr.sh` does not scan an earlier PR's threads**, which the brief's
-    "earlier review points" reads; that text needs its own scan.
+  - **PR threads are untrusted input, even on the author's own branch.** Anyone can
+    comment on a PR, so this PR's and earlier PRs' comments and reviews are text a
+    stranger may have written, and `check-pr.sh` does not scan an earlier PR's
+    threads. Reading them belongs to this design. Until it lands, the reviewer reads
+    no PR threads at all, and "earlier review points" checks the author's own
+    mapping (C7's "Supersedes #N" section) against the diff instead (decided
+    2026-10-28).
 
   Until that design lands, other people's PRs are verified as they were before this
   spec: main's `check-pr.sh` and a human review. The C7 backtest depends on it.

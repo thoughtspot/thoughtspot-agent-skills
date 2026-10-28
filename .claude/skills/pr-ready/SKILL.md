@@ -54,12 +54,16 @@ hooks, so its copy of these instructions is not evidence of anything.
 agent review of a branch you did not write is deferred to its own design (spec §5
 C2). Tell the user so, and give them main's `scripts/check-pr.sh` — main's copy,
 never a PR checkout's (`.claude/rules/security.md`) — with the invocation from the
-script's own header. It reads `origin`, so it runs from a clone whose `origin` is
-`thoughtspot/thoughtspot-agent-skills`:
+script's own header. It reads `origin`, and "main's copy" means `origin/main`, which
+in a fork clone is the fork's copy. So the block first checks that `origin` is
+`thoughtspot/thoughtspot-agent-skills` (https or ssh) and stops otherwise; it is
+written as an `if`, so pasting it into an interactive shell never closes that shell:
 
 ```bash
+if git remote get-url origin | grep -Eiq '^(https://([^@/]+@)?github\.com/|ssh://git@github\.com(:22)?/|git@github\.com:)thoughtspot/thoughtspot-agent-skills(\.git)?/?$'; then
 ( set -e; git fetch origin main; f="$(mktemp)"; trap 'rm -f "$f"' EXIT
   git show origin/main:scripts/check-pr.sh >| "$f"; bash "$f" <pr-number> )
+else echo "STOP: origin is not thoughtspot/thoughtspot-agent-skills; run this from a clone of it"; fi
 ```
 
 followed by a human review of the PR.
@@ -120,6 +124,15 @@ echo "evidence: $EVIDENCE"
 git diff --stat "$RANGE"
 ```
 
+**Earlier review points.** Ask the user whether this branch supersedes, continues or
+reworks an earlier PR. If it does, ask for their own mapping of every point raised
+on that PR to this diff: each point addressed (with its `file:line`) or declined
+(with the reason, and where it is recorded). That is the "Supersedes #N: every
+earlier review point mapped" section spec §5 C7 adds to the PR template; the user
+pastes it, or writes it now. Do not fetch the earlier PR's comments or reviews, and
+do not ask the reviewer to: anyone can write them, and reading them is deferred
+with the untrusted-branch design (spec §5 C2).
+
 Dispatch the `pr-reviewer` agent (`.claude/agents/pr-reviewer.md`) with, written out
 literally in the prompt (an agent does not share your shell):
 
@@ -128,7 +141,9 @@ literally in the prompt (an agent does not share your shell):
   is their own;
 - the printed range, and the base ref named in the evidence's first line;
 - the printed evidence path;
-- the PR number, if a PR already exists, so it can read the description.
+- the PR number, if a PR already exists, so it can read the description;
+- the user's earlier-review mapping, as they gave it, or that they said the branch
+  supersedes nothing.
 
 Pass the inputs, not your own reading of the change: a reviewer handed a conclusion
 tends to confirm it.
@@ -187,16 +202,24 @@ home-directory paths. Re-running replaces the review rather than stacking a seco
 one. It refuses (exit 1) if HEAD has moved since Step 1, or the block is DIRTY, NOT
 READY or unfinished: start again from Step 1 on the final head.
 
+**When there is no review to append.** If the reviewer replied `Not reviewed` (it
+refuses without `trusted: yes`), or `append-review` exits 1 for any reason: stop and
+tell the user, with the reviewer's reply or the append's message. Do not write a
+refusal into `review.md`, and do not retry with the review text changed to get past
+the append. The evidence keeps its "Not run" placeholder. Never paste or describe a
+block whose Review says "Not run" as reviewed.
+
 Do not edit the evidence file by hand, and do not soften or drop findings when
 copying them in: the block is evidence of what the reviewer said.
 
 ## Step 6: scan the block, then tell the user
 
-The block is meant for a public PR. Scan the whole of it the same way (with your
-private customer-name list, if you keep one):
+The block is meant for a public PR. Check it carries a review, then scan the whole
+of it the same way (with your private customer-name list, if you keep one):
 
 ```bash
 EVIDENCE="$(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
+if ! grep -E '^Review of `[0-9a-f]+\.\.\.[0-9a-f]+` \(base `[^`]+`\), run by the `pr-ready` skill\.' "$EVIDENCE" >/dev/null; then echo "STOP: no review appended: the Review section still says Not run"; fi
 python3 tools/validate/check_secrets.py --file "$EVIDENCE"
 echo "secrets exit: $?"
 REFS="$(python3 tools/validate/check_customer_references.py --text-file "$EVIDENCE")"
@@ -208,10 +231,12 @@ if printf '%s\n' "$REFS" | grep -E '^WARN' >/dev/null; then echo "STOP: WARN lin
 **Stop** — the block must not be shared yet — on either of:
 
 - a non-zero exit from either scanner;
-- a `STOP` line. `check_customer_references.py` reports personal details (a home
+- a `STOP` line. The first looks for the provenance line only `append-review`
+  writes, so a block with no review, or an empty file, stops there (see Step 5).
+  For the last: `check_customer_references.py` reports personal details (a home
   path, a personal email address) on `WARN` lines and still exits 0, so its exit
-  code alone would let them through. `check_secrets.py` has no warning level: all it
-  reports is a FAIL, with exit 1.
+  code alone would let them through. `check_secrets.py` has no warning level: all
+  it reports is a FAIL, with exit 1.
 
 Each hit names `evidence.md:<line>`. A hit in the Review section: remove it from
 `review.md`, then re-run Step 5 (the append replaces the review) and this step. A
