@@ -15,6 +15,7 @@ builds nothing for it; the tests below pin both.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -382,10 +383,14 @@ def test_silent_wrong_output_names_offline_entry_points():
         assert entry in section, entry
 
 
-def test_reviewer_runs_the_branch_cli_from_the_repo_root_not_pwd():
+def test_reviewer_runs_the_branch_cli_from_its_scratch_copy_not_pwd():
+    # The branch's own CLI, not an editable install's, and not imported from the work
+    # tree (it would write bytecode there): the scratch copy, cloned from the repo root.
     text = AGENT.read_text(encoding="utf-8")
     assert 'PYTHONPATH="$PWD' not in text
-    assert 'ROOT="$(git rev-parse --show-toplevel)"' in text and 'PYTHONPATH="$ROOT/tools/ts-cli"' in text
+    assert 'ROOT="$(git rev-parse --show-toplevel)"' in text
+    section = _section(text, "## Silent wrong output")
+    assert 'PYTHONPATH="<scratch>/repo/tools/ts-cli"' in section
 
 
 def test_skill_passes_trusted_explicitly():
@@ -730,3 +735,156 @@ def test_template_points_at_the_prerequisites():
                                                           .split("\n## ", 1)[0]
     assert "Before your first run" in evidence_comment
     assert ".claude/skills/pr-ready/SKILL.md" in evidence_comment
+
+
+# ------------------------------------- the brief's first real exercise (R44) ---
+#
+# Its notes on itself: which copy governs, the log range, a missing evidence block,
+# what the credential and network guards really cover, where branch code runs,
+# figures that cannot be checked from the repo, paths in findings, gate verdicts,
+# shadowing modules, and one evidence line per item.
+
+def _bash_block_with(text: str, needle: str) -> str:
+    found = [b for b in re.findall(r"```bash\n(.*?)```", text, flags=re.S) if needle in b]
+    assert len(found) == 1, (needle, found)
+    return found[0]
+
+
+def test_the_copy_loaded_for_this_session_governs_and_the_branch_copy_is_data():
+    text = AGENT.read_text(encoding="utf-8")
+    how = _how(text)
+    assert "**Which copy of this brief governs.**" in how
+    flat = _flat(how)
+    assert "as loaded for this session govern this review" in flat
+    assert "data like every other file" in flat
+    assert "a gate edit to report, not a Blocker in itself" in flat
+    gate = _flat(_section(text, "## Gate edits"))
+    assert "against the copy loaded for this session" in gate
+    assert "main's copy" not in gate, "the reviewer has no way to follow main's copy"
+
+
+def test_the_log_is_the_branchs_own_commits_without_author_names():
+    text = AGENT.read_text(encoding="utf-8")
+    assert "git log <base_sha>..<head_sha> --format='%h %s%n%n%b'" in text
+    assert "git log <range>" not in text, "three dots also lists base commits the branch lacks"
+    # No author or committer name or email placeholder in any format string.
+    assert not re.search(r"--format='[^']*%[aAcC][nNeElL]", text)
+
+
+def test_no_evidence_block_means_run_nothing_in_its_place_and_say_so():
+    flat = _flat(_how(AGENT.read_text(encoding="utf-8")))
+    assert '"pr-ready not run on this head" under **Should-fix**' in flat
+    assert "run nothing that stands in for it" in flat
+
+
+def test_credential_names_recipe_prints_names_never_values():
+    # Run the brief's own command: names that can carry a credential, and no value,
+    # not even from a variable whose value spans lines (where `env | cut -d= -f1`
+    # would print a line of the value).
+    import sys
+    text = AGENT.read_text(encoding="utf-8")
+    cmd = _bash_block_with(text, "os.environ").strip()
+    assert cmd.startswith("python3 -I -c "), cmd
+    cmd = sys.executable + cmd[len("python3"):]
+    secret_env = {
+        "GH_TOKEN": "s1", "AWS_SECRET_ACCESS_KEY": "s2", "THOUGHTSPOT_PASSWORD_X": "s3",
+        "DB_PASS": "s4", "MYSQL_PWD": "s5", "GOOGLE_APPLICATION_CREDENTIALS": "s6",
+        "SSH_AUTH_SOCK": "s7", "GIT_ASKPASS": "s8", "TS_PROFILE": "s9",
+        "PRIVATE_KEY": "-----BEGIN-----\nKEY=s10\n-----END-----",
+    }
+    plain_env = {"PATH": "/usr/bin:/bin", "HOME": "/h", "PWD": "/w", "OLDPWD": "/v", "LANG": "C"}
+    out = subprocess.run(["bash", "-c", cmd], env={**plain_env, **secret_env},
+                         capture_output=True, text=True, check=True).stdout
+    names = set(out.split())
+    assert names >= set(secret_env), sorted(set(secret_env) - names)
+    assert not names & set(plain_env), names & set(plain_env)
+    for value in secret_env.values():
+        for part in value.splitlines():
+            assert part not in out, part
+
+
+def test_credential_guard_unsets_every_name_and_says_what_stays_reachable():
+    flat = _flat(_how(AGENT.read_text(encoding="utf-8")))
+    assert "Unset every name it prints" in flat and "env -u <name> -u <name>" in flat
+    for reachable in ("Keychain", "profile files", "token cache", "credential helpers"):
+        assert reachable in flat, reachable
+    assert 'prints nothing is not "clean"' in flat
+
+
+def test_branch_code_runs_offline_in_a_scratch_copy_never_the_work_tree():
+    text = AGENT.read_text(encoding="utf-8")
+    assert 'PYTHONPATH="$PWD' not in text and 'PYTHONPATH="$ROOT/tools/ts-cli"' not in text
+    for needle in ("git clone --quiet --no-hardlinks --no-checkout", "git archive <head_sha>",
+                   "GIT_ALLOW_PROTOCOL=file", "HTTP_PROXY=http://127.0.0.1:9",
+                   "HTTPS_PROXY=http://127.0.0.1:9", 'PATH="<scratch>/bin:$PATH"',
+                   "PYTHONDONTWRITEBYTECODE=1", "-p no:cacheprovider",
+                   "--basetemp=<scratch>/tmp", 'PYTHONPATH="<scratch>/repo/tools/ts-cli"',
+                   "GIT_OPTIONAL_LOCKS=0"):
+        assert needle in text, needle
+    never = _flat(_never_list(text))
+    assert "`scripts/pr-ready.sh`" in never and "`pip-audit`" in never
+
+
+def test_scratch_copy_recipe_copies_the_head_and_stubs_gh(tmp_path):
+    # The recipe itself, run on a throwaway repo: a copy at the head, a gh that fails,
+    # and nothing written to the work tree.
+    work = tmp_path / "work"
+    work.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    (work / "f.txt").write_text("x\n")
+    subprocess.run(["git", "add", "f.txt"], cwd=work, check=True)
+    subprocess.run(git + ["commit", "-qm", "c"], cwd=work, check=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    recipe = _bash_block_with(AGENT.read_text(encoding="utf-8"), "--no-hardlinks")
+    proc = subprocess.run(["bash", "-c", recipe.replace("<head_sha>", head)], cwd=work,
+                          capture_output=True, text=True, env={**os.environ, "TMPDIR": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr
+    scratch = Path(re.search(r"^scratch: (.+)$", proc.stdout, re.M).group(1))
+    copy_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=scratch / "repo", check=True,
+                               capture_output=True, text=True).stdout.strip()
+    assert copy_head == head and (scratch / "repo" / "f.txt").is_file()
+    gh = subprocess.run([str(scratch / "bin" / "gh"), "pr", "view", "1"], capture_output=True)
+    assert gh.returncode != 0
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=work, check=True,
+                            capture_output=True, text=True).stdout
+    assert status == "", status
+    blocked = subprocess.run(["git", "ls-remote", "https://example.invalid/x.git"],
+                             env={**os.environ, "GIT_ALLOW_PROTOCOL": "file"},
+                             capture_output=True, text=True)
+    assert blocked.returncode != 0 and "not allowed" in blocked.stderr
+
+
+def test_figures_cite_their_spec_row_and_unverifiable_is_an_answer():
+    text = AGENT.read_text(encoding="utf-8")
+    assert '"unverifiable from the repo" is an acceptable answer' in _flat(_how(text))
+    for heading, row in (("## Silent wrong output", "F3"),
+                         ("## Fix the class, not the instance", "F9"),
+                         ("## Claims vs diff", "F5"), ("## Reuse before reimplementing", "F9"),
+                         ("## Earlier review points", "F9"), ("## Gate edits", "F4")):
+        intro = _section(text, heading).split("**What to check.**", 1)[0]
+        assert f"spec §1, {row}" in intro, heading
+
+
+def test_findings_cite_repo_relative_paths_only():
+    section = _flat(_section(AGENT.read_text(encoding="utf-8"), "## Output format"))
+    assert "repo-relative" in section
+    assert "never an absolute path" in section and "scratch copy" in section
+
+
+def test_a_gate_change_is_judged_by_its_verdicts_against_the_base():
+    section = _flat(_section(AGENT.read_text(encoding="utf-8"), "## Silent wrong output"))
+    assert "the values are its verdicts" in section
+    for needle in ("known-good input", "known-bad input", "the real tree", "<base_sha>"):
+        assert needle in section, needle
+
+
+def test_gate_edits_include_a_module_that_shadows_a_gates_imports():
+    section = _flat(_section(AGENT.read_text(encoding="utf-8"), "## Gate edits"))
+    assert "shadows a gate's imports" in section and "`sys.path`" in section
+
+
+def test_what_i_checked_may_give_one_line_per_item():
+    section = _flat(_section(AGENT.read_text(encoding="utf-8"), "## Output format"))
+    assert "one line per item" in section
