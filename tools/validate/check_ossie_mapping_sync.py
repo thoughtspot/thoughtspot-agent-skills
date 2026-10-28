@@ -144,8 +144,11 @@ def main() -> int:
     repo_root = Path(args.root).resolve()
     ours_path = repo_root / OURS
     if not ours_path.is_file():
-        print(f"  {OURS} not found; nothing to compare.")
-        return 0
+        # OURS is part of this repo, so its absence is a broken tree or a wrong
+        # --root -- unlike the upstream checkout, never an optional prerequisite.
+        print(f"FAIL  ossie mapping sync: {OURS} not found under {repo_root}; "
+              f"it is this repo's own mapping doc (wrong --root?).")
+        return 1
 
     upstream_path = find_upstream(args.ossie_root)
     if upstream_path is None:

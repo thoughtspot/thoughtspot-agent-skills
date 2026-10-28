@@ -123,6 +123,15 @@ class TestMain:
         # without one, a run that compared nothing would report PASS.
         assert any(line.startswith("SKIP ") for line in out.splitlines())
 
+    def test_a_missing_doc_of_ours_fails(self, tmp_path, monkeypatch, capsys):
+        # OURS lives in this repo; its absence is a broken repo or a bad --root,
+        # not an optional prerequisite, so it must not read as a pass.
+        up = self._upstream(tmp_path, [("SUM(expr)", "direct")])
+        assert self._run(monkeypatch, tmp_path / "empty", up, True) == 1
+        out = capsys.readouterr().out
+        assert any(line.startswith("FAIL") for line in out.splitlines())
+        assert mod.OURS in out
+
     def test_a_presence_gap_alone_never_fails(self, tmp_path, monkeypatch, capsys):
         # The two spell operators differently (`!=` vs `a != b`), so a presence
         # gap is naming convention, not drift. It is context, never a defect.

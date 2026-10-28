@@ -12,7 +12,9 @@ No test here runs a real validator — subprocess.run is replaced with a recorde
 from __future__ import annotations
 
 import json
+import re
 import shlex
+import sys
 import subprocess
 from pathlib import Path
 
@@ -65,15 +67,31 @@ def _by_id(results):
     return {r["id"]: r for r in results}
 
 
+_STATUS_LINE = re.compile(r"^(PASS|FAIL|WARN|SKIP|NOT RUN)\s")
+
+
+def _status_lines(text):
+    return [ln for ln in text.splitlines() if _STATUS_LINE.match(ln)]
+
+
 def _git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, check=True,
                           capture_output=True, text=True).stdout.strip()
 
 
 @pytest.fixture
-def repo(tmp_path):
-    _git(tmp_path, "init", "-q")
-    return tmp_path
+def repo(tmp_path, monkeypatch):
+    # A developer's ~/.gitconfig can rewrite URLs (`url.*.insteadOf`), which would
+    # change what `git remote get-url` prints; isolate from it.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    work = tmp_path / "repo"
+    work.mkdir()
+    _git(work, "init", "-q")
+    return work
 
 
 # --------------------------------------------------------------- classify ---
@@ -101,7 +119,7 @@ def test_resolve_upstream_prefers_canonical_url(repo):
 def test_resolve_upstream_adds_remote_when_only_fork(repo):
     _git(repo, "remote", "add", "origin", "https://github.com/someone/fork.git")
     assert rc.resolve_upstream(repo) == "upstream"
-    assert _git(repo, "remote", "get-url", "upstream") == CANON_HTTPS
+    assert _git(repo, "config", "--get", "remote.upstream.url") == CANON_HTTPS
 
 
 @pytest.mark.parametrize("url", [
@@ -109,6 +127,9 @@ def test_resolve_upstream_adds_remote_when_only_fork(repo):
     "https://github.com/ThoughtSpot/Thoughtspot-Agent-Skills.git",
     "git@github.com:thoughtspot/thoughtspot-agent-skills",
     "git@github.com:THOUGHTSPOT/thoughtspot-agent-skills.git",
+    "https://someone@github.com/thoughtspot/thoughtspot-agent-skills.git",
+    "ssh://git@github.com/thoughtspot/thoughtspot-agent-skills.git",
+    "ssh://git@github.com:22/thoughtspot/thoughtspot-agent-skills.git",
 ])
 def test_resolve_upstream_matches_https_and_ssh_any_case(repo, url):
     _git(repo, "remote", "add", "origin", url)
@@ -133,9 +154,11 @@ def test_resolve_upstream_raises_without_add(repo):
 def test_resolve_upstream_raises_when_upstream_name_is_taken(repo):
     # An existing non-canonical `upstream` must not be silently trusted or overwritten.
     _git(repo, "remote", "add", "upstream", "https://github.com/someone/else.git")
-    with pytest.raises(RuntimeError, match="upstream"):
+    with pytest.raises(RuntimeError, match="upstream") as err:
         rc.resolve_upstream(repo)
-    assert _git(repo, "remote", "get-url", "upstream") == "https://github.com/someone/else.git"
+    # The message names the URL it found, so the reader can see why it was refused.
+    assert "https://github.com/someone/else.git" in str(err.value)
+    assert _git(repo, "config", "--get", "remote.upstream.url") == "https://github.com/someone/else.git"
 
 
 # ---------------------------------------------------------- prereq_present ---
@@ -157,6 +180,14 @@ def test_prereq_present_resolves_relative_locations_against_repo_root(monkeypatc
     rc.prereq_present("ossie-checkout", tmp_path)
     assert seen == [tmp_path.resolve()]
     assert Path.cwd() != tmp_path.resolve()
+
+
+def test_every_optional_prereq_in_checks_is_known(tmp_path):
+    # An unknown id would pass CI (which never asks) and crash every local run.
+    prereqs = {c.optional_prereq for c in checks.CHECKS if c.optional_prereq}
+    assert prereqs, "expected at least one opt-in check"
+    for prereq in prereqs:
+        assert rc.prereq_present(prereq, tmp_path) in (True, False)
 
 
 def test_prereq_present_rejects_an_unknown_prereq(tmp_path):
@@ -187,8 +218,8 @@ def test_ci_context_continues_past_a_hard_failure_and_exits_1(monkeypatch, tmp_p
     code = rc.main(["--context", "ci", "--base", "origin/main"])
     assert fake.scripts() == ["check_a.py", "check_b.py", "check_c.py", "check_d.py"]
     assert code == 1
-    out = capsys.readouterr().out.splitlines()
-    assert out == ["PASS    a", "FAIL    b", "PASS    c", "WARN    d"]
+    assert _status_lines(capsys.readouterr().out) == [
+        "PASS    a", "FAIL    b", "PASS    c", "WARN    d"]
 
 
 def test_soft_failure_is_warn_not_fail(monkeypatch, tmp_path):
@@ -276,6 +307,90 @@ def test_result_shape(monkeypatch, tmp_path):
     assert set(r) == {"id", "status", "seconds", "output_tail"}
     assert isinstance(r["seconds"], float)
     assert "line 99" in r["output_tail"] and "line 0\n" not in r["output_tail"]
+
+
+# ------------------------------------------------- what the CLI shows a reader ---
+
+def test_a_failure_line_outside_the_tail_is_kept(monkeypatch, tmp_path, capsys):
+    # check_references prints its FAIL line first, then 170 PASS lines: a plain
+    # tail would show only passes for a failed check.
+    noisy = "FAIL  x  ->  broken link\n" + "".join(f"PASS  file {i}\n" for i in range(100))
+    monkeypatch.setattr(rc, "CHECKS", (_check("refs"),))
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {"check_refs.py": (1, noisy)})
+
+    (r,) = rc.run("ci", "origin/main", tmp_path, "py")
+    assert "FAIL  x  ->  broken link" in r["output_tail"]
+    assert "PASS  file 99" in r["output_tail"]
+    assert "PASS  file 0\n" not in r["output_tail"]
+
+    for context in ("ci", "local"):
+        assert rc.main(["--context", context, "--base", "origin/main"]) == 1
+        printed = capsys.readouterr()
+        shown = printed.out + printed.err
+        assert "FAIL  x  ->  broken link" in shown
+        assert "PASS  file 0" in shown   # a non-PASS result prints its FULL output
+
+
+def test_tail_keeps_error_and_traceback_lines():
+    out = "Traceback (most recent call last):\nERROR boom\n" + "x\n" * 200
+    tail = rc._tail(out)
+    assert "Traceback (most recent call last):" in tail and "ERROR boom" in tail
+
+
+def test_ci_prints_pass_output_in_a_collapsed_group(monkeypatch, tmp_path, capsys):
+    # check_customer_references emits GitHub annotations and exits 0; dropping a
+    # PASS's output would silently drop them from CI.
+    warning = "::warning title=Customer reference::possible tenant link in x.md"
+    monkeypatch.setattr(rc, "CHECKS", (_check("refs"),))
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {"check_refs.py": (0, warning + "\nall good\n")})
+    assert rc.main(["--context", "ci"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    start, end = out.index("::group::refs"), out.index("::endgroup::")
+    assert start < out.index(warning) < end
+    assert out.index("PASS    refs") < start
+
+
+def test_local_does_not_print_pass_output(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(rc, "CHECKS", (_check("a"),))
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {"check_a.py": (0, "chatter\n")})
+    assert rc.main(["--context", "local", "--base", "upstream/main"]) == 0
+    printed = capsys.readouterr()
+    assert "chatter" not in printed.out + printed.err
+    assert "::group::" not in printed.out
+
+
+def test_a_promoted_skip_prints_its_skip_line_once(monkeypatch, tmp_path, capsys):
+    skip = "SKIP  module health: radon not installed (`pip install radon`); enforced in CI.\n"
+    monkeypatch.setattr(rc, "CHECKS", (_check("module-health"),))
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    _fake(monkeypatch, {"check_module-health.py": (0, skip)})
+    assert rc.main(["--context", "local", "--base", "upstream/main"]) == 1
+    printed = capsys.readouterr()
+    shown = printed.out + printed.err
+    assert shown.count("radon not installed") == 1
+    assert "required on every PR" in shown
+
+
+def test_not_run_reason_is_on_the_cli_line(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(rc, "CHECKS", (_check("opt", prereq="ossie-checkout"),))
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(rc, "prereq_present", lambda prereq, root: False)
+    _fake(monkeypatch)
+    assert rc.main(["--context", "local", "--base", "upstream/main"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "NOT RUN opt (prerequisite absent: ossie-checkout)"]
+
+
+def test_undecodable_output_does_not_abort_the_run(tmp_path):
+    # Real subprocess: one byte that is not UTF-8 must not raise UnicodeDecodeError.
+    script = tmp_path / "bad.py"
+    script.write_text("import sys\nsys.stdout.buffer.write(b'ok \\xff\\xfe end\\n')\n",
+                      encoding="utf-8")
+    code, output, _ = rc._execute(sys.executable, script, (), tmp_path)
+    assert code == 0 and output.startswith("ok ") and output.rstrip().endswith("end")
 
 
 # ------------------------------------------------------------------ smokes ---
