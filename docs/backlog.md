@@ -329,6 +329,7 @@ are roughly ordered by value÷effort.
 | BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
 | BL-412 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
 | BL-413 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
+| BL-414 | the backlog novelty gate compares id sets only, so a merge that moves an id already on the base to a different item (a title swap) passes every gate; #664 did exactly that to BL-410 | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -14787,3 +14788,21 @@ world map the Lake's scene is two houses and a well on an island reached by a pi
   if the layout changes.
 
 **Target:** 2027-03-31.
+
+## BL-414 — the backlog gate misses an id moved to a different item `Tier 3`
+
+**Filed:** 2026-10-28. **Source:** review of #664.
+
+**What.** `novel_id_collisions` (`tools/validate/_novelty.py`) is
+`(head_ids - merge_base_ids) & base_ids`: it compares id sets only. A branch that resolves a
+backlog conflict by keeping its own item under an id the base already has, and moving the
+base's item to a new number, introduces no new id that collides, so `check_backlog_integrity`
+passes. #664's merge from main did this to BL-410, and the base's citations of BL-410
+(CHANGELOG.md, ts-audit SKILL.md) would have pointed at the wrong item.
+
+**Do.** For every id present at the merge base and on the head, compare its heading title on
+the head with the base's; fail when they differ and the head's title also appears on the base
+under another id (a swap rather than an edit). Add a test that replays the #664 shape and
+proves the gate fires, and one where a plain title edit still passes.
+
+**Target:** 2027-01-31.
