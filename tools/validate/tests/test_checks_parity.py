@@ -1,20 +1,24 @@
 """Parity tests pinning `checks.py` to the two places that actually run checks.
 
-`checks.CHECKS` is meant to be the one list of validators a PR must pass. It only
-earns that title if it cannot drift from what CI and pre-commit really run, so
-these tests read the committed `.github/workflows/validate.yml` and
+`checks.CHECKS` is meant to be the list of validators CI's full-repo step runs on
+every PR. It only earns that title if it cannot drift from what CI and pre-commit
+really run, so these tests read the committed `.github/workflows/validate.yml` and
 `scripts/pre-commit.sh` and fail on any line the list does not account for:
 
 - every `python3 tools/validate/X.py ARGS` in CI's full-repo step is exactly one
   `Check` (script + args + hard/soft), and every `Check` is in that step;
 - every `run_check "LABEL" "tools/validate/X.py ARGS"` in pre-commit is a `Check`
   carrying that label and those args, or is in `PRECOMMIT_ONLY` with a reason;
+- every validator pre-commit runs OUTSIDE run_check is in `PRECOMMIT_UNMANAGED`;
 - pre-commit args that differ from CI's are declared in `KNOWN_DRIFT`, so a
   difference is a recorded decision rather than an accident;
 - `CI_SMOKES` is the workflow's smoke loop.
 
-Once CI calls `run_checks.py` instead of listing validators, the workflow side of
-these tests switches to asserting that call, because the list is then the source.
+Every guard fails loud on a line it cannot parse rather than skipping it: a test
+that silently ignores an unrecognised shape is exactly the drift it exists to
+catch. Once CI calls `run_checks.py` instead of listing validators, the workflow
+side switches to asserting that call — exactly, with nothing else beside it and
+nothing (`continue-on-error`, a new `if:`) able to neutralise the step.
 """
 from __future__ import annotations
 
@@ -32,83 +36,160 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 PRECOMMIT = REPO_ROOT / "scripts" / "pre-commit.sh"
 VALIDATE_DIR = REPO_ROOT / "tools" / "validate"
 
+JOB = "suite"
 FULL_REPO_STEP = "Run validators (full-repo mode)"
 SMOKE_STEP = "Run credential-free smoke suites"
+PYTEST_STEP = "Run unit + validator tests"
 RUNNER_CI_CALL = "python3 tools/validate/run_checks.py --context ci --base origin/main"
 RUNNER_SMOKES_CALL = "python3 tools/validate/run_checks.py --smokes"
+# The only step-level guard each step may carry: what it has today. A new `if:` or
+# `continue-on-error` would let the step stop gating without any line changing.
+STEP_GUARDS = {FULL_REPO_STEP: None, SMOKE_STEP: "${{ !cancelled() }}"}
 
 _CI_LINE = re.compile(r"^python3 tools/validate/(?P<script>\S+\.py)(?P<rest>.*)$")
 _RUN_CHECK = re.compile(
-    r'^\s*run_check\s+"(?P<label>[^"]+)"\s+"tools/validate/(?P<script>[^"\s]+\.py)(?P<args>[^"]*)"'
+    r'\brun_check\s+"(?P<label>[^"]+)"\s+"tools/validate/(?P<script>[^"\s]+\.py)(?P<args>[^"]*)"'
 )
+_RUN_CHECK_WORD = re.compile(r"\brun_check\b")
+_RUN_CHECK_DEF = re.compile(r"^\s*run_check\(\)")
+# An unescaped validator path: grep patterns in the hook spell it `check_x\.py`,
+# which this deliberately does not match.
+_VALIDATOR_PATH = re.compile(r"tools/validate/(?P<script>[\w-]+\.py)")
 
 
-def _step_run(name: str) -> str:
-    """The `run:` script of the workflow step called `name` (any job)."""
+def _job() -> dict:
     doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    found = [
-        step["run"]
-        for job in doc["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == name
-    ]
-    assert len(found) == 1, f"expected exactly one step named {name!r}, found {len(found)}"
+    return doc["jobs"][JOB]
+
+
+def _step(name: str) -> dict:
+    """The step called `name` in the `suite` job."""
+    found = [s for s in _job().get("steps", []) if s.get("name") == name]
+    assert len(found) == 1, f"expected exactly one step named {name!r} in job {JOB!r}, found {len(found)}"
     return found[0]
 
 
-def _ci_validator_lines(run: str) -> list[tuple[str, tuple[str, ...], bool]]:
-    """(script, args, hard) for each `python3 tools/validate/...` line.
-
-    The trailing shell is not an argument: `|| rc=1` is a hard check (it fails the
-    step at the end), `|| echo "WARN ..."` is a soft one (it never does).
-    """
+def _code_lines(run: str) -> list[str]:
+    """Non-blank, non-comment lines of a shell body, stripped."""
     out = []
     for raw in run.splitlines():
         line = raw.strip()
-        m = _CI_LINE.match(line)
-        if not m:
+        if line and not line.startswith("#"):
+            out.append(line)
+    return out
+
+
+def _uses_runner(lines: list[str]) -> bool:
+    return any("tools/validate/run_checks.py" in line for line in lines)
+
+
+def _assert_exact_runner_call(lines: list[str], expected: str, step: str) -> None:
+    """In runner form the step's ONLY tools/validate/ line must be `expected`, verbatim:
+    no `|| true`, no `--only`, no extra args, no unlisted validator beside it."""
+    validator_lines = [line for line in lines if "tools/validate/" in line]
+    assert validator_lines == [expected], (
+        f"{step!r} must call exactly {expected!r} and no other tools/validate/ script; "
+        f"found {validator_lines}"
+    )
+
+
+def _ci_validator_lines(lines: list[str]) -> list[tuple[str, tuple[str, ...], bool]]:
+    """(script, args, hard) for each `python3 tools/validate/...` line.
+
+    The trailing shell is not an argument. `|| rc=1` is a hard check (it fails the
+    step at the end); `|| echo ...` is a soft one (it never does). Any other shape —
+    no suffix, `|| true`, `|| :`, another interpreter spelling — fails, because the
+    test could not otherwise say whether the line gates.
+    """
+    out = []
+    for line in lines:
+        if "tools/validate/" not in line:
             continue
+        m = _CI_LINE.match(line)
+        assert m, f"unrecognised validator line in {FULL_REPO_STEP!r}: {line}"
         rest = m.group("rest")
-        hard = True
-        if "||" in rest:
-            rest, suffix = rest.split("||", 1)
-            hard = not suffix.strip().startswith("echo")
+        assert "||" in rest, f"validator line must end `|| rc=1` (hard) or `|| echo ...` (soft): {line}"
+        rest, suffix = rest.split("||", 1)
+        suffix = suffix.strip()
+        if suffix == "rc=1":
+            hard = True
+        elif suffix.startswith("echo"):
+            hard = False
+        else:
+            raise AssertionError(f"validator line suffix must be `|| rc=1` or `|| echo ...`, got `|| {suffix}`: {line}")
         out.append((m.group("script"), tuple(shlex.split(rest)), hard))
     return out
+
+
+def _precommit_code_lines() -> list[str]:
+    return [
+        line for line in PRECOMMIT.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
 def _precommit_run_checks() -> list[tuple[str, str, tuple[str, ...]]]:
     """(label, script, args) for each `run_check` call in pre-commit.sh.
 
+    Every non-comment line mentioning run_check (other than its definition) must
+    parse, whatever precedes it (`&&`, `then`, a tab), or the test fails.
     run_check splits its command with `read -r -a`, i.e. on whitespace, so a plain
     `split()` reproduces exactly the argv pre-commit passes.
     """
-    text = PRECOMMIT.read_text(encoding="utf-8")
-    calls = [
-        line for line in text.splitlines()
-        if line.strip().startswith("run_check ") and not line.strip().startswith("run_check()")
-    ]
     parsed = []
-    for line in calls:
-        m = _RUN_CHECK.match(line)
-        assert m, f"pre-commit run_check line not in the expected shape: {line.strip()}"
-        parsed.append((m.group("label"), m.group("script"), tuple(m.group("args").split())))
+    for line in _precommit_code_lines():
+        if _RUN_CHECK_DEF.match(line):
+            continue
+        mentions = len(_RUN_CHECK_WORD.findall(line))
+        if not mentions:
+            continue
+        matches = list(_RUN_CHECK.finditer(line))
+        assert len(matches) == mentions, f"pre-commit run_check call not in the expected shape: {line.strip()}"
+        for m in matches:
+            parsed.append((m.group("label"), m.group("script"), tuple(m.group("args").split())))
     assert parsed, "found no run_check calls in pre-commit.sh — has the hook been restructured?"
     return parsed
+
+
+def _precommit_unmanaged_scripts() -> list[str]:
+    """Validators pre-commit invokes directly rather than through run_check."""
+    found = []
+    for line in _precommit_code_lines():
+        if _RUN_CHECK_DEF.match(line):
+            continue
+        bare = _RUN_CHECK.sub("", line)
+        found.extend(m.group("script") for m in _VALIDATOR_PATH.finditer(bare))
+    return found
+
+
+def _pytest_dirs(args: list[str]) -> set[str]:
+    return {a.rstrip("/") for a in args if not a.startswith("-")}
 
 
 # ── workflow side ──────────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("name", sorted(STEP_GUARDS))
+def test_step_cannot_be_neutralised(name):
+    step = _step(name)
+    assert "continue-on-error" not in step, f"{name!r} has continue-on-error"
+    assert step.get("if") == STEP_GUARDS[name], (
+        f"{name!r} has `if: {step.get('if')}`; expected {STEP_GUARDS[name]!r}"
+    )
+    assert "continue-on-error" not in _job(), f"job {JOB!r} has continue-on-error"
+
+
 def test_every_ci_validator_line_is_listed():
-    run = _step_run(FULL_REPO_STEP)
-    if "tools/validate/run_checks.py" in run:
+    lines = _code_lines(_step(FULL_REPO_STEP)["run"])
+    if _uses_runner(lines):
         # CI reads the list itself, so there is nothing left to compare line by line.
-        assert RUNNER_CI_CALL in run, f"full-repo step calls run_checks.py without {RUNNER_CI_CALL!r}"
+        _assert_exact_runner_call(lines, RUNNER_CI_CALL, FULL_REPO_STEP)
         return
 
-    ci_lines = _ci_validator_lines(run)
+    ci_lines = _ci_validator_lines(lines)
     assert ci_lines, f"no validator lines found in {FULL_REPO_STEP!r}"
+    # `|| rc=1` only gates because the step ends by exiting with it.
+    assert lines[-1] == "exit $rc", f"{FULL_REPO_STEP!r} must end with `exit $rc`, ends with {lines[-1]!r}"
     listed = {(c.script, c.ci_args): c for c in checks.CHECKS}
 
     missing = [(s, a) for s, a, _ in ci_lines if (s, a) not in listed]
@@ -128,9 +209,10 @@ def test_every_ci_validator_line_is_listed():
 
 
 def test_ci_smokes_match_workflow():
-    run = _step_run(SMOKE_STEP)
-    if "tools/validate/run_checks.py" in run:
-        assert RUNNER_SMOKES_CALL in run, f"smoke step calls run_checks.py without {RUNNER_SMOKES_CALL!r}"
+    run = _step(SMOKE_STEP)["run"]
+    lines = _code_lines(run)
+    if _uses_runner(lines):
+        _assert_exact_runner_call(lines, RUNNER_SMOKES_CALL, SMOKE_STEP)
         return
     joined = run.replace("\\\n", " ")
     m = re.search(r"for s in (?P<suites>.*?);\s*do", joined, re.S)
@@ -176,6 +258,19 @@ def test_precommit_only_entries_have_reasons_and_are_not_also_checks():
         assert label not in check_labels, f"{label!r} is both a Check and PRECOMMIT_ONLY"
 
 
+def test_precommit_unmanaged_invocations_are_declared():
+    """Validators the hook runs outside run_check get no PASS/FAIL line and often
+    `|| true`; each must be a recorded decision, and the record must not go stale."""
+    found = set(_precommit_unmanaged_scripts())
+    declared = {script for script, _ in checks.PRECOMMIT_UNMANAGED}
+    for script, reason in checks.PRECOMMIT_UNMANAGED:
+        assert reason.strip(), f"PRECOMMIT_UNMANAGED {script!r} has no reason"
+    undeclared = sorted(found - declared)
+    assert not undeclared, f"pre-commit runs validators outside run_check, undeclared in PRECOMMIT_UNMANAGED: {undeclared}"
+    stale = sorted(declared - found)
+    assert not stale, f"PRECOMMIT_UNMANAGED entries pre-commit no longer runs outside run_check: {stale}"
+
+
 def test_arg_drift_is_declared():
     """Pre-commit args that differ from CI's must be a recorded decision, and a
     KNOWN_DRIFT entry must still describe real drift (or it is a stale excuse)."""
@@ -191,8 +286,26 @@ def test_arg_drift_is_declared():
     ids = {c.id for c in checks.CHECKS}
     stale = sorted(s for s in declared if s in ids and s not in drifted)
     assert not stale, f"KNOWN_DRIFT entries whose args no longer differ: {stale}"
-    unknown = sorted(s for s in declared if s not in ids and not s.startswith("pytest"))
-    assert not unknown, f"KNOWN_DRIFT subjects that are neither a Check id nor a pytest invocation: {unknown}"
+    unknown = sorted(s for s in declared if s not in ids and s != "pytest")
+    assert not unknown, f"KNOWN_DRIFT subjects that are neither a Check id nor `pytest`: {unknown}"
+
+
+def test_pytest_drift_is_exactly_the_declared_one():
+    """The `pytest` KNOWN_DRIFT entry is checked, not just written down: CI's first
+    pytest invocation and pre-commit's "unit tests (ts-cli)" one differ by exactly
+    tools/ossie-roundtrip/tests/. A new difference, or the gap closing, fails."""
+    ci_cmds = [line for line in _code_lines(_step(PYTEST_STEP)["run"]) if line.startswith("pytest ")]
+    assert ci_cmds, f"no pytest line in {PYTEST_STEP!r}"
+    ci_dirs = _pytest_dirs(shlex.split(ci_cmds[0])[1:])
+
+    pc_cmds = [line for line in _precommit_code_lines() if 'run_pytest "unit tests (ts-cli)"' in line]
+    assert len(pc_cmds) == 1, f"expected one `run_pytest \"unit tests (ts-cli)\"` line, found {len(pc_cmds)}"
+    pc_dirs = _pytest_dirs(shlex.split(pc_cmds[0])[2:])
+
+    expected_gap = {"tools/ossie-roundtrip/tests"}
+    assert "pytest" in dict(checks.KNOWN_DRIFT), "pytest drift exists but is not declared in KNOWN_DRIFT"
+    assert ci_dirs - pc_dirs == expected_gap, f"CI-only pytest dirs {sorted(ci_dirs - pc_dirs)} != {sorted(expected_gap)}"
+    assert pc_dirs - ci_dirs == set(), f"pre-commit-only pytest dirs: {sorted(pc_dirs - ci_dirs)}"
 
 
 # ── the list itself ────────────────────────────────────────────────────────────
@@ -207,7 +320,8 @@ def test_ids_unique():
 
 def test_scripts_exist():
     missing = [c.script for c in checks.CHECKS if not (VALIDATE_DIR / c.script).is_file()]
-    assert not missing, f"Check.script not found under tools/validate/: {missing}"
+    missing += [s for s, _ in checks.PRECOMMIT_UNMANAGED if not (VALIDATE_DIR / s).is_file()]
+    assert not missing, f"script not found under tools/validate/: {missing}"
     smokes = REPO_ROOT / "tools" / "smoke-tests"
     missing = [s for s in checks.CI_SMOKES if not (smokes / f"{s}.py").is_file()]
     assert not missing, f"CI_SMOKES not found under tools/smoke-tests/: {missing}"

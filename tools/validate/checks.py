@@ -1,11 +1,15 @@
-"""checks.py — the one list of validators a pull request must pass.
+"""checks.py — the validators CI's full-repo step runs on every pull request.
 
-Before this file the list existed twice, by hand: CI's "Run validators
+Before this file that list existed twice, by hand: CI's "Run validators
 (full-repo mode)" step in `.github/workflows/validate.yml` and the `run_check`
 calls in `scripts/pre-commit.sh`. Nothing compared them, so a validator could be
 added to one and not the other, or run with different arguments, and nothing
 would say so. A contributor checking locally before opening a PR had no list at
 all to run.
+
+It is not every check a PR must pass. `check_ci_gate_coverage.py` and
+`check_audit_workflow_permissions.py` also run on every PR, each in its own CI
+step, and are outside `CHECKS`; so are the PR-only steps below.
 
 This module is data only. Each `Check` records:
 
@@ -20,9 +24,10 @@ This module is data only. Each `Check` records:
 hook and fails on any line this list does not account for. Where pre-commit
 deliberately differs from CI (usually `--staged`, or no `--base` because the
 hook has no reliable `origin/main`), the difference is declared in `KNOWN_DRIFT`;
-`run_check` calls that are not CI full-repo checks are in `PRECOMMIT_ONLY`. Both
-carry a one-line reason, and the parity test rejects entries that have gone
-stale.
+`run_check` calls that are not CI full-repo checks are in `PRECOMMIT_ONLY`, and
+validators the hook runs outside `run_check` are in `PRECOMMIT_UNMANAGED`. All
+three carry a one-line reason, and the parity test rejects entries that have
+gone stale.
 
 PR-only CI steps (open-items, changelog, dependency-types, PR-range customer
 references, PR size, the scoped quality-gates hard gate) are not listed here:
@@ -161,6 +166,19 @@ PRECOMMIT_ONLY: Tuple[Tuple[str, str], ...] = (
     ("audit workflow perms", "CI runs it in its own step, not the full-repo step"),
     ("CI gate coverage", "CI runs it in its own step, not the full-repo step"),
     ("repo changelog", "CI runs it in the PR-only changelog gate step, against the PR's base"),
+)
+
+# Validators pre-commit invokes directly, not through run_check, so they get no
+# PASS/FAIL line and mostly never block: (script, reason).
+PRECOMMIT_UNMANAGED: Tuple[Tuple[str, str], ...] = (
+    ("suggest_skill_version.py", "interactive SKILL.md version-bump suggester, not a check"),
+    ("check_mapping_currency.py",
+     "drift: pre-commit runs a soft `--staged || true` staleness nudge; CI runs `--check` as a hard presence gate"),
+    ("suggest_dependency_types.py",
+     "soft co-change nudge; CI runs `--check` in the PR-only dependency-types gate step"),
+    ("suggest_repo_changelog.py",
+     "interactive entry suggester; the gate is the `repo changelog` run_check (`--check`)"),
+    ("check_audit_freshness.py", "soft nudge that an audit sweep is due; never blocks and CI does not run it"),
 )
 
 # Where pre-commit passes different args from CI, on purpose: (check id or pytest, reason).
