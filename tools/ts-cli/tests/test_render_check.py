@@ -98,7 +98,7 @@ def test_render_summary_failing_board_names_tiles():
     ]
 
 
-# --- chart_tiles_missing_axis: the blank-chart detector (Gunjan failure mode) ---
+# --- chart_tiles_missing_axis: the blank-chart detector (hand-authored board failure mode) ---
 
 def test_missing_axis_flags_linechart_without_axis():
     doc = {"answer": {"name": "NH by Month", "chart": {"type": "LINE"}}}

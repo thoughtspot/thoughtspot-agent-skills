@@ -81,7 +81,7 @@ def test_extract_table_calc_addressing_none():
 
 
 # Both values are taken from real workbooks this crashed on (SCAL-338450):
-# 'false' (Channel Performance Dashboards_v2025.1), '"All Pages"' (Partner Clickstream).
+# 'false' (workbook A), '"All Pages"' (workbook B).
 NON_NUMERIC_ADDRESS_XML = """
 <workbook>
   <datasource name='federated.a'>

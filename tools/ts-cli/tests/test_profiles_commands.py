@@ -280,7 +280,7 @@ class TestAddCommand:
         result = runner.invoke(app, [
             "add", "--platform", "thoughtspot", "--name", "Private",
             "--auth-type", "password",
-            "--field", "base_url=https://172.32.6.115:8443",
+            "--field", "base_url=https://192.0.2.10:8443",
             "--field", "username=tsadmin",
             "--field", "verify_ssl=false",
         ])
@@ -365,7 +365,7 @@ class TestUpdateCommand:
 
     def test_update_coerces_bool_field_to_boolean(self, profile_dir):
         profile_dir["thoughtspot"].write_text(json.dumps([
-            {"name": "Private", "base_url": "https://172.32.6.115:8443",
+            {"name": "Private", "base_url": "https://192.0.2.10:8443",
              "verify_ssl": "false"}
         ]))
         result = runner.invoke(app, [
