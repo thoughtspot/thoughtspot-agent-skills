@@ -32,10 +32,13 @@ Two entry points serve it, so the skill never parses or edits this file itself:
         the run and the review cannot move the base.
     python3 tools/validate/evidence.py append-review --file REVIEW.md [--evidence PATH]
         replaces the Review section (re-running replaces, never stacks). Refused
-        (exit 1) unless HEAD is still the block's head and the block is neither
-        unfinished nor DIRTY: a DIRTY block's checks ran on uncommitted code the
-        reviewer's committed diff does not contain, so the two would describe
-        different code under one head SHA.
+        (exit 1) unless HEAD is still the block's head and the block is READY and
+        not DIRTY: a DIRTY block's checks ran on uncommitted code the reviewer's
+        committed diff does not contain, so the two would describe different code
+        under one head SHA; a NOT READY block is one the skill must stop on. Also
+        refused: a blank review, or one without the reviewer's closing "What I
+        checked and found nothing" section — either would stamp the block as
+        reviewed with no evidence that a review ran.
 
 Must import and run on Python 3.9 (the system interpreter).
 """
@@ -64,6 +67,13 @@ _HOME_PATH = re.compile(
     # separator or the end of the line, so a name with spaces never leaves a fragment
     # (`C:\Users\Carol Ann` at the end of a line); over-scrubbing is the safe side.
     r"|[A-Za-z]:(\\{1,2})(?i:users)\1[^\\\n" + _END + r"]+")
+#: Claude Code names a project's folders after its path with `/` turned into `-`
+#: (`~/.claude/projects/-Users-<name>-Dev-repo`, scratchpads under
+#: `/private/tmp/claude-501/-Users-<name>-...`), so a review that cites a scratch file
+#: carries a home directory with no slash in it. Where the name ends cannot be known
+#: (a name may itself contain `-`), so the rest of the token goes too: over-scrubbing
+#: is the safe side. Anchored to a path or token boundary, so `take-home-pay` stays.
+_DASHED_HOME = re.compile(r"(?<![^\s/`'\"(=-])-(?i:users|home)-[^\s/" + _END + r"]+")
 
 
 #: Written before a run starts, so an unfinished run never leaves an old READY block.
@@ -72,8 +82,8 @@ UNFINISHED = ("**pr-ready** did not finish: NOT READY. This file is replaced whe
 
 
 def scrub(text: str) -> str:
-    """Replace every home-directory prefix with `~`."""
-    return _HOME_PATH.sub("~", text)
+    """Replace every home-directory prefix with `~`, dash-encoded ones included."""
+    return _DASHED_HOME.sub("-~", _HOME_PATH.sub("~", text))
 
 
 def _first_line(text: str, prefix: str = "") -> str:
@@ -201,6 +211,8 @@ def write(text: str, repo_root: Path) -> Path:
 _HEADER = re.compile(r"^\*\*pr-ready\*\* head `(?P<head>[0-9a-f]+)` against "
                      r"`(?P<base_ref>[^`]+)` at `(?P<base>[0-9a-f]+)`(?P<rest>.*)$")
 _REVIEW_HEADING = "## Review"
+#: The reviewer brief's closing section (`.claude/agents/pr-reviewer.md`).
+REVIEW_CLOSER = "What I checked and found nothing"
 
 
 def header(text: str) -> Optional[Dict[str, object]]:
@@ -227,6 +239,15 @@ def with_review(text: str, review: str, *, head_sha: str) -> str:
     if head["dirty"]:
         raise ValueError("the evidence is DIRTY: its checks ran on uncommitted changes the "
                          "reviewed diff does not contain; commit, then re-run")
+    preamble = lines[:lines.index("## Results")] if "## Results" in lines else []
+    if "**READY**" not in preamble:
+        raise ValueError("the evidence is NOT READY: the pr-ready skill stops before the "
+                         "review on a failing run; fix it and re-run")
+    if not review.strip():
+        raise ValueError("the review is empty")
+    if REVIEW_CLOSER.lower() not in review.lower():
+        raise ValueError(f"the review has no \"{REVIEW_CLOSER}\" section, so nothing shows "
+                         "what it tried; append the reviewer's whole report")
     # The Review section is the last one render writes; earlier sections' lines are
     # table rows or `- ` items, so the first exact heading line is the section.
     kept = lines[:lines.index(_REVIEW_HEADING) + 1]

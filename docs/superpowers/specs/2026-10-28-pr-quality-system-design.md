@@ -157,6 +157,16 @@ and spot checks, not on finding validator failures or building the first repro.
 - **Local skill.** `.claude/skills/pr-ready/` runs C1, then the reviewer agent on the
   diff against upstream main, and appends the findings to the evidence block. The
   evidence block records the head SHA reviewed, so a stale block is visible.
+- **Only on your own branch (revised 2026-10-28 after review).** The skill's first step
+  runs the branch's own code (the runner, every validator, the smokes and the test
+  suite) with the runner's full environment, and from a PR checkout the PR also
+  controls the skill, the reviewer brief, `pr-ready.sh` and `.claude/settings.json`
+  hooks. So it runs only on a branch the person running it wrote or has read, and the
+  reviewer executes branch code only when the skill passes `trusted: yes`. For anyone
+  else's PR the procedure is: run main's `scripts/check-pr.sh` first (main's copy,
+  never the PR's); never run the skill or `pr-ready.sh` from the PR checkout; from a
+  checkout of main, dispatch main's `pr-reviewer` read-only (`trusted: no`) on
+  `git diff <base>...<fetched PR head SHA>`.
 - **Maintainer PRs (§8.2).** The maintainer runs the same skill before every self-merge
   and reads the output. This is **advisory**. It is not a required check and not a
   GitHub review, so F1's metric (PRs with a GitHub review) does not move. Success for
@@ -382,8 +392,11 @@ gate steps merge **one at a time**, not in parallel.
    not closed in GitHub terms, and C3's controls don't bind the maintainer.
 3. **Review stays local for now (decided 2026-10-28).** No CI job and no credentials.
    **Consequence:** a contributor's evidence block can't be verified to have run. The
-   head SHA in it makes a stale block visible, and the maintainer can re-run the skill
-   on the PR head.
+   head SHA in it makes a stale block visible. The maintainer does **not** re-run the
+   skill on a contributor's PR head (that would execute the PR's code, and the PR's own
+   copy of the skill, with the maintainer's credentials in the environment). Instead:
+   main's `scripts/check-pr.sh` first, then main's `pr-reviewer`, from a checkout of
+   main, read-only (`trusted: no`) on `git diff <base>...<fetched PR head SHA>` (§5 C2).
 
 ## 9. Left to the builder
 

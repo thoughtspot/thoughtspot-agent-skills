@@ -188,6 +188,10 @@ def test_unverifiable_skips_are_listed_as_fail():
 # belongs only on a block for the same head, and only on a block whose checks ran
 # on that head's committed code.
 
+#: A minimal review that passes the closer rule.
+DONE = "\n### What I checked and found nothing\n- everything: nothing\n"
+
+
 def _repo(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / "f").write_text("x\n")
@@ -208,7 +212,7 @@ def test_header_reads_back_what_render_wrote():
 
 def test_with_review_replaces_the_placeholder_and_keeps_the_rest():
     before = _render()
-    after = evidence.with_review(before, "### Blocker\n- none\n", head_sha=HEAD)
+    after = evidence.with_review(before, "### Blocker\n- none\n" + DONE, head_sha=HEAD)
     assert before.split("## Review", 1)[0] == after.split("## Review", 1)[0]
     section = after.split("## Review", 1)[1]
     assert "Not run." not in section and "### Blocker" in section, section
@@ -216,30 +220,30 @@ def test_with_review_replaces_the_placeholder_and_keeps_the_rest():
 
 
 def test_with_review_twice_replaces_rather_than_stacks():
-    once = evidence.with_review(_render(), "first review", head_sha=HEAD)
-    twice = evidence.with_review(once, "second review", head_sha=HEAD)
+    once = evidence.with_review(_render(), "first review" + DONE, head_sha=HEAD)
+    twice = evidence.with_review(once, "second review" + DONE, head_sha=HEAD)
     assert "first review" not in twice and "second review" in twice
     assert twice.count("## Review") == 1
 
 
 def test_with_review_refuses_another_head():
     with pytest.raises(ValueError, match="head"):
-        evidence.with_review(_render(), "r", head_sha="c" * 40)
+        evidence.with_review(_render(), "r" + DONE, head_sha="c" * 40)
 
 
 def test_with_review_refuses_a_dirty_block():
     # Its checks ran on uncommitted code the reviewer's diff does not contain.
     with pytest.raises(ValueError, match="DIRTY"):
-        evidence.with_review(_render(dirty=True), "r", head_sha=HEAD)
+        evidence.with_review(_render(dirty=True), "r" + DONE, head_sha=HEAD)
 
 
 def test_with_review_refuses_an_unfinished_block():
     with pytest.raises(ValueError, match="finish"):
-        evidence.with_review(evidence.UNFINISHED, "r", head_sha=HEAD)
+        evidence.with_review(evidence.UNFINISHED, "r" + DONE, head_sha=HEAD)
 
 
 def test_with_review_scrubs_home_paths():
-    out = evidence.with_review(_render(), "see /Users/alice/x.py:3", head_sha=HEAD)
+    out = evidence.with_review(_render(), "see /Users/alice/x.py:3" + DONE, head_sha=HEAD)
     assert "/Users/" not in out and "alice" not in out
 
 
@@ -254,7 +258,7 @@ def test_cli_append_review_writes_into_the_evidence_file(tmp_path):
     head = _repo(tmp_path)
     path = evidence.write(_render(head_sha=head), tmp_path)
     review = tmp_path.parent / f"{tmp_path.name}-review.md"
-    review.write_text("### Nit\n- f:1 something\n", encoding="utf-8")
+    review.write_text("### Nit\n- f:1 something\n" + DONE, encoding="utf-8")
     assert evidence.main(["append-review", "--file", str(review)], repo_root=tmp_path) == 0
     assert "### Nit" in path.read_text(encoding="utf-8").split("## Review", 1)[1]
 
@@ -263,7 +267,7 @@ def test_cli_append_review_refuses_when_head_moved(tmp_path, capsys):
     _repo(tmp_path)
     path = evidence.write(_render(), tmp_path)        # names HEAD = "a" * 40
     review = tmp_path.parent / f"{tmp_path.name}-review.md"
-    review.write_text("r\n", encoding="utf-8")
+    review.write_text("r\n" + DONE, encoding="utf-8")
     assert evidence.main(["append-review", "--file", str(review)], repo_root=tmp_path) == 1
     assert "Not run." in path.read_text(encoding="utf-8")
     assert "head" in capsys.readouterr().err
@@ -274,8 +278,54 @@ def test_cli_append_review_can_target_a_copy(tmp_path):
     copy = tmp_path.parent / f"{tmp_path.name}-copy.md"
     copy.write_text(_render(head_sha=head), encoding="utf-8")
     review = tmp_path.parent / f"{tmp_path.name}-review.md"
-    review.write_text("sample\n", encoding="utf-8")
+    review.write_text("sample\n" + DONE, encoding="utf-8")
     assert evidence.main(["append-review", "--file", str(review), "--evidence", str(copy)],
                          repo_root=tmp_path) == 0
     assert "sample" in copy.read_text(encoding="utf-8")
     assert not evidence.evidence_path(tmp_path).exists()
+
+
+def test_with_review_refuses_a_blank_review():
+    # A blank review would stamp the block "reviewed" with nothing behind it.
+    for blank in ("", "   \n\t\n"):
+        with pytest.raises(ValueError, match="empty"):
+            evidence.with_review(_render(), blank, head_sha=HEAD)
+
+
+def test_with_review_refuses_a_review_without_its_closer():
+    # The closer is what shows a review ran: without it, nothing says what was tried.
+    with pytest.raises(ValueError, match="What I checked and found nothing"):
+        evidence.with_review(_render(), "### Blocker\nNone.\n", head_sha=HEAD)
+
+
+def test_with_review_refuses_a_not_ready_block():
+    failing = _render(checks=[_r("secrets", "FAIL", "boom")])
+    with pytest.raises(ValueError, match="NOT READY"):
+        evidence.with_review(failing, "r" + DONE, head_sha=HEAD)
+    with pytest.raises(ValueError, match="NOT READY"):
+        evidence.with_review(_render(behind=2), "r" + DONE, head_sha=HEAD)
+
+
+def test_cli_append_review_refuses_a_blank_file(tmp_path, capsys):
+    head = _repo(tmp_path)
+    path = evidence.write(_render(head_sha=head), tmp_path)
+    review = tmp_path.parent / f"{tmp_path.name}-review.md"
+    review.write_text("\n", encoding="utf-8")
+    assert evidence.main(["append-review", "--file", str(review)], repo_root=tmp_path) == 1
+    assert "Not run." in path.read_text(encoding="utf-8")
+    assert "empty" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("raw,name", [
+    # Claude Code's project and scratchpad folders: the path with `/` as `-`.
+    ("/private/tmp/claude-501/-Users-alice-Dev-x/scratchpad/a.md", "alice"),
+    ("~/.claude/projects/-home-bob-Dev-repo/memory.md", "bob"),
+    ("cited `-Users-carol-ann-Dev-repo` here", "carol"),
+    ("C--Users-dave-proj", "dave"),
+])
+def test_scrub_dash_encoded_home_paths(raw, name):
+    assert name not in evidence.scrub(raw)
+
+
+def test_scrub_leaves_ordinary_hyphenated_words():
+    assert evidence.scrub("take-home-pay and pre-Users-x") == "take-home-pay and pre-Users-x"
