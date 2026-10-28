@@ -4,14 +4,18 @@ What these pin, and why each matters:
 
 - **Behind upstream main is not ready**, even with every check green: a branch
   that is behind was checked against code it will not merge onto.
-- **Upstream is fetched every run.** A stale `<upstream>/main` already present
-  locally would otherwise be compared against, and "behind" would read 0.
+- **Upstream is fetched every run, and named in full.** A stale `<upstream>/main`
+  already present locally, or a local branch or tag CALLED `upstream/main` (git
+  resolves those before the remote-tracking ref), would otherwise be the base, and
+  "behind" would read 0.
 - **The fork's `main` is never the base.** Upstream is found by URL.
-- **Nothing is posted unless the run is green**, and only after the path is printed.
-- **CI-superset is checked, not claimed.** Every validator CI's `suite` job runs
-  must be run here too (through the check list, the PR-only/every-PR list in
-  pr_ready, or the scoped quality-gates gate), with the same args modulo the base
-  ref; and the pytest invocations are read from the workflow, never copied.
+- **A skipped test is never hidden under PASS**, and one skipped for a missing
+  module is FAIL (CI installs it).
+- **Nothing is posted unless the run is green, the tree clean, and the canonical
+  repo's PR has the evidence's head**; always with `--repo`, after the path prints.
+- **CI-superset is checked, not claimed.** Every line of every job in the workflow
+  is run by pr-ready or is known plumbing; a new job, step or interpreter spelling
+  fails (the reviewer's five workflow mutations are cases below).
 
 No test touches the network or `gh`. Upstream is a local bare repo; the canonical
 URL pattern is monkeypatched to match it (there is deliberately no production
@@ -20,8 +24,8 @@ against the wrong code). Validator, pytest and gh execution are replaced.
 """
 from __future__ import annotations
 
+import os
 import re
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,10 +36,10 @@ import yaml
 import checks
 import pr_ready
 import run_checks as rc
-from test_checks_parity import _code_lines
 
 REPO = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO / ".github" / "workflows" / "validate.yml"
+BASE = "refs/remotes/upstream/main"
 
 
 # ---------------------------------------------------------------- helpers ---
@@ -67,6 +71,24 @@ class Recorder:
         return 0, "ok\n", 0.01
 
 
+class FakeGh:
+    """Stands in for pr_ready._gh: `pr view` answers `head`, `pr comment` succeeds."""
+
+    def __init__(self):
+        self.head = ""
+        self.calls = []
+        self.comment_code = 0
+
+    def __call__(self, args):
+        self.calls.append(list(args))
+        if args[:2] == ["pr", "view"]:
+            return 0, self.head + "\n", ""
+        return self.comment_code, "https://example.invalid/comment\n", "boom" if self.comment_code else ""
+
+    def comments(self):
+        return [c for c in self.calls if c[:2] == ["pr", "comment"]]
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     """upstream bare repo U, a fork F of it, and a work clone of F with remote
@@ -76,7 +98,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    monkeypatch.delenv("PYTHONPATH", raising=False)
+    # main() writes PYTHONPATH into os.environ; setenv first so teardown restores
+    # the original value (absent or not) rather than leaking ours to later tests.
+    monkeypatch.setenv("PYTHONPATH", "placeholder")
+    monkeypatch.delenv("PYTHONPATH")
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
                        ("init.defaultBranch", "main")):
@@ -104,15 +129,14 @@ def env(tmp_path, monkeypatch):
                         lambda python, script, args, root: checks_run.answer([script, *args]))
     commands = Recorder()
     monkeypatch.setattr(pr_ready, "_run_command", lambda argv, root: commands.answer(argv))
-    posted = []
-    monkeypatch.setattr(pr_ready, "_gh_comment",
-                        lambda number, path: posted.append((number, path)) or 0)
+    gh = FakeGh()
+    monkeypatch.setattr(pr_ready, "_gh", gh)
 
     class Env:
         pass
     e = Env()
     e.tmp, e.seed, e.upstream, e.fork, e.work = tmp_path, seed, upstream, fork, work
-    e.checks, e.commands, e.posted = checks_run, commands, posted
+    e.checks, e.commands, e.gh = checks_run, commands, gh
     return e
 
 
@@ -127,17 +151,21 @@ def _main(e, *argv):
     return pr_ready.main(list(argv), repo_root=e.work, python="python3")
 
 
+def _evidence(e):
+    path = Path(_git(e.work, "rev-parse", "--absolute-git-dir")) / "pr-ready" / "evidence.md"
+    return path, path.read_text(encoding="utf-8")
+
+
 # ------------------------------------------------------------ the verdict ---
 
 def test_pr_ready_passes_when_current_and_green(env, capsys):
     assert _main(env, "--no-review") == 0
     out = capsys.readouterr().out
-    path = Path(_git(env.work, "rev-parse", "--absolute-git-dir")) / "pr-ready" / "evidence.md"
+    path, text = _evidence(env)
     assert str(path) in out, out
-    text = path.read_text(encoding="utf-8")
     head = _git(env.work, "rev-parse", "HEAD")
-    base = _git(env.work, "rev-parse", "upstream/main")
-    assert head in text and base in text and "upstream/main" in text, text
+    base = _git(env.work, "rev-parse", BASE)
+    assert head in text and base in text and BASE in text, text
     assert "DIRTY" not in text
     assert "NOT READY" not in text and "READY" in text
 
@@ -147,8 +175,7 @@ def test_pr_ready_refuses_when_behind(env, capsys):
     assert _main(env, "--no-review") == 1
     out = capsys.readouterr().out
     assert "behind" in out.lower(), out
-    path = Path(_git(env.work, "rev-parse", "--absolute-git-dir")) / "pr-ready" / "evidence.md"
-    assert "Behind upstream main: 1 commit" in path.read_text(encoding="utf-8")
+    assert "Behind upstream main: 1 commit" in _evidence(env)[1]
 
 
 def test_upstream_is_fetched_even_when_a_stale_ref_exists(env, capsys):
@@ -158,13 +185,26 @@ def test_upstream_is_fetched_even_when_a_stale_ref_exists(env, capsys):
     assert "behind" in capsys.readouterr().out.lower()
 
 
+@pytest.mark.parametrize("kind", ["branch", "tag"])
+def test_a_local_ref_named_like_the_base_does_not_shadow_it(env, capsys, kind):
+    # `git checkout -b upstream/main` or a tag of that name resolves BEFORE the
+    # remote-tracking ref for the short name; the run must still see the real tip.
+    _git(env.work, kind, "upstream/main", _git(env.work, "rev-parse", "HEAD"))
+    _push_extra_commit(env, env.upstream, "upstream-only.md")
+    assert _main(env, "--no-review") == 1
+    real_tip = _git(env.upstream, "rev-parse", "main")
+    assert real_tip in _evidence(env)[1]
+    base_args = [c for c in env.checks.calls if "--base" in c]
+    assert base_args and all(f"--base {BASE}" in c for c in base_args), base_args
+
+
 def test_the_forks_main_is_never_the_base(env, capsys):
     # The fork's main moving ahead must change nothing: origin is not upstream.
     _push_extra_commit(env, env.fork, "fork-only.md")
     _git(env.work, "fetch", "-q", "origin")
     assert _main(env, "--no-review") == 0
     base_args = [c for c in env.checks.calls if "--base" in c]
-    assert base_args and all("--base upstream/main" in c for c in base_args), base_args
+    assert base_args and all(f"--base {BASE}" in c for c in base_args), base_args
 
 
 def test_a_failing_check_exits_1(env, capsys):
@@ -180,17 +220,16 @@ def test_a_failing_pytest_exits_1(env, capsys):
 def test_dirty_tree_is_marked(env, capsys):
     (env.work / "README.md").write_text("changed\n")
     assert _main(env, "--no-review") == 0
-    path = Path(_git(env.work, "rev-parse", "--absolute-git-dir")) / "pr-ready" / "evidence.md"
-    assert "DIRTY" in path.read_text(encoding="utf-8")
+    assert "DIRTY" in _evidence(env)[1]
 
 
 def test_pr_only_checks_use_the_upstream_base(env, capsys):
     assert _main(env, "--no-review") == 0
     calls = env.checks.calls
-    assert any("suggest_repo_changelog.py --root . --check --base upstream/main" in c for c in calls)
-    assert any("check_open_items.py --root . --base upstream/main" in c for c in calls)
-    assert any("check_pr_size.py --root . --base upstream/main --warn" in c for c in calls)
-    assert any("check_customer_references.py --root . --range upstream/main..HEAD" in c for c in calls)
+    assert any(f"suggest_repo_changelog.py --root . --check --base {BASE}" in c for c in calls)
+    assert any(f"check_open_items.py --root . --base {BASE}" in c for c in calls)
+    assert any(f"check_pr_size.py --root . --base {BASE} --warn" in c for c in calls)
+    assert any(f"check_customer_references.py --root . --range {BASE}..HEAD" in c for c in calls)
     assert any("check_ci_gate_coverage.py --root ." in c for c in calls)
     assert any("check_audit_workflow_permissions.py --root ." in c for c in calls)
 
@@ -202,27 +241,90 @@ def test_runs_the_check_list_smokes_and_workflow_pytest(env, capsys):
     assert {f"{s}.py" for s in checks.CI_SMOKES} <= scripts
     pytests = [c for c in env.commands.calls if " -m pytest " in c]
     assert len(pytests) == len(pr_ready.pytest_invocations(env.work)), pytests
+    assert all(c.endswith(" -rs") for c in pytests), pytests
+
+
+def test_pythonpath_is_pinned_to_this_checkout(env, capsys):
+    assert _main(env, "--no-review") == 0
+    assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == str(env.work / "tools" / "ts-cli")
+
+
+def test_cannot_start_message_does_not_offer_a_flag_pr_ready_lacks(env, monkeypatch, capsys):
+    # No remote matches, and `upstream` is taken by another URL.
+    monkeypatch.setattr(rc, "_CANONICAL_URL_RE", re.compile("^nothing-matches$"))
+    assert _main(env, "--no-review") == 2
+    err = capsys.readouterr().err
+    assert "upstream" in err and "--base" not in err, err
+
+
+# ------------------------------------------------------------ pytest skips ---
+
+_SKIPS = ("....s.s\n"
+          "SKIPPED [1] tools/a/test_x.py:10: could not import 'openpyxl': No module named 'openpyxl'\n"
+          "SKIPPED [2] tools/b/test_y.py:20: $DATA not set\n"
+          "10 passed, 3 skipped in 1.0s\n")
+
+
+def test_a_skip_for_a_missing_module_is_fail_and_listed(env, capsys):
+    env.commands.answers = {"pytest agents/databricks/tests/": (0, _SKIPS)}
+    assert _main(env, "--no-review") == 1
+    text = _evidence(env)[1]
+    section = text.split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "tools/a/test_x.py:10: could not import 'openpyxl'" in section, section
+    assert "missing module" in section and "counted as FAIL" in section, section
+    assert "| pytest | `pytest agents/databricks/tests/ -q` | FAIL |" in text
+
+
+def test_other_skips_are_listed_and_do_not_fail(env, capsys):
+    env.commands.answers = {"pytest agents/databricks/tests/": (
+        0, "..s\nSKIPPED [2] tools/b/test_y.py:20: $DATA not set\n2 passed, 2 skipped\n")}
+    assert _main(env, "--no-review") == 0
+    section = _evidence(env)[1].split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "tools/b/test_y.py:20: $DATA not set (x2)" in section, section
+    assert "None." not in section
 
 
 # ------------------------------------------------------------- --post ---
 
 def test_post_happens_only_when_green_and_after_the_path(env, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
     assert _main(env, "--no-review", "--post", "42") == 0
     out = capsys.readouterr().out
-    assert len(env.posted) == 1
-    number, path = env.posted[0]
-    assert number == 42 and str(path) in out
+    path = _evidence(env)[0]
+    assert str(path) in out
+    [comment] = env.gh.comments()
+    assert comment == ["pr", "comment", "42", "--repo", rc.CANONICAL_REPO,
+                       "--body-file", str(path)]
+    view = env.gh.calls[0]
+    assert view[:3] == ["pr", "view", "42"] and view[3:5] == ["--repo", rc.CANONICAL_REPO]
 
 
 def test_post_is_refused_when_not_green(env, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
     _push_extra_commit(env, env.upstream, "upstream-only.md")
     assert _main(env, "--no-review", "--post", "42") == 1
-    assert env.posted == []
+    assert env.gh.calls == []
     assert "not posting" in capsys.readouterr().err.lower()
 
 
-def test_a_failed_post_fails_the_run(env, monkeypatch, capsys):
-    monkeypatch.setattr(pr_ready, "_gh_comment", lambda number, path: 1)
+def test_post_is_refused_on_a_dirty_tree(env, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    (env.work / "README.md").write_text("changed\n")
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.calls == []
+    assert "dirty" in capsys.readouterr().err.lower()
+
+
+def test_post_is_refused_when_the_prs_head_is_not_this_head(env, capsys):
+    env.gh.head = "f" * 40     # e.g. a fork's same-numbered PR, or an unpushed branch
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.comments() == []
+    assert "not posting" in capsys.readouterr().err.lower()
+
+
+def test_a_failed_post_fails_the_run(env, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    env.gh.comment_code = 1
     assert _main(env, "--no-review", "--post", "42") == 1
 
 
@@ -232,22 +334,12 @@ def _suite_steps():
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["suite"]["steps"]
 
 
-def _joined_lines(run):
-    """Code lines with `\\` continuations joined."""
-    out, pending = [], ""
-    for line in _code_lines(run):
-        if line.endswith("\\"):
-            pending += line[:-1] + " "
-            continue
-        out.append(pending + line)
-        pending = ""
-    return out
-
-
 def test_pytest_invocations_are_the_workflows():
     step = [s for s in _suite_steps() if s.get("name") == pr_ready.PYTEST_STEP]
     assert len(step) == 1
-    expected = [shlex.split(l)[1:] for l in _code_lines(step[0]["run"]) if l.startswith("pytest ")]
+    import shlex
+    expected = [shlex.split(l)[1:] for l in pr_ready._code_lines(step[0]["run"])
+                if l.startswith("pytest ")]
     assert expected and pr_ready.pytest_invocations(REPO) == expected
 
 
@@ -262,33 +354,83 @@ def test_a_pytest_step_with_a_line_pr_ready_cannot_reproduce_is_refused(tmp_path
         pr_ready.pytest_invocations(tmp_path)
 
 
-_VALIDATOR_CALL = re.compile(r"^python3 (tools/validate/[\w-]+\.py)(.*)$")
+def test_every_line_ci_runs_is_reproduced_or_plumbing():
+    """The CI-superset claim on the committed workflow: nothing unaccounted."""
+    assert pr_ready.ci_lines_not_reproduced(REPO) == []
 
 
-def test_every_validator_the_suite_job_runs_is_run_by_pr_ready():
-    """The CI-superset claim, checked: each `python3 tools/validate/X.py ...` line in
-    the suite job maps to something pr-ready runs, with the same args once
-    `origin/${{ github.base_ref }}` is read as the base."""
+def test_every_gate_pr_ready_runs_is_one_ci_runs():
+    """The other direction: an entry in PR_CHECKS / EVERY_PR_CHECKS that CI does not
+    run would be a gate CI never enforces, presented as if it did."""
+    import shlex
+    wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    in_ci = set()
+    for job in wf["jobs"].values():
+        for step in job.get("steps") or []:
+            for line in pr_ready._code_lines(step.get("run", "")):
+                m = pr_ready._VALIDATOR_CALL.match(line)
+                if m:
+                    in_ci.add((Path(m.group(1)).name, tuple(
+                        a.replace(pr_ready._CI_PR_BASE, "{base}") for a in shlex.split(m.group(2)))))
     mine = {(c.script, c.local_args) for c in pr_ready.PR_CHECKS + pr_ready.EVERY_PR_CHECKS}
-    seen, unaccounted = set(), []
-    for step in _suite_steps():
-        for line in _joined_lines(step.get("run", "")):
-            m = _VALIDATOR_CALL.match(line)
-            if not m:
-                continue
-            script = Path(m.group(1)).name
-            if script == "run_checks.py":
-                continue   # CHECKS / CI_SMOKES: pr-ready runs both through run_checks
-            if step["name"] == pr_ready.QUALITY_GATES_STEP and script == "generate_quality_gates.py":
-                continue   # the scoped gate, pinned by the next test
-            args = tuple(a.replace("origin/${{ github.base_ref }}", "{base}")
-                         for a in shlex.split(m.group(2)))
-            if (script, args) in mine:
-                seen.add((script, args))
-            else:
-                unaccounted.append(f"{step['name']}: {line}")
-    assert not unaccounted, f"CI runs these and pr-ready does not: {unaccounted}"
-    assert seen == mine, f"pr-ready runs these and CI does not: {sorted(mine - seen)}"
+    assert mine <= in_ci, sorted(mine - in_ci)
+
+
+_ANCHOR = "      - name: Check the CI gate covers every job\n"
+_MUTATIONS = {
+    "mypy": "      - name: Type check\n        run: |\n          python3 -m mypy tools/ts-cli/ts_cli\n\n",
+    "python-not-python3": ("      - name: New gate\n        run: |\n"
+                           "          python tools/validate/check_new_gate.py --root .\n\n"),
+    "smoke-direct": ("      - name: Extra smoke\n        run: |\n"
+                     "          python3 tools/smoke-tests/smoke_ts_extra.py\n\n"),
+    "bash-script": "      - name: PR content check\n        run: |\n          bash scripts/check-something.sh\n\n",
+    "new-action": "      - name: Lint\n        uses: some/linter@v1\n\n",
+    "echo-pipe": ("      - name: Sneaky\n        run: |\n"
+                  "          echo x | python3 tools/validate/check_new_gate.py\n\n"),
+}
+
+
+def _mutated(tmp_path, text):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "validate.yml").write_text(text)
+    return pr_ready.ci_lines_not_reproduced(tmp_path)
+
+
+@pytest.mark.parametrize("which", sorted(_MUTATIONS))
+def test_a_new_step_ci_runs_is_caught(tmp_path, which):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    assert _ANCHOR in orig
+    assert _mutated(tmp_path, orig.replace(_ANCHOR, _MUTATIONS[which] + _ANCHOR, 1))
+
+
+def test_a_new_job_is_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    text = orig.replace("  validate:\n", "  lint:\n    if: github.event_name != 'schedule'\n"
+                        "    runs-on: ubuntu-latest\n    steps:\n"
+                        "      - run: python3 tools/validate/check_lint_new.py --root .\n\n"
+                        "  validate:\n", 1)
+    text = text.replace("needs: [suite, pytest-matrix]", "needs: [suite, pytest-matrix, lint]")
+    assert any("lint" in m for m in _mutated(tmp_path, text))
+
+
+def test_changed_args_on_a_pr_gate_are_caught(tmp_path):
+    orig = WORKFLOW.read_text(encoding="utf-8")
+    text = orig.replace("check_pr_size.py --root . --base", "check_pr_size.py --root . --all --base", 1)
+    assert text != orig and _mutated(tmp_path, text)
+
+
+def test_a_matrix_pytest_line_differing_from_the_suites_is_caught(tmp_path):
+    wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for step in wf["jobs"]["pytest-matrix"]["steps"]:
+        if step.get("name") == pr_ready.PYTEST_STEP:
+            step["run"] += "pytest tools/extra/tests/ -q\n"
+    assert _mutated(tmp_path, yaml.safe_dump(wf))
+
+
+def test_a_ci_superset_gap_is_a_fail_row(env, capsys, monkeypatch):
+    monkeypatch.setattr(pr_ready, "ci_lines_not_reproduced", lambda root: ["suite / X: mypy"])
+    assert _main(env, "--no-review") == 1
+    assert "| check | `ci-superset` | FAIL |" in _evidence(env)[1]
 
 
 def test_the_scoped_quality_gates_pattern_is_the_workflows():
@@ -306,7 +448,6 @@ def test_quality_gates_scoped_gate_runs_only_when_a_source_changed(env, capsys):
     (env.work / "tools" / "validate").mkdir(parents=True)
     _commit(env.work, "tools/validate/check_new.py")
     env.checks.calls.clear()
-    env.checks.answers = {}
     assert _main(env, "--no-review") == 0
     gates = [c for c in env.checks.calls if "generate_quality_gates.py" in c]
     assert len(gates) == 2, gates   # the soft CHECKS entry and the scoped hard gate

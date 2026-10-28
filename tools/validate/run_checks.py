@@ -110,7 +110,7 @@ def resolve_upstream(repo_root: Path, *, add_if_missing: bool = True) -> str:
         existing = _git(repo_root, "remote", "get-url", "upstream").stdout.strip()
         raise RuntimeError(
             f"remote 'upstream' exists but points at {existing!r}, not {CANONICAL_REPO}; "
-            f"add a remote for {CANONICAL_URL} or pass --base explicitly"
+            f"add a remote for {CANONICAL_URL}"
         )
     added = _git(repo_root, "remote", "add", "upstream", CANONICAL_URL)
     if added.returncode != 0:
@@ -298,14 +298,18 @@ def _reporter(ci_log: bool) -> Reporter:
 
 
 def _local_base(repo_root: Path) -> str:
+    """`refs/remotes/<upstream>/main`, fetched if absent (not refreshed if present;
+    pr-ready always fetches). In full, because the short `<upstream>/main` resolves
+    to a local branch or tag of that name first, which would silently be the base."""
     remote = resolve_upstream(repo_root)
-    ref = f"{remote}/main"
-    if _git(repo_root, "rev-parse", "--verify", "--quiet", ref).returncode != 0:
+    ref = f"refs/remotes/{remote}/main"
+    if _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
         print(f"run_checks: fetching {remote} main", file=sys.stderr)
-        fetched = _git(repo_root, "fetch", "--quiet", remote, "main")
+        fetched = _git(repo_root, "fetch", "--quiet", "--no-tags", remote,
+                       f"+refs/heads/main:{ref}")
         if fetched.returncode != 0:
             raise RuntimeError(f"could not fetch {remote} main: {fetched.stderr.strip()}")
-    sha = _git(repo_root, "rev-parse", ref).stdout.strip()
+    sha = _git(repo_root, "rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
     print(f"run_checks: base is {ref} ({sha})", file=sys.stderr)
     return ref
 
@@ -336,7 +340,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.context:
             base = args.base
             if args.context == "local" and base is None:
-                base = _local_base(REPO_ROOT)
+                try:
+                    base = _local_base(REPO_ROOT)
+                except RuntimeError as exc:
+                    # Only this CLI has --base; resolve_upstream's callers word their own hint.
+                    raise RuntimeError(f"{exc} (or pass --base explicitly)") from exc
             results += run(args.context, base, REPO_ROOT, python, report=report)
         if args.smokes:
             results += run_smokes(REPO_ROOT, python, report=report)

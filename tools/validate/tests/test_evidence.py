@@ -130,3 +130,29 @@ def test_write_goes_to_the_git_dir(tmp_path):
     assert path.read_text(encoding="utf-8") == "hello\n"
     # Never in the work tree, so never tracked.
     assert not (tmp_path / "pr-ready").exists()
+
+
+def test_a_soft_checks_promoted_skip_is_listed():
+    promoted = f"{evidence.PROMOTED_PREFIX}\nSKIP  tool absent"
+    section = _render(checks=[_r("soft-one", "WARN", promoted)]).split(
+        "## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "soft-one" in section and "SKIP  tool absent" in section, section
+    assert "WARN" in section, section
+
+
+def test_skipped_tests_are_listed_with_missing_modules_marked():
+    r = _r("pytest a/ -q", "FAIL", skips=["a/t.py:1: No module named 'x'", "a/u.py:2: $D unset"],
+           missing=["a/t.py:1: No module named 'x'"])
+    section = _render(pytest=[r]).split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
+    assert "a/t.py:1: No module named 'x'; a missing module" in section, section
+    assert "a/u.py:2: $D unset" in section and "a/u.py:2: $D unset;" not in section, section
+
+
+def test_scrub_handles_windows_names_with_spaces_doubled_backslashes_and_root():
+    for raw, name in (("C:\\Users\\Carol Ann\\Docs\\x", "Carol"),
+                      (repr("C:\\Users\\dave\\x"), "dave"),
+                      ("D:\\\\Users\\\\erin\\\\x", "erin"),
+                      ("cache at /root/.cache/pip", "/root")):
+        text = _render(review=raw)
+        assert name not in text, (raw, text.split("## Review", 1)[1])
+    assert "/rootfs/x" in _render(review="/rootfs/x")

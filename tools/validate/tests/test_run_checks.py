@@ -178,6 +178,50 @@ def test_resolve_upstream_raises_when_upstream_name_is_taken(repo):
     assert _git(repo, "config", "--get", "remote.upstream.url") == "https://github.com/someone/else.git"
 
 
+# ------------------------------------------------------------- _local_base ---
+
+@pytest.fixture
+def upstream_repo(repo, tmp_path, monkeypatch):
+    """`repo` with a remote `upstream` -> a local bare repo the URL pattern matches."""
+    for key, value in (("user.email", "t@example.com"), ("user.name", "T")):
+        _git(repo, "config", key, value)
+    (repo / "a.md").write_text("a\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a")
+    bare = tmp_path / "up.git"
+    _git(tmp_path, "clone", "-q", "--bare", str(repo), str(bare))
+    _git(bare, "symbolic-ref", "HEAD", f"refs/heads/{_git(repo, 'branch', '--show-current')}")
+    _git(bare, "branch", "-m", _git(repo, "branch", "--show-current"), "main")
+    url = f"file://{bare}"
+    _git(repo, "remote", "add", "upstream", url)
+    monkeypatch.setattr(rc, "_CANONICAL_URL_RE", re.compile(re.escape(url) + "$"))
+    return repo, bare
+
+
+@pytest.mark.parametrize("kind", ["branch", "tag"])
+def test_local_base_is_the_remote_ref_not_a_shadowing_local_one(upstream_repo, kind, capsys):
+    repo, bare = upstream_repo
+    # A local branch or tag named `upstream/main` resolves first for the short name,
+    # and used to make _local_base skip the fetch and return a stale base.
+    (repo / "b.md").write_text("b\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "b")
+    _git(repo, kind, "upstream/main", "HEAD")
+    ref = rc._local_base(repo)
+    assert ref == "refs/remotes/upstream/main"
+    assert _git(repo, "rev-parse", ref) == _git(bare, "rev-parse", "main")
+
+
+def test_cli_hint_to_pass_base_is_on_the_cli_only(repo, monkeypatch, capsys):
+    _git(repo, "remote", "add", "upstream", "https://github.com/someone/else.git")
+    with pytest.raises(RuntimeError) as err:
+        rc.resolve_upstream(repo)
+    assert "--base" not in str(err.value)
+    monkeypatch.setattr(rc, "REPO_ROOT", repo)
+    assert rc.main(["--context", "local"]) == 2
+    assert "pass --base" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------- prereq_present ---
 
 def test_prereq_present_reuses_the_ossie_checks_own_locator(monkeypatch, tmp_path):

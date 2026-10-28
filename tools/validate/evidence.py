@@ -40,7 +40,13 @@ from run_checks import _PROMOTED as PROMOTED_PREFIX  # noqa: E402
 
 Result = Dict[str, object]
 
-_HOME_PATH = re.compile(r"(?:/Users|/home)/[^/\s`'\"|)]+|[A-Za-z]:\\Users\\[^\\\s`'\"|)]+")
+_END = "`'\"|)"
+_HOME_PATH = re.compile(
+    # POSIX homes: /Users/<name>, /home/<name>, and root's /root.
+    r"(?:/Users|/home)/[^/\s" + _END + r"]+|/root\b"
+    # Windows, single or repr-doubled backslashes. A name may contain spaces when a
+    # separator follows it (C:\Users\Carol Ann\x); a trailing one stops at a space.
+    r"|[A-Za-z]:(\\{1,2})Users\1(?:[^\\\n" + _END + r"]+(?=\\)|[^\\\s" + _END + r"]+)")
 
 
 def scrub(text: str) -> str:
@@ -69,10 +75,16 @@ def _not_run_or_skipped(results: Sequence[Result]) -> List[str]:
         elif status == "SKIP":
             reason = r.get("reason") or _first_line(tail, "SKIP") or "printed a SKIP line"
             lines.append(f"- `{r['id']}` — SKIP: {reason}")
-        elif status == "FAIL" and tail.startswith(PROMOTED_PREFIX):
+        elif status in ("FAIL", "WARN") and tail.startswith(PROMOTED_PREFIX):
+            # A required check that skipped is FAIL; a soft one stays WARN — listed either way.
             reason = _first_line(tail, "SKIP") or "missing tool"
-            lines.append(f"- `{r['id']}` — skipped (`{reason}`); required on every PR, "
-                         "so counted as FAIL")
+            counted = "FAIL" if status == "FAIL" else "WARN (a soft check)"
+            lines.append(f"- `{r['id']}` — skipped (`{reason}`); counted as {counted}")
+        missing = set(r.get("missing") or ())
+        for skip in r.get("skips") or ():
+            note = ("; a missing module CI installs, so counted as FAIL" if skip in missing
+                    else "")
+            lines.append(f"- `{r['id']}` — test skipped: {skip}{note}")
     return lines
 
 
