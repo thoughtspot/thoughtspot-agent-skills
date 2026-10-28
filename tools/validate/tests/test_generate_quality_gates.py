@@ -1,13 +1,12 @@
 """Tests for generate_quality_gates.py parsing logic."""
 from __future__ import annotations
 
-import re
-import shutil
 import sys
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -266,12 +265,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNER_CI_CALL = "python3 tools/validate/run_checks.py --context ci --base origin/main"
 RUNNER_SMOKES_CALL = "python3 tools/validate/run_checks.py --smokes"
 
-# The catalog's (validator, mode) pairs as rendered from the explicit-lines
-# workflow (one `python3 tools/validate/X.py ... || rc=1` per validator), captured
-# 2026-10-28 immediately before CI switched to run_checks.py. Switching CI to read
-# checks.CHECKS must not add, drop or re-mode a single gate. A deliberate gate
-# change after this point updates the literal in the same PR.
-CATALOG_BEFORE_RUNNER_SWITCH = {
+# The catalog's (validator, mode) pairs. Captured 2026-10-28 from the
+# explicit-lines workflow (one `python3 tools/validate/X.py ... || rc=1` per
+# validator) just before CI switched to run_checks.py, and unchanged by that
+# switch. A deliberate second copy: a change to the gate set (a gate added,
+# dropped or re-moded, in checks.py, pre-commit.sh or the workflow) updates this
+# literal in the same PR.
+EXPECTED_GATES = {
     ("_pip_audit", "gate"),
     ("_pytest_ci", "gate"),
     ("check_agentql_quest.py", "gate"),
@@ -333,59 +333,27 @@ CATALOG_BEFORE_RUNNER_SWITCH = {
 }
 
 
-def _replace_step(text: str, name: str, run_line: str) -> str:
-    """Swap the step called `name` for one whose whole body is `run_line`.
-
-    A step is its `- name:` line plus every following line that is blank or
-    indented deeper than the `-`. The step's `if:` is kept so the fixture differs
-    from the real workflow only in what the step runs.
-    """
-    lines = text.split("\n")
-    starts = [i for i, ln in enumerate(lines) if ln.strip() == f"- name: {name}"]
-    assert len(starts) == 1, f"expected one step named {name!r}, found {len(starts)}"
-    start = starts[0]
-    indent = len(lines[start]) - len(lines[start].lstrip())
-    end = start + 1
-    while end < len(lines) and (not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) > indent):
-        end += 1
-    # Leave trailing blank lines (the gap before the next step or job) in place.
-    while end > start + 1 and not lines[end - 1].strip():
-        end -= 1
-    body = lines[start + 1:end]
-    guard = [ln for ln in body if ln.strip().startswith("if:")]
-    pad = " " * (indent + 2)
-    new = [lines[start], *guard, f"{pad}run: |", f"{pad}  {run_line}"]
-    return "\n".join(lines[:start] + new + lines[end:])
+def _step_lines(workflow: dict, name: str) -> list[str]:
+    steps = [s for s in workflow["jobs"]["suite"]["steps"] if s.get("name") == name]
+    assert len(steps) == 1, f"expected one step named {name!r}"
+    return [ln.strip() for ln in steps[0]["run"].splitlines() if ln.strip() and not ln.strip().startswith("#")]
 
 
-def _runner_fixture_root(tmp_path: Path) -> Path:
-    """A repo root with the real pre-commit hook and the real workflow, except that
-    the full-repo and smoke steps call run_checks.py instead of listing scripts."""
-    (tmp_path / "scripts").mkdir()
-    shutil.copy(REPO_ROOT / "scripts" / "pre-commit.sh", tmp_path / "scripts" / "pre-commit.sh")
-    wf = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
-    wf = _replace_step(wf, "Run validators (full-repo mode)", RUNNER_CI_CALL)
-    wf = _replace_step(wf, "Run credential-free smoke suites", RUNNER_SMOKES_CALL)
-    assert RUNNER_CI_CALL in wf and "|| rc=1" not in wf, "fixture still lists validators explicitly"
-    (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "workflows" / "validate.yml").write_text(wf, encoding="utf-8")
-    return tmp_path
+def test_catalog_gate_set():
+    # The snapshot is only evidence about the runner path while CI uses it.
+    wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8"))
+    assert RUNNER_CI_CALL in _step_lines(wf, "Run validators (full-repo mode)")
+    assert RUNNER_SMOKES_CALL in _step_lines(wf, "Run credential-free smoke suites")
 
-
-def test_catalog_unchanged_by_runner_switch(tmp_path):
-    gates = collect_gates(_runner_fixture_root(tmp_path))
+    gates = collect_gates(REPO_ROOT)
     pairs = {(v, info["mode"]) for v, info in gates.items()}
-    assert pairs - CATALOG_BEFORE_RUNNER_SWITCH == set(), "runner form adds or re-modes gates"
-    assert CATALOG_BEFORE_RUNNER_SWITCH - pairs == set(), "runner form drops or re-modes gates"
-    # Every listed check is still recorded as running in CI, not just present via pre-commit.
+    assert pairs - EXPECTED_GATES == set(), (
+        "gate set changed (added or re-moded) — update EXPECTED_GATES deliberately")
+    assert EXPECTED_GATES - pairs == set(), (
+        "gate set changed (dropped or re-moded) — update EXPECTED_GATES deliberately")
+    # Every listed check is recorded as running in CI, not just present via pre-commit.
     not_ci = sorted(c.script for c in checks.CHECKS if not gates[c.script]["ci"])
-    assert not_ci == [], f"checks the runner form no longer marks as CI: {not_ci}"
-
-
-def test_committed_catalog_matches_the_snapshot():
-    """The real workflow, whichever form it is in, renders the same gate set."""
-    pairs = {(v, info["mode"]) for v, info in collect_gates(REPO_ROOT).items()}
-    assert pairs == CATALOG_BEFORE_RUNNER_SWITCH
+    assert not_ci == [], f"checks the catalog no longer marks as CI: {not_ci}"
 
 
 class TestParseCiRunner:

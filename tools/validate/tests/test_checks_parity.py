@@ -8,6 +8,15 @@ full-repo step may open with `set -e`) — no `|| true`, no `exit 0`, no
 `set +e`, no `if false` wrapper, no extra args, no validator beside it — and
 nothing around the step (`continue-on-error`, a new `if:`, a custom `shell:`,
 `defaults`, the job's own `if:`) may stop it gating while the call stays put.
+Those two calls must also be the only non-comment workflow lines naming the
+runner, so the catalog generator, which reads the workflow as text, sees the
+same thing.
+
+Pinning the call means CI runs whatever the list says, so the parts of the
+list with no second copy anywhere (the smoke suites, and the checks pre-commit
+does not run, and the CI args of checks whose pre-commit args differ) are
+pinned to literals here: changing what CI enforces through them takes a
+visible test edit.
 
 Pre-commit does not read the list yet, so it is pinned line by line:
 
@@ -60,6 +69,51 @@ STEP_GUARDS = {FULL_REPO_STEP: None, SMOKE_STEP: "${{ !cancelled() }}"}
 # The only keys each step may have. `shell:` (e.g. `bash -c "exit 0" {0}`),
 # `env:` or `working-directory:` could each change what the call does.
 STEP_KEYS = {FULL_REPO_STEP: {"name", "run"}, SMOKE_STEP: {"name", "if", "run"}}
+_RUNNER_PATH = "tools/validate/run_checks.py"
+
+# DELIBERATE SECOND COPIES. CI runs whatever checks.py says, so for the entries
+# below — the smoke suites, and the checks pre-commit does not run (no
+# `precommit_label`, hence no second copy in the hook either) — an edit to
+# checks.py alone would change what CI enforces with no other file moving: drop a
+# suite, drop a check, or drop `--check` and a hard gate turns into a nudge. These
+# literals make such a change a visible test edit in the same diff. Update them
+# only when you mean to change what CI runs.
+EXPECTED_CI_SMOKES = (
+    "smoke_ts_publish_orgs",
+    "smoke_ts_security_columns",
+    "smoke_ts_setup_tenancy",
+    "smoke_ts_migrate_orgs",
+    "smoke_ts_object_model_alias",
+    "smoke_ts_convert_from_dbt",
+    "smoke_ts_convert_to_dbt",
+)
+EXPECTED_CI_ONLY_CHECKS = {
+    "mapping-currency": ("check_mapping_currency.py", ("--root", ".", "--check"), True),
+    "ossie-mapping-sync": ("check_ossie_mapping_sync.py", ("--root", ".", "--check"), True),
+}
+# Same reason, one step further. A check whose pre-commit args equal its CI args
+# is pinned by pre-commit itself (change one and the arg-drift test fails). A
+# check in KNOWN_DRIFT is not: its drift entry is keyed by id, so its ci_args can
+# change (`--all` → `--staged`, say) while the drift stays "declared". Pin those.
+EXPECTED_DRIFTED_CI_ARGS = {
+    "secrets": ("check_secrets.py", ("--root", ".", "--all"), True),
+    "customer-references": ("check_customer_references.py", ("--root", ".", "--all"), True),
+    "patterns": ("check_patterns.py", ("--root", "."), True),
+    "version-sync": ("check_version_sync.py", ("--root", ".", "--base", "origin/main"), True),
+    "module-health": ("check_module_health.py", ("--root", "."), True),
+    "python-redefinitions": ("check_python_redefinitions.py", ("--root", "."), True),
+    "file-size": ("check_file_size.py", ("--root", "."), True),
+    "yaml": ("check_yaml.py", ("--root", "."), True),
+    "sv-yaml": ("check_sv_yaml.py", ("--root", "."), True),
+    "tml": ("check_tml.py", ("--root", "."), True),
+    "consistency": ("check_consistency.py", ("--root", "."), True),
+    "smoke-tests": ("check_smoke_tests.py", ("--root", "."), True),
+    "skill-context-cost": ("check_skill_context_cost.py", ("--root", "."), True),
+    "coverage-matrix": ("check_coverage_matrix.py", ("--root", ".", "--base", "origin/main"), True),
+    "lint-invariant-list": ("check_lint_invariant_list.py", ("--root", ".", "--base", "origin/main"), True),
+    "audit-catalog": ("check_audit_catalog.py", ("--root", ".", "--base", "origin/main"), True),
+    "backlog-integrity": ("check_backlog_integrity.py", ("--root", ".", "--base", "origin/main"), True),
+}
 
 _RUN_CHECK = re.compile(
     r'\brun_check\s+"(?P<label>[^"]+)"\s+"tools/validate/(?P<script>[^"\s]+\.py)(?P<args>[^"]*)"'
@@ -164,6 +218,10 @@ def test_suite_job_cannot_be_neutralised():
     # appearing on the step itself.
     assert "defaults" not in job, f"job {JOB!r} has `defaults:`"
     assert "defaults" not in _workflow(), "the workflow has top-level `defaults:`"
+    # Likewise `env:` reaches every step: PYTHONOPTIMIZE=1 strips the asserts some
+    # validators check with, PYTHONPATH can swap the code a validator imports.
+    assert "env" not in job, f"job {JOB!r} has `env:`"
+    assert "env" not in _workflow(), "the workflow has top-level `env:`"
 
 
 @pytest.mark.parametrize("name", sorted(STEP_BODIES))
@@ -176,6 +234,49 @@ def test_step_body_is_exactly_the_runner_call(name):
     lines = _code_lines(_step(name)["run"])
     assert lines in [list(b) for b in STEP_BODIES[name]], (
         f"{name!r} must be exactly one of {list(STEP_BODIES[name])} (comments aside); found {lines}"
+    )
+
+
+def test_runner_lines_are_only_the_two_exact_calls():
+    """`generate_quality_gates._parse_ci` reads the workflow as text and expands
+    only an exact `RUNNER_CI_CALL` line. Any other code line naming run_checks.py —
+    a one-line `run: python3 ...`, an `echo` that mentions it — would make the
+    catalog generator raise while the YAML-level checks above still passed. Reject
+    it here so the two readers of the workflow cannot disagree. Comment lines are
+    skipped by both."""
+    lines = [ln.strip() for ln in WORKFLOW.read_text(encoding="utf-8").splitlines()]
+    mentions = [ln for ln in lines if _RUNNER_PATH in ln and not ln.startswith("#")]
+    assert sorted(mentions) == sorted([RUNNER_CI_CALL, RUNNER_SMOKES_CALL]), (
+        f"the only non-comment lines naming {_RUNNER_PATH} must be one {RUNNER_CI_CALL!r} "
+        f"and one {RUNNER_SMOKES_CALL!r}, each on its own line; found {mentions}"
+    )
+
+
+def test_ci_smokes_are_the_expected_suites():
+    assert checks.CI_SMOKES == EXPECTED_CI_SMOKES, (
+        "CI_SMOKES changed, which changes what CI's smoke step runs; if that is "
+        "intended, update EXPECTED_CI_SMOKES in the same change"
+    )
+
+
+def test_ci_only_checks_are_the_expected_ones():
+    actual = {c.id: (c.script, c.ci_args, c.hard) for c in checks.CHECKS if c.precommit_label is None}
+    assert actual == EXPECTED_CI_ONLY_CHECKS, (
+        "a check pre-commit does not run changed (added, dropped, re-argued or made "
+        "soft), which changes what CI enforces; if intended, update "
+        "EXPECTED_CI_ONLY_CHECKS in the same change"
+    )
+
+
+def test_drifted_checks_keep_their_ci_args():
+    actual = {
+        c.id: (c.script, c.ci_args, c.hard) for c in checks.CHECKS
+        if c.precommit_label is not None and c.precommit_args != c.ci_args
+    }
+    assert actual == EXPECTED_DRIFTED_CI_ARGS, (
+        "a check whose pre-commit args differ from CI's changed its CI args (or "
+        "started/stopped drifting), which changes what CI enforces; if intended, "
+        "update EXPECTED_DRIFTED_CI_ARGS in the same change"
     )
 
 

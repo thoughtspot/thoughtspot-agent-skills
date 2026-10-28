@@ -444,6 +444,20 @@ def test_run_smokes_runs_every_ci_smoke(monkeypatch, tmp_path):
     assert rc.exit_code(results) == 1
 
 
+def test_cli_smokes_continues_past_a_failure_and_exits_1(monkeypatch, tmp_path, capsys):
+    # CI's smoke step is exactly `run_checks.py --smokes`, so this exit code is the
+    # only thing that can turn the step red. A main() that ran the suites but
+    # dropped their results would print every failure and still exit 0.
+    monkeypatch.setattr(rc, "REPO_ROOT", tmp_path)
+    failing = checks.CI_SMOKES[1]
+    fake = _fake(monkeypatch, {f"{failing}.py": (1, "boom\n")})
+    code = rc.main(["--smokes"])
+    assert [Path(a[1]).stem for a, _ in fake.calls] == list(checks.CI_SMOKES)
+    assert code == 1
+    assert _status_lines(capsys.readouterr().out) == [
+        f"{'FAIL' if s == failing else 'PASS':7} {s}" for s in checks.CI_SMOKES]
+
+
 # --------------------------------------------------------------------- CLI ---
 
 def test_cli_accepts_the_invocations_ci_will_use(monkeypatch, tmp_path, capsys):

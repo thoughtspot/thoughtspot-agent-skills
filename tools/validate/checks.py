@@ -13,7 +13,8 @@ step, and are outside `CHECKS`; so are the PR-only steps below.
 
 This module is data only. Each `Check` records:
 
-- `ci_args` — exactly what CI's full-repo step passes, copied verbatim;
+- `ci_args` — the args CI runs the script with (`run_checks.py --context ci`
+  passes them as-is; nothing else in the repo records them);
 - `local_args` — the same with `origin/main` replaced by `{base}`, which a local
   runner substitutes with whatever upstream ref it resolved (a fork's `origin`
   is not upstream, so the ref cannot be hardcoded);
@@ -83,7 +84,7 @@ _ROOT = ("--root", ".")
 _STAGED = ("--root", ".", "--staged")
 _BASE = ("--root", ".", "--base", "origin/main")
 
-# In CI's order, so a reader can hold this against validate.yml line by line.
+# The order run_checks.py runs them in, CI and locally alike.
 CHECKS: Tuple[Check, ...] = (
     _check("secrets", "check_secrets.py", ("--root", ".", "--all"), ("secrets", _ROOT)),
     _check("customer-references", "check_customer_references.py", ("--root", ".", "--all"),
@@ -145,9 +146,9 @@ CHECKS: Tuple[Check, ...] = (
            ("audit catalog", ("--root", ".", "--merge-base-with", "origin/main"))),
     _check("repo-hygiene", "check_repo_hygiene.py", _ROOT, ("repo hygiene", _ROOT)),
     _check("backlog-integrity", "check_backlog_integrity.py", _BASE, ("backlog integrity", _ROOT)),
-    # Soft in CI (`|| echo WARN`): the catalog embeds git-log dates that move whenever
-    # any validator is touched. CI's PR-only step makes it hard for PRs that touch its
-    # sources.
+    # Soft (`hard=False`: the runner prints WARN and the step still passes): the
+    # catalog embeds git-log dates that move whenever any validator is touched. CI's
+    # PR-only step makes it hard for PRs that touch its sources.
     _check("quality-gates", "generate_quality_gates.py", ("--root", ".", "--check"),
            ("quality gates catalog", ("--root", ".", "--check")), hard=False),
 )

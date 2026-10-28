@@ -5,7 +5,9 @@ actual quality infrastructure.
 
 Sources of truth (never manually maintained — always scraped):
   1. scripts/pre-commit.sh — what runs locally, trigger conditions, inline comments
-  2. .github/workflows/validate.yml — what runs in CI
+  2. .github/workflows/validate.yml — what runs in CI. Its full-repo step is one
+     `run_checks.py --context ci` call, which this expands from
+     tools/validate/checks.py (CHECKS) — the list CI actually runs
   3. Validator docstrings — what each check does
   4. git log — when each validator was last modified / last had a meaningful change
 
@@ -421,8 +423,9 @@ def generate_catalog(repo_root: Path) -> str:
         "- **Audit (angle 7):** review the Last Modified column to find gates that",
         "  haven't changed in 6+ months — are they still catching real issues, or",
         "  checking something that no longer happens?",
-        "- **Adding a gate:** add the validator, wire it into `pre-commit.sh` and/or",
-        "  `validate.yml`, then re-run this generator.",
+        "- **Adding a gate:** add the validator, list it in `tools/validate/checks.py`",
+        "  (CI runs that list) and/or wire it into `pre-commit.sh`, then re-run this",
+        "  generator.",
         "",
         "> **`Last modified` is a snapshot, not a gated value** (BL-192). It comes from",
         "> `git log` per validator, which made the whole document a function of repo",

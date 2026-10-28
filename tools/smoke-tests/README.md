@@ -10,9 +10,14 @@ auditing coverage from the docs. There are three tiers, not two:
 
 | Tier | Needs | Runs in CI |
 |---|---|---|
-| **Pure** | nothing — plain Python | Yes, the ones in `CI_SMOKES` (`tools/validate/checks.py`) |
-| **CLI-only** | `ts` on `PATH`, **no credentials** | No (could) |
+| **Pure** | nothing — plain Python | Five of the nine: publish_orgs, security_columns, setup_tenancy, migrate_orgs, object_model_alias |
+| **CLI-only** | `ts` on `PATH`, **no credentials** | Two of the four: convert_to_dbt, convert_from_dbt (CI installs `ts`) |
 | **Live** | `ts` + a configured profile for the named platform(s) | No |
+
+What CI runs is `CI_SMOKES` in `tools/validate/checks.py` — the source of truth, run by
+`run_checks.py --smokes` in CI's "Run credential-free smoke suites" step; the "Runs in CI"
+column above restates it. To add a suite to CI, add it there and to `EXPECTED_CI_SMOKES`
+in `tools/validate/tests/test_checks_parity.py`, which pins the list on purpose.
 
 Every classification below was verified by running the script, not inferred from its
 imports — an import-based guess mislabels both directions (`smoke_ts_convert_from_qlik`
