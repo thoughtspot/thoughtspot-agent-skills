@@ -348,6 +348,34 @@ def test_which_skips_are_a_missing_tool(env, capsys, reason, missing):
         assert "CI's `ubuntu-latest` runner has node and Chrome" in text
 
 
+def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
+    # "Install what CI installs" is only a remedy if it says what that is, exactly.
+    env.commands.answers = {"pytest agents/databricks/tests/": (0, _SKIPS)}
+    assert _main(env, "--no-review") == 1
+    err = capsys.readouterr().err
+    assert pr_ready.SUITE_PIP_INSTALLS, "no remedy to print"
+    for line in pr_ready.SUITE_PIP_INSTALLS:
+        assert line in err, (line, err)
+    # Named for the interpreter that ran, without the path to it (a home directory).
+    assert "python3 -m pip" in err, err
+
+
+def test_no_install_remedy_without_a_missing_module(env, capsys):
+    env.commands.answers = {"pytest agents/databricks/tests/": (
+        0, "..s\nSKIPPED [1] tools/b/test_y.py:20: $DATA not set\n2 passed, 1 skipped in 0.1s\n")}
+    assert _main(env, "--no-review") == 0
+    assert "pip install" not in capsys.readouterr().err
+
+
+def test_the_install_remedy_is_the_suite_jobs_installs_in_order():
+    # Read from the workflow each time it is checked: a hand copy that drifted would
+    # send a contributor to install the wrong thing.
+    lines = [line for step in _suite_steps() for line in pr_ready._code_lines(step.get("run", ""))
+             if line.startswith("pip install")]
+    assert list(pr_ready.SUITE_PIP_INSTALLS) == lines
+    assert set(pr_ready.SUITE_PIP_INSTALLS) <= pr_ready._PIP_INSTALLS
+
+
 # -------------------------------------------------------- stale evidence ---
 
 def test_a_run_that_cannot_start_replaces_an_earlier_ready_block(env, capsys):
@@ -368,6 +396,19 @@ def test_a_crash_mid_run_leaves_not_ready(env, monkeypatch, capsys):
     with pytest.raises(KeyboardInterrupt):
         _main(env, "--no-review")
     assert "NOT READY" in _evidence(env)[1]
+
+
+@pytest.mark.parametrize("argv", [("--post", "0"), ("--post", "abc"), ("--no-such-flag",)])
+def test_an_argument_error_replaces_an_earlier_ready_block(env, capsys, argv):
+    # argparse exits 2 on a bad argument, before anything else in main() runs; the
+    # placeholder must already be written by then.
+    assert _main(env, "--no-review") == 0
+    assert "**READY**" in _evidence(env)[1]
+    with pytest.raises(SystemExit) as exc:
+        _main(env, *argv)
+    assert exc.value.code == 2
+    text = _evidence(env)[1]
+    assert "**READY**" not in text and "NOT READY" in text, text
 
 
 # ------------------------------------------------------------- --post ---
@@ -458,6 +499,52 @@ def test_post_is_refused_when_the_tree_changes_during_the_run(env, monkeypatch, 
     monkeypatch.setattr(rc, "run_smokes", edit_meanwhile)
     assert _main(env, "--no-review", "--post", "42") == 1
     assert env.gh.calls == []
+
+
+def test_post_scans_the_block_with_both_scanners_before_posting(env, monkeypatch, capsys):
+    # The block is about to become a public PR comment: the same two scans the
+    # pr-ready skill runs before it shares one (Step 6), every line of the file.
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    scanned_before_comment = []
+    def gh(args):
+        if args[:2] == ["pr", "comment"]:
+            scanned_before_comment.extend(env.checks.calls)
+        return env.gh(args)
+    monkeypatch.setattr(pr_ready, "_gh", gh)
+    assert _main(env, "--no-review", "--post", "42") == 0
+    path = str(_evidence(env)[0])
+    assert len(env.gh.comments()) == 1
+    assert any(c.endswith(f"check_secrets.py --file {path}") for c in scanned_before_comment)
+    assert any(c.endswith(f"check_customer_references.py --text-file {path}")
+               for c in scanned_before_comment)
+
+
+@pytest.mark.parametrize("key, answer", [
+    ("check_secrets.py --file", (1, "FAIL  evidence.md:12: [github-token] <redacted>\n")),
+    ("check_customer_references.py --text-file", (1, "FAIL  evidence.md:9: [sharepoint] <redacted>\n")),
+    # Exit 0 with a WARN line: a personal detail. The skill stops on it; so does --post.
+    ("check_customer_references.py --text-file",
+     (0, "WARN  evidence.md:3: [personal-email] <redacted>\nNo customer references.\n")),
+])
+def test_post_is_refused_when_a_scanner_finds_something(env, capsys, key, answer):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    env.checks.answers = {key: answer}
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.comments() == []
+    err = capsys.readouterr().err
+    assert "not posting" in err.lower() and key.split()[0] in err, err
+
+
+def test_post_is_refused_when_a_scanner_cannot_run(env, monkeypatch, capsys):
+    env.gh.head = _git(env.work, "rev-parse", "HEAD")
+    original = rc._execute
+    def execute(python, script, args, root):
+        if "--file" in args or "--text-file" in args:
+            raise FileNotFoundError("no interpreter")
+        return original(python, script, args, root)
+    monkeypatch.setattr(rc, "_execute", execute)
+    assert _main(env, "--no-review", "--post", "42") == 1
+    assert env.gh.comments() == []
 
 
 # ------------------------------------------------ derived from validate.yml ---

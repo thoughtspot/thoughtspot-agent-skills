@@ -31,7 +31,8 @@ CI runs, the way CI runs it, and writes down what it ran:
      (`pytest_invocations`), never a hand copy, with `-rs --color=no` added so every
      skipped test is reported with its reason, and PYTEST_ADDOPTS dropped (CI sets
      none). A skip for a module that cannot be imported, or that lacks an attribute
-     the test needs (too old), is a missing tool, so FAIL (CI installs it); other
+     the test needs (too old), is a missing tool, so FAIL (CI installs it), and the
+     run prints CI's suite-job installs (`SUITE_PIP_INSTALLS`) as the remedy; other
      skips are listed. If pytest's own skipped count cannot be read, or does not
      match the reported skips, that is FAIL too: unverifiable is not zero.
    The workflow is then classified (`ci_lines_not_reproduced`): every key of the
@@ -52,12 +53,18 @@ CI runs, the way CI runs it, and writes down what it ran:
    environment, not the fresh install CI audits, so a hit here may be in a package
    the PR cannot affect and a pass here does not prove CI's.
 5. **Evidence** goes to `<git-dir>/pr-ready/evidence.md` (see evidence.py),
-   stating what CI does that this run did not reproduce.
+   stating what CI does that this run did not reproduce. The first thing a run
+   does, before it even reads its arguments, is replace that file with a NOT READY
+   placeholder, so a run that stops early (an argument error included) never
+   leaves an earlier READY block looking current; `--help` replaces it too.
 
 `--post N` comments the evidence on PR N of the canonical repo (`--repo`, never
 gh's default repo, which in a fork is the fork), and only when the run would exit
-0, the tree is clean, and PR N's head is the head SHA the evidence describes. It
-posts after the path is printed. Nothing else is ever sent to GitHub.
+0, the tree is clean, PR N's head is the head SHA the evidence describes, and the
+block passes the two scans the `pr-ready` skill runs before sharing one
+(`check_secrets.py --file` and `check_customer_references.py --text-file`; a `WARN`
+line is a hit). It posts after the path is printed. Nothing else is ever sent to
+GitHub.
 
 The adversarial review is not run here — a script cannot dispatch an agent. The
 `pr-ready` skill runs this with `--no-review`, then the reviewer, and appends the
@@ -223,14 +230,19 @@ def pytest_invocations(repo_root: Path) -> List[List[str]]:
 _PR_FETCH = 'git fetch --no-tags origin "${{ github.base_ref }}"'
 #: Shell lines that set up a step but check nothing, anywhere in a run script.
 _PLUMBING = frozenset({"set -e", _PR_FETCH})
-#: The exact installs CI makes today (deliberate copies: a changed install changes
-#: what the checks run with, so it must be looked at, not waved through).
-_PIP_INSTALLS = frozenset({
+#: The installs CI's suite job makes, in workflow order (a test pins them to it). The
+#: remedy printed when a test is skipped for a missing module, and the prerequisite
+#: the pr-ready skill quotes.
+SUITE_PIP_INSTALLS: Tuple[str, ...] = (
     "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
     "pip install -e tools/ts-cli",
     'pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"',
-    "pip install pytest pyyaml jsonschema==4.25.1",
-})
+)
+#: The exact installs CI makes today, in any job (deliberate copies: a changed install
+#: changes what the checks run with, so it must be looked at, not waved through).
+_PIP_INSTALLS = frozenset(SUITE_PIP_INSTALLS + (
+    "pip install pytest pyyaml jsonschema==4.25.1",   # the pytest-matrix job's subset
+))
 #: An `echo` that only prints: no pipe, chaining, substitution or redirection.
 _ECHO = re.compile(r"echo [^|;&`<>]*")
 _USES_PLUMBING = ("actions/checkout@", "actions/setup-python@")
@@ -434,6 +446,19 @@ def _pytest_env() -> dict:
     return {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
 
 
+def _install_remedy(python: str) -> List[str]:
+    """What to run so the missing modules are there: CI's suite-job installs, exactly.
+
+    `pip` on PATH can belong to another interpreter than the one pr-ready picked, so
+    the note names that one by its command name (its full path can be a home
+    directory, which has no place in output that may be pasted)."""
+    name = Path(python).name or "python3"
+    return ([f"  Install what CI's suite job installs, from the repo root, for the "
+             f"interpreter this run used (`{name} -m pip install ...` if `pip` is "
+             f"another interpreter's):"]
+            + [f"    {line}" for line in SUITE_PIP_INSTALLS])
+
+
 def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result]:
     results = []
     for args in pytest_invocations(repo_root):
@@ -456,6 +481,7 @@ def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result
         if missing:
             notes.append("FAIL  tests skipped for a missing module (CI installs it):")
             notes += [f"  {s}" for s in missing]
+            notes += _install_remedy(python)
         report(result, "\n".join(notes + [clean]) if notes else clean)
     return results
 
@@ -531,6 +557,31 @@ def _gh(args: Sequence[str]) -> Tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+#: The scans the pr-ready skill runs on a block before it is shared (its Step 6), each
+#: over every line of the file: (script, its single-file option).
+_BLOCK_SCANS = (("check_secrets.py", "--file"), ("check_customer_references.py", "--text-file"))
+
+
+def _scan_block(path: Path, repo_root: Path, python: str) -> Optional[str]:
+    """None when both scanners pass the block; else why it must not be posted.
+
+    A hit is a non-zero exit, or a `WARN` line: the customer-reference scanner reports
+    a personal detail that way and still exits 0. A scanner that cannot run refuses
+    too, since an unscanned block is not one to publish."""
+    for script, option in _BLOCK_SCANS:
+        try:
+            code, output, _ = rc._execute(python, rc.VALIDATE_DIR / script,
+                                          (option, str(path)), repo_root)
+        except OSError as exc:
+            return f"{script} could not scan the block: {exc}"
+        warned = any(line.startswith("WARN") for line in output.splitlines())
+        if code != 0 or warned:
+            found = f"exit {code}" + (", a WARN line" if warned else "")
+            return (f"{script} {option} found something in the block ({found}); fix it at "
+                    f"its source and re-run:\n{output.rstrip()}")
+    return None
+
+
 def _post(number: int, path: Path, head_sha: str) -> Optional[str]:
     """Comment the evidence on the canonical repo's PR `number`; None on success,
     else why not. Refuses unless that PR's head is the SHA the evidence describes:
@@ -550,6 +601,23 @@ def _post(number: int, path: Path, head_sha: str) -> Optional[str]:
     if code != 0:
         return f"gh pr comment failed: {err.strip() or out.strip()}"
     return None
+
+
+def _try_post(number: int, *, exit_code: int, dirty: bool, head_sha: str, path: Path,
+              repo_root: Path, python: str) -> Optional[str]:
+    """Post the block to PR `number`: None once posted, else why it was not."""
+    if exit_code:
+        return "the run is not green"
+    if dirty:
+        return "the tree is dirty, so the head SHA does not describe what was checked"
+    # The run takes minutes: a commit or an edit made meanwhile would make the block
+    # describe code that is no longer what is there.
+    now_head = rc._git(repo_root, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+    now_dirty = rc._git(repo_root, "status", "--porcelain").stdout.strip()
+    if now_head != head_sha or now_dirty:
+        return "the head or the work tree changed during the run; re-run on the final state"
+    # Scanned last, just before it leaves the machine.
+    return _scan_block(path, repo_root, python) or _post(number, path, head_sha)
 
 
 # ----------------------------------------------------------------------- CLI ---
@@ -576,6 +644,14 @@ def _pin_pythonpath(repo_root: Path) -> None:
 
 def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
          python: Optional[str] = None) -> int:
+    # Replace any earlier block first, before even the arguments are read: a run that
+    # stops early (an argument error, exit 2, a crash, Ctrl-C) must not leave a
+    # previous READY block looking current. `--help` replaces it too.
+    try:
+        evidence.write(evidence.UNFINISHED, repo_root)
+    except (RuntimeError, OSError) as exc:
+        print(f"pr-ready: cannot replace the evidence file: {exc}", file=sys.stderr)
+        return 2
     parser = argparse.ArgumentParser(
         prog="scripts/pr-ready.sh",
         description="Run CI's pull-request checks locally against upstream main and "
@@ -585,15 +661,13 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
                              "skill's job (the skill passes this)")
     parser.add_argument("--post", type=_pr_number, metavar="PR_NUMBER",
                         help="comment the evidence on this PR of the canonical repo with gh, "
-                             "only if the run is green, the tree is clean and the PR's head "
-                             "is this head")
+                             "only if the run is green, the tree is clean, the PR's head "
+                             "is this head and the block passes the secrets and "
+                             "customer-reference scans")
     args = parser.parse_args(argv)
     python = python or sys.executable or "python3"
 
     try:
-        # Replace any earlier block first: a run that stops early (exit 2, a crash,
-        # Ctrl-C) must not leave a previous READY block looking current.
-        evidence.write(evidence.UNFINISHED, repo_root)
         remote = rc.resolve_upstream(repo_root)
         # In full: a local branch or tag named `<remote>/main` shadows the short name.
         base_ref = f"refs/remotes/{remote}/main"
@@ -648,21 +722,8 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
     print(f"pr-ready: evidence written to {path}", flush=True)
 
     if args.post is not None:
-        refusal = None
-        if code:
-            refusal = "the run is not green"
-        elif dirty:
-            refusal = "the tree is dirty, so the head SHA does not describe what was checked"
-        else:
-            # The run takes minutes: a commit or an edit made meanwhile would make the
-            # block describe code that is no longer what is there.
-            now_head = rc._git(repo_root, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
-            now_dirty = rc._git(repo_root, "status", "--porcelain").stdout.strip()
-            if now_head != head_sha or now_dirty:
-                refusal = ("the head or the work tree changed during the run; re-run on the "
-                           "final state")
-            else:
-                refusal = _post(args.post, path, head_sha)
+        refusal = _try_post(args.post, exit_code=code, dirty=dirty, head_sha=head_sha,
+                            path=path, repo_root=repo_root, python=python)
         if refusal:
             print(f"pr-ready: not posting to PR #{args.post}: {refusal}", file=sys.stderr)
             code = 1
