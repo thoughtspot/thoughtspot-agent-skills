@@ -189,17 +189,27 @@ ADVERSARIAL = {
 # Linearity is asserted as a GROWTH RATIO, not a wall-clock budget: CI runners are several
 # times slower than a laptop, and a fixed 1s budget failed there on correct code. Linear
 # code scales x4 from 250K to 1M; the quadratic code this guards against scaled x16.
+# The cyclic GC is off while a scan is timed: a seed that fires (zoom: 100K hits at 1M)
+# allocates enough at 1M, and not at 250K, to trigger a full collection of the whole
+# pytest heap (~500K objects in CI), a one-off cost that pushed 3.11 to x8.1-8.7 on
+# linear code. Measured on the CI runners with it off: x4.0 on every seed, 3.10-3.14.
 _RATIO_LIMIT = 8.0
 _CEILING_1M = 10.0        # seconds; still far below the ~100s of the quadratic version
 _NOISE_FLOOR = 0.05       # a 1M scan this fast cannot be quadratic; ratios of tiny times are noise
 
 
 def _scan_seconds(seed: str, size: int) -> float:
+    import gc
     import time
     line = "thoughtspot slack sharepoint google " + seed * (size // len(seed))
-    start = time.perf_counter()
-    ccr.scan_text(line, "x.md")
-    return time.perf_counter() - start
+    gc.collect()
+    gc.disable()
+    try:
+        start = time.perf_counter()
+        ccr.scan_text(line, "x.md")
+        return time.perf_counter() - start
+    finally:
+        gc.enable()
 
 
 @pytest.mark.parametrize("name", sorted(ADVERSARIAL))
