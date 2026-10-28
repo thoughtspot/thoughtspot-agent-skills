@@ -126,7 +126,7 @@ SQL Views, scalar formulas, filter/join progressiveness, date constraints, colum
 
 ### Security (S)
 
-PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics.
+PII detection, indexing without RLS, CLS gaps, RLS bypass, RLS join loops, credentials in analytics.
 
 | ID | What it detects | Severity | Finding text | Remediation |
 |---|---|---|---|---|

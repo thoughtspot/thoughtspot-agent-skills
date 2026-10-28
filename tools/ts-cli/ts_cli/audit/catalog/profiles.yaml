@@ -5,6 +5,8 @@
 - id: spotter
   label: Spotter-ready
   default: false
+  description: aggressive, the bar for a Model Spotter will answer from (AI context required)
 - id: general
   label: General
   default: true
+  description: lighter, the bar for Search and Liveboards (AI context recommended)

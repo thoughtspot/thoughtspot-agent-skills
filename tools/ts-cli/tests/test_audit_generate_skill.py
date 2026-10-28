@@ -55,12 +55,24 @@ def test_rules_files_table_lists_active_and_retired_ids(blocks):
 
 def test_profile_block_names_each_profile_and_what_differs(blocks):
     text = blocks["profiles"]
-    assert "Spotter-ready" in text and "General" in text and "(default)" in text
-    # every rule whose grading differs by profile is listed, with both gradings
     cat = load_catalog()
+    # the menu says what each profile is for, not just its name
+    for p in cat.profiles.values():
+        assert p.description and f"— {p.description}" in text, p.id
+    assert "(default)" in text
+    # every rule whose grading differs by profile is listed, with each profile's grading
     for rule in cat.rules.values():
         if rule.status == "active" and rule.profiles:
-            assert rule.title in text, rule.id
+            line = next(l for l in text.splitlines() if f"**{rule.id} — {rule.title}:**" in l)
+            for p in cat.profiles.values():
+                assert f"{p.label}: " in line, (rule.id, p.id)
+
+
+def test_a_provisional_profile_line_says_so(blocks):
+    """P8's Spotter-ready lines are unmeasured; its profile message says provisional."""
+    line = next(l for l in blocks["profiles"].splitlines() if l.startswith("- **P8 "))
+    spotter, general = line.split(" · ")
+    assert spotter.endswith("(provisional)") and "provisional" not in general
 
 
 def test_render_named_blocks_replaces_only_the_marked_text():
@@ -72,6 +84,13 @@ def test_render_named_blocks_replaces_only_the_marked_text():
 def test_render_named_blocks_fails_on_a_missing_marker():
     with pytest.raises(ValueError, match="x"):
         render_named_blocks("no markers here\n", {"x": "new"})
+
+
+def test_render_named_blocks_fails_on_a_second_copy():
+    """A stale duplicate (a bad conflict resolution, a paste) would never be checked."""
+    one = "<!-- BEGIN GENERATED: x -->\nold\n<!-- END GENERATED: x -->\n"
+    with pytest.raises(ValueError, match="exactly once"):
+        render_named_blocks(one + "between\n" + one, {"x": "new"})
 
 
 def test_shipped_docs_are_current():

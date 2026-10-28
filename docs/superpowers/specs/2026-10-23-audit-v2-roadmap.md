@@ -1,6 +1,6 @@
 # ts-audit v2 — roadmap
 
-**Status:** draft for the user's approval · **Date:** 2026-10-23
+**Status:** accepted by the product owner (PR #668) · **Date:** 2026-10-23
 **Inputs:** the expert rule review (2026-10-23, kept outside the repo — role labels only),
 the BL-406 contradiction sheet, the product owner's rulings in conversation (recorded
 below), production call-home size data (aggregates only), and the RLS support case

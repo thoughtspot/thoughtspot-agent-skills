@@ -27,4 +27,4 @@
   angle_key: security
   label: Security
   order: 5
-  description: PII detection, indexing without RLS, CLS gaps, RLS bypass, credentials in analytics.
+  description: PII detection, indexing without RLS, CLS gaps, RLS bypass, RLS join loops, credentials in analytics.

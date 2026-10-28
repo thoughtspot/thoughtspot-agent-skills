@@ -16,9 +16,10 @@ imported; what it covers and its evasions are in catalog_reads.py),
 code-rule names that nothing registers, duplicate ids, a profile override of a key that
 defines what a rule means, band levels not ordered worst first, and an active rule
 without a `fires` and a `silent` example. It also fails when the generated rule tables in
-`agents/cli/ts-audit/references/check-catalog.md` are stale (`ts_cli.audit.generate`,
-the same check as `python -m ts_cli.audit.generate --check`) — checked whenever the
-repo has the ts-audit skill directory, so a missing doc fails too.
+`agents/cli/ts-audit/references/check-catalog.md`, or the named GENERATED blocks in
+`agents/cli/ts-audit/SKILL.md`, are stale (`ts_cli.audit.generate`, the same check as
+`python -m ts_cli.audit.generate --check`) — checked whenever the repo has the ts-audit
+skill directory, so a missing doc fails too.
 
 The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementation,
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
@@ -166,12 +167,16 @@ def _history(root: Path, ref: str) -> tuple:
 
 
 def _doc_problems(root: Path) -> list:
-    """Stale generated tables in check-catalog.md. Skipped only where the repo has no
-    ts-audit skill directory at all (a catalog-only copy, as the gate's tests make)."""
+    """Stale generated sections in check-catalog.md and SKILL.md. Skipped only where the
+    repo has no ts-audit skill directory at all (a catalog-only copy, as the gate's tests
+    make). `generate` renders SKILL.md only when it exists, so its absence is checked
+    here: a deleted SKILL.md would otherwise pass."""
     if not (root / SKILL_REL).is_dir():
         return []
     generate = importlib.import_module("ts_cli.audit.generate")
-    return generate.check(root)
+    missing = [] if (root / generate.SKILL_REL).is_file() else [
+        f"{generate.SKILL_REL} is missing: its GENERATED blocks cannot be checked"]
+    return missing + generate.check(root)
 
 
 def main() -> int:

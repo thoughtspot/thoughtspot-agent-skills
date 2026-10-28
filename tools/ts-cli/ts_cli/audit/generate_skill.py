@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Dict, Iterable, List
 
-from ts_cli.audit.catalog_model import Catalog, Rule
+from ts_cli.audit.catalog_model import Catalog, Rule, profile_override
 
 #: Block name -> what it holds. Every name must appear in SKILL.md exactly once.
 SKILL_BLOCKS = {
@@ -42,8 +42,12 @@ def _end(name: str) -> str:
 
 def render_named_blocks(doc: str, blocks: Dict[str, str]) -> str:
     """`doc` with each named block's content replaced; ValueError naming any block whose
-    markers are missing or out of order."""
+    markers are missing, repeated or out of order (a second copy would never be checked)."""
     for name, body in blocks.items():
+        counts = (doc.count(_begin(name)), doc.count(_end(name)))
+        if counts != (1, 1) and counts != (0, 0):
+            raise ValueError(f"the GENERATED block '{name}' must appear exactly once "
+                             f"(found {counts[0]} BEGIN and {counts[1]} END markers)")
         b, e = doc.find(_begin(name)), doc.find(_end(name))
         if b < 0 or e < b:
             raise ValueError(f"the GENERATED block '{name}' is missing its markers")
@@ -105,11 +109,13 @@ def _profile_rules(cat: Catalog) -> List[Rule]:
 
 
 def _profiles(cat: Catalog) -> str:
-    from ts_cli.audit.generate import grading, per_profile
+    from ts_cli.audit.generate import per_profile
 
     choices = list(cat.profiles.values())
     menu = ["```", "Assessment profile — sets pass/fail thresholds:", ""]
-    menu += [f"  {i}. {p.label}{' (default)' if p.default else ''}"
+    width = max(len(p.label) + (10 if p.default else 0) for p in choices) + 2
+    menu += [f"  {i}. {(p.label + (' (default)' if p.default else '')).ljust(width)}"
+             f"{'— ' + p.description if p.description else ''}".rstrip()
              for i, p in enumerate(choices, 1)]
     menu += ["", f"Enter {' or '.join(str(i) for i in range(1, len(choices) + 1))}:", "```"]
     flags = " or ".join(f"`--assessment {p.id}` ({i})" for i, p in enumerate(choices, 1))
@@ -117,8 +123,18 @@ def _profiles(cat: Catalog) -> str:
                                        "Step 5. What the profile changes:", ""]
     for rule in _profile_rules(cat):
         lines.append(f"- **{rule.id} — {rule.title}:** "
-                     f"{per_profile(cat, lambda pid, r=rule: grading(r, pid))}")
+                     f"{per_profile(cat, lambda pid, r=rule: _graded(r, pid))}")
     return "\n".join(lines)
+
+
+def _graded(rule: Rule, pid: str) -> str:
+    """The profile's grading, marked provisional when that profile's own message says its
+    lines are (P8's Spotter-ready lines: no measurement sets them yet)."""
+    from ts_cli.audit.generate import grading
+
+    text = grading(rule, pid)
+    message = str(profile_override(rule, pid).get("message") or "")
+    return f"{text} (provisional)" if "provisional" in message.lower() else text
 
 
 def _rules_files(cat: Catalog) -> str:

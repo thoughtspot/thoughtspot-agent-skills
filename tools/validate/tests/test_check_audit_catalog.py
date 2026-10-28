@@ -50,7 +50,7 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "engine/code_rules.py", "engine/code_rules_human.py",
                 "engine/code_rules_security.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
-                "generate.py", "catalog_history.py",
+                "generate.py", "generate_skill.py", "catalog_history.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")
@@ -149,9 +149,13 @@ def test_shape_error_is_a_fail_not_a_traceback(tmp_path):
 DOC_REL = Path("agents/cli/ts-audit/references/check-catalog.md")
 
 
+SKILL_MD = Path("agents/cli/ts-audit/SKILL.md")
+
+
 def _with_doc(root: Path) -> Path:
     (root / DOC_REL).parent.mkdir(parents=True)
     shutil.copy(REPO / DOC_REL, root / DOC_REL)
+    shutil.copy(REPO / SKILL_MD, root / SKILL_MD)
     return root
 
 
@@ -173,6 +177,14 @@ def test_missing_doc_fails_where_the_skill_exists(tmp_path):
     (root / DOC_REL).unlink()
     res = _run(root)
     assert res.returncode == 1 and "check-catalog.md" in res.stdout, res.stdout
+
+
+def test_missing_skill_fails_where_the_skill_exists(tmp_path):
+    """`generate` renders SKILL.md only when present, so the gate checks it exists."""
+    root = _with_doc(_copy_repo(tmp_path))
+    (root / SKILL_MD).unlink()
+    res = _run(root)
+    assert res.returncode == 1 and "SKILL.md is missing" in res.stdout, res.stdout
 
 
 def test_missing_catalog_fails(tmp_path):

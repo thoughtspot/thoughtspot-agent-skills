@@ -123,7 +123,7 @@ RULE_KEYS = {
     "remediation", "examples", "views",
 }
 CATEGORY_KEYS = {"id", "label", "order", "description", "angle_key"}
-PROFILE_KEYS = {"id", "label", "default"}
+PROFILE_KEYS = {"id", "label", "default", "description"}
 BANDS_KEYS = {"direction", "unit", "levels"}
 LEVEL_KEYS = {"op", "value", "severity"}
 EXAMPLE_KINDS = ("fires", "silent")

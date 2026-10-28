@@ -3,7 +3,7 @@
 `ts audit`'s checks are data: YAML under `ts_cli/audit/catalog/`.
 
     catalog/categories.yaml   [{id, label, order, description, angle_key}] — report tabs
-    catalog/profiles.yaml     [{id, label, default}]             — assessment profiles
+    catalog/profiles.yaml     [{id, label, default, description}]          — assessment profiles
     catalog/rules/*.yaml      [rule, ...]                        — one entry per rule
 
 A rule entry (every key but `id`, `title`, `categories`, `scope` is optional):
@@ -116,6 +116,7 @@ class Profile:
     id: str
     label: str
     default: bool = False
+    description: str = ""
 
 
 @dataclass
@@ -267,7 +268,8 @@ def _categories(rows: List[Dict[str, Any]]) -> Dict[str, Category]:
 
 def _profiles(rows: List[Dict[str, Any]]) -> Dict[str, Profile]:
     return {str(r["id"]): Profile(str(r["id"]), str(r.get("label", "")),
-                                  bool(r.get("default", False)))
+                                  bool(r.get("default", False)),
+                                  str(r.get("description", "")))
             for r in rows}
 
 
