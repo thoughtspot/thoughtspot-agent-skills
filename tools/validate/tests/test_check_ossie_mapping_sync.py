@@ -117,7 +117,11 @@ class TestMain:
     def test_a_missing_upstream_skips_rather_than_failing(self, tmp_path, monkeypatch, capsys):
         repo = self._repo(tmp_path, [("SUM(expr)", "direct")])
         assert self._run(monkeypatch, repo, tmp_path / "nope", True) == 0
-        assert "Skipping" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "Skipping" in out
+        # run_checks.classify() reads a line starting `SKIP` as "did not compare";
+        # without one, a run that compared nothing would report PASS.
+        assert any(line.startswith("SKIP ") for line in out.splitlines())
 
     def test_a_presence_gap_alone_never_fails(self, tmp_path, monkeypatch, capsys):
         # The two spell operators differently (`!=` vs `a != b`), so a presence

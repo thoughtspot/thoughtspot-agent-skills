@@ -60,7 +60,10 @@ def test_uncited_open_items_is_allowlisted_not_flagged(tmp_path):
 
     orphans, info = ck.check(tmp_path)
     assert orphans == []
-    assert any(msg.startswith("SKIP") and "open-items.md" in msg for msg in info)
+    assert any(msg.startswith("ALLOW") and "open-items.md" in msg for msg in info)
+    # A line starting `SKIP` means "this whole check did not run" to run_checks.py,
+    # so an allowlisted FILE must not be reported that way.
+    assert not any(msg.startswith("SKIP") for msg in info)
 
 
 def test_direct_references_dir_under_runtime_root_is_scanned(tmp_path):

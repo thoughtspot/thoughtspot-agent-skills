@@ -125,7 +125,9 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
     for ref in reference_files:
         rel = ref.relative_to(repo_root)
         if ref.name in ALLOWLIST_BASENAMES:
-            info.append(f"SKIP  {rel}  (allowlisted basename: {ref.name})")
+            # Not `SKIP`: run_checks.py reads a line starting `SKIP` as "this
+            # check did not run", and would report the whole check as skipped.
+            info.append(f"ALLOW {rel}  (allowlisted basename: {ref.name})")
             continue
         if is_cited(ref, repo_root, search_files):
             info.append(f"PASS  {rel}  (cited)")
