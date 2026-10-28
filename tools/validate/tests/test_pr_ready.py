@@ -106,6 +106,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "placeholder")
     monkeypatch.delenv("PYTHONPATH")
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    # pr-ready itself exports it when it runs this suite; the remedy text depends on it.
+    monkeypatch.delenv("CHECKS_PYTHON", raising=False)
     for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
                        ("init.defaultBranch", "main")):
         _git(tmp_path, "config", "--global", key, value)
@@ -360,16 +362,32 @@ def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
     assert "python3 -m pip" in err, err
 
 
-def test_the_install_remedy_offers_the_virtual_environment_route():
+def test_the_install_remedy_offers_the_virtual_environment_route(monkeypatch):
     # A uv- or Homebrew-managed Python refuses `pip install`; the remedy must not be a
     # dead end there (BL-436).
+    monkeypatch.delenv("CHECKS_PYTHON", raising=False)
     text = "\n".join(pr_ready._install_remedy("/somewhere/bin/python3.12"))
     assert "CHECKS_PYTHON" in text and ".github/CONTRIBUTING.md" in text, text
     assert "uv pip install --python" in text, text
+    assert "python3.12 -m pip install" in text, text
     assert "/somewhere" not in text, "the interpreter's path can name a home directory"
 
 
-def test_a_missing_pyyaml_names_the_virtual_environment_route(monkeypatch, tmp_path):
+def test_the_install_remedy_targets_checks_python_when_it_is_set(monkeypatch):
+    # The run used the interpreter the variable names: install into that one, named by
+    # the variable (its value can be a home directory), and do not tell the user to
+    # set what is already set.
+    monkeypatch.setenv("CHECKS_PYTHON", "/somewhere/venv/bin/python3.12")
+    text = "\n".join(pr_ready._install_remedy("/somewhere/venv/bin/python3.12"))
+    assert '"$CHECKS_PYTHON" -m pip install' in text, text
+    assert 'uv pip install --python "$CHECKS_PYTHON"' in text, text
+    assert "set CHECKS_PYTHON" not in text.lower(), text
+    assert "/somewhere" not in text, text
+    for line in pr_ready.SUITE_PIP_INSTALLS:
+        assert line in text, (line, text)
+
+
+def _without_yaml(monkeypatch):
     import builtins
     real_import = builtins.__import__
 
@@ -378,11 +396,28 @@ def test_a_missing_pyyaml_names_the_virtual_environment_route(monkeypatch, tmp_p
             raise ImportError("No module named 'yaml'")
         return real_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", no_yaml)
+
+
+def test_a_missing_pyyaml_names_the_virtual_environment_route(monkeypatch, tmp_path):
+    monkeypatch.delenv("CHECKS_PYTHON", raising=False)
+    _without_yaml(monkeypatch)
     with pytest.raises(RuntimeError) as caught:
         pr_ready._workflow(tmp_path)
     message = str(caught.value)
     assert "pip install pyyaml" in message
     assert "CHECKS_PYTHON" in message and ".github/CONTRIBUTING.md" in message, message
+
+
+def test_a_missing_pyyaml_targets_checks_python_when_it_is_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("CHECKS_PYTHON", "/somewhere/venv/bin/python3.12")
+    _without_yaml(monkeypatch)
+    with pytest.raises(RuntimeError) as caught:
+        pr_ready._workflow(tmp_path)
+    message = str(caught.value)
+    assert '"$CHECKS_PYTHON" -m pip install pyyaml' in message, message
+    assert 'uv pip install --python "$CHECKS_PYTHON"' in message, message
+    assert "set CHECKS_PYTHON" not in message.lower(), message
+    assert "/somewhere" not in message, message
 
 
 def test_no_install_remedy_without_a_missing_module(env, capsys):

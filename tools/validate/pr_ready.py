@@ -168,16 +168,32 @@ _WARN_LINES = {"pr-size": "LARGE PR:"}
 
 # ----------------------------------------------------------------- workflow ---
 
+def _checks_python_set() -> bool:
+    """Whether this run's interpreter was named by CHECKS_PYTHON (scripts/lib/python-bin.sh
+    refuses an empty or unusable one before this module runs)."""
+    return bool(os.environ.get("CHECKS_PYTHON"))
+
+
+def _pyyaml_remedy() -> str:
+    # The variable's NAME, never its value: the value can be a home directory, and this
+    # text may be pasted.
+    if _checks_python_set():
+        return ("PyYAML is needed to read the CI workflow (pip install pyyaml, as CI does), "
+                "into the interpreter CHECKS_PYTHON names: `\"$CHECKS_PYTHON\" -m pip install "
+                "pyyaml`, or `uv pip install --python \"$CHECKS_PYTHON\" pyyaml` if it has no "
+                f"pip; see {CONTRIBUTING_GUIDE}")
+    return ("PyYAML is needed to read the CI workflow (pip install pyyaml, as CI does). If "
+            "this Python refuses `pip install`, create a virtual environment, install CI's "
+            "lines into it with `uv pip install --python <venv>/bin/python` (or "
+            "`<venv>/bin/pip install`), and set CHECKS_PYTHON to its python: see "
+            f"{CONTRIBUTING_GUIDE}")
+
+
 def _workflow(repo_root: Path) -> dict:
     try:
         import yaml
     except ImportError as exc:
-        raise RuntimeError("PyYAML is needed to read the CI workflow "
-                           "(pip install pyyaml, as CI does). If this Python refuses "
-                           "`pip install`, create a virtual environment, install CI's lines "
-                           "into it with `uv pip install --python <venv>/bin/python` (or "
-                           "`<venv>/bin/pip install`), and set CHECKS_PYTHON to its python: "
-                           f"see {CONTRIBUTING_GUIDE}") from exc
+        raise RuntimeError(_pyyaml_remedy()) from exc
     path = repo_root / WORKFLOW
     try:
         wf = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -458,6 +474,13 @@ def _install_remedy(python: str) -> List[str]:
     `pip` on PATH can belong to another interpreter than the one pr-ready picked, so
     the note names that one by its command name (its full path can be a home
     directory, which has no place in output that may be pasted)."""
+    if _checks_python_set():
+        return (["  Install what CI's suite job installs, from the repo root, into the "
+                 "interpreter CHECKS_PYTHON names (`\"$CHECKS_PYTHON\" -m pip install ...` in "
+                 "place of `pip install`, or `uv pip install --python \"$CHECKS_PYTHON\" ...` "
+                 "if it has no pip):"]
+                + [f"    {line}" for line in SUITE_PIP_INSTALLS]
+                + [f"  See {CONTRIBUTING_GUIDE}."])
     name = Path(python).name or "python3"
     return ([f"  Install what CI's suite job installs, from the repo root, for the "
              f"interpreter this run used (`{name} -m pip install ...` if `pip` is "

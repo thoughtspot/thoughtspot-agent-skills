@@ -40,11 +40,12 @@ It reports **READY** when nothing FAILs and the branch is not behind upstream `m
 required check skipped for a missing tool, and a test skipped for a missing module, count
 as FAIL. Everything else is reported but does not block READY:
 
-- **WARN**: a soft check that failed, a PR-size warning, or a `pip-audit` finding. Its
-  reason is printed in the terminal as the run goes; the block's results table shows only
-  the status (a soft check skipped for a missing tool is the exception: it is listed with
-  its reason). Read the terminal output: a `pip-audit` WARN here can be a failure in CI,
-  where `pip-audit` is a hard gate.
+- **WARN**: a soft check that failed, a PR-size warning, or any non-zero `pip-audit` exit
+  (a vulnerable package, or an advisory service it could not reach). Its reason is
+  printed in the terminal as the run goes; the block's results table shows only the
+  status (a soft check skipped for a missing tool is the exception: it is listed with its
+  reason). Read the terminal output: a `pip-audit` WARN here can be a failure in CI, where
+  `pip-audit` is a hard gate.
 - **SKIP** (a check or smoke suite that ran but checked nothing, such as a smoke whose
   fixture is missing) and **NOT RUN** (an opt-in check whose prerequisite is absent, or a
   scoped gate the branch does not trigger): listed in the block with their reasons, under
@@ -72,11 +73,16 @@ installs. The install lines are quoted, and kept in step with CI by a test, unde
 your first run" in [`.claude/skills/pr-ready/SKILL.md`](../.claude/skills/pr-ready/SKILL.md).
 Copy them from there rather than from anywhere else.
 
-Which Python it uses: the one named by the `CHECKS_PYTHON` environment variable (a path, or
-a command name on your `PATH`) when that is set; otherwise the newest `python3.1x` on your
-`PATH` that has pytest. A `CHECKS_PYTHON` that does not exist or cannot import pytest stops
-the run with an error; it never falls back to the search. The pre-commit hook picks its
-Python the same way.
+Which Python it uses: the one named by the `CHECKS_PYTHON` environment variable when that
+is set (a path, read relative to the checkout's root if it is not absolute, or a command
+name on your `PATH`); otherwise the newest `python3.1x` on your `PATH` that has pytest. A
+`CHECKS_PYTHON` that does not exist, does not run as Python 3.10 or newer, or cannot import
+pytest stops the run with an error; it never falls back to the search.
+
+The pre-commit hook picks its Python the same way, but it sees `CHECKS_PYTHON` only if the
+variable is exported in the shell you commit from. The alias below sets it for `pr-ready`
+only; to have the hook use the environment too, add
+`export CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12` to `~/.zshrc` (or `~/.bashrc`).
 
 If your Python accepts `pip install`, run those lines with it. If it refuses
 ("externally-managed-environment": a Python managed by uv or Homebrew), use a dedicated
@@ -116,8 +122,9 @@ CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12 bash scripts/pr-ready.sh # without 
 It takes a few minutes. It ends with `pr-ready: READY` or `pr-ready: NOT READY` (the
 failing rows are printed above), the path of the evidence file, and a reminder that the
 Claude Code skill adds the review (`--no-review` drops the reminder). A run that cannot
-start (no upstream remote reachable, a failed fetch, a `CHECKS_PYTHON` that is missing or
-has no pytest) exits with status 2 and neither verdict.
+start (no upstream remote reachable, a failed fetch, an unusable `CHECKS_PYTHON`) exits
+with status 2 and neither verdict; the evidence file then holds only a "did not finish"
+placeholder (or, if even that could not be written, the run says so).
 
 `--post N` comments the block on PR N for you, but only when the run is READY, the tree
 is clean, PR N's head is your HEAD, and the block passes the secrets and
@@ -157,9 +164,12 @@ changed not to ask.
 
 A checkout of someone else's branch runs its code even if you run nothing yourself. With
 this repo's git hooks installed, a commit in it runs that branch's own
-`scripts/pre-commit.sh` and `scripts/commit-msg.sh`, and a merge runs at least its
-`scripts/commit-msg.sh`. Starting a Claude Code session in it runs the `SessionStart` hook
-in that branch's `.claude/settings.json`. So read another person's PR with
+`scripts/pre-commit.sh` and `scripts/commit-msg.sh`; a merge that creates a merge commit
+runs its `scripts/commit-msg.sh`; a fast-forward runs neither hook but leaves that branch's
+scripts in place for your next commit. Starting a Claude Code session in it runs the
+`SessionStart` hook in that branch's `.claude/settings.json`, and loads the rest of that
+branch's Claude Code setup: its other hooks, status line and pre-approved commands, and its
+`CLAUDE.md` and rules. So read another person's PR with
 `gh pr diff <N>` or in GitHub's web view, or, if you need the files, in a throwaway clone
 with no hooks installed and no Claude Code session started in it. Never commit or merge in
 a checkout of someone else's branch.

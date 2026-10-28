@@ -57,7 +57,10 @@ def test_pre_commit_runs_from_a_path_with_a_space(tmp_path):
     _git(["config", "user.name", "Test"], root)
     (root / "README.md").write_text("hello\n")
     _git(["add", "-A"], root)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # Not CHECKS_PYTHON either: the hook must pick its interpreter by its own search here,
+    # whatever the run executing this test exported.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("GIT_") and k != "CHECKS_PYTHON"}
     result = subprocess.run(["bash", "scripts/pre-commit.sh"], cwd=root, env=env,
                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
     out = result.stdout + result.stderr

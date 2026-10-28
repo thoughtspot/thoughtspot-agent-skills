@@ -455,6 +455,47 @@ def test_step_1_says_how_long_to_wait():
     assert "600000" in section and "background" in section
 
 
+def _step_1_interpreter(tmp_path, *, preset=None, user_py=None, default_exists=False):
+    """Run Step 1's block with pr-ready.sh replaced by a print of CHECKS_PYTHON."""
+    block = _bash_block_with(_section(SKILL.read_text(encoding="utf-8"),
+                                      "## Step 1: run the checks"),
+                             "bash scripts/pr-ready.sh --no-review")
+    assert 'USER_PY=""' in block, block
+    script = block.replace("bash scripts/pr-ready.sh --no-review",
+                           'echo "CHOSEN=${CHECKS_PYTHON-<unset>}"')
+    if user_py is not None:
+        script = script.replace('USER_PY=""', f'USER_PY="{user_py}"')
+    home = tmp_path / "home"
+    venv = home / ".venvs" / "tas-ci" / "bin"
+    venv.mkdir(parents=True)
+    if default_exists:
+        (venv / "python3.12").write_text("#!/bin/sh\n")
+        (venv / "python3.12").chmod(0o755)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
+    if preset is not None:
+        env["CHECKS_PYTHON"] = preset
+    out = subprocess.run(["/bin/bash", "-c", script], cwd=tmp_path, env=env,
+                         capture_output=True, text=True).stdout
+    return next(l.split("=", 1)[1] for l in out.splitlines() if l.startswith("CHOSEN="))
+
+
+def test_step_1_sets_checks_python_without_overriding_the_users_choice(tmp_path):
+    default = str(tmp_path / "home" / ".venvs" / "tas-ci" / "bin" / "python3.12")
+    # Nothing set, no environment: pr-ready.sh searches PATH.
+    assert _step_1_interpreter(tmp_path / "a") == "<unset>"
+    # The default environment exists: it is named.
+    default_b = default.replace(str(tmp_path), str(tmp_path / "b"))
+    assert _step_1_interpreter(tmp_path / "b", default_exists=True) == default_b
+    # Already set in the user's shell: left alone, even when the default exists.
+    assert _step_1_interpreter(tmp_path / "c", preset="/opt/py/bin/python3.13",
+                               default_exists=True) == "/opt/py/bin/python3.13"
+    # Named by the user: exported as given, even if it does not exist, so a typo stops
+    # the run (python-bin.sh fails closed) instead of quietly using another Python.
+    assert _step_1_interpreter(tmp_path / "d", user_py="/no/such/python3.12",
+                               preset="/opt/py/bin/python3.13",
+                               default_exists=True) == "/no/such/python3.12"
+
+
 def test_step_4_lists_the_files_before_grepping_them():
     # Under pipefail a failing `git diff | grep` reports git's status, not grep's, so the
     # exit legend would misread it; the list is captured, and its failure stops.

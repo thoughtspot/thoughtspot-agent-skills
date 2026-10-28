@@ -17,11 +17,13 @@
 #
 # CHECKS_PYTHON overrides the search (BL-436): the search takes the NEWEST Python with
 # pytest, so a CI-equivalent virtual environment lost to any newer one on PATH. When
-# set (a path, or a command name looked up on PATH), it must be an executable that
-# imports pytest; anything else stops the caller here. It never falls back to the
-# search: that would run the checks on an interpreter the user just said not to use.
-# `exit`, not `return`: both callers must stop, whatever their `set` options. Status 2,
-# pr-ready's "the run could not start": no evidence block was written by this run.
+# set (a path, relative to the checkout root both callers cd to, or a command name
+# looked up on PATH), it must run as Python 3.10+ and import pytest; anything else
+# stops the caller here. The probe must PRINT `ok`: an exit status alone accepts
+# `true`, `:` or `echo`, and the callers would then read every check's exit 0 as
+# PASS. It never falls back to the search: that would run the checks on an
+# interpreter the user just said not to use. `exit`, not `return`: both callers must
+# stop, whatever their `set` options. Status 2 is pr-ready's "the run could not start".
 PYTHON_BIN=""
 if [ -n "${CHECKS_PYTHON+set}" ]; then
   _checks_python="$(command -v "$CHECKS_PYTHON" 2>/dev/null || true)"
@@ -31,14 +33,22 @@ if [ -n "${CHECKS_PYTHON+set}" ]; then
     echo "  or unset it to use the newest python3.1x with pytest on PATH." >&2
     exit 2
   fi
-  if ! "$_checks_python" -c "import pytest" >/dev/null 2>&1; then
-    echo "Error: CHECKS_PYTHON='$CHECKS_PYTHON' ($_checks_python) cannot import pytest." >&2
-    echo "  Install CI's packages into it (see .github/CONTRIBUTING.md), point CHECKS_PYTHON" >&2
-    echo "  at an interpreter that has them, or unset it to search PATH." >&2
+  # "old" before pytest is imported, so a 3.9 with pytest is told apart from no pytest.
+  _probe="$("$_checks_python" -c 'import sys; print("old" if sys.version_info < (3, 10) else ("ok" if __import__("pytest") else ""))' 2>/dev/null || true)"
+  if [ "$_probe" = "old" ]; then
+    echo "Error: CHECKS_PYTHON='$CHECKS_PYTHON' ($_checks_python) is older than Python 3.10," >&2
+    echo "  which ts-cli requires. Point CHECKS_PYTHON at a 3.10+ interpreter with CI's packages" >&2
+    echo "  (see .github/CONTRIBUTING.md), or unset it to search PATH." >&2
+    exit 2
+  fi
+  if [ "$_probe" != "ok" ]; then
+    echo "Error: CHECKS_PYTHON='$CHECKS_PYTHON' ($_checks_python) did not run as a Python that" >&2
+    echo "  can import pytest. Install CI's packages into it (see .github/CONTRIBUTING.md), point" >&2
+    echo "  CHECKS_PYTHON at an interpreter that has them, or unset it to search PATH." >&2
     exit 2
   fi
   PYTHON_BIN="$_checks_python"
-  unset _checks_python
+  unset _checks_python _probe
   return 0
 fi
 # Newest first. Must stay in step with requires-python in tools/ts-cli/pyproject.toml
