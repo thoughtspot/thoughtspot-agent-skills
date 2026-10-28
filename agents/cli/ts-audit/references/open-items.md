@@ -92,7 +92,7 @@ sequentially in batches. Kept for the record — the old step exported TML at 4-
 
 ### #3 — Dependent counts for orphan detection — UNVERIFIED
 
-Step 5 uses `ts metadata dependents` to detect orphan models (H4) and sets (H5).
+Step 4 (`ts audit run`) uses the dependents lookup to detect orphan models (H4) and sets (H5).
 Need to verify:
 - Does the dependents API return empty results (not errors) for objects with no dependents?
 - Can we batch this, or must it be one call per object?

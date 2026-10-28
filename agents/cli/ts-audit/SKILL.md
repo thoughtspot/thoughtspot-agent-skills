@@ -229,17 +229,23 @@ It prints the inventory as JSON and fetches nothing else:
 ```json
 {"models": [{"guid": "…", "name": "…"}], "model_count": 12,
  "legacy_worksheets_skipped": 3, "connections": ["Snowflake_Prod"],
- "tables_on_connections": 87}
+ "tables_by_connection": {"Snowflake_Prod": 87}, "views_not_followed": 0}
 ```
 
 How the scope is decided (`tools/ts-cli/ts_cli/audit/scope.py`):
 
-- **Models only.** Legacy Worksheets are skipped and counted, never audited.
+- **Models only.** Legacy Worksheets are skipped and counted, never audited. Hidden and
+  incomplete Models are not audited either (hidden Tables are still searched, since a
+  hidden Table can feed a visible Model).
 - **A connection scope goes through the Tables.** A Model's own search result rarely
   names a connection, so the audit finds the Tables on the chosen connections and the
   Models that use them, directly or through a View. A Model is in scope when **any** of
   its Tables is on a chosen connection, so a Model spanning connections is included.
+- **A connection name that matches no Table is an error** (exit 1, naming it): usually a
+  typo. Check the name against `ts connections list` and ask the user again.
 - **An empty scope is an error** (exit 1, with the reason), never an empty report.
+- `views_not_followed` above 0 means Views stacked deeper than the audit follows; Models
+  built on them are not in scope. Tell the user.
 
 Show the user the inventory and confirm:
 
@@ -260,7 +266,10 @@ step.
 ## Step 4 — Run the Audit
 
 Run the audit over the scope confirmed in Step 3 (the same `--all-models` /
-`--connection` flags, without `--dry-run`):
+`--connection` flags, without `--dry-run`). The scope is resolved again here; on a
+cluster that is changing it can differ slightly from the confirmed inventory, and the
+report lists the Models actually audited. Use a run folder of its own, with the time in
+its name, so a second audit on the same day does not overwrite the first:
 
 ```bash
 ts audit run \
@@ -268,8 +277,8 @@ ts audit run \
   --angles "{A,D,H,P,S}" \
   --assessment "{spotter|general}" \
   --profile "{profile_name}" \
-  --snapshot-out ~/Dev/audit-runs/{profile_name}-{date}/snapshot \
-  --output ~/Dev/audit-runs/{profile_name}-{date}/audit.json
+  --snapshot-out ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/snapshot \
+  --output ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/audit.json
 ```
 
 `--snapshot-out` saves everything the audit fetched. A follow-up audit of the same scope
@@ -277,9 +286,9 @@ ts audit run \
 `--profile`:
 
 ```bash
-ts audit run --snapshot-in ~/Dev/audit-runs/{profile_name}-{date}/snapshot \
+ts audit run --snapshot-in ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/snapshot \
   --angles "{…}" --assessment "{…}" \
-  --output ~/Dev/audit-runs/{profile_name}-{date}/audit-{variant}.json
+  --output ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/audit-{variant}.json
 ```
 
 A replay can only run rules whose data was captured, so capture with every angle the
@@ -358,11 +367,11 @@ See open items #9 through #12 in the reference file.*
 Generate the unified HTML report from the JSON output:
 
 ```bash
-ts audit report ~/Dev/audit-runs/{profile_name}-{date}/audit.json \
-  --output ~/Dev/audit-runs/{profile_name}-{date}/report.html
+ts audit report ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/audit.json \
+  --output ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/report.html
 ```
 
-Or piped directly from Step 4:
+Or piped directly from Step 4 (no snapshot, so a follow-up audit fetches again):
 
 ```bash
 ts audit run \
@@ -370,7 +379,7 @@ ts audit run \
   --angles "{A,D,H,P,S}" \
   --assessment "{spotter|general}" \
   --profile "{profile_name}" \
-  | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}/report.html
+  | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/report.html
 ```
 
 The report is a single self-contained HTML file (~100–200KB) with five views:
@@ -423,7 +432,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
-| 3.3.0 | 2026-10-28 | **`ts audit run` owns scope; the export step is gone (BL-407).** Step 3 runs `ts audit run --all-models [--connection …] --dry-run` and shows the inventory it prints, instead of the LLM searching for Models, telling them from legacy Worksheets and filtering them to connections by hand. A connection scope goes through the Tables (directly or through a View); a Model with any Table on a chosen connection is in scope. The old Step 4 (a 1–5 minute TML export into a cache nothing read) is dropped, so the steps are now 0–6; the audit step always saves a snapshot (`--snapshot-out`) so a follow-up audit with other angles or the other assessment replays from disk. Design: `docs/superpowers/specs/2026-10-28-audit-run-scope.md`. |
+| 3.3.0 | 2026-10-28 | **`ts audit run` owns scope; the export step is gone (BL-407).** Step 3 runs `ts audit run --all-models [--connection …] --dry-run` and shows the inventory it prints, instead of the LLM searching for Models, telling them from legacy Worksheets and filtering them to connections by hand. A connection scope goes through the Tables (directly or through a View); a Model with any Table on a chosen connection is in scope. A connection name matching no Table stops the run, naming it. A Model the user may not export is now a warning in the report rather than a crash of the whole audit. The old Step 4 (a 1–5 minute TML export into a cache nothing read) is dropped, so the steps are now 0–6; the audit step always saves a snapshot (`--snapshot-out`) so a follow-up audit with other angles or the other assessment replays from disk. Design: `docs/superpowers/specs/2026-10-28-audit-run-scope.md`. |
 | 3.2.2 | 2026-10-28 | **The report's join count and join depth are real.** Both read a Model-level `joins` key that Model TML does not have (joins sit under each `model_tables[]` entry), so every Model showed 0 joins and depth 0. They now use the same helpers as D1 and P7, so the report and those rules cannot disagree. No finding changes. |
 | 3.2.1 | 2026-10-23 | **The catalog-derived sections are generated.** The category table, the Step 0 and Step 2a category lists, the Step 2b profile prompt with what each profile changes, and the catalog-file table of rule ids are now generated from the rule catalog (`python -m ts_cli.audit.generate`) and checked by the catalog gate, so a rule change can no longer leave them stale. |
 | 3.2.0 | 2026-10-23 | **Model size lines from production data; S11 is CRITICAL.** The size lines flagged a quarter of production Models (2026-10 call-home data, 268k Models: 21% over the old 75-column HIGH line). P8 now owns column count: General MEDIUM above 500 (Search Data gets hard to use) and HIGH above 1,500 (queries slow down); Spotter-ready 250 / 500, provisional. Its "wider GROUP BY" rationale was wrong — a query groups only by the columns it selects — and is gone. D1 grades tables and joins at 30 / 50 (formulas unchanged at 30 / 50) and no longer reports columns (P8's) or join depth (P7's, same lines). S11 (an RLS join that closes a loop with the Model's joins) is CRITICAL: the Model is broken for every user under the rule, not merely at risk. On the SE demo snapshot D1 goes 204 → 6 findings and P8 15 → 0; nothing else changes. |

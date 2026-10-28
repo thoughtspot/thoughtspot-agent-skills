@@ -9,6 +9,7 @@ from ts_cli.audit.engine.tml import BRACKET_REF
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
+from ts_cli.tml_common import export_item_doc
 
 
 @dataclass
@@ -294,8 +295,11 @@ def _export_answers(client: Any, dependents: dict) -> list:
             _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
             continue
         for item in resp.json():
-            edoc = item.get("edoc", "")
-            parsed = parse_edoc(edoc, "YAML")
+            reason = _export_failure(item)
+            if reason:
+                _log(f"Warning: answer not exported ({reason}), skipping it")
+                continue
+            parsed = parse_edoc(item["edoc"], "YAML")
             if parsed and detect_tml_type(parsed) == "answer":
                 answers.append(parsed)
     return answers
@@ -304,6 +308,17 @@ def _export_answers(client: Any, dependents: dict) -> list:
 #: Data `build_context` fetches for every audit, whatever the needs: Model TML (with
 #: its associated Table TML), metadata headers and dependents.
 ALWAYS_FETCHED = frozenset({"model_tml", "table_tml", "metadata", "dependents"})
+
+
+def _export_failure(item) -> Optional[str]:
+    """Why a `metadata/tml/export` item carries no TML, or None when it does.
+
+    A FORBIDDEN or invalid object fails inside an HTTP 200 with `edoc: null`, which
+    `parse_edoc` cannot take; `export_item_doc` owns that reading and its wording.
+    """
+    if isinstance(item, dict) and item.get("edoc") not in (None, ""):
+        return None
+    return export_item_doc(item)[1]
 
 
 def build_context(
@@ -353,8 +368,13 @@ def build_context(
             warnings.append(msg)
             continue
         for item in resp.json():
-            edoc = item.get("edoc", "")
-            parsed = parse_edoc(edoc, "YAML")
+            reason = _export_failure(item)
+            if reason:
+                msg = f"Not exported, so not checked: {reason}"
+                _log(f"Warning: {msg}")
+                warnings.append(msg)
+                continue
+            parsed = parse_edoc(item["edoc"], "YAML")
             if not parsed:
                 continue
             tml_type = detect_tml_type(parsed)

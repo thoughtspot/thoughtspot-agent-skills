@@ -123,7 +123,7 @@ def _capture(client, models: list, angle_list: Optional[list], assessment_name: 
 
 
 def _check_scope_options(models, all_models: bool, connections, dry_run: bool,
-                         snapshot_in) -> None:
+                         snapshot_in, snapshot_out) -> None:
     """Exactly one scope source; --connection and --dry-run only narrow --all-models."""
     if models and all_models:
         raise typer.BadParameter("give --models or --all-models, not both",
@@ -131,6 +131,9 @@ def _check_scope_options(models, all_models: bool, connections, dry_run: bool,
     if (connections or dry_run) and not all_models:
         raise typer.BadParameter("requires --all-models",
                                  param_hint="--connection" if connections else "--dry-run")
+    if dry_run and snapshot_out:
+        raise typer.BadParameter("a dry run fetches nothing to snapshot",
+                                 param_hint="--dry-run / --snapshot-out")
     if all_models and snapshot_in:
         raise typer.BadParameter("--snapshot-in audits the snapshot's own Models",
                                  param_hint="--all-models / --snapshot-in")
@@ -139,19 +142,28 @@ def _check_scope_options(models, all_models: bool, connections, dry_run: bool,
                                  param_hint="--models")
 
 
-def _resolve_models(profile: Optional[str], connections: Optional[List[str]],
-                    dry_run: bool) -> List[str]:
+def _resolve_models(client, connections: Optional[List[str]], dry_run: bool,
+                    output: Optional[Path]) -> List[str]:
     """Resolve --all-models (narrowed by --connection) to Model GUIDs.
 
-    With --dry-run the inventory is printed to stdout; an empty scope exits non-zero
-    either way, so an empty audit is never run or reported as clean.
+    With --dry-run the inventory goes to --output, or stdout. A connection name matching
+    no Table, or an empty scope, exits 1 either way: a typo beside a good name used to
+    narrow the audit silently, and an empty audit must never read as clean.
     """
-    from ts_cli.audit.scope import resolve_scope
+    from ts_cli.audit import scope
 
     typer.echo("Resolving audit scope...", err=True)
-    inv = resolve_scope(ThoughtSpotClient(resolve_profile(profile)), connections)
+    inv = scope.resolve_scope(client, connections)
     if dry_run:
-        print(json.dumps(inv, indent=2))
+        _emit(inv, output)
+    unmatched = scope.unmatched_connections(inv)
+    if unmatched:
+        typer.echo(f"No Tables on connection(s): {', '.join(unmatched)}. Check the name(s) "
+                   "with `ts connections list`.", err=True)
+        raise typer.Exit(1)
+    if inv["views_not_followed"]:
+        typer.echo(f"Warning: {inv['views_not_followed']} View(s) beyond the depth cap were "
+                   "not followed; Models built on them are not in scope.", err=True)
     if not inv["models"]:
         where = (f" with a Table on {', '.join(inv['connections'])}"
                  if inv["connections"] else "")
@@ -161,6 +173,16 @@ def _resolve_models(profile: Optional[str], connections: Optional[List[str]],
                + (f" on {', '.join(inv['connections'])}" if inv["connections"] else "")
                + f"; {inv['legacy_worksheets_skipped']} legacy Worksheet(s) skipped", err=True)
     return [m["guid"] for m in inv["models"]]
+
+
+def _emit(data: dict, output: Optional[Path]) -> None:
+    """JSON to --output, or stdout (the only thing a command writes there)."""
+    json_str = json.dumps(data, indent=2)
+    if output:
+        output.write_text(json_str)
+        typer.echo(f"Written to {output}", err=True)
+    else:
+        print(json_str)
 
 
 @app.command("run")
@@ -208,11 +230,13 @@ def run(
     if snapshot_in and snapshot_out:
         raise typer.BadParameter("--snapshot-in and --snapshot-out cannot be used together",
                                  param_hint="--snapshot-in / --snapshot-out")
-    _check_scope_options(models, all_models, connections, dry_run, snapshot_in)
+    _check_scope_options(models, all_models, connections, dry_run, snapshot_in, snapshot_out)
 
     angle_list = _parse_angles(angles)
+    client = None
     if all_models:
-        models = _resolve_models(profile, connections, dry_run)
+        client = ThoughtSpotClient(resolve_profile(profile))
+        models = _resolve_models(client, connections, dry_run, output)
         if dry_run:
             return
     if snapshot_in:
@@ -221,18 +245,12 @@ def run(
                        "the snapshot's models are audited.", err=True)
         result = _replay(snapshot_in, angle_list, assessment_name)
     else:
-        client = ThoughtSpotClient(resolve_profile(profile))
+        client = client or ThoughtSpotClient(resolve_profile(profile))
         if snapshot_out:
             result = _capture(client, models, angle_list, assessment_name, snapshot_out)
         else:
             result = run_audit(client, models, angle_list, assessment_name)
-    json_str = json.dumps(result, indent=2)
-
-    if output:
-        output.write_text(json_str)
-        typer.echo(f"Report written to {output}", err=True)
-    else:
-        print(json_str)
+    _emit(result, output)
 
     summary = result.get("summary", {})
     total = sum(summary.get("by_severity", {}).values())

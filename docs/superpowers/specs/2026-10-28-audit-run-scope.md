@@ -35,7 +35,7 @@ ts audit run ... --dry-run                # resolve scope, print the inventory, 
 - Exactly one of `--models` / `--all-models` (or `--snapshot-in`). `--connection` is
   repeatable and requires `--all-models`.
 - `--dry-run` prints `{"models": [{guid, name}], "model_count", "legacy_worksheets_skipped",
-  "connections", "tables_on_connections"}` to stdout and exits. The skill shows this as the
+  "connections", "tables_by_connection", "views_not_followed"}` and exits. The skill shows this as the
   inventory and asks to proceed. A scope resolving to zero Models exits non-zero with the
   reason, never runs an empty audit.
 
@@ -68,6 +68,16 @@ Pure functions, tested without a cluster, plus one thin I/O function:
 - Step 4 (export) is deleted; Steps 5–7 become 4–6.
 - New Step 4 runs with `--snapshot-out <run dir>/snapshot`; a follow-up audit of the same
   scope uses `--snapshot-in`.
+
+## Review changes (2026-10-28, before merge)
+
+An independent review found, and this PR fixes: a Model the user may not export
+(`edoc: null` inside an HTTP 200) crashed the whole audit, which `--all-models` makes easy
+to hit, and is now a per-Model warning; a misspelt connection beside a good one narrowed the
+scope silently, and now exits 1 naming it (`tables_by_connection`); dependents are fetched 15
+sources per call with a 300 s timeout, as `context.py` does; hidden Tables are searched;
+Views cut off by the depth cap are reported (`views_not_followed`); repeated rows from
+offset paging are dropped; `--dry-run` honours `--output` and refuses `--snapshot-out`.
 
 ## Out of scope
 
