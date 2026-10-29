@@ -231,6 +231,12 @@ the manifest alone because ThoughtSpot types the generated Table columns from
 `catalog.json`: a manifest-only archive imports *successfully*, with no column
 types.
 
+Also set `project_name` for the ZIP_FILE path (Step 3's duplicate check and
+`ts dbt create --project-name` both use it). Read `name:` from the
+`dbt_project.yml` in the project root above `target/` and confirm it with the
+user; if the file is not there, ask for it. ThoughtSpot rejected the create with
+"Project Name should not be empty" when it was absent (seen on one cluster, open-items #21).
+
 Also collect `connection_name` and `database_name`. **`connection_name` is the
 display name of an EXISTING ThoughtSpot warehouse connection** (an "Embrace"
 connection — e.g. `My Snowflake`), not a label for the new dbt connection
@@ -1148,6 +1154,6 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.1 | 2026-10-29 | Requires ts-cli 0.190.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (the CLI now refuses without it instead of sending a request ThoughtSpot rejects with a misleading 400); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (the server rejects it without). |
+| 1.1.1 | 2026-10-29 | Requires ts-cli 0.190.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (the CLI now refuses without it instead of sending a request ThoughtSpot rejects with a misleading 400); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (the server rejects it without), taken from `dbt_project.yml` `name:` in Step 2. |
 | 1.1.0 | 2026-10-29 | Requires ts-cli 0.187.0. `ts dbt build-model` and `ts dbt-export build-model --import` lint the Model TML before importing it (I5 advisory); `ts dbt build-model` applies `ts_rls_rules` before the Model import — for every Table the Model joins, including join targets outside `--model-path` — and stops (non-zero) if any Table's rules did not apply (audit 2026-10-29: 9.3, 17.2). |
 | 1.0.0 | 2026-09-10 | Initial release — dbt (Cloud or Core) → ThoughtSpot Tables + Model, first import and resync. Path N (server-side `generate-tml`) and Path Y (`ts dbt build-model`, for `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics), with `ts dbt list-models` / `ts dbt inspect` choosing between them. |

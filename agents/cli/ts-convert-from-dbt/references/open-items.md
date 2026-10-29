@@ -833,7 +833,8 @@ fails with `400 POST /api/rest/2.0/dbt/generate-tml "Error with the uploaded ZIP
 even though the archive that created the connection was fine.
 
 **Real cause.** The API requires the archive on every generate call for a ZIP_FILE
-connection (intended): the CLI sends it with each request, taken from `--file`, and a
+connection (intended; ThoughtSpot's published SDK docs say `file_content` is needed on every
+generate call for ZIP_FILE): the CLI sends it with each request, taken from `--file`, and a
 generate call without `--file` sends none. The message blames the ZIP, so the obvious suspects — a fresh connection, regenerated
 `manifest.json`/`catalog.json`, a different archive layout, a clean Org — are all dead ends
 (each was tried and returned the same 400). The API requires the archive on every generate
@@ -852,7 +853,9 @@ live server: `generate-tml` and `generate-sync-tml` without `--file` were refuse
 shows the real `dbt/search` response has the shape the guard reads. Test objects were deleted afterwards.
 
 **Small gap found in the same run, fixed:** the server rejects a ZIP_FILE `create` with no
-`--project-name` (`400 / 10002: "Project Name should not be empty."`), but the CLI neither said it
+`--project-name` (`400 / 10002: "Project Name should not be empty."`; **seen live on one cluster only** — the
+published spec marks `projectName` optional with no ZIP_FILE condition, so treat the refusal as
+that cluster's behaviour, not a documented rule), but the CLI neither said it
 was required for ZIP_FILE nor checked. `ts dbt create --import-type ZIP_FILE` now refuses locally
 without it, and the help text, README and Step 4 example say so. Whether DBT_CLOUD also needs it
 is unverified here, so it stays optional there.
@@ -861,7 +864,11 @@ is unverified here, so it stays optional there.
 up (`dbt/search`, the call behind `ts dbt list`) and refuse locally when its `import_type` is
 `ZIP_FILE`, naming `--file`. A DBT_CLOUD connection is untouched. The lookup is best effort:
 if the list cannot be read or does not include the connection, the call goes ahead and the
-server decides.
+server decides. "Cannot be read" includes a non-2xx, a dropped connection and a non-JSON body.
+`ThoughtSpotClient.request()` signals failure with `SystemExit`, not an `Exception`, so the
+lookup calls with `raise_for_status=False` and a 15s timeout and catches `SystemExit` too
+(PR #669 review blocker; the tests drive the real client, since a fake raising `RuntimeError`
+passed while every DBT_CLOUD generate call would have exited 1).
 
 Why best effort and never "refuse when not found" — verified against
 `get-rest-api-reference(apiName: "dbtSearch")` and live, 2026-10-23: `dbt/search` is scoped
@@ -886,10 +893,10 @@ Snowflake project layout on each):
 The wrong command raises no error: the upload proceeds with a stale or missing catalog, and
 ThoughtSpot types Table columns from it. `find_artifacts` now names the command for the engine
 that wrote the manifest (`metadata.dbt_version`: 1.x Core, 2.x Fusion) and names both when it
-cannot tell. **Not yet detected — fix in progress (follow-up PR):** a catalog that is merely
+cannot tell. **Not yet detected — tracked as BL-497:** a catalog that is merely
 *older* than the manifest (what `dbt docs generate` on Fusion leaves behind), or a
-`schema.yml` edited since the artifacts were generated, is still accepted silently. The
-follow-up warns when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
+`schema.yml` edited since the artifacts were generated, is still accepted silently. BL-497
+warns when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
 when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the manifest, with an
 `--allow-stale` override. Until it lands, re-run the engine's command above after every
 `schema.yml` edit and before `build-model`.

@@ -280,9 +280,17 @@ def _require_archive_for_zip_file(client: ThoughtSpotClient, connection_id: str)
     list cannot be read or does not include this connection, do nothing and
     let the server decide.
     """
+    # ThoughtSpotClient.request() signals failure with SystemExit, not an
+    # Exception, so both are caught: this lookup must never block the generate
+    # call. raise_for_status=False plus a short timeout keeps a slow or failing
+    # dbt/search from stalling the command or printing a misleading error.
     try:
-        connections = client.post("/api/rest/2.0/dbt/search", json={}).json()
-    except Exception:
+        resp = client.post("/api/rest/2.0/dbt/search", json={},
+                           raise_for_status=False, timeout=15)
+        if not resp.ok:
+            return
+        connections = resp.json()
+    except (Exception, SystemExit):
         return
     if not isinstance(connections, list):
         return

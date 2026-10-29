@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+import requests
+
 import ts_cli.commands.dbt as dbt_mod
 import ts_cli.dbt.cloud_api as cloud_api_mod
 from ts_cli.dbt_build_export import build_model_tml_from_manifest
@@ -39,6 +42,8 @@ NO_BODY = object()
 
 
 class _FakeResp:
+    ok = True
+
     def __init__(self, payload):
         self._payload = payload
 
@@ -374,6 +379,8 @@ class TestGenerateTml:
             "dbt", "generate-tml", "--connection-id", "conn-1", "--model-tables", self._MODEL_TABLES,
         ])
         assert result.exit_code == 0, result.output
+        # no --file: the ZIP_FILE guard looks the connection up, then exactly one generate call
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/search", "/api/rest/2.0/dbt/generate-tml"]
         path, kwargs = calls[-1]
         assert path == "/api/rest/2.0/dbt/generate-tml"
         form = kwargs["files"]
@@ -392,6 +399,7 @@ class TestGenerateTml:
             "--include-semantic-report",
         ])
         assert result.exit_code == 0, result.output
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/search", "/api/rest/2.0/dbt/generate-tml"]
         _, kwargs = calls[-1]
         assert kwargs["files"]["include_semantic_report"] == (None, "true")
 
@@ -432,6 +440,7 @@ class TestGenerateTml:
             "--import-worksheets", "selected", "--worksheets", '["orders_worksheet"]',
         ])
         assert result.exit_code == 0, result.output
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/search", "/api/rest/2.0/dbt/generate-tml"]
         _, kwargs = calls[-1]
         form = kwargs["files"]
         assert form["import_worksheets"] == (None, "SELECTED")
@@ -1624,15 +1633,66 @@ class TestGenerateRefusesZipFileWithoutArchive:
         assert result.exit_code == 0, result.output
         assert len(self._generate_calls(calls)) == 1
 
-    def test_unreadable_connection_list_does_not_block_generate(self, monkeypatch):
-        """The lookup is a convenience. If dbt/search fails or does not list
-        the connection, the generate call goes ahead and the server decides."""
-        for connections in (RuntimeError("boom"), [], {"unexpected": "shape"}):
+    def test_unlisted_connection_does_not_block_generate(self, monkeypatch):
+        """If dbt/search does not list the connection (or answers an odd
+        shape), the generate call goes ahead and the server decides."""
+        for connections in ([], {"unexpected": "shape"}):
             calls = []
             self._patch_routed(monkeypatch, calls, connections)
             result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-x"])
             assert result.exit_code == 0, result.output
             assert len(self._generate_calls(calls)) == 1
+
+    @pytest.mark.parametrize("failure", [
+        {"status": 500}, {"status": 400}, {"status": 403}, {"status": 502}, {"status": 504},
+        {"raises": requests.exceptions.ConnectionError("dropped")},
+        {"status": 200, "body": "<html>not json</html>"},
+    ], ids=["500", "400", "403", "502", "504", "connection-dropped", "non-json-200"])
+    def test_unreadable_connection_list_does_not_block_generate(
+            self, monkeypatch, tmp_path, failure):
+        """Drives the REAL ThoughtSpotClient, whose request() raises SystemExit
+        (a BaseException) on a non-2xx or exhausted retries. A fake that raises
+        RuntimeError passes while the real client breaks every DBT_CLOUD call."""
+        from unittest.mock import MagicMock, patch
+        from ts_cli.client import ThoughtSpotClient
+
+        profile = {"name": "p", "base_url": "https://test.thoughtspot.cloud",
+                   "username": "u@test.com", "token_env": "THOUGHTSPOT_TOKEN_P"}
+        with patch("ts_cli.client.load_profiles", return_value={"p": profile}):
+            client = ThoughtSpotClient("p")
+        client._token_path = lambda: tmp_path / "token.txt"
+        client._expiry_path = lambda: tmp_path / "expiry.txt"
+        client._token = "tok"
+
+        sent = []
+
+        def transport(method, url, **kwargs):
+            sent.append(url)
+            if url.endswith("/dbt/search"):
+                if "raises" in failure:
+                    raise failure["raises"]
+                resp = MagicMock()
+                resp.status_code = failure["status"]
+                resp.ok = failure["status"] < 400
+                resp.text = failure.get("body", "boom")
+                resp.json.side_effect = ValueError("not json")
+                return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.ok = True
+            resp.json.return_value = {"ok": True}
+            return resp
+
+        client._session = MagicMock()
+        client._session.request.side_effect = transport
+        monkeypatch.setattr(dbt_mod, "ThoughtSpotClient", lambda profile_name: client)
+        monkeypatch.setattr(dbt_mod, "resolve_profile", lambda p: "p")
+
+        with patch("ts_cli.client.time.sleep"):
+            result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-x"])
+
+        assert result.exit_code == 0, result.output
+        assert any(u.endswith("/dbt/generate-sync-tml") for u in sent), sent
 
     def test_with_file_no_lookup_is_made(self, monkeypatch, tmp_path):
         """--file present means nothing to guard: no extra dbt/search round trip."""

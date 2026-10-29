@@ -3701,8 +3701,9 @@ Every `--file` flag in this group — `create`, `update`, `generate-tml`,
 Zipping the two files was previously a documented **user** prerequisite. It is a
 mechanical step over paths dbt already fixes, so the CLI does it.
 
-**A missing `catalog.json` is refused**, naming `dbt docs generate` (which
-writes both) rather than uploading the manifest alone: ThoughtSpot types the
+**A missing `catalog.json` is refused**, naming the command that writes it for
+the engine that wrote the manifest (`dbt docs generate` on dbt Core,
+`dbt compile --write-catalog` on dbt Fusion) rather than uploading the manifest alone: ThoughtSpot types the
 generated Table columns from the catalog, so a manifest-only archive imports
 *successfully*, with no column types. `dbt compile` writes only the manifest,
 which is the usual reason it is absent. To upload without one anyway, zip it
@@ -3904,7 +3905,7 @@ ts dbt build-model \
 | Flag | Required | Description |
 |---|---|---|
 | `--dbt-cloud-profile` | one of these two | dbt Cloud profile name — reads account-id, project-id, dbt-env-id, dbt-url, and token from keychain |
-| `--manifest` | one of these two | Local dbt Core artifacts: a `target/` dir, a project ZIP, or `manifest.json` (`catalog.json` read from beside it; refused if absent — `dbt docs generate` writes both) |
+| `--manifest` | one of these two | Local dbt Core artifacts: a `target/` dir, a project ZIP, or `manifest.json` (`catalog.json` read from beside it; refused if absent — the message names `dbt docs generate` on Core or `dbt compile --write-catalog` on Fusion) |
 | `--model-path` | yes | Directory path in the manifest (e.g. `models/staging/barbershop`) |
 | `--model-name` | yes | Name for the ThoughtSpot Model (e.g. `BARBERSHOP_OPERATIONS`) |
 | `--pretty-names` | no | Title-case Model column display names and replace `_` with spaces (`APPOINTMENT_DATETIME` → `Appointment Datetime`; `ID`, `URL`, `SKU`, `ZIP` … stay upper-case). `column_id` keeps the physical `TABLE::COLUMN`; formula names are untouched |
@@ -4052,7 +4053,8 @@ complementary YAML artifacts:
   ThoughtSpot's own `ts_*` metadata tags under `meta:` (`ts_column_type`,
   `ts_aggregation`, `ts_synonym`, `ts_format_pattern`, and others on columns;
   `ts_join_cardinality`/`ts_join_type`/`ts_join_name` on a `relationships:`
-  test). This is what a `dbt run`/`dbt compile` + `dbt docs generate` step
+  test). This is what a `dbt run`/`dbt compile` + `dbt docs generate` (Core) or
+  `dbt compile --write-catalog` (Fusion) step
   compiles into `manifest.json`/`catalog.json` — the actual artifact
   ThoughtSpot's `ZIP_FILE` import reads (`file_content` on `dbtGenerateTml`).
   Uses current dbt config syntax (`config: {meta: ...}`, `data_tests:` +
@@ -4083,7 +4085,7 @@ This command generates a dbt **project** only — it does not run `dbt build`,
 zip anything, or call the dbt Cloud API. Getting the result back into
 ThoughtSpot is a separate, connection-type-specific hand-off (see
 open-items.md #7): `ZIP_FILE` connections need a local `dbt run`/`dbt
-compile` + `dbt docs generate` + zip step before `ts dbt create --import-type
+compile` + `dbt docs generate` (Core) / `dbt compile --write-catalog` (Fusion) + zip step before `ts dbt create --import-type
 ZIP_FILE`; `DBT_CLOUD` connections need the generated files committed into
 the dbt-Cloud-connected repo and a dbt Cloud job run, with no local artifact
 file at all.

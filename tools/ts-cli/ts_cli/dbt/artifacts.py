@@ -295,10 +295,25 @@ def load_local_catalog(path_str: str) -> dict:
     """Load `catalog.json` from the same places `load_local_manifest` accepts.
 
     `ts dbt build-model --manifest` needs both: the catalog types the columns
-    that carry no `ts_*` meta. Only `dbt docs generate` writes it.
+    that carry no `ts_*` meta. The command that writes it depends on the engine
+    that wrote the manifest (`_how_to_write_catalog`), the same advice `--file` gives.
     """
     return _load_local_artifact(path_str, CATALOG,
-                                "Run `dbt docs generate` — it writes the catalog.")
+                                _how_to_write_catalog(_sibling_manifest(Path(path_str))))
+
+
+def _sibling_manifest(path: Path) -> Optional[Path]:
+    """The `manifest.json` a `--manifest` value points at, if it is a plain file.
+
+    A ZIP is skipped (no cheap head read), which makes the advice name both engines.
+    """
+    if path.is_dir():
+        candidates = [c / MANIFEST for c in _candidate_dirs(path)]
+    elif path.suffix.lower() == ".zip":
+        return None
+    else:
+        candidates = [path.parent / MANIFEST if path.name == CATALOG else path]
+    return next((c for c in candidates if c.is_file()), None)
 
 
 def _load_local_artifact(path_str: str, name: str, hint: str) -> dict:

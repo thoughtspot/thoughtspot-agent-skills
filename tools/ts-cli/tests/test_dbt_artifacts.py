@@ -94,7 +94,27 @@ class TestFindArtifacts:
             find_artifacts(target)
         msg = str(ei.value)
         assert "dbt compile --write-catalog" in msg
-        assert "dbt docs generate" in msg and "not" in msg.lower()  # named only as the one to avoid
+        assert "Do not use `dbt docs generate`" in msg  # named only as the one to avoid
+
+    @pytest.mark.parametrize("version, wanted, avoided", [
+        ("2.0.6", "dbt compile --write-catalog", "Do not use `dbt docs generate`"),
+        ("1.12.5", "dbt docs generate", "--write-catalog"),
+    ])
+    def test_manifest_flag_gives_the_same_engine_advice_as_file_flag(
+            self, tmp_path, version, wanted, avoided):
+        """`ts dbt build-model --manifest` reads the catalog through
+        load_local_catalog; it must not contradict what `--file` says."""
+        from ts_cli.dbt.artifacts import load_local_catalog
+        target = self._manifest_only(tmp_path, version)
+        for arg in (target, target / "manifest.json"):
+            with pytest.raises(SystemExit) as ei:
+                load_local_catalog(str(arg))
+            msg = str(ei.value)
+            assert wanted in msg
+            if version.startswith("2"):
+                assert avoided in msg
+            else:
+                assert avoided not in msg
 
     @pytest.mark.parametrize("version", [None, "not-a-version", ""])
     def test_unknown_engine_names_both_commands(self, tmp_path, version):

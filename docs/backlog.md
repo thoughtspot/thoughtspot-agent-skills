@@ -15891,3 +15891,19 @@ infers it (for example from key uniqueness, which needs data) or states the gap 
 description and the report.
 
 **Target:** 2027-01-31.
+
+## BL-497 — ts dbt: warn when the uploaded dbt artifacts are stale `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** PR #669 review; ts-convert-from-dbt open-items #21.
+
+**What.** `find_artifacts` picks the right command for the engine, but it still accepts a
+`catalog.json` that is merely *older* than the manifest (what `dbt docs generate` on Fusion
+leaves behind), and a project whose `schema.yml` was edited after the artifacts were
+generated. ThoughtSpot types Table columns from the catalog, so the upload succeeds with
+stale or missing column types and nothing says so.
+
+**Do.** Warn when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
+when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the manifest, with an
+`--allow-stale` override. Cover `--file` and `--manifest`.
+
+**Target:** 2026-12-31.
