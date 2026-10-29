@@ -228,7 +228,7 @@ for full detail.
 > `"{table} does not exist in schema"` at query time.)
 >
 > **I5 — `COUNTD(x)` → `unique count ( [T::x] )` formula entry, never `aggregation: COUNT_DISTINCT`.**
-> Using `aggregation: COUNT_DISTINCT` silently flips `column_type` from MEASURE to ATTRIBUTE.
+> Using `aggregation: COUNT_DISTINCT` silently flips `column_type` from MEASURE to ATTRIBUTE on a non-numeric column.
 >
 > **I6 — Connection referenced by name, never GUID.** In every table and sql_view TML block,
 > use `connection: name: "{name}"` — the display name from Step 4.5. GUIDs are environment-specific

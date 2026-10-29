@@ -153,9 +153,26 @@ model_tables:
 `unique count ( [TABLE::col] )`. Never use `aggregation: COUNT_DISTINCT` on a `columns[]`
 entry that references a physical column.
 
-**Failure mode:** Using `aggregation: COUNT_DISTINCT` causes ThoughtSpot to silently
-override `column_type: MEASURE` → `ATTRIBUTE` on that column, making it unsearchable as
-a measure. No import error is raised.
+**Failure mode:** depends on the column's data type. Live-probed 2026-10-29 on the SE
+demo cluster (throwaway Model over a bank-customers Table, re-exported and queried via
+`searchdata`, then deleted):
+
+| Physical column type | Stored `column_type` after import | Search on the column returns |
+|---|---|---|
+| Numeric (INT64) | `MEASURE` — kept | The distinct count (identical to the `unique count` formula) |
+| VARCHAR | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+| DATE | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+
+Every import succeeds; nothing is reported. Text and date keys (string customer ids,
+order dates) are common distinct-count targets, so the silent case is the usual one.
+
+**Why the rule still forbids it on numeric columns.** The formula works for every data
+type, so one emission form needs no type lookup — `tml_lint` sees only the Model TML and
+cannot know the column's type. And the column form fails outright when the same physical
+column is also wanted as an attribute (`customer_id` as a field *and* a count): two
+`columns[]` entries sharing a `column_id` is a hard `duplicate column_id` rejection (I8).
+Before 2026-10-29 this section said the override applied to every column; that was never
+dated evidence and is wrong for numeric columns.
 
 **Applies to:** All source dialects.
 - Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
@@ -187,7 +204,7 @@ columns:
   column_id: ORDERS::customer_id
   properties:
     column_type: MEASURE
-    aggregation: COUNT_DISTINCT   # WRONG — silently flips to ATTRIBUTE
+    aggregation: COUNT_DISTINCT   # WRONG — flips to ATTRIBUTE on a non-numeric column; use the formula
 ```
 
 ---

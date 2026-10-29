@@ -680,7 +680,7 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I1 | a `formulas[]` entry with no paired `columns[]` entry (`formula_id` == `id`) — silently dropped |
 | I2 | an `aggregation:` under a `formulas[]` entry (only `columns[]` may carry it) |
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
-| I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE |
+| I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE on a non-numeric column |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
 | I12 | a bare (unqualified) `column_id` on a single-table model — rejected at import |
 | I13 | a `[formula_*]` reference (in `formulas[].expr`) or a `columns[].formula_id` matching no declared `formulas[].id` — hard import rejection (`error_code 14516`, `Search did not find "formula_X"`). Distinct from I9: I9 says use the id form, I13 says the id must exist |

@@ -409,7 +409,7 @@ def validate_model_tml(data: dict) -> list[str]:
                     "(ThoughtSpot uses AVERAGE, not AVG)"
                 )
 
-        # I5: COUNT_DISTINCT as an aggregation on a physical column silently flips
+        # I5: COUNT_DISTINCT as an aggregation on a non-numeric physical column silently flips
         # the column MEASURE -> ATTRIBUTE. Distinct counts must be `unique count(...)` formulas.
         if (
             isinstance(props, dict)
@@ -419,7 +419,7 @@ def validate_model_tml(data: dict) -> list[str]:
         ):
             errors.append(
                 f"Column '{col_display}' uses aggregation: COUNT_DISTINCT on a physical "
-                "column — ThoughtSpot silently overrides column_type MEASURE -> ATTRIBUTE. "
+                "column — on a non-numeric column ThoughtSpot silently overrides column_type MEASURE -> ATTRIBUTE. "
                 "Express distinct counts as a 'unique count ( [TABLE::col] )' formula instead (I5)."
             )
 

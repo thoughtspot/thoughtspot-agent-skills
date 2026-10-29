@@ -452,8 +452,8 @@ def resolve_name_collisions(
 # formula aggregation function. Covers the enum values BOTH the from-Snowflake
 # (sv_translate._SIMPLE_AGG_MAP — STDDEV/MEDIAN) and from-Databricks
 # (mv_translate._COLUMN_AGG — STD_DEVIATION) builders emit, plus COUNT_DISTINCT
-# for the related I5 rule (a COUNT_DISTINCT column silently flips MEASURE →
-# ATTRIBUTE; `unique count(...)` is the correct form).
+# for the related I5 rule (a non-numeric COUNT_DISTINCT column silently flips
+# MEASURE → ATTRIBUTE; `unique count(...)` is the correct form).
 _AGG_TO_FORMULA_FN = {
     "SUM": "sum",
     "AVERAGE": "average",

@@ -969,6 +969,6 @@ column expression: `moving_sum([col], N, -1, [date])`, not `moving_sum(sum([col]
 **`count(distinct col)` — use `unique count`:** ThoughtSpot does not support `count(distinct ...)`.
 Always express a distinct count as a **`formulas[]` entry** with `unique count ( [col] )` (with a
 space, not underscore) plus its paired `columns[]` entry. **Never** set
-`aggregation: COUNT_DISTINCT` on a physical-column `columns[]` entry — that silently flips the
+`aggregation: COUNT_DISTINCT` on a physical-column `columns[]` entry — on a non-numeric column that silently flips the
 column's `column_type` from MEASURE to ATTRIBUTE (invariant **I5**). This matches the Snowflake
 mapping (`ts-snowflake-formula-translation.md`): distinct counts are formulas, not an aggregation.

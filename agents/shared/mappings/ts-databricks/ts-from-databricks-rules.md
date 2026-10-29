@@ -269,7 +269,7 @@ Is expr a simple aggregate? (single AGG function wrapping a column or simple exp
   Is it COUNT(DISTINCT col)?
     YES → Formula MEASURE: unique count ( [TABLE::col] )
           Do NOT use aggregation: COUNT_DISTINCT on a column_id — ThoughtSpot
-          silently overrides column_type to ATTRIBUTE on physical column refs.
+          silently overrides column_type to ATTRIBUTE on non-numeric physical columns (I5).
           Always create a formulas[] entry instead.
     NO  → MEASURE column
           Extract the aggregate function → aggregation field

@@ -260,7 +260,7 @@ unique count ( [TRANSACTIONS::customer_id] )
 
 `COUNT(DISTINCT col)` must always be a formula using `unique count` (two words,
 space — NOT `unique_count` with underscore). Never use `aggregation: COUNT_DISTINCT`
-on a `column_id` — ThoughtSpot silently overrides `column_type` to ATTRIBUTE.
+on a `column_id` — ThoughtSpot silently overrides `column_type` to ATTRIBUTE when the column is non-numeric (VARCHAR, DATE; live-probed 2026-10-29, see I5).
 
 | Property | Value |
 |---|---|
@@ -665,7 +665,7 @@ model:
 
 6. **`COUNT(DISTINCT col)` must always be a formula using `unique count`.** Two words,
    space — NOT `unique_count` with underscore. Never use `aggregation: COUNT_DISTINCT`
-   on a physical `column_id` — ThoughtSpot silently overrides `column_type` to ATTRIBUTE.
+   on a physical `column_id` — ThoughtSpot silently overrides `column_type` to ATTRIBUTE when the column is non-numeric (VARCHAR, DATE; live-probed 2026-10-29, see I5).
 
 7. **Ratio measures inline all aggregates — no cross-formula references.**
    `SUM(a) / COUNT(DISTINCT b)` translates to `sum ( [a] ) / unique count ( [b] )` in

@@ -196,7 +196,8 @@ def lint_tml(data: dict) -> list[str]:
             )
 
     # I5 — a physical-column columns[] entry must not use aggregation: COUNT_DISTINCT
-    # (it silently flips column_type MEASURE → ATTRIBUTE; use a `unique count(...)` formula).
+    # (on a VARCHAR/DATE column it silently flips MEASURE → ATTRIBUTE; numeric columns survive,
+    # but lint cannot see the type and the formula works for every type — live 2026-10-29).
     for c in columns:
         if not isinstance(c, dict) or "formula_id" in c:
             continue  # formula columns are exempt; this targets physical columns
@@ -204,7 +205,7 @@ def lint_tml(data: dict) -> list[str]:
         if isinstance(props, dict) and props.get("aggregation") == "COUNT_DISTINCT":
             findings.append(
                 f"I5: column '{c.get('name', '?')}' uses aggregation: COUNT_DISTINCT — "
-                f"this flips MEASURE → ATTRIBUTE silently. Use a `unique count(...)` formula instead."
+                f"on a non-numeric column this flips MEASURE → ATTRIBUTE silently. Use a `unique count(...)` formula instead."
             )
 
     # I8 — every column_id in columns[] must be unique. A duplicate is a HARD import
