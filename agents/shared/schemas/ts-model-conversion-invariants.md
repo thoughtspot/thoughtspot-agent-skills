@@ -153,22 +153,30 @@ model_tables:
 `unique count ( [TABLE::col] )`. Never use `aggregation: COUNT_DISTINCT` on a `columns[]`
 entry that references a physical column.
 
-**Failure mode:** depends on the column's data type. Live-probed 2026-10-29 on the SE
-demo cluster (throwaway Model over a bank-customers Table, re-exported and queried via
-`searchdata`, then deleted):
+**Failure mode:** depends on the column's data type, not on the aggregation.
+ThoughtSpot decides a physical column's role from its type: a `MEASURE` over a
+non-numeric column is silently stored as an `ATTRIBUTE`, whatever `aggregation` it
+carries. Live-probed 2026-10-29 on the SE demo cluster (two throwaway Models over a
+bank-customers Table, re-exported, the first also queried via `searchdata`, both deleted):
 
-| Physical column type | Stored `column_type` after import | Search on the column returns |
-|---|---|---|
-| Numeric (INT64) | `MEASURE` — kept | The distinct count (identical to the `unique count` formula) |
-| VARCHAR | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
-| DATE | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+| Physical column type | Aggregation tested | Stored `column_type` after import | Search returns |
+|---|---|---|---|
+| INT64 | `COUNT_DISTINCT` | `MEASURE` — kept | The distinct count (identical to the `unique count` formula) |
+| DOUBLE | `COUNT_DISTINCT` | `MEASURE` — kept | (not queried) |
+| VARCHAR | `COUNT_DISTINCT`, `COUNT`, `MIN` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+| DATE | `COUNT_DISTINCT`, `MAX` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
 
-Every import succeeds; nothing is reported. Text and date keys (string customer ids,
-order dates) are common distinct-count targets, so the silent case is the usual one.
+Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. "Numeric" and "non-numeric" below
+generalise from the rows above; BL-265 (a `COUNT` metric over a VARCHAR key, demoted the
+same way) is the same platform rule. Every import succeeds; nothing is reported. Text and
+date keys (string customer ids, order dates) are common distinct-count targets, so the
+silent case is the usual one.
 
 **Why the rule still forbids it on numeric columns.** The formula works for every data
-type, so one emission form needs no type lookup — `tml_lint` sees only the Model TML and
-cannot know the column's type. And the column form fails outright when the same physical
+type, so one emission form needs no type lookup — a converter emitting it never has to
+know the column's type, and `ts tml lint` run on a Model file alone cannot see it either
+(with the Table TML in the same batch it could; that is not implemented). And the column
+form fails outright when the same physical
 column is also wanted as an attribute (`customer_id` as a field *and* a count): two
 `columns[]` entries sharing a `column_id` is a hard `duplicate column_id` rejection (I8).
 Before 2026-10-29 this section said the override applied to every column; that was never

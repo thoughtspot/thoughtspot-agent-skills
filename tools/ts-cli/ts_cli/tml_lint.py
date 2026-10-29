@@ -197,7 +197,8 @@ def lint_tml(data: dict) -> list[str]:
 
     # I5 — a physical-column columns[] entry must not use aggregation: COUNT_DISTINCT
     # (on a VARCHAR/DATE column it silently flips MEASURE → ATTRIBUTE; numeric columns survive,
-    # but lint cannot see the type and the formula works for every type — live 2026-10-29).
+    # but a Model file alone does not show the type and the formula works for every type —
+    # live 2026-10-29).
     for c in columns:
         if not isinstance(c, dict) or "formula_id" in c:
             continue  # formula columns are exempt; this targets physical columns

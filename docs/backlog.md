@@ -10686,9 +10686,14 @@ applied to a **metric**, where the converter does not anticipate it at all.
 `COUNT`/`COUNT_DISTINCT` over a non-numeric column, either emit it in the form ThoughtSpot will
 keep as a `MEASURE` (a formula counting the key, so the column's own type does not decide), or
 **annotate it** so the operator knows the kind will change on import. Silent kind-change is the
-part worth fixing; the platform behaviour itself is not ours to change. Confirm the exact
+part worth fixing; the platform behaviour itself is not ours to change. ~~Confirm the exact
 trigger first — whether it is `VARCHAR` specifically or any non-numeric type — which is one
-probe on a live Model.
+probe on a live Model.~~ **Trigger confirmed 2026-10-29** (live probe, recorded under
+invariant I5): a `MEASURE` on a VARCHAR column was demoted with `COUNT`, `MIN` and
+`COUNT_DISTINCT`, and on a DATE column with `MAX` and `COUNT_DISTINCT`; INT64 and DOUBLE
+columns kept `MEASURE` with `COUNT_DISTINCT`. So it is not VARCHAR-specific and not
+aggregation-specific — the platform types the column by its data type. BOOL, DATE_TIME and
+TIME were not probed.
 
 **Target:** next from-direction converter pass; fold the type rule in beside
 `fact_column_type()` so facts and metrics share one decision.
