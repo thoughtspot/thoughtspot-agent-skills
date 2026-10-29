@@ -394,7 +394,9 @@ def _resolve_columns(columns: List[dict], aggregation_mode: str, fallback: Optio
         kept.append(_Resolved(c, dt, True, agg))
         # No COUNT_DISTINCT warning: every measure kept here is numeric (non-numeric
         # ones were skipped above), and a numeric COUNT_DISTINCT column keeps MEASURE
-        # on import — live-probed 2026-10-29 (open item #4). Only VARCHAR/DATE flip.
+        # on import — live-probed 2026-10-29 on INT64 and DOUBLE (open item #4; INT32 and
+        # FLOAT unprobed; any non-numeric type is demoted). The post-import `coerced` check
+        # still catches any change.
     if errors:
         raise LinkSpecError("spec cannot be built:\n  " + "\n  ".join(errors))
     if not kept:

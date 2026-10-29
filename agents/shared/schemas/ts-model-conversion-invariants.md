@@ -151,7 +151,8 @@ model_tables:
 
 **Rule:** Any distinct-count measure must be expressed as a `formulas[]` entry with
 `unique count ( [TABLE::col] )`. Never use `aggregation: COUNT_DISTINCT` on a `columns[]`
-entry that references a physical column.
+entry that references a physical column, nor on a formula column whose `expr` is just a
+column reference (`[TABLE::col]`) — the probes below show the second fails the same way.
 
 **Failure mode:** depends on the column's data type, not on the aggregation.
 ThoughtSpot decides a physical column's role from its type: a `MEASURE` over a
@@ -163,8 +164,8 @@ bank-customers Table, re-exported, the first also queried via `searchdata`, all 
 |---|---|---|---|
 | INT64 | `COUNT_DISTINCT` | `MEASURE` — kept | The distinct count (identical to the `unique count` formula) |
 | DOUBLE | `COUNT_DISTINCT` | `MEASURE` — kept | (not queried) |
-| VARCHAR | `COUNT_DISTINCT`, `COUNT`, `MIN` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
-| DATE | `COUNT_DISTINCT`, `MAX` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+| VARCHAR | `COUNT_DISTINCT`, `COUNT`, `MIN` | `ATTRIBUTE` — **silently overridden** | `COUNT_DISTINCT`: the list of values, no count (others not queried) |
+| DATE | `COUNT_DISTINCT`, `MAX` | `ATTRIBUTE` — **silently overridden** | `COUNT_DISTINCT`: the list of values, no count (`MAX` not queried) |
 | VARCHAR, via a scalar formula `[T::col]` | `COUNT_DISTINCT` on the formula column | `ATTRIBUTE` — **silently overridden** | (not queried; the INT64 twin stayed `MEASURE`) |
 
 Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. The formula row matters because `ts tml

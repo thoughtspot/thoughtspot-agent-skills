@@ -291,7 +291,7 @@ def test_numeric_count_distinct_does_not_warn():
     cnt = {"name": "n", "data_type": "bigint", "kind": "measure", "expr": "COUNT(DISTINCT x)"}
     t, _, r = build_link_tml(_spec([cnt]), aggregation_mode="standard", model_name="S")
     assert t["table"]["columns"][0]["properties"]["aggregation"] == "COUNT_DISTINCT"
-    assert not any("COUNT_DISTINCT" in w for w in r["warnings"])
+    assert r["warnings"] == []
 
 
 def test_diff_treats_omitted_sum_as_default():

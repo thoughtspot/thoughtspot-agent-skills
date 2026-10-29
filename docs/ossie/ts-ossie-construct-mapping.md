@@ -736,13 +736,16 @@ failure recorded in the two TML references, so none is stylistic.
   display-name form — a display-name reference fails on first import (ThoughtSpot parses
   it as search tokens), while id references resolve order-independently in a single pass.
 - **R4** A metric is always emitted as a formula, never as a physical `column_id` plus an
-  `aggregation`. Two reasons: (a) is sufficient on its own; (b), since 2026-10-29, only for a non-numeric column: (a) the same physical
+  `aggregation`, for two reasons. Reason (a) applies whenever the column is also a field; reason (b), since
+  2026-10-29, applies only to a non-numeric column. (a) The same physical
   column is usually also a field, and two `columns[]` entries sharing a `column_id` is a
   `duplicate column_id` import error; (b) `aggregation: COUNT_DISTINCT` on a non-numeric
   physical column (VARCHAR, DATE) makes ThoughtSpot **silently override** `column_type` to
   `ATTRIBUTE` — the documented fix is a `unique count ( [T::c] )` formula. *Narrowed
   2026-10-29 by live probe:* a numeric column keeps `MEASURE` and counts correctly, so (b)
-  is type-scoped; (a) is unaffected.
+  is type-scoped; (a) is unaffected. For a numeric metric column that is not also a field,
+  neither reason applies; the rule then rests on uniformity — one emission form that never
+  depends on knowing the column's type (invariant I5).
   **(c) — corrected, and no longer a reason.** An earlier revision of this rule gave a third
   reason: "`aggregation` on a formula column is ignored at query time, so the aggregation has to
   be inside `expr` regardless." *Per ThoughtSpot domain review, 2026-07-30* that is only true of
