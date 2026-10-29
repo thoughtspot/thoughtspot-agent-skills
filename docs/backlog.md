@@ -203,7 +203,7 @@ are roughly ordered by value÷effort.
 | ~~BL-297~~ | ~~27 of 51 ts-audit checks were imported by a test but never CALLED by one~~ | DONE (#530 — every check now has a test that trips it) |
 | BL-298 | the two sharing checks `ts-audit` advertises — S8 "Overly permissive sharing (FULL access to all users)" and S9 "Sharing to external groups" — **are not implemented anywhere**; grepping the audit module for `permission|shared_with|sharing|access_level` returns only those two description strings. The descriptions are corrected so reports stop mislabelling, but a security audit still silently omits sharing entirely | next ts-audit pass |
 | BL-307 | audit 9.1 — `ts-convert-from-looker` instructs `is_hidden: true` on every joined dimension PK (`step-6-model-joins.md:68`, SKILL.md:404, step-6:64/:132, step-5:264, coverage-matrix:36). **I11 says never set it during conversion**, and `thoughtspot-model-tml.md:243` repeats the prohibition. Every joined dimension's PK ships hidden, producing the locked-visualization and join-path failure I11 names. Remove the construct AND add an `is_hidden` rule to `tml_lint.py` under the CANONICAL-RULE-SET marker, which every converter already invokes | next converter pass |
-| BL-308 | audit 9.4 — `sisense/functions.py`'s `translate_agg` has **no live caller** (only a docstring mention), so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes. The semantic mapping itself is correct and should NOT be changed (Sisense `count` is a distinct count, `dupcount` the exact total — corrected 2026-08-26, finding 14.3). Two exits needed: wire it or delete it, and if wired, note that `aggregation: COUNT_DISTINCT` on a `column_id`-backed entry silently flips MEASURE to ATTRIBUTE on a non-numeric column (I5) | next converter pass |
+| BL-308 | audit 9.4 — `sisense/functions.py`'s `translate_agg` has **no live caller** (only a docstring mention), so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes. The semantic mapping itself is correct and should NOT be changed (Sisense `count` is a distinct count, `dupcount` the exact total — corrected 2026-08-26, finding 14.3). Two exits needed: wire it or delete it, and if wired, note that `aggregation: COUNT_DISTINCT` on a `column_id`-backed entry silently flips MEASURE to ATTRIBUTE on a non-numeric column (I5) | 2026-12-31 |
 | BL-309 | audit 9.5 — the CoCo `ts-convert-from-snowflake-sv` mirror carries **no I14 rule**: no role-play, alias-node or duplicate-join-pair guidance anywhere. The CLI primary added Step 7.5 plus a reference file at v1.20.0; CoCo has no `ts` CLI and executes the doc, so the rule must be prose there. An SV joining one fact to DIM_TIME on order date and ship date emits two joins on the same ordered pair and **the Model will not load** (observed at 21 joins across 7 pairs on a real customer SV). Also: `check_mirror_sync` collects only each ledger row's path and never compares the recorded CLI version against the actual one, so any SYNC-DEBT row acknowledges its mirror permanently | next mirror pass |
 | BL-310 | audit 9.6 — `model_builder.filter_unresolvable_formulas` computes the drop set to a fixpoint via `_cascade_drop_dependents`, and three sibling skills instruct the executor to do it **by hand, one hop deep**, with the identical sentence (from-qlik:92, from-powerbi:86, from-sisense:78). With C referencing B referencing rejected A, B is dropped and C survives carrying a dangling `[formula_B]` — an I13 violation and a hard 14516 rejection, or a dangling `formula_id` and an I1 silent drop. Expose the retry loop as a shared command or helper the three skills invoke. This is BL-217's remainder and the prior sweep's 11.4 | next converter pass |
 | ~~BL-311~~ | ~~audit 13.2 — `ts-object-model-coach` open-item #4 defers Data Model Instructions to v1.1 and ships manual copy-paste, but the write API exists: `setNLInstructions` (`POST /api/rest/2.0/ai/instructions/set`, Beta 10.15.0.cl), whose **read twin this repo already calls** at `audit/context.py:145`. Needs a `ts` command, then replace the paste step. Second-order: 26.8.0.cl `ai/memory/export`/`import` (Spotter memory) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` move models between Orgs and silently leave it behind~~ | MERGED into BL-030 (2026-10-29, audit finding 5.2) |
@@ -303,7 +303,7 @@ are roughly ordered by value÷effort.
 | BL-466 | `check_harness_routing` matches Haiku pins exactly; add Haiku fixtures | 2026-11-30 |
 | BL-467 | Review/audit agents declare no `effort:`; auditor lists stale invariants | 2026-11-30 |
 | BL-468 | `repo-publisher` still runs the dormant stage sync; re-check its model pin | 2026-11-30 |
-| BL-469 | `ts dbt create/update` token resolver lacks the Keychain fallback | 2026-11-30 |
+| BL-469 | `ts dbt create/update` token resolver lacks the derived env-var and Keychain-name fallbacks | 2026-11-30 |
 | BL-470 | Keyring fallbacks swallow backend errors as "no credential" | 2026-11-30 |
 | BL-471 | `check_backlog_integrity`: ISO-date targets, index/section status agreement, deleted-id gate; audit-row routing gate | 2026-11-30 |
 | BL-472 | Seven `ts snowflake` subcommands have no CliRunner tests | 2026-11-30 |
@@ -311,6 +311,7 @@ are roughly ordered by value÷effort.
 | BL-474 | Model-vs-Worksheet predicate written four ways; two skills contradict | 2026-11-30 |
 | BL-475 | to-snowflake-sv hand-rolls Snowflake access; widen `check_patterns` rule 7 | 2026-11-30 |
 | BL-476 | Re-date or close eight overdue OPEN items and six index rows that contradict their RESOLVED sections | 2026-11-30 |
+| BL-265 | Any physical measure over a non-numeric column is demoted to an attribute (`COUNT`/`MIN`/`MAX`/`COUNT_DISTINCT`); SV, MV and dbt converters neither predict nor report it | 2026-11-30 |
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
@@ -10753,7 +10754,7 @@ columns kept `MEASURE` with `COUNT_DISTINCT`. So it is not VARCHAR-specific and 
 aggregation-specific — the platform types the column by its data type. BOOL, DATE_TIME and
 TIME were not probed.
 
-**Target:** next from-direction converter pass; fold the type rule in beside
+**Target:** 2026-11-30 (dated 2026-10-29: it now carries audit finding 9.18; was "next from-direction converter pass"); fold the type rule in beside
 `fact_column_type()` so facts and metrics share one decision.
 
 ## BL-266 — Step 8.5's documented remedy is incompatible with the documented command, so its own predicted artifact ships `Tier 3`
@@ -15377,7 +15378,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **What.** `check_smoke_tests.py`'s ALLOWLIST exempts skills by citing BL items, and `_BL_REF_RE` checks only that a BL-shaped string is present. Sisense cites BL-118 (DONE, AgentQL) where the real item is BL-119; Power BI cites BL-076 (no Power BI content, target passed).
 
-**Do.** Resolve each cited BL against `docs/backlog.md`: it must exist, be OPEN, name the skill and carry a future ISO date. Fix the two citations (Power BI may need its own item). Known-bad fixtures for each failure.
+**Do.** Resolve each cited BL against `docs/backlog.md`: it must exist, be OPEN, name the skill and carry a future ISO date. Fix the two citations (Power BI may need its own item) and give BL-119 an ISO-date target, or the repointed citation fails the new rule. Known-bad fixtures for each failure.
 
 **Target:** 2026-11-15.
 
@@ -15442,7 +15443,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **What.** All five Snowflake mapping/schema files lead with `2026-07` while their bodies cite verification dated 2026-08/09, so `check_mapping_currency` reads them by a date their content has already moved past.
 
-**Do.** In `check_mapping_currency.py`, require an anchor's leading date to be at least the newest ISO date cited in the file body (soft-warn, matching the check's other nudges), with a test.
+**Do.** In `check_mapping_currency.py`, require an anchor's leading date to be at least the newest ISO date the body cites **as a verification against that platform** (not any date — a ThoughtSpot probe date in a Snowflake file must not inflate the `snowflake` anchor, which scopes the next external sweep) (soft-warn, matching the check's other nudges), with a test.
 
 **Target:** 2026-11-30.
 
@@ -15564,7 +15565,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 4.1.
 
-**What.** `commands/dbt.py::_read_access_token` lacks the derived env var and Keychain fallback that `cloud_api.token_from_keychain` has, so `ts dbt create/update` find no credential where `list-models` succeeds.
+**What.** `commands/dbt.py::_read_access_token` reads the Keychain only when the profile records `keychain_service`/`keychain_account`; it lacks the derived env var and the derived `dbt-cloud-{slug}`/`token` names that `cloud_api.token_from_keychain` falls back to, so `ts dbt create/update` find no credential where `list-models` succeeds.
 
 **Do.** Route it through the shared resolver and move its tests.
 
@@ -15589,7 +15590,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 - 7.2: no gate fails a branch that deletes backlog items present on its base. The 2026-10-29 audit report's own branch silently reverted BL-438..446 (#683) and every check passed. Rule 4 checks only ids a branch introduces; Rule 2 scans citations only in `agents/`, `tools/`, `.github/`.
 - Routing: 19 findings of the 2026-09-22 sweep sat in neither bucket for five weeks; nothing checks that a committed audit report's action rows were routed.
 
-**Do.** In `check_backlog_integrity.py`: require an ISO-date target on OPEN items and warn when one has passed; warn when an index row is open but its section says RESOLVED/DONE; with `--base`, fail when an id owning a section at the merge base is missing at HEAD from both `docs/backlog.md` and `docs/backlog-archive.md`. Add a check that every action row of a committed `docs/audit/*-full.md` cites a BL id, PR or accepted-gap note within a set number of days. Known-bad fixtures for each.
+**Do.** In `check_backlog_integrity.py`: require an ISO-date target on OPEN items and warn when one has passed; warn when an index row is open but its section says RESOLVED/DONE; with `--base`, fail when an id owning a section at the merge base is missing at HEAD from both `docs/backlog.md` and `docs/backlog-archive.md`. Add a check that every action row of a committed `docs/audit/*-full.md` is routed — a BL id, PR or accepted-gap note — **in its `docs/audit/<date>-routing.md` companion** (never by editing the report: BL-473), within a set number of days. Land after BL-473. Known-bad fixtures for each.
 
 **Target:** 2026-11-30.
 
@@ -15609,7 +15610,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **What.** `.claude/workflows/repo-audit.js:166` starts the delta at the last commit that *touched* the newest `*-full.md`; the rubric (`repo-audit.md:114`) and `check_audit_freshness.py:141-158` (`--diff-filter=A`) mean the commit that *added* it. After the 2026-08-26 report was edited in place by its routing wave, the 2026-09-22 delta started at #475 and 32 commits fell into no angle-17 review. **Until this lands, never edit a `*-full.md` after it merges:** the 2026-10-29 routing went into a separate `docs/audit/2026-10-29-routing.md` for exactly this reason.
 
-**Do.** Use the adding commit in the workflow prompt; add a validator (or a shared helper both call) so the two implementations agree.
+**Do.** Start the delta at the previous report's **recorded delta end**, not at any commit of the report file: "use the adding commit" still skips what merges between a sweep's base and its report landing (#523, 4252da4, fell between the 2026-09-22 and 2026-10-29 deltas this way and its requested targeted review was never recorded; #683 did the same this cycle, docs only). Record the delta end machine-readably in each report; have the workflow and `check_audit_freshness.py` read it through one shared helper, with a validator that they agree. Also route the outstanding targeted review of #523.
 
 **Target:** 2026-11-30.
 
@@ -15637,7 +15638,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, Verdict (overdue targets) and finding 5.4 (index rows). The gate that stops this recurring is BL-471.
 
-**What.** OPEN items past their ISO-date target: BL-030, BL-031, BL-032, BL-071, BL-076, BL-080 and BL-130 (due 2026-09-30) and BL-095 (2026-08-31 per the index; its section has an event-style target). Index rows not struck through although their sections say RESOLVED: BL-178, BL-174, BL-373, BL-193, BL-380, BL-259.
+**What.** OPEN items past their ISO-date target: BL-030, BL-031, BL-032, BL-071, BL-076, BL-080 and BL-130 (due 2026-09-30) and BL-095 (2026-08-31 per the index; its section has an event-style target). Index rows not struck through although their sections say RESOLVED: BL-178, BL-174, BL-373, BL-193, BL-380, BL-259; also BL-179 (section says both RESOLVED and OPEN) and BL-128 (partial) — check whether either was reopened on purpose.
 
 **Do.** For each of the eight, read the section and either close it (strike the index row, mark the section) or give it a new ISO-date target in both places with a one-line reason; reconcile BL-095's index and section. For each of the six, confirm the resolution and strike the index row. BL-030 also absorbs BL-311 (2026-10-29 audit finding 5.2).
 
