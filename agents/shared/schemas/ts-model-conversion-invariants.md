@@ -156,8 +156,8 @@ entry that references a physical column.
 **Failure mode:** depends on the column's data type, not on the aggregation.
 ThoughtSpot decides a physical column's role from its type: a `MEASURE` over a
 non-numeric column is silently stored as an `ATTRIBUTE`, whatever `aggregation` it
-carries. Live-probed 2026-10-29 on the SE demo cluster (two throwaway Models over a
-bank-customers Table, re-exported, the first also queried via `searchdata`, both deleted):
+carries. Live-probed 2026-10-29 on the SE demo cluster (three throwaway Models over a
+bank-customers Table, re-exported, the first also queried via `searchdata`, all deleted):
 
 | Physical column type | Aggregation tested | Stored `column_type` after import | Search returns |
 |---|---|---|---|
@@ -165,8 +165,12 @@ bank-customers Table, re-exported, the first also queried via `searchdata`, both
 | DOUBLE | `COUNT_DISTINCT` | `MEASURE` — kept | (not queried) |
 | VARCHAR | `COUNT_DISTINCT`, `COUNT`, `MIN` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
 | DATE | `COUNT_DISTINCT`, `MAX` | `ATTRIBUTE` — **silently overridden** | The list of values, no count |
+| VARCHAR, via a scalar formula `[T::col]` | `COUNT_DISTINCT` on the formula column | `ATTRIBUTE` — **silently overridden** | (not queried; the INT64 twin stayed `MEASURE`) |
 
-Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. "Numeric" and "non-numeric" below
+Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. The formula row matters because `ts tml
+lint` exempts formula columns from I5: a formula that only wraps a column, carrying
+`aggregation: COUNT_DISTINCT`, is the same failure and is not caught today (audit 2026-10-29,
+9.1 path B). "Numeric" and "non-numeric" below
 generalise from the rows above; BL-265 (a `COUNT` metric over a VARCHAR key, demoted the
 same way) is the same platform rule. Every import succeeds; nothing is reported. Text and
 date keys (string customer ids, order dates) are common distinct-count targets, so the
