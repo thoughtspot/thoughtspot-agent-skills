@@ -23,6 +23,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from ts_cli.audit.catalog_model import Rule
 from ts_cli.audit.engine import bands, fields, predicates, scopes
+# Set keys live in fields.py so a code rule can reuse them (D7's model_overlap).
+from ts_cli.audit.engine.fields import as_key as _hashable, as_set as _as_set
 from ts_cli.audit.engine.messages import Key, NameList, render, template
 from ts_cli.audit.findings import Finding
 
@@ -146,21 +148,6 @@ def count(rule: Rule, ctx, profile: str) -> List[Finding]:
 
 # ── group ───────────────────────────────────────────────────────────────────
 
-def _hashable(v: Any) -> Any:
-    """A grouping / set key comparing as Python does — 1, 1.0 and True are one key, as
-    they are in the legacy checks' sets and dicts (D7, D8) — with lists, tuples and
-    mappings (where legacy would raise) wrapped so they can be keys at all."""
-    if isinstance(v, (list, tuple)):
-        return ("seq", tuple(_hashable(x) for x in v))
-    if isinstance(v, dict):
-        return ("map", repr(v))
-    try:
-        hash(v)
-    except TypeError:
-        return ("unhashable", repr(v))
-    return v
-
-
 def _group_key(key_spec: Any, item: dict, ctx) -> Any:
     if isinstance(key_spec, list):
         return Key(fields.get(item, p, ctx) for p in key_spec)
@@ -222,16 +209,6 @@ def group(rule: Rule, ctx, profile: str) -> List[Finding]:
 
 
 # ── pairwise ────────────────────────────────────────────────────────────────
-
-def _as_set(value: Any) -> set:
-    """The collection at a pairwise `set` path. None is an element like any other
-    (legacy D7 counts an explicit `fqn: None`); a path mapped over a list reads an
-    absent key as None too, so a rule that needs a default supplies it in a derived
-    field (D7's @table_set does)."""
-    if not isinstance(value, (list, tuple, set)):
-        return set()
-    return {_hashable(v) for v in value}
-
 
 def pairwise(rule: Rule, ctx, profile: str) -> List[Finding]:
     """Every unordered pair of scope items sharing at least one element of `set`,

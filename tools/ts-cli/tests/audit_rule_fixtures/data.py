@@ -373,8 +373,8 @@ def data_fanout_many_to_one() -> AuditContext:
 
 
 def data_fanout_many_to_many_dimension() -> AuditContext:
-    """MANY_TO_MANY to a dimension: INFO, worded ONE_TO_MANY (the xfail in
-    test_checks_data_trip.py)."""
+    """MANY_TO_MANY to a dimension: INFO, worded by its cardinality (worded
+    ONE_TO_MANY until 2026-10)."""
     return build_fanout_ctx("CUSTOMER", build_dimension_columns(), cardinality="MANY_TO_MANY")
 
 

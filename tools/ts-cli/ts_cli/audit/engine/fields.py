@@ -186,6 +186,33 @@ def _is_coached(item: dict, ctx: Any) -> bool:
             or "").strip())
 
 
+# ── set keys (the group and pairwise modes, D7's code rule) ─────────────────
+
+def as_key(v: Any) -> Any:
+    """A grouping / set key comparing as Python does — 1, 1.0 and True are one key, as
+    they are in the legacy checks' sets and dicts (D7, D8) — with lists, tuples and
+    mappings (where legacy would raise) wrapped so they can be keys at all."""
+    if isinstance(v, (list, tuple)):
+        return ("seq", tuple(as_key(x) for x in v))
+    if isinstance(v, dict):
+        return ("map", repr(v))
+    try:
+        hash(v)
+    except TypeError:
+        return ("unhashable", repr(v))
+    return v
+
+
+def as_set(value: Any) -> set:
+    """The collection at a pairwise `set` path (or a code rule's, D7), as a set of keys. None is an element like any other
+    (legacy D7 counts an explicit `fqn: None`); a path mapped over a list reads an
+    absent key as None too, so a rule that needs a default supplies it in a derived
+    field (D7's @table_set does)."""
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    return {as_key(v) for v in value}
+
+
 def _model_of(item: dict) -> dict:
     """The Model body a child item (column, formula, join) belongs to."""
     return ((item.get("parent") or {}).get("obj")) or {}
@@ -205,6 +232,23 @@ def _is_scalar_formula(item: dict, ctx: Any) -> bool:
 def _aggregated_formula_ids(model: dict) -> set:
     return {c.get("formula_id") for c in (model.get("columns") or [])
             if (c.get("properties") or {}).get("aggregation")}
+
+
+@register("formula_expr", uses=(),
+          label="the expression of the formula the column surfaces")
+def _formula_expr(item: dict, ctx: Any) -> Any:
+    """Model column: the `expr` of the formula it surfaces (its `formula_id`), or None
+    for a column on a table, or a `formula_id` matching no formula."""
+    fid = (item.get("obj") or {}).get("formula_id")
+    if not fid:
+        return None
+    model = _model_of(item)
+    return cached("formula_exprs", model, _formula_exprs, model).get(fid)
+
+
+def _formula_exprs(model: dict) -> dict:
+    return {f.get("id"): f.get("expr") for f in (model.get("formulas") or [])
+            if isinstance(f, dict) and f.get("id")}
 
 
 @register("has_date_constraint", uses=(),

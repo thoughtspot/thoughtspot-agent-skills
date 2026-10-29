@@ -118,14 +118,16 @@
   title: High model overlap detected
   description: >-
     Two Models whose table sets (each table's fqn, else its name) share tables, graded
-    by Jaccard similarity: HIGH when identical, MEDIUM above 0.5. Reported once per
-    pair, on the first Model's guid.
+    by Jaccard similarity: HIGH when identical, MEDIUM above 0.5 but only when the two
+    also share a fact table (more than 3 MEASURE columns) — Models that only reuse
+    the same dimensions are not duplicates. Reported once per pair, on the first
+    Model's guid.
+  # A code rule (code:model_overlap) because the shared-fact test applies to a pair,
+  # and only below identical: the pairwise mode filters items, never pairs.
   categories: [D]
   requires: [model_tml]
+  implementation: code:model_overlap
   scope: model
-  aggregate:
-    mode: pairwise
-    set: "@table_set"
   bands:
     direction: lower_is_better
     unit: ratio
@@ -173,15 +175,16 @@
 - id: D9
   title: SQL pass-through function usage (>20% formulas)
   description: >-
-    More than 20% of a Model's formulas call sql_int_aggregate_op,
-    sql_string_aggregate_op or sql_bool_aggregate_op (any case).
+    More than 20% of a Model's formulas call a SQL pass-through aggregate,
+    `sql_<type>_aggregate_op` for any type — int, double, string, bool, date and the
+    rest (any case). Before 2026-10 only the int, string and bool forms were matched.
   categories: [D]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: ratio
     over: model.formula
-    match: {field: expr, regex: '(?i)sql_(int|string|bool)_aggregate_op'}
+    match: {field: expr, regex: '(?i)\bsql_[a-z_]+_aggregate_op\b'}
   bands:
     direction: lower_is_better
     unit: percent
@@ -215,10 +218,11 @@
   title: Fan-out join risk (row multiplication)
   description: >-
     A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
-    ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. Both ends
-    are looked up by name — the declaring model table's `name` and the join's `with` —
-    so an aliased end reads as unknown (BL-305, kept), and the INFO wording says
-    ONE_TO_MANY whatever the cardinality (kept).
+    ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. A
+    referencing join takes its cardinality from the model, else from the Table's
+    `joins_with` entry (exported Table TML usually carries none). Both ends are looked
+    up by name — the declaring model table's `name` and the join's `with` — so an
+    aliased end reads as unknown (BL-305, kept).
   categories: [D]
   requires: [model_tml]
   scope: join
@@ -232,7 +236,7 @@
   message:
     by_severity:
       MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
-      INFO: "ONE_TO_MANY join '{@join_from_name}' -> '{obj.with}'"
+      INFO: "{@join_cardinality} join '{@join_from_name}' -> '{obj.with}'"
   examples:
     fires: {fixture: data_fanout_fact_to_fact, severity: MEDIUM}
     silent: {fixture: data_fanout_many_to_one}

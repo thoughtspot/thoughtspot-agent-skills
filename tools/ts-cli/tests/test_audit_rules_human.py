@@ -96,7 +96,8 @@ def test_model_formula_match_and_name_last_wins():
 
 def test_h_code_rules_declare_what_they_read():
     assert code_rules.SEVERITY_SOURCES["description_quality"] == "severity"
-    assert code_rules.SEVERITY_SOURCES["stale_names"] == "severity_name"
+    assert code_rules.SEVERITY_SOURCES["stale_names"] == frozenset({"MEDIUM", "LOW"})
+    assert code_rules.CODE_USES["stale_names"] == frozenset({"dependents", "sets"})
     assert code_rules.PLACEHOLDERS["description_quality"] == {"count", "issues"}
     assert code_rules.PLACEHOLDERS["stale_names"] == {"what", "value"}
     assert not {"description_quality", "stale_names"} & code_rules.OWN_THRESHOLD
@@ -119,15 +120,32 @@ def test_is_stale_name(name, stale):
     assert code_rules_human.is_stale_name(name) is stale
 
 
+def _stale_model_ctx(dependents):
+    return make_context(models=[fx.build_human_model(name="Sales_old", columns=[
+        {"name": "tmp_a", "description": "Temporary"}, {"name": "B", "description": 7}])],
+        dependents=dependents)
+
+
 def test_stale_names_reports_model_then_columns_in_order():
-    ctx = make_context(models=[fx.build_human_model(name="Sales_old", columns=[
-        {"name": "tmp_a", "description": "Temporary"}, {"name": "B", "description": 7}])])
+    ctx = _stale_model_ctx({"m-1": [{"id": "a-1", "type": "ANSWER", "name": "A"}]})
     got = [(f.object_type, f.object_name, f.detail, f.severity)
            for f in run_rule(ctx, load_catalog(), "H10", "general")]
     assert got == [
         ("model", "Sales_old", "Model name matches stale pattern: 'Sales_old'", "LOW"),
         ("column", "tmp_a", "Column name matches stale pattern: 'tmp_a'", "LOW"),
         ("column", "tmp_a", "Column description matches stale pattern: 'Temporary'", "LOW")]
+
+
+@pytest.mark.parametrize("dependents", [{}, {"m-1": [{"id": "s-1", "type": "SET",
+                                                      "name": "S"}]}])
+def test_a_stale_model_name_on_an_orphan_model_is_medium(dependents):
+    """H10 MEDIUM "if also orphan" (BL-406 item 2, 2026-10): H4's test — no dependents
+    but Sets. Only the Model-name finding moves; column findings stay LOW."""
+    got = [(f.object_type, f.severity, f.detail)
+           for f in run_rule(_stale_model_ctx(dependents), load_catalog(), "H10", "general")]
+    assert got[0] == ("model", "MEDIUM", "Model name matches stale pattern: 'Sales_old', "
+                      "and nothing uses the Model")
+    assert [s for t, s, _ in got[1:]] == ["LOW", "LOW"]
 
 
 # ── H6: retired with no logic ───────────────────────────────────────────────

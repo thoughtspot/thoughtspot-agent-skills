@@ -352,16 +352,24 @@
     silent: {fixture: perf_formulas_real_export}
 
 - id: P18
-  title: COUNT_DISTINCT aggregation (most expensive)
-  description: A Model column aggregated with COUNT_DISTINCT, which is expensive to compute.
+  title: Distinct count (most expensive aggregation)
+  description: >-
+    A Model column that counts distinct values, which is expensive to compute: one
+    aggregated with COUNT_DISTINCT, or one surfacing a formula that calls
+    `unique count`, `unique_count_if` or `group_unique_count` (any case). Before
+    2026-10 only the aggregation was read, so a Model built the recommended way (a
+    `unique count` formula, invariant I5) reported nothing.
   categories: [P]
   requires: [model_tml]
   scope: model.column
   aggregate:
     mode: each
-    where: {field: properties.aggregation, eq: COUNT_DISTINCT}
+    where:
+      any:
+        - {field: properties.aggregation, eq: COUNT_DISTINCT}
+        - {field: "@formula_expr", regex: '(?i)\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b'}
   severity: INFO
-  message: "COUNT_DISTINCT aggregation on '{name}'"
+  message: "Distinct count on '{name}'"
   examples:
     fires: {fixture: perf_column_count_distinct, severity: INFO}
     silent: {fixture: perf_model_80_columns}

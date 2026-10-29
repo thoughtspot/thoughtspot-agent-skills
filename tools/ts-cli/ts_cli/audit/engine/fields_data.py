@@ -184,6 +184,19 @@ def _table_set(item: dict, ctx: Any) -> list:
             for t in (item.get("obj") or {}).get("model_tables") or []]
 
 
+@register("fact_table_set", uses=(),
+          label="the Model's fact tables")
+def _fact_table_set(item: dict, ctx: Any) -> list:
+    """Model: the identity (as @table_set reads it: `fqn`, else `name`) of each model
+    table that reads as a fact table — more than 3 MEASURE columns, its columns found
+    by the table's `name` (tml.fact_tables; an aliased table therefore reads as no
+    fact, BL-305)."""
+    model = item.get("obj") or {}
+    facts = tml.fact_tables(model.get("columns") or [], model.get("model_tables") or [])
+    return [t.get("fqn", t.get("name", "")) for t in model.get("model_tables") or []
+            if t.get("name", "") in facts]
+
+
 @register("physical_table_key", uses=(),
           label="the physical table (connection, database, schema, name)")
 def _physical_table_key(item: dict, ctx: Any) -> Any:

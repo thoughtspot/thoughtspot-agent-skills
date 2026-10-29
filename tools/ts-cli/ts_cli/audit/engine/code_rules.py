@@ -335,6 +335,41 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     return out
 
 
+@code_rule("model_overlap", placeholders={"name", "a", "b", "similarity", "shared",
+                                         "union"},
+           severity="bands", uses=(),
+           label="graded per pair of Models on the share of tables they have in "
+                 "common; a partial overlap only when the two share a fact table")
+def model_overlap(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
+    """D7 — every unordered pair of Models sharing a table (@table_set), graded on the
+    Jaccard similarity of their table sets by the rule's bands, as the pairwise mode
+    grades. Below identical (a partial overlap), a pair is reported only when the two
+    also share a fact table (@fact_table_set): two Models that merely reuse the same
+    dimensions are not duplicates. Reported once per pair, on the first Model."""
+    from itertools import combinations
+    models = [(i, fields.as_set(fields.get(i, "@table_set", ctx)),
+               fields.as_set(fields.get(i, "@fact_table_set", ctx)))
+              for i in scopes.available(ctx, rule)]
+    out: List[Finding] = []
+    for (a, ta, fa), (b, tb, fb) in combinations(models, 2):
+        shared = ta & tb
+        if not shared:
+            continue
+        union = ta | tb
+        similarity = len(shared) / len(union)
+        if similarity < 1 and not (fa & fb):
+            continue
+        severity = bands.classify(similarity, rule.bands)
+        if severity is None:
+            continue
+        name = f"{a['name']} / {b['name']}"
+        values = {"name": name, "a": a["name"], "b": b["name"], "similarity": similarity,
+                  "shared": len(shared), "union": len(union)}
+        out.append(_d_finding(rule, a, severity, values, metric=round(similarity, 2),
+                              object_name=name))
+    return out
+
+
 @code_rule("zero_column_tables", placeholders={"name", "role"}, severity="severity",
            uses=(), label="graded on the table's place in the joins")
 def zero_column_tables(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:

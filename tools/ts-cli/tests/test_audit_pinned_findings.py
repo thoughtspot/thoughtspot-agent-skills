@@ -76,15 +76,14 @@ OWN_INPUTS = ap.OWN_INPUTS
 #: (input, rule) pairs on which the legacy check RAISED (under both profiles). What
 #: the catalog reports there has no legacy answer to compare with. A None name or a
 #: list-valued `properties` aborts the legacy regex and lookup code. A rule re-pinned
-#: since (2026-10: A5, P9 and S3 retired, pinned to []; P2 re-graded, pinned to the
-#: catalog's answer) holds no legacy RAISES any more and is not listed.
+#: since holds no legacy RAISES any more and is not listed (2026-10, PR 2.1: A5, P9, S3
+#: retired and P2 re-graded; PR 2.2: H10 re-graded and P18 widened, each pinned to the
+#: catalog's answer on these inputs).
 LEGACY_RAISES = {
-    "ai_model_name_none": {"H10"},
-    "tml_value_shapes": {"H3", "P18"},
-    "perf_names_none": {"A6", "H1", "H10", "S1", "S2", "S5"},
-    "sec_names_none": {"H10"},
-    "data_names_none": {"A6", "H1", "H10", "S1", "S2", "S5"},
-    "data_single_model_malformed_column": {"H3", "P18"},
+    "tml_value_shapes": {"H3"},
+    "perf_names_none": {"A6", "H1", "S1", "S2", "S5"},
+    "data_names_none": {"A6", "H1", "S1", "S2", "S5"},
+    "data_single_model_malformed_column": {"H3"},
 }
 
 #: (input, rule) pairs on which the CATALOG raises too, pinned so that a fix shows up
@@ -276,9 +275,9 @@ D_PROBES = [
     ("data_names_absent", lambda f: f["check_id"] == "D8" and f["object_name"] == "..."),
     # D1's None names and per-measure thresholds: test_checks_data.py (its 2026-10 lines
     # sit above every pinned input's size)
-    # D7: the MEDIUM finding carries a threshold, the HIGH one none
-    ("models_overlapping_tables", lambda f: f["check_id"] == "D7" and f["severity"] == "MEDIUM"
-     and f["threshold"] == {"high_overlap": 0.5}),
+    # D7: the HIGH finding carries no threshold. (Its MEDIUM probe went in 2026-10: a
+    # partial overlap now needs a shared fact table, which no pinned input has; the
+    # MEDIUM threshold is held in test_checks_data.py.)
     ("data_models_identical_tables", lambda f: f["check_id"] == "D7" and f["threshold"] is None),
     # D7: an explicit `fqn: None` is an element; an absent fqn falls back to the name
     ("data_models_overlap_edges", lambda f: f["check_id"] == "D7"
@@ -291,9 +290,10 @@ D_PROBES = [
     ("data_model_aliased_fact", lambda f: f["check_id"] == "D10" and f["object_name"] == "ORDERS"),
     ("data_model_aliased_fact", lambda f: f["check_id"] == "D11" and f["severity"] == "INFO"
      and f["detail"] == "ONE_TO_MANY join 'SHIPMENTS' -> 'O'"),
-    # D11 words a MANY_TO_MANY INFO finding "ONE_TO_MANY" (kept)
+    # D11 words an INFO finding by the join's own cardinality (2026-10; it said
+    # "ONE_TO_MANY" for a MANY_TO_MANY join before)
     ("data_fanout_many_to_many_dimension", lambda f: f["check_id"] == "D11"
-     and f["detail"].startswith("ONE_TO_MANY join")),
+     and f["detail"].startswith("MANY_TO_MANY join")),
     # D12: a later column overwrites an earlier one's type within a Model
     ("data_models_column_type_edges", lambda f: f["check_id"] == "D12"
      and f["detail"].endswith("A=MEASURE, B=ATTRIBUTE")),
@@ -337,8 +337,10 @@ H_PROBES = [
     ("human_h9_match_shapes", lambda f: f["check_id"] == "H9"
      and f["detail"] == "Answer formula '' duplicates model formula 'Second'"),
     # H10: Model and column findings; a description cut at 60 characters
+    # (a stale Model name on an orphan Model is MEDIUM, 2026-10)
     ("human_h10_name_shapes", lambda f: f["check_id"] == "H10" and f["object_type"] == "model"
-     and f["detail"] == "Model name matches stale pattern: 'Sales (Backup)'"),
+     and f["severity"] == "MEDIUM" and f["detail"] == "Model name matches stale pattern: "
+     "'Sales (Backup)', and nothing uses the Model"),
     ("human_h10_name_shapes", lambda f: f["check_id"] == "H10" and f["object_name"] == "Plain"
      and f["detail"] == "Column description matches stale pattern: 'Deprecated: this "
      "column will be removed once the new ledger '"),

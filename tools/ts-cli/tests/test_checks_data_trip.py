@@ -157,13 +157,9 @@ def test_d11_many_to_one_join_returns_nothing():
     assert run_rule(fx.data_fanout_many_to_one(), "D11") == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "D11's else branch (legacy checks_data.py at main@982c2010; the catalog reproduces it) hardcodes 'ONE_TO_MANY join' into the "
-    "detail, so a MANY_TO_MANY join — the worse of the two, and the one the check "
-    "explicitly admits at legacy checks_data.py at main@982c2010 — is reported to the user as "
-    "ONE_TO_MANY. The MEDIUM branch interpolates `cardinality` correctly; only the "
-    "INFO branch lies."))
 def test_d11_many_to_many_detail_names_the_actual_cardinality():
+    """Was a strict xfail: the INFO wording hardcoded "ONE_TO_MANY join", so a
+    MANY_TO_MANY join was reported as the other kind (BL-406 item 5, fixed 2026-10)."""
     findings = run_rule(fx.data_fanout_many_to_many_dimension(), "D11")
     assert len(findings) == 1
     assert "MANY_TO_MANY" in findings[0].detail

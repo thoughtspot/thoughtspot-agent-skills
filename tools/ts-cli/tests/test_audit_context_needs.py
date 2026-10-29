@@ -166,10 +166,11 @@ def test_shipped_catalog_fetches_the_pinned_needs_per_selection(profile):
             assert needs_for(cat, list(sel), profile) == expected, sel
 
 
-# The rules that read Set data: H5 (requires sets) and H4 (uses sets — @dependent_count
-# reads ctx.dependents, which Set discovery writes into). Turning both off is what drops
-# `sets` from an H selection.
-_SET_READERS = ("H4", "H5")
+# The rules that read Set data: H5 (requires sets), and H4 and H10 (use sets —
+# @dependent_count reads ctx.dependents, which Set discovery writes into; H10 since
+# 2026-10, for its orphan test). Turning all three off is what drops `sets` from an H
+# selection.
+_SET_READERS = ("H4", "H5", "H10")
 
 
 def test_sets_are_needed_while_either_set_reader_runs():
@@ -292,8 +293,8 @@ def test_set_consumers_do_not_widen_the_answer_export():
 
 @pytest.fixture
 def h5_off_for_spotter(monkeypatch):
-    """The catalog every `data_needs` call loads: both Set readers (H4, H5) retired
-    under spotter only."""
+    """The catalog every `data_needs` call loads: every Set reader (H4, H5, H10)
+    retired under spotter only."""
     import ts_cli.audit.catalog_model as cm
 
     def h5_off(rules):

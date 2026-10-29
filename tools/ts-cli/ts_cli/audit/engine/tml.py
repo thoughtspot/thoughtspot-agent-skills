@@ -131,7 +131,9 @@ def _resolve_join(model_table: dict, join: dict, by_name: dict) -> dict:
         # The model overrides the table's type where it declares one.
         "type": join.get("type") or base.get("type", ""),
         "with": join.get("with") or dest.get("name", ""),
-        "cardinality": join.get("cardinality", ""),
+        # The model's own cardinality wins, as its type does; exported Table TML
+        # rarely carries one (0 of 165 joins_with entries, 2026-07-30 census).
+        "cardinality": join.get("cardinality") or base.get("cardinality", ""),
     }
 
 

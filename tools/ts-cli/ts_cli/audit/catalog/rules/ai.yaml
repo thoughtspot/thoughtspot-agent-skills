@@ -102,8 +102,10 @@
     silent: {fixture: ai_model_coached, profile: spotter}
 
 - id: A4
-  title: Missing Spotter config
-  description: A Model with no (or a blank) description.
+  title: Model has no description
+  description: >-
+    A Model with no (or a blank) description. (Titled "Missing Spotter config" until
+    2026-10, which it never checked.)
   categories: [A]
   requires: [model_tml]
   scope: model

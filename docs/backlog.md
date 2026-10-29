@@ -295,8 +295,8 @@ are roughly ordered by value÷effort.
 | BL-458 | Snowflake constraints attributed to Cortex Analyst unverified under Cortex Agents — live check first | 2026-11-30 |
 | BL-459 | Databricks Metric View Runtime 19: semiadditive default, derived names, window carry-overs (2026-09-22 13.15–13.18), `refresh_policy` | 2026-11-30 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
-| BL-461 | Audit rule D9 misses `sql_double_aggregate_op` and date variants | 2026-11-30 |
-| BL-462 | Audit rule P18 ignores `unique count` formulas | 2026-11-30 |
+| ~~BL-461~~ | ~~Audit rule D9 misses `sql_double_aggregate_op` and date variants~~ | RESOLVED (2026-10-30 — D9 matches every `sql_<type>_aggregate_op`, ts-audit 3.5.0) |
+| ~~BL-462~~ | ~~Audit rule P18 ignores `unique count` formulas~~ | RESOLVED (2026-10-30 — P18 also reads `unique count` / `unique_count_if` / `group_unique_count` formulas, ts-audit 3.5.0) |
 | BL-463 | pip-audit on the oldest and newest matrix legs; Python end-of-life check | 2026-11-30 |
 | BL-464 | `model-routing.md` anchor records a legacy model lineup | 2026-11-30 |
 | BL-465 | Repo no-Haiku rule cites a stale reason — re-derive | 2026-11-30 |
@@ -14750,6 +14750,16 @@ and raises `TypeError` on a null one, ending the run (pre-existing, found while 
 PR 2.1). D2's fixed severities moved to P6 (`join_keys`, LOW / INFO), still in code
 (item 3). P5 is retired, so its part of item 4 is moot.
 
+**Progress (2026-10-30, roadmap PR 2.2).** Item 1 is closed: every contradiction follows
+the decision sheet. A4 is retitled; D7 reports a partial overlap only when the two Models
+share a fact table; D11 words its INFO finding by the join's cardinality and reads a
+referencing join's cardinality from its Table (item 5's wording and reach; its alias
+lookup is PR 2.3 with item 4); H10 is MEDIUM for a stale Model name on an orphan Model
+(item 2's H10 half); and D1, D5, D9, H1, H2, S1, S2 and S5 needed no change, since their
+catalog descriptions, from which the check catalog is generated, already state the coded
+behaviour (H1 and H2 keep one finding per Model, item 2's other half). H10's severities
+are now fixed in code (LOW / MEDIUM), which item 3 moves into data.
+
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.
@@ -15496,7 +15506,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-30.
 
-## BL-461 — audit rule D9 misses `sql_double_aggregate_op` and the date variants `Tier 2`
+## BL-461 — audit rule D9 misses `sql_double_aggregate_op` and the date variants `Tier 2` — **RESOLVED 2026-10-30**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 14.1; carry-over of `docs/audit/2026-09-22-full.md` finding 14.2 (BL-406 no longer covers it).
 
@@ -15506,7 +15516,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-30.
 
-## BL-462 — audit rule P18 will report zero once converters emit `unique count` formulas `Tier 2`
+## BL-462 — audit rule P18 will report zero once converters emit `unique count` formulas `Tier 2` — **RESOLVED 2026-10-30**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 14.2; carry-over of `docs/audit/2026-09-22-full.md` finding 14.3.
 

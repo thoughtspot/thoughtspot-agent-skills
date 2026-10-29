@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from ts_cli.audit.engine import bands, scopes
-from ts_cli.audit.engine.code_rules import _named_severity, code_rule
+from ts_cli.audit.engine import bands, fields, scopes
+from ts_cli.audit.engine.code_rules import code_rule
 from ts_cli.audit.engine.messages import render, template
 from ts_cli.audit.findings import Finding
 
@@ -112,17 +112,22 @@ def is_stale_description(desc: Any) -> bool:
     return isinstance(desc, str) and bool(desc) and bool(_STALE_DESC.search(desc))
 
 
-@code_rule("stale_names", placeholders={"what", "value"}, severity="severity_name",
-           uses=(), label="one finding per stale-looking name or description")
+@code_rule("stale_names", placeholders={"what", "value"}, severity={"MEDIUM", "LOW"},
+           uses={"dependents", "sets"},  # @dependent_count, H4's orphan test
+           label="one finding per stale-looking name or description: MEDIUM for a "
+                 "Model name on a Model nothing uses, LOW otherwise")
 def stale_names(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """H10 — per Model: its name, then each column's name and description, every match
     its own finding (`{what}` names which, `{value}` quotes it — a description's first
-    60 characters)."""
+    60 characters). A stale-looking Model name is MEDIUM when the Model is also an
+    orphan (no dependents but Sets — H4's test, the same derived field); every other
+    match is LOW."""
     out: List[Finding] = []
-    severity = _named_severity(rule)
+    severity = "LOW"
     for item in scopes.available(ctx, rule):
         if is_stale_name(item["name"]):
-            out.append(_finding(rule, item, severity,
+            orphan = fields.get(item, "@dependent_count", ctx) == 0
+            out.append(_finding(rule, item, "MEDIUM" if orphan else severity,
                                 {"what": "Model name", "value": item["name"]}))
         for col in scopes.iterate(ctx, "model.column", parent=item):
             if is_stale_name(col["name"]):

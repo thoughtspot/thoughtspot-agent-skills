@@ -218,17 +218,22 @@
     A Model name, column name or column description that reads as stale or
     temporary (do not use, deprecated, test, tmp, copy of, (2), backup, old, …; a
     name on the safe list — test_results, test_suite, … — never does). Each match is
-    its own finding, a description quoted to 60 characters. Always LOW: nothing reads
-    H4's result.
+    its own finding, a description quoted to 60 characters. LOW, except MEDIUM for a
+    stale-looking Model name on a Model that is also an orphan (no dependents but
+    Sets, H4's test).
   # A code rule (code:stale_names) because one rule reports on two scopes, the Model
   # and its columns, with three wordings; the patterns are in
   # engine/code_rules_human.py.
   categories: [H]
   requires: [model_tml]
+  # The orphan test reads dependents (Set rows included); fetched, never gates.
+  uses: [dependents, sets]
   implementation: code:stale_names
   scope: model
-  severity: LOW
-  message: "{what} matches stale pattern: '{value}'"
+  message:
+    by_severity:
+      MEDIUM: "{what} matches stale pattern: '{value}', and nothing uses the Model"
+      LOW: "{what} matches stale pattern: '{value}'"
   views: [cleanup]
   examples:
     fires: {fixture: human_stale_column, severity: LOW}
