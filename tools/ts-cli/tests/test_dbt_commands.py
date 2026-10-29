@@ -1569,6 +1569,27 @@ def test_rls_out_of_path_ignored_when_in_path_model_has_no_rules():
         assert extract_model_rls_from_manifest({"nodes": dict(order)}, "models/staging", {"CUSTOMERS"}) == {}
 
 
+class TestZipFileRefusal:
+    """The pure decision behind the generate guard: only a positive ZIP_FILE
+    match refuses; anything unreadable or unmatched lets the server decide."""
+
+    def test_zip_file_match_refuses_naming_file(self):
+        from ts_cli.dbt.zip_guard import zip_file_refusal
+        msg = zip_file_refusal(
+            [{"dbt_connection_identifier": "c1", "import_type": "zip_file"}], "c1")
+        assert msg and "--file" in msg and "ZIP_FILE" in msg
+
+    @pytest.mark.parametrize("connections", [
+        None, {}, "text", [], ["not-a-dict"],
+        [{"dbt_connection_identifier": "c1", "import_type": "DBT_CLOUD"}],
+        [{"dbt_connection_identifier": "other", "import_type": "ZIP_FILE"}],
+        [{"dbt_connection_identifier": "c1"}],
+    ])
+    def test_anything_else_does_not_refuse(self, connections):
+        from ts_cli.dbt.zip_guard import zip_file_refusal
+        assert zip_file_refusal(connections, "c1") is None
+
+
 class TestGenerateRefusesZipFileWithoutArchive:
     """A ZIP_FILE connection stores no archive: every generate call must carry
     one via --file. Without it ThoughtSpot answers 400 "Error with the uploaded

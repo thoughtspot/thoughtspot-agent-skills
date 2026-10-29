@@ -37,6 +37,7 @@ from ts_cli.dbt.cloud_api import (
 from ts_cli.dbt.formula_pass import print_double_aggregation, print_reaggregation_kept
 from ts_cli.dbt.artifacts import load_local_catalog, load_local_manifest, resolve_artifact_zip
 from ts_cli.dbt.inspect import group_manifest_models
+from ts_cli.dbt.zip_guard import zip_file_refusal
 from ts_cli.profile_ops import get_profile, load_platform_profiles
 
 app = typer.Typer(help="dbt connection management and TML generation.")
@@ -273,12 +274,8 @@ def delete_connection(
 def _require_archive_for_zip_file(client: ThoughtSpotClient, connection_id: str) -> None:
     """Refuse a generate call with no `--file` when the connection is ZIP_FILE.
 
-    The API requires the artifact archive on every generate call for a ZIP_FILE
-    connection (intended), so every call must upload one. Without it ThoughtSpot answers 400 "Error with the
-    uploaded ZIP file.", which reads as a bad archive and sends people
-    regenerating artifacts that were fine. Best effort: if the connection
-    list cannot be read or does not include this connection, do nothing and
-    let the server decide.
+    The decision is ts_cli/dbt/zip_guard.py; this is the lookup. Best effort:
+    an unreadable list never blocks.
     """
     # ThoughtSpotClient.request() signals failure with SystemExit, not an
     # Exception, so both are caught: this lookup must never block the generate
@@ -287,21 +284,12 @@ def _require_archive_for_zip_file(client: ThoughtSpotClient, connection_id: str)
     try:
         resp = client.post("/api/rest/2.0/dbt/search", json={},
                            raise_for_status=False, timeout=15)
-        if not resp.ok:
-            return
-        connections = resp.json()
+        connections = resp.json() if resp.ok else None
     except (Exception, SystemExit):
         return
-    if not isinstance(connections, list):
-        return
-    for connection in connections:
-        if (isinstance(connection, dict)
-                and connection.get("dbt_connection_identifier") == connection_id
-                and str(connection.get("import_type", "")).upper() == "ZIP_FILE"):
-            raise SystemExit(
-                f"Connection {connection_id} is a ZIP_FILE connection: pass --file on every "
-                "generate call (the `target/` directory, or a .zip of manifest.json + catalog.json). "
-                "Without it ThoughtSpot returns a misleading 400 'Error with the uploaded ZIP file.'")
+    refusal = zip_file_refusal(connections, connection_id)
+    if refusal:
+        raise SystemExit(refusal)
 
 
 def _generate(
