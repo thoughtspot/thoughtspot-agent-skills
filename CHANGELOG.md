@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
-- feat(audit): the BL-406 rule contradictions resolved per the 2026-10-23 rulings (ts-audit v2 roadmap PR 2.2), with BL-461 and BL-462. A4 retitled "Model has no description"; D7 reports a partial overlap only when the Models share a fact table; D11 words INFO findings by the join's cardinality and reads a referencing join's cardinality from its Table; H10 is MEDIUM for a stale Model name on an orphan Model; D9 matches every `sql_<type>_aggregate_op`; P18 also reads distinct-count formulas. ts-audit 3.5.0
+- feat(audit): the BL-406 rule contradictions resolved per the 2026-10-23 rulings (ts-audit v2 roadmap PR 2.2), with BL-461 and BL-462. A4 retitled "Model has no description"; D7 reports a partial overlap only when a table both Models contain is a fact table in either; D11 words INFO findings by the join's cardinality and reads a referencing join's cardinality from its Table; H10 is MEDIUM for a stale Model name on an orphan Model; D9 matches every `sql_<type>_aggregate_op`; P18 also reads distinct-count formulas. ts-audit 3.5.0
 - chore: bump ts-cli to v0.189.0
 - feat(audit): rules retired, merged and reworded per the 2026-10-23 rulings (ts-audit v2 roadmap PR 2.1, BL-406). S3, P9, S8, P5 and D6 retired; D2 merged into P6, D4 into P4, S9 into P14; P2 reworded and one step lower. A5 is no longer a finding: the Spotter readiness score shows in each Model's header and as a heatmap column. ts-audit 3.4.0
 - chore: bump ts-cli to v0.188.0

@@ -2,7 +2,8 @@
 BL-462: each rule's new behaviour, held directly rather than only through the pins.
 
 - A4 is titled for what it checks (a Model description).
-- D7 reports a partial overlap only when the two Models share a fact table.
+- D7 reports a partial overlap only when a table both Models contain is a fact
+  table in either.
 - D9 matches every `sql_<type>_aggregate_op` (BL-461).
 - D11 words an INFO finding by the join's own cardinality, and reads a referencing
   join's cardinality from its Table when the model gives none.
@@ -30,7 +31,8 @@ def _measures(table, n):
 
 def _overlap_ctx(fact_in_both: bool):
     """M1 has tables F, D1, D2, D3; M2 has F, D1, D2: Jaccard 0.75. F is a fact table
-    (4 MEASURE columns) in M1, and in M2 too when `fact_in_both`."""
+    (4 MEASURE columns) in M1; in M2 too when `fact_in_both`, else M2 surfaces only one
+    of its measures (as a Model measuring F through formulas would)."""
     tables = [{"name": n, "fqn": f"db.s.{n}"} for n in ("F", "D1", "D2", "D3")]
     return make_context(models=[
         fx.build_data_model(name="M1", guid="g1", model_tables=tables,
@@ -47,9 +49,38 @@ def test_d7_partial_overlap_with_a_shared_fact_is_medium():
     assert f.detail == "High overlap: 3/4 tables shared (Jaccard 0.75)"
 
 
-def test_d7_partial_overlap_without_a_shared_fact_is_silent():
-    """Models that only reuse the same dimensions are not duplicates."""
-    assert run_rule(_overlap_ctx(fact_in_both=False), "D7") == []
+def test_d7_a_shared_table_that_is_a_fact_in_either_model_counts():
+    """The fact test counts physical measures only, so a Model measuring F through
+    formulas reads F as a dimension; F is still the fact both Models share."""
+    [f] = run_rule(_overlap_ctx(fact_in_both=False), "D7")
+    assert f.severity == "MEDIUM"
+
+
+def test_d7_models_sharing_only_dimensions_are_silent():
+    """M1 = F, D1, D2, D3 and M2 = G, D1, D2, D3: Jaccard 0.6, but their fact tables
+    differ and every shared table is a dimension."""
+    dims = [{"name": n, "fqn": f"db.s.{n}"} for n in ("D1", "D2", "D3")]
+    ctx = make_context(models=[
+        fx.build_data_model(name="M1", guid="g1",
+                            model_tables=[{"name": "F", "fqn": "db.s.F"}] + dims,
+                            columns=_measures("F", 4)),
+        fx.build_data_model(name="M2", guid="g2",
+                            model_tables=[{"name": "G", "fqn": "db.s.G"}] + dims,
+                            columns=_measures("G", 4))])
+    assert run_rule(ctx, "D7") == []
+
+
+def test_d7_finds_an_aliased_fact_table():
+    """Columns carry the alias as their prefix; a name-only lookup saw no fact."""
+    tables = [{"name": "F", "alias": "Sales", "fqn": "db.s.F"}] + \
+        [{"name": n, "fqn": f"db.s.{n}"} for n in ("D1", "D2", "D3")]
+    ctx = make_context(models=[
+        fx.build_data_model(name="M1", guid="g1", model_tables=tables,
+                            columns=_measures("Sales", 4)),
+        fx.build_data_model(name="M2", guid="g2", model_tables=tables[:3],
+                            columns=_measures("Sales", 4))])
+    [f] = run_rule(ctx, "D7")
+    assert f.severity == "MEDIUM"
 
 
 def test_d7_identical_models_are_high_with_or_without_facts():

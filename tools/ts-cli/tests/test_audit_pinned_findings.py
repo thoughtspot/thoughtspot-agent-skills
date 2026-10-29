@@ -277,7 +277,7 @@ D_PROBES = [
     # sit above every pinned input's size)
     # D7: the HIGH finding carries no threshold. (Its MEDIUM probe went in 2026-10: a
     # partial overlap now needs a shared fact table, which no pinned input has; the
-    # MEDIUM threshold is held in test_checks_data.py.)
+    # MEDIUM threshold is held in test_audit_contradictions.py.)
     ("data_models_identical_tables", lambda f: f["check_id"] == "D7" and f["threshold"] is None),
     # D7: an explicit `fqn: None` is an element; an absent fqn falls back to the name
     ("data_models_overlap_edges", lambda f: f["check_id"] == "D7"

@@ -118,10 +118,10 @@
   title: High model overlap detected
   description: >-
     Two Models whose table sets (each table's fqn, else its name) share tables, graded
-    by Jaccard similarity: HIGH when identical, MEDIUM above 0.5 but only when the two
-    also share a fact table (more than 3 MEASURE columns) — Models that only reuse
-    the same dimensions are not duplicates. Reported once per pair, on the first
-    Model's guid.
+    by Jaccard similarity: HIGH when identical, MEDIUM above 0.5 but only when a table
+    both contain is a fact table (more than 3 MEASURE columns, found by alias else
+    name) in either of them — Models that only reuse the same dimensions are not
+    duplicates. Reported once per pair, on the first Model's guid.
   # A code rule (code:model_overlap) because the shared-fact test applies to a pair,
   # and only below identical: the pairwise mode filters items, never pairs.
   categories: [D]

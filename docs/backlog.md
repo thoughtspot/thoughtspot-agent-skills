@@ -270,7 +270,7 @@ are roughly ordered by value÷effort.
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): the 16 catalog-vs-code contradictions, alias-vs-name lookups (D10, D11, P5, H3), H10's never-emitted MEDIUM, gradings still in code (D1, D2, H2, H10), A5 crashing on a column with no name | 2027-01-31 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): alias-vs-name lookups (D10, D11, H3), gradings still in code (D1, H2, H10, P6), the report corpus crashing on a column with no name, P2's expression-based test (the 16 contradictions and H10's MEDIUM closed by roadmap PRs 2.1–2.2) | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 | BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
@@ -313,6 +313,7 @@ are roughly ordered by value÷effort.
 | BL-476 | Re-date or close eight overdue OPEN items and six index rows that contradict their RESOLVED sections | 2026-11-30 |
 | BL-265 | Any physical measure over a non-numeric column is demoted to an attribute (`COUNT`/`MIN`/`MAX`/`COUNT_DISTINCT`); SV, MV and dbt converters neither predict nor report it | 2026-11-30 |
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
+| BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -14751,14 +14752,19 @@ PR 2.1). D2's fixed severities moved to P6 (`join_keys`, LOW / INFO), still in c
 (item 3). P5 is retired, so its part of item 4 is moot.
 
 **Progress (2026-10-30, roadmap PR 2.2).** Item 1 is closed: every contradiction follows
-the decision sheet. A4 is retitled; D7 reports a partial overlap only when the two Models
-share a fact table; D11 words its INFO finding by the join's cardinality and reads a
-referencing join's cardinality from its Table (item 5's wording and reach; its alias
-lookup is PR 2.3 with item 4); H10 is MEDIUM for a stale Model name on an orphan Model
-(item 2's H10 half); and D1, D5, D9, H1, H2, S1, S2 and S5 needed no change, since their
-catalog descriptions, from which the check catalog is generated, already state the coded
-behaviour (H1 and H2 keep one finding per Model, item 2's other half). H10's severities
-are now fixed in code (LOW / MEDIUM), which item 3 moves into data.
+the decision sheet. A4 is retitled; D7 reports a partial overlap only when a table both
+Models contain is a fact table in either (found by alias, else name); D11 words its INFO
+finding by the join's cardinality (item 5's wording); H10 is MEDIUM for a stale Model name
+on an orphan Model (item 2's H10 half); and D1, D5, D9, H1, H2, S1 and S2 needed no
+change, since their catalog descriptions, from which the check catalog is generated,
+already state the coded behaviour (H1 and H2 keep one finding per Model, item 2's other
+half). S5's and H2's descriptions were corrected to match their code: S5 does not match a
+spaced "API Key" or "Secret Key" (whether it should is a noise question for PR 2.3).
+Item 5's **reach is not closed**: D11 now falls back to a referencing join's Table
+`joins_with` cardinality, but exported Table TML carries none (0 of 527 entries on the SE
+demo sample), so referencing joins stay unjudged — BL-496. D11's alias lookup is PR 2.3
+with item 4. H10's severities are now fixed in code (LOW / MEDIUM), which item 3 moves
+into data.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
@@ -15516,6 +15522,10 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-30.
 
+**Resolution (2026-10-30, roadmap PR 2.2).** D9's regex is `\bsql_[a-z_]+_aggregate_op\b`:
+every type, any case, and not a name merely containing the function's spelling
+(`[sql_int_aggregate_op_total]`). Tests in `tests/test_audit_contradictions.py`.
+
 ## BL-462 — audit rule P18 will report zero once converters emit `unique count` formulas `Tier 2` — **RESOLVED 2026-10-30**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 14.2; carry-over of `docs/audit/2026-09-22-full.md` finding 14.3.
@@ -15525,6 +15535,13 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 **Do.** Also scan `formulas[].expr` for `unique count`, `unique_count_if` and `group_unique_count`, in the rule catalog; regenerate and re-pin.
 
 **Target:** 2026-11-30.
+
+**Resolution (2026-10-30, roadmap PR 2.2).** P18 also reports a column surfacing a formula
+that calls `unique count`, `unique_count_if` or `group_unique_count` (new field
+`@formula_expr`); its message is now "Distinct count on …". It matches a function name
+inside a `[...]` reference or a string literal too (none on the SE demo sample's 56 hits),
+and its message no longer tells a COUNT_DISTINCT aggregation (an I5 violation) from the
+recommended formula; both are noise questions for roadmap PR 2.3.
 
 ## BL-463 — pip-audit covers one Python only, and nothing flags an end-of-life Python in the matrix `Tier 2`
 
@@ -15855,3 +15872,22 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-30.
 
+## BL-496 — audit rule D11 cannot judge a referencing join: no cardinality in exported Table TML `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the independent review of roadmap PR 2.2 (BL-406 item 5,
+"reach").
+
+**What.** D11 (fan-out risk) reads a join's cardinality. A referencing join keeps its
+definition in the Table's `joins_with[]`, and exported Table TML carries no `cardinality`
+there: 0 of 165 in the 2026-07-30 census, 0 of 527 on the 2026-10-30 SE demo sample. PR 2.2
+added the fallback to the Table's value, but with nothing to read, D11 still skips every
+referencing join that the model does not annotate — 150 of 154 on the sample, about a
+fifth of all joins.
+
+**Do.** Find where the cardinality of a referencing join can be read: the SpotterCode MCP
+(`get-rest-api-reference`) for a metadata or join endpoint that returns it, then a live probe
+on the SE demo cluster. If no surface carries it, decide with the product owner whether D11
+infers it (for example from key uniqueness, which needs data) or states the gap in its
+description and the report.
+
+**Target:** 2027-01-31.

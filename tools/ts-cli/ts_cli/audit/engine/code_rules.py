@@ -339,13 +339,17 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
                                          "union"},
            severity="bands", uses=(),
            label="graded per pair of Models on the share of tables they have in "
-                 "common; a partial overlap only when the two share a fact table")
+                 "common; a partial overlap only when a table they share is a fact "
+                 "table in either")
 def model_overlap(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D7 — every unordered pair of Models sharing a table (@table_set), graded on the
     Jaccard similarity of their table sets by the rule's bands, as the pairwise mode
-    grades. Below identical (a partial overlap), a pair is reported only when the two
-    also share a fact table (@fact_table_set): two Models that merely reuse the same
-    dimensions are not duplicates. Reported once per pair, on the first Model."""
+    grades. Below identical (a partial overlap), a pair is reported only when a table
+    both contain reads as a fact in either Model (@fact_table_set) — "either", because
+    the fact test counts physical measures only, so the same fact table can read as a
+    dimension in a Model that measures it through formulas. Two Models that merely
+    reuse the same dimensions are not duplicates. Reported once per pair, on the
+    first Model."""
     from itertools import combinations
     models = [(i, fields.as_set(fields.get(i, "@table_set", ctx)),
                fields.as_set(fields.get(i, "@fact_table_set", ctx)))
@@ -357,7 +361,7 @@ def model_overlap(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
             continue
         union = ta | tb
         similarity = len(shared) / len(union)
-        if similarity < 1 and not (fa & fb):
+        if similarity < 1 and not (shared & (fa | fb)):
             continue
         severity = bands.classify(similarity, rule.bands)
         if severity is None:
