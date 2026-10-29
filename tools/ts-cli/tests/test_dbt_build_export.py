@@ -2606,12 +2606,12 @@ class TestCountDistinctBecomesFormula:
         from ts_cli.formula_common import count_distinct_columns_to_formulas
         cols = [{"name": "Amount", "column_id": "T::AMOUNT",
                  "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
-        kept, formulas, fcols, converted = count_distinct_columns_to_formulas(cols, set())
+        kept, formulas, fcols, converted = count_distinct_columns_to_formulas(cols, [])
         assert kept == cols and not formulas and not fcols and not converted
 
     def test_formula_id_does_not_collide(self):
         from ts_cli.formula_common import count_distinct_columns_to_formulas
         cols = [{"name": "N", "column_id": "T::C",
                  "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]
-        _, formulas, fcols, _ = count_distinct_columns_to_formulas(cols, {"formula_N"})
+        _, formulas, fcols, _ = count_distinct_columns_to_formulas(cols, [{"id": "formula_N"}])
         assert formulas[0]["id"] == "formula_N 2" == fcols[0]["formula_id"]

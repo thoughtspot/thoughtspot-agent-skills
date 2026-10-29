@@ -470,7 +470,7 @@ _AGG_TO_FORMULA_FN = {
 
 def count_distinct_columns_to_formulas(
     columns: list[dict],
-    existing_formula_ids: "set[str]",
+    existing_formulas: list[dict],
 ) -> "tuple[list[dict], list[dict], list[dict], list[str]]":
     """Re-express every physical ``columns[]`` entry carrying
     ``aggregation: COUNT_DISTINCT`` as a ``unique count`` formula (invariant I5).
@@ -483,14 +483,14 @@ def count_distinct_columns_to_formulas(
     and other properties carry over, so the measure keeps its name and metadata.
 
     Returns ``(kept_columns, new_formulas, new_formula_columns, converted_names)``.
-    Formula ids follow the ``formula_<Name>`` convention, de-duplicated against
-    ``existing_formula_ids``. Inputs are not mutated.
+    Formula ids follow the ``formula_<Name>`` convention, de-duplicated against the
+    ids in ``existing_formulas``. Inputs are not mutated.
     """
     kept: list[dict] = []
     new_formulas: list[dict] = []
     new_cols: list[dict] = []
     converted: list[str] = []
-    taken = set(existing_formula_ids)
+    taken = {f.get("id") for f in existing_formulas}
     for col in columns:
         props = col.get("properties") or {}
         if "column_id" not in col or props.get("aggregation") != "COUNT_DISTINCT":

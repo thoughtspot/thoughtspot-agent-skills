@@ -330,7 +330,7 @@ def build_model_tml_from_manifest(
     # formula (I5; audit 2026-10-29, 9.2). Before the metric/collision passes, so
     # the new formulas go through them like any other.
     columns, cd_formulas, cd_cols, cd_converted = count_distinct_columns_to_formulas(
-        columns, {f["id"] for f in formulas})
+        columns, formulas)
     formulas += cd_formulas
     formula_col_entries += cd_cols
 
