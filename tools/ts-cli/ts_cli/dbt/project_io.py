@@ -83,3 +83,11 @@ def commit_writes(writes: "dict[Path, str]") -> None:
         raise
     for tmp, target in staged:
         os.replace(tmp, target)
+
+
+def pending_or_disk(writes: "dict[Path, str]", path: Path) -> str:
+    """A file's text as this run will leave it: the queued write if there is one."""
+    for queued, text in writes.items():   # samefile: models/Schema.yml vs schema.yml on
+        if queued == path or (queued.exists() and os.path.samefile(queued, path)):  # macOS
+            return text
+    return path.read_text(encoding="utf-8")

@@ -31,7 +31,8 @@ from .tags import (
     tml_properties_from_ts_meta,
 )
 
-def extract_model_rls_from_manifest(manifest: dict, model_path: str) -> dict[str, dict]:
+def extract_model_rls_from_manifest(manifest: dict, model_path: str,
+                                    table_names: "set[str] | None" = None) -> dict[str, dict]:
     """Extract ts_rls_rules from compiled manifest model nodes.
 
     Parallel to extract_table_rls_from_schema_yml but reads from a compiled
@@ -40,8 +41,10 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str) -> dict[str
     this returns the same data as the schema.yml reader without needing the
     source file.
 
-    Returns {TABLE_NAME_UPPER: rls_rules_block} for each model in model_path
-    that carries ts_rls_rules under config.meta.  The caller should export the
+    Returns {TABLE_NAME_UPPER: rls_rules_block} for each model in model_path —
+    and, when ``table_names`` is given, each model whose Table is in it (join
+    targets outside model_path, audit 2026-10-29 PR A review) — that carries
+    ts_rls_rules under config.meta.  The caller should export the
     current Table TML, merge in the rls_rules block, and re-import.
     """
     result: dict[str, dict] = {}
@@ -50,7 +53,8 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str) -> dict[str
         # match, which also swept in a sibling directory sharing the prefix
         # (`models/staging` picking up `models/staging_archive`) and disagreed
         # with what `ts dbt inspect` reported for the same path.
-        if not model_in_path(node, model_path):
+        if not (model_in_path(node, model_path)
+                or _node_table_name(node) in (table_names or ())):
             continue
         model_name = node.get("name")
         if not model_name:

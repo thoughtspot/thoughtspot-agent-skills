@@ -1439,3 +1439,16 @@ def test_build_model_import_is_lint_gated(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert "LINT: I14" in result.output and "nothing was imported" in result.output
     assert calls == []
+
+
+def test_pending_write_found_under_a_different_case(tmp_path):
+    """PR A review: models/Schema.yml on a case-insensitive filesystem."""
+    import os
+    from ts_cli.dbt.project_io import pending_or_disk
+    real = tmp_path / "Schema.yml"
+    real.write_text("disk", encoding="utf-8")
+    other = tmp_path / "schema.yml"
+    if not other.exists():          # case-sensitive filesystem: nothing to test
+        return
+    assert os.path.samefile(real, other)
+    assert pending_or_disk({other: "queued"}, real) == "queued"

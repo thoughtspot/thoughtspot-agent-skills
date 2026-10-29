@@ -126,7 +126,10 @@ never fails to "translate" here — the only skip is structural:
 The Model column's `aggregation` is written lowercased as `ts_aggregation` and read back
 through `_AGG_MAP`: `sum`, `count`, `count_distinct`, `min`, `max`, `average`,
 `std_deviation`, `variance`, `none`. Round-trips exactly — these are ThoughtSpot tag
-values, not MetricFlow syntax.
+values, not MetricFlow syntax — with one exception (ts-cli 0.187.0): when the reader
+**creates** a Model, `count_distinct` on a physical measure column, or on a formula that only
+wraps a column, is emitted as a `unique count ( [T::col] )` formula (invariant I5). An
+**update** (`--model-guid`) keeps the existing column as it is, so dependents stay intact.
 
 ### Column aggregation → MetricFlow `agg` (`--semantic-models` only)
 

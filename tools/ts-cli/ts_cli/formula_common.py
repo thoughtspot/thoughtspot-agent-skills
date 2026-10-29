@@ -496,7 +496,8 @@ def count_distinct_columns_to_formulas(
     taken = {f.get("id") for f in existing_formulas}
     for col in columns:
         props = col.get("properties") or {}
-        if "column_id" not in col or props.get("aggregation") != "COUNT_DISTINCT":
+        if ("column_id" not in col or props.get("aggregation") != "COUNT_DISTINCT"
+                or props.get("column_type") == "ATTRIBUTE"):   # a declared attribute stays one
             kept.append(col)
             continue
         name = col["name"]
@@ -515,6 +516,40 @@ def count_distinct_columns_to_formulas(
         new_cols.append(entry)
         converted.append(name)
     return kept, new_formulas, new_cols, converted
+
+
+_BARE_COLUMN_REF = re.compile(r"^\s*\[[^\[\]]+::[^\[\]]+\]\s*$")
+
+
+def count_distinct_bare_formulas(
+    formulas: list[dict], formula_columns: list[dict],
+) -> "tuple[list[dict], list[dict], list[str]]":
+    """The formula half of invariant I5: a formula column whose ``expr`` is only a
+    column reference (``[T::col]``) and which carries ``aggregation: COUNT_DISTINCT``
+    is demoted to an ATTRIBUTE on a VARCHAR column exactly like a physical one
+    (live probe 2026-10-29), and ``tml_lint`` exempts formula columns. Rewrites the
+    expr to ``unique count ( [T::col] )`` and the column aggregation to SUM.
+
+    Returns ``(formulas, formula_columns, converted_names)``; inputs not mutated.
+    """
+    by_id = {f.get("id"): f for f in formulas}
+    targets = {
+        c.get("formula_id") for c in formula_columns
+        if (c.get("properties") or {}).get("aggregation") == "COUNT_DISTINCT"
+        and (c.get("properties") or {}).get("column_type") != "ATTRIBUTE"
+        and _BARE_COLUMN_REF.match(str((by_id.get(c.get("formula_id")) or {}).get("expr", "")))
+    }
+    fn = _AGG_TO_FORMULA_FN["COUNT_DISTINCT"]
+    new_formulas = [
+        {**f, "expr": f"{fn} ( {f['expr'].strip()} )"} if f.get("id") in targets else f
+        for f in formulas]
+    new_cols, converted = [], []
+    for c in formula_columns:
+        if c.get("formula_id") in targets:
+            c = {**c, "properties": {**c["properties"], "aggregation": "SUM"}}
+            converted.append(c.get("name", ""))
+        new_cols.append(c)
+    return new_formulas, new_cols, converted
 
 
 def promote_duplicate_column_ids(

@@ -34,7 +34,7 @@ from ts_cli.dbt.case_b_plan import (
     _kept_ts_keys,  # noqa: F401 -- re-exported for tests
     render_report_markdown,
 )
-from ts_cli.dbt.project_io import commit_writes, property_files
+from ts_cli.dbt.project_io import commit_writes, pending_or_disk, property_files
 from ts_cli.io_helpers import load_json_file
 
 app = typer.Typer(help="ThoughtSpot Model TML -> dbt project scaffold (offline file transform).")
@@ -599,11 +599,6 @@ def _merge_new_source_tables(
     return [f"{relative_path} (merged)"]
 
 
-def _pending_or_disk(writes: "dict[Path, str]", path: Path) -> str:
-    """A file's text as this run will leave it: the queued write if there is one."""
-    return writes[path] if path in writes else path.read_text(encoding="utf-8")
-
-
 def _update_existing_schema_models(
     proj: Path, report: dict, writes: "dict[Path, str]",
 ) -> "tuple[list[str], dict[str, list[str]]]":
@@ -649,7 +644,7 @@ def _update_existing_schema_models(
             # the file (e.g. new models appended to schema.yml), not from disk —
             # re-reading disk here overwrote that write and lost the new blocks
             # (audit 2026-10-29, 17.1).
-            doc = yaml.safe_load(_pending_or_disk(writes, yml_path))
+            doc = yaml.safe_load(pending_or_disk(writes, yml_path))
         except Exception:
             continue
         if not isinstance(doc, dict):

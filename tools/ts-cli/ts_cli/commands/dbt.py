@@ -598,6 +598,13 @@ def _build_model_artifacts(dbt_cloud_profile: Optional[str], manifest_path: Opti
             fetch_artifact(ctx, run_id, "catalog.json", use_cache=not no_cache))
 
 
+def _import_confirmed(objects: list) -> bool:
+    """A security gate needs a positive OK/WARNING per item, not "no failure reported"."""
+    return bool(objects) and all(
+        ((o.get("response") or {}).get("status") or {}).get("status_code") in ("OK", "WARNING")
+        for o in objects if isinstance(o, dict))
+
+
 def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
                      table_guids: dict) -> "list[str]":
     """Export each Table carrying ts_rls_rules, patch in `rls_rules`, re-import.
@@ -641,7 +648,7 @@ def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
         )
         rls_objects = rls_resp.json() if isinstance(rls_resp.json(), list) else []
         failures = tml_import_failures(rls_objects)
-        if not rls_objects or failures:
+        if failures or not _import_confirmed(rls_objects):
             detail = (failures[0].get("error_message") or "").strip() if failures else ""
             not_applied.append(
                 f"{table_name}: the RLS import did not succeed ({detail or 'no per-item status returned'})")
@@ -716,16 +723,16 @@ def build_model(
     )
 
     manifest, catalog = _build_model_artifacts(dbt_cloud_profile, manifest_path, no_cache)
-    # 2026-10 (PR #506 review): extracted — and validated — BEFORE the Model
-    # import. It used to run after, so a malformed hand-written ts_rls_rules tag
-    # raised only once the Model was already imported, leaving it live without
-    # the row-level security its author declared.
-    rls_by_table = extract_model_rls_from_manifest(manifest, model_path)
-
     model_tml = build_model_tml_from_manifest(
         manifest, catalog, model_path, model_name,
         pretty_names=pretty_names, metrics=metrics,
         count_distinct_as_formula=not model_guid)
+    # ts_rls_rules are extracted — and validated — BEFORE the Model import (PR #506
+    # review: a malformed tag used to raise only after the Model was live), for every
+    # Table the Model joins, not only those under --model-path: a shared dimension
+    # elsewhere can carry rules too (audit 2026-10-29 PR A review).
+    rls_by_table = extract_model_rls_from_manifest(
+        manifest, model_path, {t["name"] for t in model_tml["model"]["model_tables"]})
     excluded = model_tml.pop("_excluded_columns", [])
     if excluded:
         print(f"  ts_column_exclude: {len(excluded)} column(s) left out of the Model — "
@@ -783,10 +790,10 @@ def build_model(
     )
     apply_table_fqns(model_tml, table_guids)
 
-    # Lint before anything is written to ThoughtSpot, as the Snowflake, Databricks
-    # and Tableau builders do: without it, model-invariant violations reached the
-    # server, and some (I5 on a text column) import "successfully" and wrong
-    # (audit 2026-10-29, 9.3).
+    # Lint before anything is written to ThoughtSpot, as the Snowflake and Databricks
+    # builders do (Tableau's merge mode does not yet). Without it, model-invariant
+    # violations reached the server, and some (I5 on a text column) import
+    # "successfully" and wrong (audit 2026-10-29, 9.3).
     lint_gate(model_tml, updating=bool(model_guid))
     tml_yaml = _yaml.dump(model_tml, sort_keys=False, allow_unicode=True)
 

@@ -2653,3 +2653,35 @@ class TestLintGate:
         assert "advisory" in capsys.readouterr().err
         with pytest.raises(SystemExit):
             lint_gate(model, updating=False)
+
+
+class TestCountDistinctReviewCases:
+    """PR A review: a declared attribute stays one; a bare-column ts_formula with
+    count_distinct is the I5 formula path and is converted too."""
+
+    def _build(self, cols):
+        schema = yaml.safe_dump({"version": 2, "models": [{"name": "stg_orders", "columns": cols}]})
+        return build_model_tml_from_schema_yml(schema, "M")
+
+    def test_declared_attribute_is_not_converted(self):
+        tml = self._build([{"name": "REGION", "config": {"meta": {
+            "ts_column_type": "attribute", "ts_aggregation": "count_distinct"}}}])
+        col = tml["model"]["columns"][0]
+        assert col["column_id"] == "STG_ORDERS::REGION"
+        assert col["properties"]["column_type"] == "ATTRIBUTE"
+
+    def test_bare_column_formula_is_converted(self):
+        tml = self._build([{"name": "Cust Key", "config": {"meta": {
+            "ts_formula": "[STG_ORDERS::CUSTOMER_NAME]", "ts_column_type": "measure",
+            "ts_aggregation": "count_distinct"}}}])
+        f = tml["model"]["formulas"][0]
+        assert f["expr"] == "unique count ( [STG_ORDERS::CUSTOMER_NAME] )"
+        col = next(c for c in tml["model"]["columns"] if c.get("formula_id") == f["id"])
+        assert col["properties"]["aggregation"] == "SUM"
+        assert "Cust Key" in tml["_count_distinct_as_formula"]
+
+    def test_computed_formula_with_count_distinct_is_left_alone(self):
+        tml = self._build([{"name": "X", "config": {"meta": {
+            "ts_formula": "concat ( [STG_ORDERS::A] , [STG_ORDERS::B] )", "ts_column_type": "measure",
+            "ts_aggregation": "count_distinct"}}}])
+        assert tml["model"]["formulas"][0]["expr"].startswith("concat")

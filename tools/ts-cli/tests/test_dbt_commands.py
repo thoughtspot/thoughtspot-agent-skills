@@ -1469,3 +1469,21 @@ class TestBuildModelRlsGate:
         assert result.exit_code != 0
         assert "LINT: I5" in result.output and "nothing was imported" in result.output
         assert not any(p.endswith("/tml/import") or p.endswith("/tml/export") for p, _ in calls)
+
+
+def test_rls_gate_needs_a_positive_status():
+    c = TestApplyTableRls._Client(TestApplyTableRls._GOOD_EXPORT, [{"response": {}}])
+    assert dbt_mod._apply_table_rls(c, TestApplyTableRls._RLS, {})
+
+
+def test_rls_rules_on_join_target_outside_model_path():
+    """PR A review blocker: ts_rls_rules on a joined model outside --model-path."""
+    from ts_cli.dbt.manifest import extract_model_rls_from_manifest
+    manifest = {"nodes": {
+        "model.p.stg_barbers": {"resource_type": "model", "name": "stg_barbers",
+            "original_file_path": "models/marts/core/stg_barbers.sql",
+            "config": {"meta": {"ts_rls_rules": [{"name": "r", "expr": "ts_username = [STG_BARBERS::NAME]"}]}}},
+    }}
+    assert extract_model_rls_from_manifest(manifest, "models/staging/barbershop") == {}
+    got = extract_model_rls_from_manifest(manifest, "models/staging/barbershop", {"STG_BARBERS"})
+    assert list(got) == ["STG_BARBERS"]

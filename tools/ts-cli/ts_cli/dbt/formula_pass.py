@@ -34,7 +34,7 @@ import re
 from typing import Callable
 
 from ts_cli.formula_common import (
-    count_distinct_columns_to_formulas, expr_is_aggregated, fix_double_aggregation,
+    count_distinct_bare_formulas, count_distinct_columns_to_formulas, expr_is_aggregated, fix_double_aggregation,
     resolve_name_collisions)
 
 FORMULA_ID_PREFIX = "formula_"
@@ -178,4 +178,6 @@ def count_distinct_pass(columns: list, formulas: list, formula_col_entries: list
     from .tags import _formula_id   # lazy — tags imports from this package
     columns, new_f, new_cols, converted = count_distinct_columns_to_formulas(
         columns, formulas, id_fn=_formula_id)
-    return columns, formulas + new_f, formula_col_entries + new_cols, converted
+    formulas, formula_col_entries, bare = count_distinct_bare_formulas(
+        formulas, formula_col_entries)
+    return columns, formulas + new_f, formula_col_entries + new_cols, converted + bare
