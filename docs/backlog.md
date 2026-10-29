@@ -15331,11 +15331,18 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 ## BL-447 — distinct counts that ThoughtSpot demotes to an attribute: Snowflake SV formula path and Power BI; no gate on the literal `COUNT_DISTINCT` `Tier 1`
 
-**Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, findings 9.1 and 9.4 (and the validator half of 9.3), Codification opportunities 1 and 2. The dbt instance (9.2) and dbt's lint gate (9.3) are in the pending fix PR on branch `fix/dbt-correctness`, which adds the shared `formula_common` helper this item uses.
+**Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, findings 9.1 and 9.4 (and the validator half of 9.3), Codification opportunities 1 and 2. dbt's lint gate (9.3) and 17.1/17.2 are fixed by the dbt correctness PR; the dbt `count_distinct` conversion (9.2) is **here**, because review of that PR showed it needs the design below.
 
 **What.** ThoughtSpot types a physical `MEASURE` by its column's data type (I5 probes, 2026-10-29): a VARCHAR or DATE column with `aggregation: COUNT_DISTINCT` is stored as an `ATTRIBUTE` and search returns values, not a count. from-snowflake-sv emits a fact's `count_distinct` three ways; the computed-fact / `T.COL as col` form is a **formula** column carrying `aggregation: COUNT_DISTINCT` (`sv_translate.py:142` → `sv_build_model.py:60`), which `lint_tml` exempts and the platform demotes the same way — silent. `ts-from-snowflake-rules.md:268` instructs the column form. from-powerbi maps `summarizeBy distinctCount` to a column `COUNT_DISTINCT` (`powerbi/tables.py:26`, `build_model.py:122`); only the prose `ts tml lint` step reports it. Separately, `ts tableau build-model --existing-guid` imports through a `ts tml import` subprocess with no lint (`commands/tableau.py:507-512`), and nothing requires a converter's import path to lint at all.
 
 **Do.** Emit `unique count ( [T::c] )` for every SV fact form and for Power BI `distinctCount` through the shared helper; correct `ts-from-snowflake-rules.md:268`; extend I5's lint to formula columns whose expr is a bare column reference. Add `check_converter_parity` requirement C (no from-converter maps a source aggregation to the literal column `COUNT_DISTINCT`; current hits `sv_naming.py:132`, `powerbi/tables.py:26`, `sisense/functions.py:32` — the last is BL-308's dead code) and requirement D (every `ts-convert-*` builder that imports Model TML, by POST or `ts tml import` subprocess, lints it first — excluding `ts link` and the round-trip commands), and lint Tableau's merge mode.
+
+**dbt (9.2) — design constraints found by two review passes of the attempted fix (2026-10-29).** Converting `ts_aggregation: count_distinct` to a `unique count` formula at build time:
+- must read the **existing Model** on update (`--model-guid`) and keep the form it holds: converting only on create meant a resync replaced the created formula with a physical `COUNT_DISTINCT` column again, and converting on update would replace a round-tripped physical column that Answers use;
+- must not leave a Table with **no `column_id` entry** (ThoughtSpot refuses such a Model): keep the physical column as an attribute under its own name when the count was its only use;
+- must not rewrite a bare-column `ts_formula` **in place** when another formula references it — the per-row value becomes an aggregate; add a separate count formula instead;
+- must leave a declared `ts_column_type: attribute` alone.
+Until then the dbt lint gate reports I5 as advisory, so these columns import as they always did.
 
 **Target:** 2026-11-15.
 
@@ -15826,7 +15833,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **What.** With `ts_rls_rules` in schema.yml and no `--rls-out`, the schema.yml path prints a WARNING (`commands/dbt_export.py`, `_handle_schema_yml_rls`), imports the Model and exits 0, which is the outcome `ts dbt build-model` now treats as fatal. Documented in `ts-convert-from-dbt/SKILL.md`, so not silent, but the two Model builders disagree on what a missing RLS application means.
 
-**Do.** Apply the rules before the Model import as `ts dbt build-model` does (reuse `_apply_table_rls`), or refuse `--import` when rules exist and `--rls-out` is absent.
+**Do.** Apply the rules before the Model import as `ts dbt build-model` does (reuse `_apply_table_rls`), or refuse `--import` when rules exist and `--rls-out` is absent. Also align `dbt/inspect.py`'s `rls_models` with build-model, which now applies rules to join targets outside `--model-path` too.
 
 **Target:** 2026-11-30.
 
