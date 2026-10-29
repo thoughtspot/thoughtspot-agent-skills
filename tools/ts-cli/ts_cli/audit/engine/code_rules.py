@@ -256,8 +256,9 @@ def readiness_score(item: dict, ctx: Any) -> float:
                    if fields.get(c, "@has_synonyms", ctx)) / total) * 100
     has_ai = bool(fields.get(item, "@is_coached", ctx))
     has_desc = _nonblank(model.get("description"))
-    # `or ""`: a present-but-null name is not a poor name, and must not raise (BL-406 #7)
-    anti = sum(1 for c in cols if _poor_name(c.get("name") or ""))
+    # A present-but-null name is not a poor name, and a null or YAML-typed (numeric) one
+    # must not raise (BL-406 #7)
+    anti = sum(1 for c in cols if _poor_name(str(c.get("name") or "")))
     name_quality = ((total - anti) / total) * 100 if total else 100
     return (desc_pct * 0.30
             + (100 if has_ai else 0) * 0.25

@@ -176,7 +176,8 @@ def _is_coached(item: dict, ctx: Any) -> bool:
     """Model: coached — its ai/instructions response carries an instruction, or its TML
     has `model_instructions.data_model_instructions`. A model whose lookup failed (no
     entry in `ctx.ai_instructions`) reads as uncoached here; a rule that must skip it
-    instead declares `requires: [ai_instructions]` (A3 does, A5 does not)."""
+    instead declares `requires: [ai_instructions]` (A3 does; the report's Spotter readiness
+    score, A5 until 2026-10, does not)."""
     from ts_cli.audit.context import nl_instructions  # not gate-safe: import on use
     model = item.get("obj") or {}
     return bool(

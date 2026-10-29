@@ -449,8 +449,8 @@ the same Model still had **no** `model_instructions` key. So TML is neither a wr
 read path on that build: **write with `ai/instructions/set`, read with `ai/instructions/get`**,
 and treat an absent TML key as "unknown", not "none". (`ts-audit`'s open-item #5 reports the
 field present in exported TML on another build — undated and un-instanced; the 2026-07-30 census
-found it in 0 of 143 Models.) Readers that use only the TML field (`tml_probes.py`) under-report; the audit's A3/A5
-coaching read (`@is_coached`, `audit/engine/fields.py`) also takes the API `get`. `ts link build` writes instructions via the API for this
+found it in 0 of 143 Models.) Readers that use only the TML field (`tml_probes.py`) under-report; the audit's A3 and
+Spotter readiness coaching read (`@is_coached`, `audit/engine/fields.py`) also takes the API `get`. `ts link build` writes instructions via the API for this
 reason. Whether `set` replaces or appends is not yet known. (BL-030.)
 
 **The API twin returns a different shape.** `POST /api/rest/2.0/ai/instructions/get` (parameter

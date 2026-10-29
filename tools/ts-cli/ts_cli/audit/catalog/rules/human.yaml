@@ -21,7 +21,7 @@
     The share of a Model's columns whose names a person would not search for: col1,
     field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse
     names. One finding per Model over 10%, listing the first five such names. The
-    same two patterns A5 scores name quality with.
+    same two patterns the report's Spotter readiness score rates name quality with.
   categories: [H]
   requires: [model_tml]
   scope: model

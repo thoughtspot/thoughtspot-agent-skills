@@ -3,11 +3,11 @@
 # tools/validate/check_audit_catalog.py.
 #
 # None of these is profile-aware: the catalog default holds under both profiles.
-# D4 repeats P4 and the HIGH half of D2 repeats P6 — each angle reports the shared
-# rule under its own id and wording (engine/tml.py, BL-304). Titles are the legacy
+# D2 and D4 were merged into P6 and P4 in 2026-10, which now sit in category D as
+# well. Titles are the legacy
 # CHECK_META descriptions; D7 and D8 carry the report's existing remediation text, the
 # others have never had one. Where a rule words its findings differently by severity
-# (D2, D3, D7, D11), the message is `{by_severity: ...}` (catalog_forms.py).
+# (D3, D7, D11), the message is `{by_severity: ...}` (catalog_forms.py).
 #
 # Known legacy defects reproduced here, not fixed (the pinned legacy answers hold the
 # rules to them — tests/test_audit_pinned_findings.py; the spec's follow-up list owns the fixes): D10 and D11 look a model

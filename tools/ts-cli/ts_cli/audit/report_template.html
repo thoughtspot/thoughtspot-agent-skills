@@ -229,6 +229,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   text-align:left;min-width:140px;max-width:200px;
 }
 .heatmap th.angle-col{min-width:90px;cursor:pointer;}
+.heatmap th.score-col{min-width:90px;}
 .heatmap th.angle-col:hover{color:var(--accent);}
 .heatmap td{padding:4px;text-align:center;border-bottom:1px solid var(--hair-2);}
 .heatmap td.model-name{
@@ -1120,7 +1121,7 @@ function buildScorecard(D, guid, filterAngle){
     });
     if(cm.rs){
       titleHtml += '<div class="stat-item" title="'+esc(READINESS_TITLE)+'"><div class="stat-val readiness" data-level="'+esc(cm.rs.l)+'">'+
-                   Math.round(cm.rs.s)+'/100</div><div class="stat-lbl">Spotter readiness</div></div>';
+                   Math.floor(cm.rs.s)+'/100</div><div class="stat-lbl">Spotter readiness</div></div>';
     }
     titleHtml += '</div>';
   }
@@ -2876,7 +2877,8 @@ function buildHeatmap(){
   html += '<th class="model-col">Model</th>';
   var readiness = readinessByGuid();
   var showReadiness = Object.keys(readiness).length > 0;
-  if(showReadiness) html += '<th class="angle-col" title="'+esc(READINESS_TITLE)+'">Spotter readiness</th>';
+  /* not an angle-col: that class makes a header a category filter */
+  if(showReadiness) html += '<th class="score-col" title="'+esc(READINESS_TITLE)+'">Spotter readiness</th>';
   angleKeys.forEach(function(a){
     html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
             ANGLE_LABELS[a]+'</th>';
@@ -2889,7 +2891,7 @@ function buildHeatmap(){
     if(showReadiness){
       var rs = readiness[r.g];
       html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
-                   Math.round(rs.s)+'</span></td>' : '<td></td>';
+                   Math.floor(rs.s)+'</span></td>' : '<td></td>';
     }
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";

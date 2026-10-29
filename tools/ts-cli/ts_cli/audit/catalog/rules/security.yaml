@@ -5,10 +5,9 @@
 # None of these is profile-aware: the catalog default holds under both profiles.
 # The PII and credential name heuristics are derived fields (@pii_category,
 # @pii_confidence, @credential_term in engine/fields.py), one copy shared by S1-S5.
-# S8 repeats P15 without the value_casing guard, S9 repeats P14 — each angle reports
-# the shared rule under its own id and wording (engine/tml.py, BL-304). Titles are the
-# legacy CHECK_META descriptions; S1-S5 carry the report's existing remediation
-# text, S8-S10 have never had one.
+# S3 and S8 were retired and S9 merged into P14 in 2026-10. Titles are the legacy
+# CHECK_META descriptions; S1-S5 carry the report's existing remediation text, S10
+# has never had one.
 
 - id: S1
   title: PII column detection (heuristic regex)
@@ -61,8 +60,8 @@
   title: PII without CLS or masking formula
   description: >-
     Retired 2026-10: it reported "no CLS or masking formula" but never read column
-    security, only a heuristic over the Model's formula text. It returns when it reads
-    Column Security Rules.
+    security, only a heuristic over the Model's formula text. A check that reads
+    Column Security Rules would be a new rule with a new id.
   status: retired
   categories: [S]
   requires: [model_tml]

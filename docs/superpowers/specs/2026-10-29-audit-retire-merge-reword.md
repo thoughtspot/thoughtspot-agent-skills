@@ -21,9 +21,12 @@ made") · **Roadmap:** `2026-10-23-audit-v2-roadmap.md`, wave 2, PR 2.1
 ## Choices the rulings left open
 
 - **Retired rules keep their logic** (S3, P9, S8, P5, D6), as rule-authoring.md
-  allows, so a profile can revive one without rewriting it. D2, D4, S9 and A5 drop
-  theirs: D2 and D4 would duplicate the rule they merged into, S9 likewise, and A5's
-  code rule is deleted because the score is now computed for the report.
+  allows, as a record of what each checked. They cannot run again under these ids: the
+  history gate refuses reactivating a retired id, under a profile too, so a check that
+  comes back (S3 reading Column Security Rules) is a new rule with a new id. D2, D4, S9
+  and A5 drop their logic: D2 and D4 would duplicate the rule they merged into, S9
+  likewise, and A5's code rule is deleted because the score is now computed for the
+  report.
 - **P6 in D as well as P.** The ruling names categories only for D4→P4. D2 sat in D,
   and a multi-key join is a modelling observation, so P6 joins D too; otherwise the
   Data Modeling tab would lose both join-key findings.
@@ -45,7 +48,11 @@ touches D9.
 ## Verification
 
 - Every retired or changed pinned rule is re-pinned. The before/after output is in the PR.
-- Before/after finding counts per rule, from a 150-Model sample of the SE demo cluster
-  replayed offline from one snapshot (aggregates only; the snapshot stays outside the
-  repository).
+- Before/after finding counts per rule, from a random sample of the SE demo cluster's
+  Models (148 audited) replayed offline from one snapshot (aggregates only; the snapshot
+  stays outside the repository).
+- **Not done:** roadmap principle 4 also asks for a before/after on the support-case
+  Model. That Model is kept outside the repository and was not available to this run;
+  the change removes or regrades findings only for the rules listed above, which the
+  pinned inputs and the sample both cover.
 - The report is rendered from the replay to check the header and heatmap score.

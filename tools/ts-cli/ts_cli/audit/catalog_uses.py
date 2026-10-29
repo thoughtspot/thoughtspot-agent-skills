@@ -8,8 +8,8 @@ reads them declares them. A rule declares data one of two ways:
 
     requires: [answers]          fetched, AND an object lacking it is skipped
     uses: [ai_instructions]      fetched, never gates — the rule reads it but judges an
-                                 object without it (A5 scores a Model whose lookup
-                                 failed as uncoached rather than skip it)
+                                 object without it (a Model whose lookup failed reads
+                                 as uncoached rather than being skipped)
 
 `uses` takes only conditional data: Model and Table TML and metadata are fetched for
 every audit, so there is nothing to declare for fetching. It is not overridable — what

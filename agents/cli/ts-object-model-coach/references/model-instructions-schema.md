@@ -1,6 +1,6 @@
 # `model_instructions` Schema — Declarative-Only Spec
 
-> **Before writing any of this to TML, read BL-288.** `model_instructions` is a real Model TML key holding a free-text **string** (`data_model_instructions`) that the audit's A3/A5 coaching read (`@is_coached`, `tools/ts-cli/ts_cli/audit/engine/fields.py`) and `report/tml_probes.py` both read. Writing the typed categories below under that key does not error — it silently makes a coached Model read as uncoached: a HIGH-severity A3 "no coaching configured", A5's 25-point AI weight lost, and `find_ai_surface_uses` blind to every column named in the rules. See `agents/shared/schemas/thoughtspot-model-tml.md` for the shape the readers expect.
+> **Before writing any of this to TML, read BL-288.** `model_instructions` is a real Model TML key holding a free-text **string** (`data_model_instructions`) that the audit's A3 and Spotter readiness coaching read (`@is_coached`, `tools/ts-cli/ts_cli/audit/engine/fields.py`) and `report/tml_probes.py` both read. Writing the typed categories below under that key does not error — it silently makes a coached Model read as uncoached: a HIGH-severity A3 "no coaching configured", the Spotter readiness score's 25-point coaching weight lost, and `find_ai_surface_uses` blind to every column named in the rules. See `agents/shared/schemas/thoughtspot-model-tml.md` for the shape the readers expect.
 
 `model_instructions` is the structured, machine-parsable channel for **global,
 untriggered guidance** about a Model. It carries rules the LLM should apply on
@@ -627,7 +627,7 @@ rule — goes in `model.description` (the Model-level prose surface, parallel to
 for Model-level instructions is `model.model_instructions.data_model_instructions`, a
 free-text **string**, documented in
 [thoughtspot-model-tml.md](~/.claude/shared/schemas/thoughtspot-model-tml.md) and read in
-production by the audit's A3/A5 coaching read (`@is_coached` in `audit/engine/fields.py`)
+production by the audit's A3 and Spotter readiness coaching read (`@is_coached` in `audit/engine/fields.py`)
 and `report/tml_probes.py`. What is still unverified is
 the **write** path — whether TML import persists a value written there. The candidates
 below are retained for history; note that writing the typed categories in this document

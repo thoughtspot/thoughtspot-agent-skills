@@ -237,8 +237,10 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         }
         entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
         if items is not None:
-            score = round(readiness_score(items[i], ctx), 1)
-            entry["spotter_readiness"] = {"score": score, "level": readiness_level(score)}
+            score = readiness_score(items[i], ctx)
+            # graded on the raw score, as A5 was; rounded only for the report
+            entry["spotter_readiness"] = {"score": round(score, 1),
+                                          "level": readiness_level(score)}
         models_out.append(entry)
 
     table_reuse = _build_table_reuse_from_ctx(models_out)
