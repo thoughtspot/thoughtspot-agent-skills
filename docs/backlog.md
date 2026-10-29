@@ -15833,7 +15833,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **What.** With `ts_rls_rules` in schema.yml and no `--rls-out`, the schema.yml path prints a WARNING (`commands/dbt_export.py`, `_handle_schema_yml_rls`), imports the Model and exits 0, which is the outcome `ts dbt build-model` now treats as fatal. Documented in `ts-convert-from-dbt/SKILL.md`, so not silent, but the two Model builders disagree on what a missing RLS application means.
 
-**Do.** Apply the rules before the Model import as `ts dbt build-model` does (reuse `_apply_table_rls`), or refuse `--import` when rules exist and `--rls-out` is absent. Also align `dbt/inspect.py`'s `rls_models` with build-model, which now applies rules to join targets outside `--model-path` too.
+**Do.** Apply the rules before the Model import as `ts dbt build-model` does (reuse `_apply_table_rls`), or refuse `--import` when rules exist and `--rls-out` is absent. Also align `dbt/inspect.py`'s `rls_models` with build-model, which now applies rules to join targets outside `--model-path` too. And run the cross-file I22 check (`tml_lint.lint_rls_join_cycles`) in `ts dbt build-model` before re-importing the patched Tables: the builder already holds that batch, and applying rules to out-of-path join targets widens the chance of an RLS path closing a join cycle (BACH 12325 at query time after a clean import).
 
 **Target:** 2026-11-30.
 
