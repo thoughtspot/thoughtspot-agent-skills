@@ -599,11 +599,18 @@ def _build_model_artifacts(dbt_cloud_profile: Optional[str], manifest_path: Opti
 
 
 def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
-                     table_guids: dict) -> None:
-    """Export each Table carrying ts_rls_rules, patch in `rls_rules`, re-import."""
+                     table_guids: dict) -> "list[str]":
+    """Export each Table carrying ts_rls_rules, patch in `rls_rules`, re-import.
+
+    Returns one line per Table whose rules did NOT apply (empty when all did).
+    The caller must treat a non-empty result as fatal: printing a warning and
+    exiting 0 left a Model live with no row-level security (audit 2026-10-29, 17.2).
+    """
     import sys
     import yaml as _yaml
+    from ts_cli.tml_common import export_item_doc, tml_import_failures
 
+    not_applied: list[str] = []
     for table_name, rls_block in rls_by_table.items():
         print(f"Applying ts_rls_rules to {table_name}...", file=sys.stderr)
         export_resp = client.post(
@@ -618,14 +625,10 @@ def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
             },
         )
         items = export_resp.json() if isinstance(export_resp.json(), list) else []
-        if not items or not items[0].get("edoc"):
-            print(
-                f"  Warning: could not export Table TML for {table_name} "
-                f"({export_resp.status_code}) — ts_rls_rules skipped.",
-                file=sys.stderr,
-            )
+        table_tml_dict, reason = export_item_doc(items[0] if items else None)
+        if reason:
+            not_applied.append(f"{table_name}: could not export its Table TML ({reason})")
             continue
-        table_tml_dict = _yaml.safe_load(items[0]["edoc"])
         table_tml_dict.setdefault("table", {})["rls_rules"] = rls_block
         patched_tml = _yaml.dump(table_tml_dict, sort_keys=False, allow_unicode=True)
         rls_resp = client.post(
@@ -637,10 +640,14 @@ def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
             },
         )
         rls_objects = rls_resp.json() if isinstance(rls_resp.json(), list) else []
-        status = (rls_objects[0] if rls_objects else {}).get("response", {}).get(
-            "status", {}
-        ).get("status_code", "unknown")
-        print(f"  {table_name}: RLS import status = {status}", file=sys.stderr)
+        failures = tml_import_failures(rls_objects)
+        if not rls_objects or failures:
+            detail = (failures[0].get("error_message") or "").strip() if failures else ""
+            not_applied.append(
+                f"{table_name}: the RLS import did not succeed ({detail or 'no per-item status returned'})")
+            continue
+        print(f"  {table_name}: RLS rules applied", file=sys.stderr)
+    return not_applied
 
 
 @app.command("build-model")
@@ -772,6 +779,20 @@ def build_model(
     apply_table_fqns(model_tml, table_guids)
     tml_yaml = _yaml.dump(model_tml, sort_keys=False, allow_unicode=True)
 
+    # Apply ts_rls_rules to Table TMLs (model-level config.meta tag) BEFORE the
+    # Model import, and stop if any did not apply. ThoughtSpot's server-side
+    # generate-tml does not process this tag; the CLI exports each affected Table
+    # TML, patches in rls_rules and re-imports it. Done after the import, a failure
+    # left the Model live over Tables with no RLS and the command exited 0
+    # (audit 2026-10-29, 17.2). Adding rules to a Table is safe even if the Model
+    # import then fails.
+    not_applied = _apply_table_rls(client, rls_by_table, table_guids)
+    if not_applied:
+        raise SystemExit(
+            "Row-level security was not applied, so the Model was not imported:\n  "
+            + "\n  ".join(not_applied)
+            + "\nFix the Table(s) above and re-run; nothing about the Model has changed.")
+
     resp = client.post(
         "/api/rest/2.0/metadata/tml/import",
         json={
@@ -789,11 +810,6 @@ def build_model(
         msg = ((failed[0].get("response") or {}).get("status") or {}).get("error_message", "")
         raise SystemExit(f"Model import failed: {msg[:500]}")
 
-    # Apply ts_rls_rules to Table TMLs (model-level config.meta tag).
-    # ThoughtSpot's server-side generate-tml does not process this tag; the CLI
-    # handles it by exporting each affected Table TML, patching in rls_rules, and
-    # re-importing. Extracted (and validated) above, before the Model import.
-    _apply_table_rls(client, rls_by_table, table_guids)
 
 
 # ---------------------------------------------------------------------------

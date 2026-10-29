@@ -1399,3 +1399,62 @@ def test_no_archive_adds_no_file_field():
     form = {}
     _attach_zip(form, None)
     assert form == {}
+
+
+class TestApplyTableRls:
+    """Audit 2026-10-29 17.2: an RLS step that did not apply used to print a
+    warning and exit 0 with the Model live over Tables with no row-level security."""
+
+    _RLS = {"STG_BARBERS": {"rules": [{"name": "r", "expr": "ts_username = [STG_BARBERS::FIRST_NAME]"}]}}
+
+    class _Client:
+        def __init__(self, export_items, import_items):
+            self.export_items, self.import_items, self.calls = export_items, import_items, []
+
+        def post(self, path, **kw):
+            self.calls.append(path)
+            return _FakeResp(self.export_items if path.endswith("/tml/export") else self.import_items)
+
+    _GOOD_EXPORT = [{"info": {"name": "STG_BARBERS", "status": {"status_code": "OK"}},
+                     "edoc": "{\"table\": {\"name\": \"STG_BARBERS\"}}"}]
+
+    def test_all_applied_returns_empty(self):
+        c = self._Client(self._GOOD_EXPORT, [{"response": {"status": {"status_code": "OK"}}}])
+        assert dbt_mod._apply_table_rls(c, self._RLS, {}) == []
+        assert c.calls[-1].endswith("/tml/import")
+
+    def test_export_without_edoc_is_reported_not_skipped(self):
+        c = self._Client([{"info": {"name": "STG_BARBERS", "status": {"status_code": "ERROR",
+                                    "error_message": "FORBIDDEN"}}, "edoc": None}], [])
+        out = dbt_mod._apply_table_rls(c, self._RLS, {})
+        assert len(out) == 1 and "STG_BARBERS" in out[0] and "FORBIDDEN" in out[0]
+        assert not any(p.endswith("/tml/import") for p in c.calls)
+
+    def test_import_error_is_reported(self):
+        c = self._Client(self._GOOD_EXPORT, [{"response": {"status": {"status_code": "ERROR",
+                                                                      "error_message": "bad expr"}}}])
+        out = dbt_mod._apply_table_rls(c, self._RLS, {})
+        assert len(out) == 1 and "bad expr" in out[0]
+
+    def test_empty_import_response_is_reported(self):
+        c = self._Client(self._GOOD_EXPORT, [])
+        assert dbt_mod._apply_table_rls(c, self._RLS, {})
+
+
+class TestBuildModelRlsGate:
+    _RUN = TestBuildModelFlags._RUN
+    _setup = TestBuildModelFlags._setup
+    _MANIFEST = TestBuildModelFlags._MANIFEST
+
+    def test_rls_failure_exits_nonzero_before_model_import(self, monkeypatch, tmp_path):
+        calls, _ = self._setup(monkeypatch, tmp_path)
+        import ts_cli.dbt_build_export as dbe
+        monkeypatch.setattr(dbe, "extract_model_rls_from_manifest",
+                            lambda *a, **k: {"STG_BARBERS": {"rules": []}})
+        monkeypatch.setattr(dbt_mod, "_apply_table_rls",
+                            lambda *a, **k: ["STG_BARBERS: the RLS import did not succeed (boom)"])
+        result = runner.invoke(app, ["dbt", "build-model", "--dbt-cloud-profile", "p",
+                                     "--model-path", "models/staging/barbershop", "--model-name", "M"])
+        assert result.exit_code != 0
+        assert "STG_BARBERS" in result.output and "boom" in result.output
+        assert not any(p.endswith("/tml/import") for p, _ in calls)
