@@ -642,5 +642,5 @@ tags) is still all ThoughtSpot's dbt integration needs.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.1 | 2026-10-23 | ZIP_FILE hand-off: the artifact-generating command depends on the engine (`dbt docs generate` on Core, `dbt compile --write-catalog` on Fusion), and `--file` takes the `target/` directory — no manual zipping. |
+| 1.0.1 | 2026-10-29 | ZIP_FILE hand-off: the artifact-generating command depends on the engine (`dbt docs generate` on Core, `dbt compile --write-catalog` on Fusion), and `--file` takes the `target/` directory — no manual zipping. |
 | 1.0.0 | 2026-09-10 | Initial release — ThoughtSpot Model TML → dbt project. Case A scaffolds a new project (staging models aliased to their ThoughtSpot Table names so the return leg preserves identity); Case B diffs and syncs into an existing project. `ts dbt-export build-model` assembles a unified Model TML back from a project's `schema.yml`. |

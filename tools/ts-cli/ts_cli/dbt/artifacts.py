@@ -144,14 +144,15 @@ def _how_to_write_catalog(manifest: Optional[Path] = None) -> str:
 
     So the right command depends on the engine, and on Fusion `docs generate`
     is the one that silently leaves an old catalog behind. Fusion reports a 2.x
-    version; Core is 1.x.
+    version; Core is 1.x. Any other major version is neither as verified, so it
+    gets the advice that names both.
     """
     major = _dbt_major_version(manifest)
-    if major is not None and major >= 2:
+    if major == 2:
         return ("This manifest was written by dbt Fusion: run `dbt compile --write-catalog` "
                 "to write catalog.json. Do not use `dbt docs generate` on Fusion — it "
                 "refreshes only manifest.json and leaves any old catalog.json in place.")
-    if major is not None:
+    if major == 1:
         return ("This manifest was written by dbt Core: run `dbt docs generate`, which "
                 "writes both files (`dbt compile` writes only manifest.json).")
     return ("Run `dbt docs generate` (dbt Core) or `dbt compile --write-catalog` "
@@ -226,8 +227,9 @@ def pack_artifacts(manifest: Path, catalog: Path, dest: "Path | None" = None) ->
     "a ZIP containing manifest.json and catalog.json", and what a user doing
     this by hand (`cd target && zip a.zip manifest.json catalog.json`) would
     produce. Verified against a live ZIP_FILE connection: passing `--file target` with
-    flat `manifest.json` + `catalog.json` is accepted by `generate-tml` and
-    `build-model` (dbt Fusion 2.0.6, manifest schema v12, 2026-10-22) and by
+    flat `manifest.json` + `catalog.json` is accepted by `generate-tml`, after
+    which `ts dbt build-model` built the Model (dbt Fusion 2.0.6, manifest
+    schema v12, 2026-10-22), and by
     `generate-tml` from dbt Core 1.12.5 (2026-10-23) — see ts-convert-from-dbt
     coverage-matrix L6.
 

@@ -96,6 +96,17 @@ class TestFindArtifacts:
         assert "dbt compile --write-catalog" in msg
         assert "Do not use `dbt docs generate`" in msg  # named only as the one to avoid
 
+    @pytest.mark.parametrize("version", ["3.0.0", "2025.10.14+abc", "0.21.0"])
+    def test_unverified_major_version_names_both_commands(self, tmp_path, version):
+        """Only 1.x (Core) and 2.x (Fusion) were verified; any other stamp is
+        neither as verified, so it gets the advice that names both."""
+        target = self._manifest_only(tmp_path, version)
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+        assert "was written by" not in msg
+
     @pytest.mark.parametrize("version, wanted, avoided", [
         ("2.0.6", "dbt compile --write-catalog", "Do not use `dbt docs generate`"),
         ("1.12.5", "dbt docs generate", "--write-catalog"),

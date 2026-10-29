@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 import requests as _requests  # noqa: F401
 import typer
 
-from ts_cli.client import ThoughtSpotClient, resolve_profile
+from ts_cli.client import ThoughtSpotClient, format_http_error, resolve_profile
 from ts_cli.dbt.cloud_api import (
     fetch_artifact,
     get_run,
@@ -37,7 +37,7 @@ from ts_cli.dbt.cloud_api import (
 from ts_cli.dbt.formula_pass import print_double_aggregation, print_reaggregation_kept
 from ts_cli.dbt.artifacts import load_local_catalog, load_local_manifest, resolve_artifact_zip
 from ts_cli.dbt.inspect import group_manifest_models
-from ts_cli.dbt.zip_guard import zip_file_refusal
+from ts_cli.dbt.zip_guard import missing_archive_message
 from ts_cli.profile_ops import get_profile, load_platform_profiles
 
 app = typer.Typer(help="dbt connection management and TML generation.")
@@ -182,10 +182,10 @@ def create_connection(
         )
     if import_type == "ZIP_FILE" and not zip_path:
         raise SystemExit("--file is required when --import-type is ZIP_FILE.")
-    if import_type == "ZIP_FILE" and not project_name:
+    if import_type == "ZIP_FILE" and not (project_name or "").strip():
         raise SystemExit(
             "--project-name is required when --import-type is ZIP_FILE "
-            "(ThoughtSpot rejects the create with 'Project Name should not be empty').")
+            "(ThoughtSpot has rejected a ZIP_FILE create without it: 'Project Name should not be empty').")
 
     form = _multipart_fields({
         "connection_name": connection_name,
@@ -271,27 +271,6 @@ def delete_connection(
     client.post(f"/api/rest/2.0/dbt/{connection_id}/delete", json={})
 
 
-def _require_archive_for_zip_file(client: ThoughtSpotClient, connection_id: str) -> None:
-    """Refuse a generate call with no `--file` when the connection is ZIP_FILE.
-
-    The decision is ts_cli/dbt/zip_guard.py; this is the lookup. Best effort:
-    an unreadable list never blocks.
-    """
-    # ThoughtSpotClient.request() signals failure with SystemExit, not an
-    # Exception, so both are caught: this lookup must never block the generate
-    # call. raise_for_status=False plus a short timeout keeps a slow or failing
-    # dbt/search from stalling the command or printing a misleading error.
-    try:
-        resp = client.post("/api/rest/2.0/dbt/search", json={},
-                           raise_for_status=False, timeout=15)
-        connections = resp.json() if resp.ok else None
-    except (Exception, SystemExit):
-        return
-    refusal = zip_file_refusal(connections, connection_id)
-    if refusal:
-        raise SystemExit(refusal)
-
-
 def _generate(
     path: str,
     connection_id: str,
@@ -302,8 +281,6 @@ def _generate(
 ) -> None:
     zip_path = _read_zip_file(file)
     client = ThoughtSpotClient(resolve_profile(profile))
-    if not zip_path:
-        _require_archive_for_zip_file(client, connection_id)
     fields: Dict[str, Optional[str]] = {"dbt_connection_identifier": connection_id}
     if extra_fields:
         fields.update(extra_fields)
@@ -312,7 +289,15 @@ def _generate(
     )
     form: Dict[str, Any] = _multipart_fields(fields)
     _attach_zip(form, zip_path)
-    resp = client.post(path, files=form)
+    # Without --file, a ZIP_FILE connection gets a 400 that reads as a bad
+    # archive; read it here and say what is missing (ts_cli/dbt/zip_guard.py).
+    resp = client.post(path, files=form, raise_for_status=bool(zip_path))
+    if not resp.ok:
+        explanation = missing_archive_message(resp.status_code, resp.text, connection_id)
+        if explanation:
+            raise SystemExit(explanation)
+        print(format_http_error("POST", f"{client.base_url}{path}", resp), file=sys.stderr)
+        raise SystemExit(1)
     print(json.dumps(resp.json()))
 
 
