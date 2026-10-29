@@ -448,7 +448,7 @@ Core ≤1.7-era projects may still use a bare `meta:` sibling instead, see below
 | Tag | Sets | Valid values |
 |---|---|---|
 | `ts_column_type` | Column type | `attribute` or `measure` |
-| `ts_aggregation` | Default aggregation | `sum`, `count`, `count_distinct`, `min`, `max`, `average`, `std_deviation`, `variance`, `none` |
+| `ts_aggregation` | Default aggregation | `sum`, `count`, `count_distinct`, `min`, `max`, `average`, `std_deviation`, `variance`, `none`. On Path Y, `count_distinct` on a physical column is emitted as a `unique count ( [T::col] )` formula column with the same name, never as `aggregation: COUNT_DISTINCT` (invariant I5: that silently becomes an attribute on a text or date column). Path N's server-side generator is ThoughtSpot's own and is not changed by this |
 | `ts_synonym` | Search synonyms | Comma-separated text, or a YAML list when a synonym itself contains a comma (`ts-convert-to-dbt` writes the list form then) |
 | `ts_format_pattern` | Numeric/date display format | Format pattern strings |
 | `ts_hidden` | Column visibility | `yes`/`no` (default `no`) |
@@ -1115,4 +1115,5 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.1 | 2026-10-29 | `ts dbt build-model` now lints the Model TML before writing anything, applies `ts_rls_rules` before the Model import and stops (non-zero) if any Table's rules did not apply, and emits `ts_aggregation: count_distinct` as a `unique count` formula (audit 2026-10-29: 9.3, 17.2, 9.2). |
 | 1.0.0 | 2026-09-10 | Initial release — dbt (Cloud or Core) → ThoughtSpot Tables + Model, first import and resync. Path N (server-side `generate-tml`) and Path Y (`ts dbt build-model`, for `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics), with `ts dbt list-models` / `ts dbt inspect` choosing between them. |

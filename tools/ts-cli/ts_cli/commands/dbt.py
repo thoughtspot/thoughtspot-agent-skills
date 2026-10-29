@@ -746,6 +746,9 @@ def build_model(
     mf = model_tml.pop("_metrics_report", None)
     _print_metrics_report(mf)
     print_double_aggregation(model_tml.pop("_double_aggregation_collapsed", []))
+    for name in model_tml.pop("_count_distinct_as_formula", []):
+        print(f"Note: '{name}' (ts_aggregation: count_distinct) is emitted as a "
+              "`unique count` formula (invariant I5).", file=sys.stderr)
     print_reaggregation_kept(model_tml.pop("_reaggregation_kept", []))
     if model_guid:
         # guid belongs at the document root (see thoughtspot-model-tml.md), not under model:

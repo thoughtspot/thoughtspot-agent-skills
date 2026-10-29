@@ -883,6 +883,9 @@ def build_model_cmd(
     tml = build_model_tml_from_schema_yml(schema_text, model_name)
 
     print_double_aggregation(tml.pop("_double_aggregation_collapsed", []))
+    for name in tml.pop("_count_distinct_as_formula", []):
+        typer.echo(f"Note: '{name}' (ts_aggregation: count_distinct) is emitted as a "
+                   "`unique count` formula (invariant I5).", err=True)
     print_reaggregation_kept(tml.pop("_reaggregation_kept", []))
     excluded = tml.pop("_excluded_columns", [])
     if excluded:

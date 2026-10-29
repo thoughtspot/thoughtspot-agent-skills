@@ -2565,3 +2565,53 @@ class TestFormulaIdsStayDistinct:
         tml = {"model": {"formulas": [{"id": "formula_X", "name": "X"},
                                       {"id": "formula_X", "name": "X "}]}}
         assert find_formula_id_collisions(tml) == [("formula_X", ["X", "X "])]
+
+
+class TestCountDistinctBecomesFormula:
+    """Audit 2026-10-29 9.2 (invariant I5): `ts_aggregation: count_distinct` on a
+    physical column was emitted as `aggregation: COUNT_DISTINCT`, which ThoughtSpot
+    silently turns into an ATTRIBUTE on a VARCHAR/DATE column. Both dbt readers
+    must emit a `unique count` formula that keeps the column's name and metadata."""
+
+    _META = {"ts_column_type": "measure", "ts_aggregation": "count_distinct",
+             "ts_display_name": "Unique Customers", "ts_synonym": "distinct customers"}
+
+    def _check(self, model):
+        from ts_cli.tml_lint import lint_tml
+        cols = {c["name"]: c for c in model["model"]["columns"]}
+        col = cols["Unique Customers"]
+        assert "column_id" not in col
+        assert col["properties"]["column_type"] == "MEASURE"
+        assert col["properties"]["synonyms"] == ["distinct customers"]
+        formula = next(f for f in model["model"]["formulas"] if f["id"] == col["formula_id"])
+        assert formula["expr"] == "unique count ( [STG_ORDERS::CUSTOMER_ID] )"
+        assert model.pop("_count_distinct_as_formula") == ["Unique Customers"]
+        assert not [f for f in lint_tml(model) if f.startswith("I5")]
+
+    def test_schema_yml_reader(self):
+        schema = yaml.safe_dump({"version": 2, "models": [{
+            "name": "stg_orders",
+            "columns": [{"name": "CUSTOMER_ID", "config": {"meta": dict(self._META)}}]}]})
+        self._check(build_model_tml_from_schema_yml(schema, "M"))
+
+    def test_manifest_reader(self):
+        from ts_cli.dbt_build_export import build_model_tml_from_manifest
+        manifest = {"nodes": {"model.p.stg_orders": {
+            "resource_type": "model", "name": "stg_orders",
+            "original_file_path": "models/staging/stg_orders.sql",
+            "columns": {"CUSTOMER_ID": {"config": {"meta": dict(self._META)}}}}}}
+        self._check(build_model_tml_from_manifest(manifest, {}, "models/staging", "M"))
+
+    def test_other_aggregations_stay_physical(self):
+        from ts_cli.formula_common import count_distinct_columns_to_formulas
+        cols = [{"name": "Amount", "column_id": "T::AMOUNT",
+                 "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+        kept, formulas, fcols, converted = count_distinct_columns_to_formulas(cols, set())
+        assert kept == cols and not formulas and not fcols and not converted
+
+    def test_formula_id_does_not_collide(self):
+        from ts_cli.formula_common import count_distinct_columns_to_formulas
+        cols = [{"name": "N", "column_id": "T::C",
+                 "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]
+        _, formulas, fcols, _ = count_distinct_columns_to_formulas(cols, {"formula_N"})
+        assert formulas[0]["id"] == "formula_N 2" == fcols[0]["formula_id"]

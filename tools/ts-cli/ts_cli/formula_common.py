@@ -468,6 +468,51 @@ _AGG_TO_FORMULA_FN = {
 }
 
 
+def count_distinct_columns_to_formulas(
+    columns: list[dict],
+    existing_formula_ids: "set[str]",
+) -> "tuple[list[dict], list[dict], list[dict], list[str]]":
+    """Re-express every physical ``columns[]`` entry carrying
+    ``aggregation: COUNT_DISTINCT`` as a ``unique count`` formula (invariant I5).
+
+    For builders that assemble Model TML column dicts directly (dbt), where a
+    source tag can ask for ``COUNT_DISTINCT`` on a physical column. On a VARCHAR or
+    DATE column ThoughtSpot silently turns that column into an ATTRIBUTE; on a
+    numeric one it works (live-probed 2026-10-29), but the builder cannot see the
+    type, and the formula is correct for every type. The display name, description
+    and other properties carry over, so the measure keeps its name and metadata.
+
+    Returns ``(kept_columns, new_formulas, new_formula_columns, converted_names)``.
+    Formula ids follow the ``formula_<Name>`` convention, de-duplicated against
+    ``existing_formula_ids``. Inputs are not mutated.
+    """
+    kept: list[dict] = []
+    new_formulas: list[dict] = []
+    new_cols: list[dict] = []
+    converted: list[str] = []
+    taken = set(existing_formula_ids)
+    for col in columns:
+        props = col.get("properties") or {}
+        if "column_id" not in col or props.get("aggregation") != "COUNT_DISTINCT":
+            kept.append(col)
+            continue
+        name = col["name"]
+        fid, n = f"formula_{name}", 2
+        while fid in taken:
+            fid, n = f"formula_{name} {n}", n + 1
+        taken.add(fid)
+        new_formulas.append({"id": fid, "name": name,
+                             "expr": f"unique count ( [{col['column_id']}] )"})
+        new_props = {k: v for k, v in props.items() if k != "aggregation"}
+        new_props.update({"column_type": "MEASURE", "aggregation": "SUM"})
+        new_props.setdefault("index_type", "DONT_INDEX")
+        entry = {k: v for k, v in col.items() if k not in ("column_id", "properties")}
+        entry.update({"formula_id": fid, "properties": new_props})
+        new_cols.append(entry)
+        converted.append(name)
+    return kept, new_formulas, new_cols, converted
+
+
 def promote_duplicate_column_ids(
     physical: list[dict],
     formula_entries: list[dict],

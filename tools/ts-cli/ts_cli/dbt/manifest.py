@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 
+from ts_cli.formula_common import count_distinct_columns_to_formulas
+
 from .constraint_joins import add_uncovered_joins, constraint_joins, relation_tables
 from .formula_pass import (
     collapse_double_aggregation, find_reaggregation_kept, rename_colliding_columns,
@@ -324,6 +326,14 @@ def build_model_tml_from_manifest(
                 col_doc["properties"] = props
             columns.append(col_doc)
 
+    # A ts_aggregation: count_distinct tag on a physical column → unique count
+    # formula (I5; audit 2026-10-29, 9.2). Before the metric/collision passes, so
+    # the new formulas go through them like any other.
+    columns, cd_formulas, cd_cols, cd_converted = count_distinct_columns_to_formulas(
+        columns, {f["id"] for f in formulas})
+    formulas += cd_formulas
+    formula_col_entries += cd_cols
+
     metrics_report: dict | None = None
     if metrics:
         from ts_cli.dbt_metricflow import translate_metrics   # lazy — avoids a circular import
@@ -372,6 +382,8 @@ def build_model_tml_from_manifest(
         out["_skipped_joins"] = skipped_joins                 # diagnostics only — caller strips
     if double_agg:
         out["_double_aggregation_collapsed"] = double_agg     # diagnostics only — caller strips
+    if cd_converted:
+        out["_count_distinct_as_formula"] = cd_converted      # diagnostics only — caller strips
     if reagg_kept:
         out["_reaggregation_kept"] = reagg_kept               # diagnostics only — caller strips
     if metrics_report is not None:

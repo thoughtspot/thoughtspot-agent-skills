@@ -18,6 +18,8 @@ from collections import defaultdict
 
 import yaml
 
+from ts_cli.formula_common import count_distinct_columns_to_formulas
+
 from .formula_pass import collapse_double_aggregation, find_reaggregation_kept
 from .tags import (
     _formula_id,
@@ -227,6 +229,14 @@ def build_model_tml_from_schema_yml(
                 col_entry_f["description"] = col_desc_f
             formula_col_entries.append(col_entry_f)
 
+    # A ts_aggregation: count_distinct tag on a physical column → unique count
+    # formula (I5; audit 2026-10-29, 9.2). Before the metric/collision passes, so
+    # the new formulas go through them like any other.
+    columns, cd_formulas, cd_cols, cd_converted = count_distinct_columns_to_formulas(
+        columns, {f["id"] for f in formulas})
+    formulas += cd_formulas
+    formula_col_entries += cd_cols
+
     # 2026-10 (PR #506 review, BL-217): the same shared fix_double_aggregation
     # pass as build_model_tml_from_manifest (dbt/formula_pass.py). The shared
     # resolve_name_collisions pass is not run here, deliberately: every column is
@@ -248,6 +258,7 @@ def build_model_tml_from_schema_yml(
     if excluded_columns:
         out["_excluded_columns"] = sorted(excluded_columns)   # diagnostics; caller strips
     out["_double_aggregation_collapsed"] = double_agg         # diagnostics (may be []); caller strips
+    out["_count_distinct_as_formula"] = cd_converted          # diagnostics (may be []); caller strips
     out["_reaggregation_kept"] = reagg_kept                   # diagnostics (may be []); caller strips
     return out
 
