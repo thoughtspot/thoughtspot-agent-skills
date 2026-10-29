@@ -311,6 +311,7 @@ are roughly ordered by value÷effort.
 | BL-474 | Model-vs-Worksheet predicate written four ways; two skills contradict | 2026-11-30 |
 | BL-475 | to-snowflake-sv hand-rolls Snowflake access; widen `check_patterns` rule 7 | 2026-11-30 |
 | BL-476 | Re-date or close eight overdue OPEN items and six index rows that contradict their RESOLVED sections | 2026-11-30 |
+| BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -10718,7 +10719,7 @@ must not be broken by the fix.
 **Affects:** `tools/ts-cli/ts_cli/sv_naming.py` (`fact_column_type()` and the metric analogue),
 `tools/ts-cli/ts_cli/sv_build_model.py`, `sv_translate.py:278` (metrics), and — widened
 2026-10-29, audit finding 9.18 — `tools/ts-cli/ts_cli/databricks/mv_translate.py:294-307`, which
-emits e.g. `MAX(transaction_date)` as a physical MEASURE/MAX with no type check.
+emits e.g. `MAX(transaction_date)` as a physical MEASURE/MAX with no type check. Also the dbt readers (`dbt/tags.py:46`, `dbt/manifest.py`): `ts_aggregation: count|min|max` on a VARCHAR/DATE column is emitted as a physical MEASURE; the manifest builder already reads catalog types, so it can emit `count ( … )` / `max ( … )` formulas or warn (PR A review, 2026-10-29).
 **Status:** OPEN.
 
 `asof_join`'s `Orders.order_count AS COUNT(o_ordid)` was built as a `MEASURE`, imported, and
@@ -15817,3 +15818,14 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 **Do.** Shallow-clone a pinned ossie-converters ref in CI, or record it as an accepted gap with a date.
 
 **Target:** 2026-12-31.
+
+## BL-495 — `ts dbt-export build-model --import` imports a Model whose Tables' `ts_rls_rules` were never applied `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** the `pr-reviewer` pass on the audit 2026-10-29 dbt fix PR (`fix/dbt-correctness`), sibling of finding 17.2.
+
+**What.** With `ts_rls_rules` in schema.yml and no `--rls-out`, the schema.yml path prints a WARNING (`commands/dbt_export.py`, `_handle_schema_yml_rls`), imports the Model and exits 0, which is the outcome `ts dbt build-model` now treats as fatal. Documented in `ts-convert-from-dbt/SKILL.md`, so not silent, but the two Model builders disagree on what a missing RLS application means.
+
+**Do.** Apply the rules before the Model import as `ts dbt build-model` does (reuse `_apply_table_rls`), or refuse `--import` when rules exist and `--rls-out` is absent.
+
+**Target:** 2026-11-30.
+
