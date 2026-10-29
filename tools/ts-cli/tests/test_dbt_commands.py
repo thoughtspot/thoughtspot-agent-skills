@@ -1458,3 +1458,14 @@ class TestBuildModelRlsGate:
         assert result.exit_code != 0
         assert "STG_BARBERS" in result.output and "boom" in result.output
         assert not any(p.endswith("/tml/import") for p, _ in calls)
+
+    def test_lint_finding_exits_nonzero_before_any_write(self, monkeypatch, tmp_path):
+        """Audit 2026-10-29 9.3: build-model POSTed Model TML with no lint gate."""
+        calls, _ = self._setup(monkeypatch, tmp_path)
+        import ts_cli.tml_lint as tl
+        monkeypatch.setattr(tl, "lint_tml", lambda doc: ["I5: column 'X' uses aggregation: COUNT_DISTINCT"])
+        result = runner.invoke(app, ["dbt", "build-model", "--dbt-cloud-profile", "p",
+                                     "--model-path", "models/staging/barbershop", "--model-name", "M"])
+        assert result.exit_code != 0
+        assert "LINT: I5" in result.output and "nothing was imported" in result.output
+        assert not any(p.endswith("/tml/import") or p.endswith("/tml/export") for p, _ in calls)
