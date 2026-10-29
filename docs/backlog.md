@@ -15829,7 +15829,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 ## BL-495 — `ts dbt-export build-model --import` imports a Model whose Tables' `ts_rls_rules` were never applied `Tier 2`
 
-**Filed:** 2026-10-29. **Source:** the `pr-reviewer` pass on the audit 2026-10-29 dbt fix PR (`fix/dbt-correctness`), sibling of finding 17.2.
+**Filed:** 2026-10-29. **Source:** the `pr-reviewer` pass on the audit 2026-10-29 dbt fix PR (#687), sibling of finding 17.2.
 
 **What.** With `ts_rls_rules` in schema.yml and no `--rls-out`, the schema.yml path prints a WARNING (`commands/dbt_export.py`, `_handle_schema_yml_rls`), imports the Model and exits 0, which is the outcome `ts dbt build-model` now treats as fatal. Documented in `ts-convert-from-dbt/SKILL.md`, so not silent, but the two Model builders disagree on what a missing RLS application means.
 
