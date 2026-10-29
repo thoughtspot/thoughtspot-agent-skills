@@ -278,6 +278,9 @@ are roughly ordered by value÷effort.
 | BL-429 | Spec C7 remainder (the contributor guide is `.github/CONTRIBUTING.md`): a design-issue template (new skill, new runtime dependency, rule exception), and the step-9 re-measure against the baseline at the window's end (90 days or 15 external PRs); the backtest waits for BL-416 | 2027-01-31 |
 | BL-430 | The pr-reviewer scratch-copy recipe leaves the copy's `origin` pointing at the source work tree with `GIT_ALLOW_PROTOCOL=file`, so branch code run there can push refs into the repo under review; set `remote set-url --push origin no-push` | 2026-11-30 |
 | BL-431 | An unowned `conftest.py` (root or `tools/`) or root pytest config can deselect the tests that pin the gates (proven: a 2-line a conftest.py under tools/ made `test_known_bad_fixtures.py` collect nothing); own them in CODEOWNERS and name them in pr-reviewer's gate-edits list | 2026-11-30 |
+| BL-443 | Source row restrictions (data source / report filters) may be dropped unreported in any converter — audit each | after 2026-10-29 audit fixes |
+| BL-444 | Tableau data source filters ignored: the Model returns unfiltered numbers, no warning | after 2026-10-29 audit fixes |
+| BL-445 | Tableau `<relation type='union'>` unhandled — members probably emitted as separate Tables (unverified; fixture first) | after 2026-10-29 audit fixes |
 
 ### Tier 3 — Opportunistic
 
@@ -353,6 +356,11 @@ are roughly ordered by value÷effort.
 | BL-435 | The CODEOWNERS coverage test (`_owned()` in `test_pr_reviewer_brief.py`) treats a path as owned if any rule matches, while GitHub applies the last matching rule, so a future owner-less override line would still read as owned | 2026-12-31 |
 | BL-437 | `CHECKS_PYTHON` polish from the pr-reviewer's last pass on the contributor-guide branch: a quoted `~/…` interpreter path in the skill's Step 1 is not expanded (fails closed, confusing message); an unexported shell `CHECKS_PYTHON` counts as set; remedies print `"$CHECKS_PYTHON"`, empty in a terminal that lacks it; the unset PATH search still trusts an exit status (document as an accepted gap); Step 2 on a non-zero exit after the placeholder; per-validator `pip install X` remedies | 2026-11-30 |
 | ~~BL-436~~ | ~~`pr-ready` has no explicit interpreter override: `scripts/lib/python-bin.sh` takes the newest `python3.1x` with pytest anywhere on `PATH`, so a CI-equivalent virtual environment is bypassed by a newer system Python; and its failure messages (the `python3` fallback, the PyYAML and missing-module remedies) point only at `pip install`, never the virtual-environment route~~ | DONE (2026-10-29 — `CHECKS_PYTHON`, honoured before the search, fails closed) |
+| BL-438 | No shared loss catalogue / per-run loss record / `--strict` across converters (design pass first) | after 2026-10-29 audit fixes |
+| BL-439 | Converter mapping docs hand-maintained and drifting; generate the mechanical parts with a `--check` gate | after BL-438 |
+| BL-441 | No property-based (`hypothesis`) or malformed-input tests on the shared formula output layer | after 2026-10-29 audit fixes |
+| BL-442 | Live-verified vs approximated status of a formula mapping is not carried into the output | after BL-438 |
+| BL-446 | Tableau initial SQL dropped without a report | after 2026-10-29 audit fixes |
 
 ### Tier 4 — Deferred
 
@@ -379,6 +387,7 @@ are roughly ordered by value÷effort.
 | BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
+| BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 
 ---
 
@@ -15161,3 +15170,93 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 **Do.** Expand a leading `~/` in Step 1 (and say "the interpreter's path"), `export CHECKS_PYTHON` on the set branch, print remedies with the value through `evidence.scrub`, add the accepted-gap comment (or the token probe) to the search loop, make Step 2 report stderr when the block is the placeholder, route validator remedies through one helper, and write the probe token without a newline. Tests for the tilde and unexported cases.
 
 **Target:** 2026-11-30.
+
+## BL-438 — no shared loss catalogue: each converter reports what it could not carry its own way `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** comparison with the apache/ossie-converters Tableau converter (PR #82, `tableau/src/ossie_tableau/losses.py`). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** Every converter drops or approximates some constructs, but the record of it is per converter and mostly prose: Tableau spreads it across the tier sets in `ts_cli/tableau/classify.py`, the findings in `ts_cli/tableau/verify.py` and the migration report; the other converters each word "untranslatable" their own way. There is no closed list of loss kinds, no machine-readable per-run record, and no switch that fails a run on a serious loss. PR #82 has all three: a catalogue of about 60 kinds, each with a category (`preserved` / `parked` / `approximated` / `dropped`), a severity (`info` / `warning` / `error`) and a remedy; a `.loss.json` written per output; `--strict` failing on `error`; and an unknown kind defaulting to a warning so it is never hidden.
+
+**Do.** Design pass first, since every converter would use it: a shared module under `tools/ts-cli/ts_cli/` holding the kind → category/severity/remedy catalogue, with each converter registering its own kinds; a per-run loss file next to the TML; a `--strict` flag on the build commands. Migrate Tableau first, then one non-Tableau converter to prove the shape is generic. BL-439, BL-442 and BL-443 build on this.
+
+**Target:** after the 2026-10-29 audit fixes.
+
+## BL-439 — converter mapping docs are hand-maintained and drift from the code `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (`tools/gen_docs.py --check`, `tests/test_docs_sync.py`). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** The coverage matrices and the mapping docs under `agents/shared/mappings/<source>/` are written by hand, and the drift is recurring: `ts_cli/tableau/classify.py:30` records "two sites, one stale census (audit finding 13.22)", and the 2026-10-29 full audit has two more (9.7: `coverage-matrix.md` claims a PT1 marker that `SIZE()` does not carry; 13.15: the matrix contradicts BL-380). PR #82 generates its loss catalogue and expression-mapping doc from the code and fails CI when the committed copy differs.
+
+**Do.** Generate the mechanical parts of each converter's mapping doc (function → ThoughtSpot form, status, notes) from the code's own tables (the `formula_translate/catalog.py` catalogue and, once BL-438 exists, the loss catalogue), keep hand-written prose in separate sections, and add a `--check` validator to pre-commit. Start with Tableau, where the drift is documented.
+
+**Target:** after BL-438.
+
+## BL-440 — ThoughtSpot formula output is built as text, so precedence is fixed after the fact `Tier 4`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (`calc_parser.py` parses to a sqlglot tree and raises `Untranslatable` outside its grammar). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** The converters produce ThoughtSpot formulas by rewriting text (Tableau: the regex map in `ts_cli/tableau/functions.py`), and `formula_text.ts_finalize_formula` repairs precedence afterwards. Recent wrong-answer bugs are the kind a tree rules out by construction: `a * b / c` read as `a * ( b / c )` (BL-365) and `INT([x]) * 2` multiplying one branch only (#579 review). Source-language parsing stays per converter; the ThoughtSpot side is shared.
+
+**Do.** Design a small ThoughtSpot formula tree with a printer that brackets by precedence, and move the shared emitters in `formula_text.py` onto it one converter at a time. Land BL-441's property tests first so the move has a regression net. Large change; design pass before any code.
+
+**Target:** after BL-441.
+
+## BL-441 — no property-based or malformed-input tests on the shared formula output layer `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (`hypothesis` in `test_calc_properties.py` / `test_properties.py`; `test_malformed_input.py` with empty, bad-XML and DOCTYPE fixtures). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** No test under `tools/ts-cli/tests/` uses `hypothesis`. The shared output layer (`formula_text.py`, `formula_common.py`) is exercised only by example-based tests, so bugs like BL-365 surface live rather than in CI.
+
+**Do.** Add `hypothesis` (test dependency only) and property tests on `formula_text.py`: every product under a division is bracketed; a string literal containing either quote kind round-trips to the same value; translation either returns a formula or refuses, never raises. Add a malformed-input test per converter's parser (empty, truncated, wrong format).
+
+**Target:** after the 2026-10-29 audit fixes.
+
+## BL-442 — whether a formula mapping is live-verified is not carried into the output `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (its `sql_unreconciled` kind marks window SQL that did not match Tableau on live Snowflake; "a 40-row slice match is not Compute Using"). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** Live verification exists (the formula-fidelity runs under `tools/formula-fidelity/`, and dated "live-verified" notes in `coverage-matrix.md`), but it lives in notes. A converted Model does not say which of its formulas rest on a verified mapping and which are approximate or unverified.
+
+**Do.** Record a status (`verified` with run reference / `approximated` / `unverified`) against each shared catalogue entry, fed by formula-fidelity runs, and surface it per formula through the BL-438 loss record and the migration report.
+
+**Target:** after BL-438.
+
+## BL-443 — source row restrictions (data source / report filters) may be dropped without a report, in any converter `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (its `datasource_filter` loss kind); the Tableau instance is BL-444. **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** Every BI source can restrict rows outside its formulas: Tableau data source filters, Power BI report/page filters, Looker `sql_always_where` / `always_filter`, Qlik section access, Sisense dashboard filters. If a converter drops one, the ThoughtSpot Model returns different numbers from the source with nothing reported. Tableau is confirmed (BL-444); the other converters have **not** been checked (`powerbi/` and `sisense/` mention filters; what that code does was not read).
+
+**Do.** Audit each converter for its source's row-restriction constructs. Each must become a Model filter where one can express it, or a reported loss (`error` severity under BL-438) where not. File a per-converter item for each gap found.
+
+**Target:** after the 2026-10-29 audit fixes.
+
+## BL-444 — Tableau data source filters are ignored: the Model returns unfiltered numbers `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82. **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** `ts_cli/tableau/twb.py` never reads `<filter>` children of a `<datasource>`, and neither the skill nor `agents/shared/mappings/tableau/` mentions data source filters. A workbook whose data source filters rows converts to a Model that returns more rows than Tableau, with no warning. Found by the absence of handling code; not yet reproduced with a fixture.
+
+**Do.** Add a fixture workbook with a categorical and a quantitative data source filter and assert the current output (proving the gap). Then parse the filters and emit Model `filters` where expressible, else a `NEEDS-REVIEW` validation warning (a BL-438 `error` once that exists). Extract filters are a separate case: record whether they change rows for a live connection.
+
+**Target:** after the 2026-10-29 audit fixes.
+
+## BL-445 — Tableau union relations are probably split into separate Tables `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (emits a NULL-padded `UNION ALL` for members with differing columns). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** `ts_cli/tableau/twb.py` (`_extract_tables`, `:534`, `:556`) collects tables with `.//relation[@type='table']`, which also matches the members inside a `<relation type='union'>`. Nothing handles `type='union'`. The expected result is one Table per union member with no union semantics, so the Model would count only one member's rows or be disconnected. **Unverified:** inferred from the code, no fixture run.
+
+**Do.** Add a union fixture (same columns, and differing columns) and record what the converter emits. If confirmed, emit a SQL View holding the `UNION ALL` (NULL-padding missing columns; Tableau's generated `Table Name` / `Sheet` columns noted as not produced), or reject with a reported loss.
+
+**Target:** after the 2026-10-29 audit fixes.
+
+## BL-446 — Tableau initial SQL is dropped without a report `Tier 3`
+
+**Filed:** 2026-10-29. **Source:** comparison with apache/ossie-converters PR #82 (`initial_sql` loss kind). **Parked** until the 2026-10-29 full-audit fixes land.
+
+**What.** Nothing in `ts_cli/tableau/` reads a connection's initial SQL. ThoughtSpot will not run it, so session settings, temp tables or role switches the workbook depends on are silently absent; Custom SQL that relies on them fails or returns different data.
+
+**Do.** Parse initial SQL from each connection and report it as a validation warning naming the statements, so the user can recreate the effect in the warehouse (a view, a role default). Do not attempt to execute or translate it.
+
+**Target:** after the 2026-10-29 audit fixes.
