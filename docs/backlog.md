@@ -121,7 +121,7 @@ are roughly ordered by value÷effort.
 | ~~BL-213~~ | ~~from-Snowflake drops unqualified derived metrics — the only way an SV expresses a cross-fact ratio~~ | DONE (2026-08-06) |
 | ~~BL-214~~ | ~~parse-sv consumes only the first `unique (...)` per table; the rest corrupt the table name~~ | DONE (2026-08-06) |
 | BL-215 | No validator for a custom calendar CSV; the reference file everyone copies is itself wrong in 99% of rows | next client calendar review |
-| BL-217 | Converter helper adoption uneven (pass-throughs, name collisions, I3); nothing detects a converter that skips one | before the next converter |
+| BL-217 | Converter helper adoption uneven (pass-throughs, name collisions, I3); nothing detects a converter that skips one | 2026-12-31 |
 | BL-218 | 3 `--name-status` git call sites still parse quoted paths — same fail-open as BL-217's sibling, needs a status-pairing parser | with the next validator pass |
 | BL-219 | Tableau relationships on any operator but `=` are dropped entirely; the "no range joins" premise is false | next Tableau pass |
 | BL-220 | Gate the hardcoded `thoughtspot-profiles.json` path out of SKILL.md — the enforcement half of BL-084's adoption pass | with BL-084's adoption pass |
@@ -206,8 +206,8 @@ are roughly ordered by value÷effort.
 | BL-308 | audit 9.4 — `sisense/functions.py`'s `translate_agg` has **no live caller** (only a docstring mention), so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes. The semantic mapping itself is correct and should NOT be changed (Sisense `count` is a distinct count, `dupcount` the exact total — corrected 2026-08-26, finding 14.3). Two exits needed: wire it or delete it, and if wired, note that `aggregation: COUNT_DISTINCT` on a `column_id`-backed entry silently flips MEASURE to ATTRIBUTE on a non-numeric column (I5) | next converter pass |
 | BL-309 | audit 9.5 — the CoCo `ts-convert-from-snowflake-sv` mirror carries **no I14 rule**: no role-play, alias-node or duplicate-join-pair guidance anywhere. The CLI primary added Step 7.5 plus a reference file at v1.20.0; CoCo has no `ts` CLI and executes the doc, so the rule must be prose there. An SV joining one fact to DIM_TIME on order date and ship date emits two joins on the same ordered pair and **the Model will not load** (observed at 21 joins across 7 pairs on a real customer SV). Also: `check_mirror_sync` collects only each ledger row's path and never compares the recorded CLI version against the actual one, so any SYNC-DEBT row acknowledges its mirror permanently | next mirror pass |
 | BL-310 | audit 9.6 — `model_builder.filter_unresolvable_formulas` computes the drop set to a fixpoint via `_cascade_drop_dependents`, and three sibling skills instruct the executor to do it **by hand, one hop deep**, with the identical sentence (from-qlik:92, from-powerbi:86, from-sisense:78). With C referencing B referencing rejected A, B is dropped and C survives carrying a dangling `[formula_B]` — an I13 violation and a hard 14516 rejection, or a dangling `formula_id` and an I1 silent drop. Expose the retry loop as a shared command or helper the three skills invoke. This is BL-217's remainder and the prior sweep's 11.4 | next converter pass |
-| BL-311 | audit 13.2 — `ts-object-model-coach` open-item #4 defers Data Model Instructions to v1.1 and ships manual copy-paste, but the write API exists: `setNLInstructions` (`POST /api/rest/2.0/ai/instructions/set`, Beta 10.15.0.cl), whose **read twin this repo already calls** at `audit/context.py:145`. Needs a `ts` command, then replace the paste step. Second-order: 26.8.0.cl `ai/memory/export`/`import` (Spotter memory) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` move models between Orgs and silently leave it behind | next ts-cli pass |
-| BL-312 | audit 6.2 — `ts_cli/powerbi/parsing.py` is 300 statements, **266 missed (11%)**; its test file is 1.8 KB and exercises two private helpers added reactively in a PR review. Every front-door parse path is untested, in the module a whole converter depends on | next testing pass |
+| ~~BL-311~~ | ~~audit 13.2 — `ts-object-model-coach` open-item #4 defers Data Model Instructions to v1.1 and ships manual copy-paste, but the write API exists: `setNLInstructions` (`POST /api/rest/2.0/ai/instructions/set`, Beta 10.15.0.cl), whose **read twin this repo already calls** at `audit/context.py:145`. Needs a `ts` command, then replace the paste step. Second-order: 26.8.0.cl `ai/memory/export`/`import` (Spotter memory) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` move models between Orgs and silently leave it behind~~ | MERGED into BL-030 (2026-10-29, audit finding 5.2) |
+| BL-312 | audit 6.2 — `ts_cli/powerbi/parsing.py` is 300 statements, **266 missed (11%)**; its test file is 1.8 KB and exercises two private helpers added reactively in a PR review. Every front-door parse path is untested, in the module a whole converter depends on | 2026-11-30 (re-dated 2026-10-29, audit finding 6.6) |
 | ~~BL-306~~ | ~~the join checks are blind to the referencing join shape, whose condition lives in the Table TML's `joins_with[]`~~ | DONE (2026-09-24 — live-verified: 4 VARCHAR join keys now reported that two prior runs missed) |
 | ~~BL-299~~ | ~~`index_type` sense inverted in three checks (S2, P9, P11) — presence tested instead of value, so default-indexed PII was invisible and `DONT_INDEX` false-positived~~ | DONE (2026-09-23) |
 | ~~BL-300~~ | ~~`check_p17` cannot fire on any model the audit can see — it matches formula cross-references by display name; real TML refs are `formula_<name>` ids, and a display-name ref fails on first import~~ | DONE (2026-09-23) |
@@ -311,6 +311,8 @@ are roughly ordered by value÷effort.
 | BL-474 | Model-vs-Worksheet predicate written four ways; two skills contradict | 2026-11-30 |
 | BL-475 | to-snowflake-sv hand-rolls Snowflake access; widen `check_patterns` rule 7 | 2026-11-30 |
 | BL-476 | Re-date or close eight overdue OPEN items and six index rows that contradict their RESOLVED sections | 2026-11-30 |
+| BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
+| BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
 ### Tier 3 — Opportunistic
 
@@ -345,7 +347,7 @@ are roughly ordered by value÷effort.
 | BL-101 | Chart-axis-role in `ts metadata report` | — |
 | BL-102 | Databricks MV `parameters:` parse + emit | — |
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
-| BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | — |
+| BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | 2026-11-30 |
 | BL-116 | Live destructive dependency-manager smoke | — |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
@@ -425,7 +427,6 @@ are roughly ordered by value÷effort.
 | BL-098 | DBX trailing/leading sparse data (item 3 only) | next DBX live-verify |
 | BL-103 | searchConnection with OAuth hierarchy | next OAuth connection |
 | BL-104 | Evaluate DBX BI compatibility mode | evaluation item |
-| BL-106 | Python 3.11 floor bump (remaining) | after 2026-10 |
 | BL-113 | Live provisioning step for load smoke | next SF live session |
 | BL-114 | Document export_with_column_aliases | GA or skill need |
 | BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
@@ -1430,6 +1431,8 @@ No converter writes instructions today. Snowflake SV `ai_sql_generation` /
 only in `model.description`. The `ts` command this item adds (overlaps BL-311's
 `setNLInstructions` wrapper — do it once) should be called from both from-converters and
 from `ts-link-semantic-layer`, behind the BL-318 keep/discard check.
+
+**Note (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 5.2) — BL-311 merged in.** `setNLInstructions` is still implemented only as the private `_set_instructions` in `link.py`, and model-coach still ships the manual-paste step while citing an open item this section records as verified. Add a public `ts models instructions get|set` with get-and-merge (the replace-vs-append question above), call it from `ts link` and switch model-coach to it. BL-311 was a duplicate of this item and is closed into it; its second-order point comes with it: `ai/memory/export`/`import` (Spotter memory, 26.8.0.cl) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` leave it behind when they move a Model. The overdue target below is re-dated or closed under BL-476, not here.
 
 **Target:** 2026-09-30.
 
@@ -3384,7 +3387,7 @@ reintroduce the CVEs. urllib3 is covered transitively — no separate pin needed
 
 ---
 
-## BL-106 — Lift the CPython 3.14 cap; plan the 3.11 floor bump `Tier 4`
+## BL-106 — Lift the CPython 3.14 cap; plan the 3.11 floor bump `Tier 2`
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 16.2.
@@ -3397,7 +3400,7 @@ for 3.14 to be testable). **Remaining:** (b) the `>=3.11` floor bump after 3.10 
 `requires-python = ">=3.10,<3.14"` blocked CPython 3.14 (GA Oct 2025). The cap is now lifted and
 3.14 is CI-verified; the floor bump to `>=3.11` remains deferred.
 
-**Target:** ✅ cap lifted; revisit the 3.11 floor bump after 2026-10.
+**Target:** 2026-11-30 for the 3.11 floor bump (re-dated and moved from Tier 4 on 2026-10-29, `docs/audit/2026-10-29-full.md` finding 16.1: 3.10 reached end of life in October 2026 and is still in `requires-python` and the CI matrix). Do: raise the floor to `>=3.11`, drop 3.10 from the matrix, bump ts-cli and add a CHANGELOG entry. The end-of-life check that would have flagged it is BL-463. Was: ✅ cap lifted; revisit the 3.11 floor bump after 2026-10.
 
 **Note (2026-07-29 full audit finding 16.1):** re-confirms the floor bump is already
 tracked here (not a new item) and narrows the plan now that 3.10 EOL (2026-10) is ~2
@@ -3523,7 +3526,7 @@ skill logic") that can silently diverge from the audit's own list (now `PII_PATT
 Point the smoke test at `ts audit run` live; import or delete the duplicated list.
 Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 
-**Target:** no fixed date — natural next touch of the audit smoke test.
+**Target:** 2026-11-30 (dated 2026-10-29, `docs/audit/2026-10-29-full.md` finding 6.2: the smoke's PII patterns have since drifted from `audit/engine/fields.py`, it never runs `ts audit run`, and its join step runs no join check; assert on rule ids when rewiring). Was: no fixed date — natural next touch of the audit smoke test.
 
 ---
 
@@ -5074,7 +5077,7 @@ that is a warning to the reader, not a guard in the code.
 `ts_cli` imports (PR #405, extending rule 8 / finding 5.2) -- remove that entry when this
 item ships and the imports are replaced.
 
-**Target:** next `ts-object-model-aggregates` touch -- the audit's own Follow-ups section
+**Target:** 2026-11-30 (dated 2026-10-29, `docs/audit/2026-10-29-full.md` finding 5.1: the event-style trigger "next aggregates touch" fired with #526 on 2026-09-23 and nothing noticed, so the `_TS_CLI_IMPORT_ALLOWLIST` entry had become a permanent exemption). Was: next `ts-object-model-aggregates` touch -- the audit's own Follow-ups section
 names this as the next scoped unit of work once the migrate-engine/harness/mapping wave closed.
 
 ---
@@ -8477,6 +8480,10 @@ handed to a customer, and the failure mode is always the same — the report say
 `Migrated`.
 
 Raised 2026-08-26 from the PR #440 review.
+
+**Note (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` findings 9.10, 9.12, 9.13).** Part 2 is still open. PowerBI skips `resolve_name_collisions` and `fix_double_aggregation`; Qlik skips `resolve_name_collisions` (`model_builder.py:37` imports it and never calls it; the import is a live re-export used by `commands/tableau.py`), so a one-line call closes Qlik's gap (9.10). Three pass-through mechanisms produce two spellings of `sql_*_op`, and only `sql_passthrough_call` guards braces and quotes: converge on one shared emitter (9.12). I3: Tableau, PowerBI, Qlik and Sisense formula MEASURE columns omit `index_type: DONT_INDEX` and no shared helper exists; add one to `formula_common` (the doc example at `ts-from-snowflake-rules.md:575` also omits it) (9.13).
+
+**Target:** 2026-12-31 (dated 2026-10-29; was "before the next converter").
 
 ---
 
@@ -15125,6 +15132,8 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Do.** As spec C3 describes: a meta-check that every gate in `tools/validate/checks.py` (and pr_ready's PR-only/every-PR gates) has a known-bad fixture, with the uncovered ones listed in one dated follow-up; `check_module_health` compares complexity values per function (refactors that move keys pass); `check_file_size` fails a raise against base unless labelled with a cited BL; `pr-ready` warns when a PR edits a gate and product code together.
 
+**Also covers (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 6.4):** three blocking gates have no self-test today — `check_harness_routing`, `generate_parity --check` and `suggest_dependency_types`; the meta-check should list them until they do. The Haiku fixtures for `check_harness_routing` are BL-466.
+
 **Target:** 2026-12-31.
 
 ## BL-428 — spec C4 — run every credential-free smoke suite in CI `Tier 3`
@@ -15132,6 +15141,8 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 **Filed:** 2026-10-29. **Source:** `docs/superpowers/specs/2026-10-28-pr-quality-system-design.md` §5 C4 (F7); PR #680 moved CI's 7 suites onto `run_checks.py --smokes` but did not add the classification.
 
 **Do.** Add a `CI_RUNNABLE` declaration beside `check_smoke_tests.py`'s `ALLOWLIST`, fail a new smoke that declares neither, feed `CI_SMOKES` from it (keeping `test_checks_parity.py`'s literal as the deliberate second copy), and isolate per-skill caches for credential-free suites. Pairs with BL-422 (two smoke runners).
+
+**Also covers (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 6.3; carry-over of 2026-09-22 finding 7.1):** six suites that need no credentials (four Pure, two CLI-only) run in no CI job, and `test_checks_parity` pins the short list, which locks the gap in. The audit suggested deriving `CI_SMOKES` from the README tiers; the `CI_RUNNABLE` declaration above is the same fix.
 
 **Target:** 2026-12-31.
 
