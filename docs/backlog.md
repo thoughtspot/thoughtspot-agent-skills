@@ -15606,7 +15606,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 7.3.
 
-**What.** `.claude/workflows/repo-audit.js:166` starts the delta at the last commit that *touched* the newest `*-full.md`; the rubric (`repo-audit.md:114`) and `check_audit_freshness.py:141-158` (`--diff-filter=A`) mean the commit that *added* it. After the 2026-08-26 report was edited in place by its routing wave, the 2026-09-22 delta started at #475 and 32 commits fell into no angle-17 review. **The routing of the 2026-10-29 report edits it in place, so until this lands the next full sweep will start its delta at that routing commit and skip everything merged between #684 and it.**
+**What.** `.claude/workflows/repo-audit.js:166` starts the delta at the last commit that *touched* the newest `*-full.md`; the rubric (`repo-audit.md:114`) and `check_audit_freshness.py:141-158` (`--diff-filter=A`) mean the commit that *added* it. After the 2026-08-26 report was edited in place by its routing wave, the 2026-09-22 delta started at #475 and 32 commits fell into no angle-17 review. **Until this lands, never edit a `*-full.md` after it merges:** the 2026-10-29 routing went into a separate `docs/audit/2026-10-29-routing.md` for exactly this reason.
 
 **Do.** Use the adding commit in the workflow prompt; add a validator (or a shared helper both call) so the two implementations agree.
 
