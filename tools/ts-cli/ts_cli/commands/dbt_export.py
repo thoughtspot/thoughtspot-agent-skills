@@ -879,11 +879,9 @@ def build_model_cmd(
         raise SystemExit("--import requires --profile (or TS_PROFILE).")
 
     schema_text = schema_path.read_text(encoding="utf-8")
-    tml = build_model_tml_from_schema_yml(schema_text, model_name, not model_guid)
+    tml = build_model_tml_from_schema_yml(schema_text, model_name)
 
     print_double_aggregation(tml.pop("_double_aggregation_collapsed", []))
-    for name in tml.pop("_count_distinct_as_formula", []):
-        typer.echo(f"Note: '{name}' (count_distinct) emitted as a `unique count` formula (I5).", err=True)
     print_reaggregation_kept(tml.pop("_reaggregation_kept", []))
     excluded = tml.pop("_excluded_columns", [])
     if excluded:
@@ -920,7 +918,7 @@ def build_model_cmd(
 
     if do_import:
         from ts_cli.dbt.import_gate import lint_gate
-        lint_gate(tml, updating=bool(model_guid))
+        lint_gate(tml)
         _import_model_tml(tml, profile, model_guid, model_name)
     elif not output:
         print(result)

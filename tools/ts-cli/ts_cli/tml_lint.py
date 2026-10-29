@@ -135,6 +135,29 @@ def _check_chart_tile_encoding(data: dict) -> list[str]:
     ]
 
 
+def _check_i5(columns: list) -> list[str]:
+    # I5 — a physical-column columns[] entry must not use aggregation: COUNT_DISTINCT
+    # (on a VARCHAR/DATE column it silently flips MEASURE → ATTRIBUTE; numeric columns survive,
+    # live 2026-10-29 — but a Model file alone does not show the type, and the formula
+    # needs no type knowledge). A bare-column formula with COUNT_DISTINCT fails the same way
+    # and is not checked here yet (audit 2026-10-29 finding 9.1).
+    out: list[str] = []
+    for c in columns:
+        if not isinstance(c, dict) or "formula_id" in c:
+            continue  # formula columns are exempt; this targets physical columns
+        props = c.get("properties") or {}
+        # A declared ATTRIBUTE has nothing to demote: ThoughtSpot's own exports carry
+        # ATTRIBUTE + COUNT_DISTINCT (the demoted form, live 2026-10-29), so flagging it
+        # is a false positive on every round-trip.
+        if (isinstance(props, dict) and props.get("aggregation") == "COUNT_DISTINCT"
+                and props.get("column_type") != "ATTRIBUTE"):
+            out.append(
+                f"I5: column '{c.get('name', '?')}' uses aggregation: COUNT_DISTINCT — "
+                f"on a non-numeric column this flips MEASURE → ATTRIBUTE silently. Use a `unique count(...)` formula instead."
+            )
+    return out
+
+
 def lint_tml(data: dict) -> list[str]:
     """Return a list of invariant-violation strings for one parsed TML doc. Empty = clean.
 
@@ -195,20 +218,7 @@ def lint_tml(data: dict) -> list[str]:
                 f"joins silently fail at query time ('{t.get('name')} does not exist in schema')."
             )
 
-    # I5 — a physical-column columns[] entry must not use aggregation: COUNT_DISTINCT
-    # (on a VARCHAR/DATE column it silently flips MEASURE → ATTRIBUTE; numeric columns survive,
-    # live 2026-10-29 — but a Model file alone does not show the type, and the formula
-    # needs no type knowledge). A bare-column formula with COUNT_DISTINCT fails the same way
-    # and is not checked here yet (audit 2026-10-29 finding 9.1).
-    for c in columns:
-        if not isinstance(c, dict) or "formula_id" in c:
-            continue  # formula columns are exempt; this targets physical columns
-        props = c.get("properties") or {}
-        if isinstance(props, dict) and props.get("aggregation") == "COUNT_DISTINCT":
-            findings.append(
-                f"I5: column '{c.get('name', '?')}' uses aggregation: COUNT_DISTINCT — "
-                f"on a non-numeric column this flips MEASURE → ATTRIBUTE silently. Use a `unique count(...)` formula instead."
-            )
+    findings.extend(_check_i5(columns))
 
     # I8 — every column_id in columns[] must be unique. A duplicate is a HARD import
     # rejection ("columns should have unique column_id values"). When a source defines

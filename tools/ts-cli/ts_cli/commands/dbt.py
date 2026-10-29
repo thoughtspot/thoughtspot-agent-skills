@@ -601,8 +601,9 @@ def _build_model_artifacts(dbt_cloud_profile: Optional[str], manifest_path: Opti
 def _import_confirmed(objects: list) -> bool:
     """A security gate needs a positive OK/WARNING per item, not "no failure reported"."""
     return bool(objects) and all(
-        ((o.get("response") or {}).get("status") or {}).get("status_code") in ("OK", "WARNING")
-        for o in objects if isinstance(o, dict))
+        isinstance(o, dict)
+        and ((o.get("response") or {}).get("status") or {}).get("status_code") in ("OK", "WARNING")
+        for o in objects)
 
 
 def _apply_table_rls(client: "ThoughtSpotClient", rls_by_table: dict,
@@ -725,8 +726,7 @@ def build_model(
     manifest, catalog = _build_model_artifacts(dbt_cloud_profile, manifest_path, no_cache)
     model_tml = build_model_tml_from_manifest(
         manifest, catalog, model_path, model_name,
-        pretty_names=pretty_names, metrics=metrics,
-        count_distinct_as_formula=not model_guid)
+        pretty_names=pretty_names, metrics=metrics)
     # ts_rls_rules are extracted — and validated — BEFORE the Model import (PR #506
     # review: a malformed tag used to raise only after the Model was live), for every
     # Table the Model joins, not only those under --model-path: a shared dimension
@@ -754,9 +754,6 @@ def build_model(
     mf = model_tml.pop("_metrics_report", None)
     _print_metrics_report(mf)
     print_double_aggregation(model_tml.pop("_double_aggregation_collapsed", []))
-    for name in model_tml.pop("_count_distinct_as_formula", []):
-        print(f"Note: '{name}' (ts_aggregation: count_distinct) is emitted as a "
-              "`unique count` formula (invariant I5).", file=sys.stderr)
     print_reaggregation_kept(model_tml.pop("_reaggregation_kept", []))
     if model_guid:
         # guid belongs at the document root (see thoughtspot-model-tml.md), not under model:
@@ -794,7 +791,7 @@ def build_model(
     # builders do (Tableau's merge mode does not yet). Without it, model-invariant
     # violations reached the server, and some (I5 on a text column) import
     # "successfully" and wrong (audit 2026-10-29, 9.3).
-    lint_gate(model_tml, updating=bool(model_guid))
+    lint_gate(model_tml)
     tml_yaml = _yaml.dump(model_tml, sort_keys=False, allow_unicode=True)
 
     # Apply ts_rls_rules to Table TMLs (model-level config.meta tag) BEFORE the
@@ -809,7 +806,9 @@ def build_model(
         raise SystemExit(
             "Row-level security was not applied, so the Model was not imported:\n  "
             + "\n  ".join(not_applied)
-            + "\nFix the Table(s) above and re-run; nothing about the Model has changed.")
+            + "\nThe Model is unchanged. Tables reported above as 'RLS rules applied' now "
+            "carry their dbt rules (replacing any rule not declared in dbt). Fix the "
+            "Table(s) listed and re-run.")
 
     resp = client.post(
         "/api/rest/2.0/metadata/tml/import",

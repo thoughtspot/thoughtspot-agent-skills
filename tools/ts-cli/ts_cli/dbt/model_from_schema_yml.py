@@ -18,8 +18,7 @@ from collections import defaultdict
 
 import yaml
 
-from .formula_pass import (
-    collapse_double_aggregation, count_distinct_pass, find_reaggregation_kept)
+from .formula_pass import collapse_double_aggregation, find_reaggregation_kept
 from .tags import (
     _formula_id,
     is_column_excluded,
@@ -48,7 +47,6 @@ def _table_name_of(model_entry: dict) -> str:
 def build_model_tml_from_schema_yml(
     schema_yml_text: str,
     model_name: str,
-    count_distinct_as_formula: bool = True,
 ) -> dict:
     """Build a ThoughtSpot Model TML dict from a dbt schema.yml.
 
@@ -229,9 +227,6 @@ def build_model_tml_from_schema_yml(
                 col_entry_f["description"] = col_desc_f
             formula_col_entries.append(col_entry_f)
 
-    columns, formulas, formula_col_entries, cd_converted = count_distinct_pass(
-        columns, formulas, formula_col_entries, enabled=count_distinct_as_formula)
-
     # 2026-10 (PR #506 review, BL-217): the same shared fix_double_aggregation
     # pass as build_model_tml_from_manifest (dbt/formula_pass.py). The shared
     # resolve_name_collisions pass is not run here, deliberately: every column is
@@ -253,7 +248,6 @@ def build_model_tml_from_schema_yml(
     if excluded_columns:
         out["_excluded_columns"] = sorted(excluded_columns)   # diagnostics; caller strips
     out["_double_aggregation_collapsed"] = double_agg         # diagnostics (may be []); caller strips
-    out["_count_distinct_as_formula"] = cd_converted          # diagnostics (may be []); caller strips
     out["_reaggregation_kept"] = reagg_kept                   # diagnostics (may be []); caller strips
     return out
 

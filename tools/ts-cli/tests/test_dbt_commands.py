@@ -1463,11 +1463,11 @@ class TestBuildModelRlsGate:
         """Audit 2026-10-29 9.3: build-model POSTed Model TML with no lint gate."""
         calls, _ = self._setup(monkeypatch, tmp_path)
         import ts_cli.tml_lint as tl
-        monkeypatch.setattr(tl, "lint_tml", lambda doc: ["I5: column 'X' uses aggregation: COUNT_DISTINCT"])
+        monkeypatch.setattr(tl, "lint_tml", lambda doc: ["I13: dangling [formula_X] reference"])
         result = runner.invoke(app, ["dbt", "build-model", "--dbt-cloud-profile", "p",
                                      "--model-path", "models/staging/barbershop", "--model-name", "M"])
         assert result.exit_code != 0
-        assert "LINT: I5" in result.output and "nothing was imported" in result.output
+        assert "LINT: I13" in result.output and "nothing was imported" in result.output
         assert not any(p.endswith("/tml/import") or p.endswith("/tml/export") for p, _ in calls)
 
 
@@ -1487,3 +1487,43 @@ def test_rls_rules_on_join_target_outside_model_path():
     assert extract_model_rls_from_manifest(manifest, "models/staging/barbershop") == {}
     got = extract_model_rls_from_manifest(manifest, "models/staging/barbershop", {"STG_BARBERS"})
     assert list(got) == ["STG_BARBERS"]
+
+
+def test_rls_in_path_model_wins_and_seeds_are_ignored():
+    """Review of the 17.2 fix: an out-of-path node with the same Table name must not
+    replace the in-path model's rules, and a seed never contributes rules."""
+    from ts_cli.dbt.manifest import extract_model_rls_from_manifest
+    rule = lambda n: {"config": {"meta": {"ts_rls_rules": [{"name": n, "expr": "ts_username = [CUSTOMERS::X]"}]}}}
+    manifest = {"nodes": {
+        "model.p.stg": {"resource_type": "model", "name": "stg_customers", "alias": "customers",
+                        "original_file_path": "models/staging/stg_customers.sql", **rule("staging_rule")},
+        "model.p.cust": {"resource_type": "model", "name": "customers",
+                         "original_file_path": "models/marts/customers.sql", **rule("marts_rule")},
+        "seed.p.cust": {"resource_type": "seed", "name": "customers",
+                        "original_file_path": "seeds/customers.csv", **rule("seed_rule")},
+    }}
+    for order in (list(manifest["nodes"].items()), list(reversed(manifest["nodes"].items()))):
+        got = extract_model_rls_from_manifest({"nodes": dict(order)}, "models/marts", {"CUSTOMERS"})
+        assert "marts_rule" in str(got["CUSTOMERS"]), got
+
+
+def test_import_confirmed_rejects_non_dict_items():
+    assert not dbt_mod._import_confirmed(["OK"])
+    assert not dbt_mod._import_confirmed([{"response": {"status": {"status_code": "OK"}}}, "junk"])
+    assert dbt_mod._import_confirmed([{"response": {"status": {"status_code": "OK"}}}])
+
+
+def test_lint_gate_i5_is_advisory(capsys):
+    """I5 on a dbt count_distinct column must not block: the column imports as it
+    did before the gate existed (conversion is audit 2026-10-29 finding 9.2)."""
+    import pytest
+    from ts_cli.dbt.import_gate import lint_gate
+    model = {"model": {"name": "M", "model_tables": [{"name": "T"}], "columns": [
+        {"name": "N", "column_id": "T::C",
+         "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]}}
+    lint_gate(model)
+    assert "advisory" in capsys.readouterr().err
+    model["model"]["guid"] = "nested"   # a blocking finding: guid belongs at the root
+    with pytest.raises(SystemExit):
+        lint_gate(model)
+

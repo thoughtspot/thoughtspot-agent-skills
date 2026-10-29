@@ -15,8 +15,8 @@ from collections import defaultdict
 
 from .constraint_joins import add_uncovered_joins, constraint_joins, relation_tables
 from .formula_pass import (
-    collapse_double_aggregation, count_distinct_pass, find_reaggregation_kept,
-    rename_colliding_columns, repoint_formula_refs)
+    collapse_double_aggregation, find_reaggregation_kept, rename_colliding_columns,
+    repoint_formula_refs)
 from .model_from_schema_yml import rls_rules_block
 from .node_paths import (
     model_in_path, parse_ts_join_test, ref_tables, table_name as _node_table_name)
@@ -42,19 +42,24 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str,
     source file.
 
     Returns {TABLE_NAME_UPPER: rls_rules_block} for each model in model_path —
-    and, when ``table_names`` is given, each model whose Table is in it (join
-    targets outside model_path, audit 2026-10-29 PR A review) — that carries
-    ts_rls_rules under config.meta.  The caller should export the
+    and, when ``table_names`` is given, each *model* node whose Table is in it (a
+    join target outside model_path) — that carries ts_rls_rules under config.meta.
+    A model in model_path always wins over an out-of-path node with the same Table
+    name (audit 2026-10-29, 17.2 review).  The caller should export the
     current Table TML, merge in the rls_rules block, and re-import.
     """
     result: dict[str, dict] = {}
+    in_path_tables: set[str] = set()
     for node in manifest.get("nodes", {}).values():
         # Exact dirname, matching inspect.py's rls_models. This was a substring
         # match, which also swept in a sibling directory sharing the prefix
         # (`models/staging` picking up `models/staging_archive`) and disagreed
         # with what `ts dbt inspect` reported for the same path.
-        if not (model_in_path(node, model_path)
-                or _node_table_name(node) in (table_names or ())):
+        in_path = model_in_path(node, model_path)
+        table = _node_table_name(node)
+        if not in_path and not (node.get("resource_type") == "model"
+                                and table in (table_names or ())
+                                and table not in in_path_tables):
             continue
         model_name = node.get("name")
         if not model_name:
@@ -66,7 +71,9 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str,
 
         # Malformed hand-written rules raise SystemExit naming the model
         # (PR #506 review) — see model_from_schema_yml.rls_rules_block.
-        result[_node_table_name(node)] = rls_rules_block(model_name, ts_rls)
+        result[table] = rls_rules_block(model_name, ts_rls)
+        if in_path:
+            in_path_tables.add(table)
 
     return result
 def manifest_table_locations(manifest: dict) -> dict[str, dict]:
@@ -159,7 +166,6 @@ def build_model_tml_from_manifest(
     model_name: str,
     pretty_names: bool = False,
     metrics: bool = True,
-    count_distinct_as_formula: bool = True,
 ) -> dict:
     """Build a ThoughtSpot Model TML dict from dbt Cloud job artifacts.
 
@@ -337,11 +343,6 @@ def build_model_tml_from_manifest(
         formulas, formula_col_entries = _apply_superseded(
             formulas, formula_col_entries, metrics_report)
 
-    # After the metric pass, so a metric cannot silently supersede a converted
-    # count_distinct column; a same-named pair reaches the display-name refusal.
-    columns, formulas, formula_col_entries, cd_converted = count_distinct_pass(
-        columns, formulas, formula_col_entries, enabled=count_distinct_as_formula)
-
     # An inferred (untagged) physical column may prettify to the same name as a
     # metric-derived formula — the docs' own pattern (TRANSACTION_TOTAL column vs the
     # `transaction_total` metric). There is no schema.yml entry to hang a
@@ -382,8 +383,6 @@ def build_model_tml_from_manifest(
         out["_skipped_joins"] = skipped_joins                 # diagnostics only — caller strips
     if double_agg:
         out["_double_aggregation_collapsed"] = double_agg     # diagnostics only — caller strips
-    if cd_converted:
-        out["_count_distinct_as_formula"] = cd_converted      # diagnostics only — caller strips
     if reagg_kept:
         out["_reaggregation_kept"] = reagg_kept               # diagnostics only — caller strips
     if metrics_report is not None:

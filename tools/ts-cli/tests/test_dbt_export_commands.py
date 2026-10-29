@@ -1448,7 +1448,8 @@ def test_pending_write_found_under_a_different_case(tmp_path):
     real = tmp_path / "Schema.yml"
     real.write_text("disk", encoding="utf-8")
     other = tmp_path / "schema.yml"
-    if not other.exists():          # case-sensitive filesystem: nothing to test
-        return
+    if not other.exists():
+        import pytest
+        pytest.skip("case-sensitive filesystem")
     assert os.path.samefile(real, other)
     assert pending_or_disk({other: "queued"}, real) == "queued"

@@ -10,7 +10,7 @@ closure. Never fork these into a platform module; import them.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -466,90 +466,6 @@ _AGG_TO_FORMULA_FN = {
     "VARIANCE": "variance",
     "COUNT_DISTINCT": "unique count",
 }
-
-
-def count_distinct_columns_to_formulas(
-    columns: list[dict],
-    existing_formulas: list[dict],
-    id_fn: "Callable[[str], str] | None" = None,
-) -> "tuple[list[dict], list[dict], list[dict], list[str]]":
-    """Re-express every physical ``columns[]`` entry carrying
-    ``aggregation: COUNT_DISTINCT`` as a ``unique count`` formula (invariant I5).
-
-    For builders that assemble Model TML column dicts directly (dbt), where a
-    source tag can ask for ``COUNT_DISTINCT`` on a physical column. On a VARCHAR or
-    DATE column ThoughtSpot silently turns that column into an ATTRIBUTE; on a
-    numeric one it works (live-probed 2026-10-29), but the builder cannot see the
-    type, and the formula is correct for every type. The display name, description
-    and other properties carry over, so the measure keeps its name and metadata.
-
-    Returns ``(kept_columns, new_formulas, new_formula_columns, converted_names)``.
-    Formula ids come from ``id_fn(name)`` — pass the converter's own id function so
-    the new ids match its other formulas (dbt escapes brackets) — defaulting to the
-    ``formula_<Name>`` convention, and are de-duplicated against the ids in
-    ``existing_formulas``. Inputs are not mutated.
-    """
-    kept: list[dict] = []
-    new_formulas: list[dict] = []
-    new_cols: list[dict] = []
-    converted: list[str] = []
-    taken = {f.get("id") for f in existing_formulas}
-    for col in columns:
-        props = col.get("properties") or {}
-        if ("column_id" not in col or props.get("aggregation") != "COUNT_DISTINCT"
-                or props.get("column_type") == "ATTRIBUTE"):   # a declared attribute stays one
-            kept.append(col)
-            continue
-        name = col["name"]
-        make_id = id_fn or (lambda s: f"formula_{s}")
-        fid, n = make_id(name), 2
-        while fid in taken:
-            fid, n = make_id(f"{name} {n}"), n + 1
-        taken.add(fid)
-        new_formulas.append({"id": fid, "name": name,
-                             "expr": f"{_AGG_TO_FORMULA_FN['COUNT_DISTINCT']} ( [{col['column_id']}] )"})
-        new_props = {k: v for k, v in props.items() if k != "aggregation"}
-        new_props.update({"column_type": "MEASURE", "aggregation": "SUM"})
-        new_props.setdefault("index_type", "DONT_INDEX")
-        entry = {k: v for k, v in col.items() if k not in ("column_id", "properties")}
-        entry.update({"formula_id": fid, "properties": new_props})
-        new_cols.append(entry)
-        converted.append(name)
-    return kept, new_formulas, new_cols, converted
-
-
-_BARE_COLUMN_REF = re.compile(r"^\s*\[[^\[\]]+::[^\[\]]+\]\s*$")
-
-
-def count_distinct_bare_formulas(
-    formulas: list[dict], formula_columns: list[dict],
-) -> "tuple[list[dict], list[dict], list[str]]":
-    """The formula half of invariant I5: a formula column whose ``expr`` is only a
-    column reference (``[T::col]``) and which carries ``aggregation: COUNT_DISTINCT``
-    is demoted to an ATTRIBUTE on a VARCHAR column exactly like a physical one
-    (live probe 2026-10-29), and ``tml_lint`` exempts formula columns. Rewrites the
-    expr to ``unique count ( [T::col] )`` and the column aggregation to SUM.
-
-    Returns ``(formulas, formula_columns, converted_names)``; inputs not mutated.
-    """
-    by_id = {f.get("id"): f for f in formulas}
-    targets = {
-        c.get("formula_id") for c in formula_columns
-        if (c.get("properties") or {}).get("aggregation") == "COUNT_DISTINCT"
-        and (c.get("properties") or {}).get("column_type") != "ATTRIBUTE"
-        and _BARE_COLUMN_REF.match(str((by_id.get(c.get("formula_id")) or {}).get("expr", "")))
-    }
-    fn = _AGG_TO_FORMULA_FN["COUNT_DISTINCT"]
-    new_formulas = [
-        {**f, "expr": f"{fn} ( {f['expr'].strip()} )"} if f.get("id") in targets else f
-        for f in formulas]
-    new_cols, converted = [], []
-    for c in formula_columns:
-        if c.get("formula_id") in targets:
-            c = {**c, "properties": {**c["properties"], "aggregation": "SUM"}}
-            converted.append(c.get("name", ""))
-        new_cols.append(c)
-    return new_formulas, new_cols, converted
 
 
 def promote_duplicate_column_ids(

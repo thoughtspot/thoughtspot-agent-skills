@@ -550,3 +550,15 @@ def test_ts_tml_lint_runs_i16_when_tables_are_in_the_batch(tmp_path):
     # The same Model linted alone has nothing to compare against.
     alone = CliRunner().invoke(app, ["tml", "lint", "--file", str(tmp_path / "m.model.tml")])
     assert not any(f.startswith("I16:") for r in _json.loads(alone.stdout)["results"] for f in r["findings"])
+
+
+def test_i5_skips_declared_attribute():
+    """ThoughtSpot's own exports carry ATTRIBUTE + COUNT_DISTINCT (the demoted form);
+    flagging it is a round-trip false positive (PR A converter audit, 2026-10-29)."""
+    from ts_cli.tml_lint import lint_tml
+    doc = {"model": {"name": "M", "model_tables": [{"name": "T"}], "columns": [
+        {"name": "R", "column_id": "T::R",
+         "properties": {"column_type": "ATTRIBUTE", "aggregation": "COUNT_DISTINCT"}}]}}
+    assert not [f for f in lint_tml(doc) if f.startswith("I5")]
+    doc["model"]["columns"][0]["properties"]["column_type"] = "MEASURE"
+    assert [f for f in lint_tml(doc) if f.startswith("I5")]

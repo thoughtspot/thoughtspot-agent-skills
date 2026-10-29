@@ -414,6 +414,7 @@ def validate_model_tml(data: dict) -> list[str]:
         if (
             isinstance(props, dict)
             and props.get("aggregation") == "COUNT_DISTINCT"
+            and props.get("column_type") != "ATTRIBUTE"   # nothing to demote
             and col.get("column_id")
             and not col.get("formula_id")
         ):
