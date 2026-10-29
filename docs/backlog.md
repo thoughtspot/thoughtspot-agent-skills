@@ -10653,7 +10653,7 @@ must not be broken by the fix.
 
 **Target:** next from-direction converter pass.
 
-## BL-265 — ThoughtSpot demotes a `COUNT` metric over a `VARCHAR` key to an `ATTRIBUTE`, and the converter neither predicts nor reports it `Tier 3`
+## BL-265 — ThoughtSpot demotes any physical measure over a non-numeric column (`COUNT`, `MIN`, `MAX`, `COUNT_DISTINCT`) to an `ATTRIBUTE`, and the converters neither predict nor report it `Tier 3`
 
 **Filed:** 2026-09-08.
 **Source:** the round-trip fidelity study — `docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`
@@ -10661,7 +10661,9 @@ must not be broken by the fix.
 `.svrt/work/asof_join/` — `tml/`, `classify.json` and the name map
 (**`.svrt/` is gitignored**).
 **Affects:** `tools/ts-cli/ts_cli/sv_naming.py` (`fact_column_type()` and the metric analogue),
-`tools/ts-cli/ts_cli/sv_build_model.py`.
+`tools/ts-cli/ts_cli/sv_build_model.py`, `sv_translate.py:278` (metrics), and — widened
+2026-10-29, audit finding 9.18 — `tools/ts-cli/ts_cli/databricks/mv_translate.py:294-307`, which
+emits e.g. `MAX(transaction_date)` as a physical MEASURE/MAX with no type check.
 **Status:** OPEN.
 
 `asof_join`'s `Orders.order_count AS COUNT(o_ordid)` was built as a `MEASURE`, imported, and
@@ -10682,7 +10684,7 @@ Related but distinct from row 16: that row is about **facts** being typed by dat
 (`fact_column_type()`, live-confirmed and now correct in the matrix). This is the same rule
 applied to a **metric**, where the converter does not anticipate it at all.
 
-**Approach.** Predict the demotion rather than discover it: where a metric's aggregation is
+**Approach (widened 2026-10-29 to MIN/MAX/COUNT and the MV builder).** Predict the demotion rather than discover it: where a metric's aggregation is
 `COUNT`/`COUNT_DISTINCT` over a non-numeric column, either emit it in the form ThoughtSpot will
 keep as a `MEASURE` (a formula counting the key, so the column's own type does not decide), or
 **annotate it** so the operator knows the kind will change on import. Silent kind-change is the
@@ -12100,7 +12102,7 @@ part of BL-130. The `ts-link-*` builder should share this map rather than carry 
 **Status: v1 shipped 2026-09-28** — `ts-link-semantic-layer` 1.0.0 + `ts link build`
 (ts-cli 0.150.0). Design changed from the plan below at the user's direction: **no
 per-platform adapters** — one normalized spec and one `--aggregation aggregate|standard`
-switch; re-run preservation parked (BL-318). Remaining: the skill's open items #2–#5
+switch; re-run preservation parked (BL-318). Remaining: the skill's open items #2, #3 and #5
 (Honeydew/Cube/Kyvos metadata, Cube/Kyvos aggregation mode, ~~COUNT_DISTINCT coercion~~ —
 #4 verified 2026-10-29 by live probe, instructions replace-vs-append). The builder carries its own type map (including
 `timestamp_ltz`, and the no-scale → INT64 rule shared with `sv_introspect`) rather than

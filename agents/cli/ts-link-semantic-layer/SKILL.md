@@ -202,10 +202,10 @@ column's role and aggregation with what it sent. JSON summary on stdout:
 | `instructions_result` | `{"set": true}`, or the HTTP status and error. A failure here does not undo the link |
 | `coerced` | Columns whose `column_type` or `aggregation` ThoughtSpot changed on import. Should be `[]` — report any entry to the user |
 | `existing_table_guid` | Present when the object was already linked (Step 2 missed it); nothing was created |
-| `warnings` | Pre-import advisories |
+| `warnings` | Pre-import advisories (none are emitted today; kept for compatibility) |
 | `error` | Present on failure. If `table_guid` is also present, the Table was created and remains |
 
-**Editing a linked Model later:** change a measure's aggregation on the **Table** too. AgentQL/SpotQL reads the Table's aggregation (UI search reads the Model's), so a Model-only change to `AGGREGATE` leaves every AgentQL query on it failing. `ts tml lint --file table.tml --file model.tml` flags it (I16; [open item #8](references/open-items.md)). Lint also reports **I5** on every `COUNT_DISTINCT` measure. It is safe to ignore **only** where the column's `data_type` in the Table TML is numeric (INT64, INT32, DOUBLE, FLOAT) — true of every measure the build emits. A hand-edited `COUNT_DISTINCT` on a VARCHAR, DATE or other non-numeric column is a real failure: ThoughtSpot will store it as an ATTRIBUTE.
+**Editing a linked Model later:** change a measure's aggregation on the **Table** too. AgentQL/SpotQL reads the Table's aggregation (UI search reads the Model's), so a Model-only change to `AGGREGATE` leaves every AgentQL query on it failing. `ts tml lint --file table.tml --file model.tml` flags it (I16; [open item #8](references/open-items.md)). Lint also reports **I5** on every `COUNT_DISTINCT` measure. It is safe to ignore **only** where the column's `data_type` in the Table TML is INT64 or DOUBLE (probed); INT32 and FLOAT are treated as numeric by the build but were not probed, so check the post-import `coerced` result for them. A hand-edited `COUNT_DISTINCT` on a VARCHAR, DATE or other non-numeric column is a real failure: ThoughtSpot will store it as an ATTRIBUTE.
 
 If the Model import fails, the Table has already been created: the summary still carries
 `table_guid` alongside `error`. Fix the cause and delete the Table

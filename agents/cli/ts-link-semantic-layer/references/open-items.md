@@ -59,8 +59,10 @@ link with a distinct-count metric.
 **Resolved 2026-10-29 by live probe** (the SE demo cluster, throwaway Model over a
 bank-customers Table, re-exported and queried via `searchdata`, then deleted): the
 coercion depends on the column's type. An INT64 column keeps `MEASURE` and returns the
-distinct count; VARCHAR and DATE columns are silently turned into an ATTRIBUTE. That
-explains the `Employee Count` data point above. The link keeps only numeric measures, so its
+distinct count; VARCHAR and DATE columns are silently turned into an ATTRIBUTE. That is
+consistent with the `Employee Count` data point above (its type is not recorded). The probe
+used an ordinary Table, not a Table over a semantic object; the result transfers because the
+role is decided from the Table column's `data_type` either way. The link keeps only numeric measures, so its
 `COUNT_DISTINCT` measures are safe and the build no longer warns; the `coerced` check stays.
 Recorded in invariant I5 (`agents/shared/schemas/ts-model-conversion-invariants.md`).
 

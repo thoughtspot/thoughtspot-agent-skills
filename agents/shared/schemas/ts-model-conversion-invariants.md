@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504; I22 2026-10-23 — RLS join cycle, from a support case's exported TML) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504; I22 2026-10-23 — RLS join cycle, from a support case's exported TML; I5 failure mode narrowed by type 2026-10-29, live probes on the SE demo cluster) -->
 
 # ThoughtSpot Model Conversion Invariants
 
@@ -170,8 +170,8 @@ bank-customers Table, re-exported, the first also queried via `searchdata`, all 
 
 Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. The formula row matters because `ts tml
 lint` exempts formula columns from I5: a formula that only wraps a column, carrying
-`aggregation: COUNT_DISTINCT`, is the same failure and is not caught today (audit 2026-10-29,
-9.1 path B). "Numeric" and "non-numeric" below
+`aggregation: COUNT_DISTINCT`, is the same failure and is not caught today (audit 2026-10-29 finding 9.1, routed to a
+validator). "Numeric" and "non-numeric" below
 generalise from the rows above; BL-265 (a `COUNT` metric over a VARCHAR key, demoted the
 same way) is the same platform rule. Every import succeeds; nothing is reported. Text and
 date keys (string customer ids, order dates) are common distinct-count targets, so the
@@ -186,6 +186,11 @@ column is also wanted as an attribute (`customer_id` as a field *and* a count): 
 `columns[]` entries sharing a `column_id` is a hard `duplicate column_id` rejection (I8).
 Before 2026-10-29 this section said the override applied to every column; that was never
 dated evidence and is wrong for numeric columns.
+
+**Exceptions (not converters):** a round-trip of a Model someone else authored may pass a
+numeric `COUNT_DISTINCT` column through unchanged (`thoughtspot-model-tml.md`), and
+`ts-link-*` emits one by design over numeric measures; `ts tml lint`'s I5 finding is advisory
+in both cases.
 
 **Applies to:** All source dialects.
 - Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
