@@ -285,10 +285,13 @@ def test_default_aggregation_ignored_in_aggregate_mode():
     assert t["table"]["columns"][0]["properties"]["aggregation"] == "AGGREGATE"
 
 
-def test_count_distinct_warns():
+def test_numeric_count_distinct_does_not_warn():
+    # Live-probed 2026-10-29 (open item #4): a numeric COUNT_DISTINCT column keeps
+    # MEASURE on import, and the link only ever keeps numeric measures.
     cnt = {"name": "n", "data_type": "bigint", "kind": "measure", "expr": "COUNT(DISTINCT x)"}
-    _, _, r = build_link_tml(_spec([cnt]), aggregation_mode="standard", model_name="S")
-    assert r["warnings"] and "COUNT_DISTINCT" in r["warnings"][0]
+    t, _, r = build_link_tml(_spec([cnt]), aggregation_mode="standard", model_name="S")
+    assert t["table"]["columns"][0]["properties"]["aggregation"] == "COUNT_DISTINCT"
+    assert not any("COUNT_DISTINCT" in w for w in r["warnings"])
 
 
 def test_diff_treats_omitted_sum_as_default():

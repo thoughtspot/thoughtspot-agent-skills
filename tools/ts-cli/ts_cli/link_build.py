@@ -392,9 +392,9 @@ def _resolve_columns(columns: List[dict], aggregation_mode: str, fallback: Optio
             continue
         agg_source[source] = agg_source.get(source, 0) + 1
         kept.append(_Resolved(c, dt, True, agg))
-        if agg == "COUNT_DISTINCT":
-            warnings.append(f"{n}: COUNT_DISTINCT on a physical column is documented to be coerced "
-                            f"to ATTRIBUTE on import (open item #4) — check 'coerced' after import")
+        # No COUNT_DISTINCT warning: every measure kept here is numeric (non-numeric
+        # ones were skipped above), and a numeric COUNT_DISTINCT column keeps MEASURE
+        # on import — live-probed 2026-10-29 (open item #4). Only VARCHAR/DATE flip.
     if errors:
         raise LinkSpecError("spec cannot be built:\n  " + "\n  ".join(errors))
     if not kept:
@@ -531,7 +531,7 @@ def diff_column_roles(expected_model: dict, exported_model: dict) -> List[dict]:
     """Columns whose column_type or aggregation ThoughtSpot changed on import.
 
     ThoughtSpot coerces some combinations silently (a non-numeric MEASURE becomes an
-    ATTRIBUTE; COUNT_DISTINCT on a physical column is documented to do the same), and
+    ATTRIBUTE; COUNT_DISTINCT on a VARCHAR or DATE physical column does the same), and
     the import still reports OK — so the only reliable check is to re-export and compare.
     Matches by ``column_id``. Pure.
     """

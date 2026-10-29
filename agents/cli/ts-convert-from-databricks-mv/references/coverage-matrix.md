@@ -54,7 +54,7 @@ Use this as the canonical limitations reference.
 | 18 | `AVG(col)` / `MIN(col)` / `MAX(col)` | `columns[]` with matching `aggregation` | |
 | 19 | `COUNT(col)` | `columns[]` with `aggregation: COUNT` | |
 | 20 | `COUNT(*)` | Formula: `count ( 1 )` | |
-| 21 | `COUNT(DISTINCT col)` | Formula: `unique count ( [T::col] )` | Never `COUNT_DISTINCT` aggregation (silently overridden to ATTRIBUTE) |
+| 21 | `COUNT(DISTINCT col)` | Formula: `unique count ( [T::col] )` | Never `COUNT_DISTINCT` aggregation (silently overridden to ATTRIBUTE on a non-numeric column — I5) |
 | 22 | `STDDEV(col)` / `VARIANCE(col)` | `columns[]` with matching `aggregation` | |
 
 ### Measures — Complex Expressions

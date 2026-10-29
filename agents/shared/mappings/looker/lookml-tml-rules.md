@@ -154,7 +154,7 @@ Never use `aggregation: COUNT_DISTINCT` in a `columns[]` entry.
 Always translate `type: count_distinct` to a formula using `unique count()`.
 
 ```yaml
-# Wrong — COUNT_DISTINCT is not a supported columns[] aggregation, causes import error
+# Wrong — imports fine, but silently becomes an ATTRIBUTE on a non-numeric column (I5); the formula works for every type
 columns:
 - name: Order Count
   column_id: ORDER_FACT::ORDER_ID
