@@ -192,6 +192,16 @@ numeric `COUNT_DISTINCT` column through unchanged (`thoughtspot-model-tml.md`), 
 `ts-link-*` emits one by design over numeric measures; `ts tml lint`'s I5 finding is advisory
 in both cases.
 
+**Temporary converter exception (dated 2026-10-29, ends with BL-447):** `ts-convert-from-dbt`'s
+import lint gate reports I5 as advisory rather than blocking. A dbt `ts_aggregation: count_distinct`
+tag is often ThoughtSpot's own column round-tripped by ts-convert-to-dbt, and blocking would break
+builds that work today on numeric columns; converting it safely needs the existing Model read first
+(BL-447). Before that gate existed nothing was linted at all.
+
+**Not an I5 violation:** a column whose declared `column_type` is `ATTRIBUTE` carrying
+`aggregation: COUNT_DISTINCT` — there is no measure to demote, and ThoughtSpot's own exports carry
+exactly that pair after a demotion. `ts tml lint` and `check_tml.py` skip it.
+
 **Applies to:** All source dialects.
 - Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
 - Snowflake SV: `COUNT(DISTINCT col)` metrics → `unique count ( [TABLE::col] )` formula

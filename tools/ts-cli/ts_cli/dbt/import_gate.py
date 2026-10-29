@@ -16,8 +16,8 @@ def lint_gate(model_tml: dict) -> None:
     I5 (`aggregation: COUNT_DISTINCT` on a physical measure) is reported but does
     not block. A dbt `ts_aggregation: count_distinct` tag is often ThoughtSpot's own
     column round-tripped by ts-convert-to-dbt, and on a numeric column it works;
-    converting it safely means reading the existing Model first (audit 2026-10-29
-    findings 9.1/9.2, routed to the backlog).
+    converting it safely means reading the existing Model first (BL-447; audit
+    2026-10-29 finding 9.2). Recorded as a temporary exception under invariant I5.
     Until then the column imports exactly as it did before this gate existed.
     """
     from ts_cli.tml_lint import lint_tml
@@ -27,7 +27,7 @@ def lint_gate(model_tml: dict) -> None:
     blocking = [f for f in findings if f not in advisory]
     for finding in advisory:
         print(f"LINT (advisory — on a text or date column this imports as an attribute; "
-              f"audit 2026-10-29 9.2): {finding}", file=sys.stderr)
+              f"BL-447): {finding}", file=sys.stderr)
     for finding in blocking:
         print(f"LINT: {finding}", file=sys.stderr)
     if blocking:
