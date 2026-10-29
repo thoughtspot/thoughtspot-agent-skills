@@ -1398,3 +1398,25 @@ class TestSourceNamesCompareCaseInsensitively:
         assert "duplicate source names" in str(result.exception)
         assert sources.read_text() == before
 
+
+
+def test_update_metadata_keeps_new_table_block_appended_in_same_run(tmp_path):
+    """Audit 2026-10-29 17.1: a new table's schema.yml block and a metadata change
+    to an existing model in the SAME file, in one --update-metadata run. The metadata
+    pass used to re-read schema.yml from disk and overwrite the pending write that
+    carried the appended block, so the new model was lost while the output said
+    "appended" — and the next sync saw it as existing, so it never came back."""
+    model_path, export_dir = _write_export_fixtures(tmp_path)
+    proj = _write_existing_project(tmp_path)
+
+    result = _invoke_with("sync", model_path, export_dir, proj, "--update-metadata")
+    assert result.exit_code == 0, result.output
+
+    schema_doc = yaml.safe_load((proj / "models" / "schema.yml").read_text(encoding="utf-8"))
+    models = {m["name"]: m for m in schema_doc["models"]}
+    assert set(models) == {"stg_customers", "stg_orders"}
+    # the new block arrived whole (columns and their ts_* tags), not just its name
+    assert models["stg_orders"].get("columns"), models["stg_orders"]
+    # and the metadata pass still applied to the existing model in the same file
+    cust_meta = models["stg_customers"]["columns"][0]["config"]["meta"]
+    assert cust_meta.get("ts_synonym"), cust_meta

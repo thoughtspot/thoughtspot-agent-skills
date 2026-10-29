@@ -640,7 +640,12 @@ def _update_existing_schema_models(
     model_to_file: dict[str, Path] = {}
     for yml_path in property_files(models_dir):
         try:
-            doc = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            # Start from a write an earlier pass in this run already queued for
+            # the file (e.g. new models appended to schema.yml), not from disk —
+            # re-reading disk here overwrote that write and lost the new blocks
+            # (audit 2026-10-29, 17.1).
+            text = writes[yml_path] if yml_path in writes else yml_path.read_text(encoding="utf-8")
+            doc = yaml.safe_load(text)
         except Exception:
             continue
         if not isinstance(doc, dict):
