@@ -17,11 +17,11 @@ findings and actionable recommendations, but makes no changes.
 
 | Code | Angle | What it finds |
 |---|---|---|
-| **A** | AI Readiness | Description/synonym coverage, AI context, Spotter readiness score |
-| **D** | Data Modeling | Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables |
+| **A** | AI Readiness | Description/synonym coverage, AI context; the report also scores each Model's Spotter readiness |
+| **D** | Data Modeling | Complexity, join quality/types and keys, progressive joins, duplicates, SQL pass-through, zero-column tables |
 | **H** | Human Readiness | Name quality, hidden columns, orphans, direct table connections, formula promotion candidates |
-| **P** | Performance | SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl |
-| **S** | Security | PII detection, indexing without RLS, CLS gaps, RLS bypass, RLS join loops, credentials in analytics |
+| **P** | Performance | SQL Views, row-level formulas, join keys, filter/join progressiveness, RLS functions, column sprawl |
+| **S** | Security | PII detection, indexing without RLS, RLS bypass, RLS join loops, credentials in analytics |
 <!-- END GENERATED: categories-table -->
 
 **When to use this skill:**
@@ -96,11 +96,11 @@ Auto-executed: Steps 1, 4, 5
 ### B. Available angles
 
 <!-- BEGIN GENERATED: angles-overview -->
-  A  AI Readiness ...... Description/synonym coverage, AI context, Spotter readiness score
-  D  Data Modeling ..... Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables
+  A  AI Readiness ...... Description/synonym coverage, AI context; the report also scores each Model's Spotter readiness
+  D  Data Modeling ..... Complexity, join quality/types and keys, progressive joins, duplicates, SQL pass-through, zero-column tables
   H  Human Readiness ... Name quality, hidden columns, orphans, direct table connections, formula promotion candidates
-  P  Performance ....... SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl
-  S  Security .......... PII detection, indexing without RLS, CLS gaps, RLS bypass, RLS join loops, credentials in analytics
+  P  Performance ....... SQL Views, row-level formulas, join keys, filter/join progressiveness, RLS functions, column sprawl
+  S  Security .......... PII detection, indexing without RLS, RLS bypass, RLS join loops, credentials in analytics
 
   X  All angles (A, D, H, P, S)
 <!-- END GENERATED: angles-overview -->
@@ -304,7 +304,7 @@ them:
 | Data | Fetched |
 |---|---|
 | Model TML with its associated Table TML, metadata headers, dependents | Every audit |
-| AI instructions (`ai/instructions/get`, one call per Model) | When a selected rule declares `ai_instructions` (A3, A5) |
+| AI instructions (`ai/instructions/get`, one call per Model) | When a selected rule declares `ai_instructions` (A3); the report's Spotter readiness score reads them too |
 | Answer TML (the Answers among the Models' dependents) | When a selected rule declares `answers` (H7, H8, H9) |
 | Sets and each Set's consumers | When a selected rule declares `sets` (H4, H5) |
 
@@ -341,11 +341,11 @@ are in its catalog entry.
 
 | Catalog file | Category | Rules |
 |---|---|---|
-| `rules/ai.yaml` | A — AI Readiness | A1–A6 |
-| `rules/data.yaml` | D — Data Modeling | D1–D12 |
+| `rules/ai.yaml` | A — AI Readiness | A1–A4, A6 (A5 retired) |
+| `rules/data.yaml` | D — Data Modeling | D1, D3, D5, D7–D12 (D2, D4, D6 retired) |
 | `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H10 (H6 retired) |
-| `rules/perf.yaml` | P — Performance | P1–P9, P11, P13–P18 (P10, P12 retired) |
-| `rules/security.yaml` | S — Security | S1–S5, S8–S11 (S6–S7 retired) |
+| `rules/perf.yaml` | P — Performance | P1–P4, P6–P8, P11, P13–P18 (P5, P9–P10, P12 retired) |
+| `rules/security.yaml` | S — Security | S1–S2, S4–S5, S10–S11 (S3, S6–S9 retired) |
 <!-- END GENERATED: rules-files -->
 
 See [references/check-catalog.md](references/check-catalog.md) for every rule — what it
@@ -432,6 +432,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.4.0 | 2026-10-29 | **Rules retired, merged and reworded (roadmap PR 2.1, BL-406).** Retired: S3 (said "no CLS" but never read column security), P9 (search indexing is not query performance), S8 (a text RLS column is not a security gap), P5 (a date limit on fact tables is a design choice) and D6 (grain is keys and dates). Merged: D2 into P6 (string-typed join keys LOW, a multi-key join INFO; P6 now in Performance and Data Modeling), D4 into P4 (P4 in both categories), S9 into P14 (performance, not security). P2 reworded: row-level formulas the warehouse recomputes on every query, LOW above 5 and MEDIUM above 10 (was MEDIUM / HIGH). **A5 is no longer a finding:** the Spotter readiness score shows in each Model's header and as a heatmap column (Ready at 80, Needs work at 50). On a 150-Model sample of the SE demo cluster, findings fall from 2,072 to 1,561 and HIGH findings from 531 to 148. Design: `docs/superpowers/specs/2026-10-29-audit-retire-merge-reword.md`. |
 | 3.3.0 | 2026-10-28 | **`ts audit run` owns scope; the export step is gone (BL-407).** Step 3 runs `ts audit run --all-models [--connection …] --dry-run` and shows the inventory it prints, instead of the LLM searching for Models, telling them from legacy Worksheets and filtering them to connections by hand. A connection scope goes through the Tables (directly or through a View); a Model with any Table on a chosen connection is in scope. A connection name matching no Table stops the run, naming it. A Model the user may not export is now a warning in the report rather than a crash of the whole audit. The old Step 4 (a 1–5 minute TML export into a cache nothing read) is dropped, so the steps are now 0–6; the audit step always saves a snapshot (`--snapshot-out`) so a follow-up audit with other angles or the other assessment replays from disk. Design: `docs/superpowers/specs/2026-10-28-audit-run-scope.md`. |
 | 3.2.2 | 2026-10-28 | **The report's join count and join depth are real.** Both read a Model-level `joins` key that Model TML does not have (joins sit under each `model_tables[]` entry), so every Model showed 0 joins and depth 0. They now use the same helpers as D1 and P7, so the report and those rules cannot disagree. No finding changes. |
 | 3.2.1 | 2026-10-23 | **The catalog-derived sections are generated.** The category table, the Step 0 and Step 2a category lists, the Step 2b profile prompt with what each profile changes, and the catalog-file table of rule ids are now generated from the rule catalog (`python -m ts_cli.audit.generate`) and checked by the catalog gate, so a rule change can no longer leave them stale. |

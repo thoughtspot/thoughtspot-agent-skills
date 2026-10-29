@@ -235,29 +235,33 @@ def test_code_rule_names_checked_in_isolation(tmp_path):
 
 def test_shipped_code_rule_message_typo_fails(tmp_path):
     # The gate holds a code rule's message to the placeholders its function declares
-    # (A5 renders only {score}); a typo there has no mode to catch it otherwise.
+    # (P6's code:join_keys renders {varchar_keys} and {key_pairs}); a typo there has no
+    # mode to catch it otherwise.
     root = _copy_repo(tmp_path)
-    ai = root / AUDIT_REL / "catalog" / "rules" / "ai.yaml"
-    text = ai.read_text()
-    assert "{score:.0f}" in text
-    ai.write_text(text.replace("{score:.0f}", "{scroe:.0f}"))
+    perf = root / AUDIT_REL / "catalog" / "rules" / "perf.yaml"
+    text = perf.read_text()
+    assert text.count("({key_pairs} keys)") == 1
+    perf.write_text(text.replace("({key_pairs} keys)", "({key_pairz} keys)"))
     res = _run(root)
     assert res.returncode == 1, res.stdout
-    assert "A5: message: unknown placeholder 'scroe' (known: score)" in res.stdout
+    assert ("P6: message.by_severity.INFO: unknown placeholder 'key_pairz' "
+            "(known: key_pairs, varchar_keys)") in res.stdout
     assert "Traceback" not in res.stderr
 
 
 def test_undeclared_conditional_read_fails(tmp_path):
     # The gate holds a rule's requires/uses to what its code reads, from the registries'
-    # declarations: A5 reads ai_instructions (via @is_coached) and declares it in uses.
+    # declarations: A3 reads ai_instructions (via @is_coached) and declares it in
+    # requires. (A5, whose code rule read it, retired 2026-10.)
     root = _copy_repo(tmp_path)
     ai = root / AUDIT_REL / "catalog" / "rules" / "ai.yaml"
     text = ai.read_text()
-    assert text.count("  uses: [ai_instructions]\n") == 1
-    ai.write_text(text.replace("  uses: [ai_instructions]\n", ""))
+    assert text.count("  requires: [model_tml, ai_instructions]\n") == 1
+    ai.write_text(text.replace("  requires: [model_tml, ai_instructions]\n",
+                               "  requires: [model_tml]\n"))
     res = _run(root)
     assert res.returncode == 1, res.stdout
-    assert "A5: reads 'ai_instructions' (via code:spotter_readiness)" in res.stdout
+    assert "A3: reads 'ai_instructions' (via @is_coached)" in res.stdout
     assert "Traceback" not in res.stderr
 
 

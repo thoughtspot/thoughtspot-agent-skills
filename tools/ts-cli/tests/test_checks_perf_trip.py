@@ -42,21 +42,21 @@ from audit_run_rule import run_rule
 
 
 # --------------------------------------------------------------------------
-# P2 — scalar formula density
+# P2 — row-level formulas recomputed on every query
 # --------------------------------------------------------------------------
-# A formula counts as scalar when no columns[] entry surfacing it declares an
-# aggregation. Six trips MEDIUM, eleven trips HIGH.
+# A formula counts as row-level when no columns[] entry surfacing it declares an
+# aggregation. Six trips LOW, eleven trips MEDIUM (one step down each, 2026-10).
 
 def test_p2_trips_on_six_unaggregated_formulas():
     findings = run_rule(fx.perf_six_scalar_formulas(), "P2")
     assert len(findings) == 1
     assert findings[0].check_id == "P2"
-    assert findings[0].severity == "MEDIUM"
+    assert findings[0].severity == "LOW"
     assert findings[0].metric == 6
 
 
 def test_p2_escalates_past_ten():
-    assert run_rule(fx.perf_eleven_scalar_formulas(), "P2")[0].severity == "HIGH"
+    assert run_rule(fx.perf_eleven_scalar_formulas(), "P2")[0].severity == "MEDIUM"
 
 
 def test_p2_clean_when_formulas_are_aggregated():
@@ -106,35 +106,11 @@ def test_p3_clean_when_model_has_no_filters():
 
 
 # --------------------------------------------------------------------------
-# P5 — no date constraints on a model with fact tables
+# P5 — retired 2026-10 (a date limit on fact tables is a design choice)
 # --------------------------------------------------------------------------
-# "Fact table" = a model_tables[] entry with >3 MEASURE columns whose column_id
-# prefix matches its name.
 
-def test_p5_trips_on_an_unconstrained_fact_model():
-    findings = run_rule(fx.perf_fact_model_unconstrained(), "P5")
-    assert len(findings) == 1
-    assert findings[0].check_id == "P5"
-    assert "ORDERS" in findings[0].detail
-
-
-def test_p5_clean_when_no_table_looks_like_a_fact():
-    """Three measures is not >3, so no fact table, so nothing to constrain."""
-    assert run_rule(fx.perf_thin_fact_model(), "P5") == []
-
-
-def test_p5_clean_when_the_model_has_no_tables():
-    assert run_rule(fx.perf_fact_columns_without_tables(), "P5") == []
-
-
-def test_p5_a_real_date_constraint_should_suppress_the_finding():
-    assert run_rule(fx.perf_fact_model_date_window(), "P5") == []
-
-
-def test_p5_suppression_only_works_on_a_shape_no_export_produces():
-    """Pinning the above: flatten the mapping by hand and the guard starts working."""
-    # the constraint list without its mapping, which TML never is
-    assert run_rule(fx.perf_fact_model_flattened_window(), "P5") == []
+def test_p5_is_retired_and_silent_on_an_unconstrained_fact_model():
+    assert run_rule(fx.perf_fact_model_unconstrained(), "P5") == []
 
 
 # --------------------------------------------------------------------------
@@ -167,47 +143,12 @@ def test_p7_clean_when_the_model_has_no_joins():
 
 
 # --------------------------------------------------------------------------
-# P9 — high-cardinality ID column indexed as ATTRIBUTE
+# P9 — retired 2026-10 (search indexing is unrelated to query performance)
 # --------------------------------------------------------------------------
-# The name pattern is snake_case-anchored (`_id|_guid|_uuid|...$`), so it only
-# matches a model whose column display names are the physical names.
-
-def test_p9_trips_on_an_indexed_id_attribute():
-    findings = run_rule(fx.perf_indexed_id_attribute(), "P9")
-    assert len(findings) == 1
-    assert findings[0].check_id == "P9"
-    assert findings[0].object_name == "CUSTOMER_ID"
-
 
 @pytest.mark.parametrize("name", fx.P9_ID_SUFFIXES)
-def test_p9_trips_on_every_id_suffix_in_the_pattern(name):
-    assert len(run_rule(fx.build_id_column(name, "PREFIX_ONLY"), "P9")) == 1
-
-
-def test_p9_clean_on_a_measure():
-    assert run_rule(fx.perf_id_measure(), "P9") == []
-
-
-def test_p9_clean_on_a_non_id_attribute():
-    assert run_rule(fx.perf_non_id_attribute(), "P9") == []
-
-
-def test_p9_misses_a_friendly_display_name():
-    """Not a bug so much as a blind spot worth recording.
-
-    `_ID_PATTERN` anchors on an underscore, and `columns[].name` is the *display*
-    name. A model built with friendly names -- the common case for anything a
-    converter produced -- never matches, however the column is indexed.
-    """
-    assert run_rule(fx.perf_friendly_id_name(), "P9") == []
-
-
-def test_p9_index_type_sense_is_inverted():
-    """`index_type` absent means indexed; P9 used to test presence (BL-299, fixed)."""
-    assert run_rule(fx.perf_id_attribute_not_indexed(), "P9") == [], \
-        "DONT_INDEX means NOT indexed"
-    assert len(run_rule(fx.perf_id_attribute_default_indexed(), "P9")) == 1, \
-        "an omitted index_type IS the indexed default"
+def test_p9_is_retired_and_silent_on_every_id_suffix(name):
+    assert run_rule(fx.build_id_column(name, "PREFIX_ONLY"), "P9") == []
 
 
 # --------------------------------------------------------------------------

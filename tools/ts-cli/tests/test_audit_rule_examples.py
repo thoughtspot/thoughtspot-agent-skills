@@ -322,6 +322,32 @@ def test_a_code_rule_left_behind_is_detected(monkeypatch):
     assert unused_code_rules(_SHIPPED) == ["left_behind"]
 
 
+def _problems(tmp_path: Path, name: str, entry: dict) -> List[str]:
+    return check_catalog(_write_catalog(tmp_path / name, entry))[1]
+
+
+def test_a_bands_code_rule_needs_bands_and_takes_no_severity(tmp_path, wide_registered):
+    """A code rule registered `severity="bands"` grades by the entry's bands: without them
+    the gate fails, and a `severity` beside them is reported as having no effect."""
+    no_bands = _code_rule_entry()
+    del no_bands["bands"], no_bands["profiles"]["spotter"]["bands"], no_bands["legacy_threshold"]
+    assert any(f"D99: bands are required: code:{WIDE} grades" in p
+               for p in _problems(tmp_path, "no_bands", no_bands))
+    assert any(f"D99: severity has no effect: code:{WIDE} reads bands" in p
+               for p in _problems(tmp_path, "sev", _code_rule_entry(severity="HIGH")))
+
+
+def test_a_code_rule_read_must_be_covered_by_requires_or_uses(tmp_path, wide_registered,
+                                                              monkeypatch):
+    """What a code rule's registration says it reads, its entry must fetch."""
+    monkeypatch.setitem(code_rules.CODE_USES, WIDE, frozenset({"ai_instructions"}))
+    uncovered = _problems(tmp_path, "bare", _code_rule_entry())
+    assert any("D99" in p and "ai_instructions" in p and f"code:{WIDE}" in p
+               for p in uncovered)
+    covered = _problems(tmp_path, "uses", _code_rule_entry(uses=["ai_instructions"]))
+    assert not any("ai_instructions" in p for p in covered)
+
+
 def test_code_rule_dispatch(tmp_path, wide_registered):
     cat, problems = check_catalog(_write_catalog(tmp_path, _code_rule_entry()))
     assert problems == []
@@ -447,10 +473,10 @@ def test_code_rule_registration_declares_a_valid_severity_source(kwargs):
 
 def test_shipped_code_rules_declare_what_they_read():
     assert {n: code_rules.SEVERITY_SOURCES[n] for n in (
-        "spotter_readiness", "model_complexity", "join_keys", "zero_column_tables",
+        "model_complexity", "join_keys", "zero_column_tables",
         "column_type_divergence")} == {
-        "spotter_readiness": "bands", "model_complexity": frozenset({"HIGH", "MEDIUM"}),
-        "join_keys": frozenset({"HIGH", "MEDIUM"}), "zero_column_tables": "severity",
+        "model_complexity": frozenset({"HIGH", "MEDIUM"}),
+        "join_keys": frozenset({"LOW", "INFO"}), "zero_column_tables": "severity",
         "column_type_divergence": "severity_name"}
     assert code_rules.OWN_THRESHOLD >= {"model_complexity"}
     assert "join_keys" not in code_rules.OWN_THRESHOLD

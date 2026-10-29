@@ -78,143 +78,52 @@ def test_s2_should_not_flag_a_dont_index_pii_column():
 # RLS is found. Covered by tools/ts-cli/tests/test_alias_and_join_names.py.
 
 # --------------------------------------------------------------------------
-# S3 — PII without CLS or masking formula
+# S3 — retired 2026-10: it claimed "no CLS" but never read column security
 # --------------------------------------------------------------------------
 
-def test_s3_trips_on_pii_with_no_masking_formula():
-    findings = run_rule(fx.sec_pii_unmasked(), "S3")
-    assert len(findings) == 1
-    assert findings[0].check_id == "S3"
-    assert findings[0].severity == "HIGH"
-    assert findings[0].object_name == "customer_email"
-    # The claim S3 makes. Nothing in check_s3 reads sharing/CLS state — it only
-    # greps the model's own formulas — so the "no CLS" half is unverified.
-    assert "no CLS or masking formula" in findings[0].detail
-
-
-def test_s3_clean_model_returns_nothing():
-    assert run_rule(fx.sec_non_pii_columns(), "S3") == []
-
-
-def test_s3_masking_formula_suppresses_the_finding():
-    assert run_rule(fx.sec_pii_masked(), "S3") == []
-
-
-def test_s3_is_silenced_by_any_formula_that_merely_names_the_column():
-    """DOCUMENTS A PRECISION DEFECT — asserts today's behaviour, not a requirement.
-
-    checks_security.py:88-92 joins *all* formula exprs into one string, sets
-    `has_masking` if "is_group_member" appears anywhere in it, then skips any PII
-    column whose name is a substring of that same blob. Here the masking guards
-    Salary and the email is projected raw — S3 still says nothing.
-    """
-    assert run_rule(fx.sec_mask_elsewhere_raw_projection(), "S3") == [], \
-        "the email is not masked, yet S3 is silent"
+def test_s3_is_retired_and_silent_on_unmasked_pii():
+    assert run_rule(fx.sec_pii_unmasked(), "S3") == []
 
 
 # --------------------------------------------------------------------------
-# S8 — VARCHAR RLS column
+# S8 — retired 2026-10: a text column in an RLS rule is not a security problem.
+# P15, the same walk with a value_casing guard, still runs.
 # --------------------------------------------------------------------------
 
-def test_s8_trips_on_a_varchar_rls_column():
-    """Expr shape is the live example from thoughtspot-table-tml.md:129."""
-    findings = run_rule(fx.sec_rls_uncased_varchar(), "S8")
-    assert len(findings) == 1
-    assert findings[0].check_id == "S8"
-    assert findings[0].severity == "MEDIUM"
-    assert findings[0].object_name == "COUNTRY"
-    assert findings[0].object_guid == "t-1"
-
-
-def test_s8_reads_the_type_from_the_table_and_needs_no_model_at_all():
-    """The reason S8 does NOT share the P6/D2 defect (audit 14.1).
-
-    Those two read `db_column_properties.data_type` off the MODEL, where it
-    never exists. S8 iterates `ctx.tables` and reads it off the Table TML, where
-    the schema makes it required — so it still fires with no models in context,
-    and a lying type on a model column cannot influence it.
-    """
-    # a model column with no db_column_properties anywhere, beside the Table
-    assert len(run_rule(fx.sec_rls_varchar_beside_a_model(), "S8")) == 1
-    assert len(run_rule(fx.sec_rls_uncased_varchar(), "S8")) == 1  # no models at all
-
-
-def test_s8_integer_rls_column_returns_nothing():
-    assert run_rule(fx.sec_rls_integer_column(), "S8") == []
-
-
-def test_s8_table_without_rls_returns_nothing():
-    assert run_rule(fx.sec_table_without_rls(), "S8") == []
-
-
-def test_s8_unresolvable_ref_is_silently_treated_as_not_a_string():
-    """DOCUMENTS A GAP — asserts today's behaviour, not a requirement.
-
-    `col_types.get(col_name, "")` (checks_security.py:153) gives "" for a ref
-    that resolves to another table via `rls_rules.tables[]`/`table_paths[]`, and
-    "" is not in the VARCHAR set, so it passes silently. Unknown is not the same
-    as "not a string" — the same hazard test_checks_varchar_join_keys.py:111
-    guards for P6/D2.
-    """
-    assert run_rule(fx.sec_rls_unresolved_ref(), "S8") == []
-
-
-def test_s8_is_p15_minus_the_value_casing_guard():
-    """DOCUMENTS A NEAR-CLONE. checks_security.py:140-161 vs checks_perf.py:295-320.
-
-    Identical but for P15's `and not vc`, so on a cased VARCHAR column S8 fires
-    and P15 does not, and on an uncased one the estate gets two findings for one
-    column.
-    """
-    ctx = fx.sec_rls_cased_varchar()
-    assert len(run_rule(ctx, "S8")) == 1
-    assert run_rule(ctx, "P15") == []
-
+def test_s8_is_retired_and_p15_still_reports_an_uncased_varchar_rls_column():
     uncased = fx.sec_rls_uncased_varchar()
-    assert len(run_rule(uncased, "S8")) == 1 and len(run_rule(uncased, "P15")) == 1
+    assert run_rule(uncased, "S8") == []
+    assert len(run_rule(uncased, "P15")) == 1
+    assert run_rule(fx.sec_rls_cased_varchar(), "P15") == []
 
 
 # --------------------------------------------------------------------------
-# S9 — function in an RLS expression
+# S9 — merged into P14 (2026-10): a function in an RLS rule is a performance
+# issue, so it is reported once, as P14, not twice (HIGH security + MEDIUM perf)
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("expr", fx.S9_TRIP_EXPRS)
-def test_s9_trips_on_a_function_in_the_rls_expression(expr):
-    findings = run_rule(fx.build_sec_rls_expr(expr), "S9")
-    assert len(findings) == 1
-    assert findings[0].check_id == "S9"
-    assert findings[0].severity == "HIGH"
-    assert findings[0].object_type == "table"
-    assert findings[0].object_name == "CUSTOMERS"
-    assert expr[:80] in findings[0].detail
+def test_p14_reports_a_function_in_the_rls_expression_once(expr):
+    ctx = fx.build_sec_rls_expr(expr)
+    assert run_rule(ctx, "S9") == []
+    [finding] = run_rule(ctx, "P14")
+    assert finding.severity == "MEDIUM"
+    assert finding.object_type == "table"
+    assert finding.object_name == "CUSTOMERS"
+    assert expr[:80] in finding.detail
 
 
-def test_s9_plain_comparison_returns_nothing():
-    assert run_rule(fx.sec_rls_uncased_varchar(), "S9") == []
-
-
-def test_s9_table_without_rls_returns_nothing():
-    assert run_rule(fx.sec_table_without_rls(), "S9") == []
-
-
-def test_s9_is_a_verbatim_clone_of_p14():
-    """DOCUMENTS A CLONE. checks_security.py:164-178 vs checks_perf.py:278-292.
-
-    Same loop, same regex, same trigger — only check_id, severity and wording
-    differ. Every such RLS expression is counted twice in the report, once HIGH
-    (security) and once MEDIUM (performance).
-    """
-    ctx = fx.sec_rls_upper_function()
-    s9, p14 = run_rule(ctx, "S9"), run_rule(ctx, "P14")
-    assert len(s9) == len(p14) == 1
-    assert (s9[0].object_name, s9[0].object_guid) == (p14[0].object_name, p14[0].object_guid)
+def test_p14_plain_comparison_and_no_rls_return_nothing():
+    assert run_rule(fx.sec_rls_uncased_varchar(), "P14") == []
+    assert run_rule(fx.sec_table_without_rls(), "P14") == []
 
 
 # --------------------------------------------------------------------------
 # Report titles
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("cid,word", [("S8", "rls"), ("S9", "rls")])
+# S8 and S9 retired (2026-10); P15 and P14 are their RLS walks that still run.
+@pytest.mark.parametrize("cid,word", [("P15", "rls"), ("P14", "rls")])
 def test_check_meta_describes_what_the_check_actually_does(cid, word):
     """`desc` is rendered as the finding TITLE (audit/__init__.py:44).
 

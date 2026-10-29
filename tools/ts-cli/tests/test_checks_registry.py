@@ -120,7 +120,10 @@ def test_registries_are_not_empty():
 # ── BL-304: rules that used to exist twice now exist once ──────────────────
 
 def test_shared_rule_pairs_stay_in_step():
-    """The data/perf split was made by copying; six rules existed twice.
+    """The data/perf split was made by copying; six rules existed twice. Two pairs
+    were merged into one rule each in 2026-10 (D4 into P4, S9 into P14), and their
+    retired halves carry no logic to drift; S8/P15 remain, S8 retired with its logic
+    kept.
 
     A threshold tuned in one angle silently left the other on the old value, and
     `check_d2`/`check_p6` shipped the *same* two defects and had to be fixed twice
@@ -143,21 +146,16 @@ def test_shared_rule_pairs_stay_in_step():
         r = cat[rid]
         return (r.scope, r.requires, r.uses, r.implementation, r.aggregate)
 
-    # D4 / P4: one predicate (wide model, join_progressive off), one band.
-    if (logic("D4"), levels("D4")) != (logic("P4"), levels("P4")):
-        offenders.append("D4/P4: the join_progressive rule differs between the angles")
-    # S9 / P14: the same walk over RLS rules with one function-call regex.
-    if logic("S9") != logic("P14"):
-        offenders.append("S9/P14: the RLS function-call rule differs")
+    # D4 → P4 and S9 → P14: merged, so the retired half must stay logic-free.
+    for rid in ("D4", "S9"):
+        if cat[rid].status != "retired" or cat[rid].aggregate or cat[rid].bands:
+            offenders.append(f"{rid}: merged away, but carries logic again")
     # S8 / P15: P15 is S8 plus the value_casing guard, nothing else.
     s8, p15 = logic("S8"), logic("P15")
     if s8[:4] != p15[:4] or s8[4]["mode"] != p15[4]["mode"] or \
             p15[4]["where"] != {"all": [s8[4]["where"],
                                         {"field": "value_casing", "truthy": False}]}:
         offenders.append("S8/P15: P15 is no longer S8 plus the value_casing guard")
-    # The legacy threshold payloads restate those numbers: they must say the same.
-    if cat["D4"].legacy_threshold != {"min_tables_for_flag": levels("D4")[0][1]}:
-        offenders.append("D4: legacy_threshold disagrees with its band")
 
     # The bracketed-reference pattern is declared once (engine/tml.py BRACKET_REF): a
     # copy under any name is found by its pattern text, not its name.
@@ -173,15 +171,16 @@ def test_shared_rule_pairs_stay_in_step():
 
 
 def test_both_angles_still_report_a_shared_rule():
-    """Collapsing the code must not collapse the reporting.
+    """Collapsing the rules must not collapse the reporting.
 
     A wide un-progressive model is legitimately both a modelling and a
-    performance finding; the angles are different lenses. Only the rule is shared.
+    performance finding; the angles are different lenses. Since D4 merged into P4
+    (2026-10) that is one finding in both categories, not two findings.
     """
     import audit_rule_fixtures as fx
 
     ctx = fx.registry_wide_not_progressive()
-    d4, p4 = run_rule(ctx, "D4"), run_rule(ctx, "P4")
-    assert len(d4) == 1 and d4[0].check_id == "D4"
-    assert len(p4) == 1 and p4[0].check_id == "P4"
-    assert d4[0].metric == p4[0].metric == 6
+    assert run_rule(ctx, "D4") == []
+    [p4] = run_rule(ctx, "P4")
+    assert p4.check_id == "P4" and p4.metric == 6
+    assert p4.categories == ["P", "D"]

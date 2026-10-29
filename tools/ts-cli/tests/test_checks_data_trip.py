@@ -1,4 +1,4 @@
-"""D3 / D6 / D8 / D10 / D11 / D12 — proof that each check can return a finding.
+"""D3 / D8 / D10 / D11 / D12 — proof that each check can return a finding.
 
 2026-09-22 audit finding 6.1: 27 of 51 checks are *imported* by a test and never
 *called* by one, which satisfies a coverage grep and exercises nothing. Two checks
@@ -72,27 +72,12 @@ def test_d3_clean_model_returns_nothing():
 
 
 # --------------------------------------------------------------------------
-# D6 — grain consistency. Needs a table that is BOTH a fact (>3 MEASURE
-# columns) and >40% ATTRIBUTE columns.
+# D6 — grain consistency, retired 2026-10: grain is keys and dates, not the
+# share of attribute columns.
 # --------------------------------------------------------------------------
 
-def test_d6_flags_fact_table_that_is_mostly_attributes():
-    """4 MEASURE + 3 ATTRIBUTE = fact (4 > 3) and 42.9% attributes (> 40%)."""
-    findings = run_rule(fx.data_fact_table_mostly_attributes(), "D6")
-    assert len(findings) == 1
-    assert findings[0].check_id == "D6"
-    assert findings[0].object_name == "ORDERS"
-    assert findings[0].metric == pytest.approx(42.9)
-
-
-def test_d6_clean_fact_table_returns_nothing():
-    """4 MEASURE + 2 ATTRIBUTE = 33% attributes, under the 40% line."""
-    assert run_rule(fx.data_fact_table_mostly_measures(), "D6") == []
-
-
-def test_d6_ignores_dimension_tables():
-    """A dimension (<=3 measures) is allowed to be nearly all attributes."""
-    assert run_rule(fx.data_dimension_mostly_attributes(), "D6") == []
+def test_d6_is_retired_and_silent_on_a_mostly_attribute_fact_table():
+    assert run_rule(fx.data_fact_table_mostly_attributes(), "D6") == []
 
 
 # --------------------------------------------------------------------------

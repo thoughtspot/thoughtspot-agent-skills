@@ -14742,6 +14742,14 @@ re-pin (`repin_findings.py --rule <id>`), as `agents/cli/ts-audit/references/rul
     `test_audit_pinned_findings.py`), but the semantics were inherited, not chosen:
     decide whether such a value reads as absent, and pin that.
 
+**Progress (2026-10-29, roadmap PR 2.1).** S3, D6, A5 and D2 are retired or merged, which
+closes their contradictions (item 1) and item 6. A5's score now lives in the report, not
+the rule engine, and no longer raises on a null column name (item 7); but the report's
+corpus still does: `_build_ai_analysis` in `ts_cli/audit/__init__.py` joins column names
+and raises `TypeError` on a null one, ending the run (pre-existing, found while testing
+PR 2.1). D2's fixed severities moved to P6 (`join_keys`, LOW / INFO), still in code
+(item 3). P5 is retired, so its part of item 4 is moot.
+
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.

@@ -24,11 +24,12 @@
     silent: {fixture: perf_metadata_logical_only}
 
 - id: P2
-  title: Scalar formula density (run at query time)
+  title: Row-level formulas recomputed on every query
   description: >-
-    How many of a Model's formulas are scalar — no `columns[]` entry surfacing the
-    formula (by `formula_id`) declares an `aggregation` — graded MEDIUM above 5 and
-    HIGH above 10. Scalar formulas run at query time in the ThoughtSpot engine.
+    How many of a Model's formulas are row-level — no `columns[]` entry surfacing the
+    formula (by `formula_id`) declares an `aggregation` — graded LOW above 5 and MEDIUM
+    above 10. The warehouse recomputes a row-level formula on every query that uses it;
+    a heavy one is cheaper materialised as a column in ETL.
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -40,12 +41,13 @@
     direction: lower_is_better
     unit: count
     levels:
-      - {op: gt, value: 10, severity: HIGH}
-      - {op: gt, value: 5, severity: MEDIUM}
-  message: "{count} scalar formulas (run at query time in TS engine)"
+      - {op: gt, value: 10, severity: MEDIUM}
+      - {op: gt, value: 5, severity: LOW}
+  message: "{count} row-level formulas, recomputed by the warehouse on every query"
   legacy_threshold: {green: 5, yellow: 10}
+  remediation: Materialise heavy row-level formulas as columns in ETL
   examples:
-    fires: {fixture: perf_eleven_scalar_formulas, severity: HIGH}
+    fires: {fixture: perf_eleven_scalar_formulas, severity: MEDIUM}
     silent: {fixture: perf_six_aggregated_formulas}
 
 - id: P3
@@ -75,8 +77,9 @@
   description: >-
     A Model with more than 5 tables and `join_progressive` off joins every table on
     every query. Counted as the Model's tables when join_progressive is not set, so
-    the count is 0 — and silent — on a progressive Model. Same rule as D4.
-  categories: [P]
+    the count is 0 — and silent — on a progressive Model. D4 was merged into this rule
+    in 2026-10.
+  categories: [P, D]
   requires: [model_tml]
   scope: model
   aggregate:
@@ -96,9 +99,9 @@
 - id: P5
   title: No date constraints on fact tables
   description: >-
-    A Model with fact tables (a `model_tables` entry with more than 3 MEASURE columns,
-    matched by its `name`) but no `date_range_condition` in its `constraints`, so every
-    query scans all history.
+    Retired 2026-10: a date limit on fact tables is a design choice, not a defect, and
+    the rule found fact tables by counting measures, which is not what makes a fact.
+  status: retired
   # Fact tables are found by engine/tml.py fact_tables.
   categories: [P]
   requires: [model_tml]
@@ -112,28 +115,27 @@
     measure: "@fact_table_count"
   severity: MEDIUM
   message: "No date constraints on model with fact tables: {@fact_tables:head3}"
-  examples:
-    fires: {fixture: perf_fact_model_unconstrained, severity: MEDIUM}
-    silent: {fixture: perf_fact_model_date_window}
 
 - id: P6
-  title: VARCHAR join keys (performance framing of D2)
+  title: String-typed or multi-column join keys
   description: >-
-    A join (inline, or referencing a Table's `joins_with`) whose key columns are
-    string-typed on their Table TML; string keys join 2-5x slower than integers. A
-    key whose Table TML is not in scope has an unknown type and is not reported.
-    Same keys as D2's HIGH half.
-  categories: [P]
+    Per join (inline, or referencing a Table's `joins_with`): LOW when its key columns
+    are string-typed on their Table TML, which join more slowly than integers (a key
+    whose Table TML is not in scope has an unknown type and is not reported), and,
+    separately, INFO when it joins on more than one key pair. The Table TMLs are
+    optional enrichment: the multi-key finding needs none. One join can yield both
+    findings. D2 was merged into this rule in 2026-10.
+  # A code rule (code:join_keys) because one join yields up to two independent findings.
+  categories: [P, D]
   requires: [model_tml]
+  implementation: code:join_keys
   scope: join
-  aggregate:
-    mode: each
-    where: {field: "@varchar_join_key_count", gt: 0}
-    measure: "@varchar_join_key_count"
-  severity: HIGH
-  message: "VARCHAR join key(s) — 2-5x slower than integer: {@varchar_join_keys:all}"
+  message:
+    by_severity:
+      LOW: "String-typed join key(s), slower to join than integers: {varchar_keys:all}"
+      INFO: "Multi-column join ({key_pairs} keys)"
   examples:
-    fires: {fixture: join_keys_varchar, severity: HIGH}
+    fires: {fixture: join_keys_varchar, severity: LOW}
     silent: {fixture: join_keys_integer}
 
 - id: P7
@@ -199,9 +201,9 @@
 - id: P9
   title: High-cardinality ID column indexed as ATTRIBUTE
   description: >-
-    An ATTRIBUTE column that is text-search indexed (no `index_type: DONT_INDEX`)
-    and whose name ends like an identifier (`_id`, `_guid`, `_uuid`,
-    `transaction_id`, `row_id`, `surrogate_key`; any case).
+    Retired 2026-10: search indexing an identifier column has nothing to do with query
+    performance, which is what the rule claimed.
+  status: retired
   categories: [P]
   requires: [model_tml]
   scope: model.column
@@ -214,9 +216,6 @@
         - {field: name, regex: '(?i)(_id|_guid|_uuid|transaction_id|row_id|surrogate_key)$'}
   severity: MEDIUM
   message: "High-cardinality ID column '{name}' indexed as ATTRIBUTE"
-  examples:
-    fires: {fixture: perf_indexed_id_attribute, severity: MEDIUM}
-    silent: {fixture: perf_id_attribute_not_indexed}
 
 - id: P11
   title: Excessive indexed columns on Spotter-enabled model

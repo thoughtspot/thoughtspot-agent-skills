@@ -17,12 +17,12 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
     placeholders   the names it renders `rule.message` with — the rule's message and
                    every profile's are held to them
     severity       where a finding's severity comes from (required):
-                     "bands"          graded by the rule's `bands` (A5)
+                     "bands"          graded by the rule's `bands`
                      "severity"       the catalog `severity`, a name or a mapping (D10)
                      "severity_name"  the catalog `severity`, a plain name only (D12:
                                       its findings are not about one item, so it has
                                       nothing to look a mapping up on)
-                     {"HIGH", ...}    fixed in the function: these severities (D1, D2)
+                     {"HIGH", ...}    fixed in the function: these severities (D1, P6)
                    It fixes which severities the rule can emit (a by-severity message
                    must word each, and only those) and which of `bands` / `severity`
                    the entry must — and must not — carry.
@@ -34,7 +34,7 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
     uses           (required) the conditional data (catalog_expr.CONDITIONAL_DATA) it
                    reads from the context, through a derived field included — `()` for
                    none. The gate fails an entry whose `requires`/`uses` do not cover
-                   it (catalog_uses.py): A5 reads `ai_instructions` via `@is_coached`
+                   it (catalog_uses.py)
 
 The contract (`run.run_rules` dispatches; `check_findings` enforces it):
 
@@ -219,8 +219,8 @@ def _nonblank(value: Any) -> bool:
     return bool((value or "").strip())
 
 
-# A5: column names a person would not search for (col1, field_2, val, tmp_x, 9lives)
-# and SHOUTING_SNAKE warehouse names.
+# The readiness score's column-name quality: names a person would not search for
+# (col1, field_2, val, tmp_x, 9lives) and SHOUTING_SNAKE warehouse names.
 _NAME_ANTI = re.compile(r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d", re.IGNORECASE)
 _NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
 
@@ -229,8 +229,22 @@ def _poor_name(name: str) -> bool:
     return bool(_NAME_ANTI.match(name) or _NAME_ANTI_UPPER.match(name))
 
 
+#: The Spotter readiness score's levels (A5's bands until it stopped being a finding,
+#: 2026-10): at or above READY a Model is ready, at or above NEEDS_WORK it needs work.
+READINESS_READY = 80
+READINESS_NEEDS_WORK = 50
+
+
+def readiness_level(score: float) -> str:
+    """`ready`, `needs_work` or `not_ready` for a readiness score."""
+    if score >= READINESS_READY:
+        return "ready"
+    return "needs_work" if score >= READINESS_NEEDS_WORK else "not_ready"
+
+
 def readiness_score(item: dict, ctx: Any) -> float:
-    """A5's weighted score for one model item, 0-100: descriptions 30%, coaching 25%,
+    """The Spotter readiness score of one model item, 0-100, shown in the report (no
+    longer a finding: A5 was retired 2026-10): descriptions 30%, coaching 25%,
     synonyms 15%, model description 15%, column-name quality 15%. Every column share
     is over ALL columns, and a model without columns counts as one, so its score is
     defined (its shares are 0% and its name quality 100%)."""
@@ -242,32 +256,14 @@ def readiness_score(item: dict, ctx: Any) -> float:
                    if fields.get(c, "@has_synonyms", ctx)) / total) * 100
     has_ai = bool(fields.get(item, "@is_coached", ctx))
     has_desc = _nonblank(model.get("description"))
-    anti = sum(1 for c in cols if _poor_name(c.get("name", "")))
+    # `or ""`: a present-but-null name is not a poor name, and must not raise (BL-406 #7)
+    anti = sum(1 for c in cols if _poor_name(c.get("name") or ""))
     name_quality = ((total - anti) / total) * 100 if total else 100
     return (desc_pct * 0.30
             + (100 if has_ai else 0) * 0.25
             + syn_pct * 0.15
             + (100 if has_desc else 0) * 0.15
             + name_quality * 0.15)
-
-
-@code_rule("spotter_readiness", placeholders={"score"}, severity="bands",
-           uses={"ai_instructions"},  # readiness_score -> @is_coached
-           label="graded on a weighted readiness score")
-def spotter_readiness(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
-    """A5 — one finding per model whose readiness score the bands grade."""
-    out: List[Finding] = []
-    for item in scopes.available(ctx, rule):
-        score = readiness_score(item, ctx)
-        severity = bands.classify(score, rule.bands)
-        if severity is None:
-            continue
-        out.append(Finding(check_id=rule.id, angle="", severity=severity,
-                           object_type=item["object_type"], object_name=item["name"],
-                           object_guid=item["guid"],
-                           detail=render(template(rule, severity), {"score": score}),
-                           metric=round(score, 1)))
-    return out
 
 
 # ── D: Data Modeling ────────────────────────────────────────────────────────
@@ -318,12 +314,13 @@ def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
 
 
 @code_rule("join_keys", placeholders={"varchar_keys", "key_pairs"},
-           severity={"HIGH", "MEDIUM"}, uses=(),
-           label="graded per join: HIGH for string-typed keys, MEDIUM for more than "
+           severity={"LOW", "INFO"}, uses=(),
+           label="graded per join: LOW for string-typed keys, INFO for more than "
                  "one key pair")
 def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
-    """D2 — per join, up to two findings: HIGH for string-typed keys (P6's test,
-    @varchar_join_keys), MEDIUM for a composite key (more than one operand pair)."""
+    """P6 (D2 merged into it, 2026-10) — per join, up to two findings: LOW for
+    string-typed keys (@varchar_join_keys), INFO for a composite key (more than one
+    operand pair)."""
     from ts_cli.audit.context import join_key_ids  # not gate-safe: import on use
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
@@ -331,9 +328,9 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
         keys = join_key_ids(item["obj"]["on"])
         values = {"varchar_keys": varchar, "key_pairs": len(keys) // 2}
         if varchar:
-            out.append(_d_finding(rule, item, "HIGH", values, metric=len(varchar)))
+            out.append(_d_finding(rule, item, "LOW", values, metric=len(varchar)))
         if len(keys) > 2:
-            out.append(_d_finding(rule, item, "MEDIUM", values, metric=len(keys) // 2))
+            out.append(_d_finding(rule, item, "INFO", values, metric=len(keys) // 2))
     return out
 
 

@@ -112,7 +112,7 @@ _TOY_RULES = yaml.safe_load("""
   categories: [A]
   requires: [model_tml]
   uses: [ai_instructions]
-  implementation: code:spotter_readiness
+  implementation: code:toy_score
   scope: model
   bands:
     direction: higher_is_better
@@ -145,8 +145,28 @@ for _rule in _TOY_RULES:
         _rule["examples"] = _EX
 
 
+def _toy_score(rule, ctx, profile):
+    return []
+
+
 @pytest.fixture(scope="module")
 def toy():
+    # T6 needs a bands-graded code rule reading AI instructions; none ships since A5
+    # retired, so the toy registers its own for the module and removes it afterwards.
+    from ts_cli.audit.engine import code_rules
+    code_rules.code_rule("toy_score", placeholders={"score"}, severity="bands",
+                         uses={"ai_instructions"},
+                         label="graded on a weighted readiness score")(_toy_score)
+    try:
+        yield _toy_catalog()
+    finally:
+        for registry in (code_rules.REGISTRY, code_rules.PLACEHOLDERS,
+                         code_rules.SEVERITY_SOURCES, code_rules.CODE_LABELS,
+                         code_rules.CODE_USES):
+            registry.pop("toy_score", None)
+
+
+def _toy_catalog():
     raw = {"categories.yaml": _TOY_CATEGORIES, "profiles.yaml": _TOY_PROFILES,
            "rules/toy.yaml": _TOY_RULES}
     toy_cat = build_catalog(raw)

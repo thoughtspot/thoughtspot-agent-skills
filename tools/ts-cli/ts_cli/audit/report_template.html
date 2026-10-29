@@ -252,6 +252,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .heatmap .cell[data-severity="INFO"]{background:var(--sev-info);}
 .heatmap .cell[data-severity="PASS"]{background:var(--sev-green);}
 .heatmap .cell[data-severity="NONE"]{background:var(--hair-2);}
+/* Spotter readiness score (0-100): a figure, not a finding */
+.readiness{font-variant-numeric:tabular-nums;font-weight:600;}
+.readiness[data-level="ready"]{color:var(--sev-green);}
+.readiness[data-level="needs_work"]{color:var(--sev-medium);}
+.readiness[data-level="not_ready"]{color:var(--sev-high);}
 
 /* Stats strip */
 .stats-strip{
@@ -1113,6 +1118,10 @@ function buildScorecard(D, guid, filterAngle){
     statItems.forEach(function(s){
       titleHtml += '<div class="stat-item"><div class="stat-val">'+s.v+'</div><div class="stat-lbl">'+s.l+'</div></div>';
     });
+    if(cm.rs){
+      titleHtml += '<div class="stat-item" title="'+esc(READINESS_TITLE)+'"><div class="stat-val readiness" data-level="'+esc(cm.rs.l)+'">'+
+                   Math.round(cm.rs.s)+'/100</div><div class="stat-lbl">Spotter readiness</div></div>';
+    }
     titleHtml += '</div>';
   }
 
@@ -2774,6 +2783,16 @@ function buildDashboard(){
 
 }
 
+/* ── Spotter readiness ── */
+var READINESS_TITLE = "Spotter readiness: descriptions 30%, coaching 25%, synonyms 15%, "+
+  "Model description 15%, column-name quality 15%. Ready at 80 or more, needs work at 50 or more.";
+var READINESS_LABEL = {ready:"Ready", needs_work:"Needs work", not_ready:"Not ready"};
+function readinessByGuid(){
+  var out = {};
+  if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.rs) out[m.g] = cm.rs; });
+  return out;
+}
+
 /* ── Heatmap builder ── */
 function buildHeatmap(){
   if(!D.F || D.F.length === 0){
@@ -2855,6 +2874,9 @@ function buildHeatmap(){
   }
   html += '<table class="heatmap"><thead><tr>';
   html += '<th class="model-col">Model</th>';
+  var readiness = readinessByGuid();
+  var showReadiness = Object.keys(readiness).length > 0;
+  if(showReadiness) html += '<th class="angle-col" title="'+esc(READINESS_TITLE)+'">Spotter readiness</th>';
   angleKeys.forEach(function(a){
     html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
             ANGLE_LABELS[a]+'</th>';
@@ -2864,6 +2886,11 @@ function buildHeatmap(){
   rows.forEach(function(r){
     html += '<tr>';
     html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
+    if(showReadiness){
+      var rs = readiness[r.g];
+      html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
+                   Math.round(rs.s)+'</span></td>' : '<td></td>';
+    }
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);

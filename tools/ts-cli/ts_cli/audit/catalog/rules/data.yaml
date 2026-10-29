@@ -37,23 +37,12 @@
 - id: D2
   title: VARCHAR join keys detected
   description: >-
-    Per join (inline, or referencing a Table's `joins_with`): HIGH when its key
-    columns are string-typed on their Table TML (P6's test — a key whose Table TML is
-    not in scope has an unknown type and is not reported), and, separately, MEDIUM
-    when it joins on more than one key pair. The Table TMLs are optional enrichment:
-    the multi-key finding needs none. One join can yield both findings.
-  # A code rule (code:join_keys) because one join yields up to two independent findings.
+    Retired 2026-10: merged into P6, which now reports both of its halves (string-typed
+    join keys LOW, a join on more than one key pair INFO) under Performance and Data
+    Modeling.
+  status: retired
   categories: [D]
-  requires: [model_tml]
-  implementation: code:join_keys
   scope: join
-  message:
-    by_severity:
-      HIGH: "VARCHAR join key(s): {varchar_keys:all}"
-      MEDIUM: "Multi-column join ({key_pairs} keys)"
-  examples:
-    fires: {fixture: join_keys_varchar, severity: HIGH}
-    silent: {fixture: join_keys_integer}
 
 - id: D3
   title: Join type analysis (FULL OUTER, LEFT/RIGHT)
@@ -79,26 +68,11 @@
 - id: D4
   title: Progressive joins disabled on large models
   description: >-
-    A Model with more than 5 tables and `join_progressive` off joins every table on
-    every query. Counted as the Model's tables when join_progressive is not set, so
-    the count is 0 — and silent — on a progressive Model. Same rule as P4.
+    Retired 2026-10: merged into P4, the same rule, which now sits under both Performance
+    and Data Modeling.
+  status: retired
   categories: [D]
-  requires: [model_tml]
   scope: model
-  aggregate:
-    mode: count
-    over: model.table
-    where: {field: parent.properties.join_progressive, truthy: false}
-  bands:
-    direction: lower_is_better
-    unit: count
-    levels:
-      - {op: gt, value: 5, severity: HIGH}
-  message: "join_progressive is false on model with {count} tables (>5)"
-  legacy_threshold: {min_tables_for_flag: 5}
-  examples:
-    fires: {fixture: data_model_six_tables_not_progressive, severity: HIGH}
-    silent: {fixture: data_model_six_tables_progressive}
 
 - id: D5
   title: Orphan tables in model (Cartesian risk)
@@ -123,9 +97,9 @@
 - id: D6
   title: Grain consistency — fact tables with >40% attributes
   description: >-
-    A fact table (more than 3 MEASURE columns) more than 40% of whose model columns
-    are ATTRIBUTEs, its columns found by its alias, else its name. The metric is that
-    share as a percentage, rounded to one place.
+    Retired 2026-10: grain is set by a table's keys and dates, not by its share of
+    attribute columns, so the rule judged grain on the wrong evidence.
+  status: retired
   categories: [D]
   requires: [model_tml]
   scope: model.table
@@ -139,9 +113,6 @@
   severity: LOW
   message: "Fact table '{name}' has {@attribute_count}/{@table_column_count} ATTRIBUTE columns (>40%)"
   legacy_threshold: {max_attribute_pct: 40}
-  examples:
-    fires: {fixture: data_fact_table_mostly_attributes, severity: LOW}
-    silent: {fixture: data_fact_table_mostly_measures}
 
 - id: D7
   title: High model overlap detected

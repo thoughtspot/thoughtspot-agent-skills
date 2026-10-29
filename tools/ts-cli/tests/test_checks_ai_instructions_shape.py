@@ -36,15 +36,20 @@ def test_tml_side_still_counts_on_its_own():
     assert [f for f in run_rule(ctx, "A3") if "coaching instructions" in f.detail] == []
 
 
-def test_a5_credits_the_api_surface():
-    """A5 emits a readiness SCORE, so the fix shows as a better score.
+def test_readiness_credits_the_api_surface():
+    """The Spotter readiness score (A5's, now the report's) credits coaching read from
+    the API surface.
 
-    Coached scores 25 points higher than bare — the AI weight the check assigns
+    Coached scores 25 points higher than bare — the AI weight the score assigns
     to having instructions at all, and which was unreachable via the API surface.
     """
-    coached = run_rule(fx.instructions_live_shape(), "A5")
-    bare = run_rule(fx.instructions_empty_info(), "A5")
-    assert len(coached) == len(bare) == 1
-    assert coached[0].metric > bare[0].metric, \
-        "a coached model must score higher than an uncoached one"
-    assert coached[0].metric - bare[0].metric == 25
+    from ts_cli.audit.engine import scopes
+    from ts_cli.audit.engine.code_rules import readiness_score
+
+    def score(ctx):
+        [item] = scopes.iterate(ctx, "model")
+        return readiness_score(item, ctx)
+    coached = score(fx.instructions_live_shape())
+    bare = score(fx.instructions_empty_info())
+    assert coached > bare, "a coached model must score higher than an uncoached one"
+    assert coached - bare == 25

@@ -45,18 +45,11 @@ def test_s2_does_not_flag_pii_with_indexing_suppressed(idx):
     assert run_rule(fx.build_index_pii_ctx(idx), "S2") == []
 
 
-# ── P9: indexed ATTRIBUTE id columns ───────────────────────────────────────
+# ── P9: retired 2026-10 ────────────────────────────────────────────────────
 
-def test_p9_flags_a_default_indexed_id_column():
-    assert len(run_rule(fx.index_id_default_indexed(), "P9")) == 1
-
-
-def test_p9_does_not_flag_an_id_column_with_indexing_suppressed():
-    assert run_rule(fx.index_id_not_indexed(), "P9") == []
-
-
-def test_p9_ignores_a_measure():
-    assert run_rule(fx.index_id_measure(), "P9") == []
+def test_p9_is_retired_and_silent_on_a_default_indexed_id_column():
+    """Retired: search indexing an identifier column is not a performance problem."""
+    assert run_rule(fx.index_id_default_indexed(), "P9") == []
 
 
 # ── P11: indexed-column count on a Spotter model ───────────────────────────

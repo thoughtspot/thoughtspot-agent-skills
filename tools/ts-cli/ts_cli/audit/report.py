@@ -164,6 +164,30 @@ def _compact_ai(ai: dict) -> dict:
     return out
 
 
+def _compact_model(m: dict, model_index: dict) -> dict:
+    """One corpus Model, compacted: its stats, tables, and — when present — its AI
+    analysis, Spotter readiness score (`rs`: score and level) and ERD."""
+    key = (m.get("name", ""), m.get("guid", ""))
+    cm = {
+        "mi": model_index.get(key, -1),
+        "tc": m.get("table_count", 0),
+        "cc": m.get("column_count", 0),
+        "fc": m.get("formula_count", 0),
+        "jc": m.get("join_count", 0),
+        "jd": m.get("join_depth", 0),
+        "ds": m.get("description", ""),
+        "mt": [{"n": t["name"], "f": t["fqn"]} for t in m.get("model_tables", [])],
+    }
+    if m.get("ai_analysis"):
+        cm["ai"] = _compact_ai(m["ai_analysis"])
+    if m.get("spotter_readiness"):
+        cm["rs"] = {"s": m["spotter_readiness"]["score"],
+                    "l": m["spotter_readiness"]["level"]}
+    if m.get("erd"):
+        cm["ed"] = m["erd"]
+    return cm
+
+
 def compact_payload(data: dict) -> dict:
     findings = data.get("findings", [])
     summary = data.get("summary", {})
@@ -193,25 +217,7 @@ def compact_payload(data: dict) -> dict:
     }
 
     if corpus:
-        compact_models = []
-        for m in corpus.get("models", []):
-            key = (m.get("name", ""), m.get("guid", ""))
-            cm = {
-                "mi": model_index.get(key, -1),
-                "tc": m.get("table_count", 0),
-                "cc": m.get("column_count", 0),
-                "fc": m.get("formula_count", 0),
-                "jc": m.get("join_count", 0),
-                "jd": m.get("join_depth", 0),
-                "ds": m.get("description", ""),
-                "mt": [{"n": t["name"], "f": t["fqn"]} for t in m.get("model_tables", [])],
-            }
-            if m.get("ai_analysis"):
-                cm["ai"] = _compact_ai(m["ai_analysis"])
-            erd = m.get("erd")
-            if erd:
-                cm["ed"] = erd
-            compact_models.append(cm)
+        compact_models = [_compact_model(m, model_index) for m in corpus.get("models", [])]
 
         compact_reuse = [
             {

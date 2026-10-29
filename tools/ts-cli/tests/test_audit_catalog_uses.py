@@ -26,18 +26,13 @@ def _shipped_with(edit):
     return validate_catalog(build_catalog(raw), raw)
 
 
-def test_shipped_catalog_is_valid_and_a5_declares_its_use():
+def test_shipped_catalog_is_valid():
     assert _shipped_with(lambda rules: None) == []
-    assert load_catalog().rules["A5"].uses == ["ai_instructions"]
 
 
 # ── the gate: requires ∪ uses must cover what a rule reads ──────────────────
-
-def test_gate_fires_for_a5_without_uses():
-    problems = _shipped_with(lambda rules: rules["A5"].pop("uses"))
-    [p] = problems
-    assert "A5" in p and "ai_instructions" in p and "code:spotter_readiness" in p
-
+# A code rule's declared read (A5's, until it retired) is covered synthetically in
+# test_audit_rule_examples.py: no shipped code rule reads conditional data now.
 
 def test_gate_fires_for_a_derived_field_read_undeclared():
     """A3 reads @is_coached; dropping its `requires: ai_instructions` leaves it uncovered."""
@@ -63,8 +58,6 @@ def test_uses_covers_a_read_as_well_as_requires():
 
 
 def test_data_reads_names_each_source():
-    reads = data_reads(load_catalog().rules["A5"])
-    assert reads == {"ai_instructions": ["code:spotter_readiness"]}
     assert data_reads(load_catalog().rules["H5"]) == {
         "dependents": ["scope set", "@set_consumers"], "sets": ["scope set", "@set_consumers"]}
 
@@ -96,13 +89,17 @@ def test_a_profile_cannot_override_uses():
 
 
 def test_uses_never_gates_an_item():
-    """A5 still judges a Model with no ai/instructions entry (scored uncoached)."""
+    """A rule that only `uses` ai_instructions still judges a Model with no
+    ai/instructions entry; one that `requires` it skips the Model (A3, as shipped)."""
+    import dataclasses
     from ts_cli.audit.context import make_context
     ctx = make_context(models=[{"guid": "m1", "model": {"name": "S", "columns": []}}])
     assert ctx.ai_instructions == {}
-    rule = load_catalog().rules["A5"]
-    assert [i["guid"] for i in scopes.available(ctx, rule)] == ["m1"]
-    assert [f.object_guid for f in run_rule(ctx, load_catalog(), "A5", "general")] == ["m1"]
+    a3 = load_catalog().rules["A3"]
+    assert "ai_instructions" in a3.requires
+    assert [i["guid"] for i in scopes.available(ctx, a3)] == []
+    uses_only = dataclasses.replace(a3, requires=["model_tml"], uses=["ai_instructions"])
+    assert [i["guid"] for i in scopes.available(ctx, uses_only)] == ["m1"]
 
 
 # ── the registries ──────────────────────────────────────────────────────────

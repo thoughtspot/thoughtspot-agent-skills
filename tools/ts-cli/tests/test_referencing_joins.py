@@ -71,13 +71,8 @@ def test_p6_reports_the_varchar_key_of_a_referencing_join():
     assert "PROMOTION_KEY" in findings[0].detail
 
 
-def test_d2_reports_it_too():
-    assert len(run_rule(fx.referencing_join_varchar(), "D2")) == 1
-
-
 def test_an_integer_referencing_join_is_not_reported():
     assert run_rule(fx.referencing_join_integer(), "P6") == []
-    assert run_rule(fx.referencing_join_integer(), "D2") == []
 
 
 def test_d3_sees_a_referencing_joins_type():

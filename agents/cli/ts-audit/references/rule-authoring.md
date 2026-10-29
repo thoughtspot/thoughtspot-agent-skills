@@ -219,7 +219,8 @@ whichever category selected each rule:
 - **`requires`** both fetches the data and gates: an object lacking it is **skipped**.
   A3 requires `ai_instructions`, so a Model whose lookup failed is not judged.
 - **`uses`** fetches but never gates. The rule reads the data and still judges an object
-  without it: A5 scores a Model whose lookup failed as uncoached.
+  without it: a rule that `uses: [ai_instructions]` would judge a Model whose lookup
+  failed as uncoached, where A3, which requires them, skips it.
 - `uses` takes only conditional data (`dependents`, `ai_instructions`, `answers`, `sets`).
   Model and Table TML and metadata are always fetched, so there is nothing to declare.
   `dependents` is fetched every audit today but is still declared, because Set discovery
@@ -410,8 +411,9 @@ Follow procedure 1 with these differences.
   and paste it into the PR.
 - **A rule that shares a threshold or logic with another moves with it.**
   `test_shared_rule_pairs_stay_in_step` (`test_checks_registry.py`) deliberately holds
-  the pairs the data/perf split created to one value (BL-304): D4/P4, S9/P14, S8/P15,
-  and P8's column ceiling and P7's depth bands, which equal D1's constants in
+  the pairs the data/perf split created to one value (BL-304): S8/P15 (S8 retired with
+  its logic kept; D4/P4 and S9/P14 were merged into P4 and P14 in 2026-10), and P8's
+  column ceiling and P7's depth bands, which equal D1's constants in
   `engine/tml.py` (`MAX_MODEL_COLUMNS`, `JOIN_DEPTH_*`), together with their
   `legacy_threshold`s. Change both sides in the same edit. Changing P8's 75 means
   changing `MAX_MODEL_COLUMNS`, which changes D1's findings too, so re-pin both
@@ -529,7 +531,8 @@ Prefer declarative. Write a code rule only when the rule needs a mode, an operat
 cross-rule dependency that nothing else would use. Examples:
 
 - one rule grading several measures against separate thresholds (D1);
-- one item yielding several independent findings (D2);
+- one item yielding several independent findings (P6: a join's string-typed keys and its
+  key count);
 - a finding that depends on another rule's result.
 
 A one-off value is a derived field, not a code rule. Then:

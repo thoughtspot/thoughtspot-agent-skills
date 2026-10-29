@@ -31,18 +31,19 @@ def test_d1_passes_small_model():
     assert not any("table" in f.detail.lower() for f in findings)
 
 
-def test_d4_flags_non_progressive():
-    findings = run_rule(fx.data_model_six_tables_not_progressive(), "D4")
-    assert len(findings) == 1
-    assert findings[0].severity == "HIGH"
+def test_d4_is_retired_into_p4():
+    """D4 merged into P4 (2026-10): D4 is silent, P4 reports the same Model, and P4's
+    finding is counted under Data Modeling as well as Performance."""
+    ctx = fx.data_model_six_tables_not_progressive()
+    assert run_rule(ctx, "D4") == []
+    [finding] = run_rule(ctx, "P4")
+    assert finding.severity == "HIGH"
+    assert finding.categories == ["P", "D"]
 
 
-def test_d4_passes_progressive():
-    assert run_rule(fx.data_model_six_tables_progressive(), "D4") == []
-
-
-def test_d4_passes_small_model():
-    assert run_rule(fx.data_model_three_tables_not_progressive(), "D4") == []
+def test_p4_passes_progressive_and_small_models():
+    assert run_rule(fx.data_model_six_tables_progressive(), "P4") == []
+    assert run_rule(fx.data_model_three_tables_not_progressive(), "P4") == []
 
 
 def test_d5_flags_unjoined_table():

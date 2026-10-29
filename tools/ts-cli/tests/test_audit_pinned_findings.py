@@ -75,20 +75,22 @@ OWN_INPUTS = ap.OWN_INPUTS
 
 #: (input, rule) pairs on which the legacy check RAISED (under both profiles). What
 #: the catalog reports there has no legacy answer to compare with. A None name or a
-#: list-valued `properties` aborts the legacy regex and lookup code.
+#: list-valued `properties` aborts the legacy regex and lookup code. A rule re-pinned
+#: since (2026-10: A5, P9 and S3 retired, pinned to []; P2 re-graded, pinned to the
+#: catalog's answer) holds no legacy RAISES any more and is not listed.
 LEGACY_RAISES = {
     "ai_model_name_none": {"H10"},
-    "tml_value_shapes": {"H3", "P2", "P9", "P18"},
-    "perf_names_none": {"A5", "A6", "H1", "H10", "S1", "S2", "S3", "S5"},
+    "tml_value_shapes": {"H3", "P18"},
+    "perf_names_none": {"A6", "H1", "H10", "S1", "S2", "S5"},
     "sec_names_none": {"H10"},
-    "data_names_none": {"A5", "A6", "H1", "H10", "P9", "S1", "S2", "S3", "S5"},
-    "data_single_model_malformed_column": {"H3", "P2", "P9", "P18"},
+    "data_names_none": {"A6", "H1", "H10", "S1", "S2", "S5"},
+    "data_single_model_malformed_column": {"H3", "P18"},
 }
 
-#: (input, rule) pairs on which the CATALOG raises too: A5 (a code rule) reads the
-#: column names as the legacy A5 did, and a None name raises in both. Pinned so that a
-#: fix shows up here; a pinned rule raising anywhere else fails.
-ENGINE_RAISES = {("perf_names_none", "A5"), ("data_names_none", "A5")}
+#: (input, rule) pairs on which the CATALOG raises too, pinned so that a fix shows up
+#: here; a pinned rule raising anywhere else fails. Empty since A5 — a code rule that
+#: read None column names as the legacy A5 did — retired (2026-10).
+ENGINE_RAISES: set = set()
 
 
 def _pinned() -> dict:
@@ -240,13 +242,9 @@ S_PROBES = [
     # `name: None` / `guid: None` reach the finding as None, not ""
     ("sec_names_none", lambda f: f["check_id"] == "S4" and f["object_name"] is None
      and f["object_guid"] is None),
-    ("sec_names_none", lambda f: f["check_id"] == "S9" and f["object_name"] is None
-     and f["object_guid"] is None),
-    ("sec_names_none", lambda f: f["check_id"] == "S8" and f["object_guid"] is None),
     # absent keys reach it as ""
     ("sec_names_absent", lambda f: f["check_id"] == "S10" and f["object_name"] == ""
      and f["object_guid"] == ""),
-    ("sec_names_absent", lambda f: f["check_id"] == "S9" and f["object_name"] == ""),
     # S2: the owning table's RLS through "" keys, overriding aliases and absent tables
     ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
      and f["object_name"] == "email_no_id" and f["severity"] == "INFO"),
@@ -254,14 +252,11 @@ S_PROBES = [
      and f["object_name"] == "email_x" and f["severity"] == "HIGH"),
     ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
      and f["object_name"] == "email_y" and f["severity"] == "INFO"),
-    # S3: the masking blob is case-insensitive on both sides
-    ("sec_masking_edges", lambda f: f["check_id"] == "S3" and f["object_name"] == "home_phone"),
     # S5: `token` is HIGH, the other words CRITICAL, matched in any case
     ("credential_names", lambda f: f["check_id"] == "S5" and f["object_name"] == "TOKEN"
      and f["severity"] == "HIGH"),
-    # S9: the detail quotes the first 80 characters
-    ("sec_long_rls_expression", lambda f: f["check_id"] == "S9"
-     and len(f["detail"]) == len("Function in RLS expression prevents filter pushdown: ") + 80),
+    # (S3, S8 and S9 probes went with those rules, retired 2026-10; P14 quotes the
+    # first 80 characters of an RLS expression as S9 did, and its pin holds it to that)
 ]
 
 

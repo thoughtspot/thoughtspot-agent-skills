@@ -65,9 +65,9 @@ def test_run_audit_uses_catalog():
 def test_run_audit_orders_findings_by_the_requested_categories():
     """As the legacy loop did: category by category, in the order asked for."""
     from ts_cli.audit import run_audit
-    out = run_audit(None, [], ["S", "A"], "spotter", ctx=fx.registry_populated_context())
+    out = run_audit(None, [], ["P", "A"], "spotter", ctx=fx.registry_populated_context())
     letters = [f["check_id"][0] for f in out["findings"]]
-    assert letters == sorted(letters, key=lambda c: {"S": 0, "A": 1}[c]) and set(letters) == {"S", "A"}
+    assert letters == sorted(letters, key=lambda c: {"P": 0, "A": 1}[c]) and set(letters) == {"P", "A"}
 
 
 # ── 2. a multi-category finding: once in totals, once per category ──────────

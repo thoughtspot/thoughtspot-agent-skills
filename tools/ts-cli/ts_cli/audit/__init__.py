@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Optional
 
 from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
-from ts_cli.audit.engine import tml
+from ts_cli.audit.engine import scopes, tml
+from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 
@@ -24,6 +25,9 @@ from ts_cli.audit.findings import Finding, build_summary
 #: the report says "not collected for this selection" for a section whose data is
 #: missing from `corpus.fetched_needs`.
 REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets"})
+
+#: The category whose run computes each Model's Spotter readiness score (`build_corpus`).
+READINESS_CATEGORY = "A"
 
 
 _SEV_MAP = {"CRITICAL": "crit", "HIGH": "warn", "MEDIUM": "warn", "LOW": "info", "INFO": "info"}
@@ -206,8 +210,14 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
     if not angles:
         from ts_cli.audit import catalog_model
         angles = list(catalog_model.load_catalog().categories)
+    # The Spotter readiness score (A5 until 2026-10, now a report figure rather than a
+    # finding) is computed when the AI Readiness category ran, which is when the AI
+    # instructions it reads (coaching, 25% of the score) are fetched — and not when the
+    # caller knows they were not, since every Model would then score as uncoached.
+    scored = READINESS_CATEGORY in angles and ai_fetched is not False
+    items = list(scopes.iterate(ctx, "model")) if scored else None
     models_out = []
-    for model in ctx.models:
+    for i, model in enumerate(ctx.models):
         m = model.get("model", {})
         guid = model.get("guid", m.get("guid", ""))
         model_tables = m.get("model_tables") or []
@@ -226,6 +236,9 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
             ],
         }
         entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
+        if items is not None:
+            score = round(readiness_score(items[i], ctx), 1)
+            entry["spotter_readiness"] = {"score": score, "level": readiness_level(score)}
         models_out.append(entry)
 
     table_reuse = _build_table_reuse_from_ctx(models_out)

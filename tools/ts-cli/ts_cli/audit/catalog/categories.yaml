@@ -7,12 +7,12 @@
   angle_key: ai
   label: AI Readiness
   order: 1
-  description: Description/synonym coverage, AI context, Spotter readiness score.
+  description: Description/synonym coverage, AI context; the report also scores each Model's Spotter readiness.
 - id: D
   angle_key: data_modeling
   label: Data Modeling
   order: 2
-  description: Complexity, join quality/types, progressive joins, duplicates, grain consistency, SQL pass-through, zero-column tables.
+  description: Complexity, join quality/types and keys, progressive joins, duplicates, SQL pass-through, zero-column tables.
 - id: H
   angle_key: human
   label: Human Readiness
@@ -22,9 +22,9 @@
   angle_key: performance
   label: Performance
   order: 4
-  description: SQL Views, scalar formulas, filter/join progressiveness, date constraints, column sprawl.
+  description: SQL Views, row-level formulas, join keys, filter/join progressiveness, RLS functions, column sprawl.
 - id: S
   angle_key: security
   label: Security
   order: 5
-  description: PII detection, indexing without RLS, CLS gaps, RLS bypass, RLS join loops, credentials in analytics.
+  description: PII detection, indexing without RLS, RLS bypass, RLS join loops, credentials in analytics.

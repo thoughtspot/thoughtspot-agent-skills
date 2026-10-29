@@ -59,15 +59,33 @@ def test_a4_passes_with_description():
     assert run_rule(fx.ai_model_described(), "A4") == []
 
 
-def test_a5_flags_not_ready():
-    findings = run_rule(fx.ai_model_bare_columns(), "A5")
-    assert len(findings) == 1
-    assert findings[0].check_id == "A5"
+def _readiness(ctx):
+    """The Spotter readiness score of the context's one Model (A5 until 2026-10; now
+    the report's score, not a finding)."""
+    from ts_cli.audit.engine import scopes
+    from ts_cli.audit.engine.code_rules import readiness_score
+    [item] = scopes.iterate(ctx, "model")
+    return readiness_score(item, ctx)
 
 
-def test_a5_passes_ready():
-    findings = run_rule(fx.ai_model_ready(), "A5")
-    assert findings == [] or findings[0].severity == "INFO"
+def test_a5_is_retired_and_silent():
+    assert run_rule(fx.ai_model_bare_columns(), "A5") == []
+
+
+def test_readiness_scores_bare_columns_not_ready():
+    from ts_cli.audit.engine.code_rules import readiness_level
+    assert readiness_level(_readiness(fx.ai_model_bare_columns())) == "not_ready"
+
+
+def test_readiness_scores_a_described_coached_model_ready():
+    from ts_cli.audit.engine.code_rules import readiness_level
+    assert readiness_level(_readiness(fx.ai_model_ready())) == "ready"
+
+
+def test_readiness_levels_have_their_lines_at_80_and_50():
+    from ts_cli.audit.engine.code_rules import readiness_level
+    assert [readiness_level(s) for s in (80, 79.9, 50, 49.9)] == \
+        ["ready", "needs_work", "needs_work", "not_ready"]
 
 
 # --- Columns written as exported Model TML writes them -----------------------------
@@ -121,13 +139,12 @@ class TestSynonymsUnderProperties:
     def test_a2_root_synonyms_still_count(self):
         assert run_rule(fx.tml_root_synonyms_column(), "A2", "spotter") == []
 
-    def test_a5_counts_properties_synonyms(self):
+    def test_readiness_counts_properties_synonyms(self):
         """Same Model, synonyms present vs absent: the readiness score must differ by
         the synonym weight (15 points at 100% coverage)."""
-        with_syn = run_rule(fx.tml_described_column_with_synonyms(), "A5", "spotter")
-        without = run_rule(fx.tml_described_column(), "A5", "spotter")
-        assert with_syn and without
-        assert round(with_syn[0].metric - without[0].metric) == 15
+        with_syn = _readiness(fx.tml_described_column_with_synonyms())
+        without = _readiness(fx.tml_described_column())
+        assert round(with_syn - without) == 15
 
 
 # --- Assessment profiles (BL-399) ---------------------------------------------------

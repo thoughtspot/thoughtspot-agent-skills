@@ -1,6 +1,7 @@
 """Two guards that could not do their job (BL-302, BL-303).
 
-P5 suppresses its finding when the model carries a rolling date window. The
+P5 (retired 2026-10; its logic is kept in the catalog, so the guard is recorded here
+for when it is revived) suppressed its finding when the model carries a rolling date window. The
 schema: *"The outer key is `constraints:`, which contains a single `constraint:`
 list (not a list at the top level)"* — a **mapping**. `for c in constraints`
 therefore yields the key string `"constraint"`, which never contains
@@ -20,24 +21,12 @@ from audit_run_rule import run_rule
 # answers test_audit_pinned_findings.py pins.
 
 
-# ── P5 — the real exported shape must suppress ─────────────────────────────
+# ── P5 — retired 2026-10 ───────────────────────────────────────────────────
 
-def test_p5_reports_a_fact_model_with_no_constraints():
-    assert len(run_rule(fx.guard_fact_model_unconstrained(), "P5")) == 1
-
-
-def test_p5_is_suppressed_by_the_real_mapping_shape():
-    """The shape an export actually produces — previously ignored."""
-    assert run_rule(fx.guard_fact_model_date_window(), "P5") == []
-
-
-def test_p5_is_still_suppressed_by_a_list_shape():
-    """A hand-built fixture may pass a list; keep tolerating it."""
-    assert run_rule(fx.guard_fact_model_listed_window(), "P5") == []
-
-
-def test_p5_is_not_suppressed_by_an_unrelated_constraint():
-    assert len(run_rule(fx.guard_fact_model_other_constraint(), "P5")) == 1
+def test_p5_is_retired_and_silent_on_a_fact_model_with_no_constraints():
+    """Retired: a date limit on fact tables is a design choice, not a defect."""
+    assert run_rule(fx.guard_fact_model_unconstrained(), "P5") == []
+    assert run_rule(fx.guard_fact_model_other_constraint(), "P5") == []
 
 
 # ── H5 — only speak about sets whose dependents were actually fetched ──────

@@ -147,7 +147,9 @@ SHIPPED_NEEDS = {
     "D": {"model_tml", "metadata"},
     "H": {"model_tml", "dependents", "sets", "answers"},
     "P": {"model_tml", "metadata", "table_tml"},
-    "S": {"model_tml", "table_tml"},
+    # S8 and S9, the Security rules that declared Table TML, retired 2026-10 (Table TML
+    # is still fetched for every audit; no S rule declares it).
+    "S": {"model_tml"},
 }
 
 
@@ -220,23 +222,45 @@ def _a3_retired_under_spotter(rules):
     rules["A3"].setdefault("profiles", {})["spotter"] = {"status": "retired"}
 
 
-def test_a5_gets_ai_instructions_when_a3_is_retired_by_a_profile():
-    """A5 declares `uses: [ai_instructions]`, so its data no longer rides on A3's
-    `requires`: with A3 off, an A-only selection still fetches the instructions."""
+def test_with_a3_off_nothing_needs_ai_instructions():
+    """A3 is the only rule reading AI instructions since A5 retired (2026-10): with it
+    off, by a profile or a layer, an A-only selection fetches none."""
     cat = _catalog_with(_a3_retired_under_spotter)
-    assert "ai_instructions" in needs_for(cat, ["A"], "spotter")
-    client, _, _ = _build(needs_for(cat, ["A"], "spotter"))
-    assert any(u.endswith(_AI) for u in client.urls())
-
-
-def test_a5_gets_ai_instructions_when_a3_is_retired_by_a_layer():
+    assert "ai_instructions" not in needs_for(cat, ["A"], "spotter")
     off = [{"A3": {"status": "retired"}}]
-    assert "ai_instructions" in needs_for(load_catalog(), ["A"], "general", layers=off)
-
-
-def test_with_a3_and_a5_off_nothing_needs_ai_instructions():
-    off = [{"A3": {"status": "retired"}, "A5": {"status": "retired"}}]
     assert "ai_instructions" not in needs_for(load_catalog(), ["A"], "general", layers=off)
+
+
+def test_the_readiness_score_survives_a_null_column_name():
+    """A5 raised TypeError on a column whose `name` is null (BL-406 item 7). As a
+    report figure it runs outside the rule engine, where a raise would end the audit."""
+    import audit_rule_fixtures as fx
+    from ts_cli.audit.engine import scopes
+    from ts_cli.audit.engine.code_rules import readiness_score
+    for build in (fx.perf_names_none, fx.data_names_none):
+        ctx = build()
+        items = list(scopes.iterate(ctx, "model"))
+        assert items and any(c.get("name") is None
+                             for i in items for c in i["obj"].get("columns") or [])
+        assert all(0 <= readiness_score(i, ctx) <= 100 for i in items)
+
+
+def test_the_readiness_score_needs_the_ai_instructions_fetched():
+    """The report's Spotter readiness score reads coaching from the AI instructions: it
+    is computed when the A category ran and they were (or may have been) fetched, and
+    left out when the run knows they were not, rather than scoring every Model as
+    uncoached."""
+    from ts_cli.audit import build_corpus
+    from ts_cli.audit.context import make_context
+    ctx = make_context(models=[{"guid": "m1", "model": {"name": "S", "columns": []}}])
+    [scored] = build_corpus(ctx, angles=["A"], ai_fetched=True)["models"]
+    # no columns: only column-name quality (15%) scores
+    assert scored["spotter_readiness"] == {"score": 15.0, "level": "not_ready"}
+    [unknown] = build_corpus(ctx, angles=["A"], ai_fetched=None)["models"]
+    assert "spotter_readiness" in unknown
+    [not_fetched] = build_corpus(ctx, angles=["A"], ai_fetched=False)["models"]
+    [no_a] = build_corpus(ctx, angles=["D"], ai_fetched=True)["models"]
+    assert "spotter_readiness" not in not_fetched and "spotter_readiness" not in no_a
 
 
 def test_a_layer_cannot_add_uses():
