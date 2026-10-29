@@ -34,7 +34,8 @@ import re
 from typing import Callable
 
 from ts_cli.formula_common import (
-    expr_is_aggregated, fix_double_aggregation, resolve_name_collisions)
+    count_distinct_columns_to_formulas, expr_is_aggregated, fix_double_aggregation,
+    resolve_name_collisions)
 
 FORMULA_ID_PREFIX = "formula_"
 
@@ -159,3 +160,22 @@ def repoint_formula_refs(formulas: list[dict], id_map: dict[str, str]) -> list[d
             changes.append({"formula": f["name"], "from": f["expr"], "to": new})
             f["expr"] = new
     return changes
+
+
+def count_distinct_pass(columns: list, formulas: list, formula_col_entries: list,
+                        *, enabled: bool) -> tuple:
+    """`ts_aggregation: count_distinct` on a physical column → a `unique count`
+    formula column of the same name (invariant I5; audit 2026-10-29, 9.2).
+
+    ``enabled`` is False when UPDATING an existing Model: a dbt `count_distinct`
+    tag is usually ThoughtSpot's own column, round-tripped by ts-convert-to-dbt, and
+    turning it into a formula in place could break the Answers built on it. I5's
+    round-trip exception keeps it as it is there; the lint gate reports it as
+    advisory. Returns ``(columns, formulas, formula_col_entries, converted_names)``.
+    """
+    if not enabled:
+        return columns, formulas, formula_col_entries, []
+    from .tags import _formula_id   # lazy — tags imports from this package
+    columns, new_f, new_cols, converted = count_distinct_columns_to_formulas(
+        columns, formulas, id_fn=_formula_id)
+    return columns, formulas + new_f, formula_col_entries + new_cols, converted

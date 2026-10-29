@@ -2615,3 +2615,41 @@ class TestCountDistinctBecomesFormula:
                  "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]
         _, formulas, fcols, _ = count_distinct_columns_to_formulas(cols, [{"id": "formula_N"}])
         assert formulas[0]["id"] == "formula_N 2" == fcols[0]["formula_id"]
+
+
+class TestCountDistinctOnUpdate:
+    """PR A converter-audit D2/D3: on UPDATE of an existing Model the round-tripped
+    COUNT_DISTINCT column is kept (I5's round-trip exception), and new formula ids
+    use dbt's own id function (bracket-escaped)."""
+
+    def test_update_keeps_physical_column(self):
+        schema = yaml.safe_dump({"version": 2, "models": [{
+            "name": "stg_orders",
+            "columns": [{"name": "CUSTOMER_ID", "config": {"meta": {
+                "ts_column_type": "measure", "ts_aggregation": "count_distinct"}}}]}]})
+        tml = build_model_tml_from_schema_yml(schema, "M", count_distinct_as_formula=False)
+        col = tml["model"]["columns"][0]
+        assert col["column_id"] == "STG_ORDERS::CUSTOMER_ID"
+        assert col["properties"]["aggregation"] == "COUNT_DISTINCT"
+        assert not tml.get("_count_distinct_as_formula")
+
+    def test_formula_id_uses_dbt_escaping(self):
+        from ts_cli.dbt.tags import _formula_id
+        from ts_cli.formula_common import count_distinct_columns_to_formulas
+        cols = [{"name": "Users [EU]", "column_id": "T::C",
+                 "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]
+        _, formulas, _, _ = count_distinct_columns_to_formulas(cols, [], id_fn=_formula_id)
+        assert formulas[0]["id"] == _formula_id("Users [EU]")
+
+
+class TestLintGate:
+    def test_i5_is_advisory_on_update_only(self, capsys):
+        import pytest
+        from ts_cli.dbt.import_gate import lint_gate
+        model = {"model": {"name": "M", "model_tables": [{"name": "T"}], "columns": [
+            {"name": "N", "column_id": "T::C",
+             "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}}]}}
+        lint_gate(model, updating=True)
+        assert "advisory" in capsys.readouterr().err
+        with pytest.raises(SystemExit):
+            lint_gate(model, updating=False)

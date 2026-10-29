@@ -3975,11 +3975,13 @@ on a name identifier.
 **Column properties read from the manifest** (from model node `columns[].config.meta` or `columns[].meta`):
 `ts_column_type` → `column_type`, `ts_aggregation` → `aggregation`, `ts_synonym` → `synonyms`,
 `ts_format_pattern` → `format_pattern`, `ts_index_type` → `index_type`, `ts_ai_context` → `ai_context`.
-`ts_aggregation: count_distinct` on a physical column is the exception: it is emitted as a
-`unique count ( [T::col] )` formula column of the same name (invariant I5), and noted on stderr.
+`ts_aggregation: count_distinct` on a physical column is the exception: when the command
+**creates** a Model it is emitted as a `unique count ( [T::col] )` formula column of the same
+name (invariant I5), and noted on stderr. With `--model-guid` (an update) the column is kept as
+it is, so Answers built on it are not broken, and its I5 lint finding is advisory.
 
 **Gates before anything is written.** The Model TML is linted (`ts tml lint`'s model
-invariants) and `ts_rls_rules` are applied to their Tables **before** the Model import. A lint
+invariants; `ts dbt-export build-model --import` runs the same gate) and `ts_rls_rules` are applied to their Tables **before** the Model import. A lint
 finding, or a Table whose rules did not apply, stops the command with a non-zero exit and names
 the problem; the Model is not imported, so it is never live without its row-level security.
 

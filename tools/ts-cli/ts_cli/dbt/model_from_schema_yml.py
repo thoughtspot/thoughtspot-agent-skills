@@ -18,9 +18,8 @@ from collections import defaultdict
 
 import yaml
 
-from ts_cli.formula_common import count_distinct_columns_to_formulas
-
-from .formula_pass import collapse_double_aggregation, find_reaggregation_kept
+from .formula_pass import (
+    collapse_double_aggregation, count_distinct_pass, find_reaggregation_kept)
 from .tags import (
     _formula_id,
     is_column_excluded,
@@ -49,6 +48,7 @@ def _table_name_of(model_entry: dict) -> str:
 def build_model_tml_from_schema_yml(
     schema_yml_text: str,
     model_name: str,
+    count_distinct_as_formula: bool = True,
 ) -> dict:
     """Build a ThoughtSpot Model TML dict from a dbt schema.yml.
 
@@ -229,13 +229,8 @@ def build_model_tml_from_schema_yml(
                 col_entry_f["description"] = col_desc_f
             formula_col_entries.append(col_entry_f)
 
-    # A ts_aggregation: count_distinct tag on a physical column → unique count
-    # formula (I5; audit 2026-10-29, 9.2). Before the metric/collision passes, so
-    # the new formulas go through them like any other.
-    columns, cd_formulas, cd_cols, cd_converted = count_distinct_columns_to_formulas(
-        columns, formulas)
-    formulas += cd_formulas
-    formula_col_entries += cd_cols
+    columns, formulas, formula_col_entries, cd_converted = count_distinct_pass(
+        columns, formulas, formula_col_entries, enabled=count_distinct_as_formula)
 
     # 2026-10 (PR #506 review, BL-217): the same shared fix_double_aggregation
     # pass as build_model_tml_from_manifest (dbt/formula_pass.py). The shared

@@ -1420,3 +1420,22 @@ def test_update_metadata_keeps_new_table_block_appended_in_same_run(tmp_path):
     # and the metadata pass still applied to the existing model in the same file
     cust_meta = models["stg_customers"]["columns"][0]["config"]["meta"]
     assert cust_meta.get("ts_synonym"), cust_meta
+
+
+def test_build_model_import_is_lint_gated(tmp_path, monkeypatch):
+    """PR A converter-audit P1: `ts dbt-export build-model --import` POSTed Model
+    TML with no lint, the sibling of audit 2026-10-29 finding 9.3."""
+    import ts_cli.io_helpers as io
+    import ts_cli.tml_lint as tl
+    calls = []
+    monkeypatch.setattr(io, "run_tml_import", lambda *a, **k: calls.append(a) or ("OK", "g", None))
+    monkeypatch.setattr(tl, "lint_tml", lambda doc: ["I14: something"])
+    schema = tmp_path / "schema.yml"
+    schema.write_text(yaml.safe_dump({"version": 2, "models": [{
+        "name": "stg_orders", "columns": [{"name": "AMOUNT", "config": {"meta": {
+            "ts_column_type": "measure", "ts_aggregation": "sum"}}}]}]}), encoding="utf-8")
+    result = runner.invoke(app, ["dbt-export", "build-model", "--schema-yml", str(schema),
+                                 "--model-name", "M", "--import", "--profile", "p"])
+    assert result.exit_code != 0
+    assert "LINT: I14" in result.output and "nothing was imported" in result.output
+    assert calls == []

@@ -13,12 +13,10 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 
-from ts_cli.formula_common import count_distinct_columns_to_formulas
-
 from .constraint_joins import add_uncovered_joins, constraint_joins, relation_tables
 from .formula_pass import (
-    collapse_double_aggregation, find_reaggregation_kept, rename_colliding_columns,
-    repoint_formula_refs)
+    collapse_double_aggregation, count_distinct_pass, find_reaggregation_kept,
+    rename_colliding_columns, repoint_formula_refs)
 from .model_from_schema_yml import rls_rules_block
 from .node_paths import (
     model_in_path, parse_ts_join_test, ref_tables, table_name as _node_table_name)
@@ -157,6 +155,7 @@ def build_model_tml_from_manifest(
     model_name: str,
     pretty_names: bool = False,
     metrics: bool = True,
+    count_distinct_as_formula: bool = True,
 ) -> dict:
     """Build a ThoughtSpot Model TML dict from dbt Cloud job artifacts.
 
@@ -326,14 +325,6 @@ def build_model_tml_from_manifest(
                 col_doc["properties"] = props
             columns.append(col_doc)
 
-    # A ts_aggregation: count_distinct tag on a physical column → unique count
-    # formula (I5; audit 2026-10-29, 9.2). Before the metric/collision passes, so
-    # the new formulas go through them like any other.
-    columns, cd_formulas, cd_cols, cd_converted = count_distinct_columns_to_formulas(
-        columns, formulas)
-    formulas += cd_formulas
-    formula_col_entries += cd_cols
-
     metrics_report: dict | None = None
     if metrics:
         from ts_cli.dbt_metricflow import translate_metrics   # lazy — avoids a circular import
@@ -341,6 +332,11 @@ def build_model_tml_from_manifest(
             manifest, model_path, {f["name"] for f in formulas})
         formulas, formula_col_entries = _apply_superseded(
             formulas, formula_col_entries, metrics_report)
+
+    # After the metric pass, so a metric cannot silently supersede a converted
+    # count_distinct column; a same-named pair reaches the display-name refusal.
+    columns, formulas, formula_col_entries, cd_converted = count_distinct_pass(
+        columns, formulas, formula_col_entries, enabled=count_distinct_as_formula)
 
     # An inferred (untagged) physical column may prettify to the same name as a
     # metric-derived formula — the docs' own pattern (TRANSACTION_TOTAL column vs the

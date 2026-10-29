@@ -706,7 +706,7 @@ def build_model(
     """
     import sys
     import yaml as _yaml
-    from ts_cli.tml_lint import lint_tml
+    from ts_cli.dbt.import_gate import lint_gate
     from ts_cli.dbt_build_export import (
         apply_table_fqns,
         build_model_tml_from_manifest,
@@ -724,7 +724,8 @@ def build_model(
 
     model_tml = build_model_tml_from_manifest(
         manifest, catalog, model_path, model_name,
-        pretty_names=pretty_names, metrics=metrics)
+        pretty_names=pretty_names, metrics=metrics,
+        count_distinct_as_formula=not model_guid)
     excluded = model_tml.pop("_excluded_columns", [])
     if excluded:
         print(f"  ts_column_exclude: {len(excluded)} column(s) left out of the Model — "
@@ -786,13 +787,7 @@ def build_model(
     # and Tableau builders do: without it, model-invariant violations reached the
     # server, and some (I5 on a text column) import "successfully" and wrong
     # (audit 2026-10-29, 9.3).
-    lint_findings = lint_tml(model_tml)
-    if lint_findings:
-        for finding in lint_findings:
-            print(f"LINT: {finding}", file=sys.stderr)
-        raise SystemExit(
-            f"Model TML failed {len(lint_findings)} lint check(s) (listed above); "
-            "nothing was imported.")
+    lint_gate(model_tml, updating=bool(model_guid))
     tml_yaml = _yaml.dump(model_tml, sort_keys=False, allow_unicode=True)
 
     # Apply ts_rls_rules to Table TMLs (model-level config.meta tag) BEFORE the
