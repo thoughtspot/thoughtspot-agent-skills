@@ -49,9 +49,13 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str,
     current Table TML, merge in the rls_rules block, and re-import.
     """
     result: dict[str, dict] = {}
-    in_path_tables: set[str] = set()
-    for node in manifest.get("nodes", {}).values():
-        # Exact dirname, matching inspect.py's rls_models. This was a substring
+    nodes = list(manifest.get("nodes", {}).values())
+    # Every in-path model's Table, with or without rules: an out-of-path node with
+    # the same Table name never contributes rules, whatever the manifest order.
+    in_path_tables = {_node_table_name(n) for n in nodes if model_in_path(n, model_path)}
+    for node in nodes:
+        # Exact dirname for the in-path set (inspect.py's rls_models reports only
+        # that set; out-of-path join targets are BL-495). This was a substring
         # match, which also swept in a sibling directory sharing the prefix
         # (`models/staging` picking up `models/staging_archive`) and disagreed
         # with what `ts dbt inspect` reported for the same path.
@@ -72,8 +76,6 @@ def extract_model_rls_from_manifest(manifest: dict, model_path: str,
         # Malformed hand-written rules raise SystemExit naming the model
         # (PR #506 review) — see model_from_schema_yml.rls_rules_block.
         result[table] = rls_rules_block(model_name, ts_rls)
-        if in_path:
-            in_path_tables.add(table)
 
     return result
 def manifest_table_locations(manifest: dict) -> dict[str, dict]:

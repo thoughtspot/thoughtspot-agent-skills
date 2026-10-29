@@ -1527,3 +1527,17 @@ def test_lint_gate_i5_is_advisory(capsys):
     with pytest.raises(SystemExit):
         lint_gate(model)
 
+
+
+def test_rls_out_of_path_ignored_when_in_path_model_has_no_rules():
+    """Review of the 17.2 fix: the in-path model wins even when it has no rules."""
+    from ts_cli.dbt.manifest import extract_model_rls_from_manifest
+    manifest = {"nodes": {
+        "model.p.stg": {"resource_type": "model", "name": "stg_customers", "alias": "customers",
+                        "original_file_path": "models/staging/stg_customers.sql"},
+        "model.p.cust": {"resource_type": "model", "name": "customers",
+                         "original_file_path": "models/marts/customers.sql",
+                         "config": {"meta": {"ts_rls_rules": [{"name": "m", "expr": "ts_username = [CUSTOMERS::X]"}]}}},
+    }}
+    for order in (list(manifest["nodes"].items()), list(reversed(manifest["nodes"].items()))):
+        assert extract_model_rls_from_manifest({"nodes": dict(order)}, "models/staging", {"CUSTOMERS"}) == {}
