@@ -73,8 +73,10 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
 )
 from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     CODE_IMPL,
+    band_shape_problems,
     code_rule_aggregate_problems,
     code_rule_problems,
+    parameter_problems,
     implementation_problems,
     known_code_rules,
     rule_message_problems,
@@ -107,7 +109,7 @@ from ts_cli.audit.catalog_model import (
 
 REQUIRES = ["model_tml", "table_tml", "metadata", "dependents", "ai_instructions",
             "answers", "sets"]
-OVERRIDABLE = {"status", "bands", "severity", "message", "remediation"}
+OVERRIDABLE = {"status", "bands", "severity", "message", "remediation", "parameters"}
 # Accepted in a profile block but not a general override: it reproduces the legacy
 # per-profile `threshold` dict (A1/A2/A6) and goes when the legacy dict does.
 PROFILE_ONLY = {"legacy_threshold"}
@@ -120,7 +122,7 @@ VIEWS = ["duplicates", "cleanup"]
 RULE_KEYS = {
     "id", "title", "description", "status", "categories", "requires", "uses", "implementation",
     "scope", "aggregate", "bands", "severity", "profiles", "message", "legacy_threshold",
-    "remediation", "examples", "views",
+    "parameters", "remediation", "examples", "views",
 }
 CATEGORY_KEYS = {"id", "label", "order", "description", "angle_key"}
 PROFILE_KEYS = {"id", "label", "default", "description"}
@@ -304,6 +306,8 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
             else [f"{path}: must be a mapping"]
     if key == "message":
         return message_problems_any(rule, value, path)
+    if key == "parameters":
+        return []  # parameter_problems checks every profile's effective map
     if not isinstance(value, str):
         return [f"{path}: must be a string"]
     return []
@@ -380,12 +384,13 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     the legacy threshold's placeholders, and where severity comes from. A retired rule
     with no logic has none of these; it may only never be revived."""
     if rule.status == "retired" and has_no_logic(rule):
-        return _revival_problems(rule)
+        return _revival_problems(rule) + parameter_problems(rule, list(cat.profiles) or [""])
     out = code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
     out += message_problems_any(rule, rule.message, "message")
     out += legacy_threshold_form_problems(rule.legacy_threshold, "legacy_threshold")
     profiles = list(cat.profiles) or [""]
+    out += parameter_problems(rule, profiles) + band_shape_problems(rule, profiles)
     if CODE_IMPL.match(rule.implementation):
         out += code_rule_problems(rule, profiles)
     elif rule.implementation == "declarative":

@@ -140,7 +140,18 @@ def _code_label(name: str) -> str:
 
 
 def grading(rule: Rule, pid: str) -> str:
-    """How `rule` grades a finding under profile `pid`."""
+    """How `rule` grades a finding under profile `pid`, and the `parameters` it is
+    tuned by there, in words (` (tuned by min chars 20, ...)`: not " · ", which
+    separates profiles, nor "; ", which separates a severity map's cases)."""
+    params = profile_override(rule, pid).get("parameters", rule.parameters)
+    text = _grading(rule, pid)
+    if not params:
+        return text
+    tuned = ", ".join(f"{str(k).replace('_', ' ')} {_scalar(v)}" for k, v in params.items())
+    return f"{text} (tuned by {tuned})"
+
+
+def _grading(rule: Rule, pid: str) -> str:
     override = profile_override(rule, pid)
     bands = override.get("bands", rule.bands)
     severity = override.get("severity", rule.severity)

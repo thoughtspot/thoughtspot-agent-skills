@@ -9,6 +9,7 @@ import copy
 import pytest
 
 import audit_rule_fixtures as fx
+from audit_catalog_helpers import PKG_CATALOG
 from ts_cli.audit.catalog_model import build_catalog, load_catalog, load_raw
 from ts_cli.audit.catalog_validate import validate_catalog
 from ts_cli.audit.context import make_context
@@ -26,9 +27,11 @@ def _by_name(ctx, scope, field):
 
 # ── derived fields ──────────────────────────────────────────────────────────
 
-def test_sole_join_carrier_looks_tables_up_by_name():
+def test_sole_join_carrier_looks_tables_up_by_alias():
+    """K1 sits on DIM aliased D1, which declares its own join: joined by its alias, so
+    exempt (by name, before 2026-10, it was reported)."""
     got = _by_name(fx.human_h3_join_edges(), "model.column", "@is_sole_join_carrier")
-    assert got == {"K": True, "X": False, "Y": True, "K1": False, "KA": True,
+    assert got == {"K": True, "X": False, "Y": True, "K1": True, "KA": True,
                    "NOID": False, "LK": False}
 
 
@@ -38,9 +41,11 @@ def test_sole_join_carrier_skips_the_column_itself_by_identity():
     assert got == [True, True]
 
 
-def test_referenced_by_formula_reads_display_names_only():
+def test_referenced_by_formula_reads_ids_and_display_names():
+    """ById's formula is referenced only as `[formula_ById]`, how TML writes it: seen
+    since 2026-10."""
     got = _by_name(fx.human_h3_formula_edges(), "model.column", "@referenced_by_formula")
-    assert got == {"Amount": True, "Calc": True, "ById": False, "Str": False,
+    assert got == {"Amount": True, "Calc": True, "ById": True, "Str": False,
                    "Zero": False, "NoProps": False}
 
 
@@ -96,8 +101,8 @@ def test_model_formula_match_and_name_last_wins():
 
 def test_h_code_rules_declare_what_they_read():
     assert code_rules.SEVERITY_SOURCES["description_quality"] == "severity"
-    assert code_rules.SEVERITY_SOURCES["stale_names"] == frozenset({"MEDIUM", "LOW"})
-    assert code_rules.CODE_USES["stale_names"] == frozenset({"dependents", "sets"})
+    assert code_rules.SEVERITY_SOURCES["stale_names"] == "severity"
+    assert code_rules.CODE_USES["stale_names"] == frozenset()  # @orphan_model declares them
     assert code_rules.PLACEHOLDERS["description_quality"] == {"count", "issues"}
     assert code_rules.PLACEHOLDERS["stale_names"] == {"what", "value"}
     assert not {"description_quality", "stale_names"} & code_rules.OWN_THRESHOLD
@@ -106,10 +111,14 @@ def test_h_code_rules_declare_what_they_read():
 @pytest.mark.parametrize("desc,issue", [
     ("x" * 19, "'C' too short (19 chars)"), ("x" * 20, None), ("x" * 400, None),
     ("x" * 401, "'C' too long (401 chars)"), ("  " + "x" * 19 + "  ", "'C' too short (19 chars)"),
-    ("The opening is boilerplate here.", "'C' uses boilerplate pattern"),
+    ("The opening is ordinary prose here.", None),  # "The "/"A " dropped 2026-10
+    ("A plain sentence that is long enough.", None),
+    ("Column for the net amount of the order.", "'C' uses boilerplate pattern"),
+    ("this is a column with enough characters.", "'C' uses boilerplate pattern"),
     ("Them apples are counted in this one.", None), ("   ", None), (None, None), (5, None)])
 def test_description_issue(desc, issue):
-    assert code_rules_human.description_issue({"name": "C", "description": desc}) == issue
+    assert code_rules_human.description_issue(
+        {"name": "C", "description": desc}, min_chars=20, max_chars=400) == issue
 
 
 @pytest.mark.parametrize("name,stale", [
@@ -184,3 +193,33 @@ def test_an_active_rule_still_needs_its_logic():
     problems = _shipped_with("H6", lambda r: r.update(status="active"))
     assert any("H6: aggregate.mode is required for a declarative rule" in p
                for p in problems), problems
+
+
+def test_h2_reads_its_parameters_and_an_override_replaces_them():
+    """`parameters` reach the code rule, and a later layer replaces the map whole."""
+    ctx = make_context(models=[fx.build_human_model(columns=[
+        {"name": "A", "description": "x" * 15}, {"name": "B", "description": "y" * 15}])])
+    cat = load_catalog()
+    [base] = run_rule(ctx, cat, "H2", "general")
+    assert base.metric == 2
+    looser = {"H2": {"parameters": {"min_chars": 10, "max_chars": 400, "issues_shown": 1}}}
+    assert run_rule(ctx, cat, "H2", "general", layers=[looser]) == []
+    shown = {"H2": {"parameters": {"min_chars": 20, "max_chars": 400, "issues_shown": 1}}}
+    [one] = run_rule(ctx, cat, "H2", "general", layers=[shown])
+    assert one.metric == 2 and one.detail.count("too short") == 1
+
+
+def test_a_profile_parameters_override_reaches_the_code_rule():
+    """Through the catalog's own profile block, not an extra layer: only the profile
+    that overrides `parameters` changes what H2 flags."""
+    raw = copy.deepcopy(load_raw(PKG_CATALOG))
+    [h2] = [r for f, rules in raw.items() if f.startswith("rules/") for r in rules
+            if r["id"] == "H2"]
+    h2.setdefault("profiles", {})["spotter"] = {
+        "parameters": {"min_chars": 10, "max_chars": 400, "issues_shown": 3}}
+    cat = build_catalog(raw)
+    assert validate_catalog(cat, raw) == []
+    ctx = make_context(models=[fx.build_human_model(columns=[
+        {"name": "A", "description": "x" * 15}])])
+    assert run_rule(ctx, cat, "H2", "spotter") == []
+    assert len(run_rule(ctx, cat, "H2", "general")) == 1

@@ -20,6 +20,11 @@ beyond it. The remaining conditional aggregates (`count_if`, `average_if`, `min_
 This module is now the single canonical source; both skills call through
 `ts agentql classify-columns` instead of carrying their own copy.
 
+The audit reads `AGGREGATE_FUNCS` too (P2's `@is_row_level_formula`, in
+`ts_cli/audit/engine/fields.py`): an edit here moves P2's findings, and because the audit
+catalog gate imports it under Python 3.9 with only PyYAML, this module stays stdlib-only
+(`GATE_SHARED_MODULES` in `tools/validate/tests/test_check_audit_catalog.py`).
+
 **Semi-additive sub-case (live-verified 2026-07-13, nebula-aggregate-aware).** Most
 aggregate-formula measures must be referenced in AgentQL as `AGG(...)` (a real
 `SUM(...)` errors `NESTED_AGGREGATE_NOT_SUPPORTED`). The exception is a *semi-additive*

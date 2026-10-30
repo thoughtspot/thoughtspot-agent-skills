@@ -90,7 +90,8 @@ def _package_data_globs(text: str) -> list[str]:
 
 def test_vocabulary_constants():
     assert SEVERITIES == ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
-    assert OVERRIDABLE == {"status", "bands", "severity", "message", "remediation"}
+    assert OVERRIDABLE == {"status", "bands", "severity", "message", "remediation",
+                           "parameters"}
     assert {"each", "ratio", "count", "group", "pairwise", "composite"} == set(MODES)
     assert {"model", "model.column", "join", "set", "metadata"} <= set(SCOPES)
     assert {"model_tml", "answers", "sets"} <= set(REQUIRES)

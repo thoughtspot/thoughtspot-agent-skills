@@ -1,3 +1,5 @@
+import pytest
+
 from ts_cli.audit.test_fixtures import generate_test_data
 
 
@@ -95,3 +97,58 @@ def test_build_corpus_counts_joins_where_model_tml_keeps_them():
     m = build_corpus(ctx, angles=["D"])["models"][0]
     assert m["join_count"] == 3
     assert m["join_depth"] == 2
+
+
+def test_ai_analysis_tolerates_null_and_typed_names():
+    """A null column name or a YAML-typed one (`name: 2024`) crashed the join."""
+    from ts_cli.audit import _build_ai_analysis
+    model = {"name": 2024, "model_tables": [{"name": None}, {"name": "SALES"}],
+             "columns": [{"name": None, "properties": {"column_type": "MEASURE"}},
+                         {"name": 7}, "not-a-column"]}
+    out = _build_ai_analysis([], model)
+    assert "1 metric." in out["domain"]
+
+
+@pytest.mark.parametrize("where,value", [
+    ("model", None), ("model", 2024), ("table", None), ("table", 2024),
+    ("alias", 7), ("column", None), ("column", 7), ("description", 7)])
+def test_a_null_or_typed_name_does_not_end_the_run(where, value):
+    """End to end — run_audit, then render_report — not one helper: a fix to one
+    function moved the crash one function down (PR 2.4 review)."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.report import render_report
+    tables = [{"name": "FACT", "fqn": "g-fact",
+               "joins": [{"name": "fact_dim", "with": "DIM", "on": "[FACT::D_ID] = [DIM::ID]",
+                          "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+              {"name": "DIM", "fqn": "g-sqlview"}]
+    columns = [{"name": "Amount", "column_id": "FACT::AMT",
+                "properties": {"column_type": "MEASURE"}, "description": "Net amount"}]
+    model = {"name": "Sales", "model_tables": tables, "columns": columns}
+    if where == "model":
+        model["name"] = value
+    elif where == "table":
+        tables[1]["name"] = value
+    elif where == "alias":
+        tables[1]["alias"] = value
+    elif where == "column":
+        columns[0]["name"] = value
+    else:
+        columns[0]["description"] = value
+    # FACT's Table TML present, DIM's absent (a SQL View model table, which the context
+    # does not store, or a failed export): the ERD then looks DIM up by name among the
+    # Table TMLs it has (PR 2.4 re-review: the crash's next stop, erd.py, ran only then).
+    fact_tml = {"guid": "g-fact", "table": {"name": "FACT", "columns": [
+        {"name": "AMT", "db_column_properties": {"data_type": "DOUBLE"}}]}}
+    ctx = make_context(models=[{"guid": "m-1", "model": model}],
+                       tables={"g-fact": fact_tml}, dependents={}, model_guids=["m-1"])
+    out = run_audit(None, ["m-1"], ctx=ctx)
+    assert "<html" in render_report(out).lower()
+
+
+def test_readiness_reads_a_typed_description_as_a1_does():
+    """A YAML-typed `description: 2024` is present to A1 and A4, so to the readiness
+    score too (it read as blank, losing 45 points for data the report calls present)."""
+    from ts_cli.audit.engine.code_rules import _nonblank
+    from ts_cli.audit.engine.predicates import _blank
+    for value in (2024, 3.5, "x", "  ", "", None, [], ["a"]):
+        assert _nonblank(value) is (not _blank(value)), value

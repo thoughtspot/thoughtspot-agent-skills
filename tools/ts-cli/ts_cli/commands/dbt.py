@@ -294,10 +294,11 @@ def _generate(
     # archive; read it here and say what is missing (ts_cli/dbt/zip_guard.py).
     resp = client.post(path, files=form, raise_for_status=bool(zip_path))
     if not resp.ok:
+        # The server's own line first, so the explanation never hides what it said.
+        print(format_http_error("POST", f"{client.base_url}{path}", resp), file=sys.stderr)
         explanation = missing_archive_message(resp.status_code, resp.text, connection_id)
         if explanation:
             raise SystemExit(explanation)
-        print(format_http_error("POST", f"{client.base_url}{path}", resp), file=sys.stderr)
         raise SystemExit(1)
     print(json.dumps(resp.json()))
 

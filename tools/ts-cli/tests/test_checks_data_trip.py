@@ -122,14 +122,10 @@ def test_d10_model_where_every_table_contributes_columns_returns_nothing():
     assert run_rule(fx.data_model_every_table_has_columns(), "D10") == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "D10 (legacy checks_data.py at main@982c2010; the catalog reproduces it) keys on model_tables[].name, but a table with an "
-    "alias prefixes its column_id with the ALIAS (model-tml schema, `alias` row). "
-    "AuditContext.column_types (context.py:44) already does `alias or name`; the "
-    "check does not, so a fully-populated aliased table is reported zero-column. "
-    "D6 (legacy checks_data.py at main@982c2010) and D11 (via the legacy _table_role) are blind the same way — "
-    "there they cause a silent miss rather than a false positive."))
 def test_d10_aliased_table_is_not_zero_column():
+    """Was a strict xfail: D10 keyed on model_tables[].name while an aliased table
+    prefixes its column_id with the ALIAS, so a fully populated aliased table read
+    zero-column (BL-305; fixed 2026-10, roadmap PR 2.3)."""
     assert run_rule(fx.data_model_aliased_table_with_columns(), "D10") == []
 
 

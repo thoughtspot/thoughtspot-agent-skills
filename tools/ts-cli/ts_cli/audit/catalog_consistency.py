@@ -17,8 +17,8 @@ Two things a rule says twice, where nothing else holds the copies together:
     uses. A rule without bands (its threshold lives in a `where:`) is not checked.
 
 A third copy — numbers the `description` quotes — is checked against history by the
-gate's `--base` mode (catalog_history.description_drift_problems): a band value that
-changed since the base and is still quoted fails.
+gate's `--base` mode (catalog_history.description_drift_problems): a band or parameter
+value that changed since the base and is still quoted fails.
 
 Kept importable on Python 3.9 with only PyYAML (see catalog_model.py).
 """

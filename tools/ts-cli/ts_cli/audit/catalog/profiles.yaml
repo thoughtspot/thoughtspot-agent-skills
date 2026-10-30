@@ -1,6 +1,6 @@
 # Assessment profiles — the bar an audit is measured against (ts-audit SKILL Step 2b).
 # A profile is a named override layer: a rule's `profiles.<id>` block may replace only
-# the overridable keys (status, bands, severity, message, remediation). Exactly one
+# the overridable keys (status, bands, severity, message, remediation, parameters). Exactly one
 # profile is the default.
 - id: spotter
   label: Spotter-ready

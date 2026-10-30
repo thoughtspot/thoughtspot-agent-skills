@@ -21,14 +21,19 @@
     and graded HIGH over its HIGH line: tables (30 / 50), joins (30 / 50) and formulas
     (30 / 50). Column count is P8's and join depth P7's. The table and join lines come
     from production call-home data (2026-10: 268k Models, 99th percentile 35 tables).
-  # A code rule (code:model_complexity, grading table D1_MEASURES in
-  # engine/code_rules.py) because one rule grades three measures against three pairs
-  # of lines and reports each with its own legacy threshold — the catalog holds one set
-  # of bands and one threshold per rule. Moving the lines into bands: BL-406.
+  # A code rule (code:model_complexity, its measures D1_MEASURES in engine/code_rules.py)
+  # because one rule grades three measures, each its own finding with its own legacy
+  # threshold. The lines are these bands, shared by the three (since 2026-10).
   categories: [D]
   requires: [model_tml]
   implementation: code:model_complexity
   scope: model
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 50, severity: HIGH}
+      - {op: gt, value: 30, severity: MEDIUM}
   message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
   examples:
     fires: {fixture: data_model_fifty_one_tables, severity: HIGH}
@@ -47,20 +52,21 @@
 - id: D3
   title: Join type analysis (FULL OUTER, LEFT/RIGHT)
   description: >-
-    An outer join (inline, or referencing a Table's `joins_with`; the model's own type
-    wins): HIGH for a full outer join (ThoughtSpot's `OUTER`), INFO for LEFT_OUTER and
-    RIGHT_OUTER. The type is read case-insensitively.
+    Outer joins (inline, or referencing a Table's `joins_with`; the model's own type
+    wins; the type read case-insensitively): HIGH on each full outer join
+    (ThoughtSpot's `OUTER`), and one INFO per Model listing its LEFT_OUTER and
+    RIGHT_OUTER joins. Until 2026-10 each one-sided outer join was its own INFO
+    finding.
+  # A code rule (code:join_types) because one rule reports on two scopes: each full
+  # outer join, and the Model its one-sided outer joins roll up to.
   categories: [D]
   requires: [model_tml]
-  scope: join
-  aggregate:
-    mode: each
-    where: {field: "@join_type", in: [OUTER, LEFT_OUTER, RIGHT_OUTER]}
-  severity: {field: "@join_type", map: {OUTER: HIGH}, default: INFO}
+  implementation: code:join_types
+  scope: model
   message:
     by_severity:
       HIGH: FULL OUTER join causes performance issues
-      INFO: "{@join_type} join — may indicate data discrepancies"
+      INFO: "{count} LEFT/RIGHT outer join(s), which may drop or add rows in results: {joins}"
   examples:
     fires: {fixture: data_join_full_outer, severity: HIGH}
     silent: {fixture: data_join_inner}
@@ -78,7 +84,8 @@
   title: Orphan tables in model (Cartesian risk)
   description: >-
     A table of a multi-table Model that is on neither side of any join — keyed by its
-    alias, else its name, on the declaring side and by the join's `with` on the other.
+    alias, else its name, on both sides; a join's `with` is resolved to the table it
+    names (by alias, id or name; until 2026-10 the raw `with` was compared).
   categories: [D]
   requires: [model_tml]
   scope: model.table
@@ -200,10 +207,11 @@
   title: Zero-column tables (bridge vs leaf)
   description: >-
     A model table no model column comes from: INFO when it is on either side of a
-    join (a bridge), MEDIUM when not (a leaf). Looked up — and reported — by the
-    table's `name`, so an aliased table always reads zero-column (BL-305, kept).
-  # A code rule (code:zero_column_tables) because the finding names the table by its
-  # `name`, where the model.table scope names it by alias.
+    join (a bridge), MEDIUM when not (a leaf). Looked up and reported by its alias,
+    else its name; a join's target is resolved by alias, id or name. Until 2026-10 it
+    went by `name`, so every aliased table read zero-column.
+  # A code rule (code:zero_column_tables): the role and the reporting name are computed
+  # together per table.
   categories: [D]
   requires: [model_tml]
   implementation: code:zero_column_tables
@@ -220,9 +228,10 @@
     A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
     ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. A
     referencing join takes its cardinality from the model, else from the Table's
-    `joins_with` entry (exported Table TML usually carries none). Both ends are looked
-    up by name — the declaring model table's `name` and the join's `with` — so an
-    aliased end reads as unknown (BL-305, kept).
+    `joins_with` entry (exported Table TML usually carries none). Both ends are found
+    by alias, else name: the declaring model table, and the table the join's `with`
+    names (by alias, id or name). Until 2026-10 they were looked up by `name`, so an
+    aliased end read as unknown.
   categories: [D]
   requires: [model_tml]
   scope: join

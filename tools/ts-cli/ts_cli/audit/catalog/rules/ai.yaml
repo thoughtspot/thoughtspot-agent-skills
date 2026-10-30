@@ -13,14 +13,16 @@
 - id: A1
   title: Description coverage below threshold
   description: >-
-    Share of a Model's columns with a non-blank description, against the profile's
-    pass mark (Spotter-ready 95%, General 50%).
+    Share of a Model's visible columns with a non-blank description, against the
+    profile's pass mark (Spotter-ready 95%, General 50%). Hidden columns are left out:
+    search and Spotter never show them (counted until 2026-10).
   categories: [A]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: ratio
     over: model.column
+    where: {not: {field: properties.is_hidden, truthy: true}}
     match: {field: description, nonblank: true, truthy: true}
   bands:
     direction: higher_is_better
@@ -37,7 +39,7 @@
           - {op: lt, value: 47.5, severity: HIGH}
           - {op: lt, value: 95, severity: MEDIUM}
       legacy_threshold: {green: 95, assessment: "{profile_label}", yellow: 47.5}
-  message: "{matched}/{total} columns have descriptions ({pct:.0f}%)"
+  message: "{matched}/{total} visible columns have descriptions ({pct:.0f}%)"
   legacy_threshold: {green: 50, assessment: "{profile_label}", yellow: 25.0}
   remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
   examples:
@@ -47,15 +49,17 @@
 - id: A2
   title: Synonym coverage below threshold
   description: >-
-    Share of a Model's columns carrying synonyms (under `properties:`, where Model TML
-    keeps them, or at the column root), against the profile's pass mark
-    (Spotter-ready 80%, General 25%).
+    Share of a Model's visible columns carrying synonyms (under `properties:`, where
+    Model TML keeps them, or at the column root), against the profile's pass mark
+    (Spotter-ready 80%, General 25%). Hidden columns are left out (counted until
+    2026-10).
   categories: [A]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: ratio
     over: model.column
+    where: {not: {field: properties.is_hidden, truthy: true}}
     match: {field: "@has_synonyms", truthy: true}
   bands:
     direction: higher_is_better
@@ -72,7 +76,7 @@
           - {op: lt, value: 40.0, severity: HIGH}
           - {op: lt, value: 80, severity: MEDIUM}
       legacy_threshold: {green: 80, assessment: "{profile_label}", yellow: 40.0}
-  message: "{matched}/{total} columns have synonyms ({pct:.0f}%)"
+  message: "{matched}/{total} visible columns have synonyms ({pct:.0f}%)"
   legacy_threshold: {green: 25, assessment: "{profile_label}", yellow: 12.5}
   remediation: Run /ts-object-model-coach to improve descriptions, synonyms, AI context
   examples:

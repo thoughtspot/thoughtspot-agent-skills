@@ -3763,7 +3763,7 @@ ts dbt generate-tml --connection-id <id> --model-tables '[...]' \
 | `--model-tables` | yes | JSON array of `{model_name, model_path, tables[]}` — the dbt models (and their tables) to import |
 | `--import-worksheets` | no (default `ALL`) | `ALL`, `NONE`, or `SELECTED` |
 | `--worksheets` | `SELECTED` only | JSON array of worksheet names |
-| `--file` | **required** for `ZIP_FILE` connections, on every call | The `target/` directory (or project root, either artifact, or a ready-made ZIP). Without it ThoughtSpot answers a misleading `400 "Error with the uploaded ZIP file."`; the CLI replaces that with an error saying the archive is missing. Leave it off for `DBT_CLOUD` |
+| `--file` | **required** for `ZIP_FILE` connections, on every call | The `target/` directory (or project root, either artifact, or a ready-made ZIP). Without it ThoughtSpot answers a misleading `400 "Error with the uploaded ZIP file."`; the CLI prints that error, then explains that the archive is missing. Leave it off for `DBT_CLOUD` |
 | `--include-semantic-report` / `--no-include-semantic-report` | no | Per-model import/skip breakdown — Snowflake and Databricks connections only |
 
 ### `ts dbt generate-sync-tml`

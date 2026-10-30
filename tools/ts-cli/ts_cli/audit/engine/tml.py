@@ -25,6 +25,9 @@ engine modules that import it.
 from __future__ import annotations
 
 import re
+from typing import Any, Optional
+
+from ts_cli.tml_join_graph import node_id
 
 #: Warehouse types ThoughtSpot treats as strings. A string join or RLS key is
 #: markedly slower than an integer one and is what several checks look for.
@@ -46,13 +49,17 @@ def join_count(model_tables: list) -> int:
 def join_depth(model_tables: list) -> int:
     """Longest join chain reachable from any table in the model.
 
-    A DFS per start node, counting hops. Cycles terminate on the visited set.
+    A DFS per start node, counting hops. Cycles terminate on the visited set. Each
+    table is a node by its key (alias, else name) and a join's ``with`` resolves to the
+    table it names (``join_target_key``); until 2026-10 nodes were keyed by ``name`` while
+    ``with`` carries aliases, so a chain of aliased tables read as depth 1.
     """
+    tables = model_tables or []
     graph: dict = {}
-    for t in model_tables or []:
-        tn = t.get("name", "")
+    for t in tables:
+        tn = table_key(t)
         for j in (t.get("joins") or []):
-            graph.setdefault(tn, []).append(j.get("with", ""))
+            graph.setdefault(tn, []).append(join_target_key(tables, j.get("with", "")))
     if not graph:
         return 0
     max_d = 0
@@ -80,6 +87,44 @@ def table_key(model_table: dict) -> str:
     zero-column leaf, D6 and D11 silently saw "unknown" (BL-305).
     """
     return model_table.get("alias") or model_table.get("name") or ""
+
+
+def join_target(model_tables: list, ref: Any) -> Optional[dict]:
+    """The model_tables entry a join's ``with`` names: the entry whose node identity
+    (``tml_join_graph.node_id``) it is — exactly, else ignoring case, as
+    ``tml_join_graph.JoinGraph.resolve`` resolves it — else, for a ``with`` written as a
+    physical name, the entry with that ``name``. None when nothing matches."""
+    if not isinstance(ref, str) or not ref:
+        return None
+    entries = [t for t in (model_tables or []) if isinstance(t, dict)]
+    for key in (node_id, lambda t: t.get("name")):
+        for fold in (lambda s: s, str.lower):
+            want = fold(ref)
+            for t in entries:
+                k = key(t)
+                if isinstance(k, str) and k and fold(k) == want:
+                    return t
+    return None
+
+
+def joined_keys(model_tables: list) -> set:
+    """Every table on either side of a join, by key (alias, else name): each table that
+    declares a join, and each table a join's ``with`` names (``join_target_key``). The
+    one definition D5, D10 and H3 share (H3 kept its own copy until 2026-10, and drifted)."""
+    tables = model_tables or []
+    joined: set = set()
+    for t in tables:
+        for j in (t.get("joins") or []):
+            joined.add(table_key(t))
+            joined.add(join_target_key(tables, j.get("with", "")))
+    return joined
+
+
+def join_target_key(model_tables: list, ref: Any) -> Any:
+    """The column-prefix key (``table_key``) of the table a join's ``with`` names, or
+    ``ref`` itself when it names no model table."""
+    target = join_target(model_tables, ref)
+    return table_key(target) if target is not None else ref
 
 
 def model_joins(model: dict, tables: dict):

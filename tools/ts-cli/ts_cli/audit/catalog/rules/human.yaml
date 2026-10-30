@@ -21,17 +21,14 @@
     The share of a Model's columns whose names a person would not search for: col1,
     field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse
     names. One finding per Model over 10%, listing the first five such names. The
-    same two patterns the report's Spotter readiness score rates name quality with.
+    report's Spotter readiness score rates name quality with the same field.
   categories: [H]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: ratio
     over: model.column
-    match:
-      any:
-        - {field: name, regex: '(?i)^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d'}
-        - {field: name, regex: '^[A-Z][A-Z0-9]*_[A-Z0-9_]+$'}
+    match: {field: "@is_poor_name", truthy: true}
   bands:
     direction: lower_is_better
     unit: percent
@@ -47,10 +44,11 @@
   title: Description quality (too-short, boilerplate)
   description: >-
     Column descriptions that are too short (under 20 characters, stripped), too long
-    (over 400) or open with boilerplate ("This is a", "Column for", "Field for",
-    "The ", "A "; any case); a blank or absent description is A1's remit, not this rule's. One
+    (over 400) or open with boilerplate ("This is a", "Column for", "Field for"; any
+    case; "The " and "A " counted until 2026-10); a blank or absent description is A1's
+    remit, not this rule's. One
     finding per Model, its metric the number of columns with an issue, listing the
-    first three.
+    first 3.
   # A code rule (code:description_quality) because each column's issue is worded by its
   # own kind and the Model's finding joins them — no mode words its children one by
   # one; the lengths and the boilerplate pattern are in engine/code_rules_human.py.
@@ -59,6 +57,7 @@
   implementation: code:description_quality
   scope: model
   severity: LOW
+  parameters: {min_chars: 20, max_chars: 400, issues_shown: 3}
   message: "{count} description quality issues: {issues}"
   examples:
     fires: {fixture: human_description_short, severity: LOW}
@@ -68,10 +67,11 @@
   title: Unnecessary hidden columns
   description: >-
     A hidden Model column that no formula references by `[<name>]` — nor, when it
-    surfaces a formula, by that formula's `[<display name>]` (an id reference is not
-    seen). Excused when it is the last carrier of a joined table: its `column_id`
-    prefix names a table that declares or receives a join (by `name`, not alias) and
-    no other visible column has that prefix.
+    surfaces a formula, by that formula's `[<id>]` (how TML references it) or
+    `[<display name>]`. Excused when it is the last carrier of a joined table: its
+    `column_id` prefix names a table that declares or receives a join (by alias, else
+    name) and no other visible column has that prefix. Until 2026-10 an id reference
+    was not seen and joined tables were matched by `name` only.
   categories: [H]
   requires: [model_tml]
   scope: model.column
@@ -167,7 +167,7 @@
   title: Formula promotion candidate
   description: >-
     The same Answer formula — compared lower-cased, stripped, whitespace collapsed;
-    blank ones ignored — in two Answer formulas or more, and on no Model. Counted per
+    blank ones ignored — in 2 or more Answer formulas, and on no Model. Counted per
     formula, so one Answer holding it twice counts twice. The finding is named by
     that count, with no guid, listing the first three Answers.
   categories: [H]
@@ -230,6 +230,8 @@
   uses: [dependents, sets]
   implementation: code:stale_names
   scope: model
+  severity: {field: "@orphan_model", map: {true: MEDIUM}, default: LOW}
+  parameters: {quote_chars: 60}
   message:
     by_severity:
       MEDIUM: "{what} matches stale pattern: '{value}', and nothing uses the Model"

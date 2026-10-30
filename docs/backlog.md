@@ -270,7 +270,7 @@ are roughly ordered by value÷effort.
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): alias-vs-name lookups (D10, D11, H3), gradings still in code (D1, H2, H10, P6), the report corpus crashing on a column with no name, P2's expression-based test (the 16 contradictions and H10's MEDIUM closed by roadmap PRs 2.1–2.2) | 2027-01-31 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): malformed TML under a `parent.` condition, the one item left (items 1–9 closed by roadmap PRs 2.1–2.4; P6's in-code grading accepted) | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 | BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
@@ -314,9 +314,10 @@ are roughly ordered by value÷effort.
 | BL-265 | Any physical measure over a non-numeric column is demoted to an attribute (`COUNT`/`MIN`/`MAX`/`COUNT_DISTINCT`); SV, MV and dbt converters neither predict nor report it | 2026-11-30 |
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
-| BL-497 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
-| BL-498 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
-| BL-499 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
+| BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
+| BL-498 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
+| BL-499 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
+| BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -353,7 +354,7 @@ are roughly ordered by value÷effort.
 | BL-101 | Chart-axis-role in `ts metadata report` | — |
 | BL-102 | Databricks MV `parameters:` parse + emit | — |
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
-| BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | 2026-11-30 |
+| ~~BL-112~~ | ~~Rewire smoke_ts_audit.py onto `ts audit run/report`~~ | RESOLVED (2026-10-30 — the smoke runs `ts audit run` and `report`, checks rule ids against the catalog, and tests the audit's own PII patterns; ts-audit 3.6.0) |
 | BL-116 | Live destructive dependency-manager smoke | — |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
@@ -3518,7 +3519,7 @@ column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" tr
 
 ---
 
-## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list `Tier 3`
+## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list `Tier 3` — **RESOLVED 2026-10-30**
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.2.
@@ -3533,6 +3534,14 @@ Point the smoke test at `ts audit run` live; import or delete the duplicated lis
 Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 
 **Target:** 2026-11-30 (dated 2026-10-29, `docs/audit/2026-10-29-full.md` finding 6.2: the smoke's PII patterns have since drifted from `audit/engine/fields.py`, it never runs `ts audit run`, and its join step runs no join check; assert on rule ids when rewiring). Was: no fixed date — natural next touch of the audit smoke test.
+
+**Resolution (2026-10-30, roadmap PR 2.3).** `smoke_ts_audit.py` now runs the audit the skill
+runs: `ts audit run --models <guid>` (it checks the rules that ran are the catalog's, that
+every finding's rule ran and none is retired, and that the corpus holds the Model with its
+Spotter readiness score), then `ts audit report`. Its local PII list is gone; it tests the
+audit's own `PII_PATTERNS` on snake_case, display names and words that must not match. Run
+live on the SE demo cluster 2026-10-30: the audit, report and PII steps pass; the auth step
+fails on `ts auth whoami`, a separate, pre-existing fault (BL-497).
 
 ---
 
@@ -14769,6 +14778,37 @@ demo sample), so referencing joins stay unjudged — BL-496. D11's alias lookup 
 with item 4. H10's severities are now fixed in code (LOW / MEDIUM), which item 3 moves
 into data.
 
+**Progress (2026-10-30, roadmap PR 2.3).** Item 4 is closed: D10, D11 and H3 (and D5 and
+P7, the same class) find a model table by alias, else name, and resolve a join's `with` to
+the table it names as the join graph does; H3 also credits a formula referenced by id and a
+column referenced as `[TABLE::COL]`. The noise fixes: D3 rolls a Model's LEFT/RIGHT outer joins into
+one INFO (decided with the product owner 2026-10-30); H2 no longer flags a "The "/"A "
+opening; A1 and A2 count visible columns only; S1's patterns match display names and keep
+short tokens to whole words (with BL-112); S5 matches a spaced "API Key"; P18 ignores
+function names inside references and literals and names the kind of distinct count.
+
+**Progress (2026-10-30, roadmap PR 2.4).** Items 3, 7, 8 and 9 are closed. Item 3: a new
+catalog key, `parameters`, holds a code rule's tuning numbers (H2's `min_chars`,
+`max_chars`, `issues_shown`; H10's `quote_chars`), profile-overridable and gated (exactly
+the declared names, each a number; a changed value the description still quotes fails the
+`--base` drift check); D1 grades by its catalog `bands` and H10 by a catalog `severity`
+map on `@orphan_model`. P6 keeps its LOW / INFO in code, **accepted**: one join yields up
+to two findings of different severities, which no single catalog severity source says.
+Item 7: `ts audit run` no longer ends on a null or numeric Model, table or column name or
+alias, or a numeric column description (tested end to end, Table TML present). Item 8: P2 reads the
+formula's expression (an aggregate function, a `sql_*_aggregate_op`, or a reference to an
+aggregate formula), not the column's `aggregation:` key; on the SE demo sample P2 goes
+from 6 to 8 findings. Item 9: the stale fixture titles now come from the catalog, and H1
+and the readiness score share one derived field (`@is_poor_name`). **Item 10 stays open**
+(malformed TML under a `parent.` condition): it needs a ruling, not a fix. **Found in the
+PR 2.4 review, open:** D9 and P16 still count function names inside `[...]` references
+and quoted literals (`concat ( 'if ( if (' , [T::A] )` counts two `if` calls), which P18
+and P2 now strip with `_NOT_CODE`; fixing them moves pinned findings, so it is its own
+change. D7 words HIGH "Identical table sets", true only while its HIGH line is 1.0, and a
+profile may lower it (latent: none does; `band_shape` fixes shape, not value). A YAML date
+used as a name or description still ends the run at the JSON output (the report's and
+`ts audit run`'s `json.dumps` take no `default`).
+
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.
@@ -15895,7 +15935,27 @@ description and the report.
 
 **Target:** 2027-01-31.
 
-## BL-497 — ts dbt: warn when the uploaded dbt artifacts are stale `Tier 2`
+## BL-497 — `ts auth whoami` returns 404 on the SE demo cluster `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** a live run of `tools/smoke-tests/smoke_ts_audit.py`
+(roadmap PR 2.3).
+
+**What.** `ts auth whoami --profile se-thoughtspot` fails: `GET
+/api/rest/2.0/auth/session/user` returns HTTP 404 with error code 13003, on main as on the
+branch, while the same profile's metadata search, TML export and audit calls succeed. Every
+smoke test starts with `ts_auth_check`, which calls `whoami`, so each fails its first step;
+`ts share` (`commands/share.py`) and `ts migrate` (`migrate/discover.py`) call the same
+endpoint.
+
+**Do.** Look the endpoint and code 13003 up with the SpotterCode MCP
+(`get-rest-api-reference(apiName: "getCurrentUserInfo")`), then probe live: whether the
+session endpoint needs a different auth mode than the profile's token, or the cluster build
+moved it. Fix `ts auth whoami` (and the two other callers) to the supported call, and keep
+`ts_auth_check` meaningful.
+
+**Target:** 2026-11-30.
+
+## BL-498 — ts dbt: warn when the uploaded dbt artifacts are stale `Tier 2`
 
 **Filed:** 2026-10-29. **Source:** PR #669 review; ts-convert-from-dbt open-items #21.
 
@@ -15911,7 +15971,7 @@ when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the man
 
 **Target:** 2026-12-31.
 
-## BL-498 — ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract `Tier 2`
+## BL-499 — ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract `Tier 2`
 
 **Filed:** 2026-10-29. **Source:** PR #669, both review rounds (the human review, then the
 `pr-ready` review of `e7c6fe7c`).
@@ -15940,7 +16000,7 @@ so they ship quietly.
 
 **Target:** 2026-11-30.
 
-## BL-499 — `ts dbt create` / `generate-tml` are classed safe to retry `Tier 2`
+## BL-500 — `ts dbt create` / `generate-tml` are classed safe to retry `Tier 2`
 
 **Filed:** 2026-10-29. **Source:** `pr-ready` review of PR #669 at `047c8279` (low
 confidence; predates the PR).

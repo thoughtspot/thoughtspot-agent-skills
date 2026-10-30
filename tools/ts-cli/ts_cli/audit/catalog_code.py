@@ -19,6 +19,7 @@ Python 3.9 with only PyYAML (see catalog_model.py). `catalog_validate` re-export
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -91,6 +92,64 @@ def code_rule_declaration(name: str) -> Optional[Tuple[Any, bool]]:
     return SEVERITY_SOURCES[name], name in OWN_THRESHOLD
 
 
+def parameter_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
+    """`parameters` under every profile: a code rule's must be exactly the names its
+    registration declares, each a finite number, not negative (not a boolean: a length,
+    a count); any other rule takes none."""
+    m = CODE_IMPL.match(rule.implementation)
+    from ts_cli.audit.engine.code_rules import CODE_PARAMETERS
+    declared = CODE_PARAMETERS.get(m.group(1), frozenset()) if m else frozenset()
+    by_problem: Dict[str, List[str]] = {}
+    for pid in profiles:
+        params = profile_override(rule, pid).get("parameters", rule.parameters)
+        found: List[str] = []
+        if not isinstance(params, dict):
+            found.append(f"parameters must be a mapping of names to numbers, got {params!r}")
+        else:
+            if not m and params:
+                found.append("parameters are read only by a code rule; this rule has none")
+            elif m:
+                names = {str(k) for k in params}
+                missing, extra = sorted(declared - names), sorted(names - declared)
+                if missing:
+                    found.append(f"parameters missing {', '.join(missing)}: "
+                                 f"{rule.implementation} reads them")
+                if extra:
+                    found.append(f"parameters {', '.join(extra)} have no effect: "
+                                 f"{rule.implementation} does not read them")
+            found += [f"parameters.{k} must be a finite number, not negative, got {v!r}"
+                      for k, v in params.items() if not _parameter_value_ok(v)]
+        for problem in found:
+            by_problem.setdefault(problem, []).append(pid)
+    return [f"{problem} (profile: {', '.join(pids)})" if pids != [""] else problem
+            for problem, pids in by_problem.items()]
+
+
+def band_shape_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
+    """A code rule that registered a `band_shape` grades by exactly those `(op,
+    severity)` levels under every profile; its wording assumes them."""
+    m = CODE_IMPL.match(rule.implementation)
+    from ts_cli.audit.engine.code_rules import BAND_SHAPES
+    shape = BAND_SHAPES.get(m.group(1)) if m else None
+    if not shape:
+        return []
+    by_problem: Dict[str, List[str]] = {}
+    for pid in profiles:
+        bands = profile_override(rule, pid).get("bands", rule.bands)
+        if tuple(_band_levels(bands)) != shape:
+            want = ", ".join(f"{op} {sev}" for op, sev in shape)
+            by_problem.setdefault(f"bands must be exactly the levels {want} (any values): "
+                                  f"{rule.implementation} words its findings by them",
+                                  []).append(pid)
+    return [f"{problem} (profile: {', '.join(pids)})" if pids != [""] else problem
+            for problem, pids in by_problem.items()]
+
+
+def _parameter_value_ok(value: Any) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and (isinstance(value, int) or math.isfinite(value)) and value >= 0)
+
+
 def _declaration(rule: Rule) -> Optional[Tuple[Any, bool]]:
     m = CODE_IMPL.match(rule.implementation)
     return code_rule_declaration(m.group(1)) if m else None
@@ -98,9 +157,17 @@ def _declaration(rule: Rule) -> Optional[Tuple[Any, bool]]:
 
 def _band_severities(bands: Any) -> Set[Any]:
     """Severities of a Bands object or a raw (profile override) bands mapping."""
+    return {severity for _, severity in _band_levels(bands)}
+
+
+def _band_levels(bands: Any) -> List[Tuple[Any, Any]]:
+    """`(op, severity)` per level of a Bands object or a raw (profile override) bands
+    mapping; [] for a malformed one (a scalar `levels`), which the bands checks report."""
     if isinstance(bands, dict):
-        return {lv.get("severity") for lv in bands.get("levels") or [] if isinstance(lv, dict)}
-    return {lv.severity for lv in getattr(bands, "levels", None) or []}
+        levels = bands.get("levels")
+        return [(lv.get("op"), lv.get("severity")) for lv in
+                (levels if isinstance(levels, list) else []) if isinstance(lv, dict)]
+    return [(lv.op, lv.severity) for lv in getattr(bands, "levels", None) or []]
 
 
 def _mapped_severities(severity: Any) -> Set[Any]:

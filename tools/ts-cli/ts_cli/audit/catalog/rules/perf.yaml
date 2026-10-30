@@ -24,9 +24,9 @@
 - id: P2
   title: Row-level formulas recomputed on every query
   description: >-
-    How many of a Model's formulas are row-level — no `columns[]` entry surfacing the
-    formula (by `formula_id`) declares an `aggregation` — graded LOW above 5 and MEDIUM
-    above 10. The warehouse recomputes a row-level formula on every query that uses it;
+    How many of a Model's formulas are row-level — the expression calls no aggregate
+    function and references no aggregate formula, however the surfacing column's
+    `aggregation` reads — graded LOW above 5 and MEDIUM above 10. The warehouse recomputes a row-level formula on every query that uses it;
     a heavy one is cheaper materialised as a column in ETL.
   categories: [P]
   requires: [model_tml]
@@ -34,7 +34,7 @@
   aggregate:
     mode: count
     over: model.formula
-    where: {field: "@is_scalar_formula", truthy: true}
+    where: {field: "@is_row_level_formula", truthy: true}
   bands:
     direction: lower_is_better
     unit: count
@@ -46,7 +46,7 @@
   remediation: Materialise heavy row-level formulas as columns in ETL
   examples:
     fires: {fixture: perf_eleven_scalar_formulas, severity: MEDIUM}
-    silent: {fixture: perf_six_aggregated_formulas}
+    silent: {fixture: perf_aggregate_expr_formulas}
 
 - id: P3
   title: Model filters lacking apply_on_tables
@@ -140,7 +140,8 @@
   title: Join depth exceeding thresholds
   description: >-
     The longest join chain across a Model's tables (the same depth D1 grades),
-    MEDIUM above 3 hops and HIGH above 5.
+    MEDIUM above 3 hops and HIGH above 5. Tables are followed by alias, else name
+    (until 2026-10 by name, so a chain of aliased tables read as one hop).
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -356,20 +357,18 @@
   description: >-
     A Model column that counts distinct values, which is expensive to compute: one
     aggregated with COUNT_DISTINCT, or one surfacing a formula that calls
-    `unique count`, `unique_count_if` or `group_unique_count` (any case). Before
-    2026-10 only the aggregation was read, so a Model built the recommended way (a
-    `unique count` formula, invariant I5) reported nothing.
+    `unique count`, `unique_count_if` or `group_unique_count` (any case; not a name
+    inside a `[...]` reference or a quoted literal). The detail says which, since a
+    COUNT_DISTINCT aggregation on a physical column is what invariant I5 replaces
+    with the formula.
   categories: [P]
   requires: [model_tml]
   scope: model.column
   aggregate:
     mode: each
-    where:
-      any:
-        - {field: properties.aggregation, eq: COUNT_DISTINCT}
-        - {field: "@formula_expr", regex: '(?i)\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b'}
+    where: {field: "@distinct_count_kind", exists: true}
   severity: INFO
-  message: "Distinct count on '{name}'"
+  message: "Distinct count on '{name}' ({@distinct_count_kind})"
   examples:
     fires: {fixture: perf_column_count_distinct, severity: INFO}
     silent: {fixture: perf_model_80_columns}

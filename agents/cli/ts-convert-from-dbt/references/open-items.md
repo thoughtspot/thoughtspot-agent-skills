@@ -862,7 +862,8 @@ is unverified here, so it stays optional there.
 
 **Fix.** `ts dbt generate-tml` / `generate-sync-tml` with no `--file` send the request as
 before and read the response: a 400 whose body says "Error with the uploaded ZIP file." is
-replaced with an explanation that the archive is missing, not bad, naming `--file`. Any other
+followed by an explanation that the archive is missing, not bad, naming `--file` (the
+server's own error line is still printed first). Any other
 failure keeps the server's own error, and with `--file` the 400 is reported as the server
 wrote it, since then an archive really was sent. A DBT_CLOUD call is one request, as before.
 The match is on the 400 body text this item recorded live (2026-10-22). **Verified live
@@ -901,9 +902,9 @@ The wrong command raises no error: the upload proceeds with a stale or missing c
 ThoughtSpot types Table columns from it. `find_artifacts` now names the command for the engine
 that wrote the manifest (`metadata.dbt_version`: 1.x Core, 2.x Fusion; any other major version names both, since it is
 neither engine as verified) and names both when it
-cannot tell. **Not yet detected — tracked as BL-497:** a catalog that is merely
+cannot tell. **Not yet detected — tracked as BL-498:** a catalog that is merely
 *older* than the manifest (what `dbt docs generate` on Fusion leaves behind), or a
-`schema.yml` edited since the artifacts were generated, is still accepted silently. BL-497
+`schema.yml` edited since the artifacts were generated, is still accepted silently. BL-498
 warns when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
 when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the manifest, with an
 `--allow-stale` override. Until it lands, re-run the engine's command above after every

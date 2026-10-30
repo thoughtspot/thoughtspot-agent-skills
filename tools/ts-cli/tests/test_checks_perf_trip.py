@@ -59,28 +59,18 @@ def test_p2_escalates_past_ten():
     assert run_rule(fx.perf_eleven_scalar_formulas(), "P2")[0].severity == "MEDIUM"
 
 
-def test_p2_clean_when_formulas_are_aggregated():
-    """Same six formulas, each surfaced by an aggregating column: nothing to flag."""
-    assert run_rule(fx.perf_six_aggregated_formulas(), "P2") == []
+def test_p2_counts_row_level_formulas_whatever_the_column_aggregation():
+    """The model schema says a column's `aggregation` applies on a row-level expr, so
+    six `[A] - [B]` formulas are row-level whether or not their columns roll them up."""
+    assert len(run_rule(fx.perf_six_aggregated_formulas(), "P2")) == 1
+
+
+def test_p2_clean_when_the_formulas_aggregate():
+    assert run_rule(fx.perf_aggregate_expr_formulas(), "P2") == []
 
 
 def test_p2_clean_under_threshold():
     assert run_rule(fx.perf_five_scalar_formulas(), "P2") == []
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "checks_perf.py:51-53 decides 'scalar' from whether the surfacing columns[] "
-    "entry carries an `aggregation:` key, and never looks at `expr`. The model "
-    "schema says that key is a no-op on an aggregate expr and APPLIES on a scalar "
-    "one, so it does not discriminate -- it is wrong in both directions. Six "
-    "`sum ( ... )` formulas are counted and reported as '6 scalar formulas (run at "
-    "query time in TS engine)', and six genuinely row-level ones are excluded "
-    "whenever their column declares an aggregation. Reported, not fixed."))
-def test_p2_metric_counts_the_wrong_formulas():
-    assert run_rule(fx.perf_aggregate_expr_formulas(), "P2") == [], \
-        "sum ( ... ) is not a scalar formula"
-    assert len(run_rule(fx.perf_six_aggregated_formulas(), "P2")) == 1, \
-        "[A] - [B] is scalar whether or not the column rolls it up"
 
 
 # --------------------------------------------------------------------------

@@ -97,8 +97,8 @@ work — see [references/open-items.md](references/open-items.md) #5.
 - The dbt project's warehouse must be Redshift, Databricks, BigQuery, or Snowflake
   (ThoughtSpot's certified list for this integration)
 - Authentication configured — run `/ts-profile-thoughtspot` if you haven't already
-- The `ts` CLI installed (`pip install -e /path/to/tools/ts-cli`), **v0.190.0+** —
-  `ts dbt` arrived in v0.133.0; 0.190.0 adds the ZIP_FILE handling and the
+- The `ts` CLI installed (`pip install -e /path/to/tools/ts-cli`), **v0.192.0+** —
+  `ts dbt` arrived in v0.133.0; 0.192.0 adds the ZIP_FILE handling and the
   engine-specific catalog advice this skill describes
 
 **There is no file-only / dry-run mode for this integration.** `ts dbt generate-tml`
@@ -1157,6 +1157,6 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.1 | 2026-10-29 | Requires ts-cli 0.190.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (without it ThoughtSpot answers a misleading 400 that reads as a bad archive; the CLI now explains it names a missing `--file`); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (refused locally; the server rejected a create without it on one cluster), taken from `dbt_project.yml` `name:` in Step 2. |
+| 1.1.1 | 2026-10-29 | Requires ts-cli 0.192.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (without it ThoughtSpot answers a misleading 400 that reads as a bad archive; the CLI now explains it names a missing `--file`); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (refused locally; the server rejected a create without it on one cluster), taken from `dbt_project.yml` `name:` in Step 2. |
 | 1.1.0 | 2026-10-29 | Requires ts-cli 0.187.0. `ts dbt build-model` and `ts dbt-export build-model --import` lint the Model TML before importing it (I5 advisory); `ts dbt build-model` applies `ts_rls_rules` before the Model import — for every Table the Model joins, including join targets outside `--model-path` — and stops (non-zero) if any Table's rules did not apply (audit 2026-10-29: 9.3, 17.2). |
 | 1.0.0 | 2026-09-10 | Initial release — dbt (Cloud or Core) → ThoughtSpot Tables + Model, first import and resync. Path N (server-side `generate-tml`) and Path Y (`ts dbt build-model`, for `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics), with `ts dbt list-models` / `ts dbt inspect` choosing between them. |

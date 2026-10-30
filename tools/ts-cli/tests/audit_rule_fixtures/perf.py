@@ -179,8 +179,8 @@ def perf_five_scalar_formulas() -> AuditContext:
 
 
 def perf_aggregate_expr_formulas() -> AuditContext:
-    """Six `sum ( ... )` formulas whose columns declare no aggregation (counted as
-    scalar: the legacy defect test_checks_perf_trip.py pins)."""
+    """Six `sum ( ... )` formulas whose columns declare no aggregation: aggregate,
+    so P2 is silent (the legacy check counted them as scalar)."""
     return build_trip_ctx(build_trip_model(
         formulas=[{"id": f"formula_Rev {i}", "name": f"Rev {i}",
                    "expr": "sum ( [ORDERS::AMOUNT] )"} for i in range(6)],

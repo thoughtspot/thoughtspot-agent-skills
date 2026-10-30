@@ -7,13 +7,11 @@ read, step for step, including the readings that are known to be wrong (the lega
 answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it;
 fixing them is the follow-up work the spec lists):
 
-- H3 decides which tables are "joined" by a model table's `name` (and a join's
-  `with`), where its columns' `column_id`s carry the `alias` when it has one — so a
-  hidden column of an aliased table that declares its own joins is never exempt
-  (@is_sole_join_carrier keeps that).
-- H3 tests a formula-backed column by its formula's display name in brackets, where
-  real TML references a formula by id (`[formula_<name>]`) — @referenced_by_formula
-  keeps that.
+- H3 decided which tables are "joined" by a model table's `name` (and a join's raw
+  `with`), where its columns' `column_id`s carry the `alias` when it has one, and
+  tested a formula-backed column by its formula's display name only, where real TML
+  references a formula by id (`[formula_<name>]`). Both fixed 2026-10 (roadmap PR 2.3):
+  a table is keyed by alias, else name, and an id reference counts.
 
 Where the legacy check would raise on a malformed value (a non-string expression or
 `column_id`, a non-mapping `properties`), these read it as absent instead: a raising
@@ -26,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
+from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
 from ts_cli.audit.engine.memo import cached
 
@@ -36,22 +35,34 @@ def _str(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+# ── H1: column names a person would not search for ──────────────────────────
+
+#: col1, field_2, val, tmp_x, a leading digit (any case) — and SHOUTING_SNAKE warehouse
+#: names. H1 and the report's Spotter readiness score both read them through
+#: `is_poor_name`; each kept its own copy until 2026-10.
+_NAME_ANTI = re.compile(r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d", re.IGNORECASE)
+_NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
+
+
+def is_poor_name(name: Any) -> bool:
+    """A name matching either pattern; False for a non-string."""
+    return isinstance(name, str) and bool(_NAME_ANTI.match(name) or
+                                          _NAME_ANTI_UPPER.match(name))
+
+
+@register("is_poor_name", uses=(),
+          label="the column's name is generic or a warehouse name")
+def _is_poor_name(item: dict, ctx: Any) -> bool:
+    """Model column: its `name` is one a person would not search for (is_poor_name)."""
+    return is_poor_name((item.get("obj") or {}).get("name"))
+
+
 # ── H3: hidden columns no formula references ────────────────────────────────
 
 def _joined_table_names(model: dict) -> set:
-    """legacy H3's `joined`: the `name` of every model table that declares a join, and
-    every join's `with` (a table with `joins` absent or empty contributes nothing).
-    Once per Model per run (engine/memo.py)."""
-    return cached("h3_joined_table_names", model, _build_joined_table_names, model)
-
-
-def _build_joined_table_names(model: dict) -> set:
-    joined: set = set()
-    for t in model.get("model_tables") or []:
-        for j in t.get("joins") or []:
-            joined.add(t.get("name", ""))
-            joined.add(j.get("with", ""))
-    return joined
+    """H3's joined tables, by key: the same set D5 and D10 read (tml.joined_keys). Once
+    per Model per run (engine/memo.py)."""
+    return cached("joined_keys", model, tml.joined_keys, model.get("model_tables") or [])
 
 
 def _is_hidden(column: Any) -> bool:
@@ -80,8 +91,10 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
 @register("referenced_by_formula", uses=(),
           label="a formula references the column")
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
-    """Model column: `[<its name>]` appears in the Model's formula expressions joined by
-    spaces — or it surfaces a formula (`formula_id`) whose `[<display name>]` does."""
+    """Model column: the Model's formula expressions, joined by spaces, reference it —
+    as `[<its name>]` or `[<its column_id>]` (`[TABLE::COL]`, the usual form) — or it
+    surfaces a formula (`formula_id`) that another formula references, by `[<its id>]`
+    (how TML writes it) or `[<its display name>]`."""
     model = _model_of(item)
     formulas = model.get("formulas") or []
     exprs = cached("h3_formula_text", model, _formula_text, formulas)
@@ -89,8 +102,14 @@ def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     if f"[{column.get('name', '')}]" in exprs:
         return True
     fid = column.get("formula_id")
-    return bool(fid) and any(f"[{fn.get('name', '')}]" in exprs
-                             for fn in formulas if fn.get("id") == fid)
+    cid = column.get("column_id")
+    if isinstance(cid, str) and cid and f"[{cid}]" in exprs:
+        return True  # `[TABLE::COL]`, how most formulas reference a physical column
+    if not fid:
+        return False
+    if isinstance(fid, str) and f"[{fid}]" in exprs:
+        return True
+    return any(f"[{fn.get('name', '')}]" in exprs for fn in formulas if fn.get("id") == fid)
 
 
 def _formula_text(formulas: list) -> str:
@@ -110,6 +129,14 @@ def _dependent_count(item: dict, ctx: Any) -> int:
     alone never makes a Model used. A Model never listed has none."""
     rows = ctx.dependents.get(item.get("guid"), []) or []
     return sum(1 for d in rows if d.get("type") != "SET")
+
+
+@register("orphan_model", uses={"dependents", "sets"}, values=(False, True),
+          label="the item is a Model nothing uses")
+def _orphan_model(item: dict, ctx: Any) -> bool:
+    """True for a Model with no dependents but Sets (H4's test, @dependent_count); False
+    for any other item, a column included — H10 grades its findings on this."""
+    return item.get("scope") == "model" and _dependent_count(item, ctx) == 0
 
 
 @register("set_consumers", uses={"dependents", "sets"},

@@ -77,13 +77,11 @@ OWN_INPUTS = ap.OWN_INPUTS
 #: the catalog reports there has no legacy answer to compare with. A None name or a
 #: list-valued `properties` aborts the legacy regex and lookup code. A rule re-pinned
 #: since holds no legacy RAISES any more and is not listed (2026-10, PR 2.1: A5, P9, S3
-#: retired and P2 re-graded; PR 2.2: H10 re-graded and P18 widened, each pinned to the
-#: catalog's answer on these inputs).
+#: retired and P2 re-graded; PR 2.2: H10 re-graded and P18 widened; PR 2.3: H3, S1, S2
+#: and S5 changed, each pinned to the catalog's answer on these inputs).
 LEGACY_RAISES = {
-    "tml_value_shapes": {"H3"},
-    "perf_names_none": {"A6", "H1", "S1", "S2", "S5"},
-    "data_names_none": {"A6", "H1", "S1", "S2", "S5"},
-    "data_single_model_malformed_column": {"H3"},
+    "perf_names_none": {"A6", "H1"},
+    "data_names_none": {"A6", "H1"},
 }
 
 #: (input, rule) pairs on which the CATALOG raises too, pinned so that a fix shows up
@@ -260,9 +258,10 @@ S_PROBES = [
 
 
 D_PROBES = [
-    # `name: None` / `guid: None` reach the finding as None, not ""
-    ("data_names_none", lambda f: f["check_id"] == "D10" and f["object_name"] is None
-     and f["detail"] == "Zero-column bridge table 'None'"),
+    # `name: None` / `guid: None` reach the finding as None, not "" — except D10, which
+    # names a table by its key (alias, else name, else "") since 2026-10
+    ("data_names_none", lambda f: f["check_id"] == "D10" and f["object_name"] == ""
+     and f["detail"] == "Zero-column leaf table ''"),
     ("data_names_none", lambda f: f["check_id"] == "D7" and f["object_name"] == "None / Twin"
      and f["object_guid"] is None),
     ("data_names_none", lambda f: f["check_id"] == "D8" and f["object_name"] == "...None"
@@ -286,10 +285,10 @@ D_PROBES = [
      and f["object_name"] == "ByName / ByFqn"),
     # D8: an absent stripe groups with an explicit "", never with None
     ("data_metadata_edges", lambda f: f["check_id"] == "D8" and f["object_name"] == "...LINES"),
-    # D10 / D11 look a table up by name, not alias (BL-305, kept)
-    ("data_model_aliased_fact", lambda f: f["check_id"] == "D10" and f["object_name"] == "ORDERS"),
-    ("data_model_aliased_fact", lambda f: f["check_id"] == "D11" and f["severity"] == "INFO"
-     and f["detail"] == "ONE_TO_MANY join 'SHIPMENTS' -> 'O'"),
+    # D11 finds both ends by alias (2026-10; by name, BL-305, it read the fact-to-fact
+    # join as INFO and D10 called the aliased tables zero-column)
+    ("data_model_aliased_fact", lambda f: f["check_id"] == "D11" and f["severity"] == "MEDIUM"
+     and f["detail"] == "Fan-out risk: fact-to-fact join 'SHIP' -> 'O' with ONE_TO_MANY"),
     # D11 words an INFO finding by the join's own cardinality (2026-10; it said
     # "ONE_TO_MANY" for a MANY_TO_MANY join before)
     ("data_fanout_many_to_many_dimension", lambda f: f["check_id"] == "D11"
@@ -309,11 +308,13 @@ H_PROBES = [
      and f["detail"] == "7/7 columns have anti-pattern names (100%): col1, col2, val, "
      "tmp_a, 9b" and f["threshold"] == {"max_pct": 10} and f["metric"] == 100.0),
     # H2: one finding per Model, three issues listed, "; "-joined
-    ("human_h2_many_issues", lambda f: f["check_id"] == "H2" and f["metric"] == 4
-     and f["detail"] == "4 description quality issues: 'C0' too short (5 chars); "
-     "'C1' too short (4 chars); '' uses boilerplate pattern"),
-    # H3 looks a table up by NAME: a hidden column of an aliased table is reported
-    ("human_h3_join_edges", lambda f: f["check_id"] == "H3" and f["object_name"] == "K1"),
+    # (a "The …" opening is not boilerplate since 2026-10)
+    ("human_h2_many_issues", lambda f: f["check_id"] == "H2" and f["metric"] == 3
+     and f["detail"] == "3 description quality issues: 'C0' too short (5 chars); "
+     "'C1' too short (4 chars); 'C3' too short (5 chars)"),
+    # H3 finds a joined table by alias (2026-10): K1, on an aliased table that declares
+    # its join, is exempt; X, on a joined table with another visible column, is not
+    ("human_h3_join_edges", lambda f: f["check_id"] == "H3" and f["object_name"] == "X"),
     # H4: a Model whose only dependents are Sets is an orphan
     ("human_h4_dependent_shapes", lambda f: f["check_id"] == "H4"
      and f["object_guid"] == "m-sets"),

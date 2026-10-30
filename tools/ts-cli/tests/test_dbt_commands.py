@@ -1673,6 +1673,9 @@ class TestGenerateExplainsMissingArchive:
         assert result.exit_code == 1
         assert "--file" in result.output and "ZIP_FILE" in result.output
         assert "not that it is bad" in result.output
+        # The server's own error line is kept alongside the explanation.
+        assert (f"ThoughtSpot API 400 on POST https://test.thoughtspot.cloud/api/rest/2.0/dbt/{command[0]}"
+                in result.output)
         assert [u for u, _ in sent] == [f"https://test.thoughtspot.cloud/api/rest/2.0/dbt/{command[0]}"]
 
     def test_success_without_file_is_one_request(self, monkeypatch, tmp_path):
