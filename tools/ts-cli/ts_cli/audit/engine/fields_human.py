@@ -151,18 +151,26 @@ def _set_consumers(item: dict, ctx: Any) -> Any:
 
 def _known_table_guids(ctx: Any) -> set:
     """legacy H7's `table_guids`: every non-empty `model_tables[].fqn` of every Model,
-    and every Table TML key in the context. Once per run (engine/memo.py)."""
+    and every Table TML key in the context — those left out as malformed included (they
+    are still Tables). Once per run (engine/memo.py)."""
     return cached("h7_known_table_guids", ctx, _build_known_table_guids, ctx)
 
 
 def _build_known_table_guids(ctx: Any) -> set:
     guids: set = set()
-    for doc in ctx.models:
+    for doc in _all_models(ctx):
         for mt in (doc.get("model") or {}).get("model_tables") or []:
-            fqn = mt.get("fqn", "")
+            fqn = mt.get("fqn", "") if isinstance(mt, dict) else ""
             if fqn:
                 guids.add(fqn)
-    return guids | set(ctx.tables)
+    return guids | set(ctx.tables) | set(getattr(ctx, "excluded_tables", {}) or {})
+
+
+def _all_models(ctx: Any) -> list:
+    """Every Model in the run: the judged ones and those left out as malformed (BL-406
+    item 10). A rule asking whether something is on NO Model reads this, never
+    `ctx.models` alone, or excluding a Model would make that answer false."""
+    return list(ctx.models) + list(getattr(ctx, "excluded_models", []) or [])
 
 
 @register("is_table_reference", uses=(),
@@ -195,7 +203,7 @@ def _model_formula_names(ctx: Any) -> Dict[str, Any]:
 
 def _build_model_formula_names(ctx: Any) -> Dict[str, Any]:
     names: Dict[str, Any] = {}
-    for doc in ctx.models:
+    for doc in _all_models(ctx):
         for f in (doc.get("model") or {}).get("formulas") or []:
             key = _normalize(f.get("expr", ""))
             if key is not None:

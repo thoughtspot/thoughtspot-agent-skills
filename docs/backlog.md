@@ -14818,7 +14818,11 @@ a mapping (`properties`, `spotter_config`, `db_column_properties`) is left out o
 rule and the report corpus (`engine/run.py` `readable`, `tml.unreadable_documents`), and
 so is everything hanging off it: such a Table, the Answers built on either (or else H8
 judges them against a Model no rule sees: a false "not in model" HIGH), the Model's Sets
-and the metadata headers. Cross-Model rules (D7, D12) do not see it either. `ts audit run` warns on stderr, and the run's JSON
+the metadata headers. Cross-Model rules (D7, D8, D12) do not see it either, so a
+duplicate it is part of goes unreported; but its formulas and Tables still count where a
+rule asks whether something is on NO Model (H7, H8, H9: `fields_human._all_models`,
+`ctx.excluded_models` / `excluded_tables`), or H8 would call a formula an excluded Model
+holds "not in model". `ts audit run` warns on stderr, and the run's JSON
 (`corpus.unreadable`) and the report's "Could not be read" box name each one and the path.
 Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column as
 hidden and A1/A2 left it out, and the same shape ended `ts audit run` (the report corpus,

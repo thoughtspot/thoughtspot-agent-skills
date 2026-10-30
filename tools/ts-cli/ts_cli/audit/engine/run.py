@@ -56,24 +56,41 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
 def readable(ctx):
     """`ctx` without what no rule may judge (tml.unreadable_documents): each Model,
     Table and Answer whose TML, or TML it depends on, holds a list or scalar where a
-    mapping belongs; with them, their metadata headers and the dependents (Sets
-    included) of each excluded Model. A shallow copy; `ctx` itself is unchanged. The run
-    lists every excluded object (audit/__init__.py), so none is skipped silently."""
+    mapping belongs; with them, their metadata headers, the dependents of each excluded
+    Model or Table, and the excluded Models' Sets wherever they are listed (the
+    dependents API repeats a Set under each of its Tables). A shallow copy; `ctx` itself
+    is unchanged. Models, Tables and Answers are listed by the run (audit/__init__.py);
+    the Sets and headers go with their Model or Table. The excluded Models and Tables
+    stay readable as the attributes `excluded_models` / `excluded_tables`, for rules
+    asking whether something is on NO Model."""
     models, tables, answers, _ = tml.unreadable_documents(ctx)
     if not (models or tables or answers):
         return ctx
     gone = models | tables | answers
+    sets = {row.get("guid") for g in models for row in ctx.dependents.get(g) or []
+            if isinstance(row, dict) and row.get("type") == "SET"}
 
     def guid(doc):
         return doc.get("guid")
-    return dataclasses.replace(
+    out = dataclasses.replace(
         ctx,
         models=_without(ctx.models, guid, models),
         model_guids=_without(ctx.model_guids, lambda g: g, models),
         tables={k: v for k, v in ctx.tables.items() if k not in tables},
         answers=_without(ctx.answers, guid, answers),
         metadata=_without(ctx.metadata, _header_id, gone),
-        dependents={g: rows for g, rows in ctx.dependents.items() if g not in models})
+        dependents=_dependents_without(ctx.dependents, models | tables | sets, sets))
+    # Derived per run, not captured data, so attributes rather than AuditContext fields
+    # (a snapshot writes one file per field).
+    out.excluded_models = [m for m in ctx.models if m.get("guid") in models]
+    out.excluded_tables = {k: v for k, v in ctx.tables.items() if k in tables}
+    return out
+
+
+def _dependents_without(dependents: dict, owners: set, sets: set) -> dict:
+    """The dependents lists of every object not in `owners`, without rows for `sets`."""
+    return {g: [r for r in rows if not (isinstance(r, dict) and r.get("guid") in sets)]
+            for g, rows in dependents.items() if g not in owners}
 
 
 def _without(items: list, key, gone: set) -> list:

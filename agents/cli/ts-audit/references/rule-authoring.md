@@ -213,7 +213,11 @@ and metadata header; `engine/run.py` `readable`, `tml.unreadable_documents`), an
 report lists it under "Could not be read". A rule needs no guard for it. (`run_rule`, which
 checks one rule's examples, does not filter; examples are well-formed.) A new kind of
 document that refers to a Model or Table must be added to `unreadable_documents`, or a
-rule will judge it against an object no rule can see. A derived field or code
+rule will judge it against an object no rule can see. And a rule that asserts something
+is on **no** Model (H7's known Tables, H8/H9's Model formulas) must read every Model,
+`fields_human._all_models(ctx)` and `ctx.excluded_tables` included: the excluded ones are
+not judged, but their formulas and Tables still exist, and leaving them out makes "on no
+Model" false (a false H8 HIGH, PR #693 review round 6). A derived field or code
 rule should still read those keys through `tml.mapping(obj, key)`, which gives `{}` for
 the same cases, so a document reached some other way cannot crash the run.
 

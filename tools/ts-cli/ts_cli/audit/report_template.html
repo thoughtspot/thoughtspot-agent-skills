@@ -2712,8 +2712,9 @@ function buildDashboard(){
   /* Items no rule judged: malformed TML (BL-406 item 10). Shown, never silent. */
   if(D.C && D.C.ur && D.C.ur.length > 0){
     html += '<div class="unread" role="note"><strong>Could not be read — '+D.C.ur.length+
-      ' item'+(D.C.ur.length === 1 ? '' : 's')+' not judged.</strong> Their TML holds a list or a '+
-      'single value where a mapping belongs, so no rule judged them; fix the TML and re-run.<ul>';
+      ' item'+(D.C.ur.length === 1 ? '' : 's')+' not judged.</strong> Each one\u2019s own TML, or TML it '+
+      'depends on (a Table it uses, the Model an Answer is built on), holds a list or a single '+
+      'value where a mapping belongs. Fix the TML each entry names and re-run.<ul>';
     D.C.ur.slice(0, 50).forEach(function(u){ html += '<li><code>'+esc(u)+'</code></li>'; });
     if(D.C.ur.length > 50) html += '<li>…and '+(D.C.ur.length - 50)+' more (see the run’s JSON)</li>';
     html += '</ul></div>';

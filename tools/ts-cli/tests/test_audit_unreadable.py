@@ -119,3 +119,34 @@ def test_one_entry_per_object_so_the_box_counts_objects():
                     ctx=make_context(models=[a, b], model_guids=["m-1", "m-2"]))
     assert len(out["corpus"]["unreadable"]) == 2
     assert "Model 'Returns' (m-2)" in _listed(out)
+
+
+def test_an_excluded_models_formulas_still_count_as_on_a_model():
+    """Round-6 blocker: H8 asks whether a formula is on NO Model. Answers on a readable
+    Model B repeat a formula that only the excluded Model A holds: it IS on a Model, so
+    H9 (LOW), never H8 (HIGH, "not in model")."""
+    formula = "sum ( [Amount] )"
+
+    def run(props):
+        a = _model(guid="m-a", name="A", props=props, formulas=[{"name": "Rev", "expr": formula}])
+        b = _model(guid="m-b", name="B")
+        ctx = make_context(models=[a, b], model_guids=["m-a", "m-b"],
+                           answers=[_answer("b-1", "m-b", formula), _answer("b-2", "m-b", formula)])
+        return run_audit(None, ["m-a", "m-b"], ctx=ctx, angles=["H"])
+    for props in ({}, BAD):
+        out = run(props)
+        assert not _ids(out, "H8"), props
+        assert _ids(out, "H9") == {"b-1", "b-2"}, props
+
+
+def test_an_excluded_models_set_is_dropped_wherever_it_is_listed():
+    """The dependents API lists a Set under its Model AND under each of its Tables (R18):
+    excluding the Model must drop the Set from every list, or H5 judges it anyway."""
+    ctx = fx.human_set_without_consumers()
+    model_guid = ctx.models[0]["guid"]
+    set_row = ctx.dependents[model_guid][0]
+    ctx.dependents["t-1"] = [dict(set_row)]
+    ctx.dependents["t-2"] = [dict(set_row)]
+    assert _ids(run_audit(None, [], ctx=ctx, angles=["H"]), "H5")
+    ctx.models[0]["model"]["properties"] = BAD
+    assert not _ids(run_audit(None, [], ctx=ctx, angles=["H"]), "H5")
