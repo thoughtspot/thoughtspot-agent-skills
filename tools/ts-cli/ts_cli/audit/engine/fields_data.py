@@ -81,20 +81,9 @@ def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
 # ── model tables (D5, D6, D10) ──────────────────────────────────────────────
 
 def _joined_keys(model: dict) -> set:
-    """Every table on either side of a join: the declaring table's key (alias, else
-    name) and the join's `with`, as legacy D5 and D10 collect them. Once per Model per
-    run (engine/memo.py)."""
-    return cached("joined_keys", model, _build_joined_keys, model)
-
-
-def _build_joined_keys(model: dict) -> set:
-    tables = model.get("model_tables") or []
-    joined: set = set()
-    for t in tables:
-        for j in (t.get("joins") or []):
-            joined.add(tml.table_key(t))
-            joined.add(tml.join_target_key(tables, j.get("with", "")))
-    return joined
+    """Every table on either side of a join, by key (tml.joined_keys; D5, D10, and H3
+    through fields_human). Once per Model per run (engine/memo.py)."""
+    return cached("joined_keys", model, tml.joined_keys, model.get("model_tables") or [])
 
 
 @register("is_joined", uses=(),

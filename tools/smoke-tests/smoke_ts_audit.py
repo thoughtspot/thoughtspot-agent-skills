@@ -5,9 +5,9 @@ smoke_ts_audit.py — live smoke test for ts-audit.
 Runs the audit the skill runs, on a real ThoughtSpot instance, and checks what it
 returns against the rule catalog:
   1.  ThoughtSpot auth
-  2.  `ts audit run --models <guid>`: the run completes, it ran exactly the catalog's
-      active rules, every finding's rule id is one of them, and the corpus holds the
-      Model (with its Spotter readiness score)
+  2.  `ts audit run --models <guid>`: the run completes, it ran exactly the rules the
+      catalog's default profile selects, every finding's rule id is one of them and none
+      is retired, and the corpus holds the Model (with its Spotter readiness score)
   3.  `ts audit report`: the run's JSON renders to a self-contained HTML report
   4.  The audit's own PII patterns (`ts_cli.audit.engine.fields.PII_PATTERNS`, S1's)
       on known names: snake_case, display names and words that must not match
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,14 +40,18 @@ from _common import SmokeTestResult, ts_auth_check  # noqa: E402
 #: what Model columns usually carry; the last group are ordinary words a loose pattern
 #: matched before 2026-10.
 PII_CASES = [
-    ("customer_email", "email"), ("Email Address", "email"),
+    ("customer_email", "email"), ("Email Address", "email"), ("CustomerEmail", "email"),
     ("phone_number", "phone"), ("Mobile", "phone"), ("telNumber", "phone"),
-    ("SSN", "national_id"), ("Social Security Number", "national_id"),
+    ("MOBILENUMBER", "phone"), ("Telefono", "phone"),
+    ("SSN", "national_id"), ("SSNLast4", "national_id"),
+    ("Social Security Number", "national_id"),
     ("birth_date", "dob"), ("Date of Birth", "dob"),
     ("credit_card_num", "financial"), ("Account Number", "financial"),
+    ("IBANNumber", "financial"),
     ("First Name", "person_name"), ("Postal Code", "address"),
     ("revenue", None), ("order_date", None), ("Hotel", None), ("Cousin", None),
     ("Business Unit", None), ("Adobe Campaign", None), ("Automobile", None),
+    ("Voice Mail Count", None), ("Scorecard Numerator", None),
 ]
 
 
@@ -76,11 +81,14 @@ def run_smoke_test(ts_profile: str, model_guid: str) -> int:
         from ts_cli.audit.catalog_model import load_catalog
         from ts_cli.audit.engine.run import selected_rules
         catalog = load_catalog()
+        default = next(pid for pid, p in catalog.profiles.items() if p.default)
         active = {rule.id for rule in selected_rules(catalog, list(catalog.categories),
-                                                     next(iter(catalog.profiles)))}
+                                                     default)}
         ran = set(data["summary"]["all_check_ids"])
-        if not ran or not ran <= {rid for rid in catalog.rules}:
-            raise RuntimeError(f"ran rule ids not in the catalog: {sorted(ran - set(catalog.rules))}")
+        if ran != active:
+            raise RuntimeError(f"ran {len(ran)} rules, the {default} profile selects "
+                               f"{len(active)}: extra {sorted(ran - active)}, "
+                               f"missing {sorted(active - ran)}")
         fired = {f["check_id"] for f in data["findings"]}
         if not fired <= ran:
             raise RuntimeError(f"findings from rules that did not run: {sorted(fired - ran)}")
@@ -92,7 +100,7 @@ def run_smoke_test(ts_profile: str, model_guid: str) -> int:
             raise RuntimeError(f"corpus models {[m['guid'] for m in models]} != [{model_guid}]")
         if "spotter_readiness" not in models[0]:
             raise RuntimeError("the corpus Model carries no Spotter readiness score")
-        r.info(f"   {len(ran)} rules ran ({len(active)} active by default), "
+        r.info(f"   {len(ran)} rules ran (the {default} profile's), "
                f"{len(data['findings'])} findings from {len(fired)} of them")
         return data
 
@@ -124,6 +132,7 @@ def run_smoke_test(ts_profile: str, model_guid: str) -> int:
 
     r.step("4. The audit's PII patterns (S1)", pii_patterns)
 
+    shutil.rmtree(work, ignore_errors=True)  # it holds real exported findings
     return r.summary()
 
 

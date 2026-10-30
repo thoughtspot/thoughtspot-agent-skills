@@ -40,7 +40,8 @@ def _finding(rule: "Rule", item: dict, severity: str, values: Dict[str, Any],
 H2_MIN_CHARS = 20
 H2_MAX_CHARS = 400
 #: "The " and "A " were dropped 2026-10 (roadmap PR 2.3): ordinary English openings, they
-#: made 4,772 of 4,841 flagged descriptions on the SE demo snapshot.
+#: made 4,772 of 4,841 flagged descriptions on the 351-Model SE demo snapshot (the
+#: 2026-10-23 BL-406 decision sheet; 1,314 of 1,370 on the 148-Model sample).
 _BOILERPLATE = re.compile(r"^(This is a|Column for|Field for)", re.IGNORECASE)
 #: How many issues the finding's detail lists.
 H2_ISSUES_SHOWN = 3

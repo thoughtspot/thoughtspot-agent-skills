@@ -106,10 +106,9 @@
 - id: S5
   title: Credentials in analytics
   description: >-
-    A Model column named like a credential — password, passwd, secretkey or
-    secret_key / secret-key, apikey or api_key / api-key, or token, each as a whole
-    word, any case (a spaced "API Key" is not matched). CRITICAL, except HIGH for
-    `token`.
+    A Model column named like a credential — password, passwd, secret key or api key
+    (joined, hyphenated, underscored or spaced: "API Key" since 2026-10), or token,
+    each as a whole word, any case. CRITICAL, except HIGH for `token`.
   categories: [S]
   requires: [model_tml]
   scope: model.column

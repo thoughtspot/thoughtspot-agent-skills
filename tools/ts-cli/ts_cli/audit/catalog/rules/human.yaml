@@ -47,8 +47,9 @@
   title: Description quality (too-short, boilerplate)
   description: >-
     Column descriptions that are too short (under 20 characters, stripped), too long
-    (over 400) or open with boilerplate ("This is a", "Column for", "Field for",
-    "The ", "A "; any case); a blank or absent description is A1's remit, not this rule's. One
+    (over 400) or open with boilerplate ("This is a", "Column for", "Field for"; any
+    case; "The " and "A " counted until 2026-10); a blank or absent description is A1's
+    remit, not this rule's. One
     finding per Model, its metric the number of columns with an issue, listing the
     first three.
   # A code rule (code:description_quality) because each column's issue is worded by its

@@ -38,20 +38,9 @@ def _str(value: Any) -> str:
 # ── H3: hidden columns no formula references ────────────────────────────────
 
 def _joined_table_names(model: dict) -> set:
-    """legacy H3's `joined`: the `name` of every model table that declares a join, and
-    every join's `with` (a table with `joins` absent or empty contributes nothing).
-    Once per Model per run (engine/memo.py)."""
-    return cached("h3_joined_table_names", model, _build_joined_table_names, model)
-
-
-def _build_joined_table_names(model: dict) -> set:
-    tables = model.get("model_tables") or []
-    joined: set = set()
-    for t in tables:
-        for j in t.get("joins") or []:
-            joined.add(tml.table_key(t))
-            joined.add(tml.join_target_key(tables, j.get("with", "")))
-    return joined
+    """H3's joined tables, by key: the same set D5 and D10 read (tml.joined_keys). Once
+    per Model per run (engine/memo.py)."""
+    return cached("joined_keys", model, tml.joined_keys, model.get("model_tables") or [])
 
 
 def _is_hidden(column: Any) -> bool:
@@ -80,9 +69,10 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
 @register("referenced_by_formula", uses=(),
           label="a formula references the column")
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
-    """Model column: `[<its name>]` appears in the Model's formula expressions joined by
-    spaces — or it surfaces a formula (`formula_id`) that another formula references,
-    by `[<its id>]` (how TML writes it) or `[<its display name>]`."""
+    """Model column: the Model's formula expressions, joined by spaces, reference it —
+    as `[<its name>]` or `[<its column_id>]` (`[TABLE::COL]`, the usual form) — or it
+    surfaces a formula (`formula_id`) that another formula references, by `[<its id>]`
+    (how TML writes it) or `[<its display name>]`."""
     model = _model_of(item)
     formulas = model.get("formulas") or []
     exprs = cached("h3_formula_text", model, _formula_text, formulas)
@@ -90,6 +80,9 @@ def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     if f"[{column.get('name', '')}]" in exprs:
         return True
     fid = column.get("formula_id")
+    cid = column.get("column_id")
+    if isinstance(cid, str) and cid and f"[{cid}]" in exprs:
+        return True  # `[TABLE::COL]`, how most formulas reference a physical column
     if not fid:
         return False
     if isinstance(fid, str) and f"[{fid}]" in exprs:

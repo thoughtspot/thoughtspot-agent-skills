@@ -140,7 +140,8 @@
   title: Join depth exceeding thresholds
   description: >-
     The longest join chain across a Model's tables (the same depth D1 grades),
-    MEDIUM above 3 hops and HIGH above 5.
+    MEDIUM above 3 hops and HIGH above 5. Tables are followed by alias, else name
+    (until 2026-10 by name, so a chain of aliased tables read as one hop).
   categories: [P]
   requires: [model_tml]
   scope: model

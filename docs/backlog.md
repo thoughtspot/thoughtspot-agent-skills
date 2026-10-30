@@ -14775,9 +14775,10 @@ demo sample), so referencing joins stay unjudged — BL-496. D11's alias lookup 
 with item 4. H10's severities are now fixed in code (LOW / MEDIUM), which item 3 moves
 into data.
 
-**Progress (2026-10-30, roadmap PR 2.3).** Item 4 is closed: D10, D11 and H3 find a model
-table by alias, else name, and resolve a join's `with` by alias, id or name; H3 also credits
-a formula referenced by id. The noise fixes: D3 rolls a Model's LEFT/RIGHT outer joins into
+**Progress (2026-10-30, roadmap PR 2.3).** Item 4 is closed: D10, D11 and H3 (and D5 and
+P7, the same class) find a model table by alias, else name, and resolve a join's `with` to
+the table it names as the join graph does; H3 also credits a formula referenced by id and a
+column referenced as `[TABLE::COL]`. The noise fixes: D3 rolls a Model's LEFT/RIGHT outer joins into
 one INFO (decided with the product owner 2026-10-30); H2 no longer flags a "The "/"A "
 opening; A1 and A2 count visible columns only; S1's patterns match display names and keep
 short tokens to whole words (with BL-112); S5 matches a spaced "API Key"; P18 ignores

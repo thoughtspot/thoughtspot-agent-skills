@@ -70,3 +70,72 @@ def test_s5_matches_spaced_credential_names():
     ctx = make_context(models=[fx.build_data_model(columns=cols)])
     assert sorted((f.object_name, f.severity) for f in run_rule(ctx, "S5")) == [
         ("API Key", "CRITICAL"), ("Secret Key", "CRITICAL")]
+
+
+# ── review of PR 2.3: join targets, P7, H3, S1, the ERD target ──────────────
+
+from ts_cli.audit.engine import tml  # noqa: E402
+
+
+def test_join_target_resolves_a_node_identity_before_a_physical_name():
+    """FACT joins `with: CUSTOMER`. The entry NAMED CUSTOMER is aliased BILL_TO; the entry
+    whose alias IS CUSTOMER is the join's target, as the join graph resolves it, whatever
+    the list order."""
+    tables = [{"name": "FACT", "joins": [{"with": "CUSTOMER"}]},
+              {"name": "CUSTOMER", "alias": "BILL_TO"},
+              {"name": "CUST_TBL", "alias": "CUSTOMER"}]
+    assert tml.join_target(tables, "CUSTOMER")["name"] == "CUST_TBL"
+    assert tml.joined_keys(tables) == {"FACT", "CUSTOMER"}
+    # a `with` written as a physical name still resolves, last
+    assert tml.join_target(tables[:2], "customer")["alias"] == "BILL_TO"
+    assert tml.join_target(tables, "NOPE") is None
+
+
+def test_d5_reports_the_unjoined_table_not_the_join_target():
+    tables = [{"name": "FACT", "joins": [{"with": "CUSTOMER", "on": "[FACT::K] = [CUSTOMER::K]"}]},
+              {"name": "CUSTOMER", "alias": "BILL_TO"},
+              {"name": "CUST_TBL", "alias": "CUSTOMER"}]
+    ctx = make_context(models=[fx.build_data_model(model_tables=tables)])
+    assert [f.object_name for f in run_rule(ctx, "D5")] == ["BILL_TO"]
+
+
+def _chain(n, aliased):
+    """T0 -> T1 -> … -> T{n-1}, every table aliased A0… when `aliased`."""
+    key = (lambda i: f"A{i}") if aliased else (lambda i: f"T{i}")
+    tables = []
+    for i in range(n):
+        t = {"name": f"T{i}", "fqn": f"t-{i}"}
+        if aliased:
+            t["alias"] = key(i)
+        if i + 1 < n:
+            t["joins"] = [{"with": key(i + 1), "on": f"[{key(i)}::K] = [{key(i + 1)}::K]"}]
+        tables.append(t)
+    return tables
+
+
+def test_join_depth_follows_aliased_tables():
+    """Keyed by name, a chain of aliased tables read as depth 1, and P7 missed it."""
+    assert tml.join_depth(_chain(6, aliased=False)) == 5
+    assert tml.join_depth(_chain(6, aliased=True)) == 5
+    ctx = make_context(models=[fx.build_data_model(model_tables=_chain(7, aliased=True))])
+    [f] = run_rule(ctx, "P7")
+    assert (f.severity, f.metric) == ("HIGH", 6)
+
+
+def test_h3_credits_a_table_column_reference():
+    cols = [{"name": "Amount", "column_id": "T1::AMOUNT", "properties": {"is_hidden": True}},
+            {"name": "Seen", "column_id": "T1::SEEN", "properties": {}}]
+    formulas = [{"id": "f1", "name": "F", "expr": "sum ( [T1::AMOUNT] )"}]
+    ctx = make_context(models=[fx.build_human_model(columns=cols, formulas=formulas)])
+    assert run_rule(ctx, "H3") == []
+
+
+def test_erd_target_is_the_first_table_the_detail_names():
+    from ts_cli.audit import _inject_findings_into_erd
+    from ts_cli.audit.findings import Finding
+    corpus = {"models": [{"guid": "m-1", "erd": {
+        "tables": [{"id": n} for n in ("D2", "D0", "FACT", "D1")], "findings": []}}]}
+    f = Finding("D3", "x", "INFO", "model", "Sales", "m-1",
+                "3 LEFT/RIGHT outer join(s): FACT -> D0 (LEFT_OUTER), FACT -> D2 (LEFT_OUTER)")
+    _inject_findings_into_erd(corpus, [f], {})
+    assert corpus["models"][0]["erd"]["findings"][0]["target"] == "FACT"

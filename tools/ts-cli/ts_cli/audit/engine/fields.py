@@ -420,32 +420,42 @@ def _reference_chain_depth(item: dict, ctx: Any):
 #: snake_case warehouse name and the display name a Model column usually has both match
 #: ("first_name", "First Name", "FirstName"). Before 2026-10 a space did not.
 _SEP = r"[-_ ]?"
+#: Where a word starts: not after a letter, or at a camelCase hump ("customerEmail").
+_START = r"(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))"
+#: Where a word ends: not before a letter, at a camelCase hump ("telNumber"), or where an
+#: acronym meets a capitalised word ("SSNLast4", "IBANNumber").
+_END = r"(?:(?![A-Za-z])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]))"
 
 
 def _word(token: str) -> str:
-    """`token` (any case) as a whole word: not inside a longer word, where a word ends
-    at a non-letter or at a camelCase hump. For the short tokens that otherwise match
-    inside ordinary words: "tel" in "hotel", "sin" in "cousin", "dob" in "adobe"."""
-    start = r"(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))"
-    end = r"(?:(?![A-Za-z])|(?<=[a-z])(?=[A-Z]))"
-    return f"{start}(?i:{token}){end}"
+    """`token` (any case) as a whole word — for the short tokens that otherwise match
+    inside ordinary words: "tel" in "hotel", "sin" in "cousin", "dob" in "adobe". Known
+    misses: a token run into another word with no separator or case change ("TELNO",
+    "EMPSSN"), which no pattern can tell from "HOTEL"."""
+    return f"{_START}(?i:{token}){_END}"
+
+
+def _starts_word(term: str) -> str:
+    """`term` (any case) starting a word, for a term whose first letters also end other
+    words: "e-mail" in "Voice Mail", "card number" in "Scorecard Numerator"."""
+    return f"{_START}(?i:{term})"
 
 
 #: The column-name patterns S1 reads as personal data (first match names the category).
-#: Compiled case-sensitively: `(?i:...)` makes every term any case, while `_word`'s
-#: camelCase test needs the case of the letters around it.
+#: Compiled case-sensitively: `(?i:...)` makes every term any case, while the word
+#: boundaries need the case of the letters around them.
 PII_PATTERNS = [
-    (re.compile(rf"(?i:e{_SEP}mail)"), "email", "HIGH"),
-    (re.compile(rf"(?i:phone|cell{_SEP}phone|telephone)|{_word('mobile')}|{_word('fax')}"
-                rf"|{_word('tel')}"),
+    (re.compile(_starts_word(r"e[-_]?mail")), "email", "HIGH"),
+    (re.compile(rf"(?i:phone|cell{_SEP}phone|telephone|telef[oó]n|(?<!auto)mobile)"
+                rf"|{_word('fax')}|{_word('tel')}"),
      "phone", "HIGH"),
     (re.compile(rf"{_word('ssn')}|(?i:social{_SEP}sec|national{_SEP}id|tax{_SEP}id)"
                 rf"|{_word('nin')}|{_word('sin')}"),
      "national_id", "HIGH"),
     (re.compile(rf"{_word('dob')}|(?i:birth{_SEP}date|date{_SEP}of{_SEP}birth|birthday)"),
      "dob", "HIGH"),
-    (re.compile(rf"(?i:credit{_SEP}card|card{_SEP}num|account{_SEP}num|routing{_SEP}num)"
-                rf"|{_word('iban')}"),
+    (re.compile(rf"(?i:credit{_SEP}card|account{_SEP}num|routing{_SEP}num)"
+                rf"|{_starts_word(f'card{_SEP}num')}|{_word('iban')}"),
      "financial", "HIGH"),
     (re.compile(rf"(?i:first{_SEP}name|last{_SEP}name|surname|full{_SEP}name|given{_SEP}name)"),
      "person_name", "MEDIUM"),

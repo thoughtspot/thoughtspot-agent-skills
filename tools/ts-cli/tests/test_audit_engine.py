@@ -815,6 +815,12 @@ def test_derived_placeholder_with_a_path_raises_at_render():
     # display names (a space between words) match since 2026-10
     ("Zip Code", "address", "MEDIUM"), ("zip_code", "address", "MEDIUM"),
     ("Date of Birth", "dob", "HIGH"), ("First Name", "person_name", "MEDIUM"),
+    # review of PR 2.3: precision (no space through "e mail" / "card num" mid-word) and
+    # recall (acronym meets a capitalised word; run-together "mobile"; "Telefon")
+    ("Voice Mail Count", None, None), ("Scorecard Numerator", None, None),
+    ("SSNLast4", "national_id", "HIGH"), ("IBANNumber", "financial", "HIGH"),
+    ("DOBYear", "dob", "HIGH"), ("MOBILENUMBER", "phone", "HIGH"),
+    ("Telefonnummer", "phone", "HIGH"), ("CustomerEmail", "email", "HIGH"),
     ("", None, None), (None, None, None), (5, None, None)])
 def test_pii_category_and_confidence(name, category, confidence):
     item = _item({"name": name})

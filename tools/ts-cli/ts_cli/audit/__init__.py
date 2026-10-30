@@ -46,12 +46,13 @@ def _inject_findings_into_erd(corpus: dict, findings: list, check_meta: dict) ->
         if not erd:
             continue
         table_names = {t["id"] for t in erd.get("tables", [])}
-        target = ""
+        # The table named first in the detail (longest name on a tie, then by name), so
+        # the target is the same on every run: set order is not (a detail naming several
+        # tables, D3's roll-up, picked a different one per hash seed).
         detail_lower = f.detail.lower()
-        for tn in table_names:
-            if tn.lower() in detail_lower:
-                target = tn
-                break
+        named = [(detail_lower.find(tn.lower()), -len(tn), tn) for tn in table_names
+                 if tn.lower() in detail_lower]
+        target = min(named)[2] if named else ""
         erd_finding = {
             "sev": _SEV_MAP.get(f.severity, "info"),
             "check": f.check_id,

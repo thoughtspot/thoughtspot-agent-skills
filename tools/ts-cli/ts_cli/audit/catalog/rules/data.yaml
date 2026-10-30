@@ -79,7 +79,8 @@
   title: Orphan tables in model (Cartesian risk)
   description: >-
     A table of a multi-table Model that is on neither side of any join — keyed by its
-    alias, else its name, on the declaring side and by the join's `with` on the other.
+    alias, else its name, on both sides; a join's `with` is resolved to the table it
+    names (by alias, id or name; until 2026-10 the raw `with` was compared).
   categories: [D]
   requires: [model_tml]
   scope: model.table

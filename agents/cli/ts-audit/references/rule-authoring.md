@@ -96,7 +96,7 @@ The shipped A6 entry, annotated. Keys not shown are described after it.
 `bands`. `each` and `group` take a fixed `severity: HIGH`, or a mapping on a field:
 
 ```yaml
-severity: {field: "@join_type", map: {OUTER: HIGH}, default: INFO}
+severity: {field: "@zero_column_role", map: {bridge: INFO}, default: MEDIUM}   # D10
 ```
 
 The lookup is exact and type-sensitive (YAML `true` is a boolean key). When the map is
@@ -110,10 +110,10 @@ both: `severity` beside `bands` is rejected.
 wording; `legacy_threshold` takes the same form:
 
 ```yaml
-message:
+message:                          # D11
   by_severity:
-    HIGH: FULL OUTER join causes performance issues
-    INFO: "{@join_type} join — may indicate data discrepancies"
+    MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
+    INFO: "{@join_cardinality} join '{@join_from_name}' -> '{obj.with}'"
 legacy_threshold:
   by_severity:
     MEDIUM: {high_overlap: 0.5}     # a severity with no entry has no threshold (null)

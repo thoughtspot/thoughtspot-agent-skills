@@ -48,7 +48,7 @@ def test_h2_trips_on_a_description_over_400_chars():
 def test_h2_no_longer_flags_an_ordinary_the_opening():
     """"The total revenue recognised for this order line." — 49 characters, clear of
     both length branches — was "boilerplate" until 2026-10, when "The " and "A " were
-    dropped from the pattern (4,772 of 4,841 flagged descriptions on the SE demo
+    dropped from the pattern (4,772 of 4,841 flagged descriptions on the 351-Model SE demo
     snapshot)."""
     assert run_rule(fx.human_description_boilerplate(), "H2") == []
 
