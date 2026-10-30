@@ -1,6 +1,6 @@
 ---
 name: ts-convert-from-looker
-description: Convert a Looker semantic model (LookML project) into ThoughtSpot — parses model + view .lkml files, generates Table TML and Model TML per explore, validates invariants, and imports. Optionally converts LookML dashboards to ThoughtSpot Liveboards. Direction is always Looker → ThoughtSpot.
+description: Convert a Looker semantic model (LookML project) into ThoughtSpot — parses model + view .lkml files, generates Table TML and Model TML per explore, validates invariants, and imports. Optionally converts LookML dashboards to ThoughtSpot Liveboards via SpotterViz. Direction is always Looker → ThoughtSpot.
 ---
 
 # LookML → ThoughtSpot
@@ -8,7 +8,9 @@ description: Convert a Looker semantic model (LookML project) into ThoughtSpot �
 Converts a Looker semantic model into ThoughtSpot objects. Parses `.model.lkml` and
 `.view.lkml` files to extract tables, columns, joins, dimensions, and measures, then
 generates Table TMLs and a Model TML per explore. Optionally converts LookML dashboards
-into ThoughtSpot Liveboards.
+into ThoughtSpot Liveboards via **SpotterViz** (ThoughtSpot's own MCP server for building
+dashboards from natural-language instructions) — there is no hand-authored-TML liveboard
+path.
 
 Ask one question at a time for **dependent** decisions. Batch **independent** questions
 into a single multi-question prompt to cut round-trips — e.g. mode + scope, formula
@@ -30,6 +32,8 @@ inline strategy + label-vs-name decisions, or chart-type + layout preferences.
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
 | [../../shared/schemas/thoughtspot-formula-patterns.md](../../shared/schemas/thoughtspot-formula-patterns.md) | ThoughtSpot formula pattern library |
 | [../../shared/schemas/thoughtspot-connection.md](../../shared/schemas/thoughtspot-connection.md) | Connection handling in TML |
+| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Analytical-intent → chart-type mapping — vocabulary for Step 10's SpotterViz instructions |
+| [../../shared/schemas/spotterviz-liveboard-build.md](../../shared/schemas/spotterviz-liveboard-build.md) | Step 1.5/Step 10 — SpotterViz connectivity setup, the `is_spotter_enabled` gate, build-instruction composition, known gotchas |
 | [references/coverage-matrix.md](references/coverage-matrix.md) | Mapped and unmapped LookML constructs |
 | [references/open-items.md](references/open-items.md) | Known gaps, validation quirks, deferred items |
 | [references/step-3-parse-fields.md](references/step-3-parse-fields.md) | Step 3 model-file and view-file field-by-field extraction lists |
@@ -37,7 +41,7 @@ inline strategy + label-vs-name decisions, or chart-type + layout preferences.
 | [references/step-5-tml-generation.md](references/step-5-tml-generation.md) | Step 5 derived-table (SQL View) generation detail (§5b) and column/measure naming-conflict rules (§5c–§5f) |
 | [references/step-6-model-joins.md](references/step-6-model-joins.md) | Step 6 join-SQL translation example, join-type/cardinality mapping tables, join-key handling table |
 | [references/step-7-review-templates.md](references/step-7-review-templates.md) | Step 7.5 migration-gaps console display and gaps-file heredoc templates; Step 8 import-error → fix lookup |
-| [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md) | Step 10 dashboard field list, chart-type mapping, search-query/layout detail, full Liveboard TML template, filter mapping, migration-details format |
+| [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md) | Step 10 dashboard field list (10a) and migration-details table format + heredoc (10h) — groundwork for composing Step 10's SpotterViz build instructions |
 | [references/migration-report-format.md](references/migration-report-format.md) | Step 11 migration summary console block and `.md` report structure (Migrate mode) |
 | [references/audit-mode-report.md](references/audit-mode-report.md) | Audit mode console report and `.md` report structure, including CLEAN/CAVEAT/BLOCKED classification rules |
 | [fixtures/skilltest-orders/skilltest_orders.model.lkml](fixtures/skilltest-orders/skilltest_orders.model.lkml) | Verified LookML fixture — input for re-testing the skill |
@@ -103,6 +107,7 @@ Enter A / M:
 ### Steps (Migrate mode)
 
   1.  Authenticate to ThoughtSpot .......................... auto
+  1.5 Confirm SpotterViz MCP connectivity (scope 1,3 only) .. auto/you choose
   2.  Locate and read LookML files ......................... ask for path
   3.  Parse LookML project .................................. auto
   4.  Resolve field references .............................. auto + surface blockers
@@ -112,7 +117,7 @@ Enter A / M:
   7.5 Migration gaps review + write gaps file ............... auto (review before import)
   8.  Build zip + batch payload, import all TMLs ............. auto
   9.  Confirm import, retrieve model GUID ................... auto
-  10. (Optional) Convert dashboards → Liveboards + migration details  auto + review
+  10. (Optional) Build Liveboard via SpotterViz + migration details  auto + review
   11. Migration summary report .............................. auto
 
 ---
@@ -124,6 +129,40 @@ ts auth whoami --profile {profile_name}
 ```
 
 If the command fails: run `/ts-profile-thoughtspot` to configure the profile, then return here.
+
+---
+
+## Step 1.5 — Confirm SpotterViz Connectivity
+
+> **Scope gate:** runs for scopes **1** and **3** (the only scopes that build liveboards).
+> **Skip for scope 2.**
+
+This skill builds liveboards exclusively via **SpotterViz**, ThoughtSpot's own MCP server
+for building Liveboards from natural-language instructions — there is no hand-authored-TML
+fallback. Check now, before parsing any LookML, so a missing connection surfaces early.
+
+Check whether the SpotterViz MCP tools are loaded this session (tool names under
+`mcp__claude_ai_ThoughtSpot_Spotter__*` — try `check_connectivity`). If connected, confirm
+and continue to Step 2.
+
+**If not connected**, walk the user through setup — see
+[`../../shared/schemas/spotterviz-liveboard-build.md`](../../shared/schemas/spotterviz-liveboard-build.md)
+for the exact MCP config, the restart requirement, and the interactive OAuth login (none of
+which can be completed in a non-interactive session). Then ask:
+
+```
+SpotterViz isn't connected yet — liveboard generation (Step 10) needs it, with no
+hand-authored-TML fallback in this skill.
+
+  Y  I've set it up — recheck connectivity
+  N  Proceed without it — I understand liveboards can't be built this session
+
+Enter Y / N:
+```
+
+**On N:** proceed with the migration normally through Step 9 (Table/Model work is
+unaffected), but skip Step 10 — tell the user again, at the point Step 10 would have run,
+that dashboards can't be migrated to liveboards this session.
 
 ---
 
@@ -565,9 +604,17 @@ Surface the model GUID to the user for future exports or updates.
 
 ---
 
-## Step 10 — Convert LookML dashboard → ThoughtSpot Liveboard (optional)
+## Step 10 — Build Liveboard via SpotterViz (optional)
 
-Only run if the user selected scope 1 (Models + Liveboards) or scope 3 (Liveboards only).
+> **Scope gate:** runs for scopes **1** and **3**, and only when Step 1.5 confirmed
+> SpotterViz connectivity. If the user declined setup at Step 1.5, skip this step entirely
+> and say so again here.
+
+This skill builds the liveboard exclusively via **SpotterViz** — there is no
+hand-authored-TML path. See
+[`../../shared/schemas/spotterviz-liveboard-build.md`](../../shared/schemas/spotterviz-liveboard-build.md)
+for the full procedure (connectivity, the `is_spotter_enabled` gate, build-instruction
+composition, polling, and known gotchas).
 
 ### 10a. Parse LookML dashboard file
 
@@ -576,140 +623,51 @@ fields (`dashboard: name`, `layout:`, `filters:`) and, per element (`elements:` 
 `tiles:`), the viz title/type/explore/fields/sorts/limit/listen/filters/grid-position —
 full field-by-field list:
 [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10a. Parse LookML dashboard file — full field list". **Assign viz IDs sequentially:**
-`Viz_1`, `Viz_2`, ... in the order elements appear.
+"10a. Parse LookML dashboard file — full field list". This is the raw material for the
+SpotterViz build instructions below — not a literal grid/TML conversion.
 
-### 10b. LookML chart type → ThoughtSpot chart type
+### 10b. Build and run the SpotterViz dashboard
 
-Map each LookML tile `type:` to a ThoughtSpot `display_mode` + chart `type` — most map
-1:1 to `CHART_MODE` (`single_value`→KPI, `looker_column`→COLUMN, `looker_bar`→BAR,
-`looker_line`→LINE, `looker_pie`→PIE, `looker_scatter`→SCATTER, `looker_area`→AREA,
-`looker_waterfall`→WATERFALL); `looker_grid`/`table` → `TABLE_MODE` (omit `chart:`
-entirely); `looker_donut_multiples` has no small-multiples equivalent and becomes PIE
-(document as a migration gap); `looker_funnel` becomes a `TABLE_MODE` placeholder
-(unsupported); `looker_map`/`looker_geo_choropleth` are omitted entirely (unsupported).
-Full table:
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10b. LookML chart type → ThoughtSpot chart type".
-
-### 10c. Resolve field references and build search query
-
-**Resolve `view.field` → ThoughtSpot column display name** using the model built in
-Steps 3–6: formula columns (translated measures) use the formula's `name:` **as-is** (no
-"Total" prefix); physical attribute columns use the column's `name:`. **Build
-`search_query`** by joining all resolved column names in square brackets, e.g.
-`'[Region] [Total Net Revenue]'`. **Handle tile-level `filters:`** (hard filters) by
-embedding them as filter conditions appended to the `search_query` — do NOT translate
-these to liveboard-level filters, they are tile-specific — using ThoughtSpot's **dot
-notation** (`[Column].Value`, not SQL syntax). **Build `answer_columns[]`** with one
-entry per resolved column display name, in field order.
-
-Full value-syntax table, the tile-level filter worked example, and the 5-step
-value-token translation procedure:
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10c. Resolve field references and build search query — full detail".
-
-### 10d. Layout coordinate conversion (24-column → 12-column grid)
-
-LookML `newspaper` layout uses a **24-column grid** (`col`, `row`, `width`, `height`).
-ThoughtSpot layout uses a **12-column grid** (`x`, `y`, `width`, `height`).
-
-Conversion rule (apply to every element):
-```
-x      = floor(col / 2)        (integer, round down)
-y      = row                   (unchanged)
-width  = ceil(width / 2)       (round up — preserves adjacency for odd widths)
-height = height                (unchanged)
-```
-
-Using `ceil` for width ensures adjacent tiles stay adjacent when widths are odd (e.g. two tiles of LookML width 11 each → `ceil(11/2) = 6`, total = 12, fills grid cleanly).
-
-Worked example (from `skilltest_orders.dashboard.lookml`) including the odd-width case:
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10d. Layout coordinate conversion — worked example".
-
-### 10e. Liveboard TML template
-
-**Data source binding — use `obj_id`, not `fqn`:**
-
-Each viz must bind to the model using `obj_id`. A bare `fqn` GUID is silently dropped on
-import, leaving the viz with no data source — the chart renders broken with no data.
-
-```
-obj_id format:  {ModelNameNoSpaces}-{first-8-chars-of-GUID}
-Example:  model "Orders" with GUID "fdea93b4-a80f-..."  →  obj_id: Orders-fdea93b4
-```
-
-**Chart block completeness rule:**
-
-- `TABLE_MODE` tiles: **omit the `chart:` block entirely.** There is no `chart.type: TABLE`.
-- `CHART_MODE` tiles: supply a **complete** `chart:` block — `type`, `chart_columns[]`, and
-  `axis_configs[]`. A partial block (type alone) is NOT auto-completed on import — the viz
-  renders broken. All `column_id` values must use the **resolved** column display names from Step 10c.
-- **`axis_configs[]` keys depend on chart type — don't default to KPI's `y`-only shape for
-  everything.** `KPI` is the only type with no category to plot, so it correctly uses `y`
-  only. Every other type in this list — **including `PIE`** — needs **both** `x` (the
-  category/slice column) and `y` (the measure), exactly like the CHART tile template below.
-  It's tempting to treat a pie chart as "just one measure" the way a KPI is and give it a
-  `y`-only `axis_configs`, but that's a different, harder-to-spot failure than the
-  "renders broken" case above: it imports with **no error** and the tile is not visibly
-  broken — it just hangs/loads for a very long time while structurally similar tiles with
-  a complete `x`+`y` load normally. Verified 2026-07-02: a PIE tile built with `axis_configs:
-  [{y: [Measure]}]` (no `x`) hung indefinitely; adding `x: [Category]` fixed it immediately.
-  If a specific tile is unusually slow while others in the same liveboard are fast, diff
-  its `axis_configs` against a working tile of a similar chart type before assuming a data
-  volume problem.
-
-**Full Liveboard TML** (CHART tile, KPI tile, and TABLE tile shapes, plus the `layout:`
-block): see
-[references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10e. Full Liveboard TML template".
-
-### 10f. Dashboard filters → Liveboard filters
-
-**Collect all unique filters** from the dashboard-level `filters:` block. Build one
-ThoughtSpot liveboard filter per dashboard filter, mapping LookML `allow_multiple_values`
-+ field type to a ThoughtSpot `oper` (multi-value string → `in`, single-value string/
-number → `EQ`, date → a `date_filter:` block instead of `oper`). **`excluded_visualizations`
-rule:** for each liveboard filter, find every viz ID whose `listen:` block does **not**
-include that filter name and add it to `excluded_visualizations`, so the filter only
-applies to tiles that explicitly opted in.
-
-Full YAML example, operator mapping table, and the excluded_visualizations worked
-example: [references/step-10-liveboard-generation.md](references/step-10-liveboard-generation.md)
-"10f. Dashboard filters → Liveboard filters — full detail".
-
----
-
-### 10g. Import the Liveboard TML and get its URL
-
-Import the Liveboard TML built in 10e/10f the same way Step 8 imports tables and the
-model — validate first, then import for real:
-
-```bash
-ts tml import --file {output_dir}/{dashboard_name}.liveboard.tml --policy VALIDATE_ONLY --profile {name}
-
-ts tml import --file {output_dir}/{dashboard_name}.liveboard.tml --policy PARTIAL --create-new --profile {name}
-```
-
-Retrieve the Liveboard's GUID from the import response, or confirm via search if the
-response doesn't surface it directly:
-
-```bash
-ts metadata search --profile {name} --subtype LIVEBOARD --name "{liveboard_name}"
-```
-
-Construct the full Liveboard URL from the profile's `base_url` (stored in
-`~/.claude/thoughtspot-profiles.json` — see `ts-profile-thoughtspot`) and the GUID:
-
-```
-{liveboard_url} = {base_url}/#/insights/pinboard/{liveboard_guid}
-```
-
-Surface this URL to the user right after import completes, and carry it into
-`migration_details.md` (Step 10h) and the Step 11 summary's Liveboard row.
-
----
+1. **Re-confirm `is_spotter_enabled` on the target model.** Export it
+   (`ts tml export {model_guid} --profile {profile_name} --parse`) and check
+   `properties.spotter_config.is_spotter_enabled`. If `false` or absent, ask the user to
+   enable it, set it `true`, and re-import in place (existing `guid`/`obj_id` at the
+   document root, `--no-create-new`) before proceeding. If they decline, liveboard
+   generation cannot proceed.
+2. **Check which fields actually survived model-build before describing any tile.** The
+   dashboard/tile extraction (10a) reflects the *source* LookML, not what Step 4-7 actually
+   succeeded in translating and importing — a measure/dimension can be unclassifiable or
+   dropped during migration-gaps review (Step 7.5) without 10a's own data knowing.
+   Cross-check every `view.field` a tile would reference against the live model's export
+   from Step 9: for anything missing, drop that specific tile and record it as not
+   migrated — never describe a tile to SpotterViz referencing a field that isn't in the
+   model.
+3. **Compose build instructions** from the Step 10a extraction: describe, per tile, what it
+   should show (fields, chart intent in plain words — use
+   `../../shared/schemas/thoughtspot-chart-types.md`'s analytical-intent vocabulary),
+   embed any tile-level `filters:` as part of that tile's description, and describe the
+   dashboard-level `filters:` as liveboard-wide filters each tile should respect per its
+   `listen:` map. Preserve the dashboard's relative layout (row/column grouping) in the
+   description — SpotterViz doesn't need literal 24-column coordinates, but a clear
+   description of what's grouped together.
+4. **Call `create_dashboard`** with a `title`, the composed `instructions`, and
+   `data_source_id` set to the model's `obj_id` (from Step 9).
+5. **Poll `get_dashboard_status`** until `completed` (capture the returned Liveboard
+   guid/URL), `needs_input` (relay the question to the user verbatim, get an answer,
+   resubmit), or `failed` (report plainly — never treat as success).
+6. **Verify every answer on the liveboard actually runs and returns data** — export the
+   completed liveboard and, for each tile, run its search/query and confirm it succeeds
+   **and** returns at least one row. For any tile that errors or comes back empty, retry
+   once (a transient failure, or ask SpotterViz via `modify_dashboard` to rebuild that
+   specific tile). **If it still fails after the retry**, call `modify_dashboard` once more
+   asking it to note that tile's name and failure detail in `migration_details.md` (Step
+   10h) rather than leaving it unexplained.
+7. **Display the result:**
+   ```
+   {liveboard_url} = {base_url}/#/insights/pinboard/{liveboard_guid}
+   ```
+   Carry this URL into `migration_details.md` (Step 10h) and the Step 11 summary's
+   Liveboard row.
 
 ### 10h. Write migration details file
 
@@ -725,7 +683,7 @@ than to one answer (e.g. a filter's `listens_to_filters:` cascading behaviour, w
 no ThoughtSpot equivalent, or a filter's default-value handling), add a `## Notes`
 section below the table — one bullet per gap. Omit the section entirely if there are none.
 
-**Liveboard URL.** Include the URL from Step 10g exactly **once**, as its own line after
+**Liveboard URL.** Include the URL from Step 10b exactly **once**, as its own line after
 the table (and Notes section, if present) — never repeat it per row. If more than one
 dashboard was converted in this run, add one `Liveboard URL:` line per dashboard, each
 labelled with the dashboard name.
@@ -895,6 +853,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.0 | 2026-10-28 | **BREAKING — liveboard generation moves to SpotterViz, dropping the hand-authored-TML path entirely.** New Step 1.5 confirms SpotterViz MCP connectivity before any parsing work (scope 1/3), with setup instructions if it's missing and a clear "liveboards can't be built this session, Table/Model work is unaffected" message if the user proceeds without it. Step 10's 10b–10g (chart-type mapping, search-query construction, 24→12-column layout conversion, the Liveboard TML template, dashboard-filter mapping, TML import) collapse into one 10b: check which fields survived model-build before describing any tile, re-confirm `is_spotter_enabled`, compose natural-language build instructions from 10a's dashboard/element extraction, call `create_dashboard`/`modify_dashboard`, poll to completion, **then verify every tile actually runs and returns data** — retry once, record any still-failing tile in `migration_details.md`. 10a and 10h (migration-details report) unaffected. See `../../shared/schemas/spotterviz-liveboard-build.md` for the full procedure and known gotchas. |
 | 1.0.7 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.0.6 | 2026-10-06 | **`SUBSTR(col, pos, len)` mapping row corrected** (BL-340 class): SQL `SUBSTR` is 1-based and ThoughtSpot `substr` zero-based, so the identity row shifted every substring one character; it is now `substr ( [T::COL] , pos - 1 , len )` for a literal `pos` ≥ 1 (and `strlen` for the 2-argument form), with a `sql_string_op` pass-through for a `pos` ≤ 0 or a non-literal `pos` — the Snowflake / Databricks translators' rule |
 | 1.0.5 | 2026-09-22 | **I7 marker added at the classification step.** The skill already stated the rule in prose at §4a and checklisted it at step 6e — what it lacked was the machine-checkable marker, so no gate could tell it apart from a skill that said nothing, and the prose sat *after* the dimension and measure verdicts it needed to govern. The gate now heads Step 4, ahead of all three untranslatable verdicts; the §4a prose and the 6e checklist are unchanged. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |

@@ -52,6 +52,7 @@ schemas/
   thoughtspot-answer-tml.md           — Answer TML structure (formulas, parameters, sets, data source lookup) — verified
   thoughtspot-liveboard-tml.md        — Liveboard TML structure (visualizations, filters, layout, tabs) — verified
   thoughtspot-chart-types.md          — verified answer.chart.type enum (44 values) + analytical-intent → chart-type mapping
+  spotterviz-liveboard-build.md       — SpotterViz MCP connectivity, is_spotter_enabled gate, build-instruction composition, gotchas
   thoughtspot-view-tml.md             — View (AGGR_WORKSHEET) TML structure — view_columns, joins, table_paths, search_query
   thoughtspot-alert-tml.md            — Monitor Alert TML structure — metric_id references, personalised_view_info
   thoughtspot-feedback-tml.md         — NLS Feedback/Coaching TML structure — search_tokens, formula_info column references
