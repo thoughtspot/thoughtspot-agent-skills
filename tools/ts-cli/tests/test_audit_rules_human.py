@@ -9,6 +9,7 @@ import copy
 import pytest
 
 import audit_rule_fixtures as fx
+from audit_catalog_helpers import PKG_CATALOG
 from ts_cli.audit.catalog_model import build_catalog, load_catalog, load_raw
 from ts_cli.audit.catalog_validate import validate_catalog
 from ts_cli.audit.context import make_context
@@ -206,3 +207,19 @@ def test_h2_reads_its_parameters_and_an_override_replaces_them():
     shown = {"H2": {"parameters": {"min_chars": 20, "max_chars": 400, "issues_shown": 1}}}
     [one] = run_rule(ctx, cat, "H2", "general", layers=[shown])
     assert one.metric == 2 and one.detail.count("too short") == 1
+
+
+def test_a_profile_parameters_override_reaches_the_code_rule():
+    """Through the catalog's own profile block, not an extra layer: only the profile
+    that overrides `parameters` changes what H2 flags."""
+    raw = copy.deepcopy(load_raw(PKG_CATALOG))
+    [h2] = [r for f, rules in raw.items() if f.startswith("rules/") for r in rules
+            if r["id"] == "H2"]
+    h2.setdefault("profiles", {})["spotter"] = {
+        "parameters": {"min_chars": 10, "max_chars": 400, "issues_shown": 3}}
+    cat = build_catalog(raw)
+    assert validate_catalog(cat, raw) == []
+    ctx = make_context(models=[fx.build_human_model(columns=[
+        {"name": "A", "description": "x" * 15}])])
+    assert run_rule(ctx, cat, "H2", "spotter") == []
+    assert len(run_rule(ctx, cat, "H2", "general")) == 1

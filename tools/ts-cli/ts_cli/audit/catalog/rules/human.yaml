@@ -167,7 +167,7 @@
   title: Formula promotion candidate
   description: >-
     The same Answer formula — compared lower-cased, stripped, whitespace collapsed;
-    blank ones ignored — in two Answer formulas or more, and on no Model. Counted per
+    blank ones ignored — in 2 or more Answer formulas, and on no Model. Counted per
     formula, so one Answer holding it twice counts twice. The finding is named by
     that count, with no guid, listing the first three Answers.
   categories: [H]

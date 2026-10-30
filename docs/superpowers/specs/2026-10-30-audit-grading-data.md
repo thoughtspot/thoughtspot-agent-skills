@@ -13,7 +13,7 @@ Closes BL-406 items 3, 7, 8 and 9; item 10 deferred (needs a ruling).
 | P6 | LOW / INFO fixed in code | Unchanged, **accepted**: one join yields up to two findings of different severities, which no single catalog severity source says |
 | P2 | "Row-level" when no surfacing column declares an `aggregation`. The model schema says that key is a no-op on an aggregate expression and applies on a row-level one, so it was wrong both ways | `@is_row_level_formula`: the expression calls no aggregate function (`spotql_ops.AGGREGATE_FUNCS`, or a `sql_*_aggregate_op`, outside references and literals) and references no aggregate formula, followed through chains |
 | H1, readiness score | The name anti-patterns kept twice (H1's `regex:` and `_NAME_ANTI` in `code_rules.py`) | One derived field, `@is_poor_name`, read by both |
-| report | A null or non-string Model, table or column name, or a non-string column description, ended `ts audit run` (`_build_ai_analysis`, then the ERD finding placement, then the readiness score) | A null name reads as empty, a typed one as its text; a typed description as blank. Tested end to end (`run_audit` then `render_report`), since fixing one function first just moved the crash to the next |
+| report | A null or numeric Model, table or column name or alias, or a numeric column description, ended `ts audit run` (`_build_ai_analysis`, the ERD's table lookup, the ERD finding placement, the readiness score) | A null name reads as empty, a numeric one as its text; a numeric description as present, as A1 and A4 read it. Tested end to end (`run_audit` then `render_report`, with a Table TML present so the ERD's lookup runs), since fixing one function at a time just moved the crash to the next — twice |
 
 ## The `parameters` key
 
@@ -22,13 +22,13 @@ touching Python. `@code_rule(..., parameters={"min_chars", ...})` declares the n
 function reads `rule.parameters`. The gate:
 
 - requires exactly the declared names, each a finite, non-negative number (not a boolean);
-- rejects `parameters` on a declarative rule;
+- rejects `parameters` on a declarative rule, a retired one included;
 - allows a profile override, which replaces the map whole (like `bands`);
 - in `--base` mode, fails a rule whose parameter value changed while its description still
   quotes the old one (the band drift check, extended).
 
 The generated catalog and the report's grading text show them after the grading
-("LOW; tuned by min chars 20, max chars 400, issues shown 3").
+("LOW (tuned by min chars 20, max chars 400, issues shown 3)").
 
 A code rule may also register a `band_shape`: the `(op, severity)` levels its wording
 assumes. D1 words its findings ">{yellow} HIGH, >{green} MEDIUM", so every profile's
@@ -68,6 +68,12 @@ bands must be exactly `gt HIGH, gt MEDIUM`; the values are free.
 - D9 and P16 still count function names inside references and literals (P18 and now P2
   strip them). Pre-existing; both are pinned. Recorded on BL-406.
 - Engine provenance records the source of bands and severity, not of `parameters`.
+- A count parameter (`issues_shown`) accepts a fraction or 0, which `int()` truncates to
+  an empty list. The gate's rule is "finite, non-negative", which suits lengths.
+- D7 words HIGH "Identical table sets", true only while its HIGH line is 1.0; a profile
+  could lower the line and keep the words. Latent (no profile overrides D7). On BL-406.
+- A YAML date used as a name or description still ends the run, at the JSON output.
+  Whether exports ever carry one unquoted is unknown. On BL-406.
 
 ## Effect on the SE demo sample (148 Models)
 

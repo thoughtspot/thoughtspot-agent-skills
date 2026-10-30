@@ -97,7 +97,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, Lis
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
-from ts_cli.audit.engine import bands, fields, fields_human, scopes
+from ts_cli.audit.engine import bands, fields, fields_human, predicates, scopes
 from ts_cli.audit.engine.messages import NameList, render, template
 from ts_cli.audit.findings import Finding
 
@@ -235,9 +235,9 @@ def _declares_legacy_threshold(rule: "Rule") -> bool:
 # ── the code rules ──────────────────────────────────────────────────────────
 
 def _nonblank(value: Any) -> bool:
-    """The legacy text test: `(value or "").strip()` is non-empty; a non-string (a
-    YAML-typed `description: 7`) is blank rather than a crash."""
-    return isinstance(value, str) and bool(value.strip())
+    """Not blank as A1 and A4 read it (`predicates._blank`): a YAML-typed
+    `description: 2024` is present, as it is to them."""
+    return not predicates._blank(value)
 
 
 #: The Spotter readiness score's levels (A5's bands until it stopped being a finding,

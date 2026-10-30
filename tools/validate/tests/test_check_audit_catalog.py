@@ -617,6 +617,24 @@ def test_history_fails_a_description_still_quoting_a_changed_parameter(tmp_path)
         "quotes 20" in res.stdout, res.stdout
 
 
+def test_history_reads_a_thousands_separator_in_a_description(tmp_path):
+    """P8 writes its base HIGH line as "1,500" (PR 2.4 re-review: the drift check
+    read only plain digit runs, so 1500 -> 2000 passed)."""
+    def edit(rules):
+        for r in rules:
+            if r["id"] == "P8":
+                for lv in r["bands"]["levels"]:
+                    if lv["value"] == 1500:
+                        lv["value"] = 2000
+        return rules
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "perf.yaml", edit)
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "P8: its bands or parameters changed since HEAD" in res.stdout, res.stdout
+    assert "quotes 1500" in res.stdout, res.stdout
+
+
 def test_history_passes_once_the_description_moves_with_the_bands(tmp_path):
     root = _git_repo(tmp_path)
     _edit_rules(root, "ai.yaml", _raise_a1_general(

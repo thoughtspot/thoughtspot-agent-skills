@@ -157,7 +157,9 @@ may override `parameters`, and replaces the map whole, as with `bands`: list eve
 A code rule whose wording assumes particular levels registers `band_shape` (D1:
 `(("gt", "HIGH"), ("gt", "MEDIUM"))`, since it words ">{yellow} HIGH, >{green}
 MEDIUM"); every profile's bands must then have exactly those ops and severities, in that
-order, with any values.
+order, with any values. It fixes the shape only: a rule whose wording assumes a band
+*value* (D7 calls HIGH "identical table sets", true only while its HIGH line is 1.0)
+must word that finding from a placeholder instead.
 
 ### Vocabulary
 

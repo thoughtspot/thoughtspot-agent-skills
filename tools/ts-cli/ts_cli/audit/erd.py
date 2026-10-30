@@ -37,6 +37,20 @@ def _load_shared_parse_model():
 parse_model = _load_shared_parse_model()
 
 
+def _table_tml(tables: dict, fqn: Any, name: str) -> Any:
+    """A model table's Table TML: by its `fqn`, else the first whose name is `name` or
+    whose key ends with `.name` (a SQL View model table, which the context does not
+    store, or a failed export, falls through to this)."""
+    t = tables.get(fqn)
+    if t:
+        return t
+    for k, v in tables.items():
+        tbl_name = v.get("table", {}).get("name") or v.get("sql_view", {}).get("name")
+        if tbl_name == name or k.endswith("." + name):
+            return v
+    return None
+
+
 def build_erd_for_audit(ctx: Any) -> list:
     """Generate ERD data for all models in the audit context.
 
@@ -51,15 +65,8 @@ def build_erd_for_audit(ctx: Any) -> list:
     for model_tml in ctx.models:
         needed: dict = {}
         for mt in (model_tml.get("model", {}).get("model_tables") or []):
-            fqn = mt.get("fqn", "")
-            name = mt.get("name", "")
-            t = ctx.tables.get(fqn)
-            if not t:
-                for k, v in ctx.tables.items():
-                    tbl_name = v.get("table", {}).get("name") or v.get("sql_view", {}).get("name")
-                    if tbl_name == name or k.endswith("." + name):
-                        t = v
-                        break
+            name = str(mt.get("name") or "")  # null or YAML-typed: no crash below
+            t = _table_tml(ctx.tables, mt.get("fqn", ""), name)
             if t:
                 needed[name] = t
         erd = parse_model(model_tml, needed)

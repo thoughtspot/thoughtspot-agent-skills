@@ -172,6 +172,9 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
      "H10: parameters.quote_chars must be a finite number, not negative, got inf"),
     ("H2", _set("parameters.issues_shown", -1),
      "H2: parameters.issues_shown must be a finite number, not negative, got -1"),
+    ("D1", _set("profiles.general.bands", {"direction": "lower_is_better",
+                                           "unit": "count", "levels": 5}),
+     "D1: 'profiles.general.bands.levels' must be a list of mappings"),
     ("H10", _set("parameters", {5: 1}),
      "H10: parameters 5 have no effect: code:stale_names does not read them"),
     ("H10", _set("profiles.spotter.parameters", [60]),
@@ -201,6 +204,16 @@ def test_d1_bands_with_other_values_are_valid():
         "direction": "lower_is_better", "unit": "count",
         "levels": [{"op": "gt", "value": 40, "severity": "HIGH"},
                    {"op": "gt", "value": 25, "severity": "MEDIUM"}]})) == []
+
+
+def test_a_huge_integer_parameter_is_judged_not_crashed_on():
+    """An integer is finite however large: `math.isfinite` would overflow on it."""
+    assert _shipped_with("H10", _set("parameters.quote_chars", 10 ** 400)) == []
+
+
+def test_parameters_on_a_retired_rule_with_no_logic_are_still_checked():
+    problems = _shipped_with("D2", _set("profiles.spotter.parameters", [60]))
+    assert any("D2: parameters must be a mapping" in p for p in problems), problems
 
 
 def test_a_complete_profile_parameters_override_is_valid():

@@ -96,7 +96,8 @@ def history_problems(base: Dict[str, Dict[str, Any]], head: Dict[str, Dict[str, 
 
 # ── a description quoting a band value that changed ─────────────────────────
 
-_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?!\w)")
+#: A number as prose writes it, thousands separators included ("1,500").
+_NUMBER = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\w)|(?<![\w.])\d+(?:\.\d+)?(?!\w)")
 
 
 def _level_values(bands: Any) -> Set[float]:
@@ -148,7 +149,8 @@ def description_drift_problems(base: Dict[str, Dict[str, Any]],
             continue
         still = set().union(*after.values()) if after else set()
         gone = set().union(*before.values()) - still
-        quoted = {float(n) for n in _NUMBER.findall(str(new.get("description") or ""))}
+        text = str(new.get("description") or "")
+        quoted = {float(n.replace(",", "")) for n in _NUMBER.findall(text)}
         stale = sorted(gone & quoted)
         if stale:
             out.append(f"{rid}: its bands or parameters changed since {ref}, but its "

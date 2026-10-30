@@ -136,12 +136,7 @@ def band_shape_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
     by_problem: Dict[str, List[str]] = {}
     for pid in profiles:
         bands = profile_override(rule, pid).get("bands", rule.bands)
-        if isinstance(bands, dict):
-            got = tuple((lv.get("op"), lv.get("severity")) for lv in bands.get("levels") or []
-                        if isinstance(lv, dict))
-        else:
-            got = tuple((lv.op, lv.severity) for lv in getattr(bands, "levels", None) or [])
-        if got != shape:
+        if tuple(_band_levels(bands)) != shape:
             want = ", ".join(f"{op} {sev}" for op, sev in shape)
             by_problem.setdefault(f"bands must be exactly the levels {want} (any values): "
                                   f"{rule.implementation} words its findings by them",
@@ -152,7 +147,7 @@ def band_shape_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
 
 def _parameter_value_ok(value: Any) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value) and value >= 0)
+            and (isinstance(value, int) or math.isfinite(value)) and value >= 0)
 
 
 def _declaration(rule: Rule) -> Optional[Tuple[Any, bool]]:
@@ -162,9 +157,17 @@ def _declaration(rule: Rule) -> Optional[Tuple[Any, bool]]:
 
 def _band_severities(bands: Any) -> Set[Any]:
     """Severities of a Bands object or a raw (profile override) bands mapping."""
+    return {severity for _, severity in _band_levels(bands)}
+
+
+def _band_levels(bands: Any) -> List[Tuple[Any, Any]]:
+    """`(op, severity)` per level of a Bands object or a raw (profile override) bands
+    mapping; [] for a malformed one (a scalar `levels`), which the bands checks report."""
     if isinstance(bands, dict):
-        return {lv.get("severity") for lv in bands.get("levels") or [] if isinstance(lv, dict)}
-    return {lv.severity for lv in getattr(bands, "levels", None) or []}
+        levels = bands.get("levels")
+        return [(lv.get("op"), lv.get("severity")) for lv in
+                (levels if isinstance(levels, list) else []) if isinstance(lv, dict)]
+    return [(lv.op, lv.severity) for lv in getattr(bands, "levels", None) or []]
 
 
 def _mapped_severities(severity: Any) -> Set[Any]:

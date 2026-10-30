@@ -117,9 +117,10 @@ def test_a_null_or_typed_name_does_not_end_the_run(where, value):
     function moved the crash one function down (PR 2.4 review)."""
     from ts_cli.audit import run_audit
     from ts_cli.audit.report import render_report
-    tables = [{"name": "FACT", "fqn": "DB.S.FACT",
-               "joins": [{"with": "DIM", "on": "[FACT::D_ID] = [DIM::ID]"}]},
-              {"name": "DIM", "fqn": "DB.S.DIM"}]
+    tables = [{"name": "FACT", "fqn": "g-fact",
+               "joins": [{"name": "fact_dim", "with": "DIM", "on": "[FACT::D_ID] = [DIM::ID]",
+                          "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+              {"name": "DIM", "fqn": "g-sqlview"}]
     columns = [{"name": "Amount", "column_id": "FACT::AMT",
                 "properties": {"column_type": "MEASURE"}, "description": "Net amount"}]
     model = {"name": "Sales", "model_tables": tables, "columns": columns}
@@ -133,7 +134,21 @@ def test_a_null_or_typed_name_does_not_end_the_run(where, value):
         columns[0]["name"] = value
     else:
         columns[0]["description"] = value
-    ctx = make_context(models=[{"guid": "m-1", "model": model}], tables={},
-                       dependents={}, model_guids=["m-1"])
+    # FACT's Table TML present, DIM's absent (a SQL View model table, which the context
+    # does not store, or a failed export): the ERD then looks DIM up by name among the
+    # Table TMLs it has (PR 2.4 re-review: the crash's next stop, erd.py, ran only then).
+    fact_tml = {"guid": "g-fact", "table": {"name": "FACT", "columns": [
+        {"name": "AMT", "db_column_properties": {"data_type": "DOUBLE"}}]}}
+    ctx = make_context(models=[{"guid": "m-1", "model": model}],
+                       tables={"g-fact": fact_tml}, dependents={}, model_guids=["m-1"])
     out = run_audit(None, ["m-1"], ctx=ctx)
     assert "<html" in render_report(out).lower()
+
+
+def test_readiness_reads_a_typed_description_as_a1_does():
+    """A YAML-typed `description: 2024` is present to A1 and A4, so to the readiness
+    score too (it read as blank, losing 45 points for data the report calls present)."""
+    from ts_cli.audit.engine.code_rules import _nonblank
+    from ts_cli.audit.engine.predicates import _blank
+    for value in (2024, 3.5, "x", "  ", "", None, [], ["a"]):
+        assert _nonblank(value) is (not _blank(value)), value

@@ -384,7 +384,7 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     the legacy threshold's placeholders, and where severity comes from. A retired rule
     with no logic has none of these; it may only never be revived."""
     if rule.status == "retired" and has_no_logic(rule):
-        return _revival_problems(rule)
+        return _revival_problems(rule) + parameter_problems(rule, list(cat.profiles) or [""])
     out = code_rule_aggregate_problems(rule) if CODE_IMPL.match(rule.implementation) \
         else aggregate_problems(rule.aggregate, rule.scope, rule.implementation)
     out += message_problems_any(rule, rule.message, "message")
