@@ -205,11 +205,16 @@ To combine a combinator with anything else, wrap both in `all`.
 **Field paths.** `properties.column_type` walks the item. A non-numeric step on a list
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
 item, and `@name` is a derived field. A missing key yields null, never an error. So
-does malformed TML: a key the schema defines as a mapping (`properties`,
-`spotter_config`, `db_column_properties`) holding a list or a scalar reads as absent,
-never mapped over, and the run prints a warning naming the Model or Table and the path.
-A derived field or code rule reads those keys through `tml.mapping(obj, key)`, which
-gives `{}` for the same cases.
+does malformed TML (a key the schema defines as a mapping, `properties`,
+`spotter_config` or `db_column_properties`, holding a list or a scalar), but such an item
+is **not judged**: the engine skips a column or formula with one for every rule, and the
+report lists it under "Could not be read". A Model is not skipped, so a rule that reads
+the Model's own `properties` and **fires when the value is absent** (P4: an unset
+`join_progressive` is off) must exclude an unreadable Model with
+`{not: {field: "parent.@properties_unreadable", truthy: true}}` (or `@properties_unreadable`
+at model scope); `test_a_rule_firing_on_an_absent_model_property_excludes_an_unreadable_model`
+fails a rule that does not. A derived field or code rule reads those keys through
+`tml.mapping(obj, key)`, which gives `{}` for the same cases.
 
 **Message placeholders** per mode (Python `str.format`; any other name fails the gate):
 

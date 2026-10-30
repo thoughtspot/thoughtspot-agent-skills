@@ -36,8 +36,7 @@
     so its values surface in search suggestions. HIGH when the Table its
     `column_id` prefix names (through `model_tables`, alias first) has no RLS rules
     on its Table TML — or that Table TML is not in scope — and INFO when it has. The
-    detail says which, so the message is worded per severity. A column whose
-    `properties` is malformed is not judged: its index setting cannot be read.
+    detail says which, so the message is worded per severity.
   categories: [S]
   requires: [model_tml]
   scope: model.column
@@ -46,7 +45,6 @@
     where:
       all:
         - {field: "@pii_category", exists: true}
-        - {not: {field: "@properties_unreadable", truthy: true}}
         - {field: "@is_indexed", truthy: true}
   severity: {field: "@owning_table_has_rls", map: {true: INFO}, default: HIGH}
   message:

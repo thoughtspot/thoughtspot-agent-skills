@@ -342,18 +342,24 @@ def data_needs(angles: list, profiles: Optional[list] = None) -> set:
     return needs
 
 
-def _warn_malformed(ctx: AuditContext) -> None:
-    """Name each Model or Table whose TML holds a list or scalar where the schema has a
-    mapping: the rules read it as absent (engine/fields.py), so say what was skipped."""
+def _unreadable(ctx: AuditContext) -> list:
+    """Each place a Model's or Table's TML holds a list or scalar where the schema has a
+    mapping, warned on stderr and returned for the run's JSON and the report: no rule
+    judges such an item (the engine skips the column or formula; a rule reading the
+    Model's own `properties` excludes the Model), so the reader must be told
+    (product owner's ruling, 2026-10-30: skip, and show it)."""
     from ts_cli.audit.context import _log
     docs = [(d.get("model"), "Model", d.get("guid")) for d in ctx.models] + \
            [(d.get("table"), "Table", d.get("guid")) for d in ctx.tables.values()]
+    out = []
     for doc, kind, guid in docs:
         for where in tml.malformed_mappings(doc) if isinstance(doc, dict) else []:
             msg = (f"{kind} '{_name(doc)}' ({guid or 'no guid'}): '{where}' is not a "
-                   "mapping; rules read it as absent")
+                   "mapping; not judged")
             _log(f"Warning: {msg}")
             ctx.warnings.append(msg)
+            out.append(msg)
+    return out
 
 
 def run_audit(
@@ -394,7 +400,7 @@ def run_audit(
         profile = resolve_profile(catalog, assessment_name if assessment_name is not None
                                   else ctx.assessment)
     ctx.assessment = profile
-    _warn_malformed(ctx)
+    unreadable = _unreadable(ctx)
     known = [a for a in angles if a in catalog.categories]
     findings: list[Finding] = run_rules(ctx, catalog, known, profile)
     run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]
@@ -408,6 +414,8 @@ def run_audit(
         ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
     )
     corpus["assessment"] = catalog.profiles[profile].label
+    if unreadable:
+        corpus["unreadable"] = unreadable
     if fetched_needs is not None:
         corpus["fetched_needs"] = sorted(fetched_needs)
 

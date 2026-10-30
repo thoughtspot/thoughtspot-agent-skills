@@ -11,10 +11,13 @@ mapping's `field:`, an `{each}` message placeholder):
     @is_indexed              a derived field: a registered function of (item, ctx)
 
 A missing key, an index out of range or a step into a scalar yields None, never an
-error — absence is data, and the operators define what None means. So does a key the
-TML schema defines as a mapping (`tml.MAPPING_KEYS`: `properties`, `spotter_config`,
-`db_column_properties`) holding a list or a scalar: malformed TML reads as absent, so a
-rule never judges what it finds inside it (BL-406 item 10).
+error — absence is data, and the operators define what None means. A key the TML schema
+defines as a mapping (`tml.MAPPING_KEYS`: `properties`, `spotter_config`,
+`db_column_properties`) holding a list or a scalar reads as None too, never mapped over.
+Such an item is not judged at all (BL-406 item 10, product owner's ruling 2026-10-30):
+the engine skips a column or formula with one (scopes.iterate), a rule reading a Model's
+own `properties` that would fire on an absent value excludes the Model with
+`@properties_unreadable`, and the report lists every such item as "Could not be read".
 
 Derived fields are small pure functions, written once, for what a path cannot express
 (a default the schema implies, a join graph, a lookup into another document). Register
@@ -157,13 +160,13 @@ def _step(value: Any, step: str) -> Any:
 @register("properties_unreadable", uses=(), values=(False, True),
           label="its properties are malformed and cannot be read")
 def _properties_unreadable(item: dict, ctx: Any) -> bool:
-    """Model, column or table: `properties` is present but not a mapping (a list or a
-    scalar). A path reads it as absent (BL-406 item 10), which is right for a value the
-    platform defaults — but where absent has a meaning of its own (an unset
-    `join_progressive` joins every table; an unset `index_type` indexes the column), a
-    rule must not judge what it could not read: it excludes the item with this field."""
-    value = (item.get("obj") or {}).get("properties")
-    return value is not None and not isinstance(value, dict)
+    """Model (or any item): a mapping key it holds is present but not a mapping
+    (tml.unreadable). The engine already skips such a column or formula for every rule;
+    a Model is not skipped (its joins, names and tables are still readable), so a rule
+    that reads the Model's own `properties` and would fire on an absent value excludes it
+    with this field: P4 reads an unset `join_progressive` as off, which is the platform's
+    behaviour (live-verified 2026-08-10), but not a guess about an unreadable one."""
+    return tml.unreadable(item.get("obj"))
 
 
 @register("is_indexed", uses=(), values=(False, True),

@@ -315,7 +315,8 @@ are roughly ordered by value÷effort.
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
 | BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
-| BL-498 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| BL-498 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| BL-499 | Four Model emitters (`model_builder.build_model_tml` for Qlik, Power BI, Sisense, dbt `model_from_schema_yml`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -14807,25 +14808,28 @@ profile may lower it (latent: none does; `band_shape` fixes shape, not value). A
 used as a name or description still ends the run at the JSON output (the report's and
 `ts audit run`'s `json.dumps` take no `default`).
 
-**Progress (2026-10-30, BL-406 item 10).** Item 10 is closed, by the product owner's ruling
-(2026-10-30): malformed TML reads as absent. A key the schema defines as a mapping
-(`properties`, `spotter_config`, `db_column_properties`) holding a list or scalar is null
-to every field path (`fields._step`, `tml.MAPPING_KEYS`), never mapped over; the Python
-reads that crashed use `tml.mapping` (two older reads keep equivalent `isinstance`
-guards); and `ts audit run` warns, naming the Model or Table (with its guid) and the path.
-Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column
-as hidden and A1/A2 left it out, and the same shape ended `ts audit run` (the report
-corpus, the ERD, `table_role`, column types, the RLS column reads, D12). On a malformed
-Model `properties`, S4, S10 and P11 stay silent (their `parent.properties` reads are
-absent). Where an unset value has a meaning of its own, absent is not enough: an unset
-`join_progressive` joins every table (live-verified 2026-08-10) and an unset `index_type`
-indexes the column, so P4, S2 and P11 exclude an item whose `properties` cannot be read
-(`@properties_unreadable`) rather than reporting it. Pinned: A1, A2 and H3 on the two
-malformed inputs; nothing else moves, and the SE demo sample is unchanged. The wider class
-is BL-498. P6's in-code grading is accepted (same date), to revisit when a profile needs
-different P6 severities or a second rule shares its shape. What remains open here is only
-the review follow-ups recorded above (D9/P16 literals, D7's value-dependent wording,
-date-typed values at the JSON output).
+**Progress (2026-10-30, BL-406 item 10).** Item 10 is closed, by the product owner's rulings
+(2026-10-30): malformed TML is **not judged, and shown**. A key the schema defines as a
+mapping (`properties`, `spotter_config`, `db_column_properties`) holding a list or scalar
+is null to every field path (`fields._step`, `tml.MAPPING_KEYS`), never mapped over. A
+column or formula with one is skipped by the engine for every rule (`scopes.iterate`,
+`tml.unreadable`); a Model is not skipped, but P4, the one rule that reads the Model's own
+`properties` and fires on an absent value, excludes it (`@properties_unreadable`), and a
+test fails any future rule of that shape without the guard. `ts audit run` warns on
+stderr and the run's JSON (`corpus.unreadable`) and the report ("Could not be read") list
+every such item. Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3
+reported the column as hidden and A1/A2 left it out, and the same shape ended
+`ts audit run` (the report corpus, the ERD, `table_role`, column types, the RLS column
+reads, D12). Reading malformed as merely absent (the first attempt) produced confident
+wrong findings wherever absent has a meaning (P4 "joins every table", S2 "PII indexed",
+A1/A2 coverage, P15 "no value_casing"); skipping does not. P4 still reads an unset
+`join_progressive` as off (it joins every table, live-verified 2026-08-10). Pinned: A1, A2
+and H3 on the two malformed inputs; the SE demo sample is unchanged. The wider class is
+BL-498; the converters that emit Models without `join_progressive` are BL-499. P6's
+in-code grading is accepted (same date), to revisit when a profile needs different P6
+severities or a second rule shares its shape. What remains open here is only the review
+follow-ups recorded above (D9/P16 literals, D7's value-dependent wording, date-typed
+values at the JSON output).
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
@@ -15987,8 +15991,8 @@ fixture with one mutation each:
 |---|---|
 | a Table's `rls_rules` as a flat list of rules | `engine/scopes.py` `_rls_rules`, `engine/tml.py` `rls_column_refs`, `engine/fields.py`'s RLS reads |
 | a scalar `rls_rules.rules[]` entry, or a string `rules` | `engine/tml.py` `rls_column_refs` |
-| a Model's `model_instructions` as a list or a string | `engine/fields.py` `@is_coached` (A3, the readiness score) |
-| a model table's `joins_with` as a mapping | `engine/tml.py` `_joins_with_index` |
+| a Model's `model_instructions` as a list or a string, on a Model with no AI-instructions entry | `engine/fields.py` `@is_coached` (A3, the readiness score) |
+| a source Table's `table.joins_with` as a mapping | `engine/tml.py` `_joins_with_index` |
 | a scalar `model_tables[]` entry | `engine/tml.py` (join counting) |
 | a scalar Model `columns[]` or `formulas[]` entry | `engine/scopes.py` |
 | a scalar Table `columns[]` entry | `audit/context.py` (column types) |
@@ -16002,7 +16006,34 @@ mapping key reads a non-mapping as absent, each with the item-10 warning. `rls_r
 the exception and must NOT read as absent, since that would hide a Table's row-level
 security and make the security rules call it unprotected: confirm the flat-list shape
 against a live export or the SpotterCode MCP, then normalise both shapes in one audit
-helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). End-to-end tests
+helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). Follow the
+item-10 ruling for the rest: not judged, and listed under "Could not be read". Note that
+reading a malformed `model_instructions` as absent would make A3 report a coached Model
+as uncoached (HIGH under Spotter-ready), so it too must skip, not default. End-to-end tests
 (`run_audit` then `render_report`) for each row above.
+
+**Target:** 2026-11-30.
+
+## BL-499 — converters emit Models without `join_progressive: true` `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the third review of the BL-406 item-10 fix, after the
+Model schema doc was corrected to say an unset `join_progressive` behaves as off.
+
+**What.** A Model without `join_progressive` joins every table into every query, so a
+dimension-only query is silently filtered by the fact table (live-verified 2026-08-10: 73
+members against the true 79; `ts-object-model-agentql-query` `references/limitations.md`).
+These emitters never set it: `tools/ts-cli/ts_cli/model_builder.py` `build_model_tml`
+(used by Qlik), `powerbi/build_model.py`, `sisense/build_model.py`,
+`dbt/model_from_schema_yml.py`, and the Tableau hand-assembly template in
+`agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md`. Only
+`link_build.py`, `sv_build_model.py` and `databricks/mv_build_model.py` set it. Audit P4
+reports the result once imported, but only on Models of more than 5 tables.
+
+**Do.** Set `properties.join_progressive: true` in each emitter (one shared helper, not
+five copies), and consider a `ts tml lint` check, since hand-authored TML hits this too.
+Re-probe the live behaviour first: the 2026-08-10 result is marked "Not re-probed". The
+adjacent `spotter_config.is_spotter_enabled` default is also contested in the repo (the
+schema doc says true; the Power BI and Sisense emitters say a TML import defaults it off):
+settle both with one probe.
 
 **Target:** 2026-11-30.

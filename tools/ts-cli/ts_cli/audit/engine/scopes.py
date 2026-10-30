@@ -190,7 +190,10 @@ def iterate(ctx, scope: str, parent: Optional[Item] = None) -> Iterator[Item]:
         yield from _indexed(_TOP[scope](ctx))
         return
     for p in parents:
-        yield from _indexed(_CHILDREN[scope](p, ctx))
+        # A child whose properties cannot be read is not judged by any rule (BL-406 item
+        # 10); indexed first, so the others keep their positions.
+        yield from (i for i in _indexed(_CHILDREN[scope](p, ctx))
+                    if not tml.unreadable(i.get("obj")))
 
 
 def _indexed(items: Iterator[Item]) -> Iterator[Item]:

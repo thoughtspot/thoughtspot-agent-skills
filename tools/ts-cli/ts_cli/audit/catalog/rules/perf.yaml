@@ -225,9 +225,7 @@
   description: >-
     More than 30 text-search indexed columns on a Model with Spotter enabled
     (`properties.spotter_config.is_spotter_enabled`). Counted as the indexed columns
-    of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter. A
-    column whose `properties` is malformed is not counted: its index setting cannot be
-    read.
+    of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter.
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -237,7 +235,6 @@
     where:
       all:
         - {field: parent.properties.spotter_config.is_spotter_enabled, truthy: true}
-        - {not: {field: "@properties_unreadable", truthy: true}}
         - {field: "@is_indexed", truthy: true}
   bands:
     direction: lower_is_better

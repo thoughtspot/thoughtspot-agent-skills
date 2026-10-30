@@ -525,12 +525,52 @@ def test_a_malformed_mapping_is_named_in_a_warning(capsys):
         "name": "Sales", "model_tables": [], "properties": ["oops"],
         "columns": [{"name": "A", "column_id": "T::A", "properties": ["MEASURE"]}]}}],
         tables={}, dependents={}, model_guids=["m-1"])
-    run_audit(None, ["m-1"], ctx=ctx)
+    out = run_audit(None, ["m-1"], ctx=ctx)
     err = capsys.readouterr().err
-    assert ("Model 'Sales' (m-1): 'properties' is not a mapping; rules read it as "
-            "absent") in err
-    assert "'columns[A].properties' is not a mapping" in err
-    assert len(ctx.warnings) == 2
+    assert "Model 'Sales' (m-1): 'properties' is not a mapping; not judged" in err
+    assert "'columns[A].properties' is not a mapping; not judged" in err
+    # …and shown to the reader, never only on stderr (product owner's ruling)
+    assert len(out["corpus"]["unreadable"]) == 2
+    from ts_cli.audit.report import render_report
+    html = render_report(out)
+    assert '"ur": [' in html or '"ur":[' in html
+
+
+def _leaves(expr, negated=False):
+    """(field, op, value, negated) for every leaf of a catalog expression."""
+    if isinstance(expr, dict):
+        if "not" in expr:
+            yield from _leaves(expr["not"], not negated)
+        elif "all" in expr or "any" in expr:
+            for sub in expr.get("all") or expr.get("any") or []:
+                yield from _leaves(sub, negated)
+        elif "field" in expr:
+            for op, value in expr.items():
+                if op != "field":
+                    yield expr["field"], op, value, negated
+
+
+def test_a_rule_firing_on_an_absent_model_property_excludes_an_unreadable_model():
+    """The engine skips a column or formula whose properties cannot be read; a Model is
+    not skipped. So a rule that reads the Model's own `properties` and FIRES when the
+    value is absent would report a guess about an unreadable Model (P4 did): it must
+    carry the `@properties_unreadable` guard. This fails the next such rule."""
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.predicates import LEAF
+    missing = []
+    for rule in load_catalog().rules.values():
+        agg = rule.aggregate or {}
+        model_level = rule.scope == "model" and not agg.get("over")
+        for key in ("where", "match"):
+            for field, op, value, negated in _leaves(agg.get(key)):
+                reads_model = field.startswith("parent.properties.") or (
+                    model_level and field.startswith("properties."))
+                if not reads_model or op not in LEAF:
+                    continue
+                if LEAF[op](None, value) is not negated and \
+                        "@properties_unreadable" not in repr(agg):
+                    missing.append((rule.id, field))
+    assert missing == []
 
 
 def test_derived_fields_registry():

@@ -41,9 +41,9 @@ BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
 #: Keys the Model and Table TML schemas define as mappings, never lists
 #: (thoughtspot-model-tml.md, thoughtspot-table-tml.md). A list or scalar under one is
-#: malformed: a field path reads it as absent (fields._step) and the run warns
-#: (malformed_mappings), rather than mapping over the list and judging what it finds
-#: there (BL-406 item 10).
+#: malformed: a field path reads it as None (fields._step), the item holding it is not
+#: judged (`unreadable`), and the run lists it (`malformed_mappings`) rather than mapping
+#: over the list and judging what it finds there (BL-406 item 10).
 MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
 
 
@@ -52,6 +52,19 @@ def mapping(obj: Any, key: str) -> dict:
     so a malformed (list or scalar) value reads as absent rather than raising."""
     value = obj.get(key) if isinstance(obj, dict) else None
     return value if isinstance(value, dict) else {}
+
+
+def unreadable(obj: Any) -> bool:
+    """`obj` (a column, formula or Model body) holds a MAPPING_KEYS key, directly or as
+    `properties.spotter_config`, that is present but not a mapping. Such an item is not
+    judged: the engine skips a child item (a column, a formula) for every rule
+    (scopes.iterate), and a rule reading a Model's own `properties` excludes the Model
+    with `@properties_unreadable` (product owner's ruling, 2026-10-30)."""
+    if not isinstance(obj, dict):
+        return False
+    bad = [k for k in MAPPING_KEYS if obj.get(k) is not None and not isinstance(obj[k], dict)]
+    spotter = mapping(obj, "properties").get("spotter_config")
+    return bool(bad) or (spotter is not None and not isinstance(spotter, dict))
 
 
 def malformed_mappings(doc: Any, path: str = "") -> list:
@@ -264,6 +277,8 @@ def rls_column_refs(table: dict):
     t = table.get("table", {})
     props = {}
     for c in (t.get("columns") or []):
+        if unreadable(c):  # not judged: its type and casing read as unknown, like an
+            continue       # unresolved reference, which no caller reports
         props[c.get("name", "")] = (
             mapping(c, "db_column_properties").get("data_type", ""),
             mapping(c, "properties").get("value_casing", ""),

@@ -224,15 +224,53 @@ def test_p4_reads_unset_as_off_and_does_not_judge_malformed(props, fires):
     assert bool(p4) is fires
 
 
+def _firing_model(props):
+    """A Model on which S4 (RLS bypass with PII), S10 and P11 (31 indexed columns, Spotter
+    on) all fire when `properties` is the well-formed mapping."""
+    ctx = _populated_with_two_models()
+    model = ctx.models[0]["model"]
+    model["columns"] += [{"name": "Email Address", "column_id": "ORDERS::EMAIL",
+                          "properties": {"column_type": "ATTRIBUTE"}}]
+    model["columns"] += [{"name": f"Attr {i}", "column_id": f"ORDERS::A{i}",
+                          "properties": {"column_type": "ATTRIBUTE"}} for i in range(30)]
+    model["properties"] = props
+    return ctx
+
+
 def test_a_malformed_model_properties_silences_its_parent_property_rules():
-    """S4, S10 and P11 read `parent.properties.*`; on a malformed Model `properties`
-    holding a mapping that would fire them all, they read it as absent."""
+    """S4, S10 and P11 read `parent.properties.*`: with the mapping they fire; wrapped in a
+    list (unreadable) they judge nothing."""
     from ts_cli.audit import run_audit
-    ctx = _corrupt("model", [{"is_bypass_rls": True,
-                              "spotter_config": {"is_spotter_enabled": True}}])
-    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
-    fired = {f["check_id"] for f in out["findings"] if f["object_guid"] == "m-1"}
-    assert not fired & {"S4", "S10", "P11"}
+    good = {"is_bypass_rls": True, "spotter_config": {"is_spotter_enabled": True}}
+    rules = {"S4", "S10", "P11"}
+
+    def fired(props):
+        out = run_audit(None, ["m-1", "m-2"], ctx=_firing_model(props))
+        return {f["check_id"] for f in out["findings"] if f["object_guid"] == "m-1"} & rules
+    assert fired(good) == rules
+    assert fired([good]) == set()
+
+
+def test_p11_does_not_count_a_column_whose_properties_cannot_be_read():
+    """30 readable indexed columns plus one unreadable one (wrapping DONT_INDEX): the
+    unreadable one is not counted, so P11 (more than 30) stays silent."""
+    from ts_cli.audit import run_audit
+    good = {"spotter_config": {"is_spotter_enabled": True}}
+
+    def p11(extra_props):
+        ctx = _firing_model(good)
+        cols = ctx.models[0]["model"]["columns"]
+        del cols[-30:]
+        cols += [{"name": f"Attr {i}", "column_id": f"ORDERS::A{i}",
+                  "properties": {"column_type": "ATTRIBUTE"}} for i in range(27)]
+        cols.append({"name": "Odd", "column_id": "ORDERS::ODD", "properties": extra_props})
+        assert sum(1 for c in cols if isinstance(c["properties"], dict)) == \
+            (31 if isinstance(extra_props, dict) else 30)
+        out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
+        return [f for f in out["findings"] if f["check_id"] == "P11"
+                and f["object_guid"] == "m-1"]
+    assert p11({"column_type": "ATTRIBUTE"})
+    assert not p11([{"index_type": "DONT_INDEX"}])
 
 
 def test_s2_does_not_judge_a_column_whose_properties_cannot_be_read():
@@ -250,3 +288,19 @@ def test_s2_does_not_judge_a_column_whose_properties_cannot_be_read():
     out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["S"])
     assert [f for f in out["findings"]
             if f["check_id"] == "S2" and f["object_name"] == "Email Address"]
+
+
+def test_p15_does_not_judge_an_rls_column_whose_properties_cannot_be_read():
+    """P15 reports a VARCHAR RLS column with no `value_casing`; a column whose
+    `properties` wraps the casing in a list cannot be read, so it is not judged."""
+    from ts_cli.audit import run_audit
+
+    def p15(props):
+        ctx = _populated_with_two_models()
+        column = next(iter(ctx.tables.values()))["table"]["columns"][0]   # CUST_ID, VARCHAR
+        column["properties"] = props
+        out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
+        return [f for f in out["findings"] if f["check_id"] == "P15"]
+    assert p15({})
+    assert not p15({"value_casing": "UPPER"})
+    assert not p15([{"value_casing": "UPPER"}])
