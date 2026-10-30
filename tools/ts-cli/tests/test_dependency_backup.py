@@ -9,6 +9,7 @@ from ts_cli.dependency.backup import (
     backup_filename,
     build_manifest,
     delete_sort_key,
+    remap_guids,
     restore_policy_for,
     rollback_order,
     rollback_sort_key,
@@ -168,6 +169,39 @@ class TestRollbackOrder:
 
     def test_empty_list(self):
         assert rollback_order([]) == []
+
+    def test_sql_view_restored_before_the_model_built_on_it(self):
+        # PR #666 review B3: SQL_VIEW had no rank, so it restored last — after the
+        # Models that need it.
+        entries = [
+            {"type": "model", "name": "model_on_view"},
+            {"type": "sql_view", "name": "the_view"},
+        ]
+        ordered = [e["name"] for e in rollback_order(entries)]
+        assert ordered == ["the_view", "model_on_view"]
+        assert V2_TYPE_MAP["SQL_VIEW"] == "LOGICAL_TABLE"
+
+
+class TestRemapGuids:
+    OLD = "8a730793-5379-4ecd-aa4b-68dd9a602aef"
+    NEW = "51194061-9063-4842-8cc2-d98bdbce8b54"
+
+    def test_replaces_every_occurrence(self):
+        text = f"table:\n  fqn: {self.OLD}\n  other: {self.OLD}\n"
+        out = remap_guids(text, {self.OLD: self.NEW})
+        assert self.OLD not in out
+        assert out.count(self.NEW) == 2
+
+    def test_leaves_unmapped_guids_alone(self):
+        other = "00000000-0000-0000-0000-000000000001"
+        assert remap_guids(f"fqn: {other}", {self.OLD: self.NEW}) == f"fqn: {other}"
+
+    def test_empty_map_is_identity(self):
+        assert remap_guids("fqn: x", {}) == "fqn: x"
+
+    def test_skips_a_missing_new_guid(self):
+        # A restore that succeeded without reporting a GUID records nothing to map to.
+        assert remap_guids(f"fqn: {self.OLD}", {self.OLD: ""}) == f"fqn: {self.OLD}"
 
 
 # ---------------------------------------------------------------------------

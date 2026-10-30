@@ -35,8 +35,14 @@ def backup_filename(obj_type: str, guid: str, name: str) -> str:
 # still needs to exist so the Set's TML can be backed up earlier in Step 7. Sets
 # delete cleanly even while their Model is still present, since the cascade is
 # one-directional.
+#
+# A SQL View sits on a connection exactly as a Table does — Models are built on it, it
+# is built on nothing in ThoughtSpot — so it shares the Table's rank. Unranked, it
+# restored LAST (rollback_sort_key's -1), after the Models that need it (PR #666
+# review, B3). `PINBOARD` is the pre-Liveboard TML key `detect_tml_type` can return.
 DELETE_ORDER: Dict[str, int] = {
     "LIVEBOARD": 0,
+    "PINBOARD": 0,
     "ANSWER": 1,
     "SET": 2,
     "COHORT": 2,
@@ -44,6 +50,7 @@ DELETE_ORDER: Dict[str, int] = {
     "MODEL": 4,
     "WORKSHEET": 4,
     "TABLE": 5,
+    "SQL_VIEW": 5,
 }
 
 
@@ -57,10 +64,12 @@ def delete_sort_key(obj: Dict[str, Any]) -> int:
 V2_TYPE_MAP: Dict[str, str] = {
     "ANSWER": "ANSWER",
     "LIVEBOARD": "LIVEBOARD",
+    "PINBOARD": "LIVEBOARD",
     "MODEL": "LOGICAL_TABLE",
     "WORKSHEET": "LOGICAL_TABLE",
     "VIEW": "LOGICAL_TABLE",
     "TABLE": "LOGICAL_TABLE",
+    "SQL_VIEW": "LOGICAL_TABLE",
     "SET": "LOGICAL_COLUMN",
     "COHORT": "LOGICAL_COLUMN",
 }
@@ -107,6 +116,24 @@ def rollback_order(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     completed after a second run (once the table had been restored last).
     """
     return sorted(entries, key=rollback_sort_key, reverse=True)
+
+
+def remap_guids(text: str, new_guids: Dict[str, str]) -> str:
+    """Replace every original GUID in `text` with the GUID its object was restored under.
+
+    A restored DELETE gets a new GUID, but the backups of its dependents were exported
+    with `export_fqn=True`, so they still name the ORIGINAL one — an Answer restored
+    after its Model pointed at a GUID that no longer exists (PR #666 review, B3).
+    `rollback_order` restores referenced objects first, so by the time a dependent is
+    imported every GUID it references that was re-created is already in `new_guids`.
+
+    Plain substring replacement is safe here: a GUID is a 36-character 8-4-4-4-12 hex
+    value, so one cannot occur inside another or inside ordinary TML text.
+    """
+    for old, new in new_guids.items():
+        if old and new:
+            text = text.replace(old, new)
+    return text
 
 
 # ---------------------------------------------------------------------------
