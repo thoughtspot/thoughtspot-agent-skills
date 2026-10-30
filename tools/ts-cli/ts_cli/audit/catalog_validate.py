@@ -73,6 +73,7 @@ from ts_cli.audit.catalog_expr import (  # noqa: F401  (re-exported vocabulary)
 )
 from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     CODE_IMPL,
+    band_shape_problems,
     code_rule_aggregate_problems,
     code_rule_problems,
     parameter_problems,
@@ -305,6 +306,8 @@ def _override_value_problems(key: str, value: Any, path: str, rule: Rule) -> Lis
             else [f"{path}: must be a mapping"]
     if key == "message":
         return message_problems_any(rule, value, path)
+    if key == "parameters":
+        return []  # parameter_problems checks every profile's effective map
     if not isinstance(value, str):
         return [f"{path}: must be a string"]
     return []
@@ -387,7 +390,7 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     out += message_problems_any(rule, rule.message, "message")
     out += legacy_threshold_form_problems(rule.legacy_threshold, "legacy_threshold")
     profiles = list(cat.profiles) or [""]
-    out += parameter_problems(rule, profiles)
+    out += parameter_problems(rule, profiles) + band_shape_problems(rule, profiles)
     if CODE_IMPL.match(rule.implementation):
         out += code_rule_problems(rule, profiles)
     elif rule.implementation == "declarative":

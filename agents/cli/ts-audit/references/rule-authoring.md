@@ -151,8 +151,13 @@ constants, so a reader can see and change them without touching Python:
 
 The registration names what it reads (`@code_rule(..., parameters={"min_chars", ...})`)
 and the function reads `rule.parameters["min_chars"]`. The gate requires exactly the
-declared names, each a number (not a boolean); a declarative rule takes none. A profile
+declared names, each a finite, non-negative number (not a boolean); a declarative rule takes none. A profile
 may override `parameters`, and replaces the map whole, as with `bands`: list every name.
+
+A code rule whose wording assumes particular levels registers `band_shape` (D1:
+`(("gt", "HIGH"), ("gt", "MEDIUM"))`, since it words ">{yellow} HIGH, >{green}
+MEDIUM"); every profile's bands must then have exactly those ops and severities, in that
+order, with any values.
 
 ### Vocabulary
 

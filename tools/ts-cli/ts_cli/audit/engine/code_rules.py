@@ -30,6 +30,9 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
                    the entry must — and must not — carry.
     own_threshold  True when it sets each finding's legacy threshold itself (D1); the
                    entry must then carry no `legacy_threshold`
+    band_shape     the `(op, severity)` levels, worst first, its message or threshold
+                   assumes (D1 words ">{yellow} HIGH, >{green} MEDIUM"): every
+                   profile's bands must be exactly these, values free
     parameters     the names of the tuning numbers it reads from `rule.parameters`
                    (H2's `min_chars`, H10's `quote_chars`). The entry must carry
                    exactly these, each a number; a profile may replace the map whole.
@@ -89,7 +92,8 @@ only the permitted modules and fails if this one needs more.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List, Set
+from typing import (TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List, Set,
+                    Tuple)
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
@@ -110,6 +114,7 @@ OWN_THRESHOLD: Set[str] = set()
 CODE_USES: Dict[str, FrozenSet[str]] = {}   # conditional data it reads (catalog_uses.py)
 CODE_LABELS: Dict[str, str] = {}   # how its grading reads in generated text
 CODE_PARAMETERS: Dict[str, FrozenSet[str]] = {}   # the `parameters` names it reads
+BAND_SHAPES: Dict[str, Tuple[Tuple[str, str], ...]] = {}  # the (op, severity) levels it words
 CATALOG_SEVERITY_SOURCES = ("bands", "severity", "severity_name")
 _PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -130,12 +135,14 @@ def _severity_source(name: str, severity: Any) -> Any:
 
 def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = None,
               uses: Any = None, own_threshold: bool = False, label: Any = None,
-              parameters: Iterable[str] = ()) -> Callable[[CodeRule], CodeRule]:
+              parameters: Iterable[str] = (),
+              band_shape: Iterable[Tuple[str, str]] = ()) -> Callable[[CodeRule], CodeRule]:
     """Register the decorated function as `implementation: code:<name>`, rendering its
     message with `placeholders`, its severity from `severity`, reading the conditional
     data `uses` from the context (itself or through a derived field), and — with
     `own_threshold` — setting each finding's legacy threshold itself; `label` is how its
-    grading reads to an audit reader; `parameters` the `rule.parameters` names it reads."""
+    grading reads to an audit reader; `parameters` the `rule.parameters` names it reads;
+    `band_shape` the `(op, severity)` levels, worst first, its wording assumes."""
     if not isinstance(name, str) or not CODE_IMPL.match(f"code:{name}"):
         raise ValueError(f"'{name}' is not a valid code rule name "
                          "(lower case letters, digits and '_', not starting with a digit)")
@@ -160,6 +167,8 @@ def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = No
         CODE_USES[name] = data
         CODE_LABELS[name] = text
         CODE_PARAMETERS[name] = frozenset(parameters)
+        if band_shape:
+            BAND_SHAPES[name] = tuple(tuple(level) for level in band_shape)
         if own_threshold:
             OWN_THRESHOLD.add(name)
         return fn
@@ -226,8 +235,9 @@ def _declares_legacy_threshold(rule: "Rule") -> bool:
 # ── the code rules ──────────────────────────────────────────────────────────
 
 def _nonblank(value: Any) -> bool:
-    """The legacy text test: `(value or "").strip()` is non-empty."""
-    return bool((value or "").strip())
+    """The legacy text test: `(value or "").strip()` is non-empty; a non-string (a
+    YAML-typed `description: 7`) is blank rather than a crash."""
+    return isinstance(value, str) and bool(value.strip())
 
 
 #: The Spotter readiness score's levels (A5's bands until it stopped being a finding,
@@ -301,6 +311,7 @@ def _whole(value: float) -> Any:
 
 @code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"},
            severity="bands", uses=(), own_threshold=True,
+           band_shape=(("gt", "HIGH"), ("gt", "MEDIUM")),
            label="graded per size measure (tables, joins, formulas), each against "
                  "the rule's bands")
 def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:

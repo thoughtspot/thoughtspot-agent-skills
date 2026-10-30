@@ -48,7 +48,7 @@
     case; "The " and "A " counted until 2026-10); a blank or absent description is A1's
     remit, not this rule's. One
     finding per Model, its metric the number of columns with an issue, listing the
-    first three.
+    first 3.
   # A code rule (code:description_quality) because each column's issue is worded by its
   # own kind and the Model's finding joins them — no mode words its children one by
   # one; the lengths and the boilerplate pattern are in engine/code_rules_human.py.

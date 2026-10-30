@@ -1,3 +1,5 @@
+import pytest
+
 from ts_cli.audit.test_fixtures import generate_test_data
 
 
@@ -105,3 +107,33 @@ def test_ai_analysis_tolerates_null_and_typed_names():
                          {"name": 7}, "not-a-column"]}
     out = _build_ai_analysis([], model)
     assert "1 metric." in out["domain"]
+
+
+@pytest.mark.parametrize("where,value", [
+    ("model", None), ("model", 2024), ("table", None), ("table", 2024),
+    ("alias", 7), ("column", None), ("column", 7), ("description", 7)])
+def test_a_null_or_typed_name_does_not_end_the_run(where, value):
+    """End to end — run_audit, then render_report — not one helper: a fix to one
+    function moved the crash one function down (PR 2.4 review)."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.report import render_report
+    tables = [{"name": "FACT", "fqn": "DB.S.FACT",
+               "joins": [{"with": "DIM", "on": "[FACT::D_ID] = [DIM::ID]"}]},
+              {"name": "DIM", "fqn": "DB.S.DIM"}]
+    columns = [{"name": "Amount", "column_id": "FACT::AMT",
+                "properties": {"column_type": "MEASURE"}, "description": "Net amount"}]
+    model = {"name": "Sales", "model_tables": tables, "columns": columns}
+    if where == "model":
+        model["name"] = value
+    elif where == "table":
+        tables[1]["name"] = value
+    elif where == "alias":
+        tables[1]["alias"] = value
+    elif where == "column":
+        columns[0]["name"] = value
+    else:
+        columns[0]["description"] = value
+    ctx = make_context(models=[{"guid": "m-1", "model": model}], tables={},
+                       dependents={}, model_guids=["m-1"])
+    out = run_audit(None, ["m-1"], ctx=ctx)
+    assert "<html" in render_report(out).lower()

@@ -14791,12 +14791,17 @@ the declared names, each a number; a changed value the description still quotes 
 `--base` drift check); D1 grades by its catalog `bands` and H10 by a catalog `severity`
 map on `@orphan_model`. P6 keeps its LOW / INFO in code, **accepted**: one join yields up
 to two findings of different severities, which no single catalog severity source says.
-Item 7: the report corpus tolerates a null or non-string name. Item 8: P2 reads the
+Item 7: `ts audit run` no longer ends on a null or non-string Model, table or column name,
+or a non-string column description (tested end to end). Item 8: P2 reads the
 formula's expression (an aggregate function, a `sql_*_aggregate_op`, or a reference to an
 aggregate formula), not the column's `aggregation:` key; on the SE demo sample P2 goes
 from 6 to 8 findings. Item 9: the stale fixture titles now come from the catalog, and H1
 and the readiness score share one derived field (`@is_poor_name`). **Item 10 stays open**
-(malformed TML under a `parent.` condition): it needs a ruling, not a fix.
+(malformed TML under a `parent.` condition): it needs a ruling, not a fix. **Found in the
+PR 2.4 review, open:** D9 and P16 still count function names inside `[...]` references
+and quoted literals (`concat ( 'if ( if (' , [T::A] )` counts two `if` calls), which P18
+and P2 now strip with `_NOT_CODE`; fixing them moves pinned findings, so it is its own
+change.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the

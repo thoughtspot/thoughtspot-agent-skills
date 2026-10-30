@@ -127,6 +127,14 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
      "D12: severity is required: code:column_type_divergence reads the catalog severity"),
     ("D10", _drop("severity"),
      "D10: severity is required: code:zero_column_tables reads the catalog severity"),
+    ("D1", _set("profiles.spotter.bands", {
+        "direction": "lower_is_better", "unit": "count",
+        "levels": [{"op": "gte", "value": 50, "severity": "HIGH"},
+                   {"op": "gte", "value": 30, "severity": "MEDIUM"}]}),
+     "D1: bands must be exactly the levels gt HIGH, gt MEDIUM (any values): "
+     "code:model_complexity words its findings by them (profile: spotter)"),
+    ("D1", _set("bands.levels", [{"op": "gt", "value": 40, "severity": "HIGH"}]),
+     "D1: bands must be exactly the levels gt HIGH, gt MEDIUM"),
     ("D1", _drop("bands"),
      "D1: bands are required: code:model_complexity grades its findings by bands"),
     ("H10", _drop("severity"),
@@ -134,6 +142,7 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
     # …and nothing it ignores
     ("D1", _set("severity", "HIGH"), "D1: severity has no effect: code:model_complexity"),
     ("P6", _set("bands", _COUNT_BANDS), "P6: bands has no effect: code:join_keys"),
+    ("P6", _set("profiles.spotter.bands", _COUNT_BANDS), "(profile: spotter)"),
     ("P6", _set("severity", "HIGH"),
      "P6: severity has no effect: code:join_keys chooses its severities itself (INFO, LOW)"),
     ("D12", _set("bands", _COUNT_BANDS),
@@ -156,9 +165,15 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
     ("H2", lambda r: r["parameters"].update(min_length=5),
      "H2: parameters min_length have no effect: code:description_quality does not read"),
     ("H2", lambda r: r["parameters"].update(min_chars="20"),
-     "H2: parameters.min_chars must be a number, got '20'"),
+     "H2: parameters.min_chars must be a finite number, not negative, got '20'"),
     ("H10", _set("parameters.quote_chars", True),
-     "H10: parameters.quote_chars must be a number, got True"),
+     "H10: parameters.quote_chars must be a finite number, not negative, got True"),
+    ("H10", _set("parameters.quote_chars", float("inf")),
+     "H10: parameters.quote_chars must be a finite number, not negative, got inf"),
+    ("H2", _set("parameters.issues_shown", -1),
+     "H2: parameters.issues_shown must be a finite number, not negative, got -1"),
+    ("H10", _set("parameters", {5: 1}),
+     "H10: parameters 5 have no effect: code:stale_names does not read them"),
     ("H10", _set("profiles.spotter.parameters", [60]),
      "H10: parameters must be a mapping of names to numbers, got [60] (profile: spotter)"),
     # …replaced whole under a profile, never merged
@@ -179,6 +194,21 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
 def test_shipped_rule_mistakes_fail_validation(rule_id, edit, expected):
     problems = _shipped_with(rule_id, edit)
     assert any(expected in p and f": {rule_id}: " in p for p in problems), problems
+
+
+def test_d1_bands_with_other_values_are_valid():
+    assert _shipped_with("D1", _set("profiles.spotter.bands", {
+        "direction": "lower_is_better", "unit": "count",
+        "levels": [{"op": "gt", "value": 40, "severity": "HIGH"},
+                   {"op": "gt", "value": 25, "severity": "MEDIUM"}]})) == []
+
+
+def test_a_complete_profile_parameters_override_is_valid():
+    """A profile may override `parameters` (review blocker: the gate rejected every
+    profile block as "must be a string")."""
+    assert _shipped_with("H2", _set("profiles.spotter.parameters", {
+        "min_chars": 25, "max_chars": 400, "issues_shown": 3})) == []
+    assert _shipped_with("H10", _set("profiles.general.parameters", {"quote_chars": 80})) == []
 
 
 def test_shipped_catalog_still_clean_under_the_new_checks():

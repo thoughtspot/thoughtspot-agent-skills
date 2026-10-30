@@ -379,5 +379,5 @@ def test_parameters_render_in_the_grading():
     from ts_cli.audit.catalog_model import load_catalog
     checks = generate.report_meta(load_catalog())["checks"]
     assert checks["H2"]["thresholds"] == \
-        "LOW · tuned by min_chars=20, max_chars=400, issues_shown=3"
-    assert checks["H10"]["thresholds"].endswith(" · tuned by quote_chars=60")
+        "LOW; tuned by min chars 20, max chars 400, issues shown 3"
+    assert checks["H10"]["thresholds"].endswith("; tuned by quote chars 60")

@@ -45,7 +45,7 @@ def _inject_findings_into_erd(corpus: dict, findings: list, check_meta: dict) ->
         erd = model.get("erd")
         if not erd:
             continue
-        table_names = {t["id"] for t in erd.get("tables", [])}
+        table_names = {str(t["id"]) for t in erd.get("tables", []) if t.get("id")}
         # The table named first in the detail (longest name on a tie, then by name), so
         # the target is the same on every run: set order is not (a detail naming several
         # tables, D3's roll-up, picked a different one per hash seed).
