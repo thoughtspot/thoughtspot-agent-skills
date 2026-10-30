@@ -73,18 +73,21 @@
 - id: P4
   title: "Apply-all-joins anti-pattern (join_progressive:false)"
   description: >-
-    A Model with more than 5 tables and `join_progressive: false` joins every table on
-    every query. Counted as the Model's tables when join_progressive is explicitly
-    false, so the count is 0, and silent, on a progressive Model and on one that does
-    not set it (the schema default is true; until 2026-10 an unset value counted as
-    off). D4 was merged into this rule in 2026-10.
+    A Model with more than 5 tables and `join_progressive` off joins every table on
+    every query. Counted as the Model's tables when join_progressive is not set (an
+    unset value joins every table, live-verified 2026-08-10), so the count is 0, and
+    silent, on a progressive Model, and on one whose `properties` is malformed and so
+    cannot be read. D4 was merged into this rule in 2026-10.
   categories: [P, D]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: count
     over: model.table
-    where: {field: parent.properties.join_progressive, eq: false}
+    where:
+      all:
+        - {not: {field: "parent.@properties_unreadable", truthy: true}}
+        - {field: parent.properties.join_progressive, truthy: false}
   bands:
     direction: lower_is_better
     unit: count
@@ -222,7 +225,9 @@
   description: >-
     More than 30 text-search indexed columns on a Model with Spotter enabled
     (`properties.spotter_config.is_spotter_enabled`). Counted as the indexed columns
-    of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter.
+    of a Spotter-enabled Model, so the count is 0 — and silent — without Spotter. A
+    column whose `properties` is malformed is not counted: its index setting cannot be
+    read.
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -232,6 +237,7 @@
     where:
       all:
         - {field: parent.properties.spotter_config.is_spotter_enabled, truthy: true}
+        - {not: {field: "@properties_unreadable", truthy: true}}
         - {field: "@is_indexed", truthy: true}
   bands:
     direction: lower_is_better

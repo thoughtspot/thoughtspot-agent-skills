@@ -500,6 +500,11 @@ def test_a_malformed_mapping_reads_as_absent(bad):
     # a derived field reading the key in Python takes the same view: absent `index_type`
     # is the default, indexed (S2 and P11 reach it only behind other conditions)
     assert fields.get(_item({"properties": bad}), "@is_indexed", ctx) is True
+    # …which is why a rule that must not judge it excludes the item explicitly
+    assert fields.get(_item({"properties": bad}), "@properties_unreadable", ctx) is True
+    for fine in ({}, {"x": 1}, None):
+        assert fields.get(_item({"properties": fine}), "@properties_unreadable", ctx) is False
+    assert fields.get(_item({}), "@properties_unreadable", ctx) is False
 
 
 def test_malformed_mappings_names_each_path():

@@ -198,14 +198,55 @@ def test_a_malformed_mapping_does_not_end_the_run(where, bad):
     assert ctx.warnings, "a malformed mapping is named in a warning"
 
 
-@pytest.mark.parametrize("props", [["oops"], {}, {"is_bypass_rls": False}])
-def test_an_unset_join_progressive_raises_no_finding(props):
-    """Absent `join_progressive` is the schema default, true: P4 reports neither a
-    Model that leaves it unset nor one whose `properties` is malformed and so reads as
-    absent (review finding: with item 10 alone, a malformed one read as off)."""
-    from ts_cli.audit import run_audit
-    ctx = _corrupt("model", props)
+def _wide(ctx):
     tables = ctx.models[0]["model"]["model_tables"]
     tables += [{"name": f"T{i}", "fqn": f"t-x{i}"} for i in range(6)]
+    return ctx
+
+
+@pytest.mark.parametrize("props,fires", [
+    ({}, True),                                  # unset: joins every table (live 2026-08-10)
+    ({"is_bypass_rls": False}, True),
+    ({"join_progressive": False}, True),
+    ({"join_progressive": True}, False),
+    (["oops"], False),                           # malformed: cannot be read, not judged
+    ([{"join_progressive": False}], False),
+])
+def test_p4_reads_unset_as_off_and_does_not_judge_malformed(props, fires):
+    """An unset `join_progressive` joins every table into every query (live-verified
+    2026-08-10, ts-object-model-agentql-query patterns.md), so P4 reports it; a malformed
+    `properties` cannot be read, so P4 judges nothing (review: reading it as absent made a
+    false HIGH, and making unset read as on contradicted the live probe)."""
+    from ts_cli.audit import run_audit
+    ctx = _wide(_corrupt("model", props))
     out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
-    assert not [f for f in out["findings"] if f["check_id"] == "P4"]
+    p4 = [f for f in out["findings"] if f["check_id"] == "P4" and f["object_guid"] == "m-1"]
+    assert bool(p4) is fires
+
+
+def test_a_malformed_model_properties_silences_its_parent_property_rules():
+    """S4, S10 and P11 read `parent.properties.*`; on a malformed Model `properties`
+    holding a mapping that would fire them all, they read it as absent."""
+    from ts_cli.audit import run_audit
+    ctx = _corrupt("model", [{"is_bypass_rls": True,
+                              "spotter_config": {"is_spotter_enabled": True}}])
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    fired = {f["check_id"] for f in out["findings"] if f["object_guid"] == "m-1"}
+    assert not fired & {"S4", "S10", "P11"}
+
+
+def test_s2_does_not_judge_a_column_whose_properties_cannot_be_read():
+    """A PII column whose `properties` is a list (here wrapping DONT_INDEX) has an
+    unreadable index setting: S2 must not report it indexed (review finding)."""
+    from ts_cli.audit import run_audit
+    ctx = _populated_with_two_models()
+    ctx.models[0]["model"]["columns"].append(
+        {"name": "Email Address", "column_id": "ORDERS::EMAIL",
+         "properties": [{"column_type": "ATTRIBUTE", "index_type": "DONT_INDEX"}]})
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["S"])
+    assert not [f for f in out["findings"]
+                if f["check_id"] == "S2" and f["object_name"] == "Email Address"]
+    ctx.models[0]["model"]["columns"][-1]["properties"] = {"column_type": "ATTRIBUTE"}
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["S"])
+    assert [f for f in out["findings"]
+            if f["check_id"] == "S2" and f["object_name"] == "Email Address"]

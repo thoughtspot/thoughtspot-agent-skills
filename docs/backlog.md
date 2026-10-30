@@ -315,7 +315,7 @@ are roughly ordered by value÷effort.
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
 | BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
-| BL-498 | `ts audit run` still ends on a Table's `rls_rules` written as a flat list (a shape some builds export), a Model's `model_instructions` written as a list, and a scalar `columns[]` entry; the item-10 fix covered `properties`, `spotter_config` and `db_column_properties` only | 2026-11-30 |
+| BL-498 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -14810,21 +14810,22 @@ used as a name or description still ends the run at the JSON output (the report'
 **Progress (2026-10-30, BL-406 item 10).** Item 10 is closed, by the product owner's ruling
 (2026-10-30): malformed TML reads as absent. A key the schema defines as a mapping
 (`properties`, `spotter_config`, `db_column_properties`) holding a list or scalar is null
-to every field path (`fields._step`, `tml.MAPPING_KEYS`), never mapped over; Python reads
-go through `tml.mapping`; and `ts audit run` warns, naming the Model or Table (with its
-guid) and the path. Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3
-reported the column as hidden and A1/A2 left it out, and the same shape ended
-`ts audit run` (the report corpus, the ERD, `table_role`, the RLS column reads, D12). On a
-malformed Model `properties`, S4, S10 and P11 now stay silent (their `parent.properties`
-reads are absent). P4 now fires only on an explicit `join_progressive: false`: the schema
-default is true, and P4 had read an unset value as off, so with item 10 a malformed
-`properties` would have raised a false HIGH; real exports always set it, and the SE demo
-sample is unchanged. Pinned: A1, A2 and H3 on the two malformed inputs, P4 on the inputs
-that left `join_progressive` unset. The wider class (flat-list `rls_rules`, list
-`model_instructions`, scalar columns) is BL-498. P6's in-code grading is accepted (same
-date), to revisit when a profile needs different P6 severities or a second rule shares its
-shape. What remains open here is only the review follow-ups recorded above (D9/P16
-literals, D7's value-dependent wording, date-typed values at the JSON output).
+to every field path (`fields._step`, `tml.MAPPING_KEYS`), never mapped over; the Python
+reads that crashed use `tml.mapping` (two older reads keep equivalent `isinstance`
+guards); and `ts audit run` warns, naming the Model or Table (with its guid) and the path.
+Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column
+as hidden and A1/A2 left it out, and the same shape ended `ts audit run` (the report
+corpus, the ERD, `table_role`, column types, the RLS column reads, D12). On a malformed
+Model `properties`, S4, S10 and P11 stay silent (their `parent.properties` reads are
+absent). Where an unset value has a meaning of its own, absent is not enough: an unset
+`join_progressive` joins every table (live-verified 2026-08-10) and an unset `index_type`
+indexes the column, so P4, S2 and P11 exclude an item whose `properties` cannot be read
+(`@properties_unreadable`) rather than reporting it. Pinned: A1, A2 and H3 on the two
+malformed inputs; nothing else moves, and the SE demo sample is unchanged. The wider class
+is BL-498. P6's in-code grading is accepted (same date), to revisit when a profile needs
+different P6 severities or a second rule shares its shape. What remains open here is only
+the review follow-ups recorded above (D9/P16 literals, D7's value-dependent wording,
+date-typed values at the JSON output).
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
@@ -15972,28 +15973,36 @@ moved it. Fix `ts auth whoami` (and the two other callers) to the supported call
 
 **Target:** 2026-11-30.
 
-## BL-498 — `ts audit run` ends on other non-mapping shapes: flat-list `rls_rules`, list `model_instructions`, scalar columns `Tier 2`
+## BL-498 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
 
-**Filed:** 2026-10-30. **Source:** the independent review of the BL-406 item-10 fix.
+**Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
 **What.** Item 10 made a list or scalar under `properties`, `spotter_config` or
-`db_column_properties` read as absent (`tml.MAPPING_KEYS`, `tml.mapping`). Three shapes
-outside that set still end `ts audit run` with an AttributeError and no warning:
+`db_column_properties` read as absent (`tml.MAPPING_KEYS`, `tml.mapping`). The class is
+wider: anywhere the schema has a mapping, or a list of mappings, a different shape still
+ends `ts audit run` with an AttributeError and no warning. Reproduced on the populated
+fixture with one mutation each:
 
-- a Table's `rls_rules` as a flat list of rules (`engine/scopes.py` `_rls_rules`,
-  `engine/tml.py` `rls_column_refs`, `engine/fields.py`'s RLS reads). The ERD parser's
-  `_rls_rule_list` (`agents/shared/erd/parser.py`) says some builds export exactly this,
-  so it may be a real export shape, not malformed input;
-- a Model's `model_instructions` as a list (`@is_coached`, read by A3 and the readiness
-  score);
-- a `columns[]` entry that is a scalar (`engine/scopes.py`).
+| Shape | Crash site |
+|---|---|
+| a Table's `rls_rules` as a flat list of rules | `engine/scopes.py` `_rls_rules`, `engine/tml.py` `rls_column_refs`, `engine/fields.py`'s RLS reads |
+| a scalar `rls_rules.rules[]` entry, or a string `rules` | `engine/tml.py` `rls_column_refs` |
+| a Model's `model_instructions` as a list or a string | `engine/fields.py` `@is_coached` (A3, the readiness score) |
+| a model table's `joins_with` as a mapping | `engine/tml.py` `_joins_with_index` |
+| a scalar `model_tables[]` entry | `engine/tml.py` (join counting) |
+| a scalar Model `columns[]` or `formulas[]` entry | `engine/scopes.py` |
+| a scalar Table `columns[]` entry | `audit/context.py` (column types) |
 
-**Do.** `rls_rules` must NOT read as absent: that would hide a Table's row-level
-security and make the security rules report it unprotected. Confirm the flat-list shape
+None was seen in the 2026-07-30 TML census (2 of 2 `table.rls_rules` were mappings); the
+flat-list `rls_rules` shape rests only on the ERD parser's `_rls_rule_list` docstring
+(`agents/shared/erd/parser.py`), unverified.
+
+**Do.** One rule for the class: a list of mappings skips a non-mapping entry, and a
+mapping key reads a non-mapping as absent, each with the item-10 warning. `rls_rules` is
+the exception and must NOT read as absent, since that would hide a Table's row-level
+security and make the security rules call it unprotected: confirm the flat-list shape
 against a live export or the SpotterCode MCP, then normalise both shapes in one audit
-helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). Read
-`model_instructions` through `tml.mapping` and add it to `MAPPING_KEYS` if the schema
-confirms it is always a mapping. Skip a scalar column entry with a warning. Each with an
-end-to-end test (`run_audit` then `render_report`).
+helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). End-to-end tests
+(`run_audit` then `render_report`) for each row above.
 
 **Target:** 2026-11-30.

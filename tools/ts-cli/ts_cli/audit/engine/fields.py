@@ -154,6 +154,18 @@ def _step(value: Any, step: str) -> Any:
 
 # ── derived fields ──────────────────────────────────────────────────────────
 
+@register("properties_unreadable", uses=(), values=(False, True),
+          label="its properties are malformed and cannot be read")
+def _properties_unreadable(item: dict, ctx: Any) -> bool:
+    """Model, column or table: `properties` is present but not a mapping (a list or a
+    scalar). A path reads it as absent (BL-406 item 10), which is right for a value the
+    platform defaults — but where absent has a meaning of its own (an unset
+    `join_progressive` joins every table; an unset `index_type` indexes the column), a
+    rule must not judge what it could not read: it excludes the item with this field."""
+    value = (item.get("obj") or {}).get("properties")
+    return value is not None and not isinstance(value, dict)
+
+
 @register("is_indexed", uses=(), values=(False, True),
           label="the column is indexed for search")
 def _is_indexed(item: dict, ctx: Any) -> bool:
