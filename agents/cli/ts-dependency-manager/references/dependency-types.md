@@ -7,6 +7,14 @@ or before changing how Step 4 walks the graph. When the status of a row here cha
 (e.g. a "Partial" entry becomes "Implementable" because retrieval is now verified),
 update both this file AND the corresponding `references/open-items.md` entry.
 
+**Scope.** Every row below is a dependent that Audit, Remove and Repoint detect, and
+rewrite or review. Mode D (Delete with dependents, SKILL.md Step 3-D) uses none of this
+table: its scope for each run is the server's own cascade preview
+(`ts dependency cascade-preview`) — every object that answer names. That is the best
+available estimate, not a proven-complete one (it was only checked live on a shallow
+graph), so the delete step also checks afterwards which objects actually went. See
+open-items #26.
+
 Status legend:
 - **Implementable** — retrieval verified, detection & update logic sketched
 - **Partial** — TML structure known but retrieval mechanism not yet verified

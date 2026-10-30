@@ -15,6 +15,11 @@ rollback would have passed silently. It now drives the three subcommands directl
       target model (source only, unless --fix-guid/--delete-guid are given), pipes it
       to `ts dependency backup` on stdin, and validates the returned manifest JSON and
       the backup directory it wrote to disk.
+  3b. ts dependency cascade-preview   — NON-destructive dry run of a cascade delete of the
+      target model (administrators only; skipped for any other profile). Passes on a
+      preview whose backup_source is the model, or on a server business-rule REFUSED.
+      The cascade delete itself has no leg here: it was live-tested by hand on
+      throwaway objects (references/open-items.md #26).
   4.  ts dependency apply-change      — DESTRUCTIVE. Gated behind an explicit opt-in
       flag, --run-apply-change (default OFF). Without the flag this step is SKIPPED,
       not run. When set, it builds a minimal REMOVE plan against the Step 3 backup_dir
@@ -236,6 +241,33 @@ def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | No
         return result.summary()
     manifest, backup_dir = backup_out
     result.info(f"Backup dir: {backup_dir}  ({len(manifest['objects'])} object(s) backed up)")
+
+    # ── Step 3b: ts dependency cascade-preview (dry run, non-destructive) ─
+    def _run_cascade_preview():
+        if "ADMINISTRATION" not in (whoami.get("privileges") or []):
+            raise SkipStep("cascade-preview is administrators-only — profile is not an admin")
+        proc = subprocess.run(
+            ["ts", "dependency", "cascade-preview", model_guid, "--type", "LOGICAL_TABLE",
+             "--profile", ts_profile], capture_output=True, text=True)
+        try:
+            parsed = json.loads(proc.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"cascade-preview gave no JSON (exit {proc.returncode}): "
+                               f"{proc.stderr.strip()[:300]}") from e
+        if parsed.get("status") == "REFUSED":       # a server rule blocks it — valid answer
+            return parsed
+        if proc.returncode != 0 or parsed.get("status") != "PREVIEW":
+            raise RuntimeError(f"cascade-preview failed: {proc.stderr.strip()[:300]}")
+        if (parsed.get("backup_source") or {}).get("guid") != model_guid:
+            raise RuntimeError(f"backup_source should be the model itself, got {parsed.get('backup_source')}")
+        return parsed
+
+    ok, preview = result.step(
+        "ts dependency cascade-preview (dry run, administrators only)", _run_cascade_preview,
+    )
+    if ok and preview:
+        result.info(f"cascade-preview: {preview.get('status')}, "
+                    f"{preview.get('total', 0)} dependent(s) would be deleted with the model")
 
     # ── Step 4: ts dependency apply-change (DESTRUCTIVE — opt-in only) ───
     def _run_apply_change():

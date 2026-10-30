@@ -289,3 +289,78 @@ Re-verified live: the same cycle now rolls back all 5 objects in ONE pass (sourc
 first, then the 4 models), 0 failures. Tests updated in `test_dependency_backup.py`.
 
 **Status:** FIXED + unit-tested + live-verified.
+
+---
+
+## #26 — Cascade delete endpoint (`ts dependency cascade-*`) — VERIFIED LIVE 2026-10-30
+
+`POST /callosum/v1/dependency/delete-with-dependents` deletes an object and its whole
+dependent cascade server-side. It is v1-only: there is no v2 equivalent. Request shape
+from the `ts-dependency-cleanup` investigation (PR #666, its open items #12, #16, #17):
+form body `type` (`LOGICAL_TABLE` | `LOGICAL_COLUMN`), `id` (a JSON-array string),
+`operation_type=DELETE_OBJECT_CASCADE`, `apply_changes` (`false` = dry run). Note the
+prefix: `/callosum/v1/dependency/`, not `/callosum/v1/tspublic/v1/` (404 there).
+
+Re-verified on a test cluster (build reports its version as `test`), 2026-10-30:
+
+| Question | Finding |
+|---|---|
+| Does the v2 bearer token from `ts auth` work? | **Yes.** The PR's v1 `session/login` cookie is not needed — same as `/callosum/v1/metadata/detail` in `ts_cli/sets/discover.py` |
+| Body encoding | Form only. `Content-Type: application/json` → **415**. `client.py` forced that header on every call; a dict `data=` now gets the form header |
+| Admin check on clusters where `auth/session/user` 404s | The CLI's role check calls `auth/session/user`, which BL-497 records as 404 on one cluster. There both commands stop with that error before any cascade call — safe, but mode D is unusable there until BL-497 is fixed |
+| Who may call it | **Administrators only, preview included.** A non-admin (no `ADMINISTRATION` privilege) gets **403** `Tenant privilege required to perform this operation` on the dry run |
+| Does the server check `type` against the GUID? | **No.** A Table's GUID sent as `LOGICAL_COLUMN` returned a preview. The CLI now checks the type with `resolve_source` before any cascade call |
+| Author of each object | `dependents[].authorName` is null; the author is only in the `csv` field's `author` column |
+| Business-rule refusals | `400 METADATA_ERROR`, e.g. *Deleting columns linked to filters is not allowed* — matches PR #666 #18 |
+| Delete, live, on throwaway objects | Model alone ✅; Model + Answer ✅; Model column + Answer ✅ (the column leaves the Model, which survives) |
+| Rollback, live | ✅ All three. A restored Answer points at the restored Model's NEW GUID (closes PR #666 #20) |
+| Race guard | ✅ A backup missing one dependent → `RECHECK_MISMATCH`, nothing deleted |
+| Cascade vs. dependents lookup | Same objects on this cluster's shallow data. PR #666 #19 measured 4 reported vs 12 deleted on a deeper graph — so the preview, not `ts metadata report`, sizes a delete |
+| Preview of an object that is already deleted | **200 with `{"dependents": {"<guid>": []}}`** — indistinguishable from a live object with no dependents. So the preview cannot tell whether a delete happened. `cascade-delete` decides that from v2 `metadata/search` with an explicit type, which returns no row for a deleted object and one row for a live one (also batched) |
+
+`dependency/purge` is deliberately not wrapped: it takes no parameters and its scope —
+possibly every soft-deleted object on the instance — is unverified (PR #666 #8).
+
+**Not proven: whether the preview holds the full closure of a deep graph.** PR #666's
+#19 left this open ("this run does not settle it"), and this cluster's data was one
+level deep. The CLI therefore takes the scope from every object the preview names —
+every `dependents` key's list and every CSV row, not only `dependents[<guid>]` — and,
+after the delete, checks which objects are actually gone and names any the server's
+answer lists that the backup does not hold. Settle it by previewing a Table → Model →
+View → Answer chain live.
+
+**Status:** VERIFIED on one build, except the closure question above. Re-run the
+non-destructive smoke test step on a second build (SaaS) before relying on it there.
+
+---
+
+## #27 — Cascade delete fails when the cascade includes a Liveboard — OPEN (server-side)
+
+Live on the same test cluster, 2026-10-30: any cascade whose preview includes a
+Liveboard answered the delete with **HTTP 500** `code 14009`, `FAILED_TO_COMMIT ...
+Restrict delete failed for edge=2`. Reproduced twice (a joined Model with an Answer and
+a Liveboard; a single-table Model with the same). The identical Model + Answer without
+the Liveboard deleted cleanly, and the same Liveboard deleted fine on its own through
+v2 `ts metadata delete`.
+
+Nothing is deleted when this happens — the re-check after the failure reported every
+object still present, and `cascade-delete` reports `NOT_APPLIED` with the server's text
+in `server_response`. PR #666 deleted Liveboards in a cascade on its cluster, so this
+looks build-specific.
+
+**Next:** retest on a SaaS build. If it reproduces, raise it with ThoughtSpot with the
+incident id, and consider a documented workaround (delete the previewed Liveboards with
+`ts metadata delete` after the backup, then run the cascade).
+
+---
+
+## #28 — Re-running a partial rollback duplicates what it already restored — OPEN
+
+`ts dependency rollback` re-creates each DELETE entry with `create_new=True` and does not
+record the new GUIDs anywhere but its stdout. After a partial restore (exit 1), running it
+again creates a second copy of every object the first run restored, and a `--guid` re-run
+has nothing to re-link the remaining objects to. Found in the PR #666 follow-up review.
+
+**Next:** write `new_guids` into the backup directory as each object is restored, and
+have a re-run skip entries already restored and re-link against the recorded GUIDs.
+Until then, SKILL.md D7 and Step 11 say not to re-run a partial rollback.

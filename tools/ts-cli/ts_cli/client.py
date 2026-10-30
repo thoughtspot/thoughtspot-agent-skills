@@ -413,7 +413,9 @@ class ThoughtSpotClient:
         url = f"{self._base_url}{path}"
         allow_401_retry = path != _AUTH_TOKEN_PATH
 
-        is_multipart = "files" in kwargs
+        # A dict `data=` is a form body: requests sets its form Content-Type, which a
+        # forced application/json would override (the v1 /dependency family answers 415).
+        is_multipart = "files" in kwargs or isinstance(kwargs.get("data"), dict)
         retried_401 = False
         transient_attempts = 0
         while True:

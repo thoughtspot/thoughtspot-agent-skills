@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
+- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0
+- chore: bump ts-cli to v0.191.0
 - feat(audit): noise fixes (ts-audit v2 roadmap PR 2.3), with BL-112. D3 rolls LEFT/RIGHT outer joins into one INFO per Model; H2 drops the "The "/"A " boilerplate test; A1/A2 count visible columns only; D5, D10, D11, H3 and P7 find tables by alias; S1 matches display names with whole-word short tokens; S5 matches a spaced "API Key"; P18 ignores references and literals and names its kind; the audit smoke test runs `ts audit run`/`report`. ts-audit 3.6.0
 - chore: bump ts-cli to v0.190.0
 - feat(audit): the BL-406 rule contradictions resolved per the 2026-10-23 rulings (ts-audit v2 roadmap PR 2.2), with BL-461 and BL-462. A4 retitled "Model has no description"; D7 reports a partial overlap only when a table both Models contain is a fact table in either; D11 words INFO findings by the join's cardinality and reads a referencing join's cardinality from its Table; H10 is MEDIUM for a stale Model name on an orphan Model; D9 matches every `sql_<type>_aggregate_op`; P18 also reads distinct-count formulas. ts-audit 3.5.0

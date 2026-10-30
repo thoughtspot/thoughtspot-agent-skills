@@ -118,6 +118,28 @@ def rollback_order(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(entries, key=rollback_sort_key, reverse=True)
 
 
+def order_by_references(entries: List[Dict[str, Any]], texts: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Refine `rollback_order` so every entry restores after the entries its TML names.
+
+    Type rank alone is not enough: a Model built on a View ranks above it and would
+    restore first, still naming the View's deleted GUID (PR #666 follow-up review). An
+    entry depends on another when its backup text (`texts[guid]`) contains that entry's
+    GUID. Ties and cycles fall back to `rollback_order`. Does not mutate `entries`.
+    """
+    pending = rollback_order(entries)
+    deps = {id(e): {o.get("guid") for o in entries
+                    if o is not e and o.get("guid") and o["guid"] in texts.get(e.get("guid") or "", "")}
+            for e in pending}
+    placed: List[Dict[str, Any]] = []
+    done: set = set()
+    while pending:
+        nxt = next((e for e in pending if deps[id(e)] <= done), pending[0])
+        pending.remove(nxt)
+        placed.append(nxt)
+        done.add(nxt.get("guid"))
+    return placed
+
+
 def remap_guids(text: str, new_guids: Dict[str, str]) -> str:
     """Replace every original GUID in `text` with the GUID its object was restored under.
 
