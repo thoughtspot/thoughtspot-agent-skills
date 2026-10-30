@@ -315,8 +315,8 @@ are roughly ordered by value÷effort.
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
 | BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
-| BL-498 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
-| BL-499 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -14826,8 +14826,8 @@ such a value as None and Python reads go through `tml.mapping`, as a backstop. P
 `data_single_model_malformed_column` loses its A4 and H4 (the Model is not judged), and
 `tml_value_shapes` no longer carries the two malformed columns (moving A1/A2 7 → 6
 columns and dropping H3), so it keeps testing the other value shapes. The SE demo sample
-is unchanged (no malformed TML). The wider class is BL-498; converters emitting Models
-without `join_progressive` are BL-499. P6's in-code grading is accepted (same date), to
+is unchanged (no malformed TML). The wider class is BL-501; converters emitting Models
+without `join_progressive` are BL-502. P6's in-code grading is accepted (same date), to
 revisit when a profile needs different P6 severities or a second rule shares its shape.
 What remains open here is only the review follow-ups recorded above (D9/P16 literals, D7's
 value-dependent wording, date-typed values at the JSON output).
@@ -15978,7 +15978,7 @@ moved it. Fix `ts auth whoami` (and the two other callers) to the supported call
 
 **Target:** 2026-11-30.
 
-## BL-498 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
+## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
 
 **Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
@@ -16016,7 +16016,7 @@ make A3 report a coached Model as uncoached (HIGH under Spotter-ready). End-to-e
 
 **Target:** 2026-11-30.
 
-## BL-499 — converters emit Models without `join_progressive: true` `Tier 2`
+## BL-502 — converters emit Models without `join_progressive: true` `Tier 2`
 
 **Filed:** 2026-10-30. **Source:** the third review of the BL-406 item-10 fix, after the
 Model schema doc was corrected to say an unset `join_progressive` behaves as off.
