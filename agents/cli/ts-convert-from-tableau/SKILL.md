@@ -1618,11 +1618,17 @@ filter classes are now caught pre-import.
 Parse the JSON output to report results to the user:
 
 See [references/step-7-review-templates.md](references/step-7-review-templates.md) "Phase 2 — `build-model --existing-guid` JSON output shape" for the exact
-field list (`formulas_translated`/`skipped`/`filtered`/`added`, `formulas_dropped_on_import`
-with `name`/`expr`/`error`/`original_tableau`, `validation_warnings`, `updated_model_guid`).
+field list (`import_status`, `formulas_translated`/`skipped`/`filtered`/`added`,
+`formulas_dropped_on_import` with `name`/`expr`/`error`/`original_tableau`,
+`validation_warnings`, `updated_model_guid`).
 
-**If `formulas_dropped_on_import` is empty (or absent):** Report success. Proceed to
-Step 7.5 regardless of migration pace.
+**Check `import_status` first — an empty `formulas_dropped_on_import` alone isn't success.**
+A hard failure not attributable to one formula exits non-zero with `import_status: ERROR`
+and an empty `formulas_dropped_on_import` too. If `import_status` isn't `"OK"`, report
+`import_error` and stop.
+
+**If `import_status == "OK"` and `formulas_dropped_on_import` is empty (or absent):**
+Report success. Proceed to Step 7.5 regardless of migration pace.
 
 **If `formulas_dropped_on_import` is non-empty — behaviour depends on `{migration_pace}`:**
 
@@ -2494,10 +2500,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
-| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
-| 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
-| 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
-| 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |
+| 1.47.0 | 2026-10-30 | Model/formula-engine fixes (ts-cli v0.192.1). Parser false positives (function-name scans now mask literals/`[ref]`s first), nested-`group_aggregate` detection (checks span containment, not match-count, and only the 1st-argument position), LOD brace-scanning (single-pass stack scanner skipping `[ref]` spans), `convert_string_concat` gated on `datatype == "string"`, import-retry no longer fails open, reports success on an unattributable failure, or exits before the per-datasource JSON report prints, parameter types `INT64`/`DATE`, `range_config` → `range_min`/`range_max`, and mapping-doc fixes (nested-`group_aggregate` workaround, ratio-explosion, `WINDOW_AVG`/`STDEV` reconstruction, CHAR-parameter casts, dynamic-grain `DATETRUNC`) — backlog BL-501/502. |
 
-**Older entries (v1.0.0–v1.44.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.46.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

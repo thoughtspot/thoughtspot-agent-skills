@@ -110,7 +110,8 @@ Base model imported: {model_name}
   ],
   "validation_warnings": [...],
   "updated_model_guid": "guid",
-  "import_status": "OK"
+  "import_status": "OK",
+  "import_error": "present only when import_status != OK — e.g. an unparseable import response or a structural failure not attributable to one formula"
 }
 ```
 

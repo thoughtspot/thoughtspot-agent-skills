@@ -475,6 +475,58 @@ def _migrate_missing_parameters(
     return [p["name"] for p in added]
 
 
+def _run_one_import_attempt(import_tml: dict, profile: str) -> tuple[str, list | None, str]:
+    """Run one ``ts tml import``; import_result is None only when unparseable."""
+    import subprocess
+
+    tml_str = json.dumps(import_tml)
+    import_proc = subprocess.run(
+        ["ts", "tml", "import", "--profile", profile, "--policy", "ALL_OR_NONE"],
+        input=json.dumps([tml_str]), capture_output=True, text=True)
+    # Exits 1 on any per-item failure even under ALL_OR_NONE, so read the JSON.
+    try:
+        import_result = json.loads(import_proc.stdout)
+        status = import_result[0]["response"]["status"]["status_code"]
+    except (json.JSONDecodeError, LookupError, TypeError, KeyError):
+        msg = f"Unparseable import response (exit {import_proc.returncode}): {import_proc.stdout[:200] or import_proc.stderr[:200]}"
+        return "ERROR", None, msg
+    if status == "OK":
+        return status, import_result, ""
+    return status, import_result, import_result[0]["response"]["status"].get("error_message", "")
+
+
+def _parsed_err_for_added_formula(parsed_err: tuple | None, added_names: set[str]) -> tuple | None:
+    """Drop only a formula THIS batch added — a dependent may be the real cause."""
+    if parsed_err is not None and parsed_err[0] not in added_names:
+        return None
+    return parsed_err
+
+
+def _drop_cascade_victims(
+    merged: dict, bad_name: str, err_detail: str, added_names: set[str],
+    expr_by_fid: dict, original_by_name: dict, stats: dict, dropped_on_import: list[dict],
+) -> None:
+    """Drop ``bad_name`` and any added formula referencing it, this cycle only."""
+    from ts_cli.tableau.build_model import remove_formula
+
+    to_drop, reasons = _collect_cascade_victims(merged, bad_name, err_detail)
+    to_drop = [v for v in to_drop if v in added_names]  # same added-only rule
+    for victim in to_drop:
+        dropped_on_import.append({
+            "name": victim,
+            "expr": expr_by_fid.get(f"formula_{victim}", ""),
+            "error": reasons[victim],
+            "original_tableau": original_by_name.get(victim, ""),
+        })
+        remove_formula(merged, victim)
+        stats["added"] -= 1
+    if len(to_drop) > 1:
+        typer.echo(
+            f"    ↳ cascade-dropped {len(to_drop) - 1} dependent formula(s)",
+            err=True,
+        )
+
+
 def _import_with_retry(
     merged: dict,
     ds: dict,
@@ -488,43 +540,28 @@ def _import_with_retry(
     Mutates ``merged`` (formulas dropped on error), ``merged["_merge_stats"]``,
     and ``result`` (import_status / updated_model_guid / dropped list).
     """
-    import subprocess
-
-    from ts_cli.tableau.build_model import (
-        extract_imported_guid,
-        parse_import_error,
-        remove_formula,
-    )
+    from ts_cli.tableau.build_model import extract_imported_guid, parse_import_error
 
     stats = merged["_merge_stats"]
     expr_by_fid = {f["id"]: f.get("expr", "") for f in merged["model"]["formulas"]}
-    original_by_name = {
-        c.get("caption", c.get("name", "")): c.get("formula", "")
-        for c in ds.get("calculated_fields", [])
-    }
+    original_by_name = {c.get("caption", c.get("name", "")): c.get("formula", "")
+                         for c in ds.get("calculated_fields", [])}
     dropped_on_import: list[dict] = []
+    added_names = set(stats.get("added_names") or [])
     for _attempt in range(max_retries):
         import_tml = {k: v for k, v in merged.items() if not k.startswith("_")}
-        tml_str = json.dumps(import_tml)
-        import_proc = subprocess.run(
-            ["ts", "tml", "import", "--profile", profile, "--policy", "ALL_OR_NONE"],
-            input=json.dumps([tml_str]),
-            capture_output=True, text=True,
-        )
-        if import_proc.returncode != 0:
-            typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
-            raise SystemExit(1)
-        import_result = json.loads(import_proc.stdout)
-        status = import_result[0]["response"]["status"]["status_code"]
+        status, import_result, msg = _run_one_import_attempt(import_tml, profile)
+        if import_result is None:
+            result["import_status"] = "ERROR"
+            result["import_error"] = msg
+            typer.echo(f"  Import: {result['import_error']}", err=True)
+            break
         if status == "OK":
             result["import_status"] = status
-            result["updated_model_guid"] = (
-                extract_imported_guid(import_result) or existing_guid
-            )
+            result["updated_model_guid"] = extract_imported_guid(import_result) or existing_guid
             typer.echo(f"  Import: OK", err=True)
             break
-        msg = import_result[0]["response"]["status"].get("error_message", "")
-        parsed_err = parse_import_error(msg)
+        parsed_err = _parsed_err_for_added_formula(parse_import_error(msg), added_names)
         if parsed_err is None:
             result["import_status"] = status
             result["import_error"] = msg
@@ -532,24 +569,8 @@ def _import_with_retry(
             break
         bad_name, err_detail = parsed_err
         typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
-        # Drop the failing formula, then cascade-drop any formula that
-        # references it — in THIS cycle — so a failed root (e.g. a date-window
-        # formula) doesn't cost one import round-trip per downstream dependent.
-        to_drop, reasons = _collect_cascade_victims(merged, bad_name, err_detail)
-        for victim in to_drop:
-            dropped_on_import.append({
-                "name": victim,
-                "expr": expr_by_fid.get(f"formula_{victim}", ""),
-                "error": reasons[victim],
-                "original_tableau": original_by_name.get(victim, ""),
-            })
-            remove_formula(merged, victim)
-            stats["added"] -= 1
-        if len(to_drop) > 1:
-            typer.echo(
-                f"    ↳ cascade-dropped {len(to_drop) - 1} dependent formula(s)",
-                err=True,
-            )
+        _drop_cascade_victims(
+            merged, bad_name, err_detail, added_names, expr_by_fid, original_by_name, stats, dropped_on_import)
         if stats["added"] <= 0:
             typer.echo("  All new formulas dropped — nothing to import", err=True)
             result["import_status"] = "SKIPPED"
@@ -1442,6 +1463,8 @@ def build_model_cmd(
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
+    if any(r.get("import_status") not in (None, "OK") for r in all_results):
+        raise SystemExit(1)
 
 
 def _resolve_lb_spec(data: dict, model_name, model_fqn, report_name) -> dict:

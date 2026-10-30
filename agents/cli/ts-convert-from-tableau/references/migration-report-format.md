@@ -94,6 +94,17 @@ silently double-counts every measure built on it. The first two categories carry
 `(composite key)` when that happened, so say the whole key was dropped rather than one
 condition.
 
+**⚠ DATE_TIME parameter precision** — present only when a migrated parameter's Tableau
+`data_type` was `datetime` AND its source default/range/list value carried a non-midnight
+time component. ThoughtSpot's parameter `data_type` enum has no DATE_TIME (coverage-matrix.md
+L29), so the parameter imports as `DATE` and `MM/DD/YYYY` — the date survives, the time of day
+is silently dropped. Name each affected parameter and its original value so the user can judge
+whether the lost precision matters for that parameter's use:
+
+| Parameter | Tableau value | Migrated value |
+|---|---|---|
+| {name} | `{original, e.g. #2024-01-15 14:30:00#}` | `{MM/DD/YYYY}` |
+
 **Decisions made** — the non-obvious calls (blend → one SQL view, bins = formula vs cohort,
 dynamic vs anchored YoY, orphan worksheets added/left off, separate vs tabbed liveboards…).
 

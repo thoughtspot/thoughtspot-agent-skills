@@ -1092,6 +1092,60 @@ class TestConvertStringConcat:
         result = convert_string_concat(expr, role="measure")
         assert result == expr
 
+    def test_function_call_operand_wrapped_when_datatype_is_string(self):
+        """The case this was built for: a function call returning text
+        (e.g. LEFT, not just to_string) joined to a string literal by `+`,
+        in a dimension/string-typed formula."""
+        expr = "[a] + ' ' + LEFT ( [b] , 2 )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == "concat ( [a] , ' ' , LEFT ( [b] , 2 ) )"
+
+    def test_function_call_operand_not_wrapped_without_datatype_string(self):
+        """Without datatype=='string', a function call is not an eligible
+        concat operand — only the base [ref]/'literal'/to_string()/masked-
+        placeholder shapes are, same as before this change. `[a] + ' '` still
+        concats (both operands are already in the unconditional base set);
+        the chain simply doesn't extend to swallow `LEFT(...)` too."""
+        expr = "[a] + ' ' + LEFT ( [b] , 2 )"
+        result = convert_string_concat(expr, role="dimension", datatype=None)
+        assert result == "concat ( [a] , ' ' ) + LEFT ( [b] , 2 )"
+
+    def test_date_arithmetic_in_dimension_role_not_wrapped_in_concat(self):
+        """Regression: the new 'any function call' operand, combined with the
+        pre-existing `role == "dimension"` shortcut (which alone makes any `+`
+        pair look like string concat), wrapped ordinary numeric arithmetic in
+        `concat()` — which rejects non-text arguments, so a formula that
+        imports fine today would fail. Must not fire when datatype isn't
+        declared 'string', even though role is 'dimension'."""
+        expr = "diff_days ( [End Date] , [Start Date] ) + [Offset Days]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_year_plus_n_in_dimension_role_not_wrapped_in_concat(self):
+        expr = "year ( [d] ) + [n]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_ref_plus_ref_in_numeric_dimension_role_not_wrapped_in_concat(self):
+        """Gap: role=='dimension' alone (regardless of datatype) used to be
+        read as sufficient evidence of string concatenation — a numeric
+        dimension formula doing plain `[ref] + [ref]` addition (e.g. a
+        derived numeric key) got wrongly concat()-ed. Must stay plain
+        arithmetic once datatype is declared non-string."""
+        expr = "[Year] + [Month Offset]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_arithmetic_inside_to_string_wrapper_not_split_into_concat(self):
+        """Gap: with datatype=='string' enabling the 'any function call'
+        concat operand, `sum([a]) + sum([b])` INSIDE a to_string(...) call's
+        own argument (ordinary arithmetic being stringified, not
+        concatenation) was matched as its own concat-pair and wrapped,
+        breaking the formula's arithmetic. Must come back out unchanged."""
+        expr = "to_string ( sum ( [a] ) + sum ( [b] ) )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
 
 class TestLooksLikeStringConcat:
     """`_looks_like_string_concat` — heuristic classifier (currently unused by
@@ -1448,6 +1502,40 @@ class TestConvertLod:
         # any other keyword is exercised here directly.
         result = _lod_to_group_aggregate("BOGUS", "[A] , [B]", "SUM([X])")
         assert result == "group_aggregate ( SUM([X]) , {} , {} )"
+
+    def test_field_name_with_unescaped_bracket_does_not_hide_a_following_lod(self):
+        """A [ref] can contain a literal, unescaped `[` (only a literal `]`
+        needs Tableau's `]]` escape) — e.g. a field named "Ratio [x" is
+        written `[Ratio [x]`. A naive bracket-depth counter miscounts this
+        and can leave a real {FIXED/INCLUDE/EXCLUDE...} that follows raw."""
+        expr = "[Ratio [x] + {FIXED [B]: SUM([t])}"
+        result = convert_lod(expr)
+        assert "group_aggregate" in result
+        assert "{FIXED" not in result
+
+    def test_sibling_lods_one_per_if_elseif_branch_all_convert(self):
+        """An if/else-if chain with one {FIXED/INCLUDE/EXCLUDE...} per branch
+        (e.g. one per tier) only had its first branch converted: the first
+        branch's own emitted `{ [dims] }` set-literal becomes the next brace
+        pair the scan sees, `_parse_lod_content` correctly rejects it (not
+        real LOD syntax) — but the scan must continue past it to find the
+        next sibling's real LOD, not stop there."""
+        expr = (
+            'IF [Tier] = "All" THEN {FIXED [Date]: MAX([CountAll])} '
+            'ELSEIF [Tier] = "A" THEN {FIXED [Date]: MAX([CountA])} '
+            'ELSE {FIXED [Date]: MAX([CountOther])} END'
+        )
+        result = convert_lod(expr)
+        assert result.count("group_aggregate") == 3
+        assert "{FIXED" not in result
+
+    def test_genuinely_nested_lod_still_converts_both_levels(self):
+        """The innermost-first behavior must survive alongside the
+        skip-past-a-failed-candidate fix above — a failed candidate's outer
+        LOD (if it has one) must not be lost either."""
+        result = convert_lod("{FIXED [A] : SUM({FIXED [B] : MAX([col])})}")
+        assert result.count("group_aggregate") == 2
+        assert "{FIXED" not in result
 
 
 # ---------------------------------------------------------------------------

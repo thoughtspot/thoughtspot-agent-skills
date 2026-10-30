@@ -257,6 +257,7 @@ through untranslated.
 | L21 | Legend zones (the legend UI element) | TS draws its own legends | Skipped. NB: this is the legend *zone* only — a Color *shelf encoding* IS migrated (mapped #119/#121) |
 | L22 | `DATEDIFF('week', ...)` boundary semantics | Week-start semantics differ between Tableau and TS | Flag per workbook for manual verification |
 | L23 | Manual group value snapshot | `categorical-bin` values from TWB authoring time may not exist in current data | Flag as data-fidelity limitation |
+| L29 | DATE_TIME parameter default/range/list values with a time component | ThoughtSpot's parameter `data_type` enum has no DATE_TIME (`_tableau_type_to_ts_param`, `twb.py`), so a `datetime`-typed parameter maps to `DATE`; `_normalize_date_params`/`_reformat_tableau_date` convert `#YYYY-MM-DD[ HH:MM:SS]#` to `MM/DD/YYYY`, silently dropping any `HH:MM:SS` present — the value imports cleanly, just date-only | Flag in the migration report when a DATE_TIME parameter's source value carries a non-midnight time component; document the loss rather than attempt a workaround (no DATE_TIME parameter type exists to migrate to) |
 
 ### Notes on limitations
 

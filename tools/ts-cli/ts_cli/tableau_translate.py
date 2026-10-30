@@ -89,8 +89,6 @@ WEEK_START_ASSUMED_NOTE = (
     "formula (BL-334)")
 
 from ts_cli.tableau.strings_types import (  # noqa: F401
-    _CONCAT_OPERAND,
-    _CONCAT_PAIR,
     _IN_PAREN,
     _looks_like_string_concat,
     _replace_string_plus_chains,
@@ -161,6 +159,7 @@ def translate_single(
     csq_to_table: dict[str, str] | None = None,
     date_columns: set[str] | None = None,
     week_start: str | None = None,
+    datatype: str | None = None,
 ) -> tuple[str, list[str], dict[str, int]]:
     """Apply the full translation pipeline to a single formula expression.
 
@@ -226,7 +225,7 @@ def translate_single(
     expr = convert_boolean_aggregate(expr)
 
     # 11. String concatenation
-    expr = convert_string_concat(expr, role, literal_registry)
+    expr = convert_string_concat(expr, role, literal_registry, datatype)
 
     # 11b. Operator spacing (BL-046 #4)
     expr = normalize_operator_spacing(expr)
@@ -434,6 +433,7 @@ def translate_formulas(
                 csq_to_table=csq_to_table,
                 date_columns=date_columns,
                 week_start=week_start,
+                datatype=f.get("datatype"),
             )
 
             for note_key, note_count in notes.items():

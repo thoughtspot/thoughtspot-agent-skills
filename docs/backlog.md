@@ -320,6 +320,7 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
+| BL-501 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -418,6 +419,7 @@ are roughly ordered by value÷effort.
 | BL-492 | from-dbt column-removal diff uncodified — `ts dbt diff-columns` | 2026-12-31 |
 | BL-493 | `smoke_ts_to_databricks.py` passes with the emitter skipped | 2026-12-31 |
 | BL-494 | `check_ossie_mapping_sync` runs nowhere | 2026-12-31 |
+| BL-502 | Unconfirmed whether `fix_double_aggregation`'s blanket `sum([formula_X])` → `[formula_X]` simplification silently undoes a `group_aggregate(...)`-wrapped reference another formula shape needs to avoid a misleading import failure | 2026-12-31, or the next converter work touching `fix_double_aggregation` |
 
 ### Tier 4 — Deferred
 
@@ -16019,3 +16021,56 @@ objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
 `idempotent=False` at the two call sites in `commands/dbt.py`), with a test.
 
 **Target:** 2026-11-30.
+
+## BL-501 — Correct Step 7's "rerun when formulas are filtered" explanation `Tier 2`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.
+`references/step-7-review-templates.md` tells the reader that a non-zero
+`formulas_filtered` from `build-model --existing-guid` can be a same-batch ordering
+artifact — a formula depending on another formula added in the *same* batch, filtered
+because its dependency "wasn't live yet" — and that an identical retry often clears it once
+the dependency is live. That explanation is wrong: a same-batch `[Base]` dependency is
+rewritten to the resolved `[formula_Base]` reference and kept, not filtered, so retrying
+fixes nothing in that case. Left as-is, this sends the next reader down the wrong
+diagnostic path on a genuine `formulas_filtered` result.
+
+**Do.** Identify the actual mechanism `filter_unresolvable_formulas` uses that makes a
+second identical run sometimes clear previously-filtered formulas (if one still exists —
+confirm live, don't assume the prose was describing a real behavior that just had the wrong
+cause), and correct the step-7 reference accordingly. If no such mechanism survives
+scrutiny, remove the "retry once" advice entirely rather than leave a plausible-sounding but
+false explanation in place.
+
+**Target:** next Tableau skill touch that reaches Step 7, or 2026-12-31, whichever comes
+first.
+
+## BL-502 — Check whether `fix_double_aggregation` (formula_common.py) undoes a wrapper a different formula shape actually needs `Tier 3`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission, flagging a
+tension between two findings from the same session:
+
+1. A Tableau-specific finding: when a formula references another `group_aggregate`-valued
+   formula and the combination hits ThoughtSpot's nested-`group_aggregate` restriction, one
+   fix shape is to wrap the reference in `group_aggregate(sum([formula_X]), query_groups(),
+   {})` rather than a bare `sum([formula_X])` — specifically because a bare `sum(...)`
+   around a reference to a formula with `average()`/`stddev()` dependents fails import with
+   a misleading `Formula addition failed... Search did not find` error, while the
+   `group_aggregate(...)`-wrapped form does not.
+2. The shared `fix_double_aggregation` (`tools/ts-cli/ts_cli/formula_common.py`, used by
+   every `ts-convert-from-*` converter, not just Tableau's) replaces `sum([formula_X])` with
+   bare `[formula_X]` whenever `X` is already aggregated — intended to avoid a genuine
+   double-aggregation, but applied as a blanket simplification regardless of what depends on
+   `X` downstream.
+
+If (1) is a real, general pattern (not Tableau-specific), (2) could be silently undoing the
+exact wrapper (1) says is required — reintroducing the same avg/stdev-dependent import
+failure for *any* converter's formula that happens to match this shape, not just Tableau's.
+
+**Do.** Confirm live, on a real cluster: does `fix_double_aggregation` ever fire on a
+formula `X` that itself has `average()`/`stddev()` dependents? If yes, does the simplified
+(bare-reference) output actually fail import the way a bare `sum(...)` wrap does in finding
+(1)? If the interaction is real, either make `fix_double_aggregation` skip simplifying when
+`X` has such a dependent, or confirm the two shapes are safe together and document why.
+
+**Target:** 2026-12-31, or the next converter work that touches `fix_double_aggregation` or
+the nested-`group_aggregate` reconstruction guidance, whichever comes first.

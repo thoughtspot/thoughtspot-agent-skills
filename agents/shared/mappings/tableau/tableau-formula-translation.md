@@ -185,6 +185,7 @@ command detects pass-through conflicts automatically and skips them.
 | `DATETRUNC('week', d [, start_of_week])` | Monday: `start_of_week ( d )`; Sunday (also the **assumed** start when none is recorded): `add_days ( date ( d ) , 0 - mod ( day_number_of_week ( d ) , 7 ) )`; Saturday: `add_days ( date ( d ) , 0 - mod ( day_number_of_week ( d ) + 1 , 7 ) )`; other days via `mod` (`formula_week.ts_week_start`) | Week start, in order: a literal `start_of_week`; else the datasource's Week start; else **Sunday, assumed**, as for `DATEPART('weekday')`. Tableau writes the datasource Week start only when the author changed it, and the en-US default is Sunday. The assumption is counted in `stats.weekday_week_start_assumed` and surfaced as a review note and pre-import warning (advisory). The non-Monday form is rebuilt from the fixed `day_number_of_week`, **not** by shifting `start_of_week`: `add_days ( start_of_week ( add_days ( d , 1 ) ) , -1 )` was exact on se-thoughtspot, but `start_of_week` compiles to `DATE_TRUNC(week, d)`, and under Snowflake `WEEK_START = 7` that shift returns Saturday. `date ( … )` casts a genuine DATETIME to a date (`date ( now ( ) )` → `CAST(… AS date)`). Live-verified for all seven start days on 120 dates, 2026-10-07 (BL-373, ts-cli 0.174.0). A field/parameter start is left untranslated. The week note says "exact week start (<day>)" for these forms; only `start_of_week` keeps the Monday-assumption wording |
 | `DATETRUNC('day', d)` | `date ( d )` | Truncating to day is just the date part — ThoughtSpot has no separate `start_of_day` function |
 | `DATETRUNC('week', TODAY()) + 1` | `add_days ( <the DATETRUNC('week') form above, over today ()> , 1 )`, e.g. `add_days ( start_of_week ( today () ) , 1 )` for a Monday start | Do NOT use + operator on dates |
+| `DATETRUNC([Grain Parameter], d)` (grain is a **parameter**, not a literal) | dispatch on the parameter's value | ThoughtSpot has no `date_trunc`-style function that takes a *variable* grain. The parameter driving it is almost always a small fixed list (Month/Quarter/Year) — dispatch with `if/else-if`: `if ( [Grain Parameter] = 'Month' ) then start_of_month ( d ) else if ( [Grain Parameter] = 'Quarter' ) then start_of_quarter ( d ) else if ( [Grain Parameter] = 'Year' ) then start_of_year ( d ) else null`. Same technique for a paired `DATENAME`-based label formula, using `month()`/`quarter_number()`/`year()` + `concat()`/`to_string()`. Don't default to omit-and-log just because the grain is dynamic — this is reconstructible (live-verified on a Tableau migration, 2026-10-14; 22 formulas in this and the `WINDOW_AVG`/`WINDOW_STDEV` family below, previously reported "untranslatable," all reconstructed this way). **Compare against the parameter's migrated `display_name`** — check an *already-working sibling formula* that references the same parameter for the actual runtime value/casing in use, rather than assuming a convention; a CHAR list parameter's runtime value is the migrated `display_name`, not Tableau's internal `list_config.value`, and a sibling formula referencing the same parameter is the authoritative source for what that display_name actually looks like (including any pre-existing spelling quirk carried over from the source). `DATEADD([Grain Parameter], n, d)` with a dynamic unit needs the identical dispatch, substituting `add_months`/`add_years` (note **`add_quarters` does not exist** — use `add_months(d, n*3)`). |
 | `DATEADD('day', n, d)` | `add_days ( d , n )` | Also `add_months`, `add_years` |
 | `DATEPART('month', d)` | `month_number ( d )` | Also `day()` (day of month), `year`, `quarter_number`, `day_number_of_week`, `day_number_of_quarter`, `day_number_of_year` |
 | `DATENAME('month', d)` | `month ( d )` | Returns month name (e.g. "January"). Use `month_number()` if numeric value needed |
@@ -333,6 +334,14 @@ answer (Snowflake: "Division by zero"). Every translated division gets one of:
 5. **Boolean operators** — `and`, `or`, `not` (lowercase)
 6. **No semicolons or statement terminators**
 7. **`to_date()` requires exactly 2 arguments** — `to_date ( '2019-07-31' , 'yyyy-MM-dd' )`
+9. **Every branch of an if/else-if chain must return the same type.** Mixing a boolean
+   branch with a string `else ''` (or a numeric `else 0` tacked onto an otherwise-string
+   chain) fails with an unrelated-looking error (*"Expecting a Text token"*). When
+   Tableau's source `CASE` had no `ELSE` at all (implicit `NULL`), pick an else value
+   matching the **other branches'** type — don't default to an arbitrary placeholder.
+   Synthetic example: an `if [tier] = 'A' then true else if [tier] = 'B' then true else ''`
+   chain breaks because the first two branches are boolean and the trailing `else ''` is a
+   string; it should be `else false` instead.
 
 ### Don't create redundant pass-through formulas
 
@@ -423,18 +432,102 @@ the ThoughtSpot translation so the user can compare.
 ### Platform limitation: nested `group_aggregate` not supported
 
 Tableau supports nested LOD expressions — e.g. `{FIXED [A] : SUM({FIXED [B] : MAX([col])})}`.
-ThoughtSpot does **not** support nesting `group_aggregate()` inside another `group_aggregate()`.
-This is a platform limitation, not a translation gap.
+ThoughtSpot does **not** support nesting `group_aggregate()` inside another `group_aggregate()`
+— specifically, a `group_aggregate` call's own 1st argument (the aggregate expression) cannot
+itself contain another `group_aggregate` call, whether written inline or as a reference to a
+`group_aggregate`-valued sibling formula. This is a platform limitation, not a translation gap,
+and it is enforced by the **query planner at execution time**, not the import validator — a
+formula built the wrong way can pass `VALIDATE_ONLY` import cleanly and only fail the moment
+something actually queries it (`"Nesting group-aggregate formulas is not supported"` in the
+UI; `NESTED_GROUP_AGGREGATE_NOT_SUPPORTED` via `ts agentql fetch-data`). **Always confirm a new
+`group_aggregate` formula with a real query, not just a clean import, before treating it as
+done.**
 
-**Workaround:** decompose nested LODs into separate formulas:
-1. Create the inner LOD as its own formula (e.g. `inner_max = group_aggregate(max([col]), {B}, {})`)
-2. Reference it in the outer LOD (e.g. `outer_sum = group_aggregate(sum([inner_max]), {A}, {})`)
+**What actually works, by the shape of the outer wrapper** (all three confirmed by live
+query, not import alone, on a Tableau migration, 2026-10-14):
 
-This requires two-phase import (the inner formula must exist before the outer one can reference it).
+- **Grand-total wrapper** (`group_aggregate(ref, {}, query_filters())`, e.g. Tableau's
+  `TOTAL(SUM(...))` applied to an already-LOD value) — drop the outer `group_aggregate`
+  entirely. A bare `sum([formula_inner])` gives the same result **only in an ungrouped
+  query** — confirm this holds for the actual usage before relying on it, since a grouped
+  query can behave differently depending on the inner formula's own dims shape.
+- **`EXCLUDE`-shaped wrapper** (`group_aggregate(ref, query_groups() - {dims}, filters)`,
+  e.g. `{EXCLUDE [x]: SUM({FIXED [a,b]: MAX([col])})}`) — there is no bare-aggregate escape
+  hatch here; relative `query_groups() - {...}` dims genuinely require `group_aggregate`
+  syntax. Inline the raw aggregate directly in the one remaining `group_aggregate` call
+  instead of referencing the inner FIXED-LOD formula: `group_aggregate(max([raw_col]),
+  query_groups() - {dims}, query_filters())`, dropping the inner FIXED's own grouping dims.
+  **This is a simplification, not a proven exact equivalent** — the only verification
+  available is that the result is *constant across the excluded dimension's groups* (the
+  defining behavioral test for "exclude"), not that it numerically matches what the true
+  two-level Tableau computation would have produced. State that plainly in the migration
+  report rather than presenting it as faithful.
+- Referencing a `group_aggregate`-valued sibling in a **filter clause** (3rd arg) of another
+  `group_aggregate`, or combining two such siblings with plain **arithmetic** (no outer
+  `group_aggregate` at all — `[formula_A] + [formula_B]`, or a ratio of two independent
+  FIXED-LOD siblings like `{FIXED [Region]: SUM([Profit])} / {FIXED [Region]: SUM([Sales])}`),
+  both genuinely work and are **not** flagged as nested — the restriction is specifically
+  about the 1st-argument (aggregate-expression) position, not merely "two or more
+  `group_aggregate` calls appear in the expression."
 
-**Detection:** the translation engine flags any output containing two or more `group_aggregate(`
-occurrences as a validation warning. In audit mode, classify these as **Platform Limitation**,
-not Untranslatable — the formula IS expressible in ThoughtSpot, just not as a single expression.
+**Detection:** the translation engine's validator flags only a *real* nesting (one call's own
+argument span containing another call's start), not every expression with two or more
+`group_aggregate(` occurrences — the sibling-arithmetic shape above must not be flagged. In
+audit mode, classify a genuine nesting as **Platform Limitation**, not Untranslatable — the
+formula may be expressible via one of the shapes above, but confirm with a live query.
+
+### A `group_aggregate(agg, {}, {})` numerator can explode a ratio built on it
+
+**Live-verified on a Tableau migration, 2026-10-14** (seen: a ratio reading 74,203 instead
+of ~170; a related formula reading 23 billion). Wrapping a bare aggregate in
+`group_aggregate(agg, {}, {})` (literal empty dims) is one way
+to satisfy the "needs `group_aggregate` to be re-aggregated by `average()`/`stddev()`" case
+documented above, but the **literal empty `{}` dims** forces a permanent grand-total that
+does not adapt to query context — genuinely different from "no `group_aggregate` wrapper at
+all" (a bare aggregate adapts normally, like a plain SQL aggregate). If that same formula is
+also used as the numerator of a ratio (`100 * (wrapped / other_measure)`) where
+`other_measure` genuinely varies per group, the ratio can explode to an absurd magnitude once
+the query groups by anything, because the frozen numerator value gets implicitly re-summed
+across every underlying row. **A ratio that looks plausible at one grouping grain proves
+nothing about another** — sanity-check both the bare/ungrouped value and at least one
+grouped value before trusting a formula built this way.
+
+**Fix: use `query_groups ( )` (bare, no `{}`, no `+`/`-`) as the dims argument instead of
+`{ }`.** It still satisfies "wrapped in `group_aggregate`" for the average()/stddev()-nesting
+case, but is context-adaptive.
+
+### Explicitly dropping a `SUM()`/`COUNTD()` wrapper the Tableau source had
+
+**Live-verified on a Tableau migration, 2026-10-14** (seen: 74,203 instead of ~170 once
+the wrapper was restored). Tableau formulas sometimes read `(COUNTD(x) / SUM([FixedLODCalc])) * 100` — an explicit
+aggregate wrapper around a FIXED-LOD reference used as a ratio denominator. A translation
+that drops that wrapper — emitting `(unique count(x) / [formula_FixedLODCalc]) * 100` with
+no `sum()` at all — can produce a far larger value than expected, because ThoughtSpot does
+not dedupe-then-sum a `group_aggregate(agg, {absolute dims}, {})` reference the way Tableau's
+own LOD engine does; without the wrapper, the per-row-repeated fixed value gets
+re-aggregated across every underlying row. **Diff the ThoughtSpot formula against the
+original Tableau `<calculation formula='...'>` for any ratio whose denominator is a
+FIXED-LOD reference** — a missing wrapper is easy to miss, since the formula still imports
+and computes *a* number, just not necessarily the right one; confirm the magnitude is
+plausible with a live query rather than assuming the import succeeding proves it's correct.
+
+If restoring the wrapper, note it has the same nested-aggregate interaction as the rest of
+this section: a bare `sum([formula_FixedLODRef])` can break the import of any
+`average()`/`stddev()`-dependent sibling formula with a cryptic `Search did not find`
+error (the import-time validator appears to text-scan the referenced formula for a visible
+aggregate-function token). `group_aggregate(sum(...), query_groups(), {})` avoids that —
+**but using a literal `{}` filter argument there disables incorporation of query-level
+filters** (live-verified: see `thoughtspot-formula-patterns.md`'s "Filter argument" table —
+`{}` means no *query-level* filters, not "no filters at all"). If the formula needs to stay
+responsive to active search filters, use `query_filters()` as the 3rd argument instead of
+`{}` and re-verify the result with a filter applied before relying on it.
+
+### A dims-shape mismatch between sibling LODs can also explode a ratio — open, not yet solved
+
+Two sibling LOD measures built as `query_groups() + {dimsA}` and `query_groups() + {dimsB}`
+where `dimsA != dimsB` (one includes an extra dimension the other doesn't) can explode when
+divided, even bare — a different shape from the grand-total-numerator case above, and not
+yet root-caused. Don't assume the same fix applies without re-investigating from scratch.
 
 ### Common pattern: relative time via grand FIXED
 
@@ -725,6 +818,15 @@ a different calculation produced by the analytics engine, not `categorical-bin`)
 ThoughtSpot equivalent; omit + log. **Always classify by the calculation `class`, not the
 field's display name.**
 
+**A `categorical-bin` field can be dropped at *extraction*, before any of the above ever
+runs — found on a Tableau migration, 2026-10-14.** The parser can find no `formula=` attribute to extract for a particular bin field
+and silently skip it, so it never appears in `skipped`/`filtered` output with a reason — it
+and its dependents just vanish. If a formula's dependency resolves to nothing in the parsed
+spec (not "untranslatable", not "filtered as a dependent" — genuinely absent), check whether
+the root is a `categorical-bin` the parser dropped before concluding it's a translation
+problem at all — the bin definition itself is usually still readable directly from the TWB
+XML even when the calculated-field wrapper around it was dropped.
+
 ---
 
 ## Running / Cumulative Functions
@@ -835,6 +937,88 @@ function with `PARTITION BY` in the SQL string instead.
 
 **Extended windowed variants with no model-formula equivalent:**
 - `WINDOW_STDEV`, `WINDOW_PERCENTILE`, `WINDOW_COUNT`, `WINDOW_MEDIAN` — no windowed model-formula equivalent (table calculations, answer-level per EXC1). If the viz uses them as a plain aggregate over the whole partition (not a sliding window), use `stddev()`, `percentile(measure, p)`, `count()`, `median()` respectively. Otherwise realize answer-level or omit + log.
+
+### `WINDOW_AVG(m, FIRST(), FIRST()+N)` / `WINDOW_STDEV(...)` as a "reference period" baseline
+
+A common Tableau pattern computes a reference-period average/std-dev band (e.g. "average of
+the first N date-bins of data ± 2 std dev") for a trend-chart overlay:
+`WINDOW_AVG(measure, FIRST(), FIRST()+N)`. This is **not** a sliding window (the `moving_*`
+family above) and **not** a whole-partition aggregate (`average()`/`stddev()` alone) — it's a
+bounded window anchored to the start of the data. Reconstructible:
+
+1. A grand-min helper for the period start: `group_aggregate ( min ( [binned_date] ) , {} , {} )`.
+2. The period end, N bins later — dispatch on whatever parameter drives the date grain (see
+   the `DATETRUNC`-dynamic-parameter row above for the same dispatch pattern): `add_months`/
+   `add_years` off the start helper (**`add_quarters` does not exist** — use
+   `add_months(d, n*3)`).
+3. The windowed aggregate itself, filtered to that range: `group_aggregate ( average (
+   [measure] ) , {} , query_filters () + { [binned_date] >= [formula_<start>] and
+   [binned_date] < [formula_<end>] } )`. `stddev()` the same way for the std-dev band, then
+   combine with ordinary arithmetic: `[formula_<avg>] + group_aggregate ( stddev ( [measure] ) ,
+   {} , {same filter} ) * 2`.
+4. See "Platform limitation: nested `group_aggregate` not supported" above for the restriction
+   that bites here — a branch can't reference a `group_aggregate`-valued sibling as its own
+   1st argument.
+
+**Two real blockers found doing this on a Tableau migration, 2026-10-14/15 — check for both
+before concluding a measure can't be re-aggregated:**
+
+- **A branch with a bare (non-`group_aggregate`-wrapped) aggregate call cannot be
+  re-aggregated by an outer `average()`/`stddev()`**, even though it imports and computes
+  fine standalone. E.g. `if (tier='All') then unique count(x) else sum_if(cond, 1)` fails
+  `average([that formula])` outright with a misleading "not found" error — not because the
+  branches use different aggregate functions, but because neither branch is wrapped in
+  `group_aggregate`. Fix: wrap every branch in `group_aggregate(agg(...), {}, {})` (see the
+  grand-total-numerator caveat above for the side effect this has elsewhere — prefer
+  `query_groups()` over `{}` if the same formula is also used in a ratio).
+- **Two sibling ratio formulas combined by arithmetic (`A - B`, e.g. a before/after
+  period-over-period comparison) must use the *same* aggregate-wrapper shape on their own
+  numerator.** `count(lod_measure) / other` minus a bare `lod_measure / other` fails even
+  though each side imports and computes correctly alone. Match the working sibling's exact
+  shape (don't drop a `count(...)`/`sum(...)` wrapper that looks redundant — the Tableau
+  source likely had it for a reason).
+
+**Diagnostic method:** isolate with a real-query test of the *exact* claim (`average
+([formula_X])` alone, unchanged) before and after each candidate fix, and diff the failing
+formula's shape against a working sibling's line by line — not just "both are if/else on a
+parameter." Don't accept the first plausible theory.
+
+### CHAR-typed parameters need an explicit cast or comparison before use
+
+Found on a Tableau migration, 2026-10-12. Per the type-mapping table above, a Tableau `list`-type parameter migrates to ThoughtSpot
+`data_type: CHAR` — including when every value is a number string (`"0.05"`, `"true"`/
+`"false"`). **`CHAR` is never implicitly numeric or boolean**, however the values look; a
+formula that treats the bare parameter reference as one fails with an error that reads like
+a missing reference, not a type error:
+
+| Formula shape | Fails with | Fix |
+|---|---|---|
+| `[Numeric-looking Param] <= [some column]` (or `>=`, `<`, `>`) | `Search did not find "<param name>" in your data or metadata` | Cast explicitly: `to_double ( [Param] ) <= [some column]` |
+| `if ( [Yes/No Param] ) then ... else ...` | `(If / else if) expects condition to be Boolean` | Compare explicitly: `if ( [Param] = 'true' ) then ... else ...` |
+
+Apply this whenever a translated formula references a parameter directly in a numeric
+comparison or as a bare boolean condition — don't conclude the formula is unfixable from
+either error message alone.
+
+### Expression complexity ceiling — a hypothesis, not a confirmed limit
+
+A formula built entirely from translatable constructs (plain `if`/`else if` branches over
+physical columns, no unmapped function) can still be rejected by ThoughtSpot's formula
+parser with a cryptic tokenization error once it has many branches — e.g. a ~30-branch
+parameter-dispatch `CASE`/if-else chain. **This is a hypothesis about a branch-count or
+expression-size ceiling, not a confirmed platform limit** — only one such failure has been
+observed, with no isolated minimal reproduction narrowing down the actual threshold or
+whether branch count is really the operative variable (versus total expression length, or
+something else about that specific formula).
+
+**How to tell the difference before reaching for this explanation:** confirm (a) every
+bracket reference resolves to a real column/formula, (b) any `(copy)`-style alias is
+resolved via the real alias/calc map rather than guessed, and (c) every branch returns a
+consistent type (see "ThoughtSpot Formula Syntax Rules" above) — and the error is a
+generic/cryptic parse failure rather than naming a specific missing reference. If all of
+that checks out and the formula still fails, record it as a hypothesis in
+`MIGRATION_LIMITATIONS.md` (not an established fact), and flag it for anyone touching this
+area to narrow down with a minimal repro if they have time.
 
 ---
 
