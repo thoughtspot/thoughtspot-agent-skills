@@ -11,7 +11,10 @@ mapping's `field:`, an `{each}` message placeholder):
     @is_indexed              a derived field: a registered function of (item, ctx)
 
 A missing key, an index out of range or a step into a scalar yields None, never an
-error — absence is data, and the operators define what None means.
+error — absence is data, and the operators define what None means. So does a key the
+TML schema defines as a mapping (`tml.MAPPING_KEYS`: `properties`, `spotter_config`,
+`db_column_properties`) holding a list or a scalar: malformed TML reads as absent, so a
+rule never judges what it finds inside it (BL-406 item 10).
 
 Derived fields are small pure functions, written once, for what a path cannot express
 (a default the schema implies, a join graph, a lookup into another document). Register
@@ -136,7 +139,11 @@ def walk(value: Any, path: str) -> Any:
 
 def _step(value: Any, step: str) -> Any:
     if isinstance(value, dict):
-        return value.get(step)
+        found = value.get(step)
+        # A schema mapping holding a list or scalar is malformed: absent, not mapped over.
+        if step in tml.MAPPING_KEYS and not isinstance(found, dict):
+            return None
+        return found
     if isinstance(value, list):
         if step.lstrip("-").isdigit():
             i = int(step)
@@ -159,7 +166,7 @@ def _is_indexed(item: dict, ctx: Any) -> bool:
 def _has_synonyms(item: dict, ctx: Any) -> bool:
     """Column: carries synonyms under `properties:` (exported TML) or at the root."""
     col = item.get("obj") or {}
-    props = col.get("properties") or {}
+    props = tml.mapping(col, "properties")
     return bool((props.get("synonyms") if isinstance(props, dict) else None)
                 or col.get("synonyms"))
 

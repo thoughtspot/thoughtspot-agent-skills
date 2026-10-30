@@ -124,7 +124,8 @@ def _build_columns(model, table_ids, formulas):
     cols_by_table = {tid: [] for tid in table_ids}
     known = set(table_ids)
     for col in model.get("columns", []):
-        props = col.get("properties", {}) or {}
+        props = col.get("properties")
+        props = props if isinstance(props, dict) else {}  # malformed TML: absent
         is_formula = "formula_id" in col
         if is_formula:
             owner = _primary_table_of_formula(formulas.get(col.get("name"), ""), known)

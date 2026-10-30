@@ -146,7 +146,7 @@ def _model_names(model_data: dict) -> tuple:
     tables = [_name(mt) for mt in (model_data.get("model_tables") or [])]
     cols = [c for c in (model_data.get("columns") or []) if isinstance(c, dict)]
     measures = sum(1 for c in cols
-                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
+                   if tml.mapping(c, "properties").get("column_type") == "MEASURE")
     text = " ".join(tables + [_name(c) for c in cols] + [_name(model_data)])
     return tables, measures, text.lower().replace("_", " ")
 
@@ -342,6 +342,20 @@ def data_needs(angles: list, profiles: Optional[list] = None) -> set:
     return needs
 
 
+def _warn_malformed(ctx: AuditContext) -> None:
+    """Name each Model or Table whose TML holds a list or scalar where the schema has a
+    mapping: the rules read it as absent (engine/fields.py), so say what was skipped."""
+    from ts_cli.audit.context import _log
+    docs = [(d.get("model"), "Model") for d in ctx.models] + \
+           [(d.get("table"), "Table") for d in ctx.tables.values()]
+    for doc, kind in docs:
+        for where in tml.malformed_mappings(doc) if isinstance(doc, dict) else []:
+            msg = (f"{kind} '{_name(doc)}': '{where}' is not a mapping; "
+                   "rules read it as absent")
+            _log(f"Warning: {msg}")
+            ctx.warnings.append(msg)
+
+
 def run_audit(
     client,
     model_guids: list,
@@ -380,6 +394,7 @@ def run_audit(
         profile = resolve_profile(catalog, assessment_name if assessment_name is not None
                                   else ctx.assessment)
     ctx.assessment = profile
+    _warn_malformed(ctx)
     known = [a for a in angles if a in catalog.categories]
     findings: list[Finding] = run_rules(ctx, catalog, known, profile)
     run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]

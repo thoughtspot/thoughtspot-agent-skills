@@ -39,6 +39,37 @@ FACT_MEASURE_THRESHOLD = 3
 #: A bracketed column reference inside a TML expression: ``[TABLE::COL]``.
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
+#: Keys the Model and Table TML schemas define as mappings, never lists
+#: (thoughtspot-model-tml.md, thoughtspot-table-tml.md). A list or scalar under one is
+#: malformed: a field path reads it as absent (fields._step) and the run warns
+#: (malformed_mappings), rather than mapping over the list and judging what it finds
+#: there (BL-406 item 10).
+MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
+
+
+def mapping(obj: Any, key: str) -> dict:
+    """`obj[key]` when it is a mapping, else {}: the one reader for a MAPPING_KEYS key,
+    so a malformed (list or scalar) value reads as absent rather than raising."""
+    value = obj.get(key) if isinstance(obj, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def malformed_mappings(doc: Any, path: str = "") -> list:
+    """Dotted paths in `doc` where a MAPPING_KEYS key holds something other than a
+    mapping (absent and null excepted), in document order."""
+    out: list = []
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            here = f"{path}.{key}" if path else str(key)
+            if key in MAPPING_KEYS and value is not None and not isinstance(value, dict):
+                out.append(here)
+            else:
+                out += malformed_mappings(value, here)
+    elif isinstance(doc, list):
+        for i, value in enumerate(doc):
+            out += malformed_mappings(value, f"{path}.{i}")
+    return out
+
 
 def join_count(model_tables: list) -> int:
     """Joins declared across the model's tables (each lives under its ``model_tables[]``
@@ -209,7 +240,7 @@ def table_role(columns: list, table_name: str) -> str:
     if not table_cols:
         return "unknown"
     measures = sum(1 for c in table_cols
-                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
+                   if mapping(c, "properties").get("column_type") == "MEASURE")
     return "fact" if measures > FACT_MEASURE_THRESHOLD else "dimension"
 
 
@@ -232,8 +263,8 @@ def rls_column_refs(table: dict):
     props = {}
     for c in (t.get("columns") or []):
         props[c.get("name", "")] = (
-            (c.get("db_column_properties") or {}).get("data_type", ""),
-            (c.get("properties") or {}).get("value_casing", ""),
+            mapping(c, "db_column_properties").get("data_type", ""),
+            mapping(c, "properties").get("value_casing", ""),
         )
     for rule in ((t.get("rls_rules") or {}).get("rules") or []):
         for ref in BRACKET_REF.findall(rule.get("expr", "")):
@@ -262,7 +293,7 @@ def is_indexed(column: dict) -> bool:
     `DONT_INDEX` is also the only value this repo ever writes, so every
     converter-produced model turned S2 into a pure false-positive generator.
     """
-    idx = (column.get("properties") or {}).get("index_type", "")
+    idx = mapping(column, "properties").get("index_type", "")
     return (idx or "").upper() != NOT_INDEXED
 
 

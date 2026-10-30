@@ -270,7 +270,7 @@ are roughly ordered by value÷effort.
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): malformed TML under a `parent.` condition, the one item left (items 1–9 closed by roadmap PRs 2.1–2.4; P6's in-code grading accepted) | 2027-01-31 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): items 1–10 closed (roadmap PRs 2.1–2.4 and the item-10 follow-up); open only for the review follow-ups: D9/P16 count function names inside literals, D7's HIGH wording assumes its line is 1.0, a YAML date as a name ends the run at the JSON output | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 | BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
@@ -14805,6 +14805,19 @@ change. D7 words HIGH "Identical table sets", true only while its HIGH line is 1
 profile may lower it (latent: none does; `band_shape` fixes shape, not value). A YAML date
 used as a name or description still ends the run at the JSON output (the report's and
 `ts audit run`'s `json.dumps` take no `default`).
+
+**Progress (2026-10-30, BL-406 item 10).** Item 10 is closed, by the product owner's ruling
+(2026-10-30): malformed TML reads as absent. A key the schema defines as a mapping
+(`properties`, `spotter_config`, `db_column_properties`) holding a list or scalar is null
+to every field path (`fields._step`, `tml.MAPPING_KEYS`), never mapped over; Python reads
+go through `tml.mapping`; and `ts audit run` warns, naming the Model or Table and the path.
+Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column
+as hidden and A1/A2 left it out; the same shape crashed the report corpus. Pinned:
+A1, A2 and H3 moved on the two committed malformed inputs; the SE demo sample is
+unchanged (no malformed TML). P6's in-code grading is accepted (same date), to revisit
+when a profile needs different P6 severities or a second rule shares its shape. What
+remains open here is only the review follow-ups recorded above (D9/P16 literals, D7's
+value-dependent wording, date-typed values at the JSON output).
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the

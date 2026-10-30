@@ -204,7 +204,12 @@ To combine a combinator with anything else, wrap both in `all`.
 
 **Field paths.** `properties.column_type` walks the item. A non-numeric step on a list
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
-item, and `@name` is a derived field. A missing key yields null, never an error.
+item, and `@name` is a derived field. A missing key yields null, never an error. So
+does malformed TML: a key the schema defines as a mapping (`properties`,
+`spotter_config`, `db_column_properties`) holding a list or a scalar reads as absent,
+never mapped over, and the run prints a warning naming the Model or Table and the path.
+A derived field or code rule reads those keys through `tml.mapping(obj, key)`, which
+gives `{}` for the same cases.
 
 **Message placeholders** per mode (Python `str.format`; any other name fails the gate):
 

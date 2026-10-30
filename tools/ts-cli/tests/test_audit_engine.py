@@ -481,6 +481,48 @@ def test_field_paths():
     assert fields.get(_item({}), "parent.name", ctx) is None
 
 
+@pytest.mark.parametrize("bad", [[{"is_bypass_rls": True}], ["MEASURE"], 5, "x", True])
+def test_a_malformed_mapping_reads_as_absent(bad):
+    """BL-406 item 10: a list or scalar where the schema has a mapping is absent — the
+    walk does not map over a list there and judge what it finds (`[None]` read as true,
+    so a column with `properties: [...]` counted as hidden)."""
+    ctx = make_context()
+    model = _item({"name": "M", "properties": bad})
+    column = _item({"name": "C", "properties": bad,
+                    "db_column_properties": bad}, parent=model)
+    assert fields.get(column, "parent.properties.is_bypass_rls", ctx) is None
+    assert fields.get(column, "properties.is_hidden", ctx) is None
+    assert fields.get(column, "db_column_properties.data_type", ctx) is None
+    assert fields.get(_item({"properties": {"spotter_config": bad}}),
+                      "properties.spotter_config.is_spotter_enabled", ctx) is None
+    # a key outside the schema's mappings still maps over a list, as before
+    assert fields.get(_item({"list": [{"k": 1}]}), "list.k", ctx) == [1]
+
+
+def test_malformed_mappings_names_each_path():
+    from ts_cli.audit.engine.tml import malformed_mappings
+    doc = {"name": "M", "properties": [{"is_bypass_rls": True}],
+           "columns": [{"name": "A", "properties": {"is_hidden": True}},
+                       {"name": "B", "properties": ["MEASURE"]},
+                       {"name": "C", "properties": None}]}
+    assert malformed_mappings(doc) == ["properties", "columns.1.properties"]
+    assert malformed_mappings({"properties": {"spotter_config": 1}}) == \
+        ["properties.spotter_config"]
+
+
+def test_a_malformed_mapping_is_named_in_a_warning(capsys):
+    from ts_cli.audit import run_audit
+    ctx = make_context(models=[{"guid": "m-1", "model": {
+        "name": "Sales", "model_tables": [], "properties": ["oops"],
+        "columns": [{"name": "A", "column_id": "T::A", "properties": ["MEASURE"]}]}}],
+        tables={}, dependents={}, model_guids=["m-1"])
+    run_audit(None, ["m-1"], ctx=ctx)
+    err = capsys.readouterr().err
+    assert "Model 'Sales': 'properties' is not a mapping; rules read it as absent" in err
+    assert "'columns.0.properties' is not a mapping" in err
+    assert len(ctx.warnings) == 2
+
+
 def test_derived_fields_registry():
     ctx = make_context()
     assert fields.get(_item({"properties": {}}), "@is_indexed", ctx) is True

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, NoReturn, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
+from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.tml import BRACKET_REF
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
@@ -54,7 +55,7 @@ class AuditContext:
                 name = col.get("name", "")
                 if not name:
                     continue
-                dt = (col.get("db_column_properties") or {}).get("data_type", "")
+                dt = tml.mapping(col, "db_column_properties").get("data_type", "")
                 out[f"{prefix}::{name}"] = dt
         return out
 
