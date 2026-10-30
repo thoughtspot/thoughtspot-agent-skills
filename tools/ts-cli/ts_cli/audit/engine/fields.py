@@ -166,9 +166,7 @@ def _is_indexed(item: dict, ctx: Any) -> bool:
 def _has_synonyms(item: dict, ctx: Any) -> bool:
     """Column: carries synonyms under `properties:` (exported TML) or at the root."""
     col = item.get("obj") or {}
-    props = tml.mapping(col, "properties")
-    return bool((props.get("synonyms") if isinstance(props, dict) else None)
-                or col.get("synonyms"))
+    return bool(tml.mapping(col, "properties").get("synonyms") or col.get("synonyms"))
 
 
 @register("join_depth", uses=(),

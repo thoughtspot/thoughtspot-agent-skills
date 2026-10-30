@@ -497,6 +497,9 @@ def test_a_malformed_mapping_reads_as_absent(bad):
                       "properties.spotter_config.is_spotter_enabled", ctx) is None
     # a key outside the schema's mappings still maps over a list, as before
     assert fields.get(_item({"list": [{"k": 1}]}), "list.k", ctx) == [1]
+    # a derived field reading the key in Python takes the same view: absent `index_type`
+    # is the default, indexed (S2 and P11 reach it only behind other conditions)
+    assert fields.get(_item({"properties": bad}), "@is_indexed", ctx) is True
 
 
 def test_malformed_mappings_names_each_path():
@@ -505,7 +508,8 @@ def test_malformed_mappings_names_each_path():
            "columns": [{"name": "A", "properties": {"is_hidden": True}},
                        {"name": "B", "properties": ["MEASURE"]},
                        {"name": "C", "properties": None}]}
-    assert malformed_mappings(doc) == ["properties", "columns.1.properties"]
+    assert malformed_mappings(doc) == ["properties", "columns[B].properties"]
+    assert malformed_mappings({"columns": [{"properties": []}]}) == ["columns.0.properties"]
     assert malformed_mappings({"properties": {"spotter_config": 1}}) == \
         ["properties.spotter_config"]
 
@@ -518,8 +522,9 @@ def test_a_malformed_mapping_is_named_in_a_warning(capsys):
         tables={}, dependents={}, model_guids=["m-1"])
     run_audit(None, ["m-1"], ctx=ctx)
     err = capsys.readouterr().err
-    assert "Model 'Sales': 'properties' is not a mapping; rules read it as absent" in err
-    assert "'columns.0.properties' is not a mapping" in err
+    assert ("Model 'Sales' (m-1): 'properties' is not a mapping; rules read it as "
+            "absent") in err
+    assert "'columns[A].properties' is not a mapping" in err
     assert len(ctx.warnings) == 2
 
 

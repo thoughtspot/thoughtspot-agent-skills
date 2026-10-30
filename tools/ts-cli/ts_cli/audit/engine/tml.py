@@ -56,7 +56,8 @@ def mapping(obj: Any, key: str) -> dict:
 
 def malformed_mappings(doc: Any, path: str = "") -> list:
     """Dotted paths in `doc` where a MAPPING_KEYS key holds something other than a
-    mapping (absent and null excepted), in document order."""
+    mapping (absent and null excepted), in document order. A list entry is named by its
+    `name` when it has one (`columns[Amount].properties`), else by its index."""
     out: list = []
     if isinstance(doc, dict):
         for key, value in doc.items():
@@ -67,7 +68,8 @@ def malformed_mappings(doc: Any, path: str = "") -> list:
                 out += malformed_mappings(value, here)
     elif isinstance(doc, list):
         for i, value in enumerate(doc):
-            out += malformed_mappings(value, f"{path}.{i}")
+            name = value.get("name") if isinstance(value, dict) else None
+            out += malformed_mappings(value, f"{path}[{name}]" if name else f"{path}.{i}")
     return out
 
 

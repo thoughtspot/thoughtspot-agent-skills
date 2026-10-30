@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
-- fix(audit): malformed TML (a list or scalar where the schema has a mapping) reads as absent, with a warning naming where (BL-406 item 10). ts-audit 3.7.1
+- fix(audit): a list or scalar under `properties`, `spotter_config` or `db_column_properties` reads as absent instead of being mapped over or ending the run, with a warning naming where (BL-406 item 10); P4 fires only on an explicit `join_progressive: false` (the schema default is true). Other non-mapping shapes are BL-498. ts-audit 3.7.1
 - chore: bump ts-cli to v0.191.1
 - feat(audit): grading into data (ts-audit v2 roadmap PR 2.4). New catalog key `parameters` for code-rule tuning numbers (H2, H10); D1 and H10 graded from the catalog; P2 reads the formula expression; H1 and the readiness score share one name test; `ts audit run` no longer ends on a null or numeric name. ts-audit 3.7.0
 - chore: bump ts-cli to v0.191.0

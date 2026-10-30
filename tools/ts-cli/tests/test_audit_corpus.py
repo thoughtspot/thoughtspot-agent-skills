@@ -152,3 +152,60 @@ def test_readiness_reads_a_typed_description_as_a1_does():
     from ts_cli.audit.engine.predicates import _blank
     for value in (2024, 3.5, "x", "  ", "", None, [], ["a"]):
         assert _nonblank(value) is (not _blank(value)), value
+
+
+def _populated_with_two_models():
+    """The populated fixture plus a second Model on the same Table, so D12 compares a
+    column across two Models."""
+    import copy as _copy
+    import audit_rule_fixtures as fx
+    ctx = fx.registry_populated_context()
+    second = _copy.deepcopy(ctx.models[0])
+    second["guid"], second["model"]["name"] = "m-2", "Returns"
+    ctx.models.append(second)
+    ctx.model_guids.append("m-2")
+    ctx.dependents = {}  # the fixture's dependent rows carry no guid, which the report needs
+    return ctx
+
+
+def _corrupt(where, bad):
+    ctx = _populated_with_two_models()
+    table = next(iter(ctx.tables.values()))["table"]
+    if where == "model_column":           # table_role, the corpus, D12, the ERD parser
+        ctx.models[0]["model"]["columns"][1]["properties"] = bad
+    elif where == "table_column_db":      # column types, RLS column refs
+        table["columns"][0]["db_column_properties"] = bad
+    elif where == "table_column_props":   # RLS column refs (value casing)
+        table["columns"][0]["properties"] = bad
+    elif where == "model":                # the parent.properties reads
+        ctx.models[0]["model"]["properties"] = bad
+    return ctx
+
+
+@pytest.mark.parametrize("bad", [["MEASURE"], [{"column_type": "MEASURE"}]])
+@pytest.mark.parametrize("where", ["model_column", "table_column_db",
+                                   "table_column_props", "model"])
+def test_a_malformed_mapping_does_not_end_the_run(where, bad):
+    """BL-406 item 10, end to end over a Model whose tables are in `model_tables`, a
+    Table TML under an RLS rule, and two Models sharing a column: every read of a
+    malformed mapping reads it as absent (review: the committed malformed inputs reached
+    none of these sites)."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.report import render_report
+    ctx = _corrupt(where, bad)
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    assert "<html" in render_report(out).lower()
+    assert ctx.warnings, "a malformed mapping is named in a warning"
+
+
+@pytest.mark.parametrize("props", [["oops"], {}, {"is_bypass_rls": False}])
+def test_an_unset_join_progressive_raises_no_finding(props):
+    """Absent `join_progressive` is the schema default, true: P4 reports neither a
+    Model that leaves it unset nor one whose `properties` is malformed and so reads as
+    absent (review finding: with item 10 alone, a malformed one read as off)."""
+    from ts_cli.audit import run_audit
+    ctx = _corrupt("model", props)
+    tables = ctx.models[0]["model"]["model_tables"]
+    tables += [{"name": f"T{i}", "fqn": f"t-x{i}"} for i in range(6)]
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
+    assert not [f for f in out["findings"] if f["check_id"] == "P4"]

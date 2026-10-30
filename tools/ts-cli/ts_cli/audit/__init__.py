@@ -346,12 +346,12 @@ def _warn_malformed(ctx: AuditContext) -> None:
     """Name each Model or Table whose TML holds a list or scalar where the schema has a
     mapping: the rules read it as absent (engine/fields.py), so say what was skipped."""
     from ts_cli.audit.context import _log
-    docs = [(d.get("model"), "Model") for d in ctx.models] + \
-           [(d.get("table"), "Table") for d in ctx.tables.values()]
-    for doc, kind in docs:
+    docs = [(d.get("model"), "Model", d.get("guid")) for d in ctx.models] + \
+           [(d.get("table"), "Table", d.get("guid")) for d in ctx.tables.values()]
+    for doc, kind, guid in docs:
         for where in tml.malformed_mappings(doc) if isinstance(doc, dict) else []:
-            msg = (f"{kind} '{_name(doc)}': '{where}' is not a mapping; "
-                   "rules read it as absent")
+            msg = (f"{kind} '{_name(doc)}' ({guid or 'no guid'}): '{where}' is not a "
+                   "mapping; rules read it as absent")
             _log(f"Warning: {msg}")
             ctx.warnings.append(msg)
 
