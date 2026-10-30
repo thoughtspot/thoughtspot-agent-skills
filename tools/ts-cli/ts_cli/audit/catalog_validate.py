@@ -75,6 +75,7 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     CODE_IMPL,
     code_rule_aggregate_problems,
     code_rule_problems,
+    parameter_problems,
     implementation_problems,
     known_code_rules,
     rule_message_problems,
@@ -107,7 +108,7 @@ from ts_cli.audit.catalog_model import (
 
 REQUIRES = ["model_tml", "table_tml", "metadata", "dependents", "ai_instructions",
             "answers", "sets"]
-OVERRIDABLE = {"status", "bands", "severity", "message", "remediation"}
+OVERRIDABLE = {"status", "bands", "severity", "message", "remediation", "parameters"}
 # Accepted in a profile block but not a general override: it reproduces the legacy
 # per-profile `threshold` dict (A1/A2/A6) and goes when the legacy dict does.
 PROFILE_ONLY = {"legacy_threshold"}
@@ -120,7 +121,7 @@ VIEWS = ["duplicates", "cleanup"]
 RULE_KEYS = {
     "id", "title", "description", "status", "categories", "requires", "uses", "implementation",
     "scope", "aggregate", "bands", "severity", "profiles", "message", "legacy_threshold",
-    "remediation", "examples", "views",
+    "parameters", "remediation", "examples", "views",
 }
 CATEGORY_KEYS = {"id", "label", "order", "description", "angle_key"}
 PROFILE_KEYS = {"id", "label", "default", "description"}
@@ -386,6 +387,7 @@ def _engine_problems(rule: Rule, cat: Catalog) -> List[str]:
     out += message_problems_any(rule, rule.message, "message")
     out += legacy_threshold_form_problems(rule.legacy_threshold, "legacy_threshold")
     profiles = list(cat.profiles) or [""]
+    out += parameter_problems(rule, profiles)
     if CODE_IMPL.match(rule.implementation):
         out += code_rule_problems(rule, profiles)
     elif rule.implementation == "declarative":

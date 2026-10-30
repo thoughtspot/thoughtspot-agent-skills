@@ -106,6 +106,10 @@ _TOY_RULES = yaml.safe_load("""
   requires: [model_tml]
   implementation: code:model_complexity
   scope: model
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels: [{op: gt, value: 50, severity: HIGH}, {op: gt, value: 30, severity: MEDIUM}]
   message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
 - id: T6
   title: Toy readiness
@@ -162,7 +166,7 @@ def toy():
     finally:
         for registry in (code_rules.REGISTRY, code_rules.PLACEHOLDERS,
                          code_rules.SEVERITY_SOURCES, code_rules.CODE_LABELS,
-                         code_rules.CODE_USES):
+                         code_rules.CODE_USES, code_rules.CODE_PARAMETERS):
             registry.pop("toy_score", None)
 
 
@@ -212,7 +216,7 @@ def test_legacy_threshold_by_severity_and_per_profile(toy_doc):
                           "yellow=47.5 · General: green=50, assessment=General, yellow=25 |")
     # a code rule that sets its own threshold per finding
     assert rows["T5"] == ("| T5 | set per finding — graded per size measure (tables, "
-                          "joins, formulas), each against its own lines |")
+                          "joins, formulas), each against the rule's bands |")
 
 
 def test_profile_overrides_render_per_profile(toy_meta):
@@ -227,9 +231,7 @@ def test_severity_maps_and_code_rules_render_as_text(toy_meta):
         "HIGH when the join type is OUTER; otherwise INFO"
     assert toy_meta["checks"]["T7"]["thresholds"] == \
         "MEDIUM when the name is token; otherwise CRITICAL"
-    assert toy_meta["checks"]["T5"]["thresholds"] == (
-        "graded per size measure (tables, joins, formulas), each against its own "
-        "lines — HIGH, MEDIUM")
+    assert toy_meta["checks"]["T5"]["thresholds"] == "HIGH > 50, MEDIUM > 30"
     assert toy_meta["checks"]["T6"]["thresholds"] == "HIGH < 50, MEDIUM < 80"
 
 
@@ -371,3 +373,11 @@ def test_severity_maps_read_as_words(severity, text):
 ])
 def test_message_placeholders_read_as_words(template, text):
     assert generate.template_text(template) == text
+
+
+def test_parameters_render_in_the_grading():
+    from ts_cli.audit.catalog_model import load_catalog
+    checks = generate.report_meta(load_catalog())["checks"]
+    assert checks["H2"]["thresholds"] == \
+        "LOW · tuned by min_chars=20, max_chars=400, issues_shown=3"
+    assert checks["H10"]["thresholds"].endswith(" · tuned by quote_chars=60")

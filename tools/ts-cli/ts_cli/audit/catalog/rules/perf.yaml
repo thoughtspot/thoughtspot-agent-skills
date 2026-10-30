@@ -24,9 +24,9 @@
 - id: P2
   title: Row-level formulas recomputed on every query
   description: >-
-    How many of a Model's formulas are row-level — no `columns[]` entry surfacing the
-    formula (by `formula_id`) declares an `aggregation` — graded LOW above 5 and MEDIUM
-    above 10. The warehouse recomputes a row-level formula on every query that uses it;
+    How many of a Model's formulas are row-level — the expression calls no aggregate
+    function and references no aggregate formula, however the surfacing column's
+    `aggregation` reads — graded LOW above 5 and MEDIUM above 10. The warehouse recomputes a row-level formula on every query that uses it;
     a heavy one is cheaper materialised as a column in ETL.
   categories: [P]
   requires: [model_tml]
@@ -34,7 +34,7 @@
   aggregate:
     mode: count
     over: model.formula
-    where: {field: "@is_scalar_formula", truthy: true}
+    where: {field: "@is_row_level_formula", truthy: true}
   bands:
     direction: lower_is_better
     unit: count
@@ -46,7 +46,7 @@
   remediation: Materialise heavy row-level formulas as columns in ETL
   examples:
     fires: {fixture: perf_eleven_scalar_formulas, severity: MEDIUM}
-    silent: {fixture: perf_six_aggregated_formulas}
+    silent: {fixture: perf_aggregate_expr_formulas}
 
 - id: P3
   title: Model filters lacking apply_on_tables

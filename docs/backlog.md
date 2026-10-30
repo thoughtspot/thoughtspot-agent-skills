@@ -270,7 +270,7 @@ are roughly ordered by value÷effort.
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): alias-vs-name lookups (D10, D11, H3), gradings still in code (D1, H2, H10, P6), the report corpus crashing on a column with no name, P2's expression-based test (the 16 contradictions and H10's MEDIUM closed by roadmap PRs 2.1–2.2) | 2027-01-31 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): malformed TML under a `parent.` condition, the one item left (items 1–9 closed by roadmap PRs 2.1–2.4; P6's in-code grading accepted) | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 | BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
@@ -14783,6 +14783,20 @@ one INFO (decided with the product owner 2026-10-30); H2 no longer flags a "The 
 opening; A1 and A2 count visible columns only; S1's patterns match display names and keep
 short tokens to whole words (with BL-112); S5 matches a spaced "API Key"; P18 ignores
 function names inside references and literals and names the kind of distinct count.
+
+**Progress (2026-10-30, roadmap PR 2.4).** Items 3, 7, 8 and 9 are closed. Item 3: a new
+catalog key, `parameters`, holds a code rule's tuning numbers (H2's `min_chars`,
+`max_chars`, `issues_shown`; H10's `quote_chars`), profile-overridable and gated (exactly
+the declared names, each a number; a changed value the description still quotes fails the
+`--base` drift check); D1 grades by its catalog `bands` and H10 by a catalog `severity`
+map on `@orphan_model`. P6 keeps its LOW / INFO in code, **accepted**: one join yields up
+to two findings of different severities, which no single catalog severity source says.
+Item 7: the report corpus tolerates a null or non-string name. Item 8: P2 reads the
+formula's expression (an aggregate function, a `sql_*_aggregate_op`, or a reference to an
+aggregate formula), not the column's `aggregation:` key; on the SE demo sample P2 goes
+from 6 to 8 findings. Item 9: the stale fixture titles now come from the catalog, and H1
+and the readiness score share one derived field (`@is_poor_name`). **Item 10 stays open**
+(malformed TML under a `parent.` condition): it needs a ruling, not a fix.
 
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the

@@ -21,14 +21,19 @@
     and graded HIGH over its HIGH line: tables (30 / 50), joins (30 / 50) and formulas
     (30 / 50). Column count is P8's and join depth P7's. The table and join lines come
     from production call-home data (2026-10: 268k Models, 99th percentile 35 tables).
-  # A code rule (code:model_complexity, grading table D1_MEASURES in
-  # engine/code_rules.py) because one rule grades three measures against three pairs
-  # of lines and reports each with its own legacy threshold — the catalog holds one set
-  # of bands and one threshold per rule. Moving the lines into bands: BL-406.
+  # A code rule (code:model_complexity, its measures D1_MEASURES in engine/code_rules.py)
+  # because one rule grades three measures, each its own finding with its own legacy
+  # threshold. The lines are these bands, shared by the three (since 2026-10).
   categories: [D]
   requires: [model_tml]
   implementation: code:model_complexity
   scope: model
+  bands:
+    direction: lower_is_better
+    unit: count
+    levels:
+      - {op: gt, value: 50, severity: HIGH}
+      - {op: gt, value: 30, severity: MEDIUM}
   message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
   examples:
     fires: {fixture: data_model_fifty_one_tables, severity: HIGH}

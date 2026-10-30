@@ -534,12 +534,28 @@ def test_is_string_type_is_the_legacy_upper_case_test(data_type, expected):
     assert fields.get(item, "@is_string_type", make_context()) is expected
 
 
-def test_is_scalar_formula_reads_the_surfacing_columns_aggregation():
+def test_is_row_level_formula_reads_the_expression_not_the_column():
     agg = _children_of(fx.perf_six_aggregated_formulas(), "model.formula")
-    raw = _children_of(fx.perf_six_scalar_formulas(), "model.formula")
+    summed = _children_of(fx.perf_aggregate_expr_formulas(), "model.formula")
     ctx = make_context()
-    assert [fields.get(i, "@is_scalar_formula", ctx) for i in agg] == [False] * 6
-    assert [fields.get(i, "@is_scalar_formula", ctx) for i in raw] == [True] * 6
+    assert [fields.get(i, "@is_row_level_formula", ctx) for i in agg] == [True] * 6
+    assert [fields.get(i, "@is_row_level_formula", ctx) for i in summed] == [False] * 6
+
+
+def test_is_row_level_formula_follows_references_and_ignores_names_and_literals():
+    model = {"formulas": [
+        {"id": "formula_Rev", "name": "Rev", "expr": "sum ( [T::AMT] )"},
+        {"id": "formula_Ratio", "name": "Ratio", "expr": "[formula_Rev] / 2"},
+        {"id": "formula_Top", "name": "Top", "expr": "[Ratio] * 100"},
+        {"id": "formula_Lbl", "name": "Lbl", "expr": "concat ( 'sum(' , [T::Count (x)] )"},
+        {"id": "formula_Raw", "expr": "count ( [T::ID] )"},
+        {"name": "Pass", "expr": "sql_int_aggregate_op ( \"sum({0})\" , [T::AMT] )"},
+        {"name": "Typed", "expr": 2024},
+    ]}
+    ctx = make_context()
+    got = [fields.get({"obj": f, "parent": {"obj": model}}, "@is_row_level_formula", ctx)
+           for f in model["formulas"]]
+    assert got == [False, False, False, True, False, False, True]
 
 
 def test_varchar_join_keys_need_the_table_tml():

@@ -15,9 +15,9 @@ rule's own): retired at `ref` means retired under every profile — a rule activ
 one profile never stopped running — and active now means active under any profile, so
 a retired rule revived only through `profiles.<p>.status` is caught.
 
-A third check reads history for a different reason: a band value that changed since
-`ref` and that the rule's `description` still quotes (`description_drift_problems`) —
-the description is prose, so only a change shows which of its numbers were thresholds.
+A third check reads history for a different reason: a band or parameter value that
+changed since `ref` and that the rule's `description` still quotes
+(`description_drift_problems`) — the description is prose, so only a change shows which of its numbers were thresholds.
 
 The gate (tools/validate/check_audit_catalog.py --base <ref>) reads `ref`'s catalog
 with git and passes both here. Kept importable on Python 3.9 with only PyYAML.
@@ -106,15 +106,23 @@ def _level_values(bands: Any) -> Set[float]:
             and not isinstance(lv.get("value"), bool)}
 
 
+def _parameter_values(params: Any) -> Set[float]:
+    return {float(v) for v in (params.values() if isinstance(params, dict) else ())
+            if isinstance(v, (int, float)) and not isinstance(v, bool)}
+
+
 def band_values(entry: Dict[str, Any], profiles: Iterable[str]) -> Dict[str, Set[float]]:
-    """`{profile: effective band values}` of a raw rule entry (a profile's non-null
-    `bands` replaces the rule's whole list)."""
+    """`{profile: effective band and parameter values}` of a raw rule entry (a profile's
+    non-null `bands` or `parameters` replaces the rule's whole list or map)."""
     overrides = entry.get("profiles") if isinstance(entry.get("profiles"), dict) else {}
     out = {}
     for pid in list(profiles) or [""]:
         block = overrides.get(pid) if pid else None
-        bands = block.get("bands") if isinstance(block, dict) else None
-        out[pid] = _level_values(bands if bands is not None else entry.get("bands"))
+        block = block if isinstance(block, dict) else {}
+        bands, params = block.get("bands"), block.get("parameters")
+        out[pid] = (_level_values(bands if bands is not None else entry.get("bands"))
+                    | _parameter_values(params if params is not None
+                                        else entry.get("parameters")))
     return out
 
 
@@ -125,9 +133,10 @@ def _fmt(v: float) -> str:
 def description_drift_problems(base: Dict[str, Dict[str, Any]],
                                head: Dict[str, Dict[str, Any]], ref: str,
                                profiles: Iterable[str] = ()) -> List[str]:
-    """Rules whose band values changed since `ref` while the description still quotes a
-    value no profile grades by any more ("Spotter-ready 95%, General 50%" left behind
-    when General moved to 60)."""
+    """Rules whose band or parameter values changed since `ref` while the description
+    still quotes a value no profile grades by any more ("Spotter-ready 95%, General 50%"
+    left behind when General moved to 60; H2's "under 20 characters" when min_chars
+    moved)."""
     profiles = list(profiles)
     out: List[str] = []
     for rid, new in head.items():
@@ -142,7 +151,8 @@ def description_drift_problems(base: Dict[str, Dict[str, Any]],
         quoted = {float(n) for n in _NUMBER.findall(str(new.get("description") or ""))}
         stale = sorted(gone & quoted)
         if stale:
-            out.append(f"{rid}: its bands changed since {ref}, but its description still "
+            out.append(f"{rid}: its bands or parameters changed since {ref}, but its "
+                       f"description still "
                        f"quotes {', '.join(_fmt(v) for v in stale)}, which no profile "
                        "grades by now — update the description (and legacy_threshold)")
     return out

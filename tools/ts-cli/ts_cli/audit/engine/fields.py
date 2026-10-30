@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tup
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
 from ts_cli.audit.engine.memo import cached
+from ts_cli.spotql_ops import AGGREGATE_FUNCS
 
 DerivedField = Callable[[dict, Any], Any]
 FIELDS: Dict[str, DerivedField] = {}
@@ -218,20 +219,44 @@ def _model_of(item: dict) -> dict:
     return ((item.get("parent") or {}).get("obj")) or {}
 
 
-@register("is_scalar_formula", uses=(),
-          label="no column aggregates the formula")
-def _is_scalar_formula(item: dict, ctx: Any) -> bool:
-    """Formula: no `columns[]` entry surfacing it (by `formula_id`) declares an
-    `aggregation`. A formula with no `id` is not scalar when some aggregating column
-    has no `formula_id` either (both read None) — the legacy P2 reading, kept."""
+@register("is_row_level_formula", uses=(),
+          label="the formula computes row by row")
+def _is_row_level_formula(item: dict, ctx: Any) -> bool:
+    """Formula: its `expr` calls no aggregate function (spotql_ops.AGGREGATE_FUNCS or a
+    `sql_*_aggregate_op`, outside any `[...]` reference or quoted literal) and references no formula that is
+    aggregate, directly or through a chain (_reference_graph). How a surfacing column's
+    `aggregation` key reads plays no part: the model schema says it is a no-op on an
+    aggregate expr and applies on a row-level one, so it never told the two apart."""
+    obj = item.get("obj") or {}
+    if not obj.get("name"):
+        return not _calls_aggregate(obj)
     model = _model_of(item)
-    aggregated = cached("aggregated_formula_ids", model, _aggregated_formula_ids, model)
-    return (item.get("obj") or {}).get("id") not in aggregated
+    aggregate = cached("aggregate_formula_names", model, _aggregate_formula_names, model)
+    return obj["name"] not in aggregate
 
 
-def _aggregated_formula_ids(model: dict) -> set:
-    return {c.get("formula_id") for c in (model.get("columns") or [])
-            if (c.get("properties") or {}).get("aggregation")}
+#: SQL pass-through aggregation: its SQL sits in a quoted literal, which _NOT_CODE strips.
+_SQL_AGGREGATE_OP = re.compile(r"\bsql_[a-z_]+_aggregate_op\s*\(", re.IGNORECASE)
+
+
+def _calls_aggregate(formula: dict) -> bool:
+    code = _NOT_CODE.sub(" ", str(formula.get("expr") or ""))
+    return bool(AGGREGATE_FUNCS.search(code) or _SQL_AGGREGATE_OP.search(code))
+
+
+def _aggregate_formula_names(model: dict) -> set:
+    formulas = [f for f in (model.get("formulas") or []) if isinstance(f, dict)]
+    direct = {f.get("name") for f in formulas if f.get("name") and _calls_aggregate(f)}
+    graph, _ = _reference_graph(formulas)
+    found = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for name, refs in graph.items():
+            if name not in found and any(r in found for r in refs):
+                found.add(name)
+                changed = True
+    return found
 
 
 @register("formula_expr", uses=(),
@@ -341,7 +366,7 @@ _IF_CALL = re.compile(r"\bif\s*\(", re.IGNORECASE)
           label="the number of IF calls")
 def _if_call_count(item: dict, ctx: Any) -> int:
     """Formula: how many `if (` calls its `expr` makes."""
-    return len(_IF_CALL.findall((item.get("obj") or {}).get("expr", "")))
+    return len(_IF_CALL.findall(str((item.get("obj") or {}).get("expr") or "")))
 
 
 def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
@@ -369,7 +394,7 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):
         fname = f.get("name", "")
-        refs = tml.BRACKET_REF.findall(f.get("expr", ""))
+        refs = tml.BRACKET_REF.findall(str(f.get("expr") or ""))
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
@@ -565,7 +590,7 @@ def _named_in_masking_formula(item: dict, ctx: Any) -> bool:
 
 
 def _lowered_formula_text(model: dict) -> str:
-    return " ".join(f.get("expr", "") for f in (model.get("formulas") or [])).lower()
+    return " ".join(str(f.get("expr") or "") for f in (model.get("formulas") or [])).lower()
 
 
 # The D (Data Modeling) and H (Human Readiness) fields live in their own modules;

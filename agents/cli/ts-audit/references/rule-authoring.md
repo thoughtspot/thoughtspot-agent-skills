@@ -139,6 +139,21 @@ carry no logic at all when no profile revives it (H6):
 (`bands`, the entry's `severity`, or severities fixed in code) and data reads are
 declared by the registration, and the gate holds the entry to them.
 
+**Parameters.** A code rule's tuning numbers live in the catalog, not in module
+constants, so a reader can see and change them without touching Python:
+
+```yaml
+- id: H2
+  implementation: code:description_quality
+  severity: LOW
+  parameters: {min_chars: 20, max_chars: 400, issues_shown: 3}
+```
+
+The registration names what it reads (`@code_rule(..., parameters={"min_chars", ...})`)
+and the function reads `rule.parameters["min_chars"]`. The gate requires exactly the
+declared names, each a number (not a boolean); a declarative rule takes none. A profile
+may override `parameters`, and replaces the map whole, as with `bands`: list every name.
+
 ### Vocabulary
 
 | | Values |
@@ -268,7 +283,7 @@ layer. A rule's `profiles.<id>` block may replace only these keys:
 
 | Overridable | Not overridable (what the rule *means*) |
 |---|---|
-| `status`, `bands` (the whole list), `severity`, `message`, `remediation` | `scope`, `aggregate` (`where`, `match`, `measure`, ...), `implementation`, `requires`, `uses`, `categories`, `id` |
+| `status`, `bands` (the whole list), `severity`, `message`, `remediation`, `parameters` (the whole map) | `scope`, `aggregate` (`where`, `match`, `measure`, ...), `implementation`, `requires`, `uses`, `categories`, `id` |
 
 `legacy_threshold` is also accepted in a profile block, only to reproduce the old
 per-profile threshold dict (A1, A2, A6). To inherit a key, omit it from the profile
@@ -538,12 +553,16 @@ cross-rule dependency that nothing else would use. Examples:
 A one-off value is a derived field, not a code rule. Then:
 
 1. Register the function: `@code_rule("<name>", placeholders={...}, severity=...,
-   uses=..., label="graded per join, on its key types and key count")` in
+   uses=..., label="graded per join, on its key types and key count", parameters=...)` in
    `engine/code_rules*.py`. `label` says how it grades, in words: generated text shows it
    where a fixed-severity code rule's grading goes, never `code:<name>`, signature `(rule, ctx, profile) -> list[Finding]`.
    It receives the **effective** rule, with profile overrides applied. Grade with
    `bands.classify(value, rule.bands)`, word with `rule.message`, and never read the
-   profile block yourself. Every finding's `check_id` must be the rule's id.
+   profile block yourself. Every finding's `check_id` must be the rule's id. Prefer
+   grading from the catalog (`severity="bands"` or `"severity"`) over severities fixed
+   in code: D1 grades by its `bands`, H10 by a `severity` map on a derived field. Fix
+   them in code only when one item yields findings of different severities (P6).
+   Any number a reader might tune is a `parameters` entry, never a module constant.
 2. The catalog entry is complete as for any rule: `implementation: code:<name>`, no
    `aggregate`, and the severity source the registration declares. Give the reason it is
    code in a YAML comment beside `implementation:`, not in `description`: the

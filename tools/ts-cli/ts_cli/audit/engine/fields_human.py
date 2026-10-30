@@ -35,6 +35,28 @@ def _str(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+# ── H1: column names a person would not search for ──────────────────────────
+
+#: col1, field_2, val, tmp_x, a leading digit (any case) — and SHOUTING_SNAKE warehouse
+#: names. H1 and the report's Spotter readiness score both read them through
+#: `is_poor_name`; each kept its own copy until 2026-10.
+_NAME_ANTI = re.compile(r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d", re.IGNORECASE)
+_NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
+
+
+def is_poor_name(name: Any) -> bool:
+    """A name matching either pattern; False for a non-string."""
+    return isinstance(name, str) and bool(_NAME_ANTI.match(name) or
+                                          _NAME_ANTI_UPPER.match(name))
+
+
+@register("is_poor_name", uses=(),
+          label="the column's name is generic or a warehouse name")
+def _is_poor_name(item: dict, ctx: Any) -> bool:
+    """Model column: its `name` is one a person would not search for (is_poor_name)."""
+    return is_poor_name((item.get("obj") or {}).get("name"))
+
+
 # ── H3: hidden columns no formula references ────────────────────────────────
 
 def _joined_table_names(model: dict) -> set:
@@ -107,6 +129,14 @@ def _dependent_count(item: dict, ctx: Any) -> int:
     alone never makes a Model used. A Model never listed has none."""
     rows = ctx.dependents.get(item.get("guid"), []) or []
     return sum(1 for d in rows if d.get("type") != "SET")
+
+
+@register("orphan_model", uses={"dependents", "sets"}, values=(False, True),
+          label="the item is a Model nothing uses")
+def _orphan_model(item: dict, ctx: Any) -> bool:
+    """True for a Model with no dependents but Sets (H4's test, @dependent_count); False
+    for any other item, a column included — H10 grades its findings on this."""
+    return item.get("scope") == "model" and _dependent_count(item, ctx) == 0
 
 
 @register("set_consumers", uses={"dependents", "sets"},

@@ -27,6 +27,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from ts_cli.tml_join_graph import node_id
+
 #: Warehouse types ThoughtSpot treats as strings. A string join or RLS key is
 #: markedly slower than an integer one and is what several checks look for.
 STRING_TYPES = ("VARCHAR", "CHAR", "STRING", "TEXT")
@@ -87,23 +89,15 @@ def table_key(model_table: dict) -> str:
     return model_table.get("alias") or model_table.get("name") or ""
 
 
-def node_key(model_table: dict) -> str:
-    """A model_tables entry's node identity as the join graph keys it: ``alias``, else
-    ``id``, else ``name`` (``tml_join_graph.node_id``, restated here because the audit
-    engine may import nothing outside ``ts_cli.audit``)."""
-    return str(model_table.get("alias") or model_table.get("id") or model_table.get("name")
-               or "")
-
-
 def join_target(model_tables: list, ref: Any) -> Optional[dict]:
     """The model_tables entry a join's ``with`` names: the entry whose node identity
-    (``node_key``) it is — exactly, else ignoring case, as
+    (``tml_join_graph.node_id``) it is — exactly, else ignoring case, as
     ``tml_join_graph.JoinGraph.resolve`` resolves it — else, for a ``with`` written as a
     physical name, the entry with that ``name``. None when nothing matches."""
     if not isinstance(ref, str) or not ref:
         return None
     entries = [t for t in (model_tables or []) if isinstance(t, dict)]
-    for key in (node_key, lambda t: t.get("name")):
+    for key in (node_id, lambda t: t.get("name")):
         for fold in (lambda s: s, str.lower):
             want = fold(ref)
             for t in entries:

@@ -95,3 +95,13 @@ def test_build_corpus_counts_joins_where_model_tml_keeps_them():
     m = build_corpus(ctx, angles=["D"])["models"][0]
     assert m["join_count"] == 3
     assert m["join_depth"] == 2
+
+
+def test_ai_analysis_tolerates_null_and_typed_names():
+    """A null column name or a YAML-typed one (`name: 2024`) crashed the join."""
+    from ts_cli.audit import _build_ai_analysis
+    model = {"name": 2024, "model_tables": [{"name": None}, {"name": "SALES"}],
+             "columns": [{"name": None, "properties": {"column_type": "MEASURE"}},
+                         {"name": 7}, "not-a-column"]}
+    out = _build_ai_analysis([], model)
+    assert "1 metric." in out["domain"]

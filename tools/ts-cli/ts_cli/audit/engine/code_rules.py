@@ -18,16 +18,23 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
                    every profile's are held to them
     severity       where a finding's severity comes from (required):
                      "bands"          graded by the rule's `bands`
-                     "severity"       the catalog `severity`, a name or a mapping (D10)
+                     "severity"       the catalog `severity`, a name or a mapping (D10,
+                                      H2, H10)
                      "severity_name"  the catalog `severity`, a plain name only (D12:
                                       its findings are not about one item, so it has
                                       nothing to look a mapping up on)
-                     {"HIGH", ...}    fixed in the function: these severities (D1, P6)
+                     {"HIGH", ...}    fixed in the function: these severities (P6, whose
+                                      one join can yield two findings)
                    It fixes which severities the rule can emit (a by-severity message
                    must word each, and only those) and which of `bands` / `severity`
                    the entry must — and must not — carry.
     own_threshold  True when it sets each finding's legacy threshold itself (D1); the
                    entry must then carry no `legacy_threshold`
+    parameters     the names of the tuning numbers it reads from `rule.parameters`
+                   (H2's `min_chars`, H10's `quote_chars`). The entry must carry
+                   exactly these, each a number; a profile may replace the map whole.
+                   A number a reader might want to tune belongs here, not in a
+                   module constant
     label          (required) how the grading reads to an audit reader — generated
                    text shows it, never `code:<name>`: "graded per join, on its key
                    types and key count"
@@ -39,7 +46,7 @@ mode (catalog_code.code_rule_problems; a catalog mistake fails the gate, not the
 The contract (`run.run_rules` dispatches; `check_findings` enforces it):
 
     rule      the EFFECTIVE rule — the profile's overrides (bands, severity, message,
-              remediation) already applied. Grade with `bands.classify(value,
+              remediation, parameters) already applied. Grade with `bands.classify(value,
               rule.bands)`, word with `rule.message`; never read the profile's block.
     ctx       the AuditContext. The runner does not apply `rule.requires` for a code
               rule (it never sees the items): iterate with `scopes.available(ctx,
@@ -72,7 +79,9 @@ catalog_expr, catalog_code, catalog_forms, catalog_uses, catalog_reads,
 catalog_consistency, which it
 imports), findings, and
 engine.{tml, fields (and fields_data / fields_human, which it imports), scopes, predicates,
-messages, bands} — and code_rules_human, imported at the end of this module, holds to
+messages, bands}, and the stdlib-only shared modules the gate test copies
+(GATE_SHARED_MODULES: tml_join_graph, tml_rls_graph, spotql_ops) — and
+code_rules_human / code_rules_security, imported at the end of this module, hold to
 the same list. Anything else (context, commands) is imported
 inside the rule function. tools/validate/tests/test_check_audit_catalog.py copies
 only the permitted modules and fails if this one needs more.
@@ -84,7 +93,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
-from ts_cli.audit.engine import bands, fields, scopes
+from ts_cli.audit.engine import bands, fields, fields_human, scopes
 from ts_cli.audit.engine.messages import NameList, render, template
 from ts_cli.audit.findings import Finding
 
@@ -100,6 +109,7 @@ SEVERITY_SOURCES: Dict[str, Any] = {}   # "bands" | "severity" | "severity_name"
 OWN_THRESHOLD: Set[str] = set()
 CODE_USES: Dict[str, FrozenSet[str]] = {}   # conditional data it reads (catalog_uses.py)
 CODE_LABELS: Dict[str, str] = {}   # how its grading reads in generated text
+CODE_PARAMETERS: Dict[str, FrozenSet[str]] = {}   # the `parameters` names it reads
 CATALOG_SEVERITY_SOURCES = ("bands", "severity", "severity_name")
 _PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -119,13 +129,13 @@ def _severity_source(name: str, severity: Any) -> Any:
 
 
 def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = None,
-              uses: Any = None, own_threshold: bool = False, label: Any = None
-              ) -> Callable[[CodeRule], CodeRule]:
+              uses: Any = None, own_threshold: bool = False, label: Any = None,
+              parameters: Iterable[str] = ()) -> Callable[[CodeRule], CodeRule]:
     """Register the decorated function as `implementation: code:<name>`, rendering its
     message with `placeholders`, its severity from `severity`, reading the conditional
     data `uses` from the context (itself or through a derived field), and — with
     `own_threshold` — setting each finding's legacy threshold itself; `label` is how its
-    grading reads to an audit reader."""
+    grading reads to an audit reader; `parameters` the `rule.parameters` names it reads."""
     if not isinstance(name, str) or not CODE_IMPL.match(f"code:{name}"):
         raise ValueError(f"'{name}' is not a valid code rule name "
                          "(lower case letters, digits and '_', not starting with a digit)")
@@ -149,6 +159,7 @@ def code_rule(name: str, placeholders: Iterable[str] = (), *, severity: Any = No
         SEVERITY_SOURCES[name] = source
         CODE_USES[name] = data
         CODE_LABELS[name] = text
+        CODE_PARAMETERS[name] = frozenset(parameters)
         if own_threshold:
             OWN_THRESHOLD.add(name)
         return fn
@@ -219,16 +230,6 @@ def _nonblank(value: Any) -> bool:
     return bool((value or "").strip())
 
 
-# The readiness score's column-name quality: names a person would not search for
-# (col1, field_2, val, tmp_x, 9lives) and SHOUTING_SNAKE warehouse names.
-_NAME_ANTI = re.compile(r"^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d", re.IGNORECASE)
-_NAME_ANTI_UPPER = re.compile(r"^[A-Z][A-Z0-9]*_[A-Z0-9_]+$")
-
-
-def _poor_name(name: str) -> bool:
-    return bool(_NAME_ANTI.match(name) or _NAME_ANTI_UPPER.match(name))
-
-
 #: The Spotter readiness score's levels (A5's bands until it stopped being a finding,
 #: 2026-10): at or above READY a Model is ready, at or above NEEDS_WORK it needs work.
 READINESS_READY = 80
@@ -258,7 +259,7 @@ def readiness_score(item: dict, ctx: Any) -> float:
     has_desc = _nonblank(model.get("description"))
     # A present-but-null name is not a poor name, and a null or YAML-typed (numeric) one
     # must not raise (BL-406 #7)
-    anti = sum(1 for c in cols if _poor_name(str(c.get("name") or "")))
+    anti = sum(1 for c in cols if fields_human.is_poor_name(c.get("name")))
     name_quality = ((total - anti) / total) * 100 if total else 100
     return (desc_pct * 0.30
             + (100 if has_ai else 0) * 0.25
@@ -282,32 +283,38 @@ def _join_count(model: dict) -> int:
     return tml.join_count(model.get("model_tables"))
 
 
-#: D1's grading table: (measure, value of a Model, above this is MEDIUM, above this
-#: HIGH). Lines set 2026-10-23 from production call-home data (268k Models: tables p99
-#: 35, 0.18% above 40) — the earlier 10/15 tables and 8/12 joins flagged ~15-30% of
-#: production Models. Columns are P8's (per-profile bands in rules/perf.yaml) and join
-#: depth P7's, so D1 no longer grades either. Still code, not catalog data: moving
-#: these lines into bands is a BL-406 item.
+#: D1's size measures: (name, value of a Model). Each is graded by the rule's `bands`
+#: (rules/data.yaml: MEDIUM above 30, HIGH above 50 — lines set 2026-10-23 from
+#: production call-home data, 268k Models: tables p99 35, 0.18% above 40; profile-
+#: overridable since 2026-10). Columns are P8's and join depth P7's.
 D1_MEASURES = (
-    ("tables", lambda m: len(m.get("model_tables") or []), 30, 50),
-    ("joins", _join_count, 30, 50),
-    ("formulas", lambda m: len(m.get("formulas") or []), 30, 50),
+    ("tables", lambda m: len(m.get("model_tables") or [])),
+    ("joins", _join_count),
+    ("formulas", lambda m: len(m.get("formulas") or [])),
 )
 
 
+def _whole(value: float) -> Any:
+    """A band value as D1 has always worded and recorded it: 30, not 30.0."""
+    return int(value) if float(value).is_integer() else value
+
+
 @code_rule("model_complexity", placeholders={"value", "measure", "green", "yellow"},
-           severity={"HIGH", "MEDIUM"}, uses=(), own_threshold=True,
+           severity="bands", uses=(), own_threshold=True,
            label="graded per size measure (tables, joins, formulas), each against "
-                 "its own lines")
+                 "the rule's bands")
 def model_complexity(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
-    """D1 — up to five findings per Model, one per measure over its MEDIUM line."""
+    """D1 — up to three findings per Model, one per measure its bands grade. A finding's
+    legacy threshold is `{green: <the MEDIUM line>, yellow: <the HIGH line>}`."""
+    lines = {lv.severity: _whole(lv.value) for lv in rule.bands.levels}
+    green, yellow = lines.get("MEDIUM"), lines.get("HIGH")
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
-        for measure, value_of, green, yellow in D1_MEASURES:
+        for measure, value_of in D1_MEASURES:
             value = value_of(item["obj"])
-            if value <= green:
+            severity = bands.classify(value, rule.bands)
+            if severity is None:
                 continue
-            severity = "HIGH" if value > yellow else "MEDIUM"
             values = {"value": value, "measure": measure, "green": green, "yellow": yellow}
             out.append(_d_finding(rule, item, severity, values, metric=value,
                                   threshold={"green": green, "yellow": yellow}))

@@ -21,17 +21,14 @@
     The share of a Model's columns whose names a person would not search for: col1,
     field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse
     names. One finding per Model over 10%, listing the first five such names. The
-    same two patterns the report's Spotter readiness score rates name quality with.
+    report's Spotter readiness score rates name quality with the same field.
   categories: [H]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: ratio
     over: model.column
-    match:
-      any:
-        - {field: name, regex: '(?i)^col\d+$|^field[-_]?\d+$|^val\d*$|^tmp[-_]|^\d'}
-        - {field: name, regex: '^[A-Z][A-Z0-9]*_[A-Z0-9_]+$'}
+    match: {field: "@is_poor_name", truthy: true}
   bands:
     direction: lower_is_better
     unit: percent
@@ -60,6 +57,7 @@
   implementation: code:description_quality
   scope: model
   severity: LOW
+  parameters: {min_chars: 20, max_chars: 400, issues_shown: 3}
   message: "{count} description quality issues: {issues}"
   examples:
     fires: {fixture: human_description_short, severity: LOW}
@@ -232,6 +230,8 @@
   uses: [dependents, sets]
   implementation: code:stale_names
   scope: model
+  severity: {field: "@orphan_model", map: {true: MEDIUM}, default: LOW}
+  parameters: {quote_chars: 60}
   message:
     by_severity:
       MEDIUM: "{what} matches stale pattern: '{value}', and nothing uses the Model"

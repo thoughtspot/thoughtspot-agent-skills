@@ -127,11 +127,12 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
      "D12: severity is required: code:column_type_divergence reads the catalog severity"),
     ("D10", _drop("severity"),
      "D10: severity is required: code:zero_column_tables reads the catalog severity"),
-    # …and nothing it ignores (a bands-graded code rule's two cases are synthetic, in
-    # test_audit_rule_examples.py: no shipped code rule grades by bands since A5 retired)
-    ("D1", _set("bands", _COUNT_BANDS),
-     "D1: bands has no effect: code:model_complexity chooses its severities itself"),
-    ("D1", _set("profiles.spotter.bands", _COUNT_BANDS), "(profile: spotter)"),
+    ("D1", _drop("bands"),
+     "D1: bands are required: code:model_complexity grades its findings by bands"),
+    ("H10", _drop("severity"),
+     "H10: severity is required: code:stale_names reads the catalog severity"),
+    # …and nothing it ignores
+    ("D1", _set("severity", "HIGH"), "D1: severity has no effect: code:model_complexity"),
     ("P6", _set("bands", _COUNT_BANDS), "P6: bands has no effect: code:join_keys"),
     ("P6", _set("severity", "HIGH"),
      "P6: severity has no effect: code:join_keys chooses its severities itself (INFO, LOW)"),
@@ -149,6 +150,23 @@ _COUNT_BANDS = {"direction": "lower_is_better", "unit": "count",
      "P6: profiles.spotter.message.by_severity: no template for severity INFO"),
     ("P6", lambda r: r["message"]["by_severity"].update(MEDIUM="x"),
      "P6: message.by_severity: a template for severity MEDIUM, which the rule never emits"),
+    # a code rule's parameters: exactly the names it reads, each a number
+    ("H2", _drop("parameters"), "H2: parameters missing issues_shown, max_chars, "
+     "min_chars: code:description_quality reads them"),
+    ("H2", lambda r: r["parameters"].update(min_length=5),
+     "H2: parameters min_length have no effect: code:description_quality does not read"),
+    ("H2", lambda r: r["parameters"].update(min_chars="20"),
+     "H2: parameters.min_chars must be a number, got '20'"),
+    ("H10", _set("parameters.quote_chars", True),
+     "H10: parameters.quote_chars must be a number, got True"),
+    ("H10", _set("profiles.spotter.parameters", [60]),
+     "H10: parameters must be a mapping of names to numbers, got [60] (profile: spotter)"),
+    # …replaced whole under a profile, never merged
+    ("H2", _set("profiles.spotter.parameters", {"min_chars": 10}),
+     "parameters missing issues_shown, max_chars: code:description_quality reads them "
+     "(profile: spotter)"),
+    ("P1", _set("parameters", {"min_chars": 10}),
+     "P1: parameters are read only by a code rule; this rule has none"),
     # declarative: templates and thresholds for severities never emitted
     ("D3", lambda r: r["message"]["by_severity"].update(LOW="x"),
      "D3: message.by_severity: a template for severity LOW, which the rule never emits"),

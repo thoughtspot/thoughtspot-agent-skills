@@ -37,9 +37,9 @@ With `--base <ref>` it also holds rule ids to their history (catalog_history.py)
 id present at `<ref>` that is gone now fails (retire it instead), and so does an id
 retired at `<ref>` under every profile that is active again under any (a retired id is
 never reused — `status` is overridable per profile, so the effective status per
-profile is compared); and a rule whose bands changed since `<ref>` fails while its
-description still quotes a band value no profile grades by any more. `<ref>`'s catalog
-is read with `git show`, so it runs offline.
+profile is compared); and a rule whose bands or parameters changed since `<ref>`
+fails while its description still quotes a value no profile grades by any more.
+`<ref>`'s catalog is read with `git show`, so it runs offline.
 CI passes `--base origin/main`. Pre-commit passes `--merge-base-with origin/main`: the
 merge base of HEAD with the local `origin/main` (no fetch), so an id that exists only
 on the branch may still be dropped or renamed; without a local `origin/main`, or when
@@ -163,7 +163,7 @@ def _history(root: Path, ref: str) -> tuple:
     problems = history.history_problems(old, head, ref, profiles)
     problems += history.description_drift_problems(old, head, ref, profiles)
     return problems, (f"rule ids vs {ref}: {len(old)} at base, none removed or reused; "
-                      "no description quotes a changed band value")
+                      "no description quotes a changed band or parameter value")
 
 
 def _doc_problems(root: Path) -> list:

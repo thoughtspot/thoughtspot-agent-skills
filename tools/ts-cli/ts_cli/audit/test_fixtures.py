@@ -8,26 +8,14 @@ ANGLE_NAMES = {"A": "ai", "D": "data_modeling", "H": "human", "P": "performance"
 ALL_ANGLES = list(ANGLE_NAMES.keys())
 SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 
-CHECK_CATALOG = [
-    ("A1", "ai", "Description coverage below threshold"),
-    ("A2", "ai", "Synonym coverage below threshold"),
-    ("A3", "ai", "No AI instructions configured"),
-    ("D1", "data_modeling", "Model complexity exceeds threshold"),
-    ("D2", "data_modeling", "Chasm trap detected in join path"),
-    ("D7", "data_modeling", "High model overlap detected"),
-    ("D8", "data_modeling", "Duplicate table objects found"),
-    ("H3", "human", "Unnecessary hidden columns"),
-    ("H4", "human", "Orphan model with no dependents"),
-    ("H7", "human", "Answer queries table directly"),
-    ("H8", "human", "Formula promotion candidate"),
-    ("P1", "performance", "SQL View used as model source"),
-    ("P5", "performance", "Non-progressive join detected"),
-    ("P16", "performance", "Deeply nested if() calls"),
-    ("S1", "security", "PII column without RLS"),
-    ("S3", "security", "Indexing enabled without RLS"),
-]
-
 from ts_cli.audit.findings import CHECK_META
+
+# Active rule ids the sample findings draw on; titles come from the catalog, so a
+# retired or retitled rule cannot linger here (D2, P5 and S3 did, after 2026-10's PR 2.1).
+_SAMPLE_CHECK_IDS = ["A1", "A2", "A3", "D1", "D3", "D7", "D8", "H3", "H4", "H7", "H8",
+                     "P1", "P6", "P16", "S1", "S2"]
+CHECK_CATALOG = [(cid, ANGLE_NAMES[cid[0]], CHECK_META[cid]["title"])
+                 for cid in _SAMPLE_CHECK_IDS]
 
 MODEL_NAMES = [
     "Sales Model", "Revenue Model", "Customer Analytics", "Product Catalog",

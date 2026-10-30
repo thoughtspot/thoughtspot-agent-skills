@@ -94,6 +94,9 @@ class Rule:
     profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     message: Union[str, Dict[str, Any]] = ""   # a template, or {by_severity: {...}}
     legacy_threshold: Optional[Dict[str, Any]] = None
+    # Named numbers a code rule grades or words by (H2's description lengths), declared
+    # by its registration; overridable per profile, replaced whole like `bands`.
+    parameters: Dict[str, Any] = field(default_factory=dict)
     remediation: str = ""
     examples: Dict[str, Any] = field(default_factory=dict)
     views: List[str] = field(default_factory=list)
@@ -249,6 +252,7 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
         profiles=dict(get("profiles", dict, {})),
         message=_expect(d.get("message"), (str, dict), "", file, rid, "message"),
         legacy_threshold=get("legacy_threshold", dict, None),
+        parameters=dict(get("parameters", dict, {})),
         remediation=get("remediation", str, ""),
         examples=dict(get("examples", dict, {})),
         views=list(get("views", list, [])),

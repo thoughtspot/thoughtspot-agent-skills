@@ -130,6 +130,7 @@ def wide_registered():
     code_rules.SEVERITY_SOURCES.pop(WIDE, None)
     code_rules.CODE_LABELS.pop(WIDE, None)
     code_rules.CODE_USES.pop(WIDE, None)
+    code_rules.CODE_PARAMETERS.pop(WIDE, None)
 
 
 def _code_rule_entry(**body) -> dict:
@@ -413,6 +414,7 @@ def own_registered():
     code_rules.CODE_LABELS.pop(OWN, None)
     code_rules.SEVERITY_SOURCES.pop(OWN, None)
     code_rules.CODE_USES.pop(OWN, None)
+    code_rules.CODE_PARAMETERS.pop(OWN, None)
     code_rules.OWN_THRESHOLD.discard(OWN)
 
 
@@ -475,7 +477,7 @@ def test_shipped_code_rules_declare_what_they_read():
     assert {n: code_rules.SEVERITY_SOURCES[n] for n in (
         "model_complexity", "join_keys", "zero_column_tables",
         "column_type_divergence")} == {
-        "model_complexity": frozenset({"HIGH", "MEDIUM"}),
+        "model_complexity": "bands",
         "join_keys": frozenset({"LOW", "INFO"}), "zero_column_tables": "severity",
         "column_type_divergence": "severity_name"}
     assert code_rules.OWN_THRESHOLD >= {"model_complexity"}

@@ -8,7 +8,7 @@ section "not collected for this selection" from "collected, none".
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
 from ts_cli.audit.engine import scopes, tml
@@ -135,17 +135,25 @@ _DOMAIN_SIGNALS: list[tuple[str, str, str, str]] = [
 ]
 
 
+def _name(obj: Any) -> str:
+    """An object's name as text: a null or YAML-typed one (`name: 2024`) must not crash
+    the report."""
+    return str(obj.get("name") or "") if isinstance(obj, dict) else ""
+
+
+def _model_names(model_data: dict) -> tuple:
+    """(table names, measure count, every name lower-cased as one text) of a Model."""
+    tables = [_name(mt) for mt in (model_data.get("model_tables") or [])]
+    cols = [c for c in (model_data.get("columns") or []) if isinstance(c, dict)]
+    measures = sum(1 for c in cols
+                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
+    text = " ".join(tables + [_name(c) for c in cols] + [_name(model_data)])
+    return tables, measures, text.lower().replace("_", " ")
+
+
 def _build_ai_analysis(instructions: list, model_data: dict) -> dict:
     """Build a narrative domain summary from model structure."""
-    model_name = model_data.get("name", "")
-    tables = [mt.get("name", "") for mt in (model_data.get("model_tables") or [])]
-    cols = model_data.get("columns") or []
-    measures = [c.get("name", "") for c in cols
-                if (c.get("properties") or {}).get("column_type") == "MEASURE"]
-
-    all_text = " ".join(
-        tables + [c.get("name", "") for c in cols] + [model_name]
-    ).lower().replace("_", " ")
+    tables, n_measures, all_text = _model_names(model_data)
 
     source = ""
     for prefix, label in _SOURCE_PREFIXES.items():
@@ -169,13 +177,13 @@ def _build_ai_analysis(instructions: list, model_data: dict) -> dict:
         domain = (
             f"This model analyses {source} {domain_str} data"
             f" across {len(tables)} table{'s' if len(tables) != 1 else ''}"
-            f" with {len(measures)} metric{'s' if len(measures) != 1 else ''}."
+            f" with {n_measures} metric{'s' if n_measures != 1 else ''}."
         )
     else:
         domain = (
             f"This model covers {domain_str}"
             f" across {len(tables)} table{'s' if len(tables) != 1 else ''}"
-            f" with {len(measures)} metric{'s' if len(measures) != 1 else ''}."
+            f" with {n_measures} metric{'s' if n_measures != 1 else ''}."
         )
 
     objectives = matched_focus[:5]

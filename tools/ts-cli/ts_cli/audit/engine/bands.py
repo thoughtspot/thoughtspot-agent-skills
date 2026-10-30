@@ -9,9 +9,9 @@ the severity of a rule without bands (a name, or a mapping looked up on the item
     catalog default -> profile -> (future) cluster -> (future) Org -> ...
 
 Each layer is `{"source": <provenance name>, "overrides": {key: value}}` and may change
-only OVERRIDABLE keys (status, bands, severity, message, remediation); `bands` is
-replaced whole, never merged level by level. A key outside OVERRIDABLE is ignored and
-recorded in the provenance's `ignored` list — except `legacy_threshold` in a profile
+only OVERRIDABLE keys (status, bands, severity, message, remediation, parameters);
+`bands` and `parameters` are replaced whole, never merged. A key outside OVERRIDABLE
+is ignored and recorded in the provenance's `ignored` list — except `legacy_threshold` in a profile
 layer, which the catalog allows there and `run.py` reads separately.
 
 The provenance says which layer supplied the bands and the severity, so a report

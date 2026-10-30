@@ -91,6 +91,37 @@ def code_rule_declaration(name: str) -> Optional[Tuple[Any, bool]]:
     return SEVERITY_SOURCES[name], name in OWN_THRESHOLD
 
 
+def parameter_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
+    """`parameters` under every profile: a code rule's must be exactly the names its
+    registration declares, each a number (not a boolean); any other rule takes none."""
+    m = CODE_IMPL.match(rule.implementation)
+    from ts_cli.audit.engine.code_rules import CODE_PARAMETERS
+    declared = CODE_PARAMETERS.get(m.group(1), frozenset()) if m else frozenset()
+    by_problem: Dict[str, List[str]] = {}
+    for pid in profiles:
+        params = profile_override(rule, pid).get("parameters", rule.parameters)
+        found: List[str] = []
+        if not isinstance(params, dict):
+            found.append(f"parameters must be a mapping of names to numbers, got {params!r}")
+        else:
+            if not m and params:
+                found.append("parameters are read only by a code rule; this rule has none")
+            elif m:
+                missing, extra = sorted(declared - set(params)), sorted(set(params) - declared)
+                if missing:
+                    found.append(f"parameters missing {', '.join(missing)}: "
+                                 f"{rule.implementation} reads them")
+                if extra:
+                    found.append(f"parameters {', '.join(extra)} have no effect: "
+                                 f"{rule.implementation} does not read them")
+            found += [f"parameters.{k} must be a number, got {v!r}" for k, v in params.items()
+                      if isinstance(v, bool) or not isinstance(v, (int, float))]
+        for problem in found:
+            by_problem.setdefault(problem, []).append(pid)
+    return [f"{problem} (profile: {', '.join(pids)})" if pids != [""] else problem
+            for problem, pids in by_problem.items()]
+
+
 def _declaration(rule: Rule) -> Optional[Tuple[Any, bool]]:
     m = CODE_IMPL.match(rule.implementation)
     return code_rule_declaration(m.group(1)) if m else None

@@ -56,7 +56,7 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "context.py")
 # Pure ts_cli modules outside the audit package that a code rule imports at module
 # level (S11's join-graph search), copied beside it: stdlib only, so gate-safe.
-GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py")
+GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py", "spotql_ops.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
@@ -303,7 +303,7 @@ _IDX = ('@register("is_indexed", uses=(), values=(False, True),\n'
         '          label="the column is indexed for search")\n')
 _IDX_BODY = '    """Column: text-search indexed (absent `index_type` means indexed by default)."""\n'
 _D1 = '@code_rule("model_complexity"'
-_D1_BODY = ('    """D1 — up to five findings per Model, one per measure over its MEDIUM line."""\n'
+_D1_BODY = ('    green, yellow = lines.get("MEDIUM"), lines.get("HIGH")\n'
             '    out: List[Finding] = []\n    for item in scopes.available(ctx, rule):\n')
 
 
@@ -598,8 +598,23 @@ def test_history_fails_a_description_still_quoting_a_changed_band_value(tmp_path
     _edit_rules(root, "ai.yaml", _raise_a1_general())
     res = _run_base(root, "HEAD")
     assert res.returncode == 1, res.stdout
-    assert "A1: its bands changed since HEAD, but its description still quotes 50" \
-        in res.stdout, res.stdout
+    assert "A1: its bands or parameters changed since HEAD, but its description still " \
+        "quotes 50" in res.stdout, res.stdout
+
+
+def test_history_fails_a_description_still_quoting_a_changed_parameter(tmp_path):
+    """H2's description says "under 20 characters"; min_chars moving to 25 must take it."""
+    def edit(rules):
+        for r in rules:
+            if r["id"] == "H2":
+                r["parameters"]["min_chars"] = 25
+        return rules
+    root = _git_repo(tmp_path)
+    _edit_rules(root, "human.yaml", edit)
+    res = _run_base(root, "HEAD")
+    assert res.returncode == 1, res.stdout
+    assert "H2: its bands or parameters changed since HEAD, but its description still " \
+        "quotes 20" in res.stdout, res.stdout
 
 
 def test_history_passes_once_the_description_moves_with_the_bands(tmp_path):
