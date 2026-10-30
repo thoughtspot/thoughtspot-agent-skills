@@ -157,6 +157,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .view.active{display:block;}
 
 /* ── Dashboard ── */
+.unread{
+  margin:0 0 16px;padding:12px 14px;border:1px solid var(--hair);border-left:3px solid var(--warn);
+  background:var(--warn-soft);border-radius:6px;font-size:13px;color:var(--ink);
+}
+.unread ul{margin:6px 0 0 18px;padding:0;}
+.unread code{font-family:var(--mono);font-size:12px;}
 .dash-header{
   background:var(--surface);border:1px solid var(--hair);border-radius:8px;
   padding:16px 20px;margin-bottom:16px;
@@ -2702,6 +2708,17 @@ function buildDashboard(){
     html += '<span class="meta-item">Audit report &mdash; no corpus data</span>';
   }
   html += '</div>';
+
+  /* Items no rule judged: malformed TML (BL-406 item 10). Shown, never silent. */
+  if(D.C && D.C.ur && D.C.ur.length > 0){
+    html += '<div class="unread" role="note"><strong>Could not be read — '+D.C.ur.length+
+      ' item'+(D.C.ur.length === 1 ? '' : 's')+' not judged.</strong> Each one\u2019s own TML, or TML it '+
+      'depends on (a Table it uses, the Model an Answer is built on), holds a list or a single '+
+      'value where a mapping belongs. Fix the TML each entry names and re-run.<ul>';
+    D.C.ur.slice(0, 50).forEach(function(u){ html += '<li><code>'+esc(u)+'</code></li>'; });
+    if(D.C.ur.length > 50) html += '<li>…and '+(D.C.ur.length - 50)+' more (see the run’s JSON)</li>';
+    html += '</ul></div>';
+  }
 
   /* Severity cards */
   html += '<div class="sev-cards">';

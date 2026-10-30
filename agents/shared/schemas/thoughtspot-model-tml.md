@@ -402,7 +402,7 @@ through only on a same-instance round trip. `geo_config` also appears on **formu
 | Field | Default | Notes |
 |---|---|---|
 | `is_bypass_rls` | false | Set true to bypass row-level security. **Always emitted on export** — 143 of 143 census Models carry it, every one `false` |
-| `join_progressive` | true | ThoughtSpot execution hint — always set true. Always emitted (143/143; `true` ×142, `false` ×1) |
+| `join_progressive` | — | ThoughtSpot execution hint — **always set it true.** Absent behaves as off: every table is joined into every query (live-verified 2026-08-10; see `ts-object-model-agentql-query` patterns.md, "Dimension-anchored anti-join"), so hand-authored TML must set it. Always emitted on export (143/143; `true` ×142, `false` ×1) |
 | `spotter_config.is_spotter_enabled` | true | Enables Spotter (AI search) for this model. Always emitted (143/143; `true` ×128, `false` ×15) |
 
 ### `model_instructions`

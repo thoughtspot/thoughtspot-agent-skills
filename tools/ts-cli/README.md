@@ -4696,6 +4696,13 @@ after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips tha
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
 report). Any other exception is a bug and propagates unchanged.
 
+**Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds a list or a
+single value where a mapping belongs (`properties`, `spotter_config`,
+`db_column_properties`) gets no findings and no readiness score, and neither do such a
+Table, the Answers built on either, or the Model's Sets.
+Each is warned on stderr and listed in the JSON as `corpus.unreadable` (the report's
+"Could not be read" box), with the path, e.g. `columns[Amount].properties`.
+
 A snapshot holds exported TML from the cluster it was captured on. Keep it outside the
 repository — this repo is public.
 

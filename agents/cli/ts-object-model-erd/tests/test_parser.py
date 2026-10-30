@@ -326,3 +326,15 @@ def test_join_keys_reach_alias_nodes():
     assert _keys(m, "ORDERS") == {"ORDER_DATE_ID", "SHIP_DATE_ID"}
     assert _keys(m, "ORDER_DATE") == {"DATE_ID"}
     assert _keys(m, "SHIP_DATE") == {"DATE_ID"}
+
+
+def test_parse_model_tolerates_a_column_whose_properties_is_not_a_mapping():
+    """A list or scalar `properties` (malformed: the schema has a mapping) reads as
+    absent: the column renders with the default role instead of ending the render."""
+    import copy
+    for bad in (["MEASURE"], 5, "x"):
+        doc = copy.deepcopy(_mini_model())
+        doc["model"]["columns"][0]["properties"] = bad
+        m = parser.parse_model(doc, {})
+        names = [c["name"] for t in m["tables"] for c in t["cols"]]
+        assert doc["model"]["columns"][0]["name"] in names

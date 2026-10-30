@@ -204,7 +204,22 @@ To combine a combinator with anything else, wrap both in `all`.
 
 **Field paths.** `properties.column_type` walks the item. A non-numeric step on a list
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
-item, and `@name` is a derived field. A missing key yields null, never an error.
+item, and `@name` is a derived field. A missing key yields null, never an error. So
+does malformed TML (a key the schema defines as a mapping, `properties`,
+`spotter_config` or `db_column_properties`, holding a list or a scalar), but under
+`ts audit run` and `run_rules` no rule sees it: a Model whose TML holds one, or which uses
+a Table whose TML does, is **left out with everything hanging off it** (its Answers, Sets
+and metadata header; `engine/run.py` `readable`, `tml.unreadable_documents`), and the
+report lists it under "Could not be read". A rule needs no guard for it. (`run_rule`, which
+checks one rule's examples, does not filter; examples are well-formed.) A new kind of
+document that refers to a Model or Table must be added to `unreadable_documents`, or a
+rule will judge it against an object no rule can see. And a rule that asserts something
+is on **no** Model (H7's known Tables, H8/H9's Model formulas) must read every Model,
+`fields_human._all_models(ctx)` and `ctx.excluded_tables` included: the excluded ones are
+not judged, but their formulas and Tables still exist, and leaving them out makes "on no
+Model" false (a false H8 HIGH, PR #693 review round 6). A derived field or code
+rule should still read those keys through `tml.mapping(obj, key)`, which gives `{}` for
+the same cases, so a document reached some other way cannot crash the run.
 
 **Message placeholders** per mode (Python `str.format`; any other name fails the gate):
 

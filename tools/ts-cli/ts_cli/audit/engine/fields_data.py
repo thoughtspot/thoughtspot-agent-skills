@@ -121,7 +121,7 @@ def _table_columns(item: dict) -> Tuple[list, list]:
 
 def _attribute_count(table_cols: List[dict]) -> int:
     return sum(1 for c in table_cols
-               if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE")
+               if tml.mapping(c, "properties").get("column_type") == "ATTRIBUTE")
 
 
 @register("table_role", uses=(),

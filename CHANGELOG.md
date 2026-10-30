@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
+- fix(audit): a Model whose TML (or a Table it uses) has a list or scalar `properties`, `spotter_config` or `db_column_properties` is no longer mapped over or a crash: it is not judged, and the report and JSON list it under "Could not be read" (BL-406 item 10). Other non-mapping shapes are BL-501. ts-audit 3.7.1
+- chore: bump ts-cli to v0.192.1
 - fix: ts-cli / ts-convert-from-dbt 1.1.1 / ts-convert-to-dbt 1.0.1 — **a ZIP_FILE dbt connection no longer fails with a misleading 400.** `ts dbt generate-tml` / `generate-sync-tml` without `--file` sent no archive and ThoughtSpot answered "Error with the uploaded ZIP file.", which reads as a bad archive; the CLI now follows that 400 with an error saying the archive is missing and naming `--file`, at no extra request. The missing-catalog error and both skills now name the right command per engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion, where `docs generate` leaves `catalog.json` stale) — each verified on dbt Core 1.12.5 and Fusion 2.0.6. `ts dbt create --import-type ZIP_FILE` also refuses locally without `--project-name`, which the server rejected a create without on one cluster.
 - chore: bump ts-cli to v0.192.0
 - feat(audit): grading into data (ts-audit v2 roadmap PR 2.4). New catalog key `parameters` for code-rule tuning numbers (H2, H10); D1 and H10 graded from the catalog; P2 reads the formula expression; H1 and the readiness score share one name test; `ts audit run` no longer ends on a null or numeric name. ts-audit 3.7.0

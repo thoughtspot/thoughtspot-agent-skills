@@ -272,6 +272,9 @@ def compact_payload(data: dict) -> dict:
         # "not collected for this selection".
         if isinstance(corpus.get("fetched_needs"), list):
             result["C"]["fn"] = corpus["fetched_needs"]
+        # Items no rule judged because their TML is malformed (absent in older JSON).
+        if corpus.get("unreadable"):
+            result["C"]["ur"] = list(corpus["unreadable"])
     else:
         result["C"] = None
 

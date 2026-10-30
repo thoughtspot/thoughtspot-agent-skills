@@ -446,7 +446,7 @@ def _column_types_by_db_name(models: List[dict]) -> Dict[Any, Dict[Any, Any]]:
     for item in models:
         for c in item["obj"].get("columns") or []:
             db_name = c.get("db_column_name") or c.get("name", "")
-            ctype = (c.get("properties") or {}).get("column_type", "")
+            ctype = tml.mapping(c, "properties").get("column_type", "")
             if ctype:
                 col_types.setdefault(db_name, {})[item["name"]] = ctype
     return col_types
