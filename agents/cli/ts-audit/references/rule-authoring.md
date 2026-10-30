@@ -206,10 +206,14 @@ To combine a combinator with anything else, wrap both in `all`.
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
 item, and `@name` is a derived field. A missing key yields null, never an error. So
 does malformed TML (a key the schema defines as a mapping, `properties`,
-`spotter_config` or `db_column_properties`, holding a list or a scalar), but no rule ever
-sees it: a Model whose TML holds one, or which uses a Table whose TML does, is **left out
-of every rule** (`engine/run.py` `readable`, `tml.unreadable_documents`), and the report
-lists it under "Could not be read". A rule needs no guard for it. A derived field or code
+`spotter_config` or `db_column_properties`, holding a list or a scalar), but under
+`ts audit run` and `run_rules` no rule sees it: a Model whose TML holds one, or which uses
+a Table whose TML does, is **left out with everything hanging off it** (its Answers, Sets
+and metadata header; `engine/run.py` `readable`, `tml.unreadable_documents`), and the
+report lists it under "Could not be read". A rule needs no guard for it. (`run_rule`, which
+checks one rule's examples, does not filter; examples are well-formed.) A new kind of
+document that refers to a Model or Table must be added to `unreadable_documents`, or a
+rule will judge it against an object no rule can see. A derived field or code
 rule should still read those keys through `tml.mapping(obj, key)`, which gives `{}` for
 the same cases, so a document reached some other way cannot crash the run.
 

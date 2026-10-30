@@ -14815,8 +14815,10 @@ used as a name or description still ends the run at the JSON output (the report'
 (2026-10-30): malformed TML is **not judged, and shown**, and the unit is the **whole
 Model**. A Model whose TML, or a Table it uses, holds a list or scalar where the schema has
 a mapping (`properties`, `spotter_config`, `db_column_properties`) is left out of every
-rule and the report corpus (`engine/run.py` `readable`, `tml.unreadable_documents`); so is
-such a Table or Answer. `ts audit run` warns on stderr, and the run's JSON
+rule and the report corpus (`engine/run.py` `readable`, `tml.unreadable_documents`), and
+so is everything hanging off it: such a Table, the Answers built on either (or else H8
+judges them against a Model no rule sees: a false "not in model" HIGH), the Model's Sets
+and the metadata headers. Cross-Model rules (D7, D12) do not see it either. `ts audit run` warns on stderr, and the run's JSON
 (`corpus.unreadable`) and the report's "Could not be read" box name each one and the path.
 Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column as
 hidden and A1/A2 left it out, and the same shape ended `ts audit run` (the report corpus,
@@ -14826,7 +14828,7 @@ wherever absent has a meaning (P4 "joins every table", S2 "PII indexed", A1/A2 c
 P15), and skipping only the bad column leaked (P8 counted fewer columns, H3 judged a column
 through an unreadable sibling, the readiness score mixed both). A field path still reads
 such a value as None and Python reads go through `tml.mapping`, as a backstop. Pinned:
-`data_single_model_malformed_column` loses its A4 and H4 (the Model is not judged), and
+`data_single_model_malformed_column` loses its A4, H3 and H4 (the Model is not judged), and
 `tml_value_shapes` no longer carries the two malformed columns (moving A1/A2 7 → 6
 columns and dropping H3), so it keeps testing the other value shapes. The SE demo sample
 is unchanged (no malformed TML). The wider class is BL-501; converters emitting Models
@@ -16050,8 +16052,9 @@ objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
 
 **Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
-**What.** Item 10 made a list or scalar under `properties`, `spotter_config` or
-`db_column_properties` read as absent (`tml.MAPPING_KEYS`, `tml.mapping`). The class is
+**What.** Item 10 made a Model whose TML holds a list or scalar under `properties`,
+`spotter_config` or `db_column_properties` unjudged and listed (`tml.MAPPING_KEYS`,
+`tml.unreadable_documents`). The class is
 wider: anywhere the schema has a mapping, or a list of mappings, a different shape still
 ends `ts audit run` with an AttributeError and no warning. Reproduced on the populated
 fixture with one mutation each:
@@ -16077,7 +16080,7 @@ security and make the security rules call it unprotected: confirm the flat-list 
 against a live export or the SpotterCode MCP, then normalise both shapes in one audit
 helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). Follow the
 item-10 ruling for the rest: add each mapping key to `tml.MAPPING_KEYS` and each list of
-mappings to `tml.unreadable_documents`, so the whole Model is not judged and is listed
+mappings to `tml.malformed_mappings`, so the whole Model is not judged and is listed
 under "Could not be read". Reading a malformed `model_instructions` as absent instead would
 make A3 report a coached Model as uncoached (HIGH under Spotter-ready). End-to-end tests
 (`run_audit` then `render_report`) for each row above.

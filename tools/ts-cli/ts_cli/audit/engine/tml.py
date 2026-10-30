@@ -67,57 +67,64 @@ def _malformed_tables(tables: dict) -> Dict[Any, Tuple[dict, list]]:
     return out
 
 
-def _model_reasons(body: dict, tables: dict, bad_tables: dict, bad_names: set) -> list:
+def _model_reasons(body: dict, bad_tables: dict) -> list:
     """Why a Model is unreadable: its own malformed paths, then each malformed Table it
-    uses (by `model_tables[].fqn`, else by name when the fqn names no fetched Table)."""
+    uses (by `model_tables[].fqn`, the key `ctx.tables` holds Tables under)."""
     reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
     for mt in body.get("model_tables") or []:
-        if not isinstance(mt, dict):
-            continue
-        key = mt.get("fqn")
-        by_name = key not in (tables or {}) and str(mt.get("name")) in bad_names
-        if key in bad_tables or by_name:
+        if isinstance(mt, dict) and mt.get("fqn") in bad_tables:
             reasons.append(f"uses Table '{mt.get('name')}', whose TML is malformed")
     return reasons
 
 
-def _malformed_answers(answers: list) -> Tuple[set, list]:
-    guids, messages = set(), []
-    for doc in answers or []:
-        body = doc.get("answer") if isinstance(doc, dict) else None
-        for p in malformed_mappings(body) if isinstance(body, dict) else []:
-            guids.add(doc.get("guid"))
-            messages.append(f"Answer '{body.get('name') or ''}' ({doc.get('guid')}): "
-                            f"'{p}' is not a mapping; not judged")
-    return guids, messages
+def _answer_reasons(body: dict, excluded: Dict[Any, str]) -> list:
+    """Why an Answer is not judged: its own malformed paths, then each excluded Model or
+    Table it is built on (`tables[].fqn`) — its formulas and table references are judged
+    against that object, which no rule can now see (H7, H8, H9)."""
+    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+    for ref in body.get("tables") or []:
+        key = ref.get("fqn") if isinstance(ref, dict) else None
+        if key in excluded:
+            reasons.append(f"built on {excluded[key]}, which is not judged")
+    return reasons
+
+
+def _message(kind: str, name: Any, key: Any, reasons: list) -> str:
+    return f"{kind} '{name or ''}' ({key or 'no guid'}): {'; '.join(reasons)}; not judged"
 
 
 def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
-    """What no rule may judge, because its TML holds a list or scalar where a mapping
-    belongs: (Model guids, Table keys, Answer guids, one message per reason).
+    """What no rule may judge, because its TML, or TML it depends on, holds a list or
+    scalar where a mapping belongs: (Model guids, Table keys, Answer guids, one message
+    per object, its reasons joined).
 
-    A Model is unreadable when its own TML has such a path or a Table it uses does; a
-    Table or Answer when its own TML does. The unit is the whole Model: skipping only
-    the bad column left counts, sibling checks and the readiness score reading it anyway
-    (PR #693 review, round 4)."""
+    A Table is unreadable when its own TML has such a path; a Model when its own TML does
+    or it uses such a Table; an Answer when its own TML does or it is built on such a
+    Model or Table. The unit is the whole Model: skipping only the bad column left
+    counts, sibling checks and the readiness score reading it anyway (PR #693 review,
+    round 4), and keeping its Answers judged them against a Model no rule could see
+    (round 5)."""
     bad_tables = _malformed_tables(ctx.tables)
-    bad_names = {str(body.get("name")) for body, _ in bad_tables.values()}
+    excluded = {key: f"Table '{body.get('name') or ''}'" for key, (body, _) in bad_tables.items()}
     models, messages = set(), []
     for doc in ctx.models:
         body = doc.get("model") if isinstance(doc, dict) else None
-        if not isinstance(body, dict):
-            continue
-        reasons = _model_reasons(body, ctx.tables, bad_tables, bad_names)
+        reasons = _model_reasons(body, bad_tables) if isinstance(body, dict) else []
         if reasons:
-            guid = doc.get("guid")
-            models.add(guid)
-            messages += [f"Model '{body.get('name') or ''}' ({guid or 'no guid'}): {r}; "
-                         "not judged" for r in reasons]
+            models.add(doc.get("guid"))
+            excluded[doc.get("guid")] = f"Model '{body.get('name') or ''}'"
+            messages.append(_message("Model", body.get("name"), doc.get("guid"), reasons))
     for key, (body, paths) in bad_tables.items():
-        messages += [f"Table '{body.get('name') or ''}' ({key}): '{p}' is not a mapping; "
-                     "not judged" for p in paths]
-    answers, answer_messages = _malformed_answers(ctx.answers)
-    return models, set(bad_tables), answers, messages + answer_messages
+        messages.append(_message("Table", body.get("name"), key,
+                                 [f"'{p}' is not a mapping" for p in paths]))
+    answers = set()
+    for doc in ctx.answers or []:
+        body = doc.get("answer") if isinstance(doc, dict) else None
+        reasons = _answer_reasons(body, excluded) if isinstance(body, dict) else []
+        if reasons:
+            answers.add(doc.get("guid"))
+            messages.append(_message("Answer", body.get("name"), doc.get("guid"), reasons))
+    return models, set(bad_tables), answers, messages
 
 
 def malformed_mappings(doc: Any, path: str = "") -> list:

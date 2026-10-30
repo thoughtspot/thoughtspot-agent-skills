@@ -54,19 +54,35 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
 
 
 def readable(ctx):
-    """`ctx` without what no rule may judge: each Model, Table and Answer whose TML holds
-    a list or scalar where a mapping belongs, and each Model using such a Table
-    (tml.unreadable_documents). A shallow copy; `ctx` itself is unchanged. The run lists
-    what it left out (audit/__init__.py), so nothing is skipped silently."""
+    """`ctx` without what no rule may judge (tml.unreadable_documents): each Model,
+    Table and Answer whose TML, or TML it depends on, holds a list or scalar where a
+    mapping belongs; with them, their metadata headers and the dependents (Sets
+    included) of each excluded Model. A shallow copy; `ctx` itself is unchanged. The run
+    lists every excluded object (audit/__init__.py), so none is skipped silently."""
     models, tables, answers, _ = tml.unreadable_documents(ctx)
     if not (models or tables or answers):
         return ctx
+    gone = models | tables | answers
+
+    def guid(doc):
+        return doc.get("guid")
     return dataclasses.replace(
         ctx,
-        models=[m for m in ctx.models if m.get("guid") not in models],
-        model_guids=[g for g in ctx.model_guids if g not in models],
+        models=_without(ctx.models, guid, models),
+        model_guids=_without(ctx.model_guids, lambda g: g, models),
         tables={k: v for k, v in ctx.tables.items() if k not in tables},
-        answers=[a for a in ctx.answers if a.get("guid") not in answers])
+        answers=_without(ctx.answers, guid, answers),
+        metadata=_without(ctx.metadata, _header_id, gone),
+        dependents={g: rows for g, rows in ctx.dependents.items() if g not in models})
+
+
+def _without(items: list, key, gone: set) -> list:
+    return [i for i in items if key(i) not in gone]
+
+
+def _header_id(entry: Any) -> Any:
+    header = (entry.get("metadata_header") or entry) if isinstance(entry, dict) else {}
+    return header.get("id") if isinstance(header, dict) else None
 
 
 def needs_for(catalog: Catalog, categories: List[str], profile: str,
@@ -138,6 +154,8 @@ def run_rule(ctx, catalog: Catalog, rule_id: str, profile: str,
     if rule_id not in catalog.rules:
         raise KeyError(f"unknown rule '{rule_id}'")
     with memo.run_scope():
+        # Not filtered through `readable`, which reads every kind of data: this checks one
+        # rule's own examples, whose data reads a test records against its declaration.
         return _run_rule(ctx, catalog, catalog.rules[rule_id], profile, layers or [])
 
 

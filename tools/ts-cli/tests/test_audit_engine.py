@@ -522,10 +522,11 @@ def test_a_malformed_mapping_is_named_in_a_warning(capsys):
         tables={}, dependents={}, model_guids=["m-1"])
     out = run_audit(None, ["m-1"], ctx=ctx)
     err = capsys.readouterr().err
-    assert "Model 'Sales' (m-1): 'properties' is not a mapping; not judged" in err
-    assert "'columns[A].properties' is not a mapping; not judged" in err
+    # one entry per object, its reasons joined
+    assert ("Model 'Sales' (m-1): 'properties' is not a mapping; "
+            "'columns[A].properties' is not a mapping; not judged") in err
     # …and shown to the reader, never only on stderr (product owner's ruling)
-    assert len(out["corpus"]["unreadable"]) == 2
+    assert len(out["corpus"]["unreadable"]) == 1
     from ts_cli.audit.report import render_report
     html = render_report(out)
     assert '"ur": [' in html or '"ur":[' in html
