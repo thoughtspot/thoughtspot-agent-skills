@@ -113,3 +113,32 @@ def test_deprecated_v2_docstring_mention_is_ignored(tmp_path):
 
 def test_deprecated_v2_fast_path_short_circuits(tmp_path):
     assert _scan_src(tmp_path, "x = 1\n") == []
+
+
+def test_flags_base_path_fstring_without_trailing_slash(tmp_path):
+    # PR #666 review B6: an f-string base path ending in "/tspublic/v1" (paths appended
+    # later) has no "/tspublic/v1/" fragment and used to pass.
+    src = 'def f(base):\n    return f"{base}/callosum/v1/tspublic/v1"\n'
+    assert len(_scan_src(tmp_path, src)) == 1
+
+
+def test_exempt_files_are_exact_paths():
+    from pathlib import Path
+    for rel in nv.EXEMPT_FILES:
+        assert nv._is_excluded(Path(rel))
+    # A sibling in the same directory is not exempted by the entry.
+    assert not nv._is_excluded(Path("tools/smoke-tests/smoke_other.py"))
+
+
+def test_flags_the_v1_dependency_family(tmp_path):
+    # PR #666 review: operation 8 and purge live under /callosum/v1/dependency, outside
+    # /tspublic/v1, and passed the gate.
+    src = ('def f(base):\n    a = f"{base}/callosum/v1/dependency"\n'
+           '    return a, "/callosum/v1/dependency/purge"\n')
+    assert len(_scan_src(tmp_path, src)) == 2
+
+
+def test_other_callosum_v1_paths_are_not_flagged(tmp_path):
+    # The cohort-detail and AgentQL endpoints legitimately live under /callosum/v1/.
+    src = 'A = "/callosum/v1/metadata/detail/{guid}"\nB = "/callosum/v1/v2/data/spotql/fetch-data"\n'
+    assert _scan_src(tmp_path, src) == []

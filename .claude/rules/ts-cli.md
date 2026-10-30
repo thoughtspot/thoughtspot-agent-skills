@@ -36,6 +36,19 @@ migration hits the same issue.
   before a CLI command is written. These are temporary scaffolding, not skill logic.
 - `agents/coco-snowsight/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
   CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
+- **`agents/cli/ts-dependency-cleanup/` — the v1 `/dependency` family** (added 2026-10-28,
+  PR #666; **pending maintainer sign-off**). Its endpoints have no v2 equivalent and are
+  cookie-authenticated through v1 `session/login`, which `ts`'s bearer-token client does
+  not speak, so the skill calls them with `curl`. Scope is narrow: only
+  `/callosum/v1/tspublic/v1/{session,metadata,dependency}/*` and
+  `/callosum/v1/dependency/delete-with-dependents`. The backup and rollback around the
+  destructive call still go through `ts dependency backup` / `rollback`. The skill's
+  smoke test is the one entry in `EXEMPT_FILES` in `check_no_v1_endpoints.py` — the
+  exemption covers that whole file, not just these endpoints, so a v1 string added there
+  needs review by hand. The gate also matches `/callosum/v1/dependency`, so the family
+  is caught everywhere else. **Exit:**
+  open item #6 in that skill — once a bearer token is verified against these endpoints,
+  move them into a `ts dependency` subcommand, then remove this bullet and the exemption.
 
 ---
 
@@ -158,6 +171,9 @@ not the "List of authentication types" the REST spec describes. An array is reje
 `Enum "ConnectionSearchAuthenticationType" cannot represent non-string value:
 ["KEY_PAIR"]. Did you mean the enum value "KEY_PAIR"?` Pass `"KEY_PAIR"`, never
 `["KEY_PAIR"]`, if a future caller needs it.
+
+**One documented exception:** the v1 `/dependency` family used by `ts-dependency-cleanup`
+(see "Exceptions" above). It has no v2 equivalent, so there is nothing to migrate to.
 
 If a new v1 endpoint is ever introduced, migrate it to the v2 equivalent before use:
 confirm the v2 spec via `get-rest-api-reference`, update the command/docstring/README,

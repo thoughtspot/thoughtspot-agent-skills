@@ -1,6 +1,6 @@
 ---
 name: ts-dependency-manager
-description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback.
+description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback. Use this to change a column or object while keeping its dependents working. To delete an object together with everything that depends on it (a server-side cascade delete), use ts-dependency-cleanup instead.
 ---
 
 # ThoughtSpot: Dependency Manager
@@ -8,6 +8,10 @@ description: Safely audit, remove, or repoint columns and objects across a Thoug
 Safely make changes that affect dependent objects in ThoughtSpot. Before any modification,
 this skill generates a full impact report with hyperlinks and risk ratings, lets you choose
 exactly what to change, takes TML backups, and provides rollback capability.
+
+> **Sibling skill:** `ts-dependency-cleanup` *deletes* an object and its whole dependency
+> cascade through the v1 `/dependency` API. Use this skill when the dependents should
+> survive the change. Use that one when they should go with it.
 
 **Supported operations:**
 
@@ -1133,9 +1137,11 @@ acknowledgment before proceeding:
 **Rollback — `ts dependency rollback`:**
 
 Map the menu choice to the command flags and run it against `{backup_dir}`. The command
-reads the manifest, restores objects in dependency-safe order (dependents before source),
+reads the manifest, restores objects in dependency-safe order (referenced objects first, then their dependents),
 re-imports DELETE-intent objects as NEW objects (new GUIDs, `guid:` stripped), and updates
 every other object in place at its original GUID.
+It records progress in `rollback_state.json` in `{backup_dir}`: re-running it finishes a
+partial restore, and skips (`skipped[]`) everything an earlier run already restored.
 
 ```python
 import subprocess, json
@@ -1210,6 +1216,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.1 | 2026-10-28 | Description and intro say when to use `ts-dependency-cleanup` (cascade delete) instead of this skill (PR #666 review: neither sibling said when to use the other). Step 11 rollback, via ts-cli 0.192.0: restored deletes are re-linked to each other by their new GUIDs, SQL Views restore before the Models built on them, and `ts dependency rollback` exits 1 when any object fails to restore. The step already parsed `failed[]` from stdout, so it needs no change. |
 | 1.5.0 | 2026-10-12 | **Column security rules are walked; an unchecked security row, or an incomplete dependents list (`BLOCKED_VERIFY_DEPENDENTS_FIRST`, new "Formula column dependents" row), now blocks `SAFE`** (open-item #9, BL-289; PR #506 review blockers 1 and 6). `ts metadata report` resolves a column GUID's owning table from its header `owner`, exports that table for `rls_rules` (the export API rejects a column GUID outright, so column reports used to abort) and fetches its column security rules; a whole-table source counts every rule on the table. A Model, or a Model's column, reports both rows unchecked because the rules live on base tables. Any unchecked RLS/CSR row gives the new `UNVERIFIED` verdict (`BLOCKED_VERIFY_SECURITY_FIRST`), which Step 5 handles like STOP. All live-verified on embed-1 staging against a real RLS rule and a real CSR rule. |
 | 1.4.3 | 2026-09-22 | **Open-item #9 resolved; the column-alias "cannot retrieve" claim retired, the CSR one corrected rather than retired (audit 5.2 / 5.3).** #9 called CSR retrieval the open question, on the accurate-but-incomplete observation that a plain `--associated` export returns no CSR. It needs a second option alongside it — `export_options.export_column_security_rules: true` (Beta, 10.12+) — and ships as `ts security column-rules export`/`get`. Separately, `dependency-types.md` row 10 called column-alias retrieval "No on this build" citing a non-existent open-item #10, when `ts alias export` retrieves it via `export_with_column_aliases: true`; row 10 is now Implementable and the alias doc is no longer listed as skipped. Five dangling citations resolved in all — the `#12` reference behind "drop model-level filters" is replaced by the real mechanism (`error_code 14518`, surfaced upstream as a YAML syntax error). Both #10 and #12 once existed and were deleted as resolved in 2026-06 without updating their inbound references — `check_open_item_citations.py` now makes that a commit failure. **CSR's status is corrected, not promoted:** it is now retrievable, but `ts metadata report` still does not probe it (`csr_hits` is declared and never populated), so row 9 stays Partial for that reason instead of the retired one. BL-289 tracks wiring the walk. |
 | 1.4.2 | 2026-07-31 | **BL-191 — the View mutation paths were dead against real Views.** `ts dependency mutate`/`apply-change` bound `view_columns[]` on `column_id`, which does not exist in real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census; `search_output_column` on 265 of 265). Removing a formula therefore deleted the formula and **left its `view_columns[]` entry behind** — a dangling reference that breaks the import. Both bindings corrected to `search_output_column` / `formulas[].name`, matched so an aggregation or bucket decoration (`Total X`, `Month(X)`) is caught but an unrelated column sharing a word is not. **Also fixed:** `search_query` kept naming a formula that column removal had *cascaded* away (a View references its formulas from the search string by id, e.g. `[formula_PMPM month].monthly`) — it is now re-sanitized after the formula pass, taking the bucket modifier with the token. Two adjacent pre-existing gaps are filed rather than fixed: **BL-197** (`sanitize_search_query` misses the qualified `[table_path::col]` form) and **BL-198** (formula removal does not cascade transitively). Doc-side: the troubleshooting row asserting the `TABLE_PATH::col` format is replaced, and `references/dependency-types.md`'s View row + a new note carry the corrected detection signal. Requires ts-cli v0.127.1. |

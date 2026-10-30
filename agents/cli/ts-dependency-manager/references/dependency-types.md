@@ -7,6 +7,12 @@ or before changing how Step 4 walks the graph. When the status of a row here cha
 (e.g. a "Partial" entry becomes "Implementable" because retrieval is now verified),
 update both this file AND the corresponding `references/open-items.md` entry.
 
+**Scope.** Every row below is a dependent this skill *keeps working*, by rewriting or
+reviewing it. Deleting an object together with its whole dependent cascade is a
+different job, done server-side by the sibling `ts-dependency-cleanup` skill through the
+v1 `/dependency` API. That skill keeps no table like this one: its scope for each run is
+the cascade preview the server returns.
+
 Status legend:
 - **Implementable** — retrieval verified, detection & update logic sketched
 - **Partial** — TML structure known but retrieval mechanism not yet verified

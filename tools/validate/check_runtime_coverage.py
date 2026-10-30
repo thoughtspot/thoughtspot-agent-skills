@@ -37,6 +37,11 @@ from _dirs import ALL_RUNTIMES
 # ("<skill>", "<runtime>") here.
 EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # --- CoCo Snowsight divergences (skill exists in claude, not in coco-snowsight) ---
+    ("ts-dependency-cleanup", "coco-snowsight"):
+        "CLI-only: every operation is a raw curl against the v1 /dependency/* family "
+        "using a session-login cookie jar. CoCo runs inside Snowsight with no shell, no "
+        "curl and no ts CLI, and there is no stored-procedure equivalent for the "
+        "dependency endpoints.",
     ("ts-migrate-orgs", "coco-snowsight"):
         "CLI-only: drives a destructive cross-Org cutover through the `ts` CLI "
         "and a local state ledger, neither of which exists in Snowsight.",

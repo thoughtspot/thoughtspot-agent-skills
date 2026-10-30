@@ -147,7 +147,12 @@ def main(argv: list[str]) -> int:
             def log_message(self, *a):
                 pass
         handler = functools.partial(Quiet, directory=str(tmp / "site"))
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        # The stdlib default backlog is 5: Chrome opens the page's tile/map fetches at once, and where
+        # accepts are slow (an endpoint agent on a work Mac) the overflow is refused and logs "NOGL
+        # Failed to fetch" for a random realm. A deeper queue costs nothing.
+        class Server(http.server.ThreadingHTTPServer):
+            request_queue_size = 128
+        server = Server(("127.0.0.1", 0), handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         failed = 0
         try:

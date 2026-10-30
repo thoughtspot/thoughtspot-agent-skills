@@ -12,6 +12,7 @@
 | ts-convert-to-databricks-mv | Y | — | — | Y |
 | ts-convert-to-dbt | Y | — | — | — |
 | ts-convert-to-snowflake-sv | Y | — | Y | — |
+| ts-dependency-cleanup | Y | — | — | — |
 | ts-dependency-manager | Y | — | — | — |
 | ts-link-semantic-layer | Y | — | — | — |
 | ts-load-source-data | Y | — | — | — |

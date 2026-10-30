@@ -13,6 +13,7 @@ pip install -e /path/to/thoughtspot-agent-skills/tools/ts-cli
 ```
 
 After install, the `ts` command is available on your PATH.
+`ts --version` prints the installed version (a skill that needs a minimum release checks it).
 
 ---
 
@@ -848,6 +849,11 @@ are collected in memory first** — files are written only if every export succe
 If ANY export fails, the command aborts non-zero with a clear message and writes
 NOTHING (no partial backup directory).
 
+Add `"source_deleted": true` when the operation deletes the source itself rather than
+modifying it (a cascade delete of a Table, Model or View). Its manifest entry then
+carries `intent: "DELETE"`, so `rollback` re-creates it under a new GUID instead of
+updating it in place at a GUID that no longer exists. Defaults to `false`.
+
 **Output:** the `manifest.json` contents as JSON to stdout (also written to
 `{out_dir}/ts_dep_backup_<timestamp>/manifest.json`, alongside one
 `{type}_{guid}_{name}.json` file per backed-up object). Backup dir path + counts go
@@ -862,10 +868,27 @@ ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --profile
 ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --only deletes
 ```
 
-Restores entries in dependency-safe order (dependents before source). An entry with
+Restores entries in dependency-safe order (the objects others reference first, so each
+dependent restores onto them). An entry with
 `intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
 (the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
-other entry is updated in place at its original GUID.
+other entry is updated in place at its original GUID. Each restored delete's new GUID
+is substituted into the TML of every entry restored after it, so a restored Answer
+binds to the restored Model rather than to the deleted original. Before re-creating a
+`DELETE` entry, rollback checks it with `metadata/search`: one that still exists (a
+partial delete left it) is skipped, and its dependents bind to it. An entry whose `fqn:`
+still names a deleted object with no replacement is refused (listed in `failed`) rather
+than imported against a dead GUID. A `WARNING` import status counts as restored (listed
+under `warnings`); a re-create that returns no GUID is a failure, since its dependents
+cannot be re-linked. A request that raises stops the run with its state saved.
+
+**Resumable.** Progress is written to `rollback_state.json` in the backup directory after
+every entry. Re-running skips each entry already restored, including one whose import
+errored but returned a GUID (listed under `skipped`), and reuses the earlier run's GUID
+remap, so finishing a partial restore neither duplicates objects nor binds a dependent to
+the deleted original. A second rollback from the same directory is therefore a no-op for
+everything already restored. Delete that file only to restore
+everything again from scratch.
 
 **Options:**
 
@@ -875,10 +898,12 @@ other entry is updated in place at its original GUID.
 | `--guid` | all | Restrict rollback to these GUID(s) (repeatable) |
 | `--only` | `all` | `updates` \| `deletes` \| `all` |
 
-**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
+**Output:** `{"succeeded": [...], "failed": [...], "skipped": [...], "warnings": [...], "new_guids": {old_guid: new_guid}}`
 to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
-delete — other objects that referenced the ORIGINAL guid remain broken and need
-manual reattachment. Per-object progress goes to stderr.
+delete — objects outside the backup that referenced the ORIGINAL guid remain broken
+and need manual reattachment. Per-object progress goes to stderr. **Exits 1 when any
+entry is in `failed`** (the JSON is still printed), so a partial restore never reads as
+success.
 
 #### `ts dependency apply-change`
 

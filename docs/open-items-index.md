@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**213 total items** across 24 skills — **71 open**, 127 verified, 15 deferred
+**236 total items** across 25 skills — **74 open**, 144 verified, 18 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -19,6 +19,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
+| ts-dependency-cleanup | 23 | **3** | 17 | 3 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
@@ -33,7 +34,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (71 items)
+### Untagged (74 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -75,6 +76,9 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-to-databricks-mv | #8 | Live numeric fidelity of the codified emit path | OPEN |
 | ts-convert-to-dbt | #2 | Legacy MetricFlow spec (semantic_models.yml) | OPEN |
 | ts-convert-to-dbt | #13 | Column Security Rules (CSR) not in Table TML | OPEN |
+| ts-dependency-cleanup | #6 | Migrate the calls into a `ts dependency` CLI group | OPEN |
+| ts-dependency-cleanup | #20 | Rollback of an operation 8 cascade | OPEN |
+| ts-dependency-cleanup | #23 | `metadata/details` as proof of deletion | OPEN |
 | ts-dependency-manager | #11 | Reusable Set (cohort) delete command | OPEN |
 | ts-dependency-manager | #13 | Chart `client_state_v2` stale column references | OPEN |
 | ts-dependency-manager | #14 | Cohort `pass_thru_filter` lost on round-trip | OPEN |
