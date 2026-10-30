@@ -24,9 +24,9 @@ from ts_cli.commands.tml import detect_tml_type, parse_edoc
 from ts_cli.dependency.backup import (
     build_manifest,
     backup_filename,
+    order_by_references,
     remap_guids,
     restore_policy_for,
-    rollback_order,
 )
 from ts_cli.dependency.mutate import apply_remove, apply_repoint
 from ts_cli.tml_common import extract_imported_guid
@@ -527,8 +527,9 @@ def rollback_cmd(
 ) -> None:
     """Roll back a ts-dependency-manager mutation run from a Step-7 backup (SKILL.md Step 11).
 
-    Reads `manifest.json` from `--backup-dir`, restores entries in `rollback_order`
-    (dependents before source). For an entry with `intent == "DELETE"`, re-imports
+    Reads `manifest.json` from `--backup-dir` and restores roots first: each entry after
+    every entry its TML references, then by type (Tables and SQL Views, Models, Views,
+    Sets, Answers, Liveboards). Refuses a backup taken on another cluster. For an entry with `intent == "DELETE"`, re-imports
     the backed-up TML with `create_new=True` and the `guid:` line stripped — the
     object no longer exists at its original GUID, so ThoughtSpot assigns a new one.
     Any other entry is updated in place (`create_new=False`) at its original GUID.
@@ -573,10 +574,21 @@ def rollback_cmd(
         return True
 
     entries = [e for e in manifest.get("objects", []) if _wanted(e)]
-    ordered = rollback_order(entries)
+    texts = {}
+    for e in entries:
+        try:
+            with open(e.get("backup_file") or "") as f:
+                texts[e.get("guid")] = f.read()
+        except OSError:
+            pass    # _rollback_one_entry reports the missing file
+    ordered = order_by_references(entries, texts)
 
     resolved_profile = resolve_profile(profile)
     client = ThoughtSpotClient(resolved_profile)
+    if isinstance(manifest.get("base_url"), str) and isinstance(client.base_url, str) \
+            and manifest["base_url"] != client.base_url:
+        raise SystemExit(f"This backup was taken from {manifest['base_url']}, not "
+                         f"{client.base_url}. Nothing was restored; use that cluster's profile.")
 
     results: Dict[str, object] = {"succeeded": [], "failed": [], "new_guids": {}}
 

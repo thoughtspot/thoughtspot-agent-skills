@@ -14567,7 +14567,14 @@ Tests for each, with synthetic names only.
 
 **Target:** 2026-12-31.
 
-## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
+## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2` — **RESOLVED 2026-10-30**
+
+**Resolution.** The capability ships as `ts-dependency-manager` mode D (Step 3-D, skill 1.6.0,
+ts-cli 0.192.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
+cascade-delete` refuses without a readable, current, same-cluster backup. Item 2: the smoke
+test has only a dry-run step; no destructive flag exists. Item 3: purge is not wrapped.
+Items 4-8 described the separate skill and no longer apply; #5's lookup-vs-cascade gap is
+recorded in ts-dependency-manager open-items #26.
 
 **Filed:** 2026-10-22. **Source:** the 2026-09-14 review of PR #505, closed unmerged on
 2026-10-22 for inactivity. Recorded here so the findings outlive the closed PR. A
@@ -15949,5 +15956,20 @@ endpoint.
 session endpoint needs a different auth mode than the profile's token, or the cluster build
 moved it. Fix `ts auth whoami` (and the two other callers) to the supported call, and keep
 `ts_auth_check` meaningful.
+
+**Target:** 2026-11-30.
+
+## BL-498 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the PR #666 follow-up review (the cascade-delete PR).
+
+**Why it matters.** `rollback` now exits 1 when any entry fails to restore, so a partial
+restore cannot read as success. `apply-change` (`commands/dependency_apply.py`) still exits
+0 with entries in `failed` — it exits non-zero only on source drift — so a caller reading
+the exit code takes a partly applied REMOVE/REPOINT for a clean one. Step 10 reads the
+JSON, so the skill itself is not misled; scripts and the smoke test are.
+
+**Do.** Exit 1 when `failed` is non-empty, after printing the JSON (the `rollback` pattern),
+and check the smoke test and Step 10 still read the result.
 
 **Target:** 2026-11-30.

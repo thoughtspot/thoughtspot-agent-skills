@@ -848,6 +848,11 @@ are collected in memory first** — files are written only if every export succe
 If ANY export fails, the command aborts non-zero with a clear message and writes
 NOTHING (no partial backup directory).
 
+Add `"source_deleted": true` when the operation deletes the source itself rather than
+modifying it (a cascade delete of a Table, Model or View). Its manifest entry then
+carries `intent: "DELETE"`, so `rollback` re-creates it under a new GUID instead of
+updating it in place at a GUID that no longer exists. Defaults to `false`.
+
 **Output:** the `manifest.json` contents as JSON to stdout (also written to
 `{out_dir}/ts_dep_backup_<timestamp>/manifest.json`, alongside one
 `{type}_{guid}_{name}.json` file per backed-up object). Backup dir path + counts go
@@ -862,10 +867,15 @@ ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --profile
 ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --only deletes
 ```
 
-Restores entries in dependency-safe order (dependents before source). An entry with
+Restores roots first: each entry after every entry its TML references, then by type
+(Tables and SQL Views, Models, Views, Sets, Answers, Liveboards). Refuses a backup
+taken on another cluster. Do not re-run it after a partial restore: it would create a
+second copy of every deleted object it already restored. An entry with
 `intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
 (the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
-other entry is updated in place at its original GUID.
+other entry is updated in place at its original GUID. Each restored delete's new GUID
+is substituted into the TML of every entry restored after it, so a restored Answer
+binds to the restored Model rather than to the deleted original.
 
 **Options:**
 
@@ -877,8 +887,10 @@ other entry is updated in place at its original GUID.
 
 **Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
 to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
-delete — other objects that referenced the ORIGINAL guid remain broken and need
-manual reattachment. Per-object progress goes to stderr.
+delete — objects outside the backup that referenced the ORIGINAL guid remain broken
+and need manual reattachment. Per-object progress goes to stderr. **Exits 1 when any
+entry is in `failed`** (the JSON is still printed), so a partial restore never reads as
+success.
 
 #### `ts dependency apply-change`
 
@@ -920,6 +932,57 @@ or inline `tml` — required for FEEDBACK, which can't be exported standalone), 
 (`{"operation","source","succeeded","failed","deleted","skipped"}` — the data behind
 the Step 10 Change Report). Per-object progress goes to stderr. Exits non-zero only on
 source drift.
+
+#### `ts dependency cascade-preview` / `cascade-delete`
+
+Delete one object **and everything that depends on it** in a single server-side cascade
+(ts-dependency-manager mode D). Wraps ThoughtSpot's own
+`POST /callosum/v1/dependency/delete-with-dependents`, which has no v2 equivalent; it
+takes the normal `ts` login, a form body, and is **administrators only** — the server
+refuses even the dry run to anyone without the `ADMINISTRATION` privilege, and both
+commands check that first.
+
+```bash
+# Dry run — changes nothing. REF is a GUID or a name.
+ts dependency cascade-preview "Orders Model" --profile prod                 # whole object
+ts dependency cascade-preview "Orders Model" --column "Region" --profile prod   # one column
+ts dependency cascade-preview <column-guid> --type LOGICAL_COLUMN --profile prod
+
+# Back up everything the preview lists (plan built from the preview JSON:
+# source = backup_source, source_deleted = source_deleted, delete = objects), then
+# pass this plan on stdin — build it with json.dumps, not by pasting names into a shell string:
+#   {"guid": <source.guid>, "type": <source.type>, "backup_dir": "...", "confirm": "DELETE"}
+ts dependency cascade-delete --profile prod < plan.json
+```
+
+**`cascade-preview` output:** `{"status": "PREVIEW", "source": {guid, type}, "objects":
+[{guid, name, type, author, org, ...}], "counts", "total", "owned_by_others",
+"author_unknown", "source_deleted", "backup_source", "csv"}`. `objects` is every object
+the server's answer names besides the source — each `dependents` key's list and every
+CSV row, because whether one list holds the full closure is unproven. `source_deleted`
+is true for a Table/Model/View and false for a column (its owner is modified).
+`backup_source` is the object to use as the backup's `source`. The GUID's type is
+checked first (the server itself previews a Table's GUID sent as `LOGICAL_COLUMN`). A
+ThoughtSpot rule that blocks the delete gives `{"status": "REFUSED", "details"}`, exit 1;
+so does a cascade that reaches an object type this command does not handle (a Set, an
+uploaded table).
+
+**`cascade-delete` sends nothing** unless: the caller is an administrator; the plan
+names ONE GUID and `confirm` is exactly `"DELETE"`; the backup came from this cluster,
+its source is `backup_source`, and every backup file is readable (else `BAD_BACKUP`);
+no object in it changed after the backup was written (else `STALE_BACKUP`); and a fresh
+preview lists exactly the objects backed up for deletion (else `RECHECK_MISMATCH`).
+The delete is sent **once and never retried**. What it did is decided by checking which
+objects still exist (v2 `metadata/search`) — the preview cannot tell, because it answers
+the same for a deleted object as for a live one with no dependents.
+
+**Output `status`:** `APPLIED`, `PARTIAL` (with `deleted` and `still_present`),
+`NOT_APPLIED` (with `server_response`), `UNKNOWN` (a timeout or gateway error with
+nothing gone yet — the server may still be working; do not re-send), `REFUSED`, or one
+of the refusals above. `deleted_without_backup` names any object the server's answer
+lists that the backup does not hold; `rollback` is the command to undo it. Exit 0 only
+for `APPLIED` on an HTTP 200 whose answer was readable and with every deleted object
+backed up. `dependency/purge` is deliberately not wrapped (unbounded scope).
 
 ---
 

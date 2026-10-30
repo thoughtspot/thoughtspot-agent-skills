@@ -14,6 +14,7 @@ from ts_cli.dependency.backup import (
     backup_filename,
     build_manifest,
     delete_sort_key,
+    order_by_references,
     remap_guids,
     restore_policy_for,
     rollback_order,
@@ -57,6 +58,7 @@ __all__ = [
     "delete_sort_key",
     "remap_guids",
     "restore_policy_for",
+    "order_by_references",
     "rollback_order",
     "rollback_sort_key",
     # apply.py

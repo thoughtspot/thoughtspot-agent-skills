@@ -333,6 +333,18 @@ class TestRollbackCommand:
         assert results["failed"] == []
         assert results["new_guids"]["del-1"] == "new-guid-123"
 
+    def test_rollback_refuses_a_backup_from_another_cluster(self, tmp_path):
+        backup_dir = self._make_backup(tmp_path)
+        mock_client = self._fake_import_client()
+        mock_client.base_url = "https://other.example.com"
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"],
+            )
+        assert result.exit_code != 0
+        mock_client.post.assert_not_called()
+
     def test_rollback_picks_up_flat_shape_guid(self, tmp_path):
         # BL-099 #1 — ThoughtSpot Cloud also returns a FLAT response shape
         # (response.header.id_guid, no `object` list). Rollback must still
