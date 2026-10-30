@@ -45,11 +45,12 @@ def test_h2_trips_on_a_description_over_400_chars():
     assert "too long (527 chars)" in findings[0].detail
 
 
-def test_h2_trips_on_boilerplate_prose_of_acceptable_length():
-    # 49 chars, so it clears both length branches and reaches _BOILERPLATE (:84).
-    findings = run_rule(fx.human_description_boilerplate(), "H2")
-    assert len(findings) == 1
-    assert "boilerplate" in findings[0].detail
+def test_h2_no_longer_flags_an_ordinary_the_opening():
+    """"The total revenue recognised for this order line." — 49 characters, clear of
+    both length branches — was "boilerplate" until 2026-10, when "The " and "A " were
+    dropped from the pattern (4,772 of 4,841 flagged descriptions on the SE demo
+    snapshot)."""
+    assert run_rule(fx.human_description_boilerplate(), "H2") == []
 
 
 def test_h2_counts_every_offending_column_into_one_per_model_finding():

@@ -251,6 +251,30 @@ def _formula_exprs(model: dict) -> dict:
             if isinstance(f, dict) and f.get("id")}
 
 
+#: The distinct-count functions a formula can call (thoughtspot-formula-patterns.md).
+_DISTINCT_FORMULA = re.compile(
+    r"\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b", re.IGNORECASE)
+#: What a function name inside does not count: a `[...]` reference, a quoted literal.
+_NOT_CODE = re.compile(r"\[[^\]]*\]|'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+DISTINCT_COUNT_KINDS = ("COUNT_DISTINCT aggregation", "distinct-count formula")
+
+
+@register("distinct_count_kind", uses=(), values=(None,) + DISTINCT_COUNT_KINDS,
+          label="how the column counts distinct values")
+def _distinct_count_kind(item: dict, ctx: Any) -> Optional[str]:
+    """Model column: "COUNT_DISTINCT aggregation" when it is aggregated so (the form
+    invariant I5 forbids on a physical column), else "distinct-count formula" when it
+    surfaces a formula calling `unique count`, `unique_count_if` or
+    `group_unique_count` — outside any `[...]` reference or quoted literal — else None."""
+    props = (item.get("obj") or {}).get("properties")
+    if isinstance(props, dict) and props.get("aggregation") == "COUNT_DISTINCT":
+        return DISTINCT_COUNT_KINDS[0]
+    expr = _formula_expr(item, ctx)
+    if isinstance(expr, str) and _DISTINCT_FORMULA.search(_NOT_CODE.sub(" ", expr)):
+        return DISTINCT_COUNT_KINDS[1]
+    return None
+
+
 @register("has_date_constraint", uses=(),
           label="the Model has a date constraint")
 def _has_date_constraint(item: dict, ctx: Any) -> bool:
@@ -392,26 +416,50 @@ def _reference_chain_depth(item: dict, ctx: Any):
 # the rules that read them to the legacy findings.
 
 #: (pattern, category, confidence) — a column's FIRST matching pattern names it.
+#: A separator between the words of a multi-word term: none, `-`, `_` or a space, so the
+#: snake_case warehouse name and the display name a Model column usually has both match
+#: ("first_name", "First Name", "FirstName"). Before 2026-10 a space did not.
+_SEP = r"[-_ ]?"
+
+
+def _word(token: str) -> str:
+    """`token` (any case) as a whole word: not inside a longer word, where a word ends
+    at a non-letter or at a camelCase hump. For the short tokens that otherwise match
+    inside ordinary words: "tel" in "hotel", "sin" in "cousin", "dob" in "adobe"."""
+    start = r"(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))"
+    end = r"(?:(?![A-Za-z])|(?<=[a-z])(?=[A-Z]))"
+    return f"{start}(?i:{token}){end}"
+
+
+#: The column-name patterns S1 reads as personal data (first match names the category).
+#: Compiled case-sensitively: `(?i:...)` makes every term any case, while `_word`'s
+#: camelCase test needs the case of the letters around it.
 PII_PATTERNS = [
-    (re.compile(r"e[-_]?mail|email[-_]?addr", re.I), "email", "HIGH"),
-    (re.compile(r"phone|mobile|cell[-_]?phone|fax|tel(?:ephone)?", re.I), "phone", "HIGH"),
-    (re.compile(r"ssn|social[-_]?sec|national[-_]?id|tax[-_]?id|nin\b|sin\b", re.I),
+    (re.compile(rf"(?i:e{_SEP}mail)"), "email", "HIGH"),
+    (re.compile(rf"(?i:phone|cell{_SEP}phone|telephone)|{_word('mobile')}|{_word('fax')}"
+                rf"|{_word('tel')}"),
+     "phone", "HIGH"),
+    (re.compile(rf"{_word('ssn')}|(?i:social{_SEP}sec|national{_SEP}id|tax{_SEP}id)"
+                rf"|{_word('nin')}|{_word('sin')}"),
      "national_id", "HIGH"),
-    (re.compile(r"dob|birth[-_]?date|date[-_]?of[-_]?birth|birthday", re.I), "dob", "HIGH"),
-    (re.compile(r"credit[-_]?card|card[-_]?num|account[-_]?num|iban|routing[-_]?num", re.I),
+    (re.compile(rf"{_word('dob')}|(?i:birth{_SEP}date|date{_SEP}of{_SEP}birth|birthday)"),
+     "dob", "HIGH"),
+    (re.compile(rf"(?i:credit{_SEP}card|card{_SEP}num|account{_SEP}num|routing{_SEP}num)"
+                rf"|{_word('iban')}"),
      "financial", "HIGH"),
-    (re.compile(r"first[-_]?name|last[-_]?name|surname|full[-_]?name|given[-_]?name", re.I),
+    (re.compile(rf"(?i:first{_SEP}name|last{_SEP}name|surname|full{_SEP}name|given{_SEP}name)"),
      "person_name", "MEDIUM"),
-    (re.compile(r"street[-_]?addr|postal[-_]?code|zip[-_]?code", re.I), "address", "MEDIUM"),
+    (re.compile(rf"(?i:street{_SEP}addr|postal{_SEP}code|zip{_SEP}code)"), "address", "MEDIUM"),
 ]
 
 CREDENTIAL_PATTERN = re.compile(
-    r"\bpassword\b|\bpasswd\b|\bsecret[-_]?key\b|\bapi[-_]?key\b|\btoken\b",
+    r"\bpassword\b|\bpasswd\b|\bsecret[-_ ]?key\b|\bapi[-_ ]?key\b|\btoken\b",
     re.IGNORECASE,
 )
-#: Every term CREDENTIAL_PATTERN can match, lower-cased — @credential_term's values.
+#: Every term CREDENTIAL_PATTERN can match, lower-cased — @credential_term's values. The
+#: spaced forms (a display name, "API Key") were added 2026-10.
 CREDENTIAL_TERMS = ("password", "passwd", "secretkey", "secret-key", "secret_key",
-                    "apikey", "api-key", "api_key", "token")
+                    "secret key", "apikey", "api-key", "api_key", "api key", "token")
 
 
 def _column_name(item: dict) -> Any:
@@ -452,7 +500,8 @@ def _pii_confidence(item: dict, ctx: Any):
           label="the credential word in the column name")
 def _credential_term(item: dict, ctx: Any):
     """Column: the credential word its name contains (password, passwd, secret key, api
-    key, token — whole words, any case), lower-cased as matched; None when none."""
+    key — joined, hyphenated, underscored or spaced — or token; whole words, any case),
+    lower-cased as matched; None when none."""
     name = _column_name(item)
     match = CREDENTIAL_PATTERN.search(name) if isinstance(name, str) else None
     return match.group().lower() if match else None

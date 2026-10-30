@@ -314,6 +314,7 @@ are roughly ordered by value÷effort.
 | BL-265 | Any physical measure over a non-numeric column is demoted to an attribute (`COUNT`/`MIN`/`MAX`/`COUNT_DISTINCT`); SV, MV and dbt converters neither predict nor report it | 2026-11-30 |
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
+| BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -350,7 +351,7 @@ are roughly ordered by value÷effort.
 | BL-101 | Chart-axis-role in `ts metadata report` | — |
 | BL-102 | Databricks MV `parameters:` parse + emit | — |
 | BL-111 | `--connection` filter: converter rewiring (remaining) | — |
-| BL-112 | Rewire smoke_ts_audit.py onto `ts audit run/report` | 2026-11-30 |
+| ~~BL-112~~ | ~~Rewire smoke_ts_audit.py onto `ts audit run/report`~~ | RESOLVED (2026-10-30 — the smoke runs `ts audit run` and `report`, checks rule ids against the catalog, and tests the audit's own PII patterns; ts-audit 3.6.0) |
 | BL-116 | Live destructive dependency-manager smoke | — |
 | ~~BL-132~~ | ~~from-Databricks build-model: duplicate `column_id` → formula promotion (I8/I5 parity with from-Snowflake)~~ | DONE (PR #332) |
 | ~~BL-133~~ | ~~`ts metadata delete`: partial-success handling (batch fails atomically if one GUID is missing)~~ | DONE (PR #333, #335) |
@@ -3515,7 +3516,7 @@ column-gap map. Meets ts-cli.md's "2+ skills duplicate the same raw API call" tr
 
 ---
 
-## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list `Tier 3`
+## BL-112 — Rewire `smoke_ts_audit.py` onto `ts audit run`/`report` + dedup the PII pattern list `Tier 3` — **RESOLVED 2026-10-30**
 
 **Filed:** 2026-07-11.
 **Source:** 2026-07-11 full audit finding 6.2.
@@ -3530,6 +3531,14 @@ Point the smoke test at `ts audit run` live; import or delete the duplicated lis
 Parallels the 6.1 dependency-manager smoke-test rewire shipped in PR #212.
 
 **Target:** 2026-11-30 (dated 2026-10-29, `docs/audit/2026-10-29-full.md` finding 6.2: the smoke's PII patterns have since drifted from `audit/engine/fields.py`, it never runs `ts audit run`, and its join step runs no join check; assert on rule ids when rewiring). Was: no fixed date — natural next touch of the audit smoke test.
+
+**Resolution (2026-10-30, roadmap PR 2.3).** `smoke_ts_audit.py` now runs the audit the skill
+runs: `ts audit run --models <guid>` (it checks the rules that ran are the catalog's, that
+every finding's rule ran and none is retired, and that the corpus holds the Model with its
+Spotter readiness score), then `ts audit report`. Its local PII list is gone; it tests the
+audit's own `PII_PATTERNS` on snake_case, display names and words that must not match. Run
+live on the SE demo cluster 2026-10-30: the audit, report and PII steps pass; the auth step
+fails on `ts auth whoami`, a separate, pre-existing fault (BL-497).
 
 ---
 
@@ -14766,6 +14775,14 @@ demo sample), so referencing joins stay unjudged — BL-496. D11's alias lookup 
 with item 4. H10's severities are now fixed in code (LOW / MEDIUM), which item 3 moves
 into data.
 
+**Progress (2026-10-30, roadmap PR 2.3).** Item 4 is closed: D10, D11 and H3 find a model
+table by alias, else name, and resolve a join's `with` by alias, id or name; H3 also credits
+a formula referenced by id. The noise fixes: D3 rolls a Model's LEFT/RIGHT outer joins into
+one INFO (decided with the product owner 2026-10-30); H2 no longer flags a "The "/"A "
+opening; A1 and A2 count visible columns only; S1's patterns match display names and keep
+short tokens to whole words (with BL-112); S5 matches a spaced "API Key"; P18 ignores
+function names inside references and literals and names the kind of distinct count.
+
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.
@@ -15891,3 +15908,23 @@ infers it (for example from key uniqueness, which needs data) or states the gap 
 description and the report.
 
 **Target:** 2027-01-31.
+
+## BL-497 — `ts auth whoami` returns 404 on the SE demo cluster `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** a live run of `tools/smoke-tests/smoke_ts_audit.py`
+(roadmap PR 2.3).
+
+**What.** `ts auth whoami --profile se-thoughtspot` fails: `GET
+/api/rest/2.0/auth/session/user` returns HTTP 404 with error code 13003, on main as on the
+branch, while the same profile's metadata search, TML export and audit calls succeed. Every
+smoke test starts with `ts_auth_check`, which calls `whoami`, so each fails its first step;
+`ts share` (`commands/share.py`) and `ts migrate` (`migrate/discover.py`) call the same
+endpoint.
+
+**Do.** Look the endpoint and code 13003 up with the SpotterCode MCP
+(`get-rest-api-reference(apiName: "getCurrentUserInfo")`), then probe live: whether the
+session endpoint needs a different auth mode than the profile's token, or the cluster build
+moved it. Fix `ts auth whoami` (and the two other callers) to the supported call, and keep
+`ts_auth_check` meaningful.
+
+**Target:** 2026-11-30.

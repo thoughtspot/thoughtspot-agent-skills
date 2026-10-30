@@ -25,6 +25,7 @@ engine modules that import it.
 from __future__ import annotations
 
 import re
+from typing import Any, Optional
 
 #: Warehouse types ThoughtSpot treats as strings. A string join or RLS key is
 #: markedly slower than an integer one and is what several checks look for.
@@ -80,6 +81,29 @@ def table_key(model_table: dict) -> str:
     zero-column leaf, D6 and D11 silently saw "unknown" (BL-305).
     """
     return model_table.get("alias") or model_table.get("name") or ""
+
+
+def join_target(model_tables: list, ref: Any) -> Optional[dict]:
+    """The model_tables entry a join's ``with`` names, matched on its ``alias``, ``id``
+    or ``name`` — exactly, else ignoring case — as the join graph resolves a node
+    (``tml_join_graph.JoinGraph.resolve``); None when no entry matches."""
+    if not isinstance(ref, str) or not ref:
+        return None
+    entries = [t for t in (model_tables or []) if isinstance(t, dict)]
+    for fold in (lambda s: s, str.lower):
+        want = fold(ref)
+        for t in entries:
+            if any(isinstance(t.get(k), str) and fold(t[k]) == want
+                   for k in ("alias", "id", "name")):
+                return t
+    return None
+
+
+def join_target_key(model_tables: list, ref: Any) -> Any:
+    """The column-prefix key (``table_key``) of the table a join's ``with`` names, or
+    ``ref`` itself when it names no model table."""
+    target = join_target(model_tables, ref)
+    return table_key(target) if target is not None else ref
 
 
 def model_joins(model: dict, tables: dict):

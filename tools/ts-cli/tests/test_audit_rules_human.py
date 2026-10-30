@@ -26,9 +26,11 @@ def _by_name(ctx, scope, field):
 
 # ── derived fields ──────────────────────────────────────────────────────────
 
-def test_sole_join_carrier_looks_tables_up_by_name():
+def test_sole_join_carrier_looks_tables_up_by_alias():
+    """K1 sits on DIM aliased D1, which declares its own join: joined by its alias, so
+    exempt (by name, before 2026-10, it was reported)."""
     got = _by_name(fx.human_h3_join_edges(), "model.column", "@is_sole_join_carrier")
-    assert got == {"K": True, "X": False, "Y": True, "K1": False, "KA": True,
+    assert got == {"K": True, "X": False, "Y": True, "K1": True, "KA": True,
                    "NOID": False, "LK": False}
 
 
@@ -38,9 +40,11 @@ def test_sole_join_carrier_skips_the_column_itself_by_identity():
     assert got == [True, True]
 
 
-def test_referenced_by_formula_reads_display_names_only():
+def test_referenced_by_formula_reads_ids_and_display_names():
+    """ById's formula is referenced only as `[formula_ById]`, how TML writes it: seen
+    since 2026-10."""
     got = _by_name(fx.human_h3_formula_edges(), "model.column", "@referenced_by_formula")
-    assert got == {"Amount": True, "Calc": True, "ById": False, "Str": False,
+    assert got == {"Amount": True, "Calc": True, "ById": True, "Str": False,
                    "Zero": False, "NoProps": False}
 
 
@@ -106,7 +110,10 @@ def test_h_code_rules_declare_what_they_read():
 @pytest.mark.parametrize("desc,issue", [
     ("x" * 19, "'C' too short (19 chars)"), ("x" * 20, None), ("x" * 400, None),
     ("x" * 401, "'C' too long (401 chars)"), ("  " + "x" * 19 + "  ", "'C' too short (19 chars)"),
-    ("The opening is boilerplate here.", "'C' uses boilerplate pattern"),
+    ("The opening is ordinary prose here.", None),  # "The "/"A " dropped 2026-10
+    ("A plain sentence that is long enough.", None),
+    ("Column for the net amount of the order.", "'C' uses boilerplate pattern"),
+    ("this is a column with enough characters.", "'C' uses boilerplate pattern"),
     ("Them apples are counted in this one.", None), ("   ", None), (None, None), (5, None)])
 def test_description_issue(desc, issue):
     assert code_rules_human.description_issue({"name": "C", "description": desc}) == issue

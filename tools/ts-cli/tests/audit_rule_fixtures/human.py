@@ -551,11 +551,11 @@ def human_h2_many_issues() -> AuditContext:
 
 
 def human_h3_join_edges() -> AuditContext:
-    """H3's sole-join-carrier exemption, tables by NAME (not alias — kept):
+    """H3's sole-join-carrier exemption (tables by alias, else name, since 2026-10):
     - D::K, hidden, the only D column, D joined: exempt;
     - F::X, hidden, joined F has a visible F::Y: reported;
-    - D1::K on DIM aliased D1, which declares its join: D1 is not "joined" by name, so
-      reported (the alias bug);
+    - D1::K on DIM aliased D1, which declares its join: joined by its alias, so exempt
+      (by name, before 2026-10, it was reported);
     - DIM_A::K on DIM aliased DIM_A, joined *with* DIM_A: exempt;
     - NOID (no column_id) hidden: key "" — not joined here, reported;
     - LONE::K hidden, LONE has no joins: reported."""
@@ -575,8 +575,7 @@ def human_h3_join_edges() -> AuditContext:
 def human_h3_formula_edges() -> AuditContext:
     """A hidden column referenced by display name, one surfacing a formula another
     formula references by NAME (exempt), one whose formula is referenced only by its
-    id (reported: the id-ref is not `[name]`), and hidden values that are truthy but
-    not `true`."""
+    id (exempt since 2026-10), and hidden values that are truthy but not `true`."""
     cols = [build_human_col("Amount", is_hidden=True, column_id="T1::Amount"),
             dict(build_human_col("Calc", is_hidden=True), formula_id="f_calc"),
             dict(build_human_col("ById", is_hidden=True), formula_id="formula_ById"),

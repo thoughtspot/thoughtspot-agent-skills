@@ -7,13 +7,11 @@ read, step for step, including the readings that are known to be wrong (the lega
 answers pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it;
 fixing them is the follow-up work the spec lists):
 
-- H3 decides which tables are "joined" by a model table's `name` (and a join's
-  `with`), where its columns' `column_id`s carry the `alias` when it has one — so a
-  hidden column of an aliased table that declares its own joins is never exempt
-  (@is_sole_join_carrier keeps that).
-- H3 tests a formula-backed column by its formula's display name in brackets, where
-  real TML references a formula by id (`[formula_<name>]`) — @referenced_by_formula
-  keeps that.
+- H3 decided which tables are "joined" by a model table's `name` (and a join's raw
+  `with`), where its columns' `column_id`s carry the `alias` when it has one, and
+  tested a formula-backed column by its formula's display name only, where real TML
+  references a formula by id (`[formula_<name>]`). Both fixed 2026-10 (roadmap PR 2.3):
+  a table is keyed by alias, else name, and an id reference counts.
 
 Where the legacy check would raise on a malformed value (a non-string expression or
 `column_id`, a non-mapping `properties`), these read it as absent instead: a raising
@@ -26,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
+from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
 from ts_cli.audit.engine.memo import cached
 
@@ -46,11 +45,12 @@ def _joined_table_names(model: dict) -> set:
 
 
 def _build_joined_table_names(model: dict) -> set:
+    tables = model.get("model_tables") or []
     joined: set = set()
-    for t in model.get("model_tables") or []:
+    for t in tables:
         for j in t.get("joins") or []:
-            joined.add(t.get("name", ""))
-            joined.add(j.get("with", ""))
+            joined.add(tml.table_key(t))
+            joined.add(tml.join_target_key(tables, j.get("with", "")))
     return joined
 
 
@@ -81,7 +81,8 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
           label="a formula references the column")
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     """Model column: `[<its name>]` appears in the Model's formula expressions joined by
-    spaces — or it surfaces a formula (`formula_id`) whose `[<display name>]` does."""
+    spaces — or it surfaces a formula (`formula_id`) that another formula references,
+    by `[<its id>]` (how TML writes it) or `[<its display name>]`."""
     model = _model_of(item)
     formulas = model.get("formulas") or []
     exprs = cached("h3_formula_text", model, _formula_text, formulas)
@@ -89,8 +90,11 @@ def _referenced_by_formula(item: dict, ctx: Any) -> bool:
     if f"[{column.get('name', '')}]" in exprs:
         return True
     fid = column.get("formula_id")
-    return bool(fid) and any(f"[{fn.get('name', '')}]" in exprs
-                             for fn in formulas if fn.get("id") == fid)
+    if not fid:
+        return False
+    if isinstance(fid, str) and f"[{fid}]" in exprs:
+        return True
+    return any(f"[{fn.get('name', '')}]" in exprs for fn in formulas if fn.get("id") == fid)
 
 
 def _formula_text(formulas: list) -> str:

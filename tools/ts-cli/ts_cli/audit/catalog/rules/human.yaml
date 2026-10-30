@@ -68,10 +68,11 @@
   title: Unnecessary hidden columns
   description: >-
     A hidden Model column that no formula references by `[<name>]` — nor, when it
-    surfaces a formula, by that formula's `[<display name>]` (an id reference is not
-    seen). Excused when it is the last carrier of a joined table: its `column_id`
-    prefix names a table that declares or receives a join (by `name`, not alias) and
-    no other visible column has that prefix.
+    surfaces a formula, by that formula's `[<id>]` (how TML references it) or
+    `[<display name>]`. Excused when it is the last carrier of a joined table: its
+    `column_id` prefix names a table that declares or receives a join (by alias, else
+    name) and no other visible column has that prefix. Until 2026-10 an id reference
+    was not seen and joined tables were matched by `name` only.
   categories: [H]
   requires: [model_tml]
   scope: model.column

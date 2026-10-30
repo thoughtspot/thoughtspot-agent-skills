@@ -808,9 +808,13 @@ def test_derived_placeholder_with_a_path_raises_at_render():
 @pytest.mark.parametrize("name,category,confidence", [
     ("customer_email", "email", "HIGH"), ("email_phone", "email", "HIGH"),
     ("phone_email", "email", "HIGH"),  # first PATTERN wins, not first position
-    ("Hotel", "phone", "HIGH"), ("Cousin", "national_id", "HIGH"),
+    # short tokens are whole words since 2026-10 (they matched inside "Hotel", "Cousin")
+    ("Hotel", None, None), ("Cousin", None, None), ("telNumber", "phone", "HIGH"),
+    ("SIN", "national_id", "HIGH"), ("Automobile", None, None), ("Adobe", None, None),
     ("Single", None, None), ("Surname", "person_name", "MEDIUM"),
-    ("Zip Code", None, None), ("zip_code", "address", "MEDIUM"),
+    # display names (a space between words) match since 2026-10
+    ("Zip Code", "address", "MEDIUM"), ("zip_code", "address", "MEDIUM"),
+    ("Date of Birth", "dob", "HIGH"), ("First Name", "person_name", "MEDIUM"),
     ("", None, None), (None, None, None), (5, None, None)])
 def test_pii_category_and_confidence(name, category, confidence):
     item = _item({"name": name})
@@ -956,12 +960,13 @@ def test_join_type_and_cardinality_are_upper_cased_or_none(value, expected):
         (expected, expected)]
 
 
-def test_join_ends_are_looked_up_by_name_not_alias():
-    """BL-305 kept: SHIPMENTS (alias SHIP) has four MEASURE columns under SHIP::, so
-    by name it reads unknown and the fact-to-fact join reads as not."""
+def test_join_ends_are_looked_up_by_alias():
+    """BL-305, fixed 2026-10: SHIPMENTS (alias SHIP) has four MEASURE columns under
+    SHIP::, so by its alias it reads as a fact and the fact-to-fact join is seen (by
+    name it read unknown)."""
     ctx = fx.data_model_aliased_fact()
     assert _field_values(ctx, "join", "@join_from_name", "@is_fact_to_fact_join") == [
-        ("SHIPMENTS", False)]
+        ("SHIP", True)]
     assert _field_values(fx.data_fanout_fact_to_fact(), "join", "@is_fact_to_fact_join") == [
         (True,)]
 
@@ -971,10 +976,11 @@ def test_model_table_join_and_column_fields():
     got = [(i["name"], i["obj"].get("name"), fields.get(i, "@is_joined", ctx),
             fields.get(i, "@zero_column_role", ctx))
            for i in _children_of(ctx, "model.table")]
-    # ORDERS (alias ORD) is joined by alias but zero-column by NAME — a leaf, though
-    # it is on a join; the table NAMED ORD owns the ORD:: columns; DATES joins a table
-    # the model does not list.
-    assert got == [("ORD", "ORDERS", True, "leaf"), ("CUST", "CUSTOMER", True, "leaf"),
+    # By alias (2026-10): ORDERS (alias ORD) owns the ORD:: columns, so it is not
+    # zero-column; CUSTOMER (alias CUST) has no columns and is the target of a join,
+    # so a bridge. By name both read as leaves. DATES joins a table the model does not
+    # list.
+    assert got == [("ORD", "ORDERS", True, None), ("CUST", "CUSTOMER", True, "bridge"),
                    ("GEO", "GEO", False, "leaf"), ("DATES", "DATES", True, "bridge"),
                    ("ORD", "ORD", True, None)]
 

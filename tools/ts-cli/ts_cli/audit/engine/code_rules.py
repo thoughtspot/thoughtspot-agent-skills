@@ -85,7 +85,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_validate import CODE_IMPL, SEVERITIES
 from ts_cli.audit.engine import bands, fields, scopes
-from ts_cli.audit.engine.messages import render, template
+from ts_cli.audit.engine.messages import NameList, render, template
 from ts_cli.audit.findings import Finding
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
@@ -335,6 +335,36 @@ def join_keys(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     return out
 
 
+#: The one-sided outer join types D3 rolls up into one finding per Model.
+ONE_SIDED_OUTER = ("LEFT_OUTER", "RIGHT_OUTER")
+
+
+@code_rule("join_types", placeholders={"count", "joins"}, severity={"HIGH", "INFO"},
+           uses=(),
+           label="HIGH per full outer join; LEFT/RIGHT outer joins rolled up into one "
+                 "INFO per Model")
+def join_types(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
+    """D3 — per Model, in join order: a HIGH finding on each full outer join
+    (ThoughtSpot's `OUTER`), then one INFO finding on the Model listing its LEFT/RIGHT
+    outer joins, if it has any. Until 2026-10 each one-sided outer join was its own INFO
+    finding — about a third of all findings on the SE demo sample, for an ordinary
+    modelling choice."""
+    out: List[Finding] = []
+    for model in scopes.available(ctx, rule):
+        one_sided = NameList()
+        for join in scopes.iterate(ctx, "join", parent=model):
+            jtype = fields.get(join, "@join_type", ctx)
+            if jtype == "OUTER":
+                out.append(_d_finding(rule, join, "HIGH", {"count": 1, "joins": NameList()}))
+            elif jtype in ONE_SIDED_OUTER:
+                one_sided.append(f"{join['name']} ({jtype})")
+        if one_sided:
+            out.append(_d_finding(rule, model, "INFO",
+                                  {"count": len(one_sided), "joins": one_sided},
+                                  metric=len(one_sided)))
+    return out
+
+
 @code_rule("model_overlap", placeholders={"name", "a", "b", "similarity", "shared",
                                          "union"},
            severity="bands", uses=(),
@@ -377,13 +407,14 @@ def model_overlap(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
 @code_rule("zero_column_tables", placeholders={"name", "role"}, severity="severity",
            uses=(), label="graded on the table's place in the joins")
 def zero_column_tables(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
-    """D10 — a model table no model column comes from, named by its `name`."""
+    """D10 — a model table no model column comes from, named by its key (alias, else
+    name: an aliased table is reported by the alias that tells its roles apart)."""
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
         role = fields.get(item, "@zero_column_role", ctx)
         if role is None:
             continue
-        name = item["obj"].get("name", "")
+        name = tml.table_key(item["obj"])
         severity = bands.fixed_severity(rule, item, ctx)
         out.append(_d_finding(rule, item, severity, {"name": name, "role": role},
                               object_name=name))

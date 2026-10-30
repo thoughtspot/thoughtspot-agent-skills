@@ -7,10 +7,10 @@ step for step, including the readings that are known to be wrong (the legacy ans
 pinned in tests/audit_rule_fixtures/legacy_findings.json.gz hold them to it; fixing
 them is the follow-up work the spec lists):
 
-- D10 and D11 look a model table up by its `name`, where its columns' `column_id`s
-  carry the `alias` when it has one (BL-305) — @zero_column_role, @join_from_name and
-  @is_fact_to_fact_join keep that.
-- D6 keys by alias, else name (tml.table_key) — the model.table scope's own name.
+- D10 and D11 looked a model table up by its `name`, where its columns' `column_id`s
+  carry the `alias` when it has one (BL-305). Since 2026-10 (roadmap PR 2.3) they key a
+  table by alias, else name (tml.table_key), and resolve a join's `with` to the table
+  it names (tml.join_target), as the join graph does.
 
 Same import constraint as fields.py: Python 3.9, no third-party imports at module level.
 """
@@ -58,19 +58,22 @@ def _join_from_table(item: dict) -> dict:
 @register("join_from_name", uses=(),
           label="the table the join starts from")
 def _join_from_name(item: dict, ctx: Any) -> Any:
-    """Join: the `name` of the model table it is declared on ("" when absent) — the
-    physical name, not the alias (legacy D11's reading)."""
-    return _join_from_table(item).get("name", "")
+    """Join: the key (alias, else name) of the model table it is declared on ("" when
+    absent). The physical `name` until 2026-10 (BL-305)."""
+    return tml.table_key(_join_from_table(item))
 
 
 @register("is_fact_to_fact_join", uses=(), values=(False, True),
           label="the join links two fact tables")
 def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
-    """Join: both ends read as fact tables (more than 3 MEASURE columns — rules.
-    table_role), each end looked up by NAME: the model table's `name` and the join's
-    `with` (legacy D11; an aliased end therefore reads as "unknown", BL-305)."""
-    cols = _model_of(item).get("columns") or []
-    to_table = (item.get("obj") or {}).get("with", "")
+    """Join: both ends read as fact tables (more than 3 MEASURE columns — tml.
+    table_role), each end by its key (alias, else name): the declaring table's, and
+    the table the join's `with` names (tml.join_target_key). By name until 2026-10, so
+    an aliased end read as "unknown" (BL-305)."""
+    model = _model_of(item)
+    cols = model.get("columns") or []
+    to_table = tml.join_target_key(model.get("model_tables") or [],
+                                   (item.get("obj") or {}).get("with", ""))
     return (tml.table_role(cols, _join_from_name(item, ctx)) == "fact"
             and tml.table_role(cols, to_table) == "fact")
 
@@ -85,11 +88,12 @@ def _joined_keys(model: dict) -> set:
 
 
 def _build_joined_keys(model: dict) -> set:
+    tables = model.get("model_tables") or []
     joined: set = set()
-    for t in model.get("model_tables") or []:
+    for t in tables:
         for j in (t.get("joins") or []):
             joined.add(tml.table_key(t))
-            joined.add(j.get("with", ""))
+            joined.add(tml.join_target_key(tables, j.get("with", "")))
     return joined
 
 
@@ -103,20 +107,20 @@ def _is_joined(item: dict, ctx: Any) -> bool:
 @register("zero_column_role", uses=(), values=(None, "bridge", "leaf"),
           label="the table's place in the joins")
 def _zero_column_role(item: dict, ctx: Any) -> Optional[str]:
-    """Model table, legacy D10: None when its `name` prefixes some model column's
-    `column_id`; otherwise "bridge" when that name is on either side of a join, "leaf"
-    when not. By NAME, not alias, so an aliased table always reads zero-column
-    (BL-305, kept)."""
+    """Model table (D10): None when its key (alias, else name) prefixes some model
+    column's `column_id`; otherwise "bridge" when it is on either side of a join,
+    "leaf" when not. Keyed by `name` until 2026-10, so an aliased table always read
+    zero-column (BL-305)."""
     model = _model_of(item)
     with_columns = set()
     for c in model.get("columns") or []:
         cid = c.get("column_id", "")
         if isinstance(cid, str) and "::" in cid:
             with_columns.add(cid.split("::")[0])
-    name = (item.get("obj") or {}).get("name", "")
-    if name in with_columns:
+    key = tml.table_key(item.get("obj") or {})
+    if key in with_columns:
         return None
-    return "bridge" if name in _joined_keys(model) else "leaf"
+    return "bridge" if key in _joined_keys(model) else "leaf"
 
 
 def _table_columns(item: dict) -> Tuple[list, list]:

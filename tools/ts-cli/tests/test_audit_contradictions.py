@@ -164,7 +164,20 @@ def _formula_model(expr, aggregation=None):
     "group_unique_count ( [T1::USER_ID] , [T1::REGION] )"])
 def test_p18_reports_a_distinct_count_formula(expr):
     [f] = run_rule(_formula_model(expr), "P18")
-    assert (f.severity, f.detail) == ("INFO", "Distinct count on 'Users'")
+    assert (f.severity, f.detail) == ("INFO",
+                                      "Distinct count on 'Users' (distinct-count formula)")
+
+
+@pytest.mark.parametrize("expr", ["[Unique Count of Users] / 7",
+                                  "if ( [T1::K] = 'unique count' ) then 1 else 0",
+                                  "sum ( [T1::group_unique_count] )"])
+def test_p18_ignores_a_name_inside_a_reference_or_a_literal(expr):
+    assert run_rule(_formula_model(expr), "P18") == []
+
+
+def test_p18_says_which_kind_it_found():
+    [f] = run_rule(_formula_model("sum([T1::U])", "COUNT_DISTINCT"), "P18")
+    assert f.detail == "Distinct count on 'Users' (COUNT_DISTINCT aggregation)"
 
 
 @pytest.mark.parametrize("expr", ["count ( [T1::USER_ID] )", "sum ( [T1::uniquecount] )"])
