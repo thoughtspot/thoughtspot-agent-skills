@@ -1,3 +1,5 @@
+var _crossmodelSevListener = null;
+
 /* ── Build Cross-Model view ── */
 function buildCrossModel(D, initialFilters){
   var c = document.getElementById("v-crossmodel");
@@ -332,9 +334,10 @@ function buildCrossModel(D, initialFilters){
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
-registerView({id: "crossmodel", routes: ["crossmodel"], pills: true, show: function(route){
+registerView({id: "crossmodel", routes: ["crossmodel"], pills: true,
+  nav: {hash: "#crossmodel", icon: "≡", label: "Cross-Model"},
+  show: function(route){
   var breadcrumbParts, breadcrumbLinks;
-  highlightNav("#crossmodel");
   /* Parse query params from hash (e.g. ?severity=HIGH or ?angle=D) */
   var cmFilters = {};
   if(route.query){

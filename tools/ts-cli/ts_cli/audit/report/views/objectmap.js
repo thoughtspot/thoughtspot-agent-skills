@@ -744,12 +744,13 @@ function buildSortableDepTable(rows, colDefs, defaultSort){
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
-registerView({id: "objectmap", routes: ["object-map", "objectmap"], show: function(route){
+registerView({id: "objectmap", routes: ["object-map", "objectmap"],
+  nav: {hash: "#objectmap", icon: "⬡", label: "Object Map"},
+  show: function(route){
   var breadcrumbParts, breadcrumbLinks;
   var omSub = route.id || "overlaps";
   breadcrumbParts = ["Object Map", omSub.charAt(0).toUpperCase()+omSub.slice(1)];
   breadcrumbLinks = ["#objectmap"];
-  highlightNav("#objectmap");
   buildObjectMap(D, omSub);
   return {crumbs: breadcrumbParts, links: breadcrumbLinks};
 }});

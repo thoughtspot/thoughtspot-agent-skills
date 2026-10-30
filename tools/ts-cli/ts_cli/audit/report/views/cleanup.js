@@ -205,11 +205,12 @@ function buildPlaceholder(containerId,title,desc){
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
-registerView({id: "cleanup", routes: ["cleanup"], show: function(route){
+registerView({id: "cleanup", routes: ["cleanup"],
+  nav: {hash: "#cleanup", icon: "✂", label: "Cleanup"},
+  show: function(route){
   var breadcrumbParts, breadcrumbLinks;
   breadcrumbParts = ["Cleanup"];
   breadcrumbLinks = [];
-  highlightNav("#cleanup");
   buildCleanup(D);
   return {crumbs: breadcrumbParts, links: breadcrumbLinks};
 }});

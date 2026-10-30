@@ -43,10 +43,7 @@ function mutedNote(text, cls){
 /* ── State ── */
 var activeSevs = {};
 SEVS.forEach(function(s){ activeSevs[s] = true; });
-var builtViews = {};
 var currentRoute = null;
-var _sevFilterListener = null;
-var _crossmodelSevListener = null;
 
 /* ── Helpers ── */
 function $(sel,ctx){ return (ctx||document).querySelector(sel); }
@@ -85,14 +82,11 @@ function countCritHigh(){
 /* ── Build sidebar ── */
 function buildSidebar(){
   var nav = document.getElementById("sidebar-nav");
-  var badge = countCritHigh();
-
-  var links = [
-    {hash:"#dashboard", icon:"▣", label:"Dashboard", badge: badge > 0 ? badge : null},
-    {hash:"#crossmodel", icon:"≡", label:"Cross-Model"},
-    {hash:"#objectmap", icon:"⬡", label:"Object Map"},
-    {hash:"#cleanup", icon:"✂", label:"Cleanup"}
-  ];
+  /* One link per registered view with a `nav` entry, in registry order. */
+  var links = VIEW_REGISTRY.filter(function(v){ return v.nav; }).map(function(v){
+    return {hash: v.nav.hash, icon: v.nav.icon, label: v.nav.label,
+            badge: v.nav.badge ? v.nav.badge() : null};
+  });
 
   var html = "";
   links.forEach(function(lk){
@@ -177,11 +171,13 @@ function updateBreadcrumb(parts, links){
 }
 
 /* ── View registry ── */
-/* Each views/*.js file calls registerView({id, routes, show, pills, fallback}) at load:
-   `id` names its container (#v-<id>), `routes` the route names it answers, `show(route)`
-   builds or refreshes it and returns {crumbs, links} for the breadcrumb, `pills` shows the
-   severity filter, and the one view with `fallback` answers every other route.
-   ts_cli/audit/report.py REPORT_VIEWS lists the files; a new view is a file and a line. */
+/* Each views/*.js file calls registerView({id, routes, show, nav, pills, fallback}) at
+   load: `id` names its container (#v-<id>), `routes` the route names it answers,
+   `show(route)` builds or refreshes it and returns {crumbs, links} for the breadcrumb,
+   `nav` ({hash, icon, label, badge()}) gives it a sidebar link (highlighted while it is
+   shown), `pills` shows the severity filter, and the ONE view with `fallback` answers
+   every other route. A view keeps its own state in its own file. ts_cli/audit/report.py
+   REPORT_VIEWS lists the files: a new view is a new file and a registry line. */
 var VIEW_REGISTRY = [];
 function registerView(view){ VIEW_REGISTRY.push(view); }
 function viewForRoute(name){
@@ -231,7 +227,8 @@ function onRoute(){
   var view = viewForRoute(route.view);
   var shown = view.show(route) || {};
   var viewId = "v-" + view.id;
-  var breadcrumbParts = shown.crumbs, breadcrumbLinks = shown.links;
+  var breadcrumbParts = shown.crumbs || [], breadcrumbLinks = shown.links || [];
+  if(view.nav) highlightNav(view.nav.hash);
 
   var viewEl = document.getElementById(viewId);
   if(viewEl) viewEl.classList.add("active");
@@ -280,10 +277,4 @@ function findCorpusModel(guid){
 /* ── Spotter readiness ── */
 var READINESS_TITLE = "Spotter readiness: descriptions 30%, coaching 25%, synonyms 15%, "+
   "Model description 15%, column-name quality 15%. Ready at 80 or more, needs work at 50 or more.";
-var READINESS_LABEL = {ready:"Ready", needs_work:"Needs work", not_ready:"Not ready"};
-function readinessByGuid(){
-  var out = {};
-  if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.rs) out[m.g] = cm.rs; });
-  return out;
-}
 

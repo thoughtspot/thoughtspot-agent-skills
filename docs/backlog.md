@@ -320,6 +320,7 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -2003,7 +2004,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 ## BL-059 — ts-audit: set (cohort) usage analysis checks `Tier 3`
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
-**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
+**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report/` (the template until roadmap PR 3.1 split it into parts)` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
 **Status:** Open — research complete, implementation deferred
 **Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
 
@@ -16117,3 +16118,22 @@ schema doc says true; the Power BI and Sisense emitters say a TML import default
 settle both with one probe.
 
 **Target:** 2026-11-30.
+
+## BL-503 — the audit report's JavaScript has no size or complexity gate `Tier 3`
+
+**Filed:** 2026-10-31. **Source:** the review of roadmap PR 3.1 (the report split into
+parts).
+
+**What.** `tools/validate/check_file_size.py` and `check_module_health.py` scan `.py` files
+only, so none of the report's scripts (`tools/ts-cli/ts_cli/audit/report/core.js`,
+`boot.js`, `views/*.js`) is gated. `views/objectmap.js` is 755 lines, past the 500 at which
+the Python gate warns; `buildCrossModel` is 331 lines and `buildScorecard` 301. The
+2,951-line template was ungated too, so this predates PR 3.1, but the report is now meant
+to grow by adding view files.
+
+**Do.** Extend `check_file_size` to `ts_cli/audit/report/**/*.js` with a ratchet at
+today's sizes (warn above 500, fail on growth past the baseline), and decide whether a JS
+function-length check is worth adding to `check_module_health`, or split the largest views
+when they are next changed.
+
+**Target:** 2026-12-31.

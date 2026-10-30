@@ -1,3 +1,5 @@
+var _sevFilterListener = null;
+
 /* ── Build scorecard ── */
 function buildScorecard(D, guid, filterAngle){
   var c = document.getElementById("v-scorecard");

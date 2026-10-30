@@ -1,3 +1,12 @@
+/* ── Dashboard state ── */
+var builtViews = {};
+var READINESS_LABEL = {ready:"Ready", needs_work:"Needs work", not_ready:"Not ready"};
+function readinessByGuid(){
+  var out = {};
+  if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.rs) out[m.g] = cm.rs; });
+  return out;
+}
+
 /* ── Build Dashboard ── */
 function buildDashboard(){
   var c = document.getElementById("v-dashboard");
@@ -231,11 +240,13 @@ function buildHeatmap(){
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
-registerView({id: "dashboard", routes: ["dashboard"], fallback: true, show: function(route){
+registerView({id: "dashboard", routes: ["dashboard"], fallback: true,
+  nav: {hash: "#dashboard", icon: "▣", label: "Dashboard",
+        badge: function(){ var n = countCritHigh(); return n > 0 ? n : null; }},
+  show: function(route){
   var breadcrumbParts, breadcrumbLinks;
   breadcrumbParts = ["Dashboard"];
   breadcrumbLinks = [];
-  highlightNav("#dashboard");
   if(!builtViews.dashboard){ buildDashboard(); builtViews.dashboard=true; }
   return {crumbs: breadcrumbParts, links: breadcrumbLinks};
 }});

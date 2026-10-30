@@ -10,7 +10,7 @@ self-contained HTML file.
 What the report says about categories and rules — the category tabs, labels and order,
 each rule's title, grading text and recommendation, and which rules feed the
 duplicates and cleanup views — comes from the rule catalog (generate.report_meta), not
-from the template. JSON written before the catalog cut-over (findings with `angle` and
+from the report's parts. JSON written before the catalog cut-over (findings with `angle` and
 the legacy `threshold` dict only) still renders: a finding's categories are derived
 from its angle, and the metric bar falls back to the legacy pass mark.
 """
@@ -48,9 +48,12 @@ def assemble_page() -> str:
     for slot, value in (("{{STYLES}}", part("styles.css").rstrip("\n")),
                         ("{{VIEW_CONTAINERS}}", containers),
                         ("{{SCRIPT}}", script.rstrip("\n"))):
-        assert page.count(slot) == 1, slot
+        if page.count(slot) != 1:
+            raise ValueError(f"report/shell.html must hold {slot} exactly once")
         page = page.replace(slot, value)
     return page
+
+
 _ERD_DIR = Path(__file__).resolve().parents[4] / "agents" / "shared" / "erd"
 
 

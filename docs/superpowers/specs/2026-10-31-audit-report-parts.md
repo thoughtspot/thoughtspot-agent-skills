@@ -13,7 +13,7 @@ one file) becomes `ts_cli/audit/report/`:
 | `shell.html` | The layout, with four slots: `{{STYLES}}`, `{{VIEW_CONTAINERS}}`, `{{SCRIPT}}`, `{{AUDIT_DATA}}` |
 | `styles.css` | Every style, unchanged |
 | `core.js` | The data, constants and shared helpers (including the severity pill, the cluster link and the readiness constants, which several views use), the sidebar, the filter pills, the view registry and the router |
-| `views/<view>.js` | One per view: dashboard, scorecard, crossmodel, objectmap, cleanup. Each ends with `registerView({id, routes, show, pills, fallback})`, which carries the route handling the router's `switch` used to hold for it |
+| `views/<view>.js` | One per view: dashboard, scorecard, crossmodel, objectmap, cleanup, each holding its own state. Each ends with `registerView({id, routes, show, nav, pills, fallback})`: the route handling the router's `switch` used to hold for it, its breadcrumb, and its sidebar link (`nav`), which `core.js` builds the sidebar from and highlights while the view is shown |
 | `boot.js` | Init, last, so every view has registered before the first route |
 
 `report.REPORT_VIEWS` is the registry: (view id, script) per view, in container order.
@@ -23,6 +23,9 @@ file. A new view is a new file and a registry line; the router is never edited.
 
 ## How "no visible change" was checked
 
+0. **What the claim covers.** After the router change the page no longer holds the
+   template's lines exactly (the `switch` became `registerView` blocks); it renders and
+   behaves the same, which is what was checked.
 1. **A pure move first.** The template was sliced by line range into the parts, and the
    assembled page holds exactly the template's lines (a line-multiset comparison: none
    missing, none added).
@@ -33,6 +36,12 @@ file. A new view is a new file and a registry line; the router is never edited.
    generated test data, and a local run over the 148-Model SE demo sample (not
    committed). Visible text (`innerText`, so a hidden filter bar counts) and JS errors
    were identical on all 42 renders, after the move and again after the router change.
+3. **Driven, before and after.** The review's harness drove both pages through every
+   control on every route (pills carried across views, back and forward, tabs, sorting,
+   the hamburger, ERD documents, copy-selected), comparing the DOM, the visible text, the
+   active view, the breadcrumb, the sidebar, listener counts and clipboard writes: 0
+   differences, re-run after the sidebar moved into the registry (3,960 steps over five
+   audit JSONs).
 
 ## Choices
 
@@ -40,8 +49,14 @@ file. A new view is a new file and a registry line; the router is never edited.
   them into modules would be a rewrite, not a split. Concatenating inside the original
   IIFE keeps every name and its hoisting as it was.
 - **The registry is a Python list, the routes are in each view.** The containers are
-  built server-side (no DOM change), and each view owns its routes, breadcrumb and
-  filter-bar flag, so nothing about a view is spread across files.
+  built server-side (no DOM change), and each view owns its routes, breadcrumb, sidebar
+  link, filter-bar flag and state, so nothing about a view is spread across files.
+- **One shared scope has a cost.** A part that re-declares another's top-level name (say,
+  a helper like `esc`) replaces it everywhere with no error; a test fails on any such
+  clash. And exactly one view may be the `fallback`, or an unknown route shows nothing
+  (none) or the wrong view (two); a test guards that too.
+- **The scripts are not size-gated** (the file-size and module-health gates scan Python
+  only): BL-503.
 
 ## Tests
 
@@ -49,5 +64,6 @@ file. A new view is a new file and a registry line; the router is never edited.
 that view, and every view file is registered; the page has every slot filled and loads
 nothing external; every registered view renders from the fixed fixture with no JS error,
 shows its own container, and renders content; and a synthetic view added as one file and
-one registry line renders at its route. `tests/report_browser.py` now also reports the
-active view.
+one registry line renders at its route with its own sidebar link; exactly one view is the
+fallback and an unknown route shows it; no part redeclares another's top-level name.
+`tests/report_browser.py` now also reports the active view.
