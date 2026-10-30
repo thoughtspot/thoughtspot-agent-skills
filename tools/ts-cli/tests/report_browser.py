@@ -26,13 +26,16 @@ window.addEventListener("load",function(){setTimeout(function(){
   Array.prototype.slice.call(clone.querySelectorAll("script,#__probe")).forEach(
     function(n){n.parentNode.removeChild(n);});
   var p=document.createElement("pre");p.id="__probe";
-  p.textContent=JSON.stringify({errors:window.__errs,text:clone.textContent});
+  var view=document.querySelector(".view.active");
+  p.textContent=JSON.stringify({errors:window.__errs,text:clone.textContent,
+    active:view?view.id:null,active_text:view?view.textContent:""});
   document.body.appendChild(p);},50);});
 </script>"""
 
 
 def render(html_text: str, tmp_path, route: str = "") -> dict:
-    """`{"errors": [...], "text": "..."}` for `html_text` opened at `#route`."""
+    """`{"errors": [...], "text": "...", "active": <id of the shown view>, "active_text":
+    "..."}` for `html_text` opened at `#route`."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")

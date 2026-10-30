@@ -156,14 +156,16 @@ def test_report_renders_pre_cutover_json(tmp_path):
 def test_render_check_fails_on_a_throwing_template(tmp_path, monkeypatch):
     """The render check bites: a template that throws while building its category
     maps leaves no label on the page, and the error is reported."""
+    import shutil
     import ts_cli.audit.report as report_mod
-    template = report_mod.TEMPLATE_PATH.read_text(encoding="utf-8")
+    parts = tmp_path / "report"
+    shutil.copytree(report_mod.REPORT_DIR, parts)
+    core = (parts / "core.js").read_text(encoding="utf-8")
     anchor = "CATEGORIES.forEach(function(c){"
-    assert template.count(anchor) == 1
-    broken = tmp_path / "broken_template.html"
-    broken.write_text(template.replace(anchor, anchor + ' throw new Error("probe");'),
-                      encoding="utf-8")
-    monkeypatch.setattr(report_mod, "TEMPLATE_PATH", broken)
+    assert core.count(anchor) == 1
+    (parts / "core.js").write_text(core.replace(anchor, anchor + ' throw new Error("probe");'),
+                                   encoding="utf-8")
+    monkeypatch.setattr(report_mod, "REPORT_DIR", parts)
     data = json.loads((FIXTURES / "pre_cutover_audit.json").read_text())
     problems = _render_problems(render_report(data), tmp_path)
     assert any("JS error" in p and "probe" in p for p in problems), problems

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThoughtSpot Audit Report</title>
+<style>
+{{STYLES}}
+</style>
+</head>
+<body>
+
+<button class="hamburger" aria-label="Toggle sidebar">&#9776;</button>
+
+<div id="app">
+  <nav class="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-header">
+      <div>
+        <div class="logo">ThoughtSpot Audit</div>
+        <div class="logo-sub">Health Report</div>
+      </div>
+    </div>
+    <div class="sidebar-nav" id="sidebar-nav"></div>
+  </nav>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <div class="filter-pills" id="filter-pills"></div>
+    </div>
+
+{{VIEW_CONTAINERS}}
+  </main>
+</div>
+
+<script id="audit-data" type="application/json">{{AUDIT_DATA}}</script>
+<script>
+(function(){
+"use strict";
+
+{{SCRIPT}}
+})();
+</script>
+</body>
+</html>
