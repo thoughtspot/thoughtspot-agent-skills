@@ -24,6 +24,7 @@ from ts_cli.commands.tml import detect_tml_type, parse_edoc
 from ts_cli.dependency.backup import (
     build_manifest,
     backup_filename,
+    remap_guids,
     restore_policy_for,
     rollback_order,
 )
@@ -292,10 +293,16 @@ def backup_cmd(
         "source": {"guid": "...", "type": "MODEL", "name": "..."},
         "fix":    [{"guid": "...", "type": "ANSWER", "name": "..."}, ...],
         "delete": [{"guid": "...", "type": "LIVEBOARD", "name": "..."}, ...],
-        "out_dir": "/tmp"
+        "out_dir": "/tmp",
+        "source_deleted": false
       }
 
-    `fix`/`delete`/`out_dir` are optional (default: `[]`/`[]`/`"/tmp"`). Exports the
+    `fix`/`delete`/`out_dir`/`source_deleted` are optional (default:
+    `[]`/`[]`/`"/tmp"`/`false`). Set `source_deleted: true` when the operation deletes
+    the source itself rather than modifying it (a cascade delete of a Table, Model or
+    View): its manifest entry then carries `intent: "DELETE"`, so rollback re-creates
+    it under a new GUID instead of updating it in place at a GUID that no longer
+    exists. Exports the
     TML for the source object plus every object in `fix`/`delete` the SAME way
     `ts tml export --parse` does (export_fqn=True, export_associated=False,
     formattype YAML).
@@ -330,8 +337,12 @@ def backup_cmd(
     fix_list = plan.get("fix") or []
     delete_list = plan.get("delete") or []
 
+    source_deleted = plan.get("source_deleted", False)
+    if not isinstance(source_deleted, bool):
+        raise SystemExit("'source_deleted' must be true or false.")
+
     to_backup = (
-        [{**source, "intent": "FIX_SOURCE"}]
+        [{**source, "intent": "DELETE" if source_deleted else "FIX_SOURCE"}]
         + [{**d, "intent": "FIX"} for d in fix_list]
         + [{**d, "intent": "DELETE"} for d in delete_list]
     )
@@ -451,6 +462,10 @@ def _rollback_one_entry(client: ThoughtSpotClient, entry: dict, results: Dict[st
     `create_new=True` and the `guid:` line stripped — the object no longer exists
     at its original GUID, so ThoughtSpot assigns a new one. Any other entry is
     updated in place (`create_new=False`) at its original GUID.
+
+    Every GUID already re-created earlier in this run (`results["new_guids"]`) is
+    substituted into the TML before import, so a dependent binds to the restored
+    object rather than to the deleted original (`remap_guids`).
     """
     name = entry.get("name")
     backup_file = entry.get("backup_file")
@@ -470,6 +485,7 @@ def _rollback_one_entry(client: ThoughtSpotClient, entry: dict, results: Dict[st
         tml_dict.pop("guid", None)
 
     tml_yaml = _dump_tml_yaml(tml_dict, strip_guid=was_deleted, guid=entry.get("guid"))
+    tml_yaml = remap_guids(tml_yaml, results["new_guids"])
 
     resp = client.post(
         "/api/rest/2.0/metadata/tml/import",
@@ -517,10 +533,16 @@ def rollback_cmd(
     object no longer exists at its original GUID, so ThoughtSpot assigns a new one.
     Any other entry is updated in place (`create_new=False`) at its original GUID.
 
+    References between restored objects are carried over: each restored DELETE's new
+    GUID is substituted into every later entry's TML before it is imported.
+
     Output: `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
     to stdout. Per-object progress goes to stderr. `new_guids` lets the caller
-    surface a GUID-remap table for any restored DELETE — other objects that
-    referenced the ORIGINAL guid remain broken and need manual reattachment.
+    surface a GUID-remap table for any restored DELETE — objects OUTSIDE the backup
+    that referenced the ORIGINAL guid remain broken and need manual reattachment.
+
+    Exit code: 0 when every entry restored, 1 when any entry is in `failed` (the
+    JSON is still printed first). A partial restore must not read as success.
 
     Example:
 
@@ -562,3 +584,7 @@ def rollback_cmd(
         _rollback_one_entry(client, entry, results)
 
     print(json.dumps(results))
+    if results["failed"]:
+        print(f"  {len(results['failed'])} object(s) failed to restore — see 'failed'.",
+              file=sys.stderr)
+        raise typer.Exit(1)
