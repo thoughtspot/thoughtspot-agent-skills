@@ -388,15 +388,7 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     order legacy P17 did (it walked its name-keyed dict, where a name keeps the place
     of its first insertion).
     """
-    by_ref: Dict[Any, Any] = {}
-    for f in formulas:
-        fname = f.get("name", "")
-        if not fname:
-            continue
-        by_ref[fname] = fname
-        fid = f.get("id", "")
-        if fid:
-            by_ref[fid] = fname
+    by_ref = tml.formula_ref_index(formulas)
     graph: Dict[Any, list] = {}
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):

@@ -33,15 +33,18 @@ window.addEventListener("load",function(){setTimeout(function(){
 </script>"""
 
 
-def render(html_text: str, tmp_path, route: str = "") -> dict:
+def render(html_text: str, tmp_path, route: str = "", actions: str = "") -> dict:
     """`{"errors": [...], "text": "...", "active": <id of the shown view>, "active_text":
-    "..."}` for `html_text` opened at `#route`."""
+    "..."}` for `html_text` opened at `#route`. `actions`, a script body, runs on load
+    before the probe reads the page (a click, say)."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")
     assert sep2, "no </body> in the report"
     page = tmp_path / "report_probe.html"
-    page.write_text(head + sep + _TRAP + body + _PROBE + sep2 + tail, encoding="utf-8")
+    act = (f'<script>window.addEventListener("load",function(){{{actions}}});</script>'
+           if actions else "")
+    page.write_text(head + sep + _TRAP + body + act + _PROBE + sep2 + tail, encoding="utf-8")
     cmd = [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
            f"--user-data-dir={tmp_path / 'chrome-profile'}", "--window-size=1400,900",
            "--virtual-time-budget=5000", "--dump-dom",

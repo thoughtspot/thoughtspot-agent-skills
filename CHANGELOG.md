@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-31
+- feat(audit): the report gains a Formulas view, each Model's formula dependency tree (ts-audit 3.8.0, v2 roadmap PR 3.2)
+- chore: bump ts-cli to v0.193.0
 - chore: bump ts-cli to v0.192.2 (the audit report is assembled from parts with a view registry, ts-audit v2 roadmap PR 3.1; no visible change)
 
 ## 2026-10-30

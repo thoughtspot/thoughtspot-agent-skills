@@ -49,6 +49,23 @@ BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
 
 
+def formula_ref_index(formulas: list) -> Dict[Any, Any]:
+    """How a formula is referred to in an expression -> its NAME. A cross-reference is
+    written as the formula's id (`[formula_<name>]`), or, in a hand-built model, its
+    display name; both resolve to the name (BL-300). The one reading shared by P17's
+    reference graph and the report's formula tree."""
+    by_ref: Dict[Any, Any] = {}
+    for f in formulas:
+        fname = f.get("name", "") if isinstance(f, dict) else ""
+        if not fname:
+            continue
+        by_ref[fname] = fname
+        fid = f.get("id", "")
+        if fid:
+            by_ref[fid] = fname
+    return by_ref
+
+
 def mapping(obj: Any, key: str) -> dict:
     """`obj[key]` when it is a mapping, else {}: the one reader for a MAPPING_KEYS key,
     so a malformed (list or scalar) value reads as absent rather than raising."""
