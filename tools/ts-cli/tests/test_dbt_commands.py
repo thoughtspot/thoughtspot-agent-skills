@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+import requests
+
 import ts_cli.commands.dbt as dbt_mod
 import ts_cli.dbt.cloud_api as cloud_api_mod
 from ts_cli.dbt_build_export import build_model_tml_from_manifest
@@ -39,6 +42,8 @@ NO_BODY = object()
 
 
 class _FakeResp:
+    ok = True
+
     def __init__(self, payload):
         self._payload = payload
 
@@ -216,6 +221,46 @@ class TestCreateConnection:
         assert "--file is required" in result.output
         assert calls == []
 
+    @pytest.mark.parametrize("project_name", [None, "", "   "], ids=["absent", "empty", "blank"])
+    def test_zip_file_requires_project_name(self, monkeypatch, tmp_path, project_name):
+        """ThoughtSpot rejected a ZIP_FILE create with no project name
+        (400 / 10002 "Project Name should not be empty." — seen live 2026-10-23,
+        one cluster), so the CLI says so before sending anything. A blank name
+        is no name."""
+        calls = []
+        _patch(monkeypatch, calls)
+        zip_path = tmp_path / "artifacts.zip"
+        zip_path.write_bytes(b"PK\x03\x04")
+        extra = [] if project_name is None else ["--project-name", project_name]
+        result = runner.invoke(app, [
+            "dbt", "create",
+            "--connection-name", "my_conn", "--database-name", "MY_DB",
+            "--import-type", "ZIP_FILE", "--file", str(zip_path), *extra,
+        ])
+        assert result.exit_code != 0
+        assert "--project-name" in result.output
+        assert calls == []
+
+    def test_zip_file_project_name_is_checked_before_the_artifacts_are_read(
+            self, monkeypatch, tmp_path):
+        """With both a missing --project-name and a missing catalog.json, the
+        flag is named first and nothing is read or zipped: the cheap check
+        runs before the expensive one."""
+        calls = []
+        _patch(monkeypatch, calls)
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "manifest.json").write_text("{}")  # no catalog.json
+        result = runner.invoke(app, [
+            "dbt", "create",
+            "--connection-name", "my_conn", "--database-name", "MY_DB",
+            "--import-type", "ZIP_FILE", "--file", str(target),
+        ])
+        assert result.exit_code != 0
+        assert "--project-name" in result.output
+        assert "catalog.json" not in result.output
+        assert calls == []
+
     def test_zip_file_success_uploads_file_content(self, monkeypatch, tmp_path):
         calls = []
         _patch(monkeypatch, calls)
@@ -224,7 +269,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(zip_path),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(zip_path),
         ])
         assert result.exit_code == 0, result.output
         path, kwargs = calls[0]
@@ -250,7 +295,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(target),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(target),
         ])
         assert result.exit_code == 0, result.output
         _path, kwargs = calls[0]
@@ -273,7 +318,7 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(tmp_path / "proj"),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project", "--file", str(tmp_path / "proj"),
         ])
         assert result.exit_code == 0, result.output
         assert calls
@@ -290,7 +335,8 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(target),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project",
+            "--file", str(target),
         ])
         assert result.exit_code != 0
         assert "dbt docs generate" in result.output
@@ -357,7 +403,9 @@ class TestGenerateTml:
             "dbt", "generate-tml", "--connection-id", "conn-1", "--model-tables", self._MODEL_TABLES,
         ])
         assert result.exit_code == 0, result.output
-        path, kwargs = calls[0]
+        # no --file: exactly one generate call, no lookup first
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/generate-tml"]
+        path, kwargs = calls[-1]
         assert path == "/api/rest/2.0/dbt/generate-tml"
         form = kwargs["files"]
         assert form["dbt_connection_identifier"] == (None, "conn-1")
@@ -375,7 +423,8 @@ class TestGenerateTml:
             "--include-semantic-report",
         ])
         assert result.exit_code == 0, result.output
-        _, kwargs = calls[0]
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/generate-tml"]
+        _, kwargs = calls[-1]
         assert kwargs["files"]["include_semantic_report"] == (None, "true")
 
     def test_generate_tml_requires_model_tables(self, monkeypatch):
@@ -415,7 +464,8 @@ class TestGenerateTml:
             "--import-worksheets", "selected", "--worksheets", '["orders_worksheet"]',
         ])
         assert result.exit_code == 0, result.output
-        _, kwargs = calls[0]
+        assert [c[0] for c in calls] == ["/api/rest/2.0/dbt/generate-tml"]
+        _, kwargs = calls[-1]
         form = kwargs["files"]
         assert form["import_worksheets"] == (None, "SELECTED")
         assert form["worksheets"] == (None, '["orders_worksheet"]')
@@ -1541,3 +1591,122 @@ def test_rls_out_of_path_ignored_when_in_path_model_has_no_rules():
     }}
     for order in (list(manifest["nodes"].items()), list(reversed(manifest["nodes"].items()))):
         assert extract_model_rls_from_manifest({"nodes": dict(order)}, "models/staging", {"CUSTOMERS"}) == {}
+
+
+class TestMissingArchiveMessage:
+    """The pure decision: only generate's own 400 'Error with the uploaded ZIP
+    file.' is explained; every other failure keeps its own error."""
+
+    def test_the_missing_archive_400_is_explained(self):
+        from ts_cli.dbt.zip_guard import missing_archive_message
+        msg = missing_archive_message(
+            400, '{"error": {"message": "Error with the uploaded ZIP file."}}', "c1")
+        assert msg and "--file" in msg and "ZIP_FILE" in msg and "c1" in msg
+
+    @pytest.mark.parametrize("status, body", [
+        (400, '{"error": "model_tables: unknown table ORDERS"}'),
+        (400, ""),
+        (400, None),
+        (500, "Error with the uploaded ZIP file."),
+        (403, "Forbidden"),
+    ])
+    def test_anything_else_is_not_explained(self, status, body):
+        from ts_cli.dbt.zip_guard import missing_archive_message
+        assert missing_archive_message(status, body, "c1") is None
+
+
+class TestGenerateExplainsMissingArchive:
+    """The API requires the archive on every generate call for a ZIP_FILE
+    connection, via --file. Without it ThoughtSpot answers 400 "Error with the uploaded
+    ZIP file.", which reads as a bad archive. The CLI reads that 400 and says
+    what is missing, rather than looking the connection up first: no extra
+    request, nothing to stall, no dependence on dbt/search's user/Org scope.
+
+    Driven through the REAL ThoughtSpotClient, so a wrong keyword argument or a
+    changed error path fails here instead of silently disabling the explanation
+    (a fake whose post() accepts **kwargs let exactly that through)."""
+    _MODEL_TABLES = '[{"model_name": "orders", "model_path": "models/orders", "tables": ["ORDERS"]}]'
+    _MISSING = '{"error": {"message": "Error with the uploaded ZIP file."}}'
+
+    @staticmethod
+    def _real_client(monkeypatch, tmp_path, status, body):
+        """Patch dbt.py onto a real client whose transport answers every
+        request with `status`/`body`; returns the list of requests sent."""
+        import inspect
+        from unittest.mock import MagicMock, patch
+        from ts_cli.client import ThoughtSpotClient
+
+        profile = {"name": "p", "base_url": "https://test.thoughtspot.cloud",
+                   "username": "u@test.com", "token_env": "THOUGHTSPOT_TOKEN_P"}
+        with patch("ts_cli.client.load_profiles", return_value={"p": profile}):
+            client = ThoughtSpotClient("p")
+        client._token_path = lambda: tmp_path / "token.txt"
+        client._expiry_path = lambda: tmp_path / "expiry.txt"
+        client._token = "tok"
+
+        sent = []
+
+        def transport(method, url, **kwargs):
+            # Bound to the real signature: an argument requests would reject fails here too.
+            inspect.signature(requests.Session.request).bind(None, method, url, **kwargs)
+            sent.append((url, kwargs))
+            resp = MagicMock()
+            resp.status_code = status
+            resp.ok = status < 400
+            resp.text = body
+            resp.json.return_value = json.loads(body) if body.startswith("{") else None
+            return resp
+
+        client._session = MagicMock()
+        client._session.request.side_effect = transport
+        monkeypatch.setattr(dbt_mod, "ThoughtSpotClient", lambda profile_name: client)
+        monkeypatch.setattr(dbt_mod, "resolve_profile", lambda p: "p")
+        return sent
+
+    @pytest.mark.parametrize("command", [
+        ["generate-tml", "--model-tables", _MODEL_TABLES],
+        ["generate-sync-tml"],
+    ], ids=["generate-tml", "generate-sync-tml"])
+    def test_missing_archive_400_is_explained(self, monkeypatch, tmp_path, command):
+        sent = self._real_client(monkeypatch, tmp_path, 400, self._MISSING)
+        result = runner.invoke(app, ["dbt", command[0], "--connection-id", "conn-zip", *command[1:]])
+        assert result.exit_code == 1
+        assert "--file" in result.output and "ZIP_FILE" in result.output
+        assert "not that it is bad" in result.output
+        # The server's own error line is kept alongside the explanation.
+        assert (f"ThoughtSpot API 400 on POST https://test.thoughtspot.cloud/api/rest/2.0/dbt/{command[0]}"
+                in result.output)
+        assert [u for u, _ in sent] == [f"https://test.thoughtspot.cloud/api/rest/2.0/dbt/{command[0]}"]
+
+    def test_success_without_file_is_one_request(self, monkeypatch, tmp_path):
+        """DBT_CLOUD (never --file): one generate request, nothing else."""
+        sent = self._real_client(monkeypatch, tmp_path, 200, '{"ok": true}')
+        result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-cloud"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"ok": True}
+        assert [u for u, _ in sent] == ["https://test.thoughtspot.cloud/api/rest/2.0/dbt/generate-sync-tml"]
+
+    def test_other_400_keeps_its_own_error(self, monkeypatch, tmp_path):
+        sent = self._real_client(
+            monkeypatch, tmp_path, 400, '{"error": "model_tables: unknown table ORDERS"}')
+        result = runner.invoke(app, ["dbt", "generate-sync-tml", "--connection-id", "conn-cloud"])
+        assert result.exit_code == 1
+        assert "unknown table ORDERS" in result.output
+        assert "--file" not in result.output
+        assert len(sent) == 1
+
+    def test_with_file_a_400_is_not_blamed_on_a_missing_archive(self, monkeypatch, tmp_path):
+        """With --file the archive was sent, so the same 400 really is about the
+        archive: report the server's own error."""
+        sent = self._real_client(monkeypatch, tmp_path, 400, self._MISSING)
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "manifest.json").write_text("{}")
+        (target / "catalog.json").write_text("{}")
+        result = runner.invoke(app, [
+            "dbt", "generate-sync-tml", "--connection-id", "conn-zip", "--file", str(target)])
+        assert result.exit_code == 1
+        assert "Error with the uploaded ZIP file." in result.output
+        assert "no --file was given" not in result.output
+        assert len(sent) == 1
+        assert "file_content" in sent[0][1]["files"]

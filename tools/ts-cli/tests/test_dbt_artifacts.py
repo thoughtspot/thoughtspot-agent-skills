@@ -66,6 +66,102 @@ class TestFindArtifacts:
         msg = str(ei.value)
         assert "catalog.json" in msg and "dbt docs generate" in msg
 
+    def _manifest_only(self, tmp_path, dbt_version):
+        """A target/ holding a manifest stamped by the given dbt version."""
+        _, target = _project(tmp_path, catalog=False)
+        manifest = dict(_MANIFEST)
+        if dbt_version is not None:
+            manifest["metadata"] = {"dbt_version": dbt_version}
+        (target / "manifest.json").write_text(json.dumps(manifest))
+        return target
+
+    def test_core_manifest_names_docs_generate_only(self, tmp_path):
+        """dbt Core 1.12.5 (verified 2026-10-23): `dbt docs generate` writes both
+        artifacts; plain `dbt compile` writes only the manifest."""
+        target = self._manifest_only(tmp_path, "1.12.5")
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg
+        assert "--write-catalog" not in msg
+
+    def test_fusion_manifest_names_compile_write_catalog_and_warns_off_docs_generate(self, tmp_path):
+        """dbt Fusion 2.0.6 (verified 2026-10-23): `dbt compile --write-catalog`
+        writes catalog.json; `dbt docs generate` refreshes only the manifest and
+        leaves a stale catalog, so it must not be recommended there."""
+        target = self._manifest_only(tmp_path, "2.0.6")
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt compile --write-catalog" in msg
+        assert "Do not use `dbt docs generate`" in msg  # named only as the one to avoid
+
+    def test_real_fusion_manifest_metadata_is_detected_as_fusion(self, tmp_path):
+        """The `metadata` block of a real manifest from dbt Fusion 2.0.6 (the
+        2026-10-29 live test; ids dropped). Every other stamp here is synthetic,
+        so this pins the premise the detection rests on: Fusion writes 2.x."""
+        target = self._manifest_only(tmp_path, None)
+        manifest = json.loads((target / "manifest.json").read_text())
+        manifest["metadata"] = {
+            "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+            "dbt_version": "2.0.6",
+            "generated_at": "2026-09-30T15:17:33.943285Z",
+            "env": {},
+            "project_name": "jaffle_shop",
+            "adapter_type": "snowflake",
+        }
+        (target / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        assert "written by dbt Fusion" in str(ei.value)
+
+    @pytest.mark.parametrize("version", ["3.0.0", "2025.10.14+abc", "0.21.0"])
+    def test_unverified_major_version_names_both_commands(self, tmp_path, version):
+        """Only 1.x (Core) and 2.x (Fusion) were verified; any other stamp is
+        neither as verified, so it gets the advice that names both."""
+        target = self._manifest_only(tmp_path, version)
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+        assert "was written by" not in msg
+
+    @pytest.mark.parametrize("version, wanted, avoided", [
+        ("2.0.6", "dbt compile --write-catalog", "Do not use `dbt docs generate`"),
+        ("1.12.5", "dbt docs generate", "--write-catalog"),
+    ])
+    def test_manifest_flag_gives_the_same_engine_advice_as_file_flag(
+            self, tmp_path, version, wanted, avoided):
+        """`ts dbt build-model --manifest` reads the catalog through
+        load_local_catalog; it must not contradict what `--file` says."""
+        from ts_cli.dbt.artifacts import load_local_catalog
+        target = self._manifest_only(tmp_path, version)
+        for arg in (target, target / "manifest.json"):
+            with pytest.raises(SystemExit) as ei:
+                load_local_catalog(str(arg))
+            msg = str(ei.value)
+            assert wanted in msg
+            if version.startswith("2"):
+                assert avoided in msg
+            else:
+                assert avoided not in msg
+
+    @pytest.mark.parametrize("version", [None, "not-a-version", ""])
+    def test_unknown_engine_names_both_commands(self, tmp_path, version):
+        target = self._manifest_only(tmp_path, version)
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+
+    def test_no_artifacts_at_all_names_both_commands(self, tmp_path):
+        empty = tmp_path / "nothing"
+        empty.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(empty)
+        msg = str(ei.value)
+        assert "dbt docs generate" in msg and "dbt compile --write-catalog" in msg
+
     def test_refusal_names_the_manual_escape_hatch(self, tmp_path):
         _, target = _project(tmp_path, catalog=False)
         with pytest.raises(SystemExit) as ei:
