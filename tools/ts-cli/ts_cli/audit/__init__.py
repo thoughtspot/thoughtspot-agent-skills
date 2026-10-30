@@ -343,23 +343,16 @@ def data_needs(angles: list, profiles: Optional[list] = None) -> set:
 
 
 def _unreadable(ctx: AuditContext) -> list:
-    """Each place a Model's or Table's TML holds a list or scalar where the schema has a
-    mapping, warned on stderr and returned for the run's JSON and the report: no rule
-    judges such an item (the engine skips the column or formula; a rule reading the
-    Model's own `properties` excludes the Model), so the reader must be told
-    (product owner's ruling, 2026-10-30: skip, and show it)."""
+    """Each Model, Table and Answer no rule judges, because its TML holds a list or
+    scalar where a mapping belongs (tml.unreadable_documents): warned on stderr and
+    returned for the run's JSON and the report's "Could not be read" (product owner's
+    ruling, 2026-10-30: skip the whole Model, and show it)."""
     from ts_cli.audit.context import _log
-    docs = [(d.get("model"), "Model", d.get("guid")) for d in ctx.models] + \
-           [(d.get("table"), "Table", d.get("guid")) for d in ctx.tables.values()]
-    out = []
-    for doc, kind, guid in docs:
-        for where in tml.malformed_mappings(doc) if isinstance(doc, dict) else []:
-            msg = (f"{kind} '{_name(doc)}' ({guid or 'no guid'}): '{where}' is not a "
-                   "mapping; not judged")
-            _log(f"Warning: {msg}")
-            ctx.warnings.append(msg)
-            out.append(msg)
-    return out
+    messages = tml.unreadable_documents(ctx)[3]
+    for msg in messages:
+        _log(f"Warning: {msg}")
+        ctx.warnings.append(msg)
+    return messages
 
 
 def run_audit(
@@ -401,6 +394,8 @@ def run_audit(
                                   else ctx.assessment)
     ctx.assessment = profile
     unreadable = _unreadable(ctx)
+    from ts_cli.audit.engine.run import readable
+    ctx = readable(ctx)  # what no rule judges is left out of the findings and corpus
     known = [a for a in angles if a in catalog.categories]
     findings: list[Finding] = run_rules(ctx, catalog, known, profile)
     run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]

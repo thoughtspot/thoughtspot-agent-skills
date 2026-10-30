@@ -74,20 +74,16 @@
   title: "Apply-all-joins anti-pattern (join_progressive:false)"
   description: >-
     A Model with more than 5 tables and `join_progressive` off joins every table on
-    every query. Counted as the Model's tables when join_progressive is not set (an
-    unset value joins every table, live-verified 2026-08-10), so the count is 0, and
-    silent, on a progressive Model, and on one whose `properties` is malformed and so
-    cannot be read. D4 was merged into this rule in 2026-10.
+    every query. Counted as the Model's tables when join_progressive is not set, so
+    the count is 0 — and silent — on a progressive Model. D4 was merged into this rule
+    in 2026-10.
   categories: [P, D]
   requires: [model_tml]
   scope: model
   aggregate:
     mode: count
     over: model.table
-    where:
-      all:
-        - {not: {field: "parent.@properties_unreadable", truthy: true}}
-        - {field: parent.properties.join_progressive, truthy: false}
+    where: {field: parent.properties.join_progressive, truthy: false}
   bands:
     direction: lower_is_better
     unit: count

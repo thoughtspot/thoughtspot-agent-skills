@@ -25,7 +25,7 @@ engine modules that import it.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ts_cli.tml_join_graph import node_id
 
@@ -41,9 +41,11 @@ BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
 #: Keys the Model and Table TML schemas define as mappings, never lists
 #: (thoughtspot-model-tml.md, thoughtspot-table-tml.md). A list or scalar under one is
-#: malformed: a field path reads it as None (fields._step), the item holding it is not
-#: judged (`unreadable`), and the run lists it (`malformed_mappings`) rather than mapping
-#: over the list and judging what it finds there (BL-406 item 10).
+#: malformed. The Model holding it (or using a Table that holds it) is not judged at all:
+#: `unreadable_documents` names it and `engine/run.py` leaves it out of every rule, and
+#: the report lists it under "Could not be read" (BL-406 item 10, product owner's ruling
+#: 2026-10-30). A field path still reads such a value as None (fields._step) and Python
+#: reads go through `mapping`, as a backstop: neither maps over it nor crashes on it.
 MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
 
 
@@ -54,17 +56,68 @@ def mapping(obj: Any, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def unreadable(obj: Any) -> bool:
-    """`obj` (a column, formula or Model body) holds a MAPPING_KEYS key, directly or as
-    `properties.spotter_config`, that is present but not a mapping. Such an item is not
-    judged: the engine skips a child item (a column, a formula) for every rule
-    (scopes.iterate), and a rule reading a Model's own `properties` excludes the Model
-    with `@properties_unreadable` (product owner's ruling, 2026-10-30)."""
-    if not isinstance(obj, dict):
-        return False
-    bad = [k for k in MAPPING_KEYS if obj.get(k) is not None and not isinstance(obj[k], dict)]
-    spotter = mapping(obj, "properties").get("spotter_config")
-    return bool(bad) or (spotter is not None and not isinstance(spotter, dict))
+def _malformed_tables(tables: dict) -> Dict[Any, Tuple[dict, list]]:
+    """{Table key: (its `table` body, its malformed paths)} for each malformed Table."""
+    out: Dict[Any, Tuple[dict, list]] = {}
+    for key, doc in (tables or {}).items():
+        body = doc.get("table") if isinstance(doc, dict) else None
+        paths = malformed_mappings(body) if isinstance(body, dict) else []
+        if paths:
+            out[key] = (body, paths)
+    return out
+
+
+def _model_reasons(body: dict, tables: dict, bad_tables: dict, bad_names: set) -> list:
+    """Why a Model is unreadable: its own malformed paths, then each malformed Table it
+    uses (by `model_tables[].fqn`, else by name when the fqn names no fetched Table)."""
+    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+    for mt in body.get("model_tables") or []:
+        if not isinstance(mt, dict):
+            continue
+        key = mt.get("fqn")
+        by_name = key not in (tables or {}) and str(mt.get("name")) in bad_names
+        if key in bad_tables or by_name:
+            reasons.append(f"uses Table '{mt.get('name')}', whose TML is malformed")
+    return reasons
+
+
+def _malformed_answers(answers: list) -> Tuple[set, list]:
+    guids, messages = set(), []
+    for doc in answers or []:
+        body = doc.get("answer") if isinstance(doc, dict) else None
+        for p in malformed_mappings(body) if isinstance(body, dict) else []:
+            guids.add(doc.get("guid"))
+            messages.append(f"Answer '{body.get('name') or ''}' ({doc.get('guid')}): "
+                            f"'{p}' is not a mapping; not judged")
+    return guids, messages
+
+
+def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
+    """What no rule may judge, because its TML holds a list or scalar where a mapping
+    belongs: (Model guids, Table keys, Answer guids, one message per reason).
+
+    A Model is unreadable when its own TML has such a path or a Table it uses does; a
+    Table or Answer when its own TML does. The unit is the whole Model: skipping only
+    the bad column left counts, sibling checks and the readiness score reading it anyway
+    (PR #693 review, round 4)."""
+    bad_tables = _malformed_tables(ctx.tables)
+    bad_names = {str(body.get("name")) for body, _ in bad_tables.values()}
+    models, messages = set(), []
+    for doc in ctx.models:
+        body = doc.get("model") if isinstance(doc, dict) else None
+        if not isinstance(body, dict):
+            continue
+        reasons = _model_reasons(body, ctx.tables, bad_tables, bad_names)
+        if reasons:
+            guid = doc.get("guid")
+            models.add(guid)
+            messages += [f"Model '{body.get('name') or ''}' ({guid or 'no guid'}): {r}; "
+                         "not judged" for r in reasons]
+    for key, (body, paths) in bad_tables.items():
+        messages += [f"Table '{body.get('name') or ''}' ({key}): '{p}' is not a mapping; "
+                     "not judged" for p in paths]
+    answers, answer_messages = _malformed_answers(ctx.answers)
+    return models, set(bad_tables), answers, messages + answer_messages
 
 
 def malformed_mappings(doc: Any, path: str = "") -> list:
@@ -277,8 +330,6 @@ def rls_column_refs(table: dict):
     t = table.get("table", {})
     props = {}
     for c in (t.get("columns") or []):
-        if unreadable(c):  # not judged: its type and casing read as unknown, like an
-            continue       # unresolved reference, which no caller reports
         props[c.get("name", "")] = (
             mapping(c, "db_column_properties").get("data_type", ""),
             mapping(c, "properties").get("value_casing", ""),

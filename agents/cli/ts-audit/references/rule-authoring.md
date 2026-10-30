@@ -206,15 +206,12 @@ To combine a combinator with anything else, wrap both in `all`.
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
 item, and `@name` is a derived field. A missing key yields null, never an error. So
 does malformed TML (a key the schema defines as a mapping, `properties`,
-`spotter_config` or `db_column_properties`, holding a list or a scalar), but such an item
-is **not judged**: the engine skips a column or formula with one for every rule, and the
-report lists it under "Could not be read". A Model is not skipped, so a rule that reads
-the Model's own `properties` and **fires when the value is absent** (P4: an unset
-`join_progressive` is off) must exclude an unreadable Model with
-`{not: {field: "parent.@properties_unreadable", truthy: true}}` (or `@properties_unreadable`
-at model scope); `test_a_rule_firing_on_an_absent_model_property_excludes_an_unreadable_model`
-fails a rule that does not. A derived field or code rule reads those keys through
-`tml.mapping(obj, key)`, which gives `{}` for the same cases.
+`spotter_config` or `db_column_properties`, holding a list or a scalar), but no rule ever
+sees it: a Model whose TML holds one, or which uses a Table whose TML does, is **left out
+of every rule** (`engine/run.py` `readable`, `tml.unreadable_documents`), and the report
+lists it under "Could not be read". A rule needs no guard for it. A derived field or code
+rule should still read those keys through `tml.mapping(obj, key)`, which gives `{}` for
+the same cases, so a document reached some other way cannot crash the run.
 
 **Message placeholders** per mode (Python `str.format`; any other name fails the gate):
 

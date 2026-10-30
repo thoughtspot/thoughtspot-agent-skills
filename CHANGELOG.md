@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
-- fix(audit): a column, formula or Model whose `properties`, `spotter_config` or `db_column_properties` is a list or scalar is no longer mapped over or a crash: no rule judges it, and the report and JSON list it under "Could not be read" (BL-406 item 10). Other non-mapping shapes are BL-498. ts-audit 3.7.1
+- fix(audit): a Model whose TML (or a Table it uses) has a list or scalar `properties`, `spotter_config` or `db_column_properties` is no longer mapped over or a crash: it is not judged, and the report and JSON list it under "Could not be read" (BL-406 item 10). Other non-mapping shapes are BL-498. ts-audit 3.7.1
 - chore: bump ts-cli to v0.191.1
 - feat(audit): grading into data (ts-audit v2 roadmap PR 2.4). New catalog key `parameters` for code-rule tuning numbers (H2, H10); D1 and H10 graded from the catalog; P2 reads the formula expression; H1 and the readiness score share one name test; `ts audit run` no longer ends on a null or numeric name. ts-audit 3.7.0
 - chore: bump ts-cli to v0.191.0

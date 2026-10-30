@@ -203,7 +203,9 @@ def tml_described_column() -> AuditContext:
 def tml_value_shapes() -> AuditContext:
     """Value shapes the legacy text tests (`str(x or "").strip()`, `.upper()`) treat
     specially: a lower-case column_type, falsy non-string ai_context/description
-    values (blank), structured ai_context (covered), non-mapping properties."""
+    values (blank), structured ai_context (covered). A non-mapping `properties` is not
+    here: it leaves the whole Model unjudged (BL-406 item 10), which would hide the rest;
+    data_single_model_malformed_column and the run-level tests cover it."""
     def col(name, props, **extra):
         return {"name": name, "column_id": f"T::{name}", "properties": props, **extra}
     return build_tml_ctx(
@@ -214,8 +216,6 @@ def tml_value_shapes() -> AuditContext:
         col("empty_map", {"column_type": "MEASURE", "ai_context": {}}),
         col("structured", {"column_type": "MEASURE", "ai_context": {"additivity": "additive"}},
             description="d"),
-        col("list_props", ["MEASURE"]),
-        col("empty_props", []),
     )
 
 

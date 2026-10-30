@@ -500,11 +500,6 @@ def test_a_malformed_mapping_reads_as_absent(bad):
     # a derived field reading the key in Python takes the same view: absent `index_type`
     # is the default, indexed (S2 and P11 reach it only behind other conditions)
     assert fields.get(_item({"properties": bad}), "@is_indexed", ctx) is True
-    # …which is why a rule that must not judge it excludes the item explicitly
-    assert fields.get(_item({"properties": bad}), "@properties_unreadable", ctx) is True
-    for fine in ({}, {"x": 1}, None):
-        assert fields.get(_item({"properties": fine}), "@properties_unreadable", ctx) is False
-    assert fields.get(_item({}), "@properties_unreadable", ctx) is False
 
 
 def test_malformed_mappings_names_each_path():
@@ -534,43 +529,6 @@ def test_a_malformed_mapping_is_named_in_a_warning(capsys):
     from ts_cli.audit.report import render_report
     html = render_report(out)
     assert '"ur": [' in html or '"ur":[' in html
-
-
-def _leaves(expr, negated=False):
-    """(field, op, value, negated) for every leaf of a catalog expression."""
-    if isinstance(expr, dict):
-        if "not" in expr:
-            yield from _leaves(expr["not"], not negated)
-        elif "all" in expr or "any" in expr:
-            for sub in expr.get("all") or expr.get("any") or []:
-                yield from _leaves(sub, negated)
-        elif "field" in expr:
-            for op, value in expr.items():
-                if op != "field":
-                    yield expr["field"], op, value, negated
-
-
-def test_a_rule_firing_on_an_absent_model_property_excludes_an_unreadable_model():
-    """The engine skips a column or formula whose properties cannot be read; a Model is
-    not skipped. So a rule that reads the Model's own `properties` and FIRES when the
-    value is absent would report a guess about an unreadable Model (P4 did): it must
-    carry the `@properties_unreadable` guard. This fails the next such rule."""
-    from ts_cli.audit.catalog_model import load_catalog
-    from ts_cli.audit.engine.predicates import LEAF
-    missing = []
-    for rule in load_catalog().rules.values():
-        agg = rule.aggregate or {}
-        model_level = rule.scope == "model" and not agg.get("over")
-        for key in ("where", "match"):
-            for field, op, value, negated in _leaves(agg.get(key)):
-                reads_model = field.startswith("parent.properties.") or (
-                    model_level and field.startswith("properties."))
-                if not reads_model or op not in LEAF:
-                    continue
-                if LEAF[op](None, value) is not negated and \
-                        "@properties_unreadable" not in repr(agg):
-                    missing.append((rule.id, field))
-    assert missing == []
 
 
 def test_derived_fields_registry():

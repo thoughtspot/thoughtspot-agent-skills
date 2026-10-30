@@ -182,125 +182,39 @@ def _corrupt(where, bad):
     return ctx
 
 
-@pytest.mark.parametrize("bad", [["MEASURE"], [{"column_type": "MEASURE"}]])
-@pytest.mark.parametrize("where", ["model_column", "table_column_db",
-                                   "table_column_props", "model"])
-def test_a_malformed_mapping_does_not_end_the_run(where, bad):
-    """BL-406 item 10, end to end over a Model whose tables are in `model_tables`, a
-    Table TML under an RLS rule, and two Models sharing a column: every read of a
-    malformed mapping reads it as absent (review: the committed malformed inputs reached
-    none of these sites)."""
+@pytest.mark.parametrize("bad", [["MEASURE"], [{"column_type": "MEASURE"}], 5])
+@pytest.mark.parametrize("where,skipped", [
+    ("model_column", {"m-1"}), ("model", {"m-1"}),
+    # the Table both Models use: neither is judged
+    ("table_column_db", {"m-1", "m-2"}), ("table_column_props", {"m-1", "m-2"}),
+])
+def test_a_malformed_mapping_leaves_its_whole_model_unjudged_and_listed(where, skipped, bad):
+    """BL-406 item 10 (product owner's ruling, 2026-10-30): a Model whose TML, or a
+    Table's it uses, holds a list or scalar where a mapping belongs gets no findings and
+    no readiness score, and the run lists it; every other Model is judged as before."""
     from ts_cli.audit import run_audit
     from ts_cli.audit.report import render_report
     ctx = _corrupt(where, bad)
     out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    judged = {f["object_guid"] for f in out["findings"]}
+    assert not judged & skipped
+    assert {m["guid"] for m in out["corpus"]["models"]}.isdisjoint(skipped)
+    listed = " ".join(out["corpus"]["unreadable"])
+    assert all(f"({g})" in listed for g in skipped)
+    if skipped == {"m-1"}:
+        assert "m-2" in judged, "the other Model is still judged"
     assert "<html" in render_report(out).lower()
-    assert ctx.warnings, "a malformed mapping is named in a warning"
 
 
-def _wide(ctx):
-    tables = ctx.models[0]["model"]["model_tables"]
-    tables += [{"name": f"T{i}", "fqn": f"t-x{i}"} for i in range(6)]
-    return ctx
-
-
-@pytest.mark.parametrize("props,fires", [
-    ({}, True),                                  # unset: joins every table (live 2026-08-10)
-    ({"is_bypass_rls": False}, True),
-    ({"join_progressive": False}, True),
-    ({"join_progressive": True}, False),
-    (["oops"], False),                           # malformed: cannot be read, not judged
-    ([{"join_progressive": False}], False),
-])
-def test_p4_reads_unset_as_off_and_does_not_judge_malformed(props, fires):
-    """An unset `join_progressive` joins every table into every query (live-verified
-    2026-08-10, ts-object-model-agentql-query patterns.md), so P4 reports it; a malformed
-    `properties` cannot be read, so P4 judges nothing (review: reading it as absent made a
-    false HIGH, and making unset read as on contradicted the live probe)."""
+@pytest.mark.skipif(__import__("report_browser").CHROME is None,
+                    reason="headless Chrome not installed")
+def test_the_report_shows_what_could_not_be_read(tmp_path):
+    """The reader sees the skip, not only stderr: the dashboard lists each item."""
+    import report_browser
     from ts_cli.audit import run_audit
-    ctx = _wide(_corrupt("model", props))
-    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
-    p4 = [f for f in out["findings"] if f["check_id"] == "P4" and f["object_guid"] == "m-1"]
-    assert bool(p4) is fires
-
-
-def _firing_model(props):
-    """A Model on which S4 (RLS bypass with PII), S10 and P11 (31 indexed columns, Spotter
-    on) all fire when `properties` is the well-formed mapping."""
-    ctx = _populated_with_two_models()
-    model = ctx.models[0]["model"]
-    model["columns"] += [{"name": "Email Address", "column_id": "ORDERS::EMAIL",
-                          "properties": {"column_type": "ATTRIBUTE"}}]
-    model["columns"] += [{"name": f"Attr {i}", "column_id": f"ORDERS::A{i}",
-                          "properties": {"column_type": "ATTRIBUTE"}} for i in range(30)]
-    model["properties"] = props
-    return ctx
-
-
-def test_a_malformed_model_properties_silences_its_parent_property_rules():
-    """S4, S10 and P11 read `parent.properties.*`: with the mapping they fire; wrapped in a
-    list (unreadable) they judge nothing."""
-    from ts_cli.audit import run_audit
-    good = {"is_bypass_rls": True, "spotter_config": {"is_spotter_enabled": True}}
-    rules = {"S4", "S10", "P11"}
-
-    def fired(props):
-        out = run_audit(None, ["m-1", "m-2"], ctx=_firing_model(props))
-        return {f["check_id"] for f in out["findings"] if f["object_guid"] == "m-1"} & rules
-    assert fired(good) == rules
-    assert fired([good]) == set()
-
-
-def test_p11_does_not_count_a_column_whose_properties_cannot_be_read():
-    """30 readable indexed columns plus one unreadable one (wrapping DONT_INDEX): the
-    unreadable one is not counted, so P11 (more than 30) stays silent."""
-    from ts_cli.audit import run_audit
-    good = {"spotter_config": {"is_spotter_enabled": True}}
-
-    def p11(extra_props):
-        ctx = _firing_model(good)
-        cols = ctx.models[0]["model"]["columns"]
-        del cols[-30:]
-        cols += [{"name": f"Attr {i}", "column_id": f"ORDERS::A{i}",
-                  "properties": {"column_type": "ATTRIBUTE"}} for i in range(27)]
-        cols.append({"name": "Odd", "column_id": "ORDERS::ODD", "properties": extra_props})
-        assert sum(1 for c in cols if isinstance(c["properties"], dict)) == \
-            (31 if isinstance(extra_props, dict) else 30)
-        out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
-        return [f for f in out["findings"] if f["check_id"] == "P11"
-                and f["object_guid"] == "m-1"]
-    assert p11({"column_type": "ATTRIBUTE"})
-    assert not p11([{"index_type": "DONT_INDEX"}])
-
-
-def test_s2_does_not_judge_a_column_whose_properties_cannot_be_read():
-    """A PII column whose `properties` is a list (here wrapping DONT_INDEX) has an
-    unreadable index setting: S2 must not report it indexed (review finding)."""
-    from ts_cli.audit import run_audit
-    ctx = _populated_with_two_models()
-    ctx.models[0]["model"]["columns"].append(
-        {"name": "Email Address", "column_id": "ORDERS::EMAIL",
-         "properties": [{"column_type": "ATTRIBUTE", "index_type": "DONT_INDEX"}]})
-    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["S"])
-    assert not [f for f in out["findings"]
-                if f["check_id"] == "S2" and f["object_name"] == "Email Address"]
-    ctx.models[0]["model"]["columns"][-1]["properties"] = {"column_type": "ATTRIBUTE"}
-    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["S"])
-    assert [f for f in out["findings"]
-            if f["check_id"] == "S2" and f["object_name"] == "Email Address"]
-
-
-def test_p15_does_not_judge_an_rls_column_whose_properties_cannot_be_read():
-    """P15 reports a VARCHAR RLS column with no `value_casing`; a column whose
-    `properties` wraps the casing in a list cannot be read, so it is not judged."""
-    from ts_cli.audit import run_audit
-
-    def p15(props):
-        ctx = _populated_with_two_models()
-        column = next(iter(ctx.tables.values()))["table"]["columns"][0]   # CUST_ID, VARCHAR
-        column["properties"] = props
-        out = run_audit(None, ["m-1", "m-2"], ctx=ctx, angles=["P"])
-        return [f for f in out["findings"] if f["check_id"] == "P15"]
-    assert p15({})
-    assert not p15({"value_casing": "UPPER"})
-    assert not p15([{"value_casing": "UPPER"}])
+    from ts_cli.audit.report import render_report
+    out = run_audit(None, ["m-1", "m-2"], ctx=_corrupt("model_column", ["MEASURE"]))
+    shown = report_browser.render(render_report(out), tmp_path)
+    assert shown["errors"] == []
+    assert "Could not be read — 1 item not judged." in shown["text"]
+    assert "Model 'Sales' (m-1): 'columns[Amount].properties' is not a mapping" in shown["text"]

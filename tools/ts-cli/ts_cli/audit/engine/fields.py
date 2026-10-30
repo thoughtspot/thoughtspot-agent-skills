@@ -14,10 +14,9 @@ A missing key, an index out of range or a step into a scalar yields None, never 
 error — absence is data, and the operators define what None means. A key the TML schema
 defines as a mapping (`tml.MAPPING_KEYS`: `properties`, `spotter_config`,
 `db_column_properties`) holding a list or a scalar reads as None too, never mapped over.
-Such an item is not judged at all (BL-406 item 10, product owner's ruling 2026-10-30):
-the engine skips a column or formula with one (scopes.iterate), a rule reading a Model's
-own `properties` that would fire on an absent value excludes the Model with
-`@properties_unreadable`, and the report lists every such item as "Could not be read".
+That is a backstop only: a Model whose TML (or a Table's it uses) holds one is not judged
+at all, so rules never see it (`tml.unreadable_documents`, `engine/run.py`; BL-406 item
+10, product owner's ruling 2026-10-30).
 
 Derived fields are small pure functions, written once, for what a path cannot express
 (a default the schema implies, a join graph, a lookup into another document). Register
@@ -156,18 +155,6 @@ def _step(value: Any, step: str) -> Any:
 
 
 # ── derived fields ──────────────────────────────────────────────────────────
-
-@register("properties_unreadable", uses=(), values=(False, True),
-          label="its properties are malformed and cannot be read")
-def _properties_unreadable(item: dict, ctx: Any) -> bool:
-    """Model (or any item): a mapping key it holds is present but not a mapping
-    (tml.unreadable). The engine already skips such a column or formula for every rule;
-    a Model is not skipped (its joins, names and tables are still readable), so a rule
-    that reads the Model's own `properties` and would fire on an absent value excludes it
-    with this field: P4 reads an unset `join_progressive` as off, which is the platform's
-    behaviour (live-verified 2026-08-10), but not a guess about an unreadable one."""
-    return tml.unreadable(item.get("obj"))
-
 
 @register("is_indexed", uses=(), values=(False, True),
           label="the column is indexed for search")

@@ -26,11 +26,12 @@ a replayed snapshot carries from its capture.
 from __future__ import annotations
 
 import copy
+import dataclasses
 from typing import Any, Dict, Iterator, List, Optional, Set
 
 from ts_cli.audit.catalog_forms import BY_SEVERITY
 from ts_cli.audit.catalog_model import Catalog, Rule
-from ts_cli.audit.engine import bands, code_rules, memo
+from ts_cli.audit.engine import bands, code_rules, memo, tml
 from ts_cli.audit.engine.modes import MODES
 from ts_cli.audit.findings import Finding
 
@@ -44,11 +45,28 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
     catalog is layer 0, the profile layer 1).
     """
     _check_selection(catalog, categories, profile)
+    ctx = readable(ctx)
     findings: List[Finding] = []
     with memo.run_scope():  # lookups shared across items are computed once per run
         for rule in _selected(catalog, categories):
             findings += _run_rule(ctx, catalog, rule, profile, layers or [])
     return findings
+
+
+def readable(ctx):
+    """`ctx` without what no rule may judge: each Model, Table and Answer whose TML holds
+    a list or scalar where a mapping belongs, and each Model using such a Table
+    (tml.unreadable_documents). A shallow copy; `ctx` itself is unchanged. The run lists
+    what it left out (audit/__init__.py), so nothing is skipped silently."""
+    models, tables, answers, _ = tml.unreadable_documents(ctx)
+    if not (models or tables or answers):
+        return ctx
+    return dataclasses.replace(
+        ctx,
+        models=[m for m in ctx.models if m.get("guid") not in models],
+        model_guids=[g for g in ctx.model_guids if g not in models],
+        tables={k: v for k, v in ctx.tables.items() if k not in tables},
+        answers=[a for a in ctx.answers if a.get("guid") not in answers])
 
 
 def needs_for(catalog: Catalog, categories: List[str], profile: str,
