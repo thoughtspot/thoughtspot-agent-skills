@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-10-30
+- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0
+- chore: bump ts-cli to v0.192.0
 - feat(audit): grading into data (ts-audit v2 roadmap PR 2.4). New catalog key `parameters` for code-rule tuning numbers (H2, H10); D1 and H10 graded from the catalog; P2 reads the formula expression; H1 and the readiness score share one name test; `ts audit run` no longer ends on a null or numeric name. ts-audit 3.7.0
 - chore: bump ts-cli to v0.191.0
 - feat(audit): noise fixes (ts-audit v2 roadmap PR 2.3), with BL-112. D3 rolls LEFT/RIGHT outer joins into one INFO per Model; H2 drops the "The "/"A " boilerplate test; A1/A2 count visible columns only; D5, D10, D11, H3 and P7 find tables by alias; S1 matches display names with whole-word short tokens; S5 matches a spaced "API Key"; P18 ignores references and literals and names its kind; the audit smoke test runs `ts audit run`/`report`. ts-audit 3.6.0

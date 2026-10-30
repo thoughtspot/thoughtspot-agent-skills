@@ -333,6 +333,18 @@ class TestRollbackCommand:
         assert results["failed"] == []
         assert results["new_guids"]["del-1"] == "new-guid-123"
 
+    def test_rollback_refuses_a_backup_from_another_cluster(self, tmp_path):
+        backup_dir = self._make_backup(tmp_path)
+        mock_client = self._fake_import_client()
+        mock_client.base_url = "https://other.example.com"
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"],
+            )
+        assert result.exit_code != 0
+        mock_client.post.assert_not_called()
+
     def test_rollback_picks_up_flat_shape_guid(self, tmp_path):
         # BL-099 #1 — ThoughtSpot Cloud also returns a FLAT response shape
         # (response.header.id_guid, no `object` list). Rollback must still
@@ -444,7 +456,8 @@ class TestRollbackCommand:
                 app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"],
             )
 
-        assert result.exit_code == 0  # command completes; failures are reported in the JSON
+        # The JSON is still printed, but a partial restore must not exit 0 (PR #666 B3).
+        assert result.exit_code == 1, _all_output(result)
         results = json.loads(result.stdout)
         assert len(results["failed"]) == 3
         assert results["succeeded"] == []
@@ -461,6 +474,95 @@ class TestRollbackCommand:
 # ---------------------------------------------------------------------------
 
 import yaml as _yaml
+
+
+class TestCascadeDeleteRollback:
+    """`ts dependency backup`/`rollback` for a delete that removes the source and its
+    dependents together (ts-dependency-cleanup operation 8; PR #666 review B3)."""
+
+    MODEL = "8a730793-5379-4ecd-aa4b-68dd9a602aef"
+    ANSWER = "51194061-9063-4842-8cc2-d98bdbce8b54"
+    NEW_MODEL = "11111111-2222-3333-4444-555555555555"
+
+    def _backup(self, tmp_path, **plan_extra):
+        plan = {
+            "operation": "REMOVE",
+            "source": {"guid": self.MODEL, "type": "MODEL", "name": "Sales Model"},
+            "delete": [{"guid": self.ANSWER, "type": "ANSWER", "name": "Sales Answer"}],
+            "out_dir": str(tmp_path),
+            **plan_extra,
+        }
+        edocs = {
+            self.MODEL: f"guid: {self.MODEL}\nmodel:\n  name: Sales Model\n",
+            # export_fqn=True: the Answer names its Model by GUID.
+            self.ANSWER: (f"guid: {self.ANSWER}\nanswer:\n  name: Sales Answer\n"
+                          f"  tables:\n  - id: Sales Model\n    fqn: {self.MODEL}\n"),
+        }
+        client = MagicMock()
+        client.base_url = "https://example.thoughtspot.cloud"
+
+        def fake_post(path, json=None, **kwargs):
+            guid = json["metadata"][0]["identifier"]
+            resp = MagicMock()
+            resp.ok = True
+            resp.json.return_value = [{"edoc": edocs[guid], "info": {}}]
+            return resp
+
+        client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            return runner.invoke(app, ["dependency", "backup", "--profile", "test"],
+                                 input=json.dumps(plan))
+
+    def test_source_deleted_records_a_delete_intent(self, tmp_path):
+        result = self._backup(tmp_path, source_deleted=True)
+        assert result.exit_code == 0, _all_output(result)
+        intents = {o["guid"]: o["intent"] for o in json.loads(result.stdout)["objects"]}
+        assert intents == {self.MODEL: "DELETE", self.ANSWER: "DELETE"}
+
+    def test_source_kept_by_default(self, tmp_path):
+        result = self._backup(tmp_path)
+        assert result.exit_code == 0, _all_output(result)
+        intents = {o["guid"]: o["intent"] for o in json.loads(result.stdout)["objects"]}
+        assert intents[self.MODEL] == "FIX_SOURCE"
+
+    def test_source_deleted_must_be_boolean(self, tmp_path):
+        result = self._backup(tmp_path, source_deleted="yes")
+        assert result.exit_code != 0
+        assert not any(tmp_path.iterdir())  # nothing written
+
+    def test_rollback_recreates_source_and_rebinds_the_dependent(self, tmp_path):
+        backup = self._backup(tmp_path, source_deleted=True)
+        backup_dir = os.path.dirname(json.loads(backup.stdout)["objects"][0]["backup_file"])
+
+        client = MagicMock()
+        new_guids = iter([self.NEW_MODEL, "99999999-8888-7777-6666-555555555555"])
+
+        def fake_post(path, json=None, **kwargs):
+            resp = MagicMock()
+            resp.ok = True
+            resp.json.return_value = [{"response": {
+                "status": {"status_code": "OK"},
+                "object": [{"header": {"id_guid": next(new_guids)}}],
+            }}]
+            return resp
+
+        client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"],
+            )
+
+        assert result.exit_code == 0, _all_output(result)
+        model_call, answer_call = client.post.call_args_list
+        # The deleted source is re-created, not updated in place at a dead GUID.
+        assert model_call.kwargs["json"]["create_new"] is True
+        assert self.MODEL not in model_call.kwargs["json"]["metadata_tmls"][0]
+        # The Answer is restored onto the NEW Model, not the deleted one.
+        answer_tml = answer_call.kwargs["json"]["metadata_tmls"][0]
+        assert self.MODEL not in answer_tml
+        assert f"fqn: {self.NEW_MODEL}" in answer_tml
 
 
 class _FakeResp:

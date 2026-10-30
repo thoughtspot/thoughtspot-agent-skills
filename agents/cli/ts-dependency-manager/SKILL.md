@@ -1,6 +1,6 @@
 ---
 name: ts-dependency-manager
-description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment — generates a risk-rated impact report, backs up TML before any change, and supports full rollback.
+description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment, or delete an object together with everything that depends on it (administrators only) — generates a risk-rated impact report or a dry-run preview, backs up TML before any change, and supports full rollback.
 ---
 
 # ThoughtSpot: Dependency Manager
@@ -15,6 +15,9 @@ exactly what to change, takes TML backups, and provides rollback capability.
   clean up all dependent Answers, Liveboards, and Models that reference them
 - **Repoint objects** — redirect Answers or Liveboards to a different table or Model,
   with column-gap detection and mapping
+- **Delete with dependents** — delete a Table, Model, View or column **and everything
+  built on it**, in one server-side cascade. Administrators only. Always a dry run first,
+  then a backup, a typed confirmation and a re-check before anything is deleted
 
 > **Note: RENAME mode is intentionally not supported by this skill.** Smoke testing
 > on champ-staging (2026-04-27) demonstrated that ThoughtSpot's TML import API
@@ -75,9 +78,11 @@ On skill invocation, display this plan before doing any work:
 ### A. Steps
 
   1.  Authenticate ......................................... auto
-  2.  Choose mode (Audit | Remove | Repoint) ............... you choose
+  2.  Choose mode (Audit | Remove | Repoint | Delete with dependents) ... you choose
        Audit produces a dependency report only — no changes applied.
        Useful before any change to plan blast radius.
+       Delete with dependents (administrators only) follows its own steps,
+       Step 3-D: dry run → backup → typed DELETE → re-check → delete → rollback option.
   3.  Identify source object and column scope .............. you provide
   4.  Walk dependents via v2 dependents API and classify
       impact (alias-aware) ................................. auto  (~3 s — single API call + per-dep TML check)
@@ -205,12 +210,15 @@ What would you like to do?
     R  Remove column(s)  — remove one or more columns and clean up all dependents
     P  Repoint objects   — redirect Answers / Liveboards to a different
                            Model, View, or connection Table
+    D  Delete with dependents — delete one object AND everything built on it.
+                           Administrators only. Dry run first, always.
 
-Enter A / R / P:
+Enter A / R / P / D:
 ```
 
-Save `{operation}` (`AUDIT` / `REMOVE` / `REPOINT`) and branch to the appropriate
-Step 3 sub-section.
+Save `{operation}` (`AUDIT` / `REMOVE` / `REPOINT` / `CASCADE`) and branch to the
+appropriate Step 3 sub-section. `D` goes to **Step 3-D**, which runs end to end on its
+own and rejoins at Step 11.
 
 > **RENAME mode is not supported** — see the rationale at the top of this file. If
 > the user types `N`, respond with the warning explaining why and prompt them to
@@ -438,6 +446,132 @@ Save `{source_guid}`, `{target_guid}`, `{target_name}`, `{column_gap}`.
 
 ---
 
+## Step 3-D — Delete with dependents (operation = CASCADE)
+
+Deletes ONE object and everything built on it, in a single server-side cascade
+(`ts dependency cascade-preview` / `cascade-delete`, over ThoughtSpot's own v1-only
+`/callosum/v1/dependency/delete-with-dependents` — there is no v2 equivalent; see
+open-items #26). This step runs end to end and rejoins at Step 11. It never skips the
+dry run, the backup, the typed confirmation or the re-check, and the CLI refuses the
+delete if any of them is missing.
+
+**D1 — Role.** Tell the user first, before asking for anything else:
+
+```
+Delete with dependents is limited to ThoughtSpot administrators. The server refuses
+even the dry run to anyone else.
+```
+
+Check it with `ts auth whoami --profile {profile_name}`: the `privileges` list must
+contain `ADMINISTRATION`. If it does not, stop here and offer Remove mode (R), which
+fixes dependents instead of deleting them. (The CLI re-checks this on every call.)
+
+**D2 — What to delete.** Exactly one object per run; for several, run Step 3-D once per
+object. Ask for the Table, Model, Worksheet, View or SQL View by name (or GUID), and
+whether to delete the whole object or just one of its columns. To find a name, search
+without a subtype filter so Views and SQL Views are included:
+`ts metadata search --profile {profile_name} --name "%keyword%"`.
+
+**D3 — Dry run.** Nothing changes:
+
+```bash
+ts dependency cascade-preview "{name or GUID}" --profile {profile_name} \
+  > /tmp/{slug}_cascade_preview.json                                   # whole object
+ts dependency cascade-preview "{name or GUID}" --column "{column name}" --profile {profile_name} \
+  > /tmp/{slug}_cascade_preview.json                                   # one column
+```
+
+- `"status": "REFUSED"` (exit 1) → a ThoughtSpot rule blocks it, e.g. *Deleting columns
+  linked to filters is not allowed*. Show `details` word for word, explain what must
+  change first, and stop. Do not retry or reshape the request.
+- Any other non-zero exit → show the message and stop. It also covers objects this mode
+  does not handle: a cascade that reaches a Set, and uploaded tables.
+- Otherwise show the user, **in the chat**, one row per object in `objects[]`: type,
+  name, `author`, `org` and the **full 36-character GUID** — never shortened. Then the
+  per-type `counts`, the `total`, `owned_by_others` (other people's work that will be
+  deleted) and `author_unknown`. If `source_deleted` is true the object itself is
+  deleted too; otherwise (a column) its owning Table or Model is modified, not deleted.
+- **Size the delete from this list, never from Step 4's report.** A dependents lookup
+  shows direct dependents; the cascade takes everything downstream of them too
+  (open-items #26: 4 reported, 12 deleted). Even this list is the server's answer, not
+  a proven-complete one — the CLI reads every object the response names, and the
+  delete step checks what actually went.
+
+**D4 — Backup** (mandatory). Ask where to save it as in Step 7 — prefer a durable path
+over `/tmp/`, which is cleared on reboot and would leave nothing to roll back from. Then
+build the plan from the preview file **in Python**, never by pasting names into a shell
+string (an object name can contain a quote):
+
+```python
+import json, subprocess
+p = json.load(open("/tmp/{slug}_cascade_preview.json"))
+plan = {"operation": "CASCADE_DELETE", "source": p["backup_source"],
+        "source_deleted": p["source_deleted"],
+        "delete": [{"guid": o["guid"], "type": o["type"], "name": o["name"]} for o in p["objects"]],
+        "out_dir": out_dir}
+r = subprocess.run(["ts", "dependency", "backup", "--profile", profile_name],
+                   input=json.dumps(plan), capture_output=True, text=True)
+```
+
+A non-zero exit → stop; nothing was deleted and nothing was written. Otherwise the
+backup directory is the folder holding `manifest.json`
+(`os.path.dirname(json.loads(r.stdout)["objects"][0]["backup_file"])`).
+
+**D5 — Typed confirmation.** Show the D3 table again with:
+
+```
+This will delete {total} object(s){ plus the object itself, if source_deleted},
+{owned_by_others} of them owned by other users ({author_unknown} with no recorded
+owner). This cannot be undone on the server.
+
+Backup: {backup_dir}. A rollback re-creates the deleted objects from it, with NEW
+GUIDs, and re-links them to each other. It does NOT bring back:
+  - sharing and ownership: restored objects belong to the administrator who runs the
+    rollback and are shared with nobody until re-shared
+  - alerts, column aliases and column security rules on the deleted objects
+  - bookmarks, embeds and anything outside this list that used the old GUIDs
+
+Type DELETE to continue, or anything else to cancel:
+```
+
+Accept only the exact string `DELETE`.
+
+**D6 — Delete.** Pass the plan the same way, in Python:
+
+```python
+plan = {"guid": p["source"]["guid"], "type": p["source"]["type"],
+        "backup_dir": backup_dir, "confirm": "DELETE"}
+r = subprocess.run(["ts", "dependency", "cascade-delete", "--profile", profile_name],
+                   input=json.dumps(plan), capture_output=True, text=True)
+```
+
+Before sending anything the command checks the role, that the backup came from this
+cluster and every backup file is readable, that nothing in it changed since it was
+taken, and that a fresh dry run still lists exactly what was backed up. It sends the
+delete once, then checks which objects still exist. Read `status` from the JSON:
+
+| `status` | Meaning | Tell the user |
+|---|---|---|
+| `APPLIED` | Every object is confirmed gone | List every GUID in `deleted`. If `deleted_without_backup` is not empty, say under a heading **Deleted WITHOUT a backup** that rollback cannot restore those. If the exit code is 1 with `APPLIED`, say the deletion is confirmed but the server's answer was unusual (`response_readable: false`, or `http_status` other than 200) |
+| `PARTIAL` | Some objects are gone, some remain | List `deleted` and `still_present`. Do **not** run the delete again; offer Step 11 rollback straight away |
+| `NOT_APPLIED` | The server failed and every object still exists | Show `server_response`. Known case: on some builds a cascade that includes a **Liveboard** fails with `Restrict delete failed` (open-items #27) |
+| `UNKNOWN` | Timed out, or existence could not be checked | Do **not** run the delete again — the server may still be working. Wait, run D3 again and compare, then offer rollback for whatever is gone |
+| `REFUSED` | A ThoughtSpot rule blocked it | Nothing was deleted. Show `details` word for word |
+| `RECHECK_MISMATCH` | What would be deleted changed since the backup | Nothing was deleted. Show `not_backed_up` / `no_longer_listed`, then go back to D3 |
+| `STALE_BACKUP` | Objects in `changed_since_backup` were edited after the backup | Nothing was deleted. Back to D4 for a new backup |
+| `BAD_BACKUP` | The backup cannot protect this delete (`problems`) | Nothing was deleted. Back to D4 |
+
+The command never re-sends a delete. Neither should you.
+
+**D7 — Rollback.** Continue at **Step 11**, using the `rollback` command the JSON
+prints (it carries the profile): it restores roots first — each object after the
+objects it references — re-links them, and refuses a backup from another cluster. Show
+the `new_guids` table (old → new GUID), treat any `failed[]` entry as an incomplete
+restore, and do not re-run the rollback after a partial one (it would create a second
+copy of every object already restored — open-items #28).
+
+---
+
 ## Step 4 — Walk dependents
 
 Call the `ts metadata report` command to do the walk. It returns the same data the skill previously assembled inline, plus richer coverage (RLS, alerts, joins, Spotter AI surface area, column aliases).
@@ -491,6 +625,20 @@ ts metadata report <source-guid> --profile {profile_name} --format md --out /tmp
 Present the markdown content to the user. Apply scope filtering (Step 4) to the dependents table before display when the audit scope is column-specific.
 
 The CLI's coverage matrix is the canonical Scan Coverage block — `build_coverage.py` is now retired in favor of the live API-driven coverage list.
+
+### Full deletion chain (Audit mode, administrators only)
+
+The report above lists dependents up to `--depth` hops. If the user is an administrator
+(D1's check), offer the server's own answer to "what would a delete take with it?" —
+a dry run that changes nothing:
+
+```bash
+ts dependency cascade-preview <source-guid> --type <LOGICAL_TABLE|LOGICAL_COLUMN> --profile {profile_name}
+```
+
+Show any object in its `objects[]` that the report above does not list, under **Also
+removed by a cascade delete**. Skip this for non-administrators — the server refuses
+them — and never present it as a reason to delete: it is sizing information only.
 
 ### Stop conditions
 
@@ -1133,7 +1281,7 @@ acknowledgment before proceeding:
 **Rollback — `ts dependency rollback`:**
 
 Map the menu choice to the command flags and run it against `{backup_dir}`. The command
-reads the manifest, restores objects in dependency-safe order (dependents before source),
+reads the manifest, restores objects roots first (each after the objects it references),
 re-imports DELETE-intent objects as NEW objects (new GUIDs, `guid:` stripped), and updates
 every other object in place at its original GUID.
 
@@ -1163,7 +1311,9 @@ rollback_results = (json.loads(result.stdout) if result.stdout.strip()
 Show rollback results. If `new_guids` is non-empty, surface the `old_guid → new_guid`
 mapping table so the user can manually reattach any external references (restored deletes
 always receive new GUIDs). If any entries are in `failed`, give the user the backup file
-path (from the manifest) for manual restoration via the ThoughtSpot UI TML editor.
+path (from the manifest) for manual restoration via the ThoughtSpot UI TML editor. Do not
+re-run the rollback after a partial one: it would create a second copy of every deleted
+object it already restored (open-items #28).
 
 ---
 
@@ -1210,6 +1360,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.6.0 | 2026-10-30 | **New mode D — Delete with dependents (administrators only), Step 3-D.** Deletes one Table, Model, View or column and everything built on it in a single server-side cascade, through the new `ts dependency cascade-preview` (dry run; takes a name and `--column`) and `cascade-delete`. Nothing can be skipped: role check → dry run shown in full (full GUIDs, owners, Orgs; other users' and unknown owners counted) → mandatory backup → typed `DELETE` → the command refuses unless the backup is from this cluster, every file is readable, nothing changed since it was taken, and a fresh dry run still matches it → the delete is sent once → which objects are actually gone is checked, never assumed. The scope is every object the server's answer names, not one list in it. D5 says what a rollback does not restore (sharing, ownership, alerts, aliases, column security). Step 11's rollback now restores each object after the objects it references and refuses a backup from another cluster. Audit mode can add the server's full deletion chain for administrators. Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666 (its rollback re-linking, SQL View restore order and failing rollback exit code are carried over), through the `ts` CLI instead of raw `curl` and a session cookie. Live-tested on a test cluster (open-items #26); a cascade that includes a Liveboard fails server-side there (#27). Requires ts-cli v0.192.0. |
 | 1.5.0 | 2026-10-12 | **Column security rules are walked; an unchecked security row, or an incomplete dependents list (`BLOCKED_VERIFY_DEPENDENTS_FIRST`, new "Formula column dependents" row), now blocks `SAFE`** (open-item #9, BL-289; PR #506 review blockers 1 and 6). `ts metadata report` resolves a column GUID's owning table from its header `owner`, exports that table for `rls_rules` (the export API rejects a column GUID outright, so column reports used to abort) and fetches its column security rules; a whole-table source counts every rule on the table. A Model, or a Model's column, reports both rows unchecked because the rules live on base tables. Any unchecked RLS/CSR row gives the new `UNVERIFIED` verdict (`BLOCKED_VERIFY_SECURITY_FIRST`), which Step 5 handles like STOP. All live-verified on embed-1 staging against a real RLS rule and a real CSR rule. |
 | 1.4.3 | 2026-09-22 | **Open-item #9 resolved; the column-alias "cannot retrieve" claim retired, the CSR one corrected rather than retired (audit 5.2 / 5.3).** #9 called CSR retrieval the open question, on the accurate-but-incomplete observation that a plain `--associated` export returns no CSR. It needs a second option alongside it — `export_options.export_column_security_rules: true` (Beta, 10.12+) — and ships as `ts security column-rules export`/`get`. Separately, `dependency-types.md` row 10 called column-alias retrieval "No on this build" citing a non-existent open-item #10, when `ts alias export` retrieves it via `export_with_column_aliases: true`; row 10 is now Implementable and the alias doc is no longer listed as skipped. Five dangling citations resolved in all — the `#12` reference behind "drop model-level filters" is replaced by the real mechanism (`error_code 14518`, surfaced upstream as a YAML syntax error). Both #10 and #12 once existed and were deleted as resolved in 2026-06 without updating their inbound references — `check_open_item_citations.py` now makes that a commit failure. **CSR's status is corrected, not promoted:** it is now retrievable, but `ts metadata report` still does not probe it (`csr_hits` is declared and never populated), so row 9 stays Partial for that reason instead of the retired one. BL-289 tracks wiring the walk. |
 | 1.4.2 | 2026-07-31 | **BL-191 — the View mutation paths were dead against real Views.** `ts dependency mutate`/`apply-change` bound `view_columns[]` on `column_id`, which does not exist in real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census; `search_output_column` on 265 of 265). Removing a formula therefore deleted the formula and **left its `view_columns[]` entry behind** — a dangling reference that breaks the import. Both bindings corrected to `search_output_column` / `formulas[].name`, matched so an aggregation or bucket decoration (`Total X`, `Month(X)`) is caught but an unrelated column sharing a word is not. **Also fixed:** `search_query` kept naming a formula that column removal had *cascaded* away (a View references its formulas from the search string by id, e.g. `[formula_PMPM month].monthly`) — it is now re-sanitized after the formula pass, taking the bucket modifier with the token. Two adjacent pre-existing gaps are filed rather than fixed: **BL-197** (`sanitize_search_query` misses the qualified `[table_path::col]` form) and **BL-198** (formula removal does not cascade transitively). Doc-side: the troubleshooting row asserting the `TABLE_PATH::col` format is replaced, and `references/dependency-types.md`'s View row + a new note carry the corrected detection signal. Requires ts-cli v0.127.1. |
