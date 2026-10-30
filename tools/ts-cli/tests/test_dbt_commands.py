@@ -241,6 +241,26 @@ class TestCreateConnection:
         assert "--project-name" in result.output
         assert calls == []
 
+    def test_zip_file_project_name_is_checked_before_the_artifacts_are_read(
+            self, monkeypatch, tmp_path):
+        """With both a missing --project-name and a missing catalog.json, the
+        flag is named first and nothing is read or zipped: the cheap check
+        runs before the expensive one."""
+        calls = []
+        _patch(monkeypatch, calls)
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "manifest.json").write_text("{}")  # no catalog.json
+        result = runner.invoke(app, [
+            "dbt", "create",
+            "--connection-name", "my_conn", "--database-name", "MY_DB",
+            "--import-type", "ZIP_FILE", "--file", str(target),
+        ])
+        assert result.exit_code != 0
+        assert "--project-name" in result.output
+        assert "catalog.json" not in result.output
+        assert calls == []
+
     def test_zip_file_success_uploads_file_content(self, monkeypatch, tmp_path):
         calls = []
         _patch(monkeypatch, calls)
@@ -315,7 +335,8 @@ class TestCreateConnection:
         result = runner.invoke(app, [
             "dbt", "create",
             "--connection-name", "my_conn", "--database-name", "MY_DB",
-            "--import-type", "ZIP_FILE", "--file", str(target),
+            "--import-type", "ZIP_FILE", "--project-name", "my_project",
+            "--file", str(target),
         ])
         assert result.exit_code != 0
         assert "dbt docs generate" in result.output
@@ -1595,8 +1616,8 @@ class TestMissingArchiveMessage:
 
 
 class TestGenerateExplainsMissingArchive:
-    """A ZIP_FILE connection stores no archive: every generate call must carry
-    one via --file. Without it ThoughtSpot answers 400 "Error with the uploaded
+    """The API requires the archive on every generate call for a ZIP_FILE
+    connection, via --file. Without it ThoughtSpot answers 400 "Error with the uploaded
     ZIP file.", which reads as a bad archive. The CLI reads that 400 and says
     what is missing, rather than looking the connection up first: no extra
     request, nothing to stall, no dependence on dbt/search's user/Org scope.

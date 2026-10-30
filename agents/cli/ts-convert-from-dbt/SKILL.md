@@ -320,7 +320,9 @@ ts dbt list --profile {profile}
 ```
 
 Filter the returned array by `project_name` / `cdw_database` / `connection_name`
-against what the user gave you in Step 2. If a match is found:
+against what the user gave you in Step 2. The list covers the current Org and (per the
+API spec) the current user, so a connection another user created may not appear: no
+match is not proof there is no duplicate (open-items #21). If a match is found:
 
 ```
 Found an existing dbt connection for this project:

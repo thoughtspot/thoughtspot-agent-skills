@@ -3745,7 +3745,7 @@ the dbt models and tables named in `--model-tables`.
 ts dbt generate-tml --connection-id <dbt_connection_identifier> \
   --model-tables '[{"model_name": "orders", "model_path": "models/orders.sql", "tables": ["orders"]}]'
 
-# ZIP_FILE connections keep no archive: pass --file on EVERY call.
+# ZIP_FILE connections need the archive on EVERY generate call: pass --file each time.
 # The command that writes target/manifest.json + target/catalog.json depends on
 # the engine: `dbt docs generate` (dbt Core), `dbt compile --write-catalog`
 # (dbt Fusion — there `dbt docs generate` leaves catalog.json stale).

@@ -591,8 +591,8 @@ Next steps:
      `dbt docs generate`. dbt Fusion: `dbt compile --write-catalog`
      (there `dbt docs generate` leaves catalog.json stale).
   3. Use /ts-convert-from-dbt (Step 4, create/update) with
-     --import-type ZIP_FILE --file {the target/ directory} — the CLI
-     zips the two files for you — then Step 8 (generate-tml) or
+     --import-type ZIP_FILE --project-name {dbt_project.yml name:}
+     --file {the target/ directory} — the CLI zips the two files for you — then Step 8 (generate-tml) or
      Step 10 (resync), passing the same --file on every call.
 ```
 

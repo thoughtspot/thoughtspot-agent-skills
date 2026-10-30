@@ -96,6 +96,25 @@ class TestFindArtifacts:
         assert "dbt compile --write-catalog" in msg
         assert "Do not use `dbt docs generate`" in msg  # named only as the one to avoid
 
+    def test_real_fusion_manifest_metadata_is_detected_as_fusion(self, tmp_path):
+        """The `metadata` block of a real manifest from dbt Fusion 2.0.6 (the
+        2026-10-29 live test; ids dropped). Every other stamp here is synthetic,
+        so this pins the premise the detection rests on: Fusion writes 2.x."""
+        target = self._manifest_only(tmp_path, None)
+        manifest = json.loads((target / "manifest.json").read_text())
+        manifest["metadata"] = {
+            "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+            "dbt_version": "2.0.6",
+            "generated_at": "2026-09-30T15:17:33.943285Z",
+            "env": {},
+            "project_name": "jaffle_shop",
+            "adapter_type": "snowflake",
+        }
+        (target / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(SystemExit) as ei:
+            find_artifacts(target)
+        assert "written by dbt Fusion" in str(ei.value)
+
     @pytest.mark.parametrize("version", ["3.0.0", "2025.10.14+abc", "0.21.0"])
     def test_unverified_major_version_names_both_commands(self, tmp_path, version):
         """Only 1.x (Core) and 2.x (Fusion) were verified; any other stamp is

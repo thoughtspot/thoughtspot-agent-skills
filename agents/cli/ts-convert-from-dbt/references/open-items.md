@@ -33,7 +33,7 @@ keeping; the full investigation narratives were compressed 2026-09-09.
 | 18 | Manifest readers missed joins in a parent-dir schema.yml | FIXED 2026-09-10 (never shipped) |
 | 19 | Server and client name metric formulas differently | RESOLVED 2026-10-06 — keep label names; `build-model` refuses to mix |
 | 20 | dbt `foreign_key` constraints as joins (composite keys) | VERIFIED live 2026-10-06 — `build-model` reads them; native import ignores them |
-| 21 | ZIP_FILE: every generate call needs `--file`; the 400 does not say so | FIXED 2026-10-23 — CLI explains the 400 when no `--file` was given; artifact command per engine verified |
+| 21 | ZIP_FILE: every generate call needs `--file`; the 400 does not say so | FIXED 2026-10-29 — CLI explains the 400 when no `--file` was given (verified live on both generate calls); artifact command per engine verified |
 
 **Five genuinely open: #3, #5, #7, #12, and the ThoughtSpot half of #13.**
 #3 needs a purpose-built dbt project (the test project has no exposures,
@@ -826,7 +826,7 @@ reader now resolves both. `ts dbt inspect` uses the same reader, reports
 
 ---
 
-## #21 — ZIP_FILE: every generate call needs `--file`; the 400 does not say so — FIXED 2026-10-23
+## #21 — ZIP_FILE: every generate call needs `--file`; the 400 does not say so — FIXED 2026-10-29
 
 **Symptom.** `ts dbt generate-tml` (or `generate-sync-tml`) against a ZIP_FILE connection
 fails with `400 POST /api/rest/2.0/dbt/generate-tml "Error with the uploaded ZIP file."`
@@ -865,8 +865,13 @@ before and read the response: a 400 whose body says "Error with the uploaded ZIP
 replaced with an explanation that the archive is missing, not bad, naming `--file`. Any other
 failure keeps the server's own error, and with `--file` the 400 is reported as the server
 wrote it, since then an archive really was sent. A DBT_CLOUD call is one request, as before.
-The match is on the 400 body text this item recorded live (2026-10-22); the explanation itself
-is unit-tested through the real `ThoughtSpotClient`, not yet seen live.
+The match is on the 400 body text this item recorded live (2026-10-22). **Verified live
+2026-10-29** on a staging cluster, for both calls: `ts dbt generate-tml --import-worksheets
+NONE` against an existing ZIP_FILE connection, and `ts dbt generate-sync-tml` against a
+throwaway ZIP_FILE connection created for the test (from a dbt Fusion 2.0.6 manifest) and
+deleted afterwards. With no `--file`, each exited 1 with the explanation in place of the raw
+400, so both endpoints answer with the text the match reads. Sync was tested on a throwaway
+connection because an unexpected success there would reset the connection's Tables. The unit tests drive the real `ThoughtSpotClient` for the cases a live call cannot stage.
 
 **Why not look the connection up first.** The first version of this fix (PR #669, reviewed
 twice) called `dbt/search` before every generate with no `--file` and refused when it listed

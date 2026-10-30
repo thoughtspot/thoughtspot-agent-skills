@@ -314,6 +314,9 @@ are roughly ordered by value÷effort.
 | BL-265 | Any physical measure over a non-numeric column is demoted to an attribute (`COUNT`/`MIN`/`MAX`/`COUNT_DISTINCT`); SV, MV and dbt converters neither predict nor report it | 2026-11-30 |
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
+| BL-497 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
+| BL-498 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
+| BL-499 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -15907,3 +15910,52 @@ when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the man
 `--allow-stale` override. Cover `--file` and `--manifest`.
 
 **Target:** 2026-12-31.
+
+## BL-498 — ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** PR #669, both review rounds (the human review, then the
+`pr-ready` review of `e7c6fe7c`).
+
+**What.** 17 hand-written fake client classes across 10 test files, with 8 files patching
+`ThoughtSpotClient` with a fake, stand in for the real client. A fake that does not honour
+the real contract lets a broken path pass. PR #669 hit this twice on one change:
+- Round 1: the fake raised `RuntimeError` where the real client raises `SystemExit`, so a
+  guard caught the wrong exception and would have made every DBT_CLOUD generate exit 1 with
+  every test green.
+- Round 2: the fake's `post(self, path, **kwargs)` accepted any keyword, so a bogus argument
+  to the real call disabled the guard and all 135 dbt tests still passed.
+
+Both bugs are in error and edge paths, which smoke tests and everyday use rarely exercise,
+so they ship quietly.
+
+**Do.**
+1. A shared fixture in `tools/ts-cli/tests/conftest.py`: a real `ThoughtSpotClient` whose
+   `_session.request` is a fake transport bound to `requests.Session.request`'s signature
+   (`inspect.signature(...).bind`), answering by URL. `TestGenerateExplainsMissingArchive`
+   in `test_dbt_commands.py` is the pattern to lift.
+2. A validator that flags a NEW fake `ThoughtSpotClient` class or a `setattr(...,
+   "ThoughtSpotClient", ...)` swap in a test, pointing at the fixture (ratchet on the
+   existing ones, the `check_module_health` baseline pattern).
+3. Convert the existing fakes opportunistically, error paths first. Not required to close.
+
+**Target:** 2026-11-30.
+
+## BL-499 — `ts dbt create` / `generate-tml` are classed safe to retry `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** `pr-ready` review of PR #669 at `047c8279` (low
+confidence; predates the PR).
+
+**What.** `ThoughtSpotClient` decides whether a failed call may be re-sent with
+`_is_idempotent` (`tools/ts-cli/ts_cli/client.py`), which only refuses paths matching
+`_NON_IDEMPOTENT_PATH_RE`. `/dbt/dbt-connection` and `/dbt/generate-tml` do not match, so a
+read timeout or a 502/503/504 on either re-sends it up to three more times. Both create
+objects: that is the shape of the "four identical Tables" incident the client's comments
+record. Whether a repeated `generate-tml` actually duplicates Tables is unverified;
+`generate-sync-tml` is recorded as idempotent (ts-convert-from-dbt coverage-matrix row 4).
+
+**Do.** Verify against the spec (`get-rest-api-reference`) and, if needed, live on a
+throwaway connection whether a repeated `generate-tml` / `dbt-connection` duplicates
+objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
+`idempotent=False` at the two call sites in `commands/dbt.py`), with a test.
+
+**Target:** 2026-11-30.

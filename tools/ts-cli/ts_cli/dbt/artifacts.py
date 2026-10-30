@@ -290,7 +290,7 @@ def load_local_manifest(path_str: str) -> dict:
     carry.
     """
     return _load_local_artifact(path_str, MANIFEST,
-                                "Run `dbt compile` or `dbt docs generate` first.")
+                                "Run `dbt compile` first (it writes manifest.json on dbt Core and Fusion).")
 
 
 def load_local_catalog(path_str: str) -> dict:
