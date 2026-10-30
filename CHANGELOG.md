@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-10-31
+- chore: bump ts-cli to v0.192.2 (the audit report is assembled from parts with a view registry, ts-audit v2 roadmap PR 3.1; no visible change)
+
 ## 2026-10-30
 - fix(audit): a Model whose TML (or a Table it uses) has a list or scalar `properties`, `spotter_config` or `db_column_properties` is no longer mapped over or a crash: it is not judged, and the report and JSON list it under "Could not be read" (BL-406 item 10). Other non-mapping shapes are BL-501. ts-audit 3.7.1
 - chore: bump ts-cli to v0.192.1

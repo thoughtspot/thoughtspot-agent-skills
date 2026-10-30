@@ -180,8 +180,8 @@ ts_cli/
     snapshot.py       — --snapshot-out / --snapshot-in capture and replay (manifest records the fetched needs)
     findings.py       — Finding dataclass + build_summary() (by_category); CHECK_META built from the catalog
     equivalence.py    — compare_findings: the strict finding-list comparator (exact types, multiset); the legacy check functions it compared the catalog with were deleted when the rule catalog replaced them, and their answers are pinned in tests/audit_rule_fixtures/legacy_findings.json.gz
-    report.py         — HTML report renderer (compact payload + template injection)
-    report_template.html — Self-contained HTML template with CSS/JS
+    report.py         — HTML report renderer: compact payload, then `assemble_page` builds ONE self-contained page from `report/`. `REPORT_VIEWS` is the view registry — (view id, script) per view, in container order
+    report/           — the report's parts (audit v2 roadmap principle 3, PR 3.1): `shell.html` (layout, with `{{STYLES}}` / `{{VIEW_CONTAINERS}}` / `{{SCRIPT}}` / `{{AUDIT_DATA}}` slots), `styles.css`, `core.js` (data, shared helpers, sidebar, the view registry and router), `views/<view>.js` (one per view, holding its own state; each ends with `registerView({id, routes, show, nav, pills, fallback})` — its route handling, breadcrumb and sidebar link included; exactly one view is the `fallback`) and `boot.js` (init, runs last). A new view is a new file plus a `REPORT_VIEWS` line — never an edit to the router; `tests/test_audit_report_views.py` renders every registered view from a fixed audit JSON in headless Chrome
     erd.py            — ERD data generation for audit reports (parses Model+Table TML)
     test_fixtures.py  — Realistic test data generator
 ```

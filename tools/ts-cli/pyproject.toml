@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thoughtspot-cli"
-version = "0.192.1"
+version = "0.192.2"
 description = "ThoughtSpot REST API CLI — wraps common operations used by Claude skills"
 requires-python = ">=3.10,<3.15"
 dependencies = [
@@ -40,4 +40,4 @@ where = ["."]
 include = ["ts_cli*"]
 
 [tool.setuptools.package-data]
-"ts_cli" = ["audit/report_template.html", "audit/catalog/*.yaml", "audit/catalog/rules/*.yaml", "qlik/data/qlik_ts_formula_map.json"]
+"ts_cli" = ["audit/report/*.html", "audit/report/*.css", "audit/report/*.js", "audit/report/views/*.js", "audit/catalog/*.yaml", "audit/catalog/rules/*.yaml", "qlik/data/qlik_ts_formula_map.json"]
