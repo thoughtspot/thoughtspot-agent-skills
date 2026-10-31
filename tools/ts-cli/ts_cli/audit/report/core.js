@@ -59,7 +59,8 @@ function esc(s){
   if(!s) return "";
   var d = document.createElement("div");
   d.textContent = s;
-  return d.innerHTML;
+  /* Quotes too: callers put esc() output inside attribute values as well as text. */
+  return d.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function worstSev(findings){

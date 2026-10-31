@@ -1,10 +1,18 @@
 /* ── Formulas: each Model's formula dependency tree (audit v2 roadmap PR 3.2) ──
    The data is the corpus Model's `ft` (ts_cli/audit/formula_tree.py, compacted in
-   report.py): nodes {n name, k kind, h hidden, b used_by, u uses} where a use is
-   [0, node index] or [1, column ref], and `r` the roots, the formulas nothing uses.
+   report.py): nodes {n label, f formula name, k kind, h hidden, b used_by, u uses}
+   where a use is [0, node index], [1, column ref] or [2, parameter name], and `r` the
+   roots, the formulas nothing uses.
    Children are built only when a node is opened, since a formula many others use would
    otherwise be drawn once per path; a node already on the path is a circular reference. */
 var FORMULA_EXPAND_ALL_CAP = 2000;
+var FORMULA_KINDS = {MEASURE: true, ATTRIBUTE: true};
+var FORMULA_PREDATES = "This report\u2019s data predates the Formulas view: re-run `ts audit run` "+
+  "to build each Model\u2019s formula tree.";
+
+function anyFormulaCounts(){
+  return !!(D.C && D.C.m && D.C.m.some(function(cm){ return cm.fc > 0; }));
+}
 
 function formulaModels(){
   if(!D.C || !D.C.m) return [];
@@ -15,16 +23,19 @@ function formulaModels(){
 function buildFormulasPicker(c){
   var models = formulaModels();
   if(!models.length){
+    var predates = anyFormulaCounts();
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
-      '<div class="ph-text">No formulas in the audited Models</div>'+
-      '<div class="ph-sub">A Model with formulas shows how they build on each other here.</div></div>';
+      '<div class="ph-text">'+(predates ? 'No formula trees in this report' : 'No formulas in the audited Models')+'</div>'+
+      '<div class="ph-sub">'+esc(predates ? FORMULA_PREDATES :
+        'A Model with formulas shows how they build on each other here.')+'</div></div>';
     return;
   }
   var html = '<div class="ftree-intro">How each Model’s formulas build on each other: '+
-    'every tree starts at a formula nothing else uses and opens down to the table columns. '+
+    'every tree starts at a formula nothing else uses and opens down to the table columns '+
+    'and parameters. '+
     'Pick a Model.</div><ul class="ftree-models">';
   models.forEach(function(m){
-    html += '<li><a href="#formulas/'+esc(m.guid)+'">'+esc(findModelName(m.guid))+'</a>'+
+    html += '<li><a href="#formulas/'+encodeURIComponent(m.guid)+'">'+esc(findModelName(m.guid))+'</a>'+
       '<span class="ftree-count">'+m.cm.ft.n.length+' formula'+(m.cm.ft.n.length === 1 ? '' : 's')+
       '</span></li>';
   });
@@ -33,12 +44,15 @@ function buildFormulasPicker(c){
 
 function formulaRow(node){
   var row = el("div","ftree-row");
+  var renamed = node.f && node.f !== node.n;
   var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+
-    '<span class="ftree-name">'+esc(node.n)+'</span>';
-  if(node.k) html += '<span class="ftree-tag ftree-kind" data-kind="'+esc(node.k)+'">'+esc(node.k)+'</span>';
-  if(node.h) html += '<span class="ftree-tag ftree-hidden" title="Hidden from search, or surfaced by no column: '+
-    'it exists to feed other formulas">hidden helper</span>';
-  html += '<span class="ftree-used">used by '+node.b+'</span>';
+    '<span class="ftree-name"'+(renamed ? ' title="Formula: '+esc(node.f)+'"' : '')+'>'+esc(node.n)+'</span>';
+  if(FORMULA_KINDS[node.k]) html += '<span class="ftree-tag ftree-kind" data-kind="'+node.k+'">'+node.k+'</span>';
+  if(node.h && node.b > 0) html += '<span class="ftree-tag ftree-hidden" title="Hidden from search, or surfaced '+
+    'by no column: it feeds the formulas that use it">hidden helper</span>';
+  else if(node.h) html += '<span class="ftree-tag ftree-unused" title="Hidden from search, or surfaced by no '+
+    'column, and used by no formula: a cleanup candidate">hidden, unused</span>';
+  html += '<span class="ftree-used">used by '+node.b+' formula'+(node.b === 1 ? '' : 's')+'</span>';
   row.innerHTML = html;
   return row;
 }
@@ -69,9 +83,15 @@ function formulaNode(tree, i, path, budget){
       node.u.forEach(function(use){
         if(use[0] === 1){
           ul.appendChild(formulaLeaf('<code class="ftree-col">'+esc(use[1])+'</code>', "ftree-colleaf"));
+          budget.rows++;
+        } else if(use[0] === 2){
+          ul.appendChild(formulaLeaf('<span class="ftree-tag ftree-param">parameter</span>'+
+            '<span class="ftree-name">'+esc(use[1])+'</span>', "ftree-paramleaf"));
+          budget.rows++;
         } else if(here.indexOf(use[1]) !== -1){
           ul.appendChild(formulaLeaf('<span class="ftree-cycle">↻ circular reference to '+
             esc(tree.n[use[1]].n)+'</span>', "ftree-cycleleaf"));
+          budget.rows++;
         } else {
           ul.appendChild(formulaNode(tree, use[1], here, budget));
         }
@@ -94,25 +114,30 @@ function formulaNode(tree, i, path, budget){
   return li;
 }
 
-/* Open every node under `root`, stopping once the tree holds `cap` rows. */
+/* Open every node under `root`, stopping once THIS expansion has built `cap` rows
+   (formulas, columns, parameters and circular references alike). Returns whether it
+   stopped early. */
 function expandAll(root, budget, cap){
+  var start = budget.rows;
   var stack = Array.prototype.slice.call(root.querySelectorAll("li.ftree-node.collapsed"));
-  while(stack.length && budget.rows < cap){
+  while(stack.length && budget.rows - start < cap){
     var li = stack.shift();
     if(!li._open || !li.classList.contains("collapsed")) continue;
     li._open();
     stack = stack.concat(Array.prototype.slice.call(
       li.querySelectorAll(":scope > ul > li.ftree-node.collapsed")));
   }
-  return budget.rows >= cap;
+  return stack.some(function(li){ return li._open && li.classList.contains("collapsed"); });
 }
 
 function buildFormulaTree(c, guid){
   var cm = findCorpusModel(guid);
   var tree = cm && cm.ft;
   if(!tree){
+    var why = !cm ? "This report has no such Model." :
+      (cm.fc > 0 ? FORMULA_PREDATES : "This Model has no formulas.");
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
-      '<div class="ph-text">No formulas in this Model</div></div>';
+      '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>';
     return;
   }
   var hdr = el("div","ftree-header");
@@ -121,7 +146,7 @@ function buildFormulaTree(c, guid){
     tree.r.length+' at the top. Click a formula to open what it uses.</div>'+
     '<div class="header-actions"><button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
-    '<a class="ts-link-btn" href="#model/'+esc(guid)+'">Model scorecard</a></div>';
+    '<a class="ts-link-btn" href="#model/'+encodeURIComponent(guid)+'">Model scorecard</a></div>';
   c.appendChild(hdr);
   var note = el("div","ftree-note");
   c.appendChild(note);
@@ -135,7 +160,8 @@ function buildFormulaTree(c, guid){
   c.appendChild(ul);
   $(".ftree-expand", hdr).addEventListener("click", function(){
     var capped = expandAll(ul, budget, FORMULA_EXPAND_ALL_CAP);
-    note.textContent = capped ? "Stopped at "+FORMULA_EXPAND_ALL_CAP+" rows: open the rest by hand." : "";
+    note.textContent = capped ? "Stopped after "+FORMULA_EXPAND_ALL_CAP+" more rows: press Expand all again, "+
+      "or open the rest by hand." : "";
   });
   $(".ftree-collapse", hdr).addEventListener("click", function(){
     $$("li.ftree-node", ul).forEach(function(li){

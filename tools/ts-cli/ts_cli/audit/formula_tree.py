@@ -1,20 +1,27 @@
 """A Model's formula dependency tree, for the report's Formulas view (audit v2 roadmap
 PR 3.2). Pure; reads the Model TML only.
 
-Each formula is a node: its MEASURE / ATTRIBUTE kind and whether it is hidden, both
-read from the `columns[]` entry that surfaces it (by `formula_id`), what it uses (other
-formulas, by id or display name, through `tml.formula_ref_index`, the reading P17
-shares; and `[TABLE::COL]` columns), and how many formulas use it. The roots are the
-formulas nothing uses, typically the measures people search on. A formula reachable
-from no root (every formula in a cycle is used by another) is a root too, so none is
-lost (its first formula, so the rest hang below it); the view guards against walking a
+Each formula is a node: its MEASURE / ATTRIBUTE kind, whether it is hidden, and the
+name people search it by, all read from the `columns[]` entry that surfaces it (by
+`formula_id`); what it uses; and how many formulas use it. A bracket reference outside
+a quoted literal resolves, in order, to a formula (by id or `formulas[].name`, through
+`tml.formula_ref_index`, the index P17's reference graph also uses, or by the display
+name of the column that surfaces it), a parameter (`parameters[].name`), else a column
+(`TABLE::COL`, or a bare Model column name). The roots are the formulas nothing uses,
+typically the measures people search on. A cycle no root reaches is rooted where
+nothing outside it uses it, so no formula is lost; the view guards against walking a
 cycle.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from ts_cli.audit.engine import tml
+
+#: A quoted literal: a reference-looking `[...]` inside one is text, not a reference
+#: (`concat ( '[' , ... )`, a regex class in a `sql_*_op` string).
+_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
@@ -25,28 +32,42 @@ def _surfacing_columns(model: dict) -> Dict[Any, dict]:
     return out
 
 
-def _uses(expr: Any, by_ref: Dict[Any, Any], own: str) -> List[dict]:
-    """What one expression refers to, in order, each once: a formula by name, else a
-    column (`TABLE::COL`, or a bare Model column name)."""
+def _parameter_names(model: dict) -> set:
+    return {str(p.get("name")) for p in model.get("parameters") or []
+            if isinstance(p, dict) and p.get("name")}
+
+
+def _resolve(ref: str, by_ref: Dict[Any, Any], params: set) -> dict:
+    target = by_ref.get(ref)
+    if target:
+        return {"formula": target}
+    if ref in params:
+        return {"parameter": ref}
+    return {"column": ref}
+
+
+def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict]:
+    """What one expression refers to, in order, each once (see the module docstring)."""
+    code = _QUOTED.sub(" ", str(expr or ""))
     seen, out = set(), []
-    for ref in tml.BRACKET_REF.findall(str(expr or "")):
-        ref = ref.strip()
-        target = by_ref.get(ref)
-        item = {"formula": target} if target else {"column": ref}
+    for ref in tml.BRACKET_REF.findall(code):
+        item = _resolve(ref.strip(), by_ref, params)
         key = tuple(item.items())
-        if target == own or key in seen:
+        if item.get("formula") == own or key in seen:
             continue
         seen.add(key)
         out.append(item)
     return out
 
 
-def _node(formula: dict, column: Any, by_ref: Dict[Any, Any]) -> dict:
+def _node(formula: dict, column: Any, by_ref: Dict[Any, Any], params: set) -> dict:
     props = tml.mapping(column, "properties") if column else {}
-    return {"name": formula["name"],
+    label = column.get("name") if column and column.get("name") else formula["name"]
+    return {"name": formula["name"], "label": str(label),
             "kind": str(props.get("column_type") or "").upper() or None,
             "hidden": column is None or bool(props.get("is_hidden")),
-            "uses": _uses(formula.get("expr"), by_ref, formula["name"]), "used_by": 0}
+            "uses": _uses(formula.get("expr"), by_ref, params, formula["name"]),
+            "used_by": 0}
 
 
 def _reachable(roots: List[str], nodes: Dict[str, dict]) -> set:
@@ -60,27 +81,59 @@ def _reachable(roots: List[str], nodes: Dict[str, dict]) -> set:
     return seen
 
 
+def _cycle_roots(nodes: Dict[str, dict], reached: set) -> List[str]:
+    """Roots for what no root reaches (only cycles, and what they use): a formula whose
+    every unreached user is in its own cycle (reachable from it), so no root is used
+    from outside; the first such, in formula order, per cycle."""
+    users: Dict[str, set] = {n: set() for n in nodes}
+    for n, node in nodes.items():
+        for u in node["uses"]:
+            if "formula" in u:
+                users[u["formula"]].add(n)
+    roots: List[str] = []
+    for name in nodes:
+        if name in reached:
+            continue
+        own = _reachable([name], nodes)
+        if (users[name] - reached) <= own:
+            roots.append(name)
+            reached |= own
+    return roots
+
+
+def _by_ref(formulas: List[dict], columns: Dict[Any, dict]) -> Dict[Any, Any]:
+    """`tml.formula_ref_index`, plus each surfacing column's display name where it names
+    no formula of its own (a hand-built Model may refer to a formula that way)."""
+    by_ref = tml.formula_ref_index(formulas)
+    for f in formulas:
+        col = columns.get(f.get("id"))
+        cname = col.get("name") if col else None
+        if isinstance(cname, str) and cname and cname not in by_ref:
+            by_ref[cname] = f["name"]
+    return by_ref
+
+
 def formula_tree(model: dict) -> dict:
     """`{"nodes": [...], "roots": [names]}` for a Model TML body; nodes in formula order.
-    A node: `name`, `kind` ("MEASURE", "ATTRIBUTE" or None when no column surfaces it),
-    `hidden` (its column is hidden, or no column surfaces it), `uses` (list of
-    `{"formula": name}` / `{"column": ref}`) and `used_by` (how many formulas use it).
-    Formulas sharing a name are one node (the first)."""
+    A node: `name` (its `formulas[].name`, the key), `label` (the surfacing column's name,
+    which people search by, else `name`), `kind` ("MEASURE", "ATTRIBUTE" or None when no
+    column surfaces it), `hidden` (its column is hidden, or no column surfaces it),
+    `uses` (`{"formula": name}` / `{"parameter": name}` / `{"column": ref}`) and
+    `used_by` (how many formulas use it). Formulas sharing a name are one node (the
+    first)."""
     formulas = [f for f in (model.get("formulas") or [])
                 if isinstance(f, dict) and f.get("name")]
-    by_ref = tml.formula_ref_index(formulas)
     columns = _surfacing_columns(model)
+    by_ref = _by_ref(formulas, columns)
+    params = _parameter_names(model)
     nodes: Dict[str, dict] = {}
     for f in formulas:
-        nodes.setdefault(f["name"], _node(f, columns.get(f.get("id")), by_ref))
+        if f["name"] not in nodes:
+            nodes[f["name"]] = _node(f, columns.get(f.get("id")), by_ref, params)
     for node in nodes.values():
         for use in node["uses"]:
             if "formula" in use:
                 nodes[use["formula"]]["used_by"] += 1
     roots = [n for n, node in nodes.items() if node["used_by"] == 0]
-    reached = _reachable(roots, nodes)
-    for name in nodes:  # a cycle reachable from no root: its first formula roots it
-        if name not in reached:
-            roots.append(name)
-            reached |= _reachable([name], nodes)
+    roots += _cycle_roots(nodes, _reachable(roots, nodes))
     return {"nodes": list(nodes.values()), "roots": roots}
