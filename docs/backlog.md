@@ -320,6 +320,7 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
@@ -16145,11 +16146,13 @@ when they are next changed.
 **What.** The report's formula tree (`ts_cli/audit/formula_tree.py`) splits literals off
 with `formula_translate.refs.split_literals` before reading `[...]` references, keeps a
 reference whole when its name holds a quote (BL-369), drops self-references and strips
-whitespace. The rules that read the same expressions do none of this:
-`engine/fields.py _reference_graph` (P17, P2) and `engine/fields_human.py` (H3) count
-bracket text inside a quoted literal as a reference and do not strip names; other
-`tml.BRACKET_REF` readers (`engine/tml.py`'s RLS rule expressions, `context.py`'s join
-on-clauses) do not skip literals either. So one report can say a formula is used by
+whitespace, and resolves a formula by the display name of its column. The rules that
+read the same expressions differ: `engine/fields.py _reference_graph` (P17, P2) and
+`engine/fields_human.py` (H3) count bracket text inside a quoted literal as a reference
+and do not strip names; H3 also counts a formula's reference to itself; P17 does not
+resolve a display name. (Neither splits a quoted reference, so BL-369's failure is not
+among the differences.) Other `tml.BRACKET_REF` readers (`engine/tml.py`'s RLS rule
+expressions, `context.py`'s join on-clauses) do not skip literals either. So one report can say a formula is used by
 another (P17/H3) while the tree says it is not, or the reverse. On the 148-Model SE demo
 sample they agree (no reference sits inside a literal), so no finding is wrong there today.
 

@@ -339,7 +339,24 @@ def test_a_report_without_trees_and_an_unknown_model_say_why(tmp_path):
     page2 = _report(tmp_path, ("m-6", unnamed))
     empty = report_browser.render(page2, tmp_path, "formulas/m-6")
     assert empty["errors"] == [] and "This Model has no formulas." in empty["visible"]
-    assert "predates" not in report_browser.render(page2, tmp_path, "formulas")["visible"]
+    picker2 = report_browser.render(page2, tmp_path, "formulas")
+    assert picker2["errors"] == [] and "predates" not in picker2["visible"]
     fresh = _report(tmp_path)
     missing = report_browser.render(fresh, tmp_path, "formulas/nope")
     assert missing["errors"] == [] and "This report has no such Model." in missing["visible"]
+
+
+@needs_chrome
+def test_links_carry_an_awkward_guid_verbatim(tmp_path):
+    # the router reads the guid raw, as the sidebar writes it: escaped (an unescaped
+    # "&amp;" would read back as "&"), never URL-encoded ("%" would become "%25")
+    guid = "m%1&amp;2"
+    page = _report(tmp_path, (guid, MODEL))
+    links = ('window.__extra = Array.prototype.map.call(document.querySelectorAll('
+             '\'a[href^="#formulas/"], a[href^="#model/"]\'), function(a){ return a.getAttribute("href"); });')
+    picker = report_browser.render(page, tmp_path, "formulas", actions=links)
+    assert picker["errors"] == [] and "#formulas/" + guid in picker["extra"]
+    card = report_browser.render(page, tmp_path, "model/" + guid, actions=links)
+    assert card["errors"] == [] and "#formulas/" + guid in card["extra"]
+    tree = report_browser.render(page, tmp_path, "formulas/" + guid, actions=links)
+    assert tree["errors"] == [] and "#model/" + guid in tree["extra"]

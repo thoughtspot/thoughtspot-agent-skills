@@ -48,8 +48,12 @@ reference to itself is not a use. Two formulas sharing a name are one node (the 
 whose references alone are read: a hidden formula only the second uses shows as unused).
 When a column name collides with a formula's display name the tree reads it as the
 formula, and when a column and a parameter share a name, as the parameter; neither is
-verified against how ThoughtSpot resolves the collision. A formula or column whose id is
-not a string is ignored, so malformed TML cannot end a narrow run (BL-501).
+verified against how ThoughtSpot resolves the collision. Malformed shapes do not stop the
+tree: a formula whose id is not a string is kept without its id (so no column surfaces it,
+and it shows as hidden), a column whose `formula_id` is not a string surfaces nothing, and
+a formula whose name is not a string (including one YAML read as a number or date) is
+left out, following the audit's `_str` convention. Other parts of a narrow run may still
+fail on such TML (the ERD parser on a list-valued name; BL-501).
 
 The rules (P17, P2, H3) read references without skipping literals, so on unusual
 expressions the tree and a finding can disagree about whether a formula is used; BL-504
@@ -93,4 +97,5 @@ tree header's scorecard link, the sidebar link and the scorecard's tree link (pr
 for a Model with a tree) carry the right hrefs; a report from older JSON, a Model with an
 empty tree and an unknown Model each say why there is no tree. Each fix from review was
 checked by a deliberate mutation that a test now catches, except apostrophe escaping in
-`esc()`, which no sink needs today (the report has no single-quoted attributes). `tests/test_audit_report_views.py` covers the view's registration.
+`esc()`, which no sink needs today (the report has no single-quoted attributes), and the
+Model name in the breadcrumb. `tests/test_audit_report_views.py` covers the view's registration.
