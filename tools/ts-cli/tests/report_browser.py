@@ -6,6 +6,8 @@ loaded with `--dump-dom`. Two scripts are injected — an error trap at the very
 a probe after load that writes the JS errors and the visible text of the rendered page
 (scripts excluded, so the embedded JSON payload cannot satisfy a text check) into
 <pre id="__probe">. Tests skip when no Chrome is installed (`CHROME is None`).
+`visible` is the shown view's innerText, which leaves out what CSS hides, and `extra`
+is whatever an `actions` script stored in `window.__extra`.
 """
 import html
 import json
@@ -28,20 +30,24 @@ window.addEventListener("load",function(){setTimeout(function(){
   var p=document.createElement("pre");p.id="__probe";
   var view=document.querySelector(".view.active");
   p.textContent=JSON.stringify({errors:window.__errs,text:clone.textContent,
-    active:view?view.id:null,active_text:view?view.textContent:""});
+    active:view?view.id:null,active_text:view?view.textContent:"",
+    visible:view?view.innerText:"",extra:window.__extra===undefined?null:window.__extra});
   document.body.appendChild(p);},50);});
 </script>"""
 
 
-def render(html_text: str, tmp_path, route: str = "") -> dict:
+def render(html_text: str, tmp_path, route: str = "", actions: str = "") -> dict:
     """`{"errors": [...], "text": "...", "active": <id of the shown view>, "active_text":
-    "..."}` for `html_text` opened at `#route`."""
+    "...", "visible": "...", "extra": ...}` for `html_text` opened at `#route`. `actions`,
+    a script body, runs on load before the probe reads the page (a click, say)."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")
     assert sep2, "no </body> in the report"
     page = tmp_path / "report_probe.html"
-    page.write_text(head + sep + _TRAP + body + _PROBE + sep2 + tail, encoding="utf-8")
+    act = (f'<script>window.addEventListener("load",function(){{{actions}}});</script>'
+           if actions else "")
+    page.write_text(head + sep + _TRAP + body + act + _PROBE + sep2 + tail, encoding="utf-8")
     cmd = [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
            f"--user-data-dir={tmp_path / 'chrome-profile'}", "--window-size=1400,900",
            "--virtual-time-budget=5000", "--dump-dom",

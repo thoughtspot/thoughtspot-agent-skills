@@ -713,6 +713,45 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 @keyframes toast-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 @keyframes toast-out{from{opacity:1;}to{opacity:0;}}
 
+/* ── Formulas view (views/formulas.js) ── */
+.ftree-intro,.ftree-sub{font-size:13px;color:var(--muted);margin:4px 0 12px;}
+.ftree-header{background:var(--surface);border:1px solid var(--hair);border-radius:8px;
+  padding:16px 20px;margin-bottom:12px;}
+.ftree-header .header-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.ftree-note{font-size:12px;color:var(--muted);min-height:0;margin-bottom:6px;}
+.ftree-models{list-style:none;margin:0;padding:0;background:var(--surface);
+  border:1px solid var(--hair);border-radius:8px;}
+.ftree-models li{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;
+  border-bottom:1px solid var(--hair-2);font-size:13px;}
+.ftree-models li:last-child{border-bottom:0;}
+.ftree-models a{color:var(--accent);text-decoration:none;}
+.ftree-count{color:var(--muted);font-size:12px;white-space:nowrap;}
+.ftree,.ftree-children{list-style:none;margin:0;padding:0;}
+.ftree{background:var(--surface);border:1px solid var(--hair);border-radius:8px;padding:8px 0;}
+.ftree-children{padding-left:20px;border-left:1px solid var(--hair-2);margin-left:14px;}
+.ftree-node.collapsed > .ftree-children{display:none;}
+.ftree-row{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:13px;
+  min-width:0;flex-wrap:wrap;}
+.ftree-node > .ftree-row[role=button]{cursor:pointer;}
+.ftree-node > .ftree-row[role=button]:hover{background:var(--ground);}
+.ftree-node > .ftree-row[role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.ftree-header .model-title{font-size:18px;font-weight:600;color:var(--ink);}
+.ftree-toggle{width:14px;flex-shrink:0;color:var(--muted);font-size:13px;line-height:1;}
+.ftree-node > .ftree-row[role=button] .ftree-toggle::before{content:"\25BE";}
+.ftree-node.collapsed > .ftree-row[role=button] .ftree-toggle::before{content:"\25B8";}
+.ftree-name{font-weight:500;color:var(--ink);overflow-wrap:anywhere;}
+.ftree-tag{font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;
+  border:1px solid var(--hair);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
+.ftree-kind[data-kind=MEASURE]{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft);}
+.ftree-hidden{color:var(--warn);border-color:var(--warn-soft);background:var(--warn-soft);text-transform:none;}
+.ftree-unused{color:var(--crit);border-color:var(--crit-soft);background:var(--crit-soft);text-transform:none;}
+.ftree-param{text-transform:none;}
+.ftree-used{font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap;}
+.ftree-col{font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.ftree-cycle{font-size:12px;color:var(--warn);}
+@media (max-width:600px){ .ftree-used{margin-left:0;} .ftree-children{padding-left:12px;margin-left:8px;} }
+@media print{ .ftree-node.collapsed > .ftree-children{display:block;} .ftree-header .header-actions{display:none;} }
+
 .empty-state{
   text-align:center;padding:24px;color:var(--muted);font-size:13px;
 }

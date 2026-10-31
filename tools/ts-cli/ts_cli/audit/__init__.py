@@ -15,6 +15,7 @@ from ts_cli.audit.engine import scopes, tml
 from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
+from ts_cli.audit.formula_tree import formula_tree
 
 #: The conditional data the report reads that no rule need declare: the AI
 #: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
@@ -245,6 +246,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
             ],
         }
         entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
+        entry["formula_tree"] = formula_tree(m)
         if items is not None:
             score = readiness_score(items[i], ctx)
             # graded on the raw score, as A5 was; rounded only for the report

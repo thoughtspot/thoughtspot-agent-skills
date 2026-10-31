@@ -48,6 +48,7 @@ function buildScorecard(D, guid, filterAngle){
     titleHtml += '<a class="ts-link-btn" href="'+D.C.u+'/#/data/tables/'+guid+'" target="_blank" rel="noopener">Open in ThoughtSpot ↗</a>';
   }
   titleHtml += '<button class="erd-btn" id="erd-toggle-'+guid+'" data-erd-ready="false">ERD Diagram</button>';
+  if(cm && cm.ft && cm.ft.n.length) titleHtml += '<a class="ts-link-btn" href="#formulas/'+esc(guid)+'">Formula tree</a>';
   titleHtml += '</div>';
 
   hdr.innerHTML = titleHtml;

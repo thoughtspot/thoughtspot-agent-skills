@@ -30,6 +30,7 @@ ROUTES = {
     "crossmodel": ("crossmodel", "Example Sales"),
     "objectmap": ("objectmap/dependencies", "Example Sales"),
     "cleanup": ("cleanup", "Orphan model with no dependents"),
+    "formulas": ("formulas", "No formulas in the audited Models"),  # JSON from before 3.2
 }
 _PARTS = ["core.js"] + [script for _, script in REPORT_VIEWS] + ["boot.js"]
 

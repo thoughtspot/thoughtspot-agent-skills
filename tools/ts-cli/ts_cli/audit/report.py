@@ -33,6 +33,7 @@ REPORT_VIEWS: List[tuple] = [
     ("crossmodel", "views/crossmodel.js"),
     ("objectmap", "views/objectmap.js"),
     ("cleanup", "views/cleanup.js"),
+    ("formulas", "views/formulas.js"),
 ]
 
 
@@ -222,7 +223,26 @@ def _compact_model(m: dict, model_index: dict) -> dict:
                     "l": m["spotter_readiness"]["level"]}
     if m.get("erd"):
         cm["ed"] = m["erd"]
+    if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
+        cm["ft"] = _compact_tree(m["formula_tree"])
     return cm
+
+
+def _compact_tree(tree: dict) -> dict:
+    """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
+    {n label, f formula name, k kind, h hidden, b used_by, u uses}, each use
+    `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`; `r` root indices."""
+    index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
+
+    def use(u):
+        if "formula" in u:
+            return [0, index[u["formula"]]]
+        return [2, u["parameter"]] if "parameter" in u else [1, u["column"]]
+    nodes = [{"n": node.get("label") or node["name"], "f": node["name"],
+              "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
+              "u": [use(u) for u in node["uses"]]}
+             for node in tree["nodes"]]
+    return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
 
 
 def compact_payload(data: dict) -> dict:
