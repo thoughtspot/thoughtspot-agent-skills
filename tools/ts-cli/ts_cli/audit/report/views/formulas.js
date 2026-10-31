@@ -10,8 +10,11 @@ var FORMULA_KINDS = {MEASURE: true, ATTRIBUTE: true};
 var FORMULA_PREDATES = "This report\u2019s data predates the Formulas view: re-run `ts audit run` "+
   "to build each Model\u2019s formula tree.";
 
-function anyFormulaCounts(){
-  return !!(D.C && D.C.m && D.C.m.some(function(cm){ return cm.fc > 0; }));
+/* Formulas counted but no tree built: the audit JSON predates this view. */
+function predatesTree(cm){ return cm.fc > 0 && !cm.ft; }
+
+function anyPredates(){
+  return !!(D.C && D.C.m && D.C.m.some(predatesTree));
 }
 
 function formulaModels(){
@@ -23,7 +26,7 @@ function formulaModels(){
 function buildFormulasPicker(c){
   var models = formulaModels();
   if(!models.length){
-    var predates = anyFormulaCounts();
+    var predates = anyPredates();
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
       '<div class="ph-text">'+(predates ? 'No formula trees in this report' : 'No formulas in the audited Models')+'</div>'+
       '<div class="ph-sub">'+esc(predates ? FORMULA_PREDATES :
@@ -31,11 +34,11 @@ function buildFormulasPicker(c){
     return;
   }
   var html = '<div class="ftree-intro">How each Model’s formulas build on each other: '+
-    'every tree starts at a formula nothing else uses and opens down to the table columns '+
-    'and parameters. '+
+    'every tree starts at a formula nothing else uses (or where a circular chain is entered) '+
+    'and opens down to the table columns and parameters. '+
     'Pick a Model.</div><ul class="ftree-models">';
   models.forEach(function(m){
-    html += '<li><a href="#formulas/'+encodeURIComponent(m.guid)+'">'+esc(findModelName(m.guid))+'</a>'+
+    html += '<li><a href="#formulas/'+esc(m.guid)+'">'+esc(findModelName(m.guid))+'</a>'+
       '<span class="ftree-count">'+m.cm.ft.n.length+' formula'+(m.cm.ft.n.length === 1 ? '' : 's')+
       '</span></li>';
   });
@@ -115,8 +118,9 @@ function formulaNode(tree, i, path, budget){
 }
 
 /* Open every node under `root`, stopping once THIS expansion has built `cap` rows
-   (formulas, columns, parameters and circular references alike). Returns whether it
-   stopped early. */
+   (formulas, columns, parameters and circular references alike); the node being opened
+   when it gets there is finished, so a press can overshoot by one formula's uses.
+   Returns whether it stopped early. */
 function expandAll(root, budget, cap){
   var start = budget.rows;
   var stack = Array.prototype.slice.call(root.querySelectorAll("li.ftree-node.collapsed"));
@@ -133,9 +137,9 @@ function expandAll(root, budget, cap){
 function buildFormulaTree(c, guid){
   var cm = findCorpusModel(guid);
   var tree = cm && cm.ft;
-  if(!tree){
+  if(!tree || !tree.n.length){
     var why = !cm ? "This report has no such Model." :
-      (cm.fc > 0 ? FORMULA_PREDATES : "This Model has no formulas.");
+      (predatesTree(cm) ? FORMULA_PREDATES : "This Model has no formulas.");
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
       '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>';
     return;
@@ -146,7 +150,7 @@ function buildFormulaTree(c, guid){
     tree.r.length+' at the top. Click a formula to open what it uses.</div>'+
     '<div class="header-actions"><button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
-    '<a class="ts-link-btn" href="#model/'+encodeURIComponent(guid)+'">Model scorecard</a></div>';
+    '<a class="ts-link-btn" href="#model/'+esc(guid)+'">Model scorecard</a></div>';
   c.appendChild(hdr);
   var note = el("div","ftree-note");
   c.appendChild(note);
@@ -160,7 +164,7 @@ function buildFormulaTree(c, guid){
   c.appendChild(ul);
   $(".ftree-expand", hdr).addEventListener("click", function(){
     var capped = expandAll(ul, budget, FORMULA_EXPAND_ALL_CAP);
-    note.textContent = capped ? "Stopped after "+FORMULA_EXPAND_ALL_CAP+" more rows: press Expand all again, "+
+    note.textContent = capped ? "Stopped after about "+FORMULA_EXPAND_ALL_CAP+" more rows: press Expand all again, "+
       "or open the rest by hand." : "";
   });
   $(".ftree-collapse", hdr).addEventListener("click", function(){

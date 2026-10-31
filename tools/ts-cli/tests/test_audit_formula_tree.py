@@ -115,6 +115,37 @@ def test_display_names_parameters_and_quoted_literals():
     assert _node(tree, "Old Calc")["used_by"] == 0
 
 
+@pytest.mark.parametrize("expr, uses", [
+    # a quote inside a reference opens no literal (BL-369, BL-379)
+    ("if ( [ORDERS::Men's Sales] > 0 ) then [formula_Net] else [ORDERS::Women's Sales]",
+     [{"column": "ORDERS::Men's Sales"}, {"formula": "net_sales_f"},
+      {"column": "ORDERS::Women's Sales"}]),
+    ("[Customer's Count] + [Net Sales]",
+     [{"column": "Customer's Count"}, {"formula": "net_sales_f"}]),
+    ("if ( [T::Men's] = 'x' ) then [formula_Net] else 0",
+     [{"column": "T::Men's"}, {"formula": "net_sales_f"}]),
+    ('[T::a "b"] + [formula_Net] + strlen ( "[T::lit]" )',
+     [{"column": 'T::a "b"'}, {"formula": "net_sales_f"}]),
+])
+def test_a_quote_inside_a_reference_is_part_of_its_name(expr, uses):
+    model = {"formulas": [_f("formula_Top", "Top", expr),
+                          _f("formula_Net", "net_sales_f", "sum ( [T::X] )")],
+             "columns": [_col("Net Sales", "formula_Net", hidden=True)]}
+    tree = formula_tree(model)
+    assert _node(tree, "Top")["uses"] == uses
+    assert _node(tree, "net_sales_f")["used_by"] == 1 and tree["roots"] == ["Top"]
+
+
+def test_malformed_ids_and_names_are_ignored_not_fatal():
+    model = {"formulas": [{"id": {"x": 1}, "name": "A", "expr": "[T::X]"},
+                          {"id": "formula_B", "name": ["B"], "expr": "[T::Y]"},
+                          _f("formula_C", "C", "[A]")],
+             "columns": [{"name": "Col", "formula_id": ["formula_C"]}, _col("C", "formula_C")]}
+    tree = formula_tree(model)
+    assert [n["name"] for n in tree["nodes"]] == ["A", "C"]
+    assert _node(tree, "C")["uses"] == [{"formula": "A"}]
+
+
 def test_a_formula_and_a_column_used_twice_are_listed_once():
     dup = _node(formula_tree(EDGES), "Dup")
     assert dup["uses"] == [{"formula": "net_sales_f"}, {"column": "ORDERS::X"}]
@@ -127,6 +158,15 @@ def test_a_cycle_is_rooted_where_nothing_outside_it_uses_it():
     model = {"formulas": [_f("formula_C", "C", "[ORDERS::X]"),
                           _f("formula_A", "A", "[formula_B]"),
                           _f("formula_B", "B", "[formula_A] + [formula_C]")]}
+    assert formula_tree(model)["roots"] == ["A"]
+
+
+def test_a_cycle_beneath_another_cycle_is_not_a_root():
+    # C <-> D is used by A, inside the A <-> B cycle: one root, A
+    model = {"formulas": [_f("formula_C", "C", "[formula_D]"),
+                          _f("formula_D", "D", "[formula_C]"),
+                          _f("formula_A", "A", "[formula_B] + [formula_C]"),
+                          _f("formula_B", "B", "[formula_A]")]}
     assert formula_tree(model)["roots"] == ["A"]
 
 
@@ -178,7 +218,10 @@ def test_the_tree_opens_roots_one_level_and_expands_on_demand(tmp_path):
     for text in ("ORDERS::AMOUNT", "ORDERS::COST", "Cost", "circular reference to Loop A"):
         assert text in opened["visible"]
     assert "Stopped after" not in opened["visible"]
-    closed = report_browser.render(page, tmp_path, "formulas/m-1", actions=_EXPAND + _COLLAPSE)
+    closed = report_browser.render(page, tmp_path, "formulas/m-1", actions=_EXPAND + _COLLAPSE + (
+        'window.__extra = document.querySelectorAll('
+        '"#v-formulas [aria-expanded=true]").length;'))
+    assert closed["errors"] == [] and closed["extra"] == 0
     assert "Gross Margin %" in closed["visible"]
     assert "Revenue" not in closed["visible"] and "ORDERS::AMOUNT" not in closed["visible"]
 
@@ -216,7 +259,7 @@ def test_expand_all_stops_at_the_cap_and_continues_when_pressed_again(tmp_path):
     assert shown["errors"] == []
     x = shown["extra"]
     assert 2000 <= x["r1"] - x["r0"] <= 2010
-    assert "Stopped after 2000 more rows" in x["note"]
+    assert "Stopped after about 2000 more rows: press Expand all again" in x["note"]
     assert 2000 <= x["r2"] - x["r1"] <= 2010
     # column leaves count toward the cap too: 400 formulas of 10 columns each under one root
     leaves = [_f(f"formula_L{i}", f"L{i}", " + ".join(f"[T::C{i}_{j}]" for j in range(10)))
@@ -231,13 +274,14 @@ def test_expand_all_stops_at_the_cap_and_continues_when_pressed_again(tmp_path):
 
 
 @needs_chrome
-def test_a_formula_opens_from_the_keyboard(tmp_path):
+@pytest.mark.parametrize("key", ["Enter", " "])
+def test_a_formula_opens_from_the_keyboard(tmp_path, key):
     page = _report(tmp_path)
     shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
         'var row = Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-row"),'
         ' function(r){ return r.querySelector(".ftree-name") && '
         'r.querySelector(".ftree-name").textContent === "Gross Margin"; });'
-        'row.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", bubbles: true}));'
+        'row.dispatchEvent(new KeyboardEvent("keydown", {key: "' + key + '", bubbles: true}));'
         'window.__extra = row.getAttribute("aria-expanded");'))
     assert shown["errors"] == [] and shown["extra"] == "true"
     assert "Cost" in shown["visible"]
@@ -247,7 +291,8 @@ def test_a_formula_opens_from_the_keyboard(tmp_path):
 def test_names_are_escaped(tmp_path):
     evil = {"name": "Evil <i>m</i>", "formulas": [
         _f("formula_X", "x\" data-pwned=\"1", "[formula_Y]"), _f("formula_Y", "y", "[T::<b>c</b>]")],
-        "columns": [_col('<b>bold</b> "q" \'s\'', "formula_X"), _col("<b>y</b>", "formula_Y")]}
+        "columns": [_col('<b>bold</b> "q" \'s\'', "formula_X"),
+                    _col("<b>y</b>", "formula_Y", kind='measure" data-pwned="1')]}
     page = _report(tmp_path, ("m-4", evil))
     shown = report_browser.render(page, tmp_path, "formulas/m-4", actions=_EXPAND + (
         'window.__extra = document.querySelectorAll('
@@ -261,14 +306,20 @@ def test_names_are_escaped(tmp_path):
 def test_the_picker_the_sidebar_and_the_scorecard_link_reach_the_tree(tmp_path):
     plain = {"name": "Plain", "columns": [{"name": "A", "column_id": "T::A"}]}
     page = _report(tmp_path, ("m-1", MODEL), ("m-9", plain))
-    picker = report_browser.render(page, tmp_path, "formulas")
+    picker = report_browser.render(page, tmp_path, "formulas", actions=(
+        'window.__extra = Array.prototype.map.call(document.querySelectorAll('
+        '"#v-formulas .ftree-models a"), function(a){ return a.getAttribute("href"); });'))
     assert picker["errors"] == [] and "Sales" in picker["visible"]
+    assert picker["extra"] == ["#formulas/m-1"]
+    head = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
+        'window.__extra = document.querySelector("#v-formulas .ftree-header a").getAttribute("href");'))
+    assert head["errors"] == [] and head["extra"] == "#model/m-1"
     assert "7 formulas" in picker["visible"] and "Plain" not in picker["visible"]
     nav = ('var nav = document.querySelector(\'#sidebar-nav a[href="#formulas"]\');'
            'var link = document.querySelector(\'#v-scorecard a[href^="#formulas/"]\');'
            'window.__extra = {nav: nav && nav.textContent, link: link && link.getAttribute("href")};')
     card = report_browser.render(page, tmp_path, "model/m-1", actions=nav)
-    assert "Formula tree" in card["visible"]
+    assert card["errors"] == [] and "Formula tree" in card["visible"]
     assert card["extra"]["link"] == "#formulas/m-1"
     assert "Formulas" in card["extra"]["nav"]
     other = report_browser.render(page, tmp_path, "model/m-9", actions=nav)
@@ -279,9 +330,16 @@ def test_the_picker_the_sidebar_and_the_scorecard_link_reach_the_tree(tmp_path):
 def test_a_report_without_trees_and_an_unknown_model_say_why(tmp_path):
     page = _report(tmp_path, strip_trees=True)
     picker = report_browser.render(page, tmp_path, "formulas")
-    assert "predates the Formulas view" in picker["visible"]
+    assert picker["errors"] == [] and "predates the Formulas view" in picker["visible"]
     tree = report_browser.render(page, tmp_path, "formulas/m-1")
-    assert "predates the Formulas view" in tree["visible"]
+    assert tree["errors"] == [] and "predates the Formulas view" in tree["visible"]
+    # a fresh report whose only formulas are unnamed has formula counts but no tree
+    # nodes: that is "no formulas", not an old report
+    unnamed = {"name": "Unnamed", "formulas": [{"id": "formula_X", "expr": "[T::X]"}]}
+    page2 = _report(tmp_path, ("m-6", unnamed))
+    empty = report_browser.render(page2, tmp_path, "formulas/m-6")
+    assert empty["errors"] == [] and "This Model has no formulas." in empty["visible"]
+    assert "predates" not in report_browser.render(page2, tmp_path, "formulas")["visible"]
     fresh = _report(tmp_path)
     missing = report_browser.render(fresh, tmp_path, "formulas/nope")
     assert missing["errors"] == [] and "This report has no such Model." in missing["visible"]

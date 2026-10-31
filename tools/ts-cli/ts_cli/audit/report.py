@@ -223,7 +223,7 @@ def _compact_model(m: dict, model_index: dict) -> dict:
                     "l": m["spotter_readiness"]["level"]}
     if m.get("erd"):
         cm["ed"] = m["erd"]
-    if m.get("formula_tree") and m["formula_tree"].get("nodes"):
+    if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
         cm["ft"] = _compact_tree(m["formula_tree"])
     return cm
 

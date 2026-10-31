@@ -7,28 +7,28 @@ name people search it by, all read from the `columns[]` entry that surfaces it (
 a quoted literal resolves, in order, to a formula (by id or `formulas[].name`, through
 `tml.formula_ref_index`, the index P17's reference graph also uses, or by the display
 name of the column that surfaces it), a parameter (`parameters[].name`), else a column
-(`TABLE::COL`, or a bare Model column name). The roots are the formulas nothing uses,
-typically the measures people search on. A cycle no root reaches is rooted where
-nothing outside it uses it, so no formula is lost; the view guards against walking a
-cycle.
+(`TABLE::COL`, or a bare Model column name). Literals are split off with
+`formula_translate.refs.split_literals`, which keeps a `[...]` reference whole even when
+the name inside it holds a quote (BL-369). The roots are the formulas nothing uses,
+typically the measures people search on. A cycle no root reaches is rooted where it is
+entered: at a formula everything upstream of which lies in its own cycle, so no formula
+is lost; the view guards against walking a cycle. A formula or column id that is not a
+string is ignored (malformed TML must not end a narrow run, BL-501).
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List
 
 from ts_cli.audit.engine import tml
-
-#: A quoted literal: a reference-looking `[...]` inside one is text, not a reference
-#: (`concat ( '[' , ... )`, a regex class in a `sql_*_op` string).
-_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+from ts_cli.formula_translate.refs import split_literals
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
     out: Dict[Any, dict] = {}
     for c in model.get("columns") or []:
-        if isinstance(c, dict) and c.get("formula_id") and c["formula_id"] not in out:
-            out[c["formula_id"]] = c
+        fid = c.get("formula_id") if isinstance(c, dict) else None
+        if isinstance(fid, str) and fid and fid not in out:
+            out[fid] = c
     return out
 
 
@@ -48,7 +48,7 @@ def _resolve(ref: str, by_ref: Dict[Any, Any], params: set) -> dict:
 
 def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict]:
     """What one expression refers to, in order, each once (see the module docstring)."""
-    code = _QUOTED.sub(" ", str(expr or ""))
+    code = " ".join(seg for lit, seg in split_literals(str(expr or "")) if not lit)
     seen, out = set(), []
     for ref in tml.BRACKET_REF.findall(code):
         item = _resolve(ref.strip(), by_ref, params)
@@ -81,10 +81,20 @@ def _reachable(roots: List[str], nodes: Dict[str, dict]) -> set:
     return seen
 
 
+def _upstream(name: str, users: Dict[str, set]) -> set:
+    seen, stack = set(), list(users[name])
+    while stack:
+        n = stack.pop()
+        if n not in seen:
+            seen.add(n)
+            stack += users[n]
+    return seen
+
+
 def _cycle_roots(nodes: Dict[str, dict], reached: set) -> List[str]:
     """Roots for what no root reaches (only cycles, and what they use): a formula whose
-    every unreached user is in its own cycle (reachable from it), so no root is used
-    from outside; the first such, in formula order, per cycle."""
+    every unreached upstream user is in its own cycle (reachable from it), so neither its
+    cycle nor a cycle above it leads into it; the first such, in formula order, per cycle."""
     users: Dict[str, set] = {n: set() for n in nodes}
     for n, node in nodes.items():
         for u in node["uses"]:
@@ -95,7 +105,7 @@ def _cycle_roots(nodes: Dict[str, dict], reached: set) -> List[str]:
         if name in reached:
             continue
         own = _reachable([name], nodes)
-        if (users[name] - reached) <= own:
+        if (_upstream(name, users) - reached) <= own:
             roots.append(name)
             reached |= own
     return roots
@@ -121,8 +131,9 @@ def formula_tree(model: dict) -> dict:
     `uses` (`{"formula": name}` / `{"parameter": name}` / `{"column": ref}`) and
     `used_by` (how many formulas use it). Formulas sharing a name are one node (the
     first)."""
-    formulas = [f for f in (model.get("formulas") or [])
-                if isinstance(f, dict) and f.get("name")]
+    formulas = [f if isinstance(f.get("id"), (str, type(None))) else {**f, "id": None}
+                for f in (model.get("formulas") or [])
+                if isinstance(f, dict) and isinstance(f.get("name"), str) and f["name"]]
     columns = _surfacing_columns(model)
     by_ref = _by_ref(formulas, columns)
     params = _parameter_names(model)

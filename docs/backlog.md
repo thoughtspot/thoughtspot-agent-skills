@@ -16137,3 +16137,25 @@ function-length check is worth adding to `check_module_health`, or split the lar
 when they are next changed.
 
 **Target:** 2026-12-31.
+
+## BL-504 — audit rules read formula references without skipping string literals `Tier 3`
+
+**Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
+
+**What.** The report's formula tree (`ts_cli/audit/formula_tree.py`) splits literals off
+with `formula_translate.refs.split_literals` before reading `[...]` references, keeps a
+reference whole when its name holds a quote (BL-369), drops self-references and strips
+whitespace. The rules that read the same expressions do none of this:
+`engine/fields.py _reference_graph` (P17, P2) and `engine/fields_human.py` (H3) count
+bracket text inside a quoted literal as a reference and do not strip names; other
+`tml.BRACKET_REF` readers (`engine/tml.py`'s RLS rule expressions, `context.py`'s join
+on-clauses) do not skip literals either. So one report can say a formula is used by
+another (P17/H3) while the tree says it is not, or the reverse. On the 148-Model SE demo
+sample they agree (no reference sits inside a literal), so no finding is wrong there today.
+
+**Do.** Move every audit reader onto one literal-aware scanner (the tree's reading), with
+tests for a literal holding bracket text and a reference holding a quote, and re-pin the
+rules whose findings move (`repin_findings.py --rule <id>`). Kept out of PR 3.2, which
+changes no finding.
+
+**Target:** 2026-12-31.
