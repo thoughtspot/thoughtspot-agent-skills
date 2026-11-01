@@ -269,6 +269,18 @@ severity_exception:               # S5
   approved: 2026-11-02            # the date the product owner approved it
 ```
 
+**Fire rates.** After adding or regrading a rule, run
+`ts audit fire-rates --snapshot-in <snapshot>` under both assessments (or set
+`TS_AUDIT_SNAPSHOT` and run `scripts/pr-ready.sh`). A rule at MEDIUM or above on more
+than half of its objects warns: either it is mis-calibrated, or it is telling the reader
+something true of the whole estate. In the second case record why, per assessment, with
+the rate you measured; the review lapses after 180 days or a rise of more than 10 points:
+
+```yaml
+fire_rate_reviewed:               # A3
+  spotter: {date: 2026-11-02, rate: 0.89, note: "Most Models have no Spotter coaching yet; ..."}
+```
+
 ## `requires` vs `uses` — what the audit fetches
 
 The audit fetches, for the rules that will run, the union of their `requires` and `uses`,

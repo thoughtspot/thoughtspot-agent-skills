@@ -33,4 +33,16 @@ fi
 # shellcheck source=lib/python-bin.sh
 source "$REPO_ROOT/scripts/lib/python-bin.sh"
 
+# Opt-in (the severity rubric, 2026-11): with TS_AUDIT_SNAPSHOT naming an audit snapshot
+# directory (kept OUTSIDE the repo), report which rules fire at MEDIUM or above on more
+# than half of their objects without a current fire_rate_reviewed. Warnings only, never a
+# failure, and nothing from the snapshot is written anywhere.
+if [ -n "${TS_AUDIT_SNAPSHOT:-}" ]; then
+  for assessment in general spotter; do
+    PYTHONPATH="$REPO_ROOT/tools/ts-cli" "$PYTHON_BIN" -c "from ts_cli.cli import app; app()" \
+      audit fire-rates --snapshot-in "$TS_AUDIT_SNAPSHOT" --assessment "$assessment" \
+      >/dev/null || echo "pr-ready: fire-rates could not run on $TS_AUDIT_SNAPSHOT" >&2
+  done
+fi
+
 exec "$PYTHON_BIN" tools/validate/pr_ready.py "$@"

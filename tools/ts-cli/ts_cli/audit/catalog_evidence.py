@@ -80,3 +80,36 @@ def evidence_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
     return [f"a heuristic rule grades at most {HEURISTIC_CAP}, but this one can grade "
             f"{above} (lower it, or add an approved severity_exception)"
             for above in _above_cap(rule, profiles)]
+
+
+REVIEW_KEYS = {"date", "rate", "note"}
+
+
+def fire_rate_problems(rule: Rule, profiles: Iterable[str]) -> List[str]:
+    """`fire_rate_reviewed: {<profile id>: {date: YYYY-MM-DD, rate: 0..1, note: <why>}}` —
+    why a rule firing on most of its objects is expected under that assessment
+    (fire_rates.py reads it)."""
+    reviews = rule.fire_rate_reviewed
+    if reviews is None:
+        return []
+    if not isinstance(reviews, dict):
+        return ["fire_rate_reviewed must map a profile id to {date, rate, note}"]
+    known = set(profiles)
+    out: List[str] = []
+    for pid, review in reviews.items():
+        where = f"fire_rate_reviewed.{pid}"
+        if pid not in known:
+            out.append(f"{where}: unknown profile (known: {', '.join(sorted(known))})")
+            continue
+        if not isinstance(review, dict):
+            out.append(f"{where} must be {{date, rate, note}}")
+            continue
+        out += [f"{where}: unknown key '{k}'" for k in sorted(set(review) - REVIEW_KEYS)]
+        if not is_iso_date(review.get("date")):
+            out.append(f"{where}.date must be the review date, YYYY-MM-DD")
+        rate = review.get("rate")
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate <= 1:
+            out.append(f"{where}.rate must be the share reviewed, from 0 to 1")
+        if not isinstance(review.get("note"), str) or not review["note"].strip():
+            out.append(f"{where}.note is required: why that rate is expected")
+    return out
