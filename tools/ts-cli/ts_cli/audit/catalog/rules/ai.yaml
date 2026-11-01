@@ -12,6 +12,7 @@
 
 - id: A1
   title: Description coverage below threshold
+  evidence: measure
   description: >-
     Share of a Model's visible columns with a non-blank description, against the
     profile's pass mark (Spotter-ready 95%, General 50%). Hidden columns are left out:
@@ -48,6 +49,7 @@
 
 - id: A2
   title: Synonym coverage below threshold
+  evidence: measure
   description: >-
     Share of a Model's visible columns carrying synonyms (under `properties:`, where
     Model TML keeps them, or at the column root), against the profile's pass mark
@@ -85,6 +87,7 @@
 
 - id: A3
   title: No AI instructions configured
+  evidence: fact
   description: >-
     A Model with no Spotter coaching — no instruction in its ai/instructions response
     and no `model_instructions.data_model_instructions` in its TML. A Model whose
@@ -107,6 +110,7 @@
 
 - id: A4
   title: Model has no description
+  evidence: fact
   description: >-
     A Model with no (or a blank) description. (Titled "Missing Spotter config" until
     2026-10, which it never checked.)
@@ -137,6 +141,7 @@
 
 - id: A6
   title: Measure AI context coverage below threshold
+  evidence: measure
   description: >-
     Share of a Model's visible MEASURE columns with a non-blank
     `properties.ai_context`. Attributes are not counted: the coach's ai_context schema

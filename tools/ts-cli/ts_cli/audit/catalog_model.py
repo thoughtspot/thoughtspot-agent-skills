@@ -100,6 +100,10 @@ class Rule:
     remediation: str = ""
     examples: Dict[str, Any] = field(default_factory=dict)
     views: List[str] = field(default_factory=list)
+    # The severity rubric (PR 4.2): fact | measure | heuristic, and a heuristic rule's
+    # approved exception to the MEDIUM cap ({reason, approved}). See catalog_evidence.
+    evidence: str = ""
+    severity_exception: Optional[Dict[str, Any]] = None
     source_file: str = ""
 
 
@@ -256,6 +260,8 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
         remediation=get("remediation", str, ""),
         examples=dict(get("examples", dict, {})),
         views=list(get("views", list, [])),
+        evidence=get("evidence", str, ""),
+        severity_exception=d.get("severity_exception"),
         source_file=file,
     )
 

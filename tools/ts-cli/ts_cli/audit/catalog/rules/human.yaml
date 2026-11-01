@@ -17,6 +17,7 @@
 
 - id: H1
   title: Column name quality (anti-pattern regexes)
+  evidence: heuristic
   description: >-
     The share of a Model's columns whose names a person would not search for: col1,
     field_2, val, tmp_x, a leading digit (any case), or SHOUTING_SNAKE warehouse
@@ -42,6 +43,7 @@
 
 - id: H2
   title: Description quality (too-short, boilerplate)
+  evidence: heuristic
   description: >-
     Column descriptions that are too short (under 20 characters, stripped), too long
     (over 400) or open with boilerplate ("This is a", "Column for", "Field for"; any
@@ -65,6 +67,7 @@
 
 - id: H3
   title: Unnecessary hidden columns
+  evidence: fact
   description: >-
     A hidden Model column that no formula references by `[<name>]` — nor, when it
     surfaces a formula, by that formula's `[<id>]` (how TML references it) or
@@ -91,6 +94,7 @@
 
 - id: H4
   title: Orphan model with no dependents
+  evidence: fact
   description: >-
     A Model with no dependents but Sets — no Answer or Liveboard (a Set is a column
     on the Model, so anything using it is a Model dependent already). A
@@ -114,6 +118,7 @@
 
 - id: H5
   title: Orphan sets (zero consumers)
+  evidence: fact
   description: >-
     A Set (once, however many dependents lists name it) whose consumer lookup came
     back clean and empty. A Set whose lookup failed, was partial or was never made is
@@ -144,6 +149,7 @@
 
 - id: H7
   title: Direct table connections (bypasses semantic layer)
+  evidence: fact
   description: >-
     An Answer built straight off a Table: one finding per table reference whose `fqn`
     is a Table's guid — a model table's `fqn` in any Model, or a Table TML in the
@@ -165,6 +171,7 @@
 
 - id: H8
   title: Formula promotion candidate
+  evidence: fact
   description: >-
     The same Answer formula — compared lower-cased, stripped, whitespace collapsed;
     blank ones ignored — in 2 or more Answer formulas, and on no Model. Counted per
@@ -197,6 +204,7 @@
 
 - id: H9
   title: Redundant answer formulas (duplicating model formula)
+  evidence: fact
   description: >-
     An Answer formula whose expression (normalised as H8's) equals a Model formula's
     — a blank one included — named with the last such Model formula.
@@ -214,6 +222,7 @@
 
 - id: H10
   title: Stale / temporary objects (name pattern match)
+  evidence: heuristic
   description: >-
     A Model name, column name or column description that reads as stale or
     temporary (do not use, deprecated, test, tmp, copy of, (2), backup, old, …; a

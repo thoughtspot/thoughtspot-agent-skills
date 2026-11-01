@@ -44,7 +44,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py",
-                "catalog_consistency.py", "engine/tml.py",
+                "catalog_consistency.py", "catalog_evidence.py", "engine/tml.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py",
@@ -116,6 +116,7 @@ def test_needs_only_the_catalog_modules(tmp_path):
 GOOD_EACH_RULE = """\
 - id: A99
   title: An indexed column
+  evidence: fact
   categories: [A]
   scope: model.column
   aggregate: {mode: each, where: {field: "@is_indexed", truthy: true}}
@@ -199,6 +200,7 @@ def test_missing_catalog_fails(tmp_path):
 CODE_RULE = """\
 - id: D99
   title: A code rule
+  evidence: fact
   categories: [D]
   scope: model
   implementation: code:{name}

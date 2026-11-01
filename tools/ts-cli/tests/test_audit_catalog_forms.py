@@ -92,6 +92,6 @@ def test_catalog_level_entry_judged_only_by_profiles_that_use_it():
 def test_s2_words_its_two_severities_in_the_catalog():
     s2 = load_catalog().rules["S2"]
     assert s2.message == {"by_severity": {
-        "HIGH": "PII column '{name}' is indexed WITHOUT table RLS",
+        "MEDIUM": "PII column '{name}' is indexed WITHOUT table RLS",
         "INFO": "PII column '{name}' is indexed (table has RLS)"}}
     assert "owning_table_rls_note" not in fields.FIELDS

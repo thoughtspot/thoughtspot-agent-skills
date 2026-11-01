@@ -16,6 +16,7 @@
 
 - id: D1
   title: Model complexity exceeds threshold
+  evidence: measure
   description: >-
     Three size measures per Model, each reported on its own when over its MEDIUM line
     and graded HIGH over its HIGH line: tables (30 / 50), joins (30 / 50) and formulas
@@ -51,6 +52,7 @@
 
 - id: D3
   title: Join type analysis (FULL OUTER, LEFT/RIGHT)
+  evidence: fact
   description: >-
     Outer joins (inline, or referencing a Table's `joins_with`; the model's own type
     wins; the type read case-insensitively): HIGH on each full outer join
@@ -82,6 +84,7 @@
 
 - id: D5
   title: Orphan tables in model (Cartesian risk)
+  evidence: fact
   description: >-
     A table of a multi-table Model that is on neither side of any join — keyed by its
     alias, else its name, on both sides; a join's `with` is resolved to the table it
@@ -123,6 +126,7 @@
 
 - id: D7
   title: High model overlap detected
+  evidence: measure
   description: >-
     Two Models whose table sets (each table's fqn, else its name) share tables, graded
     by Jaccard similarity: HIGH when identical, MEDIUM above 0.5 but only when a table
@@ -157,6 +161,7 @@
 
 - id: D8
   title: Duplicate table objects found
+  evidence: fact
   description: >-
     Two or more Table objects (ONE_TO_ONE_LOGICAL or SQL_VIEW in the metadata) on one
     physical table — the same connection, database, schema and table name. Reported
@@ -183,6 +188,7 @@
 
 - id: D9
   title: SQL pass-through function usage (>20% formulas)
+  evidence: measure
   description: >-
     More than 20% of a Model's formulas call a SQL pass-through aggregate,
     `sql_<type>_aggregate_op` for any type — int, double, string, bool, date and the
@@ -207,6 +213,7 @@
 
 - id: D10
   title: Zero-column tables (bridge vs leaf)
+  evidence: fact
   description: >-
     A model table no model column comes from: INFO when it is on either side of a
     join (a bridge), MEDIUM when not (a leaf). Looked up and reported by its alias,
@@ -226,6 +233,7 @@
 
 - id: D11
   title: Fan-out join risk (row multiplication)
+  evidence: fact
   description: >-
     A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
     ends hold measures (each end's role is fact or dimension with measures): two tables
@@ -257,6 +265,7 @@
 
 - id: D12
   title: Conformed dimension divergence
+  evidence: heuristic
   description: >-
     A column (by `db_column_name`, else `name`) whose column type differs between
     Models. Each Model contributes one type per column name — a later column, or a
