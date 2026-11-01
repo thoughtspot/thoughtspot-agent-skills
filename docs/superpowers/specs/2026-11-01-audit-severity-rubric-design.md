@@ -59,7 +59,7 @@ point: heuristic = S1, S2, S4, S5, H1, H2, H10, D12; measure = A1, A2, A6, D1, D
 P8, P11, P13, P16, P17, P4, D7; fact = everything else (D11 and D7's shared-fact test
 included: a table's role is read from declared joins and measures, PR 4.1 — a role
 *default*, where no cardinality is declared, is not a name guess). So the cap moves only
-S2, S4 and S5; D7 and H8 keep their HIGH.
+S2 and S4 (S5 is an approved exception, below); D7 and H8 keep their HIGH.
 
 ## The cap
 
@@ -70,11 +70,17 @@ catalog gate enforces it, with the rule, profile and offending severity in its m
 Run-time override layers (`engine/run.py` `layers`) are not user-facing today; if they
 become so, the cap must be enforced there too (noted in the code).
 
-Effect: S2 HIGH → MEDIUM (its INFO stays), S4 HIGH → MEDIUM, S5 CRITICAL and HIGH (`token`)
-→ MEDIUM. On the
-sample this moves S2's 45 HIGH findings to MEDIUM (both assessments); S4 and S5 do not fire
-there. Their messages and remediation keep saying what to check; the description says the
-grade reflects a name match. Re-pin S2/S4/S5 with `repin_findings.py` after the sample
+**Exceptions.** A heuristic rule may exceed MEDIUM only when its catalog entry carries
+`severity_exception: {reason: "...", approved: YYYY-MM-DD}`: a non-empty reason and a valid
+date, both required by the gate, and shown in the generated catalog doc. The product owner
+approved one (2026-11-02): **S5**, a column named like a credential, keeps CRITICAL (and
+HIGH for `token`), because a real credential in an analytics Model is severe enough that a
+name match alone warrants it.
+
+Effect: S2 HIGH → MEDIUM (its INFO stays), S4 HIGH → MEDIUM; S5 unchanged (the exception).
+On the sample this moves S2's 45 HIGH findings to MEDIUM (both assessments); S4 does not
+fire there. Their messages and remediation keep saying what to check; the description says the
+grade reflects a name match. Re-pin S2/S4 with `repin_findings.py` after the sample
 comparison shows nothing else moved.
 
 ## Fire rates
@@ -112,8 +118,9 @@ one, so a reader can tell a guess from a fact.
 ## Tests
 
 - Gate: a heuristic rule reaching HIGH through a band, a severity map, a fixed severity and
-  a profile override each fails; at MEDIUM it passes; a rule with no `evidence` fails; an
-  unknown class fails.
+  a profile override each fails; at MEDIUM it passes; with a valid `severity_exception` it
+  passes; an exception with no reason, a bad date, or on a non-heuristic rule fails; a
+  rule with no `evidence` fails; an unknown class fails.
 - Fire rates: a synthetic snapshot where one rule fires on 3 of 4 Models warns, on 2 of 4
   does not; a fresh review for that assessment silences it, a review for the other
   assessment does not, a stale one does not, a rate 11 points above the reviewed one does
@@ -121,8 +128,8 @@ one, so a reader can tell a guess from a fact.
   output has no names.
 - The new finding field is listed in `audit_pinned.UNCOMPARED_AS_PINNED`, so re-pinning
   does not copy it into pins.
-- S2/S4/S5 fixtures fire at MEDIUM; the sample replay differs from main only in S2's
-  severity.
+- S2/S4 fixtures fire at MEDIUM, S5's at CRITICAL; the sample replay differs from main
+  only in S2's severity.
 
 ## Left to the builder
 
@@ -133,8 +140,8 @@ one, so a reader can tell a guess from a fact.
 ## Calls made without the product owner (check these)
 
 - Three classes, and "weakest class needed to fire" decides a mixed rule.
-- **S5 (credential-named column) drops from CRITICAL (and HIGH for `token`) to MEDIUM**
-  under the cap, like S2/S4.
+- S5 is the one exception (product owner, 2026-11-02); exceptions need a reason and a
+  date, checked by the gate.
 - D7 and H8 are not heuristic (D7 a measure, H8 a fact), so they keep HIGH.
 - A fire rate counts each rule against its own object type; rules naming no object never
   warn.
