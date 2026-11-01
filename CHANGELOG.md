@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-02
+- feat(audit): severity rubric — evidence classes, heuristic rules capped at MEDIUM (S5 an approved exception), `ts audit fire-rates` (ts-audit 3.10.0, roadmap PR 4.2)
+- chore: bump ts-cli to v0.195.0
+
 ## 2026-11-01
 - feat(audit): table roles from join direction; D7 and D11 read them (ts-audit 3.9.0, ts-object-model-erd 1.10.0, roadmap PR 4.1)
 - chore: bump ts-cli to v0.194.0
