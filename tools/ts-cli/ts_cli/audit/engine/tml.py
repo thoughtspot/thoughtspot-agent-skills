@@ -33,9 +33,6 @@ from ts_cli.tml_join_graph import node_id
 #: markedly slower than an integer one and is what several checks look for.
 STRING_TYPES = ("VARCHAR", "CHAR", "STRING", "TEXT")
 
-#: A table with more than this many MEASURE columns is treated as a fact table.
-FACT_MEASURE_THRESHOLD = 3
-
 #: A bracketed column reference inside a TML expression: ``[TABLE::COL]``.
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
@@ -331,25 +328,18 @@ def join_label(model_table: dict, join: dict) -> str:
     return f"{left} -> {right}" if left and right else (left or right)
 
 
-def table_role(columns: list, table_name: str) -> str:
-    """``"fact"``, ``"dimension"`` or ``"unknown"`` for one model table.
+def model_table_roles(model: dict, tables: dict) -> Dict[str, dict]:
+    """Each model table's role, by key (alias, else name): the shared classifier
+    (agents/shared/erd/roles.py, loaded through ts_cli.audit.erd), with a referencing
+    join's cardinality read from its Table's `joins_with` as `model_joins` reads it.
+    `{key: {role, outrigger, attribute_heavy, unjoined, measures, attributes}}`; role is
+    fact, factless, dimension or dimension_with_measures."""
+    from ts_cli.audit.erd import load_table_roles  # erd imports nothing from engine
 
-    Keyed on the ``column_id`` prefix. Note that prefix is the model_tables
-    ``alias`` when one is set, and several callers pass ``name`` — BL-305.
-    """
-    table_cols = [c for c in (columns or [])
-                  if (c.get("column_id") or "").split("::")[0] == table_name]
-    if not table_cols:
-        return "unknown"
-    measures = sum(1 for c in table_cols
-                   if mapping(c, "properties").get("column_type") == "MEASURE")
-    return "fact" if measures > FACT_MEASURE_THRESHOLD else "dimension"
-
-
-def fact_tables(columns: list, model_tables: list) -> set:
-    """Names of the model's tables that read as fact tables."""
-    return {mt.get("name", "") for mt in (model_tables or [])
-            if table_role(columns, mt.get("name", "")) == "fact"}
+    def cardinality(model_table: dict, join: dict) -> Any:
+        return _resolve_join(model_table, join,
+                             _joins_with_index(model_table, tables))["cardinality"] or None
+    return load_table_roles()(model, cardinality)
 
 
 def rls_column_refs(table: dict):

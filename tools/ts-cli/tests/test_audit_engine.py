@@ -1059,15 +1059,18 @@ def test_model_table_join_and_column_fields():
 
 
 def test_table_grain_fields_key_by_alias():
-    """D6 finds a table's columns by its key (alias, else name) — unlike D10/D11."""
+    """D6 finds a table's columns by its key (alias, else name) — unlike D10/D11. SHIP
+    is joined to, so from join direction (2026-11) it is a dimension holding measures."""
     ctx = fx.data_model_aliased_fact()
     rows = {i["name"]: tuple(fields.get(i, f, ctx) for f in (
         "@table_role", "@table_column_count", "@attribute_count", "@attribute_share",
         "@attribute_pct")) for i in _children_of(ctx, "model.table")}
-    assert rows == {"SHIP": ("fact", 4, 0, 0.0, 0.0), "O": ("fact", 8, 4, 0.5, 50.0)}
+    assert rows == {"SHIP": ("dimension_with_measures", 4, 0, 0.0, 0.0),
+                    "O": ("fact", 8, 4, 0.5, 50.0)}
     no_columns = _field_values(fx.data_lists_none(), "model.table",
                                "@table_role", "@attribute_share", "@attribute_pct")
-    assert set(no_columns) == {("unknown", None, None)}
+    # no columns: the role comes from the joins alone, holding no measures
+    assert set(no_columns) == {("dimension", None, None)}
 
 
 def test_table_set_and_physical_table_key():

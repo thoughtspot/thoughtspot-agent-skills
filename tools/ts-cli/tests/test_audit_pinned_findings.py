@@ -288,7 +288,8 @@ D_PROBES = [
     # D11 finds both ends by alias (2026-10; by name, BL-305, it read the fact-to-fact
     # join as INFO and D10 called the aliased tables zero-column)
     ("data_model_aliased_fact", lambda f: f["check_id"] == "D11" and f["severity"] == "MEDIUM"
-     and f["detail"] == "Fan-out risk: fact-to-fact join 'SHIP' -> 'O' with ONE_TO_MANY"),
+     and f["detail"] == ("Fan-out risk: 'SHIP' -> 'O' with ONE_TO_MANY joins two tables "
+                         "that both hold measures")),
     # D11 words an INFO finding by the join's own cardinality (2026-10; it said
     # "ONE_TO_MANY" for a MANY_TO_MANY join before)
     ("data_fanout_many_to_many_dimension", lambda f: f["check_id"] == "D11"

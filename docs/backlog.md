@@ -320,6 +320,7 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
 | BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
@@ -16162,3 +16163,24 @@ rules whose findings move (`repin_findings.py --rule <id>`). Kept out of PR 3.2,
 changes no finding.
 
 **Target:** 2026-12-31.
+
+## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
+
+**Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
+design scoped the classifier to the audit and the ERD.
+
+**What.** `agents/shared/erd/roles.py` decides a table's role from join direction for
+ts-audit and the ERD. Two converters keep their own fact detection:
+`ts_cli/databricks/mv_emit.py detect_fact_tables` (ThoughtSpot Model TML; already "a join
+root with a measure", but it attributes formula measures to tables, which the classifier
+does not) and `ts_cli/sv_build_model.py _detect_fact_tables` (Snowflake relationships, a
+different input), and `sisense/build_model._fact_rank` ranks its own. `mv_emit`'s
+`_join_target_tables` also ignores cardinality, so a ONE_TO_MANY join reads the wrong way
+there. A Model can therefore be split into Metric Views around a table the audit calls a
+dimension.
+
+**Do.** Move `detect_fact_tables` onto `roles.table_roles` (deciding, with a test, whether
+formula measures should count there), re-run the to-Databricks golden tests, and record
+why `sv_build_model` stays separate if it does.
+
+**Target:** 2027-01-31.

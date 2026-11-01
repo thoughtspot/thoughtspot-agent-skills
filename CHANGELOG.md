@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-01
+- feat(audit): table roles from join direction; D7 and D11 read them (ts-audit 3.9.0, ts-object-model-erd 1.10.0, roadmap PR 4.1)
+- chore: bump ts-cli to v0.194.0
+- feat: shared table-role classifier (`agents/shared/erd/roles.py`): fact / factless / dimension / dimension with measures from join direction, used by ts-audit and the ERD (roadmap PR 4.1)
+
 ## 2026-10-31
 - feat(audit): the report gains a Formulas view, each Model's formula dependency tree (ts-audit 3.8.0, v2 roadmap PR 3.2)
 - chore: bump ts-cli to v0.193.0

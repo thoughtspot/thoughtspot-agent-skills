@@ -231,6 +231,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         m = model.get("model", {})
         guid = model.get("guid", m.get("guid", ""))
         model_tables = m.get("model_tables") or []
+        roles = tml.model_table_roles(m, ctx.tables)
         entry: dict = {
             "guid": guid,
             "name": m.get("name", ""),
@@ -241,7 +242,8 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
             "join_count": tml.join_count(model_tables),
             "join_depth": tml.join_depth(model_tables),
             "model_tables": [
-                {"name": mt.get("name", ""), "fqn": mt.get("fqn", "")}
+                {"name": mt.get("name", ""), "fqn": mt.get("fqn", ""),
+                 "role": (roles.get(tml.table_key(mt)) or {}).get("role", "")}
                 for mt in model_tables
             ],
         }

@@ -112,7 +112,7 @@ wording; `legacy_threshold` takes the same form:
 ```yaml
 message:                          # D11
   by_severity:
-    MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
+    MEDIUM: "Fan-out risk: '{@join_from_name}' -> '{obj.with}' with {@join_cardinality} joins two tables that both hold measures"
     INFO: "{@join_cardinality} join '{@join_from_name}' -> '{obj.with}'"
 legacy_threshold:
   by_severity:
