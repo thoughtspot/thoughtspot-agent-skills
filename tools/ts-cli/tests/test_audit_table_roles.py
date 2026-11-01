@@ -143,3 +143,49 @@ def test_d7_medium_needs_a_shared_fact_not_a_shared_header():
     a["model_tables"].append({"name": "ROOT_A", "fqn": "t-ROOT_A"})
     b["model_tables"].append({"name": "ROOT_B", "fqn": "t-ROOT_B"})
     assert _d7(_ctx(a, b)) == ["MEDIUM"]
+
+
+# ── guards the first review found unpinned ──────────────────────────────────
+
+def test_roles_are_cached_per_model_not_per_run():
+    # the same tables, opposite directions: each Model must get its own roles, with
+    # the run's memo on (it is off outside a run, which would hide a shared key)
+    from ts_cli.audit.engine import memo
+    ctx = _ctx(_model(name="A"), _model(name="B", card="MANY_TO_ONE"))
+    by_model = {}
+    with memo.run_scope():
+        for i in _items(ctx, "model.table"):
+            by_model.setdefault(i["parent"]["obj"]["name"], {})[i["name"]] = \
+                fields.get(i, "@table_role", ctx)
+    assert by_model["A"]["LINES"] == "fact" and by_model["A"]["HEADER"] == "dimension_with_measures"
+    assert by_model["B"]["HEADER"] == "fact" and by_model["B"]["LINES"] == "dimension_with_measures"
+
+
+def test_d7_counts_a_shared_fact_that_is_a_fact_in_only_one_model():
+    # LINES is the root (a fact) in A; in B a ROOT joins to it, so there it is a
+    # dimension holding measures. "Either" Model is enough for MEDIUM.
+    a = _overlap("A", ["LINES", "CAL", "X", "Y"], "OWN_A")
+    b = _overlap("B", ["LINES", "CAL", "X", "Y"], "OWN_B")
+    b["model_tables"].insert(0, {"name": "ROOT_B", "fqn": "t-ROOT_B", "joins": [
+        {"with": "LINES", "cardinality": "MANY_TO_ONE"}]})
+    b["columns"].append(_col("ROOT_B", 0))
+    assert _d7(_ctx(a, b)) == ["MEDIUM"]
+
+
+def test_table_level_cardinality_reaches_the_fields_and_the_corpus():
+    tables = {"t-header": {"table": {"joins_with": [
+        {"name": "header_lines", "destination": {"name": "LINES"},
+         "cardinality": "ONE_TO_MANY"}]}}}
+    ctx = _ctx(_model(referencing=True), tables=tables)
+    roles = {i["name"]: fields.get(i, "@table_role", ctx) for i in _items(ctx, "model.table")}
+    assert roles["LINES"] == "fact" and roles["HEADER"] == "dimension_with_measures"
+    (m,) = build_corpus(ctx, angles=["D"])["models"]
+    assert {t["name"]: t["role"] for t in m["model_tables"]}["LINES"] == "fact"
+
+
+def test_corpus_role_is_looked_up_by_alias():
+    model = {"name": "Aliased", "columns": [_col("LINES", 0)], "model_tables": [
+        {"name": "LINES", "fqn": "t-lines", "joins": [{"with": "SHIP", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "DATE", "alias": "SHIP", "fqn": "t-date"}]}
+    (m,) = build_corpus(_ctx(model), angles=["D"])["models"]
+    assert [t["role"] for t in m["model_tables"]] == ["fact", "dimension"]

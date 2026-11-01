@@ -66,7 +66,7 @@ def register(name: str, *, uses: Any = None, values: Optional[Iterable[Any]] = N
     severity `map:` is keyed on (the catalog gate fails one that declares none).
 
     `label` is how the field reads to an audit reader, in place of `@name`: a clause for
-    a true/false field ("the join links two fact tables"), else a noun phrase ("the join
+    a true/false field ("the join links two tables that both hold measures"), else a noun phrase ("the join
     type"). Required, like `uses` — generated text never shows an engine identifier."""
     declared = _declared_uses(f"derived field '@{name}'", uses)
     text = human_label(f"derived field '@{name}'", label)

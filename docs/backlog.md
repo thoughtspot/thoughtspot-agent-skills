@@ -16174,8 +16174,10 @@ ts-audit and the ERD. Two converters keep their own fact detection:
 `ts_cli/databricks/mv_emit.py detect_fact_tables` (ThoughtSpot Model TML; already "a join
 root with a measure", but it attributes formula measures to tables, which the classifier
 does not) and `ts_cli/sv_build_model.py _detect_fact_tables` (Snowflake relationships, a
-different input). A Model can therefore be split into Metric Views around a table the
-audit calls a dimension.
+different input), and `sisense/build_model._fact_rank` ranks its own. `mv_emit`'s
+`_join_target_tables` also ignores cardinality, so a ONE_TO_MANY join reads the wrong way
+there. A Model can therefore be split into Metric Views around a table the audit calls a
+dimension.
 
 **Do.** Move `detect_fact_tables` onto `roles.table_roles` (deciding, with a test, whether
 formula measures should count there), re-run the to-Databricks golden tests, and record

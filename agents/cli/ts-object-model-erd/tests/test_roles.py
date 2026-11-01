@@ -152,8 +152,23 @@ def test_role_text():
                        [("LINES", "HEADER"), ("HEADER", "CUSTOMER"), ("F2", "D2")],
                        measures={"LINES": 1, "HEADER": 1, "F2": 1}, attributes={"F2": 3}))
     label, note = role_text(r["HEADER"])
-    assert label == "Dimension holding measures" and "repeat" in note
+    assert label == "Dimension holding measures" and "cardinality" in note
+    assert "repeat" not in note  # ThoughtSpot resolves fan traps; no defect is claimed
     label, note = role_text(r["CUSTOMER"])
     assert label == "Dimension (outrigger)" and "snowflaked" in note
     assert role_text(r["F2"])[0] == "Fact with descriptive attributes"
     assert role_text(r["LINES"])[0] == "Fact"
+
+
+def test_a_join_to_a_table_outside_the_model_is_ignored_in_either_direction():
+    for card in ("MANY_TO_ONE", "ONE_TO_MANY", None):
+        r = table_roles(_m(["A", "B"], [("A", "ELSEWHERE", card)], measures={"B": 1}))
+        assert (r["A"]["role"], r["A"]["unjoined"]) == ("dimension", True)
+        assert r["B"]["role"] == "fact"
+
+
+def test_a_non_string_with_is_skipped():
+    model = _m(["A", "B"], [("A", "B")], measures={"A": 1})
+    model["model_tables"][0]["joins"].append({"with": ["B"]})
+    model["model_tables"][0]["joins"].append({"with": {"name": "B"}})
+    assert _roles(model) == {"A": "fact", "B": "dimension"}

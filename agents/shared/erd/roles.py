@@ -40,10 +40,14 @@ _ROLE_NOTES = {
     "fact": "At the root of the joins (no table joins to it) and holds measures.",
     "factless": "At the root of the joins but holds no measures: a bridge between "
                 "tables, or a factless fact (events, coverage).",
-    "dimension": "Joined to by another table; holds no measures.",
-    "dimension_with_measures": "Joined to by another table, yet holds measures. Summed "
-                               "through a join from a table below it, they repeat once "
-                               "per row of that table (a fan trap).",
+    "dimension": "Holds no measures, and is not at the root of the joins.",
+    # ThoughtSpot resolves fan traps when a Model's joins are declared correctly
+    # (ts-object-model-agentql-query references/architecture.md: "no fan-out double
+    # counting"), so the note names the dependency, not a defect.
+    "dimension_with_measures": "Joined to by another table, yet holds measures (an order "
+                               "header's freight, say). ThoughtSpot aggregates these "
+                               "without fan-out double counting only while the joins' "
+                               "cardinality is declared correctly, so check it.",
 }
 _OUTRIGGER_NOTE = (" Joined only from other dimensions: an outrigger, or part of a "
                    "snowflaked hierarchy (direction cannot tell the two apart).")
@@ -90,7 +94,8 @@ def _edges(tables: Dict[str, dict], join_cardinality) -> list:
     edges = []
     for key, mt in tables.items():
         for join in mt.get("joins") or [] if isinstance(mt.get("joins"), list) else []:
-            if not isinstance(join, dict) or join.get("with") not in tables:
+            if not isinstance(join, dict) or not isinstance(join.get("with"), str) \
+                    or join["with"] not in tables:
                 continue
             card = join.get("cardinality") or (
                 join_cardinality(mt, join) if join_cardinality else None) or "MANY_TO_ONE"

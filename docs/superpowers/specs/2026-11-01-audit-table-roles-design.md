@@ -19,7 +19,11 @@ both mislabel the cases that matter:
   a fact (16 tables by the audit, more by the ERD);
 - an order header, which the order lines join to and which itself joins out to customer
   and date, is a dimension of the lines that also carries measures (freight, order-level
-  discount). Summing those through the lines repeats them once per line: the fan trap.
+  discount). Summed naively through the lines, those repeat once per line: the fan
+  trap. (Review note, 2026-11-01: ThoughtSpot's engine resolves fan traps when the
+  joins' cardinality is declared correctly — ts-object-model-agentql-query
+  `references/architecture.md` — so the risk is a wrong or missing cardinality, and
+  the ERD's note says that rather than claiming the measures repeat.)
   Neither classifier can name that shape.
 
 The product owner's view, which this design adopts: **a fact sits at the root of the

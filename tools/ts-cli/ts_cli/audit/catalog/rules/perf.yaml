@@ -100,7 +100,7 @@
     Retired 2026-10: a date limit on fact tables is a design choice, not a defect, and
     the rule found fact tables by counting measures, which is not what makes a fact.
   status: retired
-  # Fact tables are found by engine/tml.py fact_tables.
+  # Fact tables come from join direction (engine/tml.py model_table_roles, 2026-11).
   categories: [P]
   requires: [model_tml]
   scope: model

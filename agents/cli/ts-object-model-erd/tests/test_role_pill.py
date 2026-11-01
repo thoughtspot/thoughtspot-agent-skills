@@ -44,5 +44,5 @@ def test_pill_names_the_role_with_a_tooltip(tmp_path):
     assert "LINES" in got, got
     assert got["LINES"][0] == "Fact" and "fact" in got["LINES"][2]
     assert got["HEADER"][0] == "Dimension holding measures"
-    assert "fan trap" in got["HEADER"][1] and "dim" in got["HEADER"][2]
+    assert "cardinality" in got["HEADER"][1] and "dim" in got["HEADER"][2]
     assert got["CUSTOMER"][0] == "Dimension (outrigger)" and "snowflaked" in got["CUSTOMER"][1]

@@ -228,9 +228,10 @@
   title: Fan-out join risk (row multiplication)
   description: >-
     A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
-    ends hold measures (each end's role, from join direction, is fact or dimension
-    with measures), so one side's measures repeat across the other's rows; INFO
-    otherwise. Until 2026-11 an end counted only with more than 3 MEASURE columns. A
+    ends hold measures (each end's role is fact or dimension with measures): two tables
+    of measures joined one-to-many, whose totals are right only while the declared
+    cardinality is; INFO otherwise. Until 2026-11 an end counted only with more than 3
+    MEASURE columns. A
     referencing join takes its cardinality from the model, else from the Table's
     `joins_with` entry (exported Table TML usually carries none). Both ends are found
     by alias, else name: the declaring model table, and the table the join's `with`
