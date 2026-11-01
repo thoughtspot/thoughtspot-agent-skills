@@ -182,16 +182,41 @@ def _build_joins(model_tables, node_ids):
     return joins, dropped
 
 
-def _table_kind(cols, tid, is_target, has_outgoing):
-    """Classify a table. Fact only when it carries real (visible) measures — an
-    outgoing join alone does not make a fact (dims join to dims in normalized
-    schemas); a measureless table that both receives and emits a join is a
-    bridge; anything else with no measures is a dimension."""
-    if any(c["is_measure"] and not c["hidden"] for c in cols):
-        return "fact"
-    if tid in is_target and tid in has_outgoing:
-        return "bridge"
-    return "dim"
+def _load_roles():
+    """The shared classifier, roles.py beside this file. Loaded by path because the
+    audit loads this parser by path too, where `import roles` would not resolve."""
+    import importlib.util
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "roles.py")
+    spec = importlib.util.spec_from_file_location("_erd_roles_for_parser", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_ROLES = _load_roles()
+
+
+def _table_role_fields(entry):
+    """The bundle's role fields for one table: `kind` (fact or dim, which the
+    renderer's layout and filters read), `role`, the three flags, and the words."""
+    entry = entry or {"role": "dimension"}
+    label, note = _ROLES.role_text(entry)
+    return {"kind": _ROLES.erd_kind(entry["role"]), "role": entry["role"],
+            "outrigger": bool(entry.get("outrigger")),
+            "attribute_heavy": bool(entry.get("attribute_heavy")),
+            "unjoined": bool(entry.get("unjoined")),
+            "role_label": label, "role_note": note}
+
+
+def _table_roles(model, table_joins):
+    """Each table's role from join direction (roles.py), a referencing join's
+    cardinality read from its Table TML's `joins_with` (the index _stitch_table_joins
+    uses); "UNKNOWN" there means none."""
+    def cardinality(_model_table, join):
+        card = (table_joins.get(join.get("referencing_join", "")) or {}).get("card")
+        return None if card in (None, "", "UNKNOWN") else card
+    return _ROLES.table_roles(model, cardinality)
 
 
 def _stitch_table_joins(joins, table_joins):
@@ -327,21 +352,20 @@ def parse_model(model_tml, table_tmls, log=None):
     joins, dropped_joins = _build_joins(model_tables, set(table_ids))
     _log_dropped_joins(dropped_joins, log)
 
-    has_outgoing = {_table_node_id(mt) for mt in model_tables if mt.get("joins")}
-    is_target = {j["to"] for j in joins}
+    table_joins = _index_table_joins(table_tmls)
+    roles = _table_roles(model, table_joins)
     # An explicit `alias` instance records its physical table up front (even
     # without a Table TML); a non-aliased node may still be resolved as an alias
     # in _enrich_from_table_tmls if its Table TML's physical name differs.
     tables = [{
         "id": tid,
-        "kind": _table_kind(cols_by_table.get(tid, []), tid, is_target, has_outgoing),
+        **_table_role_fields(roles.get(tid)),
         "cols": cols_by_table.get(tid, []),
         "rls": [], "is_sql_view": False, "sql_query": None,
         "alias_of": phys_by_id.get(tid) if tid in alias_ids else None,
         "in_rls_path": False,
     } for tid in table_ids]
 
-    table_joins = _index_table_joins(table_tmls)
     _stitch_table_joins(joins, table_joins)
 
     tables_by_id = {t["id"]: t for t in tables}

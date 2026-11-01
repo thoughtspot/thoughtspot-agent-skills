@@ -1,6 +1,6 @@
 """The shared table-role classifier (agents/shared/erd/roles.py; audit v2 roadmap PR 4.1):
 a table's role from join direction, refined by the measures it holds."""
-from roles import ATTRIBUTE_HEAVY_LABEL, ROLE_LABELS, erd_kind, table_roles
+from roles import ATTRIBUTE_HEAVY_LABEL, ROLE_LABELS, erd_kind, role_text, table_roles
 
 
 def _m(tables, joins=(), measures=None, attributes=None, hidden=(), aliases=None):
@@ -145,3 +145,15 @@ def test_erd_kind_and_labels():
     assert ROLE_LABELS["dimension_with_measures"] == "Dimension holding measures"
     assert ROLE_LABELS["factless"] == "Factless / bridge"
     assert ATTRIBUTE_HEAVY_LABEL == "Fact with descriptive attributes"
+
+
+def test_role_text():
+    r = table_roles(_m(["LINES", "HEADER", "CUSTOMER", "F2", "D2"],
+                       [("LINES", "HEADER"), ("HEADER", "CUSTOMER"), ("F2", "D2")],
+                       measures={"LINES": 1, "HEADER": 1, "F2": 1}, attributes={"F2": 3}))
+    label, note = role_text(r["HEADER"])
+    assert label == "Dimension holding measures" and "repeat" in note
+    label, note = role_text(r["CUSTOMER"])
+    assert label == "Dimension (outrigger)" and "snowflaked" in note
+    assert role_text(r["F2"])[0] == "Fact with descriptive attributes"
+    assert role_text(r["LINES"])[0] == "Fact"

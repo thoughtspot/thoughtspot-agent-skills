@@ -36,10 +36,33 @@ ATTRIBUTE_HEAVY_LABEL = "Fact with descriptive attributes"
 
 _UNDIRECTED = ("ONE_TO_ONE", "MANY_TO_MANY")
 
+_ROLE_NOTES = {
+    "fact": "At the root of the joins (no table joins to it) and holds measures.",
+    "factless": "At the root of the joins but holds no measures: a bridge between "
+                "tables, or a factless fact (events, coverage).",
+    "dimension": "Joined to by another table; holds no measures.",
+    "dimension_with_measures": "Joined to by another table, yet holds measures. Summed "
+                               "through a join from a table below it, they repeat once "
+                               "per row of that table (a fan trap).",
+}
+_OUTRIGGER_NOTE = (" Joined only from other dimensions: an outrigger, or part of a "
+                   "snowflaked hierarchy (direction cannot tell the two apart).")
+
 
 def erd_kind(role: str) -> str:
     """The ERD renderer's two-valued `kind`: roots are drawn as facts."""
     return "fact" if role in ("fact", "factless") else "dim"
+
+
+def role_text(entry: dict) -> tuple:
+    """`(label, note)` for one table_roles entry: the words the ERD shows."""
+    role = entry.get("role", "")
+    label = (ATTRIBUTE_HEAVY_LABEL if role == "fact" and entry.get("attribute_heavy")
+             else ROLE_LABELS.get(role, role))
+    note = _ROLE_NOTES.get(role, "")
+    if entry.get("outrigger"):
+        label, note = label + " (outrigger)", note + _OUTRIGGER_NOTE
+    return label, note
 
 
 def _key(mt: dict) -> Optional[str]:

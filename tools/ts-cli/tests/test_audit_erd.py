@@ -72,9 +72,12 @@ def test_hidden_non_measure_formula_does_not_make_dim_a_fact():
     assert ff["hidden"] is True and ff["is_measure"] is False
 
 
-def test_dimension_with_outgoing_join_is_not_a_fact():
-    """A pure dimension that merely joins out to another table must not be a fact.
-    Regression for GTM Campaigns TS_USER (attributes + one outgoing join, no measures)."""
+def test_a_join_declared_out_of_a_measureless_table_makes_it_a_root():
+    """Roles come from join direction (roles.py, 2026-11): a join is declared on its
+    many side, so TS_USER -> EVENT with no cardinality found puts TS_USER at the root,
+    factless (drawn as a fact), and EVENT, joined to and holding a measure, a dimension
+    holding measures. Until 2026-11 TS_USER was a dimension because it held no measure;
+    a Table TML declaring the join ONE_TO_MANY restores that reading."""
     model = _model_tml(
         tables=[
             {"name": "TS_USER", "fqn": "db.TS_USER",
@@ -88,9 +91,9 @@ def test_dimension_with_outgoing_join_is_not_a_fact():
              "properties": {"column_type": "MEASURE"}},
         ],
     )
-    kinds = {t["id"]: t["kind"] for t in parse_model(model, {})["tables"]}
-    assert kinds["TS_USER"] == "dim"
-    assert kinds["EVENT"] == "fact"
+    tables = {t["id"]: t for t in parse_model(model, {})["tables"]}
+    assert (tables["TS_USER"]["kind"], tables["TS_USER"]["role"]) == ("fact", "factless")
+    assert (tables["EVENT"]["kind"], tables["EVENT"]["role"]) == ("dim", "dimension_with_measures")
 
 
 def test_parse_model_with_joins():
