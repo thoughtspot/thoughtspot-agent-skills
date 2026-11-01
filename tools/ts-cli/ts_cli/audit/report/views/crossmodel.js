@@ -190,7 +190,7 @@ function buildCrossModel(D, initialFilters){
 
     /* Detail cell */
     var tdDetail = el("td","col-detail detail-cell");
-    tdDetail.textContent = f.d || "";
+    tdDetail.innerHTML = esc(f.d || "")+nameMatchTag(f);
     tr.appendChild(tdDetail);
 
     return tr;

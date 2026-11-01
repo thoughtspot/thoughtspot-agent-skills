@@ -204,6 +204,7 @@ def _run_rule(ctx, catalog: Catalog, rule: Rule, profile: str,
     for f in found:
         own = f.threshold  # set only by a code rule (code_rules.check_findings)
         f.angle, f.categories = angle, list(rule.categories)
+        f.evidence = rule.evidence
         f.bands = copy.deepcopy(payload)
         f.threshold = own if own is not None else \
             legacy_threshold(rule, profile, label, f.severity)

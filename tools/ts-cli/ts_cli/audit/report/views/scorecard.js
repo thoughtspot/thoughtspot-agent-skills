@@ -190,7 +190,7 @@ function buildScorecard(D, guid, filterAngle){
         topHtml += '</div>';
 
         /* Detail text */
-        topHtml += '<div class="detail-text">'+esc(f.d)+'</div>';
+        topHtml += '<div class="detail-text">'+esc(f.d)+nameMatchTag(f)+'</div>';
 
         /* Metric bar — computed in report.py metric_bar() from the finding's bands
            (direction-aware), or the legacy pass mark for pre-catalog JSON */

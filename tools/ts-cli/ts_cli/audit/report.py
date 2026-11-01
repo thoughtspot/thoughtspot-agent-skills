@@ -181,6 +181,8 @@ def _compact_finding(f: dict, model_index: dict, by_angle: Dict[str, str]) -> di
     if f.get("threshold"):
         cf["th"] = f["threshold"]
     cf["c"] = _categories_of(f, by_angle)
+    if f.get("evidence") == "heuristic":
+        cf["h"] = 1  # a name match or other inference: the report says so
     bar = metric_bar(f)
     if bar:
         cf["mb"] = bar

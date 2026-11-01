@@ -92,3 +92,70 @@ def test_shipped_catalog_classes():
         set(active) - HEURISTIC - MEASURE
     assert [r.id for r in active.values() if r.severity_exception] == ["S5"]
     assert all(evidence_problems(r, PROFILES) == [] for r in active.values())
+
+
+# ── findings carry their rule's evidence ────────────────────────────────────
+
+def test_findings_carry_their_rules_evidence():
+    import audit_rule_fixtures as fx
+    from audit_run_rule import run_rule
+    (s1, *_) = run_rule(fx.sec_pii_indexed_without_rls(), "S1")
+    assert s1.evidence == "heuristic" and s1.to_dict()["evidence"] == "heuristic"
+    (a4, *_) = run_rule(fx.ai_model_without_description(), "A4")
+    assert a4.evidence == "fact" and a4.to_dict()["evidence"] == "fact"
+
+
+def test_repin_does_not_copy_evidence():
+    import audit_pinned
+    pinned = audit_pinned._as_pinned({"check_id": "S1", "severity": "INFO", "evidence": "heuristic"})
+    assert "evidence" not in pinned
+
+
+def test_compacted_finding_marks_a_heuristic():
+    from ts_cli.audit.report import _compact_finding
+    base = {"check_id": "S1", "angle": "security", "severity": "INFO", "object_type": "column",
+            "object_name": "x", "object_guid": "m-1", "detail": "d"}
+    idx = {("x", "m-1"): 0}
+    assert _compact_finding({**base, "evidence": "heuristic"}, idx, {}).get("h") == 1
+    assert "h" not in _compact_finding({**base, "evidence": "fact"}, idx, {})
+    assert "h" not in _compact_finding(base, idx, {})  # JSON from before 4.2
+
+
+import report_browser  # noqa: E402
+
+needs_chrome = pytest.mark.skipif(report_browser.CHROME is None, reason="no headless Chrome")
+
+
+def _audit():
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import run_audit
+    ctx = fx.sec_pii_indexed_without_rls()
+    return run_audit(None, [m["guid"] for m in ctx.models], ["S", "A"], ctx=ctx)
+
+
+@needs_chrome
+def test_heuristic_findings_show_name_match(tmp_path):
+    from ts_cli.audit.report import render_report
+    data = _audit()
+    heuristic = sum(1 for f in data["findings"] if f["evidence"] == "heuristic")
+    assert heuristic and any(f["evidence"] != "heuristic" for f in data["findings"])
+    page = render_report(data)
+    guid = data["findings"][0]["object_guid"]
+    for route in ("crossmodel", f"model/{guid}"):
+        shown = report_browser.render(page, tmp_path, route, actions=(
+            'window.__extra = document.querySelectorAll(".view.active .evidence-tag").length;'))
+        assert shown["errors"] == [] and shown["extra"] == heuristic, (route, shown["extra"])
+        # the scorecard opens with its angle sections collapsed, so its text, not its
+        # visible text; the cross-model table shows every finding
+        text = shown["visible"] if route == "crossmodel" else shown["active_text"]
+        assert "name match" in text
+
+
+@needs_chrome
+def test_old_json_without_evidence_renders(tmp_path):
+    from ts_cli.audit.report import render_report
+    data = _audit()
+    for f in data["findings"]:
+        f.pop("evidence")
+    shown = report_browser.render(render_report(data), tmp_path, "crossmodel")
+    assert shown["errors"] == [] and "name match" not in shown["visible"]
