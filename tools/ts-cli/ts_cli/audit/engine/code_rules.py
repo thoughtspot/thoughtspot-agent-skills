@@ -393,9 +393,10 @@ def model_overlap(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """D7 — every unordered pair of Models sharing a table (@table_set), graded on the
     Jaccard similarity of their table sets by the rule's bands, as the pairwise mode
     grades. Below identical (a partial overlap), a pair is reported only when a table
-    both contain reads as a fact in either Model (@fact_table_set) — "either", because
-    the fact test counts physical measures only, so the same fact table can read as a
-    dimension in a Model that measures it through formulas. Two Models that merely
+    both contain is a fact in either Model (@fact_table_set: role `fact`, from join
+    direction) — "either", because a table's role depends on each Model's joins and
+    physical measures, so the same table can be a fact in one Model and a dimension in
+    the other. Two Models that merely
     reuse the same dimensions are not duplicates. Reported once per pair, on the
     first Model."""
     from itertools import combinations

@@ -126,9 +126,11 @@
   description: >-
     Two Models whose table sets (each table's fqn, else its name) share tables, graded
     by Jaccard similarity: HIGH when identical, MEDIUM above 0.5 but only when a table
-    both contain is a fact table (more than 3 MEASURE columns, found by alias else
-    name) in either of them — Models that only reuse the same dimensions are not
-    duplicates. Reported once per pair, on the first Model's guid.
+    both contain is a fact (from join direction: a root of the joins holding a
+    measure) in either of them — Models that only reuse the same dimensions, a header
+    holding measures included, are not duplicates. Reported once per pair, on the
+    first Model's guid. Until 2026-11 a fact was a table with more than 3 MEASURE
+    columns.
   # A code rule (code:model_overlap) because the shared-fact test applies to a pair,
   # and only below identical: the pairwise mode filters items, never pairs.
   categories: [D]
@@ -226,7 +228,9 @@
   title: Fan-out join risk (row multiplication)
   description: >-
     A join whose cardinality contains ONE_TO_MANY or MANY_TO_MANY: MEDIUM when both
-    ends read as fact tables (more than 3 MEASURE columns), INFO otherwise. A
+    ends hold measures (each end's role, from join direction, is fact or dimension
+    with measures), so one side's measures repeat across the other's rows; INFO
+    otherwise. Until 2026-11 an end counted only with more than 3 MEASURE columns. A
     referencing join takes its cardinality from the model, else from the Table's
     `joins_with` entry (exported Table TML usually carries none). Both ends are found
     by alias, else name: the declaring model table, and the table the join's `with`
@@ -244,7 +248,7 @@
   severity: {field: "@is_fact_to_fact_join", map: {true: MEDIUM}, default: INFO}
   message:
     by_severity:
-      MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
+      MEDIUM: "Fan-out risk: '{@join_from_name}' -> '{obj.with}' with {@join_cardinality} joins two tables that both hold measures"
       INFO: "{@join_cardinality} join '{@join_from_name}' -> '{obj.with}'"
   examples:
     fires: {fixture: data_fanout_fact_to_fact, severity: MEDIUM}

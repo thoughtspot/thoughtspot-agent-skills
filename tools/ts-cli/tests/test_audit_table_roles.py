@@ -88,3 +88,58 @@ def test_corpus_carries_roles():
     (m,) = corpus["models"]
     assert [(t["name"], t["role"]) for t in m["model_tables"]] == [
         ("LINES", "fact"), ("HEADER", "dimension_with_measures"), ("CUSTOMER", "dimension")]
+
+
+# ── the rules that read roles ───────────────────────────────────────────────
+
+def _d11(ctx):
+    from audit_run_rule import run_rule
+    return {(f.object_name, f.severity) for f in run_rule(ctx, "D11")}
+
+
+def test_d11_medium_when_both_ends_hold_one_to_three_measures():
+    # the old count (more than 3) called neither end a fact, so this was INFO
+    from audit_run_rule import run_rule
+    (finding,) = run_rule(_ctx(_model(lines=2, header=1)), "D11")
+    assert finding.severity == "MEDIUM"
+    assert "both hold measures" in finding.detail
+
+
+def test_d11_info_when_one_end_holds_no_measures():
+    assert {sev for _, sev in _d11(_ctx(_model(lines=5, header=0)))} == {"INFO"}
+
+
+def _overlap(name, shared, own):
+    """A Model holding the shared tables plus its own dimension, all joined from the
+    first shared table (LINES or HEADER), which then is the root."""
+    mts = [{"name": t, "fqn": f"t-{t}"} for t in shared + [own]]
+    mts[0]["joins"] = [{"with": t["name"], "cardinality": "MANY_TO_ONE"} for t in mts[1:]]
+    return {"name": name, "model_tables": mts,
+            "columns": [_col(t, 0) for t in shared] + [_col(own, 0, "ATTRIBUTE")]}
+
+
+def _d7(ctx):
+    from audit_run_rule import run_rule
+    return sorted(f.severity for f in run_rule(ctx, "D7"))
+
+
+def test_d7_medium_needs_a_shared_fact_not_a_shared_header():
+    # two Models share LINES (a root holding a measure: a fact) and CAL: 2/4 tables...
+    a, b = _overlap("A", ["LINES", "CAL", "X"], "OWN_A"), _overlap("B", ["LINES", "CAL", "X"], "OWN_B")
+    assert _d7(_ctx(a, b)) == ["MEDIUM"]
+    # ...but when the shared table holding measures is joined to (a header, here
+    # under each Model's own root), the pair shares only dimensions: no finding
+    def under_root(m, root):
+        m["model_tables"].insert(0, {"name": root, "fqn": f"t-{root}", "joins": [
+            {"with": m["model_tables"][0]["name"], "cardinality": "MANY_TO_ONE"}]})
+        m["columns"].append(_col(root, 0))
+        return m
+    shared = ["HEADER", "CAL", "X", "Y", "Z"]  # 5 of 9 tables: above 0.5, below 1
+    a = under_root(_overlap("A", list(shared), "OWN_A"), "ROOT_A")
+    b = under_root(_overlap("B", list(shared), "OWN_B"), "ROOT_B")
+    assert _d7(_ctx(a, b)) == []
+    # the same pair, with the header read as a fact, would be MEDIUM: prove the size
+    a["model_tables"].pop(0), b["model_tables"].pop(0)
+    a["model_tables"].append({"name": "ROOT_A", "fqn": "t-ROOT_A"})
+    b["model_tables"].append({"name": "ROOT_B", "fqn": "t-ROOT_B"})
+    assert _d7(_ctx(a, b)) == ["MEDIUM"]
