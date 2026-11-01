@@ -159,3 +159,23 @@ def test_old_json_without_evidence_renders(tmp_path):
         f.pop("evidence")
     shown = report_browser.render(render_report(data), tmp_path, "crossmodel")
     assert shown["errors"] == [] and "name match" not in shown["visible"]
+
+
+@needs_chrome
+def test_the_name_match_tooltip_states_no_cap_and_details_are_escaped(tmp_path):
+    from ts_cli.audit.report import render_report
+    data = _audit()
+    for f in data["findings"]:
+        if f["evidence"] == "heuristic":
+            f["severity"], f["detail"] = "CRITICAL", '<img src=x onerror="window.__pwned=1">'
+    page = render_report(data)
+    guid = data["findings"][0]["object_guid"]
+    for route in ("crossmodel", f"model/{guid}"):
+        shown = report_browser.render(page, tmp_path, route, actions=(
+            'var t = document.querySelector(".view.active .evidence-tag");'
+            'window.__extra = {title: t && t.title, img: document.querySelectorAll('
+            '".view.active img").length, pwned: !!window.__pwned};'))
+        assert shown["errors"] == [] and shown["extra"]["img"] == 0, route
+        assert shown["extra"]["pwned"] is False
+        assert "capped" not in (shown["extra"]["title"] or "")
+        assert '<img src=x onerror="window.__pwned=1">' in shown["active_text"]

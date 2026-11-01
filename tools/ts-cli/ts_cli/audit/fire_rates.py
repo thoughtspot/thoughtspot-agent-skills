@@ -17,14 +17,19 @@ Pure: counts in, counts out. Never names or guids in what it returns.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List
+
+from ts_cli.audit.catalog_evidence import as_date
 
 WARN_SHARE = 0.5
 REVIEW_DAYS = 180
 REVIEW_RISE = 0.10
 _AT_LEAST_MEDIUM = {"MEDIUM", "HIGH", "CRITICAL"}
-#: A scope whose findings carry another scope's guid.
-_COUNTED_AS = {"join": "model", "rls_column_ref": "table"}
+#: A scope whose findings carry another scope's guid, or that is counted as one: a
+#: metadata rule (P1, D8) judges Table objects, so it is a share of Tables, not of every
+#: metadata header (which include the Models). D8 reports once per group of duplicates,
+#: on the first object, so it cannot reach half and never warns: an accepted gap.
+_COUNTED_AS = {"join": "model", "rls_column_ref": "table", "metadata": "table"}
 
 
 def object_kind(scope: str) -> str:
@@ -39,22 +44,16 @@ def object_counts(ctx: Any, kinds: Iterable[str]) -> Dict[str, int]:
     return {k: sum(1 for _ in scopes.iterate(ctx, k)) for k in set(kinds) if k}
 
 
-def _as_date(value: Any) -> Optional[datetime.date]:
-    if isinstance(value, datetime.date):
-        return value
-    try:
-        return datetime.date.fromisoformat(str(value))
-    except ValueError:
-        return None
-
-
 def _review_holds(review: Any, share: float, today: datetime.date) -> bool:
+    """Under REVIEW_DAYS old (and not dated in the future), and the share not more than
+    REVIEW_RISE above the rate reviewed."""
     if not isinstance(review, dict):
         return False
-    when = _as_date(review.get("date"))
+    when = as_date(review.get("date"))
     rate = review.get("rate")
-    return (when is not None and (today - when).days <= REVIEW_DAYS
-            and isinstance(rate, (int, float)) and share <= rate + REVIEW_RISE)
+    return (when is not None and 0 <= (today - when).days <= REVIEW_DAYS
+            and isinstance(rate, (int, float)) and not isinstance(rate, bool)
+            and share <= round(rate + REVIEW_RISE, 6))
 
 
 def _row(rule: Any, found: List[dict], profile: str, counts: Dict[str, int],

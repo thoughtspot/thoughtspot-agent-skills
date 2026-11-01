@@ -105,9 +105,12 @@ is older than 180 days, or when the rate is more than 10 points above the review
 Where it runs: the snapshot lives outside the repo, so this is **opt-in**:
 `scripts/pr-ready.sh` runs it when `TS_AUDIT_SNAPSHOT` names a snapshot directory, and
 `rule-authoring.md` makes it a step when adding or regrading a rule. CI does not run it.
-On the sample today, under Spotter: A3 (89%), A6 (79%) and A1 (62%) would warn; A2 (50%,
-exactly at the line) and A4 (41%) would not; under General, A3 (89%) would. This PR adds
-reviews for those four (A3 under both assessments) with the measured rates.
+On the sample today, under Spotter: A3 (89%), A6 (80%), A1 (62%) and A2 (75 of 148 Models,
+50.7%, just over the line) would warn; A4 (41%) would not; under General, A3 (89%) would.
+This PR adds reviews for those five (A3 under both assessments) with the measured rates.
+A metadata rule (P1, D8) is counted against Tables; D8 reports once per group of
+duplicates, so it cannot reach half and never warns (an accepted gap). Only objects the
+run judges are counted: a Model or Table excluded as unreadable is not.
 
 ## Report
 
@@ -126,8 +129,8 @@ one, so a reader can tell a guess from a fact.
   assessment does not, a stale one does not, a rate 11 points above the reviewed one does
   not; a Table-scoped rule is counted against Tables; a rule with no object never warns;
   output has no names.
-- The new finding field is listed in `audit_pinned.UNCOMPARED_AS_PINNED`, so re-pinning
-  does not copy it into pins.
+- The new finding field is left out of pins (`audit_pinned.DROPPED_AS_PINNED`), so
+  re-pinning does not copy it.
 - S2/S4 fixtures fire at MEDIUM, S5's at CRITICAL; the sample replay differs from main
   only in S2's severity.
 
@@ -138,6 +141,12 @@ one, so a reader can tell a guess from a fact.
 - Classifying the rules by the table's tests (the author's list above is a starting point).
 
 ## Calls made without the product owner (check these)
+
+Disposition (2026-11-02): the product owner skipped the design questions (2026-11-01) and
+decided one call, S5's exception. The rest are the author's, unreviewed by the product
+owner at merge; they are listed in the PR for that review, and each is a catalog or
+constant change if overturned.
+
 
 - Three classes, and "weakest class needed to fire" decides a mixed rule.
 - S5 is the one exception (product owner, 2026-11-02); exceptions need a reason and a

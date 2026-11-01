@@ -18,7 +18,7 @@ the cap must be enforced there too. Gate-safe: standard library and catalog modu
 from __future__ import annotations
 
 import datetime
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Optional
 
 from ts_cli.audit.catalog_code import emitted_severities
 from ts_cli.audit.catalog_model import Rule, profile_override
@@ -30,15 +30,25 @@ _ORDER = ("INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 EXCEPTION_KEYS = {"reason", "approved"}
 
 
-def is_iso_date(value: Any) -> bool:
-    """A YYYY-MM-DD date (a YAML date, or a string in that form)."""
+def as_date(value: Any) -> Optional[datetime.date]:
+    """A YYYY-MM-DD date — a YAML date, or a string in that form — else None. A
+    datetime is not a date here (YAML reads `2026-11-02 10:00:00` as one): the one
+    parser for catalog dates, shared with fire_rates.py."""
+    if isinstance(value, datetime.datetime):
+        return None
     if isinstance(value, datetime.date):
-        return True
+        return value
+    text = str(value)
+    if len(text) != 10:
+        return None
     try:
-        datetime.date.fromisoformat(str(value))
-        return len(str(value)) == 10
+        return datetime.date.fromisoformat(text)
     except ValueError:
-        return False
+        return None
+
+
+def is_iso_date(value: Any) -> bool:
+    return as_date(value) is not None
 
 
 def _above_cap(rule: Rule, profiles: Iterable[str]) -> List[str]:

@@ -310,7 +310,7 @@ def fire_rates_cmd(
 ) -> None:
     """How often each rule fires on its objects in a snapshot, and which warn: a rule at
     MEDIUM or above on more than half of them, without a current fire_rate_reviewed.
-    JSON rows to stdout (counts only), the warnings to stderr; always exits 0."""
+    JSON rows to stdout (counts only), the warnings to stderr; exits 0 whatever it finds."""
     import datetime
 
     from ts_cli.audit.fire_rates import fire_rates, object_counts, object_kind
@@ -323,7 +323,9 @@ def fire_rates_cmd(
     profile = _assessment(assessment if assessment is not None else ctx.assessment)
     data = _replay(snapshot_in, None, assessment)
     cat = _catalog()
-    counts = object_counts(ctx, {object_kind(r.scope) for r in cat.rules.values()})
+    from ts_cli.audit.engine.run import readable
+    # count what the run judged: a Model or Table excluded as unreadable is not an object
+    counts = object_counts(readable(ctx), {object_kind(r.scope) for r in cat.rules.values()})
     rows = fire_rates(data["findings"], cat, profile, counts, datetime.date.today())
     for r in rows:
         if r["warns"]:

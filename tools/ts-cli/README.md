@@ -4688,13 +4688,14 @@ ts audit report audit.json -o report.html
 
 **Fire rates.** `ts audit fire-rates --snapshot-in <dir> [--assessment general|spotter]`
 replays a snapshot and reports, per rule, how many of its objects it fires on (Models for
-a Model, column or join rule, Tables for a Table or RLS rule, Answers, Sets, Table objects
-for a metadata rule) and at which severities. A rule at MEDIUM or above on more than half
+a Model, column or join rule, Tables for a Table, RLS or metadata rule, Answers, Sets) and at which severities. A rule at MEDIUM or above on more than half
 of its objects **warns** (stderr) unless its catalog entry carries a current
 `fire_rate_reviewed` for that assessment: under 180 days old, and the rate not more than
 10 points above the one reviewed. A rule whose findings name no object (H8, D12) is
-listed but never warns. JSON rows to stdout — counts only, no names or guids — and it
-always exits 0. `scripts/pr-ready.sh` runs it for both assessments when
+listed but never warns, and so does D8 (reported once per group of duplicates, it cannot
+reach half). Only objects the run judges are counted (Models and Tables excluded as
+unreadable are not). JSON rows to stdout — counts only, no names or guids — and it exits 0
+whatever it finds (1 on a usage error or an unreadable snapshot). `scripts/pr-ready.sh` runs it for both assessments when
 `TS_AUDIT_SNAPSHOT` names a snapshot directory (kept outside the repo).
 
 **What is fetched.** Model TML with its associated Table TML, metadata headers and

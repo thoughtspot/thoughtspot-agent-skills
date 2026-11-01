@@ -647,3 +647,22 @@ def test_history_passes_once_the_description_moves_with_the_bands(tmp_path):
         "pass mark (Spotter-ready 95%, General 60%)."))
     res = _run_base(root, "HEAD")
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_the_gate_enforces_the_severity_rubric(tmp_path):
+    """The severity rubric (PR 4.2), through the gate itself: a heuristic rule graded
+    above MEDIUM, and a malformed fire_rate_reviewed, each fail check_audit_catalog."""
+    root = _copy_repo(tmp_path)
+    rules = root / AUDIT_REL / "catalog" / "rules"
+    sec = (rules / "security.yaml").read_text()
+    raised = "      - {op: gt, value: 0, severity: HIGH}\n  message: \"RLS bypass"
+    sec = sec.replace("      - {op: gt, value: 0, severity: MEDIUM}\n  message: \"RLS bypass", raised)
+    assert raised in sec
+    (rules / "security.yaml").write_text(sec)
+    ai = (rules / "ai.yaml").read_text()
+    assert "rate: 0.89, note" in ai
+    (rules / "ai.yaml").write_text(ai.replace("rate: 0.89, note", "rate: 89, note", 1))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert "S4: a heuristic rule grades at most MEDIUM" in res.stdout and "HIGH" in res.stdout
+    assert "A3: fire_rate_reviewed" in res.stdout and ".rate must be" in res.stdout

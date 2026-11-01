@@ -35,7 +35,7 @@ def _row(rows, rid):
 def test_object_kind_by_scope():
     assert [object_kind(s) for s in ("model", "model.column", "join", "table.rls_rule",
                                      "rls_column_ref", "metadata", "answer.formula", "set")] \
-        == ["model", "model", "model", "table", "table", "metadata", "answer", "set"]
+        == ["model", "model", "model", "table", "table", "table", "answer", "set"]
 
 
 def test_more_than_half_warns_half_does_not():
@@ -122,3 +122,55 @@ def test_the_command_reads_a_snapshot(tmp_path):
     # one Model, no description: A4 fires on all of it, unreviewed, so it warns
     assert (a4["objects"], a4["fired"], a4["warns"]) == (1, 1, True)
     assert payload["assessment"] == "general"
+
+
+# ── second review ────────────────────────────────────────────────────────────
+
+def test_metadata_rules_are_counted_against_tables():
+    assert object_kind("metadata") == "table"
+
+
+def test_only_judged_objects_are_counted(tmp_path):
+    """A Model the run does not judge (malformed TML, BL-406) is not in the denominator."""
+    from typer.testing import CliRunner
+
+    import audit_rule_fixtures as fx
+    from ts_cli.audit.snapshot import write_snapshot
+    from ts_cli.commands.audit import app
+    ctx = fx.ai_model_without_description()
+    bad = copy.deepcopy(ctx.models[0])
+    bad["guid"] = "m-bad"
+    bad["model"]["name"] = "Unreadable"
+    bad["model"]["columns"] = [{"name": "x", "column_id": "T::X", "properties": ["oops"]}]
+    ctx.models.append(bad)
+    ctx.model_guids = [m["guid"] for m in ctx.models]
+    write_snapshot(ctx, tmp_path / "snap", ["A", "D", "H", "P", "S"])
+    res = CliRunner().invoke(app, ["fire-rates", "--snapshot-in", str(tmp_path / "snap"),
+                                   "--assessment", "general"])
+    a4 = _row(json.loads(res.stdout[res.stdout.index("{"):])["rules"], "A4")
+    assert (a4["objects"], a4["fired"], a4["warns"]) == (1, 1, True)
+
+
+def test_a_review_dated_in_the_future_or_as_a_datetime_does_not_hold():
+    three = [_f("A4", f"m-{i}") for i in range(3)]
+    for date in ("2099-01-01", datetime.datetime(2026, 10, 1, 10, 0)):
+        cat = _cat(general={"date": date, "rate": 0.75, "note": "x"})
+        assert _row(fire_rates(three, cat, "general", COUNTS, TODAY), "A4")["warns"] is True
+
+
+def test_review_boundaries():
+    three = [_f("A4", f"m-{i}") for i in range(3)]  # 0.75
+
+    def warns(date, rate):
+        cat = _cat(general={"date": date, "rate": rate, "note": "x"})
+        return _row(fire_rates(three, cat, "general", COUNTS, TODAY), "A4")["warns"]
+    assert warns("2026-05-06", 0.75) is False   # exactly 180 days
+    assert warns("2026-05-05", 0.75) is True    # 181
+    assert warns("2026-10-01", 0.65) is False   # exactly 10 points above
+    assert warns("2026-10-01", 0.6499) is True
+
+
+def test_a_datetime_review_date_fails_the_gate():
+    rule = dataclasses.replace(CAT.rules["A3"], fire_rate_reviewed={
+        "general": {"date": datetime.datetime(2026, 11, 2, 10, 0), "rate": 0.5, "note": "x"}})
+    assert fire_rate_problems(rule, list(CAT.profiles))
