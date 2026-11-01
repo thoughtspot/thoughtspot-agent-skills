@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.fields import _model_of, register
+from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
 
 
@@ -64,18 +64,21 @@ def _join_from_name(item: dict, ctx: Any) -> Any:
 
 
 @register("is_fact_to_fact_join", uses=(), values=(False, True),
-          label="the join links two fact tables")
+          label="the join links two tables that both hold measures")
 def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
-    """Join: both ends read as fact tables (more than 3 MEASURE columns — tml.
-    table_role), each end by its key (alias, else name): the declaring table's, and
-    the table the join's `with` names (tml.join_target_key). By name until 2026-10, so
-    an aliased end read as "unknown" (BL-305)."""
+    """Join: both ends hold measures — each end's role (model_roles) is `fact` or
+    `dimension_with_measures` — each end by its key (alias, else name): the declaring
+    table's, and the table the join's `with` names (tml.join_target_key). Under roles
+    from join direction a root is never joined to, so "two facts" would never hold; two
+    tables of measures joined, one side's repeating, is what the field always meant.
+    Until 2026-11 an end was a fact when it had more than 3 MEASURE columns."""
     model = _model_of(item)
-    cols = model.get("columns") or []
+    roles = model_roles(model, ctx)
     to_table = tml.join_target_key(model.get("model_tables") or [],
                                    (item.get("obj") or {}).get("with", ""))
-    return (tml.table_role(cols, _join_from_name(item, ctx)) == "fact"
-            and tml.table_role(cols, to_table) == "fact")
+    held = ("fact", "dimension_with_measures")
+    return all((roles.get(k) or {}).get("role") in held
+               for k in (_join_from_name(item, ctx), to_table))
 
 
 # ── model tables (D5, D6, D10) ──────────────────────────────────────────────
@@ -125,12 +128,12 @@ def _attribute_count(table_cols: List[dict]) -> int:
 
 
 @register("table_role", uses=(),
-          label="the table's role (fact or dimension)")
+          label="the table's role (fact, factless, dimension or dimension with measures)")
 def _table_role(item: dict, ctx: Any) -> str:
-    """Model table: "fact" (more than 3 MEASURE columns), "dimension", or "unknown"
-    (no columns), its columns found by its key — alias, else name (tml.table_role)."""
-    cols, _ = _table_columns(item)
-    return tml.table_role(cols, item.get("name"))
+    """Model table: its role from join direction (model_roles), by its key — alias,
+    else name: fact, factless, dimension or dimension_with_measures ("" for a table
+    the classifier skipped as malformed)."""
+    return (model_roles(_model_of(item), ctx).get(item.get("name")) or {}).get("role", "")
 
 
 @register("table_column_count", uses=(),
@@ -183,13 +186,11 @@ def _table_set(item: dict, ctx: Any) -> list:
           label="the Model's fact tables")
 def _fact_table_set(item: dict, ctx: Any) -> list:
     """Model: the identity (as @table_set reads it: `fqn`, else `name`) of each model
-    table that reads as a fact table — more than 3 MEASURE columns, its columns found
-    by its key, alias else name (tml.table_key; not the name-only lookup BL-305
-    records). Formula measures are not counted, as in every audit fact test today."""
+    table whose role (model_roles, by key: alias else name) is `fact`."""
     model = item.get("obj") or {}
-    cols = model.get("columns") or []
+    roles = model_roles(model, ctx)
     return [t.get("fqn", t.get("name", "")) for t in model.get("model_tables") or []
-            if tml.table_role(cols, tml.table_key(t)) == "fact"]
+            if (roles.get(tml.table_key(t)) or {}).get("role") == "fact"]
 
 
 @register("physical_table_key", uses=(),

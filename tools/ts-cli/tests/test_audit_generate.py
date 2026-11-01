@@ -352,7 +352,7 @@ def test_shipped_report_meta_and_doc_show_no_engine_identifiers(meta, cat):
     ({"field": "@join_type", "map": {"OUTER": "HIGH"}, "default": "INFO"},
      "HIGH when the join type is OUTER; otherwise INFO"),
     ({"field": "@is_fact_to_fact_join", "map": {True: "MEDIUM"}, "default": "INFO"},
-     "MEDIUM when the join links two fact tables; otherwise INFO"),
+     "MEDIUM when the join links two tables that both hold measures; otherwise INFO"),
     ({"field": "@owning_table_has_rls", "map": {False: "HIGH"}, "default": "INFO"},
      "HIGH unless the column's table has row-level security; otherwise INFO"),
     ({"field": "@credential_term", "map": {None: "LOW"}, "default": "HIGH"},

@@ -315,26 +315,31 @@ def _has_date_constraint(item: dict, ctx: Any) -> bool:
     return "date_range_condition" in str((item.get("obj") or {}).get("constraints") or {})
 
 
-def _fact_table_names(item: dict) -> set:
-    model = item.get("obj") or {}
-    return cached("fact_table_names", model, tml.fact_tables,
-                  model.get("columns") or [], model.get("model_tables") or [])
+def model_roles(model: dict, ctx: Any) -> Dict[str, dict]:
+    """The Model's table roles by key (tml.model_table_roles), once per Model per run."""
+    return cached("table_roles", model, tml.model_table_roles, model,
+                  getattr(ctx, "tables", None) or {})
+
+
+def _fact_table_names(item: dict, ctx: Any) -> set:
+    roles = model_roles(item.get("obj") or {}, ctx)
+    return {key for key, r in roles.items() if r["role"] == "fact"}
 
 
 @register("fact_tables", uses=(),
           label="the fact tables")
 def _fact_tables(item: dict, ctx: Any) -> List[str]:
-    """Model: the distinct `model_tables[].name`s that read as fact tables
-    (tml.fact_tables — keyed by name, not alias), sorted; a name list in messages."""
+    """Model: the keys (alias, else name) of the tables whose role is `fact` — a root of
+    the joins holding a measure (model_roles) — sorted; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports this module
-    return NameList(sorted(_fact_table_names(item)))
+    return NameList(sorted(_fact_table_names(item, ctx)))
 
 
 @register("fact_table_count", uses=(),
           label="the number of fact tables")
 def _fact_table_count(item: dict, ctx: Any) -> int:
-    """Model: how many distinct table names read as fact tables (see @fact_tables)."""
-    return len(_fact_table_names(item))
+    """Model: how many tables' role is `fact` (see @fact_tables)."""
+    return len(_fact_table_names(item, ctx))
 
 
 @register("varchar_join_keys", uses=(),

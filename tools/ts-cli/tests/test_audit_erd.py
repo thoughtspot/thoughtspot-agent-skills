@@ -202,7 +202,7 @@ def test_erd_fix_line_is_the_remediation_else_the_grading_never_an_engine_id():
     _inject_findings_into_erd(corpus, found, checks)
     recs = {f["check"]: f["rec"] for f in corpus["models"][0]["erd"]["findings"]}
     assert recs["S1"] == checks["S1"]["remediation"]
-    assert recs["D11"] == "MEDIUM when the join links two fact tables; otherwise INFO"
+    assert recs["D11"] == "MEDIUM when the join links two tables that both hold measures; otherwise INFO"
     assert recs["D3"].startswith("HIGH per full outer join")
     assert recs["D1"] == "HIGH > 50, MEDIUM > 30"
     leaks = {cid: r for cid, r in recs.items() if re.search(r"@\w|\bcode:\w", r)}

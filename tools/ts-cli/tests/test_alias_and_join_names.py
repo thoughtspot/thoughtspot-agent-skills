@@ -34,10 +34,11 @@ def test_table_key_prefers_the_alias():
 
 def test_table_role_resolves_an_aliased_table():
     m = _aliased_model()["model"]
-    cols, mts = m["columns"], m["model_tables"]
-    assert tml.table_role(cols, tml.table_key(mts[1])) == "dimension"
-    # Keying on the physical name is what made it invisible.
-    assert tml.table_role(cols, mts[1]["name"]) == "unknown"
+    mts = m["model_tables"]
+    roles = tml.model_table_roles(m, {})
+    assert roles[tml.table_key(mts[1])]["role"] == "dimension"
+    # Keyed by alias: the physical name, shared with the other copy, is not a key.
+    assert tml.table_key(mts[1]) != mts[1]["name"]
 
 
 # ── D10 must not call a populated aliased table a zero-column leaf ─────────
@@ -51,7 +52,7 @@ def test_d10_does_not_call_an_aliased_table_a_zero_column_leaf():
 def test_d6_sees_the_columns_of_an_aliased_table():
     """Not asserting a finding — asserting the table is no longer 'unknown'."""
     m = _aliased_model()["model"]
-    assert tml.table_role(m["columns"], "SHIP_TO") != "unknown"
+    assert tml.model_table_roles(m, {})["SHIP_TO"]["attributes"] > 0
     run_rule(fx.data_model_aliased_role_playing(), "D6")  # must not raise
 
 
