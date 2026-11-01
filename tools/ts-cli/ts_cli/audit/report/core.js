@@ -55,6 +55,14 @@ function el(tag,cls,html){
   return e;
 }
 
+/* A finding whose rule rests on an inference (evidence: heuristic — a name or wording
+   pattern) carries `h`; the report says so, so a reader can tell a guess from a fact. */
+var NAME_MATCH_NOTE = "Graded on a name or wording pattern, not on something the TML states: "+
+  "check it before acting.";
+function nameMatchTag(f){
+  return f && f.h ? '<span class="evidence-tag" title="'+esc(NAME_MATCH_NOTE)+'">name match</span>' : "";
+}
+
 function esc(s){
   if(!s) return "";
   var d = document.createElement("div");

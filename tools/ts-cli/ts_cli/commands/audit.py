@@ -299,3 +299,38 @@ def report(
         typer.echo(f"Report written to {output} ({size_kb:.0f} KB)", err=True)
     else:
         print(html)
+
+
+@app.command("fire-rates")
+def fire_rates_cmd(
+    snapshot_in: Path = typer.Option(
+        ..., "--snapshot-in", help="An audit snapshot directory (ts audit run --snapshot-out)"),
+    assessment: Optional[str] = typer.Option(
+        None, "--assessment", help="spotter or general (default: the snapshot's own)"),
+) -> None:
+    """How often each rule fires on its objects in a snapshot, and which warn: a rule at
+    MEDIUM or above on more than half of them, without a current fire_rate_reviewed.
+    JSON rows to stdout (counts only), the warnings to stderr; exits 0 whatever it finds."""
+    import datetime
+
+    from ts_cli.audit.fire_rates import fire_rates, object_counts, object_kind
+    from ts_cli.audit.snapshot import SnapshotError, read_snapshot_needs
+
+    try:
+        ctx, _, _ = read_snapshot_needs(snapshot_in)
+    except SnapshotError as exc:
+        raise SystemExit(f"Cannot read snapshot: {exc}") from exc
+    profile = _assessment(assessment if assessment is not None else ctx.assessment)
+    data = _replay(snapshot_in, None, assessment)
+    cat = _catalog()
+    from ts_cli.audit.engine.run import readable
+    # count what the run judged: a Model or Table excluded as unreadable is not an object
+    counts = object_counts(readable(ctx), {object_kind(r.scope) for r in cat.rules.values()})
+    rows = fire_rates(data["findings"], cat, profile, counts, datetime.date.today())
+    for r in rows:
+        if r["warns"]:
+            typer.echo(f"WARN  {r['rule']} fires at MEDIUM+ on {r['fired']} of {r['objects']} "
+                       f"{r['kind']}s ({r['share']:.0%}) under {profile}, with no current "
+                       f"fire_rate_reviewed", err=True)
+    typer.echo(f"{sum(r['warns'] for r in rows)} rule(s) warn under {profile}", err=True)
+    typer.echo(json.dumps({"assessment": profile, "rules": rows}, indent=2))

@@ -44,7 +44,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
 # in typer or requests — a code rule importing more must do so inside its function.
 GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "catalog_code.py", "catalog_forms.py", "catalog_uses.py", "catalog_reads.py",
-                "catalog_consistency.py", "engine/tml.py",
+                "catalog_consistency.py", "catalog_evidence.py", "engine/tml.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/code_rules.py", "engine/code_rules_human.py",
@@ -116,6 +116,7 @@ def test_needs_only_the_catalog_modules(tmp_path):
 GOOD_EACH_RULE = """\
 - id: A99
   title: An indexed column
+  evidence: fact
   categories: [A]
   scope: model.column
   aggregate: {mode: each, where: {field: "@is_indexed", truthy: true}}
@@ -199,6 +200,7 @@ def test_missing_catalog_fails(tmp_path):
 CODE_RULE = """\
 - id: D99
   title: A code rule
+  evidence: fact
   categories: [D]
   scope: model
   implementation: code:{name}
@@ -645,3 +647,22 @@ def test_history_passes_once_the_description_moves_with_the_bands(tmp_path):
         "pass mark (Spotter-ready 95%, General 60%)."))
     res = _run_base(root, "HEAD")
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_the_gate_enforces_the_severity_rubric(tmp_path):
+    """The severity rubric (PR 4.2), through the gate itself: a heuristic rule graded
+    above MEDIUM, and a malformed fire_rate_reviewed, each fail check_audit_catalog."""
+    root = _copy_repo(tmp_path)
+    rules = root / AUDIT_REL / "catalog" / "rules"
+    sec = (rules / "security.yaml").read_text()
+    raised = "      - {op: gt, value: 0, severity: HIGH}\n  message: \"RLS bypass"
+    sec = sec.replace("      - {op: gt, value: 0, severity: MEDIUM}\n  message: \"RLS bypass", raised)
+    assert raised in sec
+    (rules / "security.yaml").write_text(sec)
+    ai = (rules / "ai.yaml").read_text()
+    assert "rate: 0.89, note" in ai
+    (rules / "ai.yaml").write_text(ai.replace("rate: 0.89, note", "rate: 89, note", 1))
+    res = _run(root)
+    assert res.returncode == 1, res.stdout
+    assert "S4: a heuristic rule grades at most MEDIUM" in res.stdout and "HIGH" in res.stdout
+    assert "A3: fire_rate_reviewed" in res.stdout and ".rate must be" in res.stdout

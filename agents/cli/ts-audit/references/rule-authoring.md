@@ -243,6 +243,44 @@ grading.
 
 ---
 
+## Evidence and the severity cap
+
+Every active rule declares `evidence:` — what its findings rest on (the severity rubric,
+2026-11; `ts_cli/audit/catalog_evidence.py`):
+
+| Class | The finding rests on | Examples |
+|---|---|---|
+| `fact` | something the TML or metadata states, read exactly (normalising case and whitespace is still exact) | A4, D8, S10, H8 |
+| `measure` | a count, share or ratio the TML states, graded against a pass mark the catalog chooses | A1, P4, P8, D7 |
+| `heuristic` | an inference: a name pattern, a role guess, a similarity | S1, S2, H1, H10 |
+
+A rule that combines kinds takes the **weakest one it needs to fire**: S2 needs a column to
+be PII, which only a name pattern says, so it is `heuristic` though "indexed" and "no RLS"
+are facts. A role read from declared joins and measures (PR 4.1) is a fact, not a guess.
+
+**A heuristic rule grades at most MEDIUM** under every profile, whichever way the severity
+is reached (bands, a severity map, a fixed severity, a code rule's registered severities, a
+profile override); the gate refuses more. The one way past it is an approved exception,
+shown in the generated catalog doc:
+
+```yaml
+severity_exception:               # S5
+  reason: A real credential in an analytics Model is severe enough that a name match alone warrants it.
+  approved: 2026-11-02            # the date the product owner approved it
+```
+
+**Fire rates.** After adding or regrading a rule, run
+`ts audit fire-rates --snapshot-in <snapshot>` under both assessments (or set
+`TS_AUDIT_SNAPSHOT` and run `scripts/pr-ready.sh`). A rule at MEDIUM or above on more
+than half of its objects warns: either it is mis-calibrated, or it is telling the reader
+something true of the whole estate. In the second case record why, per assessment, with
+the rate you measured; the review lapses after 180 days or a rise of more than 10 points:
+
+```yaml
+fire_rate_reviewed:               # A3
+  spotter: {date: 2026-11-02, rate: 0.89, note: "Most Models have no Spotter coaching yet; ..."}
+```
+
 ## `requires` vs `uses` — what the audit fetches
 
 The audit fetches, for the rules that will run, the union of their `requires` and `uses`,

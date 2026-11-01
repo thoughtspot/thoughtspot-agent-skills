@@ -45,7 +45,7 @@ def test_s2_trips_on_an_indexed_pii_column_with_no_table_rls():
     findings = run_rule(fx.sec_pii_indexed_without_rls(), "S2")
     assert len(findings) == 1
     assert findings[0].check_id == "S2"
-    assert findings[0].severity == "HIGH"
+    assert findings[0].severity == "MEDIUM"  # a name match, capped (2026-11)
     assert "WITHOUT table RLS" in findings[0].detail
 
 

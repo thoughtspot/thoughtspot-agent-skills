@@ -256,7 +256,17 @@ def _rule_row(cat: Catalog, rule: Rule, category: str) -> str:
     if also:
         what += f" (also in {', '.join(also)})"
     return "| " + " | ".join(_cell(v) for v in (
-        rule.id, what, meta["thresholds"], meta["message"], rule.remediation)) + " |"
+        rule.id, _evidence_cell(rule), what, meta["thresholds"], meta["message"],
+        rule.remediation)) + " |"
+
+
+def _evidence_cell(rule: Rule) -> str:
+    """The rule's evidence class (the severity rubric, PR 4.2), and an approved exception
+    to the heuristic cap with its date and reason."""
+    exc = rule.severity_exception
+    if not exc:
+        return rule.evidence
+    return f"{rule.evidence} (exception, approved {exc.get('approved')}: {exc.get('reason')})"
 
 
 def _category_section(cat: Catalog, cid: str) -> List[str]:
@@ -264,8 +274,8 @@ def _category_section(cat: Catalog, cid: str) -> List[str]:
     rows = [_rule_row(cat, r, cid) for r in cat.rules.values()
             if r.status == "active" and cid in r.categories]
     return [f"### {category.label} ({cid})", "", category.description, "",
-            "| ID | What it detects | Severity | Finding text | Remediation |",
-            "|---|---|---|---|---|", *rows, ""]
+            "| ID | Evidence | What it detects | Severity | Finding text | Remediation |",
+            "|---|---|---|---|---|---|", *rows, ""]
 
 
 def _threshold_section(cat: Catalog) -> List[str]:

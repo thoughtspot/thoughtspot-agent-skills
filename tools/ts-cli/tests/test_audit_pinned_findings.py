@@ -246,7 +246,7 @@ S_PROBES = [
     ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
      and f["object_name"] == "email_no_id" and f["severity"] == "INFO"),
     ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
-     and f["object_name"] == "email_x" and f["severity"] == "HIGH"),
+     and f["object_name"] == "email_x" and f["severity"] == "MEDIUM"),
     ("sec_owning_table_edges", lambda f: f["check_id"] == "S2"
      and f["object_name"] == "email_y" and f["severity"] == "INFO"),
     # S5: `token` is HIGH, the other words CRITICAL, matched in any case

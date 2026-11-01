@@ -162,9 +162,14 @@ def catalog_by_rule(build, category: str, profile: str):
 UNCOMPARED_AS_PINNED = {"categories": [], "bands": None}
 
 
+#: Keys left out of a pin altogether: added after the pin was taken, and compared nowhere
+#: (the evidence class is the catalog's, not the finding's — PR 4.2).
+DROPPED_AS_PINNED = {"evidence"}
+
+
 def _as_pinned(finding: dict) -> dict:
     return {k: (UNCOMPARED_AS_PINNED[k] if k in UNCOMPARED_AS_PINNED else v)
-            for k, v in finding.items()}
+            for k, v in finding.items() if k not in DROPPED_AS_PINNED}
 
 
 def current(build, rule_id: str, profile: str) -> Entry:

@@ -31,7 +31,7 @@ _EXAMPLES = {"fires": {"fixture": "f", "profile": "spotter", "severity": "HIGH"}
 
 
 def _rule(rid: str, **body) -> dict:
-    rule = {"id": rid, "title": f"Rule {rid}", "categories": ["A"],
+    rule = {"id": rid, "title": f"Rule {rid}", "evidence": "fact", "categories": ["A"],
             "requires": ["model_tml"], "examples": copy.deepcopy(_EXAMPLES)}
     rule.update(body)
     return rule

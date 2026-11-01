@@ -94,4 +94,4 @@ def test_s2_sees_table_rls_through_an_alias():
 def test_s2_still_reports_a_table_with_no_rls():
     import audit_rule_fixtures as fx
     findings = run_rule(fx.sec_alias_table_without_rls(), "S2")
-    assert len(findings) == 1 and findings[0].severity == "HIGH"
+    assert len(findings) == 1 and findings[0].severity == "MEDIUM"  # capped, 2026-11

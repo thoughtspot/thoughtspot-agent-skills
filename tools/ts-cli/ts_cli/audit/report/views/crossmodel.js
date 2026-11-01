@@ -191,6 +191,7 @@ function buildCrossModel(D, initialFilters){
     /* Detail cell */
     var tdDetail = el("td","col-detail detail-cell");
     tdDetail.textContent = f.d || "";
+    if(f.h) tdDetail.insertAdjacentHTML("beforeend", nameMatchTag(f));
     tr.appendChild(tdDetail);
 
     return tr;

@@ -135,7 +135,8 @@ def wide_registered():
 
 def _code_rule_entry(**body) -> dict:
     rule = {
-        "id": "D99", "title": "Synthetic wide model (code rule)", "categories": ["D", "P"],
+        "id": "D99", "title": "Synthetic wide model (code rule)", "evidence": "measure",
+        "categories": ["D", "P"],
         "requires": ["model_tml"], "implementation": f"code:{WIDE}", "scope": "model",
         "bands": {"direction": "lower_is_better", "unit": "count",
                   "levels": [{"op": "gt", "value": 75, "severity": "MEDIUM"}]},
@@ -155,7 +156,8 @@ def _code_rule_entry(**body) -> dict:
 def _ratio_entry(**body) -> dict:
     """A declarative ratio rule (measure AI-context coverage)."""
     rule = {
-        "id": "A98", "title": "Synthetic measure AI context", "categories": ["A"],
+        "id": "A98", "title": "Synthetic measure AI context", "evidence": "measure",
+        "categories": ["A"],
         "requires": ["model_tml"], "scope": "model",
         "aggregate": {
             "mode": "ratio", "over": "model.column",
