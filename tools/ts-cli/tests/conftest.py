@@ -51,3 +51,8 @@ def isolated_dbt_artifact_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cloud_api, "artifact_cache_path",
         lambda ctx, run_id, name: tmp_path / f"artifact_{ctx.slug}_{run_id}_{name}")
+    # `--file <dir>` packs an upload ZIP into `private_cache_dir()`, under the
+    # OS temp dir and keyed on the source path, so every run's fresh tmp_path
+    # left another archive in the real per-user cache. Point it here instead.
+    import tempfile
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))

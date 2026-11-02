@@ -37,7 +37,7 @@ def test_s5_passes_no_credentials():
 
 def test_s4_flags_bypass_with_pii():
     findings = run_rule(fx.sec_bypass_with_pii(), "S4")
-    assert any(f.check_id == "S4" and f.severity == "HIGH" for f in findings)
+    assert any(f.check_id == "S4" and f.severity == "MEDIUM" for f in findings)  # capped, 2026-11
 
 
 def test_s10_flags_bypass():

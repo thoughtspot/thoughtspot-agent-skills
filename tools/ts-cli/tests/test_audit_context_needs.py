@@ -144,7 +144,8 @@ def test_needs_for_is_the_union_of_the_selected_rules_requires():
 #: table with it.
 SHIPPED_NEEDS = {
     "A": {"model_tml", "ai_instructions"},
-    "D": {"model_tml", "metadata"},
+    # D15 (duplicate Table-level joins, 2026-11) declares Table TML, always fetched anyway.
+    "D": {"model_tml", "metadata", "table_tml"},
     "H": {"model_tml", "dependents", "sets", "answers"},
     "P": {"model_tml", "metadata", "table_tml"},
     # S8 and S9, the Security rules that declared Table TML, retired 2026-10 (Table TML

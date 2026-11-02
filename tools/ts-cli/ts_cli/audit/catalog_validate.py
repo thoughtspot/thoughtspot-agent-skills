@@ -81,6 +81,9 @@ from ts_cli.audit.catalog_code import (  # noqa: F401  (re-exported)
     known_code_rules,
     rule_message_problems,
 )
+from ts_cli.audit.catalog_evidence import (  # noqa: F401  (re-exported)
+    evidence_problems, fire_rate_problems,
+)
 from ts_cli.audit.catalog_uses import data_declaration_problems, registry_read_problems
 from ts_cli.audit.catalog_consistency import (
     category_prose_problems, rule_consistency_problems,
@@ -122,7 +125,8 @@ VIEWS = ["duplicates", "cleanup"]
 RULE_KEYS = {
     "id", "title", "description", "status", "categories", "requires", "uses", "implementation",
     "scope", "aggregate", "bands", "severity", "profiles", "message", "legacy_threshold",
-    "parameters", "remediation", "examples", "views",
+    "parameters", "remediation", "examples", "views", "evidence", "severity_exception",
+    "fire_rate_reviewed",
 }
 CATEGORY_KEYS = {"id", "label", "order", "description", "angle_key"}
 PROFILE_KEYS = {"id", "label", "default", "description"}
@@ -438,7 +442,9 @@ def rule_problems(rule: Rule, cat: Catalog) -> List[str]:
             + _engine_problems(rule, cat) + bands_problems(rule.bands, "bands")
             + _severity_problems(rule.severity, "severity")
             + _profile_override_problems(rule, cat) + _examples_problems(rule, cat)
-            + rule_consistency_problems(rule, cat))
+            + rule_consistency_problems(rule, cat)
+            + evidence_problems(rule, cat.profiles)
+            + fire_rate_problems(rule, cat.profiles))
     return [f"{rule.source_file}: {rule.id}: {m}" for m in msgs]
 
 

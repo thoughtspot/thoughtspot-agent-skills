@@ -100,6 +100,13 @@ class Rule:
     remediation: str = ""
     examples: Dict[str, Any] = field(default_factory=dict)
     views: List[str] = field(default_factory=list)
+    # The severity rubric (PR 4.2): fact | measure | heuristic, and a heuristic rule's
+    # approved exception to the MEDIUM cap ({reason, approved}). See catalog_evidence.
+    evidence: str = ""
+    severity_exception: Optional[Dict[str, Any]] = None
+    # Per assessment, why a rule firing on most of its objects is expected:
+    # {profile id: {date, rate, note}} (fire_rates.py; lapses after 180 days or a rise).
+    fire_rate_reviewed: Optional[Dict[str, Any]] = None
     source_file: str = ""
 
 
@@ -256,6 +263,9 @@ def _rule_from_dict(d: Dict[str, Any], file: str) -> Rule:
         remediation=get("remediation", str, ""),
         examples=dict(get("examples", dict, {})),
         views=list(get("views", list, [])),
+        evidence=get("evidence", str, ""),
+        severity_exception=d.get("severity_exception"),
+        fire_rate_reviewed=d.get("fire_rate_reviewed"),
         source_file=file,
     )
 

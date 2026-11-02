@@ -987,7 +987,7 @@ function showTable(id){
   const keys=allCols.filter(c=>c.key),measures=allCols.filter(c=>!c.key&&c.role==="MEASURE"),
     formulas=allCols.filter(c=>!c.key&&c.role==="FORMULA"),attrs=allCols.filter(c=>!c.key&&c.role!=="MEASURE"&&c.role!=="FORMULA");
   let h=`<button class="backlink" id="back">← Overview</button><h2>${esc(t.id)}</h2>
-    <div style="margin:2px 0 14px;display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${t.kind}">${t.kind==="fact"?"Fact table":"Dimension"}</span>
+    <div style="margin:2px 0 14px;display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${t.kind}"${t.role_note?` title="${esc(t.role_note)}"`:""}>${t.role_label?esc(t.role_label):(t.kind==="fact"?"Fact table":"Dimension")}</span>
     ${t.rls&&t.rls.length?'<span class="pill rls">🔒 Secured</span>':""}
     ${t.is_sql_view?'<span class="pill" style="color:#0D9488;background:#F0FDFA;border-color:#99F6E4">SQL View</span>':""}
     ${t.alias_of?`<span class="pill" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE">Alias of ${esc(t.alias_of)}</span>`:""}

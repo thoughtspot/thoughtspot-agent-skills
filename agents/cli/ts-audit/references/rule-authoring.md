@@ -112,7 +112,7 @@ wording; `legacy_threshold` takes the same form:
 ```yaml
 message:                          # D11
   by_severity:
-    MEDIUM: "Fan-out risk: fact-to-fact join '{@join_from_name}' -> '{obj.with}' with {@join_cardinality}"
+    MEDIUM: "Fan-out risk: '{@join_from_name}' -> '{obj.with}' with {@join_cardinality} joins two tables that both hold measures"
     INFO: "{@join_cardinality} join '{@join_from_name}' -> '{obj.with}'"
 legacy_threshold:
   by_severity:
@@ -204,7 +204,22 @@ To combine a combinator with anything else, wrap both in `all`.
 
 **Field paths.** `properties.column_type` walks the item. A non-numeric step on a list
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
-item, and `@name` is a derived field. A missing key yields null, never an error.
+item, and `@name` is a derived field. A missing key yields null, never an error. So
+does malformed TML (a key the schema defines as a mapping, `properties`,
+`spotter_config` or `db_column_properties`, holding a list or a scalar), but under
+`ts audit run` and `run_rules` no rule sees it: a Model whose TML holds one, or which uses
+a Table whose TML does, is **left out with everything hanging off it** (its Answers, Sets
+and metadata header; `engine/run.py` `readable`, `tml.unreadable_documents`), and the
+report lists it under "Could not be read". A rule needs no guard for it. (`run_rule`, which
+checks one rule's examples, does not filter; examples are well-formed.) A new kind of
+document that refers to a Model or Table must be added to `unreadable_documents`, or a
+rule will judge it against an object no rule can see. And a rule that asserts something
+is on **no** Model (H7's known Tables, H8/H9's Model formulas) must read every Model,
+`fields_human._all_models(ctx)` and `ctx.excluded_tables` included: the excluded ones are
+not judged, but their formulas and Tables still exist, and leaving them out makes "on no
+Model" false (a false H8 HIGH, PR #693 review round 6). A derived field or code
+rule should still read those keys through `tml.mapping(obj, key)`, which gives `{}` for
+the same cases, so a document reached some other way cannot crash the run.
 
 **Message placeholders** per mode (Python `str.format`; any other name fails the gate):
 
@@ -227,6 +242,44 @@ catalog. Give it to a new rule only if a reader needs one; `bands` already carri
 grading.
 
 ---
+
+## Evidence and the severity cap
+
+Every active rule declares `evidence:` — what its findings rest on (the severity rubric,
+2026-11; `ts_cli/audit/catalog_evidence.py`):
+
+| Class | The finding rests on | Examples |
+|---|---|---|
+| `fact` | something the TML or metadata states, read exactly (normalising case and whitespace is still exact) | A4, D8, S10, H8 |
+| `measure` | a count, share or ratio the TML states, graded against a pass mark the catalog chooses | A1, P4, P8, D7 |
+| `heuristic` | an inference: a name pattern, a role guess, a similarity | S1, S2, H1, H10 |
+
+A rule that combines kinds takes the **weakest one it needs to fire**: S2 needs a column to
+be PII, which only a name pattern says, so it is `heuristic` though "indexed" and "no RLS"
+are facts. A role read from declared joins and measures (PR 4.1) is a fact, not a guess.
+
+**A heuristic rule grades at most MEDIUM** under every profile, whichever way the severity
+is reached (bands, a severity map, a fixed severity, a code rule's registered severities, a
+profile override); the gate refuses more. The one way past it is an approved exception,
+shown in the generated catalog doc:
+
+```yaml
+severity_exception:               # S5
+  reason: A real credential in an analytics Model is severe enough that a name match alone warrants it.
+  approved: 2026-11-02            # the date the product owner approved it
+```
+
+**Fire rates.** After adding or regrading a rule, run
+`ts audit fire-rates --snapshot-in <snapshot>` under both assessments (or set
+`TS_AUDIT_SNAPSHOT` and run `scripts/pr-ready.sh`). A rule at MEDIUM or above on more
+than half of its objects warns: either it is mis-calibrated, or it is telling the reader
+something true of the whole estate. In the second case record why, per assessment, with
+the rate you measured; the review lapses after 180 days or a rise of more than 10 points:
+
+```yaml
+fire_rate_reviewed:               # A3
+  spotter: {date: 2026-11-02, rate: 0.89, note: "Most Models have no Spotter coaching yet; ..."}
+```
 
 ## `requires` vs `uses` — what the audit fetches
 

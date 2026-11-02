@@ -270,7 +270,7 @@ are roughly ordered by value÷effort.
 | BL-403 | pre-commit runs all seven unit-test suites on any staged `.py` (about 150 s against a 15 s budget); a hand-written suite-selection map failed three reviews | 2027-01-31 |
 | BL-404 | `check_open_items` has no in-tree uniqueness rule: two different items numbered alike pass once a branch updates from main | 2026-12-31 |
 | BL-405 | `ts audit run` still aborts on ONE failed always-on fetch: a 4xx/5xx on any `metadata/search` batch (headers or dependents) in `build_context` exits the whole run, where the AI-instructions and Answer fetches skip and warn | 2026-12-15 |
-| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): malformed TML under a `parent.` condition, the one item left (items 1–9 closed by roadmap PRs 2.1–2.4; P6's in-code grading accepted) | 2027-01-31 |
+| BL-406 | ts-audit behaviour fixes deferred by the rule-catalog reproduction (ts-audit 3.0.0): items 1–10 closed (roadmap PRs 2.1–2.4 and the item-10 follow-up); open only for the review follow-ups: D9/P16 count function names inside literals, D7's HIGH wording assumes its line is 1.0, a YAML date as a name ends the run at the JSON output | 2027-01-31 |
 | ~~BL-407~~ | ~~ts-audit Step 4 exports and caches every Model's TML (1–5 min) that nothing reads — `ts audit run` fetches its own~~ | RESOLVED (2026-10-28 — Step 4 dropped; `ts audit run --all-models [--connection]` owns scope, `--snapshot-out` covers re-runs) |
 | BL-408 | Audit override layers (`effective(rule, layers)`) are not validated: an unknown rule id, a `status` typo, an unknown severity or misordered bands in a layer are applied or dropped silently — validate before admin overrides ship | 2027-03-31 |
 | BL-415 | pre-commit does not read `tools/validate/checks.py` (a parity test pins it instead), and the quality-gates generator still regex-parses the hook: model the staged-file triggers in the list, read it from pre-commit, drop the parsing (spec §5 C1 follow-up) | 2026-11-30 |
@@ -315,6 +315,18 @@ are roughly ordered by value÷effort.
 | BL-495 | `ts dbt-export build-model --import` imports without applying `ts_rls_rules` when `--rls-out` is absent | 2026-11-30 |
 | BL-496 | Audit rule D11 cannot judge a referencing join: exported Table TML carries no join cardinality, so the fan-out check skips about a fifth of real joins | 2027-01-31 |
 | BL-497 | `ts auth whoami` (`GET /api/rest/2.0/auth/session/user`) returns 404 (code 13003) on the SE demo cluster, failing every smoke test's auth step; `ts share` and `ts migrate` call the same endpoint | 2026-11-30 |
+| BL-498 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
+| BL-499 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
+| BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
+| BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
+| BL-506 | Rule D13: a bare `group_aggregate` / `last_value` / `first_value` formula (no outer aggregate, so its column's aggregation is used) whose aggregation is wrong for what it measures — D14's check on those three shapes (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
+| BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
+| BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
+| BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
+| BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
+| BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -1998,7 +2010,7 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 ## BL-059 — ts-audit: set (cohort) usage analysis checks `Tier 3`
 
 **Source:** Live testing on champ-staging (2026-06-26) — Dunder Mifflin Sales model (`0e4406c7-d978-4be7-abd7-c34e8f7da835`, 44 reusable cohorts)
-**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report_template.html` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
+**Affects:** `tools/ts-cli/ts_cli/audit/catalog/rules/data.yaml` (new rules; `checks_data.py` until the rule-catalog cut-over removed it), `tools/ts-cli/ts_cli/audit/report.py` / `report/` (the template until roadmap PR 3.1 split it into parts)` (report sections) — the audit engine was codified into `ts_cli/audit/*`; the former skill-dir `analyzer.py`/`report.py` were removed as dead code (2026-07-02)
 **Status:** Open — research complete, implementation deferred
 **Related:** `agents/shared/schemas/thoughtspot-sets-tml.md` (set TML structure reference)
 
@@ -14813,6 +14825,36 @@ profile may lower it (latent: none does; `band_shape` fixes shape, not value). A
 used as a name or description still ends the run at the JSON output (the report's and
 `ts audit run`'s `json.dumps` take no `default`).
 
+**Progress (2026-10-30, BL-406 item 10).** Item 10 is closed, by the product owner's rulings
+(2026-10-30): malformed TML is **not judged, and shown**, and the unit is the **whole
+Model**. A Model whose TML, or a Table it uses, holds a list or scalar where the schema has
+a mapping (`properties`, `spotter_config`, `db_column_properties`) is left out of every
+rule and the report corpus (`engine/run.py` `readable`, `tml.unreadable_documents`), and
+so is everything hanging off it: such a Table, the Answers built on either (or else H8
+judges them against a Model no rule sees: a false "not in model" HIGH), the Model's Sets
+the metadata headers. Cross-Model rules (D7, D8, D12) do not see it either, so a
+duplicate it is part of goes unreported; but its formulas and Tables still count where a
+rule asks whether something is on NO Model (H7, H8, H9: `fields_human._all_models`,
+`ctx.excluded_models` / `excluded_tables`), or H8 would call a formula an excluded Model
+holds "not in model". `ts audit run` warns on stderr, and the run's JSON
+(`corpus.unreadable`) and the report's "Could not be read" box name each one and the path.
+Before, `properties: ["MEASURE"]` mapped to a truthy `[None]`, so H3 reported the column as
+hidden and A1/A2 left it out, and the same shape ended `ts audit run` (the report corpus,
+the ERD, `table_role`, column types, the RLS column reads, D12). Two narrower designs were
+tried and rejected in review: reading the value as absent gave confident wrong findings
+wherever absent has a meaning (P4 "joins every table", S2 "PII indexed", A1/A2 coverage,
+P15), and skipping only the bad column leaked (P8 counted fewer columns, H3 judged a column
+through an unreadable sibling, the readiness score mixed both). A field path still reads
+such a value as None and Python reads go through `tml.mapping`, as a backstop. Pinned:
+`data_single_model_malformed_column` loses its A4, H3 and H4 (the Model is not judged), and
+`tml_value_shapes` no longer carries the two malformed columns (moving A1/A2 7 → 6
+columns and dropping H3), so it keeps testing the other value shapes. The SE demo sample
+is unchanged (no malformed TML). The wider class is BL-501; converters emitting Models
+without `join_progressive` are BL-502. P6's in-code grading is accepted (same date), to
+revisit when a profile needs different P6 severities or a second rule shares its shape.
+What remains open here is only the review follow-ups recorded above (D9/P16 literals, D7's
+value-dependent wording, date-typed values at the JSON output).
+
 **Do.** One PR per item, or per closely related group. Each needs the user's ruling where
 the item is a contradiction, a test that fails first, the re-pin output pasted into the
 PR, and a ts-audit changelog row saying which findings change.
@@ -15959,7 +16001,282 @@ moved it. Fix `ts auth whoami` (and the two other callers) to the supported call
 
 **Target:** 2026-11-30.
 
-## BL-498 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
+## BL-498 — ts dbt: warn when the uploaded dbt artifacts are stale `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** PR #669 review; ts-convert-from-dbt open-items #21.
+
+**What.** `find_artifacts` picks the right command for the engine, but it still accepts a
+`catalog.json` that is merely *older* than the manifest (what `dbt docs generate` on Fusion
+leaves behind), and a project whose `schema.yml` was edited after the artifacts were
+generated. ThoughtSpot types Table columns from the catalog, so the upload succeeds with
+stale or missing column types and nothing says so.
+
+**Do.** Warn when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
+when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the manifest, with an
+`--allow-stale` override. Cover `--file` and `--manifest`.
+
+**Target:** 2026-12-31.
+
+## BL-499 — ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** PR #669, both review rounds (the human review, then the
+`pr-ready` review of `e7c6fe7c`).
+
+**What.** 17 hand-written fake client classes across 10 test files, with 8 files patching
+`ThoughtSpotClient` with a fake, stand in for the real client. A fake that does not honour
+the real contract lets a broken path pass. PR #669 hit this twice on one change:
+- Round 1: the fake raised `RuntimeError` where the real client raises `SystemExit`, so a
+  guard caught the wrong exception and would have made every DBT_CLOUD generate exit 1 with
+  every test green.
+- Round 2: the fake's `post(self, path, **kwargs)` accepted any keyword, so a bogus argument
+  to the real call disabled the guard and all 135 dbt tests still passed.
+
+Both bugs are in error and edge paths, which smoke tests and everyday use rarely exercise,
+so they ship quietly.
+
+**Do.**
+1. A shared fixture in `tools/ts-cli/tests/conftest.py`: a real `ThoughtSpotClient` whose
+   `_session.request` is a fake transport bound to `requests.Session.request`'s signature
+   (`inspect.signature(...).bind`), answering by URL. `TestGenerateExplainsMissingArchive`
+   in `test_dbt_commands.py` is the pattern to lift.
+2. A validator that flags a NEW fake `ThoughtSpotClient` class or a `setattr(...,
+   "ThoughtSpotClient", ...)` swap in a test, pointing at the fixture (ratchet on the
+   existing ones, the `check_module_health` baseline pattern).
+3. Convert the existing fakes opportunistically, error paths first. Not required to close.
+
+**Target:** 2026-11-30.
+
+## BL-500 — `ts dbt create` / `generate-tml` are classed safe to retry `Tier 2`
+
+**Filed:** 2026-10-29. **Source:** `pr-ready` review of PR #669 at `047c8279` (low
+confidence; predates the PR).
+
+**What.** `ThoughtSpotClient` decides whether a failed call may be re-sent with
+`_is_idempotent` (`tools/ts-cli/ts_cli/client.py`), which only refuses paths matching
+`_NON_IDEMPOTENT_PATH_RE`. `/dbt/dbt-connection` and `/dbt/generate-tml` do not match, so a
+read timeout or a 502/503/504 on either re-sends it up to three more times. Both create
+objects: that is the shape of the "four identical Tables" incident the client's comments
+record. Whether a repeated `generate-tml` actually duplicates Tables is unverified;
+`generate-sync-tml` is recorded as idempotent (ts-convert-from-dbt coverage-matrix row 4).
+
+**Do.** Verify against the spec (`get-rest-api-reference`) and, if needed, live on a
+throwaway connection whether a repeated `generate-tml` / `dbt-connection` duplicates
+objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
+`idempotent=False` at the two call sites in `commands/dbt.py`), with a test.
+
+**Target:** 2026-11-30.
+
+## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
+
+**What.** Item 10 made a Model whose TML holds a list or scalar under `properties`,
+`spotter_config` or `db_column_properties` unjudged and listed (`tml.MAPPING_KEYS`,
+`tml.unreadable_documents`). The class is
+wider: anywhere the schema has a mapping, or a list of mappings, a different shape still
+ends `ts audit run` with an AttributeError and no warning. Reproduced on the populated
+fixture with one mutation each:
+
+| Shape | Crash site |
+|---|---|
+| a Table's `rls_rules` as a flat list of rules | `engine/scopes.py` `_rls_rules`, `engine/tml.py` `rls_column_refs`, `engine/fields.py`'s RLS reads |
+| a scalar `rls_rules.rules[]` entry, or a string `rules` | `engine/tml.py` `rls_column_refs` |
+| a Model's `model_instructions` as a list or a string, on a Model whose AI-instructions entry is missing or holds no instruction (`{"nl_instructions_info": []}`) | `engine/fields.py` `@is_coached` (A3, the readiness score) |
+| a source Table's `table.joins_with` as a mapping | `engine/tml.py` `_joins_with_index` |
+| a scalar `model_tables[]` entry | `engine/tml.py` (join counting) |
+| a scalar Model `columns[]` or `formulas[]` entry | `engine/scopes.py` |
+| a scalar Table `columns[]` entry | `audit/context.py` (column types) |
+
+None was seen in the 2026-07-30 TML census (2 of 2 `table.rls_rules` were mappings); the
+flat-list `rls_rules` shape rests only on the ERD parser's `_rls_rule_list` docstring
+(`agents/shared/erd/parser.py`), unverified.
+
+**Do.** One rule for the class: a list of mappings skips a non-mapping entry, and a
+mapping key reads a non-mapping as absent, each with the item-10 warning. `rls_rules` is
+the exception and must NOT read as absent, since that would hide a Table's row-level
+security and make the security rules call it unprotected: confirm the flat-list shape
+against a live export or the SpotterCode MCP, then normalise both shapes in one audit
+helper (reusing or moving the ERD's `_rls_rule_list`, not restating it). Follow the
+item-10 ruling for the rest: add each mapping key to `tml.MAPPING_KEYS` and each list of
+mappings to `tml.malformed_mappings`, so the whole Model is not judged and is listed
+under "Could not be read". Reading a malformed `model_instructions` as absent instead would
+make A3 report a coached Model as uncoached (HIGH under Spotter-ready). End-to-end tests
+(`run_audit` then `render_report`) for each row above.
+
+**Target:** 2026-11-30.
+
+## BL-502 — converters emit Models without `join_progressive: true` `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the third review of the BL-406 item-10 fix, after the
+Model schema doc was corrected to say an unset `join_progressive` behaves as off.
+
+**What.** A Model without `join_progressive` joins every table into every query, so a
+dimension-only query is silently filtered by the fact table (live-verified 2026-08-10: 73
+members against the true 79; `ts-object-model-agentql-query` `references/limitations.md`).
+These emitters never set it: `tools/ts-cli/ts_cli/model_builder.py` `build_model_tml`
+(used by Qlik, `ts tableau build-model` and `aggregate/generate.py`),
+`powerbi/build_model.py`, `sisense/build_model.py`, `dbt/model_from_schema_yml.py`,
+`dbt/manifest.py` (`ts dbt build-model`, which emits no `properties` at all), and the
+Tableau hand-assembly template in
+`agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md`. Those that set
+it: `link_build.py`, `sv_build_model.py`, `databricks/mv_build_model.py`, and the Looker
+template (`agents/cli/ts-convert-from-looker/references/step-6-model-joins.md`). Audit P4
+reports the result once imported, but only on Models of more than 5 tables.
+
+**Do.** Set `properties.join_progressive: true` in each emitter (one shared helper, not
+five copies), and consider a `ts tml lint` check, since hand-authored TML hits this too.
+Re-probe the live behaviour first: the 2026-08-10 result is marked "Not re-probed". The
+adjacent `spotter_config.is_spotter_enabled` default is also contested in the repo (the
+schema doc says true; the Power BI and Sisense emitters say a TML import defaults it off):
+settle both with one probe.
+
+**Target:** 2026-11-30.
+
+## BL-503 — the audit report's JavaScript has no size or complexity gate `Tier 3`
+
+**Filed:** 2026-10-31. **Source:** the review of roadmap PR 3.1 (the report split into
+parts).
+
+**What.** `tools/validate/check_file_size.py` and `check_module_health.py` scan `.py` files
+only, so none of the report's scripts (`tools/ts-cli/ts_cli/audit/report/core.js`,
+`boot.js`, `views/*.js`) is gated. `views/objectmap.js` is 755 lines, past the 500 at which
+the Python gate warns; `buildCrossModel` is 331 lines and `buildScorecard` 301. The
+2,951-line template was ungated too, so this predates PR 3.1, but the report is now meant
+to grow by adding view files.
+
+**Do.** Extend `check_file_size` to `ts_cli/audit/report/**/*.js` with a ratchet at
+today's sizes (warn above 500, fail on growth past the baseline), and decide whether a JS
+function-length check is worth adding to `check_module_health`, or split the largest views
+when they are next changed.
+
+**Target:** 2026-12-31.
+
+## BL-504 — audit rules read formula references without skipping string literals `Tier 3`
+
+**Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
+
+**What.** The report's formula tree (`ts_cli/audit/formula_tree.py`) splits literals off
+with `formula_translate.refs.split_literals` before reading `[...]` references, keeps a
+reference whole when its name holds a quote (BL-369), drops self-references and strips
+whitespace, and resolves a formula by the display name of its column. The rules that
+read the same expressions differ: `engine/fields.py _reference_graph` (P17, P2) and
+`engine/fields_human.py` (H3) count bracket text inside a quoted literal as a reference
+and do not strip names; H3 also counts a formula's reference to itself; P17 does not
+resolve a display name. (Neither splits a quoted reference, so BL-369's failure is not
+among the differences.) Other `tml.BRACKET_REF` readers (`engine/tml.py`'s RLS rule
+expressions, `context.py`'s join on-clauses) do not skip literals either. So one report can say a formula is used by
+another (P17/H3) while the tree says it is not, or the reverse. On the 148-Model SE demo
+sample they agree (no reference sits inside a literal), so no finding is wrong there today.
+
+**Do.** Move every audit reader onto one literal-aware scanner (the tree's reading), with
+tests for a literal holding bracket text and a reference holding a quote, and re-pin the
+rules whose findings move (`repin_findings.py --rule <id>`). Kept out of PR 3.2, which
+changes no finding.
+
+**Target:** 2026-12-31.
+
+## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
+
+**Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
+design scoped the classifier to the audit and the ERD.
+
+**What.** `agents/shared/erd/roles.py` decides a table's role from join direction for
+ts-audit and the ERD. Two converters keep their own fact detection:
+`ts_cli/databricks/mv_emit.py detect_fact_tables` (ThoughtSpot Model TML; already "a join
+root with a measure", but it attributes formula measures to tables, which the classifier
+does not) and `ts_cli/sv_build_model.py _detect_fact_tables` (Snowflake relationships, a
+different input), and `sisense/build_model._fact_rank` ranks its own. `mv_emit`'s
+`_join_target_tables` also ignores cardinality, so a ONE_TO_MANY join reads the wrong way
+there. A Model can therefore be split into Metric Views around a table the audit calls a
+dimension.
+
+**Do.** Move `detect_fact_tables` onto `roles.table_roles` (deciding, with a test, whether
+formula measures should count there), re-run the to-Databricks golden tests, and record
+why `sv_build_model` stays separate if it does.
+
+**Target:** 2027-01-31.
+
+## BL-509 — formula `aggregation:` after the 2026-11-02 ruling `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
+
+**What.** The product owner ruled (2026-11-02): a per-row formula's column aggregation is
+applied; an aggregate formula's is ignored but must be declared, or the TML is invalid;
+a bare `group_aggregate` / `last_value` / `first_value` (no outer aggregate) uses it.
+The Model TML schema now says so. The rest of the repo does not yet:
+
+1. **Emitters with no `aggregation:` on an aggregate formula column:**
+   `powerbi/build_model.py` (every DAX measure), `powerbi/timeintel.py`,
+   `sisense/build_model.py`, `dbt/model_from_schema_yml.py` and `dbt/manifest.py` (when
+   `ts_aggregation` is absent), and `model_builder.py` (latent: a formula with no
+   `column_type`). Yet ts-convert-from-powerbi open item #1 (VERIFIED 2026-07-16) created
+   such a Model live, so "invalid" may describe the contract or a newer build: probe one
+   import with `VALIDATE_ONLY` on a current build first.
+2. **No lint invariant** checks it; `ts-model-conversion-invariants.md` says a formula
+   column's aggregation is "allowed" and "defines how the column aggregates", which is
+   false for an aggregate formula.
+3. **Six copies of "ignored at query time"**: the `spotql_ops.classify_expr` docstring,
+   `tools/ts-cli/README.md`, `formula_translate/engine.py`, `formula_common.py`,
+   `tests/test_spotql_ops.py`, and the Ossie converter directions plan.
+4. **`classify_expr` returns `aggregation: SUM`** for a bare `group_aggregate ( average
+   (...) , ... )` or `last_value ( average (...) , ... )`, which `ts model
+   promote-formula` writes; under the ruling that SUM is applied, so a promoted per-group
+   average is re-summed.
+5. **`AGGREGATE_FUNCS` misses `last_value_in_period` / `first_value_in_period`**, so P2,
+   D14 and `classify_expr` read one over a bare column as per-row (0 on the SE demo
+   sample; whether ThoughtSpot accepts a non-aggregate first argument is unverified).
+   Fixing it moves P2's findings.
+
+**Target:** 2026-12-31.
+
+## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1). **Reframed**
+2026-11-02 after the product owner's ruling on formula aggregation.
+
+**What.** A formula column's `aggregation` is used at query time when the formula is
+per-row (D14 covers that) and when it is a bare `group_aggregate`, `last_value` or
+`first_value` with no outer aggregate. For the last three, SUM is often right (a balance
+summed across accounts, taken last over time), so "summed" alone is not a defect. D13 is
+D14's check on those three shapes: a rate-, price- or ratio-like one carrying SUM, or one
+whose default aggregation would mislead. Settle first whether the `*_in_period` spellings
+belong (`spotql_ops.AGGREGATE_FUNCS` does not match them; BL-509).
+
+**Do.** Add D13 (id held for it) to roadmap PR 4.4, a heuristic like D14, with fixtures
+for each shape and a sample re-measure.
+
+**Target:** 2026-12-31.
+
+## BL-507 — the join-key type lookup misses aliased tables `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
+
+**What.** `AuditContext.column_types` keys warehouse types by the Model's alias (else
+name); a referencing join's `on`, read from the Table TML, names Tables
+(`[BASKETS_FACT::KEY]`). So every key of an aliased table reads as unknown even when its
+Table TML is loaded — P6 (string keys) and D16 (keys of different types) never see them,
+and aliased tables are the role-playing case where mismatches sit.
+
+**Do.** Resolve an `on` reference through the declaring model table's alias and name, test
+P6 and D16 on an aliased join, and re-pin P6 (`repin_findings.py --rule P6`).
+
+**Target:** 2026-12-31.
+
+## BL-508 — are redundant Model-over-Table joins worth a finding? `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** roadmap PR 4.3, which narrowed G14 to duplicate
+Table-level joins (D15).
+
+**What.** A Model inline join whose `on` repeats a Table-level join is the norm on the SE
+demo sample (369 of 575 inline joins), so flagging it would be noise. Whether it ever
+causes harm (two definitions drifting apart) is unknown.
+
+**Do.** Decide with the product owner; if it matters, a finding only when the two
+definitions differ in type or cardinality, not when they repeat each other.
+
+**Target:** 2027-01-31.
+
+## BL-510 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
 
 **Filed:** 2026-10-30. **Source:** the PR #666 follow-up review (the cascade-delete PR).
 

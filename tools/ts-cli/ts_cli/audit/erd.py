@@ -36,6 +36,29 @@ def _load_shared_parse_model():
 
 parse_model = _load_shared_parse_model()
 
+_TABLE_ROLES: Any = None
+
+
+def load_table_roles() -> Any:
+    """The shared classifier `roles.table_roles` (agents/shared/erd/roles.py), loaded
+    once. Unlike the ERD embed, the audit cannot do without it — D7, D11 and the role
+    fields read it — so a missing or broken file raises, naming the path, rather than
+    letting rules judge without roles (design: 2026-11-01-audit-table-roles)."""
+    global _TABLE_ROLES
+    if _TABLE_ROLES is None:
+        path = _ERD_DIR / "roles.py"
+        try:
+            spec = importlib.util.spec_from_file_location("_erd_roles", str(path))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _TABLE_ROLES = mod.table_roles
+        except Exception as exc:
+            raise RuntimeError(
+                f"ts audit needs the shared table-role classifier at {path}, which "
+                f"could not be loaded ({exc}). Run ts-cli from a checkout of the "
+                f"thoughtspot-agent-skills repo (pip install -e tools/ts-cli).") from exc
+    return _TABLE_ROLES
+
 
 def _table_tml(tables: dict, fqn: Any, name: str) -> Any:
     """A model table's Table TML: by its `fqn`, else the first whose name is `name` or

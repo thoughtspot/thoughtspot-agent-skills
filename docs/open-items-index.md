@@ -5,13 +5,13 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**216 total items** across 24 skills — **73 open**, 128 verified, 15 deferred
+**214 total items** across 24 skills — **71 open**, 128 verified, 15 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
-| ts-dependency-manager | 19 | **9** | 9 | 1 |
 | ts-convert-to-databricks-mv | 9 | **8** | 1 | 0 |
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
+| ts-dependency-manager | 16 | **7** | 8 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
@@ -27,13 +27,13 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
-| ts-convert-from-dbt | 20 | **0** | 18 | 2 |
+| ts-convert-from-dbt | 21 | **0** | 19 | 2 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-link-semantic-layer | 8 | **0** | 4 | 4 |
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (73 items)
+### Untagged (71 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -82,8 +82,6 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-dependency-manager | #16 | Cohort + dependent answer import ordering / TS metadata caching | OPEN |
 | ts-dependency-manager | #21 | Recommendation engine after audit | PARTIAL |
 | ts-dependency-manager | #22 | Surface chart-axis-role (REMOVE_CHART) in `ts metadata report` for Step 6 | OPEN |
-| ts-dependency-manager | #27 | Cascade delete fails when the cascade includes a Liveboard | OPEN |
-| ts-dependency-manager | #28 | Re-running a partial rollback duplicates what it already restored | OPEN |
 | ts-load-source-data | #1 | snow stage copy path format | OPEN |
 | ts-load-source-data | #2 | COPY INTO with quoted fields | OPEN |
 | ts-load-source-data | #3 | CREATE DATABASE IF NOT EXISTS permissions | OPEN |

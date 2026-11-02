@@ -33,6 +33,7 @@ keeping; the full investigation narratives were compressed 2026-09-09.
 | 18 | Manifest readers missed joins in a parent-dir schema.yml | FIXED 2026-09-10 (never shipped) |
 | 19 | Server and client name metric formulas differently | RESOLVED 2026-10-06 — keep label names; `build-model` refuses to mix |
 | 20 | dbt `foreign_key` constraints as joins (composite keys) | VERIFIED live 2026-10-06 — `build-model` reads them; native import ignores them |
+| 21 | ZIP_FILE: every generate call needs `--file`; the 400 does not say so | FIXED 2026-10-29 — CLI explains the 400 when no `--file` was given (verified live on both generate calls); artifact command per engine verified |
 
 **Five genuinely open: #3, #5, #7, #12, and the ThoughtSpot half of #13.**
 #3 needs a purpose-built dbt project (the test project has no exposures,
@@ -823,3 +824,88 @@ live round trip caught it (every constraint join would have vanished silently), 
 reader now resolves both. `ts dbt inspect` uses the same reader, reports
 `constraint_joins[]`, and recommends Path Y when any exist.
 
+---
+
+## #21 — ZIP_FILE: every generate call needs `--file`; the 400 does not say so — FIXED 2026-10-29
+
+**Symptom.** `ts dbt generate-tml` (or `generate-sync-tml`) against a ZIP_FILE connection
+fails with `400 POST /api/rest/2.0/dbt/generate-tml "Error with the uploaded ZIP file."`
+even though the archive that created the connection was fine.
+
+**Real cause.** The API requires the archive on every generate call for a ZIP_FILE
+connection (intended; ThoughtSpot's published SDK docs say `file_content` is needed on every
+generate call for ZIP_FILE): the CLI sends it with each request, taken from `--file`, and a
+generate call without `--file` sends none. The message blames the ZIP, so the obvious suspects — a fresh connection, regenerated
+`manifest.json`/`catalog.json`, a different archive layout, a clean Org — are all dead ends
+(each was tried and returned the same 400). The API requires the archive on every generate
+call; that is intended behaviour, so the fix is the CLI explaining the 400, not a server change.
+
+**Evidence (live, dbt Fusion 2.0.6 manifest schema v12, Snowflake, 2026-10-22).** The same
+call with `--file target` (flat `manifest.json` + `catalog.json`) succeeded — seven Tables
+created — and `ts dbt build-model` then created the Model with status OK. This also verifies
+the flat archive layout `pack_artifacts` assumes (coverage-matrix L6).
+
+**Also verified on dbt Core 1.12.5 (Snowflake), 2026-10-23.** `ts dbt create --import-type ZIP_FILE
+--file target`, then `generate-tml --file target --import-worksheets NONE` for one model directory,
+created one Table whose columns carry the catalog's types (VARCHAR, INT64, DATE, DOUBLE) — so the
+CLI-built flat archive is accepted from both engines. The same run confirmed the guard against the
+live server: `generate-tml` and `generate-sync-tml` without `--file` were refused by the first version of
+the guard, a `dbt/search` lookup, since replaced (see Fix). Test objects were deleted afterwards.
+
+**Small gap found in the same run, fixed:** the server rejects a ZIP_FILE `create` with no
+`--project-name` (`400 / 10002: "Project Name should not be empty."`; **seen live on one cluster only** — the
+published spec marks `projectName` optional with no ZIP_FILE condition, so treat the refusal as
+that cluster's behaviour, not a documented rule), but the CLI neither said it
+was required for ZIP_FILE nor checked. `ts dbt create --import-type ZIP_FILE` now refuses locally
+without it, and the help text, README and Step 4 example say so. Whether DBT_CLOUD also needs it
+is unverified here, so it stays optional there.
+
+**Fix.** `ts dbt generate-tml` / `generate-sync-tml` with no `--file` send the request as
+before and read the response: a 400 whose body says "Error with the uploaded ZIP file." is
+followed by an explanation that the archive is missing, not bad, naming `--file` (the
+server's own error line is still printed first). Any other
+failure keeps the server's own error, and with `--file` the 400 is reported as the server
+wrote it, since then an archive really was sent. A DBT_CLOUD call is one request, as before.
+The match is on the 400 body text this item recorded live (2026-10-22). **Verified live
+2026-10-29** on a staging cluster, for both calls: `ts dbt generate-tml --import-worksheets
+NONE` against an existing ZIP_FILE connection, and `ts dbt generate-sync-tml` against a
+throwaway ZIP_FILE connection created for the test (from a dbt Fusion 2.0.6 manifest) and
+deleted afterwards. With no `--file`, each exited 1 with the explanation in place of the raw
+400, so both endpoints answer with the text the match reads. Sync was tested on a throwaway
+connection because an unexpected success there would reset the connection's Tables. The unit tests drive the real `ThoughtSpotClient` for the cases a live call cannot stage.
+
+**Why not look the connection up first.** The first version of this fix (PR #669, reviewed
+twice) called `dbt/search` before every generate with no `--file` and refused when it listed
+the connection as ZIP_FILE. The second review showed what that cost: `ThoughtSpotClient`
+retries a timeout or a 502/503/504 three times, so a slow `dbt/search` delayed every DBT_CLOUD
+generate by about a minute, with retry noise on stderr, even with `raise_for_status=False`
+and a 15s timeout. It also missed connections the list does not show. Verified against
+`get-rest-api-reference(apiName: "dbtSearch")` and live, 2026-10-23: `dbt/search` is scoped
+"by user and organization" and gated behind an admin or data-management privilege. **Org
+scoping is verified live** (two profiles on one cluster returned disjoint lists). User
+scoping and the 403 for an unprivileged user are spec-only, because the test account is an
+admin and authored every connection. **No pagination:** the spec documents no request
+parameters for `dbtSearch`, and live, `record_size` of 1, 2 and 100 and a `record_offset` of 1
+all returned the same full list (6 of 6). So a connection created by another user, or in
+another Org, could never be matched. Reading generate's own 400 needs no extra request, cannot
+stall, and covers every connection. The skill's Step 8 and 10.4 examples show `--file`.
+
+**Which dbt command writes both artifacts depends on the engine** (verified 2026-10-23, same
+Snowflake project layout on each):
+
+| dbt | `dbt docs generate` | `dbt compile` | `dbt compile --write-catalog` |
+|---|---|---|---|
+| Core 1.12.5 | `manifest.json` + `catalog.json` | `manifest.json` only | not applicable |
+| Fusion 2.0.6 | `manifest.json` only — an old `catalog.json` is left in place | `manifest.json` only | `manifest.json` + `catalog.json` |
+
+The wrong command raises no error: the upload proceeds with a stale or missing catalog, and
+ThoughtSpot types Table columns from it. `find_artifacts` now names the command for the engine
+that wrote the manifest (`metadata.dbt_version`: 1.x Core, 2.x Fusion; any other major version names both, since it is
+neither engine as verified) and names both when it
+cannot tell. **Not yet detected — tracked as BL-498:** a catalog that is merely
+*older* than the manifest (what `dbt docs generate` on Fusion leaves behind), or a
+`schema.yml` edited since the artifacts were generated, is still accepted silently. BL-498
+warns when `catalog.json`'s `generated_at` is clearly older than the manifest's, and
+when the project's `models/**/*.yml` or `dbt_project.yml` are newer than the manifest, with an
+`--allow-stale` override. Until it lands, re-run the engine's command above after every
+`schema.yml` edit and before `build-model`.

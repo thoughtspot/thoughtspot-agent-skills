@@ -19,6 +19,7 @@ def _good_rule(**overrides) -> dict:
     rule = {
         "id": "A6",
         "title": "Measure AI context coverage below threshold",
+        "evidence": "measure",
         "description": "Visible measures should carry structured AI context.",
         "status": "active",
         "categories": ["A"],

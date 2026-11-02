@@ -104,9 +104,12 @@ def test_top_level_column_description_wins_over_properties():
     assert region["desc"] == "top-level"
 
 
-def test_dimension_with_outgoing_join_is_not_a_fact():
-    """A pure dimension that merely joins out to another table (e.g. USER -> EVENT)
-    must not be classified a fact. Regression for GTM Campaigns TS_USER."""
+def test_a_join_declared_out_of_a_measureless_table_makes_it_a_root():
+    """Roles come from join direction (roles.py, 2026-11): a join is declared on its
+    many side, so USER -> EVENT with no cardinality puts USER at the root. Holding no
+    measures, USER is factless (drawn as a fact); EVENT, joined to and holding a
+    measure, is a dimension holding measures — the fan-trap shape. Until 2026-11 the
+    ERD called USER a dimension because it held no measure."""
     model = {"guid": "g", "model": {
         "name": "M",
         "model_tables": [
@@ -120,13 +123,16 @@ def test_dimension_with_outgoing_join_is_not_a_fact():
              "properties": {"column_type": "MEASURE"}},
         ],
     }}
-    kinds = {t["id"]: t["kind"] for t in parser.parse_model(model, {})["tables"]}
-    assert kinds["USER"] == "dim"    # outgoing join alone must not make it a fact
-    assert kinds["EVENT"] == "fact"  # has a real measure
+    tables = {t["id"]: t for t in parser.parse_model(model, {})["tables"]}
+    assert (tables["USER"]["kind"], tables["USER"]["role"]) == ("fact", "factless")
+    assert (tables["EVENT"]["kind"], tables["EVENT"]["role"]) == (
+        "dim", "dimension_with_measures")
 
 
-def test_measureless_passthrough_is_a_bridge():
-    """A measureless table that both receives and emits a join is a bridge."""
+def test_a_measureless_passthrough_is_a_dimension_and_bridge_is_gone():
+    """A measureless table joined to and joining on is a dimension (until 2026-11 the
+    ERD drew a "bridge" kind the renderer never handled); DIM, reached only through
+    it, is flagged an outrigger."""
     model = {"guid": "g", "model": {
         "name": "M",
         "model_tables": [
@@ -143,10 +149,31 @@ def test_measureless_passthrough_is_a_bridge():
              "properties": {"column_type": "ATTRIBUTE"}},
         ],
     }}
-    kinds = {t["id"]: t["kind"] for t in parser.parse_model(model, {})["tables"]}
-    assert kinds["FACT"] == "fact"
-    assert kinds["BRIDGE"] == "bridge"
-    assert kinds["DIM"] == "dim"
+    tables = {t["id"]: t for t in parser.parse_model(model, {})["tables"]}
+    assert {k: t["kind"] for k, t in tables.items()} == {
+        "FACT": "fact", "BRIDGE": "dim", "DIM": "dim"}
+    assert (tables["BRIDGE"]["role"], tables["BRIDGE"]["outrigger"]) == ("dimension", False)
+    assert (tables["DIM"]["role"], tables["DIM"]["outrigger"]) == ("dimension", True)
+    assert all(t["role_label"] and t["role_note"] for t in tables.values())
+
+
+def test_referencing_join_cardinality_from_table_tml():
+    """The Table's `joins_with` cardinality decides direction for a referencing join."""
+    model = {"guid": "g", "model": {
+        "name": "M",
+        "model_tables": [{"name": "HEADER", "joins": [{"with": "LINES", "referencing_join": "hl"}]},
+                         {"name": "LINES"}],
+        "columns": [{"name": "Qty", "column_id": "LINES::q",
+                     "properties": {"column_type": "MEASURE"}},
+                    {"name": "Freight", "column_id": "HEADER::f",
+                     "properties": {"column_type": "MEASURE"}}],
+    }}
+    tables_tml = {"HEADER": {"table": {"name": "HEADER", "joins_with": [
+        {"name": "hl", "destination": {"name": "LINES"}, "cardinality": "ONE_TO_MANY"}]}}}
+    roles = {t["id"]: t["role"] for t in parser.parse_model(model, tables_tml)["tables"]}
+    assert roles == {"LINES": "fact", "HEADER": "dimension_with_measures"}
+    roles = {t["id"]: t["role"] for t in parser.parse_model(model, {})["tables"]}
+    assert roles == {"HEADER": "fact", "LINES": "dimension_with_measures"}
 
 
 def test_parse_model_formula_bound_to_table():
@@ -326,3 +353,15 @@ def test_join_keys_reach_alias_nodes():
     assert _keys(m, "ORDERS") == {"ORDER_DATE_ID", "SHIP_DATE_ID"}
     assert _keys(m, "ORDER_DATE") == {"DATE_ID"}
     assert _keys(m, "SHIP_DATE") == {"DATE_ID"}
+
+
+def test_parse_model_tolerates_a_column_whose_properties_is_not_a_mapping():
+    """A list or scalar `properties` (malformed: the schema has a mapping) reads as
+    absent: the column renders with the default role instead of ending the render."""
+    import copy
+    for bad in (["MEASURE"], 5, "x"):
+        doc = copy.deepcopy(_mini_model())
+        doc["model"]["columns"][0]["properties"] = bad
+        m = parser.parse_model(doc, {})
+        names = [c["name"] for t in m["tables"] for c in t["cols"]]
+        assert doc["model"]["columns"][0]["name"] in names

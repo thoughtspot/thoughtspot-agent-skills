@@ -19,8 +19,9 @@ from __future__ import annotations
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.fields import _model_of, register
+from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.tml_join_graph import on_clause_key_pairs
 
 
 def _upper(value: Any) -> Optional[str]:
@@ -64,18 +65,21 @@ def _join_from_name(item: dict, ctx: Any) -> Any:
 
 
 @register("is_fact_to_fact_join", uses=(), values=(False, True),
-          label="the join links two fact tables")
+          label="the join links two tables that both hold measures")
 def _is_fact_to_fact_join(item: dict, ctx: Any) -> bool:
-    """Join: both ends read as fact tables (more than 3 MEASURE columns — tml.
-    table_role), each end by its key (alias, else name): the declaring table's, and
-    the table the join's `with` names (tml.join_target_key). By name until 2026-10, so
-    an aliased end read as "unknown" (BL-305)."""
+    """Join: both ends hold measures — each end's role (model_roles) is `fact` or
+    `dimension_with_measures` — each end by its key (alias, else name): the declaring
+    table's, and the table the join's `with` names (tml.join_target_key). Under roles
+    from join direction a root is never joined to, so "two facts" would never hold; two
+    tables of measures joined, one side's repeating, is what the field always meant.
+    Until 2026-11 an end was a fact when it had more than 3 MEASURE columns."""
     model = _model_of(item)
-    cols = model.get("columns") or []
+    roles = model_roles(model, ctx)
     to_table = tml.join_target_key(model.get("model_tables") or [],
                                    (item.get("obj") or {}).get("with", ""))
-    return (tml.table_role(cols, _join_from_name(item, ctx)) == "fact"
-            and tml.table_role(cols, to_table) == "fact")
+    held = ("fact", "dimension_with_measures")
+    return all((roles.get(k) or {}).get("role") in held
+               for k in (_join_from_name(item, ctx), to_table))
 
 
 # ── model tables (D5, D6, D10) ──────────────────────────────────────────────
@@ -121,16 +125,16 @@ def _table_columns(item: dict) -> Tuple[list, list]:
 
 def _attribute_count(table_cols: List[dict]) -> int:
     return sum(1 for c in table_cols
-               if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE")
+               if tml.mapping(c, "properties").get("column_type") == "ATTRIBUTE")
 
 
 @register("table_role", uses=(),
-          label="the table's role (fact or dimension)")
+          label="the table's role (fact, factless, dimension or dimension with measures)")
 def _table_role(item: dict, ctx: Any) -> str:
-    """Model table: "fact" (more than 3 MEASURE columns), "dimension", or "unknown"
-    (no columns), its columns found by its key — alias, else name (tml.table_role)."""
-    cols, _ = _table_columns(item)
-    return tml.table_role(cols, item.get("name"))
+    """Model table: its role from join direction (model_roles), by its key — alias,
+    else name: fact, factless, dimension or dimension_with_measures ("" for a table
+    the classifier skipped as malformed)."""
+    return (model_roles(_model_of(item), ctx).get(item.get("name")) or {}).get("role", "")
 
 
 @register("table_column_count", uses=(),
@@ -183,13 +187,11 @@ def _table_set(item: dict, ctx: Any) -> list:
           label="the Model's fact tables")
 def _fact_table_set(item: dict, ctx: Any) -> list:
     """Model: the identity (as @table_set reads it: `fqn`, else `name`) of each model
-    table that reads as a fact table — more than 3 MEASURE columns, its columns found
-    by its key, alias else name (tml.table_key; not the name-only lookup BL-305
-    records). Formula measures are not counted, as in every audit fact test today."""
+    table whose role (model_roles, by key: alias else name) is `fact`."""
     model = item.get("obj") or {}
-    cols = model.get("columns") or []
+    roles = model_roles(model, ctx)
     return [t.get("fqn", t.get("name", "")) for t in model.get("model_tables") or []
-            if tml.table_role(cols, tml.table_key(t)) == "fact"]
+            if (roles.get(tml.table_key(t)) or {}).get("role") == "fact"]
 
 
 @register("physical_table_key", uses=(),
@@ -202,3 +204,94 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
     header = item.get("obj") or {}
     return Key((header.get("dataSourceName", ""), header.get("databaseStripe", ""),
                 header.get("schemaStripe", ""), header.get("name", "")))
+
+
+# ── D15: duplicate Table-level joins ────────────────────────────────────────
+
+def _join_group_key(j: Any) -> Optional[tuple]:
+    """(destination — `fqn`, else `name` —, `on` without whitespace) for a well-formed
+    `joins_with` entry, else None."""
+    dest = j.get("destination") if isinstance(j, dict) else None
+    on = j.get("on") if isinstance(j, dict) else None
+    if not isinstance(dest, dict) or not isinstance(on, str) or not on.strip():
+        return None
+    target = dest.get("fqn") or dest.get("name")
+    return (target, "".join(on.split())) if isinstance(target, str) and target else None
+
+
+def _duplicate_joins(table: dict) -> List[tuple]:
+    """(label, conflicting) per group of two or more `joins_with` entries with the same
+    destination and `on` (_join_group_key); conflicting when their type or cardinality
+    differ. Malformed entries are skipped."""
+    joins_with = table.get("joins_with")
+    groups: dict = {}
+    for j in joins_with if isinstance(joins_with, list) else []:
+        key = _join_group_key(j)
+        if key:
+            groups.setdefault(key, []).append(j)
+    out = []
+    for (dest, _), joins in groups.items():
+        if len(joins) > 1:
+            shapes = {(_upper(j.get("type")), _upper(j.get("cardinality"))) for j in joins}
+            name = joins[0]["destination"].get("name")
+            name = name if isinstance(name, str) and name else dest
+            out.append((f"{len(joins)} joins to {name} on {joins[0]['on']}", len(shapes) > 1))
+    return out
+
+
+@register("duplicate_joins", uses=(),
+          label="the Table's duplicate joins")
+def _duplicate_joins_field(item: dict, ctx: Any) -> list:
+    """Table: one label per group of `joins_with` entries sharing a destination and an
+    `on` (see _duplicate_joins); a name list in messages, empty when there are none."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(label for label, _ in _duplicate_joins(item.get("obj") or {}))
+
+
+@register("duplicate_joins_conflict", uses=(), values=(False, True),
+          label="the Table's duplicate joins differ in type or cardinality")
+def _duplicate_joins_conflict(item: dict, ctx: Any) -> bool:
+    """Table: a group of duplicate joins whose type or cardinality differ, so a query's
+    result depends on which one a Model takes."""
+    return any(conflict for _, conflict in _duplicate_joins(item.get("obj") or {}))
+
+
+# ── D16: join keys of different types ───────────────────────────────────────
+
+#: Warehouse types by family: a join pairing two families compares unlike values.
+_TYPE_FAMILIES = {
+    "string": ("VARCHAR", "CHAR", "STRING", "TEXT"),
+    "integer": ("INT32", "INT64", "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT"),
+    "decimal": ("DOUBLE", "FLOAT", "DECIMAL", "NUMBER", "NUMERIC", "REAL"),
+    "datetime": ("DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"),
+    "boolean": ("BOOL", "BOOLEAN"),
+}
+_FAMILY_OF = {t: fam for fam, types in _TYPE_FAMILIES.items() for t in types}
+
+
+def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
+    """`"A::x (TYPE) = B::y (TYPE)"` for each key pair in `on` (the join graph's reader,
+    tml_join_graph.on_clause_key_pairs: unescaped, whole conjuncts only) whose types are
+    in different families (_TYPE_FAMILIES). A key with an unknown type, or a type
+    outside the families, is not compared."""
+    out = []
+    for t1, c1, t2, c2 in on_clause_key_pairs(on if isinstance(on, str) else ""):
+        left, right = f"{t1}::{c1}", f"{t2}::{c2}"
+        lt, rt = (str(col_types.get(k, "")).upper() for k in (left, right))
+        lf, rf = _FAMILY_OF.get(lt), _FAMILY_OF.get(rt)
+        if lf and rf and lf != rf:
+            out.append(f"{left} ({lt}) = {right} ({rt})")
+    return out
+
+
+@register("join_key_type_mismatches", uses=(),
+          label="the join's key pairs of different types")
+def _join_key_type_mismatches(item: dict, ctx: Any) -> list:
+    """Join: each pair of keys in its `on` whose warehouse types, read off the Table TMLs
+    (AuditContext.column_types, as @varchar_join_keys reads them), are of different
+    families; a name list in messages. A key of a table with no Table TML in scope — or,
+    through that lookup, of an aliased table — has no type and is not compared."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
+    return NameList(key_type_mismatches((item.get("obj") or {}).get("on"), col_types))
+

@@ -31,7 +31,7 @@ _EXAMPLES = {"fires": {"fixture": "f", "profile": "spotter", "severity": "HIGH"}
 
 
 def _rule(rid: str, **body) -> dict:
-    rule = {"id": rid, "title": f"Rule {rid}", "categories": ["A"],
+    rule = {"id": rid, "title": f"Rule {rid}", "evidence": "fact", "categories": ["A"],
             "requires": ["model_tml"], "examples": copy.deepcopy(_EXAMPLES)}
     rule.update(body)
     return rule
@@ -479,6 +479,57 @@ def test_field_paths():
     assert fields.get(item, "properties.missing.deeper", ctx) is None
     assert fields.get(item, "parent.name", ctx) == "Model"
     assert fields.get(_item({}), "parent.name", ctx) is None
+
+
+@pytest.mark.parametrize("bad", [[{"is_bypass_rls": True}], ["MEASURE"], 5, "x", True])
+def test_a_malformed_mapping_reads_as_absent(bad):
+    """BL-406 item 10: a list or scalar where the schema has a mapping is absent — the
+    walk does not map over a list there and judge what it finds (`[None]` read as true,
+    so a column with `properties: [...]` counted as hidden)."""
+    ctx = make_context()
+    model = _item({"name": "M", "properties": bad})
+    column = _item({"name": "C", "properties": bad,
+                    "db_column_properties": bad}, parent=model)
+    assert fields.get(column, "parent.properties.is_bypass_rls", ctx) is None
+    assert fields.get(column, "properties.is_hidden", ctx) is None
+    assert fields.get(column, "db_column_properties.data_type", ctx) is None
+    assert fields.get(_item({"properties": {"spotter_config": bad}}),
+                      "properties.spotter_config.is_spotter_enabled", ctx) is None
+    # a key outside the schema's mappings still maps over a list, as before
+    assert fields.get(_item({"list": [{"k": 1}]}), "list.k", ctx) == [1]
+    # a derived field reading the key in Python takes the same view: absent `index_type`
+    # is the default, indexed (S2 and P11 reach it only behind other conditions)
+    assert fields.get(_item({"properties": bad}), "@is_indexed", ctx) is True
+
+
+def test_malformed_mappings_names_each_path():
+    from ts_cli.audit.engine.tml import malformed_mappings
+    doc = {"name": "M", "properties": [{"is_bypass_rls": True}],
+           "columns": [{"name": "A", "properties": {"is_hidden": True}},
+                       {"name": "B", "properties": ["MEASURE"]},
+                       {"name": "C", "properties": None}]}
+    assert malformed_mappings(doc) == ["properties", "columns[B].properties"]
+    assert malformed_mappings({"columns": [{"properties": []}]}) == ["columns.0.properties"]
+    assert malformed_mappings({"properties": {"spotter_config": 1}}) == \
+        ["properties.spotter_config"]
+
+
+def test_a_malformed_mapping_is_named_in_a_warning(capsys):
+    from ts_cli.audit import run_audit
+    ctx = make_context(models=[{"guid": "m-1", "model": {
+        "name": "Sales", "model_tables": [], "properties": ["oops"],
+        "columns": [{"name": "A", "column_id": "T::A", "properties": ["MEASURE"]}]}}],
+        tables={}, dependents={}, model_guids=["m-1"])
+    out = run_audit(None, ["m-1"], ctx=ctx)
+    err = capsys.readouterr().err
+    # one entry per object, its reasons joined
+    assert ("Model 'Sales' (m-1): 'properties' is not a mapping; "
+            "'columns[A].properties' is not a mapping; not judged") in err
+    # …and shown to the reader, never only on stderr (product owner's ruling)
+    assert len(out["corpus"]["unreadable"]) == 1
+    from ts_cli.audit.report import render_report
+    html = render_report(out)
+    assert '"ur": [' in html or '"ur":[' in html
 
 
 def test_derived_fields_registry():
@@ -1008,15 +1059,18 @@ def test_model_table_join_and_column_fields():
 
 
 def test_table_grain_fields_key_by_alias():
-    """D6 finds a table's columns by its key (alias, else name) — unlike D10/D11."""
+    """D6 finds a table's columns by its key (alias, else name) — unlike D10/D11. SHIP
+    is joined to, so from join direction (2026-11) it is a dimension holding measures."""
     ctx = fx.data_model_aliased_fact()
     rows = {i["name"]: tuple(fields.get(i, f, ctx) for f in (
         "@table_role", "@table_column_count", "@attribute_count", "@attribute_share",
         "@attribute_pct")) for i in _children_of(ctx, "model.table")}
-    assert rows == {"SHIP": ("fact", 4, 0, 0.0, 0.0), "O": ("fact", 8, 4, 0.5, 50.0)}
+    assert rows == {"SHIP": ("dimension_with_measures", 4, 0, 0.0, 0.0),
+                    "O": ("fact", 8, 4, 0.5, 50.0)}
     no_columns = _field_values(fx.data_lists_none(), "model.table",
                                "@table_role", "@attribute_share", "@attribute_pct")
-    assert set(no_columns) == {("unknown", None, None)}
+    # no columns: the role comes from the joins alone, holding no measures
+    assert set(no_columns) == {("dimension", None, None)}
 
 
 def test_table_set_and_physical_table_key():
@@ -1062,3 +1116,30 @@ def test_every_shipped_registration_has_a_label():
     assert set(code_rules.CODE_LABELS) == set(code_rules.REGISTRY)
     assert all(v.strip() for v in fields.FIELD_LABELS.values())
     assert all(v.strip() for v in code_rules.CODE_LABELS.values())
+
+
+def _columns_of(model_body):
+    ctx = make_context(models=[{"guid": "g-1", "model": model_body}])
+    return ctx, {i["name"]: i for i in scopes.iterate(ctx, "model.column")}
+
+
+def test_surfaces_row_level_formula_branches():
+    """@surfaces_row_level_formula: a per-row formula's column only; absent or odd data
+    reads False, never raises (rule-authoring.md, derived fields)."""
+    ctx, cols = _columns_of({"name": "M", "formulas": [
+        {"id": "f_row", "name": "Row", "expr": "[T::A] / [T::B]"},
+        {"id": "f_agg", "name": "Agg", "expr": "sum ( [T::A] )"},
+        {"id": "f_via", "name": "Via", "expr": "[f_agg] / 2"},
+        {"id": ["f_list"], "name": "Listed", "expr": "[T::A]"},
+        {"id": "f_noname", "expr": "[T::A]"}],
+        "columns": [
+            {"name": "Row", "formula_id": "f_row"}, {"name": "Agg", "formula_id": "f_agg"},
+            {"name": "Via", "formula_id": "f_via"}, {"name": "Phys", "column_id": "T::A"},
+            {"name": "Missing", "formula_id": "f_none"},
+            {"name": "ListId", "formula_id": ["f_row"]},
+            {"name": "DictId", "formula_id": {"x": 1}},
+            {"name": "NoName", "formula_id": "f_noname"}]})
+    get = lambda n: fields.get(cols[n], "@surfaces_row_level_formula", ctx)
+    assert get("Row") is True
+    assert [get(n) for n in ("Agg", "Via", "Phys", "Missing", "ListId", "DictId")] == [False] * 6
+    assert get("NoName") is False

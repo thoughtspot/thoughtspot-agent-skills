@@ -152,3 +152,69 @@ def test_readiness_reads_a_typed_description_as_a1_does():
     from ts_cli.audit.engine.predicates import _blank
     for value in (2024, 3.5, "x", "  ", "", None, [], ["a"]):
         assert _nonblank(value) is (not _blank(value)), value
+
+
+def _populated_with_two_models():
+    """The populated fixture plus a second Model on the same Table, so D12 compares a
+    column across two Models."""
+    import copy as _copy
+    import audit_rule_fixtures as fx
+    ctx = fx.registry_populated_context()
+    second = _copy.deepcopy(ctx.models[0])
+    second["guid"], second["model"]["name"] = "m-2", "Returns"
+    ctx.models.append(second)
+    ctx.model_guids.append("m-2")
+    ctx.dependents = {}  # the fixture's dependent rows carry no guid, which the report needs
+    return ctx
+
+
+def _corrupt(where, bad):
+    ctx = _populated_with_two_models()
+    table = next(iter(ctx.tables.values()))["table"]
+    if where == "model_column":           # table_role, the corpus, D12, the ERD parser
+        ctx.models[0]["model"]["columns"][1]["properties"] = bad
+    elif where == "table_column_db":      # column types, RLS column refs
+        table["columns"][0]["db_column_properties"] = bad
+    elif where == "table_column_props":   # RLS column refs (value casing)
+        table["columns"][0]["properties"] = bad
+    elif where == "model":                # the parent.properties reads
+        ctx.models[0]["model"]["properties"] = bad
+    return ctx
+
+
+@pytest.mark.parametrize("bad", [["MEASURE"], [{"column_type": "MEASURE"}], 5])
+@pytest.mark.parametrize("where,skipped", [
+    ("model_column", {"m-1"}), ("model", {"m-1"}),
+    # the Table both Models use: neither is judged
+    ("table_column_db", {"m-1", "m-2"}), ("table_column_props", {"m-1", "m-2"}),
+])
+def test_a_malformed_mapping_leaves_its_whole_model_unjudged_and_listed(where, skipped, bad):
+    """BL-406 item 10 (product owner's ruling, 2026-10-30): a Model whose TML, or a
+    Table's it uses, holds a list or scalar where a mapping belongs gets no findings and
+    no readiness score, and the run lists it; every other Model is judged as before."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.report import render_report
+    ctx = _corrupt(where, bad)
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    judged = {f["object_guid"] for f in out["findings"]}
+    assert not judged & skipped
+    assert {m["guid"] for m in out["corpus"]["models"]}.isdisjoint(skipped)
+    listed = " ".join(out["corpus"]["unreadable"])
+    assert all(f"({g})" in listed for g in skipped)
+    if skipped == {"m-1"}:
+        assert "m-2" in judged, "the other Model is still judged"
+    assert "<html" in render_report(out).lower()
+
+
+@pytest.mark.skipif(__import__("report_browser").CHROME is None,
+                    reason="headless Chrome not installed")
+def test_the_report_shows_what_could_not_be_read(tmp_path):
+    """The reader sees the skip, not only stderr: the dashboard lists each item."""
+    import report_browser
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.report import render_report
+    out = run_audit(None, ["m-1", "m-2"], ctx=_corrupt("model_column", ["MEASURE"]))
+    shown = report_browser.render(render_report(out), tmp_path)
+    assert shown["errors"] == []
+    assert "Could not be read — 1 item not judged." in shown["text"]
+    assert "Model 'Sales' (m-1): 'columns[Amount].properties' is not a mapping" in shown["text"]

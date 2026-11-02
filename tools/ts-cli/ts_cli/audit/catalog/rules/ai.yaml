@@ -12,6 +12,9 @@
 
 - id: A1
   title: Description coverage below threshold
+  evidence: measure
+  fire_rate_reviewed:
+    spotter: {date: 2026-11-02, rate: 0.62, note: "The Spotter pass mark (95% of visible columns described) is deliberately strict; most Models fall short of it."}
   description: >-
     Share of a Model's visible columns with a non-blank description, against the
     profile's pass mark (Spotter-ready 95%, General 50%). Hidden columns are left out:
@@ -48,6 +51,9 @@
 
 - id: A2
   title: Synonym coverage below threshold
+  evidence: measure
+  fire_rate_reviewed:
+    spotter: {date: 2026-11-02, rate: 0.51, note: "The Spotter pass mark (80% of visible columns with synonyms) is deliberately strict; about half of Models fall short of it."}
   description: >-
     Share of a Model's visible columns carrying synonyms (under `properties:`, where
     Model TML keeps them, or at the column root), against the profile's pass mark
@@ -85,6 +91,10 @@
 
 - id: A3
   title: No AI instructions configured
+  evidence: fact
+  fire_rate_reviewed:
+    general: {date: 2026-11-02, rate: 0.89, note: "Most Models have no Spotter coaching yet; the rule measures adoption, which is expected to be low across an estate."}
+    spotter: {date: 2026-11-02, rate: 0.89, note: "Most Models have no Spotter coaching yet; the rule measures adoption, which is expected to be low across an estate."}
   description: >-
     A Model with no Spotter coaching — no instruction in its ai/instructions response
     and no `model_instructions.data_model_instructions` in its TML. A Model whose
@@ -107,6 +117,7 @@
 
 - id: A4
   title: Model has no description
+  evidence: fact
   description: >-
     A Model with no (or a blank) description. (Titled "Missing Spotter config" until
     2026-10, which it never checked.)
@@ -137,6 +148,9 @@
 
 - id: A6
   title: Measure AI context coverage below threshold
+  evidence: measure
+  fire_rate_reviewed:
+    spotter: {date: 2026-11-02, rate: 0.80, note: "AI context on measures is recent; most Models carry none, and the Spotter bar requires it."}
   description: >-
     Share of a Model's visible MEASURE columns with a non-blank
     `properties.ai_context`. Attributes are not counted: the coach's ai_context schema
@@ -175,3 +189,61 @@
   examples:
     fires: {fixture: model_measures_no_ai_context, profile: spotter, severity: HIGH}
     silent: {fixture: model_measures_with_ai_context, profile: spotter}
+
+- id: A7
+  title: Visible measures without a description
+  evidence: measure
+  description: >-
+    Share of a Model's visible MEASURE columns, physical and formula, with a non-blank
+    root `description` — the columns Spotter explains numbers with. LOW when any is
+    blank, MEDIUM when more than 75% are. A1 grades descriptions over every visible
+    column; this singles out measures. A Model without visible measures is skipped.
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where:
+      all:
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - {not: {field: properties.is_hidden, truthy: true}}
+    match: {field: description, nonblank: true, truthy: true}
+    unnamed_label: "?"
+  bands:
+    direction: higher_is_better
+    unit: percent
+    levels:
+      - {op: lt, value: 25, severity: MEDIUM}
+      - {op: lt, value: 100, severity: LOW}
+  message: "{matched}/{total} visible measures have a description ({pct:.0f}%) — missing: {unmatched_names}"
+  remediation: Run /ts-object-model-coach to write descriptions for the measures
+  examples:
+    fires: {fixture: ai_measures_mostly_undescribed, severity: MEDIUM}
+    silent: {fixture: ai_measures_described}
+
+- id: A8
+  title: One search term naming two columns
+  evidence: fact
+  description: >-
+    A term — a visible column's name or one of its synonyms, compared trimmed and
+    case-insensitively — that names two or more visible columns, so search and Spotter
+    have to guess which is meant. One finding per Model, listing the terms. MEDIUM when
+    a shared term is some column's name (searching for that column may pick the other),
+    LOW when only synonyms are shared.
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@shared_term_kind", exists: true}
+  severity: {field: "@shared_term_kind", map: {name: MEDIUM}, default: LOW}
+  message:
+    by_severity:
+      MEDIUM: "{@shared_term_count} search term(s) name two or more columns, a column name among them: {@shared_terms:head5}"
+      LOW: "{@shared_term_count} synonym(s) shared by two or more columns: {@shared_terms:head5}"
+  remediation: Give each column distinct synonyms, and never another column's name — run /ts-object-model-coach
+  examples:
+    fires: {fixture: ai_name_used_as_another_columns_synonym, severity: MEDIUM}
+    silent: {fixture: ai_distinct_search_terms}
+

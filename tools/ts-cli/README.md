@@ -3723,16 +3723,17 @@ ts dbt create \
 ```
 
 ```bash
-# dbt Core: point --file at the target/ dir that `dbt docs generate` wrote.
-# manifest.json + catalog.json are zipped for you.
+# dbt Core / Fusion: point --file at the target/ dir dbt wrote (`dbt docs generate`
+# on Core, `dbt compile --write-catalog` on Fusion). manifest.json + catalog.json
+# are zipped for you. --project-name is required for ZIP_FILE.
 ts dbt create \
   --connection-name "Snowflake Prod" --database-name ANALYTICS \
-  --import-type ZIP_FILE --file ./my_dbt_project/target
+  --import-type ZIP_FILE --project-name my_dbt_project --file ./my_dbt_project/target
 
 # a ready-made archive still works verbatim
 ts dbt create \
   --connection-name "Snowflake Prod" --database-name ANALYTICS \
-  --import-type ZIP_FILE --file dbt_artifacts.zip
+  --import-type ZIP_FILE --project-name my_dbt_project --file dbt_artifacts.zip
 ```
 
 | Option | Required | Meaning |
@@ -3740,7 +3741,8 @@ ts dbt create \
 | `--connection-name` | yes | Display name of the EXISTING ThoughtSpot warehouse connection the dbt project builds into (e.g. `My Snowflake`) — not a label for the dbt connection object. The response's `connection_id` is that connection's GUID. `ts connections list` shows the candidates. |
 | `--database-name` | yes | Database on that connection that the dbt models are materialised in |
 | `--import-type` | no (default `DBT_CLOUD`) | `DBT_CLOUD` or `ZIP_FILE` |
-| `--dbt-url` / `--account-id` / `--project-id` / `--dbt-env-id` / `--project-name` | `DBT_CLOUD` only | dbt Cloud project coordinates |
+| `--dbt-url` / `--account-id` / `--project-id` / `--dbt-env-id` | `DBT_CLOUD` only | dbt Cloud project coordinates |
+| `--project-name` | **required** for `ZIP_FILE`; optional for `DBT_CLOUD` | Name of the dbt project. The CLI refuses a `ZIP_FILE` create without it, because ThoughtSpot rejected one with `Project Name should not be empty` (seen on one cluster; the spec marks it optional) |
 | `--dbt-cloud-profile` | `DBT_CLOUD` only (preferred) | Profile name — reads token from OS credential store |
 | `--access-token-env` | `DBT_CLOUD` only (alternative) | Env var holding the dbt Cloud API token |
 | `--file` | `ZIP_FILE` only | The dbt Core artifacts (see **`--file` accepts a directory** below) |
@@ -3762,8 +3764,9 @@ Every `--file` flag in this group — `create`, `update`, `generate-tml`,
 Zipping the two files was previously a documented **user** prerequisite. It is a
 mechanical step over paths dbt already fixes, so the CLI does it.
 
-**A missing `catalog.json` is refused**, naming `dbt docs generate` (which
-writes both) rather than uploading the manifest alone: ThoughtSpot types the
+**A missing `catalog.json` is refused**, naming the command that writes it for
+the engine that wrote the manifest (`dbt docs generate` on dbt Core,
+`dbt compile --write-catalog` on dbt Fusion) rather than uploading the manifest alone: ThoughtSpot types the
 generated Table columns from the catalog, so a manifest-only archive imports
 *successfully*, with no column types. `dbt compile` writes only the manifest,
 which is the usual reason it is absent. To upload without one anyway, zip it
@@ -3805,8 +3808,11 @@ the dbt models and tables named in `--model-tables`.
 ts dbt generate-tml --connection-id <dbt_connection_identifier> \
   --model-tables '[{"model_name": "orders", "model_path": "models/orders.sql", "tables": ["orders"]}]'
 
-# ZIP_FILE connections re-upload the manifest+catalog on every call:
-ts dbt generate-tml --connection-id <id> --file dbt_artifacts.zip \
+# ZIP_FILE connections need the archive on EVERY generate call: pass --file each time.
+# The command that writes target/manifest.json + target/catalog.json depends on
+# the engine: `dbt docs generate` (dbt Core), `dbt compile --write-catalog`
+# (dbt Fusion — there `dbt docs generate` leaves catalog.json stale).
+ts dbt generate-tml --connection-id <id> --file ./target \
   --model-tables '[...]'
 
 # Select specific worksheets instead of all/none:
@@ -3820,14 +3826,15 @@ ts dbt generate-tml --connection-id <id> --model-tables '[...]' \
 | `--model-tables` | yes | JSON array of `{model_name, model_path, tables[]}` — the dbt models (and their tables) to import |
 | `--import-worksheets` | no (default `ALL`) | `ALL`, `NONE`, or `SELECTED` |
 | `--worksheets` | `SELECTED` only | JSON array of worksheet names |
-| `--file` | `ZIP_FILE` connections only | Manifest+catalog ZIP |
+| `--file` | **required** for `ZIP_FILE` connections, on every call | The `target/` directory (or project root, either artifact, or a ready-made ZIP). Without it ThoughtSpot answers a misleading `400 "Error with the uploaded ZIP file."`; the CLI prints that error, then explains that the archive is missing. Leave it off for `DBT_CLOUD` |
 | `--include-semantic-report` / `--no-include-semantic-report` | no | Per-model import/skip breakdown — Snowflake and Databricks connections only |
 
 ### `ts dbt generate-sync-tml`
 
 Resync TML generation — resynchronizes the existing Table/Model/Worksheet
 TML for the connection against the current state of the dbt project. Same
-options as `generate-tml`.
+options as `generate-tml` (including `--file`, required for `ZIP_FILE`
+connections); it takes no `--model-tables` or `--import-worksheets`.
 
 ---
 
@@ -3961,7 +3968,7 @@ ts dbt build-model \
 | Flag | Required | Description |
 |---|---|---|
 | `--dbt-cloud-profile` | one of these two | dbt Cloud profile name — reads account-id, project-id, dbt-env-id, dbt-url, and token from keychain |
-| `--manifest` | one of these two | Local dbt Core artifacts: a `target/` dir, a project ZIP, or `manifest.json` (`catalog.json` read from beside it; refused if absent — `dbt docs generate` writes both) |
+| `--manifest` | one of these two | Local dbt Core artifacts: a `target/` dir, a project ZIP, or `manifest.json` (`catalog.json` read from beside it; refused if absent — the message names `dbt docs generate` on Core or `dbt compile --write-catalog` on Fusion) |
 | `--model-path` | yes | Directory path in the manifest (e.g. `models/staging/barbershop`) |
 | `--model-name` | yes | Name for the ThoughtSpot Model (e.g. `BARBERSHOP_OPERATIONS`) |
 | `--pretty-names` | no | Title-case Model column display names and replace `_` with spaces (`APPOINTMENT_DATETIME` → `Appointment Datetime`; `ID`, `URL`, `SKU`, `ZIP` … stay upper-case). `column_id` keeps the physical `TABLE::COLUMN`; formula names are untouched |
@@ -4109,7 +4116,8 @@ complementary YAML artifacts:
   ThoughtSpot's own `ts_*` metadata tags under `meta:` (`ts_column_type`,
   `ts_aggregation`, `ts_synonym`, `ts_format_pattern`, and others on columns;
   `ts_join_cardinality`/`ts_join_type`/`ts_join_name` on a `relationships:`
-  test). This is what a `dbt run`/`dbt compile` + `dbt docs generate` step
+  test). This is what a `dbt run`/`dbt compile` + `dbt docs generate` (Core) or
+  `dbt compile --write-catalog` (Fusion) step
   compiles into `manifest.json`/`catalog.json` — the actual artifact
   ThoughtSpot's `ZIP_FILE` import reads (`file_content` on `dbtGenerateTml`).
   Uses current dbt config syntax (`config: {meta: ...}`, `data_tests:` +
@@ -4140,8 +4148,8 @@ This command generates a dbt **project** only — it does not run `dbt build`,
 zip anything, or call the dbt Cloud API. Getting the result back into
 ThoughtSpot is a separate, connection-type-specific hand-off (see
 open-items.md #7): `ZIP_FILE` connections need a local `dbt run`/`dbt
-compile` + `dbt docs generate` + zip step before `ts dbt create --import-type
-ZIP_FILE`; `DBT_CLOUD` connections need the generated files committed into
+compile` + `dbt docs generate` (Core) / `dbt compile --write-catalog` (Fusion), then `ts dbt create --import-type
+ZIP_FILE --project-name <name> --file <target dir>` (the CLI builds the archive); `DBT_CLOUD` connections need the generated files committed into
 the dbt-Cloud-connected repo and a dbt Cloud job run, with no local artifact
 file at all.
 
@@ -4741,6 +4749,18 @@ ts audit report audit.json -o report.html
 | `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `needs` — the data fetched —, `files`). Refused if the data would not read back unchanged. The directory is checked before anything is fetched: refused inside a git work tree (a snapshot is real exported TML), or when it is non-empty and holds no earlier snapshot (a `manifest.json` that reads as one `--snapshot-out` wrote; any other file of that name does not count) |
 | `--snapshot-in` | — | Audit a `--snapshot-out` directory instead of fetching: no profile, no network. `--angles` defaults to the captured angles. Any selection may be replayed whose rules read only data the snapshot captured (its manifest's `needs`); one whose rules read data that was not captured is an error naming the rules and the missing data — e.g. `--angles H` (Answers, Sets) on a snapshot taken with `--angles A`, while `--angles D` on the same snapshot replays, since D reads only always-fetched data. Cannot be combined with `--snapshot-out` |
 
+**Fire rates.** `ts audit fire-rates --snapshot-in <dir> [--assessment general|spotter]`
+replays a snapshot and reports, per rule, how many of its objects it fires on (Models for
+a Model, column or join rule, Tables for a Table, RLS or metadata rule, Answers, Sets) and at which severities. A rule at MEDIUM or above on more than half
+of its objects **warns** (stderr) unless its catalog entry carries a current
+`fire_rate_reviewed` for that assessment: under 180 days old, and the rate not more than
+10 points above the one reviewed. A rule whose findings name no object (H8, D12) is
+listed but never warns, and so does D8 (reported once per group of duplicates, it cannot
+reach half). Only objects the run judges are counted (Models and Tables excluded as
+unreadable are not). JSON rows to stdout — counts only, no names or guids — and it exits 0
+whatever it finds (1 on a usage error or an unreadable snapshot). `scripts/pr-ready.sh` runs it for both assessments when
+`TS_AUDIT_SNAPSHOT` names a snapshot directory (kept outside the repo).
+
 **What is fetched.** Model TML with its associated Table TML, metadata headers and
 dependents, always; AI instructions, Answer TML and Sets only when a selected rule
 declares them (`requires`/`uses`), so a narrow `--angles` fetches less. The JSON records
@@ -4750,6 +4770,13 @@ request or its re-authentication aborts the run once. Any other non-2xx (403, 40
 after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips that Model's AI-instruction rules
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
 report). Any other exception is a bug and propagates unchanged.
+
+**Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds a list or a
+single value where a mapping belongs (`properties`, `spotter_config`,
+`db_column_properties`) gets no findings and no readiness score, and neither do such a
+Table, the Answers built on either, or the Model's Sets.
+Each is warned on stderr and listed in the JSON as `corpus.unreadable` (the report's
+"Could not be read" box), with the path, e.g. `columns[Amount].properties`.
 
 A snapshot holds exported TML from the cluster it was captured on. Keep it outside the
 repository — this repo is public.

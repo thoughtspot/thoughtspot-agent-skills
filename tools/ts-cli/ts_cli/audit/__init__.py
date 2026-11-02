@@ -15,6 +15,7 @@ from ts_cli.audit.engine import scopes, tml
 from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
+from ts_cli.audit.formula_tree import formula_tree
 
 #: The conditional data the report reads that no rule need declare: the AI
 #: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
@@ -146,7 +147,7 @@ def _model_names(model_data: dict) -> tuple:
     tables = [_name(mt) for mt in (model_data.get("model_tables") or [])]
     cols = [c for c in (model_data.get("columns") or []) if isinstance(c, dict)]
     measures = sum(1 for c in cols
-                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
+                   if tml.mapping(c, "properties").get("column_type") == "MEASURE")
     text = " ".join(tables + [_name(c) for c in cols] + [_name(model_data)])
     return tables, measures, text.lower().replace("_", " ")
 
@@ -230,6 +231,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         m = model.get("model", {})
         guid = model.get("guid", m.get("guid", ""))
         model_tables = m.get("model_tables") or []
+        roles = tml.model_table_roles(m, ctx.tables)
         entry: dict = {
             "guid": guid,
             "name": m.get("name", ""),
@@ -240,11 +242,13 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
             "join_count": tml.join_count(model_tables),
             "join_depth": tml.join_depth(model_tables),
             "model_tables": [
-                {"name": mt.get("name", ""), "fqn": mt.get("fqn", "")}
+                {"name": mt.get("name", ""), "fqn": mt.get("fqn", ""),
+                 "role": (roles.get(tml.table_key(mt)) or {}).get("role", "")}
                 for mt in model_tables
             ],
         }
         entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
+        entry["formula_tree"] = formula_tree(m)
         if items is not None:
             score = readiness_score(items[i], ctx)
             # graded on the raw score, as A5 was; rounded only for the report
@@ -342,6 +346,19 @@ def data_needs(angles: list, profiles: Optional[list] = None) -> set:
     return needs
 
 
+def _unreadable(ctx: AuditContext) -> list:
+    """Each Model, Table and Answer no rule judges, because its TML holds a list or
+    scalar where a mapping belongs (tml.unreadable_documents): warned on stderr and
+    returned for the run's JSON and the report's "Could not be read" (product owner's
+    ruling, 2026-10-30: skip the whole Model, and show it)."""
+    from ts_cli.audit.context import _log
+    messages = tml.unreadable_documents(ctx)[3]
+    for msg in messages:
+        _log(f"Warning: {msg}")
+        ctx.warnings.append(msg)
+    return messages
+
+
 def run_audit(
     client,
     model_guids: list,
@@ -380,6 +397,9 @@ def run_audit(
         profile = resolve_profile(catalog, assessment_name if assessment_name is not None
                                   else ctx.assessment)
     ctx.assessment = profile
+    unreadable = _unreadable(ctx)
+    from ts_cli.audit.engine.run import readable
+    ctx = readable(ctx)  # what no rule judges is left out of the findings and corpus
     known = [a for a in angles if a in catalog.categories]
     findings: list[Finding] = run_rules(ctx, catalog, known, profile)
     run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]
@@ -393,6 +413,8 @@ def run_audit(
         ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
     )
     corpus["assessment"] = catalog.profiles[profile].label
+    if unreadable:
+        corpus["unreadable"] = unreadable
     if fetched_needs is not None:
         corpus["fetched_needs"] = sorted(fetched_needs)
 

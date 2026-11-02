@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 import requests as _requests  # noqa: F401
 import typer
 
-from ts_cli.client import ThoughtSpotClient, resolve_profile
+from ts_cli.client import ThoughtSpotClient, format_http_error, resolve_profile
 from ts_cli.dbt.cloud_api import (
     fetch_artifact,
     get_run,
@@ -37,6 +37,7 @@ from ts_cli.dbt.cloud_api import (
 from ts_cli.dbt.formula_pass import print_double_aggregation, print_reaggregation_kept
 from ts_cli.dbt.artifacts import load_local_catalog, load_local_manifest, resolve_artifact_zip
 from ts_cli.dbt.inspect import group_manifest_models
+from ts_cli.dbt.zip_guard import missing_archive_message
 from ts_cli.profile_ops import get_profile, load_platform_profiles
 
 app = typer.Typer(help="dbt connection management and TML generation.")
@@ -150,12 +151,13 @@ def create_connection(
         ..., "--database-name",
         help="Database on that connection the dbt models are materialised in."),
     import_type: str = typer.Option("DBT_CLOUD", "--import-type",
-                                     help="DBT_CLOUD (dbt Cloud API) or ZIP_FILE (dbt Core manifest+catalog)."),
+                                     help="DBT_CLOUD (dbt Cloud API) or ZIP_FILE (dbt Core or Fusion manifest+catalog)."),
     dbt_url: Optional[str] = typer.Option(None, "--dbt-url", help="dbt Cloud URL (required for DBT_CLOUD)."),
     account_id: Optional[str] = typer.Option(None, "--account-id", help="dbt Cloud account ID (required for DBT_CLOUD)."),
     project_id: Optional[str] = typer.Option(None, "--project-id", help="dbt Cloud project ID (required for DBT_CLOUD)."),
     dbt_env_id: Optional[str] = typer.Option(None, "--dbt-env-id", help="dbt Cloud environment ID."),
-    project_name: Optional[str] = typer.Option(None, "--project-name", help="Name of the dbt project."),
+    project_name: Optional[str] = typer.Option(
+        None, "--project-name", help="Name of the dbt project. Required for --import-type ZIP_FILE."),
     access_token_env: Optional[str] = typer.Option(
         None, "--access-token-env",
         help="Env var holding the dbt Cloud API token (required for DBT_CLOUD). "
@@ -165,21 +167,26 @@ def create_connection(
         help="dbt-cloud profile name (from `ts profiles add --platform dbt-cloud`). "
              "Resolves the token from the OS credential store — alternative to --access-token-env."),
     file: Optional[str] = typer.Option(
-        None, "--file", help="dbt Core artifacts to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required for --import-type ZIP_FILE."),
+        None, "--file", help="dbt artifacts (Core or Fusion) to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required for --import-type ZIP_FILE."),
     profile: Optional[str] = _profile_option,
 ) -> None:
     """Create a dbt connection object (POST /api/rest/2.0/dbt/dbt-connection)."""
     import_type = _normalize_import_type(import_type)
     dbt_prof = _load_dbt_profile(dbt_cloud_profile)
     access_token = _read_access_token(access_token_env, dbt_prof)
-    zip_path = _read_zip_file(file)
 
+    # Flag checks first: reading --file finds, reads and zips the artifacts.
     if import_type == "DBT_CLOUD" and not access_token:
         raise SystemExit(
             "--access-token-env or --dbt-cloud-profile is required when --import-type is DBT_CLOUD."
         )
-    if import_type == "ZIP_FILE" and not zip_path:
+    if import_type == "ZIP_FILE" and not file:
         raise SystemExit("--file is required when --import-type is ZIP_FILE.")
+    if import_type == "ZIP_FILE" and not (project_name or "").strip():
+        raise SystemExit(
+            "--project-name is required when --import-type is ZIP_FILE "
+            "(ThoughtSpot has rejected a ZIP_FILE create without it: 'Project Name should not be empty').")
+    zip_path = _read_zip_file(file)
 
     form = _multipart_fields({
         "connection_name": connection_name,
@@ -216,7 +223,7 @@ def update_connection(
         help="dbt-cloud profile name. Resolves the token from the OS credential store."),
     file: Optional[str] = typer.Option(
         None, "--file",
-        help="dbt Core artifacts to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Pass refreshed artifacts to update the connection's copy."),
+        help="dbt artifacts (Core or Fusion) to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Pass refreshed artifacts to update the connection's copy."),
     profile: Optional[str] = _profile_option,
 ) -> None:
     """Update a dbt connection object (POST /api/rest/2.0/dbt/update-dbt-connection)."""
@@ -274,6 +281,7 @@ def _generate(
     extra_fields: Optional[Dict[str, Optional[str]]] = None,
 ) -> None:
     zip_path = _read_zip_file(file)
+    client = ThoughtSpotClient(resolve_profile(profile))
     fields: Dict[str, Optional[str]] = {"dbt_connection_identifier": connection_id}
     if extra_fields:
         fields.update(extra_fields)
@@ -281,9 +289,17 @@ def _generate(
         ("true" if include_semantic_report else "false") if include_semantic_report is not None else None
     )
     form: Dict[str, Any] = _multipart_fields(fields)
-    client = ThoughtSpotClient(resolve_profile(profile))
     _attach_zip(form, zip_path)
-    resp = client.post(path, files=form)
+    # Without --file, a ZIP_FILE connection gets a 400 that reads as a bad
+    # archive; read it here and say what is missing (ts_cli/dbt/zip_guard.py).
+    resp = client.post(path, files=form, raise_for_status=bool(zip_path))
+    if not resp.ok:
+        # The server's own line first, so the explanation never hides what it said.
+        print(format_http_error("POST", f"{client.base_url}{path}", resp), file=sys.stderr)
+        explanation = missing_archive_message(resp.status_code, resp.text, connection_id)
+        if explanation:
+            raise SystemExit(explanation)
+        raise SystemExit(1)
     print(json.dumps(resp.json()))
 
 
@@ -306,7 +322,7 @@ def generate_tml(
              'e.g. \'["orders_worksheet"]\'.'),
     file: Optional[str] = typer.Option(
         None, "--file",
-        help="dbt Core artifacts to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required if the connection's import_type is ZIP_FILE."),
+        help="dbt artifacts (Core or Fusion) to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required if the connection's import_type is ZIP_FILE."),
     include_semantic_report: Optional[bool] = typer.Option(
         None, "--include-semantic-report/--no-include-semantic-report",
         help="Include a per-model import/skip breakdown. Snowflake and Databricks connections only."),
@@ -338,7 +354,7 @@ def generate_sync_tml(
     connection_id: str = typer.Option(..., "--connection-id", help="dbt_connection_identifier to resync."),
     file: Optional[str] = typer.Option(
         None, "--file",
-        help="dbt Core artifacts to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required if the connection's import_type is ZIP_FILE."),
+        help="dbt artifacts (Core or Fusion) to upload: the `target/` directory (manifest.json + catalog.json are zipped for you), either artifact, or a ready-made .zip. Required if the connection's import_type is ZIP_FILE."),
     include_semantic_report: Optional[bool] = typer.Option(
         None, "--include-semantic-report/--no-include-semantic-report",
         help="Include a per-model import/skip breakdown. Snowflake and Databricks connections only."),

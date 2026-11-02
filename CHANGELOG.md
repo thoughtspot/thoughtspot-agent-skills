@@ -5,8 +5,30 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-02
+- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent; refuses a delete that would also remove unlisted Sets or Spotter feedback). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0
+- chore: bump ts-cli to v0.198.0
+- fix(audit): D14 also reads per-row formula measures (ts-audit 3.12.0); the Model TML schema's formula-aggregation table gains the required-but-ignored declaration and the bare group_aggregate / last_value / first_value exception
+- chore: bump ts-cli to v0.197.0
+- feat(audit): new rules A7, A8, H11, H12, D14, D15, D16 (ts-audit 3.11.0, roadmap PR 4.3)
+- chore: bump ts-cli to v0.196.0
+- feat(audit): severity rubric — evidence classes, heuristic rules capped at MEDIUM (S5 an approved exception), `ts audit fire-rates` (ts-audit 3.10.0, roadmap PR 4.2)
+- chore: bump ts-cli to v0.195.0
+
+## 2026-11-01
+- feat(audit): table roles from join direction; D7 and D11 read them (ts-audit 3.9.0, ts-object-model-erd 1.10.0, roadmap PR 4.1)
+- chore: bump ts-cli to v0.194.0
+- feat: shared table-role classifier (`agents/shared/erd/roles.py`): fact / factless / dimension / dimension with measures from join direction, used by ts-audit and the ERD (roadmap PR 4.1)
+
+## 2026-10-31
+- feat(audit): the report gains a Formulas view, each Model's formula dependency tree (ts-audit 3.8.0, v2 roadmap PR 3.2)
+- chore: bump ts-cli to v0.193.0
+- chore: bump ts-cli to v0.192.2 (the audit report is assembled from parts with a view registry, ts-audit v2 roadmap PR 3.1; no visible change)
+
 ## 2026-10-30
-- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0
+- fix(audit): a Model whose TML (or a Table it uses) has a list or scalar `properties`, `spotter_config` or `db_column_properties` is no longer mapped over or a crash: it is not judged, and the report and JSON list it under "Could not be read" (BL-406 item 10). Other non-mapping shapes are BL-501. ts-audit 3.7.1
+- chore: bump ts-cli to v0.192.1
+- fix: ts-cli / ts-convert-from-dbt 1.1.1 / ts-convert-to-dbt 1.0.1 — **a ZIP_FILE dbt connection no longer fails with a misleading 400.** `ts dbt generate-tml` / `generate-sync-tml` without `--file` sent no archive and ThoughtSpot answered "Error with the uploaded ZIP file.", which reads as a bad archive; the CLI now follows that 400 with an error saying the archive is missing and naming `--file`, at no extra request. The missing-catalog error and both skills now name the right command per engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion, where `docs generate` leaves `catalog.json` stale) — each verified on dbt Core 1.12.5 and Fusion 2.0.6. `ts dbt create --import-type ZIP_FILE` also refuses locally without `--project-name`, which the server rejected a create without on one cluster.
 - chore: bump ts-cli to v0.192.0
 - feat(audit): grading into data (ts-audit v2 roadmap PR 2.4). New catalog key `parameters` for code-rule tuning numbers (H2, H10); D1 and H10 graded from the catalog; P2 reads the formula expression; H1 and the readiness score share one name test; `ts audit run` no longer ends on a null or numeric name. ts-audit 3.7.0
 - chore: bump ts-cli to v0.191.0

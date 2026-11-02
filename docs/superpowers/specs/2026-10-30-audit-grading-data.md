@@ -40,9 +40,11 @@ bands must be exactly `gt HIGH, gt MEDIUM`; the values are free.
   the shipped lines were equal (30 / 50 for tables, joins and formulas), so one set
   reproduces them exactly. Tuning the measures apart would need per-measure bands, which
   no rule needs yet.
-- **P6 stays in code.** My call, not a recorded product ruling: its two severities come
-  from two independent tests of one join, which a single catalog severity source cannot
-  express without a new mode. Open to reversal.
+- **P6 stays in code.** Accepted by the product owner (2026-10-30): its two severities
+  come from two independent tests of one join, which a single catalog severity source
+  cannot express without a new mode. Revisit when a profile needs different P6
+  severities, or a second rule has the same "one item, two kinds of finding" shape —
+  then split P6 into two rules (a new id) or teach the engine per-finding grading.
 - **Parameters, not bands, for H2 and H10.** Their numbers are not severity lines: H2's are
   the edges of an acceptable length, H10's is how much of a description to quote. Bands
   would have meant inventing severities for them.

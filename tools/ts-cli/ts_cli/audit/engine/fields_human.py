@@ -22,11 +22,12 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.tml_join_graph import on_clause_refs
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -86,6 +87,34 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
     return not any(_str(cc.get("column_id", "")).startswith(prefix)
                    for cc in model.get("columns") or []
                    if cc is not column and not _is_hidden(cc))
+
+
+def _join_ons(doc: dict, ctx: Any) -> List[Any]:
+    """The `on` of every join of a Model: its inline joins, and the `joins_with` of its
+    Tables in scope (where a referencing join's `on` lives)."""
+    model_tables = (doc.get("model") or {}).get("model_tables") or []
+    joins = [j for mt in model_tables if isinstance(mt, dict) for j in mt.get("joins") or []]
+    joins += [j for t in ctx.tables_for_model(doc)
+              for j in (t.get("table") or {}).get("joins_with") or []]
+    return [j.get("on") for j in joins if isinstance(j, dict)]
+
+
+def _join_key_ids(doc: dict, ctx: Any) -> set:
+    """Lower-cased `TABLE::COL` of every key named in the Model's joins (_join_ons), read
+    with the join graph's `[TABLE::COL]` reader (unescaped)."""
+    return {f"{t}::{c}".lower() for on in _join_ons(doc, ctx) if isinstance(on, str)
+            for t, c in on_clause_refs(on)}
+
+
+@register("is_join_key", uses=(),
+          label="the column is a key of one of the Model's joins")
+def _is_join_key(item: dict, ctx: Any) -> bool:
+    """Model column: its `column_id` is named in an `on` of the Model's joins (inline,
+    or a referencing join's Table-level `on`) — a key, which a Model rightly hides. A
+    key of an aliased table is matched by the Table's name only, so may be missed."""
+    doc = item.get("doc") or {}
+    keys = cached("join_key_ids", doc, _join_key_ids, doc, ctx)
+    return _str((item.get("obj") or {}).get("column_id", "")).lower() in keys
 
 
 @register("referenced_by_formula", uses=(),
@@ -151,18 +180,26 @@ def _set_consumers(item: dict, ctx: Any) -> Any:
 
 def _known_table_guids(ctx: Any) -> set:
     """legacy H7's `table_guids`: every non-empty `model_tables[].fqn` of every Model,
-    and every Table TML key in the context. Once per run (engine/memo.py)."""
+    and every Table TML key in the context — those left out as malformed included (they
+    are still Tables). Once per run (engine/memo.py)."""
     return cached("h7_known_table_guids", ctx, _build_known_table_guids, ctx)
 
 
 def _build_known_table_guids(ctx: Any) -> set:
     guids: set = set()
-    for doc in ctx.models:
+    for doc in _all_models(ctx):
         for mt in (doc.get("model") or {}).get("model_tables") or []:
-            fqn = mt.get("fqn", "")
+            fqn = mt.get("fqn", "") if isinstance(mt, dict) else ""
             if fqn:
                 guids.add(fqn)
-    return guids | set(ctx.tables)
+    return guids | set(ctx.tables) | set(getattr(ctx, "excluded_tables", {}) or {})
+
+
+def _all_models(ctx: Any) -> list:
+    """Every Model in the run: the judged ones and those left out as malformed (BL-406
+    item 10). A rule asking whether something is on NO Model reads this, never
+    `ctx.models` alone, or excluding a Model would make that answer false."""
+    return list(ctx.models) + list(getattr(ctx, "excluded_models", []) or [])
 
 
 @register("is_table_reference", uses=(),
@@ -195,7 +232,7 @@ def _model_formula_names(ctx: Any) -> Dict[str, Any]:
 
 def _build_model_formula_names(ctx: Any) -> Dict[str, Any]:
     names: Dict[str, Any] = {}
-    for doc in ctx.models:
+    for doc in _all_models(ctx):
         for f in (doc.get("model") or {}).get("formulas") or []:
             key = _normalize(f.get("expr", ""))
             if key is not None:
@@ -233,3 +270,65 @@ def _answer_name(item: dict, ctx: Any) -> Any:
     """Answer formula: the name of its Answer, as an Answer finding reports it ("" when
     the Answer has no `name`)."""
     return (item.get("parent") or {}).get("name")
+
+
+# ── A8: one search term naming two columns ──────────────────────────────────
+
+def _column_terms(col: dict) -> Tuple[str, set]:
+    """(the column's name, trimmed and lower-cased; its synonyms, the same way) — read as
+    @has_synonyms reads them: under `properties:`, else at the root."""
+    def norm(t: Any) -> str:
+        return t.strip().lower() if isinstance(t, str) else ""
+    syns = tml.mapping(col, "properties").get("synonyms") or col.get("synonyms") or []
+    syns = syns if isinstance(syns, list) else []
+    return norm(col.get("name")), {norm(t) for t in syns} - {""}
+
+
+def _shared_terms(model: dict) -> Dict[str, str]:
+    """{term: "name" | "synonym"} for each term — a visible column's name or synonym —
+    that names two or more visible columns; "name" when it is some column's name."""
+    owners: Dict[str, set] = {}
+    names = set()
+    for i, col in enumerate(model.get("columns") or []):
+        if not isinstance(col, dict) or tml.mapping(col, "properties").get("is_hidden"):
+            continue
+        name, syns = _column_terms(col)
+        if name:
+            names.add(name)
+        for term in syns | ({name} - {""}):
+            owners.setdefault(term, set()).add(i)
+    return {t: ("name" if t in names else "synonym")
+            for t, cols in owners.items() if len(cols) > 1}
+
+
+def _shared(item: dict) -> Dict[str, str]:
+    model = item.get("obj") or {}
+    return cached("shared_terms", model, _shared_terms, model)
+
+
+@register("shared_terms", uses=(),
+          label="the search terms that name two or more columns")
+def _shared_terms_field(item: dict, ctx: Any) -> List[str]:
+    """Model: each term (trimmed, lower-cased) that is the name or a synonym of two or
+    more visible columns — column names first, so a MEDIUM message's first five show
+    what made it MEDIUM — then sorted; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    shared = _shared(item)
+    return NameList(sorted(shared, key=lambda t: (shared[t] != "name", t)))
+
+
+@register("shared_term_count", uses=(),
+          label="the number of search terms that name two or more columns")
+def _shared_term_count(item: dict, ctx: Any) -> int:
+    """Model: how many terms name two or more visible columns (see @shared_terms)."""
+    return len(_shared(item))
+
+
+@register("shared_term_kind", uses=(), values=("name", "synonym", None),
+          label="the worst kind of shared search term")
+def _shared_term_kind(item: dict, ctx: Any) -> Optional[str]:
+    """Model: "name" when a shared term is some visible column's name (searching it may
+    pick the other column), "synonym" when only synonyms are shared, None when none is."""
+    kinds = set(_shared(item).values())
+    return "name" if "name" in kinds else ("synonym" if kinds else None)
+

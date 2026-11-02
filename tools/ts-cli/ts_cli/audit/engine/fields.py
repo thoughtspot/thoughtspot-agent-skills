@@ -11,7 +11,12 @@ mapping's `field:`, an `{each}` message placeholder):
     @is_indexed              a derived field: a registered function of (item, ctx)
 
 A missing key, an index out of range or a step into a scalar yields None, never an
-error — absence is data, and the operators define what None means.
+error — absence is data, and the operators define what None means. A key the TML schema
+defines as a mapping (`tml.MAPPING_KEYS`: `properties`, `spotter_config`,
+`db_column_properties`) holding a list or a scalar reads as None too, never mapped over.
+That is a backstop only: a Model whose TML (or a Table's it uses) holds one is not judged
+at all, so rules never see it (`tml.unreadable_documents`, `engine/run.py`; BL-406 item
+10, product owner's ruling 2026-10-30).
 
 Derived fields are small pure functions, written once, for what a path cannot express
 (a default the schema implies, a join graph, a lookup into another document). Register
@@ -61,7 +66,7 @@ def register(name: str, *, uses: Any = None, values: Optional[Iterable[Any]] = N
     severity `map:` is keyed on (the catalog gate fails one that declares none).
 
     `label` is how the field reads to an audit reader, in place of `@name`: a clause for
-    a true/false field ("the join links two fact tables"), else a noun phrase ("the join
+    a true/false field ("the join links two tables that both hold measures"), else a noun phrase ("the join
     type"). Required, like `uses` — generated text never shows an engine identifier."""
     declared = _declared_uses(f"derived field '@{name}'", uses)
     text = human_label(f"derived field '@{name}'", label)
@@ -136,7 +141,11 @@ def walk(value: Any, path: str) -> Any:
 
 def _step(value: Any, step: str) -> Any:
     if isinstance(value, dict):
-        return value.get(step)
+        found = value.get(step)
+        # A schema mapping holding a list or scalar is malformed: absent, not mapped over.
+        if step in tml.MAPPING_KEYS and not isinstance(found, dict):
+            return None
+        return found
     if isinstance(value, list):
         if step.lstrip("-").isdigit():
             i = int(step)
@@ -159,9 +168,7 @@ def _is_indexed(item: dict, ctx: Any) -> bool:
 def _has_synonyms(item: dict, ctx: Any) -> bool:
     """Column: carries synonyms under `properties:` (exported TML) or at the root."""
     col = item.get("obj") or {}
-    props = col.get("properties") or {}
-    return bool((props.get("synonyms") if isinstance(props, dict) else None)
-                or col.get("synonyms"))
+    return bool(tml.mapping(col, "properties").get("synonyms") or col.get("synonyms"))
 
 
 @register("join_depth", uses=(),
@@ -276,6 +283,34 @@ def _formula_exprs(model: dict) -> dict:
             if isinstance(f, dict) and f.get("id")}
 
 
+@register("surfaces_row_level_formula", uses=(),
+          label="the column surfaces a formula computed row by row")
+def _surfaces_row_level_formula(item: dict, ctx: Any) -> bool:
+    """Model column: its `formula_id` names a named formula that is row-level by the
+    reading @is_row_level_formula uses for named formulas (no aggregate call, none
+    reached through the formulas it references, by id or name). Such a formula is rolled
+    up by the column's `aggregation`, like a physical column. An aggregate formula is
+    not: its aggregation is ignored — except a bare `group_aggregate` / `last_value` /
+    `first_value`, whose aggregation is applied (thoughtspot-model-tml.md), which is
+    D13's ground, not this field's. False for a table column, a non-string
+    `formula_id`, or one matching no named formula."""
+    fid = (item.get("obj") or {}).get("formula_id")
+    if not isinstance(fid, str) or not fid:
+        return False
+    model = _model_of(item)
+    name = cached("formula_names_by_id", model, _formula_names_by_id, model).get(fid)
+    if not name:
+        return False
+    aggregate = cached("aggregate_formula_names", model, _aggregate_formula_names, model)
+    return name not in aggregate
+
+
+def _formula_names_by_id(model: dict) -> dict:
+    return {f["id"]: f.get("name") for f in (model.get("formulas") or [])
+            if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"]
+            and isinstance(f.get("name"), str)}
+
+
 #: The distinct-count functions a formula can call (thoughtspot-formula-patterns.md).
 _DISTINCT_FORMULA = re.compile(
     r"\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b", re.IGNORECASE)
@@ -308,26 +343,31 @@ def _has_date_constraint(item: dict, ctx: Any) -> bool:
     return "date_range_condition" in str((item.get("obj") or {}).get("constraints") or {})
 
 
-def _fact_table_names(item: dict) -> set:
-    model = item.get("obj") or {}
-    return cached("fact_table_names", model, tml.fact_tables,
-                  model.get("columns") or [], model.get("model_tables") or [])
+def model_roles(model: dict, ctx: Any) -> Dict[str, dict]:
+    """The Model's table roles by key (tml.model_table_roles), once per Model per run."""
+    return cached("table_roles", model, tml.model_table_roles, model,
+                  getattr(ctx, "tables", None) or {})
+
+
+def _fact_table_names(item: dict, ctx: Any) -> set:
+    roles = model_roles(item.get("obj") or {}, ctx)
+    return {key for key, r in roles.items() if r["role"] == "fact"}
 
 
 @register("fact_tables", uses=(),
           label="the fact tables")
 def _fact_tables(item: dict, ctx: Any) -> List[str]:
-    """Model: the distinct `model_tables[].name`s that read as fact tables
-    (tml.fact_tables — keyed by name, not alias), sorted; a name list in messages."""
+    """Model: the keys (alias, else name) of the tables whose role is `fact` — a root of
+    the joins holding a measure (model_roles) — sorted; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports this module
-    return NameList(sorted(_fact_table_names(item)))
+    return NameList(sorted(_fact_table_names(item, ctx)))
 
 
 @register("fact_table_count", uses=(),
           label="the number of fact tables")
 def _fact_table_count(item: dict, ctx: Any) -> int:
-    """Model: how many distinct table names read as fact tables (see @fact_tables)."""
-    return len(_fact_table_names(item))
+    """Model: how many tables' role is `fact` (see @fact_tables)."""
+    return len(_fact_table_names(item, ctx))
 
 
 @register("varchar_join_keys", uses=(),
@@ -381,15 +421,7 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     order legacy P17 did (it walked its name-keyed dict, where a name keeps the place
     of its first insertion).
     """
-    by_ref: Dict[Any, Any] = {}
-    for f in formulas:
-        fname = f.get("name", "")
-        if not fname:
-            continue
-        by_ref[fname] = fname
-        fid = f.get("id", "")
-        if fid:
-            by_ref[fid] = fname
+    by_ref = tml.formula_ref_index(formulas)
     graph: Dict[Any, list] = {}
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):

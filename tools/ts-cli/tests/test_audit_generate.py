@@ -51,6 +51,7 @@ _EX = {"fires": {"fixture": "toy_fires", "severity": "HIGH"}, "silent": {"fixtur
 _TOY_RULES = yaml.safe_load("""
 - id: T1
   title: Toy outer join
+  evidence: fact
   categories: [D]
   requires: [model_tml]
   scope: join
@@ -63,6 +64,7 @@ _TOY_RULES = yaml.safe_load("""
   remediation: Inner-join it, or document why it is outer
 - id: T2
   title: Toy coverage
+  evidence: fact
   categories: [A]
   requires: [model_tml]
   scope: model
@@ -82,6 +84,7 @@ _TOY_RULES = yaml.safe_load("""
   legacy_threshold: {green: 50, assessment: "{profile_label}", yellow: 25}
 - id: T3
   title: Toy uncoached
+  evidence: fact
   categories: [A]
   requires: [model_tml, ai_instructions]
   scope: model
@@ -91,6 +94,7 @@ _TOY_RULES = yaml.safe_load("""
   message: Not coached
 - id: T4
   title: Toy depth
+  evidence: fact
   categories: [D]
   requires: [model_tml]
   scope: model
@@ -102,6 +106,7 @@ _TOY_RULES = yaml.safe_load("""
   message: "Depth {value}"
 - id: T5
   title: Toy complexity
+  evidence: fact
   categories: [D]
   requires: [model_tml]
   implementation: code:model_complexity
@@ -113,6 +118,7 @@ _TOY_RULES = yaml.safe_load("""
   message: "{value} {measure} (>{yellow} HIGH, >{green} MEDIUM)"
 - id: T6
   title: Toy readiness
+  evidence: fact
   categories: [A]
   requires: [model_tml]
   uses: [ai_instructions]
@@ -125,6 +131,7 @@ _TOY_RULES = yaml.safe_load("""
   message: "Score {score:.0f}"
 - id: T7
   title: Toy credential
+  evidence: fact
   categories: [D]
   requires: [model_tml]
   scope: model.column
@@ -139,6 +146,7 @@ _TOY_RULES = yaml.safe_load("""
       MEDIUM: {high_overlap: 0.5}
 - id: T8
   title: Toy retired
+  evidence: fact
   description: Retired because the toy says so.
   status: retired
   categories: [D]
@@ -189,7 +197,8 @@ def toy_doc(toy):
 
 
 def _row(doc: str, rule_id: str) -> str:
-    [row] = [ln for ln in doc.splitlines() if ln.startswith(f"| {rule_id} | **")]
+    # | ID | Evidence | **Title.** ... (the Evidence column, PR 4.2)
+    [row] = [ln for ln in doc.splitlines() if re.match(rf"\| {rule_id} \| [^|]+ \| \*\*", ln)]
     return row
 
 
@@ -263,7 +272,7 @@ def test_doc_lists_every_active_rule_under_each_category_and_retired_ones(cat, d
         if rule.status == "retired":
             assert len(rows) == 1 and rows[0] in retired_part, rule.id
         else:
-            assert len([r for r in rows if r.startswith(f"| {rule.id} | **")]) == \
+            assert len([r for r in rows if re.match(rf"\| {rule.id} \| [^|]+ \| \*\*", r)]) == \
                 len(rule.categories), rule.id
 
 
@@ -306,7 +315,8 @@ def test_cli_check_exit_codes(tmp_path):
     env = {**os.environ, "PYTHONPATH": str(REPO / "tools" / "ts-cli")}
     assert subprocess.run(cmd, capture_output=True, text=True, env=env).returncode == 0
     doc = root / generate.DOC_REL
-    doc.write_text(re.sub(r"(?m)^(\| [A-Z]\d+ \| \*\*)", r"\1Edited. ", doc.read_text(), count=1))
+    doc.write_text(re.sub(r"(?m)^(\| [A-Z]\d+ \| [^|]+ \| \*\*)", r"\1Edited. ", doc.read_text(),
+                          count=1))
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode == 1 and "stale" in res.stdout
 
@@ -352,7 +362,7 @@ def test_shipped_report_meta_and_doc_show_no_engine_identifiers(meta, cat):
     ({"field": "@join_type", "map": {"OUTER": "HIGH"}, "default": "INFO"},
      "HIGH when the join type is OUTER; otherwise INFO"),
     ({"field": "@is_fact_to_fact_join", "map": {True: "MEDIUM"}, "default": "INFO"},
-     "MEDIUM when the join links two fact tables; otherwise INFO"),
+     "MEDIUM when the join links two tables that both hold measures; otherwise INFO"),
     ({"field": "@owning_table_has_rls", "map": {False: "HIGH"}, "default": "INFO"},
      "HIGH unless the column's table has row-level security; otherwise INFO"),
     ({"field": "@credential_term", "map": {None: "LOW"}, "default": "HIGH"},

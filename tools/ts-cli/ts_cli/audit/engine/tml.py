@@ -25,7 +25,7 @@ engine modules that import it.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ts_cli.tml_join_graph import node_id
 
@@ -33,11 +33,142 @@ from ts_cli.tml_join_graph import node_id
 #: markedly slower than an integer one and is what several checks look for.
 STRING_TYPES = ("VARCHAR", "CHAR", "STRING", "TEXT")
 
-#: A table with more than this many MEASURE columns is treated as a fact table.
-FACT_MEASURE_THRESHOLD = 3
-
 #: A bracketed column reference inside a TML expression: ``[TABLE::COL]``.
 BRACKET_REF = re.compile(r"\[([^\]]+)\]")
+
+#: Keys the Model and Table TML schemas define as mappings, never lists
+#: (thoughtspot-model-tml.md, thoughtspot-table-tml.md). A list or scalar under one is
+#: malformed. The Model holding it (or using a Table that holds it) is not judged at all:
+#: `unreadable_documents` names it and `engine/run.py` leaves it out of every rule, and
+#: the report lists it under "Could not be read" (BL-406 item 10, product owner's ruling
+#: 2026-10-30). A field path still reads such a value as None (fields._step) and Python
+#: reads go through `mapping`, as a backstop: neither maps over it nor crashes on it.
+MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
+
+
+def formula_ref_index(formulas: list) -> Dict[Any, Any]:
+    """How a formula is referred to in an expression -> its NAME. A cross-reference is
+    written as the formula's id (`[formula_<name>]`), or, in a hand-built model, its
+    display name; both resolve to the name (BL-300). The one reading shared by P17's
+    reference graph and the report's formula tree. A non-string name or id is skipped,
+    not a TypeError that ends the run (BL-501's class)."""
+    by_ref: Dict[Any, Any] = {}
+    for f in formulas:
+        fname = f.get("name", "") if isinstance(f, dict) else ""
+        if not isinstance(fname, str) or not fname:
+            continue
+        by_ref[fname] = fname
+        fid = f.get("id", "")
+        if isinstance(fid, str) and fid:
+            by_ref[fid] = fname
+    return by_ref
+
+
+def mapping(obj: Any, key: str) -> dict:
+    """`obj[key]` when it is a mapping, else {}: the one reader for a MAPPING_KEYS key,
+    so a malformed (list or scalar) value reads as absent rather than raising."""
+    value = obj.get(key) if isinstance(obj, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _malformed_tables(tables: dict) -> Dict[Any, Tuple[dict, list]]:
+    """{Table key: (its `table` body, its malformed paths)} for each malformed Table."""
+    out: Dict[Any, Tuple[dict, list]] = {}
+    for key, doc in (tables or {}).items():
+        body = doc.get("table") if isinstance(doc, dict) else None
+        paths = malformed_mappings(body) if isinstance(body, dict) else []
+        if paths:
+            out[key] = (body, paths)
+    return out
+
+
+def _model_reasons(body: dict, bad_tables: dict) -> list:
+    """Why a Model is unreadable: its own malformed paths, then each malformed Table it
+    uses (by `model_tables[].fqn`, the key `ctx.tables` holds Tables under)."""
+    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+    for mt in _list(body.get("model_tables")):
+        if isinstance(mt, dict) and mt.get("fqn") in bad_tables:
+            reasons.append(f"uses Table '{mt.get('name')}', whose TML is malformed")
+    return list(dict.fromkeys(reasons))  # a Table used twice (aliases) is one reason
+
+
+def _list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _answer_reasons(body: dict, excluded: Dict[Any, str]) -> list:
+    """Why an Answer is not judged: its own malformed paths, then each excluded Model or
+    Table it is built on (`tables[].fqn`) — its formulas and table references are judged
+    against that object, which no rule can now see (H7, H8, H9)."""
+    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+    for ref in _list(body.get("tables")):
+        key = ref.get("fqn") if isinstance(ref, dict) else None
+        if key is not None and key in excluded:
+            reasons.append(f"built on {excluded[key]}, which is not judged")
+    return list(dict.fromkeys(reasons))
+
+
+def _message(kind: str, name: Any, key: Any, reasons: list) -> str:
+    return f"{kind} '{name or ''}' ({key or 'no guid'}): {'; '.join(reasons)}; not judged"
+
+
+def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
+    """What no rule may judge, because its TML, or TML it depends on, holds a list or
+    scalar where a mapping belongs: (Model guids, Table keys, Answer guids, one message
+    per object, its reasons joined).
+
+    A Table is unreadable when its own TML has such a path; a Model when its own TML does
+    or it uses such a Table; an Answer when its own TML does or it is built on such a
+    Model or Table. The unit is the whole Model: skipping only the bad column left
+    counts, sibling checks and the readiness score reading it anyway (PR #693 review,
+    round 4), and keeping its Answers judged them against a Model no rule could see
+    (round 5)."""
+    bad_tables = _malformed_tables(ctx.tables)
+    excluded = {key: f"Table '{body.get('name') or ''}'" for key, (body, _) in bad_tables.items()}
+    models, messages = set(), []
+    for doc in ctx.models:
+        body = doc.get("model") if isinstance(doc, dict) else None
+        reasons = _model_reasons(body, bad_tables) if isinstance(body, dict) else []
+        if reasons:
+            models.add(doc.get("guid"))
+            if doc.get("guid") is not None:
+                excluded[doc.get("guid")] = f"Model '{body.get('name') or ''}'"
+            messages.append(_message("Model", body.get("name"), doc.get("guid"), reasons))
+    for key, (body, paths) in bad_tables.items():
+        messages.append(_message("Table", body.get("name"), key,
+                                 [f"'{p}' is not a mapping" for p in paths]))
+    answers, answer_messages = _unreadable_answers(ctx.answers, excluded)
+    return models, set(bad_tables), answers, messages + answer_messages
+
+
+def _unreadable_answers(answers: list, excluded: Dict[Any, str]) -> Tuple[set, list]:
+    guids, messages = set(), []
+    for doc in answers or []:
+        body = doc.get("answer") if isinstance(doc, dict) else None
+        reasons = _answer_reasons(body, excluded) if isinstance(body, dict) else []
+        if reasons:
+            guids.add(doc.get("guid"))
+            messages.append(_message("Answer", body.get("name"), doc.get("guid"), reasons))
+    return guids, messages
+
+
+def malformed_mappings(doc: Any, path: str = "") -> list:
+    """Dotted paths in `doc` where a MAPPING_KEYS key holds something other than a
+    mapping (absent and null excepted), in document order. A list entry is named by its
+    `name` when it has one (`columns[Amount].properties`), else by its index."""
+    out: list = []
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            here = f"{path}.{key}" if path else str(key)
+            if key in MAPPING_KEYS and value is not None and not isinstance(value, dict):
+                out.append(here)
+            else:
+                out += malformed_mappings(value, here)
+    elif isinstance(doc, list):
+        for i, value in enumerate(doc):
+            name = value.get("name") if isinstance(value, dict) else None
+            out += malformed_mappings(value, f"{path}[{name}]" if name else f"{path}.{i}")
+    return out
 
 
 def join_count(model_tables: list) -> int:
@@ -198,25 +329,18 @@ def join_label(model_table: dict, join: dict) -> str:
     return f"{left} -> {right}" if left and right else (left or right)
 
 
-def table_role(columns: list, table_name: str) -> str:
-    """``"fact"``, ``"dimension"`` or ``"unknown"`` for one model table.
+def model_table_roles(model: dict, tables: dict) -> Dict[str, dict]:
+    """Each model table's role, by key (alias, else name): the shared classifier
+    (agents/shared/erd/roles.py, loaded through ts_cli.audit.erd), with a referencing
+    join's cardinality read from its Table's `joins_with` as `model_joins` reads it.
+    `{key: {role, outrigger, attribute_heavy, unjoined, measures, attributes}}`; role is
+    fact, factless, dimension or dimension_with_measures."""
+    from ts_cli.audit.erd import load_table_roles  # erd imports nothing from engine
 
-    Keyed on the ``column_id`` prefix. Note that prefix is the model_tables
-    ``alias`` when one is set, and several callers pass ``name`` — BL-305.
-    """
-    table_cols = [c for c in (columns or [])
-                  if (c.get("column_id") or "").split("::")[0] == table_name]
-    if not table_cols:
-        return "unknown"
-    measures = sum(1 for c in table_cols
-                   if (c.get("properties") or {}).get("column_type") == "MEASURE")
-    return "fact" if measures > FACT_MEASURE_THRESHOLD else "dimension"
-
-
-def fact_tables(columns: list, model_tables: list) -> set:
-    """Names of the model's tables that read as fact tables."""
-    return {mt.get("name", "") for mt in (model_tables or [])
-            if table_role(columns, mt.get("name", "")) == "fact"}
+    def cardinality(model_table: dict, join: dict) -> Any:
+        return _resolve_join(model_table, join,
+                             _joins_with_index(model_table, tables))["cardinality"] or None
+    return load_table_roles()(model, cardinality)
 
 
 def rls_column_refs(table: dict):
@@ -232,8 +356,8 @@ def rls_column_refs(table: dict):
     props = {}
     for c in (t.get("columns") or []):
         props[c.get("name", "")] = (
-            (c.get("db_column_properties") or {}).get("data_type", ""),
-            (c.get("properties") or {}).get("value_casing", ""),
+            mapping(c, "db_column_properties").get("data_type", ""),
+            mapping(c, "properties").get("value_casing", ""),
         )
     for rule in ((t.get("rls_rules") or {}).get("rules") or []):
         for ref in BRACKET_REF.findall(rule.get("expr", "")):
@@ -262,7 +386,7 @@ def is_indexed(column: dict) -> bool:
     `DONT_INDEX` is also the only value this repo ever writes, so every
     converter-produced model turned S2 into a pure false-positive generator.
     """
-    idx = (column.get("properties") or {}).get("index_type", "")
+    idx = mapping(column, "properties").get("index_type", "")
     return (idx or "").upper() != NOT_INDEXED
 
 

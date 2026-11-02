@@ -1,9 +1,16 @@
-"""Audit report renderer — compacts JSON, injects into HTML template.
+"""Audit report renderer — compacts JSON and assembles the page from its parts.
+
+The page is assembled from `report/`: `shell.html` (the layout), `styles.css`, `core.js`
+(data, shared helpers, sidebar, router), one file per view under `views/`, and
+`boot.js`. `REPORT_VIEWS` is the registry: each entry is a view's container id and its
+script, which registers the view's routes with `registerView`. A new view is a new file
+and a registry line (audit v2 roadmap, principle 3). The output is still one
+self-contained HTML file.
 
 What the report says about categories and rules — the category tabs, labels and order,
 each rule's title, grading text and recommendation, and which rules feed the
 duplicates and cleanup views — comes from the rule catalog (generate.report_meta), not
-from the template. JSON written before the catalog cut-over (findings with `angle` and
+from the report's parts. JSON written before the catalog cut-over (findings with `angle` and
 the legacy `threshold` dict only) still renders: a finding's categories are derived
 from its angle, and the metric bar falls back to the legacy pass mark.
 """
@@ -16,7 +23,38 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-TEMPLATE_PATH = Path(__file__).parent / "report_template.html"
+REPORT_DIR = Path(__file__).parent / "report"
+
+#: The views, in the order their containers appear: (view id, script under report/).
+#: The view's container is `<div class="view" id="v-<view id>">`.
+REPORT_VIEWS: List[tuple] = [
+    ("dashboard", "views/dashboard.js"),
+    ("scorecard", "views/scorecard.js"),
+    ("crossmodel", "views/crossmodel.js"),
+    ("objectmap", "views/objectmap.js"),
+    ("cleanup", "views/cleanup.js"),
+    ("formulas", "views/formulas.js"),
+]
+
+
+def assemble_page() -> str:
+    """The report page with every part in place and `{{AUDIT_DATA}}` still to fill."""
+    def part(name: str) -> str:
+        return (REPORT_DIR / name).read_text(encoding="utf-8")
+    containers = "\n".join(f'    <div class="view" id="v-{view}"></div>'
+                           for view, _ in REPORT_VIEWS)
+    script = "".join([part("core.js")] + [part(js) for _, js in REPORT_VIEWS]
+                     + [part("boot.js")])
+    page = part("shell.html")
+    for slot, value in (("{{STYLES}}", part("styles.css").rstrip("\n")),
+                        ("{{VIEW_CONTAINERS}}", containers),
+                        ("{{SCRIPT}}", script.rstrip("\n"))):
+        if page.count(slot) != 1:
+            raise ValueError(f"report/shell.html must hold {slot} exactly once")
+        page = page.replace(slot, value)
+    return page
+
+
 _ERD_DIR = Path(__file__).resolve().parents[4] / "agents" / "shared" / "erd"
 
 
@@ -143,6 +181,8 @@ def _compact_finding(f: dict, model_index: dict, by_angle: Dict[str, str]) -> di
     if f.get("threshold"):
         cf["th"] = f["threshold"]
     cf["c"] = _categories_of(f, by_angle)
+    if f.get("evidence") == "heuristic":
+        cf["h"] = 1  # a name match or other inference: the report says so
     bar = metric_bar(f)
     if bar:
         cf["mb"] = bar
@@ -185,7 +225,26 @@ def _compact_model(m: dict, model_index: dict) -> dict:
                     "l": m["spotter_readiness"]["level"]}
     if m.get("erd"):
         cm["ed"] = m["erd"]
+    if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
+        cm["ft"] = _compact_tree(m["formula_tree"])
     return cm
+
+
+def _compact_tree(tree: dict) -> dict:
+    """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
+    {n label, f formula name, k kind, h hidden, b used_by, u uses}, each use
+    `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`; `r` root indices."""
+    index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
+
+    def use(u):
+        if "formula" in u:
+            return [0, index[u["formula"]]]
+        return [2, u["parameter"]] if "parameter" in u else [1, u["column"]]
+    nodes = [{"n": node.get("label") or node["name"], "f": node["name"],
+              "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
+              "u": [use(u) for u in node["uses"]]}
+             for node in tree["nodes"]]
+    return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
 
 
 def compact_payload(data: dict) -> dict:
@@ -272,6 +331,9 @@ def compact_payload(data: dict) -> dict:
         # "not collected for this selection".
         if isinstance(corpus.get("fetched_needs"), list):
             result["C"]["fn"] = corpus["fetched_needs"]
+        # Items no rule judged because their TML is malformed (absent in older JSON).
+        if corpus.get("unreadable"):
+            result["C"]["ur"] = list(corpus["unreadable"])
     else:
         result["C"] = None
 
@@ -285,5 +347,4 @@ def render_report(data: dict) -> str:
         payload["E"] = erd_assets
     json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")
 
-    template = TEMPLATE_PATH.read_text(encoding="utf-8")
-    return template.replace("{{AUDIT_DATA}}", json_str)
+    return assemble_page().replace("{{AUDIT_DATA}}", json_str)

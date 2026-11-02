@@ -16,7 +16,7 @@ from ts_cli.audit.catalog_validate import validate_catalog
 
 def _join_type_rule(**overrides) -> dict:
     rule = {
-        "id": "D3", "title": "Join types", "categories": ["D"], "requires": ["model_tml"],
+        "id": "D3", "title": "Join types", "evidence": "fact", "categories": ["D"], "requires": ["model_tml"],
         "scope": "join",
         "aggregate": {"mode": "each", "where": {"field": "type", "in": ["OUTER", "LEFT_OUTER"]}},
         "severity": {"field": "type", "map": {"OUTER": "HIGH"}, "default": "INFO"},

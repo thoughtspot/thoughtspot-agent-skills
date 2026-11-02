@@ -20,6 +20,9 @@ class Finding:
     # {direction, unit, levels: [{op, value, severity}], profile, provenance}.
     categories: list[str] = field(default_factory=list)
     bands: Optional[dict] = None
+    # The rule's evidence class (fact | measure | heuristic; the severity rubric,
+    # 2026-11), so a reader can tell a name match from a fact.
+    evidence: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -34,6 +37,7 @@ class Finding:
             "threshold": self.threshold,
             "categories": list(self.categories),
             "bands": self.bands,
+            "evidence": self.evidence,
         }
 
 
