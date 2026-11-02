@@ -42,7 +42,7 @@ library and search). Use the `examples/` files further down only for shapes the 
 | Parallel coordinates | `library/who-store-parallel` | D3 | Brush an axis to filter lines |
 | Beeswarm | `library/who-product-beeswarm` | D3 force | Collision layout that fits the tile |
 | Pivot table with subtotals | `library/where-region-pivot` | hand HTML | Rows and columns expand both ways; ratio totals computed as sum over sum at every level, so they match ThoughtSpot. Read it before any pivot or crosstab |
-| League table with movement and form | `library/who-store-league` | hand HTML | Rank change against the same window last year, a five-month form strip, partial-month detection. Supersedes `examples/League Table` and `examples/Scoreboard-chart` |
+| League table with movement and form | `library/who-store-league` | hand HTML | Rank change against the same window last year, a five-month form strip, partial-month detection. Supersedes `examples/League-table` and `examples/Scoreboard-chart` |
 | Diverging bar, drill to members | `library/what-premium-diverging` | MayaCharts | Lean MayaCharts diverging bar with sign colouring and drill (preview only) |
 | Growth split into volume and price | `library/pulse-family-growth` | hand HTML and SVG | Small-multiple cards with an exact units/price decomposition and like-for-like windows derived from the rows |
 
@@ -80,7 +80,7 @@ This one is Plotly, not Chart.js. For a new sunburst use MayaCharts.
 
 *Both superseded by `library/who-store-league`* for a standings table; read these only for the single-file shape.
 
-`examples/League Table/` puts all markup, CSS and script in `.html`, leaving the `.js`
+`examples/League-table/` puts all markup, CSS and script in `.html`, leaving the `.js`
 and `.css` tabs empty. Interactive: dropdowns and filter chips driving a re-render.
 
 `examples/Scoreboard-chart/result/` is the same chart split back into three files —

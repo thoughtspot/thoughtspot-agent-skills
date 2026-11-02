@@ -44,6 +44,8 @@ if (!slug || pos.length !== 1 || need.some((k) => !opt[k])) {
   console.error('usage: library-emit.mjs <slug> --title T --search S --question Q --lib L --tile WxH --interactions I [--notes N] [--png P] [--tab T] [--model M] [--mode A|B|C]');
   process.exit(2);
 }
+// The slug names a folder and the marker patch.js finds a tile by (amuzing-slug: [\w-]+): letters, digits, - and _.
+if (!/^[\w-]+$/.test(slug)) { console.error("the slug may hold only letters, digits, - and _ (got " + JSON.stringify(slug) + ")"); process.exit(2); }
 if (!/^\d+x\d+$/.test(opt.tile)) { console.error("--tile expects grid units WxH, e.g. 8x6 (got " + JSON.stringify(opt.tile) + ")"); process.exit(2); }
 const model = opt.model ?? "(Sample) Retail - Apparel";
 const mode = (opt.mode ?? "B").toUpperCase();

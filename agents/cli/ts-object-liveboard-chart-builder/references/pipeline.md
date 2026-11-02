@@ -24,10 +24,12 @@ into blocks, and each block patches the Liveboard itself (`<L>/scripts/patch.js`
 1. every chart and the core carry a sha256; the sandbox refuses the whole block on any mismatch;
 2. it exports the Liveboard and finds the skill's tiles: those whose code carries
    `/* ts-lb-owner: <this Liveboard's guid> */` (with `/* amuzing-slug: <slug> */` naming the chart). Tiles
-   from before owner markers are taken over only with `--adopt`;
+   from before owner markers are taken over only with `--adopt`, and a marked tile off its spec position only
+   with `--relayout` (it may be a user's copy);
 3. it merges into the export: charts in the block replace their tile, the skill's other tiles keep their
    code, and everything it does not own is kept as it is (SKILL.md Step 6). Any problem (a failed search, a
-   missing tile, an ownership conflict, no backup of content it does not own) refuses the commit;
+   missing tile, an ownership conflict, no backup of a Liveboard that has visualizations, a backup that does not
+   hold all of them by content) refuses the commit;
 4. it imports, and after a commit exports again and proves the composed code came back, nothing it did not
    own was lost, and every tab holds its tiles (matched by content: ThoughtSpot may renumber viz ids).
 

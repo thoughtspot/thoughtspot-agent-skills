@@ -12,7 +12,7 @@ That makes this a verification pass, not a transformation. Work down it once.
 
 Differences the loop cannot catch. Check them by reading.
 
-- **Library version.** The chart pins an exact CDN version (MayaCharts: the doctor's `mayacharts:` line). The
+- **Library version.** The chart pins an exact CDN version with its integrity (MayaCharts: the doctor's `mayacharts:` line). The
   preview loads the same URL, so it runs the same build; say in the run README which version is pinned.
 - **Network.** The tile's sandbox blocks `fetch()`; the preview does not. Grep the chart for `fetch(`.
 - **Real data.** The stub serves `sample-data.json`. Column names, null density, row

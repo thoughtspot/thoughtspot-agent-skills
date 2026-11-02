@@ -5,7 +5,7 @@
 // Turns one chart (chart.html, chart.css, chart.js) into ready-to-paste MCP code that saves it as an answer
 // in ThoughtSpot: a search on the model, shown as a custom chart (MUZE_STUDIO) running these three files.
 // Without --answer it creates a new answer; with --answer <guid> it updates that one in place, and a commit then
-// needs --backup <file>: a TML export of that answer (ts tml export, or Export TML in ThoughtSpot) that names its
+// needs --backup <file>: a JSON TML export of that answer (ts tml export <guid> --format JSON) that names its
 // guid, is under a day old and sits outside any git working tree. The sandbox refuses the update without it.
 //
 //   --validate  (default) VALIDATE_ONLY import; changes nothing
@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { chartDirOf } from "./env.mjs";
 import { checkBackup, GUID } from "./backup-check.mjs";
+import { cdnProblems } from "./pin-check.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -56,6 +57,8 @@ if (!fs.existsSync(path.join(dir, "chart.js"))) dir = chartDirOf(pos[0]);
 if (!dir) { console.error("no chart.js in " + pos[0] + " (or a library chart of that slug)"); process.exit(2); }
 const read = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8") : "");
 P.f = { html: read("chart.html"), css: read("chart.css"), js: read("chart.js") };
+const pins = cdnProblems(P.f.html, P.f.js);
+if (pins.length) { console.error(pins.join("\n") + "\n(library-contract.md, Hard contract: pin x.y.z and carry the sha384 integrity the doctor prints)"); process.exit(2); }
 const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 P.sha = { html: sha(P.f.html), css: sha(P.f.css), js: sha(P.f.js) };
 
