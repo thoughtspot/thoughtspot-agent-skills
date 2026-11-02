@@ -19,6 +19,11 @@ The preview cannot say whether a delete happened: for an object that is already 
 answers `{"dependents": {"<guid>": []}}`, the same as a live object with no dependents
 (live 2026-10-30). Outcomes are decided by existence checks instead (`classify_gone`).
 
+The preview also never names a deleted Model's or View's reusable Sets or its Spotter
+feedback, yet the delete removes them (PR #692 review, live 2026-11-02). They are found
+separately — Sets by the per-Model cohort listing, feedback by a FEEDBACK export — and
+refused (`attached_blockers`): there is no backup and restore path for them here.
+
 PURE functions only — no network, no filesystem. The I/O shell is
 `ts_cli.commands.dependency_cascade`.
 """
@@ -35,6 +40,13 @@ CASCADE_PATH = "/callosum/v1/dependency/delete-with-dependents"
 CASCADE_TYPES = ("LOGICAL_TABLE", "LOGICAL_COLUMN")
 ADMIN_PRIVILEGE = "ADMINISTRATION"
 CONFIRM_WORD = "DELETE"
+
+# Backup types that are LOGICAL_TABLEs: deleting one also deletes its Sets and feedback.
+OWNER_TYPES = ("MODEL", "VIEW", "TABLE", "SQL_VIEW")
+
+# The FEEDBACK export's answer for a Model with no feedback (HTTP 400, code 10002, live
+# 2026-11-02). Any other failure means the feedback could not be checked.
+_NO_FEEDBACK = "No accessible metadata objects found"
 
 # Preview `type` (+ `subType` for LOGICAL_TABLE) → the type vocabulary
 # `ts dependency backup` / `rollback` use. An unlisted pair is refused, never guessed.
@@ -75,14 +87,18 @@ def backup_type(dependent_type: str, subtype: Optional[str]) -> str:
         raise CascadeError(
             f"Unsupported object type {dependent_type}/{subtype or '-'} (Sets and uploaded "
             "tables are not handled). Stopping rather than guessing how to back it up or "
-            "restore it.")
+            "restore it. Back up and remove the Set first, then run the preview again.")
     return _BACKUP_TYPE[key]
 
 
 def _csv_rows(csv_text: Any) -> List[Dict[str, str]]:
     if not isinstance(csv_text, str):
         raise CascadeError("The cascade response's 'csv' field is not text; refusing to read it.")
-    return [r for r in csv.DictReader(io.StringIO(csv_text)) if r.get("dependentGUID")]
+    rows = list(csv.DictReader(io.StringIO(csv_text)))
+    if any(not r.get("dependentGUID") for r in rows):
+        raise CascadeError("A cascade response CSV row has no 'dependentGUID'; refusing to "
+                           "read it rather than leave that object out of the scope.")
+    return rows
 
 
 def mentioned(resp_json: Any, guid: str) -> Dict[str, Dict[str, Any]]:
@@ -108,8 +124,11 @@ def _from_dependents(deps: Dict[str, Any], guid: str) -> Dict[str, Dict[str, Any
             continue
         if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
             raise CascadeError("A 'dependents' entry is not a list of objects; refusing to read it.")
+        if not all(e.get("id") for e in entries):
+            raise CascadeError("A 'dependents' entry has no 'id'; refusing to read it rather "
+                               "than leave that object out of the scope.")
         for e in entries:
-            if e.get("id") and e["id"] != guid:
+            if e["id"] != guid:
                 out.setdefault(e["id"], {"name": e.get("name"), "dependent_type": e.get("type"),
                                          "subtype": e.get("subType"), "author": e.get("authorName")})
     return out
@@ -159,6 +178,65 @@ def deleted_set(objects: Iterable[Dict[str, Any]], guid: str, source_type: str) 
     if source_type == "LOGICAL_TABLE":
         s.add(guid)
     return s
+
+
+def owners_in_scope(objects: Iterable[Dict[str, Any]], guid: str, source_type: str) -> Set[str]:
+    """The deleted objects that can own Sets and feedback: every Table, Model or View the
+    cascade deletes, the source included when it is one."""
+    s = {o["guid"] for o in objects if o.get("type") in OWNER_TYPES}
+    if source_type == "LOGICAL_TABLE":
+        s.add(guid)
+    return s
+
+
+def feedback_count(status: Optional[int], body: Any) -> Optional[int]:
+    """Feedback entries in one FEEDBACK export answer; None when it could not be read."""
+    if status == 400 and _NO_FEEDBACK in str(body):
+        return 0
+    if status != 200 or not isinstance(body, list) or not body or not isinstance(body[0], dict):
+        return None
+    try:
+        doc = json.loads(body[0].get("edoc") or "")
+    except (TypeError, ValueError):
+        return None
+    entries = ((doc or {}).get("nls_feedback") or {}).get("feedback")
+    return len(entries) if isinstance(entries, list) else None
+
+
+def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
+                      feedback: Dict[str, Optional[int]]) -> List[Dict[str, Any]]:
+    """Sets and feedback the cascade would delete without naming them. Each is a reason to
+    refuse; so is an owner that could not be checked. `sets` is `discover_sets` output."""
+    out: List[Dict[str, Any]] = []
+    incomplete = set(sets.get("incomplete") or [])
+    for g in sorted(owners):
+        if g in incomplete or g not in (sets.get("sets") or {}):
+            out.append({"owner": g, "kind": "SETS_UNCHECKED"})
+        out += [{"owner": g, "kind": "SET", "guid": s.get("guid"), "name": s.get("name")}
+                for s in (sets.get("sets") or {}).get(g) or []]
+        n = feedback.get(g)
+        if n is None:
+            out.append({"owner": g, "kind": "FEEDBACK_UNCHECKED"})
+        elif n:
+            out.append({"owner": g, "kind": "FEEDBACK", "count": n})
+    return out
+
+
+def definite_failure(status: Optional[int], body: Any) -> bool:
+    """True when an error answer proves the server is not still working on the delete: a
+    4xx other than 408, or a 500 carrying ThoughtSpot's own JSON error (14009
+    FAILED_TO_COMMIT, live 2026-10-30). A timeout, 408, gateway error or a proxy's HTML
+    page proves nothing — the server may still be deleting. A 200 is not a failure."""
+    if status is None or status < 400:
+        return False
+    if status < 500:
+        return status != 408
+    return status == 500 and isinstance(body, dict)
+
+
+def not_available(status: Optional[int], body: Any) -> bool:
+    """The cluster has the cascade endpoint switched off (404 API_NOT_ALLOWED)."""
+    return status == 404 and "API_NOT_ALLOWED" in str(body)
 
 
 def backed_up_deletes(manifest: Dict[str, Any]) -> Set[str]:
@@ -212,10 +290,20 @@ def recheck(now: Set[str], manifest: Dict[str, Any]) -> Dict[str, Any]:
             "not_backed_up": not_backed_up, "no_longer_listed": no_longer_listed}
 
 
-def stale(modified_ms: Dict[str, Optional[int]], backup_epoch_ms: int) -> List[str]:
-    """Objects modified after the backup was taken. Their backup no longer matches them,
-    so a rollback would restore old content. Unknown modification time counts as stale."""
-    return sorted(g for g, m in modified_ms.items() if m is None or m > backup_epoch_ms)
+def stale(modified_now: Dict[str, Optional[int]], manifest: Dict[str, Any]) -> List[str]:
+    """Backed-up objects whose server `modified` time is not the one recorded when they
+    were exported — their backup no longer matches them, so a rollback would restore old
+    content. Server time against server time, per object; a missing value on either side
+    counts as stale. Objects absent from `modified_now` are `invisible`'s concern."""
+    return sorted(o["guid"] for o in manifest.get("objects") or []
+                  if o.get("guid") in modified_now
+                  and (o.get("modified") is None or modified_now[o["guid"]] != o["modified"]))
+
+
+def invisible(watched: Iterable[str], present: Dict[str, Any]) -> List[str]:
+    """Objects to be deleted or changed that the existence check cannot see (another Org,
+    a type v2 search does not map). Unchecked, they would later read as "deleted"."""
+    return sorted(set(watched) - set(present))
 
 
 def classify_gone(expected: Set[str], gone: Set[str]) -> str:

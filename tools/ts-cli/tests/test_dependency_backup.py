@@ -231,6 +231,17 @@ class TestOrderByReferences:
         out = order_by_references([x, y], {"x": "y", "y": "x"})
         assert sorted(e["guid"] for e in out) == ["x", "y"]
 
+    def test_mutually_dependent_models_still_order_around_the_cycle(self):
+        # Two Models that reference each other exist on real clusters (PR #692 review).
+        # The cycle cannot be ordered, but what it sits on still restores first and what
+        # sits on it still restores last.
+        t = {"guid": "t", "type": "TABLE"}
+        x, y = {"guid": "x", "type": "MODEL"}, {"guid": "y", "type": "MODEL"}
+        a = {"guid": "a", "type": "ANSWER"}
+        texts = {"x": "on t, uses y", "y": "on t, uses x", "a": "fqn: x fqn: y"}
+        out = [e["guid"] for e in order_by_references([a, y, x, t], texts)]
+        assert out[0] == "t" and out[-1] == "a" and sorted(out[1:3]) == ["x", "y"]
+
 
 # ---------------------------------------------------------------------------
 # build_manifest

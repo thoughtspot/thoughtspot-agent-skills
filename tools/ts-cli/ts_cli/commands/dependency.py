@@ -14,7 +14,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import typer
 import yaml
@@ -22,8 +22,10 @@ import yaml
 from ts_cli.client import ThoughtSpotClient, resolve_profile
 from ts_cli.commands.tml import detect_tml_type, parse_edoc
 from ts_cli.dependency.backup import (
+    V2_TYPE_MAP,
     build_manifest,
     backup_filename,
+    cluster_mismatch,
     order_by_references,
     remap_guids,
     restore_policy_for,
@@ -259,10 +261,41 @@ def _export_one(client: ThoughtSpotClient, obj: dict) -> List[dict]:
     return items
 
 
-def _write_backup_files(backup_dir: str, exported: List[tuple], manifest: dict) -> None:
+def present_objects(client: ThoughtSpotClient, typed: Dict[str, str]) -> Dict[str, Any]:
+    """GUID → server `modified` (ms) for each object in `typed` (GUID → v2 metadata type)
+    that exists. An absent GUID is gone or not visible (live 2026-10-30: v2 search returns
+    nothing for a deleted object, one row for a live one). Raises on a failed search."""
+    if not typed:
+        return {}
+    rows = client.post("/api/rest/2.0/metadata/search", json={
+        "metadata": [{"identifier": g, "type": t} for g, t in typed.items()],
+        "record_size": -1, "include_headers": True}).json()
+    return {r.get("metadata_id"): (r.get("metadata_header") or {}).get("modified")
+            for r in rows if isinstance(r, dict) and r.get("metadata_id") in typed}
+
+
+def _v2_types(objs: List[dict]) -> Dict[str, str]:
+    """GUID → v2 metadata type for the objects whose type v2 search can look up."""
+    return {o["guid"]: V2_TYPE_MAP[str(o.get("type", "")).upper()] for o in objs
+            if o.get("guid") and str(o.get("type", "")).upper() in V2_TYPE_MAP}
+
+
+def _modified_before_export(client: ThoughtSpotClient, objs: List[dict]) -> Dict[str, Any]:
+    """Each object's server `modified` time, read BEFORE it is exported: an edit made in
+    between leaves a recorded time older than the server's, which the cascade delete's
+    staleness check refuses. Empty when the lookup fails — only that check needs it."""
+    try:
+        return present_objects(client, _v2_types(objs))
+    except (Exception, SystemExit):
+        return {}
+
+
+def _write_backup_files(backup_dir: str, exported: List[tuple], manifest: dict,
+                        modified: Optional[Dict[str, Any]] = None) -> None:
     """Write one JSON file per exported item under `backup_dir` and append a
     matching entry to `manifest["objects"]` (mutated in place). Called only
-    after every export in `exported` has already succeeded.
+    after every export in `exported` has already succeeded. `modified` is each
+    object's server modification time before it was exported (may be empty).
     """
     for obj, items in exported:
         for item in items:
@@ -276,6 +309,7 @@ def _write_backup_files(backup_dir: str, exported: List[tuple], manifest: dict) 
                 "type": item["type"],
                 "intent": obj.get("intent", "FIX"),
                 "backup_file": backup_file,
+                "modified": (modified or {}).get(item["guid"]),
             })
 
 
@@ -358,6 +392,7 @@ def backup_cmd(
 
     # Collect ALL exports first — nothing is written to disk until every export
     # (and every edoc parse) has succeeded.
+    modified = _modified_before_export(client, to_backup)
     exported: List[tuple] = [(obj, _export_one(client, obj)) for obj in to_backup]
 
     # Every export succeeded — now (and only now) write files.
@@ -374,9 +409,10 @@ def backup_cmd(
         source={"guid": source.get("guid"), "name": source.get("name"), "type": source.get("type")},
         fix_count=len(fix_list),
         delete_count=len(delete_list),
+        org=client.org,
     )
 
-    _write_backup_files(backup_dir, exported, manifest)
+    _write_backup_files(backup_dir, exported, manifest, modified)
 
     manifest_path = os.path.join(backup_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -513,6 +549,25 @@ def _rollback_one_entry(client: ThoughtSpotClient, entry: dict, results: Dict[st
         print(f"  ✗ Rollback failed: {name} — {err}", file=sys.stderr)
 
 
+def _skip_still_present(client: ThoughtSpotClient, entries: List[dict],
+                        results: Dict[str, object]) -> List[dict]:
+    """Drop DELETE entries whose original object still exists — re-creating one would make
+    a duplicate (after a PARTIAL cascade delete, the survivors were never deleted). They
+    are listed in `results["skipped"]`. Exits, restoring nothing, if the check fails."""
+    deletes = [e for e in entries if e.get("intent") == "DELETE"]
+    try:
+        alive = set(present_objects(client, _v2_types(deletes)))
+    except (Exception, SystemExit) as exc:
+        raise SystemExit(f"Could not check which deleted objects still exist ({exc}). "
+                         "Nothing was restored.")
+    for e in deletes:
+        if e.get("guid") in alive:
+            results["skipped"].append({"guid": e.get("guid"), "name": e.get("name"),
+                                       "reason": "still exists; not re-created"})
+            print(f"  - Skipped: {e.get('name')} — still exists, not re-created", file=sys.stderr)
+    return [e for e in entries if not (e.get("intent") == "DELETE" and e.get("guid") in alive)]
+
+
 @app.command("rollback")
 def rollback_cmd(
     backup_dir: str = typer.Option(..., "--backup-dir", help="Backup directory containing manifest.json."),
@@ -529,7 +584,9 @@ def rollback_cmd(
 
     Reads `manifest.json` from `--backup-dir` and restores roots first: each entry after
     every entry its TML references, then by type (Tables and SQL Views, Models, Views,
-    Sets, Answers, Liveboards). Refuses a backup taken on another cluster. For an entry with `intent == "DELETE"`, re-imports
+    Sets, Answers, Liveboards). Refuses a backup taken on another cluster or Org, or one
+    that does not record its cluster. A DELETE entry whose object still exists (a partial
+    delete's survivor) is skipped, never re-created. For an entry with `intent == "DELETE"`, re-imports
     the backed-up TML with `create_new=True` and the `guid:` line stripped — the
     object no longer exists at its original GUID, so ThoughtSpot assigns a new one.
     Any other entry is updated in place (`create_new=False`) at its original GUID.
@@ -537,8 +594,8 @@ def rollback_cmd(
     References between restored objects are carried over: each restored DELETE's new
     GUID is substituted into every later entry's TML before it is imported.
 
-    Output: `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
-    to stdout. Per-object progress goes to stderr. `new_guids` lets the caller
+    Output: `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid},
+    "skipped": [...]}` to stdout. Per-object progress goes to stderr. `new_guids` lets the caller
     surface a GUID-remap table for any restored DELETE — objects OUTSIDE the backup
     that referenced the ORIGINAL guid remain broken and need manual reattachment.
 
@@ -585,12 +642,13 @@ def rollback_cmd(
 
     resolved_profile = resolve_profile(profile)
     client = ThoughtSpotClient(resolved_profile)
-    if isinstance(manifest.get("base_url"), str) and isinstance(client.base_url, str) \
-            and manifest["base_url"] != client.base_url:
-        raise SystemExit(f"This backup was taken from {manifest['base_url']}, not "
-                         f"{client.base_url}. Nothing was restored; use that cluster's profile.")
+    mismatch = cluster_mismatch(manifest, client.base_url, client.org)
+    if mismatch:
+        raise SystemExit(f"{mismatch} Nothing was restored; use the profile (and Org) the "
+                         "backup was taken with.")
 
-    results: Dict[str, object] = {"succeeded": [], "failed": [], "new_guids": {}}
+    results: Dict[str, object] = {"succeeded": [], "failed": [], "new_guids": {}, "skipped": []}
+    ordered = _skip_still_present(client, ordered, results)
 
     for entry in ordered:
         _rollback_one_entry(client, entry, results)

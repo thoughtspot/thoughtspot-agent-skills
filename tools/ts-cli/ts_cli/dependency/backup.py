@@ -171,17 +171,41 @@ def build_manifest(
     source: Dict[str, Any],
     fix_count: int,
     delete_count: int,
+    org: str = "",
 ) -> Dict[str, Any]:
     """Return the manifest.json skeleton for a backup run, with an empty `objects`
     list — the caller appends one entry per backed-up object as exports complete.
+    `org` is the Org the client was scoped to ("" = the user's default Org).
     """
     return {
         "created": created,
         "profile": profile,
         "base_url": base_url,
+        "org": org,
         "operation": operation,
         "source_object": source,
         "fix_count": fix_count,
         "delete_count": delete_count,
         "objects": [],
     }
+
+
+def _norm_url(url: Any) -> str:
+    return str(url or "").strip().rstrip("/").lower()
+
+
+def cluster_mismatch(manifest: Dict[str, Any], base_url: str, org: str) -> str:
+    """Why a backup must not be used against this cluster and Org; "" when it can be.
+
+    A backup restored or relied on elsewhere binds to objects that are not the ones it
+    holds. A manifest with no `base_url` cannot be checked, so it is refused rather than
+    trusted. A manifest written before the Org was recorded is read as the default Org.
+    """
+    if not manifest.get("base_url"):
+        return "The backup does not record which cluster it came from."
+    if _norm_url(manifest["base_url"]) != _norm_url(base_url):
+        return f"The backup was taken from {manifest['base_url']}, not {base_url}."
+    if str(manifest.get("org") or "") != str(org or ""):
+        return (f"The backup was taken in Org '{manifest.get('org') or 'default'}', not "
+                f"'{org or 'default'}'.")
+    return ""

@@ -481,11 +481,25 @@ ts dependency cascade-preview "{name or GUID}" --column "{column name}" --profil
   > /tmp/{slug}_cascade_preview.json                                   # one column
 ```
 
+A dry run of a large object can take several minutes (250–300 s was seen live); the
+command waits up to 15 minutes per dry run and never repeats one that timed out. It also
+runs the dry run of every Table, Model and View the first one lists, and adds anything
+new they name, so a big tree takes several of those.
+
 - `"status": "REFUSED"` (exit 1) → a ThoughtSpot rule blocks it, e.g. *Deleting columns
-  linked to filters is not allowed*. Show `details` word for word, explain what must
-  change first, and stop. Do not retry or reshape the request.
+  linked to filters is not allowed* — expect this for most large trees. Show `details`
+  word for word, explain what must change first, and stop. Do not retry or reshape the
+  request.
+- `"status": "NOT_AVAILABLE"` (exit 1) → the cluster has this API switched off
+  (`API_NOT_ALLOWED`). Say so plainly — not a permissions problem — and offer Remove mode.
+- `"status": "BLOCKED"` (exit 1) → deleting a Table, Model or View also deletes its
+  reusable **Sets** and its **Spotter feedback**, but the server's dry run does not list
+  them, so this mode cannot back them up or restore them. Show every `attached[]` entry
+  (`kind` SET with its name, FEEDBACK with its `count`, or `*_UNCHECKED` — the check
+  itself failed) with its `owner_name`. The user must back up and remove them, or move
+  them to another Model, then start again at D3. Stop.
 - Any other non-zero exit → show the message and stop. It also covers objects this mode
-  does not handle: a cascade that reaches a Set, and uploaded tables.
+  does not handle: a column delete that reaches a Set, and uploaded tables.
 - Otherwise show the user, **in the chat**, one row per object in `objects[]`: type,
   name, `author`, `org` and the **full 36-character GUID** — never shortened. Then the
   per-type `counts`, the `total`, `owned_by_others` (other people's work that will be
@@ -546,29 +560,38 @@ r = subprocess.run(["ts", "dependency", "cascade-delete", "--profile", profile_n
 ```
 
 Before sending anything the command checks the role, that the backup came from this
-cluster and every backup file is readable, that nothing in it changed since it was
-taken, and that a fresh dry run still lists exactly what was backed up. It sends the
-delete once, then checks which objects still exist. Read `status` from the JSON:
+cluster and Org and every backup file is readable, that no Set or feedback would be
+deleted unlisted, that every object is visible to its existence check, that none
+changed since its backup was taken (each object's server time is recorded at backup),
+and that a fresh dry run still lists exactly what was backed up. It sends the delete
+once, then checks which objects still exist. Read `status` from the JSON:
 
 | `status` | Meaning | Tell the user |
 |---|---|---|
 | `APPLIED` | Every object is confirmed gone | List every GUID in `deleted`. If `deleted_without_backup` is not empty, say under a heading **Deleted WITHOUT a backup** that rollback cannot restore those. If the exit code is 1 with `APPLIED`, say the deletion is confirmed but the server's answer was unusual (`response_readable: false`, or `http_status` other than 200) |
-| `PARTIAL` | Some objects are gone, some remain | List `deleted` and `still_present`. Do **not** run the delete again; offer Step 11 rollback straight away |
-| `NOT_APPLIED` | The server failed and every object still exists | Show `server_response`. Known case: on some builds a cascade that includes a **Liveboard** fails with `Restrict delete failed` (open-items #27) |
-| `UNKNOWN` | Timed out, or existence could not be checked | Do **not** run the delete again — the server may still be working. Wait, run D3 again and compare, then offer rollback for whatever is gone |
+| `PARTIAL` | Some objects are gone, some remain | List `deleted` and `still_present`. Do **not** run the delete again; offer Step 11 rollback straight away — it re-creates only what is gone and lists the survivors under `skipped` |
+| `NOT_APPLIED` | The server answered with a definite error and every object still exists | Show `server_response`. Known case: on some builds a cascade that includes a **Liveboard** fails with `Restrict delete failed` (open-items #27) |
+| `UNKNOWN` | Timed out, a gateway or proxy error, or no clear answer — and nothing is gone yet; or existence could not be checked | Do **not** run the delete again — the server may still be working. Wait, run D3 again and compare, then offer rollback for whatever is gone |
 | `REFUSED` | A ThoughtSpot rule blocked it | Nothing was deleted. Show `details` word for word |
+| `NOT_AVAILABLE` / `BLOCKED` | As in D3 | Nothing was deleted. Handle as in D3 |
+| `NOT_VISIBLE` | The existence check cannot see the objects in `not_visible` (another Org, or a type it cannot look up), so it could not confirm what a delete did | Nothing was deleted. Stop; this mode cannot safely delete them |
 | `RECHECK_MISMATCH` | What would be deleted changed since the backup | Nothing was deleted. Show `not_backed_up` / `no_longer_listed`, then go back to D3 |
-| `STALE_BACKUP` | Objects in `changed_since_backup` were edited after the backup | Nothing was deleted. Back to D4 for a new backup |
+| `STALE_BACKUP` | Objects in `changed_since_backup` were edited after the backup, or the backup (made by an older `ts`) does not record when they were last changed | Nothing was deleted. Back to D4 for a new backup |
 | `BAD_BACKUP` | The backup cannot protect this delete (`problems`) | Nothing was deleted. Back to D4 |
 
-The command never re-sends a delete. Neither should you.
+The command sends the delete once. The one exception is a `401`: the client fetches a
+fresh token and sends it once more, because the server rejected the first request
+before doing any work.
+
+Never re-send a delete yourself.
 
 **D7 — Rollback.** Continue at **Step 11**, using the `rollback` command the JSON
 prints (it carries the profile): it restores roots first — each object after the
-objects it references — re-links them, and refuses a backup from another cluster. Show
-the `new_guids` table (old → new GUID), treat any `failed[]` entry as an incomplete
-restore, and do not re-run the rollback after a partial one (it would create a second
-copy of every object already restored — open-items #28).
+objects it references — re-links them, skips any deleted object that still exists
+(listed in `skipped`), and refuses a backup from another cluster or Org. Show the
+`new_guids` table (old → new GUID), treat any `failed[]` entry as an incomplete restore,
+and do not re-run the rollback after a partial one (it would create a second copy of
+every object already restored — open-items #28).
 
 ---
 
@@ -637,7 +660,9 @@ ts dependency cascade-preview <source-guid> --type <LOGICAL_TABLE|LOGICAL_COLUMN
 ```
 
 Show any object in its `objects[]` that the report above does not list, under **Also
-removed by a cascade delete**. Skip this for non-administrators — the server refuses
+removed by a cascade delete**, and any `attached[]` Sets or feedback (exit 1 with
+`BLOCKED` still prints the full JSON — read it, don't treat it as a failure here).
+Skip this for non-administrators — the server refuses
 them — and never present it as a reason to delete: it is sizing information only.
 
 ### Stop conditions
@@ -1283,7 +1308,9 @@ acknowledgment before proceeding:
 Map the menu choice to the command flags and run it against `{backup_dir}`. The command
 reads the manifest, restores objects roots first (each after the objects it references),
 re-imports DELETE-intent objects as NEW objects (new GUIDs, `guid:` stripped), and updates
-every other object in place at its original GUID.
+every other object in place at its original GUID. A DELETE-intent object that still
+exists is skipped, never duplicated. It refuses a backup from another cluster or Org, or
+one that does not record its cluster.
 
 ```python
 import subprocess, json
@@ -1305,10 +1332,10 @@ result = subprocess.run(
     capture_output=True, text=True,
 )
 rollback_results = (json.loads(result.stdout) if result.stdout.strip()
-                    else {"succeeded": [], "failed": [], "new_guids": {}})
+                    else {"succeeded": [], "failed": [], "new_guids": {}, "skipped": []})
 ```
 
-Show rollback results. If `new_guids` is non-empty, surface the `old_guid → new_guid`
+Show rollback results, including any `skipped` objects (they were never deleted). If `new_guids` is non-empty, surface the `old_guid → new_guid`
 mapping table so the user can manually reattach any external references (restored deletes
 always receive new GUIDs). If any entries are in `failed`, give the user the backup file
 path (from the manifest) for manual restoration via the ThoughtSpot UI TML editor. Do not
@@ -1360,7 +1387,7 @@ rm -f /tmp/ts_dep_*.yaml
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.6.0 | 2026-10-30 | **New mode D — Delete with dependents (administrators only), Step 3-D.** Deletes one Table, Model, View or column and everything built on it in a single server-side cascade, through the new `ts dependency cascade-preview` (dry run; takes a name and `--column`) and `cascade-delete`. Nothing can be skipped: role check → dry run shown in full (full GUIDs, owners, Orgs; other users' and unknown owners counted) → mandatory backup → typed `DELETE` → the command refuses unless the backup is from this cluster, every file is readable, nothing changed since it was taken, and a fresh dry run still matches it → the delete is sent once → which objects are actually gone is checked, never assumed. The scope is every object the server's answer names, not one list in it. D5 says what a rollback does not restore (sharing, ownership, alerts, aliases, column security). Step 11's rollback now restores each object after the objects it references and refuses a backup from another cluster. Audit mode can add the server's full deletion chain for administrators. Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666 (its rollback re-linking, SQL View restore order and failing rollback exit code are carried over), through the `ts` CLI instead of raw `curl` and a session cookie. Live-tested on a test cluster (open-items #26); a cascade that includes a Liveboard fails server-side there (#27). Requires ts-cli v0.192.0. |
+| 1.6.0 | 2026-10-30 | **New mode D — Delete with dependents (administrators only), Step 3-D.** Deletes one Table, Model, View or column and everything built on it in a single server-side cascade, through the new `ts dependency cascade-preview` (dry run; takes a name and `--column`) and `cascade-delete`. Nothing can be skipped: role check → dry run shown in full (full GUIDs, owners, Orgs; other users' and unknown owners counted) → mandatory backup → typed `DELETE` → the command refuses unless the backup is from this cluster and Org, every file is readable, nothing changed since it was taken (each object's server time is recorded at backup), every object is visible to the existence check, and a fresh dry run still matches it → the delete is sent once → which objects are actually gone is checked, never assumed. The scope is every object the server's answer names, widened by the dry run of every Table, Model and View it lists. A delete that would also remove a Model's or View's reusable Sets or Spotter feedback — which the server deletes without listing them — is refused (`BLOCKED`); a cluster with the API switched off reports `NOT_AVAILABLE`. D5 says what a rollback does not restore (sharing, ownership, alerts, aliases, column security). Step 11's rollback now restores each object after the objects it references, skips a deleted object that still exists, and refuses a backup from another cluster or Org. Audit mode can add the server's full deletion chain for administrators. Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666 (its rollback re-linking, SQL View restore order and failing rollback exit code are carried over), through the `ts` CLI instead of raw `curl` and a session cookie. Live-tested on a test cluster (open-items #26); a cascade that includes a Liveboard fails server-side there (#27); a whole-object delete removes Sets and feedback unlisted, so it is refused (#29). Requires ts-cli v0.198.0. |
 | 1.5.0 | 2026-10-12 | **Column security rules are walked; an unchecked security row, or an incomplete dependents list (`BLOCKED_VERIFY_DEPENDENTS_FIRST`, new "Formula column dependents" row), now blocks `SAFE`** (open-item #9, BL-289; PR #506 review blockers 1 and 6). `ts metadata report` resolves a column GUID's owning table from its header `owner`, exports that table for `rls_rules` (the export API rejects a column GUID outright, so column reports used to abort) and fetches its column security rules; a whole-table source counts every rule on the table. A Model, or a Model's column, reports both rows unchecked because the rules live on base tables. Any unchecked RLS/CSR row gives the new `UNVERIFIED` verdict (`BLOCKED_VERIFY_SECURITY_FIRST`), which Step 5 handles like STOP. All live-verified on embed-1 staging against a real RLS rule and a real CSR rule. |
 | 1.4.3 | 2026-09-22 | **Open-item #9 resolved; the column-alias "cannot retrieve" claim retired, the CSR one corrected rather than retired (audit 5.2 / 5.3).** #9 called CSR retrieval the open question, on the accurate-but-incomplete observation that a plain `--associated` export returns no CSR. It needs a second option alongside it — `export_options.export_column_security_rules: true` (Beta, 10.12+) — and ships as `ts security column-rules export`/`get`. Separately, `dependency-types.md` row 10 called column-alias retrieval "No on this build" citing a non-existent open-item #10, when `ts alias export` retrieves it via `export_with_column_aliases: true`; row 10 is now Implementable and the alias doc is no longer listed as skipped. Five dangling citations resolved in all — the `#12` reference behind "drop model-level filters" is replaced by the real mechanism (`error_code 14518`, surfaced upstream as a YAML syntax error). Both #10 and #12 once existed and were deleted as resolved in 2026-06 without updating their inbound references — `check_open_item_citations.py` now makes that a commit failure. **CSR's status is corrected, not promoted:** it is now retrievable, but `ts metadata report` still does not probe it (`csr_hits` is declared and never populated), so row 9 stays Partial for that reason instead of the retired one. BL-289 tracks wiring the walk. |
 | 1.4.2 | 2026-07-31 | **BL-191 — the View mutation paths were dead against real Views.** `ts dependency mutate`/`apply-change` bound `view_columns[]` on `column_id`, which does not exist in real View TML (0 of 265 columns across all 42 Views on se-thoughtspot, 2026-07-30 census; `search_output_column` on 265 of 265). Removing a formula therefore deleted the formula and **left its `view_columns[]` entry behind** — a dangling reference that breaks the import. Both bindings corrected to `search_output_column` / `formulas[].name`, matched so an aggregation or bucket decoration (`Total X`, `Month(X)`) is caught but an unrelated column sharing a word is not. **Also fixed:** `search_query` kept naming a formula that column removal had *cascaded* away (a View references its formulas from the search string by id, e.g. `[formula_PMPM month].monthly`) — it is now re-sanitized after the formula pass, taking the bucket modifier with the token. Two adjacent pre-existing gaps are filed rather than fixed: **BL-197** (`sanitize_search_query` misses the qualified `[table_path::col]` form) and **BL-198** (formula removal does not cascade transitively). Doc-side: the troubleshooting row asserting the `TABLE_PATH::col` format is replaced, and `references/dependency-types.md`'s View row + a new note carry the corrected detection signal. Requires ts-cli v0.127.1. |

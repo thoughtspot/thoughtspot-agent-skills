@@ -6,8 +6,16 @@ Attaches to the `app` Typer group in `dependency.py` (the `dependency_apply.py` 
 `cascade-preview` is the dry run: it changes nothing. `cascade-delete` is the only
 writing command, and enforces in code what the ts-dependency-manager skill also says
 in prose: an admin caller, exactly one object, a typed confirmation, a readable backup
-from the same cluster that nothing has changed since, and a fresh preview that matches
-that backup immediately before the delete. The delete is sent ONCE and never retried.
+from the same cluster and Org that nothing has changed since, no Sets or feedback the
+server would delete unlisted, every object visible to the existence check, and a fresh
+preview that matches that backup immediately before the delete. The delete is sent ONCE
+and never retried after it may have reached the server (a 401 is re-sent once with a
+fresh token: the server rejected it before doing any work).
+
+The scope is the union of the source's preview and the preview of every Table, Model or
+View that preview lists, repeated until nothing new appears: whether one preview holds
+the full closure of a deep graph is unproven (open item #26), so each extra preview is
+cheap insurance.
 What it did is decided by checking which objects still exist (v2 `metadata/search`) —
 never from the preview, which answers the same for a deleted object as for a live one
 with no dependents.
@@ -20,26 +28,33 @@ import json
 import os
 import shlex
 import sys
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import typer
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
-from ts_cli.commands.dependency import app, _profile_option
-from ts_cli.dependency.backup import V2_TYPE_MAP
+from ts_cli.commands.dependency import app, _profile_option, present_objects
+from ts_cli.dependency.backup import V2_TYPE_MAP, cluster_mismatch
 from ts_cli.dependency.cascade import (
     CASCADE_PATH,
     CASCADE_TYPES,
+    OWNER_TYPES,
     CascadeError,
+    attached_blockers,
     backed_up_deletes,
     backup_problems,
     backup_type,
     cascade_form,
     check_plan,
     classify_gone,
+    definite_failure,
     deleted_set,
+    feedback_count,
+    invisible,
     is_admin,
     mentioned,
+    not_available,
+    owners_in_scope,
     parse_preview,
     recheck,
     stale,
@@ -51,6 +66,10 @@ from ts_cli.report.resolver import (
     _fetch_table_columns,
     resolve_source,
 )
+from ts_cli.sets.discover import discover_sets
+
+# Live dry runs of large objects took 250-300 s (PR #692 review); the delete does more.
+_TIMEOUT_S = 900
 
 _ADMIN_ONLY = (
     "Cascade delete is limited to ThoughtSpot administrators (the ADMINISTRATION "
@@ -83,11 +102,13 @@ def _post(client: ThoughtSpotClient, source_type: str, guid: str, *, apply: bool
           ) -> Tuple[Optional[int], Any]:
     """One cascade call. Returns (status, parsed body or text). Status is None when the
     outcome is unknown: the client refused to retry an ambiguous failure (a timeout or a
-    gateway error — the server may still be working)."""
+    gateway error — the server may still be working). Never retried after it may have
+    reached the server, not even the preview: a preview is a heavy computation, and a
+    retry of a timed-out one only stacks more of them on the server."""
     try:
         resp = client.request(
             "POST", CASCADE_PATH, data=cascade_form(source_type, guid, apply=apply),
-            raise_for_status=False, idempotent=not apply, timeout=600 if apply else 120)
+            raise_for_status=False, idempotent=False, timeout=_TIMEOUT_S)
     except SystemExit:
         if not apply:
             raise
@@ -103,19 +124,6 @@ def _refusal(body: Any) -> Optional[str]:
     if isinstance(body, dict) and body.get("error_code") == "METADATA_ERROR":
         return str(body.get("details") or body.get("message") or body)
     return None
-
-
-def _present(client: ThoughtSpotClient, typed: Dict[str, str]) -> Dict[str, Optional[int]]:
-    """GUID → `modified` (ms) for each object in `typed` (GUID → v2 metadata type) that
-    still exists. An absent GUID is gone (live 2026-10-30: v2 search returns nothing for
-    a deleted object, one row for a live one)."""
-    if not typed:
-        return {}
-    rows = client.post("/api/rest/2.0/metadata/search", json={
-        "metadata": [{"identifier": g, "type": t} for g, t in typed.items()],
-        "record_size": -1, "include_headers": True}).json()
-    return {r.get("metadata_id"): (r.get("metadata_header") or {}).get("modified")
-            for r in rows if r.get("metadata_id") in typed}
 
 
 def _resolve_target(client, ref: str, source_type: str, column: Optional[str]) -> Dict[str, str]:
@@ -161,6 +169,11 @@ def _object_and_owner(desc, ref: str, source_type: str) -> Tuple[str, Dict[str, 
 
 def _preview_or_exit(client, source_type: str, guid: str) -> Dict[str, Any]:
     status, body = _post(client, source_type, guid, apply=False)
+    if not_available(status, body):
+        _emit({"status": "NOT_AVAILABLE", "details": str(body)[:500],
+               "note": "Cascade delete is switched off on this cluster (API_NOT_ALLOWED). "
+                       "Nothing was changed. ThoughtSpot support can enable it; until "
+                       "then, use Remove or Repoint mode."}, ok=False)
     if status == 400 and _refusal(body):
         _emit({"status": "REFUSED", "details": _refusal(body),
                "note": "A ThoughtSpot rule blocks this delete. Nothing was changed."}, ok=False)
@@ -170,6 +183,61 @@ def _preview_or_exit(client, source_type: str, guid: str) -> Dict[str, Any]:
         return parse_preview(body, guid)
     except CascadeError as e:
         _fail(str(e))
+
+
+def _scope(client, source_type: str, guid: str) -> Tuple[List[Dict[str, Any]], str]:
+    """Every object the cascade deletes besides `guid` — the source's preview, unioned with
+    the preview of each Table, Model or View it lists, until nothing new appears — and the
+    source preview's CSV."""
+    found: Dict[str, Dict[str, Any]] = {}
+    queue = [(source_type, guid)]
+    seen = {guid}
+    csv_text = None
+    while queue:
+        typ, g = queue.pop(0)
+        preview = _preview_or_exit(client, typ, g)
+        csv_text = preview["csv"] if csv_text is None else csv_text
+        for o in preview["objects"]:
+            if o["guid"] == guid:
+                continue
+            found.setdefault(o["guid"], o)
+            if o["type"] in OWNER_TYPES and o["guid"] not in seen:
+                seen.add(o["guid"])
+                queue.append(("LOGICAL_TABLE", o["guid"]))
+    return list(found.values()), csv_text or ""
+
+
+def _feedback(client, guid: str) -> Optional[int]:
+    try:
+        resp = client.request("POST", "/api/rest/2.0/metadata/tml/export", raise_for_status=False,
+                              json={"metadata": [{"identifier": guid, "type": "FEEDBACK"}],
+                                    "export_associated": False, "formattype": "YAML"})
+        try:
+            body = resp.json()
+        except ValueError:
+            body = resp.text
+        return feedback_count(resp.status_code, body)
+    except (Exception, SystemExit):
+        return None
+
+
+def _attached(client, objects: List[Dict[str, Any]], guid: str, source_type: str,
+              source_name: str) -> List[Dict[str, Any]]:
+    """Sets and feedback on the deleted Tables, Models and Views — the cascade deletes
+    them without listing them (PR #692 review, live 2026-11-02)."""
+    owners = owners_in_scope(objects, guid, source_type)
+    names = {o["guid"]: o.get("name") or "" for o in objects}
+    names[guid] = source_name
+    sets = discover_sets(client, [{"guid": g, "name": names.get(g, "")} for g in sorted(owners)])
+    blockers = attached_blockers(owners, sets, {g: _feedback(client, g) for g in owners})
+    return [{**b, "owner_name": names.get(b["owner"], "")} for b in blockers]
+
+
+_BLOCKED = ("The delete would also remove the Sets or Spotter feedback listed in "
+            "'attached' (or they could not be checked), and the server's preview does not "
+            "list them, so they cannot be backed up or restored here. Nothing was changed. "
+            "Back up and remove them first (or move them to another Model), then run the "
+            "preview again.")
 
 
 @app.command("cascade-preview")
@@ -183,20 +251,25 @@ def cascade_preview_cmd(
 
     Administrators only. Output: JSON with one row per object (guid, name, type, author,
     org), counts per type, the total, how many belong to other users or to an unknown
-    author, the object to back up (`backup_source`), and the server's CSV. `source.guid`
-    is the GUID to pass to `cascade-delete`.
+    author, the object to back up (`backup_source`), any Sets or feedback the delete
+    would remove unlisted (`attached`), and the server's CSV. `source.guid` is the GUID
+    to pass to `cascade-delete`. `status` is PREVIEW, or BLOCKED (exit 1) when
+    `attached` is not empty — `cascade-delete` refuses those.
     """
     if source_type not in CASCADE_TYPES:
         _fail(f"--type must be one of {', '.join(CASCADE_TYPES)}.")
     client = ThoughtSpotClient(resolve_profile(profile))
     user = _admin_user(client)
     target = _resolve_target(client, ref, source_type, column)
-    preview = _preview_or_exit(client, target["type"], target["guid"])
-    _emit({"status": "PREVIEW", "source": {"guid": target["guid"], "type": target["type"]},
-           "requested_by": user, "objects": preview["objects"],
-           **summarize(preview["objects"], user),
+    objects, csv_text = _scope(client, target["type"], target["guid"])
+    attached = _attached(client, objects, target["guid"], target["type"],
+                         target["backup_source"]["name"])
+    _emit({"status": "BLOCKED" if attached else "PREVIEW",
+           "source": {"guid": target["guid"], "type": target["type"]},
+           "requested_by": user, "objects": objects, **summarize(objects, user),
            "source_deleted": target["type"] == "LOGICAL_TABLE",
-           "backup_source": target["backup_source"], "csv": preview["csv"]}, ok=True)
+           "backup_source": target["backup_source"], "attached": attached,
+           **({"note": _BLOCKED} if attached else {}), "csv": csv_text}, ok=not attached)
 
 
 def _readable(path: str) -> bool:
@@ -208,26 +281,26 @@ def _readable(path: str) -> bool:
         return False
 
 
-def _load_backup(backup_dir: str) -> Tuple[Dict[str, Any], int]:
-    """(manifest, the time it was written in ms) — or exit, having deleted nothing."""
+def _load_backup(backup_dir: str) -> Dict[str, Any]:
+    """The backup's manifest — or exit, having deleted nothing."""
     manifest_path = os.path.join(backup_dir, "manifest.json")
     try:
         with open(manifest_path) as f:
-            manifest = json.load(f)
-        return manifest, int(os.path.getmtime(manifest_path) * 1000)
+            return json.load(f)
     except (OSError, ValueError) as e:
         _fail(f"Cannot read the backup manifest {manifest_path}: {e}. Nothing was deleted.")
 
 
-def _checks_before_delete(client, guid: str, source_type: str, manifest: Dict[str, Any],
-                          backup_ms: int) -> Tuple[Set[str], Dict[str, str]]:
+def _checks_before_delete(client, guid: str, source_type: str,
+                          manifest: Dict[str, Any]) -> Tuple[Set[str], Dict[str, str]]:
     """Every refusal that comes before the delete is sent. Returns the GUIDs the delete
     removes (`before`) and the objects to watch, typed for v2 search (`typed`)."""
-    if manifest.get("base_url") != client.base_url:
-        _fail(f"The backup was taken from {manifest.get('base_url')}, not {client.base_url}. "
-              "Nothing was deleted.")
+    mismatch = cluster_mismatch(manifest, client.base_url, client.org)
+    if mismatch:
+        _fail(f"{mismatch} Nothing was deleted.")
     _admin_user(client)
-    backup_source = _resolve_target(client, guid, source_type, None)["backup_source"]["guid"]
+    owner = _resolve_target(client, guid, source_type, None)["backup_source"]
+    backup_source = owner["guid"]
     files = {o.get("backup_file") or "": _readable(o.get("backup_file") or "")
              for o in manifest.get("objects") or []}
     problems = backup_problems(manifest, guid, source_type, backup_source, files)
@@ -235,7 +308,10 @@ def _checks_before_delete(client, guid: str, source_type: str, manifest: Dict[st
         _emit({"status": "BAD_BACKUP", "problems": problems,
                "note": "This backup cannot protect this delete. Nothing was deleted."}, ok=False)
 
-    objects = _preview_or_exit(client, source_type, guid)["objects"]
+    objects, _ = _scope(client, source_type, guid)
+    attached = _attached(client, objects, guid, source_type, owner["name"])
+    if attached:
+        _emit({"status": "BLOCKED", "attached": attached, "note": _BLOCKED}, ok=False)
     before = deleted_set(objects, guid, source_type)
     check = recheck(before, manifest)
     if not check["match"]:
@@ -249,10 +325,18 @@ def _checks_before_delete(client, guid: str, source_type: str, manifest: Dict[st
     typed[guid] = source_type
     if source_type == "LOGICAL_COLUMN":
         typed[backup_source] = "LOGICAL_TABLE"
-    changed = stale(_present(client, typed), backup_ms)
+    present = present_objects(client, typed)
+    unseen = invisible(typed, present)
+    if unseen:
+        _emit({"status": "NOT_VISIBLE", "not_visible": unseen,
+               "note": "The existence check cannot see these objects (another Org, or a "
+                       "type it cannot look up), so it could not confirm what the delete "
+                       "did. Nothing was deleted."}, ok=False)
+    changed = stale(present, manifest)
     if changed:
         _emit({"status": "STALE_BACKUP", "changed_since_backup": changed,
-               "note": "These objects changed after the backup, so a rollback would restore "
+               "note": "These objects changed after the backup (or the backup does not "
+                       "record when they were last changed), so a rollback would restore "
                        "old content. Nothing was deleted. Take a new backup."}, ok=False)
     return before, typed
 
@@ -260,11 +344,11 @@ def _checks_before_delete(client, guid: str, source_type: str, manifest: Dict[st
 _NOTES = {
     "APPLIED": "Everything listed is confirmed gone.",
     "PARTIAL": "Some objects are gone and some still exist. Do NOT run the delete again; "
-               "offer the rollback.",
+               "offer the rollback (it re-creates only what is gone).",
     "NOT_APPLIED": "The server failed and every object still exists.",
-    "UNKNOWN": "The call timed out or hit a gateway error and nothing is gone YET; the "
-               "server may still be working. Do NOT run the delete again. Wait, then run "
-               "cascade-preview and check the objects.",
+    "UNKNOWN": "The call timed out, hit a gateway error, or gave no clear answer, and "
+               "nothing is gone YET; the server may still be working. Do NOT run the "
+               "delete again. Wait, then run cascade-preview and check the objects.",
 }
 
 
@@ -275,15 +359,15 @@ def _report_after_delete(client, result: Dict[str, Any], guid: str, source_type:
     always print a status, never re-send."""
     expected: Set[str] = before | {guid}
     try:
-        gone = (set(typed) - set(_present(client, typed))) & expected
+        gone = (set(typed) - set(present_objects(client, typed))) & expected
     except (Exception, SystemExit):
         _emit({**result, "status": "UNKNOWN", "http_status": status, "expected": sorted(expected),
                "note": "The delete was sent, but whether the objects still exist could not be "
                        "checked. Do NOT run the delete again. Run cascade-preview and check "
                        "the objects before anything else."}, ok=False)
     outcome = classify_gone(expected, gone)
-    if status is None and outcome == "NOT_APPLIED":
-        outcome = "UNKNOWN"     # a timeout or gateway error: the server may still be working
+    if outcome == "NOT_APPLIED" and not definite_failure(status, body):
+        outcome = "UNKNOWN"     # nothing proves the server stopped: it may still be working
     try:
         named = set(mentioned(body, guid)) | ({guid} if source_type == "LOGICAL_TABLE" else set())
         readable = True
@@ -311,11 +395,13 @@ def cascade_delete_cmd(
        "backup_dir": "<ts dependency backup output dir>", "confirm": "DELETE"}
 
     Refuses, sending nothing, unless the caller is an administrator, the backup came from
-    this cluster with every file readable, nothing in it changed since it was taken, and
-    a fresh preview lists exactly the objects backed up for deletion. Sends the delete
-    once. Output: JSON whose `status` is APPLIED, PARTIAL, NOT_APPLIED, UNKNOWN, REFUSED,
-    RECHECK_MISMATCH, STALE_BACKUP or BAD_BACKUP. Exit 0 only for APPLIED, with every
-    object confirmed gone and backed up.
+    this cluster and Org with every file readable, nothing in it changed since it was
+    taken, no Sets or feedback would be deleted unlisted, every object is visible to the
+    existence check, and a fresh preview lists exactly the objects backed up for
+    deletion. Sends the delete once. Output: JSON whose `status` is APPLIED, PARTIAL,
+    NOT_APPLIED, UNKNOWN, REFUSED, NOT_AVAILABLE, BLOCKED, NOT_VISIBLE, RECHECK_MISMATCH,
+    STALE_BACKUP or BAD_BACKUP. Exit 0 only for APPLIED, with every object confirmed gone
+    and backed up.
     """
     try:
         plan = check_plan(json.load(sys.stdin))
@@ -324,10 +410,10 @@ def cascade_delete_cmd(
     except CascadeError as e:
         _fail(str(e))
     guid, source_type, backup_dir = plan["guid"], plan["type"], plan["backup_dir"]
-    manifest, backup_ms = _load_backup(backup_dir)
+    manifest = _load_backup(backup_dir)
     resolved_profile = resolve_profile(profile)
     client = ThoughtSpotClient(resolved_profile)
-    before, typed = _checks_before_delete(client, guid, source_type, manifest, backup_ms)
+    before, typed = _checks_before_delete(client, guid, source_type, manifest)
 
     status, body = _post(client, source_type, guid, apply=True)
     result: Dict[str, Any] = {

@@ -14582,7 +14582,7 @@ Tests for each, with synthetic names only.
 ## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2` — **RESOLVED 2026-10-30**
 
 **Resolution.** The capability ships as `ts-dependency-manager` mode D (Step 3-D, skill 1.6.0,
-ts-cli 0.192.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
+ts-cli 0.198.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
 cascade-delete` refuses without a readable, current, same-cluster backup. Item 2: the smoke
 test has only a dry-run step; no destructive flag exists. Item 3: purge is not wrapped.
 Items 4-8 described the separate skill and no longer apply; #5's lookup-vs-cascade gap is
@@ -16290,3 +16290,24 @@ JSON, so the skill itself is not misled; scripts and the smoke test are.
 and check the smoke test and Step 10 still read the result.
 
 **Target:** 2026-11-30.
+
+## BL-511 — cascade delete: back up and restore Sets and Spotter feedback instead of refusing `Tier 2`
+
+**Filed:** 2026-11-02. **Source:** the PR #692 review (blocker), ts-dependency-manager
+open-items #29.
+
+**Why it matters.** A whole-object cascade delete removes the deleted Models' and Views'
+reusable Sets and Spotter feedback without listing them in the dry run or in the delete's
+answer. Mode D now refuses such a delete (`BLOCKED`), which is safe, but it makes the mode
+unusable for any Model with coaching or Sets until the user removes them by hand — and
+removing feedback by hand loses it.
+
+**Do.** Find them as the refusal does (`sets/discover.py`; a `FEEDBACK` export), add them
+to the backup (feedback as its own entry), and restore them after their Model in
+`rollback`: a Set binds its Model by `fqn`, which `remap_guids` already re-targets; the
+feedback document carries its Model's GUID as its own, so it must be imported against the
+restored Model's new GUID. Then turn the refusal into a listing on the D3/D5 screens and
+check them for existence after the delete. Verify live on a throwaway Model with one Set
+and one feedback entry, delete and roll back.
+
+**Target:** 2026-12-15.

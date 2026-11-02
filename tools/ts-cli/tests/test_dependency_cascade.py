@@ -155,8 +155,54 @@ class TestPureLogic:
         assert c.recheck({M1, M2}, manifest)["not_backed_up"] == [M2]
         assert c.recheck(set(), manifest)["no_longer_listed"] == [M1]
 
-    def test_stale(self):
-        assert c.stale({M1: 5, M2: 20, LB: None}, 10) == sorted([M2, LB])
+    def test_stale_compares_server_times_per_object(self):
+        manifest = {"objects": [{"guid": M1, "modified": 5}, {"guid": M2, "modified": 5},
+                                {"guid": LB, "modified": None}, {"guid": NEW}]}
+        # M1 unchanged; M2 edited since; LB and NEW have no recorded time (an older
+        # backup) and count as stale; OWNER is not in the backup at all.
+        assert c.stale({M1: 5, M2: 6, LB: 5, NEW: 5, OWNER: 9}, manifest) == sorted([M2, LB, NEW])
+        assert c.stale({}, manifest) == []          # absent objects are invisible()'s concern
+
+    def test_invisible(self):
+        assert c.invisible({M1: "LOGICAL_TABLE", M2: "ANSWER"}, {M1: 1}) == [M2]
+
+    @pytest.mark.parametrize("status,body,want", [
+        (None, None, False), (200, {}, False), (408, "", False), (502, "<html>", False),
+        (524, "<html>", False), (500, "<html>proxy</html>", False), (503, {"x": 1}, False),
+        (400, {"error_code": "METADATA_ERROR"}, True), (403, "", True), (404, "", True),
+        (500, {"code": 14009}, True)])
+    def test_definite_failure(self, status, body, want):
+        assert c.definite_failure(status, body) is want
+
+    @pytest.mark.parametrize("status,body,want", [
+        (200, [{"edoc": json.dumps({"nls_feedback": {"feedback": [{"id": "1"}, {"id": "2"}]}})}], 2),
+        (400, {"debug": "No accessible metadata objects found for the provided input."}, 0),
+        (400, {"debug": "Specified identifier doesn't exist"}, None),
+        (200, [{"edoc": "not json"}], None), (200, [], None), (500, "", None)])
+    def test_feedback_count(self, status, body, want):
+        assert c.feedback_count(status, body) == want
+
+    def test_owners_in_scope(self):
+        objs = [{"guid": M1, "type": "MODEL"}, {"guid": LB, "type": "LIVEBOARD"},
+                {"guid": M2, "type": "VIEW"}]
+        assert c.owners_in_scope(objs, SRC, "LOGICAL_TABLE") == {M1, M2, SRC}
+        assert c.owners_in_scope(objs, COL, "LOGICAL_COLUMN") == {M1, M2}
+
+    def test_attached_blockers(self):
+        sets = {"sets": {M1: [{"guid": NEW, "name": "Top customers"}], M2: []},
+                "incomplete": [SRC]}
+        out = c.attached_blockers({M1, M2, SRC}, sets, {M1: 0, M2: 3, SRC: None})
+        kinds = {(b["owner"], b["kind"]) for b in out}
+        assert kinds == {(M1, "SET"), (M2, "FEEDBACK"), (SRC, "SETS_UNCHECKED"),
+                         (SRC, "FEEDBACK_UNCHECKED")}
+        assert c.attached_blockers({M1}, {"sets": {M1: []}}, {M1: 0}) == []
+
+    @pytest.mark.parametrize("resp", [
+        {"dependents": {SRC: [{"name": "no id"}]}, "csv": ""},
+        {"dependents": {SRC: []}, "csv": CSV_HEAD + "\n" + SRC + ",x,,Lost Answer,QUESTION_ANSWER_BOOK,,,,,a,b,0,Primary\n"}])
+    def test_entries_without_a_guid_are_refused_not_dropped(self, resp):
+        with pytest.raises(c.CascadeError, match="refusing"):
+            c.mentioned(resp, SRC)
 
     def test_classify_gone(self):
         assert c.classify_gone({M1, M2}, {M1, M2}) == "APPLIED"
@@ -180,22 +226,43 @@ class _Resp:
 
 
 class FakeClient:
-    """`auth/session/user` answers `user`. Every cascade call pops `script`; a script entry
-    that is an Exception class is raised (the client refusing to retry an ambiguous
-    failure). `metadata/search` answers from `present` (GUID → modified), which becomes
-    `after_apply` once the delete is sent; `search_fails_after_apply` makes it raise."""
+    """`auth/session/user` answers `user`. A cascade call on a source (`ROOTS`) pops
+    `script`; a script entry that is an Exception class is raised (the client refusing to
+    retry an ambiguous failure). A preview of anything else — the extra previews that
+    widen the scope — answers `sub[guid]`, or no dependents. `metadata/search` answers
+    from `present` (GUID → modified), which becomes `after_apply` once the delete is sent;
+    `search_fails_after_apply` makes it raise. The cohort listing answers `sets[guid]`
+    (a list of rows, or an Exception class to raise); the FEEDBACK export answers
+    `feedback[guid]` entries, none by default."""
+
+    ROOTS = (SRC, COL, OWNER)
 
     def __init__(self, user: dict, script: List[Any], present: Optional[Dict[str, int]] = None,
                  after_apply: Optional[Dict[str, int]] = None, base_url: str = BASE,
-                 search_fails_after_apply: bool = False):
-        self.user, self.script, self.base_url = user, list(script), base_url
+                 search_fails_after_apply: bool = False, sub: Optional[Dict[str, Any]] = None,
+                 sets: Optional[Dict[str, Any]] = None, feedback: Optional[Dict[str, int]] = None,
+                 org: str = ""):
+        self.user, self.script, self.base_url, self.org = user, list(script), base_url, org
         self.present = dict(present if present is not None else {})
         self.after_apply, self.search_fails = after_apply, search_fails_after_apply
+        self.sub, self.sets, self.feedback = sub or {}, sets or {}, feedback or {}
         self.cascade_calls: List[dict] = []
 
     def get(self, path, **_):
+        if path.startswith("/callosum/v1/metadata/detail/"):
+            rows = self.sets.get(path.rsplit("/", 1)[1], [])
+            if isinstance(rows, type) and issubclass(rows, BaseException):
+                raise rows(1)
+            return _Resp(200, rows)
         assert path == "/api/rest/2.0/auth/session/user"
         return _Resp(200, self.user)
+
+    def _feedback_export(self, guid):
+        n = self.feedback.get(guid, 0)
+        if not n:
+            return _Resp(400, {"debug": "No accessible metadata objects found for the provided input."})
+        fb = {"nls_feedback": {"feedback": [{"id": str(i)} for i in range(n)]}}
+        return _Resp(200, [{"edoc": json.dumps(fb)}])
 
     def post(self, path, json=None, **_):
         assert path == "/api/rest/2.0/metadata/search"
@@ -206,7 +273,12 @@ class FakeClient:
                            for m in json["metadata"] if m["identifier"] in self.present])
 
     def request(self, method, path, **kw):
+        if path == "/api/rest/2.0/metadata/tml/export":
+            return self._feedback_export(kw["json"]["metadata"][0]["identifier"])
         assert (method, path) == ("POST", c.CASCADE_PATH)
+        guid = json.loads(kw["data"]["id"])[0]
+        if kw["data"]["apply_changes"] == "false" and guid not in self.ROOTS:
+            return _Resp(200, self.sub.get(guid, {"dependents": {guid: []}, "csv": CSV_HEAD + "\n"}))
         self.cascade_calls.append(kw)
         if kw["data"]["apply_changes"] == "true" and self.after_apply is not None:
             self.present = dict(self.after_apply)
@@ -258,19 +330,18 @@ def _out(result):
 
 
 def _backup(tmp_path, source=SRC, deletes=(M1, M2, SRC), base_url=BASE, fix_source=True,
-            missing_file=None):
-    objs = [{"guid": g, "intent": "DELETE"} for g in deletes]
+            missing_file=None, org=""):
+    objs = [{"guid": g, "intent": "DELETE", "modified": OLD} for g in deletes]
     if source != SRC and fix_source:
-        objs.append({"guid": source, "intent": "FIX_SOURCE"})
+        objs.append({"guid": source, "intent": "FIX_SOURCE", "modified": OLD})
     for o in objs:
         path = tmp_path / f"{o['guid']}.json"
         if o["guid"] != missing_file:
             path.write_text(json.dumps({"tml": {}}))
         o["backup_file"] = str(path)
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"base_url": base_url, "source_object": {"guid": source},
-                                    "objects": objs}))
-    os.utime(manifest, (100, 100))           # backup taken at t=100 s
+    manifest.write_text(json.dumps({"base_url": base_url, "org": org,
+                                    "source_object": {"guid": source}, "objects": objs}))
     return str(tmp_path)
 
 
@@ -352,7 +423,7 @@ class TestDeleteCommand:
         assert out["status"] == "APPLIED" and out["still_present"] == []
         assert out["deleted"] == sorted([SRC, M1, M2]) and out["deleted_without_backup"] == []
         assert len(fake.applies) == 1
-        assert fake.applies[0]["idempotent"] is False and fake.applies[0]["timeout"] == 600
+        assert fake.applies[0]["idempotent"] is False and fake.applies[0]["timeout"] == 900
         assert fake.cascade_calls[0]["data"]["apply_changes"] == "false"
         assert "--profile p" in out["rollback"]
 
@@ -494,3 +565,119 @@ class TestDeleteCommand:
         assert r.exit_code == 0, _out(r)
         out = json.loads(r.stdout)
         assert out["deleted"] == sorted([COL, M1]) and out["status"] == "APPLIED"
+
+
+# ---------------------------------------------------------------------------
+# PR #692 review: Sets and feedback, scope union, timeouts, visibility, outcomes
+# ---------------------------------------------------------------------------
+
+def _set_row(guid, name):
+    return {"header": {"id": guid, "name": name}, "cohortConfig": {"cohort_type": "SIMPLE"}}
+
+
+SET1 = "22222222-3333-4444-5555-666666666666"
+
+
+class TestReviewFixes:
+    def test_preview_is_never_retried_and_waits_long(self):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())])
+        _run(["cascade-preview", SRC], fake)
+        assert fake.cascade_calls[0]["idempotent"] is False
+        assert fake.cascade_calls[0]["timeout"] == 900
+
+    def test_a_models_set_blocks_the_preview(self):
+        # live 2026-11-02: the preview of a Model never names its Sets, yet the delete
+        # removes them
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], sets={M1: [_set_row(SET1, "Top")]})
+        r = _run(["cascade-preview", SRC], fake)
+        out = json.loads(r.stdout)
+        assert r.exit_code == 1 and out["status"] == "BLOCKED"
+        assert out["attached"] == [{"owner": M1, "kind": "SET", "guid": SET1, "name": "Top",
+                                    "owner_name": "Model A"}]
+
+    def test_the_sources_own_feedback_blocks_the_preview(self):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], feedback={SRC: 2})
+        out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
+        assert out["status"] == "BLOCKED" and out["attached"][0]["kind"] == "FEEDBACK"
+
+    def test_a_failed_set_listing_blocks_rather_than_reads_as_none(self):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], sets={M2: RuntimeError})
+        out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
+        assert out["status"] == "BLOCKED" and out["attached"][0]["kind"] == "SETS_UNCHECKED"
+
+    def test_a_column_delete_does_not_check_the_owner_it_keeps(self):
+        prev = _preview(source=COL, deps=[_dep(M1, "A")])
+        fake = FakeClient(ADMIN, [_Resp(200, prev)], feedback={OWNER: 4})
+        r = _run(["cascade-preview", OWNER, "--column", "Supplier Name"], fake)
+        assert r.exit_code == 0 and json.loads(r.stdout)["attached"] == []
+
+    def test_sets_block_the_delete_before_anything_is_sent(self, tmp_path):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], present=ALL,
+                          sets={SRC: [_set_row(SET1, "Top")]})
+        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path)))
+        assert r.exit_code == 1 and json.loads(r.stdout)["status"] == "BLOCKED"
+        assert fake.applies == []
+
+    def test_scope_includes_what_a_listed_models_own_preview_names(self):
+        sub = {M1: _preview(source=M1, deps=[_dep(NEW, "Deep Answer", "QUESTION_ANSWER_BOOK", None)])}
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], sub=sub)
+        out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
+        assert {o["guid"] for o in out["objects"]} == {M1, M2, NEW} and out["total"] == 3
+
+    def test_a_wider_scope_than_the_backup_blocks_the_delete(self, tmp_path):
+        sub = {M2: _preview(source=M2, deps=[_dep(NEW, "Deep", "QUESTION_ANSWER_BOOK", None)])}
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], present=ALL, sub=sub)
+        out = json.loads(_run(["cascade-delete"], fake, _plan(_backup(tmp_path))).stdout)
+        assert out["status"] == "RECHECK_MISMATCH" and out["not_backed_up"] == [NEW]
+        assert fake.applies == []
+
+    def test_an_object_the_existence_check_cannot_see_blocks_the_delete(self, tmp_path):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], present={SRC: OLD, M1: OLD})
+        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path)))
+        out = json.loads(r.stdout)
+        assert r.exit_code == 1 and out["status"] == "NOT_VISIBLE" and out["not_visible"] == [M2]
+        assert fake.applies == []
+
+    def test_a_backup_without_recorded_times_is_stale(self, tmp_path):
+        bd = _backup(tmp_path)
+        m = json.loads((tmp_path / "manifest.json").read_text())
+        for o in m["objects"]:
+            o.pop("modified")
+        (tmp_path / "manifest.json").write_text(json.dumps(m))
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], present=ALL)
+        out = json.loads(_run(["cascade-delete"], fake, _plan(bd)).stdout)
+        assert out["status"] == "STALE_BACKUP" and fake.applies == []
+
+    @pytest.mark.parametrize("manifest_kw,client_kw", [
+        ({"org": "7"}, {}), ({}, {"org": "7"}), ({"base_url": ""}, {})])
+    def test_another_org_or_an_unrecorded_cluster_sends_nothing(self, tmp_path, manifest_kw, client_kw):
+        fake = FakeClient(ADMIN, [], **client_kw)
+        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path, **manifest_kw)))
+        assert r.exit_code == 1 and fake.cascade_calls == []
+
+    def test_a_trailing_slash_is_the_same_cluster(self, tmp_path):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview()), _Resp(200, _preview())],
+                          present=ALL, after_apply={})
+        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path, base_url=BASE.upper() + "/")))
+        assert r.exit_code == 0, _out(r)
+
+    @pytest.mark.parametrize("resp", [_Resp(502, "<html>Bad gateway</html>"), _Resp(408, ""),
+                                      _Resp(524, "<html>timeout</html>"),
+                                      _Resp(500, "<html>proxy error</html>")])
+    def test_a_gateway_answer_with_nothing_gone_yet_is_unknown(self, tmp_path, resp):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview()), resp], present=ALL, after_apply=ALL)
+        out = json.loads(_run(["cascade-delete"], fake, _plan(_backup(tmp_path))).stdout)
+        assert out["status"] == "UNKNOWN" and "NOT run the delete again" in out["note"]
+
+    def test_a_200_with_nothing_gone_is_unknown_not_not_applied(self, tmp_path):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview()), _Resp(200, _preview())],
+                          present=ALL, after_apply=ALL)
+        out = json.loads(_run(["cascade-delete"], fake, _plan(_backup(tmp_path))).stdout)
+        assert out["status"] == "UNKNOWN"
+
+    def test_endpoint_switched_off_says_so(self):
+        body = {"error": {"code": "API_NOT_ALLOWED",
+                          "message": "Requested API is not enabled. Reach out to SRE to enable this API"}}
+        fake = FakeClient(ADMIN, [_Resp(404, body)])
+        r = _run(["cascade-preview", SRC], fake)
+        assert r.exit_code == 1 and json.loads(r.stdout)["status"] == "NOT_AVAILABLE"

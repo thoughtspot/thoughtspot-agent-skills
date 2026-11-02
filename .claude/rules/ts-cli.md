@@ -114,7 +114,7 @@ python tools/validate/check_version_sync.py
 
 ---
 
-## No v1 endpoints (migration complete — 2026-06-16)
+## No public v1 endpoints (`/tspublic/v1/` migration complete — 2026-06-16; two internal `/callosum/v1/` routes remain, below)
 
 The repo no longer calls any v1 (`/tspublic/v1/...`) endpoint. The last one,
 `/tspublic/v1/connection/fetchConnection`, was removed on newer ThoughtSpot Cloud

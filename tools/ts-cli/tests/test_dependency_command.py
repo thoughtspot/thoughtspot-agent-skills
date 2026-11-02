@@ -14,6 +14,15 @@ from ts_cli.cli import app
 from runners import runner  # noqa: E402  (BL-139: one definition, see runners.py)
 
 
+def _client():
+    """A mock ThoughtSpotClient on one cluster, in the default Org. Backups record both
+    and rollback refuses a mismatch, so a bare MagicMock would never match itself."""
+    client = MagicMock()
+    client.base_url = "https://example.thoughtspot.cloud"
+    client.org = ""
+    return client
+
+
 def _all_output(result):
     try:
         return (result.stdout or "") + (result.stderr or "")
@@ -157,7 +166,7 @@ class TestBackupCommand:
             "fix": [{"guid": "dep-1", "type": "ANSWER", "name": "Revenue Answer"}],
             "out_dir": str(tmp_path),
         }
-        mock_client = MagicMock()
+        mock_client = _client()
         mock_client.base_url = "https://example.thoughtspot.cloud"
 
         def fake_post(path, json=None, **kwargs):
@@ -176,9 +185,43 @@ class TestBackupCommand:
         manifest = json.loads(result.stdout)
         assert manifest["fix_count"] == 1
         assert manifest["delete_count"] == 0
+        assert manifest["org"] == "" and manifest["base_url"] == "https://example.thoughtspot.cloud"
         assert len(manifest["objects"]) == 2
         backup_dir = os.path.dirname(manifest["objects"][0]["backup_file"])
         assert os.path.isfile(os.path.join(backup_dir, "manifest.json"))
+
+    def test_records_each_objects_server_time_before_exporting_it(self, tmp_path):
+        # The cascade delete's staleness check compares these with the server's times
+        # (PR #692 review: the manifest file's mtime was the wrong clock and moment).
+        plan = {"operation": "CASCADE_DELETE",
+                "source": {"guid": "src-1", "type": "MODEL", "name": "M"},
+                "delete": [{"guid": "dep-1", "type": "ANSWER", "name": "A"}],
+                "out_dir": str(tmp_path)}
+        mock_client = _client()
+        calls = []
+
+        def fake_post(path, json=None, **kwargs):
+            calls.append(path)
+            if path.endswith("/metadata/search"):
+                assert json["metadata"] == [{"identifier": "src-1", "type": "LOGICAL_TABLE"},
+                                            {"identifier": "dep-1", "type": "ANSWER"}]
+                resp = MagicMock()
+                resp.json.return_value = [
+                    {"metadata_id": "src-1", "metadata_header": {"modified": 11}},
+                    {"metadata_id": "dep-1", "metadata_header": {"modified": 22}}]
+                return resp
+            guid = json["metadata"][0]["identifier"]
+            return _fake_export_response(guid, {"src-1": "model", "dep-1": "answer"}[guid], guid)
+
+        mock_client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(app, ["dependency", "backup", "--profile", "test"],
+                                   input=json.dumps(plan))
+        assert result.exit_code == 0, _all_output(result)
+        assert calls[0].endswith("/metadata/search")          # read before any export
+        times = {o["guid"]: o["modified"] for o in json.loads(result.stdout)["objects"]}
+        assert times == {"src-1": 11, "dep-1": 22}
 
     def test_aborts_and_writes_nothing_on_export_failure(self, tmp_path):
         plan = {
@@ -187,7 +230,7 @@ class TestBackupCommand:
             "fix": [{"guid": "dep-1", "type": "ANSWER", "name": "Revenue Answer"}],
             "out_dir": str(tmp_path),
         }
-        mock_client = MagicMock()
+        mock_client = _client()
         mock_client.base_url = "https://example.thoughtspot.cloud"
 
         def fake_post(path, json=None, **kwargs):
@@ -231,7 +274,7 @@ class TestBackupCommand:
             "fix": [{"guid": "dep-1", "type": "ANSWER", "name": "Revenue Answer"}],
             "out_dir": str(tmp_path),
         }
-        mock_client = MagicMock()
+        mock_client = _client()
         mock_client.base_url = "https://example.thoughtspot.cloud"
 
         def fake_post(path, json=None, **kwargs):
@@ -282,7 +325,7 @@ class TestRollbackCommand:
             "delete": [{"guid": "del-1", "type": "LIVEBOARD", "name": "Old LB"}],
             "out_dir": str(tmp_path),
         }
-        mock_client = MagicMock()
+        mock_client = _client()
         mock_client.base_url = "https://example.thoughtspot.cloud"
 
         def fake_post(path, json=None, **kwargs):
@@ -301,7 +344,7 @@ class TestRollbackCommand:
         return os.path.dirname(manifest["objects"][0]["backup_file"])
 
     def _fake_import_client(self, new_guid="new-guid-123"):
-        mock_client = MagicMock()
+        mock_client = _client()
 
         def fake_post(path, json=None, **kwargs):
             resp = MagicMock()
@@ -345,12 +388,72 @@ class TestRollbackCommand:
         assert result.exit_code != 0
         mock_client.post.assert_not_called()
 
+    def test_rollback_refuses_another_org_and_an_unrecorded_cluster(self, tmp_path):
+        backup_dir = self._make_backup(tmp_path)
+        manifest_path = os.path.join(backup_dir, "manifest.json")
+        for change in ({"org": "7"}, {"base_url": None}):
+            with open(manifest_path) as f:
+                manifest = {**json.load(f), "org": "", "base_url": "https://example.thoughtspot.cloud"}
+            with open(manifest_path, "w") as f:
+                json.dump({**manifest, **change}, f)
+            mock_client = self._fake_import_client()
+            with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+                 patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+                result = runner.invoke(
+                    app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"])
+            assert result.exit_code != 0, change
+            mock_client.post.assert_not_called()
+
+    def test_rollback_skips_a_deleted_object_that_still_exists(self, tmp_path):
+        # After a PARTIAL cascade delete the survivors were never deleted: re-creating
+        # them would leave two copies (PR #692 review).
+        backup_dir = self._make_backup(tmp_path)
+        mock_client = self._fake_import_client()
+        imports = []
+
+        def fake_post(path, json=None, **kwargs):
+            resp = MagicMock()
+            resp.ok = True
+            if path.endswith("/metadata/search"):
+                resp.json.return_value = [{"metadata_id": "del-1", "metadata_header": {}}]
+                return resp
+            imports.append(json)
+            resp.json.return_value = [{"response": {"status": {"status_code": "OK"},
+                                                    "object": [{"header": {"id_guid": "n"}}]}}]
+            return resp
+
+        mock_client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"])
+        assert result.exit_code == 0, _all_output(result)
+        out = json.loads(result.stdout)
+        assert [s["guid"] for s in out["skipped"]] == ["del-1"]
+        assert len(out["succeeded"]) == 2 and not any(j["create_new"] for j in imports)
+
+    def test_rollback_restores_nothing_when_the_existence_check_fails(self, tmp_path):
+        backup_dir = self._make_backup(tmp_path)
+        mock_client = self._fake_import_client()
+
+        def fake_post(path, json=None, **kwargs):
+            if path.endswith("/metadata/search"):
+                raise SystemExit(1)
+            raise AssertionError("an import was sent")
+
+        mock_client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"])
+        assert result.exit_code != 0 and "Nothing was restored" in _all_output(result)
+
     def test_rollback_picks_up_flat_shape_guid(self, tmp_path):
         # BL-099 #1 — ThoughtSpot Cloud also returns a FLAT response shape
         # (response.header.id_guid, no `object` list). Rollback must still
         # recover the new GUID for a DELETE-intent restore.
         backup_dir = self._make_backup(tmp_path)
-        mock_client = MagicMock()
+        mock_client = _client()
 
         def fake_post(path, json=None, **kwargs):
             resp = MagicMock()
@@ -390,6 +493,8 @@ class TestRollbackCommand:
             )
 
         for call in mock_client.post.call_args_list:
+            if call.args[0].endswith("/metadata/search"):     # the still-exists check
+                continue
             tml_yaml = call.kwargs["json"]["metadata_tmls"][0]
             assert tml_yaml.count("guid:") <= 1, f"duplicate guid: line in {tml_yaml!r}"
 
@@ -438,7 +543,7 @@ class TestRollbackCommand:
 
     def test_import_failure_recorded_as_failed(self, tmp_path):
         backup_dir = self._make_backup(tmp_path)
-        mock_client = MagicMock()
+        mock_client = _client()
 
         def fake_post(path, json=None, **kwargs):
             resp = MagicMock()
@@ -498,7 +603,7 @@ class TestCascadeDeleteRollback:
             self.ANSWER: (f"guid: {self.ANSWER}\nanswer:\n  name: Sales Answer\n"
                           f"  tables:\n  - id: Sales Model\n    fqn: {self.MODEL}\n"),
         }
-        client = MagicMock()
+        client = _client()
         client.base_url = "https://example.thoughtspot.cloud"
 
         def fake_post(path, json=None, **kwargs):
@@ -535,12 +640,15 @@ class TestCascadeDeleteRollback:
         backup = self._backup(tmp_path, source_deleted=True)
         backup_dir = os.path.dirname(json.loads(backup.stdout)["objects"][0]["backup_file"])
 
-        client = MagicMock()
+        client = _client()
         new_guids = iter([self.NEW_MODEL, "99999999-8888-7777-6666-555555555555"])
 
         def fake_post(path, json=None, **kwargs):
             resp = MagicMock()
             resp.ok = True
+            if path.endswith("/metadata/search"):     # nothing deleted still exists
+                resp.json.return_value = []
+                return resp
             resp.json.return_value = [{"response": {
                 "status": {"status_code": "OK"},
                 "object": [{"header": {"id_guid": next(new_guids)}}],
@@ -555,7 +663,8 @@ class TestCascadeDeleteRollback:
             )
 
         assert result.exit_code == 0, _all_output(result)
-        model_call, answer_call = client.post.call_args_list
+        search_call, model_call, answer_call = client.post.call_args_list
+        assert search_call.args[0].endswith("/metadata/search")
         # The deleted source is re-created, not updated in place at a dead GUID.
         assert model_call.kwargs["json"]["create_new"] is True
         assert self.MODEL not in model_call.kwargs["json"]["metadata_tmls"][0]

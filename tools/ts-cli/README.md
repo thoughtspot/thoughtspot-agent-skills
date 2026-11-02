@@ -869,7 +869,9 @@ ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --only de
 
 Restores roots first: each entry after every entry its TML references, then by type
 (Tables and SQL Views, Models, Views, Sets, Answers, Liveboards). Refuses a backup
-taken on another cluster. Do not re-run it after a partial restore: it would create a
+taken on another cluster or Org, or one that does not record its cluster. A DELETE entry
+whose original object still exists (a partial delete's survivor) is skipped, never
+re-created; if that check cannot run, nothing is restored. Do not re-run it after a partial restore: it would create a
 second copy of every deleted object it already restored. An entry with
 `intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
 (the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
@@ -885,8 +887,8 @@ binds to the restored Model rather than to the deleted original.
 | `--guid` | all | Restrict rollback to these GUID(s) (repeatable) |
 | `--only` | `all` | `updates` \| `deletes` \| `all` |
 
-**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
-to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
+**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid},
+"skipped": [...]}` to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
 delete — objects outside the backup that referenced the ORIGINAL guid remain broken
 and need manual reattachment. Per-object progress goes to stderr. **Exits 1 when any
 entry is in `failed`** (the JSON is still printed), so a partial restore never reads as
@@ -955,31 +957,43 @@ ts dependency cascade-preview <column-guid> --type LOGICAL_COLUMN --profile prod
 ts dependency cascade-delete --profile prod < plan.json
 ```
 
-**`cascade-preview` output:** `{"status": "PREVIEW", "source": {guid, type}, "objects":
-[{guid, name, type, author, org, ...}], "counts", "total", "owned_by_others",
-"author_unknown", "source_deleted", "backup_source", "csv"}`. `objects` is every object
-the server's answer names besides the source — each `dependents` key's list and every
-CSV row, because whether one list holds the full closure is unproven. `source_deleted`
+**`cascade-preview` output:** `{"status": "PREVIEW" | "BLOCKED", "source": {guid, type},
+"objects": [{guid, name, type, author, org, ...}], "counts", "total", "owned_by_others",
+"author_unknown", "source_deleted", "backup_source", "attached", "csv"}`. `objects` is
+every object the server's answer names besides the source — each `dependents` key's list
+and every CSV row — unioned with the preview of every Table, Model and View it lists,
+because whether one preview holds the full closure is unproven. An answer entry with no
+GUID is refused, not dropped. Each preview waits up to 900 s (large objects took
+250–300 s live) and is never retried. `attached` lists the reusable Sets and Spotter
+feedback on every Table, Model and View the delete removes: the server deletes them
+without listing them in the preview or the delete's answer, so any entry (or a lookup
+that failed) makes the status `BLOCKED`, exit 1. `source_deleted`
 is true for a Table/Model/View and false for a column (its owner is modified).
 `backup_source` is the object to use as the backup's `source`. The GUID's type is
 checked first (the server itself previews a Table's GUID sent as `LOGICAL_COLUMN`). A
 ThoughtSpot rule that blocks the delete gives `{"status": "REFUSED", "details"}`, exit 1;
-so does a cascade that reaches an object type this command does not handle (a Set, an
-uploaded table).
+a cluster with the API switched off (`404 API_NOT_ALLOWED`) gives `NOT_AVAILABLE`. A
+cascade that reaches an object type this command does not handle (a Set listed by a
+column delete, an uploaded table) exits 1 with a message.
 
 **`cascade-delete` sends nothing** unless: the caller is an administrator; the plan
-names ONE GUID and `confirm` is exactly `"DELETE"`; the backup came from this cluster,
-its source is `backup_source`, and every backup file is readable (else `BAD_BACKUP`);
-no object in it changed after the backup was written (else `STALE_BACKUP`); and a fresh
-preview lists exactly the objects backed up for deletion (else `RECHECK_MISMATCH`).
-The delete is sent **once and never retried**. What it did is decided by checking which
+names ONE GUID and `confirm` is exactly `"DELETE"`; the backup came from this cluster and
+Org, its source is `backup_source`, and every backup file is readable (else `BAD_BACKUP`);
+no Set or feedback would be removed unlisted (else `BLOCKED`); every object is visible to
+v2 search (else `NOT_VISIBLE`); each backed-up object's server `modified` time still
+equals the one `ts dependency backup` recorded before exporting it (else `STALE_BACKUP`);
+and a fresh preview, widened the same way, lists exactly the objects backed up for
+deletion (else `RECHECK_MISMATCH`). The delete is sent **once and never retried** after
+it may have reached the server (a 401 is re-sent once with a fresh token — the server
+rejected it before doing any work). What it did is decided by checking which
 objects still exist (v2 `metadata/search`) — the preview cannot tell, because it answers
 the same for a deleted object as for a live one with no dependents.
 
 **Output `status`:** `APPLIED`, `PARTIAL` (with `deleted` and `still_present`),
-`NOT_APPLIED` (with `server_response`), `UNKNOWN` (a timeout or gateway error with
-nothing gone yet — the server may still be working; do not re-send), `REFUSED`, or one
-of the refusals above. `deleted_without_backup` names any object the server's answer
+`NOT_APPLIED` (with `server_response`; only for a definite error — a 4xx other than 408,
+or ThoughtSpot's own JSON 500), `UNKNOWN` (a timeout, a 408, a gateway or proxy error, or
+a 200, with nothing gone yet — the server may still be working; do not re-send),
+`REFUSED`, or one of the refusals above. `deleted_without_backup` names any object the server's answer
 lists that the backup does not hold; `rollback` is the command to undo it. Exit 0 only
 for `APPLIED` on an HTTP 200 whose answer was readable and with every deleted object
 backed up. `dependency/purge` is deliberately not wrapped (unbounded scope).

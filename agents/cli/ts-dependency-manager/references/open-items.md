@@ -317,6 +317,11 @@ Re-verified on a test cluster (build reports its version as `test`), 2026-10-30:
 | Race guard | ✅ A backup missing one dependent → `RECHECK_MISMATCH`, nothing deleted |
 | Cascade vs. dependents lookup | Same objects on this cluster's shallow data. PR #666 #19 measured 4 reported vs 12 deleted on a deeper graph — so the preview, not `ts metadata report`, sizes a delete |
 | Preview of an object that is already deleted | **200 with `{"dependents": {"<guid>": []}}`** — indistinguishable from a live object with no dependents. So the preview cannot tell whether a delete happened. `cascade-delete` decides that from v2 `metadata/search` with an explicit type, which returns no row for a deleted object and one row for a live one (also batched) |
+| Column delete with a downstream View (2026-11-02) | The View was **deleted outright**, not edited — even though it also used another column. So a dependent of a column delete is correctly backed up as `DELETE`; rollback restored both (Model in place, View under a new GUID) |
+| Sets and feedback | See **#29** — a Model's delete removes them, unlisted |
+| Endpoint switched off (PR #692 review, another cluster) | `404 API_NOT_ALLOWED` — *Requested API is not enabled. Reach out to SRE to enable this API*. Reported as `NOT_AVAILABLE` |
+| How common the filter refusal is (PR #692 review, a staging cluster) | `400 METADATA_ERROR` *Deleting columns linked to filters is not allowed* for 7 of the 8 deepest roots, and for 9 of 9 objects with Sets below them. Handled as `REFUSED` |
+| Preview timing (PR #692 review) | **250–300 s** for large objects. The CLI waits up to 900 s per preview and never retries one (a retried preview stacks heavy computations on the server) |
 
 `dependency/purge` is deliberately not wrapped: it takes no parameters and its scope —
 possibly every soft-deleted object on the instance — is unverified (PR #666 #8).
@@ -326,8 +331,14 @@ possibly every soft-deleted object on the instance — is unverified (PR #666 #8
 level deep. The CLI therefore takes the scope from every object the preview names —
 every `dependents` key's list and every CSV row, not only `dependents[<guid>]` — and,
 after the delete, checks which objects are actually gone and names any the server's
-answer lists that the backup does not hold. Settle it by previewing a Table → Model →
-View → Answer chain live.
+answer lists that the backup does not hold. It also runs the preview of every Table,
+Model and View the first preview lists and adds anything new (PR #692 review).
+
+Evidence so far (PR #692 review, a staging cluster, chains up to four objects deep —
+Model ↔ Model → View → View): for Models, Views, Answers and Liveboards every preview
+listed everything a v2 dependents walk found, once 24 more. Reassuring, but the walk is
+only a lower bound, so the extra previews stay until a deliberately deep fixture
+settles it.
 
 **Status:** VERIFIED on one build, except the closure question above. Re-run the
 non-destructive smoke test step on a second build (SaaS) before relying on it there.
@@ -357,10 +368,42 @@ incident id, and consider a documented workaround (delete the previewed Liveboar
 ## #28 — Re-running a partial rollback duplicates what it already restored — OPEN
 
 `ts dependency rollback` re-creates each DELETE entry with `create_new=True` and does not
-record the new GUIDs anywhere but its stdout. After a partial restore (exit 1), running it
+record the new GUIDs anywhere but its stdout. (It does skip a DELETE entry whose ORIGINAL
+object still exists — so rolling back a PARTIAL cascade delete no longer duplicates the
+survivors, live-verified 2026-11-02. That check cannot help here: after a restore the
+original GUIDs are still gone and the copies live under new ones.) After a partial restore (exit 1), running it
 again creates a second copy of every object the first run restored, and a `--guid` re-run
 has nothing to re-link the remaining objects to. Found in the PR #666 follow-up review.
 
 **Next:** write `new_guids` into the backup directory as each object is restored, and
 have a re-run skip entries already restored and re-link against the recorded GUIDs.
 Until then, SKILL.md D7 and Step 11 say not to re-run a partial rollback.
+
+---
+
+## #29 — A cascade delete removes a Model's Sets and Spotter feedback without listing them — VERIFIED LIVE 2026-11-02, handled by refusing
+
+Found by the PR #692 review on a staging cluster (a Model with one reusable BIN_BASED
+Set: the v2 dependents, the dry run and the real delete's 200 answer were all empty, yet
+the Set was gone afterwards) and reproduced on the test cluster on 2026-11-02 with a
+GROUP_BASED Set and one feedback entry:
+
+| Lookup | Finds the Set? | Finds the feedback? |
+|---|---|---|
+| Cascade dry run of the Model | **no** (`dependents` empty, CSV header only) | **no** |
+| v2 `metadata/search` dependents of the Model | **no** | **no** (the review saw a FEEDBACK bucket on its cluster; this build showed none) |
+| `/callosum/v1/metadata/detail/{model}?fetchcohortcolumnsonly=true` (`sets/discover.py`) | **yes** | — |
+| v2 `metadata/tml/export` with `type: FEEDBACK`, `formattype: YAML` | — | **yes** (`nls_feedback.feedback[]`). A Model with none answers **400** code 10002 *No accessible metadata objects found* — distinct from a bad GUID's *Specified identifier doesn't exist* |
+| Cascade dry run of a **column** a Set is anchored on | **yes** — listed as `COHORT`, refused by `backup_type` | — |
+
+**Handling.** `cascade-preview` and `cascade-delete` check every Table, Model and View the
+delete removes (the source included) with those two lookups. Any Set or feedback, or a
+lookup that fails, gives `BLOCKED` and nothing is sent. A column delete does not check its
+owner, which survives; a Set anchored on the column is already listed by the server.
+
+**Next (not built, BL-511):** back the Sets and feedback up and restore them after their Model,
+instead of refusing. The feedback document shares its Model's GUID, so a restore has to
+re-target it at the restored Model's new GUID; a Set is its own document binding the
+Model by `fqn`, which `remap_guids` already handles. Until then the user removes or moves
+them first.
+
