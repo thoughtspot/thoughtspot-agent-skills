@@ -112,7 +112,8 @@ def _formula_measure(name, expr, agg=None, extra=()):
 
 def test_d14_reads_per_row_formulas():
     """A per-row formula is rolled up by its column's aggregation, like a physical
-    column; an aggregate formula ignores it (product owner, 2026-11-02)."""
+    column; an aggregate formula's aggregation is ignored, except a bare group_aggregate /
+    last_value / first_value, which D14 leaves to D13 (product owner, 2026-11-02)."""
     assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]"), "D14") == ["MEDIUM"]
     assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]", "SUM"), "D14") == ["MEDIUM"]
     assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]", "AVERAGE"), "D14") == []
@@ -122,6 +123,9 @@ def test_d14_reads_per_row_formulas():
     assert _sev(_formula_measure("Price Ratio", "[formula_Total] / 2", extra=(via_aggregate,)),
                 "D14") == []
     assert _sev(_formula_measure("Margin", "[T::REVENUE] - [T::COST]"), "D14") == []
+    both = _formula_measure("Amount", "[T::REVENUE] / [T::QTY]")
+    both.models[0]["model"]["columns"][0]["column_id"] = "T::UNIT_PRICE"   # malformed
+    assert _sev(both, "D14") == []
 
 
 def _measure_on(name, column_id):
