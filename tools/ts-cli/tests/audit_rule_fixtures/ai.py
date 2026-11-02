@@ -294,6 +294,17 @@ def ai_measures_described() -> AuditContext:
                          build_tml_col("H", "MEASURE", hidden=True))
 
 
+def ai_name_used_as_another_columns_synonym() -> AuditContext:
+    """"revenue" is one column's name and another's synonym (A8 MEDIUM)."""
+    return build_tml_ctx(build_tml_col("Revenue"), build_tml_col("Sales", synonyms=["revenue"]))
+
+
+def ai_distinct_search_terms() -> AuditContext:
+    """Every term names one column; a synonym repeating its own name is not shared (A8)."""
+    return build_tml_ctx(build_tml_col("Revenue", synonyms=["revenue", "turnover"]),
+                         build_tml_col("Cost", synonyms=["spend"]))
+
+
 AI_INPUTS = {fn.__name__: fn for fn in (
     ai_model_one_of_three_described, ai_model_all_described, ai_model_without_columns,
     ai_model_one_of_three_with_synonyms, ai_model_all_with_synonyms, ai_model_uncoached,

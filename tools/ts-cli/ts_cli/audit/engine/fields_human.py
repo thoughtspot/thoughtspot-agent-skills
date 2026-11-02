@@ -22,7 +22,7 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
@@ -241,3 +241,63 @@ def _answer_name(item: dict, ctx: Any) -> Any:
     """Answer formula: the name of its Answer, as an Answer finding reports it ("" when
     the Answer has no `name`)."""
     return (item.get("parent") or {}).get("name")
+
+
+# ── A8: one search term naming two columns ──────────────────────────────────
+
+def _column_terms(col: dict) -> Tuple[str, set]:
+    """(the column's name, trimmed and lower-cased; its synonyms, the same way) — read as
+    @has_synonyms reads them: under `properties:`, else at the root."""
+    def norm(t: Any) -> str:
+        return t.strip().lower() if isinstance(t, str) else ""
+    syns = tml.mapping(col, "properties").get("synonyms") or col.get("synonyms") or []
+    syns = syns if isinstance(syns, list) else []
+    return norm(col.get("name")), {norm(t) for t in syns} - {""}
+
+
+def _shared_terms(model: dict) -> Dict[str, str]:
+    """{term: "name" | "synonym"} for each term — a visible column's name or synonym —
+    that names two or more visible columns; "name" when it is some column's name."""
+    owners: Dict[str, set] = {}
+    names = set()
+    for i, col in enumerate(model.get("columns") or []):
+        if not isinstance(col, dict) or tml.mapping(col, "properties").get("is_hidden"):
+            continue
+        name, syns = _column_terms(col)
+        if name:
+            names.add(name)
+        for term in syns | ({name} - {""}):
+            owners.setdefault(term, set()).add(i)
+    return {t: ("name" if t in names else "synonym")
+            for t, cols in owners.items() if len(cols) > 1}
+
+
+def _shared(item: dict) -> Dict[str, str]:
+    model = item.get("obj") or {}
+    return cached("shared_terms", model, _shared_terms, model)
+
+
+@register("shared_terms", uses=(),
+          label="the search terms that name two or more columns")
+def _shared_terms_field(item: dict, ctx: Any) -> List[str]:
+    """Model: each term (trimmed, lower-cased) that is the name or a synonym of two or
+    more visible columns, sorted; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(sorted(_shared(item)))
+
+
+@register("shared_term_count", uses=(),
+          label="the number of search terms that name two or more columns")
+def _shared_term_count(item: dict, ctx: Any) -> int:
+    """Model: how many terms name two or more visible columns (see @shared_terms)."""
+    return len(_shared(item))
+
+
+@register("shared_term_kind", uses=(), values=("name", "synonym", None),
+          label="the worst kind of shared search term")
+def _shared_term_kind(item: dict, ctx: Any) -> Optional[str]:
+    """Model: "name" when a shared term is some visible column's name (searching it may
+    pick the other column), "synonym" when only synonyms are shared, None when none is."""
+    kinds = set(_shared(item).values())
+    return "name" if "name" in kinds else ("synonym" if kinds else None)
+

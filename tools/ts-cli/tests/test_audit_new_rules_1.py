@@ -84,3 +84,28 @@ def test_h12_physical_name_only():
     assert _sev(build_tml_ctx(_col_with_id("Load", "ETL_LOAD_TS", hidden=True)), "H12") == []
     assert _sev(build_tml_ctx(_col_with_id("Load date", "ORDER_DATE")), "H12") == []
     assert _sev(build_tml_ctx(_col_with_id("Download count", "DOWNLOADS")), "H12") == []
+
+
+# ── A8: one search term naming two columns ──────────────────────────────────
+
+def test_a8_name_vs_synonym():
+    name_clash = build_tml_ctx(build_tml_col("Revenue"),
+                               build_tml_col("Sales", synonyms=["revenue "]))
+    assert _sev(name_clash, "A8") == ["MEDIUM"]
+    synonym_only = build_tml_ctx(build_tml_col("Gross", synonyms=["sales"]),
+                                 build_tml_col("Net", synonyms=["Sales"]))
+    assert _sev(synonym_only, "A8") == ["LOW"]
+    own = build_tml_ctx(build_tml_col("Revenue", synonyms=["revenue", "Revenue", "rev"]),
+                        build_tml_col("Cost", synonyms=["spend"]))
+    assert _sev(own, "A8") == []
+    hidden = build_tml_ctx(build_tml_col("Revenue"),
+                           build_tml_col("Sales", synonyms=["revenue"], hidden=True))
+    assert _sev(hidden, "A8") == []
+
+
+def test_a8_lists_the_terms():
+    from audit_run_rule import run_rule
+    ctx = build_tml_ctx(build_tml_col("Revenue"), build_tml_col("Sales", synonyms=["revenue"]),
+                        build_tml_col("A", synonyms=["x"]), build_tml_col("B", synonyms=["X"]))
+    (f,) = run_rule(ctx, "A8")
+    assert "revenue" in f.detail and "x" in f.detail and "2" in f.detail
