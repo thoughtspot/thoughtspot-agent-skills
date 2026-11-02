@@ -287,3 +287,29 @@
     fires: {fixture: human_mostly_hidden_columns, severity: MEDIUM}
     silent: {fixture: human_hidden_columns_feed_formulas}
 
+- id: H12
+  title: Technical columns visible
+  evidence: heuristic
+  description: >-
+    A visible physical column whose physical name (the column part of its
+    `column_id`) reads as plumbing rather than something people search for: an etl,
+    dw, stg, staging, batch, load, ingest, sys, audit, hash, checksum, row_num or
+    record_source token; a created/updated/modified/inserted/loaded + at/by/on/ts/date
+    name; or a leading underscore. The display name is not read. A name match.
+  categories: [H]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {not: {field: properties.is_hidden, truthy: true}}
+        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - {field: column_id, regex: '(?i)::(_|([^:]*_)?(etl|dw|stg|staging|batch|load|ingest|sys|audit|hash|checksum|row_?num|record_?source)(_[^:]*)?$|([^:]*_)?(created|updated|modified|inserted|loaded)_(at|by|on|ts|date|time|dt)$)'}
+  severity: LOW
+  message: "'{name}' ({obj.column_id}) looks like a technical column and is visible"
+  remediation: Hide the column, or remove it from the Model if nothing uses it
+  examples:
+    fires: {fixture: human_technical_column_visible, severity: LOW}
+    silent: {fixture: human_technical_column_hidden}
+

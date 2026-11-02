@@ -801,3 +801,19 @@ def human_hidden_columns_feed_formulas() -> AuditContext:
     ctx.models[0]["model"]["formulas"] = [
         {"id": f"f{i}", "name": f"F{i}", "expr": f"[H{i}] * 2"} for i in range(3)]
     return ctx
+
+
+def human_technical_column_visible() -> AuditContext:
+    """A visible column whose physical name is ETL plumbing (H12 LOW)."""
+    from .ai import build_tml_col, build_tml_ctx
+    col = build_tml_col("Load time")
+    col["column_id"] = "T::ETL_LOAD_TS"
+    return build_tml_ctx(col)
+
+
+def human_technical_column_hidden() -> AuditContext:
+    """The same column hidden (H12 silent)."""
+    ctx = human_technical_column_visible()
+    ctx.models[0]["model"]["columns"][0]["properties"]["is_hidden"] = True
+    return ctx
+

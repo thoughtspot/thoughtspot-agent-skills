@@ -710,3 +710,19 @@ D_INPUTS.update({f"duplicate_{key}_{a!r}_{b!r}":
                  (lambda key=key, a=a, b=b: build_duplicate_scalar_pair(key, a, b))
                  for key, (a, b) in (("name", (1, True)), ("name", (1, 1.0)),
                                      ("schemaStripe", (0, False)))})
+
+
+def data_rate_column_summed() -> AuditContext:
+    """A physical measure named like a price, aggregated by SUM (D14 MEDIUM)."""
+    from .ai import build_tml_col, build_tml_ctx
+    col = build_tml_col("UNIT_PRICE", "MEASURE", desc="Price of one unit")
+    col["properties"]["aggregation"] = "SUM"
+    return build_tml_ctx(col)
+
+
+def data_rate_column_averaged() -> AuditContext:
+    """The same column aggregated by AVERAGE: not summed (D14 silent)."""
+    ctx = data_rate_column_summed()
+    ctx.models[0]["model"]["columns"][0]["properties"]["aggregation"] = "AVERAGE"
+    return ctx
+

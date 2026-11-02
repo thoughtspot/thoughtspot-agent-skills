@@ -43,3 +43,44 @@ def test_h11_bands_and_what_h3_excuses():
     assert _sev(_h11_ctx(1, 3), "H11") == []               # 25%: not above
     assert _sev(_h11_ctx(3, 1, referenced=3), "H11") == [] # all three feed formulas
     assert _sev(_h11_ctx(0, 0), "H11") == []
+
+
+# ── D14: rate-like columns summed ───────────────────────────────────────────
+
+def _measure(name, agg=None, formula=False):
+    col = build_tml_col(name, "MEASURE", desc="d")
+    if agg:
+        col["properties"]["aggregation"] = agg
+    if formula:
+        col.pop("column_id")
+        col["formula_id"] = f"formula_{name}"
+    return col
+
+
+def test_d14_whole_words():
+    assert _sev(build_tml_ctx(_measure("UNIT_PRICE")), "D14") == ["MEDIUM"]
+    assert _sev(build_tml_ctx(_measure("DISCOUNT_RATE", "SUM")), "D14") == ["MEDIUM"]
+    assert _sev(build_tml_ctx(_measure("Margin Pct")), "D14") == ["MEDIUM"]
+    assert _sev(build_tml_ctx(_measure("SEPARATE_AMOUNT")), "D14") == []
+    assert _sev(build_tml_ctx(_measure("DISCOUNT_RATE", "AVERAGE")), "D14") == []
+    assert _sev(build_tml_ctx(_measure("UNIT_PRICE", formula=True)), "D14") == []
+    assert _sev(build_tml_ctx(_measure("RATE_CARD_ID")), "D14") == []
+    attribute = build_tml_col("PRICE_BAND")
+    assert _sev(build_tml_ctx(attribute), "D14") == []
+
+
+# ── H12: technical columns visible ──────────────────────────────────────────
+
+def _col_with_id(name, physical, hidden=False):
+    col = build_tml_col(name, hidden=hidden)
+    col["column_id"] = f"T::{physical}"
+    return col
+
+
+def test_h12_physical_name_only():
+    assert _sev(build_tml_ctx(_col_with_id("Load", "ETL_LOAD_TS")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Hash", "_ROW_HASH")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Updated", "UPDATED_AT")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Load", "ETL_LOAD_TS", hidden=True)), "H12") == []
+    assert _sev(build_tml_ctx(_col_with_id("Load date", "ORDER_DATE")), "H12") == []
+    assert _sev(build_tml_ctx(_col_with_id("Download count", "DOWNLOADS")), "H12") == []
