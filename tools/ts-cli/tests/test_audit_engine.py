@@ -1116,3 +1116,30 @@ def test_every_shipped_registration_has_a_label():
     assert set(code_rules.CODE_LABELS) == set(code_rules.REGISTRY)
     assert all(v.strip() for v in fields.FIELD_LABELS.values())
     assert all(v.strip() for v in code_rules.CODE_LABELS.values())
+
+
+def _columns_of(model_body):
+    ctx = make_context(models=[{"guid": "g-1", "model": model_body}])
+    return ctx, {i["name"]: i for i in scopes.iterate(ctx, "model.column")}
+
+
+def test_surfaces_row_level_formula_branches():
+    """@surfaces_row_level_formula: a per-row formula's column only; absent or odd data
+    reads False, never raises (rule-authoring.md, derived fields)."""
+    ctx, cols = _columns_of({"name": "M", "formulas": [
+        {"id": "f_row", "name": "Row", "expr": "[T::A] / [T::B]"},
+        {"id": "f_agg", "name": "Agg", "expr": "sum ( [T::A] )"},
+        {"id": "f_via", "name": "Via", "expr": "[f_agg] / 2"},
+        {"id": ["f_list"], "name": "Listed", "expr": "[T::A]"},
+        {"id": "f_noname", "expr": "[T::A]"}],
+        "columns": [
+            {"name": "Row", "formula_id": "f_row"}, {"name": "Agg", "formula_id": "f_agg"},
+            {"name": "Via", "formula_id": "f_via"}, {"name": "Phys", "column_id": "T::A"},
+            {"name": "Missing", "formula_id": "f_none"},
+            {"name": "ListId", "formula_id": ["f_row"]},
+            {"name": "DictId", "formula_id": {"x": 1}},
+            {"name": "NoName", "formula_id": "f_noname"}]})
+    get = lambda n: fields.get(cols[n], "@surfaces_row_level_formula", ctx)
+    assert get("Row") is True
+    assert [get(n) for n in ("Agg", "Via", "Phys", "Missing", "ListId", "DictId")] == [False] * 6
+    assert get("NoName") is False

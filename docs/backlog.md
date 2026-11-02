@@ -320,7 +320,8 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
-| BL-506 | Verify live whether a bare `last_value(col, ...)` / `first_value` formula surfaced with SUM aggregation gives a wrong number; if it does, add it as fact rule D13 (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
+| BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
+| BL-506 | Rule D13: a bare `group_aggregate` / `last_value` / `first_value` formula (no outer aggregate, so its column's aggregation is used) whose aggregation is wrong for what it measures — D14's check on those three shapes (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
 | BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
@@ -16188,20 +16189,54 @@ why `sv_build_model` stays separate if it does.
 
 **Target:** 2027-01-31.
 
-## BL-506 — verify whether a summed semi-additive formula gives a wrong number `Tier 3`
+## BL-509 — formula `aggregation:` after the 2026-11-02 ruling `Tier 3`
 
-**Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1), whose builder
-check found the premise unproven.
+**Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
 
-**What.** G1's formula half: a formula `last_value(col, query_groups(), {date})` (or
-`first_value`) with no aggregation inside, surfaced by a column whose `aggregation` is SUM
-or unset. The repo's own note (`ts_cli/spotql_ops.py`) says formula `aggregation` is
-ignored in query generation, and summing per-group last values across accounts can be the
-correct semi-additive result, so a fact rule at MEDIUM would be a false fact without
-evidence. It fired once on the SE demo sample.
+**What.** The product owner ruled (2026-11-02): a per-row formula's column aggregation is
+applied; an aggregate formula's is ignored but must be declared, or the TML is invalid;
+a bare `group_aggregate` / `last_value` / `first_value` (no outer aggregate) uses it.
+The Model TML schema now says so. The rest of the repo does not yet:
 
-**Do.** Build the shape on a demo Model, compare the generated SQL and totals with and
-without the SUM aggregation, and add rule D13 (id held for it) only if the number is wrong.
+1. **Emitters with no `aggregation:` on an aggregate formula column:**
+   `powerbi/build_model.py` (every DAX measure), `powerbi/timeintel.py`,
+   `sisense/build_model.py`, `dbt/model_from_schema_yml.py` and `dbt/manifest.py` (when
+   `ts_aggregation` is absent), and `model_builder.py` (latent: a formula with no
+   `column_type`). Yet ts-convert-from-powerbi open item #1 (VERIFIED 2026-07-16) created
+   such a Model live, so "invalid" may describe the contract or a newer build: probe one
+   import with `VALIDATE_ONLY` on a current build first.
+2. **No lint invariant** checks it; `ts-model-conversion-invariants.md` says a formula
+   column's aggregation is "allowed" and "defines how the column aggregates", which is
+   false for an aggregate formula.
+3. **Six copies of "ignored at query time"**: the `spotql_ops.classify_expr` docstring,
+   `tools/ts-cli/README.md`, `formula_translate/engine.py`, `formula_common.py`,
+   `tests/test_spotql_ops.py`, and the Ossie converter directions plan.
+4. **`classify_expr` returns `aggregation: SUM`** for a bare `group_aggregate ( average
+   (...) , ... )` or `last_value ( average (...) , ... )`, which `ts model
+   promote-formula` writes; under the ruling that SUM is applied, so a promoted per-group
+   average is re-summed.
+5. **`AGGREGATE_FUNCS` misses `last_value_in_period` / `first_value_in_period`**, so P2,
+   D14 and `classify_expr` read one over a bare column as per-row (0 on the SE demo
+   sample; whether ThoughtSpot accepts a non-aggregate first argument is unverified).
+   Fixing it moves P2's findings.
+
+**Target:** 2026-12-31.
+
+## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1). **Reframed**
+2026-11-02 after the product owner's ruling on formula aggregation.
+
+**What.** A formula column's `aggregation` is used at query time when the formula is
+per-row (D14 covers that) and when it is a bare `group_aggregate`, `last_value` or
+`first_value` with no outer aggregate. For the last three, SUM is often right (a balance
+summed across accounts, taken last over time), so "summed" alone is not a defect. D13 is
+D14's check on those three shapes: a rate-, price- or ratio-like one carrying SUM, or one
+whose default aggregation would mislead. Settle first whether the `*_in_period` spellings
+belong (`spotql_ops.AGGREGATE_FUNCS` does not match them; BL-509).
+
+**Do.** Add D13 (id held for it) to roadmap PR 4.4, a heuristic like D14, with fixtures
+for each shape and a sample re-measure.
 
 **Target:** 2026-12-31.
 

@@ -37,9 +37,13 @@ below), production call-home size data (aggregates only), and the RLS support ca
   query; materialise heavy ones as a column in ETL. Modest severity.
 - The 16 BL-406 contradictions follow the decision sheet's recommendations, except where a
   rule above is retired or merged (S3, D6, A5, D2 resolved by those).
-- Formula `aggregation:` is ignored in query generation except for `group_aggregate` and
-  `last_value`/`first_value` formulas with no aggregation inside — so additivity checks
-  target physical columns and those formulas only.
+- A formula column's `aggregation:` is used in query generation when the formula is
+  per-row (no aggregate function), and for a bare `group_aggregate` / `last_value` /
+  `first_value` (no outer aggregate). An aggregate formula must still declare one (the
+  TML is invalid without it) but query generation ignores it. So additivity checks
+  target physical columns, per-row formulas, and those three formula shapes. (Amended
+  2026-11-02, the product owner's ruling, author's wording: the first wording left per-row
+  formulas out, and said "no aggregation inside" where the ruling is "no outer aggregate".)
 - Date-part columns are usually unnecessary (date keywords cover them): a LOW hint, not an
   error. Many-side aliases and Spotter parameters are in rollout: LOW warnings, not errors.
 - A large number of hidden **ordinary** columns is a smell (remove them, or use column
@@ -82,7 +86,7 @@ later ones cheaper.
 | 4.1 | **Role inference from join direction** (fact / dimension / bridge / outrigger), shared by the audit, the ERD and the future remodel tool; replaces "more than 3 measures = fact". |
 | 4.2 | **Severity rubric:** each rule declares its evidence class; a heuristic alone cannot exceed MEDIUM; the catalog gate warns when a rule fires on most Models of the SE snapshot. |
 | 4.3 | **New rules, set 1** (TML alone, high value): undocumented visible measures (G4); hidden ordinary columns (new); one term naming two columns (G3); non-additive physical columns or LOD/last-value formulas summed (G1, as corrected); redundant or conflicting Table-level joins (G14); join key type mismatch (G11); technical columns visible (G15). |
-| 4.4 | **New rules, set 2:** RLS robustness — outer-joined table under an RLS rule with no `is_null` clause, an RLS path through a one-to-many join, rules that build no suggestion index (G5); IDs, zip codes and coordinates typed MEASURE, and the date-part hint (G2, as reframed); many-side alias and Spotter-parameter warnings (G9, G10); flags as 0/1 measures (G17); slot-named columns with no aliases (G19). |
+| 4.4 | **New rules, set 2:** RLS robustness — outer-joined table under an RLS rule with no `is_null` clause, an RLS path through a one-to-many join, rules that build no suggestion index (G5); IDs, zip codes and coordinates typed MEASURE, and the date-part hint (G2, as reframed); many-side alias and Spotter-parameter warnings (G9, G10); flags as 0/1 measures (G17); slot-named columns with no aliases (G19); D13, a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation (G1's formula half, moved from 4.3, BL-506). |
 
 ### Wave 5 — the proposed Model
 

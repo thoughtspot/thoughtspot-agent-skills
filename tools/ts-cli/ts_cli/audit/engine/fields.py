@@ -283,6 +283,34 @@ def _formula_exprs(model: dict) -> dict:
             if isinstance(f, dict) and f.get("id")}
 
 
+@register("surfaces_row_level_formula", uses=(),
+          label="the column surfaces a formula computed row by row")
+def _surfaces_row_level_formula(item: dict, ctx: Any) -> bool:
+    """Model column: its `formula_id` names a named formula that is row-level by the
+    reading @is_row_level_formula uses for named formulas (no aggregate call, none
+    reached through the formulas it references, by id or name). Such a formula is rolled
+    up by the column's `aggregation`, like a physical column. An aggregate formula is
+    not: its aggregation is ignored — except a bare `group_aggregate` / `last_value` /
+    `first_value`, whose aggregation is applied (thoughtspot-model-tml.md), which is
+    D13's ground, not this field's. False for a table column, a non-string
+    `formula_id`, or one matching no named formula."""
+    fid = (item.get("obj") or {}).get("formula_id")
+    if not isinstance(fid, str) or not fid:
+        return False
+    model = _model_of(item)
+    name = cached("formula_names_by_id", model, _formula_names_by_id, model).get(fid)
+    if not name:
+        return False
+    aggregate = cached("aggregate_formula_names", model, _aggregate_formula_names, model)
+    return name not in aggregate
+
+
+def _formula_names_by_id(model: dict) -> dict:
+    return {f["id"]: f.get("name") for f in (model.get("formulas") or [])
+            if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"]
+            and isinstance(f.get("name"), str)}
+
+
 #: The distinct-count functions a formula can call (thoughtspot-formula-patterns.md).
 _DISTINCT_FORMULA = re.compile(
     r"\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b", re.IGNORECASE)

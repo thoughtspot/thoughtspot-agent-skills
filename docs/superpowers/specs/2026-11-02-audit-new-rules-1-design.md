@@ -22,7 +22,9 @@ roadmap's "a large number of hidden ordinary columns is a smell" ruling.
 - Every rule declares `evidence`; a `heuristic` rule grades at most MEDIUM.
 - Formula `aggregation:` is ignored in query generation except for `group_aggregate` and
   `last_value`/`first_value` with no aggregation inside, so additivity checks target
-  physical columns and those formulas only (roadmap ruling, 2026-10-23).
+  physical columns and those formulas only (roadmap ruling, 2026-10-23). **Corrected
+  2026-11-02:** a per-row formula's aggregation is used too, so D14 now reads per-row
+  formulas (the roadmap constraint is amended).
 - Hidden formulas used by other formulas are legitimate; hidden ordinary (physical)
   columns in number are the smell.
 - New ids only; an id is never reused (A5, D2, D4, D6, H6, P5, P9, P10, P12, S3, S6–S9 are
@@ -40,7 +42,7 @@ re-measures with the real rules and reports in the PR.
 | A7 (G4) | Visible measures without a description | Per Model: the share of its visible MEASURE columns (physical and formula) with a blank root `description` | measure | LOW when any; MEDIUM above 75% | 91 Models any; 65 above 75% |
 | H11 (new) | Many hidden ordinary columns | Per Model: the share of its physical columns (a `column_id`, no `formula_id`) that are hidden **without a reason H3 recognises** — not referenced by a formula (`@referenced_by_formula`) and not the last carrier of a joined table (`@is_sole_join_carrier`) — and not a key named in one of the Model's joins (`@is_join_key`; amended after review: hiding keys is good modelling). H3 reports each such column; H11 says when there are many | measure | LOW above 25%; MEDIUM above 50% | 0 after the amendment (4 before, all resting on hidden keys) |
 | A8 (G3) | One search term naming two columns | Per Model: a term — a visible column's name or synonym, compared trimmed and case-insensitively — that names two or more visible columns. One finding per Model listing the terms (first five) and their count | fact | MEDIUM when a column's **name** is another's synonym or name; LOW when only synonyms are shared | 47 Models: 32 name collisions, 344 shared synonyms |
-| D14 (G1) | Rate-like column summed | A physical MEASURE column whose name or the column part of its `column_id` reads as a non-additive quantity (price, rate, ratio, pct/percent/percentage, avg/average, balance, unit cost, per unit — whole words) with `aggregation` SUM or unset | heuristic | MEDIUM | 124 columns in 51 Models |
+| D14 (G1) | Rate-like column summed | A physical MEASURE column (and, since 2026-11-02, a per-row formula's column) whose name or the column part of its `column_id` reads as a non-additive quantity (price, rate, ratio, pct/percent/percentage, avg/average, balance, unit cost, per unit — whole words) with `aggregation` SUM or unset | heuristic | MEDIUM | probe 124 in 51 Models; shipped 132 in 52; 133 in 53 with per-row formulas |
 | D15 (G14) | Duplicate Table-level joins | A Table TML whose `joins_with` holds two joins to the same destination (by `destination.fqn`, else name) **with the same `on`** (compared without whitespace): MEDIUM when their type or cardinality differ (a query's result depends on which is taken), LOW when identical (a redundant copy). Two joins to one destination on different keys is role-playing, not a conflict | fact | LOW/MEDIUM | 0 Tables (2 Tables repeat a destination, on different keys) |
 | D16 (G11) | Join keys of different types | A join (inline or referencing) whose `on` pairs two columns whose Table-level data types differ by family (string, integer, decimal, date/time, boolean); a key whose Table TML is not in scope is unknown and not reported, and so — through the type lookup P6 shares, keyed by Model alias — is a key of an aliased table (backlog: fixing it moves P6's pins) | fact | MEDIUM | 0 of 689 typed joins |
 | H12 (G15) | Technical columns visible | A visible physical column whose physical name (the column part of its `column_id`) reads as pipeline plumbing: an `etl`/`dw`/`stg`/`staging`/`checksum`/`row_hash`/`hash_diff`/`row_num`/`record_source` token, a `loaded_`/`ingested_`/`inserted_` + `at`/`by`/`on`/`ts`/`date` name, or a leading underscore. Amended after review: the first list (`batch`, `load`, `sys`, `audit`, `hash`, `created_`/`updated_`/`modified_`) matched 25 columns that were all business data | heuristic | LOW | 0 after the amendment |
@@ -53,10 +55,10 @@ real rule fires differently from the probe, recording why.
 
 ### Out of scope (backlog)
 
-- **A summed semi-additive formula** (G1's formula half). Nothing in the repo shows that a
-  bare `last_value(col, ...)` surfaced with SUM gives a wrong number (the repo's own note in
-  `spotql_ops.py` says formula `aggregation` is ignored), and it fired once on the sample.
-  Backlog item: verify live, then add as a fact rule (D13 left free for it).
+- **A summed semi-additive formula** (G1's formula half). Deferred as unproven; after the
+  product owner's ruling of 2026-11-02 (a bare `group_aggregate` / `last_value` /
+  `first_value` uses its column's aggregation, and SUM is often right for it) it is
+  reframed as D13 — D14's check on those three shapes — in roadmap PR 4.4 (BL-506).
 - **Aliased join keys typed as unknown** (D16, P6): the shared type lookup keys by Model
   alias while a referencing join's `on` names Tables. Fixing it moves P6's pins; backlog.
 

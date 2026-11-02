@@ -288,12 +288,15 @@
   title: Rate-like column summed
   evidence: heuristic
   description: >-
-    A physical MEASURE column (a `column_id`, no `formula_id`) whose name, or the
-    column part of its `column_id`, reads as a non-additive quantity — price, rate,
-    ratio, pct/percent/percentage, avg/average, balance, unit cost, per unit, as a whole
-    word — and whose `aggregation` is SUM or unset (which sums). Summing a price or a
-    rate across rows gives a meaningless total. A name ending in id, key or code is not
-    a quantity. A name match, so MEDIUM at most.
+    A MEASURE column rolled up by its `aggregation` — a physical column, or one
+    surfacing a per-row formula — whose name, or the column part of its `column_id`,
+    reads as a non-additive quantity — price, rate, ratio, pct/percent/percentage,
+    avg/average, balance, unit cost, per unit, as a whole word — and whose `aggregation`
+    is SUM or unset (which sums). Summing a price or a rate across rows gives a
+    meaningless total. A name ending in id, key or code is not a quantity. Other
+    formulas are not read: an aggregate formula's aggregation is ignored, except a bare
+    group_aggregate, last_value or first_value, whose aggregation is applied and which a
+    later rule covers. A name match, so MEDIUM at most.
   categories: [D]
   requires: [model_tml]
   scope: model.column
@@ -301,8 +304,13 @@
     mode: each
     where:
       all:
-        - {field: column_id, nonblank: true, truthy: true}
-        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - any:
+            - all:
+                - {field: column_id, nonblank: true, truthy: true}
+                - {not: {field: formula_id, nonblank: true, truthy: true}}
+            - all:
+                - {field: "@surfaces_row_level_formula", truthy: true}
+                - {not: {field: column_id, nonblank: true, truthy: true}}
         - {field: properties.column_type, regex: '^(?i:measure)\Z'}
         - any:
             - {not: {field: properties.aggregation, nonblank: true, truthy: true}}

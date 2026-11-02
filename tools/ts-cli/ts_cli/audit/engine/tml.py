@@ -50,15 +50,16 @@ def formula_ref_index(formulas: list) -> Dict[Any, Any]:
     """How a formula is referred to in an expression -> its NAME. A cross-reference is
     written as the formula's id (`[formula_<name>]`), or, in a hand-built model, its
     display name; both resolve to the name (BL-300). The one reading shared by P17's
-    reference graph and the report's formula tree."""
+    reference graph and the report's formula tree. A non-string name or id is skipped,
+    not a TypeError that ends the run (BL-501's class)."""
     by_ref: Dict[Any, Any] = {}
     for f in formulas:
         fname = f.get("name", "") if isinstance(f, dict) else ""
-        if not fname:
+        if not isinstance(fname, str) or not fname:
             continue
         by_ref[fname] = fname
         fid = f.get("id", "")
-        if fid:
+        if isinstance(fid, str) and fid:
             by_ref[fid] = fname
     return by_ref
 
