@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**218 total items** across 24 skills — **73 open**, 130 verified, 15 deferred
+**226 total items** across 26 skills — **81 open**, 130 verified, 15 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -16,10 +16,12 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
+| ts-object-liveboard-chart-builder | 5 | **5** | 0 | 0 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
+| ts-object-answer-chart-builder | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
 | ts-convert-from-sisense | 5 | **2** | 2 | 1 |
 | ts-convert-to-dbt | 18 | **2** | 16 | 0 |
@@ -33,7 +35,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 8 | **0** | 8 | 0 |
-### Untagged (73 items)
+### Untagged (81 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -87,12 +89,20 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-load-source-data | #1 | snow stage copy path format | OPEN |
 | ts-load-source-data | #2 | COPY INTO with quoted fields | OPEN |
 | ts-load-source-data | #3 | CREATE DATABASE IF NOT EXISTS permissions | OPEN |
+| ts-object-answer-chart-builder | #1 | An answer update keeps the column order and the chart's own state, live | OPEN |
+| ts-object-answer-chart-builder | #2 | The intake blocks' field names | OPEN |
+| ts-object-answer-chart-builder | #3 | The answer backup's fingerprint matches the sandbox's export | OPEN |
 | ts-object-answer-promote | #2 | Edit permissions in metadata search response | OPEN |
 | ts-object-answer-promote | #3 | Bare display-name column references in Model formulas | OPEN |
 | ts-object-answer-promote | #4 | Answers embedded in Liveboards (not standalone objects) | OPEN |
 | ts-object-answer-promote | #5 | Sets (cohorts) in Answer TML | OPEN |
 | ts-object-calendar-builder | #2 | `generate-csv` unavailable on `se-thoughtspot` | OPEN |
 | ts-object-calendar-builder | #3 | `fiscal_year_number` default | OPEN |
+| ts-object-liveboard-chart-builder | #1 | The write path as shipped, committed on a live Liveboard | OPEN |
+| ts-object-liveboard-chart-builder | #2 | Subresource integrity inside a tile | OPEN |
+| ts-object-liveboard-chart-builder | #3 | The backup's fingerprints match the sandbox's export | OPEN |
+| ts-object-liveboard-chart-builder | #4 | 48 MayaCharts library tiles seen on a cluster | OPEN |
+| ts-object-liveboard-chart-builder | #5 | Default date filter `LAST_N_PERIOD` with `oper: '='` excludes the current month | OPEN |
 | ts-object-model-aggregates | #3 | Aggregate Model visibility | OPEN |
 | ts-object-model-aggregates | #4 | Non-additive measure routing | OPEN |
 | ts-object-model-aggregates | #5 | Cross-connection aggregates | OPEN |

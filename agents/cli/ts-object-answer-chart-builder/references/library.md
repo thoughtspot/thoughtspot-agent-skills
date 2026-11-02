@@ -1,6 +1,6 @@
 # Library: proven live-data charts
 
-Every chart here runs on the model **(Sample) Retail - Apparel**, reads only what its search returns (data mode B, an empty state names the search), is interactive, and passed the loop, the edge checks, `probe.mjs` and a screenshot in a real cluster. Start from the nearest one: copy `library/<slug>/`, change the search and the copy, run the loop.
+Every chart here runs on the model **(Sample) Retail - Apparel**, reads only what its search returns (data mode B, an empty state names the search), is interactive, and passed the loop, the edge checks and `probe.mjs`. Only the charts not marked *(preview only)* have also been screenshotted on a tile in a real cluster (most MayaCharts charts have not yet: see below). Start from the nearest one: copy `library/<slug>/`, change the search and the copy, run the loop.
 
 Shared pieces: `library/_shared/core.js` and `core.css` (theme, data access, tooltip, bounded CDN loader, boot), `library/_shared/us-states.js` (inline US map). The Liveboard that arranges them, and the tools that build it, are in the sibling skill `ts-object-liveboard-chart-builder`.
 

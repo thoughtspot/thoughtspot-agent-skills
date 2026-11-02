@@ -7,9 +7,11 @@ screenshot unless marked otherwise.
 
 ## Any library
 
-- Load a CDN library with `AZ.loadScript([primary, fallback], () => !!window.Lib, 8000)`. It injects at once
-  when no matching `<script src>` is in the document and waits up to 3 s when one is. A plain
-  `<script src>` in `chart.html` is allowed by `liveboard-pack`; an inline script body containing `</script` is not.
+- Load a CDN library with `AZ.loadScript([{ src: primary, integrity }, { src: fallback, integrity }], () => !!window.Lib, 8000)`,
+  using the pinned build (exact version and `sha384-` integrity) given under each library below. It injects at once
+  when no matching `<script src>` is in the document and waits up to 3 s when one is. A plain `<script src>` in
+  `chart.html` (with `integrity` and `crossorigin="anonymous"`) is allowed by `liveboard-pack`; an inline script body
+  containing `</script` is not. `helpers/pin-check.mjs` refuses a script without an exact version or its integrity.
 - `fetch()` is blocked inside a tile. Inline data and maps.
 - No backtick, no `${`, ASCII only (a literal non-ASCII character such as an arrow corrupts the checksum in
   transit). Use `String.fromCharCode(8595)` for an arrow if you must; a `\\u0001` escape in source is fine.
@@ -21,9 +23,12 @@ Verified in the preview (headless Chromium, 0.18.1) on the starter below, `examp
 MayaCharts library charts (48 of 58 as of 2026-10-14): render, every data mode, 130 to 1400 px tiles, hover, click, drill, sweep. Not yet
 screenshotted on a cluster: say "verified in preview" until it has been.
 
-- **Version: the latest release, pinned.** Take it from the doctor's `mayacharts:` line (it asks jsDelivr, then npm)
-  and write it into the one `MAYA` URL constant. Never an unpinned URL: a saved tile would change under the user on
-  the next release. Never a version from memory: the library ships often. If the line says `unknown`, ask.
+- **Version: the one the skill pins.** `helpers/env.mjs` records one reviewed release (`MAYA`) with the integrity
+  of both files; the doctor's `mayacharts:` line prints them after checking the CDN still serves those bytes. Write
+  that URL into the one `MAYA` constant and that integrity into the tag and the loader. Never an unpinned URL (a
+  saved tile would change under the user), never a newer release the doctor only mentions (a release reaches tiles
+  after review, by changing `MAYA` and every library pin together), never a version from memory. If the line says
+  STOP, do not build MayaCharts tiles.
 - **Which file.** `maya.core.global.js` holds the element, the 12 core types (bar line area scatter heatmap
   waterfall kpi dumbbell ridgeline beeswarm parallel table) and `maya.host`. A module type (treemap, sunburst,
   marimekko, waffle, sankey, chord, radial, gauge, hexmap, boxplot, funnel, weave, units, orbit, constellation)
@@ -139,7 +144,8 @@ Pinned build: `{ src: 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js', in
 - Use it for scales, layouts (`d3.stack`, `d3.area`) and transitions; write the DOM yourself where a
   library would fight the shared tooltip.
 - Geography: do not fetch topology. `library/_shared/us-states.js` holds all 51 states as pre-projected
-  Albers paths (viewBox 0 0 975 610) with centroids. Paste the const into the chart body and draw plain SVG.
+  Albers paths (viewBox 0 0 975 610) with centroids, from us-atlas (ISC). Paste the const, with its licence block,
+  into the chart body and draw plain SVG.
 
 ## Chart.js (chart.js@4.6.1)
 

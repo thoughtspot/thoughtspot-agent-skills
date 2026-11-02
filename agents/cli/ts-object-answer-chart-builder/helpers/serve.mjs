@@ -50,6 +50,10 @@ export function startServer({ scaffoldDir, runDir, port = 0, host = "127.0.0.1" 
 
   const server = http.createServer((req, res) => {
     const headers = { "Content-Security-Policy": "frame-ancestors *" };
+    // Only this machine's own names: a page elsewhere that points its domain at 127.0.0.1 (DNS rebinding) would
+    // otherwise read the preview, which serves live sample rows.
+    const hostname = String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(hostname)) { res.writeHead(403, headers); res.end("forbidden host"); return; }
     // A malformed path (a lone "%") would throw here and take the daemon down with it.
     let p;
     try { p = decodeURIComponent(new URL(req.url, "http://x").pathname); }
