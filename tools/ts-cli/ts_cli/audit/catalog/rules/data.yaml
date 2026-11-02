@@ -309,7 +309,7 @@
             - {field: properties.aggregation, regex: '^(?i:sum)\Z'}
         - any:
             - {field: name, regex: '(?i)(^|[_\s:])(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|balance|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
-            - {field: column_id, regex: '(?i)(^|[_\s:])(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|balance|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
+            - {field: column_id, regex: '(?i)::(.*[_\s])?(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|balance|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
         - {field: name, not_regex: '(?i)[_\s](id|key|code)$'}
         - {field: column_id, not_regex: '(?i)[_\s](id|key|code)$'}
   severity: MEDIUM

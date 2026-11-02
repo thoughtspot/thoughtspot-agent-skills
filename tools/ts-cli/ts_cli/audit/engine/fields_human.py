@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.tml_join_graph import on_clause_refs
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -86,6 +87,34 @@ def _is_sole_join_carrier(item: dict, ctx: Any) -> bool:
     return not any(_str(cc.get("column_id", "")).startswith(prefix)
                    for cc in model.get("columns") or []
                    if cc is not column and not _is_hidden(cc))
+
+
+def _join_ons(doc: dict, ctx: Any) -> List[Any]:
+    """The `on` of every join of a Model: its inline joins, and the `joins_with` of its
+    Tables in scope (where a referencing join's `on` lives)."""
+    model_tables = (doc.get("model") or {}).get("model_tables") or []
+    joins = [j for mt in model_tables if isinstance(mt, dict) for j in mt.get("joins") or []]
+    joins += [j for t in ctx.tables_for_model(doc)
+              for j in (t.get("table") or {}).get("joins_with") or []]
+    return [j.get("on") for j in joins if isinstance(j, dict)]
+
+
+def _join_key_ids(doc: dict, ctx: Any) -> set:
+    """Lower-cased `TABLE::COL` of every key named in the Model's joins (_join_ons), read
+    with the join graph's `[TABLE::COL]` reader (unescaped)."""
+    return {f"{t}::{c}".lower() for on in _join_ons(doc, ctx) if isinstance(on, str)
+            for t, c in on_clause_refs(on)}
+
+
+@register("is_join_key", uses=(),
+          label="the column is a key of one of the Model's joins")
+def _is_join_key(item: dict, ctx: Any) -> bool:
+    """Model column: its `column_id` is named in an `on` of the Model's joins (inline,
+    or a referencing join's Table-level `on`) — a key, which a Model rightly hides. A
+    key of an aliased table is matched by the Table's name only, so may be missed."""
+    doc = item.get("doc") or {}
+    keys = cached("join_key_ids", doc, _join_key_ids, doc, ctx)
+    return _str((item.get("obj") or {}).get("column_id", "")).lower() in keys
 
 
 @register("referenced_by_formula", uses=(),
@@ -281,9 +310,11 @@ def _shared(item: dict) -> Dict[str, str]:
           label="the search terms that name two or more columns")
 def _shared_terms_field(item: dict, ctx: Any) -> List[str]:
     """Model: each term (trimmed, lower-cased) that is the name or a synonym of two or
-    more visible columns, sorted; a name list in messages."""
+    more visible columns — column names first, so a MEDIUM message's first five show
+    what made it MEDIUM — then sorted; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    return NameList(sorted(_shared(item)))
+    shared = _shared(item)
+    return NameList(sorted(shared, key=lambda t: (shared[t] != "name", t)))
 
 
 @register("shared_term_count", uses=(),

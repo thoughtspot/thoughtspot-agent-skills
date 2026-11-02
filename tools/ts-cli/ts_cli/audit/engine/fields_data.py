@@ -16,12 +16,12 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 """
 from __future__ import annotations
 
-import re
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.tml_join_graph import on_clause_key_pairs
 
 
 def _upper(value: Any) -> Optional[str]:
@@ -215,8 +215,8 @@ def _join_group_key(j: Any) -> Optional[tuple]:
     on = j.get("on") if isinstance(j, dict) else None
     if not isinstance(dest, dict) or not isinstance(on, str) or not on.strip():
         return None
-    target = dest.get("fqn") or dest.get("name") or ""
-    return (target, "".join(on.split())) if target else None
+    target = dest.get("fqn") or dest.get("name")
+    return (target, "".join(on.split())) if isinstance(target, str) and target else None
 
 
 def _duplicate_joins(table: dict) -> List[tuple]:
@@ -233,7 +233,8 @@ def _duplicate_joins(table: dict) -> List[tuple]:
     for (dest, _), joins in groups.items():
         if len(joins) > 1:
             shapes = {(_upper(j.get("type")), _upper(j.get("cardinality"))) for j in joins}
-            name = joins[0]["destination"].get("name") or dest
+            name = joins[0]["destination"].get("name")
+            name = name if isinstance(name, str) and name else dest
             out.append((f"{len(joins)} joins to {name} on {joins[0]['on']}", len(shapes) > 1))
     return out
 
@@ -266,20 +267,20 @@ _TYPE_FAMILIES = {
     "boolean": ("BOOL", "BOOLEAN"),
 }
 _FAMILY_OF = {t: fam for fam, types in _TYPE_FAMILIES.items() for t in types}
-#: One `[A::x] = [B::y]` equality of an `on` clause, both sides column references.
-_KEY_PAIR = re.compile(r"\[([^\]]+)\]\s*=\s*\[([^\]]+)\]")
 
 
 def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
-    """`"A::x (TYPE) = B::y (TYPE)"` for each column pair in `on` whose types are in
-    different families (_TYPE_FAMILIES). A key with an unknown type, or a type outside
-    the families, is not compared."""
+    """`"A::x (TYPE) = B::y (TYPE)"` for each key pair in `on` (the join graph's reader,
+    tml_join_graph.on_clause_key_pairs: unescaped, whole conjuncts only) whose types are
+    in different families (_TYPE_FAMILIES). A key with an unknown type, or a type
+    outside the families, is not compared."""
     out = []
-    for left, right in _KEY_PAIR.findall(on if isinstance(on, str) else ""):
-        lt, rt = (str(col_types.get(k.strip(), "")).upper() for k in (left, right))
+    for t1, c1, t2, c2 in on_clause_key_pairs(on if isinstance(on, str) else ""):
+        left, right = f"{t1}::{c1}", f"{t2}::{c2}"
+        lt, rt = (str(col_types.get(k, "")).upper() for k in (left, right))
         lf, rf = _FAMILY_OF.get(lt), _FAMILY_OF.get(rt)
         if lf and rf and lf != rf:
-            out.append(f"{left.strip()} ({lt}) = {right.strip()} ({rt})")
+            out.append(f"{left} ({lt}) = {right} ({rt})")
     return out
 
 

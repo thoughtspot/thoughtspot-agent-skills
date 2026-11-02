@@ -255,9 +255,10 @@
   evidence: measure
   description: >-
     Share of a Model's physical columns (a `column_id`, no `formula_id`) that are
-    hidden for no reason H3 recognises: not referenced by a formula and not the last
-    carrier of a joined table. H3 reports each such column; this says when there are
-    many — remove them from the Model, or restrict them with column security. LOW above
+    hidden for no evident reason: not referenced by a formula, not the last carrier
+    of a joined table (H3's two excuses), and not a key named in one of the Model's
+    joins (hiding keys is good modelling). H3 reports each such column; this says when
+    there are many — remove them from the Model, or restrict them with column security. LOW above
     25%, MEDIUM above 50%. Hidden formulas that feed other formulas are not counted.
   categories: [H]
   requires: [model_tml]
@@ -274,6 +275,7 @@
         - {field: properties.is_hidden, truthy: true}
         - {not: {field: "@referenced_by_formula", truthy: true}}
         - {not: {field: "@is_sole_join_carrier", truthy: true}}
+        - {not: {field: "@is_join_key", truthy: true}}
     unnamed_label: "?"
   bands:
     direction: lower_is_better
@@ -281,7 +283,7 @@
     levels:
       - {op: gt, value: 50, severity: MEDIUM}
       - {op: gt, value: 25, severity: LOW}
-  message: "{matched}/{total} ordinary columns are hidden with no formula or join using them ({pct:.0f}%): {matched_names}"
+  message: "{matched}/{total} ordinary columns are hidden though no formula uses them and they are not a join key ({pct:.0f}%): {matched_names}"
   remediation: Remove unused columns from the Model, or restrict them with column security (/ts-security-columns)
   examples:
     fires: {fixture: human_mostly_hidden_columns, severity: MEDIUM}
@@ -292,10 +294,11 @@
   evidence: heuristic
   description: >-
     A visible physical column whose physical name (the column part of its
-    `column_id`) reads as plumbing rather than something people search for: an etl,
-    dw, stg, staging, batch, load, ingest, sys, audit, hash, checksum, row_num or
-    record_source token; a created/updated/modified/inserted/loaded + at/by/on/ts/date
-    name; or a leading underscore. The display name is not read. A name match.
+    `column_id`) reads as pipeline plumbing rather than something people search for:
+    an etl, dw, stg, staging, checksum, row_hash, hash_diff, row_num or record_source
+    token; a loaded/ingested/inserted + at/by/on/ts/date name; or a leading underscore.
+    Words that also name business data (audit, batch, load, created, updated) are not
+    read. The display name is not read. A name match.
   categories: [H]
   requires: [model_tml]
   scope: model.column
@@ -305,7 +308,7 @@
       all:
         - {not: {field: properties.is_hidden, truthy: true}}
         - {not: {field: formula_id, nonblank: true, truthy: true}}
-        - {field: column_id, regex: '(?i)::(_|([^:]*_)?(etl|dw|stg|staging|batch|load|ingest|sys|audit|hash|checksum|row_?num|record_?source)(_[^:]*)?$|([^:]*_)?(created|updated|modified|inserted|loaded)_(at|by|on|ts|date|time|dt)$)'}
+        - {field: column_id, regex: '(?i)::(_|([^:]*[_\s])?(etl|dw|stg|staging|checksum|row[_\s]?hash|hash[_\s]?diff|row[_\s]?num|record[_\s]?source)([_\s][^:]*)?$|([^:]*[_\s])?(loaded|ingested|inserted)[_\s](at|by|on|ts|date|time|dt)$)'}
   severity: LOW
   message: "'{name}' ({obj.column_id}) looks like a technical column and is visible"
   remediation: Hide the column, or remove it from the Model if nothing uses it

@@ -45,6 +45,38 @@ def test_h11_bands_and_what_h3_excuses():
     assert _sev(_h11_ctx(0, 0), "H11") == []
 
 
+def test_h11_counts_physical_columns_only():
+    ctx = _h11_ctx(1, 2)
+    formula = build_tml_col("F", hidden=True)
+    formula.pop("column_id")
+    formula["formula_id"] = "f_x"
+    ctx.models[0]["model"]["columns"].append(formula)
+    assert _sev(ctx, "H11") == ["LOW"]                     # still 1 of 3
+
+
+def test_h11_excuses_join_keys():
+    """Hiding a join key is good modelling (review 2026-11-02: 44 of the 47 hidden
+    columns behind the sample's H11 findings were join keys)."""
+    ctx = _h11_ctx(4, 1)
+    model = ctx.models[0]["model"]
+    model["model_tables"] = [{"name": "T", "joins": [
+        {"name": "j", "with": "U", "on": "[T::H0] = [U::ID] and [T::H1] = [U::ID2]"}]}]
+    assert _sev(ctx, "H11") == ["LOW"]                     # H2, H3 unexplained: 2 of 5
+    (f,) = run_rule(ctx, "H11")
+    assert "H2" in f.detail and "H0" not in f.detail and "join key" in f.detail
+
+
+def test_h11_excuses_table_level_join_keys():
+    from ts_cli.audit.context import make_context
+    cols = [build_tml_col(f"H{i}", hidden=True) for i in range(3)] + [build_tml_col("V")]
+    model = {"guid": "g-1", "model": {"name": "M", "columns": cols, "model_tables": [
+        {"name": "T", "fqn": "t-t", "joins": [{"name": "j", "referencing_join": "t_u"}]}]}}
+    table = {"table": {"name": "T", "joins_with": [
+        {"name": "t_u", "destination": {"name": "U"}, "on": "[T::H0] = [U::ID]"}]}}
+    ctx = make_context(models=[model], tables={"t-t": table})
+    assert _sev(ctx, "H11") == ["LOW"]                     # H1, H2: 2 of 4, not above 50%
+
+
 # ── D14: rate-like columns summed ───────────────────────────────────────────
 
 def _measure(name, agg=None, formula=False):
@@ -67,6 +99,33 @@ def test_d14_whole_words():
     assert _sev(build_tml_ctx(_measure("RATE_CARD_ID")), "D14") == []
     attribute = build_tml_col("PRICE_BAND")
     assert _sev(build_tml_ctx(attribute), "D14") == []
+    assert _sev(build_tml_ctx(_measure("Rated Capacity")), "D14") == []
+
+
+def _measure_on(name, column_id):
+    col = _measure(name)
+    col["column_id"] = column_id
+    return col
+
+
+def test_d14_reads_the_column_part_only():
+    """The table part of column_id is not the column's name (review 2026-11-02)."""
+    assert _sev(build_tml_ctx(_measure_on("Quantity", "PRICE_HISTORY::QUANTITY")), "D14") == []
+    assert _sev(build_tml_ctx(_measure_on("Amount", "AVG_DAILY::AMOUNT")), "D14") == []
+    assert _sev(build_tml_ctx(_measure_on("Unit Amount", "T::UNIT_PRICE")), "D14") == ["MEDIUM"]
+    assert _sev(build_tml_ctx(_measure_on("Rate Card", "T::RATE_CARD_ID")), "D14") == []
+
+
+def test_h12_business_names_silent():
+    """Words that also name business data are not plumbing (review 2026-11-02: all 25
+    sample matches of the first word list were business columns)."""
+    for physical in ("AUDIT_DATE", "AUDIT_STATUS", "BATCH_NUMBER", "LOAD_FACTOR",
+                     "MAX_LOAD_AMOUNT", "CREATED_DATE", "ACCOUNT_CREATED_AT", "UPDATED_AT"):
+        assert _sev(build_tml_ctx(_col_with_id("C", physical)), "H12") == [], physical
+    assert _sev(build_tml_ctx(_col_with_id("Amount", "AMOUNT")), "H12") == []
+    staged = build_tml_col("Amount")
+    staged["column_id"] = "STG_ORDERS::AMOUNT"
+    assert _sev(build_tml_ctx(staged), "H12") == []
 
 
 # ── H12: technical columns visible ──────────────────────────────────────────
@@ -80,7 +139,9 @@ def _col_with_id(name, physical, hidden=False):
 def test_h12_physical_name_only():
     assert _sev(build_tml_ctx(_col_with_id("Load", "ETL_LOAD_TS")), "H12") == ["LOW"]
     assert _sev(build_tml_ctx(_col_with_id("Hash", "_ROW_HASH")), "H12") == ["LOW"]
-    assert _sev(build_tml_ctx(_col_with_id("Updated", "UPDATED_AT")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Loaded", "LOADED_AT")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Synced", "_FIVETRAN_SYNCED")), "H12") == ["LOW"]
+    assert _sev(build_tml_ctx(_col_with_id("Row hash", "ROW_HASH")), "H12") == ["LOW"]
     assert _sev(build_tml_ctx(_col_with_id("Load", "ETL_LOAD_TS", hidden=True)), "H12") == []
     assert _sev(build_tml_ctx(_col_with_id("Load date", "ORDER_DATE")), "H12") == []
     assert _sev(build_tml_ctx(_col_with_id("Download count", "DOWNLOADS")), "H12") == []
@@ -111,6 +172,20 @@ def test_a8_lists_the_terms():
     assert "revenue" in f.detail and "x" in f.detail and "2" in f.detail
 
 
+def test_a8_lists_name_collisions_first():
+    """A MEDIUM finding's list must show the column name that made it MEDIUM."""
+    syn = [build_tml_col(f"S{i}", synonyms=[f"a{i}"]) for i in range(6)]
+    syn += [build_tml_col(f"R{i}", synonyms=[f"A{i}"]) for i in range(6)]
+    ctx = build_tml_ctx(*syn, build_tml_col("Zeta"), build_tml_col("Z2", synonyms=["zeta"]))
+    (f,) = run_rule(ctx, "A8")
+    assert f.severity == "MEDIUM" and "zeta" in f.detail
+
+
+def test_a7_reads_measures_only():
+    cols = [build_tml_col(f"A{i}") for i in range(4)] + _measures(0, 2)
+    assert _sev(build_tml_ctx(*cols), "A7") == []
+
+
 # ── D15: duplicate Table-level joins ────────────────────────────────────────
 
 def _table_ctx(*joins):
@@ -134,6 +209,15 @@ def test_d15():
     assert _sev(_table_ctx(_jw("a"), role_play), "D15") == []
     assert _sev(_table_ctx(_jw("a"), _jw("b", dest="REGION")), "D15") == []
     assert _sev(_table_ctx(_jw("a"), {"name": "x"}, "junk", {"destination": "CUSTOMER"}), "D15") == []
+    assert _sev(_table_ctx(_jw("a"), _jw("b", card="ONE_TO_ONE")), "D15") == ["MEDIUM"]
+
+
+def test_d15_odd_destinations_do_not_crash_the_run():
+    """A non-string fqn or name is skipped, never a TypeError that loses every rule."""
+    odd = [{"destination": {"fqn": ["t-customer"]}, "on": "[A::x] = [B::y]"},
+           {"destination": {"name": {"x": 1}}, "on": "[A::x] = [B::y]"},
+           {"destination": {"fqn": ["t-customer"]}, "on": "[A::x] = [B::y]"}]
+    assert _sev(_table_ctx(_jw("a"), *odd), "D15") == []
 
 
 # ── D16: join keys of different types ───────────────────────────────────────
@@ -164,6 +248,14 @@ def test_d16():
     assert _sev(_typed_join_ctx("VARCHAR", "INT64", on="[ORDERS::CUST_ID] = 1"), "D16") == []
     two = "[ORDERS::REGION] = [CUST::REGION] and [ORDERS::CUST_ID] = [CUST::ID]"
     assert _sev(_typed_join_ctx("INT64", "VARCHAR", on=two), "D16") == ["MEDIUM"]
+
+
+def test_d16_reads_on_as_the_join_graph_does():
+    """Escaped names are unescaped; a side with arithmetic is not a column pair."""
+    assert _sev(_typed_join_ctx("VARCHAR", "INT64", on="[ORDERS::CUST_ID] = [CUST::ID] + 1"),
+                "D16") == []
+    assert _sev(_typed_join_ctx("VARCHAR", "INT64", on="[ORDERS::CUST\\_ID] = [CUST::ID]"),
+                "D16") == ["MEDIUM"]
 
 
 def test_d16_names_both_keys():
