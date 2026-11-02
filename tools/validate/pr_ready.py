@@ -267,6 +267,13 @@ _PIP_INSTALLS = frozenset(SUITE_PIP_INSTALLS + (
 ))
 #: An `echo` that only prints: no pipe, chaining, substitution or redirection.
 _ECHO = re.compile(r"echo [^|;&`<>]*")
+#: The Node installs CI's suite job makes for the chart-builder smoke suites' browser
+#: render. Locally a missing browser skips that render step (the run says so); in CI the
+#: smoke fails instead. Exact copies, like _PIP_INSTALLS.
+_NODE_INSTALLS = frozenset({
+    "npm ci --prefix agents/cli/ts-object-answer-chart-builder/helpers",
+    "npm exec --prefix agents/cli/ts-object-answer-chart-builder/helpers -- playwright install --with-deps chromium",
+})
 _USES_PLUMBING = ("actions/checkout@", "actions/setup-python@")
 #: The workflow, job and step keys the classifier understands. Anything else (`env`,
 #: `defaults`, `shell`, `working-directory`, `continue-on-error`, a job-level `uses`
@@ -303,7 +310,7 @@ def _line_reproduced(job: str, step: dict, line: str, pytest_args: List[List[str
     """Whether pr-ready runs `line`, or `line` is plumbing that checks nothing.
     (The quality-gates step is matched whole, by `_qg_step_matches`.)"""
     name = step.get("name", "")
-    if line in _PLUMBING or line in _PIP_INSTALLS or _is_echo(line):
+    if line in _PLUMBING or line in _PIP_INSTALLS or line in _NODE_INSTALLS or _is_echo(line):
         return True
     if job == "validate" and line == "exit 1" and str(step.get("if", "")).strip() == _AGGREGATE_IF:
         return True   # the aggregate gate failing on a dependency's result

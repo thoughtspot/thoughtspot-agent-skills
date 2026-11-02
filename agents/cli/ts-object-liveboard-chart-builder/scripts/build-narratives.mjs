@@ -27,6 +27,9 @@ const CORE_CSS = '/* ==== amuzing core css v1 | placeholder, replaced by helpers
 
 const owner = path.basename(lbDir);
 const cfgs = fs.readdirSync(nar).filter((n) => n.endsWith('.cfg.js'));
+// A slug names a library folder: letters, digits, - and _, never a path ('..cfg.js' would be the library root).
+const badCfg = cfgs.filter((f) => !/^[\w-]+\.cfg\.js$/.test(f));
+if (badCfg.length) { console.error('narratives/: a slug may hold only letters, digits, - and _: ' + badCfg.join(', ')); process.exit(2); }
 const clash = [];
 for (const f of cfgs) {
   const slug = f.replace('.cfg.js', '');

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // liveboard-pack.mjs [--liveboard <dir>] [--commit | --validate | --check]   (--commit requires --liveboard) (<slug> ... | --all)
-//                   [--backup <file>] [--adopt] [--adopt-by-position] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
+//                   [--backup <file>] [--adopt] [--adopt-by-position] [--relayout] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
 //
 // Turns library charts into ready-to-paste MCP code that writes them straight into the target Liveboard.
 // The Liveboard is its own store: nothing else is created in ThoughtSpot.
@@ -18,14 +18,17 @@
 //   --core-ref  send the shared core as a checksum only: the sandbox takes it from a tile already on the Liveboard.
 //               Blocks after the first in one --commit run do this by themselves, since the first block puts the
 //               core there (a --validate run writes nothing, so every block carries the core).
-//   --backup <file>  a TML export of the Liveboard taken before this commit (ts tml export, or Export TML in
-//               ThoughtSpot). Required for --commit when the Liveboard holds anything the skill does not own: the
-//               sandbox refuses the commit without it. The file must name the Liveboard's guid, be under a day
-//               old, and sit outside any git working tree.
+//   --backup <file>  a JSON TML export of the Liveboard taken before this commit (ts tml export <guid> --format
+//               JSON). Required for --commit when the Liveboard has any visualization: the sandbox refuses the
+//               commit without it, or when it does not hold every visualization on the Liveboard by content. The
+//               file must name the Liveboard's guid, be under a day old, and sit outside any git working tree.
 //   --adopt     take over tiles written before owner markers existed: the shared core and a spec slug marker, with
-//               no owner marker. Without it such tiles stop the commit, so nothing is doubled.
+//               no owner marker, at that slug's spec position. Without it such tiles stop the commit, so nothing is
+//               doubled.
 //   --adopt-by-position  also take over unmarked core tiles that sit at a spec position (no slug marker). Kept
 //               separate because such a tile can be a chart the user pinned from an answer.
+//   --relayout  the spec moved tiles: a lone tile marked as the skill's but off its spec position is taken, moved
+//               and replaced. Without it such a tile (it may be a user's copy) stops the commit.
 //   --reuse <liveboard guid>  send only checksums for these charts: the sandbox copies each one from that Liveboard
 //               (found by its slug marker) when its body matches the library, and lists the rest under needCode.
 //               Use it for library charts already on another Liveboard in the same cluster; it saves the paste.
@@ -41,8 +44,9 @@ import { chartSkill, skillDir } from "./chart-skill.mjs";
 const lib = path.join(chartSkill(), "library");
 // A slug is the user's own chart (~/.cache/ts-charts/library, from library-emit or build-narratives) when there is
 // one, else the shipped library's.
-const { chartDirOf } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
+const { chartDirOf, MAYA } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
 const { checkBackup } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "backup-check.mjs")).href);
+const { cdnProblems, mayaPinProblems } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "pin-check.mjs")).href);
 const argv = process.argv.slice(2);
 const VALUED = new Set(["--max", "--liveboard", "--reuse", "--backup"]);
 const flags = new Set(argv.filter((a, i) => a.startsWith("--") && !VALUED.has(argv[i - 1])));
@@ -100,6 +104,9 @@ function lint(s, what) {
 const coreJsFile = fs.readFileSync(path.join(lib, "_shared", "core.js"), "utf8").replace(/\s+$/, "");
 const coreCssFile = fs.readFileSync(path.join(lib, "_shared", "core.css"), "utf8").replace(/\s+$/, "");
 lint(coreJsFile, "core.js"); lint(coreCssFile, "core.css");
+// The core's MayaCharts loader ships in every core-based tile: it pins what the skill pins (env.mjs MAYA).
+const corePins = mayaPinProblems(coreJsFile, MAYA, "library/_shared/core.js");
+if (corePins.length) { console.error(corePins.join("\n")); process.exit(2); }
 const core = { js: liteJs(coreJsFile), css: liteCss(coreCssFile) };
 core.sha = { js: sha(core.js), css: sha(core.css) };
 
@@ -114,6 +121,8 @@ for (const slug of slugs) {
   if (!lean && !jsFull.includes(coreJsFile)) console.error("warning: " + slug + "/chart.js has an out-of-date core copy; the Liveboard gets the current core, run sync-core so the preview matches");
   const bodyJs = lean ? jsFull : split(jsFull, "js", slug + "/chart.js"), bodyCss = lean ? cssFull : split(cssFull, "css", slug + "/chart.css");
   lint(html, slug + "/chart.html"); lint(bodyJs, slug + "/chart.js"); lint(bodyCss, slug + "/chart.css");
+  const pins = cdnProblems(html, bodyJs);
+  if (pins.length) { console.error(slug + ": " + pins.join("; ") + " (library-contract.md, Hard contract)"); process.exit(2); }
   const f = { js: liteJs("/* amuzing-slug: " + slug + " */\n" + bodyJs), css: liteCss(bodyCss), html };
   if (lean) f.lean = true;
   tiles[slug] = { f, sha: { js: sha(f.js), css: sha(f.css), html: sha(f.html) } };
@@ -137,7 +146,7 @@ const src = (payload) => {
   out.push("core: " + (payload.core && payload.core.ref ? "{ ref: true, sha: " + JSON.stringify(payload.core.sha) + " }" : payload.core ? "{ js: " + raw(payload.core.js) + ",\ncss: " + raw(payload.core.css) + ",\nsha: " + JSON.stringify(payload.core.sha) + " }" : "null") + ",");
   out.push("tiles: {");
   for (const [slug, t] of Object.entries(payload.tiles)) if (t.ref) out.push(JSON.stringify(slug) + ": { ref: " + JSON.stringify(t.ref) + " },"); else out.push(JSON.stringify(slug) + ": { f: { html: " + raw(t.f.html) + ",\ncss: " + raw(t.f.css) + ",\njs: " + raw(t.f.js) + (t.f.lean ? ",\nlean: true" : "") + " },\nsha: " + JSON.stringify(t.sha) + " },");
-  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt") || flags.has("--adopt-by-position")) + ",", "adoptByPosition: " + JSON.stringify(flags.has("--adopt-by-position")) + ",", "backup: " + JSON.stringify(backup) + ",", "backupSha: " + JSON.stringify(backupSha) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
+  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt") || flags.has("--adopt-by-position")) + ",", "adoptByPosition: " + JSON.stringify(flags.has("--adopt-by-position")) + ",", "relayout: " + JSON.stringify(flags.has("--relayout")) + ",", "runBody: " + JSON.stringify(payload.runBody || {}) + ",", "backup: " + JSON.stringify(backup) + ",", "backupSha: " + JSON.stringify(backupSha) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
   return out.join("\n");
 };
 const block = (payload) => tpl.replace("'__MODE__'", () => JSON.stringify(MODE)).replace("__PAYLOAD__", () => src(payload));
@@ -161,5 +170,5 @@ if (size) blocks.push(cur);
 const coreRef = { ref: true, sha: core.sha };
 const needsCore = (b) => Object.values(b).some((t) => !(t.f && t.f.lean));
 const firstCore = blocks.findIndex(needsCore);
-console.log(blocks.map((t, i) => block({ spec, core: !needsCore(t) ? null : flags.has("--core-ref") || (i > firstCore && MODE === "commit") ? coreRef : core, tiles: t, bodySha: {}, pending: blocks.slice(i + 1).flatMap((b) => Object.keys(b)) })).join("\n=====\n"));
+console.log(blocks.map((t, i) => block({ spec, core: !needsCore(t) ? null : flags.has("--core-ref") || (i > firstCore && MODE === "commit") ? coreRef : core, tiles: t, bodySha: {}, runBody: MODE === "commit" ? Object.fromEntries(blocks.slice(0, i).flatMap((b) => Object.keys(b)).map((s) => [s, bodySha[s].js])) : {}, pending: blocks.slice(i + 1).flatMap((b) => Object.keys(b)) })).join("\n=====\n"));
 console.error(`\n[liveboard-pack] ${slugs.length} tile(s) in ${blocks.length} block(s), mode ${MODE}: ` + blocks.map((b) => Object.keys(b).join(" ")).join(" | "));

@@ -6,16 +6,18 @@
 //   2. exports the Liveboard and finds the tiles the skill owns: custom charts whose code carries the owner
 //      marker naming THIS Liveboard (`ts-lb-owner: <guid>`), written by the skill when it composed them. A
 //      chart that only carries the shared core (a copy pinned from an answer, a tile from another Liveboard)
-//      is not owned. A user's copy of an owned tile carries the same marker; when a slug is marked twice the
-//      tile at the spec position is the skill's, and with no tile there the block refuses to commit.
-//      Tiles written before the marker existed are taken over only with --adopt;
+//      is not owned. A user's copy of an owned tile carries the same marker, so a marked tile is taken only at
+//      its spec position: when a slug is marked twice the tile there is the skill's, and a lone marked tile
+//      elsewhere refuses the commit unless the block was built with --relayout. Tiles written before the marker
+//      existed (the shared core, at their own slug's spec position) are taken over only with --adopt;
 //   3. merges into the exported TML: charts in this payload replace their tile, owned tiles keep the code
 //      they have, owned tiles no longer in the spec are removed. Everything else on the Liveboard (native
 //      charts, notes, other custom charts, tabs, filters, parameters, style, its name) is kept as it is;
 //   4. imports VALIDATE_ONLY, and a commit (ALL_OR_NONE) only when nothing is wrong: any problem (a failed
-//      search, a missing tile, an ownership conflict, an untabbed Liveboard, no backup of content the skill
-//      does not own) refuses the commit. Right before the commit it exports the Liveboard once more and refuses
-//      when anything changed since step 2 (an edit made in ThoughtSpot meanwhile would be overwritten). After a
+//      search, a missing tile, an ownership conflict, an untabbed Liveboard, no backup of a Liveboard that has
+//      visualizations, a backup that does not hold every one of them by content) refuses the commit. Right
+//      before the commit it exports the Liveboard once more and refuses when anything in it changed since step
+//      2 (an edit made in ThoughtSpot meanwhile would be overwritten). After a
 //      commit it exports again and proves every owned tile carries the code that was composed, every
 //      visualization it does not own is still there, and the tabs hold the tiles they were given.
 // It creates no other object in ThoughtSpot.
@@ -41,6 +43,10 @@ const OWNER = /\/\* ts-lb-owner: ([\w-]+) \*\/\n?/;
 // Guids compare in lower case: a spec guid typed in upper case must not turn every tile into "not ours".
 const ownerOf = (c) => { const m = c && OWNER.exec(c.js); return m ? m[1].toLowerCase() : null; };
 const strip = (js) => js.replace(MARK, '').replace(OWNER, '');
+const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
+// A visualization's content fingerprint, the same as the chart skill's helpers/backup-check.mjs computes from the
+// backup file: name, search, chart type, decoded chart code and note. Ids play no part (ThoughtSpot renumbers them).
+const fpOf = async (v) => { const a = (v && v.answer) || {}, c = codeOf(v); return (await sha256(JSON.stringify([a.name || '', a.search_query || '', (a.chart && a.chart.type) || '', c ? [c.js, c.css, c.html] : null, v && v.note_tile ? stable(v.note_tile) : null]))).slice(0, 16); };
 
 // 1. checksums
 const badSha = [];
@@ -77,18 +83,21 @@ const specTabNames = new Set(spec.tabs.map((t) => t.name));
 const cands = [];
 for (const tab of ((doc0.layout && doc0.layout.tabs) || []).filter((t) => specTabNames.has(t.name))) for (const tl of tab.tiles || []) {
   const c = codeOf(vizById[tl.visualization_id]);
+  if (!c) continue; // a native chart or a note
   if (!hasCore(c) && !ownerOf(c) && !MARK.test(c.js)) continue; // a lean tile (no core) is the skill's by its markers
   const m = MARK.exec(c.js), pos = tab.name + '|' + tl.x + '|' + tl.y;
   cands.push({ id: tl.visualization_id, c, pos, slug: m ? m[1] : null, owner: ownerOf(c), title: nameOf(vizById[tl.visualization_id]) });
 }
-// Owned: marked with this Liveboard's guid. Adoptable: no owner marker, and its slug (or, unmarked, its
-// position) is in the spec; taken over only with --adopt, otherwise the commit is refused so nothing is doubled.
+// Owned: marked with this Liveboard's guid. Adoptable: no owner marker, the shared core (tiles from before owner
+// markers all carry it; a lean tile was always written with an owner marker), and it sits at the spec position
+// of its own slug (or, unmarked, at a spec position); taken over only with --adopt, otherwise the commit is
+// refused so nothing is doubled. A user's chart with a copied slug marker anywhere else is never adopted.
 const owned = new Set(), bySlug = {}, idBySlug = {}, byPos = {}, idByPos = {}, adoptable = [];
 const take = (k) => { owned.add(k.id); const s = k.slug || specPos[k.pos]; bySlug[s] = k.c; idBySlug[s] = k.id; byPos[k.pos] = k.c; idByPos[k.pos] = k.id; };
 const groups = {};
 for (const k of cands) {
-  const mine = k.owner === LBG, legacy = !k.owner && (k.slug ? specSlugs.has(k.slug) : !!specPos[k.pos]);
-  if (!mine && !legacy) continue; // another Liveboard's tile, or a chart pinned from an answer: not ours
+  const mine = k.owner === LBG, legacy = !k.owner && hasCore(k.c) && (k.slug ? specPos[k.pos] === k.slug : !!specPos[k.pos]);
+  if (!mine && !legacy) continue; // another Liveboard's tile, a chart pinned from an answer, a user's copy: not ours
   // --adopt takes over tiles with a slug marker; a tile matched only by its position (it could be a chart the
   // user pinned there) needs --adopt-by-position as well.
   if (legacy && !(k.slug ? P.adopt : P.adoptByPosition)) { adoptable.push((k.slug || specPos[k.pos]) + ' (' + k.title + (k.slug ? '' : ', matched by position only') + ')'); continue; }
@@ -99,7 +108,16 @@ for (const k of cands) {
   (groups[s] = groups[s] || []).push(k);
 }
 for (const [s, ks] of Object.entries(groups)) {
-  if (ks.length === 1) { take(ks[0]); continue; }
+  // A lone marked tile off its spec position may be a user's copy whose original was deleted, or the skill's tile
+  // the user moved: there is no telling, so it is taken (moved back, its code replaced) only with --relayout,
+  // which also says the spec itself moved the tile. A tile whose slug left the spec is removed (and a backup of
+  // it is required, like every other commit to a Liveboard that has visualizations).
+  if (ks.length === 1) {
+    const k = ks[0];
+    if (specPos[k.pos] === s || !specSlugs.has(s) || P.relayout) take(k);
+    else conflicts.push(s + ': the tile "' + k.title + '" at ' + k.pos + ' carries its marker but is not at its spec position; move it back, or send this block again built with --relayout if the spec moved it (it is then moved and replaced)');
+    continue;
+  }
   // Two tiles marked with one slug: a user copied the skill's tile. The one at the spec position is the
   // skill's; the copies are the user's and are kept. With none at the spec position there is no telling.
   const at = ks.filter((k) => specPos[k.pos] === s);
@@ -310,8 +328,10 @@ const filters = [...oldF.map((f) => { const s = specF.find((x) => col(x) === col
   ...specF.filter((s) => !oldF.some((f) => col(f) === col(s))).map((s) => withEx(s, s.skip))];
 const chips = [...(doc0.ordered_chips || [])];
 for (const f of spec.filters || []) if (!chips.some((c) => c.type === 'FILTER' && c.name === f.column)) chips.push({ name: f.column, type: 'FILTER' });
+// Style is the user's: the spec's style properties only fill in names the Liveboard does not have yet (a new
+// Liveboard), so a border, title or description setting changed in ThoughtSpot is never reset.
 const styleProps = [...((doc0.style && doc0.style.style_properties) || [])];
-for (const sp of spec.style || []) { const i = styleProps.findIndex((x) => x.name === sp.name); if (i >= 0) styleProps[i] = sp; else styleProps.push(sp); }
+for (const sp of spec.style || []) if (!styleProps.some((x) => x.name === sp.name)) styleProps.push(sp);
 
 // The Liveboard keeps its own name and description; the spec's are only for one that has none.
 const layout = { ...(doc0.layout || {}), tabs: layoutTabs }; delete layout.tiles;
@@ -334,6 +354,27 @@ if (needCode.length) summary.needCode = needCode;
 if (!summary.replaced.length && !removed.length && !summary.marked.length && !summary.problems.length) { summary.skipped = 'nothing in this block to write; send the needCode charts without --reuse'; return summary; }
 if (summary.tmlKB > 2000) summary.warning = 'TML over 2 MB; imports near 2.8 MB have reset the connection';
 
+// A Liveboard that has any visualization is only written with a backup of it on disk (liveboard-pack --backup):
+// a tile marked as the skill's may still be a user's copy, so owned tiles count too. Only a new, empty Liveboard
+// needs none. Later blocks of one commit run see the tiles the earlier blocks wrote, which a backup taken before
+// the run cannot hold: only those are exempt, each recognised by its owner marker, a slug an earlier block of
+// this run carried (P.runBody) and a body that is exactly that library chart's. Anything else, a user's copy of
+// a skill tile included, must be in the backup, so a later block pasted on its own still needs one.
+const runTile = async (v) => { const c = codeOf(v), m = c && MARK.exec(c.js); return !!(m && ownerOf(c) === LBG && P.runBody && P.runBody[m[1]] && (await sha256(strip(bodyOf(c).js).trim())) === P.runBody[m[1]]); };
+const vis0 = [];
+for (const v of doc0.visualizations || []) if (!(await runTile(v))) vis0.push(v);
+let backupRefusal = vis0.length && !P.backup ? 'NOT COMMITTED - this Liveboard holds ' + vis0.length + ' visualization(s); export a backup (ts tml export <guid> --format JSON) and build the block with --backup <file>' : null;
+// The backup must be of the Liveboard as it is now: every visualization on it, by content, is in the backup.
+if (P.backup) {
+  const inBackup = new Set(P.backup.viz || []);
+  const missing = [];
+  for (const v of vis0) if (!inBackup.has(await fpOf(v))) missing.push(nameOf(v));
+  if (missing.length) backupRefusal = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this Liveboard as it is now (it lacks ' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' and ' + (missing.length - 5) + ' more' : '') + '); export it again';
+}
+// A validate says so too, so a commit is not the first to hear of it.
+if (backupRefusal && MODE !== 'commit') summary.commitWouldRefuse = backupRefusal;
+if (backupRefusal && MODE === 'commit') { summary.refused = backupRefusal; return summary; }
+
 // 4. import and prove. A commit validates first in the same call, so one paste per block does both.
 const importAs = async (policy) => {
   const imp = await ts.post('/api/rest/2.0/metadata/tml/import', { metadata_tmls: [text], import_policy: policy, create_new: false });
@@ -345,29 +386,16 @@ if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON
 if (MODE !== 'commit') return summary;
 // A commit writes only a state with nothing wrong in it.
 if (summary.problems.length) { summary.refused = 'NOT COMMITTED - fix the problems above; the Liveboard is unchanged'; return summary; }
-// Content the skill does not own is only touched with a backup of it on disk (liveboard-pack --backup).
-if (others.length && !P.backup) { summary.refused = 'NOT COMMITTED - this Liveboard holds ' + others.length + ' visualization(s) the skill does not own; export a backup and build the block with --backup <file>'; return summary; }
-// The backup must be of the Liveboard as it is now: every visualization it holds is in the backup.
-if (P.backup) {
-  const inBackup = new Set(P.backup.vizIds || []);
-  const missing = (doc0.visualizations || []).filter((v) => !inBackup.has(v.id)).map((v) => (v.answer ? v.answer.name : v.id));
-  if (missing.length) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this Liveboard as it is now (it lacks ' + missing.slice(0, 5).join(', ') + (missing.length > 5 ? ' and ' + (missing.length - 5) + ' more' : '') + '); export it again'; return summary; }
-}
-const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
 // The compose merged into the export taken at the start. An edit made in ThoughtSpot since then (a tile moved, a
 // filter or a note changed, a tile added) would be overwritten by the import, and the round trip, which starts
 // from that first export, would not see it. So the Liveboard is exported once more right before the commit and
-// compared: the raw document first, then (ThoughtSpot may rewrite volatile fields) everything the compose took
-// from the first export: each visualization's id, name, search, chart type, chart code and note, the layout, the
-// filters, the name, description, parameters, style and chips. Any difference refuses the commit.
-const shape = (d) => stable({
-  v: (d.visualizations || []).map((v) => ({ id: v.id, n: v.answer && v.answer.name, s: v.answer && v.answer.search_query, t: v.answer && v.answer.chart && v.answer.chart.type, c: v.answer && v.answer.chart && v.answer.chart.custom_visual_props, note: v.note_tile })),
-  l: d.layout, f: d.filters, n: d.name, d: d.description, p: d.parameters, st: d.style, ch: d.ordered_chips
-});
+// compared: the raw text first, then the whole document with keys sorted (the compose carries every field of it,
+// so every field is compared: a tile's description, its table settings, a tab's description, a filter's values).
+// Any difference refuses the commit; a refusal is safe, the block is simply sent again.
 const ex1 = await exportLb(LB.guid);
 const doc1 = docOf(ex1);
 if (!doc1) { summary.refused = 'NOT COMMITTED - the Liveboard could not be exported again before the commit (http ' + ex1.status + '); send the block again'; return summary; }
-if (edocOf(ex1) !== edocOf(ex0) && shape(doc1) !== shape(doc0)) { summary.recheck = 'changed'; summary.refused = 'NOT COMMITTED - Liveboard changed during the patch; send the block again'; return summary; }
+if (edocOf(ex1) !== edocOf(ex0) && stable(doc1) !== stable(doc0)) { summary.recheck = 'changed'; summary.refused = 'NOT COMMITTED - Liveboard changed during the patch; send the block again'; return summary; }
 summary.recheck = 'unchanged';
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;

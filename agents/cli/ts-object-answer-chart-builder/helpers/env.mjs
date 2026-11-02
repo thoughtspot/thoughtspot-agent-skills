@@ -101,6 +101,7 @@ export function cacheRoot() {
 // repo checkout. A slug resolves to the user's copy first, then the shipped library/.
 export const userLibrary = () => path.join(cacheRoot(), "library");
 export function chartDirOf(slug, skillDir = path.resolve(here, "..")) {
+  if (!/^[\w-]+$/.test(String(slug))) return null; // a slug is a folder name, never a path
   for (const d of [path.join(userLibrary(), slug), path.join(skillDir, "library", slug)]) if (fs.existsSync(path.join(d, "chart.js"))) return d;
   return null;
 }
@@ -144,6 +145,8 @@ export function resolveEnv({ slug } = {}) {
     helpersWritable: isWritable(here),
   };
   if (slug) {
+    // A slug names folders under runs/ and output/: letters, digits, - and _, never a path.
+    if (!/^[\w-]+$/.test(String(slug))) throw new Error("the slug may hold only letters, digits, - and _ (got " + JSON.stringify(slug) + ")");
     env.slug = slug;
     env.runDir = path.join(env.runsRoot, slug);
     env.chartDir = path.join(env.runDir, "chart");
@@ -291,25 +294,34 @@ async function sri(url) {
   } catch { return "unknown (unreachable)"; }
 }
 
-// MayaCharts ships often: every chart pins the release that is latest when it is built. jsDelivr answers
-// "latest" for the URL; the npm registry is the fallback (the Claude app can often reach one but not the other).
-async function mayaLatest() {
-  const tries = [
-    ["https://data.jsdelivr.com/v1/packages/npm/mayacharts/resolved?specifier=latest", (j) => j.version],
-    ["https://registry.npmjs.org/mayacharts/latest", (j) => j.version],
-  ];
-  for (const [url, pick] of tries) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      const v = r.ok ? pick(await r.json()) : null;
-      if (/^\d+\.\d+\.\d+$/.test(v || "")) {
-        const pins = [];
-        for (const f of ["maya.core.global.js", "maya.global.js"]) pins.push(`${f === "maya.global.js" ? "every type" : "core types"} https://cdn.jsdelivr.net/npm/mayacharts@${v}/dist/${f} integrity ${await sri(`https://cdn.jsdelivr.net/npm/mayacharts@${v}/dist/${f}`)}`);
-        return `${v} (pin it, with the integrity: ${pins.join("; ")})`;
-      }
-    } catch {}
+// MayaCharts is pinned by the skill, never "whatever is latest": a new release (or a bad or compromised publish)
+// reaches a tile only after someone reviews it and writes its version and integrity here, in the same change as
+// the library charts' pins (lean-lint checks every MayaCharts tile against this). The doctor fetches the pinned
+// files and checks them against these values, and names a newer release without adopting it.
+export const MAYA = {
+  version: "0.18.1",
+  sri: {
+    "maya.core.global.js": "sha384-KZQbG8OHSEU86UWT5Pp3LATC64UAhHxwg1UMKN/lZtsu02CeDifcSVWCewQO2h/6",
+    "maya.global.js": "sha384-Z7INdXfgP1H/WUINrm44nlLrtN58MLpFXLi52fr7HiGOGg/J4FAvjgXQM2Wnd9AK",
+  },
+};
+const mayaUrl = (f) => `https://cdn.jsdelivr.net/npm/mayacharts@${MAYA.version}/dist/${f}`;
+
+async function mayaPinned() {
+  const files = [];
+  for (const [f, want] of Object.entries(MAYA.sri)) {
+    const got = await sri(mayaUrl(f));
+    if (got.startsWith("unknown")) return `${MAYA.version} pinned; could not fetch ${f} to check it (${got}): build only in preview, and say the pin is unchecked`;
+    if (got !== want) return `${MAYA.version} pinned, but the CDN's ${f} does not match the recorded integrity: STOP, do not build MayaCharts tiles; tell the user`;
+    files.push(`${f === "maya.global.js" ? "every type" : "core types"} ${mayaUrl(f)} integrity ${want}`);
   }
-  return "unknown - could not reach jsDelivr or npm; ask before pinning a version from memory";
+  let latest = null;
+  try {
+    const r = await fetch("https://registry.npmjs.org/mayacharts/latest", { signal: AbortSignal.timeout(4000) });
+    latest = r.ok ? (await r.json()).version : null;
+  } catch {}
+  const newer = latest && latest !== MAYA.version ? ` (npm's latest is ${latest}: not used until it is reviewed and pinned in env.mjs)` : "";
+  return `${MAYA.version} (pinned by the skill; files match: ${files.join("; ")})${newer}`;
 }
 
 function fontFamilies() {
@@ -360,7 +372,7 @@ async function doctor(argv) {
     ["browser-launch", launch],
     ["cdn", noProbe ? "skipped" : await cdnReachable()],
     ["fonts", fontFamilies()],
-    ["mayacharts", noProbe ? "skipped" : await mayaLatest()],
+    ["mayacharts", noProbe ? `${MAYA.version} (pinned, unchecked)` : await mayaPinned()],
   ];
   if (slug) {
     lines.push(["run-dir", env.runDir], ["chart-dir", env.chartDir],

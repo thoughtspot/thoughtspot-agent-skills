@@ -6,6 +6,8 @@
 // color-scheme light dark, a pinned MayaCharts version and its integrity (same in the html and the js), and the transport rules.
 import fs from "node:fs";
 import path from "node:path";
+import { cdnProblems, mayaPinProblems } from "./pin-check.mjs";
+import { MAYA } from "./env.mjs";
 
 const INK = /#1e1e24/i;
 let failed = 0;
@@ -35,7 +37,12 @@ for (const dir of process.argv.slice(2).filter((a) => !a.startsWith("--"))) {
   if (vh.length && !ih) bad.push('chart.html script tag lacks integrity="sha384-..." crossorigin="anonymous"');
   if (vj.length && (!ij || !/crossOrigin:\s*'anonymous'/.test(js))) bad.push("chart.js loader lacks integrity and crossOrigin: 'anonymous'");
   if (ih && ij && ih !== ij) bad.push("html and js carry different integrity values");
+  // the release the skill pins (env.mjs MAYA), never another: a newer one is adopted by changing that pin
+  const [ver, file] = (vh[0] || "/").split("/");
+  if (vh.length && ver !== MAYA.version) bad.push("pins MayaCharts " + ver + "; the skill pins " + MAYA.version + " (env.mjs MAYA)");
+  if (ih && MAYA.sri[file] && ih !== MAYA.sri[file]) bad.push("integrity differs from the skill's recorded value for " + file);
   if (!/<maya-chart id="chart"/.test(html)) bad.push('chart.html lacks <maya-chart id="chart">');
+  bad.push(...cdnProblems(html, js), ...mayaPinProblems(html + "\n" + js, MAYA, "the tile"));
   // dark mode
   const strip = (s) => s.replace(/light-dark\([^)]*\)/g, "LD");
   const cssNoLD = strip(css), jsNoLD = strip(js);

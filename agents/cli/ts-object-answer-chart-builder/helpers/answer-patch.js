@@ -19,6 +19,13 @@ const P = __PAYLOAD__;
 const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
 const unb64 = (s) => decodeURIComponent(escape(atob(s)));
 const sha256 = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+// The answer's content fingerprint, the same as helpers/backup-check.mjs computes from the backup file: name,
+// search, chart type and decoded chart code. A backup of another answer, or of this one in an older state, differs.
+const fpOf = async (a) => {
+  let c = null;
+  try { const k = JSON.parse(JSON.parse(a.chart.custom_visual_props).clientState).playground.code; c = [unb64(k.jsCodeBase64 || ''), unb64(k.cssCodeBase64 || ''), unb64(k.htmlCodeBase64 || '')]; } catch (e) { c = null; }
+  return (await sha256(JSON.stringify([a.name || '', a.search_query || '', (a.chart && a.chart.type) || '', c, null]))).slice(0, 16);
+};
 
 // 1. checksums
 const badSha = [];
@@ -34,11 +41,13 @@ const q = await ts.post('/api/rest/2.0/searchdata', { logical_table_identifier: 
 const cn = q.status === 200 && q.body && q.body.contents && q.body.contents[0] && q.body.contents[0].column_names;
 const cols = Array.isArray(cn) && cn.length ? cn : null; // no columns is a failed search, not an empty chart
 if (!cols) return { refused: 'search failed on ' + model.name + ': ' + P.search, raw: JSON.stringify(q.body).slice(0, 600) };
-let old = null;
+let old = null, edoc0 = null;
+const exportAnswer = (guid) => ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'ANSWER' }], edoc_format: 'JSON', export_fqn: true });
 if (P.guid) {
-  const ex0 = await ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: P.guid, type: 'ANSWER' }], edoc_format: 'JSON', export_fqn: true });
+  const ex0 = await exportAnswer(P.guid);
   if (ex0.status !== 200 || !ex0.body || !ex0.body[0] || !ex0.body[0].edoc) return { refused: 'answer ' + P.guid + ' not found or not exportable', http: ex0.status };
-  old = JSON.parse(ex0.body[0].edoc).answer;
+  edoc0 = ex0.body[0].edoc;
+  old = JSON.parse(edoc0).answer;
 }
 
 // 3. compose
@@ -78,10 +87,12 @@ if (old) {
     name: answer.name, search_query: answer.search_query,
     tables: tablesOk ? old.tables : answer.tables,
     answer_columns: cols.map((c) => oldCols[c] || { name: c }),
-    table: oldTable ? { ...oldTable, table_columns: cols.map((c) => oldTc[c] || { column_id: c }), ordered_column_ids: cols } : answer.table,
+    // The table keeps the user's column order for columns still in the search; new columns go last.
+    table: oldTable ? { ...oldTable, table_columns: cols.map((c) => oldTc[c] || { column_id: c }), ordered_column_ids: Array.isArray(oldTable.ordered_column_ids) ? [...oldTable.ordered_column_ids.filter((c) => cols.includes(c)), ...cols.filter((c) => !oldTable.ordered_column_ids.includes(c))] : cols } : answer.table,
     chart: { ...(oldChart || {}), ...answer.chart, chart_columns: cols.map((c) => oldCc[c] || { column_id: c }), custom_visual_props: answer.chart.custom_visual_props }
   };
   if (oldChart && oldChart.client_state_v2) merged.chart.client_state_v2 = oldChart.client_state_v2;
+  if (oldChart && oldChart.client_state !== undefined) merged.chart.client_state = oldChart.client_state;
   for (const k of Object.keys(old)) if (!(k in answer)) kept.push(k);
   if (keepCols.length) kept.push('answer_columns settings: ' + keepCols.join(', '));
   if (oldTable) kept.push('table settings');
@@ -121,8 +132,19 @@ summary.validate = v.r && v.r.status;
 if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON.stringify(v.raw).slice(0, 1200); return summary; }
 if (MODE !== 'commit') return summary;
 if (P.guid && !P.backup) { summary.refused = 'NOT COMMITTED - updating an answer needs a backup of it first: export its TML and build the block with --backup <file>'; return summary; }
-// The backup must be of the answer as it is now.
-if (P.guid && P.backup.search !== (old.search_query || '')) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this answer as it is now (its search differs); export it again'; return summary; }
+// The backup must be of the answer as it is now, by content.
+if (P.guid && !(P.backup.viz || []).includes(await fpOf(old))) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this answer as it is now (its name, search or chart differs); export it again'; return summary; }
+// An edit made in ThoughtSpot since the first export would be overwritten: export once more and compare, the raw
+// text first, then the whole answer with keys sorted. Any difference refuses the commit.
+if (P.guid) {
+  const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
+  const ex1 = await exportAnswer(P.guid);
+  const edoc1 = ex1 && ex1.status === 200 && ex1.body && ex1.body[0] && ex1.body[0].edoc;
+  let same = edoc1 === edoc0;
+  if (!same && edoc1) { try { same = stable(JSON.parse(edoc1).answer) === stable(old); } catch (e) { same = false; } }
+  summary.recheck = same ? 'unchanged' : 'changed';
+  if (!same) { summary.refused = 'NOT COMMITTED - the answer changed during the patch (or could not be exported again); send the block again'; return summary; }
+}
 const c = await importAs('ALL_OR_NONE');
 const r0 = c.r;
 summary.import = r0 && r0.status;
@@ -167,6 +189,10 @@ if (MODE === 'commit') {
     const badCols = Object.keys(sentCols).filter((n) => !covers(sentCols[n], backCols[n]));
     if (badCols.length) failed.push('column settings changed: ' + badCols.join(', '));
     if (merged.table && !covers({ ...merged.table, table_columns: undefined, ordered_column_ids: undefined }, back.table)) failed.push('table settings changed');
+    if (merged.table && JSON.stringify(merged.table.ordered_column_ids) !== JSON.stringify(back.table && back.table.ordered_column_ids)) failed.push('table column order changed');
+    // The chart's own state strings are JSON that ThoughtSpot re-serialises and fills in: compared parsed.
+    const parsed = (x) => { try { return JSON.parse(x); } catch (e) { return x; } };
+    for (const k of ['client_state', 'client_state_v2']) if (merged.chart[k] && !covers(parsed(merged.chart[k]), parsed(back.chart && back.chart[k]))) failed.push('chart ' + k + ' changed');
   }
   summary.roundTripOk = !failed.length;
   if (failed.length) summary.roundTripFailed = failed;
