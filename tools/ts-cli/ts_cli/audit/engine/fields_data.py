@@ -16,6 +16,7 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 """
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
@@ -252,4 +253,44 @@ def _duplicate_joins_conflict(item: dict, ctx: Any) -> bool:
     """Table: a group of duplicate joins whose type or cardinality differ, so a query's
     result depends on which one a Model takes."""
     return any(conflict for _, conflict in _duplicate_joins(item.get("obj") or {}))
+
+
+# ── D16: join keys of different types ───────────────────────────────────────
+
+#: Warehouse types by family: a join pairing two families compares unlike values.
+_TYPE_FAMILIES = {
+    "string": ("VARCHAR", "CHAR", "STRING", "TEXT"),
+    "integer": ("INT32", "INT64", "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT"),
+    "decimal": ("DOUBLE", "FLOAT", "DECIMAL", "NUMBER", "NUMERIC", "REAL"),
+    "datetime": ("DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"),
+    "boolean": ("BOOL", "BOOLEAN"),
+}
+_FAMILY_OF = {t: fam for fam, types in _TYPE_FAMILIES.items() for t in types}
+#: One `[A::x] = [B::y]` equality of an `on` clause, both sides column references.
+_KEY_PAIR = re.compile(r"\[([^\]]+)\]\s*=\s*\[([^\]]+)\]")
+
+
+def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
+    """`"A::x (TYPE) = B::y (TYPE)"` for each column pair in `on` whose types are in
+    different families (_TYPE_FAMILIES). A key with an unknown type, or a type outside
+    the families, is not compared."""
+    out = []
+    for left, right in _KEY_PAIR.findall(on if isinstance(on, str) else ""):
+        lt, rt = (str(col_types.get(k.strip(), "")).upper() for k in (left, right))
+        lf, rf = _FAMILY_OF.get(lt), _FAMILY_OF.get(rt)
+        if lf and rf and lf != rf:
+            out.append(f"{left.strip()} ({lt}) = {right.strip()} ({rt})")
+    return out
+
+
+@register("join_key_type_mismatches", uses=(),
+          label="the join's key pairs of different types")
+def _join_key_type_mismatches(item: dict, ctx: Any) -> list:
+    """Join: each pair of keys in its `on` whose warehouse types, read off the Table TMLs
+    (AuditContext.column_types, as @varchar_join_keys reads them), are of different
+    families; a name list in messages. A key of a table with no Table TML in scope — or,
+    through that lookup, of an aliased table — has no type and is not compared."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
+    return NameList(key_type_mismatches((item.get("obj") or {}).get("on"), col_types))
 

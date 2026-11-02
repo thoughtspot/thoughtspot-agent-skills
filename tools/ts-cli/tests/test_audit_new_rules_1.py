@@ -134,3 +134,39 @@ def test_d15():
     assert _sev(_table_ctx(_jw("a"), role_play), "D15") == []
     assert _sev(_table_ctx(_jw("a"), _jw("b", dest="REGION")), "D15") == []
     assert _sev(_table_ctx(_jw("a"), {"name": "x"}, "junk", {"destination": "CUSTOMER"}), "D15") == []
+
+
+# ── D16: join keys of different types ───────────────────────────────────────
+
+def _typed_join_ctx(left_type, right_type, on="[ORDERS::CUST_ID] = [CUST::ID]",
+                    cust_tml=True):
+    from ts_cli.audit.context import make_context
+    tables = {"t-o": {"table": {"name": "ORDERS", "columns": [
+        {"name": "CUST_ID", "db_column_properties": {"data_type": left_type}},
+        {"name": "REGION", "db_column_properties": {"data_type": "VARCHAR"}}]}}}
+    if cust_tml:
+        tables["t-c"] = {"table": {"name": "CUST", "columns": [
+            {"name": "ID", "db_column_properties": {"data_type": right_type}},
+            {"name": "REGION", "db_column_properties": {"data_type": "VARCHAR"}}]}}
+    model = {"guid": "m-1", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-o", "joins": [{"name": "j1", "with": "CUST", "on": on,
+                                                   "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-c"}]}}
+    return make_context(models=[model], tables=tables)
+
+
+def test_d16():
+    assert _sev(_typed_join_ctx("VARCHAR", "INT64"), "D16") == ["MEDIUM"]
+    assert _sev(_typed_join_ctx("INT32", "INT64"), "D16") == []
+    assert _sev(_typed_join_ctx("VARCHAR", "CHAR"), "D16") == []
+    assert _sev(_typed_join_ctx("DATE", "DATE_TIME"), "D16") == []
+    assert _sev(_typed_join_ctx("VARCHAR", "INT64", cust_tml=False), "D16") == []
+    assert _sev(_typed_join_ctx("VARCHAR", "INT64", on="[ORDERS::CUST_ID] = 1"), "D16") == []
+    two = "[ORDERS::REGION] = [CUST::REGION] and [ORDERS::CUST_ID] = [CUST::ID]"
+    assert _sev(_typed_join_ctx("INT64", "VARCHAR", on=two), "D16") == ["MEDIUM"]
+
+
+def test_d16_names_both_keys():
+    from audit_run_rule import run_rule
+    (f,) = run_rule(_typed_join_ctx("VARCHAR", "INT64"), "D16")
+    assert "ORDERS::CUST_ID (VARCHAR)" in f.detail and "CUST::ID (INT64)" in f.detail

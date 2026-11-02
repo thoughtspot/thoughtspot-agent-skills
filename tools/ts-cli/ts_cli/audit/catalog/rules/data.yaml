@@ -344,3 +344,26 @@
     fires: {fixture: data_table_conflicting_duplicate_joins, severity: MEDIUM}
     silent: {fixture: data_table_role_playing_joins}
 
+- id: D16
+  title: Join keys of different types
+  evidence: fact
+  description: >-
+    A join (inline, or referencing a Table's `joins_with`) whose `on` pairs two columns
+    whose warehouse types, read off their Table TMLs, are of different families —
+    string, integer, decimal, date/time, boolean — so the warehouse casts on every
+    query, or the join matches nothing. A key whose Table TML is not in scope has no
+    type and is not compared; nor, through the type lookup P6 shares, is a key of an
+    aliased table.
+  categories: [D, P]
+  requires: [model_tml, table_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@join_key_type_mismatches", nonblank: true, truthy: true}
+  severity: MEDIUM
+  message: "Join '{@join_from_name}' -> '{obj.with}' pairs keys of different types: {@join_key_type_mismatches}"
+  remediation: Cast one side in the warehouse (or a SQL View) so both keys share a type, then re-point the join
+  examples:
+    fires: {fixture: data_join_keys_different_types, severity: MEDIUM}
+    silent: {fixture: data_join_keys_same_family}
+

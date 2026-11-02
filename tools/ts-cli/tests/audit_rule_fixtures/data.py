@@ -749,3 +749,26 @@ def data_table_role_playing_joins() -> AuditContext:
     return _orders_with_joins(_orders_customer_join("j1"),
                               _orders_customer_join("j2", on="[ORDERS::SHIP_TO] = [CUSTOMER::ID]"))
 
+
+def _typed_keys_ctx(left_type: str, right_type: str) -> AuditContext:
+    tables = {"t-o": {"table": {"name": "ORDERS", "columns": [
+        {"name": "CUST_ID", "db_column_properties": {"data_type": left_type}}]}},
+              "t-c": {"table": {"name": "CUST", "columns": [
+        {"name": "ID", "db_column_properties": {"data_type": right_type}}]}}}
+    model = {"guid": "m-1", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-o", "joins": [{
+            "name": "j1", "with": "CUST", "on": "[ORDERS::CUST_ID] = [CUST::ID]",
+            "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-c"}]}}
+    return make_context(models=[model], tables=tables)
+
+
+def data_join_keys_different_types() -> AuditContext:
+    """A VARCHAR key joined to an INT64 key (D16 MEDIUM)."""
+    return _typed_keys_ctx("VARCHAR", "INT64")
+
+
+def data_join_keys_same_family() -> AuditContext:
+    """INT32 joined to INT64: one family (D16 silent)."""
+    return _typed_keys_ctx("INT32", "INT64")
+
