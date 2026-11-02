@@ -21,6 +21,7 @@ from typing import Any, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.tml_join_graph import on_clause_key_pairs
 
 
 def _upper(value: Any) -> Optional[str]:
@@ -203,3 +204,94 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
     header = item.get("obj") or {}
     return Key((header.get("dataSourceName", ""), header.get("databaseStripe", ""),
                 header.get("schemaStripe", ""), header.get("name", "")))
+
+
+# ── D15: duplicate Table-level joins ────────────────────────────────────────
+
+def _join_group_key(j: Any) -> Optional[tuple]:
+    """(destination — `fqn`, else `name` —, `on` without whitespace) for a well-formed
+    `joins_with` entry, else None."""
+    dest = j.get("destination") if isinstance(j, dict) else None
+    on = j.get("on") if isinstance(j, dict) else None
+    if not isinstance(dest, dict) or not isinstance(on, str) or not on.strip():
+        return None
+    target = dest.get("fqn") or dest.get("name")
+    return (target, "".join(on.split())) if isinstance(target, str) and target else None
+
+
+def _duplicate_joins(table: dict) -> List[tuple]:
+    """(label, conflicting) per group of two or more `joins_with` entries with the same
+    destination and `on` (_join_group_key); conflicting when their type or cardinality
+    differ. Malformed entries are skipped."""
+    joins_with = table.get("joins_with")
+    groups: dict = {}
+    for j in joins_with if isinstance(joins_with, list) else []:
+        key = _join_group_key(j)
+        if key:
+            groups.setdefault(key, []).append(j)
+    out = []
+    for (dest, _), joins in groups.items():
+        if len(joins) > 1:
+            shapes = {(_upper(j.get("type")), _upper(j.get("cardinality"))) for j in joins}
+            name = joins[0]["destination"].get("name")
+            name = name if isinstance(name, str) and name else dest
+            out.append((f"{len(joins)} joins to {name} on {joins[0]['on']}", len(shapes) > 1))
+    return out
+
+
+@register("duplicate_joins", uses=(),
+          label="the Table's duplicate joins")
+def _duplicate_joins_field(item: dict, ctx: Any) -> list:
+    """Table: one label per group of `joins_with` entries sharing a destination and an
+    `on` (see _duplicate_joins); a name list in messages, empty when there are none."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(label for label, _ in _duplicate_joins(item.get("obj") or {}))
+
+
+@register("duplicate_joins_conflict", uses=(), values=(False, True),
+          label="the Table's duplicate joins differ in type or cardinality")
+def _duplicate_joins_conflict(item: dict, ctx: Any) -> bool:
+    """Table: a group of duplicate joins whose type or cardinality differ, so a query's
+    result depends on which one a Model takes."""
+    return any(conflict for _, conflict in _duplicate_joins(item.get("obj") or {}))
+
+
+# ── D16: join keys of different types ───────────────────────────────────────
+
+#: Warehouse types by family: a join pairing two families compares unlike values.
+_TYPE_FAMILIES = {
+    "string": ("VARCHAR", "CHAR", "STRING", "TEXT"),
+    "integer": ("INT32", "INT64", "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT"),
+    "decimal": ("DOUBLE", "FLOAT", "DECIMAL", "NUMBER", "NUMERIC", "REAL"),
+    "datetime": ("DATE", "DATE_TIME", "DATETIME", "TIMESTAMP", "TIME"),
+    "boolean": ("BOOL", "BOOLEAN"),
+}
+_FAMILY_OF = {t: fam for fam, types in _TYPE_FAMILIES.items() for t in types}
+
+
+def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
+    """`"A::x (TYPE) = B::y (TYPE)"` for each key pair in `on` (the join graph's reader,
+    tml_join_graph.on_clause_key_pairs: unescaped, whole conjuncts only) whose types are
+    in different families (_TYPE_FAMILIES). A key with an unknown type, or a type
+    outside the families, is not compared."""
+    out = []
+    for t1, c1, t2, c2 in on_clause_key_pairs(on if isinstance(on, str) else ""):
+        left, right = f"{t1}::{c1}", f"{t2}::{c2}"
+        lt, rt = (str(col_types.get(k, "")).upper() for k in (left, right))
+        lf, rf = _FAMILY_OF.get(lt), _FAMILY_OF.get(rt)
+        if lf and rf and lf != rf:
+            out.append(f"{left} ({lt}) = {right} ({rt})")
+    return out
+
+
+@register("join_key_type_mismatches", uses=(),
+          label="the join's key pairs of different types")
+def _join_key_type_mismatches(item: dict, ctx: Any) -> list:
+    """Join: each pair of keys in its `on` whose warehouse types, read off the Table TMLs
+    (AuditContext.column_types, as @varchar_join_keys reads them), are of different
+    families; a name list in messages. A key of a table with no Table TML in scope — or,
+    through that lookup, of an aliased table — has no type and is not compared."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
+    return NameList(key_type_mismatches((item.get("obj") or {}).get("on"), col_types))
+

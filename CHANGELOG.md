@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-02
+- feat(audit): new rules A7, A8, H11, H12, D14, D15, D16 (ts-audit 3.11.0, roadmap PR 4.3)
+- chore: bump ts-cli to v0.196.0
 - feat(audit): severity rubric — evidence classes, heuristic rules capped at MEDIUM (S5 an approved exception), `ts audit fire-rates` (ts-audit 3.10.0, roadmap PR 4.2)
 - chore: bump ts-cli to v0.195.0
 

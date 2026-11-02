@@ -282,6 +282,29 @@ def ai_document_guid_none() -> AuditContext:
 # Every A input, for the pinned-findings test — listed by hand so another category's
 # fixtures cannot join and a renamed one cannot drop out silently; the profile-bar
 # families are swept across every value their legacy tests probe (and the boundaries).
+def ai_measures_mostly_undescribed() -> AuditContext:
+    """4 visible measures, none described (A7 MEDIUM: above 75% undescribed)."""
+    return build_tml_ctx(*[build_tml_col(f"M{i}", "MEASURE") for i in range(4)])
+
+
+def ai_measures_described() -> AuditContext:
+    """2 visible measures, both described; an undescribed hidden one is not counted (A7)."""
+    return build_tml_ctx(build_tml_col("M1", "MEASURE", desc="Revenue in USD"),
+                         build_tml_col("M2", "MEASURE", desc="Units sold"),
+                         build_tml_col("H", "MEASURE", hidden=True))
+
+
+def ai_name_used_as_another_columns_synonym() -> AuditContext:
+    """"revenue" is one column's name and another's synonym (A8 MEDIUM)."""
+    return build_tml_ctx(build_tml_col("Revenue"), build_tml_col("Sales", synonyms=["revenue"]))
+
+
+def ai_distinct_search_terms() -> AuditContext:
+    """Every term names one column; a synonym repeating its own name is not shared (A8)."""
+    return build_tml_ctx(build_tml_col("Revenue", synonyms=["revenue", "turnover"]),
+                         build_tml_col("Cost", synonyms=["spend"]))
+
+
 AI_INPUTS = {fn.__name__: fn for fn in (
     ai_model_one_of_three_described, ai_model_all_described, ai_model_without_columns,
     ai_model_one_of_three_with_synonyms, ai_model_all_with_synonyms, ai_model_uncoached,

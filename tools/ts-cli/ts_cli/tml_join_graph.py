@@ -337,6 +337,19 @@ def _strip_parens(term: str) -> str:
     return term
 
 
+def on_clause_key_pairs(on: str) -> list[tuple[str, str, str, str]]:
+    """(table1, col1, table2, col2), unescaped, for each top-level AND-conjunct of `on`
+    that is exactly `[T1::c1] = [T2::c2]`. A conjunct with anything else in it
+    (`= [B::key] + 1`, a function call, an OR) is not a key pair."""
+    pairs = []
+    for term in _TOP_LEVEL_AND_RE.split(_strip_parens(on or "")):
+        m = _JOIN_ON_EQ_RE.match(_strip_parens(term))
+        if m:
+            t1, c1, t2, c2 = (_unescape(x) for x in m.groups())
+            pairs.append((t1, c1, t2, c2))
+    return pairs
+
+
 def _equates_key(on: str, key: str, tables: set) -> bool:
     """True when a top-level AND-conjunct is exactly `[T1::key] = [T2::key]` spanning
     both joined tables. Any OR or NOT in the clause disqualifies it: a key under an OR
@@ -345,14 +358,8 @@ def _equates_key(on: str, key: str, tables: set) -> bool:
     on = on or ""
     if _OR_NOT_RE.search(_JOIN_ON_REF_RE.sub("", on)):
         return False
-    for term in _TOP_LEVEL_AND_RE.split(_strip_parens(on)):
-        m = _JOIN_ON_EQ_RE.match(_strip_parens(term))
-        if not m:
-            continue
-        t1, c1, t2, c2 = (_unescape(x) for x in m.groups())
-        if c1.lower() == c2.lower() == key.lower() and {t1.lower(), t2.lower()} == tables:
-            return True
-    return False
+    return any(c1.lower() == c2.lower() == key.lower() and {t1.lower(), t2.lower()} == tables
+               for t1, c1, t2, c2 in on_clause_key_pairs(on))
 
 
 def table_join_index(tables: dict) -> dict[tuple[str, str], str]:

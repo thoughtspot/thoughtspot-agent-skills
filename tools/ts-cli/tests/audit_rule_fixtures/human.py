@@ -786,3 +786,34 @@ H_INPUTS.update({f"h1_all_shapes_{k}": (lambda k=k: build_named_columns_model(
                  *H1_NAME_SHAPES[:k])) for k in (5, 10, 15, len(H1_NAME_SHAPES))})
 H_INPUTS.update({f"h2_length_{n}": (lambda n=n: build_description_model("d" * n))
                  for n in (1, 19, 20, 21, 399, 400, 401)})
+
+
+def human_mostly_hidden_columns() -> AuditContext:
+    """3 of 4 physical columns hidden, none feeding a formula (H11 MEDIUM)."""
+    from .ai import build_tml_col, build_tml_ctx
+    return build_tml_ctx(*[build_tml_col(f"H{i}", hidden=True) for i in range(3)],
+                         build_tml_col("V"))
+
+
+def human_hidden_columns_feed_formulas() -> AuditContext:
+    """3 of 4 physical columns hidden, each used by a formula: not counted (H11 silent)."""
+    ctx = human_mostly_hidden_columns()
+    ctx.models[0]["model"]["formulas"] = [
+        {"id": f"f{i}", "name": f"F{i}", "expr": f"[H{i}] * 2"} for i in range(3)]
+    return ctx
+
+
+def human_technical_column_visible() -> AuditContext:
+    """A visible column whose physical name is ETL plumbing (H12 LOW)."""
+    from .ai import build_tml_col, build_tml_ctx
+    col = build_tml_col("Load time")
+    col["column_id"] = "T::ETL_LOAD_TS"
+    return build_tml_ctx(col)
+
+
+def human_technical_column_hidden() -> AuditContext:
+    """The same column hidden (H12 silent)."""
+    ctx = human_technical_column_visible()
+    ctx.models[0]["model"]["columns"][0]["properties"]["is_hidden"] = True
+    return ctx
+

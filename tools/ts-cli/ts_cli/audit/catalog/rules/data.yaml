@@ -283,3 +283,87 @@
   examples:
     fires: {fixture: data_models_divergent_column_type, severity: MEDIUM}
     silent: {fixture: data_models_consistent_column_type}
+
+- id: D14
+  title: Rate-like column summed
+  evidence: heuristic
+  description: >-
+    A physical MEASURE column (a `column_id`, no `formula_id`) whose name, or the
+    column part of its `column_id`, reads as a non-additive quantity — price, rate,
+    ratio, pct/percent/percentage, avg/average, balance, unit cost, per unit, as a whole
+    word — and whose `aggregation` is SUM or unset (which sums). Summing a price or a
+    rate across rows gives a meaningless total. A name ending in id, key or code is not
+    a quantity. A name match, so MEDIUM at most.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: column_id, nonblank: true, truthy: true}
+        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - any:
+            - {not: {field: properties.aggregation, nonblank: true, truthy: true}}
+            - {field: properties.aggregation, regex: '^(?i:sum)\Z'}
+        - any:
+            - {field: name, regex: '(?i)(^|[_\s:])(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|balance|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
+            - {field: column_id, regex: '(?i)::(.*[_\s])?(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|balance|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
+        - {field: name, not_regex: '(?i)[_\s](id|key|code)$'}
+        - {field: column_id, not_regex: '(?i)[_\s](id|key|code)$'}
+  severity: MEDIUM
+  message: "'{name}' reads as a rate or price but is summed (aggregation SUM)"
+  remediation: Set the column's aggregation to AVERAGE, MIN or MAX (or none), or compute the measure as a ratio of sums in a formula
+  examples:
+    fires: {fixture: data_rate_column_summed, severity: MEDIUM}
+    silent: {fixture: data_rate_column_averaged}
+
+- id: D15
+  title: Duplicate Table-level joins
+  evidence: fact
+  description: >-
+    A Table whose `joins_with` holds two or more joins to the same destination
+    (`destination.fqn`, else name) on the same `on` (whitespace ignored). MEDIUM when
+    their type or cardinality differ: which one a Model takes decides the result. LOW
+    when they are identical copies. Two joins to one destination on different keys is
+    role-playing (order date and ship date) and is not reported.
+  categories: [D]
+  requires: [table_tml]
+  scope: table
+  aggregate:
+    mode: each
+    where: {field: "@duplicate_joins", nonblank: true, truthy: true}
+  severity: {field: "@duplicate_joins_conflict", map: {true: MEDIUM}, default: LOW}
+  message:
+    by_severity:
+      MEDIUM: "Duplicate joins with different type or cardinality: {@duplicate_joins}"
+      LOW: "Duplicate joins: {@duplicate_joins}"
+  remediation: Keep one join per destination and key; remove the copies from the Table
+  examples:
+    fires: {fixture: data_table_conflicting_duplicate_joins, severity: MEDIUM}
+    silent: {fixture: data_table_role_playing_joins}
+
+- id: D16
+  title: Join keys of different types
+  evidence: fact
+  description: >-
+    A join (inline, or referencing a Table's `joins_with`) whose `on` pairs two columns
+    whose warehouse types, read off their Table TMLs, are of different families —
+    string, integer, decimal, date/time, boolean — so the warehouse casts on every
+    query, or the join matches nothing. A key whose Table TML is not in scope has no
+    type and is not compared; nor, through the type lookup P6 shares, is a key of an
+    aliased table.
+  categories: [D, P]
+  requires: [model_tml, table_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@join_key_type_mismatches", nonblank: true, truthy: true}
+  severity: MEDIUM
+  message: "Join '{@join_from_name}' -> '{obj.with}' pairs keys of different types: {@join_key_type_mismatches}"
+  remediation: Cast one side in the warehouse (or a SQL View) so both keys share a type, then re-point the join
+  examples:
+    fires: {fixture: data_join_keys_different_types, severity: MEDIUM}
+    silent: {fixture: data_join_keys_same_family}
+

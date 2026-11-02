@@ -79,9 +79,9 @@ def test_missing_or_unknown_evidence_fails():
     assert evidence_problems(_rule(evidence="", status="retired"), PROFILES) == []
 
 
-HEURISTIC = {"S1", "S2", "S4", "S5", "H1", "H2", "H10", "D12"}
+HEURISTIC = {"S1", "S2", "S4", "S5", "H1", "H2", "H10", "D12", "D14", "H12"}
 MEASURE = {"A1", "A2", "A6", "D1", "D9", "P2", "P4", "P7", "P8", "P11", "P13", "P16",
-           "P17", "D7"}
+           "P17", "D7", "A7", "H11"}
 
 
 def test_shipped_catalog_classes():

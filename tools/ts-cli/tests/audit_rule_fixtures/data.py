@@ -710,3 +710,65 @@ D_INPUTS.update({f"duplicate_{key}_{a!r}_{b!r}":
                  (lambda key=key, a=a, b=b: build_duplicate_scalar_pair(key, a, b))
                  for key, (a, b) in (("name", (1, True)), ("name", (1, 1.0)),
                                      ("schemaStripe", (0, False)))})
+
+
+def data_rate_column_summed() -> AuditContext:
+    """A physical measure named like a price, aggregated by SUM (D14 MEDIUM)."""
+    from .ai import build_tml_col, build_tml_ctx
+    col = build_tml_col("UNIT_PRICE", "MEASURE", desc="Price of one unit")
+    col["properties"]["aggregation"] = "SUM"
+    return build_tml_ctx(col)
+
+
+def data_rate_column_averaged() -> AuditContext:
+    """The same column aggregated by AVERAGE: not summed (D14 silent)."""
+    ctx = data_rate_column_summed()
+    ctx.models[0]["model"]["columns"][0]["properties"]["aggregation"] = "AVERAGE"
+    return ctx
+
+
+def _orders_with_joins(*joins) -> AuditContext:
+    table = {"name": "ORDERS", "columns": [{"name": "CUST_ID", "db_column_name": "CUST_ID"}],
+             "joins_with": list(joins)}
+    return make_context(tables={"t-orders": {"guid": "t-orders", "table": table}})
+
+
+def _orders_customer_join(name, on="[ORDERS::CUST_ID] = [CUSTOMER::ID]", type_="INNER"):
+    return {"name": name, "destination": {"name": "CUSTOMER", "fqn": "t-customer"},
+            "on": on, "type": type_, "cardinality": "MANY_TO_ONE"}
+
+
+def data_table_conflicting_duplicate_joins() -> AuditContext:
+    """Two joins ORDERS -> CUSTOMER on the same keys, one INNER, one LEFT_OUTER (D15 MEDIUM)."""
+    return _orders_with_joins(_orders_customer_join("j1"),
+                              _orders_customer_join("j2", type_="LEFT_OUTER"))
+
+
+def data_table_role_playing_joins() -> AuditContext:
+    """Two joins ORDERS -> CUSTOMER on different keys: role-playing, not a duplicate (D15)."""
+    return _orders_with_joins(_orders_customer_join("j1"),
+                              _orders_customer_join("j2", on="[ORDERS::SHIP_TO] = [CUSTOMER::ID]"))
+
+
+def _typed_keys_ctx(left_type: str, right_type: str) -> AuditContext:
+    tables = {"t-o": {"table": {"name": "ORDERS", "columns": [
+        {"name": "CUST_ID", "db_column_properties": {"data_type": left_type}}]}},
+              "t-c": {"table": {"name": "CUST", "columns": [
+        {"name": "ID", "db_column_properties": {"data_type": right_type}}]}}}
+    model = {"guid": "m-1", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-o", "joins": [{
+            "name": "j1", "with": "CUST", "on": "[ORDERS::CUST_ID] = [CUST::ID]",
+            "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-c"}]}}
+    return make_context(models=[model], tables=tables)
+
+
+def data_join_keys_different_types() -> AuditContext:
+    """A VARCHAR key joined to an INT64 key (D16 MEDIUM)."""
+    return _typed_keys_ctx("VARCHAR", "INT64")
+
+
+def data_join_keys_same_family() -> AuditContext:
+    """INT32 joined to INT64: one family (D16 silent)."""
+    return _typed_keys_ctx("INT32", "INT64")
+

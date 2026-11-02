@@ -320,6 +320,9 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
+| BL-506 | Verify live whether a bare `last_value(col, ...)` / `first_value` formula surfaced with SUM aggregation gives a wrong number; if it does, add it as fact rule D13 (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
+| BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
+| BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
 | BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
 | BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
@@ -16182,5 +16185,51 @@ dimension.
 **Do.** Move `detect_fact_tables` onto `roles.table_roles` (deciding, with a test, whether
 formula measures should count there), re-run the to-Databricks golden tests, and record
 why `sv_build_model` stays separate if it does.
+
+**Target:** 2027-01-31.
+
+## BL-506 — verify whether a summed semi-additive formula gives a wrong number `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1), whose builder
+check found the premise unproven.
+
+**What.** G1's formula half: a formula `last_value(col, query_groups(), {date})` (or
+`first_value`) with no aggregation inside, surfaced by a column whose `aggregation` is SUM
+or unset. The repo's own note (`ts_cli/spotql_ops.py`) says formula `aggregation` is
+ignored in query generation, and summing per-group last values across accounts can be the
+correct semi-additive result, so a fact rule at MEDIUM would be a false fact without
+evidence. It fired once on the SE demo sample.
+
+**Do.** Build the shape on a demo Model, compare the generated SQL and totals with and
+without the SUM aggregation, and add rule D13 (id held for it) only if the number is wrong.
+
+**Target:** 2026-12-31.
+
+## BL-507 — the join-key type lookup misses aliased tables `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
+
+**What.** `AuditContext.column_types` keys warehouse types by the Model's alias (else
+name); a referencing join's `on`, read from the Table TML, names Tables
+(`[BASKETS_FACT::KEY]`). So every key of an aliased table reads as unknown even when its
+Table TML is loaded — P6 (string keys) and D16 (keys of different types) never see them,
+and aliased tables are the role-playing case where mismatches sit.
+
+**Do.** Resolve an `on` reference through the declaring model table's alias and name, test
+P6 and D16 on an aliased join, and re-pin P6 (`repin_findings.py --rule P6`).
+
+**Target:** 2026-12-31.
+
+## BL-508 — are redundant Model-over-Table joins worth a finding? `Tier 3`
+
+**Filed:** 2026-11-02. **Source:** roadmap PR 4.3, which narrowed G14 to duplicate
+Table-level joins (D15).
+
+**What.** A Model inline join whose `on` repeats a Table-level join is the norm on the SE
+demo sample (369 of 575 inline joins), so flagging it would be noise. Whether it ever
+causes harm (two definitions drifting apart) is unknown.
+
+**Do.** Decide with the product owner; if it matters, a finding only when the two
+definitions differ in type or cardinality, not when they repeat each other.
 
 **Target:** 2027-01-31.
