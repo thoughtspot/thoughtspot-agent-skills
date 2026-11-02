@@ -432,6 +432,53 @@ class TestRollbackCommand:
         assert [s["guid"] for s in out["skipped"]] == ["del-1"]
         assert len(out["succeeded"]) == 2 and not any(j["create_new"] for j in imports)
 
+    def test_a_backup_from_before_the_org_was_recorded_still_restores(self, tmp_path):
+        # A ts-cli <= 0.197.0 manifest has no `org` key; rolling it back with the same
+        # Org-scoped profile must not be refused as "taken in the default Org".
+        backup_dir = self._make_backup(tmp_path)
+        manifest_path = os.path.join(backup_dir, "manifest.json")
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        manifest.pop("org")
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f)
+        mock_client = self._fake_import_client()
+        mock_client.org = "12345"
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"])
+        assert result.exit_code == 0, _all_output(result)
+
+    def test_a_skipped_survivor_carries_a_restore_later_command_and_a_change_flag(self, tmp_path):
+        backup_dir = self._make_backup(tmp_path)
+        manifest_path = os.path.join(backup_dir, "manifest.json")
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        for o in manifest["objects"]:
+            o["modified"] = 5
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f)
+        mock_client = self._fake_import_client()
+
+        def fake_post(path, json=None, **kwargs):
+            resp = MagicMock()
+            if path.endswith("/metadata/search"):
+                resp.json.return_value = [{"metadata_id": "del-1", "metadata_header": {"modified": 9}}]
+                return resp
+            resp.json.return_value = [{"response": {"status": {"status_code": "OK"},
+                                                    "object": [{"header": {"id_guid": "n"}}]}}]
+            return resp
+
+        mock_client.post.side_effect = fake_post
+        with patch("ts_cli.commands.dependency.ThoughtSpotClient", return_value=mock_client), \
+             patch("ts_cli.commands.dependency.resolve_profile", return_value="test"):
+            result = runner.invoke(
+                app, ["dependency", "rollback", "--backup-dir", backup_dir, "--profile", "test"])
+        (skipped,) = json.loads(result.stdout)["skipped"]
+        assert "changed since the backup" in skipped["reason"]
+        assert skipped["restore_later"].endswith("--guid del-1 --profile test")
+
     def test_rollback_restores_nothing_when_the_existence_check_fails(self, tmp_path):
         backup_dir = self._make_backup(tmp_path)
         mock_client = self._fake_import_client()

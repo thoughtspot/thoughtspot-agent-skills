@@ -856,7 +856,10 @@ updating it in place at a GUID that no longer exists. Defaults to `false`.
 **Output:** the `manifest.json` contents as JSON to stdout (also written to
 `{out_dir}/ts_dep_backup_<timestamp>/manifest.json`, alongside one
 `{type}_{guid}_{name}.json` file per backed-up object). Backup dir path + counts go
-to stderr.
+to stderr. The manifest records `base_url` and `org` (the profile's configured Org, "" for
+the default), and each object entry its server `modified` time read **before** it was
+exported (null when that lookup failed) — `cascade-delete` compares it to detect a stale
+backup.
 
 #### `ts dependency rollback`
 
@@ -871,7 +874,10 @@ Restores roots first: each entry after every entry its TML references, then by t
 (Tables and SQL Views, Models, Views, Sets, Answers, Liveboards). Refuses a backup
 taken on another cluster or Org, or one that does not record its cluster. A DELETE entry
 whose original object still exists (a partial delete's survivor) is skipped, never
-re-created; if that check cannot run, nothing is restored. Do not re-run it after a partial restore: it would create a
+re-created; it is listed under `skipped` with a `restore_later` command (and flagged
+if it changed since the backup), because a delete still running may yet remove it. If
+that check cannot run, nothing is restored. A manifest from before the Org was recorded
+is checked on its cluster only. Do not re-run it after a partial restore: it would create a
 second copy of every deleted object it already restored. An entry with
 `intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
 (the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
@@ -979,7 +985,8 @@ column delete, an uploaded table) exits 1 with a message.
 **`cascade-delete` sends nothing** unless: the caller is an administrator; the plan
 names ONE GUID and `confirm` is exactly `"DELETE"`; the backup came from this cluster and
 Org, its source is `backup_source`, and every backup file is readable (else `BAD_BACKUP`);
-no Set or feedback would be removed unlisted (else `BLOCKED`); every object is visible to
+no Set or feedback would be removed unlisted, and nothing in scope is published into
+other Orgs, whose Sets the check cannot see (else `BLOCKED`); every object is visible to
 v2 search (else `NOT_VISIBLE`); each backed-up object's server `modified` time still
 equals the one `ts dependency backup` recorded before exporting it (else `STALE_BACKUP`);
 and a fresh preview, widened the same way, lists exactly the objects backed up for
@@ -993,7 +1000,9 @@ the same for a deleted object as for a live one with no dependents.
 `NOT_APPLIED` (with `server_response`; only for a definite error — a 4xx other than 408,
 or ThoughtSpot's own JSON 500), `UNKNOWN` (a timeout, a 408, a gateway or proxy error, or
 a 200, with nothing gone yet — the server may still be working; do not re-send),
-`REFUSED`, or one of the refusals above. `deleted_without_backup` names any object the server's answer
+`REFUSED` (only once existence checks confirm nothing went), or one of the refusals
+above. A failed preview of an object the source's preview listed reports `REFUSED` or
+`PREVIEW_FAILED` with `while_previewing` naming it. `deleted_without_backup` names any object the server's answer
 lists that the backup does not hold; `rollback` is the command to undo it. Exit 0 only
 for `APPLIED` on an HTTP 200 whose answer was readable and with every deleted object
 backed up. `dependency/purge` is deliberately not wrapped (unbounded scope).

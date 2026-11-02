@@ -22,7 +22,9 @@ answers `{"dependents": {"<guid>": []}}`, the same as a live object with no depe
 The preview also never names a deleted Model's or View's reusable Sets or its Spotter
 feedback, yet the delete removes them (PR #692 review, live 2026-11-02). They are found
 separately — Sets by the per-Model cohort listing, feedback by a FEEDBACK export — and
-refused (`attached_blockers`): there is no backup and restore path for them here.
+refused (`attached_blockers`): there is no backup and restore path for them here. That
+listing only sees the caller's Org, so an object published into other Orgs is refused
+too: its Sets there are invisible from here.
 
 PURE functions only — no network, no filesystem. The I/O shell is
 `ts_cli.commands.dependency_cascade`.
@@ -34,6 +36,9 @@ import io
 import json
 from typing import Any, Dict, Iterable, List, Optional, Set
 
+import yaml
+
+from ts_cli.publish_plan import published_org_ids
 from ts_cli.report.resolver import looks_like_guid
 
 CASCADE_PATH = "/callosum/v1/dependency/delete-with-dependents"
@@ -196,20 +201,32 @@ def feedback_count(status: Optional[int], body: Any) -> Optional[int]:
     if status != 200 or not isinstance(body, list) or not body or not isinstance(body[0], dict):
         return None
     try:
-        doc = json.loads(body[0].get("edoc") or "")
-    except (TypeError, ValueError):
+        doc = yaml.safe_load(body[0].get("edoc") or "")     # JSON or YAML text
+    except (TypeError, ValueError, yaml.YAMLError):
+        return None
+    if not isinstance(doc, dict):
         return None
     entries = ((doc or {}).get("nls_feedback") or {}).get("feedback")
     return len(entries) if isinstance(entries, list) else None
 
 
 def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
-                      feedback: Dict[str, Optional[int]]) -> List[Dict[str, Any]]:
+                      feedback: Dict[str, Optional[int]],
+                      headers: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Sets and feedback the cascade would delete without naming them. Each is a reason to
-    refuse; so is an owner that could not be checked. `sets` is `discover_sets` output."""
+    refuse; so is an owner that could not be checked. `sets` is `discover_sets` output;
+    `headers` maps each owner to its v2 `metadata_header` (None or absent = unread). An
+    owner published into other Orgs is refused: the Set listing sees only the caller's
+    Org, so Sets built on it there would go unlisted."""
     out: List[Dict[str, Any]] = []
     incomplete = set(sets.get("incomplete") or [])
+    headers = headers or {}
     for g in sorted(owners):
+        header = headers.get(g)
+        if not isinstance(header, dict):
+            out.append({"owner": g, "kind": "PUBLISHED_UNCHECKED"})
+        elif published_org_ids(header):
+            out.append({"owner": g, "kind": "PUBLISHED", "org_ids": published_org_ids(header)})
         if g in incomplete or g not in (sets.get("sets") or {}):
             out.append({"owner": g, "kind": "SETS_UNCHECKED"})
         out += [{"owner": g, "kind": "SET", "guid": s.get("guid"), "name": s.get("name")}
@@ -225,13 +242,14 @@ def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
 def definite_failure(status: Optional[int], body: Any) -> bool:
     """True when an error answer proves the server is not still working on the delete: a
     4xx other than 408, or a 500 carrying ThoughtSpot's own JSON error (14009
-    FAILED_TO_COMMIT, live 2026-10-30). A timeout, 408, gateway error or a proxy's HTML
-    page proves nothing — the server may still be deleting. A 200 is not a failure."""
+    FAILED_TO_COMMIT, live 2026-10-30 — recognised by the incident id ThoughtSpot puts in
+    every error). A timeout, 408, gateway error, or a proxy's HTML or JSON page proves
+    nothing — the server may still be deleting. A 200 is not a failure."""
     if status is None or status < 400:
         return False
     if status < 500:
         return status != 408
-    return status == 500 and isinstance(body, dict)
+    return status == 500 and isinstance(body, dict) and "incident_id_guid" in json.dumps(body)
 
 
 def not_available(status: Optional[int], body: Any) -> bool:

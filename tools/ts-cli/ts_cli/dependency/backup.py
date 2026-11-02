@@ -199,13 +199,14 @@ def cluster_mismatch(manifest: Dict[str, Any], base_url: str, org: str) -> str:
 
     A backup restored or relied on elsewhere binds to objects that are not the ones it
     holds. A manifest with no `base_url` cannot be checked, so it is refused rather than
-    trusted. A manifest written before the Org was recorded is read as the default Org.
+    trusted. A manifest written before the Org was recorded (no `org` key) passes on the
+    URL alone: reading it as the default Org would refuse the very profile that took it.
     """
     if not manifest.get("base_url"):
         return "The backup does not record which cluster it came from."
     if _norm_url(manifest["base_url"]) != _norm_url(base_url):
         return f"The backup was taken from {manifest['base_url']}, not {base_url}."
-    if str(manifest.get("org") or "") != str(org or ""):
+    if "org" in manifest and str(manifest.get("org") or "") != str(org or ""):
         return (f"The backup was taken in Org '{manifest.get('org') or 'default'}', not "
                 f"'{org or 'default'}'.")
     return ""

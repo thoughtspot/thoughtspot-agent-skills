@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -264,13 +265,24 @@ def _export_one(client: ThoughtSpotClient, obj: dict) -> List[dict]:
 def present_objects(client: ThoughtSpotClient, typed: Dict[str, str]) -> Dict[str, Any]:
     """GUID → server `modified` (ms) for each object in `typed` (GUID → v2 metadata type)
     that exists. An absent GUID is gone or not visible (live 2026-10-30: v2 search returns
-    nothing for a deleted object, one row for a live one). Raises on a failed search."""
+    nothing for a deleted object, one row for a live one). Raises on a failed search.
+
+    Hidden and incomplete objects are included: a survivor broken by a partial delete
+    must not read as gone. A deleted object stays absent with both flags (live
+    2026-11-02)."""
+    return {g: (h or {}).get("modified") for g, h in object_headers(client, typed).items()}
+
+
+def object_headers(client: ThoughtSpotClient, typed: Dict[str, str]) -> Dict[str, Any]:
+    """GUID → v2 `metadata_header` for each object in `typed` that exists (see
+    `present_objects`). Raises on a failed search."""
     if not typed:
         return {}
     rows = client.post("/api/rest/2.0/metadata/search", json={
         "metadata": [{"identifier": g, "type": t} for g, t in typed.items()],
-        "record_size": -1, "include_headers": True}).json()
-    return {r.get("metadata_id"): (r.get("metadata_header") or {}).get("modified")
+        "record_size": -1, "include_headers": True,
+        "include_hidden_objects": True, "include_incomplete_objects": True}).json()
+    return {r.get("metadata_id"): r.get("metadata_header") or {}
             for r in rows if isinstance(r, dict) and r.get("metadata_id") in typed}
 
 
@@ -550,20 +562,27 @@ def _rollback_one_entry(client: ThoughtSpotClient, entry: dict, results: Dict[st
 
 
 def _skip_still_present(client: ThoughtSpotClient, entries: List[dict],
-                        results: Dict[str, object]) -> List[dict]:
+                        results: Dict[str, object], backup_dir: str, profile: str) -> List[dict]:
     """Drop DELETE entries whose original object still exists — re-creating one would make
-    a duplicate (after a PARTIAL cascade delete, the survivors were never deleted). They
-    are listed in `results["skipped"]`. Exits, restoring nothing, if the check fails."""
+    a duplicate (after a PARTIAL cascade delete, the survivors were not deleted). They are
+    listed in `results["skipped"]` with a command to restore them later: if a delete may
+    still be running, a skipped object can still go. One changed since its backup was
+    taken is flagged. Exits, restoring nothing, if the check fails."""
     deletes = [e for e in entries if e.get("intent") == "DELETE"]
     try:
-        alive = set(present_objects(client, _v2_types(deletes)))
+        alive = present_objects(client, _v2_types(deletes))
     except (Exception, SystemExit) as exc:
         raise SystemExit(f"Could not check which deleted objects still exist ({exc}). "
                          "Nothing was restored.")
     for e in deletes:
         if e.get("guid") in alive:
-            results["skipped"].append({"guid": e.get("guid"), "name": e.get("name"),
-                                       "reason": "still exists; not re-created"})
+            changed = e.get("modified") is not None and alive[e["guid"]] != e["modified"]
+            results["skipped"].append({
+                "guid": e.get("guid"), "name": e.get("name"),
+                "reason": "still exists; not re-created"
+                          + ("; changed since the backup" if changed else ""),
+                "restore_later": f"ts dependency rollback --backup-dir {shlex.quote(backup_dir)} "
+                                 f"--guid {e.get('guid')} --profile {shlex.quote(profile)}"})
             print(f"  - Skipped: {e.get('name')} — still exists, not re-created", file=sys.stderr)
     return [e for e in entries if not (e.get("intent") == "DELETE" and e.get("guid") in alive)]
 
@@ -648,7 +667,7 @@ def rollback_cmd(
                          "backup was taken with.")
 
     results: Dict[str, object] = {"succeeded": [], "failed": [], "new_guids": {}, "skipped": []}
-    ordered = _skip_still_present(client, ordered, results)
+    ordered = _skip_still_present(client, ordered, results, backup_dir, resolved_profile)
 
     for entry in ordered:
         _rollback_one_entry(client, entry, results)

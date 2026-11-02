@@ -327,6 +327,9 @@ are roughly ordered by value÷effort.
 | BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
 | BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
+| BL-510 | `ts dependency apply-change` exits 0 when objects fail, so a caller reading the exit code takes a partly applied REMOVE/REPOINT for a clean one | 2026-11-30 |
+| BL-511 | Cascade delete (mode D) refuses a Model with Sets, Spotter feedback or publication instead of backing them up and restoring them; AI memory and data-model instructions are neither checked nor restored | 2026-12-15 |
+| BL-512 | `ts dependency backup`/`rollback`/`cascade-delete` compare the profile's configured Org, not the session's actual Org | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -16310,4 +16313,33 @@ restored Model's new GUID. Then turn the refusal into a listing on the D3/D5 scr
 check them for existence after the delete. Verify live on a throwaway Model with one Set
 and one feedback entry, delete and roll back.
 
+Same work, found by the independent review of the fix:
+- **Published objects** are refused too, because the Set listing sees only the caller's
+  Org. Running the listing per Org would lift that.
+- **AI memory** (`ai/memory/export`) and **data-model instructions** (`ai/instructions/get`)
+  hang off the Model as well. Rollback cannot carry them to the restored Model's new
+  GUID, and today they are neither checked nor listed; D5 names them as not restored.
+- **A column delete** does not check its surviving owner. A Set or feedback that only
+  references the column in its body (not as its anchor) is unverified;
+  `report/impact_probes.fetch_business_terms_and_ai_memory` already finds feedback and
+  AI memory that name a column.
+
 **Target:** 2026-12-15.
+
+## BL-512 — dependency backups record the configured Org, not the session's `Tier 2`
+
+**Filed:** 2026-11-02. **Source:** the independent review of the PR #692 fixes.
+
+**Why it matters.** `ts dependency backup` records `client.org` (the profile's `org`/`org_id`,
+or `TS_ORG`). `rollback` and `cascade-delete` refuse a different one. But an Org given as a
+name is silently ignored by `auth/token/full` (`commands/share.py`), and a profile with
+no Org records `""` whichever Org the token lands in. So two runs can be in different
+Orgs while the check passes. In the wrong Org, `rollback`'s still-exists check sees none
+of the originals and re-creates everything there. `cascade-delete` is additionally
+protected by resolving the GUID first.
+
+**Do.** Record the session's `current_org.id` from `auth/session/user` (as
+`commands/share.py` `assert_org_context` and `migrate/discover.py` do), compare that, and
+keep the configured value only as a fallback for older manifests.
+
+**Target:** 2026-12-31.

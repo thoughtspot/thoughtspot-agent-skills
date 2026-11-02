@@ -14,8 +14,9 @@ fresh token: the server rejected it before doing any work).
 
 The scope is the union of the source's preview and the preview of every Table, Model or
 View that preview lists, repeated until nothing new appears: whether one preview holds
-the full closure of a deep graph is unproven (open item #26), so each extra preview is
-cheap insurance.
+the full closure of a deep graph is unproven (open item #26). Each extra preview costs a
+server computation (minutes on a large object); that is the price of not trusting one
+answer for a delete.
 What it did is decided by checking which objects still exist (v2 `metadata/search`) —
 never from the preview, which answers the same for a deleted object as for a live one
 with no dependents.
@@ -33,7 +34,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import typer
 
 from ts_cli.client import ThoughtSpotClient, resolve_profile
-from ts_cli.commands.dependency import app, _profile_option, present_objects
+from ts_cli.commands.dependency import app, _profile_option, object_headers, present_objects
 from ts_cli.dependency.backup import V2_TYPE_MAP, cluster_mismatch
 from ts_cli.dependency.cascade import (
     CASCADE_PATH,
@@ -167,8 +168,18 @@ def _object_and_owner(desc, ref: str, source_type: str) -> Tuple[str, Dict[str, 
     return desc.guid, owner
 
 
-def _preview_or_exit(client, source_type: str, guid: str) -> Dict[str, Any]:
+def _preview_or_exit(client, source_type: str, guid: str,
+                     widening: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """One preview, or exit. `widening` is the listed object whose own preview widens the
+    scope; a failure there is reported against it, not against the source."""
     status, body = _post(client, source_type, guid, apply=False)
+    if widening and status != 200:
+        _emit({"status": "REFUSED" if status == 400 and _refusal(body) else "PREVIEW_FAILED",
+               "http_status": status, "details": _refusal(body) or str(body)[:500],
+               "while_previewing": {"guid": guid, "name": widening.get("name"),
+                                    "type": widening.get("type")},
+               "note": "The dry run of an object the delete would remove (not the source's own) "
+                       "failed; the full scope is unknown. Nothing was changed."}, ok=False)
     if not_available(status, body):
         _emit({"status": "NOT_AVAILABLE", "details": str(body)[:500],
                "note": "Cascade delete is switched off on this cluster (API_NOT_ALLOWED). "
@@ -190,12 +201,12 @@ def _scope(client, source_type: str, guid: str) -> Tuple[List[Dict[str, Any]], s
     the preview of each Table, Model or View it lists, until nothing new appears — and the
     source preview's CSV."""
     found: Dict[str, Dict[str, Any]] = {}
-    queue = [(source_type, guid)]
+    queue: List[Tuple[str, str, Optional[Dict[str, Any]]]] = [(source_type, guid, None)]
     seen = {guid}
     csv_text = None
     while queue:
-        typ, g = queue.pop(0)
-        preview = _preview_or_exit(client, typ, g)
+        typ, g, listed = queue.pop(0)
+        preview = _preview_or_exit(client, typ, g, listed)
         csv_text = preview["csv"] if csv_text is None else csv_text
         for o in preview["objects"]:
             if o["guid"] == guid:
@@ -203,7 +214,7 @@ def _scope(client, source_type: str, guid: str) -> Tuple[List[Dict[str, Any]], s
             found.setdefault(o["guid"], o)
             if o["type"] in OWNER_TYPES and o["guid"] not in seen:
                 seen.add(o["guid"])
-                queue.append(("LOGICAL_TABLE", o["guid"]))
+                queue.append(("LOGICAL_TABLE", o["guid"], o))
     return list(found.values()), csv_text or ""
 
 
@@ -229,15 +240,20 @@ def _attached(client, objects: List[Dict[str, Any]], guid: str, source_type: str
     names = {o["guid"]: o.get("name") or "" for o in objects}
     names[guid] = source_name
     sets = discover_sets(client, [{"guid": g, "name": names.get(g, "")} for g in sorted(owners)])
-    blockers = attached_blockers(owners, sets, {g: _feedback(client, g) for g in owners})
+    try:
+        headers = object_headers(client, {g: "LOGICAL_TABLE" for g in owners})
+    except (Exception, SystemExit):
+        headers = {}
+    blockers = attached_blockers(owners, sets, {g: _feedback(client, g) for g in owners}, headers)
     return [{**b, "owner_name": names.get(b["owner"], "")} for b in blockers]
 
 
 _BLOCKED = ("The delete would also remove the Sets or Spotter feedback listed in "
-            "'attached' (or they could not be checked), and the server's preview does not "
+            "'attached' (or they could not be checked, or an object is PUBLISHED into other "
+            "Orgs, whose Sets this check cannot see), and the server's preview does not "
             "list them, so they cannot be backed up or restored here. Nothing was changed. "
-            "Back up and remove them first (or move them to another Model), then run the "
-            "preview again.")
+            "Back up and remove them first (or move them to another Model, or unpublish), "
+            "then run the preview again.")
 
 
 @app.command("cascade-preview")
@@ -356,7 +372,8 @@ def _report_after_delete(client, result: Dict[str, Any], guid: str, source_type:
                          status: Optional[int], body: Any, before: Set[str],
                          typed: Dict[str, str], manifest: Dict[str, Any]) -> None:
     """The delete has been sent: decide what happened from which objects still exist,
-    always print a status, never re-send."""
+    always print a status, never re-send. A server refusal reads as REFUSED only once
+    the existence check confirms nothing went."""
     expected: Set[str] = before | {guid}
     try:
         gone = (set(typed) - set(present_objects(client, typed))) & expected
@@ -366,6 +383,10 @@ def _report_after_delete(client, result: Dict[str, Any], guid: str, source_type:
                        "checked. Do NOT run the delete again. Run cascade-preview and check "
                        "the objects before anything else."}, ok=False)
     outcome = classify_gone(expected, gone)
+    if outcome == "NOT_APPLIED" and status == 400 and _refusal(body):
+        _emit({**result, "status": "REFUSED", "details": _refusal(body),
+               "note": "A ThoughtSpot rule blocks this delete. Every object still exists."},
+              ok=False)
     if outcome == "NOT_APPLIED" and not definite_failure(status, body):
         outcome = "UNKNOWN"     # nothing proves the server stopped: it may still be working
     try:
@@ -420,7 +441,4 @@ def cascade_delete_cmd(
         "source": {"guid": guid, "type": source_type}, "backup_dir": backup_dir,
         "rollback": f"ts dependency rollback --backup-dir {shlex.quote(backup_dir)} "
                     f"--profile {shlex.quote(resolved_profile)}"}
-    if status == 400 and _refusal(body):
-        _emit({**result, "status": "REFUSED", "details": _refusal(body),
-               "note": "A ThoughtSpot rule blocks this delete. Nothing was deleted."}, ok=False)
     _report_after_delete(client, result, guid, source_type, status, body, before, typed, manifest)

@@ -17,7 +17,7 @@ rollback would have passed silently. It now drives the three subcommands directl
       the backup directory it wrote to disk.
   3b. ts dependency cascade-preview   — NON-destructive dry run of a cascade delete of the
       target model (administrators only; skipped for any other profile). Passes on a
-      preview whose backup_source is the model, or on a server business-rule REFUSED.
+      preview whose backup_source is the model, or on REFUSED / BLOCKED / NOT_AVAILABLE.
       The cascade delete itself has no leg here: it was live-tested by hand on
       throwaway objects (references/open-items.md #26).
   4.  ts dependency apply-change      — DESTRUCTIVE. Gated behind an explicit opt-in
@@ -254,7 +254,10 @@ def run_smoke_test(ts_profile: str, model_name: str | None, model_guid: str | No
         except json.JSONDecodeError as e:
             raise RuntimeError(f"cascade-preview gave no JSON (exit {proc.returncode}): "
                                f"{proc.stderr.strip()[:300]}") from e
-        if parsed.get("status") == "REFUSED":       # a server rule blocks it — valid answer
+        # Valid answers that are not a preview: a server rule blocks it (REFUSED), the
+        # Model carries Sets/feedback or is published (BLOCKED), or the cluster has the
+        # API switched off (NOT_AVAILABLE). All print JSON and exit 1.
+        if parsed.get("status") in ("REFUSED", "BLOCKED", "NOT_AVAILABLE"):
             return parsed
         if proc.returncode != 0 or parsed.get("status") != "PREVIEW":
             raise RuntimeError(f"cascade-preview failed: {proc.stderr.strip()[:300]}")

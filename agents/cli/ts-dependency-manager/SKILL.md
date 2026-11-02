@@ -484,7 +484,10 @@ ts dependency cascade-preview "{name or GUID}" --column "{column name}" --profil
 A dry run of a large object can take several minutes (250–300 s was seen live); the
 command waits up to 15 minutes per dry run and never repeats one that timed out. It also
 runs the dry run of every Table, Model and View the first one lists, and adds anything
-new they name, so a big tree takes several of those.
+new they name, so a big tree takes several of those. **Run D3 and D6 so they cannot be cut
+off part-way:** in the background, or with the longest timeout your shell tool allows (a
+Claude Code foreground command stops at 10 minutes). If D6 is cut off after it started,
+treat the outcome as `UNKNOWN` below — never re-run it.
 
 - `"status": "REFUSED"` (exit 1) → a ThoughtSpot rule blocks it, e.g. *Deleting columns
   linked to filters is not allowed* — expect this for most large trees. Show `details`
@@ -495,9 +498,13 @@ new they name, so a big tree takes several of those.
 - `"status": "BLOCKED"` (exit 1) → deleting a Table, Model or View also deletes its
   reusable **Sets** and its **Spotter feedback**, but the server's dry run does not list
   them, so this mode cannot back them up or restore them. Show every `attached[]` entry
-  (`kind` SET with its name, FEEDBACK with its `count`, or `*_UNCHECKED` — the check
-  itself failed) with its `owner_name`. The user must back up and remove them, or move
-  them to another Model, then start again at D3. Stop.
+  (`kind` SET with its name, FEEDBACK with its `count`, PUBLISHED with its `org_ids` —
+  published into other Orgs, whose Sets this check cannot see — or `*_UNCHECKED`, the
+  check itself failed) with its `owner_name`. The user must back up and remove them, move
+  them to another Model, or unpublish, then start again at D3. Stop.
+- `"status": "PREVIEW_FAILED"` or `REFUSED` with a `while_previewing` object → the dry
+  run of an object the delete would remove (not the source) failed, so the full scope is
+  unknown. Name that object, show `details`, and stop.
 - Any other non-zero exit → show the message and stop. It also covers objects this mode
   does not handle: a column delete that reaches a Set, and uploaded tables.
 - Otherwise show the user, **in the chat**, one row per object in `objects[]`: type,
@@ -543,6 +550,7 @@ GUIDs, and re-links them to each other. It does NOT bring back:
   - sharing and ownership: restored objects belong to the administrator who runs the
     rollback and are shared with nobody until re-shared
   - alerts, column aliases and column security rules on the deleted objects
+  - Spotter AI memory (rules, recipes) and data-model instructions on a deleted Model
   - bookmarks, embeds and anything outside this list that used the old GUIDs
 
 Type DELETE to continue, or anything else to cancel:
@@ -571,7 +579,7 @@ once, then checks which objects still exist. Read `status` from the JSON:
 | `APPLIED` | Every object is confirmed gone | List every GUID in `deleted`. If `deleted_without_backup` is not empty, say under a heading **Deleted WITHOUT a backup** that rollback cannot restore those. If the exit code is 1 with `APPLIED`, say the deletion is confirmed but the server's answer was unusual (`response_readable: false`, or `http_status` other than 200) |
 | `PARTIAL` | Some objects are gone, some remain | List `deleted` and `still_present`. Do **not** run the delete again; offer Step 11 rollback straight away — it re-creates only what is gone and lists the survivors under `skipped` |
 | `NOT_APPLIED` | The server answered with a definite error and every object still exists | Show `server_response`. Known case: on some builds a cascade that includes a **Liveboard** fails with `Restrict delete failed` (open-items #27) |
-| `UNKNOWN` | Timed out, a gateway or proxy error, or no clear answer — and nothing is gone yet; or existence could not be checked | Do **not** run the delete again — the server may still be working. Wait, run D3 again and compare, then offer rollback for whatever is gone |
+| `UNKNOWN` | Timed out, a gateway or proxy error, or no clear answer — and nothing is gone yet; or existence could not be checked | Do **not** run the delete again — the server may still be working. Wait until two D3 runs a few minutes apart agree, then offer rollback for whatever is gone. A rollback run while the server is still deleting skips what has not gone yet; each `skipped` entry carries a `restore_later` command for that case |
 | `REFUSED` | A ThoughtSpot rule blocked it | Nothing was deleted. Show `details` word for word |
 | `NOT_AVAILABLE` / `BLOCKED` | As in D3 | Nothing was deleted. Handle as in D3 |
 | `NOT_VISIBLE` | The existence check cannot see the objects in `not_visible` (another Org, or a type it cannot look up), so it could not confirm what a delete did | Nothing was deleted. Stop; this mode cannot safely delete them |
@@ -1331,11 +1339,18 @@ result = subprocess.run(
      f"{flags} --profile '{profile_name}'"],
     capture_output=True, text=True,
 )
-rollback_results = (json.loads(result.stdout) if result.stdout.strip()
-                    else {"succeeded": [], "failed": [], "new_guids": {}, "skipped": []})
+if not result.stdout.strip():
+    # A refusal before anything is restored (another cluster or Org, a backup with no
+    # cluster recorded, or the still-exists check failing) prints no JSON: show stderr
+    # and stop — nothing was restored.
+    raise SystemExit(f"Rollback did not run: {result.stderr.strip()}")
+rollback_results = json.loads(result.stdout)
 ```
 
-Show rollback results, including any `skipped` objects (they were never deleted). If `new_guids` is non-empty, surface the `old_guid → new_guid`
+Show rollback results, including any `skipped` objects: they still existed when the
+rollback ran, so they were not re-created. If the reason says "changed since the backup",
+or a delete may still have been running (D6 `UNKNOWN`), check them later and use their
+`restore_later` command if they are gone by then. If `new_guids` is non-empty, surface the `old_guid → new_guid`
 mapping table so the user can manually reattach any external references (restored deletes
 always receive new GUIDs). If any entries are in `failed`, give the user the backup file
 path (from the manifest) for manual restoration via the ThoughtSpot UI TML editor. Do not

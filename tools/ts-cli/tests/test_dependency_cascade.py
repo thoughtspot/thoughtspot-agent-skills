@@ -170,7 +170,8 @@ class TestPureLogic:
         (None, None, False), (200, {}, False), (408, "", False), (502, "<html>", False),
         (524, "<html>", False), (500, "<html>proxy</html>", False), (503, {"x": 1}, False),
         (400, {"error_code": "METADATA_ERROR"}, True), (403, "", True), (404, "", True),
-        (500, {"code": 14009}, True)])
+        (500, {"error": {"message": {"debug": {"code": 14009, "incident_id_guid": "i-1"}}}}, True),
+        (500, {"message": "upstream connect error"}, False)])
     def test_definite_failure(self, status, body, want):
         assert c.definite_failure(status, body) is want
 
@@ -191,11 +192,17 @@ class TestPureLogic:
     def test_attached_blockers(self):
         sets = {"sets": {M1: [{"guid": NEW, "name": "Top customers"}], M2: []},
                 "incomplete": [SRC]}
-        out = c.attached_blockers({M1, M2, SRC}, sets, {M1: 0, M2: 3, SRC: None})
+        headers = {M1: {"orgIds": [0], "ownerOrgId": 0}, M2: {"orgIds": [0, 7], "ownerOrgId": 0}}
+        out = c.attached_blockers({M1, M2, SRC}, sets, {M1: 0, M2: 3, SRC: None}, headers)
         kinds = {(b["owner"], b["kind"]) for b in out}
-        assert kinds == {(M1, "SET"), (M2, "FEEDBACK"), (SRC, "SETS_UNCHECKED"),
-                         (SRC, "FEEDBACK_UNCHECKED")}
-        assert c.attached_blockers({M1}, {"sets": {M1: []}}, {M1: 0}) == []
+        assert kinds == {(M1, "SET"), (M2, "FEEDBACK"), (M2, "PUBLISHED"), (SRC, "SETS_UNCHECKED"),
+                         (SRC, "FEEDBACK_UNCHECKED"), (SRC, "PUBLISHED_UNCHECKED")}
+        assert [b["org_ids"] for b in out if b["kind"] == "PUBLISHED"] == [[7]]
+        assert c.attached_blockers({M1}, {"sets": {M1: []}}, {M1: 0}, {M1: {}}) == []
+
+    def test_feedback_count_reads_a_yaml_edoc(self):
+        edoc = "nls_feedback:\n  feedback:\n  - id: '1'\n"
+        assert c.feedback_count(200, [{"edoc": edoc}]) == 1
 
     @pytest.mark.parametrize("resp", [
         {"dependents": {SRC: [{"name": "no id"}]}, "csv": ""},
@@ -233,7 +240,8 @@ class FakeClient:
     from `present` (GUID → modified), which becomes `after_apply` once the delete is sent;
     `search_fails_after_apply` makes it raise. The cohort listing answers `sets[guid]`
     (a list of rows, or an Exception class to raise); the FEEDBACK export answers
-    `feedback[guid]` entries, none by default."""
+    `feedback[guid]` entries, none by default. With `present` left out, every searched
+    object exists (the preview-only default); `published[guid]` adds Org ids."""
 
     ROOTS = (SRC, COL, OWNER)
 
@@ -241,9 +249,10 @@ class FakeClient:
                  after_apply: Optional[Dict[str, int]] = None, base_url: str = BASE,
                  search_fails_after_apply: bool = False, sub: Optional[Dict[str, Any]] = None,
                  sets: Optional[Dict[str, Any]] = None, feedback: Optional[Dict[str, int]] = None,
-                 org: str = ""):
+                 org: str = "", published: Optional[Dict[str, List[int]]] = None):
         self.user, self.script, self.base_url, self.org = user, list(script), base_url, org
-        self.present = dict(present if present is not None else {})
+        self.present = None if present is None else dict(present)
+        self.published = published or {}
         self.after_apply, self.search_fails = after_apply, search_fails_after_apply
         self.sub, self.sets, self.feedback = sub or {}, sets or {}, feedback or {}
         self.cascade_calls: List[dict] = []
@@ -268,9 +277,13 @@ class FakeClient:
         assert path == "/api/rest/2.0/metadata/search"
         if self.applies and self.search_fails:
             raise SystemExit(1)
-        return _Resp(200, [{"metadata_id": m["identifier"],
-                            "metadata_header": {"modified": self.present[m["identifier"]]}}
-                           for m in json["metadata"] if m["identifier"] in self.present])
+        assert json.get("include_hidden_objects") and json.get("include_incomplete_objects")
+        present = (self.present if self.present is not None
+                   else {m["identifier"]: OLD for m in json["metadata"]})
+        return _Resp(200, [{"metadata_id": g, "metadata_header": {
+                               "modified": present[g], "ownerOrgId": 0,
+                               "orgIds": [0] + self.published.get(g, [])}}
+                           for g in (m["identifier"] for m in json["metadata"]) if g in present])
 
     def request(self, method, path, **kw):
         if path == "/api/rest/2.0/metadata/tml/export":
@@ -278,7 +291,8 @@ class FakeClient:
         assert (method, path) == ("POST", c.CASCADE_PATH)
         guid = json.loads(kw["data"]["id"])[0]
         if kw["data"]["apply_changes"] == "false" and guid not in self.ROOTS:
-            return _Resp(200, self.sub.get(guid, {"dependents": {guid: []}, "csv": CSV_HEAD + "\n"}))
+            answer = self.sub.get(guid, {"dependents": {guid: []}, "csv": CSV_HEAD + "\n"})
+            return answer if isinstance(answer, _Resp) else _Resp(200, answer)
         self.cascade_calls.append(kw)
         if kw["data"]["apply_changes"] == "true" and self.after_apply is not None:
             self.present = dict(self.after_apply)
@@ -505,7 +519,7 @@ class TestDeleteCommand:
 
     def test_500_with_everything_present_is_not_applied(self, tmp_path):
         # live 2026-10-30: a cascade including a Liveboard failed this way; nothing deleted
-        body = {"code": 14009, "debug": "FAILED_TO_COMMIT ... Restrict delete failed for edge=2"}
+        body = {"error": {"message": {"debug": {"code": 14009, "incident_id_guid": "i-1", "debug": "FAILED_TO_COMMIT ... Restrict delete failed for edge=2"}}}}
         fake = FakeClient(ADMIN, [_Resp(200, _preview()), _Resp(500, body)],
                           present=ALL, after_apply=ALL)
         r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path)))
@@ -632,10 +646,11 @@ class TestReviewFixes:
         assert fake.applies == []
 
     def test_an_object_the_existence_check_cannot_see_blocks_the_delete(self, tmp_path):
-        fake = FakeClient(ADMIN, [_Resp(200, _preview())], present={SRC: OLD, M1: OLD})
-        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path)))
+        prev = _preview(deps=[_dep(M1, "A"), _dep(LB, "LB", "PINBOARD_ANSWER_BOOK", None)])
+        fake = FakeClient(ADMIN, [_Resp(200, prev)], present={SRC: OLD, M1: OLD})
+        r = _run(["cascade-delete"], fake, _plan(_backup(tmp_path, deletes=(M1, LB, SRC))))
         out = json.loads(r.stdout)
-        assert r.exit_code == 1 and out["status"] == "NOT_VISIBLE" and out["not_visible"] == [M2]
+        assert r.exit_code == 1 and out["status"] == "NOT_VISIBLE" and out["not_visible"] == [LB]
         assert fake.applies == []
 
     def test_a_backup_without_recorded_times_is_stale(self, tmp_path):
@@ -681,3 +696,31 @@ class TestReviewFixes:
         fake = FakeClient(ADMIN, [_Resp(404, body)])
         r = _run(["cascade-preview", SRC], fake)
         assert r.exit_code == 1 and json.loads(r.stdout)["status"] == "NOT_AVAILABLE"
+
+
+class TestSecondReviewFixes:
+    """The independent review of the PR #692 fixes."""
+
+    def test_an_object_published_into_other_orgs_blocks(self):
+        # the Set listing sees only the caller's Org: another Org's Sets would go unlisted
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], published={M2: [7]})
+        out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
+        assert out["status"] == "BLOCKED"
+        assert [(b["owner"], b["kind"], b["org_ids"]) for b in out["attached"]] == [(M2, "PUBLISHED", [7])]
+
+    def test_a_refusal_after_the_delete_is_sent_is_checked_against_existence(self, tmp_path):
+        body = {"error_code": "METADATA_ERROR", "details": "Deleting columns linked to filters is not allowed"}
+        fake = FakeClient(ADMIN, [_Resp(200, _preview()), _Resp(400, body)], present=ALL, after_apply={})
+        out = json.loads(_run(["cascade-delete"], fake, _plan(_backup(tmp_path))).stdout)
+        assert out["status"] == "APPLIED" and out["deleted"] == sorted([SRC, M1, M2])
+
+    @pytest.mark.parametrize("answer,status", [
+        (_Resp(400, {"error_code": "METADATA_ERROR", "details": "linked to filters"}), "REFUSED"),
+        (_Resp(500, {"error": {"message": {"debug": {"code": 14009, "incident_id_guid": "i"}}}}),
+         "PREVIEW_FAILED")])
+    def test_a_widening_preview_failure_names_the_object(self, answer, status):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], sub={M1: answer})
+        r = _run(["cascade-preview", SRC], fake)
+        out = json.loads(r.stdout)
+        assert r.exit_code == 1 and out["status"] == status
+        assert out["while_previewing"] == {"guid": M1, "name": "Model A", "type": "MODEL"}
