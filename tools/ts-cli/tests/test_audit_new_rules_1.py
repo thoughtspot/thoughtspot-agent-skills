@@ -109,3 +109,28 @@ def test_a8_lists_the_terms():
                         build_tml_col("A", synonyms=["x"]), build_tml_col("B", synonyms=["X"]))
     (f,) = run_rule(ctx, "A8")
     assert "revenue" in f.detail and "x" in f.detail and "2" in f.detail
+
+
+# ── D15: duplicate Table-level joins ────────────────────────────────────────
+
+def _table_ctx(*joins):
+    from ts_cli.audit.context import make_context
+    table = {"name": "ORDERS", "columns": [{"name": "ID", "db_column_name": "ID"}],
+             "joins_with": list(joins)}
+    return make_context(tables={"t-orders": {"guid": "t-orders", "table": table}})
+
+
+def _jw(name, dest="CUSTOMER", on="[ORDERS::CUST_ID] = [CUSTOMER::ID]", type_="INNER",
+        card="MANY_TO_ONE"):
+    return {"name": name, "destination": {"name": dest, "fqn": f"t-{dest.lower()}"},
+            "on": on, "type": type_, "cardinality": card}
+
+
+def test_d15():
+    assert _sev(_table_ctx(_jw("a"), _jw("b")), "D15") == ["LOW"]
+    assert _sev(_table_ctx(_jw("a"), _jw("b", on="[ORDERS::CUST_ID]=[CUSTOMER::ID]",
+                                         type_="LEFT_OUTER")), "D15") == ["MEDIUM"]
+    role_play = _jw("b", on="[ORDERS::SHIP_CUST_ID] = [CUSTOMER::ID]")
+    assert _sev(_table_ctx(_jw("a"), role_play), "D15") == []
+    assert _sev(_table_ctx(_jw("a"), _jw("b", dest="REGION")), "D15") == []
+    assert _sev(_table_ctx(_jw("a"), {"name": "x"}, "junk", {"destination": "CUSTOMER"}), "D15") == []

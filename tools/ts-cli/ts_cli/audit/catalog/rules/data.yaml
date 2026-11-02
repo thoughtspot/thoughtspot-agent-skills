@@ -319,3 +319,28 @@
     fires: {fixture: data_rate_column_summed, severity: MEDIUM}
     silent: {fixture: data_rate_column_averaged}
 
+- id: D15
+  title: Duplicate Table-level joins
+  evidence: fact
+  description: >-
+    A Table whose `joins_with` holds two or more joins to the same destination
+    (`destination.fqn`, else name) on the same `on` (whitespace ignored). MEDIUM when
+    their type or cardinality differ: which one a Model takes decides the result. LOW
+    when they are identical copies. Two joins to one destination on different keys is
+    role-playing (order date and ship date) and is not reported.
+  categories: [D]
+  requires: [table_tml]
+  scope: table
+  aggregate:
+    mode: each
+    where: {field: "@duplicate_joins", nonblank: true, truthy: true}
+  severity: {field: "@duplicate_joins_conflict", map: {true: MEDIUM}, default: LOW}
+  message:
+    by_severity:
+      MEDIUM: "Duplicate joins with different type or cardinality: {@duplicate_joins}"
+      LOW: "Duplicate joins: {@duplicate_joins}"
+  remediation: Keep one join per destination and key; remove the copies from the Table
+  examples:
+    fires: {fixture: data_table_conflicting_duplicate_joins, severity: MEDIUM}
+    silent: {fixture: data_table_role_playing_joins}
+

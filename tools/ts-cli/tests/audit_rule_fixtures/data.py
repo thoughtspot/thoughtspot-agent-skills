@@ -726,3 +726,26 @@ def data_rate_column_averaged() -> AuditContext:
     ctx.models[0]["model"]["columns"][0]["properties"]["aggregation"] = "AVERAGE"
     return ctx
 
+
+def _orders_with_joins(*joins) -> AuditContext:
+    table = {"name": "ORDERS", "columns": [{"name": "CUST_ID", "db_column_name": "CUST_ID"}],
+             "joins_with": list(joins)}
+    return make_context(tables={"t-orders": {"guid": "t-orders", "table": table}})
+
+
+def _orders_customer_join(name, on="[ORDERS::CUST_ID] = [CUSTOMER::ID]", type_="INNER"):
+    return {"name": name, "destination": {"name": "CUSTOMER", "fqn": "t-customer"},
+            "on": on, "type": type_, "cardinality": "MANY_TO_ONE"}
+
+
+def data_table_conflicting_duplicate_joins() -> AuditContext:
+    """Two joins ORDERS -> CUSTOMER on the same keys, one INNER, one LEFT_OUTER (D15 MEDIUM)."""
+    return _orders_with_joins(_orders_customer_join("j1"),
+                              _orders_customer_join("j2", type_="LEFT_OUTER"))
+
+
+def data_table_role_playing_joins() -> AuditContext:
+    """Two joins ORDERS -> CUSTOMER on different keys: role-playing, not a duplicate (D15)."""
+    return _orders_with_joins(_orders_customer_join("j1"),
+                              _orders_customer_join("j2", on="[ORDERS::SHIP_TO] = [CUSTOMER::ID]"))
+

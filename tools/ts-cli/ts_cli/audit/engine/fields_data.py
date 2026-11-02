@@ -203,3 +203,53 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
     header = item.get("obj") or {}
     return Key((header.get("dataSourceName", ""), header.get("databaseStripe", ""),
                 header.get("schemaStripe", ""), header.get("name", "")))
+
+
+# ── D15: duplicate Table-level joins ────────────────────────────────────────
+
+def _join_group_key(j: Any) -> Optional[tuple]:
+    """(destination — `fqn`, else `name` —, `on` without whitespace) for a well-formed
+    `joins_with` entry, else None."""
+    dest = j.get("destination") if isinstance(j, dict) else None
+    on = j.get("on") if isinstance(j, dict) else None
+    if not isinstance(dest, dict) or not isinstance(on, str) or not on.strip():
+        return None
+    target = dest.get("fqn") or dest.get("name") or ""
+    return (target, "".join(on.split())) if target else None
+
+
+def _duplicate_joins(table: dict) -> List[tuple]:
+    """(label, conflicting) per group of two or more `joins_with` entries with the same
+    destination and `on` (_join_group_key); conflicting when their type or cardinality
+    differ. Malformed entries are skipped."""
+    joins_with = table.get("joins_with")
+    groups: dict = {}
+    for j in joins_with if isinstance(joins_with, list) else []:
+        key = _join_group_key(j)
+        if key:
+            groups.setdefault(key, []).append(j)
+    out = []
+    for (dest, _), joins in groups.items():
+        if len(joins) > 1:
+            shapes = {(_upper(j.get("type")), _upper(j.get("cardinality"))) for j in joins}
+            name = joins[0]["destination"].get("name") or dest
+            out.append((f"{len(joins)} joins to {name} on {joins[0]['on']}", len(shapes) > 1))
+    return out
+
+
+@register("duplicate_joins", uses=(),
+          label="the Table's duplicate joins")
+def _duplicate_joins_field(item: dict, ctx: Any) -> list:
+    """Table: one label per group of `joins_with` entries sharing a destination and an
+    `on` (see _duplicate_joins); a name list in messages, empty when there are none."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(label for label, _ in _duplicate_joins(item.get("obj") or {}))
+
+
+@register("duplicate_joins_conflict", uses=(), values=(False, True),
+          label="the Table's duplicate joins differ in type or cardinality")
+def _duplicate_joins_conflict(item: dict, ctx: Any) -> bool:
+    """Table: a group of duplicate joins whose type or cardinality differ, so a query's
+    result depends on which one a Model takes."""
+    return any(conflict for _, conflict in _duplicate_joins(item.get("obj") or {}))
+
