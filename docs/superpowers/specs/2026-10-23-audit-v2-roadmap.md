@@ -37,9 +37,12 @@ below), production call-home size data (aggregates only), and the RLS support ca
   query; materialise heavy ones as a column in ETL. Modest severity.
 - The 16 BL-406 contradictions follow the decision sheet's recommendations, except where a
   rule above is retired or merged (S3, D6, A5, D2 resolved by those).
-- Formula `aggregation:` is ignored in query generation except for `group_aggregate` and
-  `last_value`/`first_value` formulas with no aggregation inside — so additivity checks
-  target physical columns and those formulas only.
+- A formula column's `aggregation:` is used in query generation when the formula is
+  per-row (no aggregate function), and for a bare `group_aggregate` / `last_value` /
+  `first_value` (no outer aggregate). An aggregate formula must still declare one (the
+  TML is invalid without it) but query generation ignores it. So additivity checks
+  target physical columns, per-row formulas, and those three formula shapes. (Amended
+  2026-11-02 by the product owner: the first wording left per-row formulas out.)
 - Date-part columns are usually unnecessary (date keywords cover them): a LOW hint, not an
   error. Many-side aliases and Spotter parameters are in rollout: LOW warnings, not errors.
 - A large number of hidden **ordinary** columns is a smell (remove them, or use column

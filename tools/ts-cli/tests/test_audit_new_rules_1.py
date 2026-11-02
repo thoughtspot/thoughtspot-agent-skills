@@ -102,6 +102,28 @@ def test_d14_whole_words():
     assert _sev(build_tml_ctx(_measure("Rated Capacity")), "D14") == []
 
 
+def _formula_measure(name, expr, agg=None, extra=()):
+    col = _measure(name, agg, formula=True)
+    ctx = build_tml_ctx(col)
+    ctx.models[0]["model"]["formulas"] = [
+        {"id": f"formula_{name}", "name": name, "expr": expr}, *extra]
+    return ctx
+
+
+def test_d14_reads_per_row_formulas():
+    """A per-row formula is rolled up by its column's aggregation, like a physical
+    column; an aggregate formula ignores it (product owner, 2026-11-02)."""
+    assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]"), "D14") == ["MEDIUM"]
+    assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]", "SUM"), "D14") == ["MEDIUM"]
+    assert _sev(_formula_measure("Unit Price", "[T::REVENUE] / [T::QTY]", "AVERAGE"), "D14") == []
+    assert _sev(_formula_measure("Unit Price", "sum ( [T::REVENUE] ) / sum ( [T::QTY] )"),
+                "D14") == []
+    via_aggregate = {"id": "formula_Total", "name": "Total", "expr": "sum ( [T::REVENUE] )"}
+    assert _sev(_formula_measure("Price Ratio", "[formula_Total] / 2", extra=(via_aggregate,)),
+                "D14") == []
+    assert _sev(_formula_measure("Margin", "[T::REVENUE] - [T::COST]"), "D14") == []
+
+
 def _measure_on(name, column_id):
     col = _measure(name)
     col["column_id"] = column_id

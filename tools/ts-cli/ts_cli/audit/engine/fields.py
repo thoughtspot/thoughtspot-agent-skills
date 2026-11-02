@@ -283,6 +283,26 @@ def _formula_exprs(model: dict) -> dict:
             if isinstance(f, dict) and f.get("id")}
 
 
+@register("surfaces_row_level_formula", uses=(),
+          label="the column surfaces a formula computed row by row")
+def _surfaces_row_level_formula(item: dict, ctx: Any) -> bool:
+    """Model column: its `formula_id` names a formula that is row-level as
+    @is_row_level_formula reads it (no aggregate call, none reached through the formulas
+    it references). Such a formula is rolled up by the column's `aggregation`, like a
+    physical column; an aggregate one ignores it. False for a table column, or a
+    `formula_id` matching no formula."""
+    fid = (item.get("obj") or {}).get("formula_id")
+    if not fid:
+        return False
+    model = _model_of(item)
+    names = {f.get("id"): f.get("name") for f in (model.get("formulas") or [])
+             if isinstance(f, dict) and f.get("id")}
+    if not names.get(fid):
+        return False
+    aggregate = cached("aggregate_formula_names", model, _aggregate_formula_names, model)
+    return names[fid] not in aggregate
+
+
 #: The distinct-count functions a formula can call (thoughtspot-formula-patterns.md).
 _DISTINCT_FORMULA = re.compile(
     r"\bunique\s+count\b|\bunique_count_if\b|\bgroup_unique_count\b", re.IGNORECASE)

@@ -288,8 +288,9 @@
   title: Rate-like column summed
   evidence: heuristic
   description: >-
-    A physical MEASURE column (a `column_id`, no `formula_id`) whose name, or the
-    column part of its `column_id`, reads as a non-additive quantity — price, rate,
+    A MEASURE column rolled up by its `aggregation` — a physical column, or one
+    surfacing a per-row formula (an aggregate formula ignores the column's aggregation)
+    — whose name, or the column part of its `column_id`, reads as a non-additive quantity — price, rate,
     ratio, pct/percent/percentage, avg/average, balance, unit cost, per unit, as a whole
     word — and whose `aggregation` is SUM or unset (which sums). Summing a price or a
     rate across rows gives a meaningless total. A name ending in id, key or code is not
@@ -301,8 +302,11 @@
     mode: each
     where:
       all:
-        - {field: column_id, nonblank: true, truthy: true}
-        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - any:
+            - all:
+                - {field: column_id, nonblank: true, truthy: true}
+                - {not: {field: formula_id, nonblank: true, truthy: true}}
+            - {field: "@surfaces_row_level_formula", truthy: true}
         - {field: properties.column_type, regex: '^(?i:measure)\Z'}
         - any:
             - {not: {field: properties.aggregation, nonblank: true, truthy: true}}

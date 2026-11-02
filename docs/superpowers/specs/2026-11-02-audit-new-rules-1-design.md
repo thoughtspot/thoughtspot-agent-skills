@@ -22,7 +22,9 @@ roadmap's "a large number of hidden ordinary columns is a smell" ruling.
 - Every rule declares `evidence`; a `heuristic` rule grades at most MEDIUM.
 - Formula `aggregation:` is ignored in query generation except for `group_aggregate` and
   `last_value`/`first_value` with no aggregation inside, so additivity checks target
-  physical columns and those formulas only (roadmap ruling, 2026-10-23).
+  physical columns and those formulas only (roadmap ruling, 2026-10-23). **Corrected
+  2026-11-02:** a per-row formula's aggregation is used too, so D14 now reads per-row
+  formulas (the roadmap constraint is amended).
 - Hidden formulas used by other formulas are legitimate; hidden ordinary (physical)
   columns in number are the smell.
 - New ids only; an id is never reused (A5, D2, D4, D6, H6, P5, P9, P10, P12, S3, S6–S9 are

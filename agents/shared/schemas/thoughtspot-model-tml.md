@@ -309,16 +309,22 @@ earlier blanket claim ("ignored at query time", stated universally) was wrong:
 | `expr` shape | Example | Does `columns[].properties.aggregation` apply? |
 |---|---|---|
 | **Scalar** (row-level, no aggregate function) | `[FACT::AMOUNT] - [FACT::COST]` | **Yes.** The formula behaves like a fact column: it is evaluated per row and then rolled up by the column's declared `aggregation`. This is the same model as a physical fact column with a default aggregation (Snowflake's FACT + default aggregation is the direct analogy). |
-| **Aggregate** (the `expr` already contains an aggregate) | `sum ( [FACT::AMOUNT] - [FACT::COST] )` | **No — it is a no-op.** ThoughtSpot evaluates the aggregate in the `expr`; the column-level `aggregation` does not re-aggregate the result. |
+| **Aggregate** (the `expr` already contains an aggregate) | `sum ( [FACT::AMOUNT] - [FACT::COST] )`, `sum ( group_aggregate ( ... ) )` | **No — it is a no-op**, but it must still be declared: the TML is invalid without one. ThoughtSpot evaluates the aggregate in the `expr`; the column-level `aggregation` does not re-aggregate the result. |
+| **Bare `group_aggregate` / `last_value` / `first_value`** (the outermost call, with no aggregate wrapped around it) | `last_value ( sum ( [FACT::BALANCE] ) , query_groups ( ) , { [DATE::DATE] } )` | **Yes.** These are the exception among aggregate formulas: the column's `aggregation` is applied to their result. SUM is usually right for a balance (summed across accounts, last over time) and wrong for a rate. |
+
+*Product owner, 2026-11-02:* the rows above, with the required-but-ignored declaration on
+aggregate formulas and the bare `group_aggregate` / `last_value` / `first_value` exception.
 
 Two consequences for generators:
 
 - A **scalar** MEASURE formula needs its `aggregation:` chosen deliberately — it is load-bearing.
   `SUM` is the right default for an additive quantity, but a scalar ratio or rate must not carry
   `SUM`, because the sum of per-row ratios is not the ratio of the sums.
-- An **aggregate** MEASURE formula may carry `aggregation: SUM` as a harmless convention; it has
-  no query-time effect either way. Do not attempt to infer a "correct" aggregation from the
-  expression shape in this case — there is nothing to get right.
+- An **aggregate** MEASURE formula must carry an `aggregation:` (SUM by convention) — the TML is
+  invalid without one — but it has no query-time effect. Do not attempt to infer a "correct"
+  aggregation from the expression shape in this case — there is nothing to get right.
+- A **bare `group_aggregate` / `last_value` / `first_value`** formula is the exception: its
+  `aggregation:` is load-bearing, chosen exactly as for a scalar formula.
 
 Both patterns are legitimate and idiomatic. The scalar form is the more reusable of the two: the
 formula stays at row grain, so it can be re-aggregated differently in different searches, and it
