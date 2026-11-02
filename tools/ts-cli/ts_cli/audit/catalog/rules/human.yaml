@@ -249,3 +249,41 @@
   examples:
     fires: {fixture: human_stale_column, severity: LOW}
     silent: {fixture: human_clean_names}
+
+- id: H11
+  title: Many hidden ordinary columns
+  evidence: measure
+  description: >-
+    Share of a Model's physical columns (a `column_id`, no `formula_id`) that are
+    hidden for no reason H3 recognises: not referenced by a formula and not the last
+    carrier of a joined table. H3 reports each such column; this says when there are
+    many — remove them from the Model, or restrict them with column security. LOW above
+    25%, MEDIUM above 50%. Hidden formulas that feed other formulas are not counted.
+  categories: [H]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where:
+      all:
+        - {field: column_id, nonblank: true, truthy: true}
+        - {not: {field: formula_id, nonblank: true, truthy: true}}
+    match:
+      all:
+        - {field: properties.is_hidden, truthy: true}
+        - {not: {field: "@referenced_by_formula", truthy: true}}
+        - {not: {field: "@is_sole_join_carrier", truthy: true}}
+    unnamed_label: "?"
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 50, severity: MEDIUM}
+      - {op: gt, value: 25, severity: LOW}
+  message: "{matched}/{total} ordinary columns are hidden with no formula or join using them ({pct:.0f}%): {matched_names}"
+  remediation: Remove unused columns from the Model, or restrict them with column security (/ts-security-columns)
+  examples:
+    fires: {fixture: human_mostly_hidden_columns, severity: MEDIUM}
+    silent: {fixture: human_hidden_columns_feed_formulas}
+

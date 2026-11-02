@@ -189,3 +189,36 @@
   examples:
     fires: {fixture: model_measures_no_ai_context, profile: spotter, severity: HIGH}
     silent: {fixture: model_measures_with_ai_context, profile: spotter}
+
+- id: A7
+  title: Visible measures without a description
+  evidence: measure
+  description: >-
+    Share of a Model's visible MEASURE columns, physical and formula, with a non-blank
+    root `description` — the columns Spotter explains numbers with. LOW when any is
+    blank, MEDIUM when more than 75% are. A1 grades descriptions over every visible
+    column; this singles out measures. A Model without visible measures is skipped.
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where:
+      all:
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - {not: {field: properties.is_hidden, truthy: true}}
+    match: {field: description, nonblank: true, truthy: true}
+    unnamed_label: "?"
+  bands:
+    direction: higher_is_better
+    unit: percent
+    levels:
+      - {op: lt, value: 25, severity: MEDIUM}
+      - {op: lt, value: 100, severity: LOW}
+  message: "{matched}/{total} visible measures have a description ({pct:.0f}%) — missing: {unmatched_names}"
+  remediation: Run /ts-object-model-coach to write descriptions for the measures
+  examples:
+    fires: {fixture: ai_measures_mostly_undescribed, severity: MEDIUM}
+    silent: {fixture: ai_measures_described}
+
