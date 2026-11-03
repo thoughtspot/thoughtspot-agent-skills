@@ -16268,3 +16268,46 @@ causes harm (two definitions drifting apart) is unknown.
 definitions differ in type or cardinality, not when they repeat each other.
 
 **Target:** 2027-01-31.
+
+## BL-513 — every delete path should agree on what a delete takes with it `Tier 2`
+
+**Filed:** 2026-11-04. **Source:** the PR #692 review (cascade delete), live probes on a
+staging cluster 2026-10-31 and 2026-11-04.
+
+**What.** Deleting a Model takes objects with it that no dependents lookup lists, and each
+delete path in the repo handles that differently:
+
+- **Reusable Sets are deleted with their Model**, by the v2 `metadata/delete` as well as
+  the cascade endpoint (live, 2026-10-31 and 2026-11-04, a throwaway Model with one Set).
+  Neither v2 dependents nor the cascade's answer lists them; a Set is a column the Model
+  owns. A Set cannot be hidden (TML `is_hidden` is ignored, `metadata/headers/update`
+  rejects `isHidden`), so the cohort listing in `sets/discover.py` sees them all.
+- **Spotter feedback** is not listed either. A FEEDBACK `tml/export` answers 400 10002
+  ("No accessible metadata objects found") for a Model without feedback, but 500 14531
+  for a Table or View and 500 13006 for a SQL View on the same cluster — so a check that
+  reads "anything but 10002" as "unchecked" blocks every non-Model delete.
+
+| Path | Sets on a deleted Model | Feedback |
+|---|---|---|
+| `ts metadata delete` (`commands/metadata.py`) | not checked | not checked |
+| `ts dependency apply-change` (`commands/dependency_apply.py`) | only Sets the plan lists | not checked |
+| `ts migrate` teardown (`commands/migrate.py`) | gated by `sets/discover.py` (BL-325) | not checked |
+| `ts dependency cascade-delete` (PR #692) | refused | refused |
+| Databricks `ts_client.delete` (`agents/databricks/notebooks/ts_client.py`) | not checked | not checked |
+
+`formula_translate/validate.py` deletes only the scratch Model it created, so it is out
+of scope.
+
+**Do.**
+
+1. One shared pure helper — "what else does deleting these GUIDs remove" (Sets via the
+   cohort listing, feedback via the export with the Model-only / error-code rules above)
+   — and one policy: refuse, or back up and restore. Every path above calls it, or
+   records here why it does not.
+2. Probe the feedback export's error codes on a second build before relying on them, and
+   whether a cascade or v2 delete removes feedback at all (not yet tested with a real
+   delete).
+3. A validator, or a test that lists the call sites of `/api/rest/2.0/metadata/delete`
+   and the cascade route, so a new delete path cannot skip the helper silently.
+
+**Target:** 2026-12-31.
