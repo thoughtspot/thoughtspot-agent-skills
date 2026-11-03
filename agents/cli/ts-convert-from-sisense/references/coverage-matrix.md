@@ -64,6 +64,7 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | Date `level` → date bucket | Mapped | `hours/days/weeks/months/quarters/years` → `HOURLY…YEARLY` (worked example) |
 | Per-attribute top/bottom N | Mapped | baked into the widget answer as `top N` |
 | Dashboard filter bar → Liveboard chips | Mapped | member→`oper: in`, exclude→`oper: not in`, top-level `values` (the exported-Liveboard shape, verified to filter — open-item #5) |
+| Cascading dashboard filter group (`levels[]`, e.g. Client > Program > Drug) | Mapped | one chip per level, each keeping its own preset. Until this release the group carried no `jaql` of its own and was dropped without a warning |
 | Numeric-range dashboard filter → chip preset | Mapped | single-sided from/to→`GE`/`LE`, fromNotEqual/toNotEqual→`GT`/`LT`; two-sided keeps BOTH bounds→`BW_INC`/`BW` (incl. mixed inclusive/exclusive — never collapses to one bound); equals→`EQ` (worked example) |
 | Dashboard → tabbed Liveboard | Mapped | one Liveboard; widgets become Answers |
 
@@ -87,6 +88,7 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip (ThoughtSpot replaces, Sisense ANDs) |
 | Dashboard filter on a dimension with several role copies | Mapped | copy reaching the most tiles, then the shortest join path; still tied → flagged |
 | Chip that cannot reach a tile's facts | Flagged | NEEDS REVIEW naming the tiles |
+| Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns keep the default. Import + export round-trip verified; on-screen rendering to be confirmed |
 
 ## Unmapped Constructs (Limitations)
 
@@ -111,3 +113,4 @@ the original Sisense expression preserved.
 | Cyclic date parts (day-of-week, month-of-year as a `level`) | Dropped | no clean date-bucket equivalent |
 | `richtexteditor` / text widget | Dropped | not a data visual — no Answer emitted (the `--target-model` path emits a note tile) |
 | Live Sisense REST fetch | Not implemented | offline bundle only (open-item #3) |
+| Locked dashboard filter (`locked: true`) | Dropped | becomes an ordinary editable chip; ThoughtSpot has no locked-chip equivalent in TML that this converter emits |

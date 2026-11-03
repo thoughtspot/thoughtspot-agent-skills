@@ -26,6 +26,21 @@ def test_dashboard_filter_classification():
     assert fils[4]["kind"] == "unknown"                        # nothing silently dropped
 
 
+def test_cascading_filter_group_yields_one_filter_per_level():
+    # A cascading group (Client > Program > Drug) has no jaql of its own, only levels[]; reading
+    # f["jaql"] alone dropped the whole group without a warning.
+    bundle = {"dashboard": {"title": "D", "filters": [
+        {"isCascading": False, "levels": [
+            {"dim": "[dim_program.client_name]", "filter": {"explicit": False, "all": True}},
+            {"dim": "[dim_program.name]", "filter": {"members": ["P1"]}},
+        ]},
+        {"jaql": {"dim": "[t.Region]", "filter": {"exclude": {"members": ["XX"]}}}},
+    ]}}
+    fils = parse_inventory(bundle)["dashboard"]["filters"]
+    assert [f["dim"] for f in fils] == ["[dim_program.client_name]", "[dim_program.name]", "[t.Region]"]
+    assert fils[1]["kind"] == "member" and fils[1]["values"] == ["P1"]
+
+
 def _bundle():
     return {
         "datamodel": {

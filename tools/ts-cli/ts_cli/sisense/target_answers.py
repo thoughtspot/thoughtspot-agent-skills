@@ -28,6 +28,7 @@ Pure functions, no I/O.
 """
 from __future__ import annotations
 
+import copy
 import html as _html
 import re
 
@@ -214,8 +215,8 @@ def _label_for(f: dict, b: dict):
 
 
 def _collect_fields(widget: dict, binder: _Binder, anchors: list) -> dict:
-    """Plotted fields -> {cols, roles, tokens, measures, labels, notes}."""
-    acc = {"cols": [], "roles": [], "tokens": {}, "measures": set(), "labels": {}, "notes": []}
+    """Plotted fields -> {cols, roles, tokens, measures, measure_outs, labels, notes}."""
+    acc = {"cols": [], "roles": [], "tokens": {}, "measures": set(), "measure_outs": set(), "labels": {}, "notes": []}
     for f in widget.get("fields", []):
         panel = (f.get("panel") or "").lower()
         if panel in _UNPLOTTED_PANELS:
@@ -231,6 +232,7 @@ def _collect_fields(widget: dict, binder: _Binder, anchors: list) -> dict:
         acc["tokens"][b["name"]] = b["token"]
         if b["measure"]:
             acc["measures"].add(b["name"])
+            acc["measure_outs"].add(b["out"])
         label = _label_for(f, b)
         if label:
             acc["labels"][b["out"]] = label
@@ -255,8 +257,16 @@ def _top_n(widget: dict):
                  if sf.get("kind") == "top_n" and str((sf.get("values") or [""])[0]).isdigit()), None)
 
 
-def _finish_answer(a: dict, binder: _Binder, ct: str, frags: list, labels: dict, description=None) -> dict:
-    """Sisense-local additions to an emitted answer: exact binding, filters, titles, mode."""
+# Sisense shows full values; ThoughtSpot's default number format abbreviates (32.16K), which
+# customers reject on migrated boards. Trailing zeroes are dropped, so counts stay integral.
+FULL_NUMBER_FORMAT = {"category": "NUMBER", "isCategoryEditable": True, "numberFormatConfig": {
+    "unit": "NONE", "decimals": 2.0, "negativeValueFormat": "PREFIX_DASH",
+    "toSeparateThousands": True, "removeTrailingZeroes": True}}
+
+
+def _finish_answer(a: dict, binder: _Binder, ct: str, frags: list, labels: dict, description=None,
+                   measures=()) -> dict:
+    """Sisense-local additions to an emitted answer: exact binding, filters, titles, mode, format."""
     if binder.t.obj_id:
         a["tables"] = [{"id": binder.t.name, "name": binder.t.name, "obj_id": binder.t.obj_id}]
     if frags:
@@ -264,6 +274,8 @@ def _finish_answer(a: dict, binder: _Binder, ct: str, frags: list, labels: dict,
     for ac in a["answer_columns"]:
         if ac["name"] in labels:
             ac["custom_name"] = labels[ac["name"]]
+        if ac["name"] in measures and not ac["name"].lstrip().startswith("%"):
+            ac["format"] = copy.deepcopy(FULL_NUMBER_FORMAT)
     if ct in ("GRID_TABLE", "PIVOT_TABLE"):
         a["display_mode"] = "TABLE_MODE"
     if description:
@@ -288,7 +300,8 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
         row.update(status="NEEDS REVIEW", note="; ".join(notes))
     a = build_answer(title, f"{ctx['key']}", binder.t.name, ctx.get("model_fqn"), acc["cols"], ct,
                      acc["measures"], acc["roles"], _token_map(acc["tokens"]), _top_n(widget))["answer"]
-    a = _finish_answer(a, binder, ct, frags + ctx.get("extra_filters", []), acc["labels"], ctx.get("description"))
+    a = _finish_answer(a, binder, ct, frags + ctx.get("extra_filters", []), acc["labels"], ctx.get("description"),
+                       acc["measure_outs"])
     return a, row, own, binder.t.facts_for(acc["cols"] + sorted(own))
 
 

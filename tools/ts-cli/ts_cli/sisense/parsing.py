@@ -290,9 +290,11 @@ def _drill_targets(drill: dict) -> list:
 def parse_dashboard(raw: dict, warnings: list) -> dict:
     dash_filters: list[dict] = []
     for f in raw.get("filters", []) or []:
-        sf = _classify_filter(f.get("jaql") or f)
-        if sf:
-            dash_filters.append(sf)
+        # a cascading filter group (Client > Program > Drug) has no jaql of its own, only levels[]
+        for jaql in f.get("levels") or [f.get("jaql") or f]:
+            sf = _classify_filter(jaql)
+            if sf:
+                dash_filters.append(sf)
     return {
         "oid": raw.get("oid") or raw.get("_id") or "",
         "title": raw.get("title") or "",

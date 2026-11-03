@@ -6,7 +6,7 @@ import json
 
 import yaml
 
-from ts_cli.sisense.target_answers import build_target_liveboard, tabber_hidden
+from ts_cli.sisense.target_answers import FULL_NUMBER_FORMAT, build_target_liveboard, tabber_hidden
 from ts_cli.sisense.target_model import TargetModel, split_dim
 
 # Raw TML text so the YAML 1.1 `on:` -> True trap is exercised exactly as an export loads.
@@ -175,7 +175,8 @@ def test_count_is_distinct_and_binds_hidden_key_to_model_formula():
     w = _w("w1", "Cases", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count", "# Cases")])
     a = _answers(build_target_liveboard(_inv([w]), _target()))["Cases"]
     assert a["search_query"] == "[Visit Case Count]"
-    assert a["answer_columns"] == [{"name": "Visit Case Count", "custom_name": "# Cases"}]
+    assert a["answer_columns"] == [{"name": "Visit Case Count", "custom_name": "# Cases",
+                                    "format": FULL_NUMBER_FORMAT}]
 
 
 def test_count_of_exposed_attribute_uses_unique_count_output_name():
@@ -189,6 +190,15 @@ def test_sum_measure_output_is_total_prefixed():
     w = _w("w1", "Cost", "indicator", [_f("[fact_visit.cost]", "value", "measure", "sum")])
     a = _answers(build_target_liveboard(_inv([w]), _target()))["Cost"]
     assert a["search_query"] == "sum [Visit Cost]" and a["answer_columns"][0]["name"] == "Total Visit Cost"
+
+
+def test_measures_show_full_values_and_attributes_keep_default_format():
+    # Sisense shows 32,161 where ThoughtSpot's default shows 32.16K; customers reject the latter.
+    w = _w("w1", "By site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                             _f("[fact_visit.cost]", "values", "measure", "sum")])
+    cols = {c["name"]: c for c in _answers(build_target_liveboard(_inv([w]), _target()))["By site"]["answer_columns"]}
+    assert cols["Total Visit Cost"]["format"]["numberFormatConfig"]["unit"] == "NONE"
+    assert all("format" not in c for n, c in cols.items() if n != "Total Visit Cost")
 
 
 def test_unbindable_count_is_needs_review_with_the_measure_to_add():

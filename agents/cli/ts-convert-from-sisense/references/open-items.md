@@ -94,6 +94,8 @@ Facts established on the way, each now encoded:
 | Server-generated obj_ids drop spaces, parentheses and commas; a Model may carry a custom obj_id no derivation reproduces | `tml_common.derive_viz_obj_id`; the target path uses the exported root `obj_id` |
 | PyYAML reads an unquoted `on:` join key as boolean `True` | `target_model.TargetModel` |
 | Sisense relation endpoints use the table **id** (sometimes opaque `tq_…`); JAQL dims use the table **name** | `parsing._parse_table` keeps `jaql_name` |
+| A cascading dashboard filter group has no `jaql` of its own, only `levels[]` — read as one filter it was dropped silently (the same dashboard carried one: 11 chips became 14) | `parsing.parse_dashboard` |
+| A measure NUMBER format (`unit: NONE`, `decimals: 2`, `removeTrailingZeroes: true`, thousands separators) on `answer_columns[].format` imports and exports unchanged (18 columns, one block); how it renders on screen is still to be confirmed in the UI | `target_answers.FULL_NUMBER_FORMAT` |
 
 ## #7 — obj_id derivation for other punctuation — KNOWN
 
