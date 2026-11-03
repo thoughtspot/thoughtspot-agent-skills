@@ -1143,3 +1143,19 @@ def test_surfaces_row_level_formula_branches():
     assert get("Row") is True
     assert [get(n) for n in ("Agg", "Via", "Phys", "Missing", "ListId", "DictId")] == [False] * 6
     assert get("NoName") is False
+
+
+def test_outer_join_unguarded_rls_branches():
+    """@outer_join_unguarded_rls: odd shapes read as no table, never raise."""
+    rls = {"rules": [{"expr": "[C_1::R] = ts_groups"}]}
+    ctx = make_context(models=[{"guid": "g-1", "model": {"name": "M", "columns": [], "model_tables": [
+        {"name": "O", "fqn": "t-o", "joins": [
+            {"with": "C", "on": "[O::K] = [C::K]", "type": "left_outer"},
+            {"with": ["C"], "type": "LEFT_OUTER"}, {"with": "C", "type": None},
+            {"with": "MISSING", "type": "LEFT_OUTER"}]},
+        {"name": "C", "fqn": "t-c"}]}}],
+        tables={"t-c": {"table": {"name": "C", "rls_rules": rls}},
+                "t-o": {"table": {"name": "O", "rls_rules": {"rules": "junk"}}}})
+    joins = list(scopes.iterate(ctx, "join"))
+    got = [fields.get(j, "@outer_join_unguarded_rls", ctx) for j in joins]
+    assert [list(g) for g in got] == [["C"], [], [], []]

@@ -148,9 +148,9 @@ SHIPPED_NEEDS = {
     "D": {"model_tml", "metadata", "table_tml"},
     "H": {"model_tml", "dependents", "sets", "answers"},
     "P": {"model_tml", "metadata", "table_tml"},
-    # S8 and S9, the Security rules that declared Table TML, retired 2026-10 (Table TML
-    # is still fetched for every audit; no S rule declares it).
-    "S": {"model_tml"},
+    # S8 and S9 retired 2026-10; S12 and S13 (RLS robustness, 2026-11) declare Table TML
+    # again, which every audit fetches anyway.
+    "S": {"model_tml", "table_tml"},
 }
 
 

@@ -16,6 +16,7 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 """
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
@@ -204,6 +205,49 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
     header = item.get("obj") or {}
     return Key((header.get("dataSourceName", ""), header.get("databaseStripe", ""),
                 header.get("schemaStripe", ""), header.get("name", "")))
+
+
+# ── S12: an RLS table on the optional side of an outer join ─────────────────
+
+#: An RLS rule keeping a table's unmatched (null) rows: `isnull ( ... )`.
+_ISNULL_CALL = re.compile(r"(?i)\bisnull\s*\(")
+
+
+def _optional_keys(join: dict) -> List[Any]:
+    """The table keys whose rows an outer join keeps even without a match — the side
+    that can be null: the `with` table for LEFT_OUTER, the declaring table for
+    RIGHT_OUTER, both for OUTER (ThoughtSpot's full outer join); none otherwise."""
+    kind = _upper(join.get("type"))
+    declaring = tml.table_key(join.get("model_table") or {})
+    return {"LEFT_OUTER": [join.get("with")], "RIGHT_OUTER": [declaring],
+            "OUTER": [declaring, join.get("with")]}.get(kind, [])
+
+
+def _unguarded_rls(table_doc: Any) -> bool:
+    """A Table TML with RLS rules, none of which calls `isnull`."""
+    t = table_doc.get("table") if isinstance(table_doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    rules = rls.get("rules") if isinstance(rls, dict) else None
+    rules = [r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else []
+    return bool(rules) and not any(_ISNULL_CALL.search(str(r.get("expr") or ""))
+                                   for r in rules)
+
+
+@register("outer_join_unguarded_rls", uses=(),
+          label="the outer join's optional-side tables with RLS and no isnull clause")
+def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
+    """Join: the keys, sorted, of the tables on its optional side (_optional_keys) whose
+    Table TML carries RLS rules none of which calls `isnull`. The docs say RLS joins are
+    INNER by default, so a user under such a rule loses the rows the outer join kept. A
+    table with no Table TML in scope is unknown and not listed; a name list in
+    messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    fqn_by_key = {tml.table_key(mt): mt.get("fqn")
+                  for mt in (_model_of(item).get("model_tables") or [])
+                  if isinstance(mt, dict)}
+    keys = [k for k in _optional_keys(item.get("obj") or {}) if isinstance(k, str) and k]
+    return NameList(sorted({k for k in keys
+                            if _unguarded_rls(ctx.tables.get(fqn_by_key.get(k) or ""))}))
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────

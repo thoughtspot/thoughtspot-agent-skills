@@ -476,3 +476,39 @@ def sec_rls_same_direction() -> AuditContext:
         "bridge", [("bridge_to_users", "bridge", "users")],
         [("users_1", "users", "bridge_to_users")], ["[users_1::c] = 1"]),
         users_fqn="g-bridge")
+
+
+# ── S12 / S13: RLS robustness (roadmap PR 4.4) ──────────────────────────────
+
+def _outer_rls_ctx(rule_expr: str) -> AuditContext:
+    """ORDERS LEFT_OUTER-joined to CUST, whose Table TML carries one RLS rule."""
+    cust = {"table": {"name": "CUST", "columns": [{"name": "K"}, {"name": "REGION"}],
+                      "rls_rules": {"tables": [{"name": "CUST"}],
+                                    "table_paths": [{"id": "CUST_1", "table": "CUST",
+                                                     "column": ["REGION"]}],
+                                    "rules": [{"name": "Region", "expr": rule_expr}]}}}
+    model = {"guid": "m-rls-outer", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-orders", "joins": [
+            {"name": "orders_cust", "with": "CUST", "on": "[ORDERS::K] = [CUST::K]",
+             "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-cust"}]}}
+    return make_context(models=[model], tables={"t-cust": cust,
+                                                "t-orders": {"table": {"name": "ORDERS"}}})
+
+
+def sec_rls_outer_joined_unguarded() -> AuditContext:
+    return _outer_rls_ctx("[CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_outer_joined_isnull() -> AuditContext:
+    return _outer_rls_ctx("isnull ( [CUST_1::REGION] ) or [CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_custom_variable_rule() -> AuditContext:
+    from .rls import build_rls_expr
+    return build_rls_expr("[BANK_EMPLOYEES_1::COUNTRY] = ts_org")
+
+
+def sec_rls_groups_rule() -> AuditContext:
+    from .rls import build_rls_expr
+    return build_rls_expr("[BANK_EMPLOYEES_1::COUNTRY] = ts_groups")
