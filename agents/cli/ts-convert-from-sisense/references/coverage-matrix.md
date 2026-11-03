@@ -88,7 +88,7 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip (ThoughtSpot replaces, Sisense ANDs) |
 | Dashboard filter on a dimension with several role copies | Mapped | copy reaching the most tiles, then the shortest join path; still tied → flagged |
 | Chip that cannot reach a tile's facts | Flagged | NEEDS REVIEW naming the tiles |
-| Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns keep the default. Import + export round-trip verified; on-screen rendering to be confirmed |
+| Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns keep the default. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)
 
