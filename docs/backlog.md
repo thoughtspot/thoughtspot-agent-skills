@@ -321,7 +321,11 @@ are roughly ordered by value÷effort.
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
 | BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
-| BL-506 | Rule D13: a bare `group_aggregate` / `last_value` / `first_value` formula (no outer aggregate, so its column's aggregation is used) whose aggregation is wrong for what it measures — D14's check on those three shapes (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
+| BL-510 | `ts audit run`'s Model export sends Models in batches of 50 and skips the whole batch on a non-200, so one deleted GUID drops 49 good Models (98 of 148 lost recapturing the SE demo sample, 2026-11-04) | 2026-11-30 |
+| BL-511 | Probe live whether RLS on the optional side of an outer join drops the unmatched rows (and whether `isnull` keeps them) before raising S12 from LOW to MEDIUM | 2026-12-31 |
+| BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
+| BL-513 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
+| ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
 | BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
@@ -16189,6 +16193,60 @@ why `sv_build_model` stays separate if it does.
 
 **Target:** 2027-01-31.
 
+## BL-510 — the audit's Model export drops a whole batch when one GUID is gone `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** recapturing the SE demo sample for roadmap PR 4.4.
+
+**What.** `build_context` (`tools/ts-cli/ts_cli/audit/context.py`, the Model export loop)
+posts `metadata/tml/export` for up to 50 Models at a time and, on a non-200, logs
+"Model export batch N returned 400, skipping 50 model(s)" and moves on. A single deleted
+or unreadable GUID makes the whole batch 400, so 49 healthy Models go unaudited, and the
+run still ends "Audit complete". Recapturing the 148-Model sample lost 98 Models to four
+deleted GUIDs.
+
+**Do.** On a non-200 batch, retry its GUIDs one by one (or bisect) and report only the
+failing ones as not checked; add a test with a fake client whose batch call 400s.
+
+**Target:** 2026-11-30.
+
+## BL-511 — probe S12's consequence before raising it to MEDIUM `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4.
+
+**What.** S12 reports a Table with RLS rules (none calling `isnull`) on the optional side
+of a Model outer join. The docs say RLS joins are INNER by default, so the rule drops the
+rows the outer join kept; nothing in the repo shows it on a live cluster, so S12 ships at
+LOW.
+
+**Do.** On a scratch Model: an RLS Table LEFT_OUTER-joined from a fact, queried as a
+user under the rule, with and without an `isnull` branch. If the rows drop, raise S12 to
+MEDIUM and cite the probe; if not, retire or reword it.
+
+**Target:** 2026-12-31.
+
+## BL-512 — RLS judgement checks G5e and G5f `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the expert rule review, deferred from roadmap PR 4.4.
+
+**What.** (e) one Model's Tables comparing the tenant through different keys or
+variables; (f) `isnull` on the secured table's own key, which the docs give for outer
+joins but which also shows ownerless rows to every user. Both need judgement: report,
+don't grade, or settle the shape first.
+
+**Target:** 2027-01-31.
+
+## BL-513 — H15, slot-named columns, needs the column aliases `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4 (G19).
+
+**What.** A visible column named as a numbered slot (`custom_3`, `Attribute 2`) means
+something different per tenant and needs per-tenant column aliases. The audit does not
+fetch aliases (`export_with_column_aliases`, a Beta option), so it cannot tell an
+aliased slot column from a bare one; 0 such columns on the SE demo sample. Build H15
+with the alias fetch.
+
+**Target:** 2027-01-31.
+
 ## BL-509 — formula `aggregation:` after the 2026-11-02 ruling `Tier 3`
 
 **Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
@@ -16222,7 +16280,9 @@ The Model TML schema now says so. The rest of the repo does not yet:
 
 **Target:** 2026-12-31.
 
-## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation `Tier 3`
+## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation — DONE `Tier 3`
+
+**Status:** DONE — roadmap PR 4.4 (2026-11-04): D13 reads the three shapes with a rate-like name and SUM. An unset aggregation and the `group_*` / `*_in_period` shapes stay with BL-509.
 
 **Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1). **Reframed**
 2026-11-02 after the product owner's ruling on formula aggregation.

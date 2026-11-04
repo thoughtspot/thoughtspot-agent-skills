@@ -208,7 +208,7 @@
     `with` table for LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER —
     is a Table carrying RLS rules, none of which calls `isnull`. The docs say RLS joins
     are INNER by default, so a user under the rule loses the rows the outer join kept.
-    LOW until a live probe confirms the drop (backlog). A Table with no TML in scope is
+    LOW until a live probe confirms the drop (BL-511). A Table with no TML in scope is
     unknown and not reported.
   categories: [S]
   requires: [model_tml, table_tml]
