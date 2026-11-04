@@ -269,8 +269,9 @@ def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
 #: A session variable an RLS rule scopes users by: ts_groups (any variant), ts_username,
 #: ts_org (any variant), ts_email_domain, or a custom `ts_var ( name )`.
 _SESSION_VARIABLE = re.compile(
-    r"(?i)\b(ts_groups\w*|ts_username|ts_org\w*|ts_email_domain"
-    r"|ts_var\s*\(\s*['\"]?(\w+)['\"]?\s*\))")
+    r"(?i)\b(ts_groups\w*|ts_username|ts_org|ts_email_domain"
+    r"|ts_var\s*\(\s*(\w+)\s*\))(?!\w)")
+_BRACKETED = re.compile(r"\[[^\]]*\]")
 #: A null test on one bracketed column: `is_null ( [X] )`, `isnull ( [X] )`, `[X] = null`.
 _NULL_TEST = re.compile(r"(?i)\bis_?null\s*\(\s*\[([^\]]+)\]\s*\)|\[([^\]]+)\]\s*=\s*null\b")
 
@@ -285,11 +286,15 @@ def _code(expr: Any) -> str:
 def _variable(match: Any) -> str:
     whole = match.group(1).lower()
     if match.group(2):
-        return f"ts_var({match.group(2)})"
-    for family in ("ts_groups", "ts_org"):
-        if whole.startswith(family):
-            return family
-    return whole
+        return f"ts_var({match.group(2).lower()})"
+    return "ts_groups" if whole.startswith("ts_groups") else whole
+
+
+def _rule_variables(expr: Any) -> set:
+    """The session-variable families an RLS rule names, outside quoted literals and
+    outside `[...]` references (a column called TS_ORG_ID is not ts_org)."""
+    code = _BRACKETED.sub(" ", _code(expr))
+    return {_variable(m) for m in _SESSION_VARIABLE.finditer(code)}
 
 
 def _rls_rules_of(table_doc: Any) -> list:
@@ -302,20 +307,28 @@ def _rls_rules_of(table_doc: Any) -> list:
 @register("rls_session_variables", uses=(),
           label="the session variables the Model's RLS rules scope users by")
 def _rls_session_variables(item: dict, ctx: Any) -> list:
-    """Model: the session variables, sorted, that the RLS rules of its Tables (Table TML
-    by `model_tables[].fqn`) compare against, outside quoted literals — one entry per
-    family: every ts_groups variant is `ts_groups`, every ts_org variant `ts_org`, and a
-    custom variable `ts_var(name)`. Two or more means its Tables can scope one user
-    differently (S14, BL-512); a name list in messages."""
+    """Model: when two or more of its Tables (Table TML by `model_tables[].fqn`, each
+    once) scope users through RLS and do so by DIFFERENT sets of session variables, all
+    of those variables, sorted; else none. One family per variable (`_rule_variables`):
+    every ts_groups variant is `ts_groups`, a custom variable `ts_var(name)`. Two
+    variables on one Table — an owner-or-group override — is not a difference between
+    Tables (S14, BL-512; review of PR 5); a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     model = item.get("obj") or {}
-    found = set()
-    for mt in model.get("model_tables") or [] if isinstance(model.get("model_tables"), list) else []:
+    mts = model.get("model_tables")
+    per_table = {}
+    for mt in mts if isinstance(mts, list) else []:
         fqn = mt.get("fqn") if isinstance(mt, dict) else None
-        doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
-        for rule in _rls_rules_of(doc):
-            found |= {_variable(m) for m in _SESSION_VARIABLE.finditer(_code(rule.get("expr")))}
-    return NameList(sorted(found))
+        if not isinstance(fqn, str) or fqn in per_table:
+            continue
+        found = set()
+        for rule in _rls_rules_of(ctx.tables.get(fqn)):
+            found |= _rule_variables(rule.get("expr"))
+        if found:
+            per_table[fqn] = frozenset(found)
+    if len(per_table) < 2 or len(set(per_table.values())) < 2:
+        return NameList()
+    return NameList(sorted(set().union(*per_table.values())))
 
 
 def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
@@ -323,7 +336,8 @@ def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
     t = doc.get("table") if isinstance(doc, dict) else None
     rls = t.get("rls_rules") if isinstance(t, dict) else None
     paths = rls.get("table_paths") if isinstance(rls, dict) else None
-    by_id = {p.get("id"): p.get("table") for p in paths if isinstance(p, dict)} \
+    by_id = {p["id"]: p.get("table") for p in paths
+             if isinstance(p, dict) and isinstance(p.get("id"), str)} \
         if isinstance(paths, list) else {}
     return (t.get("name") if isinstance(t, dict) else None), by_id
 
@@ -332,22 +346,36 @@ def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
           label="the rule's null tests on its own Table's columns")
 def _own_column_null_tests(item: dict, ctx: Any) -> list:
     """RLS rule: the columns, in order, of its own Table that it tests for null
-    (`is_null` / `isnull ( [X] )`, `[X] = null`; outside quoted literals). A reference's
-    prefix is a `table_paths` id resolved to its Table, else a Table name; it is the
-    rule's own Table when that is the Table the rule is on. Such a test keeps the rows
-    with no value there for every user under the rule — right for an outer join's
-    unmatched rows, which S12 asks for on a joined Table, but on the Table's own key it
-    also shows its ownerless rows (S15, BL-512); a name list in messages."""
+    (`is_null` / `isnull ( [X] )`, `[X] = null`; outside quoted literals) AND scopes
+    users by — the same column also appears outside the null test in a rule that names
+    a session variable (G5f's shape: the owner key). A reference's prefix is a
+    `table_paths` id resolved to its Table, else a Table name. Such a test keeps the
+    Table's ownerless rows for every user under the rule; a null test on a key that is
+    never null (the join key) keeps an outer join's unmatched rows without that, and is
+    not listed (S15, BL-512; review of PR 5); a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     own, by_id = _own_table_and_paths(item.get("doc"))
+    code = _code((item.get("obj") or {}).get("expr"))
     out = NameList()
-    for m in _NULL_TEST.finditer(_code((item.get("obj") or {}).get("expr"))):
+    if not _rule_variables(code):
+        return out
+    scoped = _BRACKETED.findall(_NULL_TEST.sub(" ", code))
+    for m in _NULL_TEST.finditer(code):
         prefix, sep, column = (m.group(1) or m.group(2)).strip().partition("::")
         prefix, column = prefix.strip(), column.strip()
         if sep and isinstance(own, str) and by_id.get(prefix, prefix) == own \
-                and column not in out:
+                and column not in out and _scopes(scoped, by_id, own, column):
             out.append(column)
     return out
+
+
+def _scopes(refs: list, by_id: dict, own: str, column: str) -> bool:
+    """One of `refs` (bracketed, outside the null tests) is `own`'s `column`."""
+    for ref in refs:
+        prefix, sep, col = ref[1:-1].strip().partition("::")
+        if sep and col.strip() == column and by_id.get(prefix.strip(), prefix.strip()) == own:
+            return True
+    return False
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────

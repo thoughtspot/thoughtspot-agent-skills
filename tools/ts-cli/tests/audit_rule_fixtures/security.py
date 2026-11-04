@@ -552,8 +552,8 @@ def sec_rls_null_test_on_own_column() -> AuditContext:
 
 
 def sec_rls_null_test_on_joined_column() -> AuditContext:
-    """ORDERS' rule tests a joined Table's column for null — the outer-join guard the
-    docs describe, which exposes none of ORDERS' own rows: S15 is silent."""
+    """ORDERS' rule null-tests a column of another Table (CUST), not its own owner
+    column: S15 reads only a rule's own Table, so it is silent."""
     ctx = _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups", "[CUST_1::REGION] = ts_groups")
     rls = ctx.tables["t-orders"]["table"]["rls_rules"]
     rls["table_paths"].append({"id": "CUST_1", "table": "CUST", "column": ["REGION"]})
