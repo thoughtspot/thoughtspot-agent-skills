@@ -335,7 +335,7 @@ are roughly ordered by value÷effort.
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
 | BL-505 | Converters' fact detection does not use the shared table-role classifier; a direction-only fix to `mv_emit` broke the emitted Metric Views and was reverted (PR 3) — the join walk must change with it | 2027-01-31 |
 | ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
-| BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
+| ~~BL-503~~ | ~~the audit report's JavaScript has no size or complexity gate~~ | DONE (2026-11-04) |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 
@@ -16155,7 +16155,9 @@ settle both with one probe.
 
 **Target:** 2026-11-30.
 
-## BL-503 — the audit report's JavaScript has no size or complexity gate `Tier 3`
+## BL-503 — the audit report's JavaScript has no size or complexity gate — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, audit backlog PR 4). `check_file_size` scans the report's `.js` parts too (`SCANNED_SUFFIXES`), with the same warn 500 / fail 1000; `views/objectmap.js` is ratcheted at 756. And yes to a function-length check: JS has no complexity tool here, so `js_function_lengths` measures each top-level `function` to its column-0 `}` — warn above 150 lines, fail above 250 — with `buildCrossModel` (332) and `buildScorecard` (302) ratcheted in `JS_FUNCTION_RATCHET`. Split those three when next changed and lower the numbers. Tests: `tools/validate/tests/test_check_file_size.py`.
 
 **Filed:** 2026-10-31. **Source:** the review of roadmap PR 3.1 (the report split into
 parts).

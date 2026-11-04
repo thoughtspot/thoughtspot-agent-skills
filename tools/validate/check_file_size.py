@@ -6,17 +6,23 @@ signals — a module can be long-but-simple or short-but-gnarly. This gate
 catches the monolith failure mode (tableau_translate.py reached 2,543 lines
 before the BL-069 split).
 
-Rules (product code under tools/ts-cli/ts_cli, excluding tests):
+Rules (product code under tools/ts-cli/ts_cli, excluding tests — `.py` modules and,
+since BL-503, the audit report's `.js` parts, which the report now grows by adding):
 - lines > HARD_FAIL and not allowlisted  -> FAIL (exit 1)
 - lines > SOFT_WARN                       -> WARN (printed nudge, exit 0)
+- a top-level JS `function` longer than JS_FUNCTION_FAIL lines -> FAIL, unless
+  ratcheted in JS_FUNCTION_RATCHET; longer than JS_FUNCTION_WARN -> WARN. (The Python
+  side's function-level gate is check_module_health's complexity ratchet; the report's
+  JS has no complexity tool here, so length stands in for it.)
 
---staged limits the scan to staged .py files (pre-commit); CI runs the full
-scan with no flag.
+--staged limits the scan to staged files (pre-commit); CI runs the full scan with no
+flag.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 
 import sys
@@ -27,6 +33,9 @@ from _git import git_paths  # noqa: E402
 SOFT_WARN = 500
 HARD_FAIL = 1000
 SCAN_ROOT = "tools/ts-cli/ts_cli"
+SCANNED_SUFFIXES = (".py", ".js")
+JS_FUNCTION_WARN = 150
+JS_FUNCTION_FAIL = 250
 
 # RATCHET, not an allowlist: path -> (recorded line count, backlog reference).
 #
@@ -46,7 +55,64 @@ RATCHET: dict[str, tuple[int, str]] = {
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
     "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
+    # The report's largest view: past SOFT_WARN when the gate reached JS (BL-503).
+    # Split it into per-tab files when it is next changed; lower this as it shrinks.
+    "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-503"),
 }
+
+# The same ratchet for top-level JS functions: (path, function name) -> (recorded
+# length in lines, backlog reference). Both were past JS_FUNCTION_FAIL when the gate
+# arrived (BL-503); split them when next changed and lower these as they shrink.
+JS_FUNCTION_RATCHET: dict[tuple[str, str], tuple[int, str]] = {
+    ("tools/ts-cli/ts_cli/audit/report/views/crossmodel.js", "buildCrossModel"):
+        (332, "BL-503"),
+    ("tools/ts-cli/ts_cli/audit/report/views/scorecard.js", "buildScorecard"):
+        (302, "BL-503"),
+}
+
+_JS_FUNCTION = re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(")
+
+
+def js_function_lengths(text: str) -> list[tuple[str, int, int]]:
+    """`(name, first line, length in lines)` for each top-level `function` declaration
+    (one starting at column 0), in order. It ends at the first later line that starts
+    with `}` at column 0 — the report's style — or on its own line when that line closes
+    every brace it opens; one never closed runs to the end of the file. Braces inside
+    strings are not counted: only column-0 `}` lines end a function."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    out = []
+    for i, line in enumerate(lines):
+        m = _JS_FUNCTION.match(line)
+        if not m:
+            continue
+        if line.rstrip().endswith("}") and line.count("{") <= line.count("}"):
+            out.append((m.group(1), i + 1, 1))
+            continue
+        end = next((j for j in range(i + 1, len(lines)) if lines[j].startswith("}")),
+                   len(lines) - 1)
+        out.append((m.group(1), i + 1, end - i + 1))
+    return out
+
+
+def _js_function_findings(root: str, rel: str) -> tuple[list, list]:
+    """(fails, warns) for one JS file's top-level functions."""
+    with open(os.path.join(root, rel), encoding="utf-8") as fh:
+        text = fh.read()
+    fails, warns = [], []
+    for name, start, n in js_function_lengths(text):
+        recorded = JS_FUNCTION_RATCHET.get((rel, name))
+        if recorded is not None:
+            if n > recorded[0]:
+                fails.append((rel, name, n, "recorded %d, %s" % recorded))
+            elif n > JS_FUNCTION_WARN:
+                warns.append((rel, name, n))
+        elif n > JS_FUNCTION_FAIL:
+            fails.append((rel, name, n, "limit %d" % JS_FUNCTION_FAIL))
+        elif n > JS_FUNCTION_WARN:
+            warns.append((rel, name, n))
+    return fails, warns
 
 
 def _scan_files(root: str) -> list[str]:
@@ -56,7 +122,7 @@ def _scan_files(root: str) -> list[str]:
         if "/tests" in dirpath.replace(os.sep, "/"):
             continue
         for fn in fnames:
-            if fn.endswith(".py"):
+            if fn.endswith(SCANNED_SUFFIXES):
                 rel = os.path.relpath(os.path.join(dirpath, fn), root)
                 files.append(rel.replace(os.sep, "/"))
     return files
@@ -66,7 +132,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Line-count gate for ts_cli modules.")
     ap.add_argument("--root", default=".")
     ap.add_argument("--staged", action="store_true",
-                    help="only evaluate staged .py files (pre-commit mode)")
+                    help="only evaluate staged files (pre-commit mode)")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
 
@@ -84,7 +150,12 @@ def main(argv=None) -> int:
             return 0
 
     fails, warns, ratchet_fails = [], [], []
+    func_fails, func_warns = [], []
     for rel in sorted(files):
+        if rel.endswith(".js"):
+            ff, fw = _js_function_findings(root, rel)
+            func_fails += ff
+            func_warns += fw
         with open(os.path.join(root, rel), encoding="utf-8") as fh:
             n = sum(1 for _ in fh)
         if rel in RATCHET:
@@ -110,6 +181,16 @@ def main(argv=None) -> int:
     for rel, n in warns:
         print("WARN  file size: %s is %d lines (>%d) — consider a module-per-concern "
               "split (see BL-069 for the pattern)" % (rel, n, SOFT_WARN))
+    for rel, name, n in func_warns:
+        print("WARN  file size: %s function %s is %d lines (>%d) — split it into helpers"
+              % (rel, name, n, JS_FUNCTION_WARN))
+    if func_fails:
+        print("FAIL  file size — JS functions too long:")
+        for rel, name, n, why in func_fails:
+            print("  %s: function %s is %d lines (%s)" % (rel, name, n, why))
+        print("\nSplit the function into helpers, or — for a pre-existing offender — add a"
+              "\nJS_FUNCTION_RATCHET entry recording its CURRENT length plus a backlog id.")
+        return 1
     if fails:
         print("FAIL  file size — modules exceed %d lines:" % HARD_FAIL)
         for rel, n in fails:
@@ -119,7 +200,8 @@ def main(argv=None) -> int:
               "\nadd a RATCHET entry in tools/validate/check_file_size.py"
               "\nrecording its CURRENT size plus a backlog cross-reference.")
         return 1
-    print("PASS  file size: %d module(s) checked, %d warning(s)" % (len(files), len(warns)))
+    print("PASS  file size: %d module(s) checked, %d warning(s)"
+          % (len(files), len(warns) + len(func_warns)))
     return 0
 
 
