@@ -486,8 +486,12 @@ def _data_type(item: dict, ctx: Any) -> str:
 def _has_date_column(item: dict, ctx: Any) -> bool:
     """Model: some column's warehouse type (@data_type) is a date type (DATE_TYPES)."""
     doc = item.get("doc") or {}
+    return cached("has_date_column", doc, _model_has_date_column, doc, ctx)
+
+
+def _model_has_date_column(doc: dict, ctx: Any) -> bool:
     col_types = cached("column_types", doc, ctx.column_types, doc)
-    cols = (item.get("obj") or {}).get("columns")
+    cols = (doc.get("model") or {}).get("columns")
     return any(isinstance(c, dict) and isinstance(c.get("column_id"), str)
                and str(col_types.get(c["column_id"]) or "").upper() in DATE_TYPES
                for c in (cols if isinstance(cols, list) else []))

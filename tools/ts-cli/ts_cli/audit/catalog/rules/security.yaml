@@ -217,7 +217,7 @@
     mode: each
     where: {field: "@outer_join_unguarded_rls", nonblank: true}
   severity: LOW
-  message: "{obj.type} join '{name}' keeps rows of {@outer_join_unguarded_rls}, whose RLS rules have no isnull clause — users under them may lose those rows"
+  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no isnull branch — users under them may lose those rows"
   remediation: Add an `isnull ( [<path>::<column>] ) or …` branch to the rule, or make the join INNER if unmatched rows are not wanted
   examples:
     fires: {fixture: sec_rls_outer_joined_unguarded, severity: LOW}
@@ -237,9 +237,11 @@
   aggregate:
     mode: each
     where:
-      any:
-        - {field: expr, not_regex: '(?i)\bts_(groups\w*|username)\b'}
-        - {field: expr, regex: '!=|<>'}
+      all:
+        - {field: expr, regex: '\S'}
+        - any:
+            - {field: expr, not_regex: '(?i)\bts_(groups\w*|username)\b'}
+            - {field: expr, regex: '!=|<>'}
   severity: LOW
   message: "RLS rule '{obj.name}' builds no suggestion index (no ts_groups / ts_username, or a != comparison): {obj.expr:.80}"
   remediation: Express the rule with ts_groups or ts_username and an equality, so search suggestions are indexed per user

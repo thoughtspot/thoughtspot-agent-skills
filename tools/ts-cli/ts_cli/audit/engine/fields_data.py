@@ -213,14 +213,25 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
 _ISNULL_CALL = re.compile(r"(?i)\bisnull\s*\(")
 
 
-def _optional_keys(join: dict) -> List[Any]:
-    """The table keys whose rows an outer join keeps even without a match — the side
-    that can be null: the `with` table for LEFT_OUTER, the declaring table for
-    RIGHT_OUTER, both for OUTER (ThoughtSpot's full outer join); none otherwise."""
+def _optional_tables(join: dict, model_tables: list) -> List[dict]:
+    """The model tables an outer join may find no row in — the side that can be null:
+    the table its `with` names (tml.join_target, as the join graph resolves it) for
+    LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER (ThoughtSpot's full
+    outer join); none otherwise, and none it cannot resolve."""
     kind = _upper(join.get("type"))
-    declaring = tml.table_key(join.get("model_table") or {})
-    return {"LEFT_OUTER": [join.get("with")], "RIGHT_OUTER": [declaring],
-            "OUTER": [declaring, join.get("with")]}.get(kind, [])
+    declaring = join.get("model_table")
+    target = tml.join_target(model_tables, join.get("with"))
+    sides = {"LEFT_OUTER": [target], "RIGHT_OUTER": [declaring],
+             "OUTER": [declaring, target]}.get(kind, [])
+    return [t for t in sides if isinstance(t, dict)]
+
+
+def _key(model_table: dict) -> str:
+    """A model table's key (alias, else name) when it is a string, else ""."""
+    for k in ("alias", "name"):
+        if isinstance(model_table.get(k), str) and model_table[k]:
+            return model_table[k]
+    return ""
 
 
 def _unguarded_rls(table_doc: Any) -> bool:
@@ -242,12 +253,12 @@ def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
     table with no Table TML in scope is unknown and not listed; a name list in
     messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    fqn_by_key = {tml.table_key(mt): mt.get("fqn")
-                  for mt in (_model_of(item).get("model_tables") or [])
-                  if isinstance(mt, dict)}
-    keys = [k for k in _optional_keys(item.get("obj") or {}) if isinstance(k, str) and k]
-    return NameList(sorted({k for k in keys
-                            if _unguarded_rls(ctx.tables.get(fqn_by_key.get(k) or ""))}))
+    model_tables = _model_of(item).get("model_tables")
+    sides = _optional_tables(item.get("obj") or {},
+                             model_tables if isinstance(model_tables, list) else [])
+    return NameList(sorted({_key(t) for t in sides
+                            if isinstance(t.get("fqn"), str)
+                            and _unguarded_rls(ctx.tables.get(t["fqn"]))} - {""}))
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────

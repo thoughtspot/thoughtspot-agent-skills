@@ -85,3 +85,10 @@ The gate passes, and on the sample `fire-rates` shows no new rule warns.
 - **D18 needs a real copy** (the Table twice), not just a renamed fact.
 - **D18 and A9 are LOW** per the rollout ruling.
 - **D13 skips unset aggregation** until BL-509.
+
+## Amended after the final review (2026-11-04)
+
+- **D13 drops `balance`** from D14's words. A balance summed across accounts and taken last over time is the semi-additive measure SUM is right for (the Model TML schema; BL-506's own reasoning).
+- **D17 reads its word as the name's last word**, optionally followed by an index word (num, number, index, sequence, desc, name, label, built), and never after "per". Latitude and longitude still match anywhere. A qualifier ("Prior Year Sales", "Order ID Count", "Day Flag") is no longer reported: the sample goes from 84 to 79 columns, and the 5 dropped are all qualifier shapes.
+- **S12 resolves `with` through the join graph's reader** (`tml.join_target`), so a physical name of an aliased destination resolves.
+- **S13 skips a rule with no expression** instead of ending the run.

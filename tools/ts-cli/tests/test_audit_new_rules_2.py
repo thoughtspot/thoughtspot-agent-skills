@@ -46,6 +46,18 @@ def test_s12_optional_side():
     assert _sev(_outer_ctx("OUTER", cust_rules=_NO_NULL), "S12") == ["LOW"]
     assert _sev(_outer_ctx("INNER", cust_rules=_NO_NULL), "S12") == []
     assert _sev(_outer_ctx("LEFT_OUTER", cust_tml=False), "S12") == []
+    assert _sev(_outer_ctx("LEFT_OUTER", orders_rules=_NO_NULL), "S12") == []   # required side
+
+
+def test_s12_resolves_with_as_the_join_graph_does():
+    """`with` naming the physical table of an aliased destination still resolves
+    (tml.join_target, review 2026-11-04)."""
+    ctx = _outer_ctx("LEFT_OUTER", cust_rules=_NO_NULL)
+    tables = ctx.models[0]["model"]["model_tables"]
+    tables[1]["alias"] = "BILL_TO"
+    assert _sev(ctx, "S12") == ["LOW"]
+    tables[1]["alias"] = ["odd"]                                  # never raises
+    assert _sev(ctx, "S12") in ([], ["LOW"])
 
 
 def test_s12_names_the_table():
@@ -62,6 +74,13 @@ def test_s13():
     assert _sev(build_rls_expr("[CUSTOMERS_1::COUNTRY] = ts_org"), "S13") == ["LOW"]
     assert _sev(build_rls_expr("[CUSTOMERS_1::COUNTRY] != ts_groups"), "S13") == ["LOW"]
     assert _sev(build_rls_expr("[CUSTOMERS_1::COUNTRY] <> ts_groups"), "S13") == ["LOW"]
+
+
+def test_s13_rule_without_an_expression_does_not_end_the_run():
+    from audit_rule_fixtures.rls import build_trip_table_ctx, build_trip_varchar
+    for rule in ({"name": "R"}, {"name": "R", "expr": None}, {"name": "R", "expr": ""},
+                 {"name": "R", "expr": 7}):
+        assert _sev(build_trip_table_ctx([build_trip_varchar("COUNTRY")], [rule]), "S13") == []
 
 
 # ── D17: identifiers, coordinates and date parts summed ─────────────────────
@@ -104,6 +123,20 @@ def test_d17_words():
     assert _sev(_typed_ctx(zip_table), "D17") == []
     assert _sev(_typed_ctx(_col("Island Count")), "D17") == []
     assert _sev(_typed_ctx(_col("Yearly Revenue")), "D17") == []
+
+
+def test_d17_reads_the_last_word_only():
+    """A date part or id used as a qualifier is not the column (review 2026-11-04)."""
+    for name in ("Prior Year Sales", "Month To Date Sales", "Fiscal Year Revenue",
+                 "Order ID Count", "Long Term Debt", "Orders Per Day", "Year Flag",
+                 "Key Account Revenue"):
+        assert _sev(_typed_ctx(_col(name, "AMOUNT")), "D17") == [], name
+    assert _sev(_typed_ctx(_col("ZIP Code", "POSTAL")), "D17") == ["MEDIUM"]
+    assert _sev(_typed_ctx(_col("Ship Day", "SHIP_DAY")), "D17") == ["MEDIUM"]
+    for name in ("Order Month Num", "Fiscal Week Number", "Year Built", "Latitude Client",
+                 "Longitude Siege", "Month Index", "Year Desc"):
+        assert _sev(_typed_ctx(_col(name, "AMOUNT")), "D17") == ["MEDIUM"], name
+    assert _sev(_typed_ctx(_col("Amount", "STORE_LAT_DEG")), "D17") == ["MEDIUM"]
 
 
 # ── H13: date-part columns beside a date ────────────────────────────────────
@@ -212,7 +245,9 @@ def test_d13():
     group = "group_aggregate ( average ( [T::PRICE] ) , query_groups ( ) , query_filters ( ) )"
     assert _sev(_bare_ctx("Avg Price", group), "D13") == ["MEDIUM"]
     assert _sev(_bare_ctx("Avg Price", f"sum ( {group} )"), "D13") == []
-    assert _sev(_bare_ctx("Balance Total", _LAST), "D13") == ["MEDIUM"]
+    # A balance summed across accounts and taken last over time is the textbook
+    # semi-additive measure: SUM is right (thoughtspot-model-tml.md; review 2026-11-04).
+    assert _sev(_bare_ctx("Closing Balance", _LAST), "D13") == []
     assert _sev(_bare_ctx("Revenue", _LAST), "D13") == []
     assert _sev(_bare_ctx("Avg Price", "group_sum ( [T::PRICE] , [T::REGION] )"), "D13") == []
     assert _sev(_bare_ctx("Avg Price", f"{_LAST} + 1"), "D13") == []
@@ -236,4 +271,7 @@ def test_d13_reads_d14s_rate_words():
                     walk(v)
         walk(rules[rid].aggregate)
         return found
-    assert name_regexes("D14")[0] in name_regexes("D13")
+    import re
+    words = lambda rx: set(re.search(r"\(\?i\)\(\^\|\[_\\s:\]\)\(([^)]*)\)", rx).group(1).split("|"))
+    d13, d14 = words(name_regexes("D13")[0]), words(name_regexes("D14")[0])
+    assert d13 and d13 <= d14 and "balance" not in d13
