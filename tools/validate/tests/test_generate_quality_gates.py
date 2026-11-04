@@ -467,3 +467,11 @@ class TestStripVolatile:
             b = "\n".join([self.HEADER, self.SEP, self._row(1, "x", mode=mode, date="2026-09-09")])
 
             assert strip_volatile(a) == strip_volatile(b), f"mode={mode} not normalised"
+
+
+def test_the_file_size_trigger_names_report_js_too():
+    """BL-503: the file-size gate runs on staged report JS as well as Python."""
+    from generate_quality_gates import _humanise_trigger
+    assert _humanise_trigger(r"^tools/ts-cli/ts_cli/.*\.(py|js)$") == \
+        "ts-cli Python or report JS staged"
+    assert _humanise_trigger(r"^tools/ts-cli/ts_cli/.*\.py$") == "ts-cli Python source staged"

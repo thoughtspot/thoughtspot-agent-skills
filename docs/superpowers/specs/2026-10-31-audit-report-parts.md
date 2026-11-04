@@ -56,7 +56,9 @@ file. A new view is a new file and a registry line; the router is never edited.
   clash. And exactly one view may be the `fallback`, or an unknown route shows nothing
   (none) or the wrong view (two); a test guards that too.
 - **The scripts are not size-gated** (the file-size and module-health gates scan Python
-  only): BL-503.
+  only): BL-503. *(Since 2026-11-04 `check_file_size` gates them — file size and a
+  column-0 function length — with the splits and the embedded ERD `renderer.js` in
+  BL-520.)*
 
 ## Tests
 
