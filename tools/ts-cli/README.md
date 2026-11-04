@@ -1218,8 +1218,13 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts agentql cl
 - `--exprs-file`/stdin mode → array of `{name, column_type, aggregation, is_aggregate}` —
   `column_type` is `MEASURE` iff the expression contains a call to an aggregate function
   (`sum`, `count`, `group_aggregate`, `last_value`, …), else `ATTRIBUTE`; `aggregation` is
-  `SUM` for every MEASURE (ThoughtSpot ignores the `aggregation` property on formula
-  columns at query time — the expr is self-contained), `null` for an ATTRIBUTE.
+  what a MEASURE formula column should declare (`spotql_ops.formula_aggregation`), `null`
+  for an ATTRIBUTE. ThoughtSpot applies a formula column's `aggregation` to a per-row
+  formula and to a bare `group_aggregate` / `group_*` / `last_value` / `first_value` (and
+  their `*_in_period` spellings), and ignores it on any other aggregate formula: so `SUM`
+  for those, and for a bare window the re-aggregation its inner aggregate implies
+  (`group_aggregate ( average ( … ) , … )` → `AVERAGE`; MIN, MAX; sum or count → `SUM`; a
+  non-additive inner aggregate → `AVERAGE`).
 
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either

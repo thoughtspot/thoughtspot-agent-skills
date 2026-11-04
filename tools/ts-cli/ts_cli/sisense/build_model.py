@@ -30,6 +30,7 @@ from collections import Counter
 from ts_cli.formula_common import (add_formula_prefix, expr_is_aggregated,
                                     fix_double_aggregation, resolve_name_collisions)
 from ts_cli.sisense.functions import translate_jaql
+from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.sisense.tables import _cardinality, _clean, _col_role, _dbname, _slug, build_table_tml
 
 
@@ -273,6 +274,9 @@ def _build_formulas(tables: list, columns: list) -> tuple:
         ctype = "MEASURE" if expr_is_aggregated(f["expr"]) else "ATTRIBUTE"
         formula_columns.append({"name": f["name"], "formula_id": f["id"],
                                 "properties": {"column_type": ctype}})
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(formula_columns, formulas)
     return formulas, formula_columns, measure_rows
 
 
@@ -295,9 +299,11 @@ def build_model_tml(inv: dict, model_name: str, join_type: str, part: Counter,
 
     columns, col_review_rows = _build_model_columns(tables, part)
     formulas, formula_columns, measure_rows = _build_formulas(tables, columns)
-    columns = columns + formula_columns
-    # Resolve collisions between physical columns and calc-column formulas (formula wins).
+    # Resolve collisions between physical columns and calc-column formulas (formula wins),
+    # THEN add the formula columns: resolve_name_collisions drops every column named like
+    # a formula, so run over all of them it dropped each formula's own column too.
     columns, formulas, _rename = resolve_name_collisions(columns, formulas, [])
+    columns = columns + formula_columns
 
     model = {
         "obj_id": f"{_slug(model_name)}-sisense",

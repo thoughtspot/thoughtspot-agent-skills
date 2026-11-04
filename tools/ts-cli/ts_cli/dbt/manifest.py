@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 
+from ts_cli.spotql_ops import declare_formula_aggregations
+
 from .constraint_joins import add_uncovered_joins, constraint_joins, relation_tables
 from .formula_pass import (
     collapse_double_aggregation, find_reaggregation_kept, rename_colliding_columns,
@@ -364,6 +366,9 @@ def build_model_tml_from_manifest(
     # on ts_formula columns too, including with --no-metrics (no report at all).
     double_agg = collapse_double_aggregation(formulas)
     reagg_kept = find_reaggregation_kept(formulas)
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(formula_col_entries, formulas)
 
     model_doc: dict = {
         "name": model_name,

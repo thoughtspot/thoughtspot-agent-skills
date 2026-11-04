@@ -944,9 +944,11 @@ average ( group_aggregate ( sum ( [value] ) , { [grain] } , query_filters ( ) ) 
   shown at a coarser grain. A **bare** `group_aggregate(...)` stays pinned at `{ [grain] }`
   (matches a Tableau `FIXED` value that repeats per row); the **wrapped** form is the
   portable measure you can drop on any viz. For a model MEASURE column you almost always
-  want the wrapped form — and recall ThoughtSpot ignores the column's `aggregation` field,
-  so the explicit outer `sum` is what actually re-aggregates. See "`group_aggregate`
-  wrapping" above.
+  want the wrapped form. On it ThoughtSpot ignores the column's `aggregation` field, so the
+  explicit outer `sum` is what re-aggregates; on a **bare** `group_aggregate` the column's
+  `aggregation` IS applied to the pinned per-group value (product owner, 2026-11-02 —
+  thoughtspot-model-tml.md), so declare the one that re-aggregates it correctly. See
+  "`group_aggregate` wrapping" above.
 - Use `query_filters()` in the filter argument when the weighted average should respect the
   user's filters (the usual case). Use a hard `{ … }` only to pin a scope that must ignore
   viz filters (Tableau `FIXED` semantics — see the Tableau mapping's "boolean predicate

@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ts_cli.spotql_ops import formula_aggregation
+
 # Default matches the worked example; a real migration overrides it to the source's as-of date.
 DEFAULT_REF_DATE = "12/31/2024"
 
@@ -91,7 +93,8 @@ def build_time_intelligence(
         columns.append({
             "name": name,
             "formula_id": fid,
-            "properties": {"column_type": "MEASURE"},
+            "properties": {"column_type": "MEASURE",
+                           "aggregation": formula_aggregation(expr)},  # BL-509
         })
 
     for spec in specs:

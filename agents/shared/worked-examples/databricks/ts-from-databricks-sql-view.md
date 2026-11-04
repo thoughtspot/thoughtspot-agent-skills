@@ -323,8 +323,9 @@ model:
 - Total Amount is a simple MEASURE (`SUM(total_amount)`) so it uses `column_id`
   directly with `aggregation: SUM` -- no formula needed.
 - Total Orders and Avg Order Amount are formula MEASURE columns with
-  `aggregation: SUM` as convention (ThoughtSpot evaluates the formula `expr`
-  directly and ignores column-level `aggregation` at query time).
+  `aggregation: SUM` as convention: their `expr` already aggregates, so ThoughtSpot
+  ignores the column-level `aggregation` (it is applied only to a per-row formula or a
+  bare `group_aggregate` / `last_value` / `first_value` — see thoughtspot-model-tml.md).
 - `display_name` from the MV YAML becomes the column `name` in ThoughtSpot.
   Where no `display_name` exists (`order_id`), the `name` field is title-cased
   (`Order Id`) -- matching ts-from-databricks.md Key Pattern #3.

@@ -324,7 +324,12 @@ Three consequences for generators:
   required, though the importer accepts it absent (`VALIDATE_ONLY`, 2026-11-04; BL-509) — but it has no query-time effect. Do not attempt to infer a "correct"
   aggregation from the expression shape in this case — there is nothing to get right.
 - A **bare `group_aggregate` / `last_value` / `first_value`** formula is the exception: its
-  `aggregation:` is load-bearing, chosen exactly as for a scalar formula.
+  `aggregation:` is load-bearing, chosen exactly as for a scalar formula. When the source
+  names none, `spotql_ops.formula_aggregation` declares the re-aggregation the inner
+  aggregate implies (`group_aggregate ( average ( … ) , … )` or `group_average` →
+  `AVERAGE`; MIN, MAX; sum or count → `SUM`; a ratio, unique count or other non-additive
+  aggregate → `AVERAGE`; an inner `[formula_X]` resolved first). The Power BI, Sisense and
+  dbt converters use it; four others still declare their own value (BL-509, BL-519).
 
 The scalar and aggregate patterns are both legitimate and idiomatic. The scalar form is the more reusable of the two: the
 formula stays at row grain, so it can be re-aggregated differently in different searches, and it

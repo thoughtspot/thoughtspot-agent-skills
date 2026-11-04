@@ -130,6 +130,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
 | 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |
 | 1.0.3 | 2026-10-07 | **Quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-365).** A literal with a quote is emitted double-quoted (read SQL-standard: `''` is one quote), a backslash doubled, and every product under a division bracketed |

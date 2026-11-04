@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.powerbi.functions import translate_dax
+from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.powerbi.tables import (_AUTO_TABLE, _cardinality, _col_role, _dbname,
                                     _slug, build_table_tml)
 
@@ -283,6 +284,9 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
     formulas, measure_rows = _build_formulas(tables, overrides, dropped_ids, force_physical, seen, columns)
     _cascade_flag(formulas, measure_rows, columns)
     formulas = _topo_sort_formulas(formulas)
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(columns, formulas)
 
     model = {
         "obj_id": f"{_slug(model_name)}-pbi",

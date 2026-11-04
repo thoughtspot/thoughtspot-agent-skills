@@ -36,7 +36,7 @@ from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
 from ts_cli.audit.engine.memo import cached
 from ts_cli.formula_translate.refs import split_literals
-from ts_cli.spotql_ops import AGGREGATE_FUNCS, outermost_func
+from ts_cli.spotql_ops import AGGREGATE_FUNCS, is_bare_window
 
 DerivedField = Callable[[dict, Any], Any]
 FIELDS: Dict[str, DerivedField] = {}
@@ -305,26 +305,20 @@ def _surfaces_row_level_formula(item: dict, ctx: Any) -> bool:
     return name not in aggregate
 
 
-#: The formulas whose column `aggregation` is applied although they aggregate: a bare
-#: call to one of these, with no aggregate wrapped around it (product owner, 2026-11-02;
-#: thoughtspot-model-tml.md). The group_* shorthands and *_in_period spellings wait on
-#: BL-509.
-BARE_WINDOW_FUNCS = ("group_aggregate", "last_value", "first_value")
-
-
 @register("surfaces_bare_window_formula", uses=(),
           label="the column surfaces a bare group_aggregate, last_value or first_value")
 def _surfaces_bare_window_formula(item: dict, ctx: Any) -> bool:
     """Model column: its `formula_id` names a formula whose whole `expr` is one call to
-    group_aggregate, last_value or first_value (spotql_ops.outermost_func, any case) —
-    the aggregate formulas whose column `aggregation` is applied. False for a table
-    column, a non-string `formula_id`, or one matching no formula."""
+    group_aggregate (or a group_* shorthand), last_value or first_value (or an
+    *_in_period spelling) — the aggregate formulas whose column `aggregation` is applied
+    (product owner, 2026-11-02; spotql_ops.is_bare_window, any case, BL-509). False for
+    a table column, a non-string `formula_id`, or one matching no formula."""
     fid = (item.get("obj") or {}).get("formula_id")
     if not isinstance(fid, str) or not fid:
         return False
     model = _model_of(item)
     expr = cached("formula_exprs_by_id", model, _formula_exprs_by_id, model).get(fid)
-    return outermost_func(expr if isinstance(expr, str) else None) in BARE_WINDOW_FUNCS
+    return is_bare_window(expr if isinstance(expr, str) else None)
 
 
 def _formula_exprs_by_id(model: dict) -> dict:
