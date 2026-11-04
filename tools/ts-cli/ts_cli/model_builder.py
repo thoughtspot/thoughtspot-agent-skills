@@ -410,7 +410,9 @@ def _build_model_columns(
                 "column_type": f.get("column_type", "MEASURE"),
             },
         }
-        if f.get("column_type") == "MEASURE":
+        # The type the entry carries, defaulted or not: an untyped formula is a MEASURE
+        # and must declare an aggregation too (BL-509).
+        if entry["properties"]["column_type"] == "MEASURE":
             entry["properties"]["aggregation"] = _aggregation_for_name(f["name"])
         model_cols.append(entry)
 

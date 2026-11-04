@@ -257,7 +257,11 @@ def test_d13():
     # semi-additive measure: SUM is right (thoughtspot-model-tml.md; review 2026-11-04).
     assert _sev(_bare_ctx("Closing Balance", _LAST), "D13") == []
     assert _sev(_bare_ctx("Revenue", _LAST), "D13") == []
-    assert _sev(_bare_ctx("Avg Price", "group_sum ( [T::PRICE] , [T::REGION] )"), "D13") == []
+    # BL-509: a group_* shorthand and an *_in_period spelling are the same functions,
+    # read as group_aggregate ( sum ( ... ) ) and last_value already are.
+    assert _sev(_bare_ctx("Avg Price", "group_sum ( [T::PRICE] , [T::REGION] )"), "D13") == ["MEDIUM"]
+    assert _sev(_bare_ctx("Interest Rate", _LAST.replace("last_value", "last_value_in_period", 1)),
+                "D13") == ["MEDIUM"]
     assert _sev(_bare_ctx("Avg Price", f"{_LAST} + 1"), "D13") == []
 
 

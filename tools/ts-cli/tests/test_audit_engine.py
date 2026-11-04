@@ -1199,11 +1199,14 @@ def test_surfaces_bare_window_formula_branches():
         {"id": "f2", "name": "B", "expr": "group_aggregate ( sum ( [T::X] ) , query_groups ( ) , query_filters ( ) )"},
         {"id": "f3", "name": "C", "expr": "sum ( group_aggregate ( sum ( [T::X] ) , query_groups ( ) , query_filters ( ) ) )"},
         {"id": "f4", "name": "G", "expr": "group_sum ( [T::X] , [T::Y] )"},
-        {"id": ["f5"], "name": "L", "expr": "first_value ( sum ( [T::X] ) , query_groups ( ) , { [D::D] } )"}],
+        {"id": ["f5"], "name": "L", "expr": "first_value ( sum ( [T::X] ) , query_groups ( ) , { [D::D] } )"},
+        {"id": "f6", "name": "I", "expr": "last_value_in_period ( sum ( [T::X] ) , query_groups ( ) , { [D::D] } )"}],
         "columns": [{"name": n, "formula_id": fid} for n, fid in
                     (("A", "f1"), ("B", "f2"), ("C", "f3"), ("G", "f4"), ("L", ["f5"]),
-                     ("M", "missing"))] + [{"name": "P", "column_id": "T::X"}]}
+                     ("I", "f6"), ("M", "missing"))] + [{"name": "P", "column_id": "T::X"}]}
     ctx = make_context(models=[{"guid": "g-1", "model": model}])
     cols = {i["name"]: i for i in scopes.iterate(ctx, "model.column")}
-    got = {n: fields.get(cols[n], "@surfaces_bare_window_formula", ctx) for n in "ABCGLMP"}
-    assert got == {"A": True, "B": True, "C": False, "G": False, "L": False, "M": False, "P": False}
+    got = {n: fields.get(cols[n], "@surfaces_bare_window_formula", ctx) for n in "ABCGILMP"}
+    # BL-509: the group_* shorthands and *_in_period spellings are the same functions
+    assert got == {"A": True, "B": True, "C": False, "G": True, "I": True, "L": False,
+                   "M": False, "P": False}

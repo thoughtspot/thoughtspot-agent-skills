@@ -288,14 +288,15 @@
   title: Group or semi-additive formula summed under a rate name
   evidence: heuristic
   description: >-
-    A MEASURE column surfacing a bare group_aggregate, last_value or first_value
-    formula — the one call making up its whole expression, with no aggregate around
-    it, so the column's `aggregation` is applied to its result — whose name reads as a
-    rate, price or ratio (D14's words, less balance: a balance summed across accounts and
-    taken last over time is the semi-additive measure SUM is right for) and whose aggregation is SUM. Summing a
-    per-group average or a last rate gives a meaningless total. An unset aggregation,
-    the group_* shorthands and the *_in_period spellings are not read until BL-509
-    settles them. A name match, so MEDIUM at most.
+    A MEASURE column surfacing a bare group_aggregate (or a group_* shorthand such as
+    group_average), last_value or first_value (or an *_in_period spelling) formula — the
+    one call making up its whole expression, with no aggregate around it, so the
+    column's `aggregation` is applied to its result — whose name reads as a rate, price
+    or ratio (D14's words, less balance: a balance summed across accounts and taken last
+    over time is the semi-additive measure SUM is right for) and whose aggregation is
+    SUM. Summing a per-group average or a last rate gives a meaningless total. An unset
+    aggregation is not read: which one ThoughtSpot applies then is unverified (BL-509).
+    A name match, so MEDIUM at most.
   categories: [D]
   requires: [model_tml]
   scope: model.column

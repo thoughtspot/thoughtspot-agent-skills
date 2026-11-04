@@ -71,7 +71,8 @@ expression.
 
 - **Semi-additive measure** — an aggregate-formula whose **outermost** call is
   `last_value`/`first_value` (the snapshot form `last_value(sum(col), query_groups(),
-  {date})`). This one **inverts** the rule above: **wrap it in `SUM(...)`, never `AGG()`**.
+  {date})`), or their `*_in_period` spelling, which takes the same arguments (classified
+  by that shape since BL-509; not probed live). This one **inverts** the rule above: **wrap it in `SUM(...)`, never `AGG()`**.
   `AGG()` fails with `NON_CONVERTIBLE_FUNCTION` ("Non standard sql function QueryGroups") —
   the serializer can't emit `query_groups()` natively. `SUM(...)` forces a per-group
   materialisation that resolves `query_groups()` and passes the already-collapsed snapshot

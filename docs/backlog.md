@@ -320,7 +320,7 @@ are roughly ordered by value÷effort.
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
 | ~~BL-501~~ | ~~`ts audit run` ends on non-mapping shapes outside the three item-10 keys~~ | DONE (2026-11-04) |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
-| BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
+| ~~BL-509~~ | ~~formula `aggregation:` after the 2026-11-02 ruling~~ | DONE (2026-11-04) |
 | ~~BL-510~~ | ~~`ts audit run`'s Model export drops a whole batch when one GUID is gone~~ | DONE (2026-11-04) |
 | ~~BL-511~~ | ~~Probe S12's consequence before raising it to MEDIUM~~ | DONE by ruling (2026-11-04): S12 is MEDIUM |
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
@@ -16362,7 +16362,9 @@ with the alias fetch.
 
 **Target:** 2027-01-31.
 
-## BL-509 — formula `aggregation:` after the 2026-11-02 ruling `Tier 3`
+## BL-509 — formula `aggregation:` after the 2026-11-02 ruling — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.0, ts-cli 0.201.0). `spotql_ops.formula_aggregation` is the one reading of what a MEASURE formula column declares: SUM for a per-row formula and for any aggregate formula (where ThoughtSpot ignores it); for a bare `group_aggregate` / `group_*` / `last_value` / `first_value` / `*_in_period`, the re-aggregation its inner aggregate implies (AVERAGE, MIN, MAX; SUM for a sum or count; SUM where there is none). (1) Every emitter listed below calls it, and a test drives each one end to end (the `model_builder` case stays latent: the Tableau and Qlik translators always set `column_type`) (`tests/test_formula_aggregation.py`); it found that the Sisense converter dropped every calc formula's own column, now fixed. (2) No lint rule, by ruling: the importer accepts the declaration absent, so an ERROR would block valid imports; `ts-model-conversion-invariants.md` now says what the aggregation does and that the converters declare it. (3) The stale copies are corrected: `classify_expr`, the README, `formula_translate/engine.py`, `formula_common.py`, the Databricks SQL View worked example; `tests/test_spotql_ops.py` was right (a per-row measure) and the Ossie plan's copy is about an aggregate formula, so both stand. (4) `classify_expr` declares a bare per-group average AVERAGE. (5) `AGGREGATE_FUNCS` matches the two `*_in_period` spellings, which are semi-additive for AgentQL too, and D13 reads them and the `group_*` shorthands; P2's pins did not move. Still open: which aggregation ThoughtSpot applies to a bare window whose column declares none (D13 does not read that case).
 
 **Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
 

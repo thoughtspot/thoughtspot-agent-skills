@@ -525,9 +525,8 @@ def promote_duplicate_column_ids(
             # `ts tml lint` I8 surfaces it for the author to resolve.
             kept.append(cand)
             continue
-        # A formula-measure column's aggregation is ignored by ThoughtSpot (the
-        # expr carries the aggregation); SUM matches the convention used for
-        # every other formula measure.
+        # `fn ( [col] )` is an aggregate formula, so ThoughtSpot ignores the column's
+        # aggregation (product owner, 2026-11-02); SUM is the declared convention.
         promoted_entry = dict(entry, aggregation="SUM")
         out_formulas.append(
             dict(cand, entry=promoted_entry, expr=f"{fn} ( [{col_id}] )"))

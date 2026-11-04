@@ -699,6 +699,7 @@ rm -f /tmp/ts_promote_formula_model.yaml
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.5.1 | 2026-11-04 | **A promoted per-group average is not summed.** `ts agentql classify-columns` now declares a bare `group_aggregate ( average ( … ) , … )` or `group_average` as AVERAGE (MIN and MAX likewise), since ThoughtSpot applies a bare window's column aggregation; other aggregate formulas keep SUM, which it ignores (BL-509). |
 | 1.5.0 | 2026-08-26 | Permission pre-flight via `ts auth whoami` + `ts share status --columns`. The "endpoint not yet verified" verdict predated `ts share`: open-item #2's 500 was on `security/metadata/fetch`, while `ts share status` posts to `security/metadata/fetch-permissions`, live-verified 2026-07-26. No new CLI work (finding 5.3); open-item #2 closed as superseded. |
 | 1.4.1 | 2026-07-22 | Relax prompt-batching: allow independent questions in a single prompt (BL-074) |
 | 1.4.0 | 2026-07-13 | Steps 7–10 delegate to `ts model promote-formula` CLI command (BL-066): duplicate detection, reference mapping, column_type inference, and TML merge are now deterministic. Prereq ts-cli v0.51.0. |

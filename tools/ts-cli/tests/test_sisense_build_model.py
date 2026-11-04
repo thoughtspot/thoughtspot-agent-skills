@@ -124,6 +124,19 @@ def test_calc_column_formula_migrated():
     assert rows["Margin"]["status"] == "Migrated"
 
 
+def test_calc_column_formula_is_surfaced_by_a_column():
+    """Every formula needs a columns[] entry binding it (TML invariant). The collision
+    pass dropped the formula's own column with the physical one it replaces, so a
+    migrated calc measure never surfaced (found by BL-509's emitter test)."""
+    _, _, model, _ = _build()
+    cols = {c["name"]: c for c in model["columns"]}
+    assert cols["Margin"].get("formula_id") == "formula_Margin"
+    assert "column_id" not in cols["Margin"]
+    assert cols["Margin"]["properties"] == {"column_type": "MEASURE", "aggregation": "SUM"}
+    ids = {f["id"] for f in model["formulas"]}
+    assert ids <= {c.get("formula_id") for c in model["columns"]}
+
+
 def test_calc_column_needs_review_not_emitted():
     _, mapping, model, _ = _build()
     emitted = {f["name"] for f in model.get("formulas", [])}

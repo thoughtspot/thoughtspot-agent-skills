@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 
+from ts_cli.spotql_ops import formula_aggregation
+
 from .constraint_joins import add_uncovered_joins, constraint_joins, relation_tables
 from .formula_pass import (
     collapse_double_aggregation, find_reaggregation_kept, rename_colliding_columns,
@@ -313,6 +315,8 @@ def build_model_tml_from_manifest(
                 props_f.setdefault("column_type", "ATTRIBUTE")
                 if props_f["column_type"] != "MEASURE":
                     props_f.pop("aggregation", None)
+                else:  # declared on every measure formula (BL-509)
+                    props_f.setdefault("aggregation", formula_aggregation(meta["ts_formula"]))
                 entry_f: dict = {"name": col_name, "formula_id": fid, "properties": props_f}
                 desc_f = (col_desc_by_table.get(table_name) or {}).get(col_name)
                 if desc_f:

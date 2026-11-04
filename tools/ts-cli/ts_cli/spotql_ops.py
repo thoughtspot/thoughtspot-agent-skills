@@ -39,7 +39,15 @@ Crucially the trigger is the OUTERMOST op, not the mere presence of `query_group
 `sum(last_value(...))` (an additive aggregate *wrapping* the window) is a normal
 `AGG(...)` measure — an extra `SUM(...)` there double-aggregates / errors NESTED. So
 classification keys off the parsed outer function, and only `last_value`/`first_value`
-as that outer op yield the `semiadditive_measure` kind (wrapper `SUM`).
+as that outer op yield the `semiadditive_measure` kind (wrapper `SUM`). Their
+`*_in_period` spellings take the same arguments, `query_groups ( )` included, and are
+classified the same way (BL-509) — by that shared shape, not by a live AgentQL probe.
+
+**Column aggregation (BL-509).** `formula_aggregation` is the one reading of what a
+generator declares on a MEASURE formula column (product owner, 2026-11-02): applied to a
+per-row formula and to a bare group_aggregate / group_* / last_value / first_value
+(`is_bare_window`), ignored for any other aggregate formula. Every Model emitter and
+`classify_expr` call it.
 """
 from __future__ import annotations
 
@@ -54,13 +62,27 @@ AGGREGATE_FUNCS = re.compile(
     r'\b(sum|count|count_distinct|unique\s+count|average|min|max|median|stddev|'
     r'variance|sum_if|count_if|average_if|min_if|max_if|stddev_if|variance_if|'
     r'unique_count_if|cumulative_\w+|moving_\w+|group_aggregate|'
-    r'group_\w+|rank|rank_percentile|last_value|first_value)\s*\(',
+    r'group_\w+|rank|rank_percentile|last_value|first_value|'
+    r'last_value_in_period|first_value_in_period)\s*\(',
     re.IGNORECASE,
 )
 
 # Semi-additive window functions that, when they are the OUTERMOST call in a formula,
 # must be referenced in AgentQL via SUM(...) not AGG(...). See the module docstring.
-SEMIADDITIVE_OUTER_FUNCS = {"last_value", "first_value"}
+# The *_in_period spellings take the same three arguments, `query_groups ( )` included
+# (thoughtspot-formula-patterns.md: "treat same as last_value"; BL-509).
+SEMIADDITIVE_OUTER_FUNCS = {"last_value", "first_value",
+                            "last_value_in_period", "first_value_in_period"}
+
+#: The aggregate formulas whose column `aggregation` ThoughtSpot applies to their result
+#: when one is the whole expression (product owner, 2026-11-02; thoughtspot-model-tml.md):
+#: group_aggregate, its group_* shorthands, and the semi-additive windows.
+_BARE_WINDOW = re.compile(r"group_\w+|(last|first)_value(_in_period)?", re.IGNORECASE)
+
+#: An inner aggregate -> the column aggregation that re-aggregates its per-group values
+#: the same way. A count re-aggregates by SUM. Anything else (unique count, stddev,
+#: rank, ...) has no faithful re-aggregation; it keeps the repo's SUM convention.
+_REAGGREGATE = {"sum": "SUM", "count": "SUM", "average": "AVERAGE", "min": "MIN", "max": "MAX"}
 
 _LEADING_FUNC = re.compile(r"([A-Za-z_]\w*)\s*\(")
 
@@ -99,21 +121,67 @@ def outermost_func(expr: Optional[str]) -> Optional[str]:
     return None
 
 
+def is_bare_window(expr: Optional[str]) -> bool:
+    """True when the whole of `expr` is one call to group_aggregate, a group_* shorthand,
+    last_value, first_value or an *_in_period spelling — an aggregate formula whose
+    column `aggregation` ThoughtSpot applies (`sum ( last_value ( ... ) )` is not one)."""
+    func = outermost_func(expr)
+    return bool(func and _BARE_WINDOW.fullmatch(func))
+
+
+def _first_arg(expr: str) -> str:
+    """The text of the first argument of the call that is the whole of `expr`."""
+    s = expr.strip()
+    start = s.index("(") + 1
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] in "([{":
+            depth += 1
+        elif s[i] in ")]}":
+            if depth == 0:
+                return s[start:i]
+            depth -= 1
+        elif s[i] == "," and depth == 0:
+            return s[start:i]
+    return s[start:]
+
+
+def formula_aggregation(expr: Optional[str]) -> str:
+    """The `aggregation` a generator declares on a MEASURE formula column whose source
+    gave none (BL-509, under the product owner's ruling of 2026-11-02):
+
+    - a **bare window** (`is_bare_window`): ThoughtSpot applies it to the per-group
+      result, so it re-aggregates the way the inner aggregate does — AVERAGE for
+      `group_aggregate ( average ( ... ) , ... )` or `group_average`, MIN, MAX, and SUM
+      for a sum or count (a balance summed across accounts). `_REAGGREGATE` is the map;
+      anything it lacks keeps SUM;
+    - any other aggregate formula: ignored, but declared — SUM, the repo convention;
+    - a per-row formula: applied, and SUM is the convention a generator falls back to.
+    """
+    if not is_bare_window(expr):
+        return "SUM"
+    func = outermost_func(expr)
+    inner = func[len("group_"):] if func.startswith("group_") and func != "group_aggregate" \
+        else outermost_func(_first_arg(expr))
+    return _REAGGREGATE.get(inner or "", "SUM")
+
+
 def classify_expr(expr: Optional[str]) -> dict[str, Any]:
     """Classify a single formula expression not yet attached to a Model column.
 
-    Matches answer-promote's `infer_column_type`/`infer_aggregation` semantics
-    exactly: MEASURE iff the expression contains an aggregate function call;
-    `aggregation` is `SUM` for a MEASURE (ThoughtSpot ignores the `aggregation`
-    property on formula columns at query time — the expr is self-contained; `SUM`
-    is the repo's documented convention), `None` for an ATTRIBUTE.
+    Matches answer-promote's `infer_column_type` semantics: MEASURE iff the
+    expression contains an aggregate function call, else ATTRIBUTE (`aggregation`
+    None). A MEASURE's `aggregation` is `formula_aggregation(expr)`: ignored by
+    ThoughtSpot for an aggregate formula (SUM, declared by convention) but applied to
+    a bare group_aggregate / last_value / first_value, so a promoted per-group average
+    is declared AVERAGE rather than summed (BL-509).
 
-    Returns: {"column_type": "MEASURE"|"ATTRIBUTE", "aggregation": "SUM"|None,
+    Returns: {"column_type": "MEASURE"|"ATTRIBUTE", "aggregation": str|None,
     "is_aggregate": bool}.
     """
     is_agg = is_aggregate_expr(expr)
     column_type = "MEASURE" if is_agg else "ATTRIBUTE"
-    aggregation = "SUM" if column_type == "MEASURE" else None
+    aggregation = formula_aggregation(expr) if column_type == "MEASURE" else None
     return {"column_type": column_type, "aggregation": aggregation, "is_aggregate": is_agg}
 
 
