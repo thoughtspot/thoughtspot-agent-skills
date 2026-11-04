@@ -209,8 +209,9 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
 
 # ── S12: an RLS table on the optional side of an outer join ─────────────────
 
-#: An RLS rule keeping a table's unmatched (null) rows: `isnull ( ... )`.
-_ISNULL_CALL = re.compile(r"(?i)\bisnull\s*\(")
+#: An RLS rule keeping a table's unmatched (null) rows: `is_null ( ... )`, the docs'
+#: spelling (security-rls, "Respect join definitions"), or `isnull ( ... )`.
+_ISNULL_CALL = re.compile(r"(?i)\bis_?null\s*\(")
 
 
 def _optional_tables(join: dict, model_tables: list) -> List[dict]:
@@ -247,11 +248,11 @@ def _unguarded_rls(table_doc: Any) -> bool:
 @register("outer_join_unguarded_rls", uses=(),
           label="the outer join's optional-side tables with RLS and no isnull clause")
 def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
-    """Join: the keys, sorted, of the tables on its optional side (_optional_keys) whose
-    Table TML carries RLS rules none of which calls `isnull`. The docs say RLS joins are
-    INNER by default, so a user under such a rule loses the rows the outer join kept. A
-    table with no Table TML in scope is unknown and not listed; a name list in
-    messages."""
+    """Join: the keys, sorted, of the tables on its optional side (_optional_tables) whose
+    Table TML carries RLS rules none of which has a null branch (`is_null` / `isnull`).
+    Without one the outer join can act as an inner one for users under the rule
+    (security-rls, "Respect join definitions"). A table with no Table TML in scope is
+    unknown and not listed; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     model_tables = _model_of(item).get("model_tables")
     sides = _optional_tables(item.get("obj") or {},

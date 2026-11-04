@@ -23,6 +23,9 @@ def _rls_table(name, rules):
 _NO_NULL = [{"name": "Region", "expr": "[CUST_1::REGION] = ts_groups"}]
 _WITH_NULL = [{"name": "Region",
                "expr": "isnull ( [CUST_1::REGION] ) or [CUST_1::REGION] = ts_groups"}]
+# The docs' own spelling (security-rls, "Respect join definitions").
+_WITH_IS_NULL = [{"name": "Region",
+                  "expr": "ts_groups = [CUST_1::REGION] or is_null ( [CUST_1::REGION] )"}]
 
 
 def _outer_ctx(join_type, cust_rules=None, orders_rules=None, cust_tml=True):
@@ -38,15 +41,16 @@ def _outer_ctx(join_type, cust_rules=None, orders_rules=None, cust_tml=True):
 
 
 def test_s12_optional_side():
-    assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=_NO_NULL), "S12") == ["LOW"]
+    assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=_NO_NULL), "S12") == ["MEDIUM"]
     assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=_WITH_NULL), "S12") == []
     assert _sev(_outer_ctx("RIGHT_OUTER", cust_rules=_NO_NULL), "S12") == []
-    assert _sev(_outer_ctx("RIGHT_OUTER", orders_rules=_NO_NULL), "S12") == ["LOW"]
-    assert _sev(_outer_ctx("OUTER", orders_rules=_NO_NULL), "S12") == ["LOW"]
-    assert _sev(_outer_ctx("OUTER", cust_rules=_NO_NULL), "S12") == ["LOW"]
+    assert _sev(_outer_ctx("RIGHT_OUTER", orders_rules=_NO_NULL), "S12") == ["MEDIUM"]
+    assert _sev(_outer_ctx("OUTER", orders_rules=_NO_NULL), "S12") == ["MEDIUM"]
+    assert _sev(_outer_ctx("OUTER", cust_rules=_NO_NULL), "S12") == ["MEDIUM"]
     assert _sev(_outer_ctx("INNER", cust_rules=_NO_NULL), "S12") == []
     assert _sev(_outer_ctx("LEFT_OUTER", cust_tml=False), "S12") == []
     assert _sev(_outer_ctx("LEFT_OUTER", orders_rules=_NO_NULL), "S12") == []   # required side
+    assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=_WITH_IS_NULL), "S12") == []
 
 
 def test_s12_resolves_with_as_the_join_graph_does():
@@ -55,9 +59,9 @@ def test_s12_resolves_with_as_the_join_graph_does():
     ctx = _outer_ctx("LEFT_OUTER", cust_rules=_NO_NULL)
     tables = ctx.models[0]["model"]["model_tables"]
     tables[1]["alias"] = "BILL_TO"
-    assert _sev(ctx, "S12") == ["LOW"]
+    assert _sev(ctx, "S12") == ["MEDIUM"]
     tables[1]["alias"] = ["odd"]                                  # never raises
-    assert _sev(ctx, "S12") in ([], ["LOW"])
+    assert _sev(ctx, "S12") in ([], ["MEDIUM"])
 
 
 def test_s12_names_the_table():

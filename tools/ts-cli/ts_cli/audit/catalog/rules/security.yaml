@@ -206,21 +206,23 @@
   description: >-
     A Model join of type LEFT_OUTER, RIGHT_OUTER or OUTER whose optional side — the
     `with` table for LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER —
-    is a Table carrying RLS rules, none of which calls `isnull`. The docs say RLS joins
-    are INNER by default, so a user under the rule loses the rows the outer join kept.
-    LOW until a live probe confirms the drop (BL-511). A Table with no TML in scope is
-    unknown and not reported.
+    is a Table carrying RLS rules, none of which has a null branch (`is_null ( … )` or
+    `isnull ( … )`). The docs' "Respect join definitions" (security-rls) show that such a
+    rule must test the joined column for null or the outer join behaves as an inner one
+    for users under the rule: they lose the rows it kept. Whether it does also depends
+    on cluster settings the audit cannot read, so MEDIUM: review the rule (product
+    owner, 2026-11-04). A Table with no TML in scope is unknown and not reported.
   categories: [S]
   requires: [model_tml, table_tml]
   scope: join
   aggregate:
     mode: each
     where: {field: "@outer_join_unguarded_rls", nonblank: true}
-  severity: LOW
-  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no isnull branch — users under them may lose those rows"
-  remediation: Add an `isnull ( [<path>::<column>] ) or …` branch to the rule, or make the join INNER if unmatched rows are not wanted
+  severity: MEDIUM
+  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no is_null branch — users under them may get an inner join instead"
+  remediation: Review the rule against the docs' "Respect join definitions" — add `or is_null ( [<path>::<column>] )` on the column the join type needs (both sides for a full outer join), or make the join INNER if unmatched rows are not wanted
   examples:
-    fires: {fixture: sec_rls_outer_joined_unguarded, severity: LOW}
+    fires: {fixture: sec_rls_outer_joined_unguarded, severity: MEDIUM}
     silent: {fixture: sec_rls_outer_joined_isnull}
 
 - id: S13
