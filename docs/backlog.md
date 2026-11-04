@@ -324,7 +324,7 @@ are roughly ordered by value÷effort.
 | BL-510 | `ts audit run`'s Model export sends Models in batches of 50 and skips the whole batch on a non-200, so one deleted GUID drops 49 good Models (98 of 148 lost recapturing the SE demo sample, 2026-11-04) | 2026-11-30 |
 | BL-511 | Probe live whether RLS on the optional side of an outer join drops the unmatched rows (and whether `isnull` keeps them) before raising S12 from LOW to MEDIUM | 2026-12-31 |
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
-| BL-513 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
+| BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
@@ -16235,7 +16235,7 @@ don't grade, or settle the shape first.
 
 **Target:** 2027-01-31.
 
-## BL-513 — H15, slot-named columns, needs the column aliases `Tier 3`
+## BL-514 — H15, slot-named columns, needs the column aliases `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4 (G19).
 

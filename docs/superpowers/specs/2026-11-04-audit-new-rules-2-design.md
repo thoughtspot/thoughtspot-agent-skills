@@ -53,7 +53,7 @@ reads differently from the probe, and must record why.
 - **G5b, an RLS rule walking a one-to-many join:** waits for BL-410's live probe, the same reason S11 leaves diamonds out.
 - **G5e and G5f** (the tenant compared through different keys across a Model's tables; `isnull` on the secured table's own key) are judgement calls. Filed as one backlog item (BL-512).
 - **Unset aggregation in D13, and its `group_*` / `*_in_period` shapes:** wait on BL-509.
-- **H15 (G19, slot-named columns):** the audit does not fetch column aliases (a Beta export option), so it cannot tell an already-aliased slot column from a bare one; 0 on the sample. BL-513, with the alias fetch.
+- **H15 (G19, slot-named columns):** the audit does not fetch column aliases (a Beta export option), so it cannot tell an already-aliased slot column from a bare one; 0 on the sample. BL-514, with the alias fetch.
 - **A live probe of S12's consequence** (an RLS Table on the optional side of a LEFT_OUTER join, with and without `isnull`), before raising S12 to MEDIUM: BL-511.
 - **The audit's Model export drops a whole batch of 50 when one GUID is gone** (found recapturing the sample). Filed as BL-510; the fix is in `audit/context.py`, not a rule.
 
