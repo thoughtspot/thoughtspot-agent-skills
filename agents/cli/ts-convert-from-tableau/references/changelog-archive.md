@@ -1,4 +1,4 @@
-# Changelog Archive (pre-1.45.0)
+# Changelog Archive (pre-1.47.0)
 
 Full version history for **ts-convert-from-tableau** below the version(s) currently kept
 inline in `SKILL.md`'s `## Changelog`. Moved here in the BL-128 second-round context-cost
@@ -10,6 +10,10 @@ archaeology ("when/why did X change"), not for executing the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
+| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
+| 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
+| 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |
 | 1.44.1 | 2026-10-06 | **`ROUND(x, n)` → `round ( x , 10^-n )` (ts-cli v0.156.0, BL-331).** ThoughtSpot's 2nd arg is an increment, so the old rename returned wrong numbers. Coverage-matrix row 31a |
 | 1.44.0 | 2026-09-25 | **SCAL-338494 — Tableau's `:Measure Names` pivot pseudo-field was emitted as a real column (prereq ts-cli v0.148.0).** It arrives as an ordinary `<column>` but names no warehouse column, so it reached Model and Table TML with a `column_id` resolving to nothing — and no gate saw it: on a single-table model the id is table-qualified and the same phantom is written into that table's TML, so the cross-reference check resolves it; on a multi-table model the id is bare and I12 is scoped out. Now excluded during column cleanup, kept out of Liveboard/Answer fields, and any formula referencing it is dropped — cascading to dependants, since a survivor would emit a reference to a column the model no longer has. `ts tableau verify` replays that decision so a deliberate removal is not reported as a silent drop. `Multiple Values`, the shelf sibling, is **not** excluded as a column: it has never been observed as a `<column>` and a warehouse column could legitimately carry that name. Step 5c and the blend hand-assembly procedure carry the rule for hand-authored models. |
