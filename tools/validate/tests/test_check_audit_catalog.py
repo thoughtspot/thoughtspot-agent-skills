@@ -59,7 +59,11 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "context.py")
 # Pure ts_cli modules outside the audit package that a code rule imports at module
 # level (S11's join-graph search), copied beside it: stdlib only, so gate-safe.
-GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py", "spotql_ops.py")
+GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py", "spotql_ops.py",
+                       # A9's @parameter_formula_names reads formulas outside quoted
+                       # literals with the shared splitter (2026-11).
+                       "formula_translate/__init__.py", "formula_translate/refs.py",
+                       "formula_translate/context.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
@@ -72,6 +76,7 @@ def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
     for name in GATE_MODULES:
         shutil.copy(REPO / AUDIT_REL / name, dst / name)
     for name in GATE_SHARED_MODULES:
+        (dst.parent / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / AUDIT_REL.parent / name, dst.parent / name)
     shutil.copytree(REPO / AUDIT_REL / "catalog", dst / "catalog")
     if clear_rules:

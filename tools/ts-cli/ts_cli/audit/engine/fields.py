@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tup
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
 from ts_cli.audit.engine.memo import cached
+from ts_cli.formula_translate.refs import split_literals
 from ts_cli.spotql_ops import AGGREGATE_FUNCS
 
 DerivedField = Callable[[dict, Any], Any]
@@ -381,6 +382,58 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
     return NameList(k for k in join_key_ids((item.get("obj") or {}).get("on"))
                     if col_types.get(k, "").upper() in tml.STRING_TYPES)
+
+
+def _table_identity(model_table: Any) -> Any:
+    """A model table's physical identity: its `fqn`, else its `name` (None if neither
+    is a non-empty string)."""
+    if not isinstance(model_table, dict):
+        return None
+    for key in ("fqn", "name"):
+        value = model_table.get(key)
+        if isinstance(value, str) and value:
+            return (key, value)
+    return None
+
+
+@register("table_copy_count", uses=(),
+          label="how many times the table appears in the Model")
+def _table_copy_count(item: dict, ctx: Any) -> int:
+    """Model table: how many of the Model's `model_tables` are the same Table — the
+    same `fqn`, else the same `name` — itself included; 1 for a table appearing once
+    (aliased or not), 0 for one with no identity."""
+    me = _table_identity(item.get("obj"))
+    if me is None:
+        return 0
+    model_tables = _model_of(item).get("model_tables")
+    return sum(1 for mt in (model_tables if isinstance(model_tables, list) else [])
+               if _table_identity(mt) == me)
+
+
+@register("parameter_formula_names", uses=(),
+          label="the formulas that read a Model parameter")
+def _parameter_formula_names(item: dict, ctx: Any) -> list:
+    """Model: the names of its formulas whose `expr`, outside quoted literals
+    (formula_translate.refs.split_literals), holds `[<parameter name>]` for one of the
+    Model's `parameters`; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports this module
+    model = item.get("obj") or {}
+    refs = _parameter_refs(model)
+    formulas = model.get("formulas")
+    out = NameList()
+    for f in (formulas if isinstance(formulas, list) and refs else []):
+        if isinstance(f, dict) and isinstance(f.get("expr"), str):
+            code = " ".join(seg for lit, seg in split_literals(f["expr"]) if not lit)
+            if any(r in code for r in refs):
+                out.append(f.get("name"))
+    return out
+
+
+def _parameter_refs(model: dict) -> set:
+    """`[<name>]` for each of the Model's parameters with a string name."""
+    params = model.get("parameters")
+    return {f"[{p['name']}]" for p in (params if isinstance(params, list) else [])
+            if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]}
 
 
 #: Warehouse types that hold a date: a column of one is what date keywords work on.

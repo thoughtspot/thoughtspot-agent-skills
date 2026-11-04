@@ -785,3 +785,33 @@ def data_identifier_as_attribute() -> AuditContext:
     from .common import build_typed_col, build_typed_model_ctx
     return build_typed_model_ctx(build_typed_col("Customer ID", "CUSTOMER_ID", ctype="ATTRIBUTE"),
                                  build_typed_col("Number of Orders", "NUM_ORDERS", agg="SUM"))
+
+
+# ── D18: copies of a table on the many side (roadmap PR 4.4) ────────────────
+
+def _copied(table: str) -> AuditContext:
+    """SALES (measures) many-to-one into DATES; `table` appears twice."""
+    sales = [{"name": "SALES", "fqn": "t-sales", "joins": [
+        {"with": "DATES", "on": "[SALES::D] = [DATES::D]", "type": "INNER",
+         "cardinality": "MANY_TO_ONE"}]}]
+    dates = [{"name": "DATES", "fqn": "t-dates"}]
+    if table == "SALES":
+        sales.append({"name": "SALES", "alias": "SALES_2", "fqn": "t-sales", "joins": [
+            {"with": "DATES", "on": "[SALES_2::D] = [DATES::D]", "type": "INNER",
+             "cardinality": "MANY_TO_ONE"}]})
+    else:
+        dates.append({"name": "DATES", "alias": "SHIP_DATES", "fqn": "t-dates"})
+    cols = [{"name": f"Amount {t.get('alias', '')}".strip(),
+             "column_id": f"{t.get('alias') or t['name']}::AMT",
+             "properties": {"column_type": "MEASURE"}} for t in sales]
+    cols.append({"name": "Date", "column_id": "DATES::D", "properties": {"column_type": "ATTRIBUTE"}})
+    return make_context(models=[{"guid": "m-copies", "model": {"name": "Copies", "columns": cols,
+                                                               "model_tables": sales + dates}}])
+
+
+def data_fact_copied() -> AuditContext:
+    return _copied("SALES")
+
+
+def data_dimension_copied() -> AuditContext:
+    return _copied("DATES")

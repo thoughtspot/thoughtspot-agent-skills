@@ -123,3 +123,55 @@ def test_h13():
                                                           "ORDER_YEAR": "INT64"}), "H13") == []
     no_tml = make_context(models=[{"guid": "m", "model": {"name": "M", "columns": [date_col, month]}}])
     assert _sev(no_tml, "H13") == []
+
+
+# ── D18: copy of a table on the many side ───────────────────────────────────
+
+def _copies_ctx(fact_copies=1, dim_copies=1, fact_alias=False):
+    """A fact SALES joined many-to-one to a dimension DATES, each repeated as asked."""
+    tables = []
+    for i in range(fact_copies):
+        alias = (fact_alias or i) and f"SALES_{i}"
+        mt = {"name": "SALES", "fqn": "t-sales", "joins": [
+            {"with": "DATES", "on": f"[{alias or 'SALES'}::D] = [DATES::D]",
+             "type": "INNER", "cardinality": "MANY_TO_ONE"}]}
+        if alias:
+            mt["alias"] = alias
+        tables.append(mt)
+    for i in range(dim_copies):
+        mt = {"name": "DATES", "fqn": "t-dates"}
+        if i:
+            mt["alias"] = f"DATES_{i}"
+        tables.append(mt)
+    cols = [{"name": "Amount", "column_id": f"{t.get('alias') or t['name']}::AMT",
+             "properties": {"column_type": "MEASURE"}} for t in tables if t["name"] == "SALES"]
+    cols += [{"name": "Date", "column_id": "DATES::D", "properties": {"column_type": "ATTRIBUTE"}}]
+    return make_context(models=[{"guid": "m-1", "model": {"name": "M", "columns": cols,
+                                                          "model_tables": tables}}])
+
+
+def test_d18():
+    assert _sev(_copies_ctx(fact_copies=2), "D18") == ["LOW", "LOW"]
+    assert _sev(_copies_ctx(fact_copies=1, fact_alias=True), "D18") == []
+    assert _sev(_copies_ctx(dim_copies=2), "D18") == []
+
+
+# ── A9: parameters under Spotter ────────────────────────────────────────────
+
+def _param_ctx(expr, spotter=True, params=("Rate",)):
+    body = {"name": "M", "columns": [], "formulas": [{"id": "f1", "name": "Adjusted", "expr": expr}],
+            "parameters": [{"id": f"p{i}", "name": p, "data_type": "DOUBLE"}
+                           for i, p in enumerate(params)]}
+    if spotter:
+        body["properties"] = {"spotter_config": {"is_spotter_enabled": True}}
+    return make_context(models=[{"guid": "m-1", "model": body}])
+
+
+def test_a9():
+    assert _sev(_param_ctx("[Rate] * [T::AMT]"), "A9") == ["LOW"]
+    assert _sev(_param_ctx("[Rate] * [T::AMT]", spotter=False), "A9") == []
+    assert _sev(_param_ctx("concat ( '[Rate]' , [T::NAME] )"), "A9") == []
+    assert _sev(_param_ctx("[Rate] * [T::AMT]", params=()), "A9") == []
+    assert _sev(_param_ctx("[T::Rate] * 2"), "A9") == []
+    (f,) = run_rule(_param_ctx("[Rate] * [T::AMT]"), "A9")
+    assert "Adjusted" in f.detail

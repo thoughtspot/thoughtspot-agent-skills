@@ -1177,3 +1177,17 @@ def test_data_type_and_has_date_column():
     bare = make_context(models=[{"guid": "g-2", "model": {"name": "N", "columns": "junk"}}])
     (n,) = scopes.iterate(bare, "model")
     assert fields.get(n, "@has_date_column", bare) is False
+
+
+def test_table_copy_count_and_parameter_formulas():
+    model = {"name": "M", "columns": [], "model_tables": [
+        {"name": "S", "fqn": "f1"}, {"name": "S", "alias": "S2", "fqn": "f1"},
+        {"name": "D"}, {"name": "D", "alias": "D2"}, {"name": "X", "fqn": ["odd"]}],
+        "parameters": [{"name": "P"}, {"name": ["odd"]}, "junk"],
+        "formulas": [{"name": "A", "expr": "[P] + 1"}, {"name": "B", "expr": "'[P]'"},
+                     {"name": "C", "expr": None}, "junk"]}
+    ctx = make_context(models=[{"guid": "g-1", "model": model}])
+    counts = [fields.get(t, "@table_copy_count", ctx) for t in scopes.iterate(ctx, "model.table")]
+    assert counts == [2, 2, 2, 2, 1]
+    (m,) = scopes.iterate(ctx, "model")
+    assert list(fields.get(m, "@parameter_formula_names", ctx)) == ["A"]

@@ -361,6 +361,31 @@
     fires: {fixture: data_identifier_summed, severity: MEDIUM}
     silent: {fixture: data_identifier_as_attribute}
 
+- id: D18
+  title: Copy of a table on the many side
+  evidence: fact
+  description: >-
+    A Model table whose role is fact or factless (the shared role classifier, from
+    join direction) and whose Table appears more than once in the Model — the same
+    `fqn`, else the same name — as a copy or alias. A fact renamed once is not a copy.
+    The docs say copies of tables on the many side of a join are not supported in
+    Models; support is in rollout, so a LOW warning. One finding per copy.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.table
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@table_role", in: [fact, factless]}
+        - {field: "@table_copy_count", gt: 1}
+  severity: LOW
+  message: "'{name}' is one of {@table_copy_count} copies of a table on the many side of its joins — not supported in Models yet"
+  remediation: Keep one copy of the fact and join the role-playing dimensions to it instead, or check the copy works on your release
+  examples:
+    fires: {fixture: data_fact_copied, severity: LOW}
+    silent: {fixture: data_dimension_copied}
+
 - id: D15
   title: Duplicate Table-level joins
   evidence: fact
