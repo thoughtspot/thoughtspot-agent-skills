@@ -837,3 +837,18 @@ def human_date_part_beside_date() -> AuditContext:
 
 def human_date_part_without_date() -> AuditContext:
     return _date_part_ctx(False)
+
+
+# ── H14: flags shown as true/false or 0/1 (roadmap PR 4.4) ──────────────────
+
+def human_flag_visible() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Active", "ACTIVE", ctype="ATTRIBUTE"),
+                                 types={"ACTIVE": "BOOL"})
+
+
+def human_flag_spelled_out() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Active", "ACTIVE", ctype="ATTRIBUTE", hidden=True),
+                                 build_typed_col("Status", "STATUS", ctype="ATTRIBUTE"),
+                                 types={"ACTIVE": "BOOL", "STATUS": "VARCHAR"})

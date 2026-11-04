@@ -326,6 +326,38 @@
     fires: {fixture: human_date_part_beside_date, severity: LOW}
     silent: {fixture: human_date_part_without_date}
 
+- id: H14
+  title: Flags shown as true/false or 0/1
+  evidence: heuristic
+  description: >-
+    A Model with visible flag columns: a BOOL or BOOLEAN warehouse type, or a name or
+    physical name starting is_, has_, was_, can_, should_ or flag_, or ending _flag,
+    _ind or _indicator. A flag is legitimate; showing it as true/false or 0/1 is not
+    something a person searches for ("active customers" finds nothing in a column of
+    trues). LOW, one finding per Model listing the first five.
+  categories: [H]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where: {not: {field: properties.is_hidden, truthy: true}}
+    match:
+      any:
+        - {field: "@data_type", in: [BOOL, BOOLEAN]}
+        - {field: name, regex: '(?i)^(is|has|was|can|should|flag)[_\s]|[_\s](flag|ind|indicator)$'}
+        - {field: column_id, regex: '(?i)::((is|has|was|can|should|flag)[_\s]|[^:]*[_\s](flag|ind|indicator)$)'}
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 0, severity: LOW}
+  message: "{matched} visible flag column(s) shown as true/false or 0/1: {matched_names:head5}"
+  remediation: Add a formula that spells the flag out (if ( [Active] ) then 'Active' else 'Inactive'), show that, and hide the raw flag
+  examples:
+    fires: {fixture: human_flag_visible, severity: LOW}
+    silent: {fixture: human_flag_spelled_out}
+
 - id: H12
   title: Technical columns visible
   evidence: heuristic

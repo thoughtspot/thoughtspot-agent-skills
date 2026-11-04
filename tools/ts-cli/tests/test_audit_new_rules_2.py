@@ -175,3 +175,19 @@ def test_a9():
     assert _sev(_param_ctx("[T::Rate] * 2"), "A9") == []
     (f,) = run_rule(_param_ctx("[Rate] * [T::AMT]"), "A9")
     assert "Adjusted" in f.detail
+
+
+# ── H14: flags shown as true/false or 0/1 ───────────────────────────────────
+
+def test_h14():
+    bool_col = _col("Active", "ACTIVE", ctype="ATTRIBUTE")
+    (f,) = run_rule(_typed_ctx(bool_col, types={"ACTIVE": "BOOL"}), "H14")
+    assert f.severity == "LOW" and "Active" in f.detail
+    assert _sev(_typed_ctx(_col("IS_ACTIVE", ctype="ATTRIBUTE"),
+                           types={"IS_ACTIVE": "INT64"}), "H14") == ["LOW"]
+    assert _sev(_typed_ctx(_col("Churned", "CHURN_FLAG")), "H14") == ["LOW"]
+    hidden = _col("Active", "ACTIVE", ctype="ATTRIBUTE", hidden=True)
+    assert _sev(_typed_ctx(hidden, types={"ACTIVE": "BOOL"}), "H14") == []
+    assert _sev(_typed_ctx(_col("Island", ctype="ATTRIBUTE"), types={"Island": "VARCHAR"}),
+                "H14") == []
+    assert _sev(_typed_ctx(_col("Display Name", ctype="ATTRIBUTE")), "H14") == []

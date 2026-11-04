@@ -350,7 +350,7 @@ are in its catalog entry.
 |---|---|---|
 | `rules/ai.yaml` | A — AI Readiness | A1–A4, A6–A9 (A5 retired) |
 | `rules/data.yaml` | D — Data Modeling | D1, D3, D5, D7–D12, D14–D18 (D2, D4, D6 retired) |
-| `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H13 (H6 retired) |
+| `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H14 (H6 retired) |
 | `rules/perf.yaml` | P — Performance | P1–P4, P6–P8, P11, P13–P18 (P5, P9–P10, P12 retired) |
 | `rules/security.yaml` | S — Security | S1–S2, S4–S5, S10–S13 (S3, S6–S9 retired) |
 <!-- END GENERATED: rules-files -->
