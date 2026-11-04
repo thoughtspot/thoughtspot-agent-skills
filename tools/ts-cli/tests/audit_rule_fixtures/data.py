@@ -772,3 +772,16 @@ def data_join_keys_same_family() -> AuditContext:
     """INT32 joined to INT64: one family (D16 silent)."""
     return _typed_keys_ctx("INT32", "INT64")
 
+
+
+# ── D17: identifiers, coordinates and date parts summed (roadmap PR 4.4) ────
+
+def data_identifier_summed() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Customer ID", "CUSTOMER_ID", agg="SUM"))
+
+
+def data_identifier_as_attribute() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Customer ID", "CUSTOMER_ID", ctype="ATTRIBUTE"),
+                                 build_typed_col("Number of Orders", "NUM_ORDERS", agg="SUM"))

@@ -383,6 +383,36 @@ def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
                     if col_types.get(k, "").upper() in tml.STRING_TYPES)
 
 
+#: Warehouse types that hold a date: a column of one is what date keywords work on.
+DATE_TYPES = ("DATE", "DATE_TIME", "DATETIME", "TIMESTAMP")
+
+
+@register("data_type", uses=(),
+          label="the column's warehouse data type")
+def _data_type(item: dict, ctx: Any) -> str:
+    """Model column: its warehouse data type, upper-cased, read off the Table TML its
+    `column_id` resolves to (AuditContext.column_types, keyed by Model alias, else
+    name). "" when unknown: a formula, a non-string `column_id`, or a Table with no
+    TML in scope — which a caller must not read as "not a date"."""
+    cid = (item.get("obj") or {}).get("column_id")
+    if not isinstance(cid, str) or not item.get("doc"):
+        return ""
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
+    return str(col_types.get(cid) or "").upper()
+
+
+@register("has_date_column", uses=(), values=(False, True),
+          label="the Model has a date column")
+def _has_date_column(item: dict, ctx: Any) -> bool:
+    """Model: some column's warehouse type (@data_type) is a date type (DATE_TYPES)."""
+    doc = item.get("doc") or {}
+    col_types = cached("column_types", doc, ctx.column_types, doc)
+    cols = (item.get("obj") or {}).get("columns")
+    return any(isinstance(c, dict) and isinstance(c.get("column_id"), str)
+               and str(col_types.get(c["column_id"]) or "").upper() in DATE_TYPES
+               for c in (cols if isinstance(cols, list) else []))
+
+
 @register("is_string_type", uses=(),
           label="the column is string-typed")
 def _is_string_type(item: dict, ctx: Any) -> bool:

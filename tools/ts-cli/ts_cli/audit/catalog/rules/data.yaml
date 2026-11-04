@@ -327,6 +327,40 @@
     fires: {fixture: data_rate_column_summed, severity: MEDIUM}
     silent: {fixture: data_rate_column_averaged}
 
+- id: D17
+  title: Identifier, coordinate or date part summed
+  evidence: heuristic
+  description: >-
+    A visible physical MEASURE column whose name, or the column part of its
+    `column_id`, reads as an identifier (id, key, code, sku), a zip or postal code, a
+    latitude or longitude, or a date part (year, quarter, month, week, day, fiscal
+    year), as a whole word, with `aggregation` SUM or unset. Adding these up gives a
+    meaningless number: they belong as attributes. "number", "num" and "no" are not
+    read: on the sample most such columns are counts. A name match, so MEDIUM at most.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: column_id, nonblank: true, truthy: true}
+        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - {not: {field: properties.is_hidden, truthy: true}}
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - any:
+            - {not: {field: properties.aggregation, nonblank: true, truthy: true}}
+            - {field: properties.aggregation, regex: '^(?i:sum)\Z'}
+        - any:
+            - {field: name, regex: '(?i)(^|[_\s])(id|key|code|sku|zip|zipcode|postal|postcode|lat|latitude|lon|lng|long|longitude|year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]|$)'}
+            - {field: column_id, regex: '(?i)::(.*[_\s])?(id|key|code|sku|zip|zipcode|postal|postcode|lat|latitude|lon|lng|long|longitude|year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]|$)'}
+  severity: MEDIUM
+  message: "'{name}' ({obj.column_id}) reads as an identifier, coordinate or date part but is summed"
+  remediation: Make the column an ATTRIBUTE (an id, zip code or date part is something to group or filter by, not add up)
+  examples:
+    fires: {fixture: data_identifier_summed, severity: MEDIUM}
+    silent: {fixture: data_identifier_as_attribute}
+
 - id: D15
   title: Duplicate Table-level joins
   evidence: fact

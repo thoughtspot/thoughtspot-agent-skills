@@ -1159,3 +1159,21 @@ def test_outer_join_unguarded_rls_branches():
     joins = list(scopes.iterate(ctx, "join"))
     got = [fields.get(j, "@outer_join_unguarded_rls", ctx) for j in joins]
     assert [list(g) for g in got] == [["C"], [], [], []]
+
+
+def test_data_type_and_has_date_column():
+    model = {"name": "M", "columns": [{"name": "D", "column_id": "T::D"},
+                                      {"name": "X", "column_id": "T::X"},
+                                      {"name": "F", "formula_id": "f"},
+                                      {"name": "L", "column_id": ["T::D"]}],
+             "model_tables": [{"name": "T", "fqn": "t-t"}]}
+    ctx = make_context(models=[{"guid": "g-1", "model": model}], tables={"t-t": {"table": {
+        "name": "T", "columns": [{"name": "D", "db_column_properties": {"data_type": "date_time"}},
+                                 {"name": "X"}]}}})
+    cols = {i["name"]: i for i in scopes.iterate(ctx, "model.column")}
+    assert [fields.get(cols[n], "@data_type", ctx) for n in "DXFL"] == ["DATE_TIME", "", "", ""]
+    (m,) = scopes.iterate(ctx, "model")
+    assert fields.get(m, "@has_date_column", ctx) is True
+    bare = make_context(models=[{"guid": "g-2", "model": {"name": "N", "columns": "junk"}}])
+    (n,) = scopes.iterate(bare, "model")
+    assert fields.get(n, "@has_date_column", bare) is False
