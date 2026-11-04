@@ -323,7 +323,7 @@ are roughly ordered by value÷effort.
 | ~~BL-509~~ | ~~formula `aggregation:` after the 2026-11-02 ruling~~ | DONE (2026-11-04) |
 | ~~BL-510~~ | ~~`ts audit run`'s Model export drops a whole batch when one GUID is gone~~ | DONE (2026-11-04) |
 | ~~BL-511~~ | ~~Probe S12's consequence before raising it to MEDIUM~~ | DONE by ruling (2026-11-04): S12 is MEDIUM |
-| BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
+| ~~BL-512~~ | ~~RLS judgement checks G5e and G5f~~ | DONE (2026-11-04) |
 | BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
 | BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
 | ~~BL-516~~ | ~~A Model the audit could not export is reported only on stderr~~ | DONE (2026-11-04) |
@@ -16261,7 +16261,9 @@ MEDIUM and cite the probe; if not, retire or reword it.
 
 **Target:** 2026-12-31.
 
-## BL-512 — RLS judgement checks G5e and G5f `Tier 3`
+## BL-512 — RLS judgement checks G5e and G5f — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision: S14 (G5e) reads the session variables a Model's RLS Tables compare against — one family per variable (every ts_groups or ts_org variant is one; a custom variable is `ts_var(name)`) — and fires on two or more; S15 (G5f) fires on a rule's null test on its own Table's column (a `table_paths` id resolved to its Table). "Different keys" in G5e is not checked: each Table is keyed by its own column, so a difference there is the norm. 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
 
 **Decision (2026-11-04, product owner):** build both as LOW rules worded "review" (audit backlog PR 5).
 

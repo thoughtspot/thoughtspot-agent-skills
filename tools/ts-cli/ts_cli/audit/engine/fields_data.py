@@ -22,6 +22,7 @@ from typing import Any, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.formula_translate.refs import split_literals
 from ts_cli.tml_join_graph import on_clause_key_pairs
 
 
@@ -261,6 +262,92 @@ def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
     return NameList(sorted({_key(t) for t in sides
                             if isinstance(t.get("fqn"), str)
                             and _unguarded_rls(ctx.tables.get(t["fqn"]))} - {""}))
+
+
+# ── S14 / S15 (BL-512): RLS judgement checks ───────────────────────────────
+
+#: A session variable an RLS rule scopes users by: ts_groups (any variant), ts_username,
+#: ts_org (any variant), ts_email_domain, or a custom `ts_var ( name )`.
+_SESSION_VARIABLE = re.compile(
+    r"(?i)\b(ts_groups\w*|ts_username|ts_org\w*|ts_email_domain"
+    r"|ts_var\s*\(\s*['\"]?(\w+)['\"]?\s*\))")
+#: A null test on one bracketed column: `is_null ( [X] )`, `isnull ( [X] )`, `[X] = null`.
+_NULL_TEST = re.compile(r"(?i)\bis_?null\s*\(\s*\[([^\]]+)\]\s*\)|\[([^\]]+)\]\s*=\s*null\b")
+
+
+def _code(expr: Any) -> str:
+    """`expr` with its quoted literals removed (formula_translate.refs.split_literals)."""
+    if not isinstance(expr, str):
+        return ""
+    return " ".join(seg for lit, seg in split_literals(expr) if not lit)
+
+
+def _variable(match: Any) -> str:
+    whole = match.group(1).lower()
+    if match.group(2):
+        return f"ts_var({match.group(2)})"
+    for family in ("ts_groups", "ts_org"):
+        if whole.startswith(family):
+            return family
+    return whole
+
+
+def _rls_rules_of(table_doc: Any) -> list:
+    t = table_doc.get("table") if isinstance(table_doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    rules = rls.get("rules") if isinstance(rls, dict) else None
+    return [r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else []
+
+
+@register("rls_session_variables", uses=(),
+          label="the session variables the Model's RLS rules scope users by")
+def _rls_session_variables(item: dict, ctx: Any) -> list:
+    """Model: the session variables, sorted, that the RLS rules of its Tables (Table TML
+    by `model_tables[].fqn`) compare against, outside quoted literals — one entry per
+    family: every ts_groups variant is `ts_groups`, every ts_org variant `ts_org`, and a
+    custom variable `ts_var(name)`. Two or more means its Tables can scope one user
+    differently (S14, BL-512); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    model = item.get("obj") or {}
+    found = set()
+    for mt in model.get("model_tables") or [] if isinstance(model.get("model_tables"), list) else []:
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
+        for rule in _rls_rules_of(doc):
+            found |= {_variable(m) for m in _SESSION_VARIABLE.finditer(_code(rule.get("expr")))}
+    return NameList(sorted(found))
+
+
+def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
+    """A Table TML's name and its RLS `table_paths` as {id: Table name}."""
+    t = doc.get("table") if isinstance(doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    paths = rls.get("table_paths") if isinstance(rls, dict) else None
+    by_id = {p.get("id"): p.get("table") for p in paths if isinstance(p, dict)} \
+        if isinstance(paths, list) else {}
+    return (t.get("name") if isinstance(t, dict) else None), by_id
+
+
+@register("own_column_null_tests", uses=(),
+          label="the rule's null tests on its own Table's columns")
+def _own_column_null_tests(item: dict, ctx: Any) -> list:
+    """RLS rule: the columns, in order, of its own Table that it tests for null
+    (`is_null` / `isnull ( [X] )`, `[X] = null`; outside quoted literals). A reference's
+    prefix is a `table_paths` id resolved to its Table, else a Table name; it is the
+    rule's own Table when that is the Table the rule is on. Such a test keeps the rows
+    with no value there for every user under the rule — right for an outer join's
+    unmatched rows, which S12 asks for on a joined Table, but on the Table's own key it
+    also shows its ownerless rows (S15, BL-512); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    own, by_id = _own_table_and_paths(item.get("doc"))
+    out = NameList()
+    for m in _NULL_TEST.finditer(_code((item.get("obj") or {}).get("expr"))):
+        prefix, sep, column = (m.group(1) or m.group(2)).strip().partition("::")
+        prefix, column = prefix.strip(), column.strip()
+        if sep and isinstance(own, str) and by_id.get(prefix, prefix) == own \
+                and column not in out:
+            out.append(column)
+    return out
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────
