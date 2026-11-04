@@ -321,11 +321,13 @@ are roughly ordered by value÷effort.
 | BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
 | BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
-| BL-510 | `ts audit run`'s Model export sends Models in batches of 50 and skips the whole batch on a non-200, so one deleted GUID drops 49 good Models (98 of 148 lost recapturing the SE demo sample, 2026-11-04) | 2026-11-30 |
-| BL-511 | Probe live whether RLS on the optional side of an outer join drops the unmatched rows (and whether `isnull` keeps them) before raising S12 from LOW to MEDIUM | 2026-12-31 |
+| ~~BL-510~~ | ~~`ts audit run`'s Model export drops a whole batch when one GUID is gone~~ | DONE (2026-11-04) |
+| ~~BL-511~~ | ~~Probe S12's consequence before raising it to MEDIUM~~ | DONE by ruling (2026-11-04): S12 is MEDIUM |
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
 | BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
 | BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
+| BL-516 | A Model the audit could not export is reported only on stderr and in a snapshot's `warnings.json`: the run JSON, the report and "Audit complete" show nothing, so a requested Model can vanish from the result silently | 2026-12-31 |
+| BL-517 | `_export_answers` (`audit/context.py`) sends 50 Answer GUIDs per export and drops a refused batch whole, logging only — one bad Answer GUID drops up to 49 Answers from H7/H8/H9. Reuse BL-510's per-GUID retry | 2026-12-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
@@ -393,7 +395,7 @@ are roughly ordered by value÷effort.
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 | BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
-| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
+| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape. **Parked 2026-11-04: needs a dedicated test cluster** | 2027-03-31 |
 | BL-412 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
 | BL-413 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
 | BL-414 | the backlog novelty gate compares id sets only, so a merge that moves an id already on the base to a different item (a title swap) passes every gate; #664 did exactly that to BL-410 | 2027-01-31 |
@@ -14949,7 +14951,26 @@ Liveboard filter). If it fails like the cycle case, extend `ts_cli/tml_rls_graph
 report it (via the existing `ambiguous_paths`) at the severity the probe shows; if it
 works, record the result in the module docstring and close this.
 
-**Target:** 2027-01-31.
+**Parked 2026-11-04 (product owner): needs a dedicated test cluster.** The SE demo
+cluster has no non-admin test user (an admin bypasses RLS, so the probe cannot run as
+one) and no agreed scratch location; setting both up there was declined. The recipe,
+ready for that cluster:
+
+1. Three warehouse tables in a scratch schema: `SALES(sale_id, user_id, org_id,
+   amount)`, `USERS(user_id, org_id, user_name)`, `ORGS(org_id, org_name)`, a few
+   rows each, with one org whose name matches a test group.
+2. Table TML for all three; on `USERS`, `joins_with` to `ORGS` and an RLS rule reaching
+   it — `table_paths` with a `join_path` through that join — e.g.
+   `[ORGS_1::ORG_NAME] = ts_groups`.
+3. A Model with `SALES` → `USERS` and `SALES` → `ORGS` (both MANY_TO_ONE), so `ORGS`
+   is reached twice: directly, and through the RLS join on `USERS`.
+4. A non-admin user in the matching group (password straight to the OS credential store,
+   never in a conversation), with a `ts` profile.
+5. As that user: a search on `SALES` measures, the same filtered on an `ORGS` column, and
+   a Liveboard filter. Compare with the admin's numbers restricted to that org.
+6. Tear everything down (marker-stamp the objects first).
+
+**Target:** 2027-03-31.
 
 ## BL-412 — AgentQL Quest: a sailing galley at a wooden pier for the Shifting Isles `Tier 3`
 
@@ -16194,7 +16215,9 @@ why `sv_build_model` stays separate if it does.
 
 **Target:** 2027-01-31.
 
-## BL-510 — the audit's Model export drops a whole batch when one GUID is gone `Tier 3`
+## BL-510 — the audit's Model export drops a whole batch when one GUID is gone — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.14.0): a batch refused as a bad request (400 or 404) is retried one GUID at a time, and only a GUID that still fails is reported as not checked. Any other failure skips the batch, and stops a retry part-way, as before. Follow-ups: BL-516 (a skipped Model is reported on stderr only) and BL-517 (the Answer export has the same batch bug).
 
 **Filed:** 2026-11-04. **Source:** recapturing the SE demo sample for roadmap PR 4.4.
 
@@ -16210,7 +16233,9 @@ failing ones as not checked; add a test with a fake client whose batch call 400s
 
 **Target:** 2026-11-30.
 
-## BL-511 — probe S12's consequence before raising it to MEDIUM `Tier 3`
+## BL-511 — probe S12's consequence before raising it to MEDIUM — DONE `Tier 3`
+
+**Status:** DONE by the product owner's ruling (2026-11-04), not by a probe. Whether an RLS rule on an outer-joined Table drops rows depends on cluster settings the audit cannot read, so S12 is MEDIUM and asks for a review. Per the docs (security-rls, "Respect join definitions") a rule must test the joined column for null (`is_null ( … )`) or the outer join can act as an inner one. S12 now reads that spelling as well as `isnull`.
 
 **Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4.
 
@@ -16235,6 +16260,34 @@ joins but which also shows ownerless rows to every user. Both need judgement: re
 don't grade, or settle the shape first.
 
 **Target:** 2027-01-31.
+
+## BL-516 — a Model the audit could not export is invisible in the result `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `build_context` appends "Model … could not be exported, so not checked" to
+`ctx.warnings`, but nothing in `ts_cli/audit/` or `commands/audit.py` reads them: they
+reach stderr and a snapshot's `warnings.json` only. The run JSON, the HTML report and the
+final "Audit complete" line say nothing about a requested Model that was skipped.
+
+**Do.** Carry the skipped GUIDs into the run JSON and the report's "Could not be read"
+list (the pattern the AI-instructions lookup already uses), and count them in the closing
+line.
+
+**Target:** 2026-12-31.
+
+## BL-517 — the Answer export drops a whole batch on one bad GUID `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `_export_answers` (`tools/ts-cli/ts_cli/audit/context.py`) exports Answers 50
+at a time and, on a non-200, logs a warning and skips the batch — without even adding it
+to `ctx.warnings`. One deleted Answer drops up to 49 others from H7, H8 and H9.
+
+**Do.** Reuse `_export_model_items`' retry (400/404 one at a time, stop on any other
+failure), and record the skips in `ctx.warnings`.
+
+**Target:** 2026-12-31.
 
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
@@ -16292,8 +16345,11 @@ The Model TML schema now says so. The rest of the repo does not yet:
    `sisense/build_model.py`, `dbt/model_from_schema_yml.py` and `dbt/manifest.py` (when
    `ts_aggregation` is absent), and `model_builder.py` (latent: a formula with no
    `column_type`). Yet ts-convert-from-powerbi open item #1 (VERIFIED 2026-07-16) created
-   such a Model live, so "invalid" may describe the contract or a newer build: probe one
-   import with `VALIDATE_ONLY` on a current build first.
+   such a Model live. **Probed 2026-11-04:** `VALIDATE_ONLY` on the SE demo cluster
+   accepts a Model whose aggregate formula columns have no `aggregation:` (and whose
+   per-row ones have none), and rejects an invalid value (error 14528). So the importer
+   does not enforce the declaration: adding it in these emitters is a consistency fix,
+   not a broken-import one.
 2. **No lint invariant** checks it; `ts-model-conversion-invariants.md` says a formula
    column's aggregation is "allowed" and "defines how the column aggregates", which is
    false for an aggregate formula.

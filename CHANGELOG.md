@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-04
+- fix(audit): S12 raised to MEDIUM and reads `is_null`; one deleted Model no longer drops its export batch (ts-audit 3.14.0, BL-510)
+- chore: bump ts-cli to v0.199.0
 - feat(audit): new rules S12, S13, D13, D17, D18, H13, H14, A9 (ts-audit 3.13.0, roadmap PR 4.4)
 - chore: bump ts-cli to v0.198.0
 
