@@ -92,7 +92,7 @@ later ones cheaper.
 
 | PR | What |
 |---|---|
-| 5.x | **`ts-object-model-remodel` skill** (own design first): from Model + Table TML and role inference, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs through `ts-object-model-erd`. First target: the RLS repair shape (tenant rule on each table's own key; group scope on an RLS-only lookup). |
+| 5.x | **`ts-object-model-remodel` skill** (own design first): from Model + Table TML and role inference, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs through `ts-object-model-erd`. First target: the RLS repair shape (tenant rule on each table's own key; group scope on an RLS-only lookup). Parked as BL-515 (2026-11-04). |
 
 ### Not scheduled (backlog items, filed in the PR that defers them)
 
