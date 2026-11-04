@@ -191,3 +191,49 @@ def test_h14():
     assert _sev(_typed_ctx(_col("Island", ctype="ATTRIBUTE"), types={"Island": "VARCHAR"}),
                 "H14") == []
     assert _sev(_typed_ctx(_col("Display Name", ctype="ATTRIBUTE")), "H14") == []
+
+
+# ── D13: group or semi-additive formula summed under a rate name ────────────
+
+_LAST = "last_value ( sum ( [T::RATE] ) , query_groups ( ) , { [D::DT] } )"
+
+
+def _bare_ctx(name, expr, agg="SUM"):
+    col = _col(name, formula=True, agg=agg)
+    ctx = _typed_ctx(col)
+    ctx.models[0]["model"]["formulas"] = [{"id": f"f_{name}", "name": name, "expr": expr}]
+    return ctx
+
+
+def test_d13():
+    assert _sev(_bare_ctx("Interest Rate", _LAST), "D13") == ["MEDIUM"]
+    assert _sev(_bare_ctx("Interest Rate", _LAST, agg="AVERAGE"), "D13") == []
+    assert _sev(_bare_ctx("Interest Rate", _LAST, agg=None), "D13") == []
+    group = "group_aggregate ( average ( [T::PRICE] ) , query_groups ( ) , query_filters ( ) )"
+    assert _sev(_bare_ctx("Avg Price", group), "D13") == ["MEDIUM"]
+    assert _sev(_bare_ctx("Avg Price", f"sum ( {group} )"), "D13") == []
+    assert _sev(_bare_ctx("Balance Total", _LAST), "D13") == ["MEDIUM"]
+    assert _sev(_bare_ctx("Revenue", _LAST), "D13") == []
+    assert _sev(_bare_ctx("Avg Price", "group_sum ( [T::PRICE] , [T::REGION] )"), "D13") == []
+    assert _sev(_bare_ctx("Avg Price", f"{_LAST} + 1"), "D13") == []
+
+
+def test_d13_reads_d14s_rate_words():
+    from ts_cli.audit.catalog_model import load_catalog
+    rules = load_catalog().rules
+
+    def name_regexes(rid):
+        found = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("field") == "name" and "regex" in node:
+                    found.append(node["regex"])
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        walk(rules[rid].aggregate)
+        return found
+    assert name_regexes("D14")[0] in name_regexes("D13")

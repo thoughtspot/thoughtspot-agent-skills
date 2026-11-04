@@ -1191,3 +1191,19 @@ def test_table_copy_count_and_parameter_formulas():
     assert counts == [2, 2, 2, 2, 1]
     (m,) = scopes.iterate(ctx, "model")
     assert list(fields.get(m, "@parameter_formula_names", ctx)) == ["A"]
+
+
+def test_surfaces_bare_window_formula_branches():
+    model = {"name": "M", "formulas": [
+        {"id": "f1", "name": "A", "expr": " LAST_VALUE ( sum ( [T::X] ) , query_groups ( ) , { [D::D] } ) "},
+        {"id": "f2", "name": "B", "expr": "group_aggregate ( sum ( [T::X] ) , query_groups ( ) , query_filters ( ) )"},
+        {"id": "f3", "name": "C", "expr": "sum ( group_aggregate ( sum ( [T::X] ) , query_groups ( ) , query_filters ( ) ) )"},
+        {"id": "f4", "name": "G", "expr": "group_sum ( [T::X] , [T::Y] )"},
+        {"id": ["f5"], "name": "L", "expr": "first_value ( sum ( [T::X] ) , query_groups ( ) , { [D::D] } )"}],
+        "columns": [{"name": n, "formula_id": fid} for n, fid in
+                    (("A", "f1"), ("B", "f2"), ("C", "f3"), ("G", "f4"), ("L", ["f5"]),
+                     ("M", "missing"))] + [{"name": "P", "column_id": "T::X"}]}
+    ctx = make_context(models=[{"guid": "g-1", "model": model}])
+    cols = {i["name"]: i for i in scopes.iterate(ctx, "model.column")}
+    got = {n: fields.get(cols[n], "@surfaces_bare_window_formula", ctx) for n in "ABCGLMP"}
+    assert got == {"A": True, "B": True, "C": False, "G": False, "L": False, "M": False, "P": False}

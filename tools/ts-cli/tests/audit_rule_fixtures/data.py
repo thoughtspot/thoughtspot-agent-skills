@@ -815,3 +815,22 @@ def data_fact_copied() -> AuditContext:
 
 def data_dimension_copied() -> AuditContext:
     return _copied("DATES")
+
+
+# ── D13: group or semi-additive formula summed under a rate name (PR 4.4) ───
+
+def _bare_window(agg: str) -> AuditContext:
+    expr = "last_value ( sum ( [T::RATE] ) , query_groups ( ) , { [T::AS_OF] } )"
+    col = {"name": "Interest Rate", "formula_id": "f_rate",
+           "properties": {"column_type": "MEASURE", "aggregation": agg}}
+    model = {"name": "Loans", "columns": [col],
+             "formulas": [{"id": "f_rate", "name": "Interest Rate", "expr": expr}]}
+    return make_context(models=[{"guid": "m-bare", "model": model}])
+
+
+def data_bare_window_rate_summed() -> AuditContext:
+    return _bare_window("SUM")
+
+
+def data_bare_window_rate_averaged() -> AuditContext:
+    return _bare_window("AVERAGE")
