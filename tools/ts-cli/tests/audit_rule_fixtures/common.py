@@ -186,3 +186,22 @@ def registry_populated_context() -> AuditContext:
         model_guids=["m-1"],
         warnings=[],
     )
+
+
+def build_typed_model_ctx(*cols, types=None, guid="m-typed", name="Typed") -> AuditContext:
+    """A Model over Table T whose Table TML types its columns (`types`: column -> type)."""
+    table_cols = [{"name": n, "db_column_name": n, "db_column_properties": {"data_type": t}}
+                  for n, t in (types or {}).items()]
+    model = {"guid": guid, "model": {"name": name, "columns": list(cols),
+                                      "model_tables": [{"name": "T", "fqn": "t-typed"}]}}
+    return make_context(models=[model], tables={"t-typed": {"table": {"name": "T",
+                                                                     "columns": table_cols}}})
+
+
+def build_typed_col(name, physical=None, ctype="MEASURE", agg=None, hidden=False) -> dict:
+    props = {"column_type": ctype}
+    if agg:
+        props["aggregation"] = agg
+    if hidden:
+        props["is_hidden"] = True
+    return {"name": name, "column_id": f"T::{physical or name}", "properties": props}

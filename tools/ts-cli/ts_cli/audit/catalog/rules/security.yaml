@@ -200,6 +200,55 @@
     fires: {fixture: sec_rls_join_cycle, severity: CRITICAL}
     silent: {fixture: sec_rls_same_direction}
 
+- id: S12
+  title: RLS table outer-joined without a null clause
+  evidence: fact
+  description: >-
+    A Model join of type LEFT_OUTER, RIGHT_OUTER or OUTER whose optional side — the
+    `with` table for LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER —
+    is a Table carrying RLS rules, none of which calls `isnull`. The docs say RLS joins
+    are INNER by default, so a user under the rule loses the rows the outer join kept.
+    LOW until a live probe confirms the drop (BL-511). A Table with no TML in scope is
+    unknown and not reported.
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@outer_join_unguarded_rls", nonblank: true}
+  severity: LOW
+  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no isnull branch — users under them may lose those rows"
+  remediation: Add an `isnull ( [<path>::<column>] ) or …` branch to the rule, or make the join INNER if unmatched rows are not wanted
+  examples:
+    fires: {fixture: sec_rls_outer_joined_unguarded, severity: LOW}
+    silent: {fixture: sec_rls_outer_joined_isnull}
+
+- id: S13
+  title: RLS rule search cannot index
+  evidence: fact
+  description: >-
+    An RLS rule whose expression names neither `ts_groups` (any variant) nor
+    `ts_username`, or that compares with `!=` or `<>`. Per the RLS implementation docs,
+    ThoughtSpot builds no suggestion index for such a rule; that includes rules built
+    only on `ts_org`, `ts_email_domain` or custom variables.
+  categories: [S]
+  requires: [table_tml]
+  scope: table.rls_rule
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: expr, regex: '\S'}
+        - any:
+            - {field: expr, not_regex: '(?i)\bts_(groups\w*|username)\b'}
+            - {field: expr, regex: '!=|<>'}
+  severity: LOW
+  message: "RLS rule '{obj.name}' builds no suggestion index (no ts_groups / ts_username, or a != comparison): {obj.expr:.80}"
+  remediation: Express the rule with ts_groups or ts_username and an equality, so search suggestions are indexed per user
+  examples:
+    fires: {fixture: sec_rls_custom_variable_rule, severity: LOW}
+    silent: {fixture: sec_rls_groups_rule}
+
 # Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
 # reused.
 - id: S6

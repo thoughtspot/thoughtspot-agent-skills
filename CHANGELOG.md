@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-04
+- feat(audit): new rules S12, S13, D13, D17, D18, H13, H14, A9 (ts-audit 3.13.0, roadmap PR 4.4)
+- chore: bump ts-cli to v0.198.0
+
 ## 2026-11-02
 - fix(audit): D14 also reads per-row formula measures (ts-audit 3.12.0); the Model TML schema's formula-aggregation table gains the required-but-ignored declaration and the bare group_aggregate / last_value / first_value exception
 - chore: bump ts-cli to v0.197.0

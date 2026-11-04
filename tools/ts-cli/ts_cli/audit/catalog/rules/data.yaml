@@ -284,6 +284,36 @@
     fires: {fixture: data_models_divergent_column_type, severity: MEDIUM}
     silent: {fixture: data_models_consistent_column_type}
 
+- id: D13
+  title: Group or semi-additive formula summed under a rate name
+  evidence: heuristic
+  description: >-
+    A MEASURE column surfacing a bare group_aggregate, last_value or first_value
+    formula — the one call making up its whole expression, with no aggregate around
+    it, so the column's `aggregation` is applied to its result — whose name reads as a
+    rate, price or ratio (D14's words, less balance: a balance summed across accounts and
+    taken last over time is the semi-additive measure SUM is right for) and whose aggregation is SUM. Summing a
+    per-group average or a last rate gives a meaningless total. An unset aggregation,
+    the group_* shorthands and the *_in_period spellings are not read until BL-509
+    settles them. A name match, so MEDIUM at most.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@surfaces_bare_window_formula", truthy: true}
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - {field: properties.aggregation, regex: '^(?i:sum)\Z'}
+        - {field: name, regex: '(?i)(^|[_\s:])(price|prices|rate|rates|ratio|ratios|pct|percent|percentage|avg|average|unit[_\s]cost|per[_\s]unit)([_\s]|$)'}
+  severity: MEDIUM
+  message: "'{name}' reads as a rate or price; its formula's result is summed (aggregation SUM)"
+  remediation: Set the column's aggregation to AVERAGE, MIN or MAX — or wrap the formula in the aggregate you mean — so the per-group value is not added up
+  examples:
+    fires: {fixture: data_bare_window_rate_summed, severity: MEDIUM}
+    silent: {fixture: data_bare_window_rate_averaged}
+
 - id: D14
   title: Rate-like column summed
   evidence: heuristic
@@ -326,6 +356,70 @@
   examples:
     fires: {fixture: data_rate_column_summed, severity: MEDIUM}
     silent: {fixture: data_rate_column_averaged}
+
+- id: D17
+  title: Identifier, coordinate or date part summed
+  evidence: heuristic
+  description: >-
+    A visible physical MEASURE column, with `aggregation` SUM or unset, whose name or
+    the column part of its `column_id` reads as one of: a latitude or longitude
+    (anywhere in it); or, as its last word, an identifier (id, key, code, sku), a zip
+    or postal code, or a date part (year, quarter, month, week, day, fiscal year) —
+    optionally followed by an index word (num, number, index, sequence, desc, name,
+    label, built), and not after "per". A date part or id used as a qualifier ("Prior
+    Year Sales", "Order ID Count") is not read, and "number", "num" or "no" alone never
+    match: on the sample most such columns are counts. Adding these up gives a
+    meaningless number: they belong as attributes. A name match, so MEDIUM at most.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.column
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: column_id, nonblank: true, truthy: true}
+        - {not: {field: formula_id, nonblank: true, truthy: true}}
+        - {not: {field: properties.is_hidden, truthy: true}}
+        - {field: properties.column_type, regex: '^(?i:measure)\Z'}
+        - any:
+            - {not: {field: properties.aggregation, nonblank: true, truthy: true}}
+            - {field: properties.aggregation, regex: '^(?i:sum)\Z'}
+        - any:
+            - {field: name, regex: '(?i)(^|[_\s])((lat|latitude|lon|lng|longitude)([_\s]|$)|(id|key|code|sku|zip|zipcode|postal|postcode|long|year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]+(num|number|nbr|no|index|idx|seq|sequence|desc|description|name|label|built))?\s*$)'}
+            - {field: column_id, regex: '(?i)::(.*[_\s])?((lat|latitude|lon|lng|longitude)([_\s]|$)|(id|key|code|sku|zip|zipcode|postal|postcode|long|year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]+(num|number|nbr|no|index|idx|seq|sequence|desc|description|name|label|built))?$)'}
+        - {field: name, not_regex: '(?i)(^|[_\s])per[_\s]\S+\s*$'}
+        - {field: column_id, not_regex: '(?i)[_\s]per[_\s][^_\s:]+$'}
+  severity: MEDIUM
+  message: "'{name}' ({obj.column_id}) reads as an identifier, coordinate or date part but is summed"
+  remediation: Make the column an ATTRIBUTE (an id, zip code or date part is something to group or filter by, not add up)
+  examples:
+    fires: {fixture: data_identifier_summed, severity: MEDIUM}
+    silent: {fixture: data_identifier_as_attribute}
+
+- id: D18
+  title: Copy of a table on the many side
+  evidence: fact
+  description: >-
+    A Model table whose role is fact or factless (the shared role classifier, from
+    join direction) and whose Table appears more than once in the Model — the same
+    `fqn`, else the same name — as a copy or alias. A fact renamed once is not a copy.
+    The docs say copies of tables on the many side of a join are not supported in
+    Models; support is in rollout, so a LOW warning. One finding per copy.
+  categories: [D]
+  requires: [model_tml]
+  scope: model.table
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@table_role", in: [fact, factless]}
+        - {field: "@table_copy_count", gt: 1}
+  severity: LOW
+  message: "'{name}' is one of {@table_copy_count} copies of a table on the many side of its joins — not supported in Models yet"
+  remediation: Keep one copy of the fact and join the role-playing dimensions to it instead, or check the copy works on your release
+  examples:
+    fires: {fixture: data_fact_copied, severity: LOW}
+    silent: {fixture: data_dimension_copied}
 
 - id: D15
   title: Duplicate Table-level joins
