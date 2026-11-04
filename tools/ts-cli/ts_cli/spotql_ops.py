@@ -46,8 +46,10 @@ classified the same way (BL-509) — by that shared shape, not by a live AgentQL
 **Column aggregation (BL-509).** `formula_aggregation` is the one reading of what a
 generator declares on a MEASURE formula column (product owner, 2026-11-02): applied to a
 per-row formula and to a bare group_aggregate / group_* / last_value / first_value
-(`is_bare_window`), ignored for any other aggregate formula. Every Model emitter and
-`classify_expr` call it.
+(`is_bare_window`), ignored for any other aggregate formula. The Power BI, Sisense and
+dbt builders, `ts aggregate generate`, the Tableau merge, `ts formula translate` and
+`classify_expr` call it (`declare_formula_aggregations`); the Snowflake SV, Databricks
+MV, Tableau and Qlik builders still declare their own value (BL-519).
 """
 from __future__ import annotations
 
@@ -80,9 +82,12 @@ SEMIADDITIVE_OUTER_FUNCS = {"last_value", "first_value",
 _BARE_WINDOW = re.compile(r"group_\w+|(last|first)_value(_in_period)?", re.IGNORECASE)
 
 #: An inner aggregate -> the column aggregation that re-aggregates its per-group values
-#: the same way. A count re-aggregates by SUM. Anything else (unique count, stddev,
-#: rank, ...) has no faithful re-aggregation; it keeps the repo's SUM convention.
-_REAGGREGATE = {"sum": "SUM", "count": "SUM", "average": "AVERAGE", "min": "MIN", "max": "MAX"}
+#: the same way (a count re-aggregates by SUM; the `_if` forms as their base).
+_REAGGREGATE = {"sum": "SUM", "count": "SUM", "average": "AVERAGE", "min": "MIN", "max": "MAX",
+                "sum_if": "SUM", "count_if": "SUM", "average_if": "AVERAGE",
+                "min_if": "MIN", "max_if": "MAX"}
+
+_SINGLE_REF = re.compile(r"^\s*\[([^\]]+)\]\s*$")
 
 _LEADING_FUNC = re.compile(r"([A-Za-z_]\w*)\s*\(")
 
@@ -146,27 +151,74 @@ def _first_arg(expr: str) -> str:
     return s[start:]
 
 
-def formula_aggregation(expr: Optional[str]) -> str:
+def formula_aggregation(expr: Optional[str], formulas: Optional[dict] = None) -> str:
     """The `aggregation` a generator declares on a MEASURE formula column whose source
     gave none (BL-509, under the product owner's ruling of 2026-11-02):
 
     - a **bare window** (`is_bare_window`): ThoughtSpot applies it to the per-group
       result, so it re-aggregates the way the inner aggregate does — AVERAGE for
       `group_aggregate ( average ( ... ) , ... )` or `group_average`, MIN, MAX, and SUM
-      for a sum or count (a balance summed across accounts). `_REAGGREGATE` is the map;
-      anything it lacks keeps SUM;
+      for a sum or count (a balance summed across accounts); `_REAGGREGATE` is the map.
+      An inner aggregate with no faithful re-aggregation (a ratio of sums, a unique
+      count, a stddev) is not additive, so AVERAGE: summing it is the failure D13
+      reports. An inner `[formula_X]` (how Power BI and promote write it) is resolved
+      through `formulas` (reference — id, or name — -> expr), following a chain of
+      references; one that cannot be resolved, or no inner aggregate at all, keeps SUM;
     - any other aggregate formula: ignored, but declared — SUM, the repo convention;
     - a per-row formula: applied, and SUM is the convention a generator falls back to.
     """
     if not is_bare_window(expr):
         return "SUM"
     func = outermost_func(expr)
-    inner = func[len("group_"):] if func.startswith("group_") and func != "group_aggregate" \
-        else outermost_func(_first_arg(expr))
-    return _REAGGREGATE.get(inner or "", "SUM")
+    if func.startswith("group_") and func != "group_aggregate":
+        return _REAGGREGATE.get(func[len("group_"):], "AVERAGE")
+    return _reaggregation(_first_arg(expr), formulas or {}, set())
 
 
-def classify_expr(expr: Optional[str]) -> dict[str, Any]:
+def _reaggregation(inner: str, formulas: dict, seen: set) -> str:
+    ref = _SINGLE_REF.match(inner)
+    if ref:
+        name = ref.group(1)
+        if name in seen or not isinstance(formulas.get(name), str):
+            return "SUM"            # opaque (a column, an unknown or cyclic reference)
+        return _reaggregation(formulas[name], formulas, seen | {name})
+    func = outermost_func(inner)
+    if func in _REAGGREGATE:
+        return _REAGGREGATE[func]
+    return "AVERAGE" if is_aggregate_expr(inner) else "SUM"
+
+
+def formula_ref_exprs(formulas: list) -> dict:
+    """{id: expr, name: expr} over `formulas[]`, the index `formula_aggregation` resolves
+    an inner `[formula_X]` (or `[Name]`) reference through."""
+    out: dict = {}
+    for f in formulas or []:
+        if not isinstance(f, dict) or not isinstance(f.get("expr"), str):
+            continue
+        for key in (f.get("id"), f.get("name")):
+            if isinstance(key, str) and key:
+                out[key] = f["expr"]
+    return out
+
+
+def declare_formula_aggregations(columns: list, formulas: list) -> None:
+    """In place: give every formula column in `columns` that is a MEASURE (an untyped one
+    reads as MEASURE, as the builders default it) and declares no `aggregation` the one
+    `formula_aggregation` names, resolving references through `formulas`. A declared
+    aggregation, an ATTRIBUTE and a table column are left as they are (BL-509)."""
+    exprs = formula_ref_exprs(formulas)
+    by_id = {f.get("id"): f.get("expr") for f in formulas or [] if isinstance(f, dict)}
+    for col in columns or []:
+        if not isinstance(col, dict) or not col.get("formula_id"):
+            continue
+        props = col.setdefault("properties", {})
+        if props.get("column_type", "MEASURE") != "MEASURE" or props.get("aggregation"):
+            continue
+        expr = by_id.get(col["formula_id"])
+        props["aggregation"] = formula_aggregation(expr if isinstance(expr, str) else None, exprs)
+
+
+def classify_expr(expr: Optional[str], formulas: Optional[dict] = None) -> dict[str, Any]:
     """Classify a single formula expression not yet attached to a Model column.
 
     Matches answer-promote's `infer_column_type` semantics: MEASURE iff the
@@ -174,14 +226,15 @@ def classify_expr(expr: Optional[str]) -> dict[str, Any]:
     None). A MEASURE's `aggregation` is `formula_aggregation(expr)`: ignored by
     ThoughtSpot for an aggregate formula (SUM, declared by convention) but applied to
     a bare group_aggregate / last_value / first_value, so a promoted per-group average
-    is declared AVERAGE rather than summed (BL-509).
+    is declared AVERAGE rather than summed (BL-509). `formulas` (`formula_ref_exprs`)
+    resolves an inner `[formula_X]` reference.
 
     Returns: {"column_type": "MEASURE"|"ATTRIBUTE", "aggregation": str|None,
     "is_aggregate": bool}.
     """
     is_agg = is_aggregate_expr(expr)
     column_type = "MEASURE" if is_agg else "ATTRIBUTE"
-    aggregation = formula_aggregation(expr) if column_type == "MEASURE" else None
+    aggregation = formula_aggregation(expr, formulas) if column_type == "MEASURE" else None
     return {"column_type": column_type, "aggregation": aggregation, "is_aggregate": is_agg}
 
 

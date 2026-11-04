@@ -1223,7 +1223,8 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts agentql cl
   formula and to a bare `group_aggregate` / `group_*` / `last_value` / `first_value` (and
   their `*_in_period` spellings), and ignores it on any other aggregate formula: so `SUM`
   for those, and for a bare window the re-aggregation its inner aggregate implies
-  (`group_aggregate ( average ( … ) , … )` → `AVERAGE`; MIN, MAX; sum or count → `SUM`).
+  (`group_aggregate ( average ( … ) , … )` → `AVERAGE`; MIN, MAX; sum or count → `SUM`; a
+  non-additive inner aggregate → `AVERAGE`).
 
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either

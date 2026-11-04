@@ -88,7 +88,9 @@ column should declare one (product owner, 2026-11-02). It defines how the column
 only for a per-row formula and for a bare `group_aggregate` / `last_value` /
 `first_value`; on any other aggregate formula it is ignored (thoughtspot-model-tml.md has
 the table). The importer accepts it absent (`VALIDATE_ONLY`, 2026-11-04), so no lint rule
-enforces it: the converters declare it through `spotql_ops.formula_aggregation` (BL-509).
+enforces it. Where the source names none, the Power BI, Sisense and dbt converters declare
+it through `spotql_ops.formula_aggregation` (BL-509); the Snowflake SV, Databricks MV,
+Tableau and Qlik converters still declare their own (source or name-based) value, BL-519.
 Only the `formulas[]` entry must not carry it.
 
 ---

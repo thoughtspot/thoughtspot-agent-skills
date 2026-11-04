@@ -30,7 +30,7 @@ from collections import Counter
 from ts_cli.formula_common import (add_formula_prefix, expr_is_aggregated,
                                     fix_double_aggregation, resolve_name_collisions)
 from ts_cli.sisense.functions import translate_jaql
-from ts_cli.spotql_ops import formula_aggregation
+from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.sisense.tables import _cardinality, _clean, _col_role, _dbname, _slug, build_table_tml
 
 
@@ -272,11 +272,11 @@ def _build_formulas(tables: list, columns: list) -> tuple:
     formula_columns = []
     for f in formulas:
         ctype = "MEASURE" if expr_is_aggregated(f["expr"]) else "ATTRIBUTE"
-        props = {"column_type": ctype}
-        if ctype == "MEASURE":  # declared on every measure formula (BL-509)
-            props["aggregation"] = formula_aggregation(f["expr"])
         formula_columns.append({"name": f["name"], "formula_id": f["id"],
-                                "properties": props})
+                                "properties": {"column_type": ctype}})
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(formula_columns, formulas)
     return formulas, formula_columns, measure_rows
 
 

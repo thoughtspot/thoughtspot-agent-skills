@@ -18,7 +18,7 @@ from collections import defaultdict
 
 import yaml
 
-from ts_cli.spotql_ops import formula_aggregation
+from ts_cli.spotql_ops import declare_formula_aggregations
 
 from .formula_pass import collapse_double_aggregation, find_reaggregation_kept
 from .tags import (
@@ -223,8 +223,6 @@ def build_model_tml_from_schema_yml(
             props_f.setdefault("column_type", "ATTRIBUTE")
             if props_f["column_type"] != "MEASURE":
                 props_f.pop("aggregation", None)
-            else:  # declared on every measure formula (BL-509)
-                props_f.setdefault("aggregation", formula_aggregation(expr))
             col_entry_f: dict = {"name": col_name, "formula_id": fid, "properties": props_f}
             col_desc_f = col.get("description")
             if col_desc_f:
@@ -240,6 +238,9 @@ def build_model_tml_from_schema_yml(
     # find_display_name_collisions refusal, as it always has.
     double_agg = collapse_double_aggregation(formulas)
     reagg_kept = find_reaggregation_kept(formulas)
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(formula_col_entries, formulas)
 
     model_doc: dict = {
         "name": model_name,

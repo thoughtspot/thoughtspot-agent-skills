@@ -329,6 +329,7 @@ are roughly ordered by value÷effort.
 | ~~BL-516~~ | ~~A Model the audit could not export is reported only on stderr~~ | DONE (2026-11-04) |
 | ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
+| BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
@@ -16318,6 +16319,33 @@ fuzz test over the string fields, run end to end (`run_audit`, `render_report`).
 
 **Target:** 2027-01-31.
 
+
+## BL-519 — formula aggregation: the converters left on their own value, and two probes `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-509 fix (audit backlog PR 2).
+
+**What.** BL-509 gave the converters that declared nothing `spotql_ops.formula_aggregation`.
+Four declare a value of their own and were left as they are:
+- the Snowflake SV builder (`sv_build_model._column_props`, `entry.get("aggregation") or "SUM"`)
+  and the Databricks MV builder (`mv_build_model._column_props`, the same): an SV metric
+  `AVG(PRICE) OVER (PARTITION BY category)` becomes `group_average ( … )` declared SUM,
+  which D13 now reports;
+- the Tableau and Qlik builders (`model_builder._aggregation_for_name`, a name heuristic):
+  right for a per-row formula named like a rate, blind to a bare window's inner aggregate.
+
+Two questions are unverified: which aggregation ThoughtSpot applies to a bare window whose
+column declares none (D13 does not read that case), and whether AgentQL needs `SUM(...)`
+around an `*_in_period` snapshot as it does around `last_value` (classified by the shared
+argument shape only). Separately, `spotql_ops.outermost_func` ignores quotes, so a bare
+window whose arguments hold a quoted `)` is not read as bare.
+
+**Do.** Route the four builders through `declare_formula_aggregations` where the source
+names no aggregation, keeping a source-declared one; probe the two questions on the SE demo
+cluster (an Answer over a bare window with and without a declared aggregation; one AgentQL
+query over an `*_in_period` measure); make `outermost_func` skip quoted text.
+
+**Target:** 2027-01-31.
+
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5
@@ -16364,7 +16392,7 @@ with the alias fetch.
 
 ## BL-509 — formula `aggregation:` after the 2026-11-02 ruling — DONE `Tier 3`
 
-**Status:** DONE (2026-11-04, ts-audit 3.16.0, ts-cli 0.201.0). `spotql_ops.formula_aggregation` is the one reading of what a MEASURE formula column declares: SUM for a per-row formula and for any aggregate formula (where ThoughtSpot ignores it); for a bare `group_aggregate` / `group_*` / `last_value` / `first_value` / `*_in_period`, the re-aggregation its inner aggregate implies (AVERAGE, MIN, MAX; SUM for a sum or count; SUM where there is none). (1) Every emitter listed below calls it, and a test drives each one end to end (the `model_builder` case stays latent: the Tableau and Qlik translators always set `column_type`) (`tests/test_formula_aggregation.py`); it found that the Sisense converter dropped every calc formula's own column, now fixed. (2) No lint rule, by ruling: the importer accepts the declaration absent, so an ERROR would block valid imports; `ts-model-conversion-invariants.md` now says what the aggregation does and that the converters declare it. (3) The stale copies are corrected: `classify_expr`, the README, `formula_translate/engine.py`, `formula_common.py`, the Databricks SQL View worked example; `tests/test_spotql_ops.py` was right (a per-row measure) and the Ossie plan's copy is about an aggregate formula, so both stand. (4) `classify_expr` declares a bare per-group average AVERAGE. (5) `AGGREGATE_FUNCS` matches the two `*_in_period` spellings, which are semi-additive for AgentQL too, and D13 reads them and the `group_*` shorthands; P2's pins did not move. Still open: which aggregation ThoughtSpot applies to a bare window whose column declares none (D13 does not read that case).
+**Status:** DONE (2026-11-04, ts-audit 3.16.0, ts-cli 0.201.0); the rest is BL-519. `spotql_ops.formula_aggregation` is the one reading of what a MEASURE formula column declares where the source names none: SUM for a per-row formula and for any aggregate formula (where ThoughtSpot ignores it); for a bare `group_aggregate` / `group_*` / `last_value` / `first_value` / `*_in_period`, the re-aggregation its inner aggregate implies (AVERAGE, MIN, MAX, the `_if` forms alike; SUM for a sum or count; AVERAGE for a ratio, unique count or other non-additive aggregate; an inner `[formula_X]` resolved through the Model's formulas; SUM when it cannot be resolved). (1) `declare_formula_aggregations` applies it in the Power BI (time intelligence included), Sisense and dbt (schema.yml and manifest) builders, `ts aggregate generate`, the Tableau `--existing-guid` merge, `ts formula translate` and `ts model promote-formula`; a test drives each end to end (`tests/test_formula_aggregation.py`). It found the Sisense converter dropping every calc formula's own column, now fixed. The Snowflake SV, Databricks MV, Tableau and Qlik builders still declare their own value: BL-519. (2) No lint rule — my call, not a ruling: the importer accepts the declaration absent, so an ERROR would block valid imports; `ts-model-conversion-invariants.md` now says what the aggregation does and which converters declare it. (3) Stale copies corrected: `classify_expr` and its test, the README, `formula_translate/engine.py`, `formula_common.py`, the Databricks SQL View worked example, `thoughtspot-formula-patterns.md` (a seventh copy, on bare `group_aggregate`) and the formula-translate SKILL snippet; the Ossie plan's copy concerns an aggregate formula and stands. (4) `classify_expr` declares a bare per-group average AVERAGE. (5) `AGGREGATE_FUNCS` and the semi-additive set match the two `*_in_period` spellings, and D13 reads them and the `group_*` shorthands; on the SE demo sample P2, D13 and D14 are unchanged (0 `*_in_period` formulas there).
 
 **Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
 

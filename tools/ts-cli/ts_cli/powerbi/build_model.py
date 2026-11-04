@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.powerbi.functions import translate_dax
-from ts_cli.spotql_ops import formula_aggregation
+from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.powerbi.tables import (_AUTO_TABLE, _cardinality, _col_role, _dbname,
                                     _slug, build_table_tml)
 
@@ -163,10 +163,7 @@ def _add_formula(ctx, name, dax, kind, home_table=None, home_cols=None):
     # an override may force the column role (e.g. a month-of-year axis formula is an
     # ATTRIBUTE, not a summable MEASURE)
     ctype = (ov.get("column_type") if ov else None) or ("MEASURE" if kind == "measure" else "ATTRIBUTE")
-    props = {"column_type": ctype}
-    if ctype == "MEASURE":  # declared on every measure formula (BL-509)
-        props["aggregation"] = formula_aggregation(expr)
-    ctx["columns"].append({"name": name, "formula_id": fid, "properties": props})
+    ctx["columns"].append({"name": name, "formula_id": fid, "properties": {"column_type": ctype}})
 
 
 def _formula_ctx(tables, overrides, force_physical, dropped_ids, seen, columns):
@@ -287,6 +284,9 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
     formulas, measure_rows = _build_formulas(tables, overrides, dropped_ids, force_physical, seen, columns)
     _cascade_flag(formulas, measure_rows, columns)
     formulas = _topo_sort_formulas(formulas)
+    # Every MEASURE formula column declares an aggregation, resolved through the final
+    # formulas (an inner [formula_X] included) — BL-509.
+    declare_formula_aggregations(columns, formulas)
 
     model = {
         "obj_id": f"{_slug(model_name)}-pbi",
