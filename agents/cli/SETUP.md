@@ -35,6 +35,23 @@ Then run `claude` to launch.
 - Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [Troubleshooting](#troubleshooting))
 - Git (to clone or update the repo)
 
+### 3. SpotterViz MCP server (for Tableau/Looker liveboard migration)
+
+If you plan to use `ts-convert-from-tableau` or `ts-convert-from-looker` to build
+Liveboards (not just convert Models/Tables), set up and connect the **SpotterViz** MCP
+server *before* you reach that step — these skills no longer hand-author Liveboard TML, so
+without it liveboard generation cannot run (Model/Table conversion is unaffected either
+way). See [`agents/shared/schemas/spotterviz-liveboard-build.md`](shared/schemas/spotterviz-liveboard-build.md)
+for the MCP config (including the version-pinned `mcp-remote` command), the interactive
+OAuth login, and the per-Model `is_spotter_enabled` gate.
+
+**Claude Code only, currently.** SpotterViz registers its tools under the
+`mcp__claude_ai_ThoughtSpot_Spotter__*` name prefix, which is specific to Claude.ai-style
+MCP connector registration. Cortex Code CLI does not expose SpotterViz under that prefix,
+so liveboard building via SpotterViz is not available there yet — the skill detects this
+and stops cleanly at the liveboard step rather than failing partway through. Cortex Code
+users can still run these skills for Model/Table conversion.
+
 ---
 
 ## Step 1: Clone the repository

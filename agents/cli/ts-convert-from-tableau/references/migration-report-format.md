@@ -6,14 +6,15 @@ and display it inline. Build hyperlinks from `{base_url}` (Step 1) and the GUID 
 import: Model/table → `{base_url}/#/data/tables/{guid}`; Liveboard →
 `{base_url}/#/pinboard/{guid}`; Answer (standalone) → `{base_url}/#/saved-answer/{guid}`.
 
-## Migration Summary tab content (Step 10g)
+## Migration Summary content (Step 10)
 
-The liveboard's final "Migration Summary" note tile's `html_parsed_string` has four sections:
+The liveboard's final "Migration Summary" tab — requested in the free-text instructions
+given to SpotterViz (Step 10) — has four sections:
 
 ```
 1. Items migrated      — each viz/tile and how (chart type, search), formulas, cohorts, params
 2. Decisions made      — non-obvious choices (unpivot via SQL view, bins=cohort vs formula,
-                          count column, growth via `growth of`, theme, top/bottom approximations…)
+                          count column, growth via `growth of`, top/bottom approximations…)
 3. Partial / placeholder — vizzes that couldn't be fully reproduced but were built as
                           placeholders (forecast → historical trend; cluster → underlying inputs);
                           flag each "needs review" + what's missing
@@ -194,8 +195,9 @@ visible in-product, not just in the report:
   `display_tokens` is the human-readable form to show in the confirm prompt).
 - `display_mode` / chart type ← Spotter's **`visualization_type`**:
   `Table` → `TABLE_MODE` (omit the `chart:` block); `Chart` → `CHART_MODE` with the chart
-  type chosen from the Step 10a intent mapping (a single measure by a date → `KPI` or
-  `LINE`; by a dimension → `BAR`); `Undefined` → default to a `KPI`/`BAR`.
+  type chosen from `thoughtspot-chart-types.md`'s analytical-intent mapping (a single
+  measure by a date → `KPI` or `LINE`; by a dimension → `BAR`); `Undefined` → default to a
+  `KPI`/`BAR`.
 - `description` ← the original Tableau expression + `via Spotter last-mile` (same
   convention as Step 11.5), so a reviewer sees source ↔ migrated side by side.
 - **Show the tile spec and ask before adding it** — never auto-append to the liveboard. On
