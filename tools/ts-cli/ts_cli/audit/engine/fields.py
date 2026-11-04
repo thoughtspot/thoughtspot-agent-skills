@@ -189,10 +189,9 @@ def _is_coached(item: dict, ctx: Any) -> bool:
     score, A5 until 2026-10, does not)."""
     from ts_cli.audit.context import nl_instructions  # not gate-safe: import on use
     model = item.get("obj") or {}
-    return bool(
-        nl_instructions(ctx.ai_instructions.get(item.get("guid")))
-        or ((model.get("model_instructions") or {}).get("data_model_instructions")
-            or "").strip())
+    text = (model.get("model_instructions") or {}).get("data_model_instructions")
+    return bool(nl_instructions(ctx.ai_instructions.get(item.get("guid")))
+                or (isinstance(text, str) and text.strip()))
 
 
 # ── set keys (the group and pairwise modes, D7's code rule) ─────────────────

@@ -49,15 +49,16 @@ MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"
 #: mapping (`{...}`) the audit reads, by path from the document body; a nested shape is
 #: what each mapping holds in turn. Any other shape there is malformed, and is treated
 #: as a malformed MAPPING_KEYS value is (BL-501): the object is not judged, and is listed.
-#: `rls_rules` is a mapping only. The flat list of rules the ERD parser also accepts is
-#: in no schema doc and in none of the census's Tables with RLS, and reading it as
-#: absent would call a protected Table unprotected; listed, it is judged neither way.
+#: Only what is read unguarded belongs here: a shape no rule reads (`parameters`, whose
+#: readers check, or `rls_rules.table_paths`) is left alone, as main left it, rather
+#: than costing its Model a judgement. `rls_rules` is a mapping only. The flat list of
+#: rules the ERD parser also accepts is in no schema doc and in none of the census's
+#: Tables with RLS, and reading it as absent would call a protected Table unprotected;
+#: listed, it is judged neither way.
 SHAPES = {
-    "model": {"columns": [{}], "formulas": [{}], "parameters": [{}], "filters": [{}],
+    "model": {"columns": [{}], "formulas": [{}], "filters": [{}],
               "model_tables": [{"joins": [{}]}], "model_instructions": {}},
-    "table": {"columns": [{}], "joins_with": [{}],
-              "rls_rules": {"rules": [{}], "tables": [{}], "table_paths": [{}],
-                            "joins": [{}]}},
+    "table": {"columns": [{}], "joins_with": [{}], "rls_rules": {"rules": [{}]}},
     "answer": {"tables": [{}], "formulas": [{}]},
 }
 
@@ -89,11 +90,13 @@ def mapping(obj: Any, key: str) -> dict:
 
 def _body(doc: Any, kind: str) -> Tuple[dict, list]:
     """A document's `kind` body (a mapping, else {}) and why its shape is malformed:
-    a body that is not a mapping, a MAPPING_KEYS value that is not one, or a departure
-    from SHAPES[kind]. No reasons for a document with no such body at all."""
-    body = doc.get(kind) if isinstance(doc, dict) else None
-    if body is None:
+    a body that is not a mapping (null included: readers take a present body as a
+    mapping), a MAPPING_KEYS value that is not one, or a departure from SHAPES[kind].
+    A document with no body at all reads as empty, as the pinned `*_lists_none` and
+    `sec_owning_table_edges` inputs judge it."""
+    if not isinstance(doc, dict) or kind not in doc:
         return {}, []
+    body = doc[kind]
     if not isinstance(body, dict):
         return {}, [f"'{kind}' is not a mapping"]
     reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
@@ -147,8 +150,8 @@ def _message(kind: str, name: Any, key: Any, reasons: list) -> str:
 
 
 def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
-    """What no rule may judge, because its TML, or TML it depends on, holds a list or
-    scalar where a mapping belongs: (Model guids, Table keys, Answer guids, one message
+    """What no rule may judge, because its TML, or TML it depends on, holds the wrong
+    shape where the audit reads one (`_body`: MAPPING_KEYS, SHAPES): (Model guids, Table keys, Answer guids, one message
     per object, its reasons joined).
 
     A Table is unreadable when its own TML has such a path; a Model when its own TML does

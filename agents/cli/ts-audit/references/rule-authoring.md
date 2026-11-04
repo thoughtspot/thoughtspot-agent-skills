@@ -205,13 +205,15 @@ To combine a combinator with anything else, wrap both in `all`.
 **Field paths.** `properties.column_type` walks the item. A non-numeric step on a list
 maps over it, and a numeric step indexes it. `parent.` (repeatable) reads the enclosing
 item, and `@name` is a derived field. A missing key yields null, never an error. So
-does malformed TML (a key the schema defines as a mapping, `properties`,
-`spotter_config` or `db_column_properties`, holding a list or a scalar; or, at a path in
-`tml.SHAPES`, a list or mapping of the wrong shape, BL-501), but under
+does malformed TML under a MAPPING_KEYS key (`properties`, `spotter_config` or
+`db_column_properties` holding a list or a scalar); a wrong shape at a `tml.SHAPES` path
+(BL-501) is passed through as it is. Either way, under
 `ts audit run` and `run_rules` no rule sees it: a Model whose TML holds one, or which uses
 a Table whose TML does, is **left out with everything hanging off it** (its Answers, Sets
 and metadata header; `engine/run.py` `readable`, `tml.unreadable_documents`), and the
-report lists it under "Could not be read". A rule needs no guard for it. (`run_rule`, which
+report lists it under "Could not be read". A rule needs no guard for it — except a rule
+reading every Model, excluded ones included (below), which must read their lists
+defensively (`fields_human._all_model_bodies`, `_mappings`). (`run_rule`, which
 checks one rule's examples, does not filter; examples are well-formed.) A new kind of
 document that refers to a Model or Table must be added to `unreadable_documents`, or a
 rule will judge it against an object no rule can see. And a rule that asserts something

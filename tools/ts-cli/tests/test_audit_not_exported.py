@@ -53,8 +53,23 @@ def test_a_model_in_a_skipped_batch_is_listed_by_guid():
     out = _run(["m-1", "x-1", "x-2"], ["m-1"],
                ["Model export batch 1 returned 503, skipping 2 model(s)"])
     assert out["corpus"]["not_exported"] == [
-        "Model x-1: not exported, so not checked (the run's warnings give the reason)",
-        "Model x-2: not exported, so not checked (the run's warnings give the reason)"]
+        "Model x-1: no TML was exported for it, so not checked",
+        "Model x-2: no TML was exported for it, so not checked"]
+
+
+def test_a_warning_for_a_longer_guid_is_not_borrowed():
+    out = _run(["a"], [], ["Model ab could not be exported (HTTP 404), so not checked"])
+    assert out["corpus"]["not_exported"] == ["Model a: no TML was exported for it, so not checked"]
+
+
+def test_a_model_doc_whose_guid_is_not_a_string_does_not_end_the_listing():
+    """`_not_exported` itself; the rest of the engine on a non-string guid is the scalar
+    class (BL-518)."""
+    from ts_cli.audit import _not_exported
+    odd = _model("m-1")
+    odd["guid"] = ["m-1"]
+    assert _not_exported(make_context(models=[odd], model_guids=["m-1"])) == [
+        "Model m-1: no TML was exported for it, so not checked"]
 
 
 def test_a_model_requested_twice_is_listed_once():
@@ -167,10 +182,12 @@ def _no_sleep():
 @pytest.mark.parametrize("status", [400, 404])
 def test_a_deleted_answer_costs_only_itself(tmp_path, status):
     warnings: list = []
-    answers = _export_answers(_client(tmp_path, Transport(bad=status)),
+    transport = Transport(bad=status)
+    answers = _export_answers(_client(tmp_path, transport),
                               _dependents(["a-1", "gone", "a-2"]), warnings)
     assert sorted(a["guid"] for a in answers) == ["a-1", "a-2"]
     assert warnings == [f"Answer gone could not be exported (HTTP {status}), so not checked"]
+    assert not any("export_associated" in b for b in transport.exports)
 
 
 def test_an_answer_batch_failing_otherwise_is_skipped_into_the_warnings(tmp_path):

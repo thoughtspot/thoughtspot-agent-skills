@@ -187,10 +187,10 @@ def _known_table_guids(ctx: Any) -> set:
 
 def _build_known_table_guids(ctx: Any) -> set:
     guids: set = set()
-    for doc in _all_models(ctx):
-        for mt in (doc.get("model") or {}).get("model_tables") or []:
-            fqn = mt.get("fqn", "") if isinstance(mt, dict) else ""
-            if fqn:
+    for body in _all_model_bodies(ctx):
+        for mt in _mappings(body.get("model_tables")):
+            fqn = mt.get("fqn", "")
+            if fqn and isinstance(fqn, str):
                 guids.add(fqn)
     return guids | set(ctx.tables) | set(getattr(ctx, "excluded_tables", {}) or {})
 
@@ -200,6 +200,19 @@ def _all_models(ctx: Any) -> list:
     item 10). A rule asking whether something is on NO Model reads this, never
     `ctx.models` alone, or excluding a Model would make that answer false."""
     return list(ctx.models) + list(getattr(ctx, "excluded_models", []) or [])
+
+
+def _all_model_bodies(ctx: Any) -> list:
+    """The `model` mapping of every Model in `_all_models`. An excluded Model may be
+    misshapen anywhere (that is why it was excluded), so its body and lists are read
+    defensively here — `_mappings` — never assumed (review of PR 1, blocker 1)."""
+    return [doc["model"] for doc in _all_models(ctx)
+            if isinstance(doc, dict) and isinstance(doc.get("model"), dict)]
+
+
+def _mappings(value: Any) -> list:
+    """The mapping entries of `value` when it is a list, else []."""
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
 
 @register("is_table_reference", uses=(),
@@ -232,8 +245,8 @@ def _model_formula_names(ctx: Any) -> Dict[str, Any]:
 
 def _build_model_formula_names(ctx: Any) -> Dict[str, Any]:
     names: Dict[str, Any] = {}
-    for doc in _all_models(ctx):
-        for f in (doc.get("model") or {}).get("formulas") or []:
+    for body in _all_model_bodies(ctx):
+        for f in _mappings(body.get("formulas")):
             key = _normalize(f.get("expr", ""))
             if key is not None:
                 names[key] = f.get("name", "")

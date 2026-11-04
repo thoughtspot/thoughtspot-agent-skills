@@ -275,11 +275,9 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
 def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
     """Answer TML for every ANSWER among `dependents`, 50 at a time with the Model
     export's retry (`_export_items`, BL-517); every Answer not exported is a warning."""
-    answer_guids: list = []
-    for deps in dependents.values():
-        for d in deps:
-            if d.get("type") == "ANSWER" and d.get("guid") and d["guid"] not in answer_guids:
-                answer_guids.append(d["guid"])
+    answer_guids = list(dict.fromkeys(
+        d["guid"] for deps in dependents.values() for d in deps
+        if d.get("type") == "ANSWER" and d.get("guid")))
     if not answer_guids:
         return []
     _log(f"Exporting {len(answer_guids)} answer TML(s)...")

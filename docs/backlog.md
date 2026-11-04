@@ -328,6 +328,7 @@ are roughly ordered by value÷effort.
 | BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
 | ~~BL-516~~ | ~~A Model the audit could not export is reported only on stderr~~ | DONE (2026-11-04) |
 | ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
+| BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
@@ -16087,7 +16088,7 @@ objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
 
 ## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys — DONE `Tier 2`
 
-**Status:** DONE (2026-11-04, ts-audit 3.15.0): every list or mapping the audit reads has its shape checked (`engine/tml.py` `SHAPES`, `misshapen`), alongside the item-10 MAPPING_KEYS, and a misshapen one makes its object unreadable: not judged, listed under "Could not be read", with what depends on it. Every row of the table below, plus a scalar parameter, Model filter, Answer formula or table, a `model_tables` mapping and a document body that is not a mapping, is an end-to-end test (`tests/test_audit_malformed_shapes.py`, `run_audit` then `render_report`, both assessments). **`rls_rules` ruling:** the flat-list shape was not confirmed (no schema doc has it, and the census's Tables with RLS were all mappings; the SpotterCode MCP was not connected), so it is malformed rather than normalised: listed, the Table is judged neither protected nor unprotected. The ERD parser still accepts it (`agents/shared/erd/parser.py` `_rls_rule_list`). Not covered: a scalar of the wrong type where a string belongs (a list-valued `fqn`), a different class.
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): every list or mapping the audit reads has its shape checked (`engine/tml.py` `SHAPES`, `misshapen`), alongside the item-10 MAPPING_KEYS, and a misshapen one makes its object unreadable: not judged, listed under "Could not be read", with what depends on it. Every row of the table below, plus a scalar Model filter, Answer formula or table, a `model_tables` mapping and a document body that is null or not a mapping, is an end-to-end test (`tests/test_audit_malformed_shapes.py`, `run_audit` then `render_report`, both assessments). **`rls_rules` ruling:** the flat-list shape was not confirmed (no schema doc has it, and the census's Tables with RLS were all mappings; the SpotterCode MCP was not connected), so it is malformed rather than normalised: listed, the Table is judged neither protected nor unprotected. The ERD parser still accepts it (`agents/shared/erd/parser.py` `_rls_rule_list`). Rules reading every Model, excluded ones included (H7, H8, H9), read their lists defensively. A null, `0` or `""` list reads as empty (the shared ERD parser no longer ends the run on one). Shapes no rule reads unguarded (`parameters`, `rls_rules.tables`/`table_paths`/`joins`) are not checked, so they cost no Model its judgement. Not covered: a scalar of the wrong type where a string belongs, BL-518.
 
 **Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
@@ -16296,6 +16297,26 @@ to `ctx.warnings`. One deleted Answer drops up to 49 others from H7, H8 and H9.
 failure), and record the skips in `ctx.warnings`.
 
 **Target:** 2026-12-31.
+
+
+## BL-518 — the audit ends on a wrong scalar type where a string belongs `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-501 fix (audit backlog PR 1).
+
+**What.** BL-501 made every wrong list or mapping shape "not judged". A scalar of the
+wrong type is a different class and still ends `ts audit run`: the review's fuzzer
+swapped a list, mapping or number into string fields of a two-Model context and found
+23 distinct crash sites, among them `engine/tml.py` (join and RLS reads),
+`engine/fields.py` (the join-key and type reads), `engine/code_rules.py`,
+`audit/context.py` `column_types`, `agents/shared/erd/parser.py`, `audit/report.py`, and
+`engine/scopes.py` on a non-string guid. None has been seen in an export.
+
+**Do.** Decide the unit first: per field (read a non-string as absent) or per object
+(extend `tml._body` with the string fields the audit reads, so the object is listed under
+"Could not be read" like BL-501's shapes). The second matches the item-10 ruling. Then a
+fuzz test over the string fields, run end to end (`run_audit`, `render_report`).
+
+**Target:** 2027-01-31.
 
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 

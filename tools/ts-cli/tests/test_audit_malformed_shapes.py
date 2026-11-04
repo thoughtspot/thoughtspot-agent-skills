@@ -26,8 +26,19 @@ VIA_TABLE = f"{MODEL}: uses Table 'ORDERS', whose TML is malformed"
 
 
 def _ctx():
+    """The populated context, plus a healthy Model m-2 with an Answer built on it that has
+    a formula and a table reference: H7, H8 and H9 then run, and they read EVERY Model,
+    the excluded ones included (fields_human._all_models; review of PR 1, blocker 1)."""
     ctx = registry_populated_context()
-    ctx.dependents = {"m-1": [{"guid": "a-1", "type": "ANSWER", "name": "A"}]}
+    ctx.models.append({"guid": "m-2", "model": {
+        "name": "Healthy", "columns": [], "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+        "formulas": [{"name": "Rev", "expr": "sum ( [Amount] )"}]}})
+    ctx.answers.append({"guid": "a-2", "answer": {
+        "name": "On healthy", "tables": [{"name": "Healthy", "fqn": "m-2"}],
+        "formulas": [{"name": "Rev", "expr": "sum ( [Amount] )"}]}})
+    ctx.model_guids = ["m-1", "m-2"]
+    ctx.dependents = {"m-1": [{"guid": "a-1", "type": "ANSWER", "name": "A"}],
+                      "m-2": [{"guid": "a-2", "type": "ANSWER", "name": "On healthy"}]}
     return ctx
 
 
@@ -88,9 +99,6 @@ CASES = {
     "a scalar formula": (
         lambda c: _model(c).__setitem__("formulas", ["oops"]),
         [f"{MODEL}: 'formulas.0' is not a mapping"]),
-    "a scalar parameter": (
-        lambda c: _model(c).__setitem__("parameters", ["oops"]),
-        [f"{MODEL}: 'parameters.0' is not a mapping"]),
     "a scalar Model filter": (
         lambda c: _model(c).__setitem__("filters", ["oops"]),
         [f"{MODEL}: 'filters.0' is not a mapping"]),
@@ -100,6 +108,22 @@ CASES = {
     "a Model body that is not a mapping": (
         lambda c: c.models[0].__setitem__("model", ["oops"]),
         ["Model '' (m-1): 'model' is not a mapping"]),
+    "a null Model body": (
+        lambda c: c.models[0].__setitem__("model", None),
+        ["Model '' (m-1): 'model' is not a mapping"]),
+    "formulas as a mapping": (
+        lambda c: _model(c).__setitem__("formulas", {"name": "x"}),
+        [f"{MODEL}: 'formulas' is not a list"]),
+    "a null formula entry": (
+        lambda c: _model(c).__setitem__("formulas", [None]),
+        [f"{MODEL}: 'formulas.0' is not a mapping"]),
+    "model_tables as a number": (
+        lambda c: _model(c).__setitem__("model_tables", 5),
+        [f"{MODEL}: 'model_tables' is not a list"]),
+    "a null Table body": (
+        lambda c: c.tables["t-1"].__setitem__("table", None),
+        ["Table '' (t-1): 'table' is not a mapping",
+         f"{MODEL}: uses Table 'ORDERS', whose TML is malformed"]),
     "a Table body that is not a mapping": (
         lambda c: c.tables["t-1"].__setitem__("table", "oops"),
         ["Table '' (t-1): 'table' is not a mapping",
@@ -119,7 +143,7 @@ def test_a_misshapen_list_or_mapping_is_listed_not_a_crash(case, assessment):
     mutate, expected = CASES[case]
     ctx = _ctx()
     mutate(ctx)
-    out = run_audit(None, ["m-1"], ctx=ctx, assessment_name=assessment)
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx, assessment_name=assessment)
     listed = out["corpus"].get("unreadable") or []
     for entry in expected:
         assert any(line.startswith(entry) for line in listed), (entry, listed)
@@ -132,6 +156,49 @@ def test_a_misshapen_list_or_mapping_is_listed_not_a_crash(case, assessment):
         gone = {"m-1"}                           # its well-formed Table is still judged
     assert not judged & gone
     assert "Could not be read" in render_report(out)
+
+
+@pytest.mark.parametrize("value", [None, 0, False, ""])
+@pytest.mark.parametrize("key", ["columns", "formulas", "model_tables"])
+def test_an_empty_looking_list_reads_as_empty_and_ends_nothing(key, value):
+    """Falsy values are read as empty, as every reader takes them (review of PR 1,
+    must-fix 2: `formulas: null` ended run_audit in the shared ERD parser)."""
+    ctx = _ctx()
+    _model(ctx)[key] = value
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    assert not out["corpus"].get("unreadable")
+    render_report(out)
+
+
+@pytest.mark.parametrize("builder", ["sec_lists_none", "data_lists_none", "human_lists_none"])
+def test_the_pinned_empty_inputs_run_end_to_end(builder):
+    """They were judged only through run_rules; the whole run ended on them."""
+    import audit_rule_fixtures as fx
+    out = run_audit(None, [], ctx=getattr(fx, builder)())
+    render_report(out)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda c: _model(c).__setitem__("parameters", ["oops"]),
+    lambda c: _table(c)["rls_rules"].__setitem__("table_paths", "oops"),
+    lambda c: _table(c)["rls_rules"].__setitem__("tables", ["oops"]),
+], ids=["scalar parameter", "rls table_paths string", "scalar rls tables entry"])
+def test_a_shape_no_rule_reads_does_not_exclude_its_model(mutate):
+    """SHAPES covers what the audit reads; these readers guard or read nothing, and
+    main judged such a Model (review of PR 1, minor 5)."""
+    ctx = _ctx()
+    mutate(ctx)
+    out = run_audit(None, ["m-1", "m-2"], ctx=ctx)
+    assert not out["corpus"].get("unreadable")
+    render_report(out)
+
+
+def test_listed_data_model_instructions_end_nothing():
+    """The ai/instructions API's list shape written into the TML (review must-fix 3)."""
+    ctx = _ctx()
+    _model(ctx)["model_instructions"] = {"data_model_instructions": ["Use last 30 days"]}
+    ctx.ai_instructions = {"m-1": {"nl_instructions_info": []}}
+    render_report(run_audit(None, ["m-1"], ctx=ctx))
 
 
 def test_the_well_formed_context_lists_nothing():
