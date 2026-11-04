@@ -254,7 +254,7 @@ def _calls_aggregate(formula: dict) -> bool:
 def _aggregate_formula_names(model: dict) -> set:
     formulas = [f for f in (model.get("formulas") or []) if isinstance(f, dict)]
     direct = {f.get("name") for f in formulas if f.get("name") and _calls_aggregate(f)}
-    graph, _ = _reference_graph(formulas)
+    graph, _ = _reference_graph(formulas, model.get("columns") or [])
     found = set(direct)
     changed = True
     while changed:
@@ -395,12 +395,15 @@ def _fact_table_count(item: dict, ctx: Any) -> int:
           label="the string-typed join keys")
 def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     """Join: the column ids in its `on` clause whose warehouse type, read off the Table
-    TMLs (AuditContext.column_types), is a string type. A key whose table is not in
-    the context has no type and is not listed — unknown is not "a string"."""
+    TMLs (AuditContext.column_types, as the join reads it: tml.join_column_types, so a
+    key of an aliased table is typed too, BL-507), is a string type. A key whose table
+    is not in the context has no type and is not listed — unknown is not "a string"."""
     from ts_cli.audit.context import join_key_ids  # not gate-safe: import on use
     from ts_cli.audit.engine.messages import NameList
-    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
-    return NameList(k for k in join_key_ids((item.get("obj") or {}).get("on"))
+    join = item.get("obj") or {}
+    col_types = tml.join_column_types(join, _model_of(item), cached(
+        "column_types", item["doc"], ctx.column_types, item["doc"]))
+    return NameList(k for k in join_key_ids(join.get("on"))
                     if col_types.get(k, "").upper() in tml.STRING_TYPES)
 
 
@@ -516,11 +519,13 @@ def _if_call_count(item: dict, ctx: Any) -> int:
     return len(_IF_CALL.findall(str((item.get("obj") or {}).get("expr") or "")))
 
 
-def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
+def _reference_graph(formulas: list, columns: Any = ()) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     """A Model's formula reference graph, keyed by formula NAME.
 
     A cross-reference is written as the formula's id (`[formula_<name>]`), or — in a
-    hand-built model — its display name; both resolve back to the name (BL-300). A
+    hand-built model — its name or its surfacing column's display name; all resolve
+    back to the name (BL-300), read as the formula tree reads them: outside quoted
+    literals, stripped (tml.expr_refs, tml.formula_reference_index; BL-504). A
     formula's edges are the other formulas its `expr` references. Formulas sharing a
     name share a node, holding the references of the LAST of them that has any;
     `owner` maps each node to the position of the FIRST of them that has any, so a rule
@@ -528,12 +533,12 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     order legacy P17 did (it walked its name-keyed dict, where a name keeps the place
     of its first insertion).
     """
-    by_ref = tml.formula_ref_index(formulas)
+    by_ref = tml.formula_reference_index(formulas, columns)
     graph: Dict[Any, list] = {}
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):
         fname = f.get("name", "")
-        refs = tml.BRACKET_REF.findall(str(f.get("expr") or ""))
+        refs = tml.expr_refs(f.get("expr"))
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
@@ -566,7 +571,7 @@ def _reference_chain_depth(item: dict, ctx: Any):
     references represent."""
     model = _model_of(item)
     graph, owner = cached("reference_graph", model, _reference_graph,
-                          model.get("formulas") or [])
+                          model.get("formulas") or [], model.get("columns") or [])
     name = (item.get("obj") or {}).get("name", "")
     if name not in owner or owner[name] != item.get("index"):
         return None

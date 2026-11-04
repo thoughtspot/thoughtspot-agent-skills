@@ -331,10 +331,10 @@ are roughly ordered by value÷effort.
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
-| BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
+| ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
-| BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
-| BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
+| ~~BL-505~~ | ~~converters' fact detection does not use the shared table-role classifier~~ | DONE (2026-11-04) |
+| ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
@@ -16174,7 +16174,9 @@ when they are next changed.
 
 **Target:** 2026-12-31.
 
-## BL-504 — audit rules read formula references without skipping string literals `Tier 3`
+## BL-504 — audit rules read formula references without skipping string literals — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): one reader, `engine/tml.expr_refs` (outside quoted literals, stripped, a quoted name kept whole), and one index, `engine/tml.formula_reference_index` (id, name, surfacing column's display name, moved from the formula tree). The tree, P17 and P2's reference graph, H3 (which also no longer counts a formula's reference to itself), the RLS column reads and `context.join_key_ids` all use them. Tests: `tests/test_audit_reference_reading.py`. No pinned finding moved and the SE demo sample is unchanged by this part.
 
 **Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
 
@@ -16198,7 +16200,9 @@ changes no finding.
 
 **Target:** 2026-12-31.
 
-## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
+## BL-505 — converters' fact detection does not use the shared table-role classifier — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-cli 0.202.0) — by parity, not by import. `mv_emit.detect_fact_tables` is vendored into the Databricks Genie notebook (`agents/databricks/build_mv_lib.py` concatenates ts_cli modules), which cannot load `agents/shared/erd/roles.py`. So `mv_emit_window._join_target_tables` now reads join direction by the classifier's rule (MANY_TO_ONE or none toward `with`, ONE_TO_MANY reversed, ONE_TO_ONE / MANY_TO_MANY neither) — a ONE_TO_MANY join used to make the fact the dimension — and `tests/test_mv_emit_fact_roles.py` holds the emitter's roots to the classifier's. Formula measures DO count toward a table there (they are what a Metric View carries; the classifier counts physical columns only), tested. `sv_build_model._detect_fact_tables` stays separate: it reads Snowflake relationships before any Model TML exists. `sisense/build_model._fact_rank` ranks tables to orient joins, a different question.
 
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.
@@ -16448,7 +16452,9 @@ for each shape and a sample re-measure.
 
 **Target:** 2026-12-31.
 
-## BL-507 — the join-key type lookup misses aliased tables `Tier 3`
+## BL-507 — the join-key type lookup misses aliased tables — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): `engine/tml.join_column_types` gives each join a type view in which its two ends' columns also answer under their physical Table name, which is what a referencing join's `on` writes. P6 and D16 read through it; only the join's own ends are added, so one alias of a role-playing Table never lends its types to another's join. The P6 pins did not move (no pinned input has an aliased referencing join); on the SE demo sample two P6 findings now also name the aliased table's string key (count unchanged), and D16 is unchanged.
 
 **Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
 

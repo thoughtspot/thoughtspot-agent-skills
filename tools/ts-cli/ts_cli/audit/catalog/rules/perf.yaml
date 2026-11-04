@@ -124,7 +124,8 @@
   description: >-
     Per join (inline, or referencing a Table's `joins_with`): LOW when its key columns
     are string-typed on their Table TML, which join more slowly than integers (a key
-    whose Table TML is not in scope has an unknown type and is not reported), and,
+    whose Table TML is not in scope has an unknown type and is not reported; one of an
+    aliased table is typed through the alias since BL-507), and,
     separately, INFO when it joins on more than one key pair. The Table TMLs are
     optional enrichment: the multi-key finding needs none. One join can yield both
     findings. D2 was merged into this rule in 2026-10.
@@ -344,8 +345,9 @@
   title: Formula cross-reference chain depth
   evidence: measure
   description: >-
-    The longest chain of formula-to-formula references starting at a formula (by id
-    or display name, BL-300), INFO above 2 and LOW above 3. Formulas sharing a name
+    The longest chain of formula-to-formula references starting at a formula (by id,
+    name or surfacing column's display name, BL-300; outside quoted literals, as the
+    report's formula tree reads them, BL-504), INFO above 2 and LOW above 3. Formulas sharing a name
     are one node and report once.
   categories: [P]
   requires: [model_tml]

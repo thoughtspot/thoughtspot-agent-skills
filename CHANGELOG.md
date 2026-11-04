@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-04
+- fix: audit reads formula references one way; aliased join keys typed; Databricks emitter reads ONE_TO_MANY joins right (ts-audit 3.16.1, BL-504, BL-505, BL-507)
+- chore: bump ts-cli to v0.202.0
 - fix: formula columns declare `aggregation:` under the 2026-11-02 ruling in the Power BI, Sisense and dbt converters, the aggregate generator and promote; Sisense calc formulas surfaced again; D13 reads every bare window (ts-audit 3.16.0, BL-509)
 - chore: bump ts-cli to v0.201.0
 - fix(audit): malformed TML shapes are listed, never a crash; not-exported Models shown; Answer export retry (ts-audit 3.15.0, BL-501, BL-516, BL-517)

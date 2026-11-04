@@ -6,7 +6,7 @@ from typing import Any, Iterable, NoReturn, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.tml import BRACKET_REF
+from ts_cli.audit.engine.tml import expr_refs
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -94,8 +94,8 @@ def join_key_ids(on_str: str) -> list:
     """
     text = on_str or ""
     # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: engine/tml.py's
-    # BRACKET_REF, the one declaration of that pattern (BL-304).
-    bracketed = [m.strip() for m in BRACKET_REF.findall(text) if m.strip()]
+    # expr_refs, the audit's one reference reader (BL-304, BL-504: literals skipped).
+    bracketed = expr_refs(text)
     if bracketed:
         return bracketed
     parts = text.replace("=", ",").replace(" and ", ",").split(",")
