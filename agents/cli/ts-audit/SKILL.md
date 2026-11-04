@@ -314,13 +314,21 @@ its re-authentication aborts the run once, because every later call would fail t
 way. Any other non-2xx (403, 404, a 5xx after the client's retries, …) or a non-JSON
 2xx skips that Model's AI-instruction rules with a warning, and the report shows "Could
 not be read". Separately, the dashboard's "Could not be read" box lists every Model whose
-TML, or a Table it uses, holds a list or a single value where a mapping belongs
-(`properties`, `spotter_config`, `db_column_properties`), every such Table, and every
-Answer that holds one or is built on an excluded Model or Table. None of them is judged
+TML, or a Table it uses, holds the wrong shape where the audit reads one — a list or a
+single value where a mapping belongs (`properties`, `spotter_config`,
+`db_column_properties`, `model_instructions`, `rls_rules`, the document body itself), a
+mapping or single value where a list of mappings belongs (`columns`, `formulas`,
+`filters`, `model_tables`, their `joins`, `joins_with`, `rls_rules.rules`, an Answer's
+`tables` and `formulas`), or a list entry that is not a mapping; an empty-looking value
+(null, `0`, `""`) reads as empty — every such Table, and every Answer that holds one or is built on an
+excluded Model or Table. None of them is judged
 (the excluded Model's Sets and metadata header go with it, and cross-Model rules such as
 D7, D8 and D12 do not see it, so a duplicate it is part of goes unreported) until the TML
 is fixed; the run warns on stderr. Its formulas and Tables still count where a rule asks
-whether something is on no Model (H7, H8, H9).
+whether something is on no Model (H7, H8, H9). A requested Model ThoughtSpot did not
+export (deleted, no access, a refused batch) is listed in a "Not exported" box, in the
+run's JSON (`corpus.not_exported`) and in the closing "Audit complete" line, which also
+counts what could not be read.
 
 Sets are **not** in a Model's dependents (BL-324); `ts audit run` discovers them
 directly when a selected rule declares `sets` (one cohort listing per Model), adds each
@@ -441,6 +449,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.15.0 | 2026-11-04 | **Malformed TML never ends the run; what was not checked is shown.** Every list or mapping the audit reads now has its shape checked, as item 10 checked `properties`: a mapping where a list belongs (`model_tables`, `columns`, `joins_with`, `rls_rules.rules`), a single value where either belongs (`rls_rules`, `model_instructions`), a list entry that is not a mapping (a column, formula, filter, join, Table column, RLS rule, Answer formula or table), or a document body that is null or not a mapping. Each ended `ts audit run`; now the object is not judged and is listed under "Could not be read" (BL-501). A null, `0` or `""` list reads as empty, and no longer ends the run in the ERD; shapes no rule reads (`parameters`, `rls_rules.table_paths`) are left alone. `rls_rules` as a flat list of rules is malformed too: no schema doc or census Table has that shape, and reading it as absent would call a protected Table unprotected. A requested Model that was not exported is listed in a new "Not exported" box and `corpus.not_exported`, and the closing line counts it and the unreadable items (BL-516). The Answer export retries a refused batch one Answer at a time, as the Model export does, and records every skipped Answer in the run's warnings (BL-517). No change on the SE demo sample. |
 | 3.14.0 | 2026-11-04 | **S12 raised to MEDIUM; the audit keeps healthy Models when one is gone.** S12 (an RLS Table on the optional side of an outer join with no null branch) is MEDIUM: per the docs' "Respect join definitions" such a rule can turn the outer join into an inner one, and whether it does depends on cluster settings the audit cannot read, so it is flagged for review (product owner, 2026-11-04). S12 now recognises the docs' `is_null ( … )` and `= null` as null branches as well as `isnull`, and its advice names no spelling (the formula language and the RLS docs disagree). `ts audit run` retries a Model export batch refused as a bad request (400 or 404) one Model at a time, so one deleted Model no longer drops up to 49 others; a server or auth failure still skips the batch, and stops a retry part-way (BL-510). The sample's findings are unchanged (S12 has none there). |
 | 3.13.0 | 2026-11-04 | **New rules, set 2 (roadmap PR 4.4).** Eight rules, each with its evidence class: **S12** an RLS Table on the optional side of an outer join with no `isnull` clause (fact, LOW until probed, BL-511); **S13** an RLS rule search cannot index — no `ts_groups` / `ts_username`, or a `!=` (fact, LOW); **D13** a bare `group_aggregate` / `last_value` / `first_value` summed under a rate, price or ratio name — not a balance, which SUM rightly totals (heuristic, MEDIUM); **D17** an identifier, zip code, coordinate or date part summed, read as the name's last word so a qualifier ("Prior Year Sales") is not (heuristic, MEDIUM); **D18** a copy of a fact or factless table in one Model (fact, LOW, in rollout); **H13** date-part columns beside a date column (heuristic, LOW hint); **H14** flags shown as true/false or 0/1 (heuristic, LOW); **A9** parameters in formulas on a Spotter-enabled Model (fact, LOW, in rollout). On the 144-Model SE demo sample: D17 79 columns in 28 Models, H14 43 Models, H13 22, A9 6, S13 1 rule, S12 / D13 / D18 none; no existing finding changes and no rule warns in `ts audit fire-rates`. Deferred: an RLS path through a one-to-many join (BL-410), G5e/G5f (BL-512), slot-named columns (BL-514). |
 | 3.12.0 | 2026-11-02 | **D14 reads per-row formulas.** A MEASURE column surfacing a per-row formula (no aggregate call, none reached through the formulas it references) is rolled up by its `aggregation`, like a physical column, so D14 now checks it too. Aggregate formulas stay out: their aggregation is ignored, except a bare `group_aggregate` / `last_value` / `first_value`, whose aggregation is applied and which D13 is to cover (BL-506). Product owner's ruling on formula aggregation, 2026-11-02. On the 148-Model SE demo sample: one more finding (a per-row ratio formula set to SUM), 133 columns in 53 Models; nothing else changes. |

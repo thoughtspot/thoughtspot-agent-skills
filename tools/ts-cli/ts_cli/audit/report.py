@@ -334,6 +334,9 @@ def compact_payload(data: dict) -> dict:
         # Items no rule judged because their TML is malformed (absent in older JSON).
         if corpus.get("unreadable"):
             result["C"]["ur"] = list(corpus["unreadable"])
+        # Requested Models the export refused, so no rule saw (BL-516; absent in older JSON).
+        if corpus.get("not_exported"):
+            result["C"]["ne"] = list(corpus["not_exported"])
     else:
         result["C"] = None
 

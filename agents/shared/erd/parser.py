@@ -116,14 +116,14 @@ def _table_node_id(mt):
 
 
 def _build_formulas(model):
-    return {f.get("name"): f.get("expr", "") for f in model.get("formulas", [])}
+    return {f.get("name"): f.get("expr", "") for f in model.get("formulas") or []}
 
 
 def _build_columns(model, table_ids, formulas):
     """Route each model column to its owning node (by alias-or-name prefix)."""
     cols_by_table = {tid: [] for tid in table_ids}
     known = set(table_ids)
-    for col in model.get("columns", []):
+    for col in model.get("columns") or []:
         props = col.get("properties")
         props = props if isinstance(props, dict) else {}  # malformed TML: absent
         is_formula = "formula_id" in col

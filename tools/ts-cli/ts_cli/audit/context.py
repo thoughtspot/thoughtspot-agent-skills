@@ -272,37 +272,26 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
         warnings.append(msg)
 
 
-def _export_answers(client: Any, dependents: dict) -> list:
-    """Answer TML for every ANSWER among `dependents`; a failed batch is skipped."""
-    answers: list = []
-    answer_guids = set()
-    for deps in dependents.values():
-        for d in deps:
-            if d.get("type") == "ANSWER" and d.get("guid"):
-                answer_guids.add(d["guid"])
+def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
+    """Answer TML for every ANSWER among `dependents`, 50 at a time with the Model
+    export's retry (`_export_items`, BL-517); every Answer not exported is a warning."""
+    answer_guids = list(dict.fromkeys(
+        d["guid"] for deps in dependents.values() for d in deps
+        if d.get("type") == "ANSWER" and d.get("guid")))
     if not answer_guids:
-        return answers
+        return []
     _log(f"Exporting {len(answer_guids)} answer TML(s)...")
-    guid_list = list(answer_guids)
-    ans_batch = 50
-    for i in range(0, len(guid_list), ans_batch):
-        batch = guid_list[i:i + ans_batch]
-        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-            "metadata": [{"identifier": g} for g in batch],
-            "export_fqn": True,
-            "formattype": "YAML",
-        }, timeout=300, raise_for_status=False)
-        if not resp.ok:
-            _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
+    answers: list = []
+    for item in _export_items(client, answer_guids, warnings, "Answer", associated=False):
+        reason = _export_failure(item)
+        if reason:
+            msg = f"Answer not exported ({reason}), so not checked"
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
             continue
-        for item in resp.json():
-            reason = _export_failure(item)
-            if reason:
-                _log(f"Warning: answer not exported ({reason}), skipping it")
-                continue
-            parsed = parse_edoc(item["edoc"], "YAML")
-            if parsed and detect_tml_type(parsed) == "answer":
-                answers.append(parsed)
+        parsed = parse_edoc(item["edoc"], "YAML")
+        if parsed and detect_tml_type(parsed) == "answer":
+            answers.append(parsed)
     return answers
 
 
@@ -322,65 +311,67 @@ def _export_failure(item) -> Optional[str]:
     return export_item_doc(item)[1]
 
 
-#: A batch refused with one of these names a bad identifier: retry its Models one by one.
+#: A batch refused with one of these names a bad identifier: retry its objects one by one.
 _RETRY_ONE_BY_ONE = (400, 404)
 
 
-def _post_model_export(client: Any, guids: list):
-    return client.post("/api/rest/2.0/metadata/tml/export", json={
-        "metadata": [{"identifier": g} for g in guids],
-        "export_fqn": True,
-        "export_associated": True,
-        "formattype": "YAML",
-    }, timeout=300, raise_for_status=False)
+def _post_export(client: Any, guids: list, associated: bool):
+    body = {"metadata": [{"identifier": g} for g in guids], "export_fqn": True}
+    if associated:
+        body["export_associated"] = True
+    body["formattype"] = "YAML"
+    return client.post("/api/rest/2.0/metadata/tml/export", json=body,
+                       timeout=300, raise_for_status=False)
 
 
-def _export_model_items(client: Any, model_guids: list, warnings: list,
-                        batch_size: int = 50) -> list:
-    """Every `metadata/tml/export` item for `model_guids`, `batch_size` at a time.
+def _export_items(client: Any, guids: list, warnings: list, kind: str = "Model",
+                  associated: bool = True, batch_size: int = 50) -> list:
+    """Every `metadata/tml/export` item for `guids` (`kind`: "Model" or "Answer";
+    a Model is exported with its associated Tables), `batch_size` at a time.
 
     A batch refused as a bad request (400 or 404) is retried one GUID at a time: one
-    deleted or unreadable Model 400s the whole request, and dropping the batch lost its
-    healthy neighbours with it (98 of 148 Models for four deleted GUIDs, BL-510). Only a
-    GUID that still fails on its own is reported, by GUID, as not checked. Any other
-    failure (auth, a server error) would fail again per GUID, so its batch is reported
-    whole, as before — and so is the rest of a batch when the retry meets one
-    (_export_one_by_one)."""
+    deleted or unreadable object 400s the whole request, and dropping the batch lost its
+    healthy neighbours with it (98 of 148 Models for four deleted GUIDs, BL-510; the
+    Answer export did the same, BL-517). Only a GUID that still fails on its own is
+    reported, by GUID, as not checked. Any other failure (auth, a server error) would
+    fail again per GUID, so its batch is reported whole, as before — and so is the rest
+    of a batch when the retry meets one (_export_one_by_one)."""
     items: list = []
-    for i in range(0, len(model_guids), batch_size):
-        batch = model_guids[i:i + batch_size]
-        resp = _post_model_export(client, batch)
+    for i in range(0, len(guids), batch_size):
+        batch = guids[i:i + batch_size]
+        resp = _post_export(client, batch, associated)
         if resp.ok:
             items.extend(resp.json())
             continue
         if resp.status_code not in _RETRY_ONE_BY_ONE:
-            msg = (f"Model export batch {i // batch_size + 1} returned {resp.status_code}, "
-                   f"skipping {len(batch)} model(s)")
+            msg = (f"{kind} export batch {i // batch_size + 1} returned {resp.status_code}, "
+                   f"skipping {len(batch)} {kind.lower()}(s)")
             _log(f"Warning: {msg}")
             warnings.append(msg)
             continue
         if len(batch) > 1:
-            _log(f"Warning: Model export batch {i // batch_size + 1} returned "
-                 f"{resp.status_code}; retrying its {len(batch)} model(s) one at a time")
-        items.extend(_export_one_by_one(client, batch, resp, warnings))
+            _log(f"Warning: {kind} export batch {i // batch_size + 1} returned "
+                 f"{resp.status_code}; retrying its {len(batch)} {kind.lower()}(s) one at a time")
+        items.extend(_export_one_by_one(client, batch, resp, warnings, kind, associated))
     return items
 
 
-def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list) -> list:
-    """The items of `batch`'s Models, one request each (a lone Model reuses the batch's
-    own response). A Model refused as a bad request is reported as not checked; any other
-    failure would recur for every Model left, so the retry stops there and the rest are
-    reported together."""
+def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list,
+                       kind: str, associated: bool) -> list:
+    """The items of `batch`'s objects, one request each (a lone object reuses the
+    batch's own response). An object refused as a bad request is reported as not
+    checked; any other failure would recur for every object left, so the retry stops
+    there and the rest are reported together."""
     items: list = []
     for n, guid in enumerate(batch):
-        one = _post_model_export(client, [guid]) if len(batch) > 1 else batch_resp
+        one = _post_export(client, [guid], associated) if len(batch) > 1 else batch_resp
         if one.ok:
             items.extend(one.json())
             continue
-        msg = f"Model {guid} could not be exported (HTTP {one.status_code}), so not checked"
+        msg = f"{kind} {guid} could not be exported (HTTP {one.status_code}), so not checked"
         rest = len(batch) - n - 1
         if one.status_code not in _RETRY_ONE_BY_ONE and rest:
-            msg += f"; the retry stopped there, skipping {rest} more model(s)"
+            msg += f"; the retry stopped there, skipping {rest} more {kind.lower()}(s)"
         _log(f"Warning: {msg}")
         warnings.append(msg)
         if one.status_code not in _RETRY_ONE_BY_ONE:
@@ -418,7 +409,7 @@ def build_context(
     # them (D2/D3/D11/P6 resolve referencing joins from Table TML, S2 and H7 read it too).
     _log(f"Exporting TML for {len(model_guids)} model(s)...")
     warnings = []
-    for item in _export_model_items(client, model_guids, warnings):
+    for item in _export_items(client, model_guids, warnings):
         reason = _export_failure(item)
         if reason:
             msg = f"Not exported, so not checked: {reason}"
@@ -488,7 +479,7 @@ def build_context(
     if "ai_instructions" in needs:
         _fetch_ai_instructions(client, model_guids, ai_instructions, warnings)
     if "answers" in needs:
-        answers = _export_answers(client, dependents)
+        answers = _export_answers(client, dependents, warnings)
     if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)

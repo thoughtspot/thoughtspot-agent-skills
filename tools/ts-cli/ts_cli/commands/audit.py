@@ -252,10 +252,23 @@ def run(
             result = run_audit(client, models, angle_list, assessment_name)
     _emit(result, output)
 
+    typer.echo(closing_line(result), err=True)
+
+
+def closing_line(result: dict) -> str:
+    """The run's last stderr line: findings and checks, then what was not checked —
+    requested Models not exported (BL-516) and objects not judged as unreadable."""
     summary = result.get("summary", {})
     total = sum(summary.get("by_severity", {}).values())
-    typer.echo(f"Audit complete: {total} finding(s) across "
-               f"{summary.get('checks_run', 0)} checks", err=True)
+    line = f"Audit complete: {total} finding(s) across {summary.get('checks_run', 0)} checks"
+    corpus = result.get("corpus") or {}
+    if corpus.get("not_exported"):
+        line += (f"; {len(corpus['not_exported'])} Model(s) could not be exported, "
+                 "so were not checked")
+    if corpus.get("unreadable"):
+        line += (f"; {len(corpus['unreadable'])} item(s) could not be read, "
+                 "so were not judged")
+    return line
 
 
 @app.command("report")

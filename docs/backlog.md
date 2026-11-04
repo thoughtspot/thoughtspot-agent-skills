@@ -318,7 +318,7 @@ are roughly ordered by value÷effort.
 | BL-498 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
 | BL-499 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
-| BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| ~~BL-501~~ | ~~`ts audit run` ends on non-mapping shapes outside the three item-10 keys~~ | DONE (2026-11-04) |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
 | BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
 | ~~BL-510~~ | ~~`ts audit run`'s Model export drops a whole batch when one GUID is gone~~ | DONE (2026-11-04) |
@@ -326,11 +326,12 @@ are roughly ordered by value÷effort.
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
 | BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
 | BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
-| BL-516 | A Model the audit could not export is reported only on stderr and in a snapshot's `warnings.json`: the run JSON, the report and "Audit complete" show nothing, so a requested Model can vanish from the result silently | 2026-12-31 |
-| BL-517 | `_export_answers` (`audit/context.py`) sends 50 Answer GUIDs per export and drops a refused batch whole, logging only — one bad Answer GUID drops up to 49 Answers from H7/H8/H9. Reuse BL-510's per-GUID retry | 2026-12-31 |
+| ~~BL-516~~ | ~~A Model the audit could not export is reported only on stderr~~ | DONE (2026-11-04) |
+| ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
+| BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
-| BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
+| ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
 | BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
 | BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
@@ -16085,7 +16086,9 @@ objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
 
 **Target:** 2026-11-30.
 
-## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
+## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys — DONE `Tier 2`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): every list or mapping the audit reads has its shape checked (`engine/tml.py` `SHAPES`, `misshapen`), alongside the item-10 MAPPING_KEYS, and a misshapen one makes its object unreadable: not judged, listed under "Could not be read", with what depends on it. Every row of the table below, plus a scalar Model filter, Answer formula or table, a `model_tables` mapping and a document body that is null or not a mapping, is an end-to-end test (`tests/test_audit_malformed_shapes.py`, `run_audit` then `render_report`, both assessments). **`rls_rules` ruling:** the flat-list shape was not confirmed (no schema doc has it, and the census's Tables with RLS were all mappings; the SpotterCode MCP was not connected), so it is malformed rather than normalised: listed, the Table is judged neither protected nor unprotected. The ERD parser still accepts it (`agents/shared/erd/parser.py` `_rls_rule_list`). Rules reading every Model, excluded ones included (H7, H8, H9), read their lists defensively. A null, `0` or `""` list reads as empty (the shared ERD parser no longer ends the run on one). Shapes no rule reads unguarded (`parameters`, `rls_rules.tables`/`table_paths`/`joins`) are not checked, so they cost no Model its judgement. Not covered: a scalar of the wrong type where a string belongs, BL-518.
 
 **Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
@@ -16252,6 +16255,8 @@ MEDIUM and cite the probe; if not, retire or reword it.
 
 ## BL-512 — RLS judgement checks G5e and G5f `Tier 3`
 
+**Decision (2026-11-04, product owner):** build both as LOW rules worded "review" (audit backlog PR 5).
+
 **Filed:** 2026-11-04. **Source:** the expert rule review, deferred from roadmap PR 4.4.
 
 **What.** (e) one Model's Tables comparing the tenant through different keys or
@@ -16261,7 +16266,9 @@ don't grade, or settle the shape first.
 
 **Target:** 2027-01-31.
 
-## BL-516 — a Model the audit could not export is invisible in the result `Tier 3`
+## BL-516 — a Model the audit could not export is invisible in the result — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): a requested Model with no exported TML is listed in `corpus.not_exported` (the run's own warning when one names it, else its GUID), a "Not exported" box on the dashboard, and the closing line, which also counts the unreadable items. Derived from `model_guids` and `models`, so older snapshots replay unchanged.
 
 **Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
 
@@ -16276,7 +16283,9 @@ line.
 
 **Target:** 2026-12-31.
 
-## BL-517 — the Answer export drops a whole batch on one bad GUID `Tier 3`
+## BL-517 — the Answer export drops a whole batch on one bad GUID — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): `_export_answers` uses the Model export's `_export_items` (400/404 retried one Answer at a time, any other failure stops it), and every skipped Answer, including one refused inside a 200, is a warning. Answers are not listed in the report: the dependents they come from also hold Set consumers that are deliberately not exported, so a missing one cannot be told from a skipped one there.
 
 **Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
 
@@ -16288,6 +16297,26 @@ to `ctx.warnings`. One deleted Answer drops up to 49 others from H7, H8 and H9.
 failure), and record the skips in `ctx.warnings`.
 
 **Target:** 2026-12-31.
+
+
+## BL-518 — the audit ends on a wrong scalar type where a string belongs `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-501 fix (audit backlog PR 1).
+
+**What.** BL-501 made every wrong list or mapping shape "not judged". A scalar of the
+wrong type is a different class and still ends `ts audit run`: the review's fuzzer
+swapped a list, mapping or number into string fields of a two-Model context and found
+23 distinct crash sites, among them `engine/tml.py` (join and RLS reads),
+`engine/fields.py` (the join-key and type reads), `engine/code_rules.py`,
+`audit/context.py` `column_types`, `agents/shared/erd/parser.py`, `audit/report.py`, and
+`engine/scopes.py` on a non-string guid. None has been seen in an export.
+
+**Do.** Decide the unit first: per field (read a non-string as absent) or per object
+(extend `tml._body` with the string fields the audit reads, so the object is listed under
+"Could not be read" like BL-501's shapes). The second matches the item-10 ruling. Then a
+fuzz test over the string fields, run end to end (`run_audit`, `render_report`).
+
+**Target:** 2027-01-31.
 
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
@@ -16320,6 +16349,8 @@ fits the `ts-object-*` family (`.claude/rules/skill-naming.md`).
 **Target:** 2027-03-31.
 
 ## BL-514 — H15, slot-named columns, needs the column aliases `Tier 3`
+
+**Decision (2026-11-04, product owner):** stays parked until the column-alias export leaves Beta.
 
 **Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4 (G19).
 
@@ -16402,7 +16433,9 @@ P6 and D16 on an aliased join, and re-pin P6 (`repin_findings.py --rule P6`).
 
 **Target:** 2026-12-31.
 
-## BL-508 — are redundant Model-over-Table joins worth a finding? `Tier 3`
+## BL-508 — are redundant Model-over-Table joins worth a finding? — CLOSED `Tier 3`
+
+**Status:** CLOSED (2026-11-04, product owner): not worth a finding. A repeat is the norm on the sample and no harm has been seen; reopen only if two definitions are seen to drift.
 
 **Filed:** 2026-11-02. **Source:** roadmap PR 4.3, which narrowed G14 to duplicate
 Table-level joins (D15).

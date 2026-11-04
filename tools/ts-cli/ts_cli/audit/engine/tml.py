@@ -45,6 +45,23 @@ BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 #: reads go through `mapping`, as a backstop: neither maps over it nor crashes on it.
 MAPPING_KEYS = frozenset({"properties", "spotter_config", "db_column_properties"})
 
+#: Where the Model, Table and Answer TML schemas hold a list of mappings (`[{...}]`) or a
+#: mapping (`{...}`) the audit reads, by path from the document body; a nested shape is
+#: what each mapping holds in turn. Any other shape there is malformed, and is treated
+#: as a malformed MAPPING_KEYS value is (BL-501): the object is not judged, and is listed.
+#: Only what is read unguarded belongs here: a shape no rule reads (`parameters`, whose
+#: readers check, or `rls_rules.table_paths`) is left alone, as main left it, rather
+#: than costing its Model a judgement. `rls_rules` is a mapping only. The flat list of
+#: rules the ERD parser also accepts is in no schema doc and in none of the census's
+#: Tables with RLS, and reading it as absent would call a protected Table unprotected;
+#: listed, it is judged neither way.
+SHAPES = {
+    "model": {"columns": [{}], "formulas": [{}], "filters": [{}],
+              "model_tables": [{"joins": [{}]}], "model_instructions": {}},
+    "table": {"columns": [{}], "joins_with": [{}], "rls_rules": {"rules": [{}]}},
+    "answer": {"tables": [{}], "formulas": [{}]},
+}
+
 
 def formula_ref_index(formulas: list) -> Dict[Any, Any]:
     """How a formula is referred to in an expression -> its NAME. A cross-reference is
@@ -71,23 +88,43 @@ def mapping(obj: Any, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _malformed_tables(tables: dict) -> Dict[Any, Tuple[dict, list]]:
-    """{Table key: (its `table` body, its malformed paths)} for each malformed Table."""
-    out: Dict[Any, Tuple[dict, list]] = {}
+def _body(doc: Any, kind: str) -> Tuple[dict, list]:
+    """A document's `kind` body (a mapping, else {}) and why its shape is malformed:
+    a body that is not a mapping (null included: readers take a present body as a
+    mapping), a MAPPING_KEYS value that is not one, or a departure from SHAPES[kind].
+    A document with no body at all reads as empty, as the pinned `*_lists_none` and
+    `sec_owning_table_edges` inputs judge it."""
+    if not isinstance(doc, dict) or kind not in doc:
+        return {}, []
+    body = doc[kind]
+    if not isinstance(body, dict):
+        return {}, [f"'{kind}' is not a mapping"]
+    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+    return body, reasons + misshapen(body, SHAPES[kind])
+
+
+def _name(body: dict) -> str:
+    name = body.get("name")
+    return name if isinstance(name, str) else ""
+
+
+def _malformed_tables(tables: dict) -> Dict[Any, Tuple[str, list]]:
+    """{Table key: (its name, why it is malformed)} for each malformed Table."""
+    out: Dict[Any, Tuple[str, list]] = {}
     for key, doc in (tables or {}).items():
-        body = doc.get("table") if isinstance(doc, dict) else None
-        paths = malformed_mappings(body) if isinstance(body, dict) else []
-        if paths:
-            out[key] = (body, paths)
+        body, reasons = _body(doc, "table")
+        if reasons:
+            out[key] = (_name(body), reasons)
     return out
 
 
-def _model_reasons(body: dict, bad_tables: dict) -> list:
-    """Why a Model is unreadable: its own malformed paths, then each malformed Table it
-    uses (by `model_tables[].fqn`, the key `ctx.tables` holds Tables under)."""
-    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+def _model_reasons(body: dict, own: list, bad_tables: dict) -> list:
+    """Why a Model is unreadable: its own malformed shapes (`own`), then each malformed
+    Table it uses (by `model_tables[].fqn`, the key `ctx.tables` holds Tables under)."""
+    reasons = list(own)
     for mt in _list(body.get("model_tables")):
-        if isinstance(mt, dict) and mt.get("fqn") in bad_tables:
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        if isinstance(fqn, str) and fqn in bad_tables:
             reasons.append(f"uses Table '{mt.get('name')}', whose TML is malformed")
     return list(dict.fromkeys(reasons))  # a Table used twice (aliases) is one reason
 
@@ -96,14 +133,14 @@ def _list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
-def _answer_reasons(body: dict, excluded: Dict[Any, str]) -> list:
-    """Why an Answer is not judged: its own malformed paths, then each excluded Model or
-    Table it is built on (`tables[].fqn`) — its formulas and table references are judged
-    against that object, which no rule can now see (H7, H8, H9)."""
-    reasons = [f"'{p}' is not a mapping" for p in malformed_mappings(body)]
+def _answer_reasons(body: dict, own: list, excluded: Dict[Any, str]) -> list:
+    """Why an Answer is not judged: its own malformed shapes (`own`), then each excluded
+    Model or Table it is built on (`tables[].fqn`) — its formulas and table references
+    are judged against that object, which no rule can now see (H7, H8, H9)."""
+    reasons = list(own)
     for ref in _list(body.get("tables")):
         key = ref.get("fqn") if isinstance(ref, dict) else None
-        if key is not None and key in excluded:
+        if isinstance(key, str) and key in excluded:
             reasons.append(f"built on {excluded[key]}, which is not judged")
     return list(dict.fromkeys(reasons))
 
@@ -113,8 +150,8 @@ def _message(kind: str, name: Any, key: Any, reasons: list) -> str:
 
 
 def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
-    """What no rule may judge, because its TML, or TML it depends on, holds a list or
-    scalar where a mapping belongs: (Model guids, Table keys, Answer guids, one message
+    """What no rule may judge, because its TML, or TML it depends on, holds the wrong
+    shape where the audit reads one (`_body`: MAPPING_KEYS, SHAPES): (Model guids, Table keys, Answer guids, one message
     per object, its reasons joined).
 
     A Table is unreadable when its own TML has such a path; a Model when its own TML does
@@ -124,19 +161,19 @@ def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
     round 4), and keeping its Answers judged them against a Model no rule could see
     (round 5)."""
     bad_tables = _malformed_tables(ctx.tables)
-    excluded = {key: f"Table '{body.get('name') or ''}'" for key, (body, _) in bad_tables.items()}
+    excluded = {key: f"Table '{name}'" for key, (name, _) in bad_tables.items()}
     models, messages = set(), []
     for doc in ctx.models:
-        body = doc.get("model") if isinstance(doc, dict) else None
-        reasons = _model_reasons(body, bad_tables) if isinstance(body, dict) else []
+        body, own = _body(doc, "model")
+        reasons = _model_reasons(body, own, bad_tables)
         if reasons:
-            models.add(doc.get("guid"))
-            if doc.get("guid") is not None:
-                excluded[doc.get("guid")] = f"Model '{body.get('name') or ''}'"
-            messages.append(_message("Model", body.get("name"), doc.get("guid"), reasons))
-    for key, (body, paths) in bad_tables.items():
-        messages.append(_message("Table", body.get("name"), key,
-                                 [f"'{p}' is not a mapping" for p in paths]))
+            guid = doc.get("guid")
+            models.add(guid)
+            if isinstance(guid, str):
+                excluded[guid] = f"Model '{_name(body)}'"
+            messages.append(_message("Model", _name(body), guid, reasons))
+    for key, (name, reasons) in bad_tables.items():
+        messages.append(_message("Table", name, key, reasons))
     answers, answer_messages = _unreadable_answers(ctx.answers, excluded)
     return models, set(bad_tables), answers, messages + answer_messages
 
@@ -144,12 +181,48 @@ def unreadable_documents(ctx: Any) -> Tuple[set, set, set, list]:
 def _unreadable_answers(answers: list, excluded: Dict[Any, str]) -> Tuple[set, list]:
     guids, messages = set(), []
     for doc in answers or []:
-        body = doc.get("answer") if isinstance(doc, dict) else None
-        reasons = _answer_reasons(body, excluded) if isinstance(body, dict) else []
+        body, own = _body(doc, "answer")
+        reasons = _answer_reasons(body, own, excluded)
         if reasons:
             guids.add(doc.get("guid"))
-            messages.append(_message("Answer", body.get("name"), doc.get("guid"), reasons))
+            messages.append(_message("Answer", _name(body), doc.get("guid"), reasons))
     return guids, messages
+
+
+def misshapen(doc: dict, shape: dict, path: str = "") -> list:
+    """Why `doc` departs from `shape` (a SHAPES entry), in shape order: a key that holds
+    something other than its list of mappings or mapping, or a list entry that is not a
+    mapping. Absent, null and any other falsy value (`0`, `""`) are excepted: every
+    reader takes those as empty (`or []`), so they never ended a run, and the pinned
+    `*_lists_none` inputs judge them as empty. Paths name a list entry as
+    `malformed_mappings` does: by its `name` when it has one, else by its index."""
+    out: list = []
+    for key, sub in shape.items():
+        value = doc.get(key)
+        if not value:
+            continue
+        here = f"{path}.{key}" if path else key
+        if isinstance(sub, list):
+            out += _misshapen_list(value, sub[0], here)
+        elif not isinstance(value, dict):
+            out.append(f"'{here}' is not a mapping")
+        else:
+            out += misshapen(value, sub, here)
+    return out
+
+
+def _misshapen_list(value: Any, entry_shape: dict, here: str) -> list:
+    if not isinstance(value, list):
+        return [f"'{here}' is not a list"]
+    out: list = []
+    for i, entry in enumerate(value):
+        name = entry.get("name") if isinstance(entry, dict) else None
+        at = f"{here}[{name}]" if isinstance(name, str) and name else f"{here}.{i}"
+        if isinstance(entry, dict):
+            out += misshapen(entry, entry_shape, at)
+        else:
+            out.append(f"'{at}' is not a mapping")
+    return out
 
 
 def malformed_mappings(doc: Any, path: str = "") -> list:
