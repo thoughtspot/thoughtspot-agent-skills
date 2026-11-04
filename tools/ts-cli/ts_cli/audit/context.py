@@ -322,6 +322,10 @@ def _export_failure(item) -> Optional[str]:
     return export_item_doc(item)[1]
 
 
+#: A batch refused with one of these names a bad identifier: retry its Models one by one.
+_RETRY_ONE_BY_ONE = (400, 404)
+
+
 def _post_model_export(client: Any, guids: list):
     return client.post("/api/rest/2.0/metadata/tml/export", json={
         "metadata": [{"identifier": g} for g in guids],
@@ -335,16 +339,24 @@ def _export_model_items(client: Any, model_guids: list, warnings: list,
                         batch_size: int = 50) -> list:
     """Every `metadata/tml/export` item for `model_guids`, `batch_size` at a time.
 
-    A batch the API refuses outright (non-200) is retried one GUID at a time: one
+    A batch refused as a bad request (400 or 404) is retried one GUID at a time: one
     deleted or unreadable Model 400s the whole request, and dropping the batch lost its
     healthy neighbours with it (98 of 148 Models for four deleted GUIDs, BL-510). Only a
-    GUID that still fails on its own is reported, by GUID, as not checked."""
+    GUID that still fails on its own is reported, by GUID, as not checked. Any other
+    failure (auth, a server error) would fail again per GUID, so its batch is reported
+    whole, as before."""
     items: list = []
     for i in range(0, len(model_guids), batch_size):
         batch = model_guids[i:i + batch_size]
         resp = _post_model_export(client, batch)
         if resp.ok:
             items.extend(resp.json())
+            continue
+        if resp.status_code not in _RETRY_ONE_BY_ONE:
+            msg = (f"Model export batch {i // batch_size + 1} returned {resp.status_code}, "
+                   f"skipping {len(batch)} model(s)")
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
             continue
         _log(f"Warning: Model export batch {i // batch_size + 1} returned "
              f"{resp.status_code}; retrying its {len(batch)} model(s) one at a time")

@@ -393,7 +393,7 @@ are roughly ordered by value÷effort.
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 | BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
-| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
+| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape. **Parked 2026-11-04: needs a dedicated test cluster** | 2027-03-31 |
 | BL-412 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
 | BL-413 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
 | BL-414 | the backlog novelty gate compares id sets only, so a merge that moves an id already on the base to a different item (a title swap) passes every gate; #664 did exactly that to BL-410 | 2027-01-31 |
@@ -14949,7 +14949,26 @@ Liveboard filter). If it fails like the cycle case, extend `ts_cli/tml_rls_graph
 report it (via the existing `ambiguous_paths`) at the severity the probe shows; if it
 works, record the result in the module docstring and close this.
 
-**Target:** 2027-01-31.
+**Parked 2026-11-04 (product owner): needs a dedicated test cluster.** The SE demo
+cluster has no non-admin test user (an admin bypasses RLS, so the probe cannot run as
+one) and no agreed scratch location; setting both up there was declined. The recipe,
+ready for that cluster:
+
+1. Three warehouse tables in a scratch schema: `SALES(sale_id, user_id, org_id,
+   amount)`, `USERS(user_id, org_id, user_name)`, `ORGS(org_id, org_name)`, a few
+   rows each, with one org whose name matches a test group.
+2. Table TML for all three; on `USERS`, `joins_with` to `ORGS` and an RLS rule reaching
+   it — `table_paths` with a `join_path` through that join — e.g.
+   `[ORGS_1::ORG_NAME] = ts_groups`.
+3. A Model with `SALES` → `USERS` and `SALES` → `ORGS` (both MANY_TO_ONE), so `ORGS`
+   is reached twice: directly, and through the RLS join on `USERS`.
+4. A non-admin user in the matching group (password straight to the OS credential store,
+   never in a conversation), with a `ts` profile.
+5. As that user: a search on `SALES` measures, the same filtered on an `ORGS` column, and
+   a Liveboard filter. Compare with the admin's numbers restricted to that org.
+6. Tear everything down (marker-stamp the objects first).
+
+**Target:** 2027-03-31.
 
 ## BL-412 — AgentQL Quest: a sailing galley at a wooden pier for the Shifting Isles `Tier 3`
 
