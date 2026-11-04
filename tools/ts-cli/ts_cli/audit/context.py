@@ -344,7 +344,8 @@ def _export_model_items(client: Any, model_guids: list, warnings: list,
     healthy neighbours with it (98 of 148 Models for four deleted GUIDs, BL-510). Only a
     GUID that still fails on its own is reported, by GUID, as not checked. Any other
     failure (auth, a server error) would fail again per GUID, so its batch is reported
-    whole, as before."""
+    whole, as before — and so is the rest of a batch when the retry meets one
+    (_export_one_by_one)."""
     items: list = []
     for i in range(0, len(model_guids), batch_size):
         batch = model_guids[i:i + batch_size]
@@ -358,16 +359,32 @@ def _export_model_items(client: Any, model_guids: list, warnings: list,
             _log(f"Warning: {msg}")
             warnings.append(msg)
             continue
-        _log(f"Warning: Model export batch {i // batch_size + 1} returned "
-             f"{resp.status_code}; retrying its {len(batch)} model(s) one at a time")
-        for guid in batch:
-            one = _post_model_export(client, [guid]) if len(batch) > 1 else resp
-            if one.ok:
-                items.extend(one.json())
-                continue
-            msg = f"Model {guid} could not be exported (HTTP {one.status_code}), so not checked"
-            _log(f"Warning: {msg}")
-            warnings.append(msg)
+        if len(batch) > 1:
+            _log(f"Warning: Model export batch {i // batch_size + 1} returned "
+                 f"{resp.status_code}; retrying its {len(batch)} model(s) one at a time")
+        items.extend(_export_one_by_one(client, batch, resp, warnings))
+    return items
+
+
+def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list) -> list:
+    """The items of `batch`'s Models, one request each (a lone Model reuses the batch's
+    own response). A Model refused as a bad request is reported as not checked; any other
+    failure would recur for every Model left, so the retry stops there and the rest are
+    reported together."""
+    items: list = []
+    for n, guid in enumerate(batch):
+        one = _post_model_export(client, [guid]) if len(batch) > 1 else batch_resp
+        if one.ok:
+            items.extend(one.json())
+            continue
+        msg = f"Model {guid} could not be exported (HTTP {one.status_code}), so not checked"
+        rest = len(batch) - n - 1
+        if one.status_code not in _RETRY_ONE_BY_ONE and rest:
+            msg += f"; the retry stopped there, skipping {rest} more model(s)"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        if one.status_code not in _RETRY_ONE_BY_ONE:
+            break
     return items
 
 

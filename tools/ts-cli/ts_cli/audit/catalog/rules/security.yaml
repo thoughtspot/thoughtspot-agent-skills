@@ -206,8 +206,8 @@
   description: >-
     A Model join of type LEFT_OUTER, RIGHT_OUTER or OUTER whose optional side — the
     `with` table for LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER —
-    is a Table carrying RLS rules, none of which has a null branch (`is_null ( … )` or
-    `isnull ( … )`). The docs' "Respect join definitions" (security-rls) show that such a
+    is a Table carrying RLS rules, none of which has a null branch (`is_null ( … )`,
+    `isnull ( … )` or `= null`). The docs' "Respect join definitions" (security-rls) show that such a
     rule must test the joined column for null or the outer join behaves as an inner one
     for users under the rule: they lose the rows it kept. Whether it does also depends
     on cluster settings the audit cannot read, so MEDIUM: review the rule (product
@@ -219,8 +219,8 @@
     mode: each
     where: {field: "@outer_join_unguarded_rls", nonblank: true}
   severity: MEDIUM
-  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no is_null branch — users under them may get an inner join instead"
-  remediation: Review the rule against the docs' "Respect join definitions" — add `or is_null ( [<path>::<column>] )` on the column the join type needs (both sides for a full outer join), or make the join INNER if unmatched rows are not wanted
+  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no null branch — users under them may get an inner join instead"
+  remediation: Review the rule against the docs' "Respect join definitions" — add an `or` null test on the column the join type needs (both sides for a full outer join), in the spelling your cluster accepts, or make the join INNER if unmatched rows are not wanted. A null test on the secured table's own key also shows its ownerless rows to every user (BL-512)
   examples:
     fires: {fixture: sec_rls_outer_joined_unguarded, severity: MEDIUM}
     silent: {fixture: sec_rls_outer_joined_isnull}

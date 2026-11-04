@@ -51,6 +51,10 @@ def test_s12_optional_side():
     assert _sev(_outer_ctx("LEFT_OUTER", cust_tml=False), "S12") == []
     assert _sev(_outer_ctx("LEFT_OUTER", orders_rules=_NO_NULL), "S12") == []   # required side
     assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=_WITH_IS_NULL), "S12") == []
+    eq_null = [{"name": "Region", "expr": "[CUST_1::REGION] = null or [CUST_1::REGION] = ts_groups"}]
+    assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=eq_null), "S12") == []
+    flag_col = [{"name": "Region", "expr": "[CUST_1::is_null_flag] = ts_groups"}]
+    assert _sev(_outer_ctx("LEFT_OUTER", cust_rules=flag_col), "S12") == ["MEDIUM"]
 
 
 def test_s12_resolves_with_as_the_join_graph_does():

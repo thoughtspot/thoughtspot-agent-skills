@@ -326,6 +326,8 @@ are roughly ordered by value÷effort.
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
 | BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
 | BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
+| BL-516 | A Model the audit could not export is reported only on stderr and in a snapshot's `warnings.json`: the run JSON, the report and "Audit complete" show nothing, so a requested Model can vanish from the result silently | 2026-12-31 |
+| BL-517 | `_export_answers` (`audit/context.py`) sends 50 Answer GUIDs per export and drops a refused batch whole, logging only — one bad Answer GUID drops up to 49 Answers from H7/H8/H9. Reuse BL-510's per-GUID retry | 2026-12-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
@@ -16215,7 +16217,7 @@ why `sv_build_model` stays separate if it does.
 
 ## BL-510 — the audit's Model export drops a whole batch when one GUID is gone — DONE `Tier 3`
 
-**Status:** DONE (2026-11-04, ts-audit 3.14.0): a refused batch is retried one GUID at a time, and only a GUID that still fails is reported as not checked.
+**Status:** DONE (2026-11-04, ts-audit 3.14.0): a batch refused as a bad request (400 or 404) is retried one GUID at a time, and only a GUID that still fails is reported as not checked. Any other failure skips the batch, and stops a retry part-way, as before. Follow-ups: BL-516 (a skipped Model is reported on stderr only) and BL-517 (the Answer export has the same batch bug).
 
 **Filed:** 2026-11-04. **Source:** recapturing the SE demo sample for roadmap PR 4.4.
 
@@ -16258,6 +16260,34 @@ joins but which also shows ownerless rows to every user. Both need judgement: re
 don't grade, or settle the shape first.
 
 **Target:** 2027-01-31.
+
+## BL-516 — a Model the audit could not export is invisible in the result `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `build_context` appends "Model … could not be exported, so not checked" to
+`ctx.warnings`, but nothing in `ts_cli/audit/` or `commands/audit.py` reads them: they
+reach stderr and a snapshot's `warnings.json` only. The run JSON, the HTML report and the
+final "Audit complete" line say nothing about a requested Model that was skipped.
+
+**Do.** Carry the skipped GUIDs into the run JSON and the report's "Could not be read"
+list (the pattern the AI-instructions lookup already uses), and count them in the closing
+line.
+
+**Target:** 2026-12-31.
+
+## BL-517 — the Answer export drops a whole batch on one bad GUID `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `_export_answers` (`tools/ts-cli/ts_cli/audit/context.py`) exports Answers 50
+at a time and, on a non-200, logs a warning and skips the batch — without even adding it
+to `ctx.warnings`. One deleted Answer drops up to 49 others from H7, H8 and H9.
+
+**Do.** Reuse `_export_model_items`' retry (400/404 one at a time, stop on any other
+failure), and record the skips in `ctx.warnings`.
+
+**Target:** 2026-12-31.
 
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
