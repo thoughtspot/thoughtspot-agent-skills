@@ -57,7 +57,9 @@ RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
-    "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
+    # 1569 as of ts-cli v0.203.1: the import-retry step moved to
+    # tableau/import_retry.py (down from 1698).
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1569, "BL-089"),
     # The report's largest view: past SOFT_WARN when the gate reached JS (BL-503).
     # Split it into per-tab files when it is next changed; lower this as it shrinks.
     "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-520"),
