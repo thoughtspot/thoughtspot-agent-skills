@@ -5,8 +5,8 @@ Each formula is a node: its MEASURE / ATTRIBUTE kind, whether it is hidden, and 
 name people search it by, all read from the `columns[]` entry that surfaces it (by
 `formula_id`); what it uses; and how many formulas use it. A bracket reference outside
 a quoted literal resolves, in order, to a formula (by id or `formulas[].name`, through
-`tml.formula_ref_index`, the index P17's reference graph also uses, or by the display
-name of the column that surfaces it), a parameter (`parameters[].name`), else a column
+`tml.formula_reference_index`, which also resolves the display name of the column that
+surfaces it — the index P17 and P2 share, BL-504), a parameter (`parameters[].name`), else a column
 (`TABLE::COL`, or a bare Model column name). Literals are split off with
 `formula_translate.refs.split_literals`, which keeps a `[...]` reference whole even when
 the name inside it holds a quote (BL-369). The roots are the formulas nothing uses,

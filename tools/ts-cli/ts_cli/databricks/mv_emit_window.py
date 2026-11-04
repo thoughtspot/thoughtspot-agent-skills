@@ -326,26 +326,16 @@ def emit_window_measure(col: dict, col_resolver: Callable[[dict], str],
 # module's other re-exports.
 
 def _join_target_tables(model: dict) -> set:
-    """Every table some join points AT -- a JOIN TARGET (a dimension joined TO),
-    never a join root -- reading each `model_tables[].joins[]` entry's direction
-    from its cardinality. Used by `mv_emit.detect_fact_tables` to exclude
+    """Every table named as a `with` value across every `model_tables[].joins[]`
+    entry -- i.e. every table that is a JOIN TARGET (a dimension joined TO),
+    never a join root. Used by `mv_emit.detect_fact_tables` to exclude
     dimensions from the fact-table result: a real fact table is never itself
     the target of another table's join.
     """
     targets: set = set()
     for mt in model.get("model_tables", []):
-        own = mt.get("alias") or mt.get("name")
         for join in mt.get("joins", []):
             target = join.get("with")
-            if not target:
-                continue
-            # Join direction as the shared table-role classifier reads it
-            # (agents/shared/erd/roles.py, which this vendored module cannot load):
-            # MANY_TO_ONE or none points at `with`, ONE_TO_MANY at the declaring
-            # table, ONE_TO_ONE and MANY_TO_MANY at neither (BL-505;
-            # tests/test_mv_emit_fact_roles.py holds the two to one answer).
-            card = str(join.get("cardinality") or "MANY_TO_ONE").upper()
-            if card in ("ONE_TO_ONE", "MANY_TO_MANY"):
-                continue
-            targets.add(own if card == "ONE_TO_MANY" else target)
+            if target:
+                targets.add(target)
     return targets

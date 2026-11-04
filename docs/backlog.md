@@ -333,7 +333,7 @@ are roughly ordered by value÷effort.
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
-| ~~BL-505~~ | ~~converters' fact detection does not use the shared table-role classifier~~ | DONE (2026-11-04) |
+| BL-505 | Converters' fact detection does not use the shared table-role classifier; a direction-only fix to `mv_emit` broke the emitted Metric Views and was reverted (PR 3) — the join walk must change with it | 2027-01-31 |
 | ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
@@ -16176,7 +16176,7 @@ when they are next changed.
 
 ## BL-504 — audit rules read formula references without skipping string literals — DONE `Tier 3`
 
-**Status:** DONE (2026-11-04, ts-audit 3.16.1): one reader, `engine/tml.expr_refs` (outside quoted literals, stripped, a quoted name kept whole), and one index, `engine/tml.formula_reference_index` (id, name, surfacing column's display name, moved from the formula tree). The tree, P17 and P2's reference graph, H3 (which also no longer counts a formula's reference to itself), the RLS column reads and `context.join_key_ids` all use them. Tests: `tests/test_audit_reference_reading.py`. No pinned finding moved and the SE demo sample is unchanged by this part.
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): one reader, `engine/tml.expr_refs` (outside quoted literals, stripped, a quoted name kept whole), and one index, `engine/tml.formula_reference_index` (id, name, surfacing column's display name, moved from the formula tree). The tree, P17 and P2's reference graph, H3 (which also no longer counts a formula's reference to itself) and the RLS column reads use them; `context.join_key_ids` (P6) now reads `on` clauses through `tml_join_graph.on_clause_refs`, outside literals, as D16 and H3 already did, so a server-escaped key (`dim\.csv`) is typed. Tests: `tests/test_audit_reference_reading.py`. No pinned finding moved. The sample has no reference inside a literal, padded, self-referencing or by display name, so it cannot show the formula half; the escaped-key half adds P6 findings there (see the PR).
 
 **Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
 
@@ -16200,9 +16200,9 @@ changes no finding.
 
 **Target:** 2026-12-31.
 
-## BL-505 — converters' fact detection does not use the shared table-role classifier — DONE `Tier 3`
+## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
 
-**Status:** DONE (2026-11-04, ts-cli 0.202.0) — by parity, not by import. `mv_emit.detect_fact_tables` is vendored into the Databricks Genie notebook (`agents/databricks/build_mv_lib.py` concatenates ts_cli modules), which cannot load `agents/shared/erd/roles.py`. So `mv_emit_window._join_target_tables` now reads join direction by the classifier's rule (MANY_TO_ONE or none toward `with`, ONE_TO_MANY reversed, ONE_TO_ONE / MANY_TO_MANY neither) — a ONE_TO_MANY join used to make the fact the dimension — and `tests/test_mv_emit_fact_roles.py` holds the emitter's roots to the classifier's. Formula measures DO count toward a table there (they are what a Metric View carries; the classifier counts physical columns only), tested. `sv_build_model._detect_fact_tables` stays separate: it reads Snowflake relationships before any Model TML exists. `sisense/build_model._fact_rank` ranks tables to orient joins, a different question.
+**Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: `agents/databricks/build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
 
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.
@@ -16454,7 +16454,7 @@ for each shape and a sample re-measure.
 
 ## BL-507 — the join-key type lookup misses aliased tables — DONE `Tier 3`
 
-**Status:** DONE (2026-11-04, ts-audit 3.16.1): `engine/tml.join_column_types` gives each join a type view in which its two ends' columns also answer under their physical Table name, which is what a referencing join's `on` writes. P6 and D16 read through it; only the join's own ends are added, so one alias of a role-playing Table never lends its types to another's join. The P6 pins did not move (no pinned input has an aliased referencing join); on the SE demo sample two P6 findings now also name the aliased table's string key (count unchanged), and D16 is unchanged.
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): `engine/tml.join_column_types` gives each join a type view in which its two ends' columns also answer under their physical Table name, which is what a join's `on` writes, inline or referencing (an alias in `on` is rejected). P6 and D16 read through it; only the join's own ends are added, so one alias of a role-playing Table never lends its types to another's join. The P6 pins did not move (no pinned input has an aliased join). With P6 also reading escaped keys (BL-504), the SE demo sample gains 10 P6 LOW findings and 7 others name more keys; D16 is unchanged.
 
 **Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
 

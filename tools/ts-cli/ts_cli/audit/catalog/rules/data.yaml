@@ -456,7 +456,7 @@
     string, integer, decimal, date/time, boolean — so the warehouse casts on every
     query, or the join matches nothing. A key whose Table TML is not in scope has no
     type and is not compared. A key of an aliased table is typed through the alias
-    (until BL-507 a referencing join's key of one read as unknown).
+    (until BL-507 it read as unknown: a join's `on` names the physical Table).
   categories: [D, P]
   requires: [model_tml, table_tml]
   scope: join
