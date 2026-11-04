@@ -19,8 +19,8 @@ Live probe (ps-internal, 2026-10-08), the emitted form grouped by the column it 
 
     Early 0 | On Time 3812 | 1 week late 0 | Less than 1 week late 0 | …
 
-Row-local. Power BI would show 3812 in *every* row, because CALCULATE drops the grouping
-filter on that column. The numbers agree only when the board does not group by it, so the
+Row-local. Power BI should show 3812 in *every* row, because CALCULATE drops the grouping
+filter on that column (inferred from CALCULATE's semantics, not measured in Power BI). The numbers agree only when the board does not group by it, so the
 label has to say Approximated. The same probe confirmed ``unique_count_if`` compiles and
 returns exactly what the older ``unique count ( if … else null )`` form returns.
 
@@ -36,9 +36,11 @@ from __future__ import annotations
 import re
 
 from ts_cli.formula_text import ts_finalize_formula, ts_string_literal
-from ts_cli.powerbi.functions import _split_args, dax_col_refs
+from ts_cli.powerbi.functions import DAX_STRING, _split_args, dax_col_refs, dax_string_value
 
-_NUM = re.compile(r"^-?\d+(?:\.\d+)?$")
+_NUM = re.compile(r"-?\d+(?:\.\d+)?")
+_EQ = re.compile(r"\s*=(?!=)\s*")                 # `=`, never `==`, `>=`, `<=`
+_IN = re.compile(r"\s*IN\s*\{", re.I)
 
 
 def _whole_call(src: str, fname: str) -> str | None:
@@ -61,48 +63,116 @@ def _whole_call(src: str, fname: str) -> str | None:
     return s[m.end():i - 1] if depth == 0 and i == len(s) else None
 
 
-def _sole_ref(text: str) -> tuple[str, str] | None:
-    """The one qualified column in ``text``, or None if there are none or several.
+def _whole_ref(text: str) -> tuple[str, str] | None:
+    """``(table, column)`` when ``text`` is *exactly* one qualified column, else None.
 
     Uses the repo's single DAX-qualifier reader, so ``'Bob''s Sales'[g]`` survives.
+    Containing one column is not enough: ``IF(T[g] > 5, 1)`` contains one.
     """
-    refs = dax_col_refs(text)
-    return (refs[0][2], refs[0][3]) if len(refs) == 1 else None
+    t = text.strip()
+    refs = dax_col_refs(t)
+    if len(refs) == 1 and refs[0][0] == 0 and refs[0][1] == len(t):
+        return refs[0][2], refs[0][3]
+    return None
 
 
-def _literal(token: str) -> str | None:
-    """One IN-set member as ThoughtSpot formula text: a string literal or a number."""
-    t = token.strip()
-    if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
-        return ts_string_literal(re.sub(r"\\(.)", r"\1", t[1:-1]))
-    return t if _NUM.match(t) else None
+def _leading_ref(s: str):
+    """``(table, column, end)`` for a qualified column at the very start of ``s``."""
+    refs = dax_col_refs(s)
+    if refs and refs[0][0] == 0:
+        return refs[0][2], refs[0][3], refs[0][1]
+    return None
+
+
+def _literal_at(s: str, i: int):
+    """``(kind, value, end)`` for one DAX literal starting at ``i``, else None. Strings
+    are decoded by the shared DAX decoder (``""`` is a quote; there are no backslash
+    escapes, so ``"C:\\temp"`` is kept as written)."""
+    m = DAX_STRING.match(s, i)
+    if m:
+        return "str", dax_string_value(m), m.end()
+    m = _NUM.match(s, i)
+    if m and not (m.end() < len(s) and (s[m.end()].isalnum() or s[m.end()] in "_.")):
+        return "num", m.group(0), m.end()
+    return None
+
+
+def _value_set(s: str, i: int):
+    """The literals of ``{a, b, …}`` whose ``{`` ends just before ``i``, when the set
+    closes exactly at the end of ``s``; else None. ``{"a" & "b"}`` and
+    ``{"a"} && T[t] IN {"b"}`` are refused, not read up to the first quote."""
+    vals = []
+    while True:
+        i = len(s) - len(s[i:].lstrip())
+        lit = _literal_at(s, i)
+        if lit is None:
+            return None
+        vals.append(lit[:2])
+        i = len(s) - len(s[lit[2]:].lstrip())
+        if s[i:i + 1] == ",":
+            i += 1
+        elif s[i:i + 1] == "}" and not s[i + 1:].strip():
+            return vals
+        else:
+            return None
+
+
+def _ts_values(vals) -> list[str]:
+    """ThoughtSpot literal text for a value set. DAX compares a mixed set as text
+    (``IN {"a", 1}`` matches ``"1"``), so once any member is a string every member is
+    emitted as one; an all-number set stays numeric."""
+    if any(k == "str" for k, _ in vals):
+        return [ts_string_literal(v) for _, v in vals]
+    return [v for _, v in vals]
+
+
+def _not_isblank_ref(rest: str) -> tuple[str, str] | None:
+    """The column of ``ISBLANK(T[c])`` or ``( ISBLANK(T[c]) )`` making up all of ``rest``
+    (the text after a leading NOT), else None."""
+    inner = _whole_call(rest, "ISBLANK")
+    if inner is None:
+        paren = _whole_call(rest, "")
+        inner = _whole_call(paren, "ISBLANK") if paren is not None else None
+    return _whole_ref(inner) if inner is not None else None
 
 
 def _parse_filter(arg: str):
-    """One CALCULATE argument -> a typed tuple, or None when not fully recognised.
+    """One CALCULATE argument -> a typed tuple, or None when not exactly a shape we read.
 
-    Every branch matches the WHOLE argument. Anchoring only the start let
-    ``NOT ISBLANK(T[g]) && T[qty] > 5`` keep the first predicate and drop the second.
+    Three shapes, each matched to the END of the argument with nothing before the column:
+    ``T[c] = <literal>``, ``T[c] IN {<literal>, …}`` and ``NOT ISBLANK(T[c])`` (plus
+    ``USERELATIONSHIP(T[a], U[b])``). Anything else, ``>=``, ``NOT T[c] = …``,
+    ``LEFT(T[c], 1) = …``, ``T[c] + 1 = …``, ``&&``, ``||`` or a function call around
+    the column, refuses: a partial read silently changes the counted population.
     """
     s = arg.strip()
-    if re.fullmatch(r"USERELATIONSHIP\s*\(.*\)", s, re.I | re.S):
-        return ("userelationship", None, None, None)
-    m = re.fullmatch(r"NOT\s*\(?\s*ISBLANK\s*\((.*)\)\s*\)?", s, re.I | re.S)
+    rel = _whole_call(s, "USERELATIONSHIP")
+    if rel is not None:
+        parts = _split_args(rel)
+        ok = len(parts) == 2 and all(_whole_ref(p) for p in parts)
+        return ("userelationship", None, None, None) if ok else None
+    m = re.match(r"NOT\b\s*", s, re.I)
     if m:
-        ref = _sole_ref(m.group(1))
+        ref = _not_isblank_ref(s[m.end():])
         return ("notnull", ref[0], ref[1], None) if ref else None
-    m = re.fullmatch(r"(.*?)\s+IN\s*\{(.*)\}", s, re.I | re.S)
+    lead = _leading_ref(s)
+    if lead is None:
+        return None
+    tbl, col, end = lead
+    m = _IN.match(s, end)
     if m:
-        ref = _sole_ref(m.group(1))
-        if not ref:
-            return None
-        vals = [_literal(v) for v in _split_args(m.group(2))]
-        return ("in", ref[0], ref[1], vals) if vals and all(vals) else None
-    m = re.fullmatch(r"(.*?)\s*=\s*(.+)", s, re.S)
+        vals = _value_set(s, m.end())
+        return ("in", tbl, col, _ts_values(vals)) if vals else None
+    m = _EQ.match(s, end)
     if m:
-        ref, val = _sole_ref(m.group(1)), _literal(m.group(2))
-        return ("in", ref[0], ref[1], [val]) if ref and val else None
+        lit = _literal_at(s, m.end())
+        if lit and not s[lit[2]:].strip():
+            return ("in", tbl, col, _ts_values([lit[:2]]))
     return None
+
+
+def _filtered_cols(spec) -> set[tuple[str, str]]:
+    return {(t, c) for t, c in spec["gates"]} | {(t, c) for t, c, _ in spec["cats"]}
 
 
 def parse_calculate(src: str):
@@ -119,13 +189,12 @@ def parse_calculate(src: str):
         gates, cats, rel = list(inner["gates"]), list(inner["cats"]), inner["userelationship"]
     else:
         dc = _whole_call(args[0], "DISTINCTCOUNT")
-        if dc is None:
-            return None
-        ref = _sole_ref(dc)
+        ref = _whole_ref(dc) if dc is not None else None
         if not ref:
             return None
         table, key = ref
         gates, cats, rel = [], [], False
+    outer = {"gates": [], "cats": []}
     for arg in args[1:]:
         parsed = _parse_filter(arg)
         if parsed is None:
@@ -134,11 +203,15 @@ def parse_calculate(src: str):
         if kind == "userelationship":
             rel = True
         elif kind == "notnull":
-            gates.append((tbl, col))
+            outer["gates"].append((tbl, col))
         else:
-            cats.append((tbl, col, vals))
-    return {"table": table, "key": key, "gates": gates, "cats": cats,
-            "userelationship": rel}
+            outer["cats"].append((tbl, col, vals))
+    if inner is not None and _filtered_cols(inner) & _filtered_cols(outer):
+        # The inner CALCULATE's filter OVERRIDES the outer one on the same column, so
+        # ANDing them (0 rows for "a" and "b") is wrong; there is no single condition.
+        return None
+    return {"table": table, "key": key, "gates": gates + outer["gates"],
+            "cats": cats + outer["cats"], "userelationship": rel}
 
 
 def parse_ratio(src: str):

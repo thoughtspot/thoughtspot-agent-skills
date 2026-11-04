@@ -7,6 +7,7 @@ Migrated. Acceptance is now whole-expression or nothing.
 """
 import pytest
 
+from ts_cli.formula_text import ts_string_literal
 from ts_cli.powerbi.functions import translate_dax
 from ts_cli.powerbi.gated import parse_calculate, translate
 
@@ -42,7 +43,8 @@ def test_gated_ratio_expands_the_value_set():
 def test_never_migrated_because_calculate_replaces_and_unique_count_if_ands():
     """Live probe (ps-internal 2026-10-08): the emitted form grouped by the column it
     filters on is row-local (On Time 3812, every other stage 0). Power BI shows 3812 in
-    every row, because CALCULATE drops the grouping filter on that column."""
+    every row (inferred from CALCULATE semantics, not measured), because CALCULATE drops the
+    grouping filter on that column."""
     for dax in ("CALCULATE(DISTINCTCOUNT(Fact[Order Line]),NOT ISBLANK(Fact[Booked]))", RATIO):
         _, status, note = _t(dax)
         assert status == "Approximated"
@@ -77,9 +79,37 @@ def test_apostrophe_in_a_value_uses_the_double_quoted_literal():
     assert expr == 'unique_count_if ( [Fact::s] = "O\'Brien" , [Fact::k] )'
 
 
-def test_mixed_value_set_keeps_the_number():
+def test_mixed_value_set_compares_as_text():
+    """DAX coerces the 1 in IN {"a", 1} to "1"; a bare 1 against a text column is wrong."""
     expr, _, _ = _t('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a", 1})')
-    assert "[Fact::s] = 'a' or [Fact::s] = 1" in expr
+    assert "[Fact::s] = 'a' or [Fact::s] = '1'" in expr
+
+
+def test_all_number_value_set_stays_numeric():
+    expr, _, _ = _t("CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[n] IN {1, 2.5, -3})")
+    assert "[Fact::n] = 1 or [Fact::n] = 2.5 or [Fact::n] = -3" in expr
+
+
+@pytest.mark.parametrize("dax_value,text", [
+    ('"C:\\temp"', "C:\\temp"),                # DAX has no backslash escapes
+    ('"say ""hi"""', 'say "hi"'),                # "" is one embedded quote (BL-365)
+])
+def test_literals_use_the_shared_dax_decoder(dax_value, text):
+    """The value is the text DAX means, printed the way every other translator prints it."""
+    expr, status, _ = _t(f"CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = {dax_value})")
+    assert status == "Approximated"
+    assert expr == f"unique_count_if ( [Fact::s] = {ts_string_literal(text)} , [Fact::k] )"
+
+
+def test_not_isblank_with_parentheses():
+    expr, _, _ = _t("CALCULATE(DISTINCTCOUNT(Fact[k]), NOT(ISBLANK(Fact[g])))")
+    assert expr == "unique_count_if ( [Fact::g] != null , [Fact::k] )"
+
+
+def test_nested_calculate_on_different_columns_is_anded():
+    expr, _, _ = _t('CALCULATE(CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "a"), '
+                    'NOT ISBLANK(Fact[g]))')
+    assert expr == "unique_count_if ( [Fact::g] != null and [Fact::s] = 'a' , [Fact::k] )"
 
 
 # ---------------------------------------------------------------- what must refuse
@@ -116,6 +146,43 @@ def test_mixed_value_set_keeps_the_number():
      "CALCULATE(DISTINCTCOUNT(Fact[k]), FILTER(Fact, Fact[qty] > 5))"),
     ("a value we cannot render as a literal",
      "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = Fact[t])"),
+    # Second review: every filter must be exactly `<ref> = lit`, `<ref> IN {…}` or
+    # NOT ISBLANK(<ref>). Each of these used to come back as a wrong formula.
+    (">= is not =", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[qty] >= 5)"),
+    ("<= is not =", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[qty] <= 5)"),
+    ("== is not =", 'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] == "a")'),
+    ("NOT before = would be lost", 'CALCULATE(DISTINCTCOUNT(Fact[k]), NOT Fact[s] = "a")'),
+    ("NOT before IN would be lost",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), NOT Fact[s] IN {"a","b"})'),
+    ("LEFT() around the column", 'CALCULATE(DISTINCTCOUNT(Fact[k]), LEFT(Fact[s],1) = "A")'),
+    ("YEAR() around the column", "CALCULATE(DISTINCTCOUNT(Fact[k]), YEAR(Fact[d]) = 2024)"),
+    ("arithmetic on the column", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[qty] + 1 = 5)"),
+    ("|| between two = predicates",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "Early" || Fact[s] = "On Time")'),
+    ("&& between two = predicates",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "a" && Fact[t] = "b")'),
+    ("&& between two IN predicates",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a"} && Fact[t] IN {"b"})'),
+    ("& concatenation inside a value set",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a" & "b"})'),
+    ("& concatenation as the value", 'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "a" & "b")'),
+    ("NOT ISBLANK && NOT(measure)",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]) && NOT([Is Test]))"),
+    ("NOT ISBLANK && ISBLANK(measure)",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]) && ISBLANK([M]))"),
+    ("NOT ISBLANK || a constant",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]) || (1 = 1))"),
+    ("NOT ISBLANK of an expression, not a column",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(IF(Fact[g] > 5, 1)))"),
+    ("USERELATIONSHIP with a trailing predicate",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), USERELATIONSHIP(Cal[Date], Fact[d]) && NOT(ISBLANK(Fact[g])))"),
+    ("a bare column, not a qualified one", 'CALCULATE(DISTINCTCOUNT(Fact[k]), [s] = "a")'),
+    ("trailing text after the value set",
+     'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a"} || TRUE)'),
+    ("nested CALCULATE filtering the same column: the inner filter wins in DAX",
+     'CALCULATE(CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "a"), Fact[s] = "b")'),
+    ("nested CALCULATE gating the same column it filters",
+     'CALCULATE(CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[s])), Fact[s] IN {"a"})'),
 ])
 def test_refuses_and_keeps_needs_review(label, dax):
     assert translate(dax, "Fact") == (None, None, None), label

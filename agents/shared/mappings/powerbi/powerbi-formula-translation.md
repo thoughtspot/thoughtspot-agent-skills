@@ -39,7 +39,7 @@ wrong answer.
 | DAX | ThoughtSpot | Reference |
 |---|---|---|
 | `CALCULATE(<agg>, <filter/cond>)` | `sum_if(<cond>, <agg-arg>)` | |
-| `CALCULATE(DISTINCTCOUNT(t[k]), NOT ISBLANK(t[g]))` | `unique_count_if ( [t::g] != null , [t::k] )` | whole-expression match only; any filter the parser cannot read refuses the shape |
+| `CALCULATE(DISTINCTCOUNT(t[k]), NOT ISBLANK(t[g]))` | `unique_count_if ( [t::g] != null , [t::k] )` | whole-expression match only; each filter must be exactly `t[c] = <literal>`, `t[c] IN {<literals>}` or `NOT ISBLANK(t[c])`, anything else refuses the shape, as does a nested CALCULATE filtering the same column (the inner filter wins in DAX). Literals go through the shared DAX decoder; a mixed set `IN {"a", 1}` compares as text |
 | `VAR a = CALCULATE(DISTINCTCOUNT(t[k]), …) VAR b = CALCULATE(DISTINCTCOUNT(t[k]), …) RETURN a/b` | two `unique_count_if` terms divided; `t[s] IN {…}` expands to ORs | both VARs must count the same key; a `RETURN` doing anything else (`DIVIDE(a,b)`, `1 - a/b`) is refused |
 | `CALCULATE(m, ALL(t[c]))` / `REMOVEFILTERS(t[c])` / `ALLSELECTED(t[c])` | `group_aggregate(m, query_groups()-{[t::c]}, query_filters()-{[t::c]})` | [worked-examples/powerbi/calculate-all-to-group-aggregate.md](../../worked-examples/powerbi/calculate-all-to-group-aggregate.md) |
 | measure / calc-column reference | `[formula_<name>]` id-reference (topo-sorted) | resolves on first import; name-refs do not |
@@ -52,14 +52,15 @@ wrong answer.
 built from a real report (ps-internal, 2026-10-08), the emitted form grouped by the very
 column it filters on:
 
-| Stage | emitted `unique_count_if` | Power BI `CALCULATE` would give |
+| Stage | emitted `unique_count_if` (measured) | Power BI `CALCULATE` (inferred, not measured) |
 |---|--:|--:|
 | Early | 0 | 3812 |
 | On Time | 3812 | 3812 |
 | 1 week late | 0 | 3812 |
 | Less than 1 week late | 0 | 3812 |
 
-Row-local here, constant there. The two agree only while the board does not group by that
+Row-local here. The Power BI column is inferred from CALCULATE's documented filter
+replacement, not measured in Power BI. The two agree only while the board does not group by that
 column, so the label has to say Approximated. The same probe confirmed `unique_count_if`
 compiles and returns exactly what `unique count ( if … else null )` returns, which is why
 the shorter form is emitted.

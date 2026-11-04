@@ -364,12 +364,21 @@ def _expand_functions(expr):
     return expr
 
 
+# A DAX "double" string literal: no backslash escapes, "" is one embedded quote.
+DAX_STRING = re.compile(r'"((?:[^"]|"")*)"')
+
+
+def dax_string_value(m: re.Match) -> str:
+    """The text a ``DAX_STRING`` match denotes. The single DAX literal decoder, shared
+    with the gated-measure parser so neither invents its own escapes (BL-365)."""
+    return m.group(1).replace('""', '"')
+
+
 def _normalize_operators(expr):
     """DAX string literals + operators -> ThoughtSpot. Returns (expr, concat_note|None)."""
     # DAX "double" string literals ("" is an embedded quote) -> SQL-standard 'single',
     # printed in ThoughtSpot's exact form at the end by ts_finalize_formula (BL-365).
-    expr = re.sub(r'"((?:[^"]|"")*)"', lambda m: sql_std_literal(m.group(1).replace('""', '"')),
-                  expr)
+    expr = DAX_STRING.sub(lambda m: sql_std_literal(dax_string_value(m)), expr)
     expr = expr.replace("<>", "!=")
     expr = expr.replace("&&", " and ").replace("||", " or ")
     expr = re.sub(r"\bNOT\b", "not", expr)
