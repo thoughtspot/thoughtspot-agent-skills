@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-04
+- feat(audit): S14 and S15, LOW "review" RLS checks (ts-audit 3.17.0, BL-512)
+- chore: bump ts-cli to v0.203.0
 - feat(validate): the file-size gate covers the audit report's own JS parts, with a function-length ratchet (BL-503)
 - fix: audit reads formula references and join keys one way; aliased and escaped join keys typed (ts-audit 3.16.1, BL-504, BL-507)
 - chore: bump ts-cli to v0.202.0
