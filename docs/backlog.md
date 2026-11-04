@@ -330,6 +330,7 @@ are roughly ordered by value÷effort.
 | ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
+| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332, `buildScorecard` 302 lines), gate the embedded ERD `renderer.js` (1,338 lines, outside the scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
@@ -16157,7 +16158,7 @@ settle both with one probe.
 
 ## BL-503 — the audit report's JavaScript has no size or complexity gate — DONE `Tier 3`
 
-**Status:** DONE (2026-11-04, audit backlog PR 4). `check_file_size` scans the report's `.js` parts too (`SCANNED_SUFFIXES`), with the same warn 500 / fail 1000; `views/objectmap.js` is ratcheted at 756. And yes to a function-length check: JS has no complexity tool here, so `js_function_lengths` measures each top-level `function` to its column-0 `}` — warn above 150 lines, fail above 250 — with `buildCrossModel` (332) and `buildScorecard` (302) ratcheted in `JS_FUNCTION_RATCHET`. Split those three when next changed and lower the numbers. Tests: `tools/validate/tests/test_check_file_size.py`.
+**Status:** DONE (2026-11-04, audit backlog PR 4). `check_file_size` scans the report's `.js` parts too (`SCANNED_SUFFIXES`), with the same warn 500 / fail 1000; `views/objectmap.js` is ratcheted at 756. And yes to a function-length check: JS has no complexity tool here, so `js_function_lengths` measures each top-level `function` to its column-0 `}` — warn above 150 lines, fail above 250 — with `buildCrossModel` (332) and `buildScorecard` (302) ratcheted in `JS_FUNCTION_RATCHET`. The three splits, the length check's blind spots and the embedded ERD `renderer.js` are BL-520, which the ratchets cite. `--staged` now also checks a renamed file (`--diff-filter=ACMR`). Tests: `tools/validate/tests/test_check_file_size.py`.
 
 **Filed:** 2026-10-31. **Source:** the review of roadmap PR 3.1 (the report split into
 parts).
@@ -16349,6 +16350,29 @@ window whose arguments hold a quoted `)` is not read as bare.
 names no aggregation, keeping a source-declared one; probe the two questions on the SE demo
 cluster (an Answer over a bare window with and without a declared aggregation; one AgentQL
 query over an `*_in_period` measure); make `outermost_func` skip quoted text.
+
+**Target:** 2027-01-31.
+
+
+## BL-520 — the report's oversized JavaScript, and the JS the gate cannot see `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of BL-503 (audit backlog PR 4).
+
+**What.** BL-503 gated the report's own JS parts and ratcheted what was already over:
+`views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
+limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
+`views/scorecard.js`). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
+(1,338 lines; `audit/report.py` reads it into the page), which sits outside
+`check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
+measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
+function expression, an arrow, a `registerView({...})` method, an indented declaration or
+a column-0 `}` inside a template literal is not measured correctly. None of those is long
+in the report today (the review's Babel parse matched all 59 declarations).
+
+**Do.** Split `objectmap.js` per tab and the two builders into helpers, lowering the
+ratchets as they shrink; bring `renderer.js` under the gate (ratcheted, or split, with the
+ERD skill's own tests); and decide whether to measure function expressions too, or keep the
+report's declaration-only style as a convention the gate documents.
 
 **Target:** 2027-01-31.
 

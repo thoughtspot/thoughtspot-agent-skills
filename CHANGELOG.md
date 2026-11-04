@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-04
-- feat(validate): the file-size gate covers the audit report's JavaScript, with a function-length ratchet (BL-503)
+- feat(validate): the file-size gate covers the audit report's own JS parts, with a function-length ratchet (BL-503)
 - fix: audit reads formula references and join keys one way; aliased and escaped join keys typed (ts-audit 3.16.1, BL-504, BL-507)
 - chore: bump ts-cli to v0.202.0
 - fix: formula columns declare `aggregation:` under the 2026-11-02 ruling in the Power BI, Sisense and dbt converters, the aggregate generator and promote; Sisense calc formulas surfaced again; D13 reads every bare window (ts-audit 3.16.0, BL-509)

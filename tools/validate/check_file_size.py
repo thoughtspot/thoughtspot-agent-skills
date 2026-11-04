@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File-size gate for ts-cli modules (BL-070).
+"""File-size gate for ts-cli modules and the audit report's JS (BL-070, BL-503).
 
 Complements check_module_health.py: complexity and size are independent
 signals — a module can be long-but-simple or short-but-gnarly. This gate
@@ -13,7 +13,10 @@ since BL-503, the audit report's `.js` parts, which the report now grows by addi
 - a top-level JS `function` longer than JS_FUNCTION_FAIL lines -> FAIL, unless
   ratcheted in JS_FUNCTION_RATCHET; longer than JS_FUNCTION_WARN -> WARN. (The Python
   side's function-level gate is check_module_health's complexity ratchet; the report's
-  JS has no complexity tool here, so length stands in for it.)
+  JS has no complexity tool here, so length stands in for it. It sees only a
+  `function name(` declaration at column 0, closed by the next column-0 `}` — the
+  report's style; a function expression, an arrow, a method in `registerView({...})` or
+  an indented declaration is not measured, and a mis-indented `}` cuts one short.)
 
 --staged limits the scan to staged files (pre-commit); CI runs the full scan with no
 flag.
@@ -57,17 +60,17 @@ RATCHET: dict[str, tuple[int, str]] = {
     "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
     # The report's largest view: past SOFT_WARN when the gate reached JS (BL-503).
     # Split it into per-tab files when it is next changed; lower this as it shrinks.
-    "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-503"),
+    "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-520"),
 }
 
 # The same ratchet for top-level JS functions: (path, function name) -> (recorded
 # length in lines, backlog reference). Both were past JS_FUNCTION_FAIL when the gate
-# arrived (BL-503); split them when next changed and lower these as they shrink.
+# arrived (BL-503); BL-520 splits them. Lower these as they shrink.
 JS_FUNCTION_RATCHET: dict[tuple[str, str], tuple[int, str]] = {
     ("tools/ts-cli/ts_cli/audit/report/views/crossmodel.js", "buildCrossModel"):
-        (332, "BL-503"),
+        (332, "BL-520"),
     ("tools/ts-cli/ts_cli/audit/report/views/scorecard.js", "buildScorecard"):
-        (302, "BL-503"),
+        (302, "BL-520"),
 }
 
 _JS_FUNCTION = re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(")
@@ -77,8 +80,9 @@ def js_function_lengths(text: str) -> list[tuple[str, int, int]]:
     """`(name, first line, length in lines)` for each top-level `function` declaration
     (one starting at column 0), in order. It ends at the first later line that starts
     with `}` at column 0 — the report's style — or on its own line when that line closes
-    every brace it opens; one never closed runs to the end of the file. Braces inside
-    strings are not counted: only column-0 `}` lines end a function."""
+    every brace it opens (braces in strings included, so `"}"` on that line can end it
+    early); one never closed runs to the end of the file. Inside a function only a
+    column-0 `}` line ends it, so a brace in a string there is never mistaken for it."""
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -142,7 +146,7 @@ def main(argv=None) -> int:
         # empty list, which this gate would have read as "nothing staged" and
         # reported PASS (audit 4.1).
         staged = set(git_paths(
-            ["-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
             _P(root)))
         files = [f for f in files if f in staged]
         if not files:

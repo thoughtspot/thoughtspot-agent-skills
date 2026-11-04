@@ -9,6 +9,8 @@ These pin the ratchet semantics: growth past the recorded size fails, at-or-belo
 passes, and a non-ratcheted file still hits the plain hard fail.
 """
 import sys
+
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -155,3 +157,47 @@ def test_the_real_js_function_ratchet_matches_the_real_files():
         lengths = dict((n, ln) for n, _s, ln in
                        fs.js_function_lengths((repo_root / rel).read_text(encoding="utf-8")))
         assert name in lengths and lengths[name] <= recorded, (rel, name, lengths.get(name))
+
+
+@pytest.mark.parametrize("length,code,word", [
+    (250, 0, "WARN"), (251, 1, "FAIL"), (150, 0, None), (151, 0, "WARN")])
+def test_the_js_function_boundaries(tmp_path, capsys, monkeypatch, length, code, word):
+    _js(tmp_path, f"{REPORT}/views/v.js", 0, functions=[("f", length)])
+    assert _run(tmp_path, monkeypatch) == code
+    out = capsys.readouterr().out
+    assert (word in out) if word else ("function f" not in out)
+
+
+def test_a_function_ratchet_is_keyed_by_path_too(tmp_path, monkeypatch):
+    rel = _js(tmp_path, f"{REPORT}/views/v.js", 0, functions=[("buildBig", 300)])
+    other = f"{REPORT}/views/other.js"
+    assert rel != other
+    assert _run(tmp_path, monkeypatch, func_ratchet={(other, "buildBig"): (300, "BL-520")}) == 1
+
+
+def test_a_renamed_and_grown_file_is_still_checked_when_staged(tmp_path, capsys, monkeypatch):
+    """`--staged` used --diff-filter=ACM, so a rename (R) was not checked at all."""
+    import subprocess
+    def git(*a):
+        subprocess.run(["git", "-C", str(tmp_path), *a], check=True, capture_output=True)
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    _js(tmp_path, f"{REPORT}/views/a.js", fs.HARD_FAIL - 10)   # similar enough to be a rename
+    git("add", "-A")
+    git("commit", "-q", "-m", "x")
+    git("mv", f"{REPORT}/views/a.js", f"{REPORT}/views/b.js")
+    _js(tmp_path, f"{REPORT}/views/b.js", fs.HARD_FAIL + 5)
+    git("add", "-A")
+    monkeypatch.setattr(fs, "RATCHET", {})
+    monkeypatch.setattr(sys, "argv", ["check_file_size.py", "--root", str(tmp_path), "--staged"])
+    assert fs.main() == 1
+    assert "b.js" in capsys.readouterr().out
+
+
+def test_pre_commit_runs_the_gate_on_staged_report_js():
+    """The trigger is the only thing that runs the gate locally on a .js change."""
+    repo_root = Path(__file__).resolve().parents[3]
+    text = (repo_root / "scripts" / "pre-commit.sh").read_text(encoding="utf-8")
+    block = text[:text.index('run_check "file size"')].rsplit("\nif ", 1)[1]
+    assert r"\.(py|js)$" in block and "grep -qE" in block
