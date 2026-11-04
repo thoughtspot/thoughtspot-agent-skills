@@ -6,7 +6,9 @@ from typing import Any, Iterable, NoReturn, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.tml import BRACKET_REF
+from ts_cli.audit.engine.tml import expr_refs
+from ts_cli.formula_translate.refs import split_literals
+from ts_cli.tml_join_graph import on_clause_refs
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -93,9 +95,15 @@ def join_key_ids(on_str: str) -> list:
     An unbracketed clause is tolerated so a hand-built fixture still parses.
     """
     text = on_str or ""
-    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: engine/tml.py's
-    # BRACKET_REF, the one declaration of that pattern (BL-304).
-    bracketed = [m.strip() for m in BRACKET_REF.findall(text) if m.strip()]
+    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: read outside
+    # quoted literals (BL-504) by the join graph's own reader, which undoes a server
+    # escape (`[dim\.csv::k]` -> `dim.csv::k`) as D16 and H3 read it; a bracketed operand
+    # that is not `TABLE::COL` falls back to engine/tml.py's expr_refs.
+    code = " ".join(seg for lit, seg in split_literals(text) if not lit)
+    pairs = on_clause_refs(code)
+    if pairs:
+        return [f"{t}::{c}" for t, c in pairs]
+    bracketed = expr_refs(text)
     if bracketed:
         return bracketed
     parts = text.replace("=", ",").replace(" and ", ",").split(",")

@@ -5,8 +5,8 @@ Each formula is a node: its MEASURE / ATTRIBUTE kind, whether it is hidden, and 
 name people search it by, all read from the `columns[]` entry that surfaces it (by
 `formula_id`); what it uses; and how many formulas use it. A bracket reference outside
 a quoted literal resolves, in order, to a formula (by id or `formulas[].name`, through
-`tml.formula_ref_index`, the index P17's reference graph also uses, or by the display
-name of the column that surfaces it), a parameter (`parameters[].name`), else a column
+`tml.formula_reference_index`, which also resolves the display name of the column that
+surfaces it — the index P17 and P2 share, BL-504), a parameter (`parameters[].name`), else a column
 (`TABLE::COL`, or a bare Model column name). Literals are split off with
 `formula_translate.refs.split_literals`, which keeps a `[...]` reference whole even when
 the name inside it holds a quote (BL-369). The roots are the formulas nothing uses,
@@ -20,7 +20,6 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ts_cli.audit.engine import tml
-from ts_cli.formula_translate.refs import split_literals
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
@@ -48,10 +47,9 @@ def _resolve(ref: str, by_ref: Dict[Any, Any], params: set) -> dict:
 
 def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict]:
     """What one expression refers to, in order, each once (see the module docstring)."""
-    code = " ".join(seg for lit, seg in split_literals(str(expr or "")) if not lit)
     seen, out = set(), []
-    for ref in tml.BRACKET_REF.findall(code):
-        item = _resolve(ref.strip(), by_ref, params)
+    for ref in tml.expr_refs(str(expr or "")):
+        item = _resolve(ref, by_ref, params)
         key = tuple(item.items())
         if item.get("formula") == own or key in seen:
             continue
@@ -111,18 +109,6 @@ def _cycle_roots(nodes: Dict[str, dict], reached: set) -> List[str]:
     return roots
 
 
-def _by_ref(formulas: List[dict], columns: Dict[Any, dict]) -> Dict[Any, Any]:
-    """`tml.formula_ref_index`, plus each surfacing column's display name where it names
-    no formula of its own (a hand-built Model may refer to a formula that way)."""
-    by_ref = tml.formula_ref_index(formulas)
-    for f in formulas:
-        col = columns.get(f.get("id"))
-        cname = col.get("name") if col else None
-        if isinstance(cname, str) and cname and cname not in by_ref:
-            by_ref[cname] = f["name"]
-    return by_ref
-
-
 def formula_tree(model: dict) -> dict:
     """`{"nodes": [...], "roots": [names]}` for a Model TML body; nodes in formula order.
     A node: `name` (its `formulas[].name`, the key), `label` (the surfacing column's name,
@@ -135,7 +121,7 @@ def formula_tree(model: dict) -> dict:
                 for f in (model.get("formulas") or [])
                 if isinstance(f, dict) and isinstance(f.get("name"), str) and f["name"]]
     columns = _surfacing_columns(model)
-    by_ref = _by_ref(formulas, columns)
+    by_ref = tml.formula_reference_index(formulas, model.get("columns") or [])
     params = _parameter_names(model)
     nodes: Dict[str, dict] = {}
     for f in formulas:

@@ -346,9 +346,12 @@ def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
 def _join_key_type_mismatches(item: dict, ctx: Any) -> list:
     """Join: each pair of keys in its `on` whose warehouse types, read off the Table TMLs
     (AuditContext.column_types, as @varchar_join_keys reads them), are of different
-    families; a name list in messages. A key of a table with no Table TML in scope — or,
-    through that lookup, of an aliased table — has no type and is not compared."""
+    families; a name list in messages. A key of a table with no Table TML in scope has
+    no type and is not compared; one of an aliased table is read under the alias
+    (tml.join_column_types, BL-507)."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
-    return NameList(key_type_mismatches((item.get("obj") or {}).get("on"), col_types))
+    join = item.get("obj") or {}
+    col_types = tml.join_column_types(join, _model_of(item), cached(
+        "column_types", item["doc"], ctx.column_types, item["doc"]))
+    return NameList(key_type_mismatches(join.get("on"), col_types))
 

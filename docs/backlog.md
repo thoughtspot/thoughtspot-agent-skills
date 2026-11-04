@@ -331,10 +331,10 @@ are roughly ordered by value÷effort.
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
-| BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
+| ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
-| BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
-| BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
+| BL-505 | Converters' fact detection does not use the shared table-role classifier; a direction-only fix to `mv_emit` broke the emitted Metric Views and was reverted (PR 3) — the join walk must change with it | 2027-01-31 |
+| ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
 | BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
@@ -16174,7 +16174,9 @@ when they are next changed.
 
 **Target:** 2026-12-31.
 
-## BL-504 — audit rules read formula references without skipping string literals `Tier 3`
+## BL-504 — audit rules read formula references without skipping string literals — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): one reader, `engine/tml.expr_refs` (outside quoted literals, stripped, a quoted name kept whole), and one index, `engine/tml.formula_reference_index` (id, name, surfacing column's display name, moved from the formula tree). The tree, P17 and P2's reference graph, H3 (which also no longer counts a formula's reference to itself) and the RLS column reads use them; `context.join_key_ids` (P6) now reads `on` clauses through `tml_join_graph.on_clause_refs`, outside literals, as D16 and H3 already did, so a server-escaped key (`dim\.csv`) is typed. Tests: `tests/test_audit_reference_reading.py`. No pinned finding moved. The sample has no reference inside a literal, padded, self-referencing or by display name, so it cannot show the formula half; the escaped-key half adds P6 findings there (see the PR).
 
 **Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
 
@@ -16199,6 +16201,8 @@ changes no finding.
 **Target:** 2026-12-31.
 
 ## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
+
+**Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: `agents/databricks/build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
 
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.
@@ -16448,7 +16452,9 @@ for each shape and a sample re-measure.
 
 **Target:** 2026-12-31.
 
-## BL-507 — the join-key type lookup misses aliased tables `Tier 3`
+## BL-507 — the join-key type lookup misses aliased tables — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): `engine/tml.join_column_types` gives each join a type view in which its two ends' columns also answer under their physical Table name, which is what a join's `on` writes, inline or referencing (an alias in `on` is rejected). P6 and D16 read through it; only the join's own ends are added, so one alias of a role-playing Table never lends its types to another's join. The P6 pins did not move (no pinned input has an aliased join). With P6 also reading escaped keys (BL-504), the SE demo sample gains 10 P6 LOW findings and 7 others name more keys; D16 is unchanged.
 
 **Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
 

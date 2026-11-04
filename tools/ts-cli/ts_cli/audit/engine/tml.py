@@ -27,6 +27,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional, Tuple
 
+from ts_cli.formula_translate.refs import split_literals
 from ts_cli.tml_join_graph import node_id
 
 #: Warehouse types ThoughtSpot treats as strings. A string join or RLS key is
@@ -63,11 +64,45 @@ SHAPES = {
 }
 
 
+def expr_refs(expr: Any) -> list:
+    """The `[...]` references of a formula, RLS rule or join `on`, in order: outside
+    quoted literals (`split_literals` keeps a bracketed reference whole even when its name
+    holds a quote, BL-369), stripped, empty ones dropped. The one reading every audit
+    reader shares — the formula tree, P17 and P2's reference graph, H3 and the RLS column
+    reads (BL-504); join `on` clauses go through tml_join_graph.on_clause_refs, which
+    also undoes a server escape (`dim\\.csv`). [] for a non-string."""
+    if not isinstance(expr, str):
+        return []
+    code = " ".join(seg for lit, seg in split_literals(expr) if not lit)
+    return [r.strip() for r in BRACKET_REF.findall(code) if r.strip()]
+
+
+def formula_reference_index(formulas: list, columns: Any = ()) -> Dict[Any, Any]:
+    """How a formula is referred to -> its NAME: `formula_ref_index` (its id, or its
+    name), plus the display name of the column that surfaces it where that names no
+    formula of its own (a hand-built Model may refer to a formula that way). Shared by
+    the report's formula tree and P17 / P2's reference graph (BL-504)."""
+    by_ref = formula_ref_index(formulas)
+    surfacing: Dict[Any, Any] = {}
+    for c in columns or []:
+        fid = c.get("formula_id") if isinstance(c, dict) else None
+        if isinstance(fid, str) and fid and fid not in surfacing:
+            surfacing[fid] = c.get("name")
+    for f in formulas:
+        if not isinstance(f, dict) or not isinstance(f.get("name"), str) or not f["name"]:
+            continue
+        cname = surfacing.get(f.get("id")) if isinstance(f.get("id"), str) else None
+        if isinstance(cname, str) and cname and cname not in by_ref:
+            by_ref[cname] = f["name"]
+    return by_ref
+
+
 def formula_ref_index(formulas: list) -> Dict[Any, Any]:
     """How a formula is referred to in an expression -> its NAME. A cross-reference is
     written as the formula's id (`[formula_<name>]`), or, in a hand-built model, its
-    display name; both resolve to the name (BL-300). The one reading shared by P17's
-    reference graph and the report's formula tree. A non-string name or id is skipped,
+    display name; both resolve to the name (BL-300). The base of
+    `formula_reference_index`, which the formula tree, P17 and P2 read. A non-string
+    name or id is skipped,
     not a TypeError that ends the run (BL-501's class)."""
     by_ref: Dict[Any, Any] = {}
     for f in formulas:
@@ -331,6 +366,29 @@ def join_target_key(model_tables: list, ref: Any) -> Any:
     return table_key(target) if target is not None else ref
 
 
+def join_column_types(join: dict, model: dict, col_types: dict) -> dict:
+    """`col_types` (`AuditContext.column_types`: `KEY::COL` -> warehouse type, keyed by
+    each model table's alias, else name) as this join reads it: its two ends' columns
+    also answer under their physical Table `name`. A join's `on`, inline or in a Table's
+    `joins_with`, names Tables (`[DATE::KEY]`; an alias there is rejected), so an aliased
+    end read as unknown and P6 and D16 never saw it (BL-507). Only this join's own ends are added, so one alias of
+    a role-playing Table never lends its types to another's join."""
+    ends = [join.get("model_table"),
+            join_target(model.get("model_tables") or [], join.get("with"))]
+    out = dict(col_types)
+    for mt in ends:
+        if not isinstance(mt, dict):
+            continue
+        key, phys = table_key(mt), mt.get("name")
+        if not key or not isinstance(phys, str) or not phys or phys == key:
+            continue
+        prefix = f"{key}::"
+        for k, v in col_types.items():
+            if k.startswith(prefix):
+                out[f"{phys}::{k[len(prefix):]}"] = v
+    return out
+
+
 def model_joins(model: dict, tables: dict):
     """Yield every join of a model, inline or referencing, in one shape.
 
@@ -433,7 +491,7 @@ def rls_column_refs(table: dict):
             mapping(c, "properties").get("value_casing", ""),
         )
     for rule in ((t.get("rls_rules") or {}).get("rules") or []):
-        for ref in BRACKET_REF.findall(rule.get("expr", "")):
+        for ref in expr_refs(rule.get("expr", "")):
             col = ref.split("::")[-1] if "::" in ref else ref
             dt, vc = props.get(col, ("", ""))
             yield rule, col, dt, vc
