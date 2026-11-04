@@ -359,6 +359,24 @@ def _unreadable(ctx: AuditContext) -> list:
     return messages
 
 
+def _not_exported(ctx: AuditContext) -> list:
+    """One entry per requested Model (`ctx.model_guids`) with no exported TML in
+    `ctx.models` (BL-516): the run's own warning when one names it — a Model refused on
+    its own — else a line naming it, since a skipped batch's warning counts its Models
+    without naming them. Derived, not recorded, so an older snapshot replays alike."""
+    exported = {m.get("guid") for m in ctx.models if isinstance(m, dict)}
+    out = []
+    for guid in dict.fromkeys(g for g in ctx.model_guids if isinstance(g, str)):
+        if guid in exported:
+            continue
+        named = [w for w in ctx.warnings
+                 if isinstance(w, str) and w.startswith(f"Model {guid} ")]
+        out.append(named[0] if named else
+                   f"Model {guid}: not exported, so not checked "
+                   "(the run's warnings give the reason)")
+    return out
+
+
 def run_audit(
     client,
     model_guids: list,
@@ -398,6 +416,7 @@ def run_audit(
                                   else ctx.assessment)
     ctx.assessment = profile
     unreadable = _unreadable(ctx)
+    not_exported = _not_exported(ctx)
     from ts_cli.audit.engine.run import readable
     ctx = readable(ctx)  # what no rule judges is left out of the findings and corpus
     known = [a for a in angles if a in catalog.categories]
@@ -415,6 +434,8 @@ def run_audit(
     corpus["assessment"] = catalog.profiles[profile].label
     if unreadable:
         corpus["unreadable"] = unreadable
+    if not_exported:
+        corpus["not_exported"] = not_exported
     if fetched_needs is not None:
         corpus["fetched_needs"] = sorted(fetched_needs)
 
