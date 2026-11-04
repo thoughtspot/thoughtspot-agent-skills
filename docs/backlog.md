@@ -325,6 +325,7 @@ are roughly ordered by value÷effort.
 | BL-511 | Probe live whether RLS on the optional side of an outer join drops the unmatched rows (and whether `isnull` keeps them) before raising S12 from LOW to MEDIUM | 2026-12-31 |
 | BL-512 | G5e / G5f: an RLS tenant compared through different keys or variables across one Model's Tables, and `isnull` on the secured table's own key (shows ownerless rows to everyone) — judgement checks deferred from roadmap PR 4.4 | 2027-01-31 |
 | BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
+| BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
 | BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
@@ -16234,6 +16235,36 @@ joins but which also shows ownerless rows to every user. Both need judgement: re
 don't grade, or settle the shape first.
 
 **Target:** 2027-01-31.
+
+## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5
+(`docs/superpowers/specs/2026-10-23-audit-v2-roadmap.md`), parked as a backlog item by
+the product owner once wave 4 (PRs 4.1–4.4) merged.
+
+**What.** A new skill that turns what the audit finds into a proposed fix. From a Model's
+TML, its Tables' TML and the shared table-role classifier (`agents/shared/erd/roles.py`,
+PR 4.1) it produces:
+
+1. a remodel plan: what to change, and why, rule by rule;
+2. lint-clean proposed Model TML (`ts tml lint`);
+3. current and proposed ERDs side by side, through `ts-object-model-erd`.
+
+**First target:** the RLS repair shape. Each table carries the tenant rule on its own
+key, and group scope moves onto an RLS-only lookup table.
+
+**Decisions to settle in its design first:**
+- the fan-trap rule (G6), parked 2026-11-02;
+- the optional `direction_assumed` flag (joins relying on the default direction);
+- BL-509, whether an aggregate formula column with no `aggregation:` is invalid TML,
+  since the skill will write formula columns;
+- BL-511, whether RLS on an outer-joined table drops rows, which the RLS repair depends
+  on.
+
+**Do.** Brainstorm a design (`docs/superpowers/specs/`), then a plan. The skill name
+fits the `ts-object-*` family (`.claude/rules/skill-naming.md`).
+
+**Target:** 2027-03-31.
 
 ## BL-514 — H15, slot-named columns, needs the column aliases `Tier 3`
 
