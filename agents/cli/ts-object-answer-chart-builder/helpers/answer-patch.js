@@ -19,13 +19,12 @@ const P = __PAYLOAD__;
 const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
 const unb64 = (s) => decodeURIComponent(escape(atob(s)));
 const sha256 = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-// The answer's content fingerprint, the same as helpers/backup-check.mjs computes from the backup file: name,
-// search, chart type and decoded chart code. A backup of another answer, or of this one in an older state, differs.
-const fpOf = async (a) => {
-  let c = null;
-  try { const k = JSON.parse(JSON.parse(a.chart.custom_visual_props).clientState).playground.code; c = [unb64(k.jsCodeBase64 || ''), unb64(k.cssCodeBase64 || ''), unb64(k.htmlCodeBase64 || '')]; } catch (e) { c = null; }
-  return (await sha256(JSON.stringify([a.name || '', a.search_query || '', (a.chart && a.chart.type) || '', c, null]))).slice(0, 16);
-};
+// The answer's fingerprint, the same as helpers/backup-check.mjs computes from the backup file: the whole answer,
+// keys sorted, without any `fqn` (this block exports with export_fqn, `ts tml export` does not by default). A backup
+// of another answer, or of this one in any older state, differs.
+const noFqn = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'fqn' ? undefined : v)));
+const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
+const fpOf = async (a) => (await sha256(stable(noFqn({ answer: a })))).slice(0, 16);
 
 // 1. checksums
 const badSha = [];
@@ -133,11 +132,10 @@ if (!v.r || !v.r.status || v.r.status.status_code !== 'OK') { summary.raw = JSON
 if (MODE !== 'commit') return summary;
 if (P.guid && !P.backup) { summary.refused = 'NOT COMMITTED - updating an answer needs a backup of it first: export its TML and build the block with --backup <file>'; return summary; }
 // The backup must be of the answer as it is now, by content.
-if (P.guid && !(P.backup.viz || []).includes(await fpOf(old))) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this answer as it is now (its name, search or chart differs); export it again'; return summary; }
+if (P.guid && !(P.backup.viz || []).includes(await fpOf(old))) { summary.refused = 'NOT COMMITTED - the backup ' + P.backup.file + ' is not of this answer as it is now (something in it differs); export it again'; return summary; }
 // An edit made in ThoughtSpot since the first export would be overwritten: export once more and compare, the raw
 // text first, then the whole answer with keys sorted. Any difference refuses the commit.
 if (P.guid) {
-  const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
   const ex1 = await exportAnswer(P.guid);
   const edoc1 = ex1 && ex1.status === 200 && ex1.body && ex1.body[0] && ex1.body[0].edoc;
   let same = edoc1 === edoc0;

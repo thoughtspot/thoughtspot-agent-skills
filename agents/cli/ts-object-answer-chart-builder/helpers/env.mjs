@@ -115,6 +115,7 @@ export function resolveEnv({ slug } = {}) {
   let home = process.env.TS_CHART_HOME;
   if (!home) {
     if (platform === "claude-app") {
+      // /home/claude is the claude.ai code sandbox's home directory, not a person's path.
       home = fs.existsSync("/home/claude") ? "/home/claude/.ts-chart" : path.join(os.homedir(), ".ts-chart");
     } else {
       // Outside the working tree: runs hold live search rows and screenshots of real Liveboards, and must

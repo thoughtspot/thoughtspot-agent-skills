@@ -112,7 +112,18 @@ await scenario("an update with a backup of an older state, or another answer, is
   const older = { ...clone(OLD), chart: { ...clone(OLD.chart), type: "COLUMN" } };
   const r = await run(pack(["--answer", ANSWER, "--backup", backup(older, "older.json"), "--commit"]).block, st);
   ok(r.refused && /not of this answer/.test(r.refused) && !st.commits, JSON.stringify(r).slice(0, 400));
+  // an older state that differs only in its description
+  const olderDesc = { ...clone(OLD), description: "before the edit" };
+  const r2 = await run(pack(["--answer", ANSWER, "--backup", backup(olderDesc, "older-desc.json"), "--commit"]).block, st);
+  ok(r2.refused && /not of this answer/.test(r2.refused) && !st.commits, JSON.stringify(r2).slice(0, 400));
   ok(pack(["--answer", ANSWER, "--commit"]).code === 2, "an update without --backup was packed");
+});
+
+await scenario("a backup exported without fqn (ts tml export's default) is current", async () => {
+  const st = { answers: { [ANSWER]: clone(OLD) } };
+  const plain = clone(OLD); plain.tables = plain.tables.map(({ fqn, ...t }) => t);
+  const r = await run(pack(["--answer", ANSWER, "--backup", backup(plain, "plain.json"), "--commit"]).block, st);
+  ok(!r.refused && st.commits, JSON.stringify(r).slice(0, 400));
 });
 
 // The read-only intake blocks (helpers/mcp/*.js), printed by mcp-block.mjs.

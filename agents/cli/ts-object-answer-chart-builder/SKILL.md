@@ -504,4 +504,4 @@ than an honest question.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.0.0 | 2026-10-26 | Initial release. Builds a custom chart (BYOC) tile as paste-ready chart.html / chart.css / chart.js, iterated in a local browser against a faithful `viz` stub with a vision critique of every attempt; MayaCharts by default, every CDN script pinned to an exact version with sha384 integrity; can save the tile as an answer (model by guid) and screenshot it in ThoughtSpot; ships a library of 58 live-data charts. |
+| 1.0.0 | 2026-11-05 | Initial release. Builds a custom chart (BYOC) tile as paste-ready chart.html / chart.css / chart.js, iterated in a local browser against a faithful `viz` stub with a vision critique of every attempt; MayaCharts by default, every CDN script pinned to an exact version with sha384 integrity; can save the tile as an answer (model by guid) and screenshot it in ThoughtSpot; ships a library of 58 live-data charts. |

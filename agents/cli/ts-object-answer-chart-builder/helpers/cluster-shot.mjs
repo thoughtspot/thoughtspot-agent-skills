@@ -125,6 +125,20 @@ try {
   }
 
 
+  // What a frame holds, shadow roots included: a MayaCharts tile draws inside <maya-chart>'s shadow root, which
+  // body.querySelectorAll and body.innerText do not see (found on ps-internal 26.11: every lean tile read as blank).
+  const frameContent = () => {
+    const b = document.body;
+    if (!b) return { text: "", marks: 0, nodes: 0, w: 0, h: 0 };
+    const roots = [b], els = [];
+    for (let i = 0; i < roots.length; i++) for (const e of roots[i].querySelectorAll("*")) { els.push(e); if (e.shadowRoot) roots.push(e.shadowRoot); }
+    const big = (e) => { const q = e.getBoundingClientRect(); return q.width > 4 && q.height > 4; };
+    const marks = els.filter((e) => /^(svg|canvas|table|img)$/i.test(e.tagName) && big(e)).length;
+    const nodes = els.filter((e) => /^(svg|canvas|img|table|div|span)$/i.test(e.tagName)).length;
+    const text = [b.innerText, ...roots.slice(1).map((r) => r.textContent)].join(" ").replace(/\s+/g, " ").trim();
+    return { text, marks, nodes, w: innerWidth, h: innerHeight };
+  };
+
   // Every frame on the page with what it holds. Chart tiles render into frames of their own; ThoughtSpot also adds
   // helper frames, so a frame counts as a rendered chart only when it holds marks (svg, canvas, table, img) or text.
   async function survey() {
@@ -133,12 +147,7 @@ try {
       if (f === page.mainFrame()) continue;
       let r = null;
       try {
-        r = await f.evaluate(() => {
-          const b = document.body;
-          if (!b) return { text: "", marks: 0, w: 0, h: 0 };
-          const marks = [...b.querySelectorAll("svg,canvas,table,img")].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 4 && q.height > 4; }).length;
-          return { text: b.innerText.trim(), marks, w: innerWidth, h: innerHeight };
-        });
+        r = await f.evaluate(frameContent);
       } catch { r = null; }
       rows.push({ f, url: f.url(), ...(r || { text: "", marks: 0, w: 0, h: 0, dead: true }) });
     }
@@ -176,7 +185,7 @@ try {
     if (!frames.length) findings.push({ frame: "page", hit: "no chart frame", text: "the page has no chart frames: still loading (raise --wait), or the tab is empty" });
     for (const f of frames) {
       let t = "", nodes = 0;
-      try { [t, nodes] = await f.evaluate(() => [document.body ? document.body.innerText : "", document.body ? document.body.querySelectorAll("svg,canvas,img,table,div,span").length : 0]); } catch { continue; }
+      try { ({ text: t, nodes } = await f.evaluate(frameContent)); } catch { continue; }
       t = t.trim();
       if (t || nodes) withContent++;
       if (!t) continue;
