@@ -74,21 +74,30 @@ Verified tile-for-tile on a live cluster (open-item #6).
 
 | Sisense construct | Status | ThoughtSpot target |
 |---|---|---|
-| `[Table.column]` on a role-playing copy | Mapped | the Model instance named like the table, else the one joined on the FK column the Sisense relation uses; ambiguous → NEEDS REVIEW |
+| `[Table.column]` on a role-playing copy | Mapped | the Model instance named like the table, else the one joined on the FK column the Sisense relation uses; ambiguous, unreachable from the widget's facts, or a name match the relation's join key disagrees with → NEEDS REVIEW |
+| `[Table.column]` where the Table renamed the warehouse column | Mapped | through the Table TML's `db_column_name` when the export carries the Tables (`ts tml export --associated`), else a unique case/underscore-insensitive match; none → NEEDS REVIEW |
 | `count` on a key the Model hides | Mapped | the Model formula `unique count ( [inst::col] )`; none → NEEDS REVIEW naming the measure to add |
 | `count` / `countduplicates` / `sum` / `avg` / `min` / `max` on a column | Mapped | `unique count` / `count` / `sum` / `average` / `min` / `max` keyword with ThoughtSpot's output name |
 | Sisense calculated column | Mapped | the Model formula of the same (normalised) name, when unique and on the same table |
-| Widget-level member / exclude / range filter | Mapped | `[X] = 'a' [X] = 'b'` (OR) / `[X] != 'a'` (AND) / `>= > <= <` in the search |
+| Widget-level member / exclude / range filter | Mapped | `[X] = 'a' [X] = 'b'` (OR) / `[X] != 'a'` (AND) / `>= > <= <` in the search; `'` escaped as `\'` (verified live with a member containing an apostrophe) |
+| Widget filter or chip at a coarser date level than days (`level: years`, …) | Flagged | NEEDS REVIEW: its members are period starts, which a comparison on the date reads as single days |
+| Relative-date or unrecognised widget filter | Flagged | NEEDS REVIEW (no deterministic search form) |
 | Filter on a key the Model hides, table the Model lacks | Flagged | NEEDS REVIEW → `filter_map` / `field_map` in overrides.json |
-| `WidgetsTabber` (time-grain tabs) | Mapped | the active tab's widget only; others `Merged` (grain is the chart's date-bucket control) |
+| `field_map` / `filter_map` naming a column the Model lacks | Flagged | NEEDS REVIEW (not an import failure) |
+| Two aggregations, or two date levels, of one column in one widget | Flagged | NEEDS REVIEW: one answer carries one use per column, so the second is reported, not dropped |
+| `WidgetsTabber` (time-grain tabs) | Mapped | the active tab's widget only; a hidden tab plotting the same fields at another date level is `Merged` (grain is the chart's date-bucket control) |
+| `WidgetsTabber` whose tabs are different charts | Mapped | every tab is a tile of its own, noted in the report |
 | Value / axis title | Mapped | `custom_name` |
 | `richtexteditor`, tab-set title | Mapped | section-header note tile |
 | Columnar layout | Mapped | tile grid, rows filling 12 columns |
-| Jump-to-dashboard drill | Approximated | details table from the drill dashboard (`--drill`) with the source widgets' shared filters; narrowed by right-click → Filter, not a pop-up |
+| Jump-to-dashboard drill | Approximated | details table from the drill dashboard's first widget with fields (`--drill`), keeping that widget's own filters plus the source widgets' shared filters; narrowed by right-click → Filter, not a pop-up. Further widgets, or none with fields → NEEDS REVIEW |
 | Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip (ThoughtSpot replaces, Sisense ANDs) |
 | Dashboard filter on a dimension with several role copies | Mapped | copy reaching the most tiles, then the shortest join path; still tied → flagged |
+| Chip whose copy differs from a tile's own Sisense path to the table | Flagged | NEEDS REVIEW naming each tile and the copy it reaches (Sisense resolves per widget, a chip binds one copy for the board) |
 | Chip that cannot reach a tile's facts | Flagged | NEEDS REVIEW naming the tiles |
-| Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns keep the default. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
+| Dashboard range filter | Mapped | chip `generic_filter` (same operators as the default path) |
+| Dashboard relative-date or unrecognised filter | Flagged | NEEDS REVIEW: the chip is emitted without a condition, so it is unfiltered until set by hand |
+| Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns and Model columns with their own `format_pattern` / `currency_type` keep theirs. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)
 

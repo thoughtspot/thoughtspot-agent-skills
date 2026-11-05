@@ -222,8 +222,12 @@ def _classify_filter(jaql: dict) -> dict | None:
     for classify in _FILTER_CLASSIFIERS:
         hit = classify(f, dim)
         if hit is not None:
-            return hit
-    return {"kind": "unknown", "dim": dim, "operator": ",".join(f.keys()), "values": [], "raw": f}
+            break
+    else:
+        hit = {"kind": "unknown", "dim": dim, "operator": ",".join(f.keys()), "values": [], "raw": f}
+    if jaql.get("level"):   # a date filter's grain: members are period starts, not days
+        hit["level"] = jaql["level"]
+    return hit
 
 
 def parse_widget(widget: dict, warnings: list) -> dict:

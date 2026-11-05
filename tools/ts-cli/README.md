@@ -2953,10 +2953,12 @@ exported TML — fields resolve by table instance + column (role copies by name 
 relation's foreign-key column), Sisense `count` becomes `unique count`, widget filters become
 search filters, tab sets keep their active tab, titles become `custom_name`, rich text and
 tab-set titles become note tiles, the layout becomes the tile grid, `--drill` dashboards become
-details tables, and dashboard filters become chips with `excluded_visualizations`.
+details tables, and dashboard filters become chips with `excluded_visualizations`. Exported with
+`--associated`, the Tables map warehouse column names onto renamed Table columns. What it cannot
+carry faithfully is NEEDS REVIEW in `migration-report.json`, never emitted as a silently wrong tile.
 
 ```bash
-ts tml export <model-guid> --include-obj-id --profile myprofile > target-model.json
+ts tml export <model-guid> --include-obj-id --associated --profile myprofile > target-model.json
 ts sisense build-liveboard --input bundle.json --target-model target-model.json --out out/ \
   --drill _drill_case_list.dash --overrides overrides.json
 ```

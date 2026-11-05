@@ -211,25 +211,32 @@ def build_liveboard_cmd(
         "liveboard": bool(lb_tml)}))
 
 
-def _load_tml(path: str) -> dict:
-    """--target-model file -> Model TML dict. Accepts a raw TML file (YAML or JSON) or the
-    JSON array `ts tml export` prints (edoc string, or parsed dict with --parse)."""
+def _edocs(doc, parse_edoc) -> list:
+    """A loaded TML file or `ts tml export` array -> its TML documents, each parsed."""
+    items = doc if isinstance(doc, list) else [doc]
+    items = [(d.get("edoc", d) if isinstance(d, dict) else d) for d in items]
+    return [parse_edoc(d) if isinstance(d, str) else d for d in items]
+
+
+def _load_tml(path: str) -> tuple:
+    """--target-model file -> (Model TML dict, Table TML dicts). Accepts a raw TML file (YAML
+    or JSON) or the JSON array `ts tml export` prints (edoc string, or parsed dict with
+    --parse); with `--associated` that array also carries the Tables, whose db_column_name
+    maps the warehouse columns a Sisense dim names onto the Table column names."""
     import yaml
     from ts_cli.commands.tml import parse_edoc
     try:
         text = Path(path).read_text(encoding="utf-8")
         doc = json.loads(text) if text.lstrip()[:1] in ("[", "{") else parse_edoc(text)
-        if isinstance(doc, list) and doc:
-            doc = doc[0].get("edoc", doc[0]) if isinstance(doc[0], dict) else doc[0]
-        if isinstance(doc, str):
-            doc = parse_edoc(doc)
+        docs = _edocs(doc, parse_edoc)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         typer.echo(f"Cannot read --target-model {path}: {exc}", err=True)
         raise SystemExit(1)
-    if not isinstance(doc, dict) or not (doc.get("model") or doc.get("worksheet")):
+    model = next((d for d in docs if isinstance(d, dict) and (d.get("model") or d.get("worksheet"))), None)
+    if model is None:
         typer.echo(f"--target-model {path} is not a Model TML", err=True)
         raise SystemExit(1)
-    return doc
+    return model, [d for d in docs if isinstance(d, dict) and d.get("table")]
 
 
 def _target_liveboard(inv, target_model, model_fqn, ov, drill_files, out) -> None:
@@ -243,7 +250,8 @@ def _target_liveboard(inv, target_model, model_fqn, ov, drill_files, out) -> Non
     for f in drill_files:
         doc = _load_bundle(f)          # a raw .dash export is the dashboard itself, not a bundle
         drills.append(parse_inventory(doc if "dashboard" in doc else {"dashboard": doc}))
-    result = build_target_liveboard(inv, _load_tml(target_model), model_fqn, ov, drills)
+    model_tml, table_tmls = _load_tml(target_model)
+    result = build_target_liveboard(inv, model_tml, model_fqn, ov, drills, tables=table_tmls)
     for w in inv.get("warnings", []):
         typer.echo(f"warning: {w}", err=True)
     out_dir = Path(out)

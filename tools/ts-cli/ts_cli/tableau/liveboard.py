@@ -124,7 +124,7 @@ _AGG_OUTPUT_PREFIX = (("unique count", "Unique Number of"), ("count", "Number of
                       ("average", "Average"), ("min", "Minimum"), ("max", "Maximum"))
 
 
-def _agg_label(token: Optional[str]) -> Optional[str]:
+def agg_label(token: Optional[str]) -> Optional[str]:
     """`unique count [X]` -> `Unique Number of`; None if the token carries no aggregation keyword."""
     t = (token or "").strip().lower()
     for kw, prefix in _AGG_OUTPUT_PREFIX:
@@ -140,7 +140,7 @@ def _output_name(col: str, bucket_tokens: dict) -> str:
     lbl = _bucket_label(token)
     if lbl:
         return f"{lbl}({col})"
-    agg = _agg_label(token)
+    agg = agg_label(token)
     return f"{agg} {col}" if agg else col
 
 

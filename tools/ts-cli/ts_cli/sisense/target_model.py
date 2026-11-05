@@ -9,12 +9,14 @@ and the model's display names differ. This module reads the target Model TML and
 
 Instance resolution, in order:
 1. A model instance named like the Sisense table (``Visit_Start_Date`` ~ alias
-   ``Visit Start Date``; ``dim_case`` ~ unaliased ``dim_case``).
+   ``Visit Start Date``; ``dim_case`` ~ unaliased ``dim_case``) -- unless the Sisense
+   relation joins the widget's fact through a DIFFERENT instance, which is flagged.
 2. Otherwise the Sisense relation that connects the table to the widget's fact: the model
    instance the fact joins ON THE SAME FOREIGN-KEY COLUMN (so ``fact.site_id_`` picks the
    ``Visit Site`` alias and ``fact.home_site_id_`` the ``Home Site`` alias of one base table).
 3. Otherwise any instance of that base table reachable from the widget's facts; more than
-   one candidate is ambiguous and flagged, never guessed.
+   one candidate is ambiguous, and one the facts cannot reach is refused -- both flagged,
+   never guessed.
 
 Pure functions, no I/O: the command layer loads the TML file and passes the dict.
 """
@@ -47,7 +49,7 @@ def split_dim(dim: str) -> tuple:
 class TargetModel:
     """Index over one Model TML dict (``{"model": {...}}`` or the bare model body)."""
 
-    def __init__(self, tml: dict):
+    def __init__(self, tml: dict, tables=None):
         model = tml.get("model") or tml.get("worksheet") or tml
         self.name = model.get("name") or ""
         # root obj_id (`ts tml export --include-obj-id`): the ONLY exact viz binding — a Model
@@ -65,6 +67,11 @@ class TargetModel:
         self.formula_measures: set = set()  # formula-backed measures keep their name as output
         self.count_measures: dict = {}    # ('unique count'|'count', inst, col) -> column name
         self.columns: list = []
+        self.formatted: set = set()       # columns carrying their own format_pattern / currency_type
+        # base table -> {warehouse column: Table TML column name}, from the associated Table TMLs
+        # (`ts tml export --associated`): a Model column_id names the TABLE column, which a
+        # hand-designed Table may have renamed from the warehouse column a Sisense dim carries
+        self.table_cols: dict = _table_columns(tables)
         for c in model.get("columns") or []:
             self._index_column(c)
         self._insts_by_norm: dict = {}
@@ -74,7 +81,10 @@ class TargetModel:
     def _index_column(self, c: dict) -> None:
         nm = c.get("name")
         self.columns.append(nm)
-        is_measure = (c.get("properties") or {}).get("column_type") == "MEASURE"
+        props = c.get("properties") or {}
+        is_measure = props.get("column_type") == "MEASURE"
+        if props.get("format_pattern") or props.get("currency_type"):
+            self.formatted.add(nm)
         if is_measure:
             self.measures.add(nm)
         if c.get("column_id"):
@@ -143,25 +153,46 @@ class TargetModel:
         """Sisense table -> (instance|None, note). ``anchors`` are the widget's fact
         instances; ``relations`` the parsed Sisense relations (``[{left, right}]`` endpoints)."""
         named = self.named_instances(sis_table)
+        hits = self.fk_instances(sis_table, anchors, relations)
+        reach = set().union(*(self.reachable(a) for a in anchors)) if anchors else None
         if len(named) == 1:
-            return named[0], ""
+            return self._by_name(sis_table, named[0], hits, reach, anchors)
         # 2. the instance each anchor joins on the FK column Sisense relates the table by
-        hits = set()
-        for anchor in anchors:
-            for fk in _sisense_fk_cols(sis_table, self.base_of.get(anchor) or anchor, relations):
-                hits.update(t for t, c in self.joins.get(anchor, []) if c == fk)
         if len(hits) == 1:
             return hits.pop(), ""
         # 3. any instance playing that table's role, reachable from the anchors
-        cands = self.candidates(sis_table, relations)
-        if anchors:
-            reach = set().union(*(self.reachable(a) for a in anchors))
-            cands = [c for c in cands if c in reach] or cands
+        return self._by_role(sis_table, self.candidates(sis_table, relations), reach, anchors)
+
+    @staticmethod
+    def _by_name(sis_table: str, inst: str, hits: set, reach, anchors: list) -> tuple:
+        if reach is not None and inst not in reach:
+            return None, (f"table {sis_table} ({inst}) is not reachable from the widget's facts "
+                          f"({', '.join(sorted(anchors))})")
+        if hits and inst not in hits:   # the name and the Sisense join key disagree
+            return None, (f"table {sis_table} matches instance {inst} by name, but the Sisense "
+                          f"relation joins through {', '.join(sorted(hits))} (map it via field_map)")
+        return inst, ""
+
+    @staticmethod
+    def _by_role(sis_table: str, cands: list, reach, anchors: list) -> tuple:
+        if reach is not None and cands:
+            if not any(c in reach for c in cands):
+                return None, (f"table {sis_table} ({', '.join(sorted(cands))}) is not reachable from "
+                              f"the widget's facts ({', '.join(sorted(anchors))})")
+            cands = [c for c in cands if c in reach]
         if len(cands) == 1:
             return cands[0], ""
         if not cands:
             return None, f"table {sis_table} is not in the target model"
         return None, f"table {sis_table} is ambiguous in the target model ({', '.join(sorted(cands))})"
+
+    def fk_instances(self, sis_table: str, anchors: list, relations: list) -> set:
+        """Instances the anchors join on the FK column a Sisense relation links ``sis_table`` by."""
+        hits = set()
+        for anchor in anchors:
+            for fk in _sisense_fk_cols(sis_table, self.base_of.get(anchor) or anchor, relations):
+                hits.update(t for t, c in self.joins.get(anchor, []) if c == fk)
+        return hits
 
     def resolve_chip_instance(self, sis_table: str, anchor_sets: list, relations=None) -> tuple:
         """Dashboard filter (no widget context) -> the instance reachable from the most
@@ -202,10 +233,15 @@ class TargetModel:
 
     # ---- column resolution ------------------------------------------------------------
     def column(self, inst: str, col: str) -> Optional[str]:
-        for key in (f"{inst}::{col}", f"{self.base_of.get(inst)}::{col}" if inst == self.base_of.get(inst) else None):
-            if key and key in self.by_column_id:
-                return self.by_column_id[key]
-        return None
+        """Model column exposing ``col`` (a WAREHOUSE column name, as a Sisense dim carries it) on
+        ``inst``: through the Table TML's db_column_name when the Tables were supplied, else the
+        column name itself, else a unique case/underscore-insensitive match."""
+        tcol = self.table_cols.get(self.base_of.get(inst), {}).get(col, col)
+        if f"{inst}::{tcol}" in self.by_column_id:
+            return self.by_column_id[f"{inst}::{tcol}"]
+        hits = [nm for key, nm in self.by_column_id.items()
+                if key.split("::")[0] == inst and _norm(key.split("::", 1)[1]) == _norm(col)]
+        return hits[0] if len(hits) == 1 else None
 
     def count_measure(self, kind: str, inst: str, col: str) -> Optional[str]:
         """A model formula measure ``unique count ( [inst::col] )`` (or ``count``), if any."""
@@ -214,6 +250,16 @@ class TargetModel:
             if nm:
                 return nm
         return None
+
+
+def _table_columns(tables) -> dict:
+    """Table TML dicts -> {table name: {db_column_name: Table column name}}."""
+    out = {}
+    for t in tables or []:
+        body = t.get("table") or t
+        out[body.get("name")] = {c.get("db_column_name"): c.get("name")
+                                 for c in body.get("columns") or [] if c.get("db_column_name")}
+    return out
 
 
 def _joins_of(mt: dict) -> list:

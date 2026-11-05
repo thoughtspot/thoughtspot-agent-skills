@@ -97,6 +97,24 @@ Facts established on the way, each now encoded:
 | A cascading dashboard filter group has no `jaql` of its own, only `levels[]` — read as one filter it was dropped silently (the same dashboard carried one: 11 chips became 14) | `parsing.parse_dashboard` |
 | A measure NUMBER format (`unit: NONE`, `decimals: 2`, `removeTrailingZeroes: true`, thousands separators) on `answer_columns[].format` imports and exports unchanged (18 columns, one block) and renders a count as `22,652`: thousands separators, no `K`, no trailing `.00` | `target_answers.FULL_NUMBER_FORMAT` |
 
+| A search literal containing `'` escaped as `\'` (`[X] = 'O\'Brien'`) matches: a member with an apostrophe returned the same count filtered as in the unfiltered list (2026-11-05, same build; the double-quoted form matches too) | `target_answers._literal` |
+
+What the target path reports NEEDS REVIEW rather than emitting (unit-tested; the live board above
+carries none of these, and its output is unchanged with every check below in place):
+
+- a chip or widget filter whose condition it cannot carry: relative-date, unrecognised, or at a
+  coarser date level than days (a `years` member is a period start, which a comparison on the date
+  reads as one day); `all` is no condition and is carried as such. Range chips are emitted as a
+  `generic_filter` and stay TO VERIFY under #5;
+- a second aggregation or date level of one column in one widget;
+- a chip bound to a different role-played copy than some tile's own Sisense path reaches;
+- an instance the widget's facts cannot reach, or a name match the relation's join key disagrees with;
+- a `field_map` / `filter_map` entry naming a column the Model lacks;
+- a drill dashboard with no widget with fields, or more widgets than its details table carries.
+
+A tab set whose hidden tabs plot different fields (not the same chart at another date level)
+emits every tab as its own tile instead of reporting them `Merged`.
+
 ## #7 — obj_id derivation for other punctuation — KNOWN
 
 Verified that the server drops spaces, parentheses and commas from a Model name when it generates
