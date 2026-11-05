@@ -67,9 +67,9 @@ def _refuse_ambiguous_retry(
         return
     what = f"network error ({type(exc).__name__})" if exc is not None else str(status)
     print(
-        f"ThoughtSpot API {what} on {method} {url} — not retried: this call creates "
-        "objects and the server may already have processed it. Check for what it "
-        "created before re-running.",
+        f"ThoughtSpot API {what} on {method} {url} — not retried: this call changes "
+        "objects and the server may already have processed it. Check what it changed "
+        "before re-running.",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -413,7 +413,9 @@ class ThoughtSpotClient:
         url = f"{self._base_url}{path}"
         allow_401_retry = path != _AUTH_TOKEN_PATH
 
-        is_multipart = "files" in kwargs
+        # A dict `data=` is a form body: requests sets its form Content-Type, which a
+        # forced application/json would override (the v1 /dependency family answers 415).
+        is_multipart = "files" in kwargs or isinstance(kwargs.get("data"), dict)
         retried_401 = False
         transient_attempts = 0
         while True:
@@ -497,3 +499,8 @@ class ThoughtSpotClient:
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    @property
+    def org(self) -> str:
+        """The Org this client is scoped to ("" = the user's default Org)."""
+        return str(self._org or "")

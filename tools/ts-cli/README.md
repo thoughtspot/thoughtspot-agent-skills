@@ -848,10 +848,18 @@ are collected in memory first** — files are written only if every export succe
 If ANY export fails, the command aborts non-zero with a clear message and writes
 NOTHING (no partial backup directory).
 
+Add `"source_deleted": true` when the operation deletes the source itself rather than
+modifying it (a cascade delete of a Table, Model or View). Its manifest entry then
+carries `intent: "DELETE"`, so `rollback` re-creates it under a new GUID instead of
+updating it in place at a GUID that no longer exists. Defaults to `false`.
+
 **Output:** the `manifest.json` contents as JSON to stdout (also written to
 `{out_dir}/ts_dep_backup_<timestamp>/manifest.json`, alongside one
 `{type}_{guid}_{name}.json` file per backed-up object). Backup dir path + counts go
-to stderr.
+to stderr. The manifest records `base_url` and `org` (the profile's configured Org, "" for
+the default), and each object entry its server `modified` time read **before** it was
+exported (null when that lookup failed) — `cascade-delete` compares it to detect a stale
+backup.
 
 #### `ts dependency rollback`
 
@@ -862,10 +870,20 @@ ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --profile
 ts dependency rollback --backup-dir /tmp/ts_dep_backup_20260704_120000 --only deletes
 ```
 
-Restores entries in dependency-safe order (dependents before source). An entry with
+Restores roots first: each entry after every entry its TML references, then by type
+(Tables and SQL Views, Models, Views, Sets, Answers, Liveboards). Refuses a backup
+taken on another cluster or Org, or one that does not record its cluster. A DELETE entry
+whose original object still exists (a partial delete's survivor) is skipped, never
+re-created; it is listed under `skipped` with a `restore_later` command (and flagged
+if it changed since the backup), because a delete still running may yet remove it. If
+that check cannot run, nothing is restored. A manifest from before the Org was recorded
+is checked on its cluster only. Do not re-run it after a partial restore: it would create a
+second copy of every deleted object it already restored. An entry with
 `intent == "DELETE"` is re-imported with `create_new=True` and its `guid:` stripped
 (the object no longer exists at that GUID, so ThoughtSpot assigns a new one); every
-other entry is updated in place at its original GUID.
+other entry is updated in place at its original GUID. Each restored delete's new GUID
+is substituted into the TML of every entry restored after it, so a restored Answer
+binds to the restored Model rather than to the deleted original.
 
 **Options:**
 
@@ -875,10 +893,12 @@ other entry is updated in place at its original GUID.
 | `--guid` | all | Restrict rollback to these GUID(s) (repeatable) |
 | `--only` | `all` | `updates` \| `deletes` \| `all` |
 
-**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid}}`
-to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
-delete — other objects that referenced the ORIGINAL guid remain broken and need
-manual reattachment. Per-object progress goes to stderr.
+**Output:** `{"succeeded": [...], "failed": [...], "new_guids": {old_guid: new_guid},
+"skipped": [...]}` to stdout. `new_guids` lets the caller surface a GUID-remap table for any restored
+delete — objects outside the backup that referenced the ORIGINAL guid remain broken
+and need manual reattachment. Per-object progress goes to stderr. **Exits 1 when any
+entry is in `failed`** (the JSON is still printed), so a partial restore never reads as
+success.
 
 #### `ts dependency apply-change`
 
@@ -920,6 +940,73 @@ or inline `tml` — required for FEEDBACK, which can't be exported standalone), 
 (`{"operation","source","succeeded","failed","deleted","skipped"}` — the data behind
 the Step 10 Change Report). Per-object progress goes to stderr. Exits non-zero only on
 source drift.
+
+#### `ts dependency cascade-preview` / `cascade-delete`
+
+Delete one object **and everything that depends on it** in a single server-side cascade
+(ts-dependency-manager mode D). Wraps ThoughtSpot's own
+`POST /callosum/v1/dependency/delete-with-dependents`, which has no v2 equivalent; it
+takes the normal `ts` login, a form body, and is **administrators only** — the server
+refuses even the dry run to anyone without the `ADMINISTRATION` privilege, and both
+commands check that first.
+
+```bash
+# Dry run — changes nothing. REF is a GUID or a name.
+ts dependency cascade-preview "Orders Model" --profile prod                 # whole object
+ts dependency cascade-preview "Orders Model" --column "Region" --profile prod   # one column
+ts dependency cascade-preview <column-guid> --type LOGICAL_COLUMN --profile prod
+
+# Back up everything the preview lists (plan built from the preview JSON:
+# source = backup_source, source_deleted = source_deleted, delete = objects), then
+# pass this plan on stdin — build it with json.dumps, not by pasting names into a shell string:
+#   {"guid": <source.guid>, "type": <source.type>, "backup_dir": "...", "confirm": "DELETE"}
+ts dependency cascade-delete --profile prod < plan.json
+```
+
+**`cascade-preview` output:** `{"status": "PREVIEW" | "BLOCKED", "source": {guid, type},
+"objects": [{guid, name, type, author, org, ...}], "counts", "total", "owned_by_others",
+"author_unknown", "source_deleted", "backup_source", "attached", "csv"}`. `objects` is
+every object the server's answer names besides the source — each `dependents` key's list
+and every CSV row — unioned with the preview of every Table, Model and View it lists,
+because whether one preview holds the full closure is unproven. An answer entry with no
+GUID is refused, not dropped. Each preview waits up to 900 s (large objects took
+250–300 s live) and is never retried. `attached` lists the reusable Sets on every Table, Model
+and View the delete removes, and the Spotter feedback on every Model among them (only
+Models carry it; a Table's or View's 14531 and a SQL View's 13006 answer read as none): the server deletes them
+without listing them in the preview or the delete's answer, so any entry (or a lookup
+that failed) makes the status `BLOCKED`, exit 1. `source_deleted`
+is true for a Table/Model/View and false for a column (its owner is modified).
+`backup_source` is the object to use as the backup's `source`. The GUID's type is
+checked first (the server itself previews a Table's GUID sent as `LOGICAL_COLUMN`). A
+ThoughtSpot rule that blocks the delete gives `{"status": "REFUSED", "details"}`, exit 1;
+a cluster with the API switched off (`404 API_NOT_ALLOWED`) gives `NOT_AVAILABLE`. A
+cascade that reaches an object type this command does not handle (a Set listed by a
+column delete, an uploaded table) exits 1 with a message.
+
+**`cascade-delete` sends nothing** unless: the caller is an administrator; the plan
+names ONE GUID and `confirm` is exactly `"DELETE"`; the backup came from this cluster and
+Org, its source is `backup_source`, and every backup file is readable (else `BAD_BACKUP`);
+no Set or feedback would be removed unlisted, and nothing in scope is published into
+other Orgs, whose Sets the check cannot see (else `BLOCKED`); every object is visible to
+v2 search (else `NOT_VISIBLE`); each backed-up object's server `modified` time still
+equals the one `ts dependency backup` recorded before exporting it (else `STALE_BACKUP`);
+and a fresh preview, widened the same way, lists exactly the objects backed up for
+deletion (else `RECHECK_MISMATCH`). The delete is sent **once and never retried** after
+it may have reached the server (a 401 is re-sent once with a fresh token — the server
+rejected it before doing any work). What it did is decided by checking which
+objects still exist (v2 `metadata/search`) — the preview cannot tell, because it answers
+the same for a deleted object as for a live one with no dependents.
+
+**Output `status`:** `APPLIED`, `PARTIAL` (with `deleted` and `still_present`),
+`NOT_APPLIED` (with `server_response`; only for a definite error — a 4xx other than 408,
+or ThoughtSpot's own JSON 500), `UNKNOWN` (a timeout, a 408, a gateway or proxy error, or
+a 200, with nothing gone yet — the server may still be working; do not re-send),
+`REFUSED` (only once existence checks confirm nothing went), or one of the refusals
+above. A failed preview of an object the source's preview listed reports `REFUSED` or
+`PREVIEW_FAILED` with `while_previewing` naming it. `deleted_without_backup` names any object the server's answer
+lists that the backup does not hold; `rollback` is the command to undo it. Exit 0 only
+for `APPLIED` on an HTTP 200 whose answer was readable and with every deleted object
+backed up. `dependency/purge` is deliberately not wrapped (unbounded scope).
 
 ---
 

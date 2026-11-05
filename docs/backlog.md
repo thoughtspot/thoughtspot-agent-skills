@@ -338,6 +338,13 @@ are roughly ordered by value÷effort.
 | BL-505 | Converters' fact detection does not use the shared table-role classifier; a direction-only fix to `mv_emit` broke the emitted Metric Views and was reverted (PR 3) — the join walk must change with it | 2027-01-31 |
 | ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
 | ~~BL-503~~ | ~~the audit report's JavaScript has no size or complexity gate~~ | DONE (2026-11-04) |
+| BL-532 | `ts dependency apply-change` exits 0 when objects fail, so a caller reading the exit code takes a partly applied REMOVE/REPOINT for a clean one | 2026-11-30 |
+| BL-533 | Cascade delete (mode D) refuses a Model with Sets, Spotter feedback or publication instead of backing them up and restoring them; AI memory and data-model instructions are neither checked nor restored | 2026-12-15 |
+| BL-534 | `ts dependency backup`/`rollback`/`cascade-delete` compare the profile's configured Org, not the session's actual Org | 2026-12-31 |
+| BL-535 | `published_org_ids` reads a missing `orgIds` as "published nowhere", so cascade delete's published-object refusal fails open if the field is ever absent on an Orgs-enabled cluster | 2026-12-31 |
+| BL-536 | Cascade delete's scope-widening dry-run loop has no cap and prints no progress; each dry run can take minutes and the loop runs twice (preview, then the pre-delete re-check) | 2026-12-31 |
+| BL-537 | `ts dependency rollback` skips forever a survivor the server edited in place (e.g. a column delete that edits a downstream Model): restoring it needs an in-place (`create_new=False`) path | 2026-12-31 |
+| BL-538 | Cascade delete of a Table column with a Model built on it is untested live (only Model column → View was) | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 | BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
@@ -14592,7 +14599,14 @@ Tests for each, with synthetic names only.
 
 **Target:** 2026-12-31.
 
-## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2`
+## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2` — **RESOLVED 2026-10-30**
+
+**Resolution.** The capability ships as `ts-dependency-manager` mode D (Step 3-D, skill 1.6.0,
+ts-cli 0.206.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
+cascade-delete` refuses without a readable, current, same-cluster backup. Item 2: the smoke
+test has only a dry-run step; no destructive flag exists. Item 3: purge is not wrapped.
+Items 4-8 described the separate skill and no longer apply; #5's lookup-vs-cascade gap is
+recorded in ts-dependency-manager open-items #26.
 
 **Filed:** 2026-10-22. **Source:** the 2026-09-14 review of PR #505, closed unmerged on
 2026-10-22 for inactivity. Recorded here so the findings outlive the closed PR. A
@@ -16628,3 +16642,132 @@ the placeholder safe, but setup is not self-service.
    hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
 
 **Target:** 2026-12-17.
+
+## BL-532 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
+
+**Filed:** 2026-10-30. **Source:** the PR #666 follow-up review (the cascade-delete PR).
+
+**Why it matters.** `rollback` now exits 1 when any entry fails to restore, so a partial
+restore cannot read as success. `apply-change` (`commands/dependency_apply.py`) still exits
+0 with entries in `failed` — it exits non-zero only on source drift — so a caller reading
+the exit code takes a partly applied REMOVE/REPOINT for a clean one. Step 10 reads the
+JSON, so the skill itself is not misled; scripts and the smoke test are.
+
+**Do.** Exit 1 when `failed` is non-empty, after printing the JSON (the `rollback` pattern),
+and check the smoke test and Step 10 still read the result.
+
+**Target:** 2026-11-30.
+
+## BL-533 — cascade delete: back up and restore Sets and Spotter feedback instead of refusing `Tier 2`
+
+**Filed:** 2026-11-02. **Source:** the PR #692 review (blocker), ts-dependency-manager
+open-items #29.
+
+**Why it matters.** A whole-object cascade delete removes the deleted Models' and Views'
+reusable Sets and Spotter feedback without listing them in the dry run or in the delete's
+answer. Mode D now refuses such a delete (`BLOCKED`), which is safe, but it makes the mode
+unusable for any Model with coaching or Sets until the user removes them by hand — and
+removing feedback by hand loses it.
+
+**Do.** Find them as the refusal does (`sets/discover.py`; a `FEEDBACK` export), add them
+to the backup (feedback as its own entry), and restore them after their Model in
+`rollback`: a Set binds its Model by `fqn`, which `remap_guids` already re-targets; the
+feedback document carries its Model's GUID as its own, so it must be imported against the
+restored Model's new GUID. Then turn the refusal into a listing on the D3/D5 screens and
+check them for existence after the delete. Verify live on a throwaway Model with one Set
+and one feedback entry, delete and roll back.
+
+Same work, found by the independent review of the fix:
+- **Published objects** are refused too, because the Set listing sees only the caller's
+  Org. Running the listing per Org would lift that.
+- **AI memory** (`ai/memory/export`) and **data-model instructions** (`ai/instructions/get`)
+  hang off the Model as well. Rollback cannot carry them to the restored Model's new
+  GUID, and today they are neither checked nor listed; D5 names them as not restored.
+- **A column delete** does not check its surviving owner. A Set or feedback that only
+  references the column in its body (not as its anchor) is unverified;
+  `report/impact_probes.fetch_business_terms_and_ai_memory` already finds feedback and
+  AI memory that name a column.
+
+**Target:** 2026-12-15.
+
+## BL-534 — dependency backups record the configured Org, not the session's `Tier 2`
+
+**Filed:** 2026-11-02. **Source:** the independent review of the PR #692 fixes.
+
+**Why it matters.** `ts dependency backup` records `client.org` (the profile's `org`/`org_id`,
+or `TS_ORG`). `rollback` and `cascade-delete` refuse a different one. But an Org given as a
+name is silently ignored by `auth/token/full` (`commands/share.py`), and a profile with
+no Org records `""` whichever Org the token lands in. So two runs can be in different
+Orgs while the check passes. In the wrong Org, `rollback`'s still-exists check sees none
+of the originals and re-creates everything there. `cascade-delete` is additionally
+protected by resolving the GUID first.
+
+**Do.** Record the session's `current_org.id` from `auth/session/user` (as
+`commands/share.py` `assert_org_context` and `migrate/discover.py` do), compare that, and
+keep the configured value only as a fallback for older manifests.
+
+**Target:** 2026-12-31.
+
+## BL-535 — the published-object refusal fails open when `orgIds` is absent `Tier 2`
+
+**Filed:** 2026-11-05. **Source:** the PR #692 review (2026-11-03, "fine as backlog").
+
+**Why it matters.** `ts dependency cascade-preview` / `cascade-delete` refuse an object
+published into other Orgs, because the Set listing sees only the caller's Org.
+`publish_plan.published_org_ids` reads a missing `orgIds` as "published nowhere"
+(`publish_plan.py`), so on an Orgs-enabled cluster whose header ever omits the field, the
+refusal silently passes and other Orgs' Sets could go unlisted.
+
+**Do.** Distinguish "no `orgIds` key" from "an empty list" for this caller (treat absent as
+unchecked on an Orgs-enabled cluster), without changing `ts publish status`'s reading, and
+test both shapes.
+
+**Target:** 2026-12-31.
+
+## BL-536 — cascade delete's widening dry runs have no cap and no progress `Tier 2`
+
+**Filed:** 2026-11-05. **Source:** the PR #692 review (2026-11-03, "fine as backlog").
+
+**Why it matters.** `_scope` runs a dry run of every Table, Model and View the first one
+lists, until nothing new appears. Each can take minutes on a large object (250–300 s
+seen), it prints nothing meanwhile, and the whole loop runs twice — once in
+`cascade-preview` and again in `cascade-delete`'s re-check. A wide tree can run for a
+very long time with no sign of life.
+
+**Do.** Print progress to stderr (`n of m dry runs`), add a cap with a clear refusal when
+it is reached, and consider reusing the preview's result in the re-check when nothing
+has changed since the backup.
+
+**Target:** 2026-12-31.
+
+## BL-537 — rollback never restores a survivor the server edited in place `Tier 2`
+
+**Filed:** 2026-11-05. **Source:** the PR #692 review (2026-11-03, "fine as backlog").
+
+**Why it matters.** `ts dependency rollback` skips a DELETE entry whose original object
+still exists, so it never makes a duplicate. If the server *edited* that object instead
+of deleting it (a column delete that removes the column from a downstream Model), the
+skip is permanent and the object stays edited; `restore_later` re-creates it only once
+it is gone.
+
+**Do.** For a skipped survivor flagged "changed since the backup", offer an in-place
+restore (`create_new=False`, original GUID) as its own explicit path.
+
+**Target:** 2026-12-31.
+
+## BL-538 — Table column → Model cascade is untested live `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the PR #692 review (2026-11-03, "fine as backlog").
+
+**Why it matters.** The PR verified a Model column → View cascade live (the View was
+deleted outright, so `DELETE` intent was right). A Table column with a Model built on it
+was not tested — a duplicate Table on the same warehouse table cannot be created, so it
+needs a disposable warehouse table. If the server edits the Model rather than deleting
+it, BL-537 applies.
+
+**Do.** Create a throwaway warehouse table, a Table and Model on it, run the preview,
+backup, column delete and rollback, and record the result in ts-dependency-manager
+open-items #26.
+
+**Target:** 2026-12-31.
+

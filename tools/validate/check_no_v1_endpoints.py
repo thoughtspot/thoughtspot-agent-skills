@@ -4,7 +4,7 @@ check_no_v1_endpoints.py — fail if any Python code calls a v1 (`/tspublic/v1/.
 ThoughtSpot REST endpoint, OR a v2 endpoint that has since been deprecated.
 
 The repo completed its v1→v2 migration on 2026-06-16 (see `.claude/rules/ts-cli.md`,
-"No v1 endpoints"). v1 paths are removed on newer ThoughtSpot Cloud builds (404), so any
+"No public v1 endpoints"). v1 paths are removed on newer ThoughtSpot Cloud builds (404), so any
 new one is a latent bug. This validator guards the invariant.
 
 2026-07-03 audit finding 13.1 added a second, narrower denylist: DEPRECATED_V2_ENDPOINTS.

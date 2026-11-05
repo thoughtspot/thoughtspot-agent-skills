@@ -289,3 +289,127 @@ Re-verified live: the same cycle now rolls back all 5 objects in ONE pass (sourc
 first, then the 4 models), 0 failures. Tests updated in `test_dependency_backup.py`.
 
 **Status:** FIXED + unit-tested + live-verified.
+
+---
+
+## #26 — Cascade delete endpoint (`ts dependency cascade-*`) — VERIFIED LIVE 2026-10-30
+
+`POST /callosum/v1/dependency/delete-with-dependents` deletes an object and its whole
+dependent cascade server-side. It is v1-only: there is no v2 equivalent. Request shape
+from the `ts-dependency-cleanup` investigation (PR #666, its open items #12, #16, #17):
+form body `type` (`LOGICAL_TABLE` | `LOGICAL_COLUMN`), `id` (a JSON-array string),
+`operation_type=DELETE_OBJECT_CASCADE`, `apply_changes` (`false` = dry run). Note the
+prefix: `/callosum/v1/dependency/`, not `/callosum/v1/tspublic/v1/` (404 there).
+
+Re-verified on a test cluster (build reports its version as `test`), 2026-10-30:
+
+| Question | Finding |
+|---|---|
+| Does the v2 bearer token from `ts auth` work? | **Yes.** The PR's v1 `session/login` cookie is not needed — same as `/callosum/v1/metadata/detail` in `ts_cli/sets/discover.py` |
+| Body encoding | Form only. `Content-Type: application/json` → **415**. `client.py` forced that header on every call; a dict `data=` now gets the form header |
+| Admin check on clusters where `auth/session/user` 404s | The CLI's role check calls `auth/session/user`, which BL-497 records as 404 on one cluster. There both commands stop with that error before any cascade call — safe, but mode D is unusable there until BL-497 is fixed |
+| Who may call it | **Administrators only, preview included.** A non-admin (no `ADMINISTRATION` privilege) gets **403** `Tenant privilege required to perform this operation` on the dry run |
+| Does the server check `type` against the GUID? | **No.** A Table's GUID sent as `LOGICAL_COLUMN` returned a preview. The CLI now checks the type with `resolve_source` before any cascade call |
+| Author of each object | `dependents[].authorName` is null; the author is only in the `csv` field's `author` column |
+| Business-rule refusals | `400 METADATA_ERROR`, e.g. *Deleting columns linked to filters is not allowed* — matches PR #666 #18 |
+| Delete, live, on throwaway objects | Model alone ✅; Model + Answer ✅; Model column + Answer ✅ (the column leaves the Model, which survives) |
+| Rollback, live | ✅ All three. A restored Answer points at the restored Model's NEW GUID (closes PR #666 #20) |
+| Race guard | ✅ A backup missing one dependent → `RECHECK_MISMATCH`, nothing deleted |
+| Cascade vs. dependents lookup | Same objects on this cluster's shallow data. PR #666 #19 measured 4 reported vs 12 deleted on a deeper graph — so the preview, not `ts metadata report`, sizes a delete |
+| Preview of an object that is already deleted | **200 with `{"dependents": {"<guid>": []}}`** — indistinguishable from a live object with no dependents. So the preview cannot tell whether a delete happened. `cascade-delete` decides that from v2 `metadata/search` with an explicit type, which returns no row for a deleted object and one row for a live one (also batched) |
+| Column delete with a downstream View (2026-11-02) | The View was **deleted outright**, not edited — even though it also used another column. So a dependent of a column delete is correctly backed up as `DELETE`; rollback restored both (Model in place, View under a new GUID) |
+| Sets and feedback | See **#29** — a Model's delete removes them, unlisted |
+| Endpoint switched off (PR #692 review, another cluster) | `404 API_NOT_ALLOWED` — *Requested API is not enabled. Reach out to SRE to enable this API*. Reported as `NOT_AVAILABLE` |
+| How common the filter refusal is (PR #692 review, a staging cluster) | `400 METADATA_ERROR` *Deleting columns linked to filters is not allowed* for 7 of the 8 deepest roots, and for 9 of 9 objects with Sets below them. Handled as `REFUSED` |
+| Preview timing (PR #692 review) | **250–300 s** for large objects. The CLI waits up to 900 s per preview and never retries one (a retried preview stacks heavy computations on the server) |
+
+`dependency/purge` is deliberately not wrapped: it takes no parameters and its scope —
+possibly every soft-deleted object on the instance — is unverified (PR #666 #8).
+
+**Not proven: whether the preview holds the full closure of a deep graph.** PR #666's
+#19 left this open ("this run does not settle it"), and this cluster's data was one
+level deep. The CLI therefore takes the scope from every object the preview names —
+every `dependents` key's list and every CSV row, not only `dependents[<guid>]` — and,
+after the delete, checks which objects are actually gone and names any the server's
+answer lists that the backup does not hold. It also runs the preview of every Table,
+Model and View the first preview lists and adds anything new (PR #692 review).
+
+Evidence so far (PR #692 review, a staging cluster, chains up to four objects deep —
+Model ↔ Model → View → View): for Models, Views, Answers and Liveboards every preview
+listed everything a v2 dependents walk found, once 24 more. Reassuring, but the walk is
+only a lower bound, so the extra previews stay until a deliberately deep fixture
+settles it.
+
+**Status:** VERIFIED on one build, except the closure question above. Re-run the
+non-destructive smoke test step on a second build (SaaS) before relying on it there.
+
+---
+
+## #27 — Cascade delete fails when the cascade includes a Liveboard — OPEN (server-side)
+
+Live on the same test cluster, 2026-10-30: any cascade whose preview includes a
+Liveboard answered the delete with **HTTP 500** `code 14009`, `FAILED_TO_COMMIT ...
+Restrict delete failed for edge=2`. Reproduced twice (a joined Model with an Answer and
+a Liveboard; a single-table Model with the same). The identical Model + Answer without
+the Liveboard deleted cleanly, and the same Liveboard deleted fine on its own through
+v2 `ts metadata delete`.
+
+Nothing is deleted when this happens — the re-check after the failure reported every
+object still present, and `cascade-delete` reports `NOT_APPLIED` with the server's text
+in `server_response`. PR #666 deleted Liveboards in a cascade on its cluster, so this
+looks build-specific.
+
+**Next:** retest on a SaaS build. If it reproduces, raise it with ThoughtSpot with the
+incident id, and consider a documented workaround (delete the previewed Liveboards with
+`ts metadata delete` after the backup, then run the cascade).
+
+---
+
+## #28 — Re-running a partial rollback duplicates what it already restored — OPEN
+
+`ts dependency rollback` re-creates each DELETE entry with `create_new=True` and does not
+record the new GUIDs anywhere but its stdout. (It does skip a DELETE entry whose ORIGINAL
+object still exists — so rolling back a PARTIAL cascade delete no longer duplicates the
+survivors, live-verified 2026-11-02. That check cannot help here: after a restore the
+original GUIDs are still gone and the copies live under new ones.) After a partial restore (exit 1), running it
+again creates a second copy of every object the first run restored, and a `--guid` re-run
+has nothing to re-link the remaining objects to. Found in the PR #666 follow-up review.
+
+**Next:** write `new_guids` into the backup directory as each object is restored, and
+have a re-run skip entries already restored and re-link against the recorded GUIDs.
+Until then, SKILL.md D7 and Step 11 say not to re-run a partial rollback.
+
+---
+
+## #29 — A cascade delete removes a Model's Sets and Spotter feedback without listing them — VERIFIED LIVE 2026-11-02, handled by refusing
+
+Found by the PR #692 review on a staging cluster (a Model with one reusable BIN_BASED
+Set: the v2 dependents, the dry run and the real delete's 200 answer were all empty, yet
+the Set was gone afterwards) and reproduced on the test cluster on 2026-11-02 with a
+GROUP_BASED Set and one feedback entry:
+
+| Lookup | Finds the Set? | Finds the feedback? |
+|---|---|---|
+| Cascade dry run of the Model | **no** (`dependents` empty, CSV header only) | **no** |
+| v2 `metadata/search` dependents of the Model | **no** | **no** (the review saw a FEEDBACK bucket on its cluster; this build showed none) |
+| `/callosum/v1/metadata/detail/{model}?fetchcohortcolumnsonly=true` (`sets/discover.py`) | **yes** | — |
+| v2 `metadata/tml/export` with `type: FEEDBACK`, `formattype: YAML` | — | **yes** (`nls_feedback.feedback[]`). A Model with none answers **400** code 10002 *No accessible metadata objects found* — distinct from a bad GUID's *Specified identifier doesn't exist* |
+| Cascade dry run of a **column** a Set is anchored on | **yes** — listed as `COHORT`, refused by `backup_type` | — |
+
+**Handling.** `cascade-preview` and `cascade-delete` check every Table, Model and View the
+delete removes (the source included) for Sets, and every **Model** among them for
+feedback — only Models carry it. On a staging cluster (PR #692 review, 2026-11-03) the
+FEEDBACK export answers a Table or View with 500 code 14531 (*not Spotter-enabled*) and a
+SQL View with 500 code 13006; both are read as "none", matched on the code. Any other
+failure on a Model still blocks. The test cluster (2026-11-05) instead answers a Table and a
+View with 400 code 10002, like a Model with none — so the answer differs by build, and
+only Models are now asked. Any Set or feedback, or a
+lookup that fails, gives `BLOCKED` and nothing is sent. A column delete does not check its
+owner, which survives; a Set anchored on the column is already listed by the server.
+
+**Next (not built, BL-533):** back the Sets and feedback up and restore them after their Model,
+instead of refusing. The feedback document shares its Model's GUID, so a restore has to
+re-target it at the restored Model's new GUID; a Set is its own document binding the
+Model by `fqn`, which `remap_guids` already handles. Until then the user removes or moves
+them first.
+
