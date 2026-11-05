@@ -970,8 +970,9 @@ every object the server's answer names besides the source — each `dependents` 
 and every CSV row — unioned with the preview of every Table, Model and View it lists,
 because whether one preview holds the full closure is unproven. An answer entry with no
 GUID is refused, not dropped. Each preview waits up to 900 s (large objects took
-250–300 s live) and is never retried. `attached` lists the reusable Sets and Spotter
-feedback on every Table, Model and View the delete removes: the server deletes them
+250–300 s live) and is never retried. `attached` lists the reusable Sets on every Table, Model
+and View the delete removes, and the Spotter feedback on every Model among them (only
+Models carry it; a Table's or View's 14531 and a SQL View's 13006 answer read as none): the server deletes them
 without listing them in the preview or the delete's answer, so any entry (or a lookup
 that failed) makes the status `BLOCKED`, exit 1. `source_deleted`
 is true for a Table/Model/View and false for a column (its owner is modified).

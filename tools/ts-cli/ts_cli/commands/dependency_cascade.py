@@ -39,6 +39,7 @@ from ts_cli.dependency.backup import V2_TYPE_MAP, cluster_mismatch
 from ts_cli.dependency.cascade import (
     CASCADE_PATH,
     CASCADE_TYPES,
+    FEEDBACK_OWNER_TYPES,
     OWNER_TYPES,
     CascadeError,
     attached_blockers,
@@ -233,18 +234,22 @@ def _feedback(client, guid: str) -> Optional[int]:
 
 
 def _attached(client, objects: List[Dict[str, Any]], guid: str, source_type: str,
-              source_name: str) -> List[Dict[str, Any]]:
+              source: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Sets and feedback on the deleted Tables, Models and Views — the cascade deletes
-    them without listing them (PR #692 review, live 2026-11-02)."""
+    them without listing them (PR #692 review, live 2026-11-02). `source` is the
+    `backup_source` (name and backup type of the source, or of a column's owner).
+    Feedback is looked up on Models only (`FEEDBACK_OWNER_TYPES`)."""
     owners = owners_in_scope(objects, guid, source_type)
     names = {o["guid"]: o.get("name") or "" for o in objects}
-    names[guid] = source_name
+    types = {o["guid"]: o.get("type") for o in objects}
+    names[guid], types[guid] = source.get("name") or "", source.get("type")
     sets = discover_sets(client, [{"guid": g, "name": names.get(g, "")} for g in sorted(owners)])
     try:
         headers = object_headers(client, {g: "LOGICAL_TABLE" for g in owners})
     except (Exception, SystemExit):
         headers = {}
-    blockers = attached_blockers(owners, sets, {g: _feedback(client, g) for g in owners}, headers)
+    feedback = {g: _feedback(client, g) for g in owners if types.get(g) in FEEDBACK_OWNER_TYPES}
+    blockers = attached_blockers(owners, sets, feedback, headers)
     return [{**b, "owner_name": names.get(b["owner"], "")} for b in blockers]
 
 
@@ -279,7 +284,7 @@ def cascade_preview_cmd(
     target = _resolve_target(client, ref, source_type, column)
     objects, csv_text = _scope(client, target["type"], target["guid"])
     attached = _attached(client, objects, target["guid"], target["type"],
-                         target["backup_source"]["name"])
+                         target["backup_source"])
     _emit({"status": "BLOCKED" if attached else "PREVIEW",
            "source": {"guid": target["guid"], "type": target["type"]},
            "requested_by": user, "objects": objects, **summarize(objects, user),
@@ -325,7 +330,7 @@ def _checks_before_delete(client, guid: str, source_type: str,
                "note": "This backup cannot protect this delete. Nothing was deleted."}, ok=False)
 
     objects, _ = _scope(client, source_type, guid)
-    attached = _attached(client, objects, guid, source_type, owner["name"])
+    attached = _attached(client, objects, guid, source_type, owner)
     if attached:
         _emit({"status": "BLOCKED", "attached": attached, "note": _BLOCKED}, ok=False)
     before = deleted_set(objects, guid, source_type)

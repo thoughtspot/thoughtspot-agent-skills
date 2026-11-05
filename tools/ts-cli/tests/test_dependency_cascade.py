@@ -609,10 +609,11 @@ class TestReviewFixes:
         assert out["attached"] == [{"owner": M1, "kind": "SET", "guid": SET1, "name": "Top",
                                     "owner_name": "Model A"}]
 
-    def test_the_sources_own_feedback_blocks_the_preview(self):
-        fake = FakeClient(ADMIN, [_Resp(200, _preview())], feedback={SRC: 2})
+    def test_a_models_feedback_blocks_the_preview(self):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())], feedback={M1: 2})
         out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
-        assert out["status"] == "BLOCKED" and out["attached"][0]["kind"] == "FEEDBACK"
+        assert out["status"] == "BLOCKED"
+        assert [(b["owner"], b["kind"], b["count"]) for b in out["attached"]] == [(M1, "FEEDBACK", 2)]
 
     def test_a_failed_set_listing_blocks_rather_than_reads_as_none(self):
         fake = FakeClient(ADMIN, [_Resp(200, _preview())], sets={M2: RuntimeError})
@@ -724,3 +725,55 @@ class TestSecondReviewFixes:
         out = json.loads(r.stdout)
         assert r.exit_code == 1 and out["status"] == status
         assert out["while_previewing"] == {"guid": M1, "name": "Model A", "type": "MODEL"}
+
+
+# The FEEDBACK export's answers on a staging cluster (PR #692 review, 2026-11-03).
+_E14531 = {"error": {"message": {"debug": {"code": 14531, "incident_id_guid": "i",
+           "debug": "Cannot manage feedbacks for object that is not Spotter-enabled"}}}}
+_E13006 = {"error": {"message": {"debug": {"code": 13006, "incident_id_guid": "i",
+           "debug": "Object of type SQL_VIEW cannot have associated NLS feedback"}}}}
+_E10002 = {"error": {"message": {"debug": {"code": 10002, "incident_id_guid": "i",
+           "debug": "No accessible metadata objects found for the provided input."}}}}
+
+
+class TestFeedbackOnlyOnModels:
+    """Damian's 2026-11-03 blocker: the feedback lookup answered Tables, Views and SQL
+    Views with an error, so every delete reaching one was BLOCKED."""
+
+    @pytest.mark.parametrize("status,body,want", [
+        (400, _E10002, 0),                    # Model with no feedback
+        (500, _E14531, 0),                    # Table / View: not Spotter-enabled
+        (500, _E13006, 0),                    # SQL View
+        (500, {"error": {"message": {"debug": {"code": 99999}}}}, None),   # anything else
+        (500, "<html>proxy</html>", None)])
+    def test_each_answer_shape(self, status, body, want):
+        assert c.feedback_count(status, body) == want
+
+    def test_a_tables_and_views_feedback_is_not_looked_up(self):
+        # SRC is a Table; M1, M2 are a View and a SQL View here. Only Models are asked.
+        prev = _preview(deps=[_dep(M1, "V", "LOGICAL_TABLE", "AGGR_WORKSHEET"),
+                              _dep(M2, "SV", "LOGICAL_TABLE", "SQL_VIEW")])
+        fake = FakeClient(ADMIN, [_Resp(200, prev)], feedback={SRC: 3, M1: 3, M2: 3})
+        exported = []
+        real = fake._feedback_export
+        fake._feedback_export = lambda g: exported.append(g) or real(g)
+        r = _run(["cascade-preview", SRC], fake)
+        assert r.exit_code == 0, _out(r)
+        assert json.loads(r.stdout)["status"] == "PREVIEW" and exported == []
+
+    def test_a_model_whose_lookup_fails_still_blocks(self):
+        fake = FakeClient(ADMIN, [_Resp(200, _preview())])
+        fake._feedback_export = lambda g: _Resp(500, "<html>proxy</html>")
+        out = json.loads(_run(["cascade-preview", SRC], fake).stdout)
+        assert out["status"] == "BLOCKED"
+        assert {(b["owner"], b["kind"]) for b in out["attached"]} == {
+            (M1, "FEEDBACK_UNCHECKED"), (M2, "FEEDBACK_UNCHECKED")}
+
+    def test_a_model_source_is_looked_up(self, tmp_path):
+        KNOWN["MODEL_SRC"] = (SRC, "LOGICAL_TABLE", "WORKSHEET", None)
+        try:
+            fake = FakeClient(ADMIN, [_Resp(200, _preview(deps=[]))], feedback={SRC: 1})
+            out = json.loads(_run(["cascade-preview", "MODEL_SRC"], fake).stdout)
+        finally:
+            del KNOWN["MODEL_SRC"]
+        assert [(b["owner"], b["kind"]) for b in out["attached"]] == [(SRC, "FEEDBACK")]

@@ -496,7 +496,7 @@ treat the outcome as `UNKNOWN` below — never re-run it.
 - `"status": "NOT_AVAILABLE"` (exit 1) → the cluster has this API switched off
   (`API_NOT_ALLOWED`). Say so plainly — not a permissions problem — and offer Remove mode.
 - `"status": "BLOCKED"` (exit 1) → deleting a Table, Model or View also deletes its
-  reusable **Sets** and its **Spotter feedback**, but the server's dry run does not list
+  reusable **Sets** and, for a Model, its **Spotter feedback**, but the server's dry run does not list
   them, so this mode cannot back them up or restore them. Show every `attached[]` entry
   (`kind` SET with its name, FEEDBACK with its `count`, PUBLISHED with its `org_ids` —
   published into other Orgs, whose Sets this check cannot see — or `*_UNCHECKED`, the

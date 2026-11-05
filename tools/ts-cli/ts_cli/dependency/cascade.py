@@ -34,6 +34,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import yaml
@@ -52,6 +53,18 @@ OWNER_TYPES = ("MODEL", "VIEW", "TABLE", "SQL_VIEW")
 # The FEEDBACK export's answer for a Model with no feedback (HTTP 400, code 10002, live
 # 2026-11-02). Any other failure means the feedback could not be checked.
 _NO_FEEDBACK = "No accessible metadata objects found"
+
+# Error codes that say the object CANNOT carry feedback, so it has none (PR #692 review, a
+# staging cluster): 14531 "Cannot manage feedbacks for object that is not
+# Spotter-enabled" (a Table or View, HTTP 500) and 13006 "Object of type SQL_VIEW cannot
+# have associated NLS feedback". Matched on the code, not the message text.
+_CANNOT_HAVE_FEEDBACK = (14531, 13006)
+_ERROR_CODE = re.compile(r"""["']code["']\s*:\s*(\d+)""")
+
+# Only a Model carries feedback (it attaches to Spotter-enabled Models), so only Models
+# are asked for it: a Table or View answers with an error that would otherwise read as
+# "could not check" and block every delete reaching one.
+FEEDBACK_OWNER_TYPES = ("MODEL",)
 
 # Preview `type` (+ `subType` for LOGICAL_TABLE) → the type vocabulary
 # `ts dependency backup` / `rollback` use. An unlisted pair is refused, never guessed.
@@ -194,20 +207,36 @@ def owners_in_scope(objects: Iterable[Dict[str, Any]], guid: str, source_type: s
     return s
 
 
-def feedback_count(status: Optional[int], body: Any) -> Optional[int]:
-    """Feedback entries in one FEEDBACK export answer; None when it could not be read."""
+def _has_no_feedback(status: Optional[int], body: Any) -> bool:
+    """An error that means "no feedback": a Model with none (400 10002), or an object that
+    cannot carry any (a code in `_CANNOT_HAVE_FEEDBACK`)."""
     if status == 400 and _NO_FEEDBACK in str(body):
-        return 0
-    if status != 200 or not isinstance(body, list) or not body or not isinstance(body[0], dict):
+        return True
+    text = json.dumps(body) if isinstance(body, (dict, list)) else str(body)
+    return bool(status and status >= 400
+                and any(int(c) in _CANNOT_HAVE_FEEDBACK for c in _ERROR_CODE.findall(text)))
+
+
+def _feedback_entries(body: Any) -> Optional[int]:
+    """How many entries a 200 FEEDBACK export holds; None when it cannot be read."""
+    if not isinstance(body, list) or not body or not isinstance(body[0], dict):
         return None
     try:
         doc = yaml.safe_load(body[0].get("edoc") or "")     # JSON or YAML text
     except (TypeError, ValueError, yaml.YAMLError):
         return None
-    if not isinstance(doc, dict):
-        return None
-    entries = ((doc or {}).get("nls_feedback") or {}).get("feedback")
+    entries = (doc.get("nls_feedback") or {}).get("feedback") if isinstance(doc, dict) else None
     return len(entries) if isinstance(entries, list) else None
+
+
+def feedback_count(status: Optional[int], body: Any) -> Optional[int]:
+    """Feedback entries in one FEEDBACK export answer; None when it could not be read.
+
+    0 for "this Model has none" (400 10002) and for an object that cannot have any (an
+    error code in `_CANNOT_HAVE_FEEDBACK`); any other error stays unread (None)."""
+    if _has_no_feedback(status, body):
+        return 0
+    return _feedback_entries(body) if status == 200 else None
 
 
 def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
@@ -215,7 +244,9 @@ def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
                       headers: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Sets and feedback the cascade would delete without naming them. Each is a reason to
     refuse; so is an owner that could not be checked. `sets` is `discover_sets` output;
-    `headers` maps each owner to its v2 `metadata_header` (None or absent = unread). An
+    `feedback` holds only the owners that can carry feedback (Models); an owner absent from
+    it is not checked for feedback. `headers` maps each owner to its v2 `metadata_header`
+    (None or absent = unread). An
     owner published into other Orgs is refused: the Set listing sees only the caller's
     Org, so Sets built on it there would go unlisted."""
     out: List[Dict[str, Any]] = []
@@ -231,7 +262,9 @@ def attached_blockers(owners: Iterable[str], sets: Dict[str, Any],
             out.append({"owner": g, "kind": "SETS_UNCHECKED"})
         out += [{"owner": g, "kind": "SET", "guid": s.get("guid"), "name": s.get("name")}
                 for s in (sets.get("sets") or {}).get(g) or []]
-        n = feedback.get(g)
+        if g not in feedback:
+            continue
+        n = feedback[g]
         if n is None:
             out.append({"owner": g, "kind": "FEEDBACK_UNCHECKED"})
         elif n:

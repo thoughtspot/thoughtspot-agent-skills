@@ -397,7 +397,13 @@ GROUP_BASED Set and one feedback entry:
 | Cascade dry run of a **column** a Set is anchored on | **yes** — listed as `COHORT`, refused by `backup_type` | — |
 
 **Handling.** `cascade-preview` and `cascade-delete` check every Table, Model and View the
-delete removes (the source included) with those two lookups. Any Set or feedback, or a
+delete removes (the source included) for Sets, and every **Model** among them for
+feedback — only Models carry it. On a staging cluster (PR #692 review, 2026-11-03) the
+FEEDBACK export answers a Table or View with 500 code 14531 (*not Spotter-enabled*) and a
+SQL View with 500 code 13006; both are read as "none", matched on the code. Any other
+failure on a Model still blocks. The test cluster (2026-11-05) instead answers a Table and a
+View with 400 code 10002, like a Model with none — so the answer differs by build, and
+only Models are now asked. Any Set or feedback, or a
 lookup that fails, gives `BLOCKED` and nothing is sent. A column delete does not check its
 owner, which survives; a Set anchored on the column is already listed by the server.
 
