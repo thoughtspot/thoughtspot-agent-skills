@@ -114,7 +114,7 @@ python tools/validate/check_version_sync.py
 
 ---
 
-## No v1 endpoints (migration complete — 2026-06-16)
+## No public v1 endpoints (`/tspublic/v1/` migration complete — 2026-06-16; two internal `/callosum/v1/` routes remain, below)
 
 The repo no longer calls any v1 (`/tspublic/v1/...`) endpoint. The last one,
 `/tspublic/v1/connection/fetchConnection`, was removed on newer ThoughtSpot Cloud
@@ -158,6 +158,14 @@ not the "List of authentication types" the REST spec describes. An array is reje
 `Enum "ConnectionSearchAuthenticationType" cannot represent non-string value:
 ["KEY_PAIR"]. Did you mean the enum value "KEY_PAIR"?` Pass `"KEY_PAIR"`, never
 `["KEY_PAIR"]`, if a future caller needs it.
+
+**Internal `/callosum/v1/` routes with no v2 equivalent** are a different case from the
+removed `/tspublic/v1/` public API: they take the normal v2 bearer token and are called
+through the `ts` client like any other route. Two are in use, each in one module:
+`metadata/detail` (`ts_cli/sets/discover.py`) and `dependency/delete-with-dependents`
+(`ts_cli/commands/dependency_cascade.py`, live-verified 2026-10-30 — ts-dependency-manager
+open-items #26). Keep each to one module, so a build that drops the route breaks in one
+place, and re-check for a v2 equivalent when touching it.
 
 If a new v1 endpoint is ever introduced, migrate it to the v2 equivalent before use:
 confirm the v2 spec via `get-rest-api-reference`, update the command/docstring/README,
