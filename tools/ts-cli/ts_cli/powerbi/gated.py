@@ -117,6 +117,13 @@ def _value_set(s: str, i: int):
             return None
 
 
+def _blank_equal(kind: str, value: str) -> bool:
+    """DAX treats BLANK() = 0 and BLANK() = "" as TRUE, so a CALCULATE filter on 0 or ""
+    also keeps blank rows, which ThoughtSpot's ``=`` drops (inferred from DAX semantics,
+    not measured). Such a filter is refused rather than undercounted."""
+    return value == "" if kind == "str" else float(value) == 0
+
+
 def _ts_values(vals) -> list[str]:
     """ThoughtSpot literal text for a value set. DAX compares a mixed set as text
     (``IN {"a", 1}`` matches ``"1"``), so once any member is a string every member is
@@ -162,13 +169,13 @@ def _parse_filter(arg: str):
     m = _IN.match(s, end)
     if m:
         vals = _value_set(s, m.end())
-        return ("in", tbl, col, _ts_values(vals)) if vals else None
-    m = _EQ.match(s, end)
-    if m:
-        lit = _literal_at(s, m.end())
-        if lit and not s[lit[2]:].strip():
-            return ("in", tbl, col, _ts_values([lit[:2]]))
-    return None
+    else:
+        m = _EQ.match(s, end)
+        lit = _literal_at(s, m.end()) if m else None
+        vals = [lit[:2]] if lit and not s[lit[2]:].strip() else None
+    if not vals or any(_blank_equal(k, v) for k, v in vals):
+        return None
+    return ("in", tbl, col, _ts_values(vals))
 
 
 def _filtered_cols(spec) -> set[tuple[str, str]]:
@@ -214,22 +221,40 @@ def parse_calculate(src: str):
             "cats": cats + outer["cats"], "userelationship": rel}
 
 
+# Each VAR definition runs up to the next VAR or the RETURN; parse_ratio checks they tile
+# the text, so nothing between them is skipped.
+_VAR_DEF = re.compile(r"\s*\bVAR\s+(\w+)\s*=\s*(.*?)(?=\bVAR\b|\bRETURN\b)", re.I | re.S)
+_COMMENT = re.compile(r"//|--|/\*")
+
+
+def _has_comment(src: str) -> bool:
+    """True when ``src`` holds a DAX comment outside a string literal. A comment can carry
+    a whole commented-out VAR, so the measure is refused rather than read around it."""
+    return bool(_COMMENT.search(DAX_STRING.sub('""', src)))
+
+
 def parse_ratio(src: str):
     """``VAR a = … VAR b = … RETURN a/b`` -> (num, den), else None. The RETURN must be
     exactly one var divided by another: ``DIVIDE(a,b)``, ``1 - a/b`` and ``a/b*2`` are all
     refused, because each means something the emitted formula would not say."""
     s = src.strip()
-    if not re.match(r"^VAR\b", s, re.I):
-        return None
-    variables = dict(re.findall(r"\bVAR\s+(\w+)\s*=\s*(.*?)(?=\bVAR\b|\bRETURN\b)",
-                                s, re.I | re.S))
     ret = re.search(r"\bRETURN\b(.*)$", s, re.I | re.S)
-    if not variables or not ret:
+    if not re.match(r"^VAR\b", s, re.I) or not ret:
+        return None
+    variables, pos = {}, 0
+    for m in _VAR_DEF.finditer(s):
+        if m.start() >= ret.start():
+            break
+        if m.start() != pos or m.group(1).lower() in variables:
+            return None                    # text between definitions, or a VAR redefined
+        variables[m.group(1).lower()] = m.group(2)
+        pos = m.end()
+    if not variables or pos != ret.start():
         return None
     div = re.fullmatch(r"\s*(\w+)\s*/\s*(\w+)\s*", ret.group(1))
     if not div:
         return None
-    num, den = (parse_calculate(variables.get(div.group(i), "")) for i in (1, 2))
+    num, den = (parse_calculate(variables.get(div.group(i).lower(), "")) for i in (1, 2))
     return (num, den) if num and den else None
 
 
@@ -262,7 +287,7 @@ _NOTE = ("gated distinct count recognised from the DAX; CALCULATE REPLACES an ex
 def translate(dax: str, home_table: str | None = None):
     """``(expr, "Approximated", note)``, or ``(None, None, None)`` when not these shapes."""
     src = (dax or "").strip()
-    if not src:
+    if not src or _has_comment(src):
         return None, None, None
 
     pair = parse_ratio(src)

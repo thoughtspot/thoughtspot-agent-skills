@@ -190,6 +190,100 @@ def test_refuses_and_keeps_needs_review(label, dax):
     assert expr is None and status == "NEEDS REVIEW", label
 
 
+# ---------------------------------------------------------------- third review
+
+@pytest.mark.parametrize("label,dax", [
+    ("a trailing -- comment carries a second VAR b that would overwrite the real one",
+     "VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]))\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[h])) "
+     "-- VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]))\n"
+     "RETURN a / b"),
+    ("a // comment line carries a second VAR a that would overwrite the real one",
+     'VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "Early")\n'
+     "// VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]))\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]))\n"
+     "RETURN a / b"),
+    ("a /* */ comment in a single CALCULATE",
+     "CALCULATE(DISTINCTCOUNT(Fact[k]), /* gate */ NOT ISBLANK(Fact[g]))"),
+    ("a VAR defined twice, no comment involved",
+     "VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]))\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[h]))\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]))\n"
+     "RETURN a / b"),
+    ("VAR names are case-insensitive in DAX, so A redefines a",
+     "VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]))\n"
+     "VAR A = CALCULATE(DISTINCTCOUNT(Fact[k]))\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[h]))\n"
+     "RETURN a / b"),
+    ("text between VAR definitions would be skipped",
+     "VAR a = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]))\n"
+     "VAR = junk\n"
+     "VAR b = CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[h]))\n"
+     "RETURN a / b"),
+    # BLANK() = 0 and BLANK() = "" are TRUE in DAX, so Power BI also keeps blank rows.
+    ("= 0 also matches BLANK in DAX", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[n] = 0)"),
+    ("= 0.0 also matches BLANK in DAX", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[n] = 0.0)"),
+    ('= "" also matches BLANK in DAX', 'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "")'),
+    ("IN {…} holding 0", "CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[n] IN {1, 0})"),
+    ('IN {…} holding ""', 'CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a", ""})'),
+])
+def test_third_review_refusals(label, dax):
+    assert translate(dax, "Fact") == (None, None, None), label
+    expr, status, _ = _t(dax)
+    assert expr is None and status == "NEEDS REVIEW", label
+
+
+def test_comment_markers_inside_a_string_are_not_comments():
+    expr, status, _ = _t('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {"a--b", "c//d"})')
+    assert status == "Approximated"
+    assert "[Fact::s] = 'a--b' or [Fact::s] = 'c//d'" in expr
+
+
+def test_a_string_holding_zero_is_not_blank_equal():
+    expr, status, _ = _t('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = "0")')
+    assert status == "Approximated"
+    assert expr == "unique_count_if ( [Fact::s] = '0' , [Fact::k] )"
+
+
+@pytest.mark.parametrize("dax,cond", [
+    ('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[d] = "2024-01-01")', "[Fact::d] = '2024-01-01'"),
+    ("CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] = 1)", "[Fact::s] = 1"),
+])
+def test_type_mismatches_pass_through_unchanged(dax, cond):
+    """Pinned, not endorsed: the column's type is unknown here, so a text literal against a
+    date column (or a number against a text one) is emitted as written. A mismatch fails at
+    Model import rather than giving a wrong number."""
+    expr, status, _ = _t(dax)
+    assert status == "Approximated"
+    assert expr == f"unique_count_if ( {cond} , [Fact::k] )"
+
+
+@pytest.mark.parametrize("flt", ['Fact[s] = "a,b"', 'Fact[s] = "a)b"', 'Fact[s] IN {"a)b"}'])
+def test_literals_holding_split_characters_are_refused(flt):
+    """Pinned coverage gap: argument splitting and paren matching do not skip strings, so
+    a value holding , or ) outside a value set mis-splits and the measure is refused. Safe,
+    never a wrong formula."""
+    assert translate(f"CALCULATE(DISTINCTCOUNT(Fact[k]), {flt})", "Fact") == (None, None, None)
+
+
+@pytest.mark.parametrize("flt,value", [
+    ('Fact[s] IN {"a,b"}', "'a,b'"), ('Fact[s] IN {"a}b"}', "'a}b'"),
+    ('Fact[s] = "a}b"', "'a}b'"),
+])
+def test_split_characters_that_do_not_mis_split_convert_whole(flt, value):
+    expr, _, _ = _t(f"CALCULATE(DISTINCTCOUNT(Fact[k]), {flt})")
+    assert expr == f"unique_count_if ( [Fact::s] = {value} , [Fact::k] )"
+
+
+def test_formula_translate_path_does_not_reach_the_gated_shapes():
+    """`ts formula translate --from dax` passes a sentinel home table, so every column is
+    off the home table and the gated translator refuses. Pinned so a change to the adapter
+    cannot open this path without a test noticing."""
+    from ts_cli.formula_translate.engine import translate as ft_translate
+    r = ft_translate("CALCULATE(DISTINCTCOUNT(Fact[k]), NOT ISBLANK(Fact[g]))", "dax")
+    assert r["status"] == "NEEDS_REVIEW" and r["formula"] is None
+
+
 def test_ratio_over_two_different_grains_is_refused():
     assert translate(RATIO.replace("DISTINCTCOUNT(Fact[Order Line]),\n        NOT ISBLANK(Fact[Booked]))",
                                    "DISTINCTCOUNT(Fact[Shipment]),\n        NOT ISBLANK(Fact[Booked]))"),
