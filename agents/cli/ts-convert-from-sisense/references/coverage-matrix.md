@@ -62,7 +62,7 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | `tablewidget` | Mapped | `GRID_TABLE` |
 | JAQL panels → roles | Mapped | Categories/x-axis→Category, Break-by→Series(color), Values/y-axis→Values, Rows/Columns→pivot axes |
 | Date `level` → date bucket | Mapped | `hours/days/weeks/months/quarters/years` → `HOURLY…YEARLY` (worked example) |
-| Per-attribute top/bottom N | Mapped | baked into the widget answer as `top N` |
+| Per-attribute top N | Mapped | baked into the widget answer as `top N` (default path); a bottom N, or an N that is not a whole number, is NEEDS REVIEW rather than turned into `top N` |
 | Dashboard filter bar → Liveboard chips | Mapped | member→`oper: in`, exclude→`oper: not in`, top-level `values` (the exported-Liveboard shape, verified to filter — open-item #5) |
 | Cascading dashboard filter group (`levels[]`, e.g. Client > Program > Drug) | Mapped | one chip per level, each keeping its own preset. Until this release the group carried no `jaql` of its own and was dropped without a warning |
 | Numeric-range dashboard filter → chip preset | Mapped | single-sided from/to→`GE`/`LE`, fromNotEqual/toNotEqual→`GT`/`LT`; two-sided keeps BOTH bounds→`BW_INC`/`BW` (incl. mixed inclusive/exclusive — never collapses to one bound); equals→`EQ` (worked example) |
@@ -78,10 +78,9 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | `[Table.column]` where the Table renamed the warehouse column | Mapped | through the Table TML's `db_column_name` when the export carries the Tables (`ts tml export --associated`), else a unique case/underscore-insensitive match; none → NEEDS REVIEW |
 | `count` on a key the Model hides | Mapped | the Model formula `unique count ( [inst::col] )`; none → NEEDS REVIEW naming the measure to add |
 | `count` / `countduplicates` / `sum` / `avg` / `min` / `max` on a column | Mapped | `unique count` / `count` / `sum` / `average` / `min` / `max` keyword with ThoughtSpot's output name |
-| Sisense calculated column | Mapped | the Model formula of the same (normalised) name, when unique and on the same table |
 | Widget-level member / exclude / range filter | Mapped | `[X] = 'a' [X] = 'b'` (OR) / `[X] != 'a'` (AND) / `>= > <= <` in the search; `'` escaped as `\'` (verified live with a member containing an apostrophe) |
-| Widget filter or chip at a coarser date level than days (`level: years`, …) | Flagged | NEEDS REVIEW: its members are period starts, which a comparison on the date reads as single days |
-| Relative-date or unrecognised widget filter | Flagged | NEEDS REVIEW (no deterministic search form) |
+| Widget filter or chip on a date | Flagged unless exact | carried only as a days-level value on a `DATE` column (types from the `--associated` Table TMLs); a coarser level (period starts), a finer level, no level, a `DATE_TIME` column (a day value matches midnight only) or an unknown type is NEEDS REVIEW |
+| Relative-date widget filter, or any filter / JAQL / panel-item setting the parser does not read | Flagged | NEEDS REVIEW naming the settings (the parser lists every key it does not read, so a new Sisense setting is flagged, never ignored) |
 | Filter on a key the Model hides, table the Model lacks | Flagged | NEEDS REVIEW → `filter_map` / `field_map` in overrides.json |
 | `field_map` / `filter_map` naming a column the Model lacks | Flagged | NEEDS REVIEW (not an import failure) |
 | Two aggregations, or two date levels, of one column in one widget | Flagged | NEEDS REVIEW: one answer carries one use per column, so the second is reported, not dropped |
@@ -91,12 +90,25 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | `richtexteditor`, tab-set title | Mapped | section-header note tile |
 | Columnar layout | Mapped | tile grid, rows filling 12 columns |
 | Jump-to-dashboard drill | Approximated | details table from the drill dashboard's first widget with fields (`--drill`), keeping that widget's own filters plus the source widgets' shared filters; narrowed by right-click → Filter, not a pop-up. Further widgets, or none with fields → NEEDS REVIEW |
-| Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip (ThoughtSpot replaces, Sisense ANDs) |
+| Dashboard filter on a column a tile also filters | Mapped | `excluded_visualizations` on the chip: in Sisense a widget filter takes priority over a dashboard filter on the same dimension, and a ThoughtSpot chip would replace the tile's own filter |
 | Dashboard filter on a dimension with several role copies | Mapped | copy reaching the most tiles, then the shortest join path; still tied → flagged |
 | Chip whose copy differs from a tile's own Sisense path to the table | Flagged | NEEDS REVIEW naming each tile and the copy it reaches (Sisense resolves per widget, a chip binds one copy for the board) |
 | Chip that cannot reach a tile's facts | Flagged | NEEDS REVIEW naming the tiles |
 | Dashboard range filter | Mapped | chip `generic_filter` (same operators as the default path) |
-| Dashboard relative-date or unrecognised filter | Flagged | NEEDS REVIEW: the chip is emitted without a condition, so it is unfiltered until set by hand |
+| Dashboard relative-date or unrecognised filter | Flagged | NEEDS REVIEW on the chip and on every tile it applies to: the chip is emitted without a condition, so it is unfiltered until set by hand |
+| Dashboard mixed inclusive/exclusive range | Flagged | `BW_INC` chip (both bounds kept), NEEDS REVIEW on the chip and its tiles because the exclusive end is included |
+| Disabled widget / dashboard filter (`disabled: true`) | Mapped | not applied, as in Sisense; reported (a dashboard filter as `Skipped`) |
+| Widget ignoring a dashboard filter (`metadata.ignore`: all, dimension, instance id) | Mapped | the tile is in that chip's `excluded_visualizations`; reported |
+| Widget in Highlight mode (`dashboardFiltersMode: select`) with a chip on a column it plots | Flagged | NEEDS REVIEW: Sisense highlights rather than filters, which a chip cannot do. A chip on a column the widget does not plot filters it, as in Sisense |
+| Chip on a tile whose facts or path to the table cannot be determined | Flagged | NEEDS REVIEW on the chip and the tile |
+| Dashboard-level top / bottom N | Flagged | no chip form; NEEDS REVIEW on every tile |
+| Top / bottom N on a widget | Mapped | `top N` / `bottom N` when it ranks by the widget's only measure (both live-verified); another ranking measure or a non-numeric N is NEEDS REVIEW |
+| Quick function (e.g. Contribution), disabled plotted field, secondary value | Flagged | NEEDS REVIEW; the field is not carried |
+| Percent display (`format.mask.percent`) on a Model column with no format | Flagged | NEEDS REVIEW (the value would show as a plain number) |
+| Weekly bucket with a Sisense week start (`firstday`) | Flagged | NEEDS REVIEW: ThoughtSpot's weekly bucket follows the cluster's week start |
+| Measure bound to a Model formula whose aggregation differs (`avg` of a `sum ( ... )` formula) | Flagged | NEEDS REVIEW unless mapped by `field_map` |
+| Sisense calculated column (`tupleTransformations` add-column) | Mapped | the Model FORMULA of the same name on the same instance; never a plain column of that name, which could be a different measure |
+| Search value containing a backslash | Flagged | NEEDS REVIEW (quoting not verified for it; `'` is) |
 | Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns and Model columns with their own `format_pattern` / `currency_type` keep theirs. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)

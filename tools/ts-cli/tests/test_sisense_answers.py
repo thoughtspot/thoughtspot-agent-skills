@@ -161,3 +161,11 @@ def test_filter_top_n_skipped_and_exposure_check():
     # exposure check on: top-N skipped, ghost column dropped
     chips = extract_liveboard_filters(inv, ["Country", "Revenue"], {"Revenue"})
     assert chips == []
+
+
+def test_default_path_never_turns_a_bottom_n_into_a_top_n():
+    from ts_cli.sisense.answers import _rank_note, _widget_top_n
+    bottom = {"filters": [{"kind": "top_n", "operator": "bottom", "values": [5]}]}
+    top = {"filters": [{"kind": "top_n", "operator": "top", "values": [5]}]}
+    assert _widget_top_n(bottom) is None and "bottom" in _rank_note(bottom)
+    assert _widget_top_n(top) == 5 and _rank_note(top) == ""

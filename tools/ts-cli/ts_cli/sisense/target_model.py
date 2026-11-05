@@ -27,6 +27,7 @@ from collections import deque
 from typing import Optional
 
 _ON_SIDE = re.compile(r"\[([^\]:]+)::([^\]]+)\]")
+_OUTER_AGG = re.compile(r"^\s*(unique\s+count|count|sum|average|min|max)\s*\(", re.I)
 _COUNT_EXPR = re.compile(r"^\s*(unique\s+count|count)\s*\(\s*\[([^\]:]+)::([^\]]+)\]\s*\)\s*$", re.I)
 
 
@@ -65,13 +66,15 @@ class TargetModel:
         self.by_column_id: dict = {}      # 'inst::col' -> column name
         self.measures: set = set()
         self.formula_measures: set = set()  # formula-backed measures keep their name as output
+        self.formula_columns: set = set()   # every formula-backed column (attribute or measure)
+        self.formula_agg: dict = {}         # formula column -> its outermost aggregation, if whole-expr
         self.count_measures: dict = {}    # ('unique count'|'count', inst, col) -> column name
         self.columns: list = []
         self.formatted: set = set()       # columns carrying their own format_pattern / currency_type
         # base table -> {warehouse column: Table TML column name}, from the associated Table TMLs
         # (`ts tml export --associated`): a Model column_id names the TABLE column, which a
         # hand-designed Table may have renamed from the warehouse column a Sisense dim carries
-        self.table_cols: dict = _table_columns(tables)
+        self.table_cols, self.table_types = _table_columns(tables)
         for c in model.get("columns") or []:
             self._index_column(c)
         self._insts_by_norm: dict = {}
@@ -93,9 +96,13 @@ class TargetModel:
             return
         if not c.get("formula_id"):
             return
+        self.formula_columns.add(nm)
         if is_measure:
             self.formula_measures.add(nm)
         expr = self.formulas.get(c["formula_id"], "")
+        agg = _outer_aggregation(expr)
+        if agg:
+            self.formula_agg[nm] = agg
         self.instances_of[nm] = {t for t, _ in _ON_SIDE.findall(expr)}
         m = _COUNT_EXPR.match(expr)
         if m:
@@ -234,14 +241,31 @@ class TargetModel:
     # ---- column resolution ------------------------------------------------------------
     def column(self, inst: str, col: str) -> Optional[str]:
         """Model column exposing ``col`` (a WAREHOUSE column name, as a Sisense dim carries it) on
-        ``inst``: through the Table TML's db_column_name when the Tables were supplied, else the
-        column name itself, else a unique case/underscore-insensitive match."""
-        tcol = self.table_cols.get(self.base_of.get(inst), {}).get(col, col)
+        ``inst``: through the Table TML's db_column_name when the Tables were supplied (exact,
+        else a unique case/underscore-insensitive db name), else the column name itself, else a
+        unique case/underscore-insensitive match. Anything ambiguous is None, never a guess."""
+        tcol = self._table_column(inst, col) or col
         if f"{inst}::{tcol}" in self.by_column_id:
             return self.by_column_id[f"{inst}::{tcol}"]
         hits = [nm for key, nm in self.by_column_id.items()
                 if key.split("::")[0] == inst and _norm(key.split("::", 1)[1]) == _norm(col)]
         return hits[0] if len(hits) == 1 else None
+
+    def _table_column(self, inst: str, col: str) -> Optional[str]:
+        cols = self.table_cols.get(self.base_of.get(inst), {})
+        if col in cols:
+            return cols[col]
+        hits = [name for db, name in cols.items() if _norm(db) == _norm(col)]
+        return hits[0] if len(hits) == 1 else None
+
+    def data_type(self, model_col: str) -> Optional[str]:
+        """ThoughtSpot data type of a column-backed Model column, from the Table TMLs; None
+        when the Tables were not supplied or the column is a formula."""
+        key = next((k for k, nm in self.by_column_id.items() if nm == model_col), None)
+        if not key:
+            return None
+        inst, tcol = key.split("::", 1)
+        return self.table_types.get(self.base_of.get(inst), {}).get(tcol)
 
     def count_measure(self, kind: str, inst: str, col: str) -> Optional[str]:
         """A model formula measure ``unique count ( [inst::col] )`` (or ``count``), if any."""
@@ -252,14 +276,34 @@ class TargetModel:
         return None
 
 
-def _table_columns(tables) -> dict:
-    """Table TML dicts -> {table name: {db_column_name: Table column name}}."""
-    out = {}
+def _table_columns(tables) -> tuple:
+    """Table / SQL View TML dicts -> ({name: {warehouse column: TML column name}},
+    {name: {TML column name: data_type}})."""
+    names, types = {}, {}
     for t in tables or []:
-        body = t.get("table") or t
-        out[body.get("name")] = {c.get("db_column_name"): c.get("name")
-                                 for c in body.get("columns") or [] if c.get("db_column_name")}
-    return out
+        body = t.get("table") or t.get("sql_view") or t
+        cols = body.get("columns") or body.get("sql_view_columns") or []
+        names[body.get("name")] = {(c.get("db_column_name") or c.get("sql_output_column")): c.get("name")
+                                   for c in cols if c.get("db_column_name") or c.get("sql_output_column")}
+        types[body.get("name")] = {c.get("name"): (c.get("db_column_properties") or {}).get("data_type")
+                                   for c in cols if (c.get("db_column_properties") or {}).get("data_type")}
+    return names, types
+
+
+def _outer_aggregation(expr: str) -> Optional[str]:
+    """``sum ( ... )`` -> 'sum' when that aggregation wraps the WHOLE expression, else None."""
+    m = _OUTER_AGG.match(expr or "")
+    if not m:
+        return None
+    depth = 0
+    for i, ch in enumerate(expr):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return re.sub(r"\s+", " ", m.group(1).lower()) if not expr[i + 1:].strip() else None
+    return None
 
 
 def _joins_of(mt: dict) -> list:

@@ -2,26 +2,27 @@
 
 The default path (answers.py) binds widgets to the model ``build-model`` generates. This path
 binds them to a Model someone already designed, and carries the parts of a dashboard that
-decide whether the rebuilt board shows the same numbers:
+decide whether the rebuilt board shows the same numbers. The rule is an ALLOWLIST: a widget,
+filter or chip is carried only when every setting on it is one this path reads and has
+verified; any other setting (an unrecognised JAQL or filter key, a quick function, a disabled
+plotted item, a date value whose day boundary is unknown) makes it NEEDS REVIEW with the reason.
 
 - ``agg``: Sisense ``count`` is COUNT DISTINCT -> ``unique count``; a count over a key the
   Model hides binds to a Model formula ``unique count ( [inst::col] )`` when one exists.
 - widget-level filters become search filters (members ``=`` repeated, which ThoughtSpot ORs;
   excludes ``!=`` repeated, which it ANDs; ranges ``>= > <= <``). Never ``in (...)`` /
   ``not in (...)``: ThoughtSpot search ignores both silently (live-verified, 26.9).
-- a WidgetsTabber keeps only its active tab's widget when the hidden tabs plot the same fields
-  at another date level (the other grains are one click away in the chart's date-bucket
-  control); a hidden tab plotting anything else becomes a tile of its own.
+- a WidgetsTabber keeps only its active tab's widget when a hidden tab is the same chart (type,
+  fields, filters) at another date level (the other grains are one click away in the chart's
+  date-bucket control); any other hidden tab becomes a tile of its own.
+- top / bottom N is carried (`top N` / `bottom N`) only when it ranks by the widget's only
+  measure; a disabled widget or dashboard filter is off in Sisense and is not applied.
 - Sisense value titles become ``custom_name``; rich-text widgets and tab-set titles become
   note tiles; the columnar layout becomes the tile grid.
 - jump-to-dashboard drills become a details table built from the drill dashboard's widget,
   narrowed on the liveboard with right-click > Filter.
-- dashboard filters become chips (members/excludes as `in` / `not in`, ranges as a
-  generic_filter; any other condition, or one at a coarser date level than days, is flagged
-  rather than left as a silently unfiltered chip); a chip on a column a tile filters itself
-  is excluded from that tile (a chip REPLACES the tile's own filter, Sisense ANDs them), and
-  a chip that cannot reach a tile's facts, or binds a different role-played copy than a
-  tile's own Sisense path, is flagged.
+- dashboard filters become chips: see target_chips.py for how each chip is checked against
+  each tile, and target_filters.py for which conditions are carried.
 
 Anything that cannot be bound faithfully is reported NEEDS REVIEW with the reason, never
 dropped or substituted. ``overrides`` may map a Sisense dim to a Model column
@@ -36,30 +37,29 @@ import copy
 import html as _html
 import re
 
-from ts_cli.sisense.answers import _range_generic_filter, chart_type_for, date_bucket_suffix
+from ts_cli.sisense.answers import chart_type_for, date_bucket_suffix
+from ts_cli.sisense.target_chips import build_chips
+from ts_cli.sisense.target_filters import is_all, top_n, widget_filter
 from ts_cli.sisense.target_model import TargetModel, split_dim
 from ts_cli.tableau.liveboard import agg_label
 
 # Sisense agg -> ThoughtSpot search keyword. Sisense `count` is a DISTINCT count.
 AGG_KEYWORD = {"count": "unique count", "countduplicates": "count", "sum": "sum",
                "avg": "average", "average": "average", "min": "min", "max": "max"}
-_RANGE_OPS = (("from", ">="), ("fromNotEqual", ">"), ("to", "<="), ("toNotEqual", "<"), ("equals", "="))
 _MIN_HEIGHT = {"KPI": 2, "GRID_TABLE": 6, "PIVOT_TABLE": 6}
 _PX_PER_ROW = 55
 _NOTE_BG = "rgb(0, 132, 169)"
 _GRAIN_SUFFIX = re.compile(r"\s*\((daily|weekly|monthly|quarterly|yearly)\)\s*$", re.I)
 _TOKEN = re.compile(r"\[([^\]]+)\]")
-# JAQL date levels a plain comparison on the date column reads correctly: a coarser level's
-# members are period starts (`2024-01-01` for the year 2024), which `[Date] = ...` reads as a day
-_DAY_LEVELS = ("days", "day")
 
-
-def _literal(v) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, (int, float)):
-        return str(v)
-    return "'" + str(v).replace("'", "\\'") + "'"
+def _calculated_columns(inv: dict) -> set:
+    """(table, column) for every Sisense CALCULATED column: the only fields a Model formula may
+    be bound to by name."""
+    out = set()
+    for t in inv.get("tables") or []:
+        names = [c.get(k) for c in t.get("columns") or [] if c.get("calculated") for k in ("id", "name")]
+        out.update((t.get("jaql_name"), n) for n in names + list(t.get("calculated_columns") or []) if n)
+    return out
 
 
 class _Binder:
@@ -73,6 +73,7 @@ class _Binder:
                           for r in inv.get("relations") or []]
         self.field_map = (overrides or {}).get("field_map") or {}
         self.filter_map = (overrides or {}).get("filter_map") or {}
+        self.calculated = _calculated_columns(inv)
 
     # -- anchors: the fact instances a widget queries ---------------------------------
     def anchors(self, widget: dict) -> list:
@@ -102,12 +103,18 @@ class _Binder:
         inst, note = self.t.resolve_instance(table, anchors, self.relations)
         if not inst:
             return None, None, note
-        name = self.t.column(inst, col)
-        if not name:   # a Sisense calculated column is a Model formula, bound by its name
-            name = self.t.column_by_display(col)
-            if name and inst not in self.t.instances_of.get(name, {inst}):
-                name = None
+        name = self.t.column(inst, col) or self._calculated(table, col, inst)
         return name, inst, "" if name else f"{table}.{col} is not exposed on the target model"
+
+    def _calculated(self, table: str, col: str, inst: str):
+        """A Sisense CALCULATED column -> the Model FORMULA of the same (normalised) name on the
+        same instance; never any other column, which could be a different measure by that name."""
+        if (table, col) not in self.calculated:
+            return None
+        name = self.t.column_by_display(col)
+        if name in self.t.formula_columns and inst in self.t.instances_of.get(name, {inst}):
+            return name
+        return None
 
     def mapped(self, dim: str) -> tuple:
         """field_map entry -> (model column | None, None, note): a name the Model lacks is refused."""
@@ -119,6 +126,8 @@ class _Binder:
     def mapped_filter(self, dim: str) -> tuple:
         """filter_map entry -> (fragment | None, None, note): a column the Model lacks is refused."""
         frag = self.filter_map[dim]
+        if not _TOKEN.findall(frag):
+            return None, None, f"filter_map for {dim} names no [column], so it cannot be checked against the target model"
         bad = [t for t in _TOKEN.findall(frag) if t not in self.t.columns]
         if bad:
             return None, None, f"filter_map for {dim} names {', '.join(bad)}, not a column of the target model"
@@ -131,17 +140,12 @@ class _Binder:
             return {"note": f"formula field '{f.get('title') or '?'}' needs a Model measure (map it via field_map)"}
         name, inst, note = self.column(dim, anchors)
         if f.get("kind") != "measure":
-            if not name:
-                return {"note": note}
-            suf = date_bucket_suffix(f.get("level"))
-            token = f"[{name}].{suf.lower()}" if suf else f"[{name}]"
-            out = f"{_bucket_out(suf)}({name})" if suf else name
-            return {"name": name, "token": token, "out": out, "measure": False, "bucketed": bool(suf)}
+            return _dimension(name, f.get("level")) if name else {"note": note}
         kw = AGG_KEYWORD.get(agg)
         if not kw:
             return {"note": f"Sisense aggregation '{agg}' on {dim} has no mapped ThoughtSpot keyword"}
         if name and name in self.t.formula_measures:
-            return {"name": name, "token": f"[{name}]", "out": name, "measure": True}
+            return self._formula_measure(name, dim, agg, kw)
         if name:   # explicit keyword: a bare SUM column would come back as "Total <name>" anyway
             token = f"{kw} [{name}]"
             return {"name": name, "token": token, "out": f"{agg_label(token)} {name}", "measure": True}
@@ -153,49 +157,39 @@ class _Binder:
             return {"note": f"{kw} of {table}.{col}: add a Model measure '{kw} ( [{inst}::{col}] )' or map it via field_map"}
         return {"note": note}
 
+    def _formula_measure(self, name: str, dim: str, agg: str, kw: str) -> dict:
+        """A measure bound to a Model formula: carried only when the formula's own aggregation
+        is the Sisense one (or the binding was mapped by hand)."""
+        fa = self.t.formula_agg.get(name)
+        if dim not in self.field_map and fa != kw:
+            return {"note": f"Sisense {agg} of {dim} binds to Model formula [{name}], which is "
+                            f"{('a ' + fa) if fa else 'not a single ' + kw} (map it via field_map if it is the same measure)"}
+        return {"name": name, "token": f"[{name}]", "out": name, "measure": True}
+
     # -- one widget/drill filter -> search fragment -------------------------------------
     def filter_fragment(self, sf: dict, anchors: list) -> tuple:
         """-> (fragment | None, model column | None, note)."""
         dim = sf.get("dim") or ""
         if dim in self.filter_map:
             return self.mapped_filter(dim)
-        kind = sf.get("kind")
-        if kind == "top_n":
-            return None, None, ""            # carried as `top N` by the emitter
-        if (sf.get("raw") or {}).get("all"):
-            return None, None, ""            # "all" = no filter
+        if sf.get("kind") == "top_n":
+            return None, None, ""            # the ranking is decided per widget (target_filters.top_n)
         name, _, note = self.column(dim, anchors)
+        if is_all(sf):
+            return None, name, ""            # "all" = no condition; the widget still owns the column
         if not name:
             return None, None, f"filter on {dim}: {note} (map it via filter_map)"
-        level = _coarse_level(sf)
-        if level:
-            return None, None, (f"filter on {dim} is at the {level} level: its values are {level} periods, "
-                                f"which a comparison on [{name}] would read as single days (map it via filter_map)")
-        frag = _search_filter(kind, name, sf.get("raw") or {}, sf.get("values") or [])
-        if frag:
-            return frag, name, ""
-        return None, None, f"filter on {dim} ({kind}) has no deterministic search form"
+        frag, problem = widget_filter(sf, name, self.t)
+        if problem:
+            return None, name, f"filter on {dim}: {problem} (map it via filter_map)"
+        return frag, name, ""
 
 
-def _coarse_level(sf: dict) -> str:
-    """The date level of a member/exclude/range filter when coarser than days, else ''."""
-    level = (sf.get("level") or "").lower()
-    if level and level not in _DAY_LEVELS and sf.get("kind") in ("member", "exclude", "range"):
-        return level
-    return ""
-
-
-def _search_filter(kind: str, name: str, raw: dict, vals: list):
-    """One Sisense filter on a resolved column -> search fragment, or None.
-    Repeated `=` is ORed and repeated `!=` ANDed by ThoughtSpot (live-verified)."""
-    if kind == "member" and vals:
-        return " ".join(f"[{name}] = {_literal(v)}" for v in vals)
-    if kind == "exclude" and vals:
-        return " ".join(f"[{name}] != {_literal(v)}" for v in vals)
-    if kind == "range":
-        parts = [f"[{name}] {op} {_literal(raw[k])}" for k, op in _RANGE_OPS if raw.get(k) is not None]
-        return " ".join(parts) or None
-    return None
+def _dimension(name: str, level) -> dict:
+    suf = date_bucket_suffix(level)
+    token = f"[{name}].{suf.lower()}" if suf else f"[{name}]"
+    out = f"{_bucket_out(suf)}({name})" if suf else name
+    return {"name": name, "token": token, "out": out, "measure": False, "bucketed": bool(suf)}
 
 
 def _bucket_out(suf: str) -> str:
@@ -217,17 +211,30 @@ def note_tile(text: str) -> dict:
         f'<div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode" style="background-color: {_NOTE_BG};"></div>')}
 
 
+def _field_key(f: dict) -> tuple:
+    return (f.get("dim") or "", (f.get("agg") or "").lower(), f.get("kind") or "",
+            (f.get("panel") or "").lower(), repr(f.get("formula")))
+
+
 def _shape(w: dict) -> tuple:
-    """A widget's plotted fields with the date level left out: two tabs with the same shape are
-    one chart at two grains."""
-    return tuple(sorted((f.get("dim") or "", (f.get("agg") or "").lower(), f.get("kind") or "",
-                         (f.get("panel") or "").lower()) for f in w.get("fields", [])))
+    """A widget's plotted fields (date level left out) and its filters, exactly."""
+    filters = sorted(repr(sorted((k, repr(v)) for k, v in sf.items())) for sf in w.get("filters", []))
+    return (w.get("wtype"), tuple(sorted(_field_key(f) for f in w.get("fields", []))), tuple(filters))
+
+
+def _levels(w: dict) -> tuple:
+    return tuple(sorted((_field_key(f), (f.get("level") or "").lower()) for f in w.get("fields", [])))
+
+
+def _grain_variant(hidden: dict, shown: dict) -> bool:
+    """One chart at another date grain: same type, fields and filters, a different date level."""
+    return _shape(hidden) == _shape(shown) and _levels(hidden) != _levels(shown)
 
 
 def _hidden_tabs(widgets: list) -> tuple:
     """(grain variants, other hidden tabs): oid -> tab-set title for every widget a
-    WidgetsTabber hides. Only a hidden widget plotting the same fields as a shown one, apart
-    from the date level, is a grain variant; any other hidden tab is a chart of its own."""
+    WidgetsTabber hides. Only a hidden widget with the same type, fields and filters as a shown
+    one and a different date level is a grain variant; any other hidden tab is a chart of its own."""
     by_oid = {w.get("oid"): w for w in widgets}
     grain, other = {}, {}
     for w in widgets:
@@ -235,11 +242,11 @@ def _hidden_tabs(widgets: list) -> tuple:
         if not tb:
             continue
         keep = set((tb["tabs"][tb["active"]]["show"] if tb["tabs"] else []))
-        shown = {_shape(by_oid[o]) for o in keep if o in by_oid}
+        shown = [by_oid[o] for o in keep if o in by_oid]
         for tab in tb["tabs"]:
             for oid in tab["show"]:
-                if oid not in keep:
-                    hit = oid in by_oid and _shape(by_oid[oid]) in shown
+                if oid not in keep and oid in by_oid:
+                    hit = any(_grain_variant(by_oid[oid], s) for s in shown)
                     (grain if hit else other)[oid] = w.get("title") or ""
     return grain, other
 
@@ -251,7 +258,7 @@ def tabber_hidden(widgets: list) -> dict:
 
 _ROLE_OF_PANEL = {"categories": "Category", "x-axis": "Category", "rows": "Rows", "columns": "Columns",
                   "break by": "Series", "break by / color": "Series", "color": "Series"}
-_UNPLOTTED_PANELS = ("filters", "min", "max", "secondary")
+_UNPLOTTED_PANELS = ("filters", "min", "max")      # gauge bounds; `secondary` is a shown value
 
 
 def _label_for(f: dict, b: dict):
@@ -266,48 +273,84 @@ def _label_for(f: dict, b: dict):
 
 def _collect_fields(widget: dict, binder: _Binder, anchors: list) -> dict:
     """Plotted fields -> {cols, roles, tokens, measures, measure_outs, labels, notes}."""
-    acc = {"cols": [], "roles": [], "tokens": {}, "measures": set(), "measure_outs": {}, "labels": {}, "notes": []}
+    acc = {"cols": [], "roles": [], "tokens": {}, "measures": set(), "measure_outs": {}, "labels": {},
+           "notes": [], "measure_fields": []}
     for f in widget.get("fields", []):
         panel = (f.get("panel") or "").lower()
         if panel in _UNPLOTTED_PANELS:
+            continue
+        problem = _field_problem(f, panel)
+        if problem:
+            acc["notes"].append(problem)
             continue
         b = binder.field(f, anchors)
         if "note" in b:
             acc["notes"].append(b["note"])
             continue
-        if b["name"] in acc["cols"]:
-            if acc["tokens"][b["name"]] != b["token"]:   # same column, another aggregation or grain
-                acc["notes"].append(f"{b['token']} is not carried: the answer already uses [{b['name']}] "
-                                    f"as {acc['tokens'][b['name']]}, and one answer carries one use per column")
-            continue
-        acc["cols"].append(b["name"])
-        acc["roles"].append("Values" if b["measure"] else (_ROLE_OF_PANEL.get(panel) or "Category"))
-        acc["tokens"][b["name"]] = b["token"]
-        if b["measure"]:
-            acc["measures"].add(b["name"])
-            acc["measure_outs"][b["out"]] = b["name"]
-        label = _label_for(f, b)
-        if label:
-            acc["labels"][b["out"]] = label
+        _add_field(acc, f, b, panel, binder)
     return acc
 
 
+def _add_field(acc: dict, f: dict, b: dict, panel: str, binder) -> None:
+    """One bound field into the answer accumulator; a second use of a column is reported."""
+    if _field_warning(f):
+        acc["notes"].append(_field_warning(f))
+    if f.get("percent") and b["measure"] and b["name"] not in binder.t.formatted:
+        acc["notes"].append(f"Sisense shows {f.get('title') or b['name']} as a percent; Model column "
+                            f"[{b['name']}] has no format of its own, so it would show as a plain number")
+    if b["name"] in acc["cols"]:
+        if acc["tokens"][b["name"]] != b["token"]:   # same column, another aggregation or grain
+            acc["notes"].append(f"{b['token']} is not carried: the answer already uses [{b['name']}] "
+                                f"as {acc['tokens'][b['name']]}, and one answer carries one use per column")
+        return
+    acc["cols"].append(b["name"])
+    acc["roles"].append("Values" if b["measure"] else (_ROLE_OF_PANEL.get(panel) or "Category"))
+    acc["tokens"][b["name"]] = b["token"]
+    if b["measure"]:
+        acc["measures"].add(b["name"])
+        acc["measure_outs"][b["out"]] = b["name"]
+        acc["measure_fields"].append(f)
+    label = _label_for(f, b)
+    if label:
+        acc["labels"][b["out"]] = label
+
+
+def _field_problem(f: dict, panel: str):
+    """Why a plotted field cannot be carried as a plain column, or None."""
+    what = f.get("title") or f.get("dim") or "?"
+    if f.get("disabled"):
+        return f"field {what} is disabled in Sisense; not carried"
+    if f.get("quick_function"):
+        return f"field {what} applies the Sisense quick function {f['quick_function']}, which is not carried"
+    if panel == "secondary":
+        return f"the secondary value {what} is not carried"
+    return None
+
+
+def _field_warning(f: dict):
+    """Why a carried field may not match Sisense exactly (the field stays; the tile is flagged)."""
+    what = f.get("title") or f.get("dim") or "?"
+    if f.get("dateTimeLevel"):
+        return f"field {what} has Sisense date-time level {f['dateTimeLevel']}, which is not carried"
+    if (f.get("level") or "").lower() == "weeks" and f.get("firstday"):
+        return (f"field {what} buckets weeks starting on {f['firstday']} in Sisense; ThoughtSpot's weekly "
+                "bucket follows the cluster's week start, so confirm they match")
+    return None
+
+
 def _collect_filters(widget: dict, binder: _Binder, anchors: list) -> tuple:
-    """Widget filters -> (search fragments, columns the widget filters itself, notes)."""
+    """Widget filters -> (search fragments, columns the widget filters itself, notes). A column
+    the widget filters at all -- even with `all` or a filter that is not carried -- is its own:
+    in Sisense a widget filter takes priority over a dashboard filter on the same dimension."""
     frags, own, notes = [], set(), []
     for sf in widget.get("filters", []):
         frag, col, fnote = binder.filter_fragment(sf, anchors)
         if frag:
             frags.append(frag)
-            own.update([col] if col else _TOKEN.findall(frag))
+        own.update([col] if col else _TOKEN.findall(frag or ""))
         if fnote:
             notes.append(fnote)
     return frags, own, notes
-
-
-def _top_n(widget: dict):
-    return next((int(sf["values"][0]) for sf in widget.get("filters", [])
-                 if sf.get("kind") == "top_n" and str((sf.get("values") or [""])[0]).isdigit()), None)
 
 
 # Sisense shows full values; ThoughtSpot's default number format abbreviates (32.16K), which
@@ -346,17 +389,26 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     anchors = binder.anchors(widget)
     acc = _collect_fields(widget, binder, anchors)
     frags, own, fnotes = _collect_filters(widget, binder, anchors)
-    notes = ([note] if note else []) + acc["notes"] + fnotes
+    n, rank_frag, rank_notes = top_n(widget, acc["measure_fields"])
+    unsupported = widget.get("unsupported") or []
+    notes = (([note] if note else []) + acc["notes"] + fnotes + rank_notes
+             + ([f"widget carries settings this converter does not read: {', '.join(unsupported)}"] if unsupported else []))
+    info = ([f"disabled widget filter(s) in Sisense, not applied: {', '.join(widget['disabled_filters'])}"]
+            if widget.get("disabled_filters") else [])
     row = {"visual": title, "ts_chart": ct, "status": status}
     if not acc["cols"]:
-        row.update(status="NEEDS REVIEW", note="; ".join(notes) or "no fields mapped")
+        row.update(status="NEEDS REVIEW", note="; ".join(notes + info) or "no fields mapped")
         return None, row, own, []
     if notes:
-        row.update(status="NEEDS REVIEW", note="; ".join(notes))
+        row["status"] = "NEEDS REVIEW"
+    if notes or info:
+        row["note"] = "; ".join(notes + info)
+    extra = ctx.get("extra_filters", [])
+    own |= {c for f in extra for c in _TOKEN.findall(f)}
     a = build_answer(title, f"{ctx['key']}", binder.t.name, ctx.get("model_fqn"), acc["cols"], ct,
-                     acc["measures"], acc["roles"], _token_map(acc["tokens"]), _top_n(widget))["answer"]
-    a = _finish_answer(a, binder, ct, frags + ctx.get("extra_filters", []), acc["labels"], ctx.get("description"),
-                       acc["measure_outs"])
+                     acc["measures"], acc["roles"], _token_map(acc["tokens"]), n)["answer"]
+    a = _finish_answer(a, binder, ct, frags + extra + ([rank_frag] if rank_frag else []), acc["labels"],
+                       ctx.get("description"), acc["measure_outs"])
     return a, row, own, binder.t.facts_for(acc["cols"] + sorted(own))
 
 
@@ -426,129 +478,37 @@ def _drill_description(src_widgets: list, target_title: str) -> str:
             f"(replaces the Sisense drill to {target_title}).")
 
 
-def _drill_tables(inv, drills, binder, sources):
-    """Distinct drill targets -> [(key, answer, row)]: one details table per target, built from
-    the drill dashboard's first widget, carrying the filters EVERY source widget shares."""
+def _drill_tables(drills, binder, sources, model_fqn):
+    """Distinct drill targets -> [(key, answer, row, own, facts, widget)]: one details table per
+    target, built from the drill dashboard's first widget, carrying the filters EVERY source
+    widget shares. The table is a tile like any other, so dashboard chips are checked against it."""
     out = []
     by_title = {(d.get("dashboard") or {}).get("title"): d for d in drills or []}
     for target, src_widgets in sources.items():
         d = by_title.get(target)
         if not d:
             out.append((f"drill:{target}", None, {"visual": f"drill -> {target}", "ts_chart": "GRID_TABLE",
-                        "status": "NEEDS REVIEW", "note": f"drill dashboard '{target}' not supplied (--drill)"}))
+                        "status": "NEEDS REVIEW", "note": f"drill dashboard '{target}' not supplied (--drill)"},
+                        set(), [], {}))
             continue
         with_fields = [w for w in d.get("widgets", []) if w.get("fields")]
         if not with_fields:
             out.append((f"drill:{target}", None, {"visual": f"drill -> {target}", "ts_chart": "GRID_TABLE",
-                        "status": "NEEDS REVIEW", "note": f"drill dashboard '{target}' has no widget with fields"}))
+                        "status": "NEEDS REVIEW", "note": f"drill dashboard '{target}' has no widget with fields"},
+                        set(), [], {}))
             continue
         dw = with_fields[0]
         detail = dict(dw, wtype="tablewidget")    # the drill widget's own filters are kept
-        ctx = {"key": f"drill-{target}", "extra_filters": _shared_filters(binder, src_widgets),
+        ctx = {"key": f"drill-{target}", "model_fqn": model_fqn, "extra_filters": _shared_filters(binder, src_widgets),
                "description": _drill_description(src_widgets, dw.get("title") or target)}
-        a, row, _, _ = _answer_for(detail, binder, ctx, title_override=dw.get("title") or target)
+        a, row, own, facts = _answer_for(detail, binder, ctx, title_override=dw.get("title") or target)
         rest = [w.get("title") or "?" for w in with_fields[1:]]
         if rest:
             row.update(status="NEEDS REVIEW", note="; ".join(filter(None, [
                 row.get("note"), f"drill dashboard '{target}' has more widgets than its details table "
                                  f"carries: {', '.join(rest)}"])))
-        out.append((f"drill:{target}", a, row))
+        out.append((f"drill:{target}", a, row, own, facts, detail))
     return out
-
-
-def _review(visual: str, note: str) -> dict:
-    return {"visual": visual, "ts_chart": "FILTER", "status": "NEEDS REVIEW", "note": note}
-
-
-def _chip_column(sf: dict, binder: _Binder, anchor_sets: list) -> tuple:
-    """Dashboard filter -> (model column | None, instance | None, note)."""
-    dim = sf.get("dim") or ""
-    if dim in binder.field_map:
-        return binder.mapped(dim)
-    table, col = split_dim(dim)
-    inst, note = binder.t.resolve_chip_instance(table, anchor_sets, binder.relations)
-    name = binder.t.column(inst, col) if inst else None
-    if inst and not name:
-        note = f"{table}.{col} is not exposed on the target model"
-    return name, inst, note
-
-
-def _chip_condition(sf: dict, chip: dict):
-    """Carry a dashboard filter's condition onto its chip; -> the reason it cannot, or None.
-    A chip with no condition is unfiltered, so anything not carried is reported."""
-    kind, vals = sf.get("kind"), [str(v) for v in sf.get("values") or []]
-    if (sf.get("raw") or {}).get("all"):
-        return None                                   # "all" = no condition, faithfully
-    level = _coarse_level(sf)
-    if level:
-        return f"its values are {level} periods, which the chip would read as single days; set the chip by hand"
-    if kind in ("member", "exclude") and vals:
-        chip.update(oper="in" if kind == "member" else "not in", values=vals)
-        return None
-    gf = _range_generic_filter(sf.get("raw")) if kind == "range" else None
-    if gf:
-        chip["generic_filter"] = gf
-        return None
-    return f"its {kind} condition is not carried, so the chip is unfiltered; set it by hand"
-
-
-def _chip(sf: dict, name: str, inst, binder: _Binder, viz_meta: list) -> tuple:
-    """One resolved dashboard filter -> (chip, review rows)."""
-    chip = {"column": [name], "is_mandatory": False, "is_single_value": False, "display_name": ""}
-    rows = []
-    why = _chip_condition(sf, chip)
-    if why:
-        rows.append(_review(f"filter chip {name}", f"dashboard filter on {sf.get('dim') or name}: {why}"))
-    excluded = [vid for vid, own, _, _ in viz_meta if name in own]
-    if excluded:
-        chip["excluded_visualizations"] = excluded
-    unreached = _unreached(inst, binder, viz_meta, excluded) if inst else []
-    if unreached:
-        rows.append(_review(f"filter chip {name}", "does not reach the facts of: " + "; ".join(unreached)))
-    other = _other_path(sf, inst, binder, viz_meta, excluded) if inst else []
-    if other:
-        rows.append(_review(f"filter chip {name}", f"binds {inst} for every tile, but Sisense resolves "
-                            "each widget by its own path: " + "; ".join(other)))
-    return chip, rows
-
-
-def _other_path(sf: dict, inst: str, binder: _Binder, viz_meta: list, excluded: list) -> list:
-    """Tiles whose own resolution of the filter's table is a different instance than the chip's."""
-    table = split_dim(sf.get("dim") or "")[0]
-    out = []
-    for vid, _, facts, title in viz_meta:
-        if not facts or vid in excluded:
-            continue
-        own = binder.t.resolve_instance(table, facts, binder.relations)[0]
-        if own and own != inst:
-            out.append(f"{title} reaches it through {own}")
-    return out
-
-
-def _unreached(inst: str, binder: _Binder, viz_meta: list, excluded: list) -> list:
-    """Titles of tiles whose facts cannot reach the chip's instance."""
-    out = []
-    for vid, _, facts, title in viz_meta:
-        if facts and vid not in excluded and not any(inst in binder.t.reachable(a) for a in facts):
-            out.append(title)
-    return out
-
-
-def _chips(inv, binder, viz_meta):
-    """Dashboard filters -> (chips, report rows). viz_meta: [(viz_id, own_cols, facts, title)]."""
-    chips, rows = [], []
-    anchor_sets = [m[2] for m in viz_meta if m[2]]
-    for sf in (inv.get("dashboard") or {}).get("filters", []) or []:
-        if sf.get("kind") == "top_n":
-            continue
-        name, inst, note = _chip_column(sf, binder, anchor_sets)
-        if not name:
-            rows.append(_review(f"filter chip {sf.get('dim') or ''}", note))
-            continue
-        chip, chip_rows = _chip(sf, name, inst, binder, viz_meta)
-        rows += chip_rows + ([_review(f"filter chip {name}", note)] if note else [])
-        chips.append(chip)
-    return chips, rows
 
 
 def _widget_tiles(inv, widgets, binder, model_fqn) -> tuple:
@@ -572,7 +532,7 @@ def _widget_tiles(inv, widgets, binder, model_fqn) -> tuple:
                     "tab, so it is a tile of its own")]))
             rows.append(row)
             if a:
-                placed[oid], content[oid] = {"kind": "answer", "ct": row["ts_chart"]}, ("answer", a, own, facts)
+                placed[oid], content[oid] = {"kind": "answer", "ct": row["ts_chart"]}, ("answer", a, own, facts, row, w)
                 for tgt in w.get("drill_targets") or []:
                     drill_sources.setdefault(tgt, []).append(w)
     return rows, placed, content, drill_sources
@@ -594,7 +554,7 @@ def _note_text(w: dict, inv: dict) -> str:
 
 
 def _assemble(inv, placed, content) -> tuple:
-    """Placed tiles -> (visualizations, layout tiles, viz_meta, answers)."""
+    """Placed tiles -> (visualizations, layout tiles, tiles for the chip checks, answers)."""
     viz, layout, viz_meta, answers = [], [], [], []
     for n, (oid, x, y, w, h) in enumerate(sorted(_place(inv, placed), key=lambda t: (t[2], t[1])), 1):
         vid, item = f"Viz_{n}", content[oid]
@@ -603,7 +563,8 @@ def _assemble(inv, placed, content) -> tuple:
         else:
             viz.append({"id": vid, "answer": item[1]})
             answers.append({"answer": item[1]})
-            viz_meta.append((vid, item[2], item[3], item[1]["name"]))
+            viz_meta.append({"vid": vid, "own": item[2], "facts": item[3], "title": item[1]["name"],
+                             "row": item[4], "widget": item[5]})
         layout.append({"visualization_id": vid, "x": x, "y": y, "height": h, "width": w})
     return viz, layout, viz_meta, answers
 
@@ -618,13 +579,14 @@ def build_target_liveboard(inv: dict, target_tml: dict, model_fqn=None, override
     report_name = overrides.get("report_name") or (inv.get("dashboard") or {}).get("title") or target.name
     rows, placed, content, drill_sources = _widget_tiles(inv, inv.get("widgets", []) or [], binder,
                                                          model_fqn or target_tml.get("guid"))
-    for key, a, row in _drill_tables(inv, drills, binder, drill_sources):
+    for key, a, row, own, facts, dw in _drill_tables(drills, binder, drill_sources,
+                                                     model_fqn or target_tml.get("guid")):
         rows.append(row)
         if a:
             placed[key + ":note"], content[key + ":note"] = {"kind": "note", "ct": None}, ("note", row["visual"])
-            placed[key], content[key] = {"kind": "answer", "ct": "GRID_TABLE"}, ("answer", a, set(), [])
-    viz, layout, viz_meta, answers = _assemble(inv, placed, content)
-    chips, chip_rows = _chips(inv, binder, viz_meta)
+            placed[key], content[key] = {"kind": "answer", "ct": "GRID_TABLE"}, ("answer", a, own, facts, row, dw)
+    viz, layout, tiles, answers = _assemble(inv, placed, content)
+    chips, chip_rows = build_chips(inv, binder, tiles)
     lb = {"liveboard": {"name": report_name, "visualizations": viz, "layout": {"tiles": layout}}}
     if chips:
         lb["liveboard"]["filters"] = chips

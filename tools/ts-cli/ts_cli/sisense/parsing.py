@@ -85,6 +85,12 @@ def _parse_table(t: dict, tables: list, col_by_oid: dict, table_by_oid: dict) ->
         "jaql_name": t.get("name") or t_id,   # the table name JAQL dims use ([name.column])
         "columns": _parse_columns(t, col_by_oid, t_id),
         "sql_expression": t.get("expression") if t.get("type") == "custom" else None,
+        # Sisense calculated columns added on the table (`tupleTransformations` add-column):
+        # names only, for binding; the model path reads `columns[].calculated` as before
+        "calculated_columns": sorted({n for tt in t.get("tupleTransformations") or []
+                                      if tt.get("type") == "add-column"
+                                      for n in ((tt.get("arguments") or {}).get("id"),
+                                                (tt.get("arguments") or {}).get("name")) if n}),
     })
     if t_oid:
         table_by_oid[t_oid] = t_id
@@ -161,8 +167,12 @@ def _jaql_to_field(jaql: dict) -> dict | None:
         kind, f = "measure", None
     else:
         kind, f = "dimension", None
-    return {"kind": kind, "dim": dim, "agg": agg, "title": jaql.get("title") or "",
-            "formula": f, "level": jaql.get("level")}
+    out = {"kind": kind, "dim": dim, "agg": agg, "title": jaql.get("title") or "",
+           "formula": f, "level": jaql.get("level")}
+    for key in ("datatype", "firstday", "dateTimeLevel"):
+        if jaql.get(key):
+            out[key] = jaql[key]
+    return out
 
 
 def _classify_member(f: dict, dim) -> dict | None:
@@ -200,6 +210,26 @@ def _classify_range(f: dict, dim) -> dict | None:
             "values": [f[k] for k in ("from", "to", "equals") if k in f], "raw": f}
 
 
+# Filter keys each kind is READ for; anything else on a filter is recorded in ``unsupported``
+# so a consumer that claims fidelity can refuse it instead of carrying a filter it cannot read.
+_COMMON_FILTER_KEYS = frozenset({"explicit", "multiSelection", "level", "all"})
+_KIND_FILTER_KEYS = {
+    "member": {"members"},
+    "exclude": {"exclude", "isCondition"},
+    "relative_date": {"last", "next"},
+    "top_n": {"top", "bottom", "by"},
+    "range": {"from", "to", "fromNotEqual", "toNotEqual", "equals", "isBetween"},
+    "unknown": set(),
+}
+
+
+def _unsupported_keys(kind: str, f: dict) -> list:
+    keys = set(f) - _COMMON_FILTER_KEYS - _KIND_FILTER_KEYS.get(kind, set())
+    if kind == "exclude":
+        keys |= {f"exclude.{k}" for k in (f.get("exclude") or {}) if k != "members"}
+    return sorted(keys)
+
+
 # Ordered so the first matching kind wins (member > exclude > relative_date > top_n > range).
 _FILTER_CLASSIFIERS = (_classify_member, _classify_exclude, _classify_relative_date,
                        _classify_top_n, _classify_range)
@@ -227,23 +257,60 @@ def _classify_filter(jaql: dict) -> dict | None:
         hit = {"kind": "unknown", "dim": dim, "operator": ",".join(f.keys()), "values": [], "raw": f}
     if jaql.get("level"):   # a date filter's grain: members are period starts, not days
         hit["level"] = jaql["level"]
+    if jaql.get("datatype"):
+        hit["datatype"] = jaql["datatype"]
+    unsupported = _unsupported_keys(hit["kind"], f)
+    if unsupported:
+        hit["unsupported"] = unsupported
     return hit
 
 
+# Panel-item and JAQL keys the parser reads or that only affect presentation. Anything else is
+# recorded per widget in ``unsupported`` (a consumer claiming fidelity refuses the widget).
+_ITEM_KEYS = frozenset({"jaql", "instanceid", "format", "disabled", "panel", "field", "hierarchies",
+                        "categoriesSorting", "originalJaql", "quickFunction"})
+_JAQL_KEYS = frozenset({"table", "column", "dim", "datatype", "columnTitle", "tableTitle", "merged",
+                        "isDashboardFilter", "datasource", "locale", "title", "collapsed", "panel",
+                        "instanceid", "filter", "isPrimary", "level", "agg", "isWidgetFilter", "type",
+                        "formula", "context", "sort", "sortDetails", "firstday", "dateTimeLevel"})
+
+
+def _item_unsupported(item: dict, jaql: dict) -> list:
+    return sorted({f"item.{k}" for k in item if k not in _ITEM_KEYS}
+                  | {f"jaql.{k}" for k in jaql if k not in _JAQL_KEYS})
+
+
+def _parse_item(pname: str, item: dict, acc: dict) -> None:
+    """One panel item -> fields / filters. A disabled FILTER is off in Sisense (no filtering),
+    so it is recorded in ``disabled_filters`` and not applied; a disabled plotted item is kept
+    with ``disabled: true`` for the consumer to decide."""
+    jaql = item.get("jaql") or {}
+    acc["unsupported"].update(_item_unsupported(item, jaql))
+    field = _jaql_to_field(jaql)
+    if field:
+        field["panel"] = pname
+        if item.get("quickFunction"):
+            field["quick_function"] = item["quickFunction"]
+        if item.get("disabled") and pname.lower() != "filters":
+            field["disabled"] = True
+        mask = (item.get("format") or {}).get("mask") or {}
+        if mask.get("percent"):
+            field["percent"] = True
+        acc["fields"].append(field)
+    if jaql.get("filter"):
+        if item.get("disabled"):
+            acc["disabled_filters"].append(jaql.get("dim") or jaql.get("title") or "?")
+            return
+        sf = _classify_filter(jaql)
+        if sf:
+            acc["filters"].append(sf)
+
+
 def parse_widget(widget: dict, warnings: list) -> dict:
-    fields: list[dict] = []
-    filters: list[dict] = []
+    acc = {"fields": [], "filters": [], "disabled_filters": [], "unsupported": set()}
     try:
         for pname, item in _items(widget):
-            jaql = item.get("jaql") or {}
-            field = _jaql_to_field(jaql)
-            if field:
-                field["panel"] = pname
-                fields.append(field)
-            if jaql.get("filter"):
-                sf = _classify_filter(jaql)
-                if sf:
-                    filters.append(sf)
+            _parse_item(pname, item, acc)
     except Exception as e:  # never let one malformed widget abort the parse
         warnings.append(f"Could not fully parse widget {widget.get('oid', '?')}: {e}")
     out = {
@@ -251,10 +318,28 @@ def parse_widget(widget: dict, warnings: list) -> dict:
         "title": widget.get("title") or "",
         "wtype": widget.get("type") or "",
         "subtype": widget.get("subtype") or "",
-        "fields": fields,
-        "filters": filters,
+        "fields": acc["fields"],
+        "filters": acc["filters"],
     }
+    for key in ("disabled_filters", "unsupported"):
+        if acc[key]:
+            out[key] = sorted(acc[key]) if key == "unsupported" else acc[key]
     out.update(_widget_extras(widget))
+    out.update(_dashboard_filter_settings(widget))
+    return out
+
+
+def _dashboard_filter_settings(widget: dict) -> dict:
+    """How dashboard filters reach this widget: ``filters_mode`` (Sisense ``filter`` slices,
+    ``select`` is Highlight) and ``ignore`` ({all, dimensions, ids}) — only when not the default."""
+    out: dict = {}
+    mode = (widget.get("options") or {}).get("dashboardFiltersMode")
+    if mode and mode != "filter":
+        out["filters_mode"] = mode
+    ig = (widget.get("metadata") or {}).get("ignore") or {}
+    if ig.get("all") or ig.get("dimensions") or ig.get("ids"):
+        out["ignore"] = {"all": bool(ig.get("all")), "dimensions": list(ig.get("dimensions") or []),
+                         "ids": list(ig.get("ids") or [])}
     return out
 
 
@@ -291,21 +376,34 @@ def _drill_targets(drill: dict) -> list:
                         for d in drill.get("dashboardIds") or [] if isinstance(d, dict)) if t]
 
 
+def _dashboard_filter(f: dict, dash_filters: list, disabled: list) -> None:
+    """One dashboard filter (a cascading group has no jaql of its own, only levels[]) -> one
+    entry per level; a switched-off one performs no filtering in Sisense, so it is listed apart."""
+    for jaql in f.get("levels") or [f.get("jaql") or f]:
+        if f.get("disabled") or jaql.get("disabled"):
+            disabled.append(jaql.get("dim") or jaql.get("title") or "?")
+            continue
+        sf = _classify_filter(jaql)
+        if sf:
+            sf["instanceids"] = [i for i in (f.get("instanceid"), jaql.get("instanceid")) if i]
+            dash_filters.append(sf)
+
+
 def parse_dashboard(raw: dict, warnings: list) -> dict:
     dash_filters: list[dict] = []
+    disabled: list = []
     for f in raw.get("filters", []) or []:
-        # a cascading filter group (Client > Program > Drug) has no jaql of its own, only levels[]
-        for jaql in f.get("levels") or [f.get("jaql") or f]:
-            sf = _classify_filter(jaql)
-            if sf:
-                dash_filters.append(sf)
-    return {
+        _dashboard_filter(f, dash_filters, disabled)
+    out = {
         "oid": raw.get("oid") or raw.get("_id") or "",
         "title": raw.get("title") or "",
         "datasource": (raw.get("datasource") or {}).get("title") or "",
         "filters": dash_filters,
         "layout": _parse_layout(raw.get("layout") or {}),
     }
+    if disabled:
+        out["disabled_filters"] = disabled
+    return out
 
 
 def _px(h) -> int:

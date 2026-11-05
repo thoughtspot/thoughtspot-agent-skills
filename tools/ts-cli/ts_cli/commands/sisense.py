@@ -236,7 +236,7 @@ def _load_tml(path: str) -> tuple:
     if model is None:
         typer.echo(f"--target-model {path} is not a Model TML", err=True)
         raise SystemExit(1)
-    return model, [d for d in docs if isinstance(d, dict) and d.get("table")]
+    return model, [d for d in docs if isinstance(d, dict) and (d.get("table") or d.get("sql_view"))]
 
 
 def _target_liveboard(inv, target_model, model_fqn, ov, drill_files, out) -> None:

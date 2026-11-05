@@ -391,16 +391,42 @@ def test_widget_filter_at_a_coarser_date_level_is_needs_review_not_a_day_equalit
     w = _w("w1", "Visits 2024", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")], [year])
     res = build_target_liveboard(_inv([w]), _target())
     row = _row(res, "Visits 2024")
-    assert row["status"] == "NEEDS REVIEW" and "years level" in row["note"]
+    assert row["status"] == "NEEDS REVIEW" and "years periods" in row["note"]
     assert "2024-01-01" not in _answers(res)["Visits 2024"]["search_query"]
 
 
-def test_day_level_widget_filter_still_compares_the_date():
-    day = dict(_member("[Visit_Start_Date.date_day (Calendar)]", ["2024-01-05T00:00:00"]), level="days")
-    w = _w("w1", "Visits 5 Jan", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")], [day])
-    res = build_target_liveboard(_inv([w]), _target())
+def _date_tables(dtype):
+    return [{"table": {"name": "dim_date", "columns": [
+        {"name": "date_day", "db_column_name": "date_day", "db_column_properties": {"data_type": dtype}}]}}]
+
+
+def _day_filter_widget(level="days"):
+    day = dict(_member("[Visit_Start_Date.date_day (Calendar)]", ["2024-01-05T00:00:00"]),
+               datatype="datetime", **({"level": level} if level else {}))
+    return _w("w1", "Visits 5 Jan", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")], [day])
+
+
+def test_day_level_filter_on_a_date_column_compares_the_date():
+    res = build_target_liveboard(_inv([_day_filter_widget()]), _target(), tables=_date_tables("DATE"))
     assert "[Visit Start Date] = '2024-01-05T00:00:00'" in _answers(res)["Visits 5 Jan"]["search_query"]
     assert _row(res, "Visits 5 Jan")["status"] == "Migrated"
+
+
+def test_day_level_filter_on_a_timestamp_or_unknown_column_is_needs_review():
+    stamp = _row(build_target_liveboard(_inv([_day_filter_widget()]), _target(), tables=_date_tables("DATE_TIME")),
+                 "Visits 5 Jan")
+    assert stamp["status"] == "NEEDS REVIEW" and "DATE_TIME column" in stamp["note"]
+    unknown = _row(build_target_liveboard(_inv([_day_filter_widget()]), _target()), "Visits 5 Jan")
+    assert unknown["status"] == "NEEDS REVIEW" and "--associated" in unknown["note"]
+
+
+def test_date_filter_with_no_level_or_a_finer_level_is_needs_review():
+    none = _row(build_target_liveboard(_inv([_day_filter_widget(level=None)]), _target(),
+                                       tables=_date_tables("DATE")), "Visits 5 Jan")
+    assert none["status"] == "NEEDS REVIEW" and "no level" in none["note"]
+    hours = _row(build_target_liveboard(_inv([_day_filter_widget(level="hours")]), _target(),
+                                        tables=_date_tables("DATE")), "Visits 5 Jan")
+    assert hours["status"] == "NEEDS REVIEW" and "finer than the days" in hours["note"]
 
 
 def test_chip_at_a_coarser_date_level_is_needs_review():
@@ -446,8 +472,11 @@ def test_chip_binding_another_role_copy_than_a_tiles_own_path_is_flagged():
     stats = _w("w2", "Visit total", "indicator", [_f("[fact_case_stats.visit_total]", "value", "measure", "sum")])
     res = build_target_liveboard(_inv([visits, stats], [_exclude("[dim_site.name]", ["Test Site"])]), _target())
     notes = [r["note"] for r in _chip_rows(res)]
-    assert any("binds Case Site" in n and "Open visits reaches it through Visit Site" in n for n in notes)
+    assert any("Open visits (the chip binds Case Site, but this widget reaches the table through Visit Site" in n
+               for n in notes)
     assert not any("Visit total" in n for n in notes)              # its own path IS Case Site
+    assert _row(res, "Open visits")["status"] == "NEEDS REVIEW"    # the tile row carries it too
+    assert _row(res, "Visit total")["status"] == "Migrated"
 
 
 def test_model_column_format_wins_over_the_full_value_default():
@@ -521,3 +550,225 @@ def test_column_names_differing_only_in_case_and_underscores_resolve():
         if c["name"] == "Case ID":
             c["column_id"] = "dim_case::Source PK"
     assert TargetModel(target).column("dim_case", "source_pk") == "Case ID"
+
+
+# --------------------------------------------------------------------------- review 3: allowlist
+def test_hidden_tab_with_different_filters_is_its_own_tile_not_merged():
+    m = [_f("[fact_visit.case_id_]", "values", "measure", "count")]
+    day = [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months")]
+    this = _w("wy", "This Year", "chart/line", day + m, [_member("[dim_case.status]", ["Open"])])
+    last = _w("wl", "Last Year", "chart/line", day + m, [_member("[dim_case.status]", ["Closed"])])
+    tab = _w("wt", "Years", "WidgetsTabber", [],
+             tabber={"tabs": [{"title": "THIS", "show": ["wy"]}, {"title": "LAST", "show": ["wl"]}], "active": 0})
+    res = build_target_liveboard(_inv([tab, this, last]), _target())
+    assert set(_answers(res)) == {"This Year", "Last Year"}
+    assert not any(r["status"] == "Merged" for r in res["visual_rows"])
+
+
+def test_hidden_tab_identical_to_the_shown_one_is_not_a_grain_variant():
+    m = [_f("[fact_visit.case_id_]", "values", "measure", "count")]
+    a = _w("wa", "A", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months")] + m)
+    b = _w("wb", "B", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months")] + m)
+    tab = _w("wt", "Same", "WidgetsTabber", [],
+             tabber={"tabs": [{"title": "A", "show": ["wa"]}, {"title": "B", "show": ["wb"]}], "active": 0})
+    assert tabber_hidden([tab, a, b]) == {}
+
+
+def _rank(op, n, by_dim="[fact_visit.cost]", by_agg="sum"):
+    raw = {op: n, "by": {"dim": by_dim, "agg": by_agg}}
+    return {"kind": "top_n", "dim": "[dim_site.name]", "operator": op, "values": [n], "raw": raw}
+
+
+def _ranked(rank):
+    return _w("w1", "Sites", "chart/bar", [_f("[dim_site.name]", "categories"),
+                                           _f("[fact_visit.cost]", "values", "measure", "sum")], [rank])
+
+
+def test_top_and_bottom_n_rank_by_the_widgets_measure():
+    top = _answers(build_target_liveboard(_inv([_ranked(_rank("top", 5))]), _target()))["Sites"]
+    assert top["search_query"].endswith("top 5") and "bottom" not in top["search_query"]
+    res = build_target_liveboard(_inv([_ranked(_rank("bottom", 5))]), _target())
+    q = _answers(res)["Sites"]["search_query"]
+    assert q.endswith("bottom 5") and "top" not in q and _row(res, "Sites")["status"] == "Migrated"
+
+
+def test_ranking_by_another_measure_or_non_numeric_n_is_needs_review():
+    other = _row(build_target_liveboard(_inv([_ranked(_rank("top", 5, by_agg="avg"))]), _target()), "Sites")
+    assert other["status"] == "NEEDS REVIEW" and "not the widget's only measure" in other["note"]
+    bad = _row(build_target_liveboard(_inv([_ranked(_rank("top", "ten"))]), _target()), "Sites")
+    assert bad["status"] == "NEEDS REVIEW" and "not a whole number" in bad["note"]
+
+
+def test_dashboard_level_ranking_is_needs_review_on_every_tile():
+    res = build_target_liveboard(_inv([_visits()], [_rank("top", 3)]), _target())
+    assert any(r["status"] == "NEEDS REVIEW" and "top/bottom" in r["note"] for r in _chip_rows(res))
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"
+
+
+def test_display_name_fallback_binds_only_a_calculated_column_to_a_model_formula():
+    # [fact_visit.Visit Case Count] is NOT a Sisense calculated column: no fallback, not exposed
+    w = _w("w1", "Cases", "indicator", [_f("[fact_visit.Visit Case Count]", "value", "measure", "sum")])
+    assert _row(build_target_liveboard(_inv([w]), _target()), "Cases")["status"] == "NEEDS REVIEW"
+    inv = _inv([w])
+    inv["tables"] = [dict(t, columns=[{"id": "Visit Case Count", "name": "Visit Case Count", "calculated": True}])
+                     if t["jaql_name"] == "fact_visit" else t for t in inv["tables"]]
+    row = _row(build_target_liveboard(inv, _target()), "Cases")
+    # bound now, but the Model formula is a unique count and Sisense sums: flagged, not carried
+    assert row["status"] == "NEEDS REVIEW" and "Model formula [Visit Case Count], which is a unique count" in row["note"]
+
+
+def test_display_name_fallback_never_binds_a_plain_model_column():
+    target = _target()
+    target["model"]["columns"].append({"name": "Revenue", "column_id": "fact_visit::net_revenue",
+                                       "properties": {"column_type": "MEASURE", "aggregation": "SUM"}})
+    inv = _inv([_w("w1", "Rev", "indicator", [_f("[fact_visit.Revenue]", "value", "measure", "sum")])])
+    inv["tables"] = [dict(t, columns=[{"id": "Revenue", "name": "Revenue", "calculated": True}])
+                     if t["jaql_name"] == "fact_visit" else t for t in inv["tables"]]
+    row = _row(build_target_liveboard(inv, target), "Rev")
+    assert row["status"] == "NEEDS REVIEW" and "not exposed" in row["note"]
+
+
+def test_chip_on_a_drill_tables_own_filter_column_excludes_that_tile():
+    src = _w("w1", "Cases by Site", "pivot2",
+             [_f("[dim_site.name]", "rows"), _f("[fact_visit.case_id_]", "values", "measure", "count")],
+             drill_targets=["_drill_case_list"])
+    drill = {"dashboard": {"title": "_drill_case_list"},
+             "widgets": [_w("d1", "Case List", "pivot2", [_f("[dim_case.source_pk]", "rows")],
+                            [_member("[dim_case.status]", ["Open"])])]}
+    res = build_target_liveboard(_inv([src], [_member("[dim_case.status]", ["Open", "Closed"])]), _target(),
+                                 drills=[drill])
+    lb = res["liveboard"]["liveboard"]
+    vid = next(v["id"] for v in lb["visualizations"] if v.get("answer", {}).get("name") == "Case List")
+    assert vid in lb["filters"][0]["excluded_visualizations"]
+    no_obj_id = _target()
+    no_obj_id.pop("obj_id")
+    bare = build_target_liveboard(_inv([src]), no_obj_id, drills=[drill])
+    # without an exported obj_id the drill table binds like every other tile (an obj_id derived
+    # from the Model GUID), not by Model name alone
+    assert _answers(bare)["Case List"]["tables"] == _answers(bare)["Cases by Site"]["tables"]
+    assert _answers(bare)["Case List"]["tables"][0]["obj_id"].endswith("-11111111")
+
+
+def test_disabled_filters_are_not_applied_and_are_reported():
+    from ts_cli.sisense.parsing import parse_dashboard, parse_widget
+    raw = {"oid": "w1", "title": "Visits", "type": "indicator", "metadata": {"panels": [
+        {"name": "value", "items": [{"jaql": {"dim": "[fact_visit.case_id_]", "agg": "count", "title": "#"}}]},
+        {"name": "filters", "items": [{"disabled": True, "jaql": {"dim": "[dim_case.status]",
+                                                                   "filter": {"members": ["Open"]}}}]}]}}
+    w = parse_widget(raw, [])
+    assert w["filters"] == [] and w["disabled_filters"] == ["[dim_case.status]"]
+    dash = parse_dashboard({"title": "D", "filters": [{"disabled": True, "jaql": {"dim": "[dim_case.status]",
+                                                                               "filter": {"members": ["Open"]}}}]}, [])
+    assert dash["filters"] == [] and dash["disabled_filters"] == ["[dim_case.status]"]
+    res = build_target_liveboard(_inv([w], [])  | {"dashboard": dict(dash, layout=[])}, _target())
+    assert "disabled widget filter" in _row(res, "Visits")["note"] and _row(res, "Visits")["status"] == "Migrated"
+    assert any(r["status"] == "Skipped" and "disabled in Sisense" in r["note"] for r in _chip_rows(res))
+
+
+def test_widget_ignoring_a_dashboard_filter_is_excluded_from_its_chip():
+    ign = dict(_visits(), ignore={"all": False, "dimensions": ["[dim_case.status]"], "ids": []})
+    res = build_target_liveboard(_inv([ign], [_member("[dim_case.status]", ["Open"])]), _target())
+    lb = res["liveboard"]["liveboard"]
+    assert lb["filters"][0]["excluded_visualizations"] == [lb["visualizations"][0]["id"]]
+    assert _row(res, "Visits")["status"] == "Migrated"
+    by_id = dict(_visits(), ignore={"all": False, "dimensions": [], "ids": ["f-1"]})
+    chip = dict(_member("[dim_case.status]", ["Open"]), instanceids=["f-1"])
+    lb2 = build_target_liveboard(_inv([by_id], [chip]), _target())["liveboard"]["liveboard"]
+    assert lb2["filters"][0]["excluded_visualizations"] == [lb2["visualizations"][0]["id"]]
+
+
+def test_highlight_mode_on_a_plotted_column_is_needs_review():
+    w = _w("w1", "By status", "chart/column", [_f("[dim_case.status]", "categories"),
+                                               _f("[fact_visit.case_id_]", "values", "measure", "count")],
+           filters_mode="select")
+    res = build_target_liveboard(_inv([w], [_member("[dim_case.status]", ["Open"])]), _target())
+    assert _row(res, "By status")["status"] == "NEEDS REVIEW" and "Highlight" in _row(res, "By status")["note"]
+    # a column the widget does not plot filters normally even in Highlight mode
+    res2 = build_target_liveboard(_inv([dict(w, fields=[_f("[fact_visit.case_id_]", "value", "measure", "count")])],
+                                       [_member("[dim_case.status]", ["Open"])]), _target())
+    assert _row(res2, "By status")["status"] == "Migrated"
+
+
+def test_mixed_bound_range_chip_and_unfiltered_chip_flag_their_tiles():
+    res = build_target_liveboard(_inv([_visits()], [_range("[fact_visit.cost]", {"from": 10, "toNotEqual": 50})]),
+                                 _target())
+    assert any("one bound is inclusive" in r["note"] for r in _chip_rows(res))
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"
+    rel = {"kind": "relative_date", "dim": "[Visit_Start_Date.date_day (Calendar)]", "operator": "last",
+           "values": [{"count": 30}], "raw": {"last": {"count": 30}}}
+    res2 = build_target_liveboard(_inv([_visits()], [rel]), _target())
+    assert _row(res2, "Visits")["status"] == "NEEDS REVIEW" and "not carried exactly" in _row(res2, "Visits")["note"]
+
+
+def test_chip_on_a_tile_whose_facts_or_path_cannot_be_determined_is_needs_review():
+    two_facts = _w("w1", "Both", "pivot2", [_f("[fact_visit.cost]", "values", "measure", "sum"),
+                                            _f("[fact_case_stats.visit_total]", "values", "measure", "sum")])
+    res = build_target_liveboard(_inv([two_facts], [_member("[dim_case.status]", ["Open"])]), _target())
+    assert _row(res, "Both")["status"] == "NEEDS REVIEW" and "could not be determined" in _row(res, "Both")["note"]
+
+
+def test_aggregation_differing_from_a_model_formula_is_needs_review():
+    # a Sisense calculated column bound to the Model formula `unique count ( ... )`: count matches,
+    # average does not and must not be carried as the formula's unique count
+    w = _w("w1", "Cases", "indicator", [_f("[fact_visit.Visit Case Count]", "value", "measure", "count"),
+                                        _f("[fact_visit.Visit Case Count]", "value", "measure", "avg")])
+    inv = _inv([w])
+    inv["tables"] = [dict(t, columns=[{"id": "Visit Case Count", "name": "Visit Case Count", "calculated": True}])
+                     if t["jaql_name"] == "fact_visit" else t for t in inv["tables"]]
+    res = build_target_liveboard(inv, _target())
+    row = _row(res, "Cases")
+    assert _answers(res)["Cases"]["search_query"] == "[Visit Case Count]"
+    assert row["status"] == "NEEDS REVIEW" and "Sisense avg" in row["note"] and "which is a unique count" in row["note"]
+
+
+def test_unread_settings_on_a_widget_or_filter_are_needs_review():
+    w = dict(_visits(), unsupported=["jaql.someNewSetting"])
+    assert "does not read" in _row(build_target_liveboard(_inv([w]), _target()), "Visits")["note"]
+    odd = dict(_member("[dim_case.status]", ["Open"]), unsupported=["contains"])
+    w2 = _w("w2", "Odd", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")], [odd])
+    assert _row(build_target_liveboard(_inv([w2]), _target()), "Odd")["status"] == "NEEDS REVIEW"
+
+
+def test_quick_function_secondary_value_and_percent_display_are_needs_review():
+    qf = _w("w1", "Share", "chart/pie", [_f("[dim_site.name]", "categories"),
+                                         dict(_f("[fact_visit.cost]", "values", "measure", "sum"), quick_function="Contribution")])
+    assert "quick function" in _row(build_target_liveboard(_inv([qf]), _target()), "Share")["note"]
+    sec = _w("w2", "KPI", "indicator", [_f("[fact_visit.cost]", "value", "measure", "sum"),
+                                        _f("[fact_visit.case_id_]", "secondary", "measure", "count")])
+    assert "secondary value" in _row(build_target_liveboard(_inv([sec]), _target()), "KPI")["note"]
+    pct = _w("w3", "Pct", "indicator", [dict(_f("[fact_visit.cost]", "value", "measure", "sum"), percent=True)])
+    assert "as a percent" in _row(build_target_liveboard(_inv([pct]), _target()), "Pct")["note"]
+
+
+def test_weekly_bucket_with_a_sisense_week_start_is_needs_review():
+    w = _w("w1", "Weekly", "chart/line", [dict(_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="weeks"),
+                                               firstday="mon"),
+                                          _f("[fact_visit.case_id_]", "values", "measure", "count")])
+    assert "week start" in _row(build_target_liveboard(_inv([w]), _target()), "Weekly")["note"]
+
+
+def test_backslash_in_a_filter_value_is_needs_review():
+    w = _w("w1", "Odd", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")],
+           [_member("[dim_case.status]", ["a\\b"])])
+    row = _row(build_target_liveboard(_inv([w]), _target()), "Odd")
+    assert row["status"] == "NEEDS REVIEW" and "backslash" in row["note"]
+
+
+def test_filter_map_with_no_column_is_needs_review():
+    w = _w("w1", "Started", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")],
+           [_range("[Visit_Start_Date.id_]", {"from": 0})])
+    row = _row(build_target_liveboard(_inv([w]), _target(),
+                                      overrides={"filter_map": {"[Visit_Start_Date.id_]": "started = true"}}), "Started")
+    assert row["status"] == "NEEDS REVIEW" and "names no [column]" in row["note"]
+
+
+def test_db_column_lookup_is_case_insensitive_and_ambiguity_is_refused():
+    target = _target()
+    for c in target["model"]["columns"]:
+        if c["name"] == "Case Status":
+            c["column_id"] = "dim_case::Status Label"
+    one = [{"table": {"name": "dim_case", "columns": [{"name": "Status Label", "db_column_name": "STATUS"}]}}]
+    assert TargetModel(target, one).column("dim_case", "status") == "Case Status"
+    two = [{"table": {"name": "dim_case", "columns": [{"name": "Status Label", "db_column_name": "STATUS"},
+                                                      {"name": "Status 2", "db_column_name": "Status_"}]}}]
+    assert TargetModel(target, two).column("dim_case", "status") is None

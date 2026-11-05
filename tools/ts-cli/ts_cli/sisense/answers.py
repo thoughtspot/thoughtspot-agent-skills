@@ -152,16 +152,24 @@ def _resolve_fields(widget: dict, norm: dict) -> tuple:
 
 
 def _widget_top_n(widget: dict) -> int | None:
-    """A per-attribute top/bottom rank on the widget -> the integer N (build_from_spec appends
-    `top N`); None when absent or unparseable."""
+    """A per-attribute TOP rank on the widget -> the integer N (build_from_spec appends
+    `top N`); None when absent, unparseable or a bottom rank (``_rank_note`` reports those)."""
     for sf in widget.get("filters", []) or []:
-        if sf.get("kind") == "top_n":
+        if sf.get("kind") == "top_n" and sf.get("operator") == "top":
             vals = sf.get("values") or []
             try:
                 return int(vals[0])
             except (TypeError, ValueError, IndexError):
                 return None
     return None
+
+
+def _rank_note(widget: dict) -> str:
+    """A top/bottom rank the default path does not carry -> the reason, else ''."""
+    for sf in widget.get("filters", []) or []:
+        if sf.get("kind") == "top_n" and (sf.get("operator") != "top" or _widget_top_n(widget) is None):
+            return f"{sf.get('operator')} {sf.get('values')} ranking is not carried"
+    return ""
 
 
 # Chart types valid with no measure; anything else with zero measures -> NEEDS REVIEW.
@@ -198,6 +206,9 @@ def _widget_answer(widget, idx, tab, model_name, model_fqn, norm, measures, buil
         note = _note_join(note, f"{ct} needs a measure but none mapped")
     if missing:
         note = _note_join(note, "unmapped field(s): " + ", ".join(missing))
+    if _rank_note(widget):                            # flag, never turn a bottom N into a top N
+        status = "NEEDS REVIEW"
+        note = _note_join(note, _rank_note(widget))
     a_obj = build_answer(title, f"{tab}-{idx}", model_name, model_fqn, cols, ct,
                          measures, roles, bucket_tokens, _widget_top_n(widget))
     return a_obj, {"answer": a_obj["answer"], "tile": None}, \

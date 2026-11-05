@@ -139,20 +139,31 @@ What it does, all deterministic:
 | `[Table.column]` | The Model column exposing exactly that table instance + column. A role-playing copy (two date tables, two copies of one dimension) resolves by name, else by the **foreign-key column** the Sisense relation uses — never by bare column name |
 | `count` (a DISTINCT count) | `unique count [X]`; over a key the Model hides, the Model formula `unique count ( [inst::col] )` |
 | Widget-level filter | Search filter: members `[X] = 'a' [X] = 'b'` (ORed), excludes `[X] != 'a'` (ANDed), ranges `>= > <= <`. Never `in (...)` / `not in (...)` — search ignores both silently |
-| WidgetsTabber (daily/weekly/… tabs) | The active tab's widget only, grain suffix dropped from its title; a hidden tab plotting the same fields at another date level is the chart's own date-bucket control, reported `Merged`. Tabs that are different charts each become a tile |
+| WidgetsTabber (daily/weekly/… tabs) | The active tab's widget only, grain suffix dropped from its title; a hidden tab that is the same chart (type, fields, filters) at another date level is the chart's own date-bucket control, reported `Merged`. Any other tab becomes a tile of its own |
+| Top / bottom N | `top N` / `bottom N`, when it ranks by the widget's only measure |
+| Disabled widget or dashboard filter | Not applied (it is off in Sisense); reported |
 | Value / axis titles | `custom_name` |
 | Number display (full values) | Every measure column gets a full-value NUMBER format (no `K`/`M` abbreviation); `%` columns and Model columns with their own format (a percent pattern, a currency) keep theirs |
 | Rich-text widget, tab-set title | Section-header note tile |
 | Columnar layout | Tile grid (rows fill 12 columns; a merged tab's width goes to the kept one) |
 | Jump-to-dashboard drill | A details table from the drill dashboard's first widget with fields (pass it with `--drill`), keeping that widget's own filters and the filters every source widget shares; users narrow it with right-click → Filter |
-| Dashboard filter (a cascading group gives one chip per level) | Chip (`oper: in` / `not in`, top-level `values`). A chip on a column a tile filters itself lists that tile in `excluded_visualizations` (a chip REPLACES a tile's own filter; Sisense ANDs them). A range filter becomes a `generic_filter`. A dimension with several role copies binds to the copy reaching the most tiles, then the shortest join path |
+| Dashboard filter (a cascading group gives one chip per level) | Chip (`oper: in` / `not in`, top-level `values`). A chip on a column a tile filters itself lists that tile in `excluded_visualizations` (in Sisense the widget's own filter takes priority; a ThoughtSpot chip would replace it), and so does a widget set to ignore that filter. A range filter becomes a `generic_filter`. A dimension with several role copies binds to the copy reaching the most tiles, then the shortest join path |
 
-Anything only the Model's author can decide is **NEEDS REVIEW** in `out/migration-report.json`
-with the reason, and is resolved in `overrides.json` or by hand — never guessed. That includes a
-filter it cannot carry (relative-date, unrecognised, or at a coarser date level than days), a
-second aggregation of one column in one widget, a chip whose role copy differs from a tile's own
-Sisense path, a table the widget's facts cannot reach, and an override naming a column the Model
-lacks:
+The rule is an allowlist: a widget, filter or chip is carried only when every setting on it is
+one the converter reads and has verified. Everything else is **NEEDS REVIEW** in
+`out/migration-report.json` with the reason, on the chip AND on every tile it affects — never
+guessed. That includes:
+
+- a filter it cannot carry: relative-date, unrecognised settings, a date value that is not a
+  days-level value on a `DATE` column (export `--associated` so the column types are known), a
+  value containing a backslash, a mixed inclusive/exclusive range chip;
+- a top/bottom N that ranks by something other than the widget's only measure;
+- a second aggregation of one column, an aggregation differing from the Model formula it binds,
+  a quick function (e.g. Contribution), a disabled plotted field, a secondary value, a percent
+  display on a column with no format, a weekly bucket with a Sisense week start;
+- a chip a tile receives differently than in Sisense: Highlight mode on a plotted column, a
+  different role-played copy, or a tile whose facts or path cannot be determined;
+- a table the widget's facts cannot reach, and an override naming a column the Model lacks.
 
 ```json
 {"field_map":  {"[legacy_events.event_id]": "Event Count"},
@@ -162,7 +173,11 @@ lacks:
 `field_map` binds a Sisense dim to a Model column (a source table the connection cannot see, a
 formula field); `filter_map` replaces a Sisense filter with a search fragment (a filter on a key
 the Model hides). Typical causes: a Sisense table missing from the Model, a hidden key, a filter
-the Model expresses as a flag. Then lint, import and verify:
+the Model expresses as a flag.
+
+**Gate before import:** every NEEDS REVIEW row in `migration-report.json` is either resolved
+(an override, a Model change, a rebuild) or shown to the user and explicitly accepted by them.
+Do not import while any row is neither. Then lint, import and verify:
 
 ```bash
 ts tml lint --dir out/
