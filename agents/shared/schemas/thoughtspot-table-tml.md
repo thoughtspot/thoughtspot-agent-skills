@@ -91,7 +91,7 @@ table:
 | `table.columns` | Yes | At least one column required |
 | `table.joins_with` | No | Only include on tables that have FK relationships to other tables |
 | `table.rls_rules` | No | Row-level security rules. Contains `tables` (self-reference), `table_paths` (aliases for bracket refs), `joins` (only when a rule reaches another table — see I22) and `rules` (name + expr). Import all related Table TMLs together when `rls_rules` reference other tables. |
-| `table.dataset_id` | No | A 12-hex-character identifier (`28ede9b627ab`) observed at the Table root on uploaded/derived tables — 4 of 275 in the 2026-07-30 census (`cbre_fact_revenue`, `doordash_report_by_data_usage`, `silvia___test_1`, `gerdau_procurement`). **Instance-local: never carry it into a portable document** and never re-emit a value copied from another instance. Pass through only on a same-instance round trip. Undocumented by ThoughtSpot; recorded here because a converter that carries it unknowingly makes its output non-portable |
+| `table.dataset_id` | No | A 12-hex-character identifier (`28ede9b627ab`) observed at the Table root on uploaded/derived tables — 4 of 275 in the 2026-07-30 census. **Instance-local: never carry it into a portable document** and never re-emit a value copied from another instance. Pass through only on a same-instance round trip. Undocumented by ThoughtSpot; recorded here because a converter that carries it unknowingly makes its output non-portable |
 
 ### `columns[]` fields
 
