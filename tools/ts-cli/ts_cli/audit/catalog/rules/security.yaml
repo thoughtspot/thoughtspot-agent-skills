@@ -298,6 +298,30 @@
     fires: {fixture: sec_rls_null_test_on_own_column, severity: LOW}
     silent: {fixture: sec_rls_null_test_on_joined_column}
 
+- id: S16
+  title: RLS Tables scope users through different columns
+  evidence: heuristic
+  description: >-
+    A Model with two or more Tables whose RLS rules scope users through differently
+    named columns — the `[path::COLUMN]` references a rule compares with a session
+    variable, outside quoted literals and null tests; names compared without case — so
+    the Tables may hold the tenant in different keys (BL-521, G5e's keys half). Often
+    intended (each Table keys its own column); it cannot be told from the TML, so LOW:
+    review that the columns hold the same tenant values (product owner, 2026-11-05: any
+    difference counts).
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@rls_key_columns", len_gt: 1}
+  severity: LOW
+  message: "'{name}' has RLS rules scoping users through different columns ({@rls_key_columns}) on different Tables — review that they hold the same tenant values"
+  remediation: Review the Tables' RLS rules together; if they should scope users the same way, compare the same tenant key on each, or check that each column holds the same values
+  examples:
+    fires: {fixture: sec_rls_two_key_columns, severity: LOW}
+    silent: {fixture: sec_rls_one_key_column}
+
 # Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
 # reused.
 - id: S6

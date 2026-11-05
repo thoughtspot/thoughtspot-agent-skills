@@ -6,6 +6,8 @@ same user can be scoped differently by different Tables of one search.
 S15 (G5f): an RLS rule with a null test on its own Table's column. The docs give the null
 test for outer joins (S12), but on the secured Table's own key it also shows every row
 with no value there to every user under the rule.
+S16 (BL-521, G5e's keys half): one Model's RLS Tables scope users through differently
+named columns — any difference, as the product owner specified (2026-11-05).
 """
 from __future__ import annotations
 
@@ -110,3 +112,55 @@ def test_a_malformed_table_path_id_ends_nothing():
     ctx.tables["t-cust"]["table"]["rls_rules"]["table_paths"].append(
         {"id": ["CUST_1"], "table": "CUST"})
     run_audit(None, [], ctx=ctx, angles=["S"])
+
+
+# ── S16 (BL-521): RLS Tables scoping users through different columns ──────────
+
+def test_s16_fires_on_two_key_columns_and_not_on_one():
+    out = run_audit(None, [], ctx=fx.sec_rls_two_key_columns(), angles=["S"])
+    assert _ids(out, "S16") == [("Sales", "LOW")]
+    out = run_audit(None, [], ctx=fx.sec_rls_one_key_column(), angles=["S"])
+    assert _ids(out, "S16") == []                    # TENANT_ID and tenant_id are one name
+
+
+def _keys(ctx):
+    (model,) = scopes.iterate(ctx, "model")
+    return list(fields.get(model, "@rls_key_columns", ctx))
+
+
+def test_rls_key_columns_reads_scoping_columns_only():
+    assert _keys(fx.sec_rls_two_key_columns()) == ["OWNER", "REGION"]
+    for orders, cust, want in [
+        # a null-tested join key is a guard, not what users are scoped by
+        (["isnull ( [ORDERS_1::K] ) or [ORDERS_1::REGION] = ts_groups"],
+         ["[CUST_1::REGION] = ts_groups"], []),
+        # a column a rule reads with no session variable scopes no one
+        (["[ORDERS_1::OWNER] = ts_groups", "[ORDERS_1::STATUS] = 'open'"],
+         ["[CUST_1::OWNER] = ts_groups"], []),
+        # text inside a quoted literal is not a reference
+        (["[ORDERS_1::OWNER] = ts_groups or 'x' = '[ORDERS_1::REGION]'"],
+         ["[CUST_1::OWNER] = ts_groups"], []),
+        # a rule reading a joined Table's column scopes by that column
+        (["[CUST_1::REGION] = ts_groups"], ["[CUST_1::REGION] = ts_groups"], []),
+        # only one Table with RLS: nothing to compare
+        (["[ORDERS_1::OWNER] = ts_groups"], None, []),
+        # a rule with a variable but no column ('admins' in ts_groups) adds no key
+        (["[ORDERS_1::OWNER] = ts_username or 'admins' in ts_groups"],
+         ["[CUST_1::OWNER] = ts_username"], []),
+        (["[ORDERS_1::OWNER] = ts_groups"], ["[CUST_1::Region] = ts_groups"],
+         ["OWNER", "Region"]),
+    ]:
+        ctx = fx.sec_rls_two_key_columns()
+        _set_rules(ctx, orders, cust)
+        assert _keys(ctx) == want, (orders, cust)
+
+
+def test_s16_is_independent_of_s14():
+    """Two variables through one column is S14 only; one variable through two columns is
+    S16 only."""
+    ctx = fx.sec_rls_two_key_columns()
+    _set_rules(ctx, ["[ORDERS_1::TENANT] = ts_username"], ["[CUST_1::TENANT] = ts_groups"])
+    out = run_audit(None, [], ctx=ctx, angles=["S"])
+    assert (_ids(out, "S14"), _ids(out, "S16")) == ([("Sales", "LOW")], [])
+    out = run_audit(None, [], ctx=fx.sec_rls_two_key_columns(), angles=["S"])
+    assert (_ids(out, "S14"), _ids(out, "S16")) == ([], [("Sales", "LOW")])

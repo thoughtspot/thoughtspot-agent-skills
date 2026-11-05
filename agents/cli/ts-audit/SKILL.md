@@ -360,7 +360,7 @@ are in its catalog entry.
 | `rules/data.yaml` | D — Data Modeling | D1, D3, D5, D7–D18 (D2, D4, D6 retired) |
 | `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H14 (H6 retired) |
 | `rules/perf.yaml` | P — Performance | P1–P4, P6–P8, P11, P13–P18 (P5, P9–P10, P12 retired) |
-| `rules/security.yaml` | S — Security | S1–S2, S4–S5, S10–S15 (S3, S6–S9 retired) |
+| `rules/security.yaml` | S — Security | S1–S2, S4–S5, S10–S16 (S3, S6–S9 retired) |
 <!-- END GENERATED: rules-files -->
 
 See [references/check-catalog.md](references/check-catalog.md) for every rule — what it
@@ -449,6 +449,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.18.0 | 2026-11-05 | **S16, RLS Tables scoping users through different columns, LOW "review" (BL-521).** G5e's keys half: a Model with two or more Tables whose RLS rules compare session variables with differently named columns (case aside; null-tested guards and quoted literals not read). Any difference counts, per the product owner (2026-11-05); often intended, so LOW: review that the columns hold the same tenant values. 0 findings on the SE demo sample. |
 | 3.17.0 | 2026-11-04 | **Two RLS checks worded "review", LOW (BL-512).** S14: a Model with two or more Tables whose RLS rules scope users by different sets of session variables (ts_groups, ts_username, ts_org, ts_email_domain, a custom `ts_var`), so one search can scope a user differently per Table. S15: an RLS rule that null-tests the column it scopes users by — the owner key — which keeps an outer join's unmatched rows but also shows the Table's ownerless rows to every user; S12 and S15 now advise testing the never-null join key instead. G5e's "different keys" half is BL-521. Both read rule expressions outside quoted literals. Neither fires on the SE demo sample (8 Tables with RLS, one variable each, no null tests). |
 | 3.16.1 | 2026-11-04 | **References and join keys are read one way.** P17, P2 and H3 read formula references as the report's formula tree does — outside quoted literals, stripped, a formula resolved by its surfacing column's display name too — and H3 no longer counts a formula's reference to itself; the RLS reads skip literals too (BL-504). P6 reads join keys as D16 does, so a server-escaped name (`dim\.csv`) is typed, and P6 and D16 type a key of an aliased table, which read as unknown (BL-507). On the SE demo sample P6 gains 10 LOW findings and 7 others name more keys; nothing else changes. |
 | 3.16.0 | 2026-11-04 | **D13 reads every bare window; the `*_in_period` spellings are aggregate.** D13 now also reads the `group_*` shorthands (`group_average`, …) and `last_value_in_period` / `first_value_in_period`, which the Model TML schema calls the same functions; an unset aggregation is still not read, since which one ThoughtSpot then applies is unverified. `AGGREGATE_FUNCS` now matches the two `*_in_period` spellings, so P2 and D14 no longer read such a formula as per-row (BL-509). No change on the SE demo sample. |

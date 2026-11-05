@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-05
+- feat(audit): S16, a LOW "review" RLS check for Tables scoping users through different columns (ts-audit 3.18.0, BL-521)
+- chore: bump ts-cli to v0.204.0
+
 ## 2026-11-04
 - feat(audit): S14 and S15, LOW "review" RLS checks (ts-audit 3.17.0, BL-512)
 - chore: bump ts-cli to v0.203.0

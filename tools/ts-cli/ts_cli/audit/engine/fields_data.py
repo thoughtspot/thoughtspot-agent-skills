@@ -331,6 +331,46 @@ def _rls_session_variables(item: dict, ctx: Any) -> list:
     return NameList(sorted(set().union(*per_table.values())))
 
 
+def _rule_key_columns(expr: Any) -> List[str]:
+    """The columns an RLS rule scopes users through: its `[path::COLUMN]` references
+    outside quoted literals and outside null tests (a null-tested join key is a guard),
+    in a rule that names a session variable; the part after `::`, stripped."""
+    code = _code(expr)
+    if not _rule_variables(code):
+        return []
+    return [ref[1:-1].rpartition("::")[2].strip()
+            for ref in _BRACKETED.findall(_NULL_TEST.sub(" ", code))]
+
+
+@register("rls_key_columns", uses=(),
+          label="the columns the Model's RLS rules scope users through")
+def _rls_key_columns(item: dict, ctx: Any) -> list:
+    """Model: when two or more of its Tables (Table TML by `model_tables[].fqn`, each
+    once) scope users through RLS and do so through DIFFERENTLY NAMED sets of columns
+    (`_rule_key_columns`; names compared without case), all of those columns, sorted,
+    each name once; else none. Any difference counts, as the product owner specified
+    for G5e's keys half (S16, BL-521, 2026-11-05); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    mts = (item.get("obj") or {}).get("model_tables")
+    per_table, names = {}, {}
+    for mt in mts if isinstance(mts, list) else []:
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        if not isinstance(fqn, str) or fqn in per_table:
+            continue
+        found = set()
+        for rule in _rls_rules_of(ctx.tables.get(fqn)):
+            for col in _rule_key_columns(rule.get("expr")):
+                if col:
+                    found.add(col.casefold())
+                    names.setdefault(col.casefold(), col)
+        if found:
+            per_table[fqn] = frozenset(found)
+    if len(per_table) < 2 or len(set(per_table.values())) < 2:
+        return NameList()
+    return NameList(sorted((names[k] for k in set().union(*per_table.values())),
+                           key=str.casefold))
+
+
 def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
     """A Table TML's name and its RLS `table_paths` as {id: Table name}."""
     t = doc.get("table") if isinstance(doc, dict) else None
