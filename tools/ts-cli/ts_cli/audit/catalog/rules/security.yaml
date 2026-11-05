@@ -200,6 +200,129 @@
     fires: {fixture: sec_rls_join_cycle, severity: CRITICAL}
     silent: {fixture: sec_rls_same_direction}
 
+- id: S12
+  title: RLS table outer-joined without a null clause
+  evidence: fact
+  description: >-
+    A Model join of type LEFT_OUTER, RIGHT_OUTER or OUTER whose optional side — the
+    `with` table for LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER —
+    is a Table carrying RLS rules, none of which has a null branch (`is_null ( … )`,
+    `isnull ( … )` or `= null`). The docs' "Respect join definitions" (security-rls) show that such a
+    rule must test the joined column for null or the outer join behaves as an inner one
+    for users under the rule: they lose the rows it kept. Whether it does also depends
+    on cluster settings the audit cannot read, so MEDIUM: review the rule (product
+    owner, 2026-11-04). A Table with no TML in scope is unknown and not reported.
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: join
+  aggregate:
+    mode: each
+    where: {field: "@outer_join_unguarded_rls", nonblank: true}
+  severity: MEDIUM
+  message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no null branch — users under them may get an inner join instead"
+  remediation: Review the rule against the docs' "Respect join definitions" — add an `or` null test on the column the join type needs (both sides for a full outer join), in the spelling your cluster accepts, or make the join INNER if unmatched rows are not wanted. Testing the join key (never null) keeps unmatched rows without showing the table's ownerless rows; a null test on the owner column also shows those to every user (S15)
+  examples:
+    fires: {fixture: sec_rls_outer_joined_unguarded, severity: MEDIUM}
+    silent: {fixture: sec_rls_outer_joined_isnull}
+
+- id: S13
+  title: RLS rule search cannot index
+  evidence: fact
+  description: >-
+    An RLS rule whose expression names neither `ts_groups` (any variant) nor
+    `ts_username`, or that compares with `!=` or `<>`. Per the RLS implementation docs,
+    ThoughtSpot builds no suggestion index for such a rule; that includes rules built
+    only on `ts_org`, `ts_email_domain` or custom variables.
+  categories: [S]
+  requires: [table_tml]
+  scope: table.rls_rule
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: expr, regex: '\S'}
+        - any:
+            - {field: expr, not_regex: '(?i)\bts_(groups\w*|username)\b'}
+            - {field: expr, regex: '!=|<>'}
+  severity: LOW
+  message: "RLS rule '{obj.name}' builds no suggestion index (no ts_groups / ts_username, or a != comparison): {obj.expr:.80}"
+  remediation: Express the rule with ts_groups or ts_username and an equality, so search suggestions are indexed per user
+  examples:
+    fires: {fixture: sec_rls_custom_variable_rule, severity: LOW}
+    silent: {fixture: sec_rls_groups_rule}
+
+- id: S14
+  title: RLS Tables scope users by different variables
+  evidence: heuristic
+  description: >-
+    A Model with two or more Tables whose RLS rules scope users by different sets of
+    session variables — ts_groups (any variant), ts_username, ts_org, ts_email_domain or
+    a custom `ts_var ( name )` — so one search can scope the same user one way on one
+    Table and another way on the next (BL-512). Two variables on one Table (an owner or
+    a group override) is not a difference. That can be intended (a per-user Table beside a
+    per-group one); it cannot be told from the TML, so LOW: review that they select the
+    same users (product owner, 2026-11-04).
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@rls_session_variables", len_gt: 1}
+  severity: LOW
+  message: "'{name}' has RLS rules scoping users by {@rls_session_variables} on different Tables — review that they select the same users"
+  remediation: Review the Tables' RLS rules together; if they should scope users the same way, compare against the same variable on each
+  examples:
+    fires: {fixture: sec_rls_two_tenant_variables, severity: LOW}
+    silent: {fixture: sec_rls_one_tenant_variable}
+
+- id: S15
+  title: RLS null test on the secured Table's own column
+  evidence: heuristic
+  description: >-
+    An RLS rule that tests for null (`is_null` / `isnull ( … )` or `= null`) a column of
+    its own Table that it also scopes users by — the owner key. Such a test keeps an
+    outer join's unmatched rows (S12) but also shows every row of this Table with no
+    owner to every user under the rule (BL-512). A null test on a key that is never null,
+    such as the join key, keeps the unmatched rows without that and is not reported.
+    LOW: review whether ownerless rows should be visible (product owner, 2026-11-04).
+  categories: [S]
+  requires: [table_tml]
+  scope: table.rls_rule
+  aggregate:
+    mode: each
+    where: {field: "@own_column_null_tests", nonblank: true}
+  severity: LOW
+  message: "RLS rule '{obj.name}' keeps rows whose {@own_column_null_tests} is null for every user — review whether ownerless rows should be visible"
+  remediation: If the null test is there for an outer join (S12), test the join key instead (a column that is never null, such as `isnull ( [T_1::KEY] )`), so unmatched rows are kept and ownerless ones are not; otherwise give ownerless rows an owner, or drop the null branch
+  examples:
+    fires: {fixture: sec_rls_null_test_on_own_column, severity: LOW}
+    silent: {fixture: sec_rls_null_test_on_joined_column}
+
+- id: S16
+  title: RLS Tables scope users through different columns
+  evidence: heuristic
+  description: >-
+    A Model with two or more Tables whose RLS rules scope users through different sets
+    of column names — the `[path::COLUMN]` references in a rule's `and` / `or` clauses
+    that name a session variable, outside quoted literals and null tests; a column only
+    compared with a literal is not read; names compared without case — so the Tables
+    may hold the tenant in different keys (BL-521, G5e's keys half). Often
+    intended (each Table keys its own column); it cannot be told from the TML, so LOW:
+    review that the columns hold the same tenant values (product owner, 2026-11-05: any
+    difference counts).
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@rls_key_columns", len_gt: 1}
+  severity: LOW
+  message: "'{name}' has Tables whose RLS rules scope users through different columns (of {@rls_key_columns}) — review that they select the same users"
+  remediation: Review the Tables' RLS rules together; if they should scope users the same way, compare the same tenant key on each, or check that each column holds the same values
+  examples:
+    fires: {fixture: sec_rls_two_key_columns, severity: LOW}
+    silent: {fixture: sec_rls_one_key_column}
+
 # Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
 # reused.
 - id: S6

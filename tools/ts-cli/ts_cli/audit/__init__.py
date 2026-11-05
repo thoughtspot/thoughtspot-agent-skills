@@ -347,8 +347,8 @@ def data_needs(angles: list, profiles: Optional[list] = None) -> set:
 
 
 def _unreadable(ctx: AuditContext) -> list:
-    """Each Model, Table and Answer no rule judges, because its TML holds a list or
-    scalar where a mapping belongs (tml.unreadable_documents): warned on stderr and
+    """Each Model, Table and Answer no rule judges, because its TML holds the wrong
+    shape where the audit reads one (tml.unreadable_documents): warned on stderr and
     returned for the run's JSON and the report's "Could not be read" (product owner's
     ruling, 2026-10-30: skip the whole Model, and show it)."""
     from ts_cli.audit.context import _log
@@ -357,6 +357,26 @@ def _unreadable(ctx: AuditContext) -> list:
         _log(f"Warning: {msg}")
         ctx.warnings.append(msg)
     return messages
+
+
+def _not_exported(ctx: AuditContext) -> list:
+    """One entry per requested Model (`ctx.model_guids`) with no exported TML in
+    `ctx.models` (BL-516): the run's own warning when one names it — a Model refused on
+    its own — else a line naming it, since a skipped batch's warning counts its Models
+    without naming them (a refusal inside a 200, or a Model ThoughtSpot exported as some
+    other type, has no such warning). Derived, not recorded, so an older snapshot
+    replays alike."""
+    exported = {m.get("guid") for m in ctx.models
+                if isinstance(m, dict) and isinstance(m.get("guid"), str)}
+    out = []
+    for guid in dict.fromkeys(g for g in ctx.model_guids if isinstance(g, str)):
+        if guid in exported:
+            continue
+        named = [w for w in ctx.warnings
+                 if isinstance(w, str) and w.startswith(f"Model {guid} ")]
+        out.append(named[0] if named else
+                   f"Model {guid}: no TML was exported for it, so not checked")
+    return out
 
 
 def run_audit(
@@ -398,6 +418,7 @@ def run_audit(
                                   else ctx.assessment)
     ctx.assessment = profile
     unreadable = _unreadable(ctx)
+    not_exported = _not_exported(ctx)
     from ts_cli.audit.engine.run import readable
     ctx = readable(ctx)  # what no rule judges is left out of the findings and corpus
     known = [a for a in angles if a in catalog.categories]
@@ -415,6 +436,8 @@ def run_audit(
     corpus["assessment"] = catalog.profiles[profile].label
     if unreadable:
         corpus["unreadable"] = unreadable
+    if not_exported:
+        corpus["not_exported"] = not_exported
     if fetched_needs is not None:
         corpus["fetched_needs"] = sorted(fetched_needs)
 

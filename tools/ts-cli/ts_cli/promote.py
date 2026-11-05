@@ -14,7 +14,7 @@ import copy
 import re
 from typing import Any, Optional
 
-from ts_cli.spotql_ops import classify_expr
+from ts_cli.spotql_ops import classify_expr, formula_ref_exprs
 from ts_cli.tml_common import dump_tml_yaml
 
 _REF_RE = re.compile(r"\[([^\]]+)\]")
@@ -240,6 +240,18 @@ def _build_model_param_entry(answer_param: dict) -> dict:
     return entry
 
 
+def _promoted_ref_exprs(model_formulas: list, promoted: list, ref_by_name: dict) -> dict:
+    """What an inner [formula_X] / [Name] of a promoted bare window resolves to (BL-509):
+    the Model's formulas, then the promoted ones by name and `formula_<name>`."""
+    out = formula_ref_exprs(model_formulas)
+    for f in promoted:
+        info = ref_by_name.get(f["name"])
+        rewritten = info["rewritten_expr"] if info else f.get("expr", "")
+        out.setdefault(f["name"], rewritten)
+        out.setdefault(f"formula_{f['name']}", rewritten)
+    return out
+
+
 def build_merged_model(
     model_tml: dict,
     formulas_to_add: list[dict],
@@ -289,6 +301,7 @@ def build_merged_model(
     new_formula_entries = []
     new_column_entries = []
 
+    ref_exprs = _promoted_ref_exprs(m.get("formulas", []), all_formulas, ref_by_name)
     for f in all_formulas:
         ref_info = ref_by_name.get(f["name"])
         expr = ref_info["rewritten_expr"] if ref_info else f.get("expr", "")
@@ -296,7 +309,7 @@ def build_merged_model(
         fid = _make_formula_id(f["name"], existing_formula_ids)
         existing_formula_ids.add(fid)
 
-        classification = classify_expr(expr)
+        classification = classify_expr(expr, ref_exprs)
         column_type = classification["column_type"]
         aggregation = classification["aggregation"]
 

@@ -8,6 +8,16 @@ function readinessByGuid(){
 }
 
 /* ── Build Dashboard ── */
+/* A note listing what the run could not judge, or '' when `list` is empty. */
+function notJudgedBox(list, title, noun, verb, body){
+  if(!list || !list.length) return '';
+  var html = '<div class="unread" role="note"><strong>'+title+' — '+list.length+' '+noun+
+    (list.length === 1 ? '' : 's')+' '+verb+'.</strong> '+body+'<ul>';
+  list.slice(0, 50).forEach(function(u){ html += '<li><code>'+esc(u)+'</code></li>'; });
+  if(list.length > 50) html += '<li>…and '+(list.length - 50)+' more (see the run’s JSON)</li>';
+  return html + '</ul></div>';
+}
+
 function buildDashboard(){
   var c = document.getElementById("v-dashboard");
   var html = "";
@@ -34,16 +44,15 @@ function buildDashboard(){
   }
   html += '</div>';
 
-  /* Items no rule judged: malformed TML (BL-406 item 10). Shown, never silent. */
-  if(D.C && D.C.ur && D.C.ur.length > 0){
-    html += '<div class="unread" role="note"><strong>Could not be read — '+D.C.ur.length+
-      ' item'+(D.C.ur.length === 1 ? '' : 's')+' not judged.</strong> Each one\u2019s own TML, or TML it '+
-      'depends on (a Table it uses, the Model an Answer is built on), holds a list or a single '+
-      'value where a mapping belongs. Fix the TML each entry names and re-run.<ul>';
-    D.C.ur.slice(0, 50).forEach(function(u){ html += '<li><code>'+esc(u)+'</code></li>'; });
-    if(D.C.ur.length > 50) html += '<li>…and '+(D.C.ur.length - 50)+' more (see the run’s JSON)</li>';
-    html += '</ul></div>';
-  }
+  /* Items no rule judged: malformed TML (BL-406 item 10, BL-501). Shown, never silent. */
+  html += notJudgedBox(D.C && D.C.ur, 'Could not be read', 'item', 'not judged',
+    'Each one\u2019s own TML, or TML it depends on (a Table it uses, the Model an Answer is '+
+    'built on), holds the wrong shape: a list, a mapping or a single value where the schema '+
+    'has something else. Fix the TML each entry names and re-run.');
+  /* Requested Models the export refused (BL-516). */
+  html += notJudgedBox(D.C && D.C.ne, 'Not exported', 'Model', 'not checked',
+    'ThoughtSpot did not export them (a deleted Model, missing access, a server error), so '+
+    'no rule saw them. Each entry gives the reason where the run had one; re-run once it is fixed.');
 
   /* Severity cards */
   html += '<div class="sev-cards">';

@@ -817,3 +817,38 @@ def human_technical_column_hidden() -> AuditContext:
     ctx.models[0]["model"]["columns"][0]["properties"]["is_hidden"] = True
     return ctx
 
+
+
+# ── H13: date-part columns beside a date (roadmap PR 4.4) ───────────────────
+
+def _date_part_ctx(date_typed: bool) -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    types = {"ORDER_MONTH": "VARCHAR"}
+    if date_typed:
+        types["ORDER_DATE"] = "DATE"
+    return build_typed_model_ctx(build_typed_col("Order Date", "ORDER_DATE", ctype="ATTRIBUTE"),
+                                 build_typed_col("Order Month", "ORDER_MONTH", ctype="ATTRIBUTE"),
+                                 types=types)
+
+
+def human_date_part_beside_date() -> AuditContext:
+    return _date_part_ctx(True)
+
+
+def human_date_part_without_date() -> AuditContext:
+    return _date_part_ctx(False)
+
+
+# ── H14: flags shown as true/false or 0/1 (roadmap PR 4.4) ──────────────────
+
+def human_flag_visible() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Active", "ACTIVE", ctype="ATTRIBUTE"),
+                                 types={"ACTIVE": "BOOL"})
+
+
+def human_flag_spelled_out() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Active", "ACTIVE", ctype="ATTRIBUTE", hidden=True),
+                                 build_typed_col("Status", "STATUS", ctype="ATTRIBUTE"),
+                                 types={"ACTIVE": "BOOL", "STATUS": "VARCHAR"})

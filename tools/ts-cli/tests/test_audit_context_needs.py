@@ -148,9 +148,9 @@ SHIPPED_NEEDS = {
     "D": {"model_tml", "metadata", "table_tml"},
     "H": {"model_tml", "dependents", "sets", "answers"},
     "P": {"model_tml", "metadata", "table_tml"},
-    # S8 and S9, the Security rules that declared Table TML, retired 2026-10 (Table TML
-    # is still fetched for every audit; no S rule declares it).
-    "S": {"model_tml"},
+    # S8 and S9 retired 2026-10; S12 and S13 (RLS robustness, 2026-11) declare Table TML
+    # again, which every audit fetches anyway.
+    "S": {"model_tml", "table_tml"},
 }
 
 
@@ -380,3 +380,53 @@ def test_an_answer_that_cannot_be_exported_is_skipped():
     with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
         ctx = build_context(client, ["m1"], {"answers"})
     assert ctx.answers == []
+
+
+# ── BL-510: one bad GUID must not drop its whole export batch ───────────────
+
+class OneDeletedModelClient(RecordingClient):
+    """Exports Models by GUID; a request naming `gone` returns HTTP 400, as the API
+    does when one identifier in a batch no longer exists."""
+
+    def post(self, url, json=None, **kw):
+        if url.endswith(_EXPORT):
+            self.calls.append((url, json))
+            ids = [m["identifier"] for m in json["metadata"]]
+            if "gone" in ids:
+                r = MagicMock()
+                r.ok, r.status_code = False, 400
+                return r
+            docs = [{"guid": g, "model": {"name": g, "model_tables": [], "columns": []}}
+                    for g in ids]
+            return _response([{"edoc": yaml.safe_dump(d)} for d in docs])
+        return super().post(url, json, **kw)
+
+
+def test_one_deleted_guid_does_not_drop_its_batch():
+    client = OneDeletedModelClient()
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
+        ctx = build_context(client, ["m1", "gone", "m2"], {"model_tml"})
+    assert sorted(m["guid"] for m in ctx.models) == ["m1", "m2"]
+    assert any("gone" in w for w in ctx.warnings)
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
+        alone = build_context(OneDeletedModelClient(), ["gone"], {"model_tml"})
+    assert alone.models == [] and any("gone" in w for w in alone.warnings)
+
+
+def test_a_server_error_is_not_retried_per_model():
+    """Only a 400/404 (a bad identifier in the batch) is worth retrying one Model at a
+    time; a 5xx or an auth failure would fail 50 more times."""
+    class Failing(RecordingClient):
+        def post(self, url, json=None, **kw):
+            if url.endswith(_EXPORT):
+                self.calls.append((url, json))
+                r = MagicMock()
+                r.ok, r.status_code = False, 503
+                return r
+            return super().post(url, json, **kw)
+    client = Failing()
+    with patch("ts_cli.audit.context.discover_sets", return_value=copy.deepcopy(_NO_SETS)):
+        ctx = build_context(client, ["m1", "m2", "m3"], {"model_tml"})
+    assert ctx.models == []
+    assert len([u for u, _ in client.calls if u.endswith(_EXPORT)]) == 1
+    assert any("503" in w and "3 model" in w for w in ctx.warnings)

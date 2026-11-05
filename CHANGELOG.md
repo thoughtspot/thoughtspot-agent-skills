@@ -5,9 +5,28 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
-## 2026-11-02
-- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent after it may have reached the server; refuses a delete that would also remove unlisted Sets or Spotter feedback, or a published object). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0
+## 2026-11-05
+- feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent after it may have reached the server; refuses a delete that would also remove unlisted Sets or Spotter feedback, or a published object). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0. `ts dependency rollback` now refuses a backup whose manifest records no `base_url` (only hand-written backups from before July lack it); add the cluster's URL to its `manifest.json` to roll one back
+- chore: bump ts-cli to v0.206.0
+- feat(audit): S16, a LOW "review" RLS check for Tables scoping users through different columns (ts-audit 3.18.0, BL-521)
+- chore: bump ts-cli to v0.204.0
+
+## 2026-11-04
+- feat(audit): S14 and S15, LOW "review" RLS checks (ts-audit 3.17.0, BL-512)
+- chore: bump ts-cli to v0.203.0
+- feat(validate): the file-size gate covers the audit report's own JS parts, with a function-length ratchet (BL-503)
+- fix: audit reads formula references and join keys one way; aliased and escaped join keys typed (ts-audit 3.16.1, BL-504, BL-507)
+- chore: bump ts-cli to v0.202.0
+- fix: formula columns declare `aggregation:` under the 2026-11-02 ruling in the Power BI, Sisense and dbt converters, the aggregate generator and promote; Sisense calc formulas surfaced again; D13 reads every bare window (ts-audit 3.16.0, BL-509)
+- chore: bump ts-cli to v0.201.0
+- fix(audit): malformed TML shapes are listed, never a crash; not-exported Models shown; Answer export retry (ts-audit 3.15.0, BL-501, BL-516, BL-517)
+- chore: bump ts-cli to v0.200.0
+- fix(audit): S12 raised to MEDIUM and reads `is_null`; one deleted Model no longer drops its export batch (ts-audit 3.14.0, BL-510)
+- chore: bump ts-cli to v0.199.0
+- feat(audit): new rules S12, S13, D13, D17, D18, H13, H14, A9 (ts-audit 3.13.0, roadmap PR 4.4)
 - chore: bump ts-cli to v0.198.0
+
+## 2026-11-02
 - fix(audit): D14 also reads per-row formula measures (ts-audit 3.12.0); the Model TML schema's formula-aggregation table gains the required-but-ignored declaration and the bare group_aggregate / last_value / first_value exception
 - chore: bump ts-cli to v0.197.0
 - feat(audit): new rules A7, A8, H11, H12, D14, D15, D16 (ts-audit 3.11.0, roadmap PR 4.3)

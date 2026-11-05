@@ -71,7 +71,8 @@
   description: >-
     A hidden Model column that no formula references by `[<name>]` — nor, when it
     surfaces a formula, by that formula's `[<id>]` (how TML references it) or
-    `[<display name>]`. Excused when it is the last carrier of a joined table: its
+    `[<display name>]`, read outside quoted literals and not counting a formula's
+    reference to itself (BL-504). Excused when it is the last carrier of a joined table: its
     `column_id` prefix names a table that declares or receives a join (by alias, else
     name) and no other visible column has that prefix. Until 2026-10 an id reference
     was not seen and joined tables were matched by `name` only.
@@ -288,6 +289,75 @@
   examples:
     fires: {fixture: human_mostly_hidden_columns, severity: MEDIUM}
     silent: {fixture: human_hidden_columns_feed_formulas}
+
+- id: H13
+  title: Date-part columns beside a date
+  evidence: heuristic
+  description: >-
+    A Model that has a date column (a DATE, DATE_TIME, DATETIME or TIMESTAMP column in
+    its Tables' TML) and also visible ATTRIBUTE columns whose name or physical name
+    reads as a date part (year, quarter, month, week, day, fiscal year) and whose type
+    is not a date. Date keywords (yearly, monthly, …) already bucket the date column,
+    so these columns are usually a carry-over from another tool. A hint: LOW, one
+    finding per Model listing the first five. A Table with no TML in scope gives no
+    types and no finding.
+  categories: [H]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where: {not: {field: properties.is_hidden, truthy: true}}
+    match:
+      all:
+        - {field: parent.@has_date_column, truthy: true}
+        - {field: properties.column_type, regex: '^(?i:attribute)\Z'}
+        - any:
+            - {field: name, regex: '(?i)(^|[_\s])(year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]|$)'}
+            - {field: column_id, regex: '(?i)::(.*[_\s])?(year|yr|quarter|qtr|month|week|wk|day|dow|fiscal[_\s]year|fy)([_\s]|$)'}
+        - {not: {field: "@data_type", in: [DATE, DATE_TIME, DATETIME, TIMESTAMP]}}
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 0, severity: LOW}
+  message: "{matched} date-part column(s) beside a date column that date keywords already cover: {matched_names:head5}"
+  remediation: Drop or hide the date-part columns and search the date column with keywords (yearly, monthly, quarterly, weekly, daily)
+  examples:
+    fires: {fixture: human_date_part_beside_date, severity: LOW}
+    silent: {fixture: human_date_part_without_date}
+
+- id: H14
+  title: Flags shown as true/false or 0/1
+  evidence: heuristic
+  description: >-
+    A Model with visible flag columns: a BOOL or BOOLEAN warehouse type, or a name or
+    physical name starting is_, has_, was_, can_, should_ or flag_, or ending _flag,
+    _ind or _indicator. A flag is legitimate; showing it as true/false or 0/1 is not
+    something a person searches for ("active customers" finds nothing in a column of
+    trues). LOW, one finding per Model listing the first five.
+  categories: [H]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: ratio
+    over: model.column
+    where: {not: {field: properties.is_hidden, truthy: true}}
+    match:
+      any:
+        - {field: "@data_type", in: [BOOL, BOOLEAN]}
+        - {field: name, regex: '(?i)^(is|has|was|can|should|flag)[_\s]|[_\s](flag|ind|indicator)$'}
+        - {field: column_id, regex: '(?i)::((is|has|was|can|should|flag)[_\s]|[^:]*[_\s](flag|ind|indicator)$)'}
+  bands:
+    direction: lower_is_better
+    unit: percent
+    levels:
+      - {op: gt, value: 0, severity: LOW}
+  message: "{matched} visible flag column(s) shown as true/false or 0/1: {matched_names:head5}"
+  remediation: Add a formula that spells the flag out (if ( [Active] ) then 'Active' else 'Inactive'), show that, and hide the raw flag
+  examples:
+    fires: {fixture: human_flag_visible, severity: LOW}
+    silent: {fixture: human_flag_spelled_out}
 
 - id: H12
   title: Technical columns visible

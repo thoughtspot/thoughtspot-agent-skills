@@ -329,3 +329,22 @@ AI_INPUTS.update({f"synonyms_{n}_of_100": (lambda n=n: build_synonym_columns(n))
 AI_INPUTS.update({f"measures_{c}_of_{t}": (lambda c=c, t=t: build_tml_measures(c, t))
                   for t in (1, 5, 10) for c in range(t + 1)})
 
+
+
+# ── A9: parameters under Spotter (roadmap PR 4.4) ───────────────────────────
+
+def _parameter_model(spotter: bool) -> AuditContext:
+    body = {"name": "Pricing", "columns": [],
+            "formulas": [{"id": "f_adj", "name": "Adjusted Amount", "expr": "[Rate] * [T::AMT]"}],
+            "parameters": [{"id": "p1", "name": "Rate", "data_type": "DOUBLE"}]}
+    if spotter:
+        body["properties"] = {"spotter_config": {"is_spotter_enabled": True}}
+    return make_context(models=[{"guid": "m-param", "model": body}])
+
+
+def ai_parameter_formula_spotter() -> AuditContext:
+    return _parameter_model(True)
+
+
+def ai_parameter_formula_no_spotter() -> AuditContext:
+    return _parameter_model(False)

@@ -772,3 +772,65 @@ def data_join_keys_same_family() -> AuditContext:
     """INT32 joined to INT64: one family (D16 silent)."""
     return _typed_keys_ctx("INT32", "INT64")
 
+
+
+# ── D17: identifiers, coordinates and date parts summed (roadmap PR 4.4) ────
+
+def data_identifier_summed() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Customer ID", "CUSTOMER_ID", agg="SUM"))
+
+
+def data_identifier_as_attribute() -> AuditContext:
+    from .common import build_typed_col, build_typed_model_ctx
+    return build_typed_model_ctx(build_typed_col("Customer ID", "CUSTOMER_ID", ctype="ATTRIBUTE"),
+                                 build_typed_col("Number of Orders", "NUM_ORDERS", agg="SUM"))
+
+
+# ── D18: copies of a table on the many side (roadmap PR 4.4) ────────────────
+
+def _copied(table: str) -> AuditContext:
+    """SALES (measures) many-to-one into DATES; `table` appears twice."""
+    sales = [{"name": "SALES", "fqn": "t-sales", "joins": [
+        {"with": "DATES", "on": "[SALES::D] = [DATES::D]", "type": "INNER",
+         "cardinality": "MANY_TO_ONE"}]}]
+    dates = [{"name": "DATES", "fqn": "t-dates"}]
+    if table == "SALES":
+        sales.append({"name": "SALES", "alias": "SALES_2", "fqn": "t-sales", "joins": [
+            {"with": "DATES", "on": "[SALES_2::D] = [DATES::D]", "type": "INNER",
+             "cardinality": "MANY_TO_ONE"}]})
+    else:
+        dates.append({"name": "DATES", "alias": "SHIP_DATES", "fqn": "t-dates"})
+    cols = [{"name": f"Amount {t.get('alias', '')}".strip(),
+             "column_id": f"{t.get('alias') or t['name']}::AMT",
+             "properties": {"column_type": "MEASURE"}} for t in sales]
+    cols.append({"name": "Date", "column_id": "DATES::D", "properties": {"column_type": "ATTRIBUTE"}})
+    return make_context(models=[{"guid": "m-copies", "model": {"name": "Copies", "columns": cols,
+                                                               "model_tables": sales + dates}}])
+
+
+def data_fact_copied() -> AuditContext:
+    return _copied("SALES")
+
+
+def data_dimension_copied() -> AuditContext:
+    return _copied("DATES")
+
+
+# ── D13: group or semi-additive formula summed under a rate name (PR 4.4) ───
+
+def _bare_window(agg: str) -> AuditContext:
+    expr = "last_value ( sum ( [T::RATE] ) , query_groups ( ) , { [T::AS_OF] } )"
+    col = {"name": "Interest Rate", "formula_id": "f_rate",
+           "properties": {"column_type": "MEASURE", "aggregation": agg}}
+    model = {"name": "Loans", "columns": [col],
+             "formulas": [{"id": "f_rate", "name": "Interest Rate", "expr": expr}]}
+    return make_context(models=[{"guid": "m-bare", "model": model}])
+
+
+def data_bare_window_rate_summed() -> AuditContext:
+    return _bare_window("SUM")
+
+
+def data_bare_window_rate_averaged() -> AuditContext:
+    return _bare_window("AVERAGE")

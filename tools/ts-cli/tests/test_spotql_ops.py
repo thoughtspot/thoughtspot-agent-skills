@@ -87,10 +87,11 @@ def test_classify_expr_attribute_for_non_aggregate():
     assert result == {"column_type": "ATTRIBUTE", "aggregation": None, "is_aggregate": False}
 
 
-def test_classify_expr_aggregation_always_sum_for_measure_regardless_of_which_func():
-    # ThoughtSpot ignores the aggregation property on formula columns at query
-    # time (self-contained expr) — SUM is the documented convention for ALL
-    # MEASURE formulas, not just ones using sum().
+def test_classify_expr_declares_sum_on_an_aggregate_formula_whatever_its_function():
+    # An aggregate formula's column aggregation is ignored (product owner, 2026-11-02),
+    # so SUM is the declared convention whichever aggregate it uses. A bare
+    # group_aggregate / last_value / first_value is the exception, where it is applied:
+    # tests/test_formula_aggregation.py (BL-509).
     result = classify_expr("max([Amount])")
     assert result["column_type"] == "MEASURE"
     assert result["aggregation"] == "SUM"

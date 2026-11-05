@@ -1304,8 +1304,13 @@ echo '[{"name": "Profit Margin", "expr": "[Revenue] - [Cost]"}]' | ts agentql cl
 - `--exprs-file`/stdin mode → array of `{name, column_type, aggregation, is_aggregate}` —
   `column_type` is `MEASURE` iff the expression contains a call to an aggregate function
   (`sum`, `count`, `group_aggregate`, `last_value`, …), else `ATTRIBUTE`; `aggregation` is
-  `SUM` for every MEASURE (ThoughtSpot ignores the `aggregation` property on formula
-  columns at query time — the expr is self-contained), `null` for an ATTRIBUTE.
+  what a MEASURE formula column should declare (`spotql_ops.formula_aggregation`), `null`
+  for an ATTRIBUTE. ThoughtSpot applies a formula column's `aggregation` to a per-row
+  formula and to a bare `group_aggregate` / `group_*` / `last_value` / `first_value` (and
+  their `*_in_period` spellings), and ignores it on any other aggregate formula: so `SUM`
+  for those, and for a bare window the re-aggregation its inner aggregate implies
+  (`group_aggregate ( average ( … ) , … )` → `AVERAGE`; MIN, MAX; sum or count → `SUM`; a
+  non-additive inner aggregate → `AVERAGE`).
 
 Diagnostic counts go to stderr. The canonical aggregate-function list lives in
 `ts_cli.spotql_ops.AGGREGATE_FUNCS` — a single source of truth, not duplicated in either
@@ -4794,12 +4799,24 @@ after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips tha
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
 report). Any other exception is a bug and propagates unchanged.
 
-**Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds a list or a
-single value where a mapping belongs (`properties`, `spotter_config`,
-`db_column_properties`) gets no findings and no readiness score, and neither do such a
-Table, the Answers built on either, or the Model's Sets.
-Each is warned on stderr and listed in the JSON as `corpus.unreadable` (the report's
-"Could not be read" box), with the path, e.g. `columns[Amount].properties`.
+**Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
+shape where the audit reads one gets no findings and no readiness score, and neither do
+such a Table, the Answers built on either, or the Model's Sets: a list or a single value
+where a mapping belongs (`properties`, `spotter_config`, `db_column_properties`,
+`model_instructions`, `rls_rules`, the document body itself), a mapping or single value
+where a list of mappings belongs (`columns`, `formulas`, `filters`, `model_tables` and
+their `joins`, `joins_with`, `rls_rules.rules`, an Answer's `tables` and `formulas`), or
+a list entry that is not a mapping. An empty-looking value (null, `0`, `""`) reads as
+empty. Each is warned on stderr and listed in the JSON as `corpus.unreadable` (the
+report's "Could not be read" box), with the path, e.g. `columns[Amount].properties`.
+
+**What was not checked.** A requested Model ThoughtSpot did not export is listed in the
+JSON as `corpus.not_exported` and in the report's "Not exported" box, with the export's
+own warning where one names it. A Model or Answer export batch refused as a bad request
+(400 or 404) is retried one object at a time, so one deleted object costs only itself;
+any other failure skips the batch, and every skip is a warning. The closing line,
+`Audit complete: N finding(s) across M checks`, adds how many Models were not exported
+and how many items could not be read.
 
 A snapshot holds exported TML from the cluster it was captured on. Keep it outside the
 repository — this repo is public.

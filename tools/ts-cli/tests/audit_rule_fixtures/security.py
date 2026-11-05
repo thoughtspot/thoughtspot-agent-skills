@@ -476,3 +476,100 @@ def sec_rls_same_direction() -> AuditContext:
         "bridge", [("bridge_to_users", "bridge", "users")],
         [("users_1", "users", "bridge_to_users")], ["[users_1::c] = 1"]),
         users_fqn="g-bridge")
+
+
+# ── S12 / S13: RLS robustness (roadmap PR 4.4) ──────────────────────────────
+
+def _outer_rls_ctx(rule_expr: str) -> AuditContext:
+    """ORDERS LEFT_OUTER-joined to CUST, whose Table TML carries one RLS rule."""
+    cust = {"table": {"name": "CUST", "columns": [{"name": "K"}, {"name": "REGION"}],
+                      "rls_rules": {"tables": [{"name": "CUST"}],
+                                    "table_paths": [{"id": "CUST_1", "table": "CUST",
+                                                     "column": ["REGION"]}],
+                                    "rules": [{"name": "Region", "expr": rule_expr}]}}}
+    model = {"guid": "m-rls-outer", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-orders", "joins": [
+            {"name": "orders_cust", "with": "CUST", "on": "[ORDERS::K] = [CUST::K]",
+             "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-cust"}]}}
+    return make_context(models=[model], tables={"t-cust": cust,
+                                                "t-orders": {"table": {"name": "ORDERS"}}})
+
+
+def sec_rls_outer_joined_unguarded() -> AuditContext:
+    return _outer_rls_ctx("[CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_outer_joined_isnull() -> AuditContext:
+    return _outer_rls_ctx("isnull ( [CUST_1::REGION] ) or [CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_custom_variable_rule() -> AuditContext:
+    from .rls import build_rls_expr
+    return build_rls_expr("[BANK_EMPLOYEES_1::COUNTRY] = ts_org")
+
+
+def sec_rls_groups_rule() -> AuditContext:
+    from .rls import build_rls_expr
+    return build_rls_expr("[BANK_EMPLOYEES_1::COUNTRY] = ts_groups")
+
+
+# ── S14 / S15 (BL-512): RLS judgement checks, LOW "review" ──────────────────
+
+def _two_rls_tables_ctx(orders_expr: str, cust_expr: str, orders_col: str = "OWNER",
+                        cust_col: str = "REGION") -> AuditContext:
+    """ORDERS joined to CUST; each Table TML carries one RLS rule on its own column."""
+    def table(name, col, expr):
+        return {"table": {"name": name, "columns": [{"name": "K"}, {"name": col}],
+                          "rls_rules": {"tables": [{"name": name}],
+                                        "table_paths": [{"id": f"{name}_1", "table": name,
+                                                         "column": [col]}],
+                                        "rules": [{"name": f"{name} rule", "expr": expr}]}}}
+    model = {"guid": "m-rls-two", "model": {"name": "Sales", "columns": [], "model_tables": [
+        {"name": "ORDERS", "fqn": "t-orders", "joins": [
+            {"name": "orders_cust", "with": "CUST", "on": "[ORDERS::K] = [CUST::K]",
+             "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
+        {"name": "CUST", "fqn": "t-cust"}]}}
+    return make_context(models=[model], tables={
+        "t-orders": table("ORDERS", orders_col, orders_expr),
+        "t-cust": table("CUST", cust_col, cust_expr)})
+
+
+def sec_rls_two_tenant_variables() -> AuditContext:
+    """One Table scopes rows by user name, the other by group: S14."""
+    return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_username",
+                               "[CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_one_tenant_variable() -> AuditContext:
+    return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups",
+                               "[CUST_1::REGION] = ts_groups_int")
+
+
+def sec_rls_two_key_columns() -> AuditContext:
+    """Both Tables scope by ts_groups, but through differently named columns: S16."""
+    return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups",
+                               "[CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_one_key_column() -> AuditContext:
+    """Both Tables scope through a column of the same name (case aside): S16 is silent."""
+    return _two_rls_tables_ctx("[ORDERS_1::TENANT_ID] = ts_groups",
+                               "[CUST_1::tenant_id] = ts_username",
+                               orders_col="TENANT_ID", cust_col="tenant_id")
+
+
+def sec_rls_null_test_on_own_column() -> AuditContext:
+    """CUST's rule keeps its own null REGION rows for everyone: S15."""
+    return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups",
+                               "isnull ( [CUST_1::REGION] ) or [CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_null_test_on_joined_column() -> AuditContext:
+    """ORDERS' rule null-tests a column of another Table (CUST), not its own owner
+    column: S15 reads only a rule's own Table, so it is silent."""
+    ctx = _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups", "[CUST_1::REGION] = ts_groups")
+    rls = ctx.tables["t-orders"]["table"]["rls_rules"]
+    rls["table_paths"].append({"id": "CUST_1", "table": "CUST", "column": ["REGION"]})
+    rls["rules"][0]["expr"] = "isnull ( [CUST_1::REGION] ) or [ORDERS_1::OWNER] = ts_groups"
+    return ctx

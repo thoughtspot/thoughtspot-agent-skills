@@ -35,7 +35,8 @@ from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tup
 from ts_cli.audit.engine import tml
 from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
 from ts_cli.audit.engine.memo import cached
-from ts_cli.spotql_ops import AGGREGATE_FUNCS
+from ts_cli.formula_translate.refs import split_literals
+from ts_cli.spotql_ops import AGGREGATE_FUNCS, is_bare_window
 
 DerivedField = Callable[[dict, Any], Any]
 FIELDS: Dict[str, DerivedField] = {}
@@ -188,10 +189,9 @@ def _is_coached(item: dict, ctx: Any) -> bool:
     score, A5 until 2026-10, does not)."""
     from ts_cli.audit.context import nl_instructions  # not gate-safe: import on use
     model = item.get("obj") or {}
-    return bool(
-        nl_instructions(ctx.ai_instructions.get(item.get("guid")))
-        or ((model.get("model_instructions") or {}).get("data_model_instructions")
-            or "").strip())
+    text = (model.get("model_instructions") or {}).get("data_model_instructions")
+    return bool(nl_instructions(ctx.ai_instructions.get(item.get("guid")))
+                or (isinstance(text, str) and text.strip()))
 
 
 # ── set keys (the group and pairwise modes, D7's code rule) ─────────────────
@@ -254,7 +254,7 @@ def _calls_aggregate(formula: dict) -> bool:
 def _aggregate_formula_names(model: dict) -> set:
     formulas = [f for f in (model.get("formulas") or []) if isinstance(f, dict)]
     direct = {f.get("name") for f in formulas if f.get("name") and _calls_aggregate(f)}
-    graph, _ = _reference_graph(formulas)
+    graph, _ = _reference_graph(formulas, model.get("columns") or [])
     found = set(direct)
     changed = True
     while changed:
@@ -303,6 +303,27 @@ def _surfaces_row_level_formula(item: dict, ctx: Any) -> bool:
         return False
     aggregate = cached("aggregate_formula_names", model, _aggregate_formula_names, model)
     return name not in aggregate
+
+
+@register("surfaces_bare_window_formula", uses=(),
+          label="the column surfaces a bare group_aggregate, last_value or first_value")
+def _surfaces_bare_window_formula(item: dict, ctx: Any) -> bool:
+    """Model column: its `formula_id` names a formula whose whole `expr` is one call to
+    group_aggregate (or a group_* shorthand), last_value or first_value (or an
+    *_in_period spelling) — the aggregate formulas whose column `aggregation` is applied
+    (product owner, 2026-11-02; spotql_ops.is_bare_window, any case, BL-509). False for
+    a table column, a non-string `formula_id`, or one matching no formula."""
+    fid = (item.get("obj") or {}).get("formula_id")
+    if not isinstance(fid, str) or not fid:
+        return False
+    model = _model_of(item)
+    expr = cached("formula_exprs_by_id", model, _formula_exprs_by_id, model).get(fid)
+    return is_bare_window(expr if isinstance(expr, str) else None)
+
+
+def _formula_exprs_by_id(model: dict) -> dict:
+    return {f["id"]: f.get("expr") for f in (model.get("formulas") or [])
+            if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"]}
 
 
 def _formula_names_by_id(model: dict) -> dict:
@@ -374,13 +395,102 @@ def _fact_table_count(item: dict, ctx: Any) -> int:
           label="the string-typed join keys")
 def _varchar_join_keys(item: dict, ctx: Any) -> List[str]:
     """Join: the column ids in its `on` clause whose warehouse type, read off the Table
-    TMLs (AuditContext.column_types), is a string type. A key whose table is not in
-    the context has no type and is not listed — unknown is not "a string"."""
+    TMLs (AuditContext.column_types, as the join reads it: tml.join_column_types, so a
+    key of an aliased table is typed too, BL-507), is a string type. A key whose table
+    is not in the context has no type and is not listed — unknown is not "a string"."""
     from ts_cli.audit.context import join_key_ids  # not gate-safe: import on use
     from ts_cli.audit.engine.messages import NameList
-    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
-    return NameList(k for k in join_key_ids((item.get("obj") or {}).get("on"))
+    join = item.get("obj") or {}
+    col_types = tml.join_column_types(join, _model_of(item), cached(
+        "column_types", item["doc"], ctx.column_types, item["doc"]))
+    return NameList(k for k in join_key_ids(join.get("on"))
                     if col_types.get(k, "").upper() in tml.STRING_TYPES)
+
+
+def _table_identity(model_table: Any) -> Any:
+    """A model table's physical identity: its `fqn`, else its `name` (None if neither
+    is a non-empty string)."""
+    if not isinstance(model_table, dict):
+        return None
+    for key in ("fqn", "name"):
+        value = model_table.get(key)
+        if isinstance(value, str) and value:
+            return (key, value)
+    return None
+
+
+@register("table_copy_count", uses=(),
+          label="how many times the table appears in the Model")
+def _table_copy_count(item: dict, ctx: Any) -> int:
+    """Model table: how many of the Model's `model_tables` are the same Table — the
+    same `fqn`, else the same `name` — itself included; 1 for a table appearing once
+    (aliased or not), 0 for one with no identity."""
+    me = _table_identity(item.get("obj"))
+    if me is None:
+        return 0
+    model_tables = _model_of(item).get("model_tables")
+    return sum(1 for mt in (model_tables if isinstance(model_tables, list) else [])
+               if _table_identity(mt) == me)
+
+
+@register("parameter_formula_names", uses=(),
+          label="the formulas that read a Model parameter")
+def _parameter_formula_names(item: dict, ctx: Any) -> list:
+    """Model: the names of its formulas whose `expr`, outside quoted literals
+    (formula_translate.refs.split_literals), holds `[<parameter name>]` for one of the
+    Model's `parameters`; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports this module
+    model = item.get("obj") or {}
+    refs = _parameter_refs(model)
+    formulas = model.get("formulas")
+    out = NameList()
+    for f in (formulas if isinstance(formulas, list) and refs else []):
+        if isinstance(f, dict) and isinstance(f.get("expr"), str):
+            code = " ".join(seg for lit, seg in split_literals(f["expr"]) if not lit)
+            if any(r in code for r in refs):
+                out.append(f.get("name"))
+    return out
+
+
+def _parameter_refs(model: dict) -> set:
+    """`[<name>]` for each of the Model's parameters with a string name."""
+    params = model.get("parameters")
+    return {f"[{p['name']}]" for p in (params if isinstance(params, list) else [])
+            if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]}
+
+
+#: Warehouse types that hold a date: a column of one is what date keywords work on.
+DATE_TYPES = ("DATE", "DATE_TIME", "DATETIME", "TIMESTAMP")
+
+
+@register("data_type", uses=(),
+          label="the column's warehouse data type")
+def _data_type(item: dict, ctx: Any) -> str:
+    """Model column: its warehouse data type, upper-cased, read off the Table TML its
+    `column_id` resolves to (AuditContext.column_types, keyed by Model alias, else
+    name). "" when unknown: a formula, a non-string `column_id`, or a Table with no
+    TML in scope — which a caller must not read as "not a date"."""
+    cid = (item.get("obj") or {}).get("column_id")
+    if not isinstance(cid, str) or not item.get("doc"):
+        return ""
+    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
+    return str(col_types.get(cid) or "").upper()
+
+
+@register("has_date_column", uses=(), values=(False, True),
+          label="the Model has a date column")
+def _has_date_column(item: dict, ctx: Any) -> bool:
+    """Model: some column's warehouse type (@data_type) is a date type (DATE_TYPES)."""
+    doc = item.get("doc") or {}
+    return cached("has_date_column", doc, _model_has_date_column, doc, ctx)
+
+
+def _model_has_date_column(doc: dict, ctx: Any) -> bool:
+    col_types = cached("column_types", doc, ctx.column_types, doc)
+    cols = (doc.get("model") or {}).get("columns")
+    return any(isinstance(c, dict) and isinstance(c.get("column_id"), str)
+               and str(col_types.get(c["column_id"]) or "").upper() in DATE_TYPES
+               for c in (cols if isinstance(cols, list) else []))
 
 
 @register("is_string_type", uses=(),
@@ -409,11 +519,13 @@ def _if_call_count(item: dict, ctx: Any) -> int:
     return len(_IF_CALL.findall(str((item.get("obj") or {}).get("expr") or "")))
 
 
-def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
+def _reference_graph(formulas: list, columns: Any = ()) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     """A Model's formula reference graph, keyed by formula NAME.
 
     A cross-reference is written as the formula's id (`[formula_<name>]`), or — in a
-    hand-built model — its display name; both resolve back to the name (BL-300). A
+    hand-built model — its name or its surfacing column's display name; all resolve
+    back to the name (BL-300), read as the formula tree reads them: outside quoted
+    literals, stripped (tml.expr_refs, tml.formula_reference_index; BL-504). A
     formula's edges are the other formulas its `expr` references. Formulas sharing a
     name share a node, holding the references of the LAST of them that has any;
     `owner` maps each node to the position of the FIRST of them that has any, so a rule
@@ -421,12 +533,12 @@ def _reference_graph(formulas: list) -> Tuple[Dict[Any, list], Dict[Any, int]]:
     order legacy P17 did (it walked its name-keyed dict, where a name keeps the place
     of its first insertion).
     """
-    by_ref = tml.formula_ref_index(formulas)
+    by_ref = tml.formula_reference_index(formulas, columns)
     graph: Dict[Any, list] = {}
     owner: Dict[Any, int] = {}
     for i, f in enumerate(formulas):
         fname = f.get("name", "")
-        refs = tml.BRACKET_REF.findall(str(f.get("expr") or ""))
+        refs = tml.expr_refs(f.get("expr"))
         cross = [by_ref[r] for r in refs if r in by_ref and by_ref[r] != fname]
         if cross:
             graph[fname] = cross
@@ -459,7 +571,7 @@ def _reference_chain_depth(item: dict, ctx: Any):
     references represent."""
     model = _model_of(item)
     graph, owner = cached("reference_graph", model, _reference_graph,
-                          model.get("formulas") or [])
+                          model.get("formulas") or [], model.get("columns") or [])
     name = (item.get("obj") or {}).get("name", "")
     if name not in owner or owner[name] != item.get("index"):
         return None

@@ -594,6 +594,8 @@ def _humanise_trigger(pattern: str) -> str:
         return "Skill files staged"
     if "coco-snowsight" in p and "SYNC-DEBT" in p:
         return "CoCo mirrors or SYNC-DEBT.md staged"
+    if "ts-cli/ts_cli" in p and "(py|js)" in p:
+        return "ts-cli Python or report JS staged"
     if "ts-cli/ts_cli" in p and "\\.py" in p:
         return "ts-cli Python source staged"
     if "shared/(mappings|schemas)" in p:

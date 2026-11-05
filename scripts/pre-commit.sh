@@ -164,9 +164,10 @@ if grep -q '\.py$' <<< "$STAGED"; then
   run_check "py redefinitions"   "tools/validate/check_python_redefinitions.py --root . --staged"
 fi
 
-# Line-count gate on staged ts_cli modules (BL-070) — warn >500, fail >1000.
-# Complements the complexity ratchet: long-but-simple files slip past radon.
-if grep -q '^tools/ts-cli/ts_cli/.*\.py$' <<< "$STAGED"; then
+# Line-count gate on staged ts_cli modules and report JS (BL-070, BL-503) — warn >500,
+# fail >1000, plus a JS function-length gate. Complements the complexity ratchet:
+# long-but-simple files slip past radon.
+if grep -qE '^tools/ts-cli/ts_cli/.*\.(py|js)$' <<< "$STAGED"; then
   run_check "file size"          "tools/validate/check_file_size.py --root . --staged"
 fi
 

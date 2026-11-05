@@ -309,7 +309,7 @@ earlier blanket claim ("ignored at query time", stated universally) was wrong:
 | `expr` shape | Example | Does `columns[].properties.aggregation` apply? |
 |---|---|---|
 | **Scalar** (row-level, no aggregate function) | `[FACT::AMOUNT] - [FACT::COST]` | **Yes.** The formula behaves like a fact column: it is evaluated per row and then rolled up by the column's declared `aggregation`. This is the same model as a physical fact column with a default aggregation (Snowflake's FACT + default aggregation is the direct analogy). |
-| **Aggregate** (the `expr` already contains an aggregate) | `sum ( [FACT::AMOUNT] - [FACT::COST] )`, `sum ( group_aggregate ( ... ) )` | **No — it is a no-op**, but declare one: the product owner rules the TML invalid without it (2026-11-02), though a Power BI Model with none was created live on 2026-07-16 — see BL-509. ThoughtSpot evaluates the aggregate in the `expr`; the column-level `aggregation` does not re-aggregate the result. |
+| **Aggregate** (the `expr` already contains an aggregate) | `sum ( [FACT::AMOUNT] - [FACT::COST] )`, `sum ( group_aggregate ( ... ) )` | **No — it is a no-op**, but declare one: the product owner rules it required (2026-11-02). The importer does not enforce that: `VALIDATE_ONLY` on the SE demo cluster (2026-11-04) accepts an aggregate formula column with no `aggregation:` (it rejects an invalid value, error 14528), as a live Power BI import did on 2026-07-16 — BL-509. ThoughtSpot evaluates the aggregate in the `expr`; the column-level `aggregation` does not re-aggregate the result. |
 | **Bare `group_aggregate` / `last_value` / `first_value`** (no aggregate wrapped around it; the `group_*` shorthands and the `*_in_period` spellings are the same functions) | `last_value ( sum ( [FACT::BALANCE] ) , query_groups ( ) , { [DATE::DATE] } )` | **Yes.** These are the exception among aggregate formulas: the column's `aggregation` is applied to their result. SUM is usually right for a balance (summed across accounts, last over time) and wrong for a rate. |
 
 *Product owner, 2026-11-02:* the rows above, with the required-but-ignored declaration on
@@ -321,10 +321,15 @@ Three consequences for generators:
   `SUM` is the right default for an additive quantity, but a scalar ratio or rate must not carry
   `SUM`, because the sum of per-row ratios is not the ratio of the sums.
 - An **aggregate** MEASURE formula should carry an `aggregation:` (SUM by convention) — ruled
-  required, though not yet enforced by every build (BL-509) — but it has no query-time effect. Do not attempt to infer a "correct"
+  required, though the importer accepts it absent (`VALIDATE_ONLY`, 2026-11-04; BL-509) — but it has no query-time effect. Do not attempt to infer a "correct"
   aggregation from the expression shape in this case — there is nothing to get right.
 - A **bare `group_aggregate` / `last_value` / `first_value`** formula is the exception: its
-  `aggregation:` is load-bearing, chosen exactly as for a scalar formula.
+  `aggregation:` is load-bearing, chosen exactly as for a scalar formula. When the source
+  names none, `spotql_ops.formula_aggregation` declares the re-aggregation the inner
+  aggregate implies (`group_aggregate ( average ( … ) , … )` or `group_average` →
+  `AVERAGE`; MIN, MAX; sum or count → `SUM`; a ratio, unique count or other non-additive
+  aggregate → `AVERAGE`; an inner `[formula_X]` resolved first). The Power BI, Sisense and
+  dbt converters use it; four others still declare their own value (BL-509, BL-519).
 
 The scalar and aggregate patterns are both legitimate and idiomatic. The scalar form is the more reusable of the two: the
 formula stays at row grain, so it can be re-aggregated differently in different searches, and it

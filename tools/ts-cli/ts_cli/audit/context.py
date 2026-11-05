@@ -6,7 +6,9 @@ from typing import Any, Iterable, NoReturn, Optional
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.tml import BRACKET_REF
+from ts_cli.audit.engine.tml import expr_refs
+from ts_cli.formula_translate.refs import split_literals
+from ts_cli.tml_join_graph import on_clause_refs
 from ts_cli.commands.tml import parse_edoc, detect_tml_type
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
@@ -93,9 +95,15 @@ def join_key_ids(on_str: str) -> list:
     An unbracketed clause is tolerated so a hand-built fixture still parses.
     """
     text = on_str or ""
-    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: engine/tml.py's
-    # BRACKET_REF, the one declaration of that pattern (BL-304).
-    bracketed = [m.strip() for m in BRACKET_REF.findall(text) if m.strip()]
+    # TML writes operands bracketed, `[ORDERS::CUST_ID] = [CUST::ID]`: read outside
+    # quoted literals (BL-504) by the join graph's own reader, which undoes a server
+    # escape (`[dim\.csv::k]` -> `dim.csv::k`) as D16 and H3 read it; a bracketed operand
+    # that is not `TABLE::COL` falls back to engine/tml.py's expr_refs.
+    code = " ".join(seg for lit, seg in split_literals(text) if not lit)
+    pairs = on_clause_refs(code)
+    if pairs:
+        return [f"{t}::{c}" for t, c in pairs]
+    bracketed = expr_refs(text)
     if bracketed:
         return bracketed
     parts = text.replace("=", ",").replace(" and ", ",").split(",")
@@ -272,37 +280,26 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
         warnings.append(msg)
 
 
-def _export_answers(client: Any, dependents: dict) -> list:
-    """Answer TML for every ANSWER among `dependents`; a failed batch is skipped."""
-    answers: list = []
-    answer_guids = set()
-    for deps in dependents.values():
-        for d in deps:
-            if d.get("type") == "ANSWER" and d.get("guid"):
-                answer_guids.add(d["guid"])
+def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
+    """Answer TML for every ANSWER among `dependents`, 50 at a time with the Model
+    export's retry (`_export_items`, BL-517); every Answer not exported is a warning."""
+    answer_guids = list(dict.fromkeys(
+        d["guid"] for deps in dependents.values() for d in deps
+        if d.get("type") == "ANSWER" and d.get("guid")))
     if not answer_guids:
-        return answers
+        return []
     _log(f"Exporting {len(answer_guids)} answer TML(s)...")
-    guid_list = list(answer_guids)
-    ans_batch = 50
-    for i in range(0, len(guid_list), ans_batch):
-        batch = guid_list[i:i + ans_batch]
-        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-            "metadata": [{"identifier": g} for g in batch],
-            "export_fqn": True,
-            "formattype": "YAML",
-        }, timeout=300, raise_for_status=False)
-        if not resp.ok:
-            _log(f"Warning: answer export batch {i//ans_batch+1} returned {resp.status_code}, skipping {len(batch)} answer(s)")
+    answers: list = []
+    for item in _export_items(client, answer_guids, warnings, "Answer", associated=False):
+        reason = _export_failure(item)
+        if reason:
+            msg = f"Answer not exported ({reason}), so not checked"
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
             continue
-        for item in resp.json():
-            reason = _export_failure(item)
-            if reason:
-                _log(f"Warning: answer not exported ({reason}), skipping it")
-                continue
-            parsed = parse_edoc(item["edoc"], "YAML")
-            if parsed and detect_tml_type(parsed) == "answer":
-                answers.append(parsed)
+        parsed = parse_edoc(item["edoc"], "YAML")
+        if parsed and detect_tml_type(parsed) == "answer":
+            answers.append(parsed)
     return answers
 
 
@@ -320,6 +317,74 @@ def _export_failure(item) -> Optional[str]:
     if isinstance(item, dict) and item.get("edoc") not in (None, ""):
         return None
     return export_item_doc(item)[1]
+
+
+#: A batch refused with one of these names a bad identifier: retry its objects one by one.
+_RETRY_ONE_BY_ONE = (400, 404)
+
+
+def _post_export(client: Any, guids: list, associated: bool):
+    body = {"metadata": [{"identifier": g} for g in guids], "export_fqn": True}
+    if associated:
+        body["export_associated"] = True
+    body["formattype"] = "YAML"
+    return client.post("/api/rest/2.0/metadata/tml/export", json=body,
+                       timeout=300, raise_for_status=False)
+
+
+def _export_items(client: Any, guids: list, warnings: list, kind: str = "Model",
+                  associated: bool = True, batch_size: int = 50) -> list:
+    """Every `metadata/tml/export` item for `guids` (`kind`: "Model" or "Answer";
+    a Model is exported with its associated Tables), `batch_size` at a time.
+
+    A batch refused as a bad request (400 or 404) is retried one GUID at a time: one
+    deleted or unreadable object 400s the whole request, and dropping the batch lost its
+    healthy neighbours with it (98 of 148 Models for four deleted GUIDs, BL-510; the
+    Answer export did the same, BL-517). Only a GUID that still fails on its own is
+    reported, by GUID, as not checked. Any other failure (auth, a server error) would
+    fail again per GUID, so its batch is reported whole, as before — and so is the rest
+    of a batch when the retry meets one (_export_one_by_one)."""
+    items: list = []
+    for i in range(0, len(guids), batch_size):
+        batch = guids[i:i + batch_size]
+        resp = _post_export(client, batch, associated)
+        if resp.ok:
+            items.extend(resp.json())
+            continue
+        if resp.status_code not in _RETRY_ONE_BY_ONE:
+            msg = (f"{kind} export batch {i // batch_size + 1} returned {resp.status_code}, "
+                   f"skipping {len(batch)} {kind.lower()}(s)")
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
+            continue
+        if len(batch) > 1:
+            _log(f"Warning: {kind} export batch {i // batch_size + 1} returned "
+                 f"{resp.status_code}; retrying its {len(batch)} {kind.lower()}(s) one at a time")
+        items.extend(_export_one_by_one(client, batch, resp, warnings, kind, associated))
+    return items
+
+
+def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list,
+                       kind: str, associated: bool) -> list:
+    """The items of `batch`'s objects, one request each (a lone object reuses the
+    batch's own response). An object refused as a bad request is reported as not
+    checked; any other failure would recur for every object left, so the retry stops
+    there and the rest are reported together."""
+    items: list = []
+    for n, guid in enumerate(batch):
+        one = _post_export(client, [guid], associated) if len(batch) > 1 else batch_resp
+        if one.ok:
+            items.extend(one.json())
+            continue
+        msg = f"{kind} {guid} could not be exported (HTTP {one.status_code}), so not checked"
+        rest = len(batch) - n - 1
+        if one.status_code not in _RETRY_ONE_BY_ONE and rest:
+            msg += f"; the retry stopped there, skipping {rest} more {kind.lower()}(s)"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        if one.status_code not in _RETRY_ONE_BY_ONE:
+            break
+    return items
 
 
 def build_context(
@@ -352,45 +417,29 @@ def build_context(
     # them (D2/D3/D11/P6 resolve referencing joins from Table TML, S2 and H7 read it too).
     _log(f"Exporting TML for {len(model_guids)} model(s)...")
     warnings = []
-    model_batch = 50
-    for i in range(0, max(len(model_guids), 1), model_batch):
-        batch = model_guids[i:i + model_batch]
-        if not batch:
-            break
-        resp = client.post("/api/rest/2.0/metadata/tml/export", json={
-            "metadata": [{"identifier": g} for g in batch],
-            "export_fqn": True,
-            "export_associated": True,
-            "formattype": "YAML",
-        }, timeout=300, raise_for_status=False)
-        if not resp.ok:
-            msg = f"Model export batch {i // model_batch + 1} returned {resp.status_code}, skipping {len(batch)} model(s)"
+    for item in _export_items(client, model_guids, warnings):
+        reason = _export_failure(item)
+        if reason:
+            msg = f"Not exported, so not checked: {reason}"
             _log(f"Warning: {msg}")
             warnings.append(msg)
             continue
-        for item in resp.json():
-            reason = _export_failure(item)
-            if reason:
-                msg = f"Not exported, so not checked: {reason}"
-                _log(f"Warning: {msg}")
-                warnings.append(msg)
-                continue
-            parsed = parse_edoc(item["edoc"], "YAML")
-            if not parsed:
-                continue
-            tml_type = detect_tml_type(parsed)
-            if tml_type == "model":
-                models.append(parsed)
-            elif tml_type == "table":
-                # Key by GUID, because that is what `model_tables[].fqn` holds.
-                # This map was keyed by the warehouse path "db.schema.db_table",
-                # so every `tables.get(mt["fqn"])` lookup compared a guid against
-                # a path and missed — `column_types` returned {} on every real
-                # run, and with it P6/D2 could never report a VARCHAR join key.
-                # `erd.py` carries a name-matching fallback written to work
-                # around exactly this rather than fix it. Falls back to the
-                # warehouse path when a doc carries no guid.
-                tables[_table_key(parsed)] = parsed
+        parsed = parse_edoc(item["edoc"], "YAML")
+        if not parsed:
+            continue
+        tml_type = detect_tml_type(parsed)
+        if tml_type == "model":
+            models.append(parsed)
+        elif tml_type == "table":
+            # Key by GUID, because that is what `model_tables[].fqn` holds.
+            # This map was keyed by the warehouse path "db.schema.db_table",
+            # so every `tables.get(mt["fqn"])` lookup compared a guid against
+            # a path and missed — `column_types` returned {} on every real
+            # run, and with it P6/D2 could never report a VARCHAR join key.
+            # `erd.py` carries a name-matching fallback written to work
+            # around exactly this rather than fix it. Falls back to the
+            # warehouse path when a doc carries no guid.
+            tables[_table_key(parsed)] = parsed
 
     model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
@@ -438,7 +487,7 @@ def build_context(
     if "ai_instructions" in needs:
         _fetch_ai_instructions(client, model_guids, ai_instructions, warnings)
     if "answers" in needs:
-        answers = _export_answers(client, dependents)
+        answers = _export_answers(client, dependents, warnings)
     if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)

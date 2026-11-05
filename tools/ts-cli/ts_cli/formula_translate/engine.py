@@ -19,6 +19,7 @@ from ts_cli.formula_translate.prompts import (
     ROLE_GRAIN_DIALECTS, build_needs_types, has_ratio, role_option,
 )
 from ts_cli.formula_translate.refs import split_literals
+from ts_cli.spotql_ops import formula_aggregation
 from ts_cli.formula_translate.traps import (
     detect_traps, is_downgrade, output_guard, repair_count_star,
 )
@@ -95,7 +96,9 @@ def formula_tml_entries(name: str, expr: str, role: str) -> tuple[dict, dict]:
     formula = {"id": fid, "name": name, "expr": expr}
     props: dict[str, Any] = {"column_type": role}
     if role == "MEASURE":
-        props["aggregation"] = "SUM"  # repo convention; ignored at query time for formulas
+        # applied to a per-row or bare-window formula, ignored (but declared) for any
+        # other aggregate one (product owner, 2026-11-02; BL-509)
+        props["aggregation"] = formula_aggregation(expr)
     column = {"name": name, "formula_id": fid, "properties": props}
     return formula, column
 

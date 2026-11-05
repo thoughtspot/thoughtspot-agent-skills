@@ -55,8 +55,8 @@ def run_rules(ctx, catalog: Catalog, categories: List[str], profile: str,
 
 def readable(ctx):
     """`ctx` without what no rule may judge (tml.unreadable_documents): each Model,
-    Table and Answer whose TML, or TML it depends on, holds a list or scalar where a
-    mapping belongs; with them, their metadata headers, the dependents of each excluded
+    Table and Answer whose TML, or TML it depends on, holds the wrong shape where the
+    audit reads one (MAPPING_KEYS, SHAPES); with them, their metadata headers, the dependents of each excluded
     Model or Table, and the excluded Models' Sets wherever they are listed (the
     dependents API repeats a Set under each of its Tables). A shallow copy; `ctx` itself
     is unchanged. Models, Tables and Answers are listed by the run (audit/__init__.py);

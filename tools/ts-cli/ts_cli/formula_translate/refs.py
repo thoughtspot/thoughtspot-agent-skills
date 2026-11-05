@@ -6,6 +6,11 @@ adapter runs ``qualify_refs`` over the translator's OUTPUT, so every reference s
 through the one recording resolver in ``context.ColumnContext``.
 
 String literals (single- or double-quoted) are never rewritten.
+
+The audit's catalog gate imports this module and `context` (A9's
+`@parameter_formula_names` reads formulas through `split_literals`) under Python 3.9
+with only PyYAML: keep both stdlib-only (`GATE_SHARED_MODULES` in
+`tools/validate/tests/test_check_audit_catalog.py`).
 """
 from __future__ import annotations
 

@@ -16,11 +16,13 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 """
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.formula_translate.refs import split_literals
 from ts_cli.tml_join_graph import on_clause_key_pairs
 
 
@@ -206,6 +208,230 @@ def _physical_table_key(item: dict, ctx: Any) -> Any:
                 header.get("schemaStripe", ""), header.get("name", "")))
 
 
+# ── S12: an RLS table on the optional side of an outer join ─────────────────
+
+#: An RLS rule keeping a table's unmatched (null) rows: a null test on a column — the RLS
+#: docs' `is_null ( … )` (security-rls, "Respect join definitions"), the formula
+#: language's `isnull ( … )` (thoughtspot-formula-patterns.md), or `= null`.
+_ISNULL_CALL = re.compile(r"(?i)\bis_?null\s*\(|=\s*null\b")
+
+
+def _optional_tables(join: dict, model_tables: list) -> List[dict]:
+    """The model tables an outer join may find no row in — the side that can be null:
+    the table its `with` names (tml.join_target, as the join graph resolves it) for
+    LEFT_OUTER, the declaring table for RIGHT_OUTER, both for OUTER (ThoughtSpot's full
+    outer join); none otherwise, and none it cannot resolve."""
+    kind = _upper(join.get("type"))
+    declaring = join.get("model_table")
+    target = tml.join_target(model_tables, join.get("with"))
+    sides = {"LEFT_OUTER": [target], "RIGHT_OUTER": [declaring],
+             "OUTER": [declaring, target]}.get(kind, [])
+    return [t for t in sides if isinstance(t, dict)]
+
+
+def _key(model_table: dict) -> str:
+    """A model table's key (alias, else name) when it is a string, else ""."""
+    for k in ("alias", "name"):
+        if isinstance(model_table.get(k), str) and model_table[k]:
+            return model_table[k]
+    return ""
+
+
+def _unguarded_rls(table_doc: Any) -> bool:
+    """A Table TML with RLS rules, none of which has a null branch (_ISNULL_CALL)."""
+    t = table_doc.get("table") if isinstance(table_doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    rules = rls.get("rules") if isinstance(rls, dict) else None
+    rules = [r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else []
+    return bool(rules) and not any(_ISNULL_CALL.search(str(r.get("expr") or ""))
+                                   for r in rules)
+
+
+@register("outer_join_unguarded_rls", uses=(),
+          label="the outer join's optional-side tables with RLS and no null branch")
+def _outer_join_unguarded_rls(item: dict, ctx: Any) -> list:
+    """Join: the keys, sorted, of the tables on its optional side (_optional_tables) whose
+    Table TML carries RLS rules none of which has a null branch (`is_null` / `isnull`).
+    Without one the outer join can act as an inner one for users under the rule
+    (security-rls, "Respect join definitions"). A table with no Table TML in scope is
+    unknown and not listed; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    model_tables = _model_of(item).get("model_tables")
+    sides = _optional_tables(item.get("obj") or {},
+                             model_tables if isinstance(model_tables, list) else [])
+    return NameList(sorted({_key(t) for t in sides
+                            if isinstance(t.get("fqn"), str)
+                            and _unguarded_rls(ctx.tables.get(t["fqn"]))} - {""}))
+
+
+# ── S14 / S15 (BL-512): RLS judgement checks ───────────────────────────────
+
+#: A session variable an RLS rule scopes users by: ts_groups (any variant), ts_username,
+#: ts_org (any variant), ts_email_domain, or a custom `ts_var ( name )`.
+_SESSION_VARIABLE = re.compile(
+    r"(?i)\b(ts_groups\w*|ts_username|ts_org|ts_email_domain"
+    r"|ts_var\s*\(\s*(\w+)\s*\))(?!\w)")
+_BRACKETED = re.compile(r"\[[^\]]*\]")
+#: A null test on one bracketed column: `is_null ( [X] )`, `isnull ( [X] )`, `[X] = null`.
+_NULL_TEST = re.compile(r"(?i)\bis_?null\s*\(\s*\[([^\]]+)\]\s*\)|\[([^\]]+)\]\s*=\s*null\b")
+
+
+def _code(expr: Any) -> str:
+    """`expr` with its quoted literals removed (formula_translate.refs.split_literals)."""
+    if not isinstance(expr, str):
+        return ""
+    return " ".join(seg for lit, seg in split_literals(expr) if not lit)
+
+
+def _variable(match: Any) -> str:
+    whole = match.group(1).lower()
+    if match.group(2):
+        return f"ts_var({match.group(2).lower()})"
+    return "ts_groups" if whole.startswith("ts_groups") else whole
+
+
+def _rule_variables(expr: Any) -> set:
+    """The session-variable families an RLS rule names, outside quoted literals and
+    outside `[...]` references (a column called TS_ORG_ID is not ts_org)."""
+    code = _BRACKETED.sub(" ", _code(expr))
+    return {_variable(m) for m in _SESSION_VARIABLE.finditer(code)}
+
+
+def _rls_rules_of(table_doc: Any) -> list:
+    t = table_doc.get("table") if isinstance(table_doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    rules = rls.get("rules") if isinstance(rls, dict) else None
+    return [r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else []
+
+
+@register("rls_session_variables", uses=(),
+          label="the session variables the Model's RLS rules scope users by")
+def _rls_session_variables(item: dict, ctx: Any) -> list:
+    """Model: when two or more of its Tables (Table TML by `model_tables[].fqn`, each
+    once) scope users through RLS and do so by DIFFERENT sets of session variables, all
+    of those variables, sorted; else none. One family per variable (`_rule_variables`):
+    every ts_groups variant is `ts_groups`, a custom variable `ts_var(name)`. Two
+    variables on one Table — an owner-or-group override — is not a difference between
+    Tables (S14, BL-512; review of PR 5); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    model = item.get("obj") or {}
+    mts = model.get("model_tables")
+    per_table = {}
+    for mt in mts if isinstance(mts, list) else []:
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        if not isinstance(fqn, str) or fqn in per_table:
+            continue
+        found = set()
+        for rule in _rls_rules_of(ctx.tables.get(fqn)):
+            found |= _rule_variables(rule.get("expr"))
+        if found:
+            per_table[fqn] = frozenset(found)
+    if len(per_table) < 2 or len(set(per_table.values())) < 2:
+        return NameList()
+    return NameList(sorted(set().union(*per_table.values())))
+
+
+_CLAUSE_SPLIT = re.compile(r"(?i)\b(?:and|or)\b")
+
+
+def _rule_key_columns(expr: Any) -> List[str]:
+    """The columns an RLS rule scopes users through: the `[path::COLUMN]` references in
+    those of its `and` / `or` clauses that name a session variable, outside quoted
+    literals and null tests; the part after `::`, stripped. A column the rule compares
+    with a literal (a status flag) or guards with `!= null` sits in a clause naming no
+    variable and is not read (review of the S16 PR). References are masked while the
+    rule is split, so an `and` inside a column name does not split it."""
+    refs: List[str] = []
+
+    def mask(m: Any) -> str:
+        refs.append(m.group(0))
+        return f" \x00{len(refs) - 1}\x00 "
+
+    masked = _BRACKETED.sub(mask, _NULL_TEST.sub(" ", _code(expr)))
+    out = []
+    for clause in _CLAUSE_SPLIT.split(masked):
+        if _rule_variables(clause):
+            out += [refs[int(i)][1:-1].rpartition("::")[2].strip()
+                    for i in re.findall(r"\x00(\d+)\x00", clause)]
+    return out
+
+
+@register("rls_key_columns", uses=(),
+          label="the columns the Model's RLS rules scope users through")
+def _rls_key_columns(item: dict, ctx: Any) -> list:
+    """Model: when two or more of its Tables (Table TML by `model_tables[].fqn`, each
+    once) scope users through RLS and do so through DIFFERENTLY NAMED sets of columns
+    (`_rule_key_columns`; names compared without case), all of those columns, sorted,
+    each name once; else none. Any difference counts, as the product owner specified
+    for G5e's keys half (S16, BL-521, 2026-11-05); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    mts = (item.get("obj") or {}).get("model_tables")
+    per_table, names = {}, {}
+    for mt in mts if isinstance(mts, list) else []:
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        if not isinstance(fqn, str) or fqn in per_table:
+            continue
+        found = set()
+        for rule in _rls_rules_of(ctx.tables.get(fqn)):
+            for col in _rule_key_columns(rule.get("expr")):
+                if col:
+                    found.add(col.casefold())
+                    names.setdefault(col.casefold(), col)
+        if found:
+            per_table[fqn] = frozenset(found)
+    if len(per_table) < 2 or len(set(per_table.values())) < 2:
+        return NameList()
+    return NameList(sorted((names[k] for k in set().union(*per_table.values())),
+                           key=str.casefold))
+
+
+def _own_table_and_paths(doc: Any) -> Tuple[Any, dict]:
+    """A Table TML's name and its RLS `table_paths` as {id: Table name}."""
+    t = doc.get("table") if isinstance(doc, dict) else None
+    rls = t.get("rls_rules") if isinstance(t, dict) else None
+    paths = rls.get("table_paths") if isinstance(rls, dict) else None
+    by_id = {p["id"]: p.get("table") for p in paths
+             if isinstance(p, dict) and isinstance(p.get("id"), str)} \
+        if isinstance(paths, list) else {}
+    return (t.get("name") if isinstance(t, dict) else None), by_id
+
+
+@register("own_column_null_tests", uses=(),
+          label="the rule's null tests on its own Table's columns")
+def _own_column_null_tests(item: dict, ctx: Any) -> list:
+    """RLS rule: the columns, in order, of its own Table that it tests for null
+    (`is_null` / `isnull ( [X] )`, `[X] = null`; outside quoted literals) AND scopes
+    users by — the same column also appears outside the null test in a rule that names
+    a session variable (G5f's shape: the owner key). A reference's prefix is a
+    `table_paths` id resolved to its Table, else a Table name. Such a test keeps the
+    Table's ownerless rows for every user under the rule; a null test on a key that is
+    never null (the join key) keeps an outer join's unmatched rows without that, and is
+    not listed (S15, BL-512; review of PR 5); a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    own, by_id = _own_table_and_paths(item.get("doc"))
+    code = _code((item.get("obj") or {}).get("expr"))
+    out = NameList()
+    if not _rule_variables(code):
+        return out
+    scoped = _BRACKETED.findall(_NULL_TEST.sub(" ", code))
+    for m in _NULL_TEST.finditer(code):
+        prefix, sep, column = (m.group(1) or m.group(2)).strip().partition("::")
+        prefix, column = prefix.strip(), column.strip()
+        if sep and isinstance(own, str) and by_id.get(prefix, prefix) == own \
+                and column not in out and _scopes(scoped, by_id, own, column):
+            out.append(column)
+    return out
+
+
+def _scopes(refs: list, by_id: dict, own: str, column: str) -> bool:
+    """One of `refs` (bracketed, outside the null tests) is `own`'s `column`."""
+    for ref in refs:
+        prefix, sep, col = ref[1:-1].strip().partition("::")
+        if sep and col.strip() == column and by_id.get(prefix.strip(), prefix.strip()) == own:
+            return True
+    return False
+
+
 # ── D15: duplicate Table-level joins ────────────────────────────────────────
 
 def _join_group_key(j: Any) -> Optional[tuple]:
@@ -289,9 +515,12 @@ def key_type_mismatches(on: Any, col_types: dict) -> List[str]:
 def _join_key_type_mismatches(item: dict, ctx: Any) -> list:
     """Join: each pair of keys in its `on` whose warehouse types, read off the Table TMLs
     (AuditContext.column_types, as @varchar_join_keys reads them), are of different
-    families; a name list in messages. A key of a table with no Table TML in scope — or,
-    through that lookup, of an aliased table — has no type and is not compared."""
+    families; a name list in messages. A key of a table with no Table TML in scope has
+    no type and is not compared; one of an aliased table is read under the alias
+    (tml.join_column_types, BL-507)."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    col_types = cached("column_types", item["doc"], ctx.column_types, item["doc"])
-    return NameList(key_type_mismatches((item.get("obj") or {}).get("on"), col_types))
+    join = item.get("obj") or {}
+    col_types = tml.join_column_types(join, _model_of(item), cached(
+        "column_types", item["doc"], ctx.column_types, item["doc"]))
+    return NameList(key_type_mismatches(join.get("on"), col_types))
 

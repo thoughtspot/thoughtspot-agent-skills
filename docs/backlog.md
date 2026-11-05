@@ -318,20 +318,33 @@ are roughly ordered by value÷effort.
 | BL-498 | ts dbt: warn when the uploaded dbt artifacts are stale (old `catalog.json`, `schema.yml` edited since) | 2026-12-31 |
 | BL-499 | ts-cli tests fake `ThoughtSpotClient` with classes that ignore its contract; error paths pass while broken (PR #669, twice) | 2026-11-30 |
 | BL-500 | `ts dbt create` / `generate-tml` are classed safe to retry, so a timeout or 502-504 can re-send a call that creates objects | 2026-11-30 |
-| BL-501 | `ts audit run` still ends on non-mapping shapes outside the three item-10 keys: a flat-list `rls_rules` (an unverified docstring says some builds export it), a list or string `model_instructions`, a Table's `joins_with` as a mapping, and any scalar entry in a list of mappings (`model_tables`, `columns`, `formulas`, Table columns, RLS rules) | 2026-11-30 |
+| ~~BL-501~~ | ~~`ts audit run` ends on non-mapping shapes outside the three item-10 keys~~ | DONE (2026-11-04) |
 | BL-502 | Model emitters (`model_builder.build_model_tml`, used by Qlik, `ts tableau build-model` and the aggregates generator; Power BI; Sisense; dbt `model_from_schema_yml` and `manifest`) and the Tableau hand-assembly template omit `join_progressive: true`, so their Models join every table into every query | 2026-11-30 |
-| BL-509 | Formula `aggregation:` after the 2026-11-02 ruling: five Model emitters write aggregate formula columns with no `aggregation:` (ruled invalid, yet a Power BI Model built so was created live in July), no lint invariant checks it, six docs and docstrings still say formula aggregation is ignored, `classify_expr` gives a bare `group_aggregate` / `last_value` SUM (which is applied), and `AGGREGATE_FUNCS` misses `*_in_period` | 2026-12-31 |
-| BL-506 | Rule D13: a bare `group_aggregate` / `last_value` / `first_value` formula (no outer aggregate, so its column's aggregation is used) whose aggregation is wrong for what it measures — D14's check on those three shapes (G1's formula half, deferred from roadmap PR 4.3) | 2026-12-31 |
-| BL-507 | The audit's join-key type lookup (`AuditContext.column_types`, keyed by Model alias) misses keys of aliased tables, because a referencing join's `on` names Tables: P6 and D16 read them as unknown. Fixing it moves P6's pins | 2026-12-31 |
-| BL-508 | Decide whether a Model inline join repeating a Table-level join (369 of 575 inline joins on the SE demo sample) is worth a finding at all — G14's "redundant" half, deferred from roadmap PR 4.3 as noise | 2027-01-31 |
-| BL-505 | The converters' own fact detectors (`databricks/mv_emit.detect_fact_tables`, `sv_build_model._detect_fact_tables`) do not use the shared table-role classifier `agents/shared/erd/roles.py` | 2027-01-31 |
-| BL-504 | Audit rules read formula references differently from the report's formula tree: P17/P2/H3 and other `BRACKET_REF` readers count bracket text inside quoted literals and do not strip whitespace; H3 counts self-references; P17 does not resolve a formula by its column's display name | 2026-12-31 |
-| BL-503 | The audit report's JavaScript (`ts_cli/audit/report/**/*.js`) has no size or complexity gate: `check_file_size` and `check_module_health` scan `.py` only; `views/objectmap.js` is 755 lines and `buildCrossModel` 331 | 2026-12-31 |
-| BL-510 | `ts dependency apply-change` exits 0 when objects fail, so a caller reading the exit code takes a partly applied REMOVE/REPOINT for a clean one | 2026-11-30 |
-| BL-511 | Cascade delete (mode D) refuses a Model with Sets, Spotter feedback or publication instead of backing them up and restoring them; AI memory and data-model instructions are neither checked nor restored | 2026-12-15 |
-| BL-512 | `ts dependency backup`/`rollback`/`cascade-delete` compare the profile's configured Org, not the session's actual Org | 2026-12-31 |
+| ~~BL-509~~ | ~~formula `aggregation:` after the 2026-11-02 ruling~~ | DONE (2026-11-04) |
+| ~~BL-510~~ | ~~`ts audit run`'s Model export drops a whole batch when one GUID is gone~~ | DONE (2026-11-04) |
+| ~~BL-511~~ | ~~Probe S12's consequence before raising it to MEDIUM~~ | DONE by ruling (2026-11-04): S12 is MEDIUM |
+| ~~BL-512~~ | ~~RLS judgement checks G5e and G5f~~ | DONE (2026-11-04) |
+| BL-514 | H15 (G19), slot-named columns: build it once the audit fetches column aliases (a Beta export option), so a slot column already aliased per tenant is not reported | 2027-01-31 |
+| BL-515 | `ts-object-model-remodel` skill (audit v2 roadmap wave 5): from Model + Table TML and the table-role classifier, a remodel plan, lint-clean proposed Model TML, and current vs proposed ERDs; first target the RLS repair shape. Parked after wave 4 by the product owner | 2027-03-31 |
+| ~~BL-516~~ | ~~A Model the audit could not export is reported only on stderr~~ | DONE (2026-11-04) |
+| ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
+| BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
+| BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
+| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332, `buildScorecard` 302 lines), gate the embedded ERD `renderer.js` (1,338 lines, outside the scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
+| ~~BL-521~~ | ~~G5e's other half: RLS Tables scoping the tenant through different key columns~~ | DONE (2026-11-05) |
+| ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
+| ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
+| ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
+| BL-505 | Converters' fact detection does not use the shared table-role classifier; a direction-only fix to `mv_emit` broke the emitted Metric Views and was reverted (PR 3) — the join walk must change with it | 2027-01-31 |
+| ~~BL-504~~ | ~~audit rules read formula references without skipping string literals~~ | DONE (2026-11-04) |
+| ~~BL-503~~ | ~~the audit report's JavaScript has no size or complexity gate~~ | DONE (2026-11-04) |
+| BL-532 | `ts dependency apply-change` exits 0 when objects fail, so a caller reading the exit code takes a partly applied REMOVE/REPOINT for a clean one | 2026-11-30 |
+| BL-533 | Cascade delete (mode D) refuses a Model with Sets, Spotter feedback or publication instead of backing them up and restoring them; AI memory and data-model instructions are neither checked nor restored | 2026-12-15 |
+| BL-534 | `ts dependency backup`/`rollback`/`cascade-delete` compare the profile's configured Org, not the session's actual Org | 2026-12-31 |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
+| BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
+| BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
 
 ### Tier 3 — Opportunistic
 
@@ -391,7 +404,7 @@ are roughly ordered by value÷effort.
 | BL-314 | nothing tells an author that a deliberate parse→TML transformation must also be declared to `tableau/verify.py`; three PRs have broken the fidelity gate the same way and the rule is prose in CLAUDE.md, not a check | next validator pass |
 | BL-337 | ts-object-formula-translate: offer a warehouse SQL pass-through for scalar functions (`--prefer-passthrough`) — evaluate performance and trade-offs | revisit after v1 testing feedback |
 | BL-409 | `ai/instructions/get` status for a Model a valid token may not read is unverified: a 401 there would abort the whole audit where a 403 skips the Model — SpotterCode MCP first, then a read-only live probe | 2027-01-31 |
-| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape | 2027-01-31 |
+| BL-410 | Does a second route (diamond) through an RLS join fail at query time? I22/S11 flag only RLS-closed cycles; probe before any rule flags the diamond shape. **Parked 2026-11-04: needs a dedicated test cluster** | 2027-03-31 |
 | BL-412 | AgentQL Quest: the Shifting Isles' boat is a plain rowing boat at a grey stone dock; make it a sailing galley (no cannons) at a wooden pier on piles | 2027-03-31 |
 | BL-413 | AgentQL Quest: the Craftsmen of the Lake is a town on an island; make it a medieval town on wooden stilts over the water, with fishermen's punts around it | 2027-03-31 |
 | BL-414 | the backlog novelty gate compares id sets only, so a merge that moves an id already on the base to a different item (a title swap) passes every gate; #664 did exactly that to BL-410 | 2027-01-31 |
@@ -14585,7 +14598,7 @@ Tests for each, with synthetic names only.
 ## BL-401 — `ts-dependency-cleanup` resubmission requirements (closed PR #505) `Tier 2` — **RESOLVED 2026-10-30**
 
 **Resolution.** The capability ships as `ts-dependency-manager` mode D (Step 3-D, skill 1.6.0,
-ts-cli 0.198.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
+ts-cli 0.206.0) instead of a separate skill, superseding PR #666. Item 1: `ts dependency
 cascade-delete` refuses without a readable, current, same-cluster backup. Item 2: the smoke
 test has only a dry-run step; no destructive flag exists. Item 3: purge is not wrapped.
 Items 4-8 described the separate skill and no longer apply; #5's lookup-vs-cascade gap is
@@ -14954,7 +14967,26 @@ Liveboard filter). If it fails like the cycle case, extend `ts_cli/tml_rls_graph
 report it (via the existing `ambiguous_paths`) at the severity the probe shows; if it
 works, record the result in the module docstring and close this.
 
-**Target:** 2027-01-31.
+**Parked 2026-11-04 (product owner): needs a dedicated test cluster.** The SE demo
+cluster has no non-admin test user (an admin bypasses RLS, so the probe cannot run as
+one) and no agreed scratch location; setting both up there was declined. The recipe,
+ready for that cluster:
+
+1. Three warehouse tables in a scratch schema: `SALES(sale_id, user_id, org_id,
+   amount)`, `USERS(user_id, org_id, user_name)`, `ORGS(org_id, org_name)`, a few
+   rows each, with one org whose name matches a test group.
+2. Table TML for all three; on `USERS`, `joins_with` to `ORGS` and an RLS rule reaching
+   it — `table_paths` with a `join_path` through that join — e.g.
+   `[ORGS_1::ORG_NAME] = ts_groups`.
+3. A Model with `SALES` → `USERS` and `SALES` → `ORGS` (both MANY_TO_ONE), so `ORGS`
+   is reached twice: directly, and through the RLS join on `USERS`.
+4. A non-admin user in the matching group (password straight to the OS credential store,
+   never in a conversation), with a `ts` profile.
+5. As that user: a search on `SALES` measures, the same filtered on an `ORGS` column, and
+   a Liveboard filter. Compare with the admin's numbers restricted to that org.
+6. Tear everything down (marker-stamp the objects first).
+
+**Target:** 2027-03-31.
 
 ## BL-412 — AgentQL Quest: a sailing galley at a wooden pier for the Shifting Isles `Tier 3`
 
@@ -16069,7 +16101,9 @@ objects. If it does, add both paths to `_NON_IDEMPOTENT_PATH_RE` (or pass
 
 **Target:** 2026-11-30.
 
-## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys `Tier 2`
+## BL-501 — `ts audit run` ends on non-mapping shapes outside the item-10 keys — DONE `Tier 2`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): every list or mapping the audit reads has its shape checked (`engine/tml.py` `SHAPES`, `misshapen`), alongside the item-10 MAPPING_KEYS, and a misshapen one makes its object unreadable: not judged, listed under "Could not be read", with what depends on it. Every row of the table below, plus a scalar Model filter, Answer formula or table, a `model_tables` mapping and a document body that is null or not a mapping, is an end-to-end test (`tests/test_audit_malformed_shapes.py`, `run_audit` then `render_report`, both assessments). **`rls_rules` ruling:** the flat-list shape was not confirmed (no schema doc has it, and the census's Tables with RLS were all mappings; the SpotterCode MCP was not connected), so it is malformed rather than normalised: listed, the Table is judged neither protected nor unprotected. The ERD parser still accepts it (`agents/shared/erd/parser.py` `_rls_rule_list`). Rules reading every Model, excluded ones included (H7, H8, H9), read their lists defensively. A null, `0` or `""` list reads as empty (the shared ERD parser no longer ends the run on one). Shapes no rule reads unguarded (`parameters`, `rls_rules.tables`/`table_paths`/`joins`) are not checked, so they cost no Model its judgement. Not covered: a scalar of the wrong type where a string belongs, BL-518.
 
 **Filed:** 2026-10-30. **Source:** the two independent reviews of the BL-406 item-10 fix.
 
@@ -16135,7 +16169,9 @@ settle both with one probe.
 
 **Target:** 2026-11-30.
 
-## BL-503 — the audit report's JavaScript has no size or complexity gate `Tier 3`
+## BL-503 — the audit report's JavaScript has no size or complexity gate — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, audit backlog PR 4). `check_file_size` scans the report's `.js` parts too (`SCANNED_SUFFIXES`), with the same warn 500 / fail 1000; `views/objectmap.js` is ratcheted at 756. And yes to a function-length check: JS has no complexity tool here, so `js_function_lengths` measures each top-level `function` to its column-0 `}` — warn above 150 lines, fail above 250 — with `buildCrossModel` (332) and `buildScorecard` (302) ratcheted in `JS_FUNCTION_RATCHET`. The three splits, the length check's blind spots and the embedded ERD `renderer.js` are BL-520, which the ratchets cite. `--staged` now also checks a renamed file (`--diff-filter=ACMR`). Tests: `tools/validate/tests/test_check_file_size.py`.
 
 **Filed:** 2026-10-31. **Source:** the review of roadmap PR 3.1 (the report split into
 parts).
@@ -16154,7 +16190,9 @@ when they are next changed.
 
 **Target:** 2026-12-31.
 
-## BL-504 — audit rules read formula references without skipping string literals `Tier 3`
+## BL-504 — audit rules read formula references without skipping string literals — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): one reader, `engine/tml.expr_refs` (outside quoted literals, stripped, a quoted name kept whole), and one index, `engine/tml.formula_reference_index` (id, name, surfacing column's display name, moved from the formula tree). The tree, P17 and P2's reference graph, H3 (which also no longer counts a formula's reference to itself) and the RLS column reads use them; `context.join_key_ids` (P6) now reads `on` clauses through `tml_join_graph.on_clause_refs`, outside literals, as D16 and H3 already did, so a server-escaped key (`dim\.csv`) is typed. Tests: `tests/test_audit_reference_reading.py`. No pinned finding moved. The sample has no reference inside a literal, padded, self-referencing or by display name, so it cannot show the formula half; the escaped-key half adds P6 findings there (see the PR).
 
 **Filed:** 2026-10-31. **Source:** the refute review of roadmap PR 3.2 (the formula tree).
 
@@ -16180,6 +16218,8 @@ changes no finding.
 
 ## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
 
+**Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: `agents/databricks/build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
+
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.
 
@@ -16199,7 +16239,231 @@ why `sv_build_model` stays separate if it does.
 
 **Target:** 2027-01-31.
 
-## BL-509 — formula `aggregation:` after the 2026-11-02 ruling `Tier 3`
+## BL-510 — the audit's Model export drops a whole batch when one GUID is gone — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.14.0): a batch refused as a bad request (400 or 404) is retried one GUID at a time, and only a GUID that still fails is reported as not checked. Any other failure skips the batch, and stops a retry part-way, as before. Follow-ups: BL-516 (a skipped Model is reported on stderr only) and BL-517 (the Answer export has the same batch bug).
+
+**Filed:** 2026-11-04. **Source:** recapturing the SE demo sample for roadmap PR 4.4.
+
+**What.** `build_context` (`tools/ts-cli/ts_cli/audit/context.py`, the Model export loop)
+posts `metadata/tml/export` for up to 50 Models at a time and, on a non-200, logs
+"Model export batch N returned 400, skipping 50 model(s)" and moves on. A single deleted
+or unreadable GUID makes the whole batch 400, so 49 healthy Models go unaudited, and the
+run still ends "Audit complete". Recapturing the 148-Model sample lost 98 Models to four
+deleted GUIDs.
+
+**Do.** On a non-200 batch, retry its GUIDs one by one (or bisect) and report only the
+failing ones as not checked; add a test with a fake client whose batch call 400s.
+
+**Target:** 2026-11-30.
+
+## BL-511 — probe S12's consequence before raising it to MEDIUM — DONE `Tier 3`
+
+**Status:** DONE by the product owner's ruling (2026-11-04), not by a probe. Whether an RLS rule on an outer-joined Table drops rows depends on cluster settings the audit cannot read, so S12 is MEDIUM and asks for a review. Per the docs (security-rls, "Respect join definitions") a rule must test the joined column for null (`is_null ( … )`) or the outer join can act as an inner one. S12 now reads that spelling as well as `isnull`.
+
+**Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4.
+
+**What.** S12 reports a Table with RLS rules (none calling `isnull`) on the optional side
+of a Model outer join. The docs say RLS joins are INNER by default, so the rule drops the
+rows the outer join kept; nothing in the repo shows it on a live cluster, so S12 ships at
+LOW.
+
+**Do.** On a scratch Model: an RLS Table LEFT_OUTER-joined from a fact, queried as a
+user under the rule, with and without an `isnull` branch. If the rows drop, raise S12 to
+MEDIUM and cite the probe; if not, retire or reword it.
+
+**Target:** 2026-12-31.
+
+## BL-512 — RLS judgement checks G5e and G5f — DONE `Tier 3`
+
+**Status:** DONE in part (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision. S14 (G5e, variables half): a Model whose RLS Tables scope users by different sets of session variables (one family per variable; two variables on one Table, an owner-or-group override, do not count). S15 (G5f): a rule's null test on a column of its own Table that the rule also scopes users by — the owner key; a null test on a never-null join key, which keeps an outer join's unmatched rows without exposing ownerless ones, is not reported, and S12's and S15's advice name that form. G5e's "different keys" half followed as BL-521 (S16, 2026-11-05). 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
+
+**Decision (2026-11-04, product owner):** build both as LOW rules worded "review" (audit backlog PR 5).
+
+**Filed:** 2026-11-04. **Source:** the expert rule review, deferred from roadmap PR 4.4.
+
+**What.** (e) one Model's Tables comparing the tenant through different keys or
+variables; (f) `isnull` on the secured table's own key, which the docs give for outer
+joins but which also shows ownerless rows to every user. Both need judgement: report,
+don't grade, or settle the shape first.
+
+**Target:** 2027-01-31.
+
+## BL-516 — a Model the audit could not export is invisible in the result — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): a requested Model with no exported TML is listed in `corpus.not_exported` (the run's own warning when one names it, else its GUID), a "Not exported" box on the dashboard, and the closing line, which also counts the unreadable items. Derived from `model_guids` and `models`, so older snapshots replay unchanged.
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `build_context` appends "Model … could not be exported, so not checked" to
+`ctx.warnings`, but nothing in `ts_cli/audit/` or `commands/audit.py` reads them: they
+reach stderr and a snapshot's `warnings.json` only. The run JSON, the HTML report and the
+final "Audit complete" line say nothing about a requested Model that was skipped.
+
+**Do.** Carry the skipped GUIDs into the run JSON and the report's "Could not be read"
+list (the pattern the AI-instructions lookup already uses), and count them in the closing
+line.
+
+**Target:** 2026-12-31.
+
+## BL-517 — the Answer export drops a whole batch on one bad GUID — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.15.0): `_export_answers` uses the Model export's `_export_items` (400/404 retried one Answer at a time, any other failure stops it), and every skipped Answer, including one refused inside a 200, is a warning. Answers are not listed in the report: the dependents they come from also hold Set consumers that are deliberately not exported, so a missing one cannot be told from a skipped one there.
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-510 fix.
+
+**What.** `_export_answers` (`tools/ts-cli/ts_cli/audit/context.py`) exports Answers 50
+at a time and, on a non-200, logs a warning and skips the batch — without even adding it
+to `ctx.warnings`. One deleted Answer drops up to 49 others from H7, H8 and H9.
+
+**Do.** Reuse `_export_model_items`' retry (400/404 one at a time, stop on any other
+failure), and record the skips in `ctx.warnings`.
+
+**Target:** 2026-12-31.
+
+
+## BL-518 — the audit ends on a wrong scalar type where a string belongs `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-501 fix (audit backlog PR 1).
+
+**What.** BL-501 made every wrong list or mapping shape "not judged". A scalar of the
+wrong type is a different class and still ends `ts audit run`: the review's fuzzer
+swapped a list, mapping or number into string fields of a two-Model context and found
+23 distinct crash sites, among them `engine/tml.py` (join and RLS reads),
+`engine/fields.py` (the join-key and type reads), `engine/code_rules.py`,
+`audit/context.py` `column_types`, `agents/shared/erd/parser.py`, `audit/report.py`, and
+`engine/scopes.py` on a non-string guid. None has been seen in an export.
+
+**Do.** Decide the unit first: per field (read a non-string as absent) or per object
+(extend `tml._body` with the string fields the audit reads, so the object is listed under
+"Could not be read" like BL-501's shapes). The second matches the item-10 ruling. Then a
+fuzz test over the string fields, run end to end (`run_audit`, `render_report`).
+
+**Target:** 2027-01-31.
+
+
+## BL-519 — formula aggregation: the converters left on their own value, and two probes `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of the BL-509 fix (audit backlog PR 2).
+
+**What.** BL-509 gave the converters that declared nothing `spotql_ops.formula_aggregation`.
+Four declare a value of their own and were left as they are:
+- the Snowflake SV builder (`sv_build_model._column_props`, `entry.get("aggregation") or "SUM"`)
+  and the Databricks MV builder (`mv_build_model._column_props`, the same): an SV metric
+  `AVG(PRICE) OVER (PARTITION BY category)` becomes `group_average ( … )` declared SUM,
+  which D13 now reports;
+- the Tableau and Qlik builders (`model_builder._aggregation_for_name`, a name heuristic):
+  right for a per-row formula named like a rate, blind to a bare window's inner aggregate.
+
+Two questions are unverified: which aggregation ThoughtSpot applies to a bare window whose
+column declares none (D13 does not read that case), and whether AgentQL needs `SUM(...)`
+around an `*_in_period` snapshot as it does around `last_value` (classified by the shared
+argument shape only). Separately, `spotql_ops.outermost_func` ignores quotes, so a bare
+window whose arguments hold a quoted `)` is not read as bare.
+
+**Do.** Route the four builders through `declare_formula_aggregations` where the source
+names no aggregation, keeping a source-declared one; probe the two questions on the SE demo
+cluster (an Answer over a bare window with and without a declared aggregation; one AgentQL
+query over an `*_in_period` measure); make `outermost_func` skip quoted text.
+
+**Target:** 2027-01-31.
+
+
+## BL-520 — the report's oversized JavaScript, and the JS the gate cannot see `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of BL-503 (audit backlog PR 4).
+
+**What.** BL-503 gated the report's own JS parts and ratcheted what was already over:
+`views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
+limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
+`views/scorecard.js`). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
+(1,338 lines; `audit/report.py` reads it into the page), which sits outside
+`check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
+measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
+function expression, an arrow, a `registerView({...})` method, an indented declaration or
+a column-0 `}` inside a template literal is not measured correctly. None of those is long
+in the report today (the review's Babel parse matched all 59 declarations).
+
+**Do.** Split `objectmap.js` per tab and the two builders into helpers, lowering the
+ratchets as they shrink; bring `renderer.js` under the gate (ratcheted, or split, with the
+ERD skill's own tests); and decide whether to measure function expressions too, or keep the
+report's declaration-only style as a convention the gate documents.
+
+**Target:** 2027-01-31.
+
+
+## BL-521 — G5e's "different keys" half — DONE `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** the independent review of BL-512 (audit backlog PR 5).
+
+**Status:** DONE (2026-11-05, ts-audit 3.18.0). The product owner ruled that any
+difference in column names is the signal. S16, LOW "review": a Model whose RLS Tables
+scope users through different sets of column names (the `[path::COLUMN]` references in
+a rule's `and` / `or` clauses that name a session variable, outside quoted literals and
+null tests; names compared without case). 0 findings on the SE demo sample: of its 2 Models with two or
+more RLS Tables, one uses the same column names and the other has a Table whose rule
+compares a session variable with a literal only. Tests:
+`tests/test_audit_rls_review_rules.py` and the rule's examples.
+
+**What.** BL-512's G5e is "one Model's Tables comparing the tenant through different keys
+or variables". PR 5 built the variables half (S14). The keys half was left out on the
+author's judgement that each Table keys its own column, so a difference is the norm —
+which the SE demo sample does not settle (of its 2 Models with two or more RLS Tables, one
+uses the same RLS column name on every Table).
+
+**Do.** Put the narrowing to the product owner; if keys matter, define the signal (for
+example, Tables of one Model whose RLS columns hold different value domains for the same
+variable) and build it as a LOW "review" rule beside S14.
+
+**Target:** 2027-01-31.
+
+## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
+
+**Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5
+(`docs/superpowers/specs/2026-10-23-audit-v2-roadmap.md`), parked as a backlog item by
+the product owner once wave 4 (PRs 4.1–4.4) merged.
+
+**What.** A new skill that turns what the audit finds into a proposed fix. From a Model's
+TML, its Tables' TML and the shared table-role classifier (`agents/shared/erd/roles.py`,
+PR 4.1) it produces:
+
+1. a remodel plan: what to change, and why, rule by rule;
+2. lint-clean proposed Model TML (`ts tml lint`);
+3. current and proposed ERDs side by side, through `ts-object-model-erd`.
+
+**First target:** the RLS repair shape. Each table carries the tenant rule on its own
+key, and group scope moves onto an RLS-only lookup table.
+
+**Decisions to settle in its design first:**
+- the fan-trap rule (G6), parked 2026-11-02;
+- the optional `direction_assumed` flag (joins relying on the default direction);
+- BL-509, whether an aggregate formula column with no `aggregation:` is invalid TML,
+  since the skill will write formula columns;
+- BL-511, whether RLS on an outer-joined table drops rows, which the RLS repair depends
+  on.
+
+**Do.** Brainstorm a design (`docs/superpowers/specs/`), then a plan. The skill name
+fits the `ts-object-*` family (`.claude/rules/skill-naming.md`).
+
+**Target:** 2027-03-31.
+
+## BL-514 — H15, slot-named columns, needs the column aliases `Tier 3`
+
+**Decision (2026-11-04, product owner):** stays parked until the column-alias export leaves Beta.
+
+**Filed:** 2026-11-04. **Source:** the builder check of roadmap PR 4.4 (G19).
+
+**What.** A visible column named as a numbered slot (`custom_3`, `Attribute 2`) means
+something different per tenant and needs per-tenant column aliases. The audit does not
+fetch aliases (`export_with_column_aliases`, a Beta option), so it cannot tell an
+aliased slot column from a bare one; 0 such columns on the SE demo sample. Build H15
+with the alias fetch.
+
+**Target:** 2027-01-31.
+
+## BL-509 — formula `aggregation:` after the 2026-11-02 ruling — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.0, ts-cli 0.201.0); the rest is BL-519. `spotql_ops.formula_aggregation` is the one reading of what a MEASURE formula column declares where the source names none: SUM for a per-row formula and for any aggregate formula (where ThoughtSpot ignores it); for a bare `group_aggregate` / `group_*` / `last_value` / `first_value` / `*_in_period`, the re-aggregation its inner aggregate implies (AVERAGE, MIN, MAX, the `_if` forms alike; SUM for a sum or count; AVERAGE for a ratio, unique count or other non-additive aggregate; an inner `[formula_X]` resolved through the Model's formulas; SUM when it cannot be resolved). (1) `declare_formula_aggregations` applies it in the Power BI (time intelligence included), Sisense and dbt (schema.yml and manifest) builders, `ts aggregate generate`, the Tableau `--existing-guid` merge, `ts formula translate` and `ts model promote-formula`; a test drives each end to end (`tests/test_formula_aggregation.py`). It found the Sisense converter dropping every calc formula's own column, now fixed. The Snowflake SV, Databricks MV, Tableau and Qlik builders still declare their own value: BL-519. (2) No lint rule — my call, not a ruling: the importer accepts the declaration absent, so an ERROR would block valid imports; `ts-model-conversion-invariants.md` now says what the aggregation does and which converters declare it. (3) Stale copies corrected: `classify_expr` and its test, the README, `formula_translate/engine.py`, `formula_common.py`, the Databricks SQL View worked example, `thoughtspot-formula-patterns.md` (a seventh copy, on bare `group_aggregate`) and the formula-translate SKILL snippet; the Ossie plan's copy concerns an aggregate formula and stands. (4) `classify_expr` declares a bare per-group average AVERAGE. (5) `AGGREGATE_FUNCS` and the semi-additive set match the two `*_in_period` spellings, and D13 reads them and the `group_*` shorthands; on the SE demo sample P2, D13 and D14 are unchanged (0 `*_in_period` formulas there).
 
 **Filed:** 2026-11-02. **Source:** the independent review of the D14 per-row formula PR.
 
@@ -16213,8 +16477,11 @@ The Model TML schema now says so. The rest of the repo does not yet:
    `sisense/build_model.py`, `dbt/model_from_schema_yml.py` and `dbt/manifest.py` (when
    `ts_aggregation` is absent), and `model_builder.py` (latent: a formula with no
    `column_type`). Yet ts-convert-from-powerbi open item #1 (VERIFIED 2026-07-16) created
-   such a Model live, so "invalid" may describe the contract or a newer build: probe one
-   import with `VALIDATE_ONLY` on a current build first.
+   such a Model live. **Probed 2026-11-04:** `VALIDATE_ONLY` on the SE demo cluster
+   accepts a Model whose aggregate formula columns have no `aggregation:` (and whose
+   per-row ones have none), and rejects an invalid value (error 14528). So the importer
+   does not enforce the declaration: adding it in these emitters is a consistency fix,
+   not a broken-import one.
 2. **No lint invariant** checks it; `ts-model-conversion-invariants.md` says a formula
    column's aggregation is "allowed" and "defines how the column aggregates", which is
    false for an aggregate formula.
@@ -16232,7 +16499,9 @@ The Model TML schema now says so. The rest of the repo does not yet:
 
 **Target:** 2026-12-31.
 
-## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation `Tier 3`
+## BL-506 — rule D13: a bare semi-additive or group formula with the wrong aggregation — DONE `Tier 3`
+
+**Status:** DONE — roadmap PR 4.4 (2026-11-04): D13 reads the three shapes with a rate-like name and SUM. An unset aggregation and the `group_*` / `*_in_period` shapes stay with BL-509.
 
 **Filed:** 2026-11-02. **Source:** roadmap PR 4.3 (new audit rules, set 1). **Reframed**
 2026-11-02 after the product owner's ruling on formula aggregation.
@@ -16250,7 +16519,9 @@ for each shape and a sample re-measure.
 
 **Target:** 2026-12-31.
 
-## BL-507 — the join-key type lookup misses aliased tables `Tier 3`
+## BL-507 — the join-key type lookup misses aliased tables — DONE `Tier 3`
+
+**Status:** DONE (2026-11-04, ts-audit 3.16.1): `engine/tml.join_column_types` gives each join a type view in which its two ends' columns also answer under their physical Table name, which is what a join's `on` writes, inline or referencing (an alias in `on` is rejected). P6 and D16 read through it; only the join's own ends are added, so one alias of a role-playing Table never lends its types to another's join. The P6 pins did not move (no pinned input has an aliased join). With P6 also reading escaped keys (BL-504), the SE demo sample gains 10 P6 LOW findings and 7 others name more keys; D16 is unchanged.
 
 **Filed:** 2026-11-02. **Source:** the builder check of roadmap PR 4.3.
 
@@ -16265,7 +16536,9 @@ P6 and D16 on an aliased join, and re-pin P6 (`repin_findings.py --rule P6`).
 
 **Target:** 2026-12-31.
 
-## BL-508 — are redundant Model-over-Table joins worth a finding? `Tier 3`
+## BL-508 — are redundant Model-over-Table joins worth a finding? — CLOSED `Tier 3`
+
+**Status:** CLOSED (2026-11-04, product owner): not worth a finding. A repeat is the norm on the sample and no harm has been seen; reopen only if two definitions are seen to drift.
 
 **Filed:** 2026-11-02. **Source:** roadmap PR 4.3, which narrowed G14 to duplicate
 Table-level joins (D15).
@@ -16279,7 +16552,94 @@ definitions differ in type or cardinality, not when they repeat each other.
 
 **Target:** 2027-01-31.
 
-## BL-510 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
+## BL-513 — every delete path should agree on what a delete takes with it `Tier 2`
+
+**Filed:** 2026-11-04. **Source:** the PR #692 review (cascade delete), live probes on a
+staging cluster 2026-10-31 and 2026-11-04.
+
+**What.** Deleting a Model takes objects with it that no dependents lookup lists, and each
+delete path in the repo handles that differently:
+
+- **Reusable Sets are deleted with their Model**, by the v2 `metadata/delete` as well as
+  the cascade endpoint (live, 2026-10-31 and 2026-11-04, a throwaway Model with one Set).
+  Neither v2 dependents nor the cascade's answer lists them; a Set is a column the Model
+  owns. A Set cannot be hidden (TML `is_hidden` is ignored, `metadata/headers/update`
+  rejects `isHidden`), so the cohort listing in `sets/discover.py` sees them all.
+- **Spotter feedback** is not listed either. A FEEDBACK `tml/export` answers 400 10002
+  ("No accessible metadata objects found") for a Model without feedback, but 500 14531
+  for a Table or View and 500 13006 for a SQL View on the same cluster — so a check that
+  reads "anything but 10002" as "unchecked" blocks every non-Model delete.
+
+| Path | Sets on a deleted Model | Feedback |
+|---|---|---|
+| `ts metadata delete` (`commands/metadata.py`) | not checked | not checked |
+| `ts dependency apply-change` (`commands/dependency_apply.py`) | only Sets the plan lists | not checked |
+| `ts migrate` teardown (`commands/migrate.py`) | gated by `sets/discover.py` (BL-325) | not checked |
+| `ts dependency cascade-delete` (PR #692) | refused | refused |
+| Databricks `ts_client.delete` (`agents/databricks/notebooks/ts_client.py`) | not checked | not checked |
+
+`formula_translate/validate.py` deletes only the scratch Model it created, so it is out
+of scope.
+
+**Do.**
+
+1. One shared pure helper — "what else does deleting these GUIDs remove" (Sets via the
+   cohort listing, feedback via the export with the Model-only / error-code rules above)
+   — and one policy: refuse, or back up and restore. Every path above calls it, or
+   records here why it does not.
+2. Probe the feedback export's error codes on a second build before relying on them, and
+   whether a cascade or v2 delete removes feedback at all (not yet tested with a real
+   delete).
+3. A validator, or a test that lists the call sites of `/api/rest/2.0/metadata/delete`
+   and the cascade route, so a new delete path cannot skip the helper silently.
+
+**Target:** 2026-12-31.
+
+## BL-530 — Liveboard-building parity across converters after SpotterViz `Tier 2`
+
+**Filed:** 2026-11-05. **Source:** the maintainer's direction decision on PR #679
+(2026-11-04), which made SpotterViz the only way `ts-convert-from-tableau` and
+`ts-convert-from-looker` build Liveboards and deferred the parity question.
+
+**What.** Once #679 merges, two converters build Liveboards through SpotterViz while
+`ts-convert-from-powerbi`, `ts-convert-from-qlik` and `ts-convert-from-sisense` still
+author Liveboard TML deterministically. SpotterViz is not exposed on Cortex Code CLI, so
+on that runtime Tableau and Looker migrations build no Liveboard at all.
+
+**Do.** Decide, using evidence from real Tableau and Looker migrations run through
+SpotterViz:
+
+1. whether Power BI, Qlik and Sisense move to SpotterViz;
+2. whether Tableau and Looker get back a deterministic fallback for runtimes without
+   SpotterViz (Cortex Code CLI);
+3. record the outcome in each converter's `references/coverage-matrix.md`.
+
+Deliberately not decided at #679's merge: the converters that build Liveboards
+deterministically work today, and SpotterViz had no field history yet.
+
+**Target:** 2026-12-17.
+
+## BL-531 — Confirm and allowlist the public SpotterViz MCP endpoint `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the maintainer's direction decision on PR #679
+(2026-11-04).
+
+**What.** #679 documents the SpotterViz MCP server configuration with a
+`<spotterviz-mcp-endpoint>` placeholder. Users must get the host from a ThoughtSpot
+contact. The skill's connectivity check (`check_connectivity` before any parsing) keeps
+the placeholder safe, but setup is not self-service.
+
+**Do.**
+
+1. Confirm the public endpoint, and who owns it, with the SpotterViz team.
+2. Replace the placeholder in `agents/cli/SETUP.md` and the shared
+   `spotterviz-liveboard-build.md` reference.
+3. Add the host to whatever allowlist applies (the customer-reference gate's allowed
+   hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
+
+**Target:** 2026-12-17.
+
+## BL-532 — `ts dependency apply-change` exits 0 when objects fail `Tier 2`
 
 **Filed:** 2026-10-30. **Source:** the PR #666 follow-up review (the cascade-delete PR).
 
@@ -16294,7 +16654,7 @@ and check the smoke test and Step 10 still read the result.
 
 **Target:** 2026-11-30.
 
-## BL-511 — cascade delete: back up and restore Sets and Spotter feedback instead of refusing `Tier 2`
+## BL-533 — cascade delete: back up and restore Sets and Spotter feedback instead of refusing `Tier 2`
 
 **Filed:** 2026-11-02. **Source:** the PR #692 review (blocker), ts-dependency-manager
 open-items #29.
@@ -16326,7 +16686,7 @@ Same work, found by the independent review of the fix:
 
 **Target:** 2026-12-15.
 
-## BL-512 — dependency backups record the configured Org, not the session's `Tier 2`
+## BL-534 — dependency backups record the configured Org, not the session's `Tier 2`
 
 **Filed:** 2026-11-02. **Source:** the independent review of the PR #692 fixes.
 

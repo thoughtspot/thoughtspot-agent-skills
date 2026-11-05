@@ -83,8 +83,15 @@ formulas:
     aggregation: SUM    # WRONG — remove this; keep aggregation: only on the columns[] entry
 ```
 
-`aggregation:` on a `columns[]` formula entry *is* allowed (it defines how the column
-aggregates when rolled up). Only the `formulas[]` entry must not carry it.
+`aggregation:` on a `columns[]` formula entry *is* allowed, and every MEASURE formula
+column should declare one (product owner, 2026-11-02). It defines how the column rolls up
+only for a per-row formula and for a bare `group_aggregate` / `last_value` /
+`first_value`; on any other aggregate formula it is ignored (thoughtspot-model-tml.md has
+the table). The importer accepts it absent (`VALIDATE_ONLY`, 2026-11-04), so no lint rule
+enforces it. Where the source names none, the Power BI, Sisense and dbt converters declare
+it through `spotql_ops.formula_aggregation` (BL-509); the Snowflake SV, Databricks MV,
+Tableau and Qlik converters still declare their own (source or name-based) value, BL-519.
+Only the `formulas[]` entry must not carry it.
 
 ---
 

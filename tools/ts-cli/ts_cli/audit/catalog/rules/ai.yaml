@@ -222,6 +222,30 @@
     fires: {fixture: ai_measures_mostly_undescribed, severity: MEDIUM}
     silent: {fixture: ai_measures_described}
 
+- id: A9
+  title: Parameters under Spotter
+  evidence: fact
+  description: >-
+    A Spotter-enabled Model (`properties.spotter_config.is_spotter_enabled`) whose
+    formulas read a Model parameter — `[<parameter name>]` outside a quoted literal.
+    The docs say Spotter does not support parameters; support is in rollout, so a LOW
+    warning naming the formulas (first five).
+  categories: [A]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: properties.spotter_config.is_spotter_enabled, truthy: true}
+        - {field: "@parameter_formula_names", nonblank: true}
+  severity: LOW
+  message: "Spotter is enabled but these formulas read a parameter, which Spotter does not support yet: {@parameter_formula_names:head5}"
+  remediation: Give Spotter a fixed version of these formulas, or check parameter support on your release
+  examples:
+    fires: {fixture: ai_parameter_formula_spotter, severity: LOW}
+    silent: {fixture: ai_parameter_formula_no_spotter}
+
 - id: A8
   title: One search term naming two columns
   evidence: fact

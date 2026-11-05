@@ -120,30 +120,37 @@ def _is_join_key(item: dict, ctx: Any) -> bool:
 @register("referenced_by_formula", uses=(),
           label="a formula references the column")
 def _referenced_by_formula(item: dict, ctx: Any) -> bool:
-    """Model column: the Model's formula expressions, joined by spaces, reference it —
-    as `[<its name>]` or `[<its column_id>]` (`[TABLE::COL]`, the usual form) — or it
-    surfaces a formula (`formula_id`) that another formula references, by `[<its id>]`
-    (how TML writes it) or `[<its display name>]`."""
+    """Model column: another of the Model's formulas references it — as `[<its name>]`
+    or `[<its column_id>]` (`[TABLE::COL]`, the usual form) — or, when it surfaces a
+    formula (`formula_id`), references that formula by `[<its id>]` (how TML writes it)
+    or `[<its formula name>]`. References are read as the formula tree reads them:
+    outside quoted literals, stripped (tml.expr_refs), and a formula's reference to
+    itself does not count (BL-504)."""
     model = _model_of(item)
-    formulas = model.get("formulas") or []
-    exprs = cached("h3_formula_text", model, _formula_text, formulas)
+    refs = cached("h3_formula_refs", model, _formula_refs, model.get("formulas") or [])
     column = item.get("obj") or {}
-    if f"[{column.get('name', '')}]" in exprs:
-        return True
     fid = column.get("formula_id")
-    cid = column.get("column_id")
-    if isinstance(cid, str) and cid and f"[{cid}]" in exprs:
-        return True  # `[TABLE::COL]`, how most formulas reference a physical column
-    if not fid:
-        return False
-    if isinstance(fid, str) and f"[{fid}]" in exprs:
-        return True
-    return any(f"[{fn.get('name', '')}]" in exprs for fn in formulas if fn.get("id") == fid)
+    own = fid if isinstance(fid, str) and fid else None
+    names = _reference_names(column, own, model.get("formulas") or [])
+    return any((own is None or owner != own) and names & used for owner, used in refs)
 
 
-def _formula_text(formulas: list) -> str:
-    """The Model's formula expressions joined by spaces (non-strings skipped)."""
-    return " ".join(e for e in (f.get("expr", "") for f in formulas) if isinstance(e, str))
+def _reference_names(column: dict, own: Any, formulas: list) -> set:
+    """What a reference to this column is written as: its name, its `column_id`, and,
+    when it surfaces formula `own`, that formula's id and name."""
+    names = {v for v in (column.get("name"), column.get("column_id"), own)
+             if isinstance(v, str) and v}
+    if own:
+        names |= {fn["name"] for fn in formulas
+                  if isinstance(fn, dict) and fn.get("id") == own
+                  and isinstance(fn.get("name"), str) and fn["name"]}
+    return names
+
+
+def _formula_refs(formulas: list) -> list:
+    """(formula id, the set of references its expr makes), per formula."""
+    return [(f.get("id"), set(tml.expr_refs(f.get("expr"))))
+            for f in formulas if isinstance(f, dict)]
 
 
 # ── H4 / H5: dependents ─────────────────────────────────────────────────────
@@ -187,10 +194,10 @@ def _known_table_guids(ctx: Any) -> set:
 
 def _build_known_table_guids(ctx: Any) -> set:
     guids: set = set()
-    for doc in _all_models(ctx):
-        for mt in (doc.get("model") or {}).get("model_tables") or []:
-            fqn = mt.get("fqn", "") if isinstance(mt, dict) else ""
-            if fqn:
+    for body in _all_model_bodies(ctx):
+        for mt in _mappings(body.get("model_tables")):
+            fqn = mt.get("fqn", "")
+            if fqn and isinstance(fqn, str):
                 guids.add(fqn)
     return guids | set(ctx.tables) | set(getattr(ctx, "excluded_tables", {}) or {})
 
@@ -200,6 +207,19 @@ def _all_models(ctx: Any) -> list:
     item 10). A rule asking whether something is on NO Model reads this, never
     `ctx.models` alone, or excluding a Model would make that answer false."""
     return list(ctx.models) + list(getattr(ctx, "excluded_models", []) or [])
+
+
+def _all_model_bodies(ctx: Any) -> list:
+    """The `model` mapping of every Model in `_all_models`. An excluded Model may be
+    misshapen anywhere (that is why it was excluded), so its body and lists are read
+    defensively here — `_mappings` — never assumed (review of PR 1, blocker 1)."""
+    return [doc["model"] for doc in _all_models(ctx)
+            if isinstance(doc, dict) and isinstance(doc.get("model"), dict)]
+
+
+def _mappings(value: Any) -> list:
+    """The mapping entries of `value` when it is a list, else []."""
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
 
 @register("is_table_reference", uses=(),
@@ -232,8 +252,8 @@ def _model_formula_names(ctx: Any) -> Dict[str, Any]:
 
 def _build_model_formula_names(ctx: Any) -> Dict[str, Any]:
     names: Dict[str, Any] = {}
-    for doc in _all_models(ctx):
-        for f in (doc.get("model") or {}).get("formulas") or []:
+    for body in _all_model_bodies(ctx):
+        for f in _mappings(body.get("formulas")):
             key = _normalize(f.get("expr", ""))
             if key is not None:
                 names[key] = f.get("name", "")

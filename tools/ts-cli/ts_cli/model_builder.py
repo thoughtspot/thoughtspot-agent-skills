@@ -30,6 +30,7 @@ from ts_cli.tableau.dag import (  # noqa: F401 — re-exported for in-repo test 
     build_formula_levels,
     resolve_all_internal_refs,
 )
+from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.formula_common import (  # noqa: F401 — moved (BL-063 PR 5)
     add_formula_prefix,
     expr_is_aggregated,
@@ -273,6 +274,9 @@ def build_model_tml(
 
     # ThoughtSpot is case-insensitive on column names; drop case-collision duplicates.
     model_columns, model_formulas = _dedup_columns_ci(model_columns, model_formulas)
+    # A formula passed with no column_type (`ts aggregate generate`) is a MEASURE that
+    # the loop above declares no aggregation for: declare it by its formula (BL-509).
+    declare_formula_aggregations(model_columns, model_formulas)
 
     model_params = _build_model_parameters(parameters)
 
@@ -499,6 +503,9 @@ def merge_formulas_into_model(
             }
             if tf.get("column_type") == "MEASURE":
                 col_entry["properties"]["aggregation"] = "SUM"
+            # `prepare_formulas_for_merge` strips column_type, so most merged columns
+            # reach here untyped: declare by the formula (BL-509), this column only.
+            declare_formula_aggregations([col_entry], model["formulas"])
             model["columns"].append(col_entry)
             existing_col_names_lower.add(tf["name"].lower())
             added += 1

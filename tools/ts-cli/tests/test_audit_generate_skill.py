@@ -50,7 +50,7 @@ def test_rules_files_table_lists_active_and_retired_ids(blocks):
     table = blocks["rules-files"]
     assert "| `rules/human.yaml` | H — Human Readiness |" in table
     assert "H6 retired" in table
-    assert "S11" in table
+    assert "S10–S16" in table  # the highest S id, read off the catalog
 
 
 def test_profile_block_names_each_profile_and_what_differs(blocks):

@@ -260,7 +260,7 @@ reference to that column in (or `None` for attributes):
 | `attribute` | `properties.column_type: ATTRIBUTE` | — | group by it (`None`) |
 | `raw_measure` | `properties.column_type: MEASURE`, **no** aggregating formula (a plain `column_id`, or a `formula_id` whose `expr` has no aggregate) | `needs_agg: false` | `SUM`/`AVG`/`MIN`/`MAX` (`aggregation` field names which) |
 | `aggregate_measure` | `properties.column_type: MEASURE` **and** its `formulas[].expr` contains an aggregate | `needs_agg: true` | **`AGG(...)`** — never `SUM` (errors `NESTED_AGGREGATE_NOT_SUPPORTED`) |
-| `semiadditive_measure` | aggregate-formula whose **outermost** call is `last_value`/`first_value` (the `last_value(sum(col), query_groups(), {date})` snapshot form) | `needs_agg: false`, `wrapper: SUM` | **`SUM(...)`** — `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION` (see below) |
+| `semiadditive_measure` | aggregate-formula whose **outermost** call is `last_value`/`first_value` (the `last_value(sum(col), query_groups(), {date})` snapshot form), or their `*_in_period` spelling (same arguments; classified by that shape, not probed live) | `needs_agg: false`, `wrapper: SUM` | **`SUM(...)`** — `AGG(...)` errors `NON_CONVERTIBLE_FUNCTION` (see below) |
 
 **Semi-additive is the one inversion of the aggregate-formula rule.** A measure whose
 outermost op is `last_value`/`first_value` cannot use `AGG(...)` — the AgentQL→SQL
@@ -377,6 +377,7 @@ without re-deriving the query mechanics.
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.19.3 | 2026-11-04 | **`last_value_in_period` / `first_value_in_period` are aggregate and semi-additive.** `ts agentql classify-columns` reads them as `last_value` / `first_value` (same arguments): `semiadditive_measure`, wrapper `SUM`. Classified by that shape, not probed live (BL-509). |
 | 2.19.2 | 2026-10-21 | **Five factual corrections to the course, checked against the committed SQL capture.** (1) Module 0 — surfacing an agent's AgentQL back as reviewable **keywords** is *coming soon*, not shipped; today you validate by reading the generated SQL. (2) Module 2 takeaway — **null-guards and the row cap are ThoughtSpot's**, not the Model's (joins, keys, formulas and RLS are the Model's); the course had contradicted `limitations.md`/`agentql-rules.md`. (3) Lesson 3.4 ③ — "the `sum` is wrapped" (not "every aggregate"; the capture has an un-guarded outer `sum` in share-of-total), and credit ThoughtSpot's compiler. (4) Lesson 3.4 ④ — case-insensitive `=` comes from ThoughtSpot's compiler (`LOWER` both sides), not the Model. (5) The 100,000-row cap is **not universal** — the lesson 1.3 `UNION ALL` is captured compiling to `SUCCESS` with no `LIMIT`; qualified the claim in `learning-path.md`, `limitations.md` and `agentql-rules.md`. No lesson numbers or titles changed. |
 | 2.19.1 | 2026-10-20 | Link **AgentQL Quest**, the course as a browser game on the repo's GitHub Pages site, from the Learn AgentQL section, with its poster as the link. |
 | 2.19.0 | 2026-10-20 | **Removed Module 6 (*Trust, but verify*): 21 → 18 lessons, Modules 0–5.** Its lessons centred on **silent-drop bugs** — `QUALIFY` and `FILTER (WHERE …)` accepted then ignored, and a `SUM(CASE … date-literal …)` returning an `UNKNOWN`-typed empty — which are defects that will be fixed, so a course resting on them rots (same reasoning as lesson 1.3). The loud-failure cases (`STDDEV`, `IN (SELECT …)`) stay documented in `limitations.md`, and all six behaviours remain under live test in the `agentql-retest` **limitations** suite (`qualify`, `filter_where`, `sum_case_date_literal`, `stddev_*`, `in_subquery`). Removed the six `l6_*` lessons-suite cases and their three controls; regenerated `lesson-sql.md` and the offline bundle. |
@@ -709,7 +710,8 @@ expression.
 
 - **Semi-additive measure** — an aggregate-formula whose **outermost** call is
   `last_value`/`first_value` (the snapshot form `last_value(sum(col), query_groups(),
-  {date})`). This one **inverts** the rule above: **wrap it in `SUM(...)`, never `AGG()`**.
+  {date})`), or their `*_in_period` spelling, which takes the same arguments (classified
+  by that shape since BL-509; not probed live). This one **inverts** the rule above: **wrap it in `SUM(...)`, never `AGG()`**.
   `AGG()` fails with `NON_CONVERTIBLE_FUNCTION` ("Non standard sql function QueryGroups") —
   the serializer can't emit `query_groups()` natively. `SUM(...)` forces a per-group
   materialisation that resolves `query_groups()` and passes the already-collapsed snapshot

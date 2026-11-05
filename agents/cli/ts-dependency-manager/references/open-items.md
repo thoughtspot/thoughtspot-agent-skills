@@ -401,7 +401,7 @@ delete removes (the source included) with those two lookups. Any Set or feedback
 lookup that fails, gives `BLOCKED` and nothing is sent. A column delete does not check its
 owner, which survives; a Set anchored on the column is already listed by the server.
 
-**Next (not built, BL-511):** back the Sets and feedback up and restore them after their Model,
+**Next (not built, BL-533):** back the Sets and feedback up and restore them after their Model,
 instead of refusing. The feedback document shares its Model's GUID, so a restore has to
 re-target it at the restored Model's new GUID; a Set is its own document binding the
 Model by `fqn`, which `remap_guids` already handles. Until then the user removes or moves
