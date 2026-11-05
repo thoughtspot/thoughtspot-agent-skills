@@ -22,6 +22,8 @@
 //               JSON). Required for --commit when the Liveboard has any visualization: the sandbox refuses the
 //               commit without it, or when it does not hold every visualization on the Liveboard by content. The
 //               file must name the Liveboard's guid, be under a day old, and sit outside any git working tree.
+//   --adopt, --adopt-by-position and --relayout can move or take over a user's tile: pass them only after the user
+//               has seen the tiles the refusal lists and said yes (SKILL.md).
 //   --adopt     take over tiles written before owner markers existed: the shared core and a spec slug marker, with
 //               no owner marker, at that slug's spec position. Without it such tiles stop the commit, so nothing is
 //               doubled.

@@ -16,7 +16,7 @@ Does NOT require a live ThoughtSpot instance. The user's own chart library
 (~/.cache/ts-charts/library) is kept out with a temporary XDG_CACHE_HOME.
 Step 3 needs the helpers' Playwright and Chromium. Locally it is skipped when
 they are missing; in CI (CI or SMOKE_REQUIRE_BROWSER set) that is a failure:
-    npm ci --prefix agents/cli/ts-object-answer-chart-builder/helpers
+    npm ci --ignore-scripts --prefix agents/cli/ts-object-answer-chart-builder/helpers
     npm exec --prefix agents/cli/ts-object-answer-chart-builder/helpers -- playwright install --with-deps chromium
 
 Usage:

@@ -7,8 +7,9 @@
 // object's type key. It must be under a day old (and not dated in the future), and its real path must sit
 // outside any git working tree.
 //
-// `viz` holds one fingerprint per visualization (a Liveboard) or one for the answer: a hash of its name, search,
-// chart type, decoded chart code and note. The sandbox computes the same fingerprints from the live object and
+// `viz` holds one fingerprint per visualization (a Liveboard) or one for the answer: a hash of the whole
+// visualization (every key, sorted) except its id, so a backup that differs in anything (a description, formatting,
+// axis settings) is not current. The sandbox computes the same fingerprints from the live object and
 // refuses the commit unless the backup holds every one, so a list of ids, a cut-off export, an older export or
 // another object's export does not pass: ids alone prove nothing (they are Viz_1, Viz_2 ... on every Liveboard,
 // and ThoughtSpot renumbers them on import). patch.js and answer-patch.js carry the same fingerprint code.
@@ -19,21 +20,14 @@ import crypto from "node:crypto";
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
-// The sandbox's decoder, exactly: a payload it cannot decode is null there, so it must be null here too.
-const unb64 = (s) => decodeURIComponent(escape(atob(s || "")));
 export const stable = (x) => Array.isArray(x) ? "[" + x.map(stable).join(",") + "]" : x && typeof x === "object" ? "{" + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ":" + stable(x[k])).join(",") + "}" : JSON.stringify(x);
-const codeOf = (v) => {
-  const p = v && v.answer && v.answer.chart && v.answer.chart.custom_visual_props;
-  if (!p) return null;
-  try {
-    const code = JSON.parse(JSON.parse(p).clientState).playground.code;
-    return { js: unb64(code.jsCodeBase64), css: unb64(code.cssCodeBase64), html: unb64(code.htmlCodeBase64) };
-  } catch { return null; }
-};
-// A visualization ({ answer } or { note_tile }), or an answer wrapped as { answer }.
+// A visualization ({ id, answer } or { id, note_tile }), or an answer wrapped as { answer }: all of it but the id
+// and viz_guid, which ThoughtSpot renumbers on import, and every `fqn`, which an export holds only when asked
+// (export_fqn) and the sandbox and `ts tml export` ask differently.
+export const noFqn = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === "fqn" ? undefined : v)));
 export function fingerprint(v) {
-  const a = (v && v.answer) || {}, c = codeOf(v);
-  return sha256(JSON.stringify([a.name || "", a.search_query || "", (a.chart && a.chart.type) || "", c ? [c.js, c.css, c.html] : null, v && v.note_tile ? stable(v.note_tile) : null])).slice(0, 16);
+  const { id, viz_guid, ...rest } = v || {};
+  return sha256(stable(noFqn(rest))).slice(0, 16);
 }
 
 // Every TML document in the file, whatever JSON form it was saved in.

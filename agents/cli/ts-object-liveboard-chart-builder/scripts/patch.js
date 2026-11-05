@@ -44,9 +44,11 @@ const OWNER = /\/\* ts-lb-owner: ([\w-]+) \*\/\n?/;
 const ownerOf = (c) => { const m = c && OWNER.exec(c.js); return m ? m[1].toLowerCase() : null; };
 const strip = (js) => js.replace(MARK, '').replace(OWNER, '');
 const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
-// A visualization's content fingerprint, the same as the chart skill's helpers/backup-check.mjs computes from the
-// backup file: name, search, chart type, decoded chart code and note. Ids play no part (ThoughtSpot renumbers them).
-const fpOf = async (v) => { const a = (v && v.answer) || {}, c = codeOf(v); return (await sha256(JSON.stringify([a.name || '', a.search_query || '', (a.chart && a.chart.type) || '', c ? [c.js, c.css, c.html] : null, v && v.note_tile ? stable(v.note_tile) : null]))).slice(0, 16); };
+// A visualization's fingerprint, the same as the chart skill's helpers/backup-check.mjs computes from the backup
+// file: the whole visualization, keys sorted, except its id and viz_guid (ThoughtSpot renumbers them on import)
+// and every `fqn` (an export holds them only when asked, and a backup may be exported either way).
+const noFqn = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'fqn' ? undefined : v)));
+const fpOf = async (v) => { const { id, viz_guid, ...rest } = v || {}; return (await sha256(stable(noFqn(rest)))).slice(0, 16); };
 
 // 1. checksums
 const badSha = [];
@@ -61,7 +63,9 @@ if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resen
 // 2. current Liveboard
 const spec = P.spec, LB = spec.liveboard, model = LB.model, LBG = String(LB.guid).toLowerCase();
 const nameOf = (v) => (v && v.answer && v.answer.name) || (v && v.id) || '?';
-const exportLb = (guid) => ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'LIVEBOARD' }], edoc_format: 'JSON' });
+// export_fqn: a tile is kept as it is only when its answer names the model by fqn, and an export holds fqns only
+// when asked (without it every kept tile was rebuilt from a new search). The backup fingerprint ignores fqns.
+const exportLb = (guid) => ts.post('/api/rest/2.0/metadata/tml/export', { metadata: [{ identifier: guid, type: 'LIVEBOARD' }], edoc_format: 'JSON', export_fqn: true });
 const edocOf = (ex) => ex && ex.status === 200 && ex.body && ex.body[0] && ex.body[0].edoc ? ex.body[0].edoc : null;
 // The Liveboard document of an export, or null when the edoc is not the JSON of a Liveboard.
 const docOf = (ex) => { try { const d = JSON.parse(edocOf(ex)); return d && d.liveboard && typeof d.liveboard === 'object' ? d.liveboard : null; } catch (e) { return null; } };
@@ -115,7 +119,7 @@ for (const [s, ks] of Object.entries(groups)) {
   if (ks.length === 1) {
     const k = ks[0];
     if (specPos[k.pos] === s || !specSlugs.has(s) || P.relayout) take(k);
-    else conflicts.push(s + ': the tile "' + k.title + '" at ' + k.pos + ' carries its marker but is not at its spec position; move it back, or send this block again built with --relayout if the spec moved it (it is then moved and replaced)');
+    else conflicts.push(s + ': the tile "' + k.title + '" at ' + k.pos + ' carries its marker but is not at its spec position; move it back, or, if the spec moved it and the user agrees, send this block again built with --relayout (it is then moved and replaced; it may be a user\'s copy, so ask the user first)');
     continue;
   }
   // Two tiles marked with one slug: a user copied the skill's tile. The one at the spec position is the
@@ -124,7 +128,7 @@ for (const [s, ks] of Object.entries(groups)) {
   if (at.length === 1) take(at[0]);
   else conflicts.push(s + ': ' + ks.length + ' tiles carry its marker (' + ks.map((k) => k.title + ' at ' + k.pos).join('; ') + ') and none sits at its spec position; remove the copy or move the original back');
 }
-if (adoptable.length) conflicts.push('tiles that look like this skill\'s but carry no owner marker (written before markers, or pinned from an answer): ' + adoptable.join(', ') + '. If they are the skill\'s, send this block again built with --adopt (and --adopt-by-position for tiles matched by position only); otherwise move them off the spec positions');
+if (adoptable.length) conflicts.push('tiles that look like this skill\'s but carry no owner marker (written before markers, or pinned from an answer): ' + adoptable.join(', ') + '. If the user confirms they are the skill\'s, send this block again built with --adopt (and --adopt-by-position for tiles matched by position only); ask the user first, since each may be their own chart. Otherwise move them off the spec positions');
 // The shared core travels in the block, or (core.ref) is taken from any tile already on this Liveboard whose
 // core matches the checksum, which saves pasting it again in every block after the first.
 let core = P.core && !P.core.ref ? { js: P.core.js, css: P.core.css } : null;

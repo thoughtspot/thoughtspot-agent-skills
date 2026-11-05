@@ -61,7 +61,9 @@ function mockTs(state, onExport) {
     if (p.endsWith("/metadata/tml/export")) {
       n++; if (onExport) onExport(n, state);
       const id = String(body.metadata[0].identifier).toLowerCase();
-      return state.doc && id === LBG ? { status: 200, body: [{ edoc: JSON.stringify(state.doc) }] } : { status: 400, body: { error: "not found" } };
+      // A cluster's export holds table fqns only when export_fqn is asked for; the mock does the same.
+      const out = body.export_fqn ? state.doc : JSON.parse(JSON.stringify(state.doc || null, (k, v) => (k === "fqn" ? undefined : v)));
+      return state.doc && id === LBG ? { status: 200, body: [{ edoc: JSON.stringify(out) }] } : { status: 400, body: { error: "not found" } };
     }
     if (p.endsWith("/searchdata")) return { status: 200, body: { contents: [{ column_names: /FAIL/.test(body.query_string) ? [] : cols(body.query_string) }] } };
     if (p.endsWith("/metadata/tml/import")) {
@@ -115,6 +117,17 @@ await scenario("a new, empty Liveboard is built in one commit and round-trips", 
   base = st.doc;
 });
 
+await scenario("a block keeps the skill's other tiles as they are, without searching them again", async () => {
+  // Found live on ps-internal 26.11: an export without export_fqn has no table fqn, so every kept tile was rebuilt
+  // from a new search, resetting anything the user set on it.
+  const st = { doc: clone(base) };
+  vizNamed(st.doc, "Bubbles").answer.table.client_state = "set by the user";
+  const r = await run(pack(["--commit", "--backup", backup(st.doc), "pulse-kpi-best"]).blocks[0], st);
+  committed(r);
+  ok(r.searches === 1, "searched " + r.searches + " times for a one-chart block");
+  ok(vizNamed(st.doc, "Bubbles").answer.table.client_state === "set by the user", "a kept tile's answer was rebuilt");
+});
+
 await scenario("B1: a native chart and a note on a spec tab do not crash validate, check or commit", async () => {
   const st = { doc: withViz(withViz(clone(base), clone(native), 0, 20), clone(note), 6, 20) };
   for (const mode of ["--validate", "--check"]) { const p = pack([mode, "pulse-kpi-best"]); const r = await run(p.blocks[0], { doc: clone(st.doc) }); ok(!r.refused || mode === "--check", mode + ": " + JSON.stringify(r).slice(0, 300)); }
@@ -138,6 +151,14 @@ await scenario("B2: a stub backup (ids only), an older export and another Livebo
   // an older export: the native chart's search has changed since
   const older = clone(doc); vizNamed(older, "Native").answer.search_query = "[sales]";
   refused(await run(pack(["--commit", "--backup", backup(older, "older.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
+  // an older export that differs only outside name, search, chart type and code: a description, an axis setting
+  const olderDesc = clone(doc); vizNamed(olderDesc, "Native").answer.description = "before the edit";
+  refused(await run(pack(["--commit", "--backup", backup(olderDesc, "older-desc.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
+  const olderAxis = clone(doc); vizNamed(olderAxis, "Native").answer.chart.axis_configs = [{ x: ["old"] }];
+  refused(await run(pack(["--commit", "--backup", backup(olderAxis, "older-axis.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
+  // ids are renumbered on import, so a backup that differs only in a visualization id is current
+  const renum = clone(doc); renum.liveboard.visualizations.forEach((v, i) => { v.id = "Viz_r" + i; });
+  ok(!/is not of this Liveboard/.test(String((await run(pack(["--validate", "--backup", backup(renum, "renum.json"), "pulse-kpi-best"]).blocks[0], clone(st))).commitWouldRefuse || "")), "a backup differing only in ids was refused");
   // another Liveboard's export with the guid edited to this one
   const other = { guid: LBG, liveboard: { visualizations: [{ id: "Viz_1", answer: { name: "Other", search_query: "[x]", chart: { type: "COLUMN" } } }] } };
   refused(await run(pack(["--commit", "--backup", backup(other, "other.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);

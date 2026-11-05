@@ -220,6 +220,12 @@ matched only by its position could be a chart the user pinned there, so it also 
 anywhere else, is never adopted, whatever slug marker it carries (a user's chart with copied code). An owned tile whose slug comment was
 removed and that sits off every spec position cannot be placed: it stops the commit too.
 
+**Ask the user before `--relayout`, `--adopt` or `--adopt-by-position`.** Each one can move a tile or take
+over one the user may think of as theirs, so a refusal that names one of these flags is never resent with it
+on Claude's own judgment. Show the user the tiles the refusal lists (title and position) and what the flag
+would do to each, and build the block with the flag only after they say yes. If they say no, they move or
+remove those tiles in ThoughtSpot, or the spec changes.
+
 **A commit writes only a clean state.** Any problem refuses it and leaves the Liveboard unchanged: a failed
 search (the tile it would have rebuilt stays as it is), a spec tile with no code (`MISSING`), an ownership
 conflict, tiles to adopt, a search that returns no columns, a Liveboard with any tile laid out without
@@ -322,4 +328,4 @@ Update the example's README when the story changes.
 
 | Version | Date | Change |
 |---|---|---|
-| 1.0.0 | 2026-10-26 | Initial release. Builds a storytelling Liveboard of custom chart tiles across numbered tabs on a real model through the ThoughtSpot MCP: intake, tab plan, tiles built by ts-object-answer-chart-builder, narrative tiles, filters, checksummed patch blocks with a round-trip proof, and a screenshot of every tab. |
+| 1.0.0 | 2026-11-05 | Initial release. Builds a storytelling Liveboard of custom chart tiles across numbered tabs on a real model through the ThoughtSpot MCP: intake, tab plan, tiles built by ts-object-answer-chart-builder, narrative tiles, filters, checksummed patch blocks with a round-trip proof, and a screenshot of every tab. |

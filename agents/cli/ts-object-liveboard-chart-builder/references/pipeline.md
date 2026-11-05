@@ -25,7 +25,7 @@ into blocks, and each block patches the Liveboard itself (`<L>/scripts/patch.js`
 2. it exports the Liveboard and finds the skill's tiles: those whose code carries
    `/* ts-lb-owner: <this Liveboard's guid> */` (with `/* amuzing-slug: <slug> */` naming the chart). Tiles
    from before owner markers are taken over only with `--adopt`, and a marked tile off its spec position only
-   with `--relayout` (it may be a user's copy);
+   with `--relayout` (it may be a user's copy). Each flag is passed only after the user says yes;
 3. it merges into the export: charts in the block replace their tile, the skill's other tiles keep their
    code, and everything it does not own is kept as it is (SKILL.md Step 6). Any problem (a failed search, a
    missing tile, an ownership conflict, no backup of a Liveboard that has visualizations, a backup that does not
