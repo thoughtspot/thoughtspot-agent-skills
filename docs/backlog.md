@@ -331,7 +331,7 @@ are roughly ordered by value÷effort.
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
 | BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332, `buildScorecard` 302 lines), gate the embedded ERD `renderer.js` (1,338 lines, outside the scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
-| BL-521 | G5e's other half: one Model's RLS Tables scoping the tenant through different key columns — decide with the product owner whether that is a signal (it is the norm when each Table keys its own column) before building it | 2027-01-31 |
+| ~~BL-521~~ | ~~G5e's other half: RLS Tables scoping the tenant through different key columns~~ | DONE (2026-11-05) |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
 | ~~BL-508~~ | ~~Decide whether a Model inline join repeating a Table-level join is worth a finding~~ | CLOSED (2026-11-04) |
@@ -16264,7 +16264,7 @@ MEDIUM and cite the probe; if not, retire or reword it.
 
 ## BL-512 — RLS judgement checks G5e and G5f — DONE `Tier 3`
 
-**Status:** DONE in part (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision. S14 (G5e, variables half): a Model whose RLS Tables scope users by different sets of session variables (one family per variable; two variables on one Table, an owner-or-group override, do not count). S15 (G5f): a rule's null test on a column of its own Table that the rule also scopes users by — the owner key; a null test on a never-null join key, which keeps an outer join's unmatched rows without exposing ownerless ones, is not reported, and S12's and S15's advice name that form. G5e's "different keys" half is not built: BL-521. 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
+**Status:** DONE in part (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision. S14 (G5e, variables half): a Model whose RLS Tables scope users by different sets of session variables (one family per variable; two variables on one Table, an owner-or-group override, do not count). S15 (G5f): a rule's null test on a column of its own Table that the rule also scopes users by — the owner key; a null test on a never-null join key, which keeps an outer join's unmatched rows without exposing ownerless ones, is not reported, and S12's and S15's advice name that form. G5e's "different keys" half followed as BL-521 (S16, 2026-11-05). 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
 
 **Decision (2026-11-04, product owner):** build both as LOW rules worded "review" (audit backlog PR 5).
 
@@ -16380,9 +16380,18 @@ report's declaration-only style as a convention the gate documents.
 **Target:** 2027-01-31.
 
 
-## BL-521 — G5e's "different keys" half `Tier 3`
+## BL-521 — G5e's "different keys" half — DONE `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** the independent review of BL-512 (audit backlog PR 5).
+
+**Status:** DONE (2026-11-05, ts-audit 3.18.0). The product owner ruled that any
+difference in column names is the signal. S16, LOW "review": a Model whose RLS Tables
+scope users through different sets of column names (the `[path::COLUMN]` references in
+a rule's `and` / `or` clauses that name a session variable, outside quoted literals and
+null tests; names compared without case). 0 findings on the SE demo sample: of its 2 Models with two or
+more RLS Tables, one uses the same column names and the other has a Table whose rule
+compares a session variable with a literal only. Tests:
+`tests/test_audit_rls_review_rules.py` and the rule's examples.
 
 **What.** BL-512's G5e is "one Model's Tables comparing the tenant through different keys
 or variables". PR 5 built the variables half (S14). The keys half was left out on the

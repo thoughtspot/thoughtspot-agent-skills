@@ -516,7 +516,8 @@ def sec_rls_groups_rule() -> AuditContext:
 
 # ── S14 / S15 (BL-512): RLS judgement checks, LOW "review" ──────────────────
 
-def _two_rls_tables_ctx(orders_expr: str, cust_expr: str) -> AuditContext:
+def _two_rls_tables_ctx(orders_expr: str, cust_expr: str, orders_col: str = "OWNER",
+                        cust_col: str = "REGION") -> AuditContext:
     """ORDERS joined to CUST; each Table TML carries one RLS rule on its own column."""
     def table(name, col, expr):
         return {"table": {"name": name, "columns": [{"name": "K"}, {"name": col}],
@@ -530,8 +531,8 @@ def _two_rls_tables_ctx(orders_expr: str, cust_expr: str) -> AuditContext:
              "type": "INNER", "cardinality": "MANY_TO_ONE"}]},
         {"name": "CUST", "fqn": "t-cust"}]}}
     return make_context(models=[model], tables={
-        "t-orders": table("ORDERS", "OWNER", orders_expr),
-        "t-cust": table("CUST", "REGION", cust_expr)})
+        "t-orders": table("ORDERS", orders_col, orders_expr),
+        "t-cust": table("CUST", cust_col, cust_expr)})
 
 
 def sec_rls_two_tenant_variables() -> AuditContext:
@@ -543,6 +544,19 @@ def sec_rls_two_tenant_variables() -> AuditContext:
 def sec_rls_one_tenant_variable() -> AuditContext:
     return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups",
                                "[CUST_1::REGION] = ts_groups_int")
+
+
+def sec_rls_two_key_columns() -> AuditContext:
+    """Both Tables scope by ts_groups, but through differently named columns: S16."""
+    return _two_rls_tables_ctx("[ORDERS_1::OWNER] = ts_groups",
+                               "[CUST_1::REGION] = ts_groups")
+
+
+def sec_rls_one_key_column() -> AuditContext:
+    """Both Tables scope through a column of the same name (case aside): S16 is silent."""
+    return _two_rls_tables_ctx("[ORDERS_1::TENANT_ID] = ts_groups",
+                               "[CUST_1::tenant_id] = ts_username",
+                               orders_col="TENANT_ID", cust_col="tenant_id")
 
 
 def sec_rls_null_test_on_own_column() -> AuditContext:
