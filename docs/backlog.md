@@ -342,6 +342,7 @@ are roughly ordered by value÷effort.
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
 | BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
 | BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
+| BL-539 | Cascade delete reads 14531 on a Model as "no feedback": probe whether a Spotter-disabled Model still owns feedback, then keep the mapping with a test or make it unchecked (#692 accepted edge case) | 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -16628,3 +16629,39 @@ the placeholder safe, but setup is not self-service.
    hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
 
 **Target:** 2026-12-17.
+
+## BL-539 — Cascade delete: does a Spotter-disabled Model still own feedback? `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the pre-merge re-review of PR #692 (`ts-dependency-manager`
+mode D, cascade delete). The maintainer accepted this as a minor edge case rather than a
+merge blocker.
+
+**What.** The cascade refuses a delete that would silently take Spotter feedback with it.
+To find feedback it sends a v2 `tml/export` with `type: FEEDBACK`, now to Models only.
+`_has_no_feedback` (`cascade.py` in the dependency package, added by #692) reads two error codes as
+"this object has no feedback": 13006 (SQL View) and 14531 ("Cannot manage feedbacks for
+object that is not Spotter-enabled"). It does this for any object type. The mapping was
+written for Tables and Views, which are no longer asked, so it now only ever fires on a
+Model.
+
+The risk: a Model that was Spotter-enabled, given feedback, and then disabled. If that
+Model answers 14531 while the feedback still exists, the cascade reports PREVIEW, and the
+delete removes the feedback without listing or backing it up. Unverified either way.
+
+**Do.**
+
+1. Live probe on a staging cluster, using a scratch Model: enable Spotter, add one feedback
+   entry, disable Spotter, then send the cascade's exact FEEDBACK export. Record the status
+   and code. Also record whether a never-enabled Model answers 14531 or 400 10002.
+2. If the disabled Model answers 14531 **and** still owns feedback (re-enable to confirm
+   it survived), make 14531 on a Model read as unchecked (`FEEDBACK_UNCHECKED`, which
+   BLOCKS). If that would block every non-Spotter Model, first check Spotter state and
+   treat "never enabled" separately.
+3. Otherwise keep the mapping, and add a test asserting what a Model answering 14531
+   gives, citing the probe.
+4. Either way, fix the 1.6.0 changelog row in `ts-dependency-manager/SKILL.md`, which
+   says a "Model's or View's" feedback (Models only since #692).
+
+Related: BL-513 (every delete path agreeing on Sets and feedback) may absorb the helper.
+
+**Target:** 2026-12-31.
