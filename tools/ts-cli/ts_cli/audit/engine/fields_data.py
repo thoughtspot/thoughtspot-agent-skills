@@ -331,15 +331,29 @@ def _rls_session_variables(item: dict, ctx: Any) -> list:
     return NameList(sorted(set().union(*per_table.values())))
 
 
+_CLAUSE_SPLIT = re.compile(r"(?i)\b(?:and|or)\b")
+
+
 def _rule_key_columns(expr: Any) -> List[str]:
-    """The columns an RLS rule scopes users through: its `[path::COLUMN]` references
-    outside quoted literals and outside null tests (a null-tested join key is a guard),
-    in a rule that names a session variable; the part after `::`, stripped."""
-    code = _code(expr)
-    if not _rule_variables(code):
-        return []
-    return [ref[1:-1].rpartition("::")[2].strip()
-            for ref in _BRACKETED.findall(_NULL_TEST.sub(" ", code))]
+    """The columns an RLS rule scopes users through: the `[path::COLUMN]` references in
+    those of its `and` / `or` clauses that name a session variable, outside quoted
+    literals and null tests; the part after `::`, stripped. A column the rule compares
+    with a literal (a status flag) or guards with `!= null` sits in a clause naming no
+    variable and is not read (review of the S16 PR). References are masked while the
+    rule is split, so an `and` inside a column name does not split it."""
+    refs: List[str] = []
+
+    def mask(m: Any) -> str:
+        refs.append(m.group(0))
+        return f" \x00{len(refs) - 1}\x00 "
+
+    masked = _BRACKETED.sub(mask, _NULL_TEST.sub(" ", _code(expr)))
+    out = []
+    for clause in _CLAUSE_SPLIT.split(masked):
+        if _rule_variables(clause):
+            out += [refs[int(i)][1:-1].rpartition("::")[2].strip()
+                    for i in re.findall(r"\x00(\d+)\x00", clause)]
+    return out
 
 
 @register("rls_key_columns", uses=(),

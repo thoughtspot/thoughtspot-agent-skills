@@ -164,3 +164,31 @@ def test_s16_is_independent_of_s14():
     assert (_ids(out, "S14"), _ids(out, "S16")) == ([("Sales", "LOW")], [])
     out = run_audit(None, [], ctx=fx.sec_rls_two_key_columns(), angles=["S"])
     assert (_ids(out, "S14"), _ids(out, "S16")) == ([], [("Sales", "LOW")])
+
+
+# ── review of the S16 PR ─────────────────────────────────────────────────────
+
+def test_rls_key_columns_reads_only_clauses_naming_a_variable():
+    """A column the same rule compares with a literal (a status or public flag), or
+    guards with `!= null`, is not what users are scoped through."""
+    for orders in [
+        "[ORDERS_1::TENANT] = ts_groups or [ORDERS_1::IS_PUBLIC] = true",
+        "[ORDERS_1::TENANT] = ts_groups and [ORDERS_1::STATUS] != 'deleted'",
+        "[ORDERS_1::K] != null and [ORDERS_1::TENANT] = ts_groups",
+        "[ORDERS_1::K] <> null AND ( [ORDERS_1::TENANT] = ts_groups )",
+        "( [ORDERS_1::TENANT] = ts_groups Or [ORDERS_1::ACTIVE] = 1 )",
+    ]:
+        ctx = fx.sec_rls_two_key_columns()
+        _set_rules(ctx, [orders], ["[CUST_1::TENANT] = ts_groups"])
+        assert _keys(ctx) == [], orders
+    ctx = fx.sec_rls_two_key_columns()
+    _set_rules(ctx, ["'admin' in ts_groups or [ORDERS_1::REGION] = 'EMEA'"],
+               ["[CUST_1::TENANT] = ts_groups"])
+    assert _keys(ctx) == []                          # ORDERS scopes through no column
+
+
+def test_rls_key_columns_keeps_and_or_inside_a_column_name():
+    ctx = fx.sec_rls_two_key_columns()
+    _set_rules(ctx, ["[ORDERS_1::Sales and Returns] = ts_groups"],
+               ["[CUST_1::TENANT] = ts_groups"])
+    assert _keys(ctx) == ["Sales and Returns", "TENANT"]

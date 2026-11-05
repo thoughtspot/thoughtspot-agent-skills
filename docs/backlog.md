@@ -16264,7 +16264,7 @@ MEDIUM and cite the probe; if not, retire or reword it.
 
 ## BL-512 — RLS judgement checks G5e and G5f — DONE `Tier 3`
 
-**Status:** DONE in part (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision. S14 (G5e, variables half): a Model whose RLS Tables scope users by different sets of session variables (one family per variable; two variables on one Table, an owner-or-group override, do not count). S15 (G5f): a rule's null test on a column of its own Table that the rule also scopes users by — the owner key; a null test on a never-null join key, which keeps an outer join's unmatched rows without exposing ownerless ones, is not reported, and S12's and S15's advice name that form. G5e's "different keys" half is not built: BL-521. 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
+**Status:** DONE in part (2026-11-04, ts-audit 3.17.0), as LOW rules worded "review" per the product owner's decision. S14 (G5e, variables half): a Model whose RLS Tables scope users by different sets of session variables (one family per variable; two variables on one Table, an owner-or-group override, do not count). S15 (G5f): a rule's null test on a column of its own Table that the rule also scopes users by — the owner key; a null test on a never-null join key, which keeps an outer join's unmatched rows without exposing ownerless ones, is not reported, and S12's and S15's advice name that form. G5e's "different keys" half followed as BL-521 (S16, 2026-11-05). 0 findings on the SE demo sample. Tests: `tests/test_audit_rls_review_rules.py` and the rules' examples.
 
 **Decision (2026-11-04, product owner):** build both as LOW rules worded "review" (audit backlog PR 5).
 
@@ -16386,9 +16386,9 @@ report's declaration-only style as a convention the gate documents.
 
 **Status:** DONE (2026-11-05, ts-audit 3.18.0). The product owner ruled that any
 difference in column names is the signal. S16, LOW "review": a Model whose RLS Tables
-scope users through differently named columns (the `[path::COLUMN]` references in a
-rule that names a session variable, outside quoted literals and null tests; names
-compared without case). 0 findings on the SE demo sample: of its 2 Models with two or
+scope users through different sets of column names (the `[path::COLUMN]` references in
+a rule's `and` / `or` clauses that name a session variable, outside quoted literals and
+null tests; names compared without case). 0 findings on the SE demo sample: of its 2 Models with two or
 more RLS Tables, one uses the same column names and the other has a Table whose rule
 compares a session variable with a literal only. Tests:
 `tests/test_audit_rls_review_rules.py` and the rule's examples.
