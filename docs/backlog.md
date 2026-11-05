@@ -340,6 +340,8 @@ are roughly ordered by value÷effort.
 | ~~BL-503~~ | ~~the audit report's JavaScript has no size or complexity gate~~ | DONE (2026-11-04) |
 | BL-106 | Python 3.11 floor bump: 3.10 is end-of-life and still in `requires-python` and the CI matrix | 2026-11-30 |
 | BL-157 | Aggregates CLI gap: `preview-names`, `widen-rls`, force-add-aware `recommend`, drop the private `ts_cli` imports (event trigger lapsed) | 2026-11-30 |
+| BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
+| BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
 
 ### Tier 3 — Opportunistic
 
@@ -16582,3 +16584,47 @@ of scope.
    and the cascade route, so a new delete path cannot skip the helper silently.
 
 **Target:** 2026-12-31.
+
+## BL-530 — Liveboard-building parity across converters after SpotterViz `Tier 2`
+
+**Filed:** 2026-11-05. **Source:** the maintainer's direction decision on PR #679
+(2026-11-04), which made SpotterViz the only way `ts-convert-from-tableau` and
+`ts-convert-from-looker` build Liveboards and deferred the parity question.
+
+**What.** Once #679 merges, two converters build Liveboards through SpotterViz while
+`ts-convert-from-powerbi`, `ts-convert-from-qlik` and `ts-convert-from-sisense` still
+author Liveboard TML deterministically. SpotterViz is not exposed on Cortex Code CLI, so
+on that runtime Tableau and Looker migrations build no Liveboard at all.
+
+**Do.** Decide, using evidence from real Tableau and Looker migrations run through
+SpotterViz:
+
+1. whether Power BI, Qlik and Sisense move to SpotterViz;
+2. whether Tableau and Looker get back a deterministic fallback for runtimes without
+   SpotterViz (Cortex Code CLI);
+3. record the outcome in each converter's `references/coverage-matrix.md`.
+
+Deliberately not decided at #679's merge: the converters that build Liveboards
+deterministically work today, and SpotterViz had no field history yet.
+
+**Target:** 2026-12-17.
+
+## BL-531 — Confirm and allowlist the public SpotterViz MCP endpoint `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the maintainer's direction decision on PR #679
+(2026-11-04).
+
+**What.** #679 documents the SpotterViz MCP server configuration with a
+`<spotterviz-mcp-endpoint>` placeholder. Users must get the host from a ThoughtSpot
+contact. The skill's connectivity check (`check_connectivity` before any parsing) keeps
+the placeholder safe, but setup is not self-service.
+
+**Do.**
+
+1. Confirm the public endpoint, and who owns it, with the SpotterViz team.
+2. Replace the placeholder in `agents/cli/SETUP.md` and the shared
+   `spotterviz-liveboard-build.md` reference.
+3. Add the host to whatever allowlist applies (the customer-reference gate's allowed
+   hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
+
+**Target:** 2026-12-17.
