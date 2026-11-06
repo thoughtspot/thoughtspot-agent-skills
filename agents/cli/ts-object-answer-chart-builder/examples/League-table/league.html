@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Football Nations Pitch</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Roboto+Condensed:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#F1FCF8;font-family:"Roboto Condensed",sans-serif;color:#fff;overflow:hidden}
+.wrapper{width:100%;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;
+  background:#F1FCF8}
+.inner{position:relative;z-index:1;width:100%;max-width:780px;display:flex;flex-direction:column;align-items:center;gap:8px}
+h1{font-family:"Oswald",sans-serif;font-size:clamp(11px,1.6vw,15px);font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6fdb6f;text-align:center}
+.filters{display:flex;gap:6px}
+.fp{padding:4px 14px;border-radius:20px;font-size:11px;font-family:"Roboto Condensed",sans-serif;
+  letter-spacing:0.07em;text-transform:uppercase;cursor:pointer;border:1px solid #2d6b2d;
+  color:#6fdb6f;background:transparent;transition:all 0.15s}
+.fp.active{background:#6fdb6f;color:#0a1a0a;border-color:#6fdb6f;font-weight:700}
+.desc{text-align:center;min-height:34px}
+.desc-line1{font-family:"Oswald",sans-serif;font-size:clamp(12px,1.8vw,15px);font-weight:600;color:#2a7a30;letter-spacing:0.03em}
+.desc-line2{font-size:clamp(10px,1.4vw,12px);color:#4a7a4a;letter-spacing:0.04em;margin-top:2px}
+.pitch-wrap{width:100%;position:relative}
+.pitch{width:100%;aspect-ratio:16/7;background:#2a7a30;border-radius:8px;position:relative;overflow:visible;border:2px solid #1a5220}
+.pm{position:absolute;border:1.5px solid rgba(255,255,255,0.2);pointer-events:none}
+.bubble{position:absolute;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;
+  transition:transform 0.25s ease;overflow:hidden;border:2px solid rgba(255,255,255,0.55)}
+.bubble:hover{transform:translate(-50%,-50%) scale(1.18);border-color:#fff;z-index:50}
+.bubble.pop{animation:popIn 0.35s ease both}
+@keyframes popIn{from{opacity:0;transform:translate(-50%,-50%) scale(0.2)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.bubble img{width:100%;height:100%;object-fit:cover;display:block;position:absolute;inset:0;border-radius:50%}
+.tt{position:fixed;background:#0a1a0a;font-family:"Roboto Condensed",sans-serif;
+  padding:8px 12px;border-radius:6px;border:1px solid #2d6b2d;pointer-events:none;
+  white-space:nowrap;z-index:999;display:none;min-width:190px}
+.tt-name{font-family:"Oswald",sans-serif;font-size:14px;font-weight:700;color:#6fdb6f;
+  letter-spacing:0.06em;text-transform:uppercase;margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.tt-flag{width:22px;height:16px;object-fit:cover;border-radius:1px;flex-shrink:0}
+.tt-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.tt-cell{display:flex;flex-direction:column;gap:1px}
+.tt-lbl{font-size:9px;color:#4a7a4a;letter-spacing:0.1em;text-transform:uppercase}
+.tt-val{font-size:13px;color:#fff;font-weight:500}
+.tt-winpct{font-size:15px;color:#6fdb6f;font-weight:700}
+.tt-full{grid-column:1/-1}
+.legend{display:flex;align-items:center;gap:10px;font-size:10px;color:#4a7a4a;letter-spacing:0.07em;text-transform:uppercase}
+.ld{border-radius:50%;border:1.5px solid #1a5220;background:#2a7a30}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<div class="inner">
+
+<p style="text-align:center;font-size:13px;color:#2a7a30;letter-spacing:0.03em;margin-top:4px;">
+  Explore how national teams rank across FIFA competitive matches since 1900.<br>
+  Bubble size reflects ranking — hover over any country to see detailed stats. 
+  Bubble colors reflect different national teams.<br>
+  Use the buttons below to switch top 10 ranking views.
+  <br><br>
+</p>
+
+  <div class="filters">
+    <button class="fp active" data-key="winpct">Top 10 by Win %</button>
+    <button class="fp" data-key="mp">Top 10 by # of Matches</button>
+    <button class="fp" data-key="wins">Top 10 by # of Wins</button>
+  </div>
+  <div class="desc">
+    <div class="desc-line1" id="desc1"></div>
+    <div class="desc-line2" id="desc2"></div>
+  </div>
+  <div class="pitch-wrap">
+    <div class="pitch" id="pitch">
+      <div class="pm" style="inset:5%"></div>
+      <div class="pm" style="top:5%;bottom:5%;left:50%;width:0;border-left:1.5px solid rgba(255,255,255,0.2)"></div>
+      <div class="pm" style="top:50%;left:50%;width:16%;aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%)"></div>
+      <div style="position:absolute;top:50%;left:50%;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,0.3);transform:translate(-50%,-50%)"></div>
+      <div class="pm" style="top:25%;bottom:25%;left:5%;width:13%"></div>
+      <div class="pm" style="top:37%;bottom:37%;left:5%;width:5%"></div>
+      <div class="pm" style="top:25%;bottom:25%;right:5%;width:13%"></div>
+      <div class="pm" style="top:37%;bottom:37%;right:5%;width:5%"></div>
+    </div>
+  </div>
+  <div class="legend">
+    <div style="display:flex;align-items:center;gap:5px">
+      <div class="ld" style="width:12px;height:12px"></div>
+      <div class="ld" style="width:20px;height:20px"></div>
+      <div class="ld" style="width:28px;height:28px"></div>
+    </div>
+    <span>larger = higher ranked &middot; positioned by geography &middot; hover for stats</span>
+  </div>
+</div>
+</div>
+
+<div class="tt" id="tt">
+  <div class="tt-name">
+    <img class="tt-flag" id="tt-flag" src="" alt="">
+    <span id="tt-nm"></span>
+  </div>
+  <div class="tt-grid">
+    <div class="tt-cell"><span class="tt-lbl">Matches</span><span class="tt-val" id="tt-mp"></span></div>
+    <div class="tt-cell"><span class="tt-lbl">Wins</span><span class="tt-val" id="tt-w"></span></div>
+    <div class="tt-cell"><span class="tt-lbl">Draws</span><span class="tt-val" id="tt-d"></span></div>
+    <div class="tt-cell"><span class="tt-lbl">Losses</span><span class="tt-val" id="tt-l"></span></div>
+    <div class="tt-cell tt-full"><span class="tt-lbl">Win %</span><span class="tt-winpct" id="tt-wp"></span></div>
+  </div>
+</div>
+
+<script>
+const DATA={"winpct": [{"name": "Germany", "rank": 1, "mp": 419, "w": 272, "d": 86, "l": 61, "win_pct": 64.9, "iso": "de", "color": "#FFCE00", "x": 58.8, "y": 21.9}, {"name": "Spain", "rank": 2, "mp": 417, "w": 268, "d": 85, "l": 64, "win_pct": 64.3, "iso": "es", "color": "#AA151B", "x": 47.0, "y": 37.2}, {"name": "Netherlands", "rank": 3, "mp": 404, "w": 248, "d": 78, "l": 78, "win_pct": 61.4, "iso": "nl", "color": "#FF6600", "x": 44.7, "y": 16.5}, {"name": "France", "rank": 4, "mp": 406, "w": 246, "d": 87, "l": 73, "win_pct": 60.6, "iso": "fr", "color": "#003189", "x": 47.5, "y": 29.1}, {"name": "Brazil", "rank": 5, "mp": 602, "w": 362, "d": 126, "l": 114, "win_pct": 60.1, "iso": "br", "color": "#009C3B", "x": 38.4, "y": 63.7}, {"name": "Iran", "rank": 6, "mp": 371, "w": 223, "d": 86, "l": 62, "win_pct": 60.1, "iso": "ir", "color": "#239F40", "x": 62.1, "y": 35.1}, {"name": "Australia", "rank": 7, "mp": 311, "w": 179, "d": 65, "l": 67, "win_pct": 57.6, "iso": "au", "color": "#00008B", "x": 80.5, "y": 69.7}, {"name": "England", "rank": 8, "mp": 604, "w": 347, "d": 151, "l": 106, "win_pct": 57.5, "iso": "gb-eng", "color": "#CF142B", "x": 50.9, "y": 21.7}, {"name": "Italy", "rank": 9, "mp": 473, "w": 270, "d": 124, "l": 79, "win_pct": 57.1, "iso": "it", "color": "#009246", "x": 55.5, "y": 29.3}, {"name": "Russia", "rank": 10, "mp": 359, "w": 204, "d": 73, "l": 82, "win_pct": 56.8, "iso": "ru", "color": "#003478", "x": 64.9, "y": 17.1}], "mp": [{"name": "Argentina", "rank": 1, "mp": 682, "w": 383, "d": 156, "l": 143, "win_pct": 56.2, "iso": "ar", "color": "#74ACDF", "x": 32.5, "y": 76.2}, {"name": "Thailand", "rank": 2, "mp": 679, "w": 267, "d": 170, "l": 242, "win_pct": 39.3, "iso": "th", "color": "#A51931", "x": 72.8, "y": 44.8}, {"name": "Uruguay", "rank": 3, "mp": 634, "w": 293, "d": 151, "l": 190, "win_pct": 46.2, "iso": "uy", "color": "#5BA4CF", "x": 40.1, "y": 73.6}, {"name": "South Korea", "rank": 4, "mp": 632, "w": 355, "d": 159, "l": 118, "win_pct": 56.2, "iso": "kr", "color": "#003478", "x": 79.2, "y": 32.1}, {"name": "England", "rank": 5, "mp": 604, "w": 347, "d": 151, "l": 106, "win_pct": 57.5, "iso": "gb-eng", "color": "#CF142B", "x": 52.0, "y": 28.6}, {"name": "Brazil", "rank": 6, "mp": 602, "w": 362, "d": 126, "l": 114, "win_pct": 60.1, "iso": "br", "color": "#009C3B", "x": 38.4, "y": 63.7}, {"name": "Malaysia", "rank": 7, "mp": 590, "w": 240, "d": 134, "l": 216, "win_pct": 40.7, "iso": "my", "color": "#CC0001", "x": 75.0, "y": 52.7}, {"name": "Scotland", "rank": 8, "mp": 540, "w": 258, "d": 120, "l": 162, "win_pct": 47.8, "iso": "gb-sct", "color": "#003399", "x": 46.3, "y": 14.1}, {"name": "Sweden", "rank": 9, "mp": 530, "w": 281, "d": 106, "l": 143, "win_pct": 53.0, "iso": "se", "color": "#006AA7", "x": 55.3, "y": 16.7}, {"name": "Northern Ireland", "rank": 10, "mp": 516, "w": 140, "d": 118, "l": 258, "win_pct": 27.1, "iso": "gb-nir", "color": "#003399", "x": 47.7, "y": 21.8}], "wins": [{"name": "Argentina", "rank": 1, "mp": 682, "w": 383, "d": 156, "l": 143, "win_pct": 56.2, "iso": "ar", "color": "#74ACDF", "x": 32.5, "y": 76.2}, {"name": "Brazil", "rank": 2, "mp": 602, "w": 362, "d": 126, "l": 114, "win_pct": 60.1, "iso": "br", "color": "#009C3B", "x": 38.4, "y": 63.7}, {"name": "South Korea", "rank": 3, "mp": 632, "w": 355, "d": 159, "l": 118, "win_pct": 56.2, "iso": "kr", "color": "#003478", "x": 79.2, "y": 32.1}, {"name": "England", "rank": 4, "mp": 604, "w": 347, "d": 151, "l": 106, "win_pct": 57.5, "iso": "gb-eng", "color": "#CF142B", "x": 46.9, "y": 23.0}, {"name": "Uruguay", "rank": 5, "mp": 634, "w": 293, "d": 151, "l": 190, "win_pct": 46.2, "iso": "uy", "color": "#5BA4CF", "x": 40.1, "y": 73.6}, {"name": "Sweden", "rank": 6, "mp": 530, "w": 281, "d": 106, "l": 143, "win_pct": 53.0, "iso": "se", "color": "#006AA7", "x": 53.8, "y": 15.2}, {"name": "Germany", "rank": 7, "mp": 419, "w": 272, "d": 86, "l": 61, "win_pct": 64.9, "iso": "de", "color": "#FFCE00", "x": 56.4, "y": 22.9}, {"name": "Italy", "rank": 8, "mp": 473, "w": 270, "d": 124, "l": 79, "win_pct": 57.1, "iso": "it", "color": "#009246", "x": 54.3, "y": 30.4}, {"name": "Mexico", "rank": 9, "mp": 495, "w": 270, "d": 107, "l": 118, "win_pct": 54.5, "iso": "mx", "color": "#006847", "x": 26.8, "y": 40.0}, {"name": "Spain", "rank": 10, "mp": 417, "w": 268, "d": 85, "l": 64, "win_pct": 64.3, "iso": "es", "color": "#AA151B", "x": 46.5, "y": 30.7}]};
+const MIN_R=15,MAX_R=40;
+const DESCS={
+  winpct:["Germany leads FIFA nations with a 64.9% competitive win rate since 1900.","European nations dominate the top 10 — only Brazil, Iran and Australia break in."],
+  mp:["Argentina and Thailand have played the most competitive international matches since 1900.","High regional tournament frequency and World Cup qualification campaigns drive match counts."],
+  wins:["Argentina and Brazil lead all FIFA nations in competitive wins since 1900.","South American and European nations share the top 10 almost equally."]
+};
+function rankR(rank,total){return Math.round(MAX_R-(MAX_R-MIN_R)*Math.pow((rank-1)/(total-1),0.55));}
+function render(key){
+  const pitch=document.getElementById('pitch');
+  pitch.querySelectorAll('.bubble').forEach(b=>b.remove());
+  const[d1,d2]=DESCS[key];
+  document.getElementById('desc1').textContent=d1;
+  document.getElementById('desc2').textContent=d2;
+  DATA[key].forEach((d,i)=>{
+    const r=rankR(d.rank,10);
+    const div=document.createElement('div');
+    div.className='bubble pop';
+    div.style.cssText=`left:${d.x}%;top:${d.y}%;width:${r*2}px;height:${r*2}px;background:${d.color};animation-delay:${i*35}ms`;
+    if(d.iso){
+      const img=document.createElement('img');
+      img.src=`https://flagcdn.com/40x30/${d.iso}.png`;
+      img.alt=d.name;
+      img.onerror=function(){this.remove();};
+      div.appendChild(img);
+    }
+    const tt=document.getElementById('tt');
+    div.addEventListener('mouseenter',()=>{
+      document.getElementById('tt-nm').textContent=d.name;
+      const fl=document.getElementById('tt-flag');
+      if(d.iso){fl.src=`https://flagcdn.com/20x15/${d.iso}.png`;fl.style.display='inline-block';}
+      else fl.style.display='none';
+      document.getElementById('tt-mp').textContent=d.mp.toLocaleString();
+      document.getElementById('tt-w').textContent=d.w.toLocaleString();
+      document.getElementById('tt-d').textContent=d.d.toLocaleString();
+      document.getElementById('tt-l').textContent=d.l.toLocaleString();
+      document.getElementById('tt-wp').textContent=d.win_pct+'%';
+      tt.style.display='block';
+    });
+    div.addEventListener('mousemove',e=>{tt.style.left=(e.clientX+16)+'px';tt.style.top=(e.clientY-44)+'px';});
+    div.addEventListener('mouseleave',()=>{tt.style.display='none';});
+    pitch.appendChild(div);
+  });
+}
+document.querySelectorAll('.fp').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.fp').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    render(btn.dataset.key);
+  });
+});
+setTimeout(()=>render('winpct'),100);
+window.addEventListener('resize',()=>{
+  const a=document.querySelector('.fp.active');
+  if(a)render(a.dataset.key);
+});
+</script>
+</body>
+</html>

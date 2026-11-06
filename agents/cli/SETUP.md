@@ -234,6 +234,15 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-link-semantic-layer \
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-calendar-builder \
       ~/.claude/skills/ts-object-calendar-builder
 
+# The two chart builders are Claude Code only, so they are not linked into Cortex: they render charts in a
+# local Playwright browser and write through the ThoughtSpot MCP (execute-thoughtspot-code), neither of
+# which Cortex Code CLI provides.
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-answer-chart-builder \
+      ~/.claude/skills/ts-object-answer-chart-builder
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-liveboard-chart-builder \
+      ~/.claude/skills/ts-object-liveboard-chart-builder
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-object-model-agentql-query \
       ~/.claude/skills/ts-object-model-agentql-query
 

@@ -16422,6 +16422,25 @@ variable) and build it as a LOW "review" rule beside S14.
 
 **Target:** 2027-01-31.
 
+## BL-522 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
+open items #4 and #5, deferred here so the write path's live run could close the PR).
+
+**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
+
+1. Liveboard open item #4: of the 58 library charts, the 48 moved to MayaCharts 0.18.1 render
+   in the local preview in every data mode but carry `.preview-only` until each has been on a
+   Liveboard and screenshotted. The live run put four of them on a cluster (all rendered).
+2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
+   exclude the current month; that has not been confirmed on a screenshot.
+
+**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
+`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
+days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
+
+**Target:** 2027-01-31.
+
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5

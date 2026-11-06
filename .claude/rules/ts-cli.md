@@ -36,6 +36,15 @@ migration hits the same issue.
   before a CLI command is written. These are temporary scaffolding, not skill logic.
 - `agents/coco-snowsight/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
   CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
+- `agents/cli/ts-object-answer-chart-builder` and `agents/cli/ts-object-liveboard-chart-builder` — their
+  calls run as `ts.post` / `ts.get` inside the ThoughtSpot MCP sandbox (`execute-thoughtspot-code`), where
+  `ts` cannot run, and a user without a `ts` profile still has the MCP. On two conditions:
+  1. Every call lives in a versioned block file (`helpers/mcp/*.js`, `helpers/answer-patch.js`,
+     `scripts/patch.js`, `scripts/mcp/*.js`), printed by a script; never inline in a SKILL.md or reference.
+  2. Every block runs against a mock `ts` in `tools/smoke-tests/_answer_patch_mock.mjs` and
+     `_liveboard_patch_mock.mjs`, which the skills' smoke suites run in CI.
+  The one call outside the sandbox is `helpers/cluster-shot.mjs`'s read-only TML export from inside the
+  user's own signed-in browser page, to count each tab's custom-chart tiles; it holds no credential.
 
 ---
 
