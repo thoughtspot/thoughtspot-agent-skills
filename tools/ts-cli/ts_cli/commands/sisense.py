@@ -252,7 +252,7 @@ def _target_liveboard(inv, target_model, model_fqn, ov, drill_files, out) -> Non
         drills.append(parse_inventory(doc if "dashboard" in doc else {"dashboard": doc}))
     model_tml, table_tmls = _load_tml(target_model)
     result = build_target_liveboard(inv, model_tml, model_fqn, ov, drills, tables=table_tmls)
-    for w in inv.get("warnings", []):
+    for w in inv.get("warnings", []) + [w for d in drills for w in d.get("warnings", [])]:
         typer.echo(f"warning: {w}", err=True)
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -313,6 +313,7 @@ def parse_widget(widget: dict, warnings: list) -> dict:
             _parse_item(pname, item, acc)
     except Exception as e:  # never let one malformed widget abort the parse
         warnings.append(f"Could not fully parse widget {widget.get('oid', '?')}: {e}")
+        acc["unsupported"].add(f"unreadable item ({type(e).__name__}: {e})")   # partly read: flag it
     out = {
         "oid": widget.get("oid") or "",
         "title": widget.get("title") or "",
@@ -392,8 +393,13 @@ def _dashboard_filter(f: dict, dash_filters: list, disabled: list) -> None:
 def parse_dashboard(raw: dict, warnings: list) -> dict:
     dash_filters: list[dict] = []
     disabled: list = []
+    unreadable: list = []
     for f in raw.get("filters", []) or []:
-        _dashboard_filter(f, dash_filters, disabled)
+        try:
+            _dashboard_filter(f, dash_filters, disabled)
+        except Exception as e:  # one malformed filter must not abort the parse, nor vanish
+            warnings.append(f"Could not parse a dashboard filter: {e}")
+            unreadable.append(str((f.get("jaql") or {}).get("dim") or "?") if isinstance(f, dict) else "?")
     out = {
         "oid": raw.get("oid") or raw.get("_id") or "",
         "title": raw.get("title") or "",
@@ -403,7 +409,17 @@ def parse_dashboard(raw: dict, warnings: list) -> dict:
     }
     if disabled:
         out["disabled_filters"] = disabled
+    if unreadable:
+        out["unreadable_filters"] = unreadable
     return out
+
+
+def _pct(w) -> float:
+    """Sisense layout width (number, or '50' / '50%') -> percent; 100 when unreadable."""
+    try:
+        return float(str(w if w is not None else 100).replace("%", "").strip())
+    except (TypeError, ValueError):
+        return 100.0
 
 
 def _px(h) -> int:
@@ -423,11 +439,11 @@ def _parse_layout(layout: dict) -> list:
     """
     rows = []
     for ci, col in enumerate(layout.get("columns") or []):
-        col_pct = float(col.get("width") or 100)
+        col_pct = _pct(col.get("width"))
         for cell in col.get("cells") or []:
             row = []
             for sub in cell.get("subcells") or []:
-                width = float(sub.get("width") or 100)
+                width = _pct(sub.get("width"))
                 for el in sub.get("elements") or []:
                     if el.get("widgetid"):
                         row.append({"oid": el["widgetid"], "width_pct": width,

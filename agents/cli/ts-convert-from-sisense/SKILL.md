@@ -140,7 +140,7 @@ What it does, all deterministic:
 | `count` (a DISTINCT count) | `unique count [X]`; over a key the Model hides, the Model formula `unique count ( [inst::col] )` |
 | Widget-level filter | Search filter: members `[X] = 'a' [X] = 'b'` (ORed), excludes `[X] != 'a'` (ANDed), ranges `>= > <= <`. Never `in (...)` / `not in (...)` — search ignores both silently |
 | WidgetsTabber (daily/weekly/… tabs) | The active tab's widget only, grain suffix dropped from its title; a hidden tab that is the same chart (type, fields, filters) at another date level is the chart's own date-bucket control, reported `Merged`. Any other tab becomes a tile of its own |
-| Top / bottom N | `top N` / `bottom N`, when it ranks by the widget's only measure |
+| Top / bottom N | `top N` / `bottom N`, when it ranks the widget's only dimension by its only measure |
 | Disabled widget or dashboard filter | Not applied (it is off in Sisense); reported |
 | Value / axis titles | `custom_name` |
 | Number display (full values) | Every measure column gets a full-value NUMBER format (no `K`/`M` abbreviation); `%` columns and Model columns with their own format (a percent pattern, a currency) keep theirs |
@@ -154,10 +154,12 @@ one the converter reads and has verified. Everything else is **NEEDS REVIEW** in
 `out/migration-report.json` with the reason, on the chip AND on every tile it affects — never
 guessed. That includes:
 
-- a filter it cannot carry: relative-date, unrecognised settings, a date value that is not a
-  days-level value on a `DATE` column (export `--associated` so the column types are known), a
-  value containing a backslash, a mixed inclusive/exclusive range chip;
-- a top/bottom N that ranks by something other than the widget's only measure;
+- a filter it cannot carry: relative-date, unrecognised settings, any date value (no search form
+  for one is verified), a null or backslash value, two filters on one column, any range chip
+  (not yet verified on a live Liveboard);
+- a top/bottom N that does not rank the widget's only dimension by its only measure;
+- a role-played table whose copy Sisense would join differently, or cannot be decided;
+- a drill dashboard's own filters, or a source filter the drill table does not carry;
 - a second aggregation of one column, an aggregation differing from the Model formula it binds,
   a quick function (e.g. Contribution), a disabled plotted field, a secondary value, a percent
   display on a column with no format, a weekly bucket with a Sisense week start;
@@ -202,7 +204,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-11-05 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Client > Program > Drug) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Verified tile-for-tile against a hand-built rebuild of a 31-widget dashboard. What it cannot carry faithfully is NEEDS REVIEW, never a silently wrong tile: a relative-date or coarser-than-day date filter, a second aggregation of one column, a chip on a different role copy than a tile's own path, an unreachable table, an override naming a missing column. |
+| 1.1.0 | 2026-11-05 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Client > Program > Drug) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. It carries a widget, filter or chip only when every setting on it is one it reads and has verified; anything else is NEEDS REVIEW on the chip and every tile it affects, never a silently wrong tile. |
 | 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
 | 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |

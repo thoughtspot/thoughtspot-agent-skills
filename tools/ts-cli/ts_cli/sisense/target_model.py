@@ -57,10 +57,10 @@ class TargetModel:
         # may carry a custom obj_id no derivation from its name can reproduce
         self.obj_id = tml.get("obj_id") if model is not tml else None
         self.base_of: dict = {}           # instance -> base table name
-        self.joins: dict = {}             # instance -> [(target instance, fk column on instance)]
-        for mt in model.get("model_tables") or model.get("tables") or []:
-            inst = mt.get("alias") or mt.get("name")
-            self.base_of[inst], self.joins[inst] = mt.get("name"), _joins_of(mt)
+        # instance -> [(target instance, fk column on instance)], ALWAYS many -> one: a join
+        # declared ONE_TO_MANY (on the dimension side) is reversed, so the facts are the roots
+        self.joins: dict = {}
+        self._index_tables(model.get("model_tables") or model.get("tables") or [])
         self.formulas = {f.get("id"): f.get("expr") or "" for f in model.get("formulas") or []}
         self.instances_of: dict = {}      # column name -> instances it reads (column_id / formula refs)
         self.by_column_id: dict = {}      # 'inst::col' -> column name
@@ -74,12 +74,28 @@ class TargetModel:
         # base table -> {warehouse column: Table TML column name}, from the associated Table TMLs
         # (`ts tml export --associated`): a Model column_id names the TABLE column, which a
         # hand-designed Table may have renamed from the warehouse column a Sisense dim carries
-        self.table_cols, self.table_types = _table_columns(tables)
+        self.table_cols = _table_columns(tables)
         for c in model.get("columns") or []:
             self._index_column(c)
         self._insts_by_norm: dict = {}
         for inst in self.base_of:
             self._insts_by_norm.setdefault(_norm(inst), []).append(inst)
+
+    def _index_tables(self, model_tables: list) -> None:
+        declared = []
+        for mt in model_tables:
+            inst = mt.get("alias") or mt.get("name")
+            self.base_of[inst] = mt.get("name")
+            self.joins.setdefault(inst, [])
+            declared += [(inst,) + j for j in _joins_of(mt)]
+        for inst, target, sides, card in declared:     # after every instance's base is known
+            self._add_join(inst, target, sides, card)
+
+    def _add_join(self, inst: str, target: str, sides: list, card: str) -> None:
+        many, one = (target, inst) if card == "ONE_TO_MANY" else (inst, target)
+        names = {many, self.base_of.get(many)}
+        fk = next((col for tbl, col in sides if tbl in names), None)
+        self.joins.setdefault(many, []).append((one, fk))
 
     def _index_column(self, c: dict) -> None:
         nm = c.get("name")
@@ -193,6 +209,16 @@ class TargetModel:
             return None, f"table {sis_table} is not in the target model"
         return None, f"table {sis_table} is ambiguous in the target model ({', '.join(sorted(cands))})"
 
+    def path_known(self, sis_table: str, inst: str, anchors: list, has_fact: bool, relations) -> bool:
+        """The copy is decided by the widget itself: it names a fact table, or every fact linking
+        its tables that Sisense relates to ``sis_table`` joins it through ``inst`` (a fact with no
+        Sisense relation to the table -- one the Model added -- is no path in Sisense)."""
+        if has_fact:
+            return True
+        hits = [self.fk_instances(sis_table, [a], relations or []) for a in anchors]
+        hits = [h for h in hits if h]
+        return bool(hits) and all(h == {inst} for h in hits)
+
     def fk_instances(self, sis_table: str, anchors: list, relations: list) -> set:
         """Instances the anchors join on the FK column a Sisense relation links ``sis_table`` by."""
         hits = set()
@@ -241,12 +267,15 @@ class TargetModel:
     # ---- column resolution ------------------------------------------------------------
     def column(self, inst: str, col: str) -> Optional[str]:
         """Model column exposing ``col`` (a WAREHOUSE column name, as a Sisense dim carries it) on
-        ``inst``: through the Table TML's db_column_name when the Tables were supplied (exact,
-        else a unique case/underscore-insensitive db name), else the column name itself, else a
-        unique case/underscore-insensitive match. Anything ambiguous is None, never a guess."""
-        tcol = self._table_column(inst, col) or col
-        if f"{inst}::{tcol}" in self.by_column_id:
-            return self.by_column_id[f"{inst}::{tcol}"]
+        ``inst``. When the Table TML was supplied, ONLY its db_column_name mapping decides (exact,
+        else a unique case/underscore-insensitive db name) -- a fallback there could bind another
+        warehouse column. Without it: the column name itself, else a unique
+        case/underscore-insensitive match. Anything ambiguous is None, never a guess."""
+        if self.base_of.get(inst) in self.table_cols:   # the Table is known: its mapping decides
+            tcol = self._table_column(inst, col)
+            return self.by_column_id.get(f"{inst}::{tcol}") if tcol else None
+        if f"{inst}::{col}" in self.by_column_id:
+            return self.by_column_id[f"{inst}::{col}"]
         hits = [nm for key, nm in self.by_column_id.items()
                 if key.split("::")[0] == inst and _norm(key.split("::", 1)[1]) == _norm(col)]
         return hits[0] if len(hits) == 1 else None
@@ -258,14 +287,29 @@ class TargetModel:
         hits = [name for db, name in cols.items() if _norm(db) == _norm(col)]
         return hits[0] if len(hits) == 1 else None
 
-    def data_type(self, model_col: str) -> Optional[str]:
-        """ThoughtSpot data type of a column-backed Model column, from the Table TMLs; None
-        when the Tables were not supplied or the column is a formula."""
-        key = next((k for k, nm in self.by_column_id.items() if nm == model_col), None)
-        if not key:
-            return None
-        inst, tcol = key.split("::", 1)
-        return self.table_types.get(self.base_of.get(inst), {}).get(tcol)
+    def role_conflict(self, sis_table: str, inst: str, widget_insts: set, path_known: bool,
+                      relations=None) -> str:
+        """Why binding ``inst`` for a role-played table may not be the copy Sisense joins for this
+        widget, or ''. Sisense joins the table through its RELATIONS from the widget's other
+        tables, so a copy one of them joins on a column a Sisense relation uses decides it; two
+        such copies cannot be decided. With no such copy, ``path_known`` says whether the
+        widget's path to the table is otherwise determined (it names a fact, or exactly one fact
+        links its tables and its Sisense relation picked ``inst``)."""
+        copies = set(self.instances_of_base(self.base_of.get(inst) or ""))
+        if len(copies) <= 1 or self.named_instances(sis_table) or not (widget_insts - copies):
+            return ""          # one copy, a Sisense table of its own for this role, or no other
+                               # table to join through (every copy then reads the same rows)
+        adjacent = {t for other in widget_insts - copies for t in self.fk_instances(sis_table, [other], relations or [])
+                    if t in copies}
+        if len(adjacent) > 1:
+            return (f"the widget's tables join {', '.join(sorted(adjacent))} directly, so which copy of "
+                    f"{sis_table} Sisense uses cannot be decided")
+        if adjacent and inst not in adjacent:
+            return f"Sisense joins {sis_table} through {adjacent.pop()} for this widget, not {inst}"
+        if not adjacent and not path_known:
+            return (f"the widget queries no fact table, so which copy of {sis_table} Sisense joins "
+                    "cannot be decided")
+        return ""
 
     def count_measure(self, kind: str, inst: str, col: str) -> Optional[str]:
         """A model formula measure ``unique count ( [inst::col] )`` (or ``count``), if any."""
@@ -276,18 +320,15 @@ class TargetModel:
         return None
 
 
-def _table_columns(tables) -> tuple:
-    """Table / SQL View TML dicts -> ({name: {warehouse column: TML column name}},
-    {name: {TML column name: data_type}})."""
-    names, types = {}, {}
+def _table_columns(tables) -> dict:
+    """Table / SQL View TML dicts -> {name: {warehouse column: TML column name}}."""
+    names = {}
     for t in tables or []:
         body = t.get("table") or t.get("sql_view") or t
         cols = body.get("columns") or body.get("sql_view_columns") or []
         names[body.get("name")] = {(c.get("db_column_name") or c.get("sql_output_column")): c.get("name")
                                    for c in cols if c.get("db_column_name") or c.get("sql_output_column")}
-        types[body.get("name")] = {c.get("name"): (c.get("db_column_properties") or {}).get("data_type")
-                                   for c in cols if (c.get("db_column_properties") or {}).get("data_type")}
-    return names, types
+    return names
 
 
 def _outer_aggregation(expr: str) -> Optional[str]:
@@ -307,13 +348,13 @@ def _outer_aggregation(expr: str) -> Optional[str]:
 
 
 def _joins_of(mt: dict) -> list:
-    """A model_tables entry's joins -> [(target instance, fk column on this table)]."""
-    inst, out = mt.get("alias") or mt.get("name"), []
+    """A model_tables entry's joins -> [(target instance, [(table, column)] on-clause sides,
+    cardinality)]."""
+    out = []
     for j in mt.get("joins") or []:
         # YAML 1.1 resolves an unquoted `on:` key to boolean True — accept both
         sides = _ON_SIDE.findall(j.get("on", j.get(True)) or "")
-        fk = next((col for tbl, col in sides if tbl in (mt.get("name"), inst)), None)
-        out.append((j.get("with"), fk))
+        out.append((j.get("with"), sides, (j.get("cardinality") or "").upper()))
     return out
 
 

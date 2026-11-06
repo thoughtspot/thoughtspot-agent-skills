@@ -99,6 +99,7 @@ Facts established on the way, each now encoded:
 
 | A search literal containing `'` escaped as `\'` (`[X] = 'O\'Brien'`) matches: a member with an apostrophe returned the same count filtered as in the unfiltered list (2026-11-05, same build; the double-quoted form matches too) | `target_answers._literal` |
 
+| A date value has no verified search form: `[D] = '2026-02-01'` and `'2026-02-01T00:00:00'` are rejected ("Date value token doesn't have a valid date filter"), bare `2026-02-01` / `02/01/2026` are invalid tokens, and `'02/01/2026'` parses but matched nothing for a day with 8,662 rows (same build) | `target_filters.date_problem` |
 | `top N` and `bottom N` rank by the answer's single measure: each returned exactly the N largest / smallest values of the unfiltered list (same build) | `target_filters.top_n` |
 | Sisense "Highlight" mode (`dashboardFiltersMode: select`) highlights members of a column the widget plots instead of filtering, and acts as a normal filter on a column it does not plot; a widget filter takes priority over a dashboard filter on the same dimension; a switched-off filter performs no filtering (Sisense documentation, Linux edition) | `target_chips` |
 
@@ -106,13 +107,16 @@ Facts established on the way, each now encoded:
 one this path reads and has verified; the parser lists every JAQL, panel-item and filter key it
 does not read, so a new Sisense setting is flagged, never ignored. What is flagged NEEDS REVIEW,
 on the chip and on every tile it affects, is enumerated in the coverage matrix ("Binding to an
-existing Model"). The live board above rebuilds to the same Liveboard TML with every check in
-place; its report gains two rows, both correct: a weekly bucket with a Sisense week start (on
-that cluster weeks also start on Monday, so it is accepted there), and a chip whose path to one
-tile cannot be determined.
+existing Model"). Rebuilt with every check in place, the live board above reports 7 rows NEEDS
+REVIEW, each a real risk: five tiles whose tables reach the filtered facility through two copies
+Sisense relates (which one Sisense filters by cannot be decided), a weekly bucket with a Sisense
+week start (that cluster also starts weeks on Monday, so it is accepted there), and the drill's
+details table, whose facility columns were bound through the enrollment copy while Sisense joins
+that widget's facility through the case -- the earlier tile-for-tile comparison above was between
+two rebuilds sharing that binding, not against Sisense.
 
-Still unit-tested only: range chips (#5), and a search value containing a backslash (flagged,
-since only `'` quoting is verified).
+Still unit-tested only: range chips (#5, flagged until verified), and a search value containing
+a backslash (flagged, since only `'` quoting is verified).
 
 ## #7 — obj_id derivation for other punctuation — KNOWN
 

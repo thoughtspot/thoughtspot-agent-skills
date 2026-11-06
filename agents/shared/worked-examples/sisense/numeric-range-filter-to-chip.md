@@ -71,7 +71,8 @@ A one-sided `{ "from": 1000 }` instead yields:
 - **What carries no condition.** An `all` preset is no condition, so its chip is column-only,
   faithfully. A relative-date or unknown preset also yields a column-only chip on the default
   path, which leaves the chip **unfiltered**. With `--target-model` that chip is reported
-  NEEDS REVIEW in `migration-report.json`, and so is a member/exclude/range filter at a coarser
-  date level than days (its values are period starts, which the chip would read as days).
+  NEEDS REVIEW in `migration-report.json`, and so is every range chip (this generic_filter form
+  is still TO VERIFY on a live Liveboard, ts-convert-from-sisense open-item #5) and any filter on
+  a date value.
 - **A per-attribute top-N is NOT a chip.** `top`/`bottom` filters are per-widget (baked into the
   widget answer as `top N`), so the liveboard-chip extractor skips them.

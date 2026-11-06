@@ -8,7 +8,10 @@ guess, because a wrong filter still returns numbers and nothing downstream can t
 
 Live-verified search behaviour this relies on (26.9): repeated ``[X] = v`` is ORed, repeated
 ``[X] != v`` ANDed; ``in (...)`` / ``not in (...)`` are ignored silently; ``'`` escaped as
-``\\'`` matches; ``top N`` / ``bottom N`` rank by the answer's measure.
+``\\'`` matches; ``top N`` / ``bottom N`` rank by the answer's measure. A DATE value has no
+verified search form: ``[D] = '2026-02-01'`` and ``'2026-02-01T00:00:00'`` are rejected ("Date value
+token doesn't have a valid date filter"), bare dates are invalid tokens, and ``'02/01/2026'`` parses
+but matched nothing for a day with rows -- so no date value is carried.
 """
 from __future__ import annotations
 
@@ -50,47 +53,42 @@ def _is_date(sf: dict) -> bool:
     return sf.get("datatype") == "datetime" or bool(sf.get("level"))
 
 
-def date_problem(sf: dict, name: str, target) -> Optional[str]:
-    """Why a date filter's values cannot be compared with ``[name]``, or None.
-
-    Only a days-level value on a DATE column is carried: a coarser level's members are period
-    starts (``2024-01-01`` for 2024), a finer level is not a day, no level leaves the grain
-    unknown, and on a DATE_TIME column a day value matches midnight only."""
+def date_problem(sf: dict) -> Optional[str]:
+    """Why a date filter's values are not carried, or None for a filter with no date values.
+    No search form for a date value is verified (see the module docstring), and a coarser level's
+    members are period starts (``2024-01-01`` for 2024) rather than days besides."""
     if not _is_date(sf) or sf.get("kind") not in _VALUE_KINDS:
         return None
     level = (sf.get("level") or "").lower()
-    if not level:
-        return "a date filter with no level: its values could be days, months or years"
     if level in _COARSE_LEVELS:
-        return f"its values are {level} periods, which a comparison on the date would read as single days"
-    if level != "days":
-        return f"it is at the {level} level, finer than the days a date comparison reads"
-    dtype = target.data_type(name)
-    if dtype == "DATE":
-        return None
-    if dtype is None:
-        return (f"[{name}] could not be confirmed as a DATE column (export the Model with "
-                "--associated so the Table types are known)")
-    return f"[{name}] is a {dtype} column: a day value matches midnight only, and a range end drops the rest of that day"
+        return f"its values are {level} periods, and no search form for a date value is verified"
+    return "a date filter's values are not carried: no search form for a date value is verified"
 
 
 def value_problem(sf: dict) -> Optional[str]:
-    """Why a filter's values cannot be written into a search, or None."""
-    if any("\\" in str(v) for v in sf.get("values") or []):
+    """Why a filter's values cannot be carried as written, or None."""
+    vals = sf.get("values") or []
+    if any(v is None for v in vals):
+        return "a member is null, which has no verified search or chip form"
+    if any("\\" in str(v) for v in vals):
         return "a value contains a backslash, which search quoting has not been verified for"
+    raw = sf.get("raw") or {}
+    if sf.get("kind") == "range" and raw.get("equals") is not None and len(
+            [k for k in ("from", "to", "fromNotEqual", "toNotEqual") if raw.get(k) is not None]):
+        return "a range with both `equals` and a bound has no single meaning"
     return None
 
 
-def common_problem(sf: dict, name: str, target) -> Optional[str]:
-    """Reasons shared by widget filters and chips (unrecognised keys, dates)."""
+def common_problem(sf: dict) -> Optional[str]:
+    """Reasons shared by widget filters and chips (unrecognised keys, values, dates)."""
     if sf.get("unsupported"):
         return "it carries filter settings this converter does not read: " + ", ".join(sf["unsupported"])
-    return date_problem(sf, name, target)
+    return date_problem(sf) or value_problem(sf)
 
 
-def widget_filter(sf: dict, name: str, target) -> tuple:
+def widget_filter(sf: dict, name: str) -> tuple:
     """A widget filter on resolved ``name`` -> (search fragment | None, problem | None)."""
-    problem = common_problem(sf, name, target) or value_problem(sf)
+    problem = common_problem(sf)
     if problem:
         return None, problem
     frag = search_filter(sf.get("kind"), name, sf.get("raw") or {}, sf.get("values") or [])
@@ -105,12 +103,12 @@ def _mixed_range(raw: dict) -> bool:
     return (lo_in or lo_ex) and (hi_in or hi_ex) and (lo_in != hi_in)
 
 
-def chip_condition(sf: dict, chip: dict, name: str, target) -> Optional[str]:
+def chip_condition(sf: dict, chip: dict) -> Optional[str]:
     """Set a dashboard filter's condition on its chip; -> why it is not carried exactly, or None.
     A chip with no condition is unfiltered, so a reason always goes to the report."""
     if is_all(sf):
         return None
-    problem = common_problem(sf, name, target)
+    problem = common_problem(sf)
     if problem:
         return problem
     kind, vals = sf.get("kind"), [str(v) for v in sf.get("values") or []]
@@ -122,33 +120,47 @@ def chip_condition(sf: dict, chip: dict, name: str, target) -> Optional[str]:
         chip["generic_filter"] = gf
         if _mixed_range(sf.get("raw") or {}):
             return "one bound is inclusive and the other exclusive; the chip includes both ends"
-        return None
+        return ("a range chip (generic_filter) has not been verified to filter on a live Liveboard "
+                "(open-item #5); check it after import")
     return f"its {kind} condition is not carried, so the chip is unfiltered"
 
 
-def top_n(widget: dict, measures: list) -> tuple:
+def top_n(widget: dict, measures: list, dimensions: list) -> tuple:
     """A widget's top/bottom-N -> (top N | None, extra search fragment | None, problems).
 
-    Carried only when N is a whole number and the ranking measure (``by``) is the widget's only
-    measure, since ThoughtSpot ranks by the answer's measure. ``bottom N`` is carried as is."""
+    ThoughtSpot ranks the ANSWER'S ROWS by its measure, so it is carried only when N is a whole
+    number above 0, the ranked dimension is the widget's only dimension (one row per member) and
+    the ranking measure (``by``) is its only measure. ``bottom N`` is carried as is."""
     ranks = [sf for sf in widget.get("filters", []) if sf.get("kind") == "top_n"]
     if not ranks:
         return None, None, []
     if len(ranks) > 1:
         return None, None, ["more than one top/bottom ranking on the widget is not carried"]
     sf = ranks[0]
-    op, raw = sf.get("operator"), sf.get("raw") or {}
+    op = sf.get("operator")
     try:
         n = int(str((sf.get("values") or [""])[0]))
     except ValueError:
         return None, None, [f"{op} {sf.get('values')} is not a whole number, so the ranking is not carried"]
-    if sf.get("unsupported"):
-        return None, None, ["the ranking carries settings this converter does not read: " + ", ".join(sf["unsupported"])]
-    by = raw.get("by") or {}
-    if len(measures) != 1 or not _same_measure(by, measures[0]):
-        return None, None, [f"{op} {n} ranks by {by.get('dim') or by.get('formula') or 'an unknown measure'}, "
-                            "which is not the widget's only measure, so the ranking is not carried"]
+    problem = _rank_problem(sf, n, measures, dimensions)
+    if problem:
+        return None, None, [problem]
     return (n, None, []) if op == "top" else (None, f"bottom {n}", [])
+
+
+def _rank_problem(sf: dict, n: int, measures: list, dimensions: list) -> Optional[str]:
+    op, by = sf.get("operator"), (sf.get("raw") or {}).get("by") or {}
+    if sf.get("unsupported"):
+        return "the ranking carries settings this converter does not read: " + ", ".join(sf["unsupported"])
+    if n <= 0:
+        return f"{op} {n} is not a positive rank, so the ranking is not carried"
+    if len(dimensions) != 1 or dimensions[0].get("dim") != sf.get("dim"):
+        return (f"{op} {n} ranks {sf.get('dim')}, which is not the widget's only dimension, "
+                "so ThoughtSpot would rank different rows; not carried")
+    if len(measures) != 1 or not _same_measure(by, measures[0]):
+        return (f"{op} {n} ranks by {by.get('dim') or by.get('formula') or 'an unknown measure'}, "
+                "which is not the widget's only measure, so the ranking is not carried")
+    return None
 
 
 def _same_measure(by: dict, f: dict) -> bool:

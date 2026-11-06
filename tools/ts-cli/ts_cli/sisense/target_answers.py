@@ -74,26 +74,36 @@ class _Binder:
         self.field_map = (overrides or {}).get("field_map") or {}
         self.filter_map = (overrides or {}).get("filter_map") or {}
         self.calculated = _calculated_columns(inv)
+        self._ctx = (set(), True)
 
     # -- anchors: the fact instances a widget queries ---------------------------------
     def anchors(self, widget: dict) -> list:
         """The fact instances a widget queries: facts it names, else facts reaching all (or
-        any) of the instances it names."""
-        insts = self._widget_instances(widget)
+        any) of the instances it names. Also records the widget's instances for the role-copy
+        check that every binding of this widget runs (``column``)."""
+        groups = self._widget_groups(widget)
+        insts = set().union(*groups) if groups else set()
         roots = self.t.roots()
         direct = [r for r in roots if r in insts]
+        self._ctx = (insts, bool(direct))
         if direct or not insts:
             return direct
-        return [r for r in roots if insts <= self.t.reachable(r)] or \
+        # facts reaching SOME copy of EVERY table the widget names (a role-played table counts once)
+        return [r for r in roots if all(g & self.t.reachable(r) for g in groups)] or \
                [r for r in roots if insts & self.t.reachable(r)]
 
-    def _widget_instances(self, widget: dict) -> set:
+    def _widget_groups(self, widget: dict) -> list:
+        """One set of candidate instances per Sisense table the widget names."""
         dims = [f.get("dim") for f in widget.get("fields", [])] + [sf.get("dim") for sf in widget.get("filters", [])]
-        insts = set()
+        groups = {}
         for dim in filter(None, dims):
             table = split_dim(dim)[0]
-            insts.update(self.t.named_instances(table) or self.t.instances_of_base(table))
-        return insts
+            groups[table] = set(self.t.named_instances(table) or self.t.instances_of_base(table))
+        return [g for g in groups.values() if g]
+
+    def _widget_instances(self, widget: dict) -> set:
+        groups = self._widget_groups(widget)
+        return set().union(*groups) if groups else set()
 
     def column(self, dim: str, anchors: list) -> tuple:
         """Sisense dim -> (model column | None, instance | None, note)."""
@@ -103,6 +113,11 @@ class _Binder:
         inst, note = self.t.resolve_instance(table, anchors, self.relations)
         if not inst:
             return None, None, note
+        insts, has_fact = self._ctx
+        known = self.t.path_known(table, inst, anchors, has_fact, self.relations)
+        conflict = self.t.role_conflict(table, inst, insts, known, relations=self.relations)
+        if conflict:
+            return None, None, f"{conflict} (map it via field_map / filter_map)"
         name = self.t.column(inst, col) or self._calculated(table, col, inst)
         return name, inst, "" if name else f"{table}.{col} is not exposed on the target model"
 
@@ -172,14 +187,14 @@ class _Binder:
         dim = sf.get("dim") or ""
         if dim in self.filter_map:
             return self.mapped_filter(dim)
-        if sf.get("kind") == "top_n":
-            return None, None, ""            # the ranking is decided per widget (target_filters.top_n)
         name, _, note = self.column(dim, anchors)
+        if sf.get("kind") == "top_n":        # the ranking is decided per widget (target_filters.top_n),
+            return None, name, ""            # but the widget filters that column itself
         if is_all(sf):
             return None, name, ""            # "all" = no condition; the widget still owns the column
         if not name:
             return None, None, f"filter on {dim}: {note} (map it via filter_map)"
-        frag, problem = widget_filter(sf, name, self.t)
+        frag, problem = widget_filter(sf, name)
         if problem:
             return None, name, f"filter on {dim}: {problem} (map it via filter_map)"
         return frag, name, ""
@@ -187,6 +202,8 @@ class _Binder:
 
 def _dimension(name: str, level) -> dict:
     suf = date_bucket_suffix(level)
+    if level and not suf:
+        return {"note": f"date level {level} on [{name}] has no ThoughtSpot bucket, so its grain is not carried"}
     token = f"[{name}].{suf.lower()}" if suf else f"[{name}]"
     out = f"{_bucket_out(suf)}({name})" if suf else name
     return {"name": name, "token": token, "out": out, "measure": False, "bucketed": bool(suf)}
@@ -211,19 +228,23 @@ def note_tile(text: str) -> dict:
         f'<div class="pinboard-note-tile-module__noteTileBg editor-module__bgNode" style="background-color: {_NOTE_BG};"></div>')}
 
 
-def _field_key(f: dict) -> tuple:
-    return (f.get("dim") or "", (f.get("agg") or "").lower(), f.get("kind") or "",
-            (f.get("panel") or "").lower(), repr(f.get("formula")))
+def _field_key(f: dict) -> str:
+    """Everything about a plotted field except its title and date level (and week start, which
+    only means something at a weekly level)."""
+    return repr(sorted((k, repr(v)) for k, v in f.items() if k not in ("level", "title", "firstday")))
 
 
 def _shape(w: dict) -> tuple:
-    """A widget's plotted fields (date level left out) and its filters, exactly."""
+    """A widget's plotted fields (date level left out), its filters and every setting that
+    changes its numbers, exactly."""
     filters = sorted(repr(sorted((k, repr(v)) for k, v in sf.items())) for sf in w.get("filters", []))
-    return (w.get("wtype"), tuple(sorted(_field_key(f) for f in w.get("fields", []))), tuple(filters))
+    settings = repr([(k, w.get(k)) for k in ("subtype", "ignore", "filters_mode", "unsupported", "disabled_filters")])
+    return (w.get("wtype"), tuple(sorted(_field_key(f) for f in w.get("fields", []))), tuple(filters), settings)
 
 
 def _levels(w: dict) -> tuple:
-    return tuple(sorted((_field_key(f), (f.get("level") or "").lower()) for f in w.get("fields", [])))
+    return tuple(sorted((_field_key(f), (f.get("level") or "").lower(), (f.get("firstday") or ""))
+                        for f in w.get("fields", [])))
 
 
 def _grain_variant(hidden: dict, shown: dict) -> bool:
@@ -232,28 +253,33 @@ def _grain_variant(hidden: dict, shown: dict) -> bool:
 
 
 def _hidden_tabs(widgets: list) -> tuple:
-    """(grain variants, other hidden tabs): oid -> tab-set title for every widget a
-    WidgetsTabber hides. Only a hidden widget with the same type, fields and filters as a shown
+    """(grain variants: oid -> (tab-set title, shown oid), other hidden tabs: oid -> tab-set
+    title) for every widget a WidgetsTabber hides. Only a hidden widget with the same type, fields and filters as a shown
     one and a different date level is a grain variant; any other hidden tab is a chart of its own."""
     by_oid = {w.get("oid"): w for w in widgets}
     grain, other = {}, {}
     for w in widgets:
-        tb = w.get("tabber")
-        if not tb:
-            continue
-        keep = set((tb["tabs"][tb["active"]]["show"] if tb["tabs"] else []))
-        shown = [by_oid[o] for o in keep if o in by_oid]
-        for tab in tb["tabs"]:
-            for oid in tab["show"]:
-                if oid not in keep and oid in by_oid:
-                    hit = any(_grain_variant(by_oid[oid], s) for s in shown)
-                    (grain if hit else other)[oid] = w.get("title") or ""
+        if w.get("tabber"):
+            _classify_tabs(w, by_oid, grain, other)
     return grain, other
+
+
+def _classify_tabs(w: dict, by_oid: dict, grain: dict, other: dict) -> None:
+    tb, title = w["tabber"], w.get("title") or ""
+    keep = set((tb["tabs"][tb["active"]]["show"] if tb["tabs"] else []))
+    shown = [by_oid[o] for o in keep if o in by_oid]
+    hidden = [o for tab in tb["tabs"] for o in tab["show"] if o not in keep and o in by_oid]
+    for oid in hidden:
+        hit = next((s.get("oid") for s in shown if _grain_variant(by_oid[oid], s)), None)
+        if hit:
+            grain[oid] = (title, hit)
+        else:
+            other[oid] = title
 
 
 def tabber_hidden(widgets: list) -> dict:
     """oid -> tab-set title for every hidden widget that is a date-grain variant of a shown one."""
-    return _hidden_tabs(widgets)[0]
+    return {oid: title for oid, (title, _) in _hidden_tabs(widgets)[0].items()}
 
 
 _ROLE_OF_PANEL = {"categories": "Category", "x-axis": "Category", "rows": "Rows", "columns": "Columns",
@@ -274,7 +300,7 @@ def _label_for(f: dict, b: dict):
 def _collect_fields(widget: dict, binder: _Binder, anchors: list) -> dict:
     """Plotted fields -> {cols, roles, tokens, measures, measure_outs, labels, notes}."""
     acc = {"cols": [], "roles": [], "tokens": {}, "measures": set(), "measure_outs": {}, "labels": {},
-           "notes": [], "measure_fields": []}
+           "notes": [], "measure_fields": [], "dimension_fields": []}
     for f in widget.get("fields", []):
         panel = (f.get("panel") or "").lower()
         if panel in _UNPLOTTED_PANELS:
@@ -310,6 +336,8 @@ def _add_field(acc: dict, f: dict, b: dict, panel: str, binder) -> None:
         acc["measures"].add(b["name"])
         acc["measure_outs"][b["out"]] = b["name"]
         acc["measure_fields"].append(f)
+    else:
+        acc["dimension_fields"].append(f)
     label = _label_for(f, b)
     if label:
         acc["labels"][b["out"]] = label
@@ -342,7 +370,7 @@ def _collect_filters(widget: dict, binder: _Binder, anchors: list) -> tuple:
     """Widget filters -> (search fragments, columns the widget filters itself, notes). A column
     the widget filters at all -- even with `all` or a filter that is not carried -- is its own:
     in Sisense a widget filter takes priority over a dashboard filter on the same dimension."""
-    frags, own, notes = [], set(), []
+    frags, own, notes, seen = [], set(), [], {}
     for sf in widget.get("filters", []):
         frag, col, fnote = binder.filter_fragment(sf, anchors)
         if frag:
@@ -350,6 +378,10 @@ def _collect_filters(widget: dict, binder: _Binder, anchors: list) -> tuple:
         own.update([col] if col else _TOKEN.findall(frag or ""))
         if fnote:
             notes.append(fnote)
+        if col and sf.get("kind") != "top_n" and not is_all(sf):
+            seen[col] = seen.get(col, 0) + 1
+    notes += [f"{n} filters on [{c}]: Sisense applies all of them, which one search cannot express "
+              "(repeated `=` would be ORed)" for c, n in seen.items() if n > 1]
     return frags, own, notes
 
 
@@ -389,7 +421,7 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     anchors = binder.anchors(widget)
     acc = _collect_fields(widget, binder, anchors)
     frags, own, fnotes = _collect_filters(widget, binder, anchors)
-    n, rank_frag, rank_notes = top_n(widget, acc["measure_fields"])
+    n, rank_frag, rank_notes = top_n(widget, acc["measure_fields"], acc["dimension_fields"])
     unsupported = widget.get("unsupported") or []
     notes = (([note] if note else []) + acc["notes"] + fnotes + rank_notes
              + ([f"widget carries settings this converter does not read: {', '.join(unsupported)}"] if unsupported else []))
@@ -463,13 +495,36 @@ def _place(inv: dict, placed: dict) -> list:
     return tiles
 
 
-def _shared_filters(binder: _Binder, widgets: list) -> list:
-    """Search fragments EVERY widget carries (the drill's context common to all its sources)."""
-    common = None
+def _shared_filters(binder: _Binder, widgets: list) -> tuple:
+    """(search fragments EVERY source widget carries, note). Sisense passes a source widget's
+    filters to the drill, so one that is not carried, or not shared by every source, means the
+    details table differs from Sisense for clicks from that source -> the note says which."""
+    common, per_source, dropped = None, [], []
     for w in widgets:
-        frs = {binder.filter_fragment(sf, binder.anchors(w))[0] for sf in w.get("filters", [])} - {None}
+        frs, missing = _source_filters(binder, w)
+        per_source.append((w.get("title") or "?", frs))
+        dropped += [f"{w.get('title') or '?'}: {d}" for d in missing]
         common = frs if common is None else common & frs
-    return sorted(common or [])
+    common = common or set()
+    dropped += [f"{t}: {f}" for t, frs in per_source for f in sorted(frs - common)]
+    note = ("filters Sisense passes to this drill from its source widgets are not carried: " + "; ".join(dropped)
+            if dropped else "")
+    return sorted(common), note
+
+
+def _source_filters(binder: _Binder, w: dict) -> tuple:
+    """A drill source widget's filters -> (carried fragments, dims of those not carried)."""
+    anchors = binder.anchors(w)
+    frs, missing = set(), []
+    for sf in w.get("filters", []):
+        if sf.get("kind") == "top_n" or is_all(sf):
+            continue
+        frag, _, fnote = binder.filter_fragment(sf, anchors)
+        if frag:
+            frs.add(frag)
+        elif fnote:
+            missing.append(sf.get("dim") or "?")
+    return frs, missing
 
 
 def _drill_description(src_widgets: list, target_title: str) -> str:
@@ -497,30 +552,44 @@ def _drill_tables(drills, binder, sources, model_fqn):
                         "status": "NEEDS REVIEW", "note": f"drill dashboard '{target}' has no widget with fields"},
                         set(), [], {}))
             continue
-        dw = with_fields[0]
-        detail = dict(dw, wtype="tablewidget")    # the drill widget's own filters are kept
-        ctx = {"key": f"drill-{target}", "model_fqn": model_fqn, "extra_filters": _shared_filters(binder, src_widgets),
-               "description": _drill_description(src_widgets, dw.get("title") or target)}
-        a, row, own, facts = _answer_for(detail, binder, ctx, title_override=dw.get("title") or target)
-        rest = [w.get("title") or "?" for w in with_fields[1:]]
-        if rest:
-            row.update(status="NEEDS REVIEW", note="; ".join(filter(None, [
-                row.get("note"), f"drill dashboard '{target}' has more widgets than its details table "
-                                 f"carries: {', '.join(rest)}"])))
-        out.append((f"drill:{target}", a, row, own, facts, detail))
+        out.append(_drill_table(d, target, with_fields, binder, src_widgets, model_fqn))
     return out
+
+
+def _drill_table(d: dict, target: str, with_fields: list, binder, src_widgets: list, model_fqn) -> tuple:
+    """One drill dashboard -> (key, answer, row, own, facts, widget) from its first widget with
+    fields; the widget's own filters and the drill dashboard's own filters both apply to it."""
+    dw = with_fields[0]
+    # the drill dashboard's OWN filters: how a jump-to-dashboard combines them with what the
+    # source passes is not verified, so any with a condition is reported, never applied
+    own_dash = [sf.get("dim") or "?" for sf in (d.get("dashboard") or {}).get("filters") or [] if not is_all(sf)]
+    detail = dict(dw, wtype="tablewidget")
+    shared, shared_note = _shared_filters(binder, src_widgets)
+    ctx = {"key": f"drill-{target}", "model_fqn": model_fqn, "extra_filters": shared,
+           "description": _drill_description(src_widgets, dw.get("title") or target)}
+    a, row, own, facts = _answer_for(detail, binder, ctx, title_override=dw.get("title") or target)
+    rest = [w.get("title") or "?" for w in with_fields[1:]]
+    problems = ([f"drill dashboard '{target}' has more widgets than its details table carries: {', '.join(rest)}"]
+                if rest else []) + ([shared_note] if shared_note else []) + (
+        [f"drill dashboard '{target}' has its own dashboard filters, not carried: {', '.join(own_dash)}"]
+        if own_dash else [])
+    if problems:
+        row.update(status="NEEDS REVIEW", note="; ".join(filter(None, [row.get("note")] + problems)))
+    return f"drill:{target}", a, row, own, facts, detail
 
 
 def _widget_tiles(inv, widgets, binder, model_fqn) -> tuple:
     """Widgets -> (report rows, placed, content, drill sources). Hidden tabs are Merged, rich
     text and tab-set titles become notes, everything else an Answer."""
     (hidden, other_tabs), kept_tabs = _hidden_tabs(widgets), _kept_tabs(widgets)
-    rows, placed, content, drill_sources = [], {}, {}, {}
+    rows, placed, content, drill_sources, merged = [], {}, {}, {}, []
     for i, w in enumerate(widgets):
         oid = w.get("oid") or f"w{i}"
         if oid in hidden:
-            rows.append({"visual": w.get("title"), "ts_chart": "(tab)", "status": "Merged",
-                         "note": f"other grain of tab set '{hidden[oid]}'; change it in the chart's date bucket"})
+            row = {"visual": w.get("title"), "ts_chart": "(tab)", "status": "Merged",
+                   "note": f"other grain of tab set '{hidden[oid][0]}'; change it in the chart's date bucket"}
+            rows.append(row)
+            merged.append((row, hidden[oid][1]))
         elif w.get("wtype") in ("WidgetsTabber", "richtexteditor"):
             placed[oid], content[oid] = {"kind": "note", "ct": None}, ("note", _note_text(w, inv))
         else:
@@ -535,6 +604,9 @@ def _widget_tiles(inv, widgets, binder, model_fqn) -> tuple:
                 placed[oid], content[oid] = {"kind": "answer", "ct": row["ts_chart"]}, ("answer", a, own, facts, row, w)
                 for tgt in w.get("drill_targets") or []:
                     drill_sources.setdefault(tgt, []).append(w)
+    for row, shown in merged:                      # a grain of a tab that produced no tile
+        if shown not in placed:
+            row.update(status="NEEDS REVIEW", note="the tab it is a grain of could not be carried, so there is no tile to merge into")
     return rows, placed, content, drill_sources
 
 

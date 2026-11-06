@@ -80,12 +80,15 @@ def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
         return f"the chip's {inst} does not reach this tile's facts"
     if (sf.get("dim") or "") in binder.field_map:
         return ""
-    own = binder.t.resolve_instance(split_dim(sf.get("dim") or "")[0], facts, binder.relations)[0]
+    table = split_dim(sf.get("dim") or "")[0]
+    own = binder.t.resolve_instance(table, facts, binder.relations)[0]
     if own is None:
         return "the tile's own path to the filtered table could not be determined"
     if own != inst:
         return f"the chip binds {inst}, but this widget reaches the table through {own} in Sisense"
-    return ""
+    insts = binder._widget_instances(tile["widget"])
+    known = binder.t.path_known(table, inst, facts, any(r in insts for r in binder.t.roots()), binder.relations)
+    return binder.t.role_conflict(table, inst, insts, known, relations=binder.relations)
 
 
 def _split_tiles(sf: dict, name: str, tiles: list) -> tuple:
@@ -102,7 +105,7 @@ def _split_tiles(sf: dict, name: str, tiles: list) -> tuple:
 
 def _condition_rows(sf: dict, chip: dict, name: str, binder, applied: list) -> list:
     """Carry the condition; when it is not carried exactly, report it on the chip and its tiles."""
-    why = chip_condition(sf, chip, name, binder.t)
+    why = chip_condition(sf, chip)
     if not why:
         return []
     for t in applied:
@@ -145,13 +148,27 @@ def build_chips(inv: dict, binder, tiles: list) -> tuple:
     for dim in dash.get("disabled_filters") or []:
         rows.append({"visual": f"filter chip {dim}", "ts_chart": "FILTER", "status": "Skipped",
                      "note": "disabled in Sisense (no filtering), so no chip"})
+    for problem in dash.get("unreadable_filters") or []:
+        rows += _uncarried({"dim": problem}, tiles, "the dashboard filter could not be read")
     anchor_sets = [t["facts"] for t in tiles if t["facts"]]
     for sf in dash.get("filters", []) or []:
         chip, chip_rows = _one_filter(sf, binder, tiles, anchor_sets)
         rows += chip_rows
         if chip:
             chips.append(chip)
-    return chips, rows
+    return chips, rows + _duplicate_chip_rows(chips, tiles)
+
+
+def _duplicate_chip_rows(chips: list, tiles: list) -> list:
+    """Two chips on one column: how a Liveboard combines them is not verified."""
+    cols = [c["column"][0] for c in chips if c.get("oper") or c.get("generic_filter")]
+    rows = []
+    for col in sorted({c for c in cols if cols.count(c) > 1}):
+        for t in tiles:
+            flag_tile(t, f"two dashboard filters on {col}: how two chips on one column combine is not verified")
+        rows.append(review(f"filter chip {col}", "two dashboard filters on this column; how two chips on one "
+                           "column combine is not verified"))
+    return rows
 
 
 def _uncarried(sf: dict, tiles: list, reason: str) -> list:
