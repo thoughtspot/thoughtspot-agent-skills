@@ -25,7 +25,7 @@ def _shape(w: dict) -> tuple:
     changes its numbers, exactly."""
     filters = sorted(repr(sorted((k, repr(v)) for k, v in sf.items())) for sf in w.get("filters", []))
     settings = repr([(k, w.get(k)) for k in ("subtype", "ignore", "filters_mode", "unsupported", "disabled_filters",
-                                             "drill_targets", "drill_filter_settings")])
+                                             "drill_targets", "drill_filter_settings", "datasource")])
     return (w.get("wtype"), tuple(sorted(_field_key(f) for f in w.get("fields", []))), tuple(filters), settings)
 
 

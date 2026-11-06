@@ -6,8 +6,33 @@ import json
 
 import yaml
 
-from ts_cli.sisense.target_answers import FULL_NUMBER_FORMAT, build_target_liveboard, tabber_hidden
+from ts_cli.sisense import target_answers as _target_answers
+from ts_cli.sisense.target_answers import FULL_NUMBER_FORMAT, tabber_hidden
 from ts_cli.sisense.target_model import TargetModel, split_dim
+
+
+def _tables_for(target: dict) -> list:
+    """The Table TMLs an `--associated` export would carry for a fixture Model: every column its
+    `column_id`s name, warehouse name = Table column name."""
+    model = target.get("model") or target
+    base = {mt.get("alias") or mt["name"]: mt["name"] for mt in model.get("model_tables") or []}
+    import re as _re
+    refs = [c["column_id"] for c in model.get("columns") or [] if c.get("column_id")]
+    for text in [f.get("expr") or "" for f in model.get("formulas") or []] + \
+            [j.get("on", j.get(True)) or "" for mt in model.get("model_tables") or [] for j in mt.get("joins") or []]:
+        refs += ["::".join(m) for m in _re.findall(r"\[([^\]:]+)::([^\]]+)\]", text)]
+    cols: dict = {}
+    for ref in refs:
+        inst, col = ref.split("::", 1)
+        cols.setdefault(base.get(inst, inst), set()).add(col)
+    return [{"table": {"name": t, "columns": [{"name": c, "db_column_name": c} for c in sorted(cs)]}}
+            for t, cs in cols.items()]
+
+
+def build_target_liveboard(inv, target, *args, tables=None, **kwargs):
+    """The real builder, given the fixture Model's Table TMLs unless a test passes its own."""
+    return _target_answers.build_target_liveboard(inv, target, *args,
+                                                  tables=_tables_for(target) if tables is None else tables, **kwargs)
 
 # Raw TML text so the YAML 1.1 `on:` -> True trap is exercised exactly as an export loads.
 MODEL_TML = """
@@ -1193,8 +1218,9 @@ def test_too_many_subcells_for_a_narrow_column_stay_inside_the_grid():
 
 
 def test_missing_table_tmls_are_reported():
-    res = build_target_liveboard(_inv([_visits()]), _target())
+    res = build_target_liveboard(_inv([_visits()]), _target(), tables=[])
     assert any(r["visual"] == "(target model Tables)" and r["status"] == "NEEDS REVIEW" for r in res["visual_rows"])
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"        # and every tile bound without them
     with_tables = build_target_liveboard(_inv([_visits()]), _target(), tables=[{"table": {"name": "x", "columns": []}}])
     assert not any(r["visual"] == "(target model Tables)" for r in with_tables["visual_rows"])
 
@@ -1230,7 +1256,7 @@ def test_formula_built_from_formulas_of_two_facts_spans_both():
                                             _f("[fact_visit.combined]", "values", "measure", "sum")])
     row = _row(build_target_liveboard(_inv([w]), target, overrides={"field_map": {"[fact_visit.combined]": "Combined"}}),
                "Combined")
-    assert row["status"] == "NEEDS REVIEW" and "multi-fact" in row["note"]
+    assert row["status"] == "NEEDS REVIEW" and ("multi-fact" in row["note"] or "several" in row["note"])
 
 
 def test_two_sisense_facts_linking_a_no_fact_widget_is_a_tie_and_needs_review():
@@ -1284,3 +1310,88 @@ def test_widget_on_another_data_source_and_parse_warnings_are_needs_review():
     res = build_target_liveboard(inv, _target())
     assert "OtherCube" in _row(res, "Visits")["note"] and _row(res, "Visits")["status"] == "NEEDS REVIEW"
     assert any(r["visual"] == "(parse warning)" for r in res["visual_rows"])
+
+
+
+# --------------------------------------------------------------------------- adversarial review 5: whole join paths
+def test_model_shortcut_sisense_does_not_have_is_needs_review():
+    # Sisense reaches site only through the case (dim_case.site_id_); the Model joins the visit's site
+    inv = _inv([_w("w1", "Cost by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                          _f("[fact_visit.cost]", "values", "measure", "sum")])])
+    inv["relations"] = [r for r in RELATIONS if r != _rel("fact_visit", "site_id_", "dim_site", "id_")]
+    for target in (_no_dim_join_model(), _plain_visit_site()):
+        row = _row(build_target_liveboard(inv, target), "Cost by site")
+        assert row["status"] == "NEEDS REVIEW", row
+    chip_inv = _inv([_visits()], [_member("[dim_site.name]", ["North"])])
+    chip_inv["relations"] = inv["relations"]
+    assert _row(build_target_liveboard(chip_inv, _plain_visit_site()), "Visits")["status"] == "NEEDS REVIEW"
+
+
+def test_second_hop_on_another_column_is_needs_review():
+    target = _target()
+    case = next(mt for mt in target["model"]["model_tables"] if mt["name"] == "dim_case")
+    case["joins"][0]["on"] = "[dim_case::billing_site_id_] = [dim_site::id_]"
+    w = _w("w1", "Totals by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                     _f("[fact_case_stats.visit_total]", "values", "measure", "sum")])
+    row = _row(build_target_liveboard(_inv([w]), target), "Totals by site")
+    assert row["status"] == "NEEDS REVIEW"
+
+
+def test_matching_paths_are_carried():
+    w = _w("w1", "Totals by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                     _f("[fact_case_stats.visit_total]", "values", "measure", "sum")])
+    res = build_target_liveboard(_inv([w]), _target())
+    assert _answers(res)["Totals by site"]["search_query"] == "[Case Site Name] sum [Case Visit Total]"
+    assert _row(res, "Totals by site")["status"] == "Migrated"
+
+
+def test_chip_adding_a_join_to_a_non_fact_measure_is_needs_review():
+    target = _target()
+    target["model"]["columns"] += [{"name": "Case Budget", "column_id": "dim_case::budget",
+                                    "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+                                   {"name": "Visit Channel", "column_id": "fact_visit::channel",
+                                    "properties": {"column_type": "ATTRIBUTE"}}]
+    kpi = _w("w1", "Budget", "indicator", [_f("[dim_case.budget]", "value", "measure", "sum")])
+    res = build_target_liveboard(_inv([kpi], [_member("[fact_visit.channel]", ["Web"])]), target)
+    assert _row(res, "Budget")["status"] == "NEEDS REVIEW"
+
+
+def test_quarterly_and_custom_calendar_buckets_are_needs_review():
+    q = _w("w1", "By quarter", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="quarters"),
+                                              _f("[fact_visit.cost]", "values", "measure", "sum")])
+    assert "fiscal-year start" in _row(build_target_liveboard(_inv([q]), _target()), "By quarter")["note"]
+    target = _target()
+    next(c for c in target["model"]["columns"] if c["name"] == "Visit Start Date")["properties"]["calendar"] = "fiscal_cal"
+    m = _w("w2", "By month", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months"),
+                                            _f("[fact_visit.cost]", "values", "measure", "sum")])
+    assert "custom calendar fiscal_cal" in _row(build_target_liveboard(_inv([m]), target), "By month")["note"]
+
+
+def test_dashboard_filter_relations_are_needs_review_on_every_tile():
+    from ts_cli.sisense.parsing import parse_dashboard
+    dash = parse_dashboard({"title": "D", "filterRelations": [{"type": "OR"}], "filters": []}, [])
+    assert dash["filter_settings"] == ["filterRelations"]
+    res = build_target_liveboard(_inv([_visits()]) | {"dashboard": dict(dash, layout=[])}, _target())
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"
+
+
+def test_renamed_sisense_column_and_level_less_date_field_are_needs_review():
+    inv = _inv([_w("w1", "Cost", "indicator", [_f("[fact_visit.cost]", "value", "measure", "sum")])])
+    inv["tables"] = [dict(t, columns=[{"id": "cost_gross", "name": "cost"}]) if t["jaql_name"] == "fact_visit" else t
+                     for t in inv["tables"]]
+    assert "renamed" in _row(build_target_liveboard(inv, _target()), "Cost")["note"]
+    d = _w("w2", "By date", "pivot2", [dict(_f("[Visit_Start_Date.date_day (Calendar)]", "rows"), datatype="datetime"),
+                                       _f("[fact_visit.cost]", "values", "measure", "sum")])
+    assert "carries no level" in _row(build_target_liveboard(_inv([d]), _target()), "By date")["note"]
+
+
+def test_all_filter_with_unread_settings_and_tab_on_another_source_are_flagged():
+    odd = dict(_member("[dim_case.status]", []), raw={"all": True, "somethingNew": 1}, unsupported=["somethingNew"])
+    w = _w("w1", "Odd", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")], [odd])
+    assert _row(build_target_liveboard(_inv([w]), _target()), "Odd")["status"] == "NEEDS REVIEW"
+    d = "[Visit_Start_Date.date_day (Calendar)]"
+    m = _f("[fact_visit.cost]", "values", "measure", "sum")
+    shown = _w("wm", "M", "chart/line", [_f(d, "x-axis", level="months"), m])
+    hidden = dict(_w("wd", "D", "chart/line", [_f(d, "x-axis", level="days"), m]), datasource="Other Cube")
+    tab = _w("wt", "T", "WidgetsTabber", [], tabber={"tabs": [{"title": "M", "show": ["wm"]}, {"title": "D", "show": ["wd"]}], "active": 0})
+    assert tabber_hidden([tab, shown, hidden]) == {}

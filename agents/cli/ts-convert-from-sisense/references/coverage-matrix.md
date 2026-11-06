@@ -106,7 +106,7 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Top / bottom N on a widget | Mapped | `top N` / `bottom N` when it ranks the widget's ONLY dimension, at its plotted date level, by its ONLY measure (ThoughtSpot ranks the answer's rows; both live-verified); any other ranking, a non-numeric or non-positive N is NEEDS REVIEW. The ranked column is the widget's own, so a chip on it excludes the tile |
 | Quick function (e.g. Contribution), disabled plotted field, secondary value | Flagged | NEEDS REVIEW; the field is not carried |
 | Percent display (`format.mask.percent`) on a Model column with no format | Flagged | NEEDS REVIEW (the value would show as a plain number) |
-| Weekly bucket (with or without a Sisense `firstday`) | Flagged | NEEDS REVIEW, on the tile and on a merged weekly grain: ThoughtSpot's weekly bucket follows the cluster's week start |
+| Weekly, quarterly or yearly bucket; any bucket on a column with a custom `calendar` | Flagged | NEEDS REVIEW, on the tile and on a merged grain: ThoughtSpot follows the cluster's week start and fiscal-year start, or the column's calendar |
 | Measure bound to a Model formula whose aggregation differs (`avg` of a `sum ( ... )` formula) | Flagged | NEEDS REVIEW unless mapped by `field_map` |
 | Sisense calculated column (`tupleTransformations` add-column) | Flagged until mapped | a Model formula of the same name and role (attribute for a dimension, measure for a measure) on the same instance is reported "bound by name only", NEEDS REVIEW until confirmed with `field_map`; never a plain column of that name |
 | Search value containing a backslash | Flagged | NEEDS REVIEW (quoting not verified for it; `'` is) |
@@ -138,7 +138,7 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Sisense relation that is not one column to one column (3+ endpoints, composite) | Flagged | NEEDS REVIEW on any field or filter on its tables |
 | Filters a drill source passes | Mapped | the filters every source shares, bound in the DRILL widget's own context (its facts and copies); a ranking or a non-shared filter is NEEDS REVIEW |
 | Ranked tab, or a hidden tab with its own drill | Mapped | a tile of its own, never `Merged` (a ranking re-ranks at whatever bucket the chart shows) |
-| Model Table TMLs not supplied | Flagged | one NEEDS REVIEW row for the board: warehouse columns matched by Table column name, not `db_column_name` |
+| Model Table TMLs not supplied | Flagged | every tile NEEDS REVIEW, plus one board-level row: warehouse columns were matched by Table column name, not `db_column_name` |
 | `field_map` / `filter_map` entries | Mapped | they choose the column (or the search fragment); every path check still runs on what they choose: role copy, a widget naming no fact, a chip's copy per tile, relations not one column to one column |
 | Formula built from other formulas | Mapped | read as reading every instance its referenced formulas read (to a fixed point), so the multi-fact and chip checks see it |
 | Widget naming no fact, linked in Sisense by two facts | Flagged | NEEDS REVIEW: a tie in Sisense's own path choice (linking facts are counted from Sisense's relations, not the Model's facts) |
@@ -147,6 +147,11 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Chip and widget filter on different Sisense dims bound to one Model column | Flagged | NEEDS REVIEW: Sisense applies both, a chip would replace the widget's |
 | Widget reading another data source than the dashboard | Flagged | NEEDS REVIEW |
 | Parse warnings (a skipped relation, an unreadable widget) | Flagged | each one a NEEDS REVIEW row in the report, not only stderr |
+| Join path from a widget's fact to each table it reads (fields, filters, chips) | Mapped when equal | carried only when the Model's many → one path is the same as Sisense's shortest relation path, hop for hop on the same columns; a different path (a shortcut, another foreign key), a tie among Sisense's shortest paths, or no unique Model path is NEEDS REVIEW |
+| Chip adding a join to a measure on a non-fact table | Flagged | NEEDS REVIEW, as for the same filter on the widget |
+| Dashboard `filterRelations` / `filterToDatasourceMapping` set | Flagged | NEEDS REVIEW on every tile: the filters are not combined by AND |
+| Sisense column renamed from its source column | Flagged | NEEDS REVIEW until mapped: which one the Model column reads is not verified |
+| Date field with no level | Flagged | NEEDS REVIEW: the grain ThoughtSpot shows it at is not decided |
 | Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns and Model columns with their own `format_pattern` / `currency_type` keep theirs. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)

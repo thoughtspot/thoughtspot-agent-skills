@@ -60,6 +60,7 @@ class TargetModel:
         # instance -> [(target instance, fk column on instance)], ALWAYS many -> one: a join
         # declared ONE_TO_MANY (on the dimension side) is reversed, so the facts are the roots
         self.joins: dict = {}
+        self.join_pk: dict = {}           # (many, one, fk) -> the column joined on the one side
         self._index_tables(model.get("model_tables") or model.get("tables") or [])
         self.formulas = {f.get("id"): f.get("expr") or "" for f in model.get("formulas") or []}
         self.instances_of: dict = {}      # column name -> instances it reads (column_id / formula refs)
@@ -71,6 +72,7 @@ class TargetModel:
         self.count_measures: dict = {}    # ('unique count'|'count', inst, col) -> column name
         self.columns: list = []
         self.formatted: set = set()       # columns carrying their own format_pattern / currency_type
+        self.calendars: dict = {}         # column -> custom calendar it buckets by
         # base table -> {warehouse column: Table TML column name}, from the associated Table TMLs
         # (`ts tml export --associated`): a Model column_id names the TABLE column, which a
         # hand-designed Table may have renamed from the warehouse column a Sisense dim carries
@@ -96,9 +98,12 @@ class TargetModel:
         if card == "MANY_TO_MANY":       # no many -> one direction: not followed, so a widget
             return                       # needing it reports its table as unreachable
         many, one = (target, inst) if card == "ONE_TO_MANY" else (inst, target)
-        names = {many, self.base_of.get(many)}
+        names, one_names = {many, self.base_of.get(many)}, {one, self.base_of.get(one)}
         fk = next((col for tbl, col in sides if tbl in names), None)
+        pk = next((col for tbl, col in sides if tbl in one_names and col != fk), None) or \
+            next((col for tbl, col in sides if tbl in one_names), None)
         self.joins.setdefault(many, []).append((one, fk))
+        self.join_pk[(many, one, fk)] = pk
 
     def _expand_formula_refs(self, columns: list) -> None:
         """A formula referencing other formulas (``[formula_A]``, or a column by display name)
@@ -125,6 +130,8 @@ class TargetModel:
         is_measure = props.get("column_type") == "MEASURE"
         if props.get("format_pattern") or props.get("currency_type"):
             self.formatted.add(nm)
+        if props.get("calendar"):
+            self.calendars[nm] = props["calendar"]
         if is_measure:
             self.measures.add(nm)
         if c.get("column_id"):

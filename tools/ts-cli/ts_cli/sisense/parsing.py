@@ -448,6 +448,9 @@ def parse_dashboard(raw: dict, warnings: list) -> dict:
         out["disabled_filters"] = disabled
     if unreadable:
         out["unreadable_filters"] = unreadable
+    combined = sorted(k for k in ("filterRelations", "filterToDatasourceMapping") if raw.get(k))
+    if combined:                       # filters combined other than by AND, or mapped per data source
+        out["filter_settings"] = combined
     return out
 
 

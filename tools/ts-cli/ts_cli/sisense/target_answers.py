@@ -43,6 +43,7 @@ from ts_cli.sisense.target_layout import _note_text, _place, note_tile
 from ts_cli.sisense.target_tabs import _GRAIN_SUFFIX, _hidden_tabs, _kept_tabs, tabber_hidden
 from ts_cli.sisense.target_filters import is_all, top_n, widget_filter
 from ts_cli.sisense.target_model import TargetModel, split_dim
+from ts_cli.sisense.target_paths import path_problem
 from ts_cli.tableau.liveboard import agg_label
 
 # Sisense agg -> ThoughtSpot search keyword. Sisense `count` is a DISTINCT count.
@@ -74,6 +75,12 @@ def _connected(tables: set, pairs: list) -> bool:
     return group == tables
 
 
+def _renamed_columns(inv: dict) -> dict:
+    """(table, column name) -> source column id, for every Sisense column renamed from its source."""
+    return {(t.get("jaql_name"), c.get("name")): c.get("id") for t in inv.get("tables") or []
+            for c in t.get("columns") or [] if c.get("id") and c.get("name") and c["id"] != c["name"]}
+
+
 def _calculated_columns(inv: dict) -> set:
     """(table, column) for every Sisense CALCULATED column: the only fields a Model formula may
     be bound to by name."""
@@ -93,6 +100,7 @@ class _Binder:
         self.field_map = (overrides or {}).get("field_map") or {}
         self.filter_map = (overrides or {}).get("filter_map") or {}
         self.calculated = _calculated_columns(inv)
+        self.renamed = _renamed_columns(inv)
         # tables in a Sisense relation that is not one column to one column: not read here
         self.multi_rel = {e.get("table") for r in self.relations if len(r.get("endpoints") or []) != 2
                           for e in r.get("endpoints") or []}
@@ -137,8 +145,16 @@ class _Binder:
                                 "column, which this converter does not read")
         if dim in self.field_map:            # the map chooses the column; the path checks still run
             name, _, note = self.mapped(dim)
-            inst = self.t.single_instance(name) if name else None
-            return (name, inst, self._path_problem(table, inst, anchors) or note) if name else (None, None, note)
+            if not name:
+                return None, None, note
+            inst = self.t.single_instance(name)
+            if inst is None:
+                return name, None, (f"field_map column [{name}] reads several (or no) table instances, so its "
+                                    "join path cannot be checked against Sisense's")
+            return name, inst, self._path_problem(table, inst, anchors)
+        if (table, col) in self.renamed:
+            return None, None, (f"Sisense column {table}.{col} is the source column {self.renamed[(table, col)]} "
+                                "renamed; which one the Model column reads is not verified (map it via field_map)")
         inst, note = self.t.resolve_instance(table, anchors, self.relations)
         if not inst:
             return None, None, note
@@ -161,6 +177,9 @@ class _Binder:
         insts, has_fact = self._ctx
         known = self.t.path_known(table, inst, anchors, has_fact, self.relations)
         conflict = self.t.role_conflict(table, inst, insts, known, relations=self.relations)
+        if not conflict and has_fact:     # the whole path, hop for hop, from each fact that reaches it
+            conflict = next((p for a in anchors if inst in self.t.reachable(a)
+                             for p in [path_problem(self.t, self.relations, a, inst, table)] if p), "")
         return f"{conflict} (map it via field_map / filter_map)" if conflict else ""
 
     def _calculated(self, table: str, col: str, inst: str, measure: bool):
@@ -190,10 +209,12 @@ class _Binder:
             return f"Sisense joins {unjoined} directly, which the target model does not join between the copies bound"
         if direct and _connected(set(bound), direct):
             return ""      # every table joined directly, in Sisense and in the Model alike
-        if len(self._linking_facts(bound)) != 1:
+        linking = self._linking_facts(bound)
+        if len(linking) != 1:
             return ("the widget names no fact table, and no single fact Sisense relates to all of its tables "
                     f"({', '.join(sorted(bound))}) decides the path")
-        return ""
+        return next((p for t, i in sorted(bound.items()) if i
+                     for p in [path_problem(self.t, self.relations, linking[0], i, t)] if p), "")
 
     def _direct_pairs(self, bound: dict) -> list:
         ends = [{e.get("table") for e in r.get("endpoints") or []} for r in self.relations]
@@ -296,6 +317,18 @@ class _Binder:
                     "ThoughtSpot repeat its rows the same way is not verified")
         return ""
 
+    def non_fact_measures(self, widget: dict) -> set:
+        """Instances of the widget's additive measures that are not facts (a join to them can repeat
+        their rows)."""
+        anchors = self.anchors(widget)
+        out = set()
+        for f in widget.get("fields", []):
+            if f.get("kind") == "measure" and AGG_KEYWORD.get((f.get("agg") or "").lower()) in ("sum", "average", "count"):
+                inst = self.column(f.get("dim") or "", anchors, measure=True)[1]
+                if inst and inst not in self.t.roots():
+                    out.add(inst)
+        return out
+
     def _dimension_field(self, dim: str, name, note: str, level) -> dict:
         if not name:
             return {"note": note}
@@ -331,7 +364,7 @@ class _Binder:
             return None, name, f"filter on {dim}: {note}"
         if sf.get("kind") == "top_n":        # the ranking is decided per widget (target_filters.top_n),
             return None, name, ""            # but the widget filters that column itself
-        if is_all(sf):
+        if is_all(sf) and not sf.get("unsupported"):
             return None, name, ""            # "all" = no condition; the widget still owns the column
         if not name:
             return None, None, f"filter on {dim}: {note} (map it via filter_map)"
@@ -398,6 +431,10 @@ def _add_field(acc: dict, f: dict, b: dict, panel: str, binder) -> None:
     """One bound field into the answer accumulator; a second use of a column is reported."""
     if _field_warning(f):
         acc["notes"].append(_field_warning(f))
+    level = (f.get("level") or "").lower()
+    if b.get("bucketed") and binder.t.calendars.get(b["name"]):
+        acc["notes"].append(f"[{b['name']}] buckets by the custom calendar {binder.t.calendars[b['name']]}, "
+                            "which Sisense's calendar periods may not match")
     if f.get("percent") and b["measure"] and b["name"] not in binder.t.formatted:
         acc["notes"].append(f"Sisense shows {f.get('title') or b['name']} as a percent; Model column "
                             f"[{b['name']}] has no format of its own, so it would show as a plain number")
@@ -441,6 +478,11 @@ def _field_warning(f: dict):
     what = f.get("title") or f.get("dim") or "?"
     if f.get("dateTimeLevel"):
         return f"field {what} has Sisense date-time level {f['dateTimeLevel']}, which is not carried"
+    if (f.get("level") or "").lower() in ("quarters", "years"):
+        return (f"field {what} buckets {f['level']}, which in ThoughtSpot follow the cluster's fiscal-year start; "
+                "confirm it matches Sisense's")
+    if f.get("datatype") == "datetime" and not f.get("level") and f.get("kind") != "measure":
+        return f"date field {what} carries no level, so the grain ThoughtSpot shows it at is not decided"
     if (f.get("level") or "").lower() == "weeks":
         start = f"starting on {f['firstday']}" if f.get("firstday") else "with the Sisense server's week start"
         return (f"field {what} buckets weeks {start}; ThoughtSpot's weekly bucket follows the cluster's "
@@ -584,9 +626,9 @@ def _merged_row(w: dict, tab_set: str) -> dict:
     """A hidden grain of a tab set; a weekly grain is flagged (week start)."""
     row = {"visual": w.get("title"), "ts_chart": "(tab)", "status": "Merged",
            "note": f"other grain of tab set '{tab_set}'; change it in the chart's date bucket"}
-    weekly = next((_field_warning(f) for f in w.get("fields", []) if (f.get("level") or "").lower() == "weeks"), None)
-    if weekly:
-        row.update(status="NEEDS REVIEW", note=f"{row['note']}; {weekly}")
+    warning = next((_field_warning(f) for f in w.get("fields", []) if _field_warning(f)), None)
+    if warning:
+        row.update(status="NEEDS REVIEW", note=f"{row['note']}; {warning}")
     return row
 
 
@@ -633,6 +675,10 @@ def _board_rows(rows: list, tables) -> list:
             row.update(status="NEEDS REVIEW", note=f"{row['note']}; the tile it merges into is NEEDS REVIEW")
     if tables:
         return []
+    for row in rows:                 # every binding was made by Table column name: none is verified
+        if row.get("status") in ("Migrated", "Approximated", "Merged"):
+            row.update(status="NEEDS REVIEW", note="; ".join(filter(None, [row.get("note"), (
+                "bound without the Model's Table TMLs (export with --associated)")])))
     return [{"visual": "(target model Tables)", "ts_chart": "-", "status": "NEEDS REVIEW",
              "note": "the Model's Table TMLs were not supplied (export with --associated), so warehouse "
                      "columns were matched by Table column name rather than db_column_name"}]

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from ts_cli.sisense.target_filters import chip_condition, is_all
 from ts_cli.sisense.target_model import split_dim
+from ts_cli.sisense.target_paths import _sisense_table, path_problem, sisense_graph
 
 
 def review(visual: str, note: str) -> dict:
@@ -71,22 +72,39 @@ def _highlights(widget: dict, sf: dict) -> bool:
 
 def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
     """Why this chip does not filter this tile the way Sisense filtered the widget, or ''."""
+    return _setting_problem(tile, sf) or _reach_problem(tile, sf, inst, binder) or _copy_problem(tile, sf, inst, binder)
+
+
+def _setting_problem(tile: dict, sf: dict) -> str:
     mode = tile["widget"].get("filters_mode")
     if mode not in (None, "filter", "select"):
         return f"the widget's dashboard-filter mode is {mode!r}, which this converter does not read"
     if _highlights(tile["widget"], sf):
         return "the widget is in Highlight mode in Sisense, so this column highlights instead of filtering"
+    return ""
+
+
+def _reach_problem(tile: dict, sf: dict, inst, binder) -> str:
     facts = tile["facts"]
     if inst is None:
         return "the chip's table instance could not be determined, so whether it filters this tile as in Sisense cannot be checked"
     path = binder.no_fact_problem(tile["widget"], (split_dim(sf.get("dim") or "")[0], inst))
     if path:
         return path
+    fan = binder.non_fact_measures(tile["widget"]) - {inst}
+    if fan:
+        return (f"the chip joins {inst} to the widget's measure on {', '.join(sorted(fan))}, a non-fact table, "
+                "whose rows the join can repeat; not verified to match Sisense")
     if not facts:
         return "the tile's facts could not be determined, so whether the chip reaches it cannot be checked"
     if not any(inst in binder.t.reachable(a) for a in facts):
         return f"the chip's {inst} does not reach this tile's facts"
-    table = split_dim(sf.get("dim") or "")[0]
+    return ""
+
+
+def _copy_problem(tile: dict, sf: dict, inst, binder) -> str:
+    """The chip's copy against the tile's own Sisense path: the copy, then the whole join path."""
+    facts, table = tile["facts"], split_dim(sf.get("dim") or "")[0]
     own = binder.t.resolve_instance(table, facts, binder.relations)[0]
     if own is None:
         return "the tile's own path to the filtered table could not be determined"
@@ -94,7 +112,14 @@ def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
         return f"the chip binds {inst}, but this widget reaches the table through {own} in Sisense"
     insts = binder._widget_instances(tile["widget"])
     known = binder.t.path_known(table, inst, facts, any(r in insts for r in binder.t.roots()), binder.relations)
-    return binder.t.role_conflict(table, inst, insts, known, relations=binder.relations)
+    conflict = binder.t.role_conflict(table, inst, insts, known, relations=binder.relations)
+    if conflict:
+        return conflict
+    graph = sisense_graph(binder.relations)       # only facts Sisense has can be compared with it
+    sis_facts = [a for a in facts if inst in binder.t.reachable(a) and _sisense_table(graph, a, binder.t.base_of.get(a))]
+    if not sis_facts:
+        return "none of the tile's facts is a Sisense table, so the chip's join path cannot be compared with Sisense's"
+    return next((p for a in sis_facts for p in [path_problem(binder.t, binder.relations, a, inst, table)] if p), "")
 
 
 def _filters_dim(widget: dict, dim: str) -> bool:
@@ -167,6 +192,10 @@ def build_chips(inv: dict, binder, tiles: list) -> tuple:
     for dim in dash.get("disabled_filters") or []:
         rows.append({"visual": f"filter chip {dim}", "ts_chart": "FILTER", "status": "Skipped",
                      "note": "disabled in Sisense (no filtering), so no chip"})
+    for key in dash.get("filter_settings") or []:
+        rows.append(review("(dashboard filters)", f"the dashboard sets {key}, which changes how its filters combine; not carried"))
+        for t in tiles:
+            flag_tile(t, f"the dashboard's {key} is not carried")
     for problem in dash.get("unreadable_filters") or []:
         rows += _uncarried({"dim": problem}, tiles, "the dashboard filter could not be read")
     anchor_sets = [t["facts"] for t in tiles if t["facts"]]
