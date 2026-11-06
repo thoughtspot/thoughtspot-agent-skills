@@ -842,7 +842,8 @@ def test_source_filter_not_carried_to_the_drill_is_needs_review():
     drill = {"dashboard": {"title": "_drill"},
              "widgets": [_w("d1", "Case List", "pivot2", [_f("[dim_case.source_pk]", "rows")])]}
     row = _row(build_target_liveboard(_inv([src]), _target(), drills=[drill]), "Case List")
-    assert row["status"] == "NEEDS REVIEW" and "Sisense passes to this drill" in row["note"]
+    # the source filter is bound in the drill widget's own context, and flagged there
+    assert row["status"] == "NEEDS REVIEW" and "relative_date" in row["note"]
 
 
 def test_two_filters_on_one_column_are_needs_review_not_ored():
@@ -1091,3 +1092,106 @@ def test_malformed_widget_settings_flag_the_widget_instead_of_crashing():
         {"name": "value", "items": [{"jaql": {"dim": "[fact_visit.cost]", "agg": "sum"}}]}]}}
     w = parse_widget(raw, [])
     assert any(u.startswith("unreadable setting") for u in w["unsupported"])
+
+
+# --------------------------------------------------------------------------- adversarial review 3
+def test_dimension_bound_to_a_model_measure_column_is_needs_review():
+    for wtype, fields in (("pivot2", [_f("[fact_visit.cost]", "rows"), _f("[fact_visit.case_id_]", "values", "measure", "count")]),
+                          ("tablewidget", [_f("[dim_case.source_pk]", "columns"), _f("[fact_visit.cost]", "columns")])):
+        row = _row(build_target_liveboard(_inv([_w("w1", "T", wtype, fields)]), _target()), "T")
+        assert row["status"] == "NEEDS REVIEW" and "is a measure" in row["note"], wtype
+
+
+def _no_dim_join_model():
+    """fact_visit joins dim_case and dim_site; dim_case does NOT join dim_site (Sisense does)."""
+    target = _plain_visit_site()
+    for mt in target["model"]["model_tables"]:
+        if mt["name"] == "dim_case":
+            mt["joins"] = [j for j in mt.get("joins") or [] if j["with"] != "Case Site"]
+    target["model"]["model_tables"] = [mt for mt in target["model"]["model_tables"] if mt.get("alias") != "Case Site"]
+    target["model"]["columns"] = [c for c in target["model"]["columns"] if not c.get("column_id", "").startswith("Case Site::")]
+    return target
+
+
+def test_widget_or_chip_with_no_fact_relating_dimensions_sisense_joins_directly_is_needs_review():
+    target = _no_dim_join_model()
+    sites = _w("w1", "Sites", "tablewidget", [_f("[dim_site.name]", "columns")])
+    w_filter = dict(sites, filters=[_member("[dim_case.status]", ["Open"])])
+    assert _row(build_target_liveboard(_inv([w_filter]), target), "Sites")["status"] == "NEEDS REVIEW"
+    chip = build_target_liveboard(_inv([sites], [_member("[dim_case.status]", ["Open"])]), target)
+    assert _row(chip, "Sites")["status"] == "NEEDS REVIEW"
+    counted = _w("w2", "Statuses per site", "pivot2", [_f("[dim_site.name]", "rows"),
+                                                       _f("[dim_case.status]", "values", "measure", "count")])
+    assert _row(build_target_liveboard(_inv([counted]), target), "Statuses per site")["status"] == "NEEDS REVIEW"
+    # the aliased fixture: a chip on a dimension-only tile is caught too
+    res = build_target_liveboard(_inv([sites], [_member("[dim_case.status]", ["Open"])]), _target())
+    assert _row(res, "Sites")["status"] == "NEEDS REVIEW"
+
+
+def test_relation_that_is_not_one_column_to_one_column_is_needs_review():
+    inv = _inv([_w("w1", "Cost by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                          _f("[fact_visit.cost]", "values", "measure", "sum")])])
+    inv["relations"] = RELATIONS + [{"endpoints": [{"table": "fact_visit", "column": "site_id_"},
+                                                   {"table": "dim_site", "column": "id_"},
+                                                   {"table": "dim_case", "column": "site_id_"}]}]
+    row = _row(build_target_liveboard(inv, _target()), "Cost by site")
+    assert row["status"] == "NEEDS REVIEW" and "not one column to one column" in row["note"]
+
+
+def test_drill_binds_source_filters_in_the_drill_widgets_own_context():
+    src = _w("w1", "Totals", "pivot2", [_f("[dim_case.status]", "rows"),
+                                        _f("[fact_case_stats.visit_total]", "values", "measure", "sum")],
+             [_member("[dim_site.name]", ["North"])], drill_targets=["_drill"])
+    drill = {"dashboard": {"title": "_drill"},
+             "widgets": [_w("d1", "Visits", "pivot2", [_f("[Visit_Start_Date.date_day (Calendar)]", "rows", level="days"),
+                                                     _f("[fact_visit.cost]", "values", "measure", "sum")])]}
+    q = _answers(build_target_liveboard(_inv([src]), _target(), drills=[drill]))["Visits"]["search_query"]
+    assert "[Visit Site Name] = 'North'" in q and "Case Site Name" not in q
+
+
+def test_boxplot_and_unknown_widget_types_are_needs_review():
+    from ts_cli.sisense.answers import chart_type_for
+    assert chart_type_for("chart/boxplot", "")[1] == "NEEDS REVIEW"
+    assert chart_type_for("histogramwidget", "")[1] == "NEEDS REVIEW"
+
+
+def test_ranked_tab_is_never_a_grain_variant():
+    d = "[Visit_Start_Date.date_day (Calendar)]"
+    rank = dict(_rank("top", 5), dim=d, level="months")
+    shown = _w("wm", "M", "chart/line", [_f(d, "x-axis", level="months"), _f("[fact_visit.cost]", "values", "measure", "sum")], [rank])
+    hidden = dict(shown, oid="wd", title="D", fields=[_f(d, "x-axis", level="days"), _f("[fact_visit.cost]", "values", "measure", "sum")])
+    tab = _w("wt", "T", "WidgetsTabber", [], tabber={"tabs": [{"title": "M", "show": ["wm"]}, {"title": "D", "show": ["wd"]}], "active": 0})
+    assert tabber_hidden([tab, shown, hidden]) == {}
+
+
+def test_hidden_tab_with_its_own_drill_is_not_merged():
+    d = "[Visit_Start_Date.date_day (Calendar)]"
+    m = _f("[fact_visit.cost]", "values", "measure", "sum")
+    shown = _w("wm", "M", "chart/line", [_f(d, "x-axis", level="months"), m])
+    hidden = dict(_w("wd", "D", "chart/line", [_f(d, "x-axis", level="days"), m]), drill_targets=["_drill"])
+    tab = _w("wt", "T", "WidgetsTabber", [], tabber={"tabs": [{"title": "M", "show": ["wm"]}, {"title": "D", "show": ["wd"]}], "active": 0})
+    assert tabber_hidden([tab, shown, hidden]) == {}
+
+
+def test_source_ranking_and_unreadable_drill_filters_are_needs_review():
+    src = _ranked(_rank("top", 3))
+    src["drill_targets"] = ["_drill"]
+    drill = {"dashboard": {"title": "_drill", "unreadable_filters": ["[dim_case.status]"]},
+             "widgets": [_w("d1", "Case List", "pivot2", [_f("[dim_case.source_pk]", "rows")])]}
+    row = _row(build_target_liveboard(_inv([src]), _target(), drills=[drill]), "Case List")
+    assert row["status"] == "NEEDS REVIEW" and "(ranking)" in row["note"] and "(unreadable)" in row["note"]
+
+
+def test_too_many_subcells_for_a_narrow_column_stay_inside_the_grid():
+    ws = [_w(f"w{i}", f"V{i}", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")]) for i in range(5)]
+    layout = [{"col": 0, "items": [{"oid": "w0", "width_pct": 100, "height_px": 100, "col_pct": 83.4}]},
+              {"col": 1, "items": [{"oid": f"w{i}", "width_pct": 25, "height_px": 100, "col_pct": 16.6} for i in range(1, 5)]}]
+    tiles = build_target_liveboard(_inv(ws, layout=layout), _target())["liveboard"]["liveboard"]["layout"]["tiles"]
+    assert all(t["width"] >= 1 and t["x"] + t["width"] <= 12 for t in tiles)
+
+
+def test_missing_table_tmls_are_reported():
+    res = build_target_liveboard(_inv([_visits()]), _target())
+    assert any(r["visual"] == "(target model Tables)" and r["status"] == "NEEDS REVIEW" for r in res["visual_rows"])
+    with_tables = build_target_liveboard(_inv([_visits()]), _target(), tables=[{"table": {"name": "x", "columns": []}}])
+    assert not any(r["visual"] == "(target model Tables)" for r in with_tables["visual_rows"])

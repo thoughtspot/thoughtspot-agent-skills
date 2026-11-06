@@ -77,6 +77,9 @@ def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
     facts = tile["facts"]
     if inst is None:
         return "the chip's table instance could not be determined, so whether it filters this tile as in Sisense cannot be checked"
+    path = binder.no_fact_problem(tile["widget"], (split_dim(sf.get("dim") or "")[0], inst))
+    if path:
+        return path
     if not facts:
         return "the tile's facts could not be determined, so whether the chip reaches it cannot be checked"
     if not any(inst in binder.t.reachable(a) for a in facts):

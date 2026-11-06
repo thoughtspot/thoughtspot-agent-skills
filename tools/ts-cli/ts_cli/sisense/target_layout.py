@@ -64,7 +64,10 @@ def _place(inv: dict, placed: dict) -> list:
             col_x += round(12 * col_pct / 100)
             y_of[ci] = 0
         x = x_of[ci] if x_of[ci] < 12 else 0
-        widths = _row_widths(items, round(12 * col_pct / 100) or 12, x)
+        span = round(12 * col_pct / 100) or 12
+        if len(items) > min(span, 12 - x):     # too many subcells for the column: a full-width row
+            x, span = 0, 12
+        widths = _row_widths(items, span, x)
         h = max(1 if placed[oid]["kind"] == "note" else _tile_height(placed[oid]["ct"], px) for oid, _, px in items)
         for (oid, _, _), w in zip(items, widths):
             tiles.append((oid, x, y_of[ci], w, h if placed[oid]["kind"] != "note" else 1))

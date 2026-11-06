@@ -24,7 +24,8 @@ def _shape(w: dict) -> tuple:
     """A widget's plotted fields (date level left out), its filters and every setting that
     changes its numbers, exactly."""
     filters = sorted(repr(sorted((k, repr(v)) for k, v in sf.items())) for sf in w.get("filters", []))
-    settings = repr([(k, w.get(k)) for k in ("subtype", "ignore", "filters_mode", "unsupported", "disabled_filters")])
+    settings = repr([(k, w.get(k)) for k in ("subtype", "ignore", "filters_mode", "unsupported", "disabled_filters",
+                                             "drill_targets", "drill_filter_settings")])
     return (w.get("wtype"), tuple(sorted(_field_key(f) for f in w.get("fields", []))), tuple(filters), settings)
 
 
@@ -36,7 +37,9 @@ def _grain_variant(hidden: dict, shown: dict) -> bool:
     """One chart at another date grain: same type, fields and filters, a different date level
     that ThoughtSpot's date bucket can show."""
     mappable = all(not f.get("level") or date_bucket_suffix(f.get("level")) for f in hidden.get("fields", []))
-    return mappable and _shape(hidden) == _shape(shown) and _levels(hidden) != _levels(shown)
+    # a ranking re-ranks at whatever bucket the chart shows, so a ranked tab is never one grain
+    ranked = any(sf.get("kind") == "top_n" for sf in hidden.get("filters", []))
+    return mappable and not ranked and _shape(hidden) == _shape(shown) and _levels(hidden) != _levels(shown)
 
 
 def _hidden_tabs(widgets: list) -> tuple:

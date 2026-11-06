@@ -61,6 +61,21 @@ _DATE_BUCKET_MAP: dict[str, str] = {
 }
 
 
+def _mapped_chart(base: str, wt: str, wtype, st: str, subtype) -> tuple:
+    if "100" in st:      # a 100% stack shows each value's SHARE of its total
+        return ("STACKED_" + base if base in ("BAR", "COLUMN") else base), "NEEDS REVIEW", \
+            f"{subtype} is a 100% stack (shares of each total); it is carried as absolute values"
+    if base in ("BAR", "COLUMN") and "stacked" in st:
+        return "STACKED_" + base, "Migrated", "stacked subtype"
+    if base == "SCATTER" and ("bubble" in st or wt == "chart/bubble"):
+        return "SCATTER", "Approximated", "bubble approximated as scatter (size dropped)"
+    if wt == "chart/boxplot":    # quartiles / median / whiskers: not the values a table shows
+        return base, "NEEDS REVIEW", f"{wtype} shows quartiles and a median; carried as a plain {base}"
+    if base in ("TREEMAP",) or wt == "sunburst":
+        return base, "Approximated", f"{wtype} approximated as {base}"
+    return base, "Migrated", ""
+
+
 def chart_type_for(wtype, subtype: str = "") -> tuple:
     """Sisense widget type -> (ts_chart, status, note). None ts_chart => skip (text widget).
 
@@ -73,19 +88,10 @@ def chart_type_for(wtype, subtype: str = "") -> tuple:
         base = _CHART_MAP[wt]
         if base is None:
             return None, "Skipped", f"{wtype} is a text/no-chart widget"
-        if "100" in st:      # a 100% stack shows each value's SHARE of its total
-            return ("STACKED_" + base if base in ("BAR", "COLUMN") else base), "NEEDS REVIEW", \
-                f"{subtype} is a 100% stack (shares of each total); it is carried as absolute values"
-        if base in ("BAR", "COLUMN") and "stacked" in st:
-            return "STACKED_" + base, "Migrated", "stacked subtype"
-        if base == "SCATTER" and ("bubble" in st or wt == "chart/bubble"):
-            return "SCATTER", "Approximated", "bubble approximated as scatter (size dropped)"
-        if base in ("TREEMAP",) or wt in ("chart/boxplot", "sunburst"):
-            return base, "Approximated", f"{wtype} approximated as {base}"
-        return base, "Migrated", ""
+        return _mapped_chart(base, wt, wtype, st, subtype)
     if wt in ("", "unknown"):
         return _DEFAULT_CHART, "NEEDS REVIEW", "widget type unknown; defaulted to GRID_TABLE"
-    return _DEFAULT_CHART, "Approximated", f"no direct mapping for '{wtype}'; defaulted to GRID_TABLE"
+    return _DEFAULT_CHART, "NEEDS REVIEW", f"no mapping for widget type '{wtype}' (what it computes is unknown); defaulted to GRID_TABLE"
 
 
 def _model_col(dim) -> str:

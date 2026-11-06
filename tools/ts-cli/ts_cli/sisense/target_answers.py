@@ -50,6 +50,26 @@ AGG_KEYWORD = {"count": "unique count", "countduplicates": "count", "sum": "sum"
                "avg": "average", "average": "average", "min": "min", "max": "max"}
 _TOKEN = re.compile(r"\[([^\]]+)\]")
 
+def _named_relations(inv: dict) -> list:
+    names = {t.get("id"): t.get("jaql_name") for t in inv.get("tables") or [] if t.get("jaql_name")}
+    return [dict(r, endpoints=[dict(e, table=names.get(e.get("table"), e.get("table")))
+                               for e in r.get("endpoints") or []])
+            for r in inv.get("relations") or []]
+
+
+def _connected(tables: set, pairs: list) -> bool:
+    """Do the pairs join every table into one group?"""
+    group = {next(iter(tables))}
+    changed = True
+    while changed:
+        changed = False
+        for a, b in pairs:
+            if (a in group) != (b in group):
+                group |= {a, b}
+                changed = True
+    return group == tables
+
+
 def _calculated_columns(inv: dict) -> set:
     """(table, column) for every Sisense CALCULATED column: the only fields a Model formula may
     be bound to by name."""
@@ -65,13 +85,13 @@ class _Binder:
         self.inv, self.t = inv, target
         # relation endpoints carry Sisense table IDS (sometimes opaque `tq_...`); JAQL dims carry
         # the table's `name` — normalise endpoints to that name so the two can be compared
-        names = {t.get("id"): t.get("jaql_name") for t in inv.get("tables") or [] if t.get("jaql_name")}
-        self.relations = [dict(r, endpoints=[dict(e, table=names.get(e.get("table"), e.get("table")))
-                                             for e in r.get("endpoints") or []])
-                          for r in inv.get("relations") or []]
+        self.relations = _named_relations(inv)
         self.field_map = (overrides or {}).get("field_map") or {}
         self.filter_map = (overrides or {}).get("filter_map") or {}
         self.calculated = _calculated_columns(inv)
+        # tables in a Sisense relation that is not one column to one column: not read here
+        self.multi_rel = {e.get("table") for r in self.relations if len(r.get("endpoints") or []) != 2
+                          for e in r.get("endpoints") or []}
         self._ctx = (set(), True)
 
     # -- anchors: the fact instances a widget queries ---------------------------------
@@ -110,6 +130,9 @@ class _Binder:
         if dim in self.field_map:
             return self.mapped(dim)
         table, col = split_dim(dim)
+        if table in self.multi_rel:
+            return None, None, (f"Sisense relates {table} through a relation that is not one column to one "
+                                "column, which this converter does not read")
         inst, note = self.t.resolve_instance(table, anchors, self.relations)
         if not inst:
             return None, None, note
@@ -140,6 +163,50 @@ class _Binder:
             return name
         return None
 
+    def no_fact_problem(self, widget: dict, extra: tuple = ()) -> str:
+        """For a widget naming no fact table: why ThoughtSpot may relate its tables (plus a chip's
+        ``extra`` = (table, bound instance)) differently from Sisense, or ''. Sisense joins them along
+        ITS relations: two of them related directly need that same join between the copies actually
+        bound, and otherwise one fact Sisense relates to every one of them has to be the path."""
+        bound = self._bound_tables(widget, extra)
+        if bound is None or len(bound) < 2:
+            return ""
+        direct = self._direct_pairs(bound)
+        unjoined = next((f"{a} and {b}" for a, b in direct if not self._joined(a, b, bound)), None)
+        if unjoined:
+            return f"Sisense joins {unjoined} directly, which the target model does not join between the copies bound"
+        if direct and _connected(set(bound), direct):
+            return ""      # every table joined directly, in Sisense and in the Model alike
+        if len(self._linking_facts(bound)) != 1:
+            return ("the widget names no fact table, and no single fact Sisense relates to all of its tables "
+                    f"({', '.join(sorted(bound))}) decides the path")
+        return ""
+
+    def _direct_pairs(self, bound: dict) -> list:
+        ends = [{e.get("table") for e in r.get("endpoints") or []} for r in self.relations]
+        return [(a, b) for a in sorted(bound) for b in sorted(bound) if a < b and {a, b} in ends]
+
+    def _linking_facts(self, bound: dict) -> list:
+        return [r for r in self.t.roots() if all(self.t.fk_instances(t, [r], self.relations) for t in bound)]
+
+    def _bound_tables(self, widget: dict, extra: tuple):
+        """Sisense table -> the instance it binds to, for a widget naming NO fact (else None)."""
+        anchors = self.anchors(widget)
+        if self._ctx[1]:
+            return None
+        dims = [f.get("dim") for f in widget.get("fields", [])] + [sf.get("dim") for sf in widget.get("filters", [])]
+        bound = {split_dim(d)[0]: self.t.resolve_instance(split_dim(d)[0], anchors, self.relations)[0]
+                 for d in dims if d and d not in self.field_map}
+        if extra:
+            bound[extra[0]] = extra[1]
+        return bound
+
+    def _joined(self, a: str, b: str, bound: dict) -> bool:
+        """The Model joins the two BOUND copies on a column a Sisense relation uses."""
+        ia, ib = bound[a], bound[b]
+        return bool(ia and ib and (ib in self.t.fk_instances(b, [ia], self.relations)
+                                   or ia in self.t.fk_instances(a, [ib], self.relations)))
+
     def mapped(self, dim: str) -> tuple:
         """field_map entry -> (model column | None, None, note): a name the Model lacks is refused."""
         name = self.field_map[dim]
@@ -166,7 +233,7 @@ class _Binder:
         if name and note:                     # bound by name only: reported, not carried
             return {"note": note}
         if f.get("kind") != "measure":
-            return _dimension(name, f.get("level")) if name else {"note": note}
+            return self._dimension_field(dim, name, note, f.get("level"))
         kw = AGG_KEYWORD.get(agg)
         if not kw:
             return {"note": f"Sisense aggregation '{agg}' on {dim} has no mapped ThoughtSpot keyword"}
@@ -176,12 +243,23 @@ class _Binder:
             token = f"{kw} [{name}]"
             return {"name": name, "token": token, "out": f"{agg_label(token)} {name}", "measure": True}
         if inst and kw in ("unique count", "count"):
-            table, col = split_dim(dim)
-            cm = self.t.count_measure(kw, inst, col)
-            if cm:
-                return {"name": cm, "token": f"[{cm}]", "out": cm, "measure": True}
-            return {"note": f"{kw} of {table}.{col}: add a Model measure '{kw} ( [{inst}::{col}] )' or map it via field_map"}
+            return self._count_field(dim, kw, inst)
         return {"note": note}
+
+    def _dimension_field(self, dim: str, name, note: str, level) -> dict:
+        if not name:
+            return {"note": note}
+        if name in self.t.measures:
+            return {"note": f"{dim} is grouped by in Sisense, but Model column [{name}] is a measure, "
+                            "which ThoughtSpot would aggregate"}
+        return _dimension(name, level)
+
+    def _count_field(self, dim: str, kw: str, inst: str) -> dict:
+        table, col = split_dim(dim)
+        cm = self.t.count_measure(kw, inst, col)
+        if cm:
+            return {"name": cm, "token": f"[{cm}]", "out": cm, "measure": True}
+        return {"note": f"{kw} of {table}.{col}: add a Model measure '{kw} ( [{inst}::{col}] )' or map it via field_map"}
 
     def _formula_measure(self, name: str, dim: str, agg: str, kw: str) -> dict:
         """A measure bound to a Model formula: carried only when the formula's own aggregation
@@ -228,7 +306,8 @@ def _bucket_out(suf: str) -> str:
 
 
 _ROLE_OF_PANEL = {"categories": "Category", "x-axis": "Category", "rows": "Rows", "columns": "Columns",
-                  "break by": "Series", "break by / color": "Series", "color": "Series"}
+                  "break by": "Series", "break-by": "Series", "break by / color": "Series", "color": "Series",
+                  "point": "Category"}
 _UNPLOTTED_PANELS = ("filters", "min", "max")      # gauge bounds; `secondary` is a shown value
 
 
@@ -387,6 +466,9 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     extra = ctx.get("extra_filters", [])
     own |= _query_columns(extra)
     read = acc["cols"] + sorted(_query_columns(frags + extra))
+    path = binder.no_fact_problem(widget)
+    if path:
+        notes.append(path)
     if binder.t.spans_facts(read):
         notes.append("its columns span facts no single fact reaches (a multi-fact query), which is not "
                      "verified to return Sisense's numbers")
@@ -480,6 +562,20 @@ def _assemble(inv, placed, content) -> tuple:
     return viz, layout, viz_meta, answers
 
 
+def _board_rows(rows: list, tables) -> list:
+    """After the chip checks: a grain merged into a flagged tile shares its risk; a missing Table
+    TML export is one board-level row."""
+    for row in rows:
+        into = row.pop("_into", None)
+        if into is not None and into["status"] == "NEEDS REVIEW":
+            row.update(status="NEEDS REVIEW", note=f"{row['note']}; the tile it merges into is NEEDS REVIEW")
+    if tables:
+        return []
+    return [{"visual": "(target model Tables)", "ts_chart": "-", "status": "NEEDS REVIEW",
+             "note": "the Model's Table TMLs were not supplied (export with --associated), so warehouse "
+                     "columns were matched by Table column name rather than db_column_name"}]
+
+
 def build_target_liveboard(inv: dict, target_tml: dict, model_fqn=None, overrides=None,
                            drills=None, tables=None) -> dict:
     """Parsed Sisense inventory + target Model TML (+ its Table TMLs, optional) ->
@@ -498,10 +594,7 @@ def build_target_liveboard(inv: dict, target_tml: dict, model_fqn=None, override
             placed[key], content[key] = {"kind": "answer", "ct": "GRID_TABLE"}, ("answer", a, own, facts, row, dw)
     viz, layout, tiles, answers = _assemble(inv, placed, content)
     chips, chip_rows = build_chips(inv, binder, tiles)
-    for row in rows:                               # a grain merged into a flagged tile shares its risk
-        into = row.pop("_into", None)
-        if into is not None and into["status"] == "NEEDS REVIEW":
-            row.update(status="NEEDS REVIEW", note=f"{row['note']}; the tile it merges into is NEEDS REVIEW")
+    chip_rows += _board_rows(rows, tables)
     lb = {"liveboard": {"name": report_name, "visualizations": viz, "layout": {"tiles": layout}}}
     if chips:
         lb["liveboard"]["filters"] = chips

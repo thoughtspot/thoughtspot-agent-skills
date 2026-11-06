@@ -56,7 +56,8 @@ truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
 | `chart/line` / `chart/area` / `chart/pie` | Mapped | `LINE` / `AREA` / `PIE` |
 | `chart/scatter` | Mapped | `SCATTER` |
 | `chart/bubble` | Approximated | `SCATTER` (bubble size dropped) |
-| `chart/polar` / `sunburst` / `treemap` / `chart/boxplot` | Approximated | nearest chart (`COLUMN` / `GRID_TABLE` / `TREEMAP`) |
+| `chart/polar` / `sunburst` / `treemap` | Approximated | nearest chart (`COLUMN` / `GRID_TABLE` / `TREEMAP`), same values |
+| `chart/boxplot`, any unmapped widget type, a 100% stack | Flagged | NEEDS REVIEW: what it computes (quartiles, an unknown plugin, shares) is not what the emitted chart shows |
 | `indicator` | Mapped | `KPI` |
 | `pivot` / `pivot2` | Mapped | `PIVOT_TABLE` (role-aware Rows/Columns) |
 | `tablewidget` | Mapped | `GRID_TABLE` |
@@ -132,6 +133,12 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | 100% stacked chart (`…100` subtype) | Flagged | NEEDS REVIEW on both paths: Sisense shows shares of each total, carried as absolute values |
 | Boolean or decimal member value | Flagged | NEEDS REVIEW: its written form is not verified |
 | Model join with `MANY_TO_MANY` cardinality | Flagged | not followed; a widget that needs it reports its table unreachable |
+| Sisense dimension bound to a Model MEASURE column | Flagged | NEEDS REVIEW: Sisense groups by it, ThoughtSpot would aggregate it |
+| Widget naming no fact table, alone or under a chip | Mapped when decided | carried when the tables Sisense relates directly are joined directly between the bound copies in the Model, or one fact Sisense relates to all of them is the path; otherwise NEEDS REVIEW |
+| Sisense relation that is not one column to one column (3+ endpoints, composite) | Flagged | NEEDS REVIEW on any field or filter on its tables |
+| Filters a drill source passes | Mapped | the filters every source shares, bound in the DRILL widget's own context (its facts and copies); a ranking or a non-shared filter is NEEDS REVIEW |
+| Ranked tab, or a hidden tab with its own drill | Mapped | a tile of its own, never `Merged` (a ranking re-ranks at whatever bucket the chart shows) |
+| Model Table TMLs not supplied | Flagged | one NEEDS REVIEW row for the board: warehouse columns matched by Table column name, not `db_column_name` |
 | Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns and Model columns with their own `format_pattern` / `currency_type` keep theirs. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)
