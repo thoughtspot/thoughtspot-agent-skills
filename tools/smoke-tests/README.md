@@ -11,7 +11,7 @@ auditing coverage from the docs. There are three tiers, not two:
 | Tier | Needs | Runs in CI |
 |---|---|---|
 | **Pure** | nothing — plain Python | Five of the nine: publish_orgs, security_columns, setup_tenancy, migrate_orgs, object_model_alias |
-| **CLI-only** | `ts` on `PATH`, **no credentials** | Two of the four: convert_to_dbt, convert_from_dbt (CI installs `ts`) |
+| **CLI-only** | `ts` on `PATH`, **no credentials** | Two of the five: convert_to_dbt, convert_from_dbt (CI installs `ts`) |
 | **Live** | `ts` + a configured profile for the named platform(s) | No |
 
 What CI runs is `CI_SMOKES` in `tools/validate/checks.py` — the source of truth, run by
@@ -37,6 +37,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_object_calendar_builder.py` | ts-object-calendar-builder | Pure |
 | `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified emitter) | Pure (`--live` opts in) |
 | `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | CLI-only |
+| `smoke_ts_convert_from_sisense.py` | ts-convert-from-sisense | CLI-only (synthetic bundle and target Model written to a temp dir; `--target-model` path) |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | CLI-only |
 | `smoke_ts_convert_to_dbt.py` | ts-convert-to-dbt | CLI-only |
 | `smoke_ts_convert_from_dbt.py` | ts-convert-from-dbt | CLI-only (the server-side / dbt Cloud half needs a live instance — see that skill's open-items.md) |

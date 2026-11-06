@@ -26,6 +26,21 @@ def test_dashboard_filter_classification():
     assert fils[4]["kind"] == "unknown"                        # nothing silently dropped
 
 
+def test_cascading_filter_group_yields_one_filter_per_level():
+    # A cascading group (Client > Program > Drug) has no jaql of its own, only levels[]; reading
+    # f["jaql"] alone dropped the whole group without a warning.
+    bundle = {"dashboard": {"title": "D", "filters": [
+        {"isCascading": False, "levels": [
+            {"dim": "[dim_program.client_name]", "filter": {"explicit": False, "all": True}},
+            {"dim": "[dim_program.name]", "filter": {"members": ["P1"]}},
+        ]},
+        {"jaql": {"dim": "[t.Region]", "filter": {"exclude": {"members": ["XX"]}}}},
+    ]}}
+    fils = parse_inventory(bundle)["dashboard"]["filters"]
+    assert [f["dim"] for f in fils] == ["[dim_program.client_name]", "[dim_program.name]", "[t.Region]"]
+    assert fils[1]["kind"] == "member" and fils[1]["values"] == ["P1"]
+
+
 def _bundle():
     return {
         "datamodel": {
@@ -106,3 +121,31 @@ def test_unknown_type_code_falls_back():
          "columns": [{"oid": "c", "id": "X", "name": "X", "type": 9999}]}]}}]}}
     inv = parse_inventory(b)
     assert inv["tables"][0]["columns"][0]["data_type"] == "unknown"
+
+
+def test_presentation_extras_layout_tabber_richtext_drill():
+    dash = {"title": "D", "filters": [],
+            "layout": {"columns": [{"width": 100, "cells": [
+                {"subcells": [{"width": 60, "elements": [{"widgetid": "a", "height": "140px"}]},
+                              {"width": 40, "elements": [{"widgetid": "b", "height": 300}]}]}]}]},
+            "widgets": [
+                {"oid": "t", "type": "WidgetsTabber", "title": "Tabs",
+                 "style": {"activeTab": "1", "tabs": [{"title": "DAILY", "displayWidgetIds": ["a"]},
+                                                      {"title": "WEEKLY", "displayWidgetIds": ["b"]}]}},
+                {"oid": "r", "type": "richtexteditor", "style": {"content": {"html": "<b>Hi</b>", "bgColor": "#fff"}}},
+                {"oid": "a", "type": "pivot2", "title": "P", "metadata": {"panels": []},
+                 "drillToDashboardConfig": {"enabled": True, "dashboardIds": [{"dashboardTitle": "_drill_x"}]}}]}
+    inv = parse_inventory({"dashboard": dash})
+    w = {x["oid"]: x for x in inv["widgets"]}
+    assert w["t"]["tabber"] == {"tabs": [{"title": "DAILY", "show": ["a"]}, {"title": "WEEKLY", "show": ["b"]}], "active": 1}
+    assert w["r"]["richtext"] == {"html": "<b>Hi</b>", "bg_color": "#fff"}
+    assert w["a"]["drill_targets"] == ["_drill_x"]
+    assert inv["dashboard"]["layout"] == [{"col": 0, "items": [
+        {"oid": "a", "width_pct": 60.0, "height_px": 140, "col_pct": 100.0},
+        {"oid": "b", "width_pct": 40.0, "height_px": 300, "col_pct": 100.0}]}]
+
+
+def test_table_keeps_jaql_name_beside_opaque_id():
+    dm = {"datasets": [{"schema": {"tables": [{"id": "tq_abc", "name": "Start_Date", "displayName": "Start Date (Dim)", "columns": []}]}}]}
+    t = parse_inventory({"datamodel": dm})["tables"][0]
+    assert (t["id"], t["jaql_name"], t["name"]) == ("tq_abc", "Start_Date", "Start Date (Dim)")
