@@ -324,6 +324,9 @@ def parse_widget(widget: dict, warnings: list) -> dict:
         "fields": acc["fields"],
         "filters": acc["filters"],
     }
+    source = (widget.get("datasource") or {}).get("title") if isinstance(widget.get("datasource"), dict) else None
+    if source:
+        out["datasource"] = source
     try:
         out.update(_widget_extras(widget))
         out.update(_dashboard_filter_settings(widget))

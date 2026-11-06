@@ -139,6 +139,14 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Filters a drill source passes | Mapped | the filters every source shares, bound in the DRILL widget's own context (its facts and copies); a ranking or a non-shared filter is NEEDS REVIEW |
 | Ranked tab, or a hidden tab with its own drill | Mapped | a tile of its own, never `Merged` (a ranking re-ranks at whatever bucket the chart shows) |
 | Model Table TMLs not supplied | Flagged | one NEEDS REVIEW row for the board: warehouse columns matched by Table column name, not `db_column_name` |
+| `field_map` / `filter_map` entries | Mapped | they choose the column (or the search fragment); every path check still runs on what they choose: role copy, a widget naming no fact, a chip's copy per tile, relations not one column to one column |
+| Formula built from other formulas | Mapped | read as reading every instance its referenced formulas read (to a fixed point), so the multi-fact and chip checks see it |
+| Widget naming no fact, linked in Sisense by two facts | Flagged | NEEDS REVIEW: a tie in Sisense's own path choice (linking facts are counted from Sisense's relations, not the Model's facts) |
+| Row-level filter or chip on a Model MEASURE column | Flagged | NEEDS REVIEW: ThoughtSpot filters a measure after aggregating, Sisense filters rows |
+| Sum / average / count of a non-fact table's column in a widget joining other tables | Flagged | NEEDS REVIEW: whether both repeat its rows the same way across the join is not verified |
+| Chip and widget filter on different Sisense dims bound to one Model column | Flagged | NEEDS REVIEW: Sisense applies both, a chip would replace the widget's |
+| Widget reading another data source than the dashboard | Flagged | NEEDS REVIEW |
+| Parse warnings (a skipped relation, an unreadable widget) | Flagged | each one a NEEDS REVIEW row in the report, not only stderr |
 | Measure number format (Sisense shows full values) | Mapped | every measure column gets a NUMBER format with unit NONE, thousands separators, 2 decimals with trailing zeroes removed — ThoughtSpot's default abbreviates (`32.16K`); `%` columns and Model columns with their own `format_pattern` / `currency_type` keep theirs. Verified live: imports and exports unchanged, and a count renders as `22,652` (no abbreviation, no `.00`) |
 
 ## Unmapped Constructs (Limitations)

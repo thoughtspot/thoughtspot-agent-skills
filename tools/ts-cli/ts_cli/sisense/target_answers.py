@@ -57,6 +57,10 @@ def _named_relations(inv: dict) -> list:
             for r in inv.get("relations") or []]
 
 
+def _same_name(a: str, b: str) -> bool:
+    return re.sub(r"[\s_]+", "", (a or "").lower()) == re.sub(r"[\s_]+", "", (b or "").lower())
+
+
 def _connected(tables: set, pairs: list) -> bool:
     """Do the pairs join every table into one group?"""
     group = {next(iter(tables))}
@@ -127,20 +131,20 @@ class _Binder:
         """Sisense dim -> (model column | None, instance | None, note). A binding made only by
         name (a Sisense calculated column to a Model formula) comes back with that note even
         though a column was found: it is a guess the Model's author has to confirm."""
-        if dim in self.field_map:
-            return self.mapped(dim)
         table, col = split_dim(dim)
         if table in self.multi_rel:
             return None, None, (f"Sisense relates {table} through a relation that is not one column to one "
                                 "column, which this converter does not read")
+        if dim in self.field_map:            # the map chooses the column; the path checks still run
+            name, _, note = self.mapped(dim)
+            inst = self.t.single_instance(name) if name else None
+            return (name, inst, self._path_problem(table, inst, anchors) or note) if name else (None, None, note)
         inst, note = self.t.resolve_instance(table, anchors, self.relations)
         if not inst:
             return None, None, note
-        insts, has_fact = self._ctx
-        known = self.t.path_known(table, inst, anchors, has_fact, self.relations)
-        conflict = self.t.role_conflict(table, inst, insts, known, relations=self.relations)
+        conflict = self._path_problem(table, inst, anchors)
         if conflict:
-            return None, None, f"{conflict} (map it via field_map / filter_map)"
+            return None, None, conflict
         name = self.t.column(inst, col)
         if name:
             return name, inst, ""
@@ -149,6 +153,15 @@ class _Binder:
             return name, inst, (f"Sisense calculated column {table}.{col} is bound to Model formula [{name}] by "
                                 "name only; confirm it is the same calculation (map it via field_map)")
         return None, inst, f"{table}.{col} is not exposed on the target model"
+
+    def _path_problem(self, table: str, inst, anchors: list) -> str:
+        """Why ``inst`` may not be the copy of ``table`` Sisense joins for the current widget, or ''."""
+        if not inst:
+            return ""
+        insts, has_fact = self._ctx
+        known = self.t.path_known(table, inst, anchors, has_fact, self.relations)
+        conflict = self.t.role_conflict(table, inst, insts, known, relations=self.relations)
+        return f"{conflict} (map it via field_map / filter_map)" if conflict else ""
 
     def _calculated(self, table: str, col: str, inst: str, measure: bool):
         """A Sisense CALCULATED column -> the Model ATTRIBUTE formula of the same (normalised) name
@@ -187,7 +200,24 @@ class _Binder:
         return [(a, b) for a in sorted(bound) for b in sorted(bound) if a < b and {a, b} in ends]
 
     def _linking_facts(self, bound: dict) -> list:
-        return [r for r in self.t.roots() if all(self.t.fk_instances(t, [r], self.relations) for t in bound)]
+        """The Sisense tables related to EVERY bound table (Sisense's shortest paths between them),
+        kept only when the Model has that table as a fact joined on the same columns. More than one
+        Sisense candidate is a tie in Sisense's own path choice, so the caller reports it."""
+        neighbours = {}
+        for r in self.relations:
+            ends = [e.get("table") for e in r.get("endpoints") or []]
+            for t in ends:
+                neighbours.setdefault(t, set()).update(set(ends) - {t})
+        linking = [t for t, ns in neighbours.items() if t not in bound and all(b in ns for b in bound)]
+        if len(linking) != 1:
+            return linking            # zero or a tie: not one decided path
+        return self._model_fact_for(linking[0], bound) or linking + linking
+
+    def _model_fact_for(self, sis_table: str, bound: dict) -> list:
+        """The Model fact standing for a Sisense table, joined to every bound table on the same columns."""
+        roots = [r for r in self.t.roots() if _same_name(self.t.base_of.get(r) or r, sis_table)
+                 and all(self.t.fk_instances(t, [r], self.relations) for t in bound)]
+        return roots if len(roots) == 1 else []
 
     def _bound_tables(self, widget: dict, extra: tuple):
         """Sisense table -> the instance it binds to, for a widget naming NO fact (else None)."""
@@ -195,11 +225,20 @@ class _Binder:
         if self._ctx[1]:
             return None
         dims = [f.get("dim") for f in widget.get("fields", [])] + [sf.get("dim") for sf in widget.get("filters", [])]
-        bound = {split_dim(d)[0]: self.t.resolve_instance(split_dim(d)[0], anchors, self.relations)[0]
-                 for d in dims if d and d not in self.field_map}
+        bound = {split_dim(d)[0]: self._bound_instance(d, anchors) for d in dims if d}
         if extra:
             bound[extra[0]] = extra[1]
         return bound
+
+    def _bound_instance(self, dim: str, anchors: list):
+        """The instance a widget's dim actually reads: the mapped column's, the filter_map
+        fragment's columns' (one instance, else None), or the native resolution."""
+        if dim in self.field_map:
+            return self.t.single_instance(self.field_map[dim])
+        if dim in self.filter_map:
+            insts = set().union(*(self.t.instances_of.get(c, set()) for c in _TOKEN.findall(self.filter_map[dim])))
+            return next(iter(insts)) if len(insts) == 1 else None
+        return self.t.resolve_instance(split_dim(dim)[0], anchors, self.relations)[0]
 
     def _joined(self, a: str, b: str, bound: dict) -> bool:
         """The Model joins the two BOUND copies on a column a Sisense relation uses."""
@@ -239,12 +278,23 @@ class _Binder:
             return {"note": f"Sisense aggregation '{agg}' on {dim} has no mapped ThoughtSpot keyword"}
         if name and name in self.t.formula_measures:
             return self._formula_measure(name, dim, agg, kw)
+        fan_out = self._fan_out(dim, kw, name, inst)
+        if fan_out:
+            return {"note": fan_out}
         if name:   # explicit keyword: a bare SUM column would come back as "Total <name>" anyway
             token = f"{kw} [{name}]"
             return {"name": name, "token": token, "out": f"{agg_label(token)} {name}", "measure": True}
         if inst and kw in ("unique count", "count"):
             return self._count_field(dim, kw, inst)
         return {"note": note}
+
+    def _fan_out(self, dim: str, kw: str, name, inst) -> str:
+        """An additive measure on a non-fact table, in a widget joining other tables: whether
+        Sisense and ThoughtSpot repeat its rows the same way across the join is not verified."""
+        if name and inst and inst not in self.t.roots() and kw in ("sum", "average", "count") and self._ctx[0] - {inst}:
+            return (f"{kw} of {dim} aggregates a non-fact table's column across a join; whether Sisense and "
+                    "ThoughtSpot repeat its rows the same way is not verified")
+        return ""
 
     def _dimension_field(self, dim: str, name, note: str, level) -> dict:
         if not name:
@@ -286,6 +336,9 @@ class _Binder:
         if not name:
             return None, None, f"filter on {dim}: {note} (map it via filter_map)"
         frag, problem = widget_filter(sf, name)
+        if not problem and name in self.t.measures:
+            problem = (f"it filters rows of [{name}], a Model measure, which ThoughtSpot would filter "
+                       "after aggregating")
         if problem:
             return None, name, f"filter on {dim}: {problem} (map it via filter_map)"
         return frag, name, ""
@@ -458,14 +511,15 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     acc = _collect_fields(widget, binder, anchors)
     frags, own, fnotes = _collect_filters(widget, binder, anchors)
     n, rank_frag, rank_notes = top_n(widget, acc["measure_fields"], acc["dimension_fields"])
-    notes, info = _widget_notes(widget, status, note, acc["notes"] + fnotes + rank_notes)
+    dash_source = (binder.inv.get("dashboard") or {}).get("datasource")
+    other_source = ([f"the widget reads data source '{widget['datasource']}', not the dashboard's '{dash_source}'"]
+                    if widget.get("datasource") and dash_source and widget["datasource"] != dash_source else [])
+    notes, info = _widget_notes(widget, status, note, acc["notes"] + fnotes + rank_notes + other_source)
     row = {"visual": title, "ts_chart": ct, "status": status}
     if not acc["cols"]:
         row.update(status="NEEDS REVIEW", note="; ".join(notes + info) or "no fields mapped")
         return None, row, own, []
-    extra = ctx.get("extra_filters", [])
-    own |= _query_columns(extra)
-    read = acc["cols"] + sorted(_query_columns(frags + extra))
+    read = acc["cols"] + sorted(_query_columns(frags))
     path = binder.no_fact_problem(widget)
     if path:
         notes.append(path)
@@ -478,7 +532,7 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
         row["note"] = "; ".join(notes + info)
     a = build_answer(title, f"{ctx['key']}", binder.t.name, ctx.get("model_fqn"), acc["cols"], ct,
                      acc["measures"], acc["roles"], _token_map(acc["tokens"]), n)["answer"]
-    a = _finish_answer(a, binder, ct, frags + extra + ([rank_frag] if rank_frag else []), acc["labels"],
+    a = _finish_answer(a, binder, ct, frags + ([rank_frag] if rank_frag else []), acc["labels"],
                        ctx.get("description"), acc["measure_outs"])
     return a, row, own, binder.t.facts_for(read)
 
@@ -562,6 +616,14 @@ def _assemble(inv, placed, content) -> tuple:
     return viz, layout, viz_meta, answers
 
 
+def _warning_rows(inv: dict, drills) -> list:
+    """Every parse warning (a skipped relation, an unreadable widget) is a report row, not only stderr."""
+    # a drill dashboard export never carries the data model: that warning is expected for it
+    warnings = (inv.get("warnings") or []) + [w for d in drills or [] for w in d.get("warnings") or []
+                                              if not w.startswith("No 'datamodel'")]
+    return [{"visual": "(parse warning)", "ts_chart": "-", "status": "NEEDS REVIEW", "note": w} for w in warnings]
+
+
 def _board_rows(rows: list, tables) -> list:
     """After the chip checks: a grain merged into a flagged tile shares its risk; a missing Table
     TML export is one board-level row."""
@@ -576,6 +638,15 @@ def _board_rows(rows: list, tables) -> list:
                      "columns were matched by Table column name rather than db_column_name"}]
 
 
+def _add_drills(drills: list, rows: list, placed: dict, content: dict) -> None:
+    """Each drill details table: its report row, and (when built) a header note and the tile."""
+    for key, a, row, own, facts, dw in drills:
+        rows.append(row)
+        if a:
+            placed[key + ":note"], content[key + ":note"] = {"kind": "note", "ct": None}, ("note", row["visual"])
+            placed[key], content[key] = {"kind": "answer", "ct": "GRID_TABLE"}, ("answer", a, own, facts, row, dw)
+
+
 def build_target_liveboard(inv: dict, target_tml: dict, model_fqn=None, overrides=None,
                            drills=None, tables=None) -> dict:
     """Parsed Sisense inventory + target Model TML (+ its Table TMLs, optional) ->
@@ -584,17 +655,12 @@ def build_target_liveboard(inv: dict, target_tml: dict, model_fqn=None, override
     target = TargetModel(target_tml, tables)
     binder = _Binder(inv, target, overrides)
     report_name = overrides.get("report_name") or (inv.get("dashboard") or {}).get("title") or target.name
-    rows, placed, content, drill_sources = _widget_tiles(inv, inv.get("widgets", []) or [], binder,
-                                                         model_fqn or target_tml.get("guid"))
-    for key, a, row, own, facts, dw in drill_tables(drills, binder, drill_sources,
-                                                    model_fqn or target_tml.get("guid"), _answer_for):
-        rows.append(row)
-        if a:
-            placed[key + ":note"], content[key + ":note"] = {"kind": "note", "ct": None}, ("note", row["visual"])
-            placed[key], content[key] = {"kind": "answer", "ct": "GRID_TABLE"}, ("answer", a, own, facts, row, dw)
+    fqn = model_fqn or target_tml.get("guid")
+    rows, placed, content, drill_sources = _widget_tiles(inv, inv.get("widgets", []) or [], binder, fqn)
+    _add_drills(drill_tables(drills, binder, drill_sources, fqn, _answer_for), rows, placed, content)
     viz, layout, tiles, answers = _assemble(inv, placed, content)
     chips, chip_rows = build_chips(inv, binder, tiles)
-    chip_rows += _board_rows(rows, tables)
+    chip_rows += _board_rows(rows, tables) + _warning_rows(inv, drills)
     lb = {"liveboard": {"name": report_name, "visualizations": viz, "layout": {"tiles": layout}}}
     if chips:
         lb["liveboard"]["filters"] = chips

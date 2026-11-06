@@ -212,7 +212,9 @@ def test_widget_filters_become_search_filters_never_in_lists():
     w = _w("w1", "Open cases", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")],
            [_member("[dim_case.status]", ["Open", "Pending"]), _exclude("[dim_case.source_pk]", ["T1", "T2"]),
             _range("[fact_visit.cost]", {"from": 0, "toNotEqual": 100})])
-    q = _answers(build_target_liveboard(_inv([w]), _target()))["Open cases"]["search_query"]
+    target = _target()                       # cost as a numeric ATTRIBUTE: a row-level filter on it is exact
+    next(c for c in target["model"]["columns"] if c["name"] == "Visit Cost")["properties"] = {"column_type": "ATTRIBUTE"}
+    q = _answers(build_target_liveboard(_inv([w]), target))["Open cases"]["search_query"]
     assert "[Case Status] = 'Open' [Case Status] = 'Pending'" in q     # ThoughtSpot ORs same-column =
     assert "[Case ID] != 'T1' [Case ID] != 'T2'" in q                  # and ANDs same-column !=
     assert "[Visit Cost] >= 0 [Visit Cost] < 100" in q
@@ -965,8 +967,8 @@ def test_widget_spanning_two_facts_is_needs_review():
                                                _f("[fact_case_stats.visit_total]", "values", "measure", "sum")],
                     [_range("[fact_visit.cost]", {"from": 100})])
     res = build_target_liveboard(_inv([two, via_filter]), _target())
-    for title in ("Both", "Stats"):
-        assert _row(res, title)["status"] == "NEEDS REVIEW" and "multi-fact" in _row(res, title)["note"], title
+    assert _row(res, "Both")["status"] == "NEEDS REVIEW" and "multi-fact" in _row(res, "Both")["note"]
+    assert _row(res, "Stats")["status"] == "NEEDS REVIEW"          # (its cost filter is on a measure, too)
 
 
 def test_rank_at_another_date_level_than_the_plotted_one_is_needs_review():
@@ -1195,3 +1197,90 @@ def test_missing_table_tmls_are_reported():
     assert any(r["visual"] == "(target model Tables)" and r["status"] == "NEEDS REVIEW" for r in res["visual_rows"])
     with_tables = build_target_liveboard(_inv([_visits()]), _target(), tables=[{"table": {"name": "x", "columns": []}}])
     assert not any(r["visual"] == "(target model Tables)" for r in with_tables["visual_rows"])
+
+
+
+# --------------------------------------------------------------------------- adversarial review 4
+def test_field_map_chooses_the_column_but_every_path_check_still_runs():
+    pairs = _w("w1", "Pairs", "tablewidget", [_f("[dim_case.status]", "rows"), _f("[dim_site.name]", "rows")])
+    row = _row(build_target_liveboard(_inv([pairs]), _target(), overrides={"field_map": {"[dim_site.name]": "Visit Site Name"}}),
+               "Pairs")
+    assert row["status"] == "NEEDS REVIEW"
+
+
+def test_chip_with_field_map_is_still_checked_per_tile():
+    wv = _w("wv", "Visit cost by status", "chart/column", [_f("[dim_case.status]", "categories"),
+                                                         _f("[fact_visit.cost]", "values", "measure", "sum")])
+    ws = _w("ws", "Stats by status", "chart/column", [_f("[dim_case.status]", "categories"),
+                                                      _f("[fact_case_stats.visit_total]", "values", "measure", "sum")])
+    res = build_target_liveboard(_inv([wv, ws], [_member("[dim_site.name]", ["North"])]), _target(),
+                                 overrides={"field_map": {"[dim_site.name]": "Case Site Name"}})
+    assert _row(res, "Visit cost by status")["status"] == "NEEDS REVIEW"
+
+
+def test_formula_built_from_formulas_of_two_facts_spans_both():
+    target = _target()
+    target["model"]["formulas"] += [{"id": "formula_A", "name": "A", "expr": "sum ( [fact_visit::cost] )"},
+                                    {"id": "formula_B", "name": "B", "expr": "sum ( [fact_case_stats::visit_total] )"},
+                                    {"id": "formula_Combined", "name": "Combined", "expr": "[formula_A] + [formula_B]"}]
+    target["model"]["columns"] += [{"name": n, "formula_id": f"formula_{n}", "properties": {"column_type": "MEASURE"}}
+                                   for n in ("A", "B", "Combined")]
+    assert TargetModel(target).instances_of["Combined"] == {"fact_visit", "fact_case_stats"}
+    w = _w("w1", "Combined", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months"),
+                                            _f("[fact_visit.combined]", "values", "measure", "sum")])
+    row = _row(build_target_liveboard(_inv([w]), target, overrides={"field_map": {"[fact_visit.combined]": "Combined"}}),
+               "Combined")
+    assert row["status"] == "NEEDS REVIEW" and "multi-fact" in row["note"]
+
+
+def test_two_sisense_facts_linking_a_no_fact_widget_is_a_tie_and_needs_review():
+    inv = _inv([_w("w1", "Status by start", "tablewidget", [_f("[dim_case.status]", "rows"),
+                                                           _f("[Visit_Start_Date.date_day (Calendar)]", "rows", level="months")])])
+    inv["relations"] = RELATIONS + [_rel("fact_appt", "case_id_", "dim_case", "id_"),
+                                    _rel("fact_appt", "date_id_", "Visit_Start_Date", "id_")]
+    assert _row(build_target_liveboard(inv, _target()), "Status by start")["status"] == "NEEDS REVIEW"
+
+
+def test_row_filter_on_a_measure_column_and_chip_on_one_are_needs_review():
+    w = _w("w1", "Big", "chart/column", [_f("[dim_case.status]", "categories"),
+                                         _f("[fact_visit.cost]", "values", "measure", "sum")],
+           [_range("[fact_visit.cost]", {"from": 100})])
+    assert "a Model measure" in _row(build_target_liveboard(_inv([w]), _target()), "Big")["note"]
+    res = build_target_liveboard(_inv([_visits()], [_member("[fact_visit.cost]", ["100"])]), _target())
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"
+
+
+def test_chip_on_a_multi_endpoint_relation_table_is_needs_review():
+    inv = _inv([_w("w1", "Total", "indicator", [_f("[fact_case_stats.visit_total]", "value", "measure", "sum")])],
+               [_member("[dim_site.name]", ["North"])])
+    inv["relations"] = [RELATIONS[0], RELATIONS[3], RELATIONS[4],
+                        {"endpoints": [{"table": "dim_case", "column": "site_id_"}, {"table": "dim_site", "column": "id_"},
+                                       {"table": "fact_appt", "column": "site_id_"}]}]
+    res = build_target_liveboard(inv, _target())
+    assert _row(res, "Total")["status"] == "NEEDS REVIEW"
+
+
+def test_additive_measure_on_a_non_fact_table_across_a_join_is_needs_review():
+    target = _target()
+    target["model"]["columns"].append({"name": "Case Value", "column_id": "dim_case::value",
+                                       "properties": {"column_type": "MEASURE", "aggregation": "SUM"}})
+    w = _w("w1", "Value by month", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months"),
+                                                  _f("[dim_case.value]", "values", "measure", "sum")])
+    assert _row(build_target_liveboard(_inv([w]), target), "Value by month")["status"] == "NEEDS REVIEW"
+
+
+def test_chip_and_widget_filter_on_different_dims_bound_to_one_column_is_needs_review():
+    w = _w("w1", "Open", "indicator", [_f("[fact_visit.case_id_]", "value", "measure", "count")],
+           [_member("[dim_case.status]", ["Open"])])
+    res = build_target_liveboard(_inv([w], [_member("[dim_case.status_code]", ["Closed"])]), _target(),
+                                 overrides={"field_map": {"[dim_case.status_code]": "Case Status"}})
+    assert _row(res, "Open")["status"] == "NEEDS REVIEW"
+
+
+def test_widget_on_another_data_source_and_parse_warnings_are_needs_review():
+    inv = _inv([dict(_visits(), datasource="OtherCube")])
+    inv["dashboard"]["datasource"] = "Acme"
+    inv["warnings"] = ["A relation had no resolvable endpoints; skipped."]
+    res = build_target_liveboard(inv, _target())
+    assert "OtherCube" in _row(res, "Visits")["note"] and _row(res, "Visits")["status"] == "NEEDS REVIEW"
+    assert any(r["visual"] == "(parse warning)" for r in res["visual_rows"])

@@ -37,11 +37,13 @@ def flag_tile(tile: dict, note: str) -> None:
 def _chip_column(sf: dict, binder, anchor_sets: list) -> tuple:
     """Dashboard filter -> (model column | None, instance | None, note)."""
     dim = sf.get("dim") or ""
+    table, col = split_dim(dim)
+    if table in binder.multi_rel:
+        return None, None, (f"Sisense relates {table} through a relation that is not one column to one "
+                            "column, which this converter does not read")
     if dim in binder.field_map:
         name, _, note = binder.mapped(dim)
-        insts = binder.t.instances_of.get(name) or set()
-        return name, (next(iter(insts)) if len(insts) == 1 else None), note
-    table, col = split_dim(dim)
+        return name, (binder.t.single_instance(name) if name else None), note
     inst, note = binder.t.resolve_chip_instance(table, anchor_sets, binder.relations)
     name = binder.t.column(inst, col) if inst else None
     if inst and not name:
@@ -84,8 +86,6 @@ def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
         return "the tile's facts could not be determined, so whether the chip reaches it cannot be checked"
     if not any(inst in binder.t.reachable(a) for a in facts):
         return f"the chip's {inst} does not reach this tile's facts"
-    if (sf.get("dim") or "") in binder.field_map:
-        return ""
     table = split_dim(sf.get("dim") or "")[0]
     own = binder.t.resolve_instance(table, facts, binder.relations)[0]
     if own is None:
@@ -97,12 +97,20 @@ def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
     return binder.t.role_conflict(table, inst, insts, known, relations=binder.relations)
 
 
+def _filters_dim(widget: dict, dim: str) -> bool:
+    return any(_same_dim(f.get("dim") or "", dim) for f in widget.get("filters", []))
+
+
 def _split_tiles(sf: dict, name: str, tiles: list) -> tuple:
     """-> (excluded viz ids, titles of tiles ignoring the filter, tiles the chip applies to)."""
     excluded, ignoring = [], []
     for t in tiles:
-        if name in t["own"]:
+        if name in t["own"] and _filters_dim(t["widget"], sf.get("dim") or ""):
             excluded.append(t["vid"])                  # the widget's own filter wins in Sisense
+        elif name in t["own"]:
+            flag_tile(t, f"dashboard filter {sf.get('dim')} binds [{name}], a column the widget filters through "
+                         "another Sisense dimension: Sisense applies both, a chip would replace the widget's")
+            excluded.append(t["vid"])
         elif _ignores(t["widget"], sf):
             excluded.append(t["vid"])
             ignoring.append(t["title"])
@@ -140,6 +148,11 @@ def _chip(sf: dict, name: str, inst, binder, tiles: list) -> tuple:
     if excluded:
         chip["excluded_visualizations"] = excluded
     rows = _condition_rows(sf, chip, name, binder, applied) + _tile_rows(sf, name, inst, binder, applied)
+    if name in binder.t.measures:
+        for t in applied:
+            flag_tile(t, f"dashboard filter {name} filters a Model measure, which ThoughtSpot applies after aggregating")
+        rows.append(review(f"filter chip {name}", "it filters a Model measure column, which ThoughtSpot applies "
+                           "after aggregating, while Sisense filters rows"))
     if ignoring:
         rows.append({"visual": f"filter chip {name}", "ts_chart": "FILTER", "status": "Migrated",
                      "note": "excluded from tiles that ignore it in Sisense: " + "; ".join(ignoring)})

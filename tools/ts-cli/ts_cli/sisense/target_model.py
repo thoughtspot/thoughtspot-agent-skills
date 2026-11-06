@@ -77,6 +77,7 @@ class TargetModel:
         self.table_cols = _table_columns(tables)
         for c in model.get("columns") or []:
             self._index_column(c)
+        self._expand_formula_refs(model.get("columns") or [])
         self._insts_by_norm: dict = {}
         for inst in self.base_of:
             self._insts_by_norm.setdefault(_norm(inst), []).append(inst)
@@ -98,6 +99,24 @@ class TargetModel:
         names = {many, self.base_of.get(many)}
         fk = next((col for tbl, col in sides if tbl in names), None)
         self.joins.setdefault(many, []).append((one, fk))
+
+    def _expand_formula_refs(self, columns: list) -> None:
+        """A formula referencing other formulas (``[formula_A]``, or a column by display name)
+        reads every instance THEY read: resolved to a fixed point, so a formula built from two
+        facts' formulas is seen spanning both."""
+        by_ref = {c.get("formula_id"): c.get("name") for c in columns if c.get("formula_id")}
+        by_ref.update({c.get("name"): c.get("name") for c in columns})
+        refs = {c["name"]: {by_ref[r] for r in re.findall(r"\[([^\]:]+)\]", self.formulas.get(c["formula_id"], ""))
+                            if r in by_ref and by_ref[r] != c["name"]}
+                for c in columns if c.get("formula_id")}
+        changed = True
+        while changed:
+            changed = False
+            for name, used in refs.items():
+                extra = set().union(*(self.instances_of.get(u, set()) for u in used)) - self.instances_of.get(name, set())
+                if extra:
+                    self.instances_of[name] = self.instances_of.get(name, set()) | extra
+                    changed = True
 
     def _index_column(self, c: dict) -> None:
         nm = c.get("name")
@@ -163,6 +182,11 @@ class TargetModel:
     def candidates(self, sis_table: str, relations: list) -> list:
         return (self.named_instances(sis_table) or self.relation_instances(sis_table, relations)
                 or self.instances_of_base(sis_table))
+
+    def single_instance(self, name: str):
+        """The one instance a Model column reads, or None (a formula over several, or none)."""
+        insts = self.instances_of.get(name) or set()
+        return next(iter(insts)) if len(insts) == 1 else None
 
     def spans_facts(self, column_names) -> bool:
         """The columns read instances no single fact reaches: a multi-fact (chasm) query."""
