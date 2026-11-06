@@ -259,6 +259,8 @@ def _classify_filter(jaql: dict) -> dict | None:
         hit["level"] = jaql["level"]
     if jaql.get("datatype"):
         hit["datatype"] = jaql["datatype"]
+    if jaql.get("agg") or jaql.get("formula"):   # a measure filter, not a row-level one
+        hit["agg"] = jaql.get("agg") or "formula"
     unsupported = _unsupported_keys(hit["kind"], f)
     if unsupported:
         hit["unsupported"] = unsupported
@@ -322,11 +324,15 @@ def parse_widget(widget: dict, warnings: list) -> dict:
         "fields": acc["fields"],
         "filters": acc["filters"],
     }
+    try:
+        out.update(_widget_extras(widget))
+        out.update(_dashboard_filter_settings(widget))
+    except Exception as e:  # a malformed setting flags the widget instead of aborting the parse
+        warnings.append(f"Could not read the settings of widget {widget.get('oid', '?')}: {e}")
+        acc["unsupported"].add(f"unreadable setting ({type(e).__name__}: {e})")
     for key in ("disabled_filters", "unsupported"):
         if acc[key]:
             out[key] = sorted(acc[key]) if key == "unsupported" else acc[key]
-    out.update(_widget_extras(widget))
-    out.update(_dashboard_filter_settings(widget))
     return out
 
 
@@ -354,10 +360,25 @@ def _widget_extras(widget: dict) -> dict:
     if wtype == "richtexteditor":
         content = style.get("content") or {}
         extras["richtext"] = {"html": content.get("html") or "", "bg_color": content.get("bgColor") or ""}
-    targets = _drill_targets(widget.get("drillToDashboardConfig") or {})
+    drill = widget.get("drillToDashboardConfig") or {}
+    targets = _drill_targets(drill)
     if targets:
         extras["drill_targets"] = targets
+        changed = _drill_filter_settings(drill)
+        if changed:
+            extras["drill_filter_settings"] = changed
     return extras
+
+
+# Jump-to-dashboard settings that change which filters reach the drilled dashboard, and their
+# defaults; any other value is recorded so a consumer can refuse to assume the default.
+_DRILL_FILTER_DEFAULTS = {"includeFilterDims": [], "excludeFilterDims": [], "includeDashFilterDims": [],
+                          "excludeDashFilterDims": [], "resetDashFiltersAfterJTD": False,
+                          "mergeTargetDashboardFilters": False}
+
+
+def _drill_filter_settings(drill: dict) -> list:
+    return sorted(k for k, default in _DRILL_FILTER_DEFAULTS.items() if k in drill and drill[k] not in (default, None))
 
 
 def _tabber(style: dict) -> dict:
@@ -387,25 +408,38 @@ def _dashboard_filter(f: dict, dash_filters: list, disabled: list) -> None:
         sf = _classify_filter(jaql)
         if sf:
             sf["instanceids"] = [i for i in (f.get("instanceid"), jaql.get("instanceid")) if i]
+            extra = sorted(f"jaql.{k}" for k in jaql if k not in _JAQL_KEYS)
+            if extra:
+                sf["unsupported"] = sorted(set(sf.get("unsupported", [])) | set(extra))
             dash_filters.append(sf)
 
 
-def parse_dashboard(raw: dict, warnings: list) -> dict:
-    dash_filters: list[dict] = []
-    disabled: list = []
-    unreadable: list = []
+def _dashboard_filters(raw: dict, warnings: list) -> tuple:
+    """-> (filters, disabled dims, unreadable dims). One malformed filter must not abort the
+    parse, nor vanish: it is listed so the consumer can report it."""
+    dash_filters, disabled, unreadable = [], [], []
     for f in raw.get("filters", []) or []:
         try:
             _dashboard_filter(f, dash_filters, disabled)
-        except Exception as e:  # one malformed filter must not abort the parse, nor vanish
+        except Exception as e:
             warnings.append(f"Could not parse a dashboard filter: {e}")
             unreadable.append(str((f.get("jaql") or {}).get("dim") or "?") if isinstance(f, dict) else "?")
+    return dash_filters, disabled, unreadable
+
+
+def parse_dashboard(raw: dict, warnings: list) -> dict:
+    dash_filters, disabled, unreadable = _dashboard_filters(raw, warnings)
+    try:
+        layout = _parse_layout(raw.get("layout") or {})
+    except Exception as e:  # layout is presentation: a bad one is reported, the board still builds
+        warnings.append(f"Could not read the dashboard layout: {e}")
+        layout = []
     out = {
         "oid": raw.get("oid") or raw.get("_id") or "",
         "title": raw.get("title") or "",
         "datasource": (raw.get("datasource") or {}).get("title") or "",
         "filters": dash_filters,
-        "layout": _parse_layout(raw.get("layout") or {}),
+        "layout": layout,
     }
     if disabled:
         out["disabled_filters"] = disabled

@@ -69,6 +69,9 @@ def _highlights(widget: dict, sf: dict) -> bool:
 
 def _tile_problem(tile: dict, sf: dict, inst, binder) -> str:
     """Why this chip does not filter this tile the way Sisense filtered the widget, or ''."""
+    mode = tile["widget"].get("filters_mode")
+    if mode not in (None, "filter", "select"):
+        return f"the widget's dashboard-filter mode is {mode!r}, which this converter does not read"
     if _highlights(tile["widget"], sf):
         return "the widget is in Highlight mode in Sisense, so this column highlights instead of filtering"
     facts = tile["facts"]

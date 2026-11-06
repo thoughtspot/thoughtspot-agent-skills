@@ -107,13 +107,15 @@ Facts established on the way, each now encoded:
 one this path reads and has verified; the parser lists every JAQL, panel-item and filter key it
 does not read, so a new Sisense setting is flagged, never ignored. What is flagged NEEDS REVIEW,
 on the chip and on every tile it affects, is enumerated in the coverage matrix ("Binding to an
-existing Model"). Rebuilt with every check in place, the live board above reports 7 rows NEEDS
-REVIEW, each a real risk: five tiles whose tables reach the filtered facility through two copies
-Sisense relates (which one Sisense filters by cannot be decided), a weekly bucket with a Sisense
-week start (that cluster also starts weeks on Monday, so it is accepted there), and the drill's
-details table, whose facility columns were bound through the enrollment copy while Sisense joins
-that widget's facility through the case -- the earlier tile-for-tile comparison above was between
-two rebuilds sharing that binding, not against Sisense.
+existing Model"). Rebuilt with every check in place, the live board above reports these NEEDS
+REVIEW rows, each a real risk or an unverified step: tiles whose tables reach the filtered
+facility through two copies Sisense relates (which one Sisense filters by cannot be decided), and
+the hidden grains merged into them; weekly buckets (that cluster starts weeks on Monday, as the
+Sisense widgets do, so they are accepted there); a calculated column bound to its Model formula by
+name only (confirmed with one `field_map` line); and the drill's details table, whose facility
+columns were bound through the enrollment copy while Sisense joins that widget's facility through
+the case, and whose patient table Sisense reaches on a column the Model does not join. The earlier
+tile-for-tile comparison above was between two rebuilds sharing those bindings, not against Sisense.
 
 Still unit-tested only: range chips (#5, flagged until verified), and a search value containing
 a backslash (flagged, since only `'` quoting is verified).

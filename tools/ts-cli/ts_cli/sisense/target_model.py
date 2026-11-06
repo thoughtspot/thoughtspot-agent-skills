@@ -92,6 +92,8 @@ class TargetModel:
             self._add_join(inst, target, sides, card)
 
     def _add_join(self, inst: str, target: str, sides: list, card: str) -> None:
+        if card == "MANY_TO_MANY":       # no many -> one direction: not followed, so a widget
+            return                       # needing it reports its table as unreachable
         many, one = (target, inst) if card == "ONE_TO_MANY" else (inst, target)
         names = {many, self.base_of.get(many)}
         fk = next((col for tbl, col in sides if tbl in names), None)
@@ -162,6 +164,11 @@ class TargetModel:
         return (self.named_instances(sis_table) or self.relation_instances(sis_table, relations)
                 or self.instances_of_base(sis_table))
 
+    def spans_facts(self, column_names) -> bool:
+        """The columns read instances no single fact reaches: a multi-fact (chasm) query."""
+        need = set().union(*(self.instances_of.get(c, set()) for c in column_names)) if column_names else set()
+        return bool(need) and not self.facts_for(column_names)
+
     def facts_for(self, column_names) -> list:
         """Roots (facts) whose join tree reaches every instance the given columns read."""
         need = set().union(*(self.instances_of.get(c, set()) for c in column_names)) if column_names else set()
@@ -177,6 +184,10 @@ class TargetModel:
         instances; ``relations`` the parsed Sisense relations (``[{left, right}]`` endpoints)."""
         named = self.named_instances(sis_table)
         hits = self.fk_instances(sis_table, anchors, relations)
+        missing = [] if hits else self.unjoined_relations(sis_table, anchors, relations)
+        if missing:
+            return None, (f"Sisense joins {sis_table} on {', '.join(missing)}, which the target model does "
+                          "not join, so it would reach the table another way")
         reach = set().union(*(self.reachable(a) for a in anchors)) if anchors else None
         if len(named) == 1:
             return self._by_name(sis_table, named[0], hits, reach, anchors)
@@ -219,12 +230,25 @@ class TargetModel:
         hits = [h for h in hits if h]
         return bool(hits) and all(h == {inst} for h in hits)
 
+    def unjoined_relations(self, sis_table: str, anchors: list, relations: list) -> list:
+        """``anchor.column`` for each Sisense relation from a widget fact to ``sis_table`` whose
+        column the Model joins nothing on from that fact."""
+        out = []
+        for a in anchors:
+            joined = {_norm(fk) for _, fk in self.joins.get(a, []) if fk}
+            for fk in _sisense_fk_cols(sis_table, self.base_of.get(a) or a, relations or []):
+                tfk = self._table_column(a, fk) or fk
+                if _norm(fk) not in joined and _norm(tfk) not in joined:
+                    out.append(f"{a}.{fk}")
+        return out
+
     def fk_instances(self, sis_table: str, anchors: list, relations: list) -> set:
         """Instances the anchors join on the FK column a Sisense relation links ``sis_table`` by."""
         hits = set()
         for anchor in anchors:
             for fk in _sisense_fk_cols(sis_table, self.base_of.get(anchor) or anchor, relations):
-                hits.update(t for t, c in self.joins.get(anchor, []) if c == fk)
+                keys = {_norm(fk), _norm(self._table_column(anchor, fk) or fk)}
+                hits.update(t for t, c in self.joins.get(anchor, []) if c and _norm(c) in keys)
         return hits
 
     def resolve_chip_instance(self, sis_table: str, anchor_sets: list, relations=None) -> tuple:
@@ -287,6 +311,14 @@ class TargetModel:
         hits = [name for db, name in cols.items() if _norm(db) == _norm(col)]
         return hits[0] if len(hits) == 1 else None
 
+    def _role_copies(self, sis_table: str, inst: str, widget_insts: set) -> set:
+        """The copies of ``inst``'s base table when its role is a real choice for this widget:
+        not for one copy, a Sisense table of its own for this role, or a widget with no other
+        table to join through (every copy then reads the same rows)."""
+        copies = set(self.instances_of_base(self.base_of.get(inst) or ""))
+        own_role_table = self.named_instances(sis_table) and _norm(sis_table) != _norm(self.base_of.get(inst) or "")
+        return set() if len(copies) <= 1 or own_role_table or not (widget_insts - copies) else copies
+
     def role_conflict(self, sis_table: str, inst: str, widget_insts: set, path_known: bool,
                       relations=None) -> str:
         """Why binding ``inst`` for a role-played table may not be the copy Sisense joins for this
@@ -295,10 +327,9 @@ class TargetModel:
         such copies cannot be decided. With no such copy, ``path_known`` says whether the
         widget's path to the table is otherwise determined (it names a fact, or exactly one fact
         links its tables and its Sisense relation picked ``inst``)."""
-        copies = set(self.instances_of_base(self.base_of.get(inst) or ""))
-        if len(copies) <= 1 or self.named_instances(sis_table) or not (widget_insts - copies):
-            return ""          # one copy, a Sisense table of its own for this role, or no other
-                               # table to join through (every copy then reads the same rows)
+        copies = self._role_copies(sis_table, inst, widget_insts)
+        if not copies:
+            return ""
         adjacent = {t for other in widget_insts - copies for t in self.fk_instances(sis_table, [other], relations or [])
                     if t in copies}
         if len(adjacent) > 1:
@@ -312,12 +343,16 @@ class TargetModel:
         return ""
 
     def count_measure(self, kind: str, inst: str, col: str) -> Optional[str]:
-        """A model formula measure ``unique count ( [inst::col] )`` (or ``count``), if any."""
-        for ref in (inst, self.base_of.get(inst)):
-            nm = self.count_measures.get((kind, ref, col))
-            if nm:
-                return nm
-        return None
+        """A model formula measure ``unique count ( [inst::col] )`` (or ``count``), if any. The
+        warehouse column goes through the Table TML mapping like any binding, and the base table
+        name stands in for ``inst`` only when the table has no other copy (it would count
+        another role's rows otherwise)."""
+        base = self.base_of.get(inst)
+        tcol = self._table_column(inst, col) if base in self.table_cols else col
+        if not tcol:
+            return None
+        refs = [inst] + ([base] if base != inst and len(self.instances_of_base(base or "")) == 1 else [])
+        return next((self.count_measures[(kind, r, tcol)] for r in refs if (kind, r, tcol) in self.count_measures), None)
 
 
 def _table_columns(tables) -> dict:

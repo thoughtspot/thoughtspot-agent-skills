@@ -72,6 +72,8 @@ def value_problem(sf: dict) -> Optional[str]:
         return "a member is null, which has no verified search or chip form"
     if any("\\" in str(v) for v in vals):
         return "a value contains a backslash, which search quoting has not been verified for"
+    if sf.get("kind") in ("member", "exclude") and any(isinstance(v, (bool, float)) for v in vals):
+        return "a member is a boolean or decimal, whose written form is not verified"
     raw = sf.get("raw") or {}
     if sf.get("kind") == "range" and raw.get("equals") is not None and len(
             [k for k in ("from", "to", "fromNotEqual", "toNotEqual") if raw.get(k) is not None]):
@@ -83,6 +85,8 @@ def common_problem(sf: dict) -> Optional[str]:
     """Reasons shared by widget filters and chips (unrecognised keys, values, dates)."""
     if sf.get("unsupported"):
         return "it carries filter settings this converter does not read: " + ", ".join(sf["unsupported"])
+    if sf.get("agg"):
+        return f"it filters an aggregate ({sf['agg']}), whose ThoughtSpot filter semantics are not verified"
     return date_problem(sf) or value_problem(sf)
 
 
@@ -154,9 +158,10 @@ def _rank_problem(sf: dict, n: int, measures: list, dimensions: list) -> Optiona
         return "the ranking carries settings this converter does not read: " + ", ".join(sf["unsupported"])
     if n <= 0:
         return f"{op} {n} is not a positive rank, so the ranking is not carried"
-    if len(dimensions) != 1 or dimensions[0].get("dim") != sf.get("dim"):
-        return (f"{op} {n} ranks {sf.get('dim')}, which is not the widget's only dimension, "
-                "so ThoughtSpot would rank different rows; not carried")
+    if len(dimensions) != 1 or dimensions[0].get("dim") != sf.get("dim") or \
+            (dimensions[0].get("level") or "").lower() != (sf.get("level") or "").lower():
+        return (f"{op} {n} ranks {sf.get('dim')} (level {sf.get('level') or 'none'}), which is not the widget's "
+                "only dimension at the same level, so ThoughtSpot would rank different rows; not carried")
     if len(measures) != 1 or not _same_measure(by, measures[0]):
         return (f"{op} {n} ranks by {by.get('dim') or by.get('formula') or 'an unknown measure'}, "
                 "which is not the widget's only measure, so the ranking is not carried")

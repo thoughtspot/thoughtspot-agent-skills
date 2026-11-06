@@ -73,6 +73,9 @@ def chart_type_for(wtype, subtype: str = "") -> tuple:
         base = _CHART_MAP[wt]
         if base is None:
             return None, "Skipped", f"{wtype} is a text/no-chart widget"
+        if "100" in st:      # a 100% stack shows each value's SHARE of its total
+            return ("STACKED_" + base if base in ("BAR", "COLUMN") else base), "NEEDS REVIEW", \
+                f"{subtype} is a 100% stack (shares of each total); it is carried as absolute values"
         if base in ("BAR", "COLUMN") and "stacked" in st:
             return "STACKED_" + base, "Migrated", "stacked subtype"
         if base == "SCATTER" and ("bubble" in st or wt == "chart/bubble"):
@@ -167,7 +170,7 @@ def _widget_top_n(widget: dict) -> int | None:
 def _rank_note(widget: dict) -> str:
     """A top/bottom rank the default path does not carry -> the reason, else ''."""
     for sf in widget.get("filters", []) or []:
-        if sf.get("kind") == "top_n" and (sf.get("operator") != "top" or _widget_top_n(widget) is None):
+        if sf.get("kind") == "top_n" and (sf.get("operator") != "top" or not _widget_top_n(widget)):
             return f"{sf.get('operator')} {sf.get('values')} ranking is not carried"
     return ""
 
