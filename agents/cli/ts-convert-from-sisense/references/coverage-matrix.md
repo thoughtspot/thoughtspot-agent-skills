@@ -139,7 +139,7 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Filters a drill source passes | Mapped | the filters every source shares, bound in the DRILL widget's own context (its facts and copies); a ranking or a non-shared filter is NEEDS REVIEW |
 | Ranked tab, or a hidden tab with its own drill | Mapped | a tile of its own, never `Merged` (a ranking re-ranks at whatever bucket the chart shows) |
 | Model Table TMLs not supplied | Flagged | every tile NEEDS REVIEW, plus one board-level row: warehouse columns were matched by Table column name, not `db_column_name` |
-| `field_map` / `filter_map` entries | Mapped | they choose the column (or the search fragment); every path check still runs on what they choose: role copy, a widget naming no fact, a chip's copy per tile, relations not one column to one column |
+| `field_map` / `filter_map` entries | Mapped | they choose the column (or the search fragment) and are KEPT in the query; every path check still runs on what they read (role copy, a widget naming no fact, the whole join path, a chip's copy per tile), and a problem flags the row NEEDS REVIEW rather than dropping the override |
 | Formula built from other formulas | Mapped | read as reading every instance its referenced formulas read (to a fixed point), so the multi-fact and chip checks see it |
 | Widget naming no fact, linked in Sisense by two facts | Flagged | NEEDS REVIEW: a tie in Sisense's own path choice (linking facts are counted from Sisense's relations, not the Model's facts) |
 | Row-level filter or chip on a Model MEASURE column | Flagged | NEEDS REVIEW: ThoughtSpot filters a measure after aggregating, Sisense filters rows |
@@ -148,6 +148,11 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Widget reading another data source than the dashboard | Flagged | NEEDS REVIEW |
 | Parse warnings (a skipped relation, an unreadable widget) | Flagged | each one a NEEDS REVIEW row in the report, not only stderr |
 | Join path from a widget's fact to each table it reads (fields, filters, chips) | Mapped when equal | carried only when the Model's many → one path is the same as Sisense's shortest relation path, hop for hop on the same columns; a different path (a shortcut, another foreign key), a tie among Sisense's shortest paths, or no unique Model path is NEEDS REVIEW |
+| Model join on more than one condition (composite key, extra predicate) | Flagged | NEEDS REVIEW wherever it is on a path: Sisense relates on one column |
+| Model reaching a table from the fact more than one way, or a widget using every table of a Sisense loop | Flagged | NEEDS REVIEW: which join each engine takes is not verified |
+| Partial Table TML export | Flagged | a binding on a table whose Table TML is missing is NEEDS REVIEW |
+| Sisense calculated column found as a plain Model column of the same name | Flagged | NEEDS REVIEW until mapped: that it computes the same thing is not verified |
+| Join type (inner vs left outer) | Not checked | a known limit: the Model's join type is not compared with Sisense's, which a migration team checks on the Model |
 | Chip adding a join to a measure on a non-fact table | Flagged | NEEDS REVIEW, as for the same filter on the widget |
 | Dashboard `filterRelations` / `filterToDatasourceMapping` set | Flagged | NEEDS REVIEW on every tile: the filters are not combined by AND |
 | Sisense column renamed from its source column | Flagged | NEEDS REVIEW until mapped: which one the Model column reads is not verified |

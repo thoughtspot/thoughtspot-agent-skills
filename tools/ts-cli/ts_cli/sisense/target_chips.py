@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from ts_cli.sisense.target_filters import chip_condition, is_all
 from ts_cli.sisense.target_model import split_dim
-from ts_cli.sisense.target_paths import _sisense_table, path_problem, sisense_graph
+from ts_cli.sisense.target_paths import _sisense_table, loop_problem, path_problem, sisense_graph
 
 
 def review(visual: str, note: str) -> dict:
@@ -45,10 +45,16 @@ def _chip_column(sf: dict, binder, anchor_sets: list) -> tuple:
     if dim in binder.field_map:
         name, _, note = binder.mapped(dim)
         return name, (binder.t.single_instance(name) if name else None), note
+    if (table, col) in binder.renamed:
+        return None, None, (f"Sisense column {table}.{col} is the source column {binder.renamed[(table, col)]} "
+                            "renamed; which one the Model column reads is not verified (map it via field_map)")
     inst, note = binder.t.resolve_chip_instance(table, anchor_sets, binder.relations)
     name = binder.t.column(inst, col) if inst else None
     if inst and not name:
         note = f"{table}.{col} is not exposed on the target model"
+    guess = binder._plain_binding_problem(table, col, inst) if name else ""
+    if guess:
+        return None, None, guess
     return name, inst, note
 
 
@@ -88,7 +94,9 @@ def _reach_problem(tile: dict, sf: dict, inst, binder) -> str:
     facts = tile["facts"]
     if inst is None:
         return "the chip's table instance could not be determined, so whether it filters this tile as in Sisense cannot be checked"
-    path = binder.no_fact_problem(tile["widget"], (split_dim(sf.get("dim") or "")[0], inst))
+    table = split_dim(sf.get("dim") or "")[0]
+    path = binder.no_fact_problem(tile["widget"], (table, inst)) or \
+        loop_problem(binder.relations, binder.sisense_tables(tile["widget"], table))
     if path:
         return path
     fan = binder.non_fact_measures(tile["widget"]) - {inst}

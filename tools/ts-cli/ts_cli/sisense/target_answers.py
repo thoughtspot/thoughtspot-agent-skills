@@ -43,7 +43,7 @@ from ts_cli.sisense.target_layout import _note_text, _place, note_tile
 from ts_cli.sisense.target_tabs import _GRAIN_SUFFIX, _hidden_tabs, _kept_tabs, tabber_hidden
 from ts_cli.sisense.target_filters import is_all, top_n, widget_filter
 from ts_cli.sisense.target_model import TargetModel, split_dim
-from ts_cli.sisense.target_paths import path_problem
+from ts_cli.sisense.target_paths import loop_problem, one_hop_problem, path_problem
 from ts_cli.tableau.liveboard import agg_label
 
 # Sisense agg -> ThoughtSpot search keyword. Sisense `count` is a DISTINCT count.
@@ -163,12 +163,22 @@ class _Binder:
             return None, None, conflict
         name = self.t.column(inst, col)
         if name:
-            return name, inst, ""
+            return name, inst, self._plain_binding_problem(table, col, inst)
         name = self._calculated(table, col, inst, measure)
         if name:
             return name, inst, (f"Sisense calculated column {table}.{col} is bound to Model formula [{name}] by "
                                 "name only; confirm it is the same calculation (map it via field_map)")
         return None, inst, f"{table}.{col} is not exposed on the target model"
+
+    def _plain_binding_problem(self, table: str, col: str, inst: str) -> str:
+        """Why a column found by its warehouse name is still a guess, or ''."""
+        if (table, col) in self.calculated:
+            return (f"Sisense calculated column {table}.{col} is bound to a plain Model column of the same name; "
+                    "confirm it computes the same thing (map it via field_map)")
+        if self.t.table_cols and self.t.base_of.get(inst) not in self.t.table_cols:
+            return (f"the Table TML for {self.t.base_of.get(inst)} was not supplied, so {table}.{col} was matched by "
+                    "Table column name (export with --associated)")
+        return ""
 
     def _path_problem(self, table: str, inst, anchors: list) -> str:
         """Why ``inst`` may not be the copy of ``table`` Sisense joins for the current widget, or ''."""
@@ -240,6 +250,11 @@ class _Binder:
                  and all(self.t.fk_instances(t, [r], self.relations) for t in bound)]
         return roots if len(roots) == 1 else []
 
+    def sisense_tables(self, widget: dict, extra: str = "") -> set:
+        """The Sisense tables a widget (plus a chip's table) reads."""
+        dims = [f.get("dim") for f in widget.get("fields", [])] + [sf.get("dim") for sf in widget.get("filters", [])]
+        return {split_dim(d)[0] for d in dims if d} | ({extra} - {""})
+
     def _bound_tables(self, widget: dict, extra: tuple):
         """Sisense table -> the instance it binds to, for a widget naming NO fact (else None)."""
         anchors = self.anchors(widget)
@@ -264,8 +279,18 @@ class _Binder:
     def _joined(self, a: str, b: str, bound: dict) -> bool:
         """The Model joins the two BOUND copies on a column a Sisense relation uses."""
         ia, ib = bound[a], bound[b]
-        return bool(ia and ib and (ib in self.t.fk_instances(b, [ia], self.relations)
-                                   or ia in self.t.fk_instances(a, [ib], self.relations)))
+        return bool(ia and ib) and not one_hop_problem(self.t, self.relations, ia, ib, a, b)
+
+    def _mapped_filter_path(self, dim: str, frag: str, anchors: list) -> tuple:
+        """A filter_map fragment: every column it reads gets the same path check as a binding."""
+        table = split_dim(dim)[0]
+        for col in _TOKEN.findall(frag):
+            inst = self.t.single_instance(col)
+            problem = (f"filter_map column [{col}] reads several (or no) table instances, so its join path "
+                       "cannot be checked") if inst is None else self._path_problem(table, inst, anchors)
+            if problem:              # the user's own override stays in the query; the row says why to check it
+                return frag, None, f"filter_map for {dim}: {problem}"
+        return frag, None, ""
 
     def mapped(self, dim: str) -> tuple:
         """field_map entry -> (model column | None, None, note): a name the Model lacks is refused."""
@@ -290,10 +315,15 @@ class _Binder:
         if f.get("formula"):
             return {"note": f"formula field '{f.get('title') or '?'}' needs a Model measure (map it via field_map)"}
         name, inst, note = self.column(dim, anchors, measure=f.get("kind") == "measure")
+        if name and note and dim in self.field_map:   # the user's own mapping is kept; the row says why to check it
+            return dict(self._mapped_field(f, name), warn=note)
         if name and note:                     # bound by name only: reported, not carried
             return {"note": note}
         if f.get("kind") != "measure":
             return self._dimension_field(dim, name, note, f.get("level"))
+        return self._measure_field(dim, agg, name, inst, note)
+
+    def _measure_field(self, dim: str, agg: str, name, inst, note: str) -> dict:
         kw = AGG_KEYWORD.get(agg)
         if not kw:
             return {"note": f"Sisense aggregation '{agg}' on {dim} has no mapped ThoughtSpot keyword"}
@@ -344,6 +374,17 @@ class _Binder:
             return {"name": cm, "token": f"[{cm}]", "out": cm, "measure": True}
         return {"note": f"{kw} of {table}.{col}: add a Model measure '{kw} ( [{inst}::{col}] )' or map it via field_map"}
 
+    def _mapped_field(self, f: dict, name: str) -> dict:
+        """A field_map binding as a field, whatever the path checks said (they are reported)."""
+        if f.get("kind") != "measure":
+            return _dimension(name, f.get("level")) if name not in self.t.measures else \
+                {"name": name, "token": f"[{name}]", "out": name, "measure": True}
+        kw = AGG_KEYWORD.get((f.get("agg") or "").lower())
+        if name in self.t.formula_measures or not kw:
+            return {"name": name, "token": f"[{name}]", "out": name, "measure": True}
+        token = f"{kw} [{name}]"
+        return {"name": name, "token": token, "out": f"{agg_label(token)} {name}", "measure": True}
+
     def _formula_measure(self, name: str, dim: str, agg: str, kw: str) -> dict:
         """A measure bound to a Model formula: carried only when the formula's own aggregation
         is the Sisense one (or the binding was mapped by hand)."""
@@ -358,7 +399,8 @@ class _Binder:
         """-> (fragment | None, model column | None, note)."""
         dim = sf.get("dim") or ""
         if dim in self.filter_map:
-            return self.mapped_filter(dim)
+            frag, col, note = self.mapped_filter(dim)
+            return (frag, col, note) if note or not frag else self._mapped_filter_path(dim, frag, anchors)
         name, _, note = self.column(dim, anchors)
         if name and note:
             return None, name, f"filter on {dim}: {note}"
@@ -423,6 +465,8 @@ def _collect_fields(widget: dict, binder: _Binder, anchors: list) -> dict:
         if "note" in b:
             acc["notes"].append(b["note"])
             continue
+        if b.get("warn"):
+            acc["notes"].append(b["warn"])
         _add_field(acc, f, b, panel, binder)
     return acc
 
@@ -553,21 +597,13 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     acc = _collect_fields(widget, binder, anchors)
     frags, own, fnotes = _collect_filters(widget, binder, anchors)
     n, rank_frag, rank_notes = top_n(widget, acc["measure_fields"], acc["dimension_fields"])
-    dash_source = (binder.inv.get("dashboard") or {}).get("datasource")
-    other_source = ([f"the widget reads data source '{widget['datasource']}', not the dashboard's '{dash_source}'"]
-                    if widget.get("datasource") and dash_source and widget["datasource"] != dash_source else [])
-    notes, info = _widget_notes(widget, status, note, acc["notes"] + fnotes + rank_notes + other_source)
+    notes, info = _widget_notes(widget, status, note, acc["notes"] + fnotes + rank_notes + _source_note(widget, binder))
     row = {"visual": title, "ts_chart": ct, "status": status}
     if not acc["cols"]:
         row.update(status="NEEDS REVIEW", note="; ".join(notes + info) or "no fields mapped")
         return None, row, own, []
     read = acc["cols"] + sorted(_query_columns(frags))
-    path = binder.no_fact_problem(widget)
-    if path:
-        notes.append(path)
-    if binder.t.spans_facts(read):
-        notes.append("its columns span facts no single fact reaches (a multi-fact query), which is not "
-                     "verified to return Sisense's numbers")
+    notes += _join_notes(widget, binder, read)
     if notes:
         row["status"] = "NEEDS REVIEW"
     if notes or info:
@@ -577,6 +613,25 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
     a = _finish_answer(a, binder, ct, frags + ([rank_frag] if rank_frag else []), acc["labels"],
                        ctx.get("description"), acc["measure_outs"])
     return a, row, own, binder.t.facts_for(read)
+
+
+def _source_note(widget: dict, binder) -> list:
+    dash_source = (binder.inv.get("dashboard") or {}).get("datasource")
+    if widget.get("datasource") and dash_source and widget["datasource"] != dash_source:
+        return [f"the widget reads data source '{widget['datasource']}', not the dashboard's '{dash_source}'"]
+    return []
+
+
+def _join_notes(widget: dict, binder, read: list) -> list:
+    """Widget-level join problems: a no-fact path, a Sisense loop among its tables, several facts."""
+    out = []
+    path = binder.no_fact_problem(widget) or loop_problem(binder.relations, binder.sisense_tables(widget))
+    if path:
+        out.append(path)
+    if binder.t.spans_facts(read):
+        out.append("its columns span facts no single fact reaches (a multi-fact query), which is not "
+                   "verified to return Sisense's numbers")
+    return out
 
 
 def _widget_notes(widget: dict, status: str, chart_note: str, problems: list) -> tuple:

@@ -61,6 +61,7 @@ class TargetModel:
         # declared ONE_TO_MANY (on the dimension side) is reversed, so the facts are the roots
         self.joins: dict = {}
         self.join_pk: dict = {}           # (many, one, fk) -> the column joined on the one side
+        self.composite: set = set()       # (many, one, fk) of joins on more than one condition
         self._index_tables(model.get("model_tables") or model.get("tables") or [])
         self.formulas = {f.get("id"): f.get("expr") or "" for f in model.get("formulas") or []}
         self.instances_of: dict = {}      # column name -> instances it reads (column_id / formula refs)
@@ -104,6 +105,8 @@ class TargetModel:
             next((col for tbl, col in sides if tbl in one_names), None)
         self.joins.setdefault(many, []).append((one, fk))
         self.join_pk[(many, one, fk)] = pk
+        if len(sides) != 2:              # more than one condition: not a one-column relation
+            self.composite.add((many, one, fk))
 
     def _expand_formula_refs(self, columns: list) -> None:
         """A formula referencing other formulas (``[formula_A]``, or a column by display name)

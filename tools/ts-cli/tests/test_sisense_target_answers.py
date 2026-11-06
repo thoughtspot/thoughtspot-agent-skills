@@ -1052,7 +1052,7 @@ def test_filter_map_owns_its_sisense_column_and_counts_with_native_filters():
               [_range("[Visit_Start_Date.id_]", {"from": 0}), _member("[dim_case.status]", ["Open"])])
     ov2 = {"filter_map": {"[Visit_Start_Date.id_]": "[Case Status] = 'Escalated'"}}
     row = _row(build_target_liveboard(_inv([both]), _target(), overrides=ov2), "Both")
-    assert row["status"] == "NEEDS REVIEW" and "2 filters on [Case Status]" in row["note"]
+    assert row["status"] == "NEEDS REVIEW"      # (its fragment also filters another table than the Sisense dim)
 
 
 def test_measure_filter_and_unread_dashboard_filter_keys_are_needs_review():
@@ -1395,3 +1395,91 @@ def test_all_filter_with_unread_settings_and_tab_on_another_source_are_flagged()
     hidden = dict(_w("wd", "D", "chart/line", [_f(d, "x-axis", level="days"), m]), datasource="Other Cube")
     tab = _w("wt", "T", "WidgetsTabber", [], tabber={"tabs": [{"title": "M", "show": ["wm"]}, {"title": "D", "show": ["wd"]}], "active": 0})
     assert tabber_hidden([tab, shown, hidden]) == {}
+
+
+# --------------------------------------------------------------------------- adversarial review 6
+def _totals_by_site():
+    return _w("w1", "Totals by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                        _f("[fact_case_stats.visit_total]", "values", "measure", "sum")])
+
+
+def test_join_on_more_than_one_condition_is_not_sisenses_relation():
+    target = _target()
+    case = next(mt for mt in target["model"]["model_tables"] if mt["name"] == "dim_case")
+    case["joins"][0]["on"] = "[dim_case::site_id_] = [dim_site::id_] and [dim_site::is_current] = true"
+    assert _row(build_target_liveboard(_inv([_totals_by_site()]), target), "Totals by site")["status"] == "NEEDS REVIEW"
+
+
+def test_no_fact_widget_checks_the_joined_key_on_both_sides():
+    target = _target()
+    case = next(mt for mt in target["model"]["model_tables"] if mt["name"] == "dim_case")
+    case["joins"][0]["on"] = "[dim_case::site_id_] = [dim_site::legacy_code_]"
+    pairs = _w("w1", "Pairs", "tablewidget", [_f("[dim_case.status]", "rows"), _f("[dim_site.name]", "rows")])
+    assert _row(build_target_liveboard(_inv([pairs]), target), "Pairs")["status"] == "NEEDS REVIEW"
+
+
+def test_chip_on_a_renamed_or_calculated_sisense_column_is_needs_review():
+    inv = _inv([_visits()], [_member("[dim_case.status]", ["Open"])])
+    inv["tables"] = [dict(t, columns=[{"id": "status_code", "name": "status"}]) if t["jaql_name"] == "dim_case" else t
+                     for t in inv["tables"]]
+    assert _row(build_target_liveboard(inv, _target()), "Visits")["status"] == "NEEDS REVIEW"
+    calc = _inv([_w("w1", "Cost by status", "chart/column", [_f("[dim_case.status]", "categories"),
+                                                            _f("[fact_visit.cost]", "values", "measure", "sum")])])
+    calc["tables"] = [dict(t, columns=[{"id": "status", "name": "status", "calculated": True}]) if t["jaql_name"] == "dim_case"
+                      else t for t in calc["tables"]]
+    row = _row(build_target_liveboard(calc, _target()), "Cost by status")
+    assert row["status"] == "NEEDS REVIEW" and "plain Model column of the same name" in row["note"]
+
+
+def test_filter_map_fragment_gets_the_path_check_and_is_kept_in_the_query():
+    w = _w("w1", "Visit cost", "indicator", [_f("[fact_visit.cost]", "value", "measure", "sum")],
+           [_member("[dim_site.name]", ["North"])])
+    res = build_target_liveboard(_inv([w]), _target(), overrides={"filter_map": {"[dim_site.name]": "[Case Site Name] = 'North'"}})
+    assert _row(res, "Visit cost")["status"] == "NEEDS REVIEW"
+    assert "[Case Site Name] = 'North'" in _answers(res)["Visit cost"]["search_query"]   # the override is kept
+
+
+def test_partial_table_export_flags_bindings_on_the_missing_tables():
+    only_fact = [{"table": {"name": "fact_visit", "columns": [{"name": c, "db_column_name": c}
+                                                             for c in ("cost", "case_id_", "site_id_", "date__start_id_", "date__end_id_")]}}]
+    w = _w("w1", "Cost by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                  _f("[fact_visit.cost]", "values", "measure", "sum")])
+    row = _row(build_target_liveboard(_inv([w]), _target(), tables=only_fact), "Cost by site")
+    assert row["status"] == "NEEDS REVIEW" and "Table TML for dim_site was not supplied" in row["note"]
+
+
+def test_path_column_compare_uses_the_table_mapping_only():
+    from ts_cli.sisense.target_paths import path_problem
+    target = _target()
+    tables = _tables_for(target)
+    for t in tables:
+        if t["table"]["name"] == "dim_site":
+            t["table"]["columns"] = [{"name": "id_", "db_column_name": "legacy_id"}, {"name": "site_key", "db_column_name": "id_"},
+                                     {"name": "name", "db_column_name": "name"}]
+    m = TargetModel(target, tables)
+    rels = _Binder_rel(_inv([]))
+    assert path_problem(m, rels, "fact_case_stats", "Case Site", "dim_site") != ""
+
+
+def _Binder_rel(inv):
+    from ts_cli.sisense.target_answers import _Binder
+    return _Binder(inv, TargetModel(_target()), {}).relations
+
+
+def test_model_reaching_a_table_two_ways_is_needs_review():
+    target = _plain_visit_site()
+    # dim_case also joins the plain dim_site: the Model reaches dim_site from fact_visit two ways
+    case = next(mt for mt in target["model"]["model_tables"] if mt["name"] == "dim_case")
+    case["joins"].append({"with": "dim_site", "on": "[dim_case::site_id_] = [dim_site::id_]",
+                          "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"})
+    w = _w("w1", "Cost by site", "chart/column", [_f("[dim_site.name]", "categories"),
+                                                  _f("[fact_visit.cost]", "values", "measure", "sum")])
+    row = _row(build_target_liveboard(_inv([w]), target), "Cost by site")
+    assert row["status"] == "NEEDS REVIEW" and "more than one way" in row["note"]
+
+
+def test_widget_using_every_table_of_a_sisense_loop_is_needs_review():
+    w = _w("w1", "Cost by status and site", "pivot2", [_f("[dim_case.status]", "rows"), _f("[dim_site.name]", "rows"),
+                                                       _f("[fact_visit.cost]", "values", "measure", "sum")])
+    row = _row(build_target_liveboard(_inv([w]), _target()), "Cost by status and site")
+    assert row["status"] == "NEEDS REVIEW"
