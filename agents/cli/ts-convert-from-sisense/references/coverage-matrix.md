@@ -152,6 +152,9 @@ Verified tile-for-tile on a live cluster (open-item #6).
 | Model reaching a table from the fact more than one way, or a widget using every table of a Sisense loop | Flagged | NEEDS REVIEW: which join each engine takes is not verified |
 | Partial Table TML export | Flagged | a binding on a table whose Table TML is missing is NEEDS REVIEW |
 | Sisense calculated column found as a plain Model column of the same name | Flagged | NEEDS REVIEW until mapped: that it computes the same thing is not verified |
+| Widget naming no fact where the Model has two or more facts reaching its tables | Flagged | NEEDS REVIEW: which fact ThoughtSpot joins through is its choice, not Sisense's |
+| Count of a non-fact table's rows through a Model count formula, across a join | Flagged | NEEDS REVIEW, as for a plain column |
+| Sisense `all` filter that also carries settings the parser does not read | Flagged | not treated as "no condition"; NEEDS REVIEW |
 | Join type (inner vs left outer) | Not checked | a known limit: the Model's join type is not compared with Sisense's, which a migration team checks on the Model |
 | Chip adding a join to a measure on a non-fact table | Flagged | NEEDS REVIEW, as for the same filter on the widget |
 | Dashboard `filterRelations` / `filterToDatasourceMapping` set | Flagged | NEEDS REVIEW on every tile: the filters are not combined by AND |

@@ -219,12 +219,23 @@ class _Binder:
             return f"Sisense joins {unjoined} directly, which the target model does not join between the copies bound"
         if direct and _connected(set(bound), direct):
             return ""      # every table joined directly, in Sisense and in the Model alike
+        many = self._model_facts_problem(bound)
+        if many:
+            return many
         linking = self._linking_facts(bound)
         if len(linking) != 1:
             return ("the widget names no fact table, and no single fact Sisense relates to all of its tables "
                     f"({', '.join(sorted(bound))}) decides the path")
         return next((p for t, i in sorted(bound.items()) if i
                      for p in [path_problem(self.t, self.relations, linking[0], i, t)] if p), "")
+
+    def _model_facts_problem(self, bound: dict) -> str:
+        """More than one Model fact reaching every bound copy: ThoughtSpot's choice, not Sisense's."""
+        facts = [r for r in self.t.roots() if all(i in self.t.reachable(r) for i in bound.values() if i)]
+        if len(facts) > 1:
+            return (f"the target model has {len(facts)} facts linking the widget's tables "
+                    f"({', '.join(sorted(facts))}), so which one ThoughtSpot joins through is not Sisense's choice")
+        return ""
 
     def _direct_pairs(self, bound: dict) -> list:
         ends = [{e.get("table") for e in r.get("endpoints") or []} for r in self.relations]
@@ -370,6 +381,9 @@ class _Binder:
     def _count_field(self, dim: str, kw: str, inst: str) -> dict:
         table, col = split_dim(dim)
         cm = self.t.count_measure(kw, inst, col)
+        fan_out = self._fan_out(dim, kw, cm, inst) if cm else ""
+        if fan_out:
+            return {"note": fan_out}
         if cm:
             return {"name": cm, "token": f"[{cm}]", "out": cm, "measure": True}
         return {"note": f"{kw} of {table}.{col}: add a Model measure '{kw} ( [{inst}::{col}] )' or map it via field_map"}

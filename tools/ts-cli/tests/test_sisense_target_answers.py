@@ -1483,3 +1483,32 @@ def test_widget_using_every_table_of_a_sisense_loop_is_needs_review():
                                                        _f("[fact_visit.cost]", "values", "measure", "sum")])
     row = _row(build_target_liveboard(_inv([w]), _target()), "Cost by status and site")
     assert row["status"] == "NEEDS REVIEW"
+
+
+# --------------------------------------------------------------------------- adversarial review 7
+def test_no_fact_widget_with_two_model_facts_linking_its_tables_is_needs_review():
+    target = _target()
+    stats = next(mt for mt in target["model"]["model_tables"] if mt["name"] == "fact_case_stats")
+    stats["joins"].append({"with": "Visit Start Date", "on": "[fact_case_stats::date_id_] = [dim_date::id_]",
+                           "type": "LEFT_OUTER", "cardinality": "MANY_TO_ONE"})
+    w = _w("w1", "Status x month", "pivot2", [_f("[dim_case.status]", "rows"),
+                                              _f("[Visit_Start_Date.date_day (Calendar)]", "rows", level="months")])
+    row = _row(build_target_liveboard(_inv([w]), target), "Status x month")
+    assert row["status"] == "NEEDS REVIEW" and "facts linking" in row["note"]
+
+
+def test_count_formula_over_a_non_fact_table_across_a_join_is_needs_review():
+    target = _target()
+    target["model"]["formulas"].append({"id": "formula_Case Rows", "name": "Case Rows", "expr": "count ( [dim_case::id_] )"})
+    target["model"]["columns"].append({"name": "Case Rows", "formula_id": "formula_Case Rows",
+                                       "properties": {"column_type": "MEASURE"}})
+    w = _w("w1", "Rows by month", "chart/line", [_f("[Visit_Start_Date.date_day (Calendar)]", "x-axis", level="months"),
+                                                 _f("[dim_case.id_]", "values", "measure", "countduplicates")])
+    assert _row(build_target_liveboard(_inv([w]), target), "Rows by month")["status"] == "NEEDS REVIEW"
+
+
+def test_all_chip_with_unread_settings_is_needs_review():
+    odd = dict(_member("[dim_case.status]", ["Open"]), raw={"all": True, "members": ["Open"], "somethingNew": 1},
+               unsupported=["somethingNew"])
+    res = build_target_liveboard(_inv([_visits()], [odd]), _target())
+    assert _row(res, "Visits")["status"] == "NEEDS REVIEW"

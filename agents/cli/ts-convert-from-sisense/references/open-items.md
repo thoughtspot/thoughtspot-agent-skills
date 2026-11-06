@@ -112,7 +112,11 @@ REVIEW rows, each a real risk or an unverified step: tiles whose tables reach th
 facility through two copies Sisense relates (which one Sisense filters by cannot be decided), and
 the hidden grains merged into them; weekly buckets (that cluster starts weeks on Monday, as the
 Sisense widgets do, so they are accepted there); a calculated column bound to its Model formula by
-name only (confirmed with one `field_map` line); and the drill's details table, whose facility
+name only (confirmed with one `field_map` line); two count tiles whose dimension both the
+enrollment fact and the Model-added union view reach (ThoughtSpot's choice of fact, not Sisense's);
+a tile on a Sisense loop (enrollment, case and facility relate to each other); a filter override
+that reads a view built to stand in for a Sisense table; quarterly grains (that cluster uses
+calendar quarters, as Sisense does, so they are accepted there); and the drill's details table, whose facility
 columns were bound through the enrollment copy while Sisense joins that widget's facility through
 the case, and whose patient table Sisense reaches on a column the Model does not join. The earlier
 tile-for-tile comparison above was between two rebuilds sharing those bindings, not against Sisense.

@@ -45,8 +45,9 @@ def search_filter(kind: str, name: str, raw: dict, vals: list):
 
 
 def is_all(sf: dict) -> bool:
-    """Sisense `all`: no condition, at any kind or level."""
-    return bool((sf.get("raw") or {}).get("all"))
+    """Sisense `all`: no condition, at any kind or level -- unless the filter also carries settings
+    this converter does not read, which may give it one."""
+    return bool((sf.get("raw") or {}).get("all")) and not sf.get("unsupported")
 
 
 def _is_date(sf: dict) -> bool:
