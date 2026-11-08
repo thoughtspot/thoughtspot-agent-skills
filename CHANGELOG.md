@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-08
-- fix: `ts load databricks` loads a CSV source's own rows instead of synthetic ones, and backslash-escapes quotes (a doubled quote dropped the apostrophe on Databricks). Synthetic rows only for a schema-only table or with the new `--generate-sample`, each named on stderr (BL-550)
+- fix: `ts load databricks` loads a CSV source's own rows instead of synthetic ones, and backslash-escapes quotes (a doubled quote dropped the apostrophe on Databricks). A table without a data file is refused unless the new `--generate-sample`; values are checked before anything is created; new `--encoding` and `--if-exists error|append|replace` (default error). `ts load infer` output now carries `data_file` and loads as a `--source` for both loaders (BL-550)
 - docs: ts-load-source-data 1.2.0 drops its "Databricks always gets synthetic rows" warning and documents `--generate-sample` for Databricks
 - chore: bump ts-cli to v0.212.0
 - feat: the README's skills tables and counts are generated from each SKILL.md's frontmatter `metadata:` (`category`, `summary`, plus the Setup and Conversion columns) by `tools/validate/generate_readme_skills.py`; `--check` gates drift and invalid metadata in pre-commit and CI

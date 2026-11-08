@@ -2973,7 +2973,7 @@ ts load infer --source <path>
 |---|---|
 | `--source`, `-s` | Path to CSV directory, Tableau download JSON, or manifest JSON (required) |
 
-**Output:** JSON with `source_type` and `tables[]` array containing `table_name`, `row_count`, and `columns[]` with `name`, `db_column_name`, `inferred_type`.
+**Output:** JSON with `source_type` and `tables[]` array containing `table_name`, `row_count`, `has_data`, `file` and `data_file` (the CSV's name and path, for a table with data), and `columns[]` with `name`, `db_column_name`, `inferred_type`. The output is itself a valid `--source` for `ts load snowflake` and `ts load databricks`: edit the types, save it, and pass it back to load the CSVs with the reviewed schema.
 
 ### `ts load generate`
 
@@ -3016,6 +3016,8 @@ ts load snowflake --source ./csvs/ --profile Production \
 | `--generate-sample` | `false` | Generate synthetic data for schema-only sources |
 | `--rows` | `100` | Rows to generate (with `--generate-sample`) |
 
+Snowflake reads each table's CSV from the source directory (or the directory holding the source JSON), so save `ts load infer` output next to the CSVs. A table with data whose CSV is not there is refused rather than created empty.
+
 **Output:** JSON with `database`, `schema`, `profile`, and `tables[]` array containing `table_name`, `status`, `rows_loaded`, `columns`, `source_file`.
 
 ### `ts load databricks`
@@ -3028,35 +3030,69 @@ profile file. Execution goes through the `databricks` CLI's SQL Statement Execut
 
 ```
 ts load databricks --source ./csvs/ --profile Production --catalog main --schema sales
-ts load databricks --source ./orders_demo_schema.json --profile Production --rows 200
+ts load databricks --source ./schema.json --profile Production --catalog main --schema sales
+ts load databricks --source ./schema_only.json --profile Production --catalog main \
+    --schema sales --generate-sample --rows 200
 ```
 
 Infers the schema from `--source`, then `CREATE TABLE` (Delta **column mapping** enabled —
 preserves column names with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
-Rows follow the same contract as `ts load snowflake`:
+`--source` may also be `ts load infer` output, edited in a schema review: each table in it
+carries `data_file`, the CSV it was inferred from, and that CSV's rows are loaded with the
+reviewed types.
 
-- **A table with a data file** (CSV dir, Tableau download, manifest `data_file`) gets **that
-  file's own rows**. Values are typed per the inferred column type: an empty cell is `NULL`,
-  strings are backslash-escaped (Databricks reads a doubled quote `''` as two concatenated
-  literals, dropping the quote), and a value that is not a valid number or boolean for its
-  column is refused, naming the row and column, before any table is created.
-- **Synthetic rows** are inserted only for a schema-only table (no data file), or for every
-  table with `--generate-sample`. Each such table gets a `NOTICE: … SYNTHETIC rows` line on
-  stderr. Unlike `ts load snowflake`, a schema-only source does not need the flag.
+- **A table with a data file** gets **that file's own rows**. The file is decoded strictly
+  (UTF-8 by default, a byte-order mark dropped; `--encoding cp1252` for another encoding), and
+  a byte that does not decode is refused, naming the file, line and byte. CSV columns are
+  matched to the schema by header name; when names do not match they are taken by position,
+  unless a name that did match sits at a different position, which is refused.
+- **A table without a data file** is refused, as `ts load snowflake` refuses a schema-only
+  source, unless `--generate-sample` is passed. `--generate-sample` inserts **synthetic rows
+  for every table**, and each gets a `NOTICE: … SYNTHETIC rows` line on stderr.
+- **Values** are typed per column: an empty cell is `NULL`; strings are backslash-escaped
+  (Databricks reads a doubled quote `''` as two concatenated literals, dropping the quote); a
+  BIGINT takes an integer only (inference samples the first 1000 rows, so a later `1.5` is
+  refused rather than truncated); DATE must be a real day; TIMESTAMP one of the ISO forms
+  Databricks accepts. Backticks inside catalog, schema, table and column names are doubled.
+- **Before anything is created**, every value is checked and every statement rendered, and
+  two files that load as one table name, or two columns as one column name, are refused. So
+  a bad value creates nothing. A failure **while executing** (permissions, a warehouse
+  error, an appended-to table whose columns differ) can leave tables partly loaded; the
+  command then prints which tables it wrote and how many rows each received, and says to
+  re-run with `--if-exists replace`.
+- **An existing table** is refused by default (`--if-exists error`, checked before anything
+  is created), appended to with `--if-exists append`, or recreated with
+  `--if-exists replace` (`--replace` is an alias).
 
-Each `INSERT` holds at most `--batch` rows and about 1 MiB of SQL. Every statement is rendered
-before the first one runs, so a bad value leaves nothing half-loaded.
+Each `INSERT` holds at most `--batch` rows and about 1 MiB of SQL.
+
+**Where it differs from `ts load snowflake`.** Snowflake loads with `COPY INTO` and its
+defaults, so these behave differently:
+
+| Case | `ts load databricks` | `ts load snowflake` |
+|---|---|---|
+| `--generate-sample` | synthetic rows for every table, replacing data files | synthetic rows only for a schema-only source |
+| A manifest table with no data file, others with one | refused unless `--generate-sample` | created empty |
+| A short row (fewer cells than the header) | missing cells are `NULL` | the load fails (column-count mismatch) |
+| A blank line | skipped; in a one-column CSV, a `NULL` value | not skipped |
+| `\N` | the two characters `\N` | `NULL` (`NULL_IF` default) |
+| A quoted empty field `""` | `NULL`, the same as an empty one | an empty string |
+| Header order | matched by name, then by position | by position |
+| Encoding | `--encoding`, decoded strictly | UTF-8, no option |
+| An invalid value | refused before anything is created | the file's `COPY INTO` fails after the table is created |
 
 | Flag | Default | Description |
 |---|---|---|
-| `--source`, `-s` | — | CSV directory, Tableau download JSON, or manifest/schema JSON (required) |
+| `--source`, `-s` | — | CSV directory, Tableau download JSON, manifest JSON, or `ts load infer` output (required) |
 | `--profile`, `-p` | — | Databricks profile name (required) |
 | `--catalog` / `--schema` | from profile | Override target catalog/schema |
-| `--generate-sample` | `false` | Insert synthetic rows even for tables that have a data file |
-| `--rows`, `-r` | `100` | Synthetic rows per table (schema-only tables, or with `--generate-sample`) |
+| `--generate-sample` | `false` | Insert synthetic rows for every table (required for a table with no data file) |
+| `--rows`, `-r` | `100` | Synthetic rows per table (with `--generate-sample`) |
 | `--seed` | `42` | Deterministic synthetic-data seed |
 | `--batch` | `200` | Max rows per `INSERT` statement |
-| `--replace` | `false` | `CREATE OR REPLACE` the table (without it, an existing table is appended to) |
+| `--if-exists` | `error` | When a table exists: `error`, `append` or `replace` |
+| `--replace` | `false` | Alias for `--if-exists replace` |
+| `--encoding` | `utf-8` | CSV text encoding, decoded strictly (e.g. `cp1252`) |
 
 **Output:** JSON with `loaded[]` (`table`, `rows` — the rows actually inserted, `data` —
 `source` or `synthetic`, `source_file`), `catalog`, `schema`, `warehouse_id`.
