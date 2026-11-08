@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (2026-07-30: join-type row corrected — the ThoughtSpot side never emits FULL_OUTER; OUTER is its full outer join, live-verified on se-thoughtspot; prior: validated in 2026-07-11 external sweep) -->
+<!-- currency: snowflake — 2026-11 (2026-11-08 BL-450: relationship_type / join_type re-verified live — not parse errors, silently parked in the CA extension; Snowflake delta 2026-07..2026-11 also swept by docs/audit/2026-11-08-external.md, its open items routed to BL-543 (LOD) and BL-458 (Cortex Agents); prior 2026-07: 2026-07-30: join-type row corrected — the ThoughtSpot side never emits FULL_OUTER; OUTER is its full outer join, live-verified on se-thoughtspot; prior: validated in 2026-07-11 external sweep) -->
 
 # Mapping Rules Reference
 
