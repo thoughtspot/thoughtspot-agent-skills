@@ -184,7 +184,7 @@ class TestDocumentedFamiliesAreNotUnknown:
     the form). They are known to the converter, so the survivor catch leaves them."""
 
     @pytest.mark.parametrize("src", [
-        "RUNNING_SUM(SUM([Sales]))", "RUNNING_AVG(SUM([Sales]))", "RUNNING_COUNT(SUM([x]))",
+        "RUNNING_SUM(SUM([Sales]))", "RUNNING_AVG(SUM([Sales]))", "RUNNING_MAX(SUM([x]))",
         "RANK_DENSE(SUM([Sales]))", "RANK_MODIFIED(SUM([Sales]))",
         "RANK_PERCENTILE(SUM([Sales]))", "RANK_UNIQUE(SUM([Sales]), 'desc')",
         "RANK(SUM([Sales]), 'asc')",
@@ -368,3 +368,37 @@ class TestDatetime:
 
     def test_wrong_arity_is_still_a_survivor(self):
         assert any("DATETIME" in e for e in _errors("DATETIME([a], [b])"))
+
+
+class TestReviewNits:
+    """BL-460 review nits 6(b)-(d)."""
+
+    # (b) /* */ block comments (help.tableau.com Operators documents both styles)
+    @pytest.mark.parametrize("src", ["SUM([x]) /* CORR(y) */",
+                                     "/* line one\nline two */ SUM([x])"])
+    def test_block_comment_is_stripped(self, src):
+        assert translate_single(src)[:2] == ("sum ( [x])", [])
+
+    @pytest.mark.parametrize("src,stripped", [
+        ("[Bob's Sales] // note", "[Bob's Sales]"),     # the apostrophe opened a literal
+        ("[http://site] + 1", "[http://site] + 1"),     # the // in a name was a comment
+        ("'a /* b */ c' // x", "'a /* b */ c'"),
+        ("'http://x' + [y]", "'http://x' + [y]"),
+    ])
+    def test_comments_never_inside_a_name_or_literal(self, src, stripped):
+        from ts_cli.tableau.pre_transforms import strip_comments
+        assert strip_comments(src) == stripped
+
+    # (c) a forbidden pattern that matches at punctuation must not crash the dedupe
+    def test_forbidden_pattern_at_punctuation_does_not_crash(self, monkeypatch):
+        import re
+        from ts_cli.tableau import validate
+        monkeypatch.setattr(validate, "_FORBIDDEN_PATTERNS",
+                            [(re.compile(r"=="), "'==' (use '=')")])
+        assert validate.validate_output("[a] == 1") == ["Contains '==' (use '=')"]
+
+    # (d) RUNNING_COUNT's form is answer-level only (coverage matrix #56, L17)
+    def test_running_count_is_caught(self):
+        assert any("RUNNING_COUNT" in e for e in _errors("RUNNING_COUNT(SUM([x]))"))
+        out = classify_formulas([_mk("Run Count", "RUNNING_COUNT(SUM([x]))")])
+        assert out["formulas"][0]["tier"] == "untranslatable"

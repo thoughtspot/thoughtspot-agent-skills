@@ -56,7 +56,10 @@ SPATIAL_FUNCTIONS = (
 # The BL-460 survivor catch leaves them alone: the converter knows them. One tuple
 # each, shared by classify.py's _RANK_RE / _RUNNING_RE and by _RANK_UNKNOWN_RE below.
 RANK_VARIANTS = ("UNIQUE", "MODIFIED", "DENSE", "PERCENTILE")
-RUNNING_FUNCTIONS = ("SUM", "AVG", "MAX", "MIN", "COUNT")
+# RUNNING_COUNT is not a member: its documented form (coverage matrix #56, L17) is
+# cumulative_sum ( 1 , <sort> ) at answer level only, so the fix cycle has no Model formula
+# to apply, and the survivor catch skips it like any unknown call (BL-460 review).
+RUNNING_FUNCTIONS = ("SUM", "AVG", "MAX", "MIN")
 _DOCUMENTED_NOT_CONVERTED = re.compile(
     rf"RANK(?:_(?:{'|'.join(RANK_VARIANTS)}))?|RUNNING_(?:{'|'.join(RUNNING_FUNCTIONS)})",
     re.IGNORECASE)
@@ -178,9 +181,10 @@ _FAMILY_CHECKS = (
 # output a ThoughtSpot function? The answer comes from the formula catalog (`is_known`).
 #
 # Exact spelling, as in `formula_translate.traps.output_guard`: every function this
-# converter emits is lower case, so an upper- or mixed-case call is untranslated
-# Tableau even when its lower-case form is a ThoughtSpot function. That is what
-# keeps LOG2 out until log2 is live-checked (BL-460).
+# converter emits is lower case, and translate_single upper-cases every call name in the
+# source first (pre_transforms.upper_call_names), so a call left in any other spelling is
+# untranslated Tableau even when its lower-case form is a ThoughtSpot function. That keeps
+# LOG2 out, as `log2(` or `LOG2(`, until log2 is live-checked (BL-460).
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 # Operators and control words, not functions. The converter leaves Tableau's upper-case
 # AND / OR / NOT in place (ThoughtSpot accepts them), and IF/CASE/WHEN/END/ELSEIF have
@@ -243,7 +247,9 @@ def validate_output(expr: str) -> list[str]:
         m = pattern.search(expr)
         if m:
             errors.append(f"Contains {desc}")
-            reported.add(_LEAD_NAME.match(m.group(0)).group(0).upper())
+            lead = _LEAD_NAME.match(m.group(0))
+            if lead:  # a pattern matching at punctuation names no function to dedupe
+                reported.add(lead.group(0).upper())
     code = _code_only(expr)
     _named_checks(code, errors, reported)
     for name in _unknown_calls(code, reported):

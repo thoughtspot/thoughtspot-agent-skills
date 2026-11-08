@@ -7,40 +7,38 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_translate.refs import REF_GRAMMAR
 from ts_cli.tableau.literals import mask_refs, unmask_refs
 from ts_cli.tableau.parsing import _extract_function_args
 
 
 # ---------------------------------------------------------------------------
-# Pre-0. Strip Tableau // line comments (BL-056)
+# Pre-0. Strip Tableau comments: // line comments (BL-056) and /* */ blocks
 # ---------------------------------------------------------------------------
+#
+# help.tableau.com (Operators): "A comment starts at the two forward slashes (//) and goes
+# to the end of the line" and "Multi-line comments can be added by typing /* to start the
+# comment and */ to end it". One left-to-right scan: a [field] reference, a string literal
+# or a comment, whichever starts first. A reference may hold a quote or `//` ([Bob's Sales],
+# [http://site]), a literal may hold `//` or `/*`, and only what is outside both is a
+# comment. The character toggle this replaced read the apostrophe in [Bob's Sales] as an
+# open literal, and the `//` in [http://site] as a comment (BL-460 review).
+_COMMENT_SCAN = re.compile(
+    rf"(?P<keep>{REF_GRAMMAR}|'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")"
+    r"|(?P<line>//[^\n]*)"
+    r"|(?P<block>/\*.*?\*/)",
+    re.S)
+
 
 def strip_comments(formula: str) -> str:
-    """Strip Tableau // line comments, preserving // inside string literals."""
-    result: list[str] = []
-    in_single = False
-    in_double = False
-    i = 0
-    while i < len(formula):
-        c = formula[i]
-        if c == "'" and not in_double:
-            in_single = not in_single
-            result.append(c)
-            i += 1
-        elif c == '"' and not in_single:
-            in_double = not in_double
-            result.append(c)
-            i += 1
-        elif (c == '/' and i + 1 < len(formula) and formula[i + 1] == '/'
-              and not in_single and not in_double):
-            newline = formula.find('\n', i)
-            if newline == -1:
-                break
-            i = newline
-        else:
-            result.append(c)
-            i += 1
-    return ''.join(result).strip()
+    """Strip Tableau comments (``//`` to the end of the line, ``/* … */`` blocks) outside
+    string literals and ``[field]`` references."""
+    def _strip(m: re.Match) -> str:
+        if m.group("keep") is not None:
+            return m.group(0)
+        return "" if m.group("line") is not None else " "
+
+    return _COMMENT_SCAN.sub(_strip, formula).strip()
 
 
 # ---------------------------------------------------------------------------
