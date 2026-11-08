@@ -86,10 +86,13 @@ Read `mapping.json`.
 ### Step 2 — Validate & import the model
 Lint locally first (structural invariants the server accepts silently), then import:
 ```bash
-ts tml lint --dir out/
-ts tml import --dir out/ --order tableau --policy ALL_OR_NONE --profile <name>
+ts tml lint --dir out/ --pattern '*.tml'
+ts tml import --dir out/ --pattern '*.table.tml' --pattern '*.model.tml' --order tableau \
+  --policy ALL_OR_NONE --profile <name>
 ```
-`--order tableau` imports tables before the model. If the engine rejects a formula, drop it
+`--order tableau` imports tables before the model. `--pattern` keeps `mapping.json` out:
+`--dir` alone reads every `.json` file in `out/` as a document, and under `ALL_OR_NONE` one
+document that is not TML would put the whole import at risk. If the engine rejects a formula, drop it
 (and any column that depends on it) and re-import — what lands is guaranteed to work, and the
 report records what was pruned.
 
@@ -112,8 +115,8 @@ chart type directly, so the widget-type mapping wins and the Approximated / NEED
 signal survives into the report (a widget that can't be mapped is flagged, never silently
 downgraded). Lint, then import the emitted TML:
 ```bash
-ts tml lint --dir out/                                    # now includes the liveboard
-ts tml import --dir out/ --order tableau --policy ALL_OR_NONE --profile <name>
+ts tml lint --dir out/ --pattern '*.tml'                 # now includes the liveboard
+ts tml import --dir out/ --pattern '*.tml' --order tableau --policy ALL_OR_NONE --profile <name>
 ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; exit 1 = broken board
 ```
 
@@ -135,6 +138,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.7 | 2026-11-08 | **Lint and import read TML only (BL-545).** Steps 2 and 3 read `--dir out/` with no filter, which also reads `mapping.json` as a document, so the `ALL_OR_NONE` import sent it to ThoughtSpot beside the Tables and Model. Both steps now add `--pattern`: Step 2 imports `*.table.tml` and `*.model.tml`, Step 3 imports every `*.tml` (Tables, Model, Liveboard and its Answers) |
 | 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
 | 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |
