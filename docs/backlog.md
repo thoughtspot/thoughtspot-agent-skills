@@ -110,7 +110,7 @@ are roughly ordered by value÷effort.
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema and generator classification done 2026-11-08 (ts-cli v0.209.0); lint unchanged pending a render check; flipping the default library open |
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
-| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.210.0); VAR/QUARTER/LOG2 mappings after a live check, 2026-11-30 |
+| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.210.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
 
 ### Tier 2 — Schedule soon
@@ -15787,10 +15787,33 @@ generic survivor catch and the UNION half are done; the mappings are not.
 - **Docs.** Mapping doc table "Functions the converter has never seen"; coverage matrix
   U12–U15 and L10 at 16. Tests: `tests/test_tableau_unknown_functions.py`.
 
-**Remains.** Map `VAR`/`VARP` → `variance` (sample or population?), `QUARTER` →
-`quarter_number` and `LOG2` → `log2` only after a live check; never `STDEVP` → `stddev`.
-`CORR`, `COVAR(P)`, `PERCENTILE` and `STDEVP` need a verified aggregate pass-through or stay
-unsupported.
+**Review follow-ups (2026-11-08).** One reference grammar (`formula_translate.refs.
+REF_GRAMMAR`: a name may hold `[`) for validate, classify and `ts formula translate`'s
+guard; classify's tiers read comment-stripped text with literals and references blanked
+(`WINDOW_*` by family, `COLLECT` geospatial); source call names upper-cased, so `log2(` is
+`LOG2(`; catalog families by documented member (`cumulative_count`, `moving_count`,
+`moving_stddev` rejected live); `DATETIME` wired to its documented pass-through; `/* */`
+comments stripped; `RUNNING_COUNT` caught (answer-level only). `MID(s, start)` was checked:
+base emitted `MID(` verbatim, which no ThoughtSpot function accepts, so excluding it is not
+a regression.
+
+**Remains** (target 2026-11-30 each):
+
+- Map `VAR`/`VARP` → `variance` (sample or population?), `QUARTER` → `quarter_number` and
+  `LOG2` → `log2` only after a live check; never `STDEVP` → `stddev`. `CORR`, `COVAR(P)`,
+  `PERCENTILE` and `STDEVP` need a verified aggregate pass-through or stay unsupported.
+- Wrong-arity mappings the catch cannot see, because the emitted name is a catalog name:
+  `LOG(x, base)` → `log10 ( x , base )` and `FIND(s, sub, start)` → `strpos ( s , sub ,
+  start )`. Map or reject the extra argument.
+- Nested LOD: in `{FIXED [a] : SUM({FIXED [b] : SUM([x])})}` the outer braces and keyword
+  survive verbatim, and so does a dimensionless `{FIXED : SUM([x])}` beside another LOD.
+  Braces are not calls, so the catch cannot see them.
+- `MID(s, start)` (two arguments): excluded now; translating it needs `substr`'s
+  past-the-end behaviour checked.
+- `RANK_UNIQUE/DENSE/MODIFIED/PERCENTILE` and `RUNNING_SUM/AVG/MAX/MIN`: documented forms the
+  CLI has never converted; they reach import verbatim and the parked-formula fix cycle.
+  `verify.py` says this is "tracked separately", but no item tracked it. Wire them, or reject
+  them at translate time as `WINDOW_*` was.
 
 ## BL-461 — audit rule D9 misses `sql_double_aggregate_op` and the date variants `Tier 2` — **RESOLVED 2026-10-30**
 

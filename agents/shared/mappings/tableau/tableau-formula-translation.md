@@ -14,7 +14,7 @@ CLI command implements this pipeline automatically.
 
 | Step | Transform | Error if skipped |
 |---|---|---|
-| P0 | **Comment stripping** (BL-056): remove `//` line comments (preserve `//` inside string literals — e.g. URLs) | `//` misidentified as an operator; formulas excluded unnecessarily |
+| P0 | **Comment stripping** (BL-056): remove `//` line comments and `/* … */` blocks (BL-460 review) — never inside a string literal (e.g. URLs) or a `[field]` name | `//` misidentified as an operator; formulas excluded unnecessarily |
 | P1 | **Custom SQL Query alias resolution** (BL-057): `[COL (Custom SQL Query N)]` → `[TABLE::COL]` using column-overlap mapping | Formulas referencing CSQ aliases excluded as untranslatable |
 | P2 | **No-keyword LOD conversion** (BL-052): `{AGG([col])}` → `group_aggregate(ts_agg([col]), {}, query_filters())` — must run before keyword LOD step | No-keyword LODs excluded as "raw LOD braces" |
 | P3 | **Scalar MAX/MIN detection** (BL-055): 2-arg `MAX(a, b)` → `greatest ( a , b )`; `MIN(a, b)` → `least ( a , b )`; 1-arg aggregate preserved | Scalar MAX/MIN misclassified as aggregate or untranslatable |
@@ -1175,17 +1175,23 @@ the ThoughtSpot formula catalog (`ts_cli/formula_translate/catalog.py`, vendored
 drift-tested against it, the same check `ts formula translate` applies). A call that is not
 a ThoughtSpot function skips the formula with the reason `untranslated Tableau function: X`,
 and the formula is omitted and logged like every row in this table. Before this, about 20
-current Tableau functions came out verbatim, failed at import, and were dropped with no
-`MIGRATION_LIMITATIONS.md` entry (audit 2026-10-29 13.13, 2026-11-08 13.16/13.17).
+current Tableau functions came out verbatim, failed at import and were parked with
+ThoughtSpot's error; now they are excluded at translate time with a reason (audit
+2026-10-29 13.13, 2026-11-08 13.16/13.17).
 
-- **Exact spelling.** The converter emits every function in lower case, so an upper- or
-  mixed-case call is untranslated Tableau even when its lower-case form is a ThoughtSpot
-  function: `LOG2(x)` is flagged although `log2` exists.
-- **Not a call:** a `[field]` reference (`[Area (sq ft)]`), a string literal, a `sql_*_op`
-  template's SQL text, and the operators `AND` / `OR` / `NOT` / `IN` in any case.
-- **Not caught:** `RANK_*` and `RUNNING_*`. Their ThoughtSpot forms are documented in the
-  Rank and Running sections, but the CLI does not convert them: they reach import, and the
-  parked-formula fix cycle applies the documented form.
+- **One spelling.** Tableau names are case-insensitive, so call names in the source are
+  upper-cased before mapping, and the converter emits lower case: a call left in any other
+  spelling is untranslated even when its lower-case form is a ThoughtSpot function. `LOG2(x)`
+  and `log2(x)` are both flagged although `log2` exists. A `group_*` / `cumulative_*` /
+  `moving_*` name counts only as a documented member (`cumulative_count`, `moving_stddev`
+  were disproved live; `group_concat` is not ThoughtSpot's).
+- **Not a call:** a `[field]` reference (`[Area (sq ft)]`, `[Revenue (net) [EUR]]]`), a
+  string literal, a comment, a `sql_*_op` template's SQL text, and the operators `AND` /
+  `OR` / `NOT` / `IN` in any case.
+- **Not caught:** `RANK_*` and `RUNNING_SUM` / `AVG` / `MAX` / `MIN`. Their ThoughtSpot
+  forms are documented in the Rank and Running sections, but the CLI does not convert them:
+  they reach import, and the parked-formula fix cycle applies the documented form.
+  `RUNNING_COUNT` is caught: its form is answer-level only (coverage matrix #56, L17).
 
 | Tableau function(s) | Status | Notes |
 |---|---|---|
@@ -1196,7 +1202,7 @@ current Tableau functions came out verbatim, failed at import, and were dropped 
 | `QUARTER(d)` | Unsupported, skipped, flagged for review | Candidate `quarter_number ( d )` (the `DATEPART('quarter')` target). Map only after a live check |
 | `LOG2(x)` | Unsupported, skipped, flagged for review | Candidate `log2 ( x )` (in the catalog). Map only after a live check |
 | `SPACE(n)` | Unsupported, skipped, flagged for review | No native ThoughtSpot function |
-| `COLLECT(spatial)` | Unsupported, skipped, flagged for review | Spatial aggregate: no ThoughtSpot spatial type, see Geospatial Policy |
+| `COLLECT(spatial)` | Unsupported, skipped, flagged for review | Spatial aggregate: no ThoughtSpot spatial type, see Geospatial Policy. Tiered `geospatial` |
 | Connector functions: `GET_JSON_OBJECT`, `PARSE_URL`, `PARSE_URL_QUERY`, `HOST`, `DOMAIN`, `TLD`, `XPATH_*`, `GROUP_CONCAT`, `LTRIM_THIS`, `RTRIM_THIS` | Unsupported, skipped, flagged for review | Specific to a Tableau connector's warehouse; no portable ThoughtSpot form. Translate by hand against the target warehouse |
 | Any other function with no converter mapping | Skipped by the catch | The reason names the function |
 

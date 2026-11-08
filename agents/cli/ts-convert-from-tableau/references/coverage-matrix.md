@@ -103,7 +103,7 @@ Use this as the canonical limitations reference.
 | # | Tableau Function(s) | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 55 | `RUNNING_SUM/AVG/MAX/MIN` | `cumulative_sum/average/max/min ( [t::col] , [sort_attr] )` | |
-| 56 | `RUNNING_COUNT` | `cumulative_sum ( 1 , [sort_attr] )` | Answer-level only; approximate; Not verified as of 2026-07-03 |
+| 56 | `RUNNING_COUNT` | `cumulative_sum ( 1 , [sort_attr] )` | Answer-level only; approximate; Not verified as of 2026-07-03. The converter excludes it (BL-460 review): there is no Model formula to emit |
 
 ### Formula Translation — Rank
 
@@ -207,9 +207,10 @@ These functions have no CLI implementation. `ts tableau translate-formulas` dete
 function: X` reason instead of emitting broken TML or silently passing the Tableau syntax
 through untranslated. Since ts-cli v0.210.0 (BL-460) a function no list names is skipped too:
 any call left in the output that is not in the ThoughtSpot formula catalog gets an
-`untranslated Tableau function: X` reason (U12–U15). `RANK_*` and `RUNNING_*` are exempt:
-their forms are documented (#55, #61, #63, #109) but not converted by the CLI, so they reach
-import and the parked-formula fix cycle.
+`untranslated Tableau function: X` reason (U12–U15). `RANK_*` and `RUNNING_SUM/AVG/MAX/MIN`
+are exempt: their forms are documented (#55, #61, #63, #109) but not converted by the CLI,
+so they reach import and the parked-formula fix cycle. `RUNNING_COUNT` (#56) is not: its
+form is answer-level only (L17), so the cycle has no Model formula to apply.
 
 | # | Tableau Function(s) | Notes |
 |---|---|---|
@@ -222,10 +223,10 @@ import and the parked-formula fix cycle.
 | U9 | `USERATTRIBUTE(attr)` / `USERATTRIBUTEINCLUDES(attr, val)` | Rejected with reason at translate time (ts-cli v0.28.1) — sibling of U7; ABAC `ts_var()` referencing a formula variable is a plausible native translation, but `ts_var(...)` is only accepted in RLS RULES, not in Model/Answer formulas today, so no faithful in-formula translation exists yet. Deferred, BL-071 |
 | U10 | `WINDOW_SUM/AVG/MAX/MIN/STDEV/VAR/MEDIAN/PERCENTILE/COUNT` | Rejected with reason at translate time (ts-cli v0.75.0). Live-confirmed hard-fail otherwise (error 14516, "Search did not find '<FUNC> ( ... )'") — `translate_formulas()` was not actually converting these (former #57-59 rows here mistiered them `moving`/Mapped) even though `moving_sum/average/max/min` are architecturally the right ThoughtSpot equivalent (see `tableau-formula-translation.md` "Window / Moving Functions"). The blocker is the required sort attribute: Tableau encodes it as worksheet "Compute Using" addressing, which `ts tableau parse` already extracts (`table_calc_addressing` — #72) but `build-model`'s automated pipeline has no wiring to consume. Tracked as a follow-on to actually wire that context through |
 | U11 | `LOOKUP(agg, N)` / `INDEX()` / `FIRST()` / `LAST()` (standalone row-offset, not as `WINDOW_*`/`RUNNING_*` offset args) | Rejected with reason at translate time (ts-cli v0.75.0). Same addressing-context gap as U10 — `first_value()`/`last_value()`/`moving_sum()`/`rank()` are the architecturally-correct native equivalents per the tiered decision tree (`tableau-formula-translation.md` "Row-Offset Table Calculations"), but `build-model` can't resolve the sort column automatically today. Formerly mistiered `row_offset_native` (Mapped, former #64-69) though never actually converted — live-confirmed hard-fail (error 14516) |
-| U12 | `VAR(x)` / `VARP(x)` / `STDEVP(x)` / `CORR(a, b)` / `COVAR(a, b)` / `COVARP(a, b)` / `PERCENTILE(x, p)` | Unsupported, flagged for review: skipped at translate time by the survivor catch (ts-cli v0.210.0, BL-460); before that they passed through verbatim and failed import unreported. `VAR`/`VARP` → `variance` waits on a live check of its sample-vs-population semantics. **`STDEVP` must never map to `stddev`** (that is `STDEV`, the sample form). `CORR`/`COVAR(P)`/`PERCENTILE` have no native function; an aggregate pass-through (PT1) is unverified |
+| U12 | `VAR(x)` / `VARP(x)` / `STDEVP(x)` / `CORR(a, b)` / `COVAR(a, b)` / `COVARP(a, b)` / `PERCENTILE(x, p)` | Unsupported, flagged for review: excluded at translate time by the survivor catch (ts-cli v0.210.0, BL-460); before that they reached import verbatim and were parked with ThoughtSpot's error. `VAR`/`VARP` → `variance` waits on a live check of its sample-vs-population semantics. **`STDEVP` must never map to `stddev`** (that is `STDEV`, the sample form). `CORR`/`COVAR(P)`/`PERCENTILE` have no native function; an aggregate pass-through (PT1) is unverified |
 | U13 | `QUARTER(d)` / `LOG2(x)` / `SPACE(n)` | Unsupported, flagged for review: skipped by the survivor catch (BL-460). `QUARTER` → `quarter_number` and `LOG2` → `log2` wait on a live check. `SPACE` has no native function. (`DATETIME` was listed here until it was wired in: #36) |
 | U14 | Connector functions: `GET_JSON_OBJECT`, `PARSE_URL`, `PARSE_URL_QUERY`, `HOST`, `DOMAIN`, `TLD`, `XPATH_*`, `GROUP_CONCAT`, `LTRIM_THIS`, `RTRIM_THIS`; spatial aggregate `COLLECT` | Unsupported, flagged for review: skipped by the survivor catch (BL-460). Warehouse-specific, so no portable ThoughtSpot form; `COLLECT` follows the Geospatial Policy |
-| U15 | Any other function the converter has no mapping for | Skipped by the survivor catch (ts-cli v0.210.0, BL-460), reason `untranslated Tableau function: X`. Whether a call is a ThoughtSpot function comes from the formula catalog (`ts_cli/formula_translate/catalog.py`), matched in exact (lower-case) spelling; `[field]` references, string literals and `sql_*_op` template text are not calls |
+| U15 | Any other function the converter has no mapping for | Skipped by the survivor catch (ts-cli v0.210.0, BL-460), reason `untranslated Tableau function: X`. Whether a call is a ThoughtSpot function comes from the formula catalog (`ts_cli/formula_translate/catalog.py`, documented family members only); source call names are upper-cased first, so every spelling gets one verdict. `[field]` references, string literals, comments and `sql_*_op` template text are not calls |
 
 ### HIGH — Functionality loss, no workaround
 

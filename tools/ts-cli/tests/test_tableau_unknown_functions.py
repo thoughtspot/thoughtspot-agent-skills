@@ -3,7 +3,7 @@
 Before the generic survivor catch, a calc calling a function with no converter
 mapping (CORR, VAR, QUARTER, GET_JSON_OBJECT, …) came out of ``translate_formulas``
 VERBATIM in ``translated[]`` with no validation error. It then failed at import and
-the retry loop dropped it, with no MIGRATION_LIMITATIONS entry: the 13.22 failure
+was parked with ThoughtSpot's error, never excluded with a reason: the 13.22 failure
 class, found a third time by census (2026-08-26 13.22, 13.25, 2026-11-08 13.16/13.17).
 
 The catch lives in ``tableau/validate.py`` (``_unknown_calls``) and asks the formula
