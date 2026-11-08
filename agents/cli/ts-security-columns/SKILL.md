@@ -3,6 +3,7 @@ name: ts-security-columns
 description: Restrict which columns a group can see on a ThoughtSpot Table or Model, choosing between the two mechanisms — Column Security Rules (CSR) and column-level sharing (CLS) — per Org, and explaining the trade-off. Use when hiding columns from a tenant or an audience, securing sensitive fields, or deciding which column-security mechanism applies to a published object. Drives the `ts share` and `ts security column-rules` pipelines.
 metadata:
   category: "Platform & Governance"
+  order: 2
   summary: "Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules`"
 ---
 

@@ -4,6 +4,7 @@ description: Set up and manage Snowflake connection profiles. Use when configuri
 metadata:
   category: Setup
   subcategory: Credentials
+  order: 2
   summary: "Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively)"
 ---
 

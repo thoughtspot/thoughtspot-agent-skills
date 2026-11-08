@@ -38,13 +38,13 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it does | Category |
 |---|---|---|
-| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials |
-| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials |
-| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials |
 | [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles | Credentials |
+| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials |
+| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials |
+| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials |
 | [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data |
-| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy |
 | [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) | Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them | Tenancy |
+| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy |
 
 <!-- END GENERATED: skills-setup -->
 
@@ -89,14 +89,14 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it does |
 |---|---|
-| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
-| [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars |
-| [`ts-object-formula-translate`](agents/cli/ts-object-formula-translate/SKILL.md) | Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model |
+| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
+| [`ts-object-set-manager`](agents/cli/ts-object-set-manager/SKILL.md) | Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only) |
+| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login |
 | [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified |
 | [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) | Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline |
-| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
-| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login |
-| [`ts-object-set-manager`](agents/cli/ts-object-set-manager/SKILL.md) | Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only) |
+| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
+| [`ts-object-formula-translate`](agents/cli/ts-object-formula-translate/SKILL.md) | Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model |
+| [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars |
 
 <!-- END GENERATED: skills-semantic-authoring -->
 
@@ -113,10 +113,10 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it does |
 |---|---|
-| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
-| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) |
 | [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline |
 | [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` |
+| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
+| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) |
 | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
 
 <!-- END GENERATED: skills-platform-governance -->

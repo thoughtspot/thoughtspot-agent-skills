@@ -3,6 +3,7 @@ name: ts-object-answer-promote
 description: Promote formulas and parameters from a saved ThoughtSpot Answer into a Model — makes them available to all users who search against it.
 metadata:
   category: Semantic Authoring
+  order: 6
   summary: Promote formulas and parameters from a saved Answer into a Model
 ---
 

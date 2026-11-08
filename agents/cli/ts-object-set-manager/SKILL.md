@@ -3,6 +3,7 @@ name: ts-object-set-manager
 description: Inventory reusable Sets (cohorts) on ThoughtSpot Models — how many each Model has, what depends on each, which are delete candidates or could become answer-level, and where every grant on a Set came from. Use when cleaning up Sets, auditing who can see a Set, finding unused Sets, or deciding which Sets should stay reusable. v1 is report only — it changes nothing.
 metadata:
   category: Semantic Authoring
+  order: 2
   summary: "Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only)"
 ---
 

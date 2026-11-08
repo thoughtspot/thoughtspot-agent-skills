@@ -3,6 +3,7 @@ name: ts-dependency-manager
 description: Safely audit, remove, or repoint columns and objects across a ThoughtSpot environment, or delete an object together with everything that depends on it (administrators only) — generates a risk-rated impact report or a dry-run preview, backs up TML before any change, and supports full rollback.
 metadata:
   category: "Platform & Governance"
+  order: 4
   summary: "Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first)"
 ---
 

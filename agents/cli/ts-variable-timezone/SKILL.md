@@ -3,6 +3,7 @@ name: ts-variable-timezone
 description: Manage the ts_user_timezone variable in ThoughtSpot — search current values, or set/remove timezone values at org or user level.
 metadata:
   category: "Platform & Governance"
+  order: 5
   summary: "Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6"
 ---
 
