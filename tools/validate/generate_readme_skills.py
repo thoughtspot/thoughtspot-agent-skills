@@ -12,6 +12,7 @@ source of truth for its README row:
       platform: Snowflake                        # Conversion only
       coverage: "references/coverage-matrix.md"  # Conversion only; relative to the skill dir, or none
       subcategory: Credentials                   # Setup only
+      order: 3                                   # optional; see "Row order" below
 
 A summary is moved verbatim from the README cell, markdown included, except that
 its relative links are written from the skill's directory, as every link in a
@@ -26,9 +27,13 @@ everything else (the prose between the tables included) as written:
 
 each closed by the matching `<!-- END GENERATED: <name> -->`.
 
-Row order within a table is a sort, not stored data: Setup by subcategory then
-skill name; Conversion by platform (to- before from-, non-converters such as
-ts-link-semantic-layer last); every other table by skill name.
+Row order: skills with an integer `metadata.order` come first, ascending (an
+order must be unique within its table); the rest follow by the table's rule:
+Setup by subcategory then skill name, Conversion by platform (to- before from-,
+non-converters such as ts-link-semantic-layer last), every other table by skill
+name. Setup, Semantic Authoring and Platform & Governance keep a curated order
+that no rule reproduces, so every skill in them carries `order`; a skill added
+there without one lands after them.
 
 A summary or field containing `|` or a line break is refused, not escaped: either
 would split the README table cell, and an escaped pipe has no spelling that is
@@ -65,9 +70,14 @@ class Skill:
     name: str                 # the skill's directory name, which is its slash command
     rel_dir: str              # e.g. "agents/cli/ts-audit"
     meta: Dict[str, str]
+    order: Optional[int] = None  # metadata.order, when set
 
     def get(self, key: str) -> str:
         return self.meta.get(key, "")
+
+    @property
+    def rel_path(self) -> str:
+        return f"{self.rel_dir}/SKILL.md"
 
 
 def _by_name(s: Skill) -> tuple:
@@ -179,6 +189,9 @@ def validate_meta(skill_dir: Path, meta: object) -> List[str]:
     if not isinstance(category, str) or category not in _BY_NAME:
         return [f"metadata.category {category!r} is not one of: {', '.join(_BY_NAME)}"]
     errors: List[str] = []
+    # bool is an int subclass, so `order: true` would otherwise read as 1.
+    if "order" in meta and (not isinstance(meta["order"], int) or isinstance(meta["order"], bool)):
+        errors.append(f"metadata.order must be an integer, got {meta['order']!r}")
     for key in _BY_NAME[category].required:
         value = meta.get(key)
         if _blank(value):
@@ -230,8 +243,27 @@ def load_skills(root: Path) -> Tuple[List[Skill], List[str]]:
             errors.extend(f"{rel}: {p}" for p in problems)
             continue
         skills.append(Skill(path.parent.name, path.parent.relative_to(root).as_posix(),
-                            {k: v for k, v in meta.items() if isinstance(v, str)}))
-    return skills, errors
+                            {k: v for k, v in meta.items() if isinstance(v, str)},
+                            meta.get("order")))
+    return skills, errors + duplicate_order_errors(skills)
+
+
+def duplicate_order_errors(skills: Sequence[Skill]) -> List[str]:
+    """One error per file whose `order` another skill in the same table also uses:
+    a tie would fall back to the table's rule, so the curated order would be
+    whatever that rule happens to give."""
+    users: Dict[Tuple[str, int], List[Skill]] = {}
+    for s in skills:
+        if s.order is not None:
+            users.setdefault((s.get("category"), s.order), []).append(s)
+    errors = []
+    for (category, order), group in sorted(users.items()):
+        if len(group) > 1:
+            for s in group:
+                others = ", ".join(o.name for o in group if o is not s)
+                errors.append(f"{s.rel_path}: metadata.order {order} is also used by {others} "
+                              f"in the {category} table; each order must be unique within a table")
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -259,11 +291,16 @@ def _cell(skill: Skill, key: str) -> str:
     return rebase_links(value, skill.rel_dir)
 
 
+def row_key(category: Category, skill: Skill) -> tuple:
+    """Skills with `metadata.order` first, ascending; then the rest by the table's rule."""
+    return (skill.order is None, skill.order or 0, category.order(skill))
+
+
 def render_category_table(category: Category, skills: Sequence[Skill]) -> str:
     headers = ["Skill"] + [h for h, _ in category.columns]
     lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
-    for s in sorted(skills, key=category.order):
-        cells = [f"[`{s.name}`]({s.rel_dir}/SKILL.md)"] + [_cell(s, k) for _, k in category.columns]
+    for s in sorted(skills, key=lambda s: row_key(category, s)):
+        cells = [f"[`{s.name}`]({s.rel_path})"] + [_cell(s, k) for _, k in category.columns]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 

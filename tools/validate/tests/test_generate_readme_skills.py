@@ -173,6 +173,58 @@ def test_row_order_is_the_documented_sort(tree):
     assert conversion == ["ts-convert-to-acme", "ts-convert-from-acme", "ts-link-semantic-layer"]
 
 
+# ── metadata.order ─────────────────────────────────────────────────────────────
+
+
+def _setup_rows(root: Path) -> list:
+    return [ln.split("`")[1] for ln in _readme(root).split("skills-setup -->")[1].splitlines()
+            if ln.startswith("| [`")]
+
+
+def test_order_wins_over_the_tables_rule(tree):
+    """Without `order` Setup reads snowflake, thoughtspot, load-source-data. With it,
+    ordered rows come first by `order`; the unordered one follows by the rule."""
+    _set_meta(tree, "ts-load-source-data",
+              'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load CSV data"\n')
+    _set_meta(tree, "ts-profile-thoughtspot",
+              'metadata:\n  category: Setup\n  subcategory: Credentials\n  order: 2\n'
+              '  summary: "Add ThoughtSpot profiles"\n')
+    assert _run(tree) == 0
+    assert _setup_rows(tree) == ["ts-load-source-data", "ts-profile-thoughtspot", "ts-profile-snowflake"]
+    assert _run(tree, "--check") == 0
+
+
+def test_duplicate_order_within_a_table_fails_naming_both_files(tree, capsys):
+    a = _set_meta(tree, "ts-load-source-data",
+                  'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load"\n')
+    b = _set_meta(tree, "ts-profile-thoughtspot",
+                  'metadata:\n  category: Setup\n  subcategory: Credentials\n  order: 1\n  summary: "Add"\n')
+    before = _readme(tree)
+    assert _run(tree, "--check") == 1
+    out = capsys.readouterr().out
+    assert f"FAIL  {a}: metadata.order 1 is also used by ts-profile-thoughtspot in the Setup table" in out
+    assert f"FAIL  {b}: metadata.order 1 is also used by ts-load-source-data in the Setup table" in out
+    assert _run(tree) == 1
+    assert _readme(tree) == before
+
+
+def test_the_same_order_in_two_different_tables_is_fine(tree):
+    _set_meta(tree, "ts-load-source-data",
+              'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load"\n')
+    _set_meta(tree, "ts-audit", 'metadata:\n  category: "Platform & Governance"\n  order: 1\n  summary: "Scan"\n')
+    assert _run(tree) == 0
+    assert _run(tree, "--check") == 0
+
+
+@pytest.mark.parametrize("value", ["2.5", '"3"', "true", "", "[1]"],
+                         ids=["float", "string", "bool", "empty", "list"])
+def test_non_integer_order_fails_naming_the_file(tree, capsys, value):
+    rel = _set_meta(tree, "ts-audit",
+                    f'metadata:\n  category: "Platform & Governance"\n  order: {value}\n  summary: "Scan"\n')
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata.order must be an integer" in capsys.readouterr().out
+
+
 # ── failure modes ──────────────────────────────────────────────────────────────
 
 
