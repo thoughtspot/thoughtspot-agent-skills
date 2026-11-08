@@ -4,12 +4,12 @@ check_references.py — verify all file paths referenced in SKILL.md, references
 and docs/**/*.md files exist.
 
 Scans:
-  - every SKILL.md in agents/cli/, agents/claude/, and agents/coco-snowsight/
-  - every references/*.md under those same three skill runtimes
+  - every SKILL.md in agents/cli/ and agents/claude/ (every runtime in _dirs)
+  - every references/*.md under those same skill runtimes
   - every docs/**/*.md file, excluding docs/audit/, docs/superpowers/, and any
     *backlog-archive* path (historical / generated content, not maintained links)
 
-for markdown links [text](path) and maps runtime-specific path prefixes back to
+for markdown links [text](path) and maps the ~/.claude/... install prefixes back to
 repo paths before checking existence.
 
 ALSO scans backtick-quoted repo-relative paths — `docs/backlog.md`,
@@ -21,33 +21,19 @@ it is unambiguous: first segment is a git-tracked top-level directory, last
 segment has a file extension, no whitespace / glob / placeholder characters. See
 "Backtick path resolution" below.
 
-Path mappings (SKILL.md only — see "Per-file-class link resolution" below):
-  Claude / CLI skills  (~/.claude/...):
+Path mappings (CLAUDE_PREFIX_MAP, applied to every scanned file):
     ~/.claude/shared/         → agents/shared/
     ~/.claude/mappings/       → agents/shared/mappings/
     ~/.claude/skills/         → agents/cli/ (or agents/claude/ for Claude-only skills)
 
-  CoCo skills (relative ../../shared/...):
-    ../../shared/             → agents/shared/   (from skill dir two levels deep)
-
-Per-file-class link resolution:
-  SKILL.md files keep the exact behaviour above (prefix maps first, else resolve
-  relative to the SKILL.md's own directory) — unchanged from before this file's
-  scope was extended.
-
-  references/*.md files sit ONE level deeper than SKILL.md (agents/<runtime>/<skill>/
-  references/foo.md vs agents/<runtime>/<skill>/SKILL.md), so the SKILL.md prefix
-  maps — which are depth-sensitive shorthand written for SKILL.md's specific
-  location (e.g. CoCo's "../../shared/" assumes exactly two levels up from the
-  skill dir) — would misresolve a relative link from this deeper location. These
-  files instead resolve plain relative links against their own directory (which is
-  depth-correct by construction via Path.resolve()), while still honouring the
-  ~/.claude/... prefixes (CLAUDE_PREFIX_MAP) since those are absolute-style
-  shorthand that map straight to a repo path regardless of the caller's depth.
-
-  docs/**/*.md files live outside agents/<runtime>/<skill>/ entirely, so none of
-  the skill prefix maps apply. These resolve plain relative links against the
-  docs file's own directory, same as references/*.md.
+  These are absolute-style shorthand, so they map straight to a repo path whatever
+  the citing file's depth. Every other relative link — from a SKILL.md, a
+  references/*.md one level deeper, or a docs/**/*.md outside agents/ — resolves
+  against the citing file's own directory, which is depth-correct by construction
+  (Path.resolve() walks the actual ../ segments). The retired CoCo runtime's
+  depth-sensitive "../../shared/" prefix map, which applied to SKILL.md only and
+  needed a per-file-class switch to keep it away from deeper files, went with that
+  runtime on 2026-11-08.
 
 Usage:
     python tools/validate/check_references.py
@@ -129,6 +115,20 @@ KNOWN_MISSING_BACKTICK_PATHS: dict[str, str] = {
     # (c) completed deletion — BL-109 is DONE and the file was the thing deleted
     "agents/claude/references/direct-api-auth.md":
         "completed deletion: BL-109 retired this file (DONE 2026-07-11)",
+    # (c) completed deletion — the CoCo Snowsight and Databricks Genie runtimes, retired
+    # 2026-11-08 and archived at git tag runtimes-archive-2026-11-08. Cited by backlog
+    # items and a review written while they existed.
+    "agents/coco-snowsight/SETUP.md": "completed deletion: CoCo runtime retired 2026-11-08",
+    "agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md":
+        "completed deletion: CoCo runtime retired 2026-11-08",
+    "agents/databricks/deploy.sh": "completed deletion: Genie runtime retired 2026-11-08",
+    "agents/databricks/build_mv_lib.py": "completed deletion: Genie runtime retired 2026-11-08",
+    "agents/databricks/notebooks/databricks_mv_lib.py":
+        "completed deletion: Genie runtime retired 2026-11-08 (was generated, never tracked)",
+    "agents/databricks/notebooks/ts_client.py":
+        "completed deletion: Genie runtime retired 2026-11-08",
+    "agents/databricks/shared/schemas/thoughtspot-model-tml.md":
+        "completed deletion: Genie runtime retired 2026-11-08 (was a generated deploy copy)",
 }
 
 # Links whose targets exist locally but are deliberately untracked / gitignored at
@@ -143,42 +143,6 @@ CLAUDE_PREFIX_MAP = {
     "~/.claude/mappings/": "agents/shared/mappings/",
     "~/.claude/skills/": "agents/cli/",
 }
-
-COCO_PREFIX_MAP = {
-    "../../shared/": "agents/shared/",
-}
-
-def _prefix_map_for(skill_file: Path) -> dict:
-    path_str = str(skill_file)
-    if "agents/coco" in path_str:
-        return COCO_PREFIX_MAP
-    return CLAUDE_PREFIX_MAP
-
-
-def _file_class(source_file: Path, repo_root: Path) -> str:
-    """Classify a source .md file so resolve_path() applies the right base path.
-
-    - "skill": agents/<runtime>/<skill>/SKILL.md — the original, depth-sensitive
-      prefix-map behaviour applies (unchanged).
-    - "reference": any references/*.md file (one level deeper than SKILL.md) —
-      resolve relative links from the file's own directory instead.
-    - "doc": anything under docs/ — also resolves relative to its own directory;
-      none of the skill prefix maps are meaningful outside agents/.
-    """
-    try:
-        rel_parts = source_file.relative_to(repo_root).parts
-    except ValueError:
-        rel_parts = source_file.parts
-
-    if source_file.name == "SKILL.md":
-        return "skill"
-    if "references" in rel_parts:
-        return "reference"
-    if rel_parts and rel_parts[0] == "docs":
-        return "doc"
-    # Anything else falls back to the original skill-style resolution rather
-    # than silently changing behaviour for an unanticipated file class.
-    return "skill"
 
 
 def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | None:
@@ -198,21 +162,10 @@ def resolve_path(link_target: str, skill_file: Path, repo_root: Path) -> Path | 
     if "{" in path_part or "}" in path_part:
         return None
 
-    file_class = _file_class(skill_file, repo_root)
-
-    if file_class == "skill":
-        prefix_map = _prefix_map_for(skill_file)
-    else:
-        # references/*.md and docs/**/*.md: only the absolute-style ~/.claude/...
-        # shorthand is safe to apply regardless of depth. The CoCo "../../shared/"
-        # convention is depth-sensitive and written for SKILL.md's location —
-        # applying it here would misresolve a legit relative link from a deeper
-        # (references/) or differently-rooted (docs/) file. See module docstring.
-        prefix_map = CLAUDE_PREFIX_MAP
-
-    # Apply prefix mappings (longest-prefix-first to avoid partial matches)
+    # Apply the ~/.claude/... prefix mappings (longest-prefix-first to avoid partial
+    # matches). They are absolute-style, so they apply whatever the citing file's depth.
     resolved = path_part
-    for prefix, replacement in sorted(prefix_map.items(), key=lambda x: -len(x[0])):
+    for prefix, replacement in sorted(CLAUDE_PREFIX_MAP.items(), key=lambda x: -len(x[0])):
         if resolved.startswith(prefix):
             resolved = replacement + resolved[len(prefix):]
             return repo_root / resolved

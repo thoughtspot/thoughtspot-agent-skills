@@ -4,9 +4,8 @@ check_skill_versions.py — verify every skill file across all runtimes has a
 ## Changelog section with at least one valid semver entry.
 
 Covers:
-  agents/cli/*/SKILL.md             — Canonical CLI skills (Claude Code + Cortex Code CLI)
-  agents/claude/*/SKILL.md          — Claude Code-only skills
-  agents/coco-snowsight/*/SKILL.md  — Snowflake Cortex (CoCo) skills
+  agents/cli/*/SKILL.md     — Canonical CLI skills (Claude Code + Cortex Code CLI)
+  agents/claude/*/SKILL.md  — Claude Code-only skills
 
 Every file must have:
   ## Changelog
@@ -142,7 +141,7 @@ def collect_skill_files(repo_root: Path) -> list[Path]:
     """Return all tracked skill files across all runtimes."""
     files: list[Path] = []
 
-    # cli = canonical CLI skills; claude = Claude-only annex; coco-snowsight = CoCo.
+    # cli = canonical CLI skills; claude = Claude-only annex.
     # Per-runtime sorted, concatenated in ALL_RUNTIMES order.
     for runtime in ALL_RUNTIMES:
         tracked = get_tracked_files(repo_root, f"agents/{runtime}")

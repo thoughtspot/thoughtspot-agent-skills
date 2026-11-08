@@ -125,7 +125,7 @@ PLATFORM_CODE_OVERRIDES: dict[str, tuple[str, ...] | None] = {
 }
 
 # Documented intentional divergences. Each entry needs a one-line justification so a
-# reviewer can sanity-check it — same convention as check_runtime_coverage.py.
+# reviewer can sanity-check it.
 #
 # Format: {(platform, helper): "one-line reason"}
 #

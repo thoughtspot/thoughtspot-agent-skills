@@ -41,10 +41,10 @@ from pathlib import Path
 
 from _git import _GitOut, git_paths, tracked_relpaths
 
-from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
+from _dirs import ALL_RUNTIMES, ALL_RUNTIME_PATHS
 
 # Trailing-slash prefixes for str.startswith on repo-relative paths.
-_CLI_SKILL_PREFIXES = tuple(f"{p}/" for p in CLI_RUNTIME_PATHS)
+_CLI_SKILL_PREFIXES = tuple(f"{p}/" for p in ALL_RUNTIME_PATHS)
 
 
 # Skills exempt from the smoke-test requirement.
@@ -231,7 +231,7 @@ def _find_double_claimed_skills(repo_root: Path, tracked: set[str]) -> list[str]
         return []
 
     known_skills: set[str] = set()
-    for runtime in CLI_RUNTIMES:
+    for runtime in ALL_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if runtime_dir.is_dir():
             known_skills |= {d.name for d in runtime_dir.iterdir() if d.is_dir()}
@@ -278,7 +278,7 @@ def _find_orphan_smoke_tests(repo_root: Path, tracked: set[str]) -> list[str]:
     alias_targets = set(NAME_ALIASES.values()) | set(COMPANION_SMOKE_TESTS)
 
     known_skills: set[str] = set()
-    for runtime in CLI_RUNTIMES:
+    for runtime in ALL_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue
@@ -347,7 +347,7 @@ def check(repo_root: Path, staged_only: bool = False) -> tuple[list[str], list[s
     tracked = _get_tracked_paths(repo_root)
 
     # Canonical CLI skills live in agents/cli/; agents/claude/ holds Claude-only skills.
-    for runtime in CLI_RUNTIMES:
+    for runtime in ALL_RUNTIMES:
         runtime_dir = repo_root / "agents" / runtime
         if not runtime_dir.is_dir():
             continue

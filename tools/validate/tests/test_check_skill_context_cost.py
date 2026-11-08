@@ -59,9 +59,8 @@ def test_ratcheted_skill_that_grew_fails(tmp_path, monkeypatch, capsys):
 def test_scans_all_runtimes(tmp_path, capsys):
     _make_skill(tmp_path, "cli", "ts-audit", 1_000)
     _make_skill(tmp_path, "claude", "ts-profile-snowflake", 1_000)
-    _make_skill(tmp_path, "coco-snowsight", "ts-setup-sv", 1_000)
     assert cc.main(["--root", str(tmp_path)]) == 0
-    assert "3 skill(s) checked" in capsys.readouterr().out
+    assert "2 skill(s) checked" in capsys.readouterr().out
 
 
 def test_non_skill_markdown_ignored(tmp_path, capsys):

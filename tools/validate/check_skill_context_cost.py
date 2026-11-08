@@ -38,7 +38,6 @@ CHARS_PER_TOKEN = 4
 SKILL_GLOBS = (
     "agents/cli/*/SKILL.md",
     "agents/claude/*/SKILL.md",
-    "agents/coco-snowsight/*/SKILL.md",
 )
 
 # RATCHET, not an allowlist: path -> (recorded est. tokens, backlog reference).

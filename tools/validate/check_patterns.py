@@ -45,7 +45,7 @@ import re
 import sys
 from pathlib import Path
 
-from _dirs import CLI_RUNTIMES, CLI_RUNTIME_PATHS
+from _dirs import ALL_RUNTIMES, ALL_RUNTIME_PATHS
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -230,12 +230,11 @@ def main() -> int:
         md_files_for_tml = all_md_files
         py_files = all_py_files
         skill_md_files = [f for f in all_md_files
-                          if any(rp in str(f) for rp in CLI_RUNTIME_PATHS)
+                          if any(rp in str(f) for rp in ALL_RUNTIME_PATHS)
                           and f.name == "SKILL.md"]
         # Check 6 also gates shared reference docs (agents/shared/**/*.md) — the
         # stdin wrapper there is inherited by every converter that links to it
-        # (BL-117). agents/databricks/shared/ is a generated, untracked copy that
-        # regenerates from agents/shared/ on deploy, so it is never scanned here.
+        # (BL-117).
         shared_md_files = [f for f in all_md_files if "agents/shared" in str(f)]
     else:
         md_files_for_tml = sorted(
@@ -249,18 +248,17 @@ def main() -> int:
         # Only check SKILL.md files that are tracked by git (skip gitignored pending skills)
         import subprocess as _sp
         _tracked = set(
-            _sp.run(["git", "ls-files", "-z", *CLI_RUNTIME_PATHS, "agents/shared"],
+            _sp.run(["git", "ls-files", "-z", *ALL_RUNTIME_PATHS, "agents/shared"],
                     capture_output=True, text=True, cwd=repo_root).stdout.split("\0")
         )
         skill_md_files: list[Path] = []
-        for runtime in CLI_RUNTIMES:
+        for runtime in ALL_RUNTIMES:
             skill_md_files += sorted(
                 f for f in repo_root.glob(f"agents/{runtime}/*/SKILL.md")
                 if str(f.relative_to(repo_root)) in _tracked
             )
         # Check 6 also gates shared reference docs (agents/shared/**/*.md) — see
-        # the --staged branch comment above. Tracked-only, so the generated
-        # agents/databricks/shared/ copy is excluded (BL-117).
+        # the --staged branch comment above. Tracked files only.
         shared_md_files = sorted(
             f for f in repo_root.glob("agents/shared/**/*.md")
             if str(f.relative_to(repo_root)) in _tracked
@@ -332,7 +330,7 @@ def main() -> int:
                 total_hits += 1
 
     # Check 5: direct requests calls in Claude SKILL.md files (should use ts CLI instead)
-    # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco-snowsight/ (no CLI available)
+    # Legitimate exception: references/ subdirs (open-items test scripts), which are never in skill_md_files
     # In --staged mode: only flag lines that are NEW in this commit (not pre-existing violations)
     requests_re = re.compile(r'\brequests\.(get|post|put|delete|patch|Session)\b')
     for md_file in skill_md_files:
@@ -356,7 +354,7 @@ def main() -> int:
     # Check 6: superseded stdin JSON-array `ts tml import`/`lint` wrapper in Claude
     # SKILL.md files AND shared reference docs (agents/shared/**/*.md, which the
     # converters inherit — BL-117) (should use --file/--dir instead — ts-cli >= v0.27.0).
-    # Legitimate exceptions: references/ subdirs (open-items test scripts) and agents/coco-snowsight/ (no CLI available)
+    # Legitimate exception: references/ subdirs (open-items test scripts), which are never in skill_md_files
     # In --staged mode: only flag hits where at least one half of the pattern is a NEW line in this commit
     for md_file in skill_md_files + shared_md_files:
         # When staged, only flag newly-added lines to avoid blocking commits that

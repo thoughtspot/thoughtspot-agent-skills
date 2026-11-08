@@ -333,7 +333,6 @@ EXPECTED_GATES = {
     ("suggest_dependency_types.py", "soft"),
     ("suggest_repo_changelog.py", "gate"),
     ("suggest_skill_version.py", "soft"),
-    ("unit tests (databricks)", "gate"),
     ("unit tests (erd)", "gate"),
     ("unit tests (ts-cli)", "gate"),
 }

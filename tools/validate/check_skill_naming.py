@@ -3,7 +3,7 @@
 check_skill_naming.py — validate skill directory names against the family
 patterns documented in .claude/rules/skill-naming.md.
 
-Walks agents/cli/<skill>/, agents/claude/<skill>/, and agents/coco-snowsight/<skill>/
+Walks agents/cli/<skill>/ and agents/claude/<skill>/ (every runtime in _dirs)
 for any directory that contains a SKILL.md, then checks the directory name matches
 one of the documented family regexes (or is on the explicit ALLOWLIST).
 
@@ -14,8 +14,7 @@ Exit codes:
 Run manually:
     python3 tools/validate/check_skill_naming.py --root .
 
-The pre-commit hook invokes this when `agents/{cli,claude,coco-snowsight}/**/SKILL.md`
-is staged.
+The pre-commit hook invokes this when `agents/{cli,claude}/**/SKILL.md` is staged.
 """
 from __future__ import annotations
 
@@ -100,9 +99,8 @@ def find_skills(root: Path) -> list[tuple[str, str, Path]]:
     Each entry is a tuple of (runtime_label, skill_name, path_for_error).
 
     Runtimes covered:
-      - agents/cli/<skill>/SKILL.md            (directory layout)
-      - agents/claude/<skill>/SKILL.md         (directory layout)
-      - agents/coco-snowsight/<skill>/SKILL.md (directory layout)
+      - agents/cli/<skill>/SKILL.md     (directory layout)
+      - agents/claude/<skill>/SKILL.md  (directory layout)
     """
     found: list[tuple[str, str, Path]] = []
 
@@ -136,7 +134,7 @@ def main() -> int:
     root = Path(args.root).resolve()
     skills = find_skills(root)
     if not skills:
-        print(f"No skills found under {root}/agents/{{cli,claude,coco-snowsight}}/. Nothing to check.")
+        print(f"No skills found under {root}/agents/{{cli,claude}}/. Nothing to check.")
         return 0
 
     failures: list[tuple[str, Path]] = []

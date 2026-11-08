@@ -156,11 +156,12 @@ def skill_dirs(root: Path) -> list[Path]:
 def items_for(name: str, known: dict[str, list[Path]]) -> set[str] | None:
     """Item numbers for a skill name, across every runtime that carries it.
 
-    Three names exist in two runtimes at once (the naming rule *requires* the CLI and
-    CoCo copies share a name), and only one copy carries ``references/open-items.md``.
-    Keying by name alone let the copy without the file win, so a valid citation failed
-    with "has no open-item #N" when the truth was "that runtime has no open-items.md".
-    Returns None when no copy has the file at all.
+    A name can exist in more than one runtime (the naming rule *requires* copies of
+    one skill to share a name), and only one copy need carry
+    ``references/open-items.md``. Keying by name alone let the copy without the file
+    win, so a valid citation failed with "has no open-item #N" when the truth was
+    "that runtime has no open-items.md" — the case three skills hit while the retired
+    CoCo runtime mirrored them. Returns None when no copy has the file at all.
     """
     found: set[str] = set()
     have_file = False

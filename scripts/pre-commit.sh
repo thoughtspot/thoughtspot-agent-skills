@@ -222,7 +222,7 @@ fi
 # Skill context cost — a SKILL.md is loaded into context on every invocation;
 # gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is
 # the remedy). Runs when a SKILL.md or the validator itself is touched.
-if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)' <<< "$STAGED"; then
+if grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/validate/check_skill_context_cost\.py)' <<< "$STAGED"; then
   run_check "skill context cost" "tools/validate/check_skill_context_cost.py --root . --staged"
 fi
 
@@ -233,10 +233,10 @@ if grep -qE '(agents/(cli|claude)/.*/SKILL\.md|tools/smoke-tests/|tools/validate
   run_check "smoke tests"        "tools/validate/check_smoke_tests.py --root . --staged"
 fi
 
-# Skill naming — every skill across all runtimes (Claude / CoCo) must
+# Skill naming — every skill across all runtimes (cli / claude) must
 # match a documented family pattern (see .claude/rules/skill-naming.md).
 # Runs when a SKILL.md, the rule itself, or the validator is added/renamed.
-if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)' <<< "$STAGED"; then
+if grep -qE '(agents/(cli|claude)/.*/SKILL\.md|\.claude/rules/skill-naming\.md|tools/validate/check_skill_naming\.py)' <<< "$STAGED"; then
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root ."
 fi
 
@@ -283,8 +283,8 @@ if grep -qE '(tools/ts-cli/ts_cli/|agents/shared/(mappings/|schemas/thoughtspot-
 fi
 
 # No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a
-# new /tspublic/v1/ call slipping into the CLI or Databricks client. Runs when any
-# Python source under tools/ or agents/ is staged, or the validator itself changes.
+# new /tspublic/v1/ call slipping into the CLI. Runs when any Python source under
+# tools/ or agents/ is staged, or the validator itself changes.
 if grep -qE '(^(tools|agents|scripts)/.*\.py$|tools/validate/check_no_v1_endpoints\.py)' <<< "$STAGED"; then
   run_check "no v1 endpoints"     "tools/validate/check_no_v1_endpoints.py --root ."
 fi
@@ -322,10 +322,9 @@ if grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_no_inline
 fi
 
 # I7 untranslatable gate — every conversion skill must tell the model to open its
-# formula-translation reference before calling an expression untranslatable. Covers
-# BOTH runtimes (CoCo executes the doc, so the gate matters there too). Runs when any
-# convert skill or the validator changes.
-if grep -qE '(^agents/(cli|coco-snowsight)/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)' <<< "$STAGED"; then
+# formula-translation reference before calling an expression untranslatable. Runs when
+# any convert skill or the validator changes.
+if grep -qE '(^agents/cli/ts-convert-.*/SKILL\.md|tools/validate/check_i7_gate\.py)' <<< "$STAGED"; then
   run_check "i7 gate"            "tools/validate/check_i7_gate.py --root ."
 fi
 
@@ -364,7 +363,7 @@ if grep -qE '(^agents/.*\.md$|tools/validate/check_slash_command_refs\.py)' <<< 
   run_check "slash-command refs" "tools/validate/check_slash_command_refs.py --root ."
 fi
 
-# Orphan reference files — every agents/{cli,claude,coco-snowsight}/**/references/*.md
+# Orphan reference files — every agents/{cli,claude}/**/references/*.md
 # must be cited somewhere else in the repo (or allowlisted by basename, e.g.
 # open-items.md) — audit finding 1.1 (the two update-mode-spec.md Mode C design docs
 # that lingered "pending implementation" long after Mode C shipped). Runs when any
@@ -415,12 +414,11 @@ fi
 
 # Only run unit tests if Python source files are staged.
 #
-# Three separate pytest invocations, not one combined command: ts-object-model-erd/tests
-# and agents/databricks/tests are each their own bare "tests" package (tests/__init__.py
-# with no distinguishing parent package) — same as tools/ts-cli/tests. pytest's conftest
-# module registration collides (ImportPathMismatchError / "Plugin already registered
-# under a different name") if two same-named "tests" packages are collected in a single
-# invocation. tools/validate/tests has no __init__.py, so it can safely share an
+# Two separate pytest invocations, not one combined command: ts-object-model-erd/tests
+# is its own bare "tests" package (tests/__init__.py with no distinguishing parent
+# package) — same as tools/ts-cli/tests. pytest's conftest module registration collides
+# (ImportPathMismatchError / "Plugin already registered under a different name") if two
+# same-named "tests" packages are collected in a single invocation. tools/validate/tests has no __init__.py, so it can safely share an
 # invocation with tools/ts-cli/tests.
 #
 # Exit code is checked directly — NOT grepped from the summary line. A failing run's
@@ -453,7 +451,6 @@ run_pytest() {
 if grep -q '\.py$' <<< "$STAGED"; then
   run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
-  run_pytest "unit tests (databricks)"  agents/databricks/tests/
 fi
 
 echo ""
@@ -482,25 +479,25 @@ fi
 # inventory and require explicit confirmation that every skill belongs in this repo.
 # This prevents accidentally committing skills that live in other projects.
 # (The agents/claude -> agents/cli rename meant this only watched agents/claude/ —
-#  CLI/CoCo skill additions slipped through unaudited. Now spans all runtimes.)
+#  CLI skill additions slipped through unaudited. Now spans all runtimes.)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
-if [ "$CURRENT_BRANCH" = "main" ] && grep -qE '^agents/(cli|claude|coco-snowsight)/' <<< "$STAGED"; then
+if [ "$CURRENT_BRANCH" = "main" ] && grep -qE '^agents/(cli|claude)/' <<< "$STAGED"; then
   # What skill-level changes are in this commit? Names keep the runtime prefix
   # (e.g. cli/ts-dependency-manager) so the same skill name across runtimes is unambiguous.
   ADDING=$(git diff --cached --name-only --diff-filter=A \
-    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' \
+    | grep -E '^agents/(cli|claude)/[^/]+/SKILL\.md$' \
     | sed 's|agents/||;s|/SKILL\.md||' | sort)
   REMOVING=$(git diff --cached --name-only --diff-filter=D \
-    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' \
+    | grep -E '^agents/(cli|claude)/[^/]+/SKILL\.md$' \
     | sed 's|agents/||;s|/SKILL\.md||' | sort)
   UPDATING=$(git diff --cached --name-only \
-    | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/' \
+    | grep -E '^agents/(cli|claude)/[^/]+/' \
     | sed -E 's|^agents/([^/]+)/([^/]+)/.*|\1/\2|' | sort -u \
     | grep -vxF "$ADDING" | grep -vxF "$REMOVING")
 
   # Skills on disk after staging (find reflects the post-staged filesystem state)
-  ALL_SKILLS=$(find agents/cli agents/claude agents/coco-snowsight \
+  ALL_SKILLS=$(find agents/cli agents/claude \
       -maxdepth 2 -name 'SKILL.md' 2>/dev/null \
     | sed 's|^agents/||;s|/SKILL\.md$||' | sort)
 

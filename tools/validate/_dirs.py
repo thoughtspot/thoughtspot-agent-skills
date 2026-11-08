@@ -12,13 +12,15 @@ Runtime                 Serves
 ======================  ===================================================
 ``cli``                 Canonical CLI skills (Claude Code + Cortex Code CLI)
 ``claude``              Claude-only annex (currently just ts-profile-snowflake)
-``coco-snowsight``      Snowflake Cortex / CoCo (Snowsight stored-proc runtime)
 ======================  ===================================================
 
-The ``agents/databricks/`` Genie runtime is deliberately NOT represented here — it
-sits outside the mirror/coverage tooling by design (see
-``.claude/rules/runtime-coverage.md``). Adding a runtime here is the single edit a
-future rename or new runtime needs; the validators pick it up automatically.
+Both use the ``ts`` CLI, so every validator scans both. The CoCo Snowsight and
+Databricks Genie runtimes were retired on 2026-11-08 (archived at git tag
+``runtimes-archive-2026-11-08``; see ``.claude/rules/runtime-coverage.md``). With
+them went the split between "every runtime" and "the runtimes that have the ``ts``
+CLI", so there is one tuple. Adding a runtime here is the single edit a future
+rename or new runtime needs, and the validators pick it up automatically; a runtime
+without the ``ts`` CLI would need that split back, so add one deliberately.
 """
 from __future__ import annotations
 
@@ -27,15 +29,9 @@ from typing import Iterable, List
 
 CLI = "cli"
 CLAUDE = "claude"
-COCO = "coco-snowsight"
 
-#: Every skill-serving runtime, in canonical order (cli, claude, coco-snowsight).
-ALL_RUNTIMES = (CLI, CLAUDE, COCO)
-
-#: The CLI family only — cli + its Claude-only annex. CoCo is deliberately
-#: excluded: it runs inside Snowsight with no ``ts`` CLI, so direct-``requests``,
-#: flag-usage and smoke-test scans do not apply to it.
-CLI_RUNTIMES = (CLI, CLAUDE)
+#: Every skill-serving runtime, in canonical order (cli, claude).
+ALL_RUNTIMES = (CLI, CLAUDE)
 
 
 def agents_path(runtime: str) -> str:
@@ -43,11 +39,8 @@ def agents_path(runtime: str) -> str:
     return f"agents/{runtime}"
 
 
-#: ``("agents/cli", "agents/claude", "agents/coco-snowsight")``.
-ALL_RUNTIME_PATHS = tuple(agents_path(r) for r in ALL_RUNTIMES)
-
 #: ``("agents/cli", "agents/claude")``.
-CLI_RUNTIME_PATHS = tuple(agents_path(r) for r in CLI_RUNTIMES)
+ALL_RUNTIME_PATHS = tuple(agents_path(r) for r in ALL_RUNTIMES)
 
 
 def runtime_globs(

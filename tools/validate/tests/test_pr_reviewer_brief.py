@@ -415,12 +415,10 @@ def test_converter_trigger_matches_converter_code_wherever_it_lives():
     shared = [f"tools/ts-cli/ts_cli/{m}.py" for m in (
         "tml_common", "formula_text", "formula_week", "sql_forms", "tml_lint",
         "tml_model_parse", "io_helpers", "formula_common", "model_builder")]
-    mirrors = [f"{d.relative_to(ROOT).as_posix()}/SKILL.md"
-               for base in ("agents/cli", "agents/coco-snowsight", "agents/databricks/skills")
-               for d in (ROOT / base).glob("ts-convert-*")]
-    assert any("coco-snowsight" in m for m in mirrors)
-    assert any("databricks/skills" in m for m in mirrors)
-    for path in commands + shared + mirrors + [
+    skills = [f"{d.relative_to(ROOT).as_posix()}/SKILL.md"
+              for d in (ROOT / "agents" / "cli").glob("ts-convert-*")]
+    assert skills, "some converter skill exists under agents/cli"
+    for path in commands + shared + skills + [
             "agents/shared/mappings/tableau/x.md",
             "agents/shared/schemas/ts-model-conversion-invariants.md"]:
         assert pattern.search(path), path

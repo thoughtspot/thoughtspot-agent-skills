@@ -11,8 +11,7 @@ angle 11). This guard prevents drift back to the hand-rolled gate — the same w
 
 Rule: no `agents/cli/ts-convert-*/SKILL.md` may contain a shell `grep` that inspects an
 `aggregation:` key. That is the fingerprint of the manual gate; the legitimate replacement
-calls `ts tml lint`. (CoCo skills are out of scope — they run in Snowsight and cannot
-invoke the `ts` CLI, so they keep their own stored-procedure checks.)
+calls `ts tml lint`.
 
 Exit codes:
   0 — no inline TML-invariant grep gate in any CLI convert skill

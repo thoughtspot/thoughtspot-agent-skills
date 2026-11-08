@@ -215,7 +215,7 @@ tends to confirm it.
 
 ## Step 4: converters also get the converter audit
 
-If the diff touches a conversion skill (any runtime), the shared mappings or schemas,
+If the diff touches a conversion skill, the shared mappings or schemas,
 or anything under `tools/ts-cli/ts_cli/`, also dispatch the existing
 `conversion-consistency-auditor` agent, as `CLAUDE.md` requires before merging
 converter changes. The pattern is deliberately broad: converter code is spread across
@@ -226,7 +226,7 @@ and a miss costs an unaudited converter.
 set -o pipefail
 RANGE="$(python3 tools/validate/evidence.py range)" || exit 1
 EVIDENCE="$(git rev-parse --absolute-git-dir)/pr-ready/evidence.md"
-CONVERTER_RE='^agents/(cli|coco-snowsight|databricks/skills)/ts-convert-|^agents/shared/(mappings|schemas)/|^tools/ts-cli/ts_cli/'
+CONVERTER_RE='^agents/cli/ts-convert-|^agents/shared/(mappings|schemas)/|^tools/ts-cli/ts_cli/'
 FILES="$(git diff --name-only "$RANGE")" || { echo "STOP: git diff failed"; exit 1; }
 printf '%s\n' "$FILES" | grep -E "$CONVERTER_RE"
 echo "match exit: $? (0 = converter change, 1 = none)"
@@ -331,5 +331,6 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |
 | 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 exports an interpreter the user named as given (a typo stops the run), else keeps a `CHECKS_PYTHON` already set, else sets it to `~/.venvs/tas-ci/bin/python3.12` when that exists; Step 2 reports no evidence on exit 2; link to `.github/CONTRIBUTING.md` |
 | 1.0.0 | 2026-10-28 | Initial release: on your own branch only (asks first), the CI-superset run, then the `pr-reviewer` agent (plus the conversion-consistency auditor on converter changes), both scanned and appended to one evidence block |

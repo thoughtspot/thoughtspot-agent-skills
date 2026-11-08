@@ -13,8 +13,8 @@ TRIGGERS = {
     "tml_lint": r"\.md$",
     "smoke_gate": r"agents/(cli|claude)/.*/SKILL\.md",
     "depmgr_nudge": r"^agents/cli/ts-dependency-manager/",
-    "main_audit": r"^agents/(cli|claude|coco-snowsight)/",
-    "naming_coverage": r"agents/(cli|claude|coco-snowsight)/.*/SKILL\.md",
+    "main_audit": r"^agents/(cli|claude)/",
+    "naming_coverage": r"agents/(cli|claude)/.*/SKILL\.md",
 }
 
 

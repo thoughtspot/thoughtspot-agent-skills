@@ -22,12 +22,12 @@ Re-run to refresh. Do not edit manually.
 > refresh whenever anyone regenerates and may lag reality in between. For an
 > authoritative answer, run `git log -1 -- tools/validate/<validator>.py`.
 
-**55 gates** across pre-commit and CI.
+**54 gates** across pre-commit and CI.
 
 | Runs in | Count |
 |---|---|
 | Pre-commit + CI | 47 |
-| Pre-commit only | 5 |
+| Pre-commit only | 4 |
 | CI only | 3 |
 
 ## Gates
@@ -42,7 +42,7 @@ Re-run to refresh. Do not edit manually.
 | 6 | `audit workflow perms` | check_audit_workflow_permissions.py — the audit sweep can actually run unattended. | Python files staged (pre-commit, CI) | The audit workflow can only run unattended if every tool it tells a finder to use is pre-approved (finding 18.1 — a 14-agent sweep stopped on one prom | gate | 2026-08-27 |
 | 7 | `backlog integrity` | check_backlog_integrity.py — three merge-integrity invariants on docs/backlog.md that PR #356 proved were ungated. | Every commit (pre-commit, CI) | Backlog integrity — duplicate BL ids, dangling BL citations, conflict markers. Runs unconditionally rather than gated to a staged-file pattern: rules  | gate | 2026-10-23 |
 | 8 | `CI gate coverage` | check_ci_gate_coverage.py — the aggregate CI gate actually covers every job. | Python files staged (pre-commit, CI) | The aggregate CI gate must cover every pull-request job. Gated on the workflow being staged: the invariant can only be broken by editing that file, an | gate | 2026-08-27 |
-| 9 | `consistency` | check_consistency.py — verify cross-file consistency (skills tables, symlink steps, stage copy list). | Agent docs staged (pre-commit, CI) | Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched Ensures README skills table, SETUP.md symlink/stage steps stay in sync  | gate | 2026-08-26 |
+| 9 | `consistency` | check_consistency.py — verify cross-file consistency (skills tables, symlink steps, directory maps). | Agent docs staged (pre-commit, CI) | Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched Ensures README skills table, SETUP.md symlink/stage steps stay in sync  | gate | 2026-08-26 |
 | 10 | `converter parity` | check_converter_parity.py — assert every converter adopts the shared correctness set. | Convert skill or validator staged (pre-commit, CI) | Converter parity (BL-217) — a converter must not emit a ThoughtSpot function that does not exist, and must adopt the shared formula helpers. Runs when | gate | 2026-10-12 |
 | 11 | `coverage matrix` | check_coverage_matrix.py — verify every conversion skill has a coverage matrix. | Convert skill or validator staged (pre-commit, CI) | Coverage matrix — every ts-convert-* skill must have references/coverage-matrix.md Runs when a converter skill is touched or the validator itself chan | gate | 2026-10-23 |
 | 12 | `customer references` | check_customer_references.py — fail on links into a customer's (or any tenant's) internal systems. | Every commit (pre-commit, CI) | Customer references — links into a tenant's internal systems (SharePoint/OneDrive, Atlassian, Slack, Google Docs/Drive, ThoughtSpot cluster hosts). Th | gate | 2026-10-29 |
@@ -57,10 +57,10 @@ Re-run to refresh. Do not edit manually.
 | 21 | `module health` | Module-health gate: block *new or worsening* function complexity. | Python files staged (pre-commit, CI) | Complexity ratchet on staged Python (soft-skips if radon isn't installed locally; enforced fully in CI). Blocks new/worsening god-functions; legacy is | gate | 2026-09-24 |
 | 22 | `no inline requests` | check_no_inline_requests.py — fail if a Claude/CLI skill's code fences instruct the `requests`/`urllib` anti-pattern ins... | Agent docs staged (pre-commit, CI) | No inline requests/urllib — Claude skills use the `ts` CLI, never direct requests/urllib calls to a ThoughtSpot endpoint (.claude/rules/ts-cli.md; aud | gate | 2026-09-23 |
 | 23 | `no inline tml gate` | check_no_inline_tml_gate.py — keep the CLI convert skills on `ts tml lint`, not a hand-rolled invariant grep gate. | Convert skill or validator staged (pre-commit, CI) |  | gate | 2026-09-02 |
-| 24 | `no v1 endpoints` | check_no_v1_endpoints.py — fail if any Python code calls a v1 (`/tspublic/v1/...`) ThoughtSpot REST endpoint, OR a v2 en... | Python files staged (pre-commit, CI) | No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a new /tspublic/v1/ call slipping into the CLI or Databricks client. Ru | gate | 2026-11-05 |
+| 24 | `no v1 endpoints` | check_no_v1_endpoints.py — fail if any Python code calls a v1 (`/tspublic/v1/...`) ThoughtSpot REST endpoint, OR a v2 en... | Python files staged (pre-commit, CI) | No v1 endpoints — the repo is v1-free (.claude/rules/ts-cli.md). Guard against a new /tspublic/v1/ call slipping into the CLI. Runs when any Python so | gate | 2026-11-05 |
 | 25 | `open-item citations` | check_open_item_citations.py — an `open-item #N` citation must resolve to a real item. | Agent docs staged (pre-commit, CI) | Open-item citations must resolve. `check_open_items` grades the items; nothing resolved a REFERENCE to one, so a citation could name an item that neve | gate | 2026-09-23 |
 | 26 | `open items` | check_open_items.py — flag unresolved items in references/open-items.md files. | Open-items files staged (pre-commit, CI) | Open-items tracking — warn only (don't block commits on pre-existing UNTESTED items) | soft | 2026-10-23 |
-| 27 | `orphan refs` | check_orphan_references.py — flag reference files that nothing in the repo cites. | Agent docs staged (pre-commit, CI) | Orphan reference files — every agents/{cli,claude,coco-snowsight}/**/references/*.md must be cited somewhere else in the repo (or allowlisted by basen | gate | 2026-10-29 |
+| 27 | `orphan refs` | check_orphan_references.py — flag reference files that nothing in the repo cites. | Agent docs staged (pre-commit, CI) | Orphan reference files — every agents/{cli,claude}/**/references/*.md must be cited somewhere else in the repo (or allowlisted by basename, e.g. open- | gate | 2026-10-29 |
 | 28 | `ossie mapping sync` | check_ossie_mapping_sync.py — our Ossie function mapping vs the shipped converter's. | Pattern: `every PR` (CI) |  | gate | 2026-10-29 |
 | 29 | `pagination convention` | check_pagination_convention.py — fail if a `record_size` literal in ts-cli is hard-capped without a pagination loop. | ts-cli Python source staged (pre-commit, CI) | Pagination convention — ts-cli.md promises auto-pagination on every search-style command; guard against a new hard-capped record_size literal slipping | gate | 2026-10-12 |
 | 30 | `anti-patterns` | check_patterns.py — detect known anti-patterns in .md and .py files. | Every commit (pre-commit, CI) |  | gate | 2026-09-24 |
@@ -72,7 +72,7 @@ Re-run to refresh. Do not edit manually.
 | 36 | `no inline tml assembly` | check_skill_cli_usage.py — keep CLI convert skills on `ts tableau build-model`, not hand-rolled inline Python for TML fo... | Convert skill or validator staged (pre-commit, CI) | No inline Python TML assembly — CLI convert skills must use `ts tableau build-model`, not hand-rolled Python heredocs for formula import. Runs when a  | gate | 2026-07-04 |
 | 37 | `skill context cost` | check_skill_context_cost.py — gate the per-invocation context cost of skills. | Skill files staged (pre-commit, CI) | Skill context cost — a SKILL.md is loaded into context on every invocation; gate its estimated-token size (warn >12k, fail >25k — BL-128 extraction is | gate | 2026-09-24 |
 | 38 | `flag cross-check` | check_skill_flag_usage.py — fail if a SKILL.md documents a `ts <group> <command> ... --<flag>` invocation whose flag doe... | Skill docs or ts-cli commands staged (pre-commit, CI) | SKILL.md flag cross-check — every `ts <group> <command> --<flag>` a SKILL.md instructs must be a real registered option (audit finding 11.1b). Runs wh | gate | 2026-07-27 |
-| 39 | `skill naming` | check_skill_naming.py — validate skill directory names against the family patterns documented in .claude/rules/skill-nam... | Skill files or naming rule staged (pre-commit, CI) | Skill naming — every skill across all runtimes (Claude / CoCo) must match a documented family pattern (see .claude/rules/skill-naming.md). Runs when a | gate | 2026-09-28 |
+| 39 | `skill naming` | check_skill_naming.py — validate skill directory names against the family patterns documented in .claude/rules/skill-nam... | Skill files or naming rule staged (pre-commit, CI) | Skill naming — every skill across all runtimes (cli / claude) must match a documented family pattern (see .claude/rules/skill-naming.md). Runs when a  | gate | 2026-09-28 |
 | 40 | `skill versions` | check_skill_versions.py — verify every skill file across all runtimes has a ## Changelog section with at least one valid... | Skill files staged (pre-commit, CI) |  | gate | 2026-10-07 |
 | 41 | `slash-command refs` | check_slash_command_refs.py — fail if a `/ts-<skill>` slash-command mention in skill docs points at a skill directory th... | Agent docs staged (pre-commit, CI) | Slash-command references — every /ts-<skill> mention in agents/ docs must resolve to a real skill directory, or be an explicitly justified planned-ski | gate | 2026-09-24 |
 | 42 | `smoke tests` | check_smoke_tests.py — verify every Claude skill has a smoke test, and vice versa. | Skill or smoke-test files staged (pre-commit, CI) | Smoke tests — every Claude skill (not on the allowlist) must have a smoke test, and non-credential ALLOWLIST exemptions must cite a BL-NNN (audit 6.3) | gate | 2026-08-26 |
@@ -82,13 +82,12 @@ Re-run to refresh. Do not edit manually.
 | 46 | `YAML blocks` | check_yaml.py — validate all fenced YAML code blocks in .md files parse without error. | Markdown files staged (pre-commit, CI) | Only run YAML check if .md files are staged — checks staged files only, not full repo | gate | 2026-09-24 |
 | 47 | `agentql offline bundle` | generate_agentql_offline.py — bundle the ts-object-model-agentql-query skill's canonical reference library into ONE offl... | Pattern: `ts-object-model-agentql-query/` (pre-commit, CI) |  | gate | 2026-10-19 |
 | 48 | `open items index` | generate_open_items_index.py — scan all open-items.md files and produce a cross-skill index at docs/open-items-index.md. | Open-items files staged (pre-commit, CI) |  | gate | 2026-07-22 |
-| 49 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-11-04 |
+| 49 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-11-08 |
 | 50 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit, CI) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-08-26 |
 | 51 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-10-23 |
 | 52 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-08-26 |
-| 53 | `unit tests (databricks)` |  | Python files staged (pre-commit) |  | gate |  |
-| 54 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
-| 55 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
+| 53 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
+| 54 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
 
 ## Enforcement model
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-check_consistency.py — verify cross-file consistency (skills tables, symlink steps, stage copy list).
+check_consistency.py — verify cross-file consistency (skills tables, symlink steps, directory maps).
 
 Checks:
-  1. README.md skills tables — every skill in agents/cli/, agents/claude/, and agents/coco-snowsight/ is listed
+  1. README.md skills tables — every skill in agents/cli/ and agents/claude/ is listed
   2. SETUP.md symlink steps — every agents/cli/ and agents/claude/ skill has an ln -s step in its runtime's SETUP.md
-  3. agents/coco-snowsight/SETUP.md stage copy list — every coco SKILL.md and agents/shared/ file is listed
-  4. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
-  5. agents/shared/CLAUDE.md coverage — every tracked file in agents/shared/ is listed there
+  3. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
+  4. agents/shared/CLAUDE.md coverage — every tracked file in agents/shared/ is listed there
+
+(The agents/coco-snowsight/SETUP.md stage-copy-list check went with the CoCo Snowsight
+runtime's retirement on 2026-11-08.)
 
 Usage:
     python tools/validate/check_consistency.py
@@ -23,7 +25,7 @@ from pathlib import Path
 
 from _git import _GitOut, git_paths
 
-from _dirs import ALL_RUNTIMES, CLI_RUNTIMES
+from _dirs import ALL_RUNTIMES
 
 
 def _get_staged_names(repo_root: Path) -> list[str]:
@@ -55,7 +57,7 @@ def _staged_touches_agents_or_setup(staged: list[str]) -> bool:
 
 def check_readme_skills(repo_root: Path) -> list[str]:
     """
-    Every directory under agents/claude/ and agents/coco-snowsight/ that contains a tracked SKILL.md
+    Every directory under agents/cli/ and agents/claude/ that contains a tracked SKILL.md
     must appear in the README.md skills tables.
     Gitignored/untracked skill directories are skipped.
     """
@@ -95,7 +97,7 @@ def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
     failures = []
     tracked = _get_tracked_paths(repo_root)
 
-    for runtime in CLI_RUNTIMES:
+    for runtime in ALL_RUNTIMES:
         agent_dir = repo_root / "agents" / runtime
         if not agent_dir.is_dir():
             continue
@@ -122,53 +124,7 @@ def check_claude_setup_symlinks(repo_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 3: agents/coco-snowsight/SETUP.md stage copy list
-# ---------------------------------------------------------------------------
-
-def check_coco_setup_stage_copy(repo_root: Path) -> list[str]:
-    """
-    Every SKILL.md under agents/coco-snowsight/ and every non-CLAUDE.md file under
-    agents/shared/ must appear in a 'snow stage copy' command in agents/coco-snowsight/SETUP.md.
-    """
-    failures = []
-    setup_path = repo_root / "agents" / "coco-snowsight" / "SETUP.md"
-    if not setup_path.exists():
-        return ["agents/coco-snowsight/SETUP.md not found"]
-
-    setup_text = setup_path.read_text(encoding="utf-8")
-
-    # Check coco-snowsight SKILL.md files
-    coco_dir = repo_root / "agents" / "coco-snowsight"
-    for skill_dir in sorted(coco_dir.iterdir()):
-        if not (skill_dir / "SKILL.md").exists():
-            continue
-        # The stage copy path uses the relative path from repo root
-        rel_path = f"agents/coco-snowsight/{skill_dir.name}/SKILL.md"
-        if rel_path not in setup_text:
-            failures.append(
-                f"agents/coco-snowsight/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
-            )
-
-    # Check agents/shared/ files (exclude CLAUDE.md — internal docs, not staged to Snowflake)
-    # Only check tracked files — gitignored content (e.g. Databricks files) is not deployed.
-    tracked = _get_tracked_paths(repo_root)
-    shared_dir = repo_root / "agents" / "shared"
-    for shared_file in sorted(shared_dir.rglob("*.md")):
-        if shared_file.name == "CLAUDE.md":
-            continue
-        rel_path = str(shared_file.relative_to(repo_root))
-        if rel_path not in tracked:
-            continue
-        if rel_path not in setup_text:
-            failures.append(
-                f"agents/coco-snowsight/SETUP.md: no 'snow stage copy' found for '{rel_path}'"
-            )
-
-    return failures
-
-
-# ---------------------------------------------------------------------------
-# Check 4: README.md structure section mentions key tool subdirectories
+# Check 3: README.md structure section mentions key tool subdirectories
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +162,7 @@ def check_readme_structure(repo_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 7: agents/shared/CLAUDE.md lists every tracked file in agents/shared/
+# Check 4: agents/shared/CLAUDE.md lists every tracked file in agents/shared/
 # ---------------------------------------------------------------------------
 
 def check_shared_claude_md(repo_root: Path) -> list[str]:
@@ -266,7 +222,6 @@ def main() -> int:
     checks = [
         ("README skills tables",         check_readme_skills),
         ("SETUP.md symlink steps",        check_claude_setup_symlinks),
-        ("stage copy list",               check_coco_setup_stage_copy),
         ("README structure section",      check_readme_structure),
         ("shared/CLAUDE.md coverage",     check_shared_claude_md),
     ]

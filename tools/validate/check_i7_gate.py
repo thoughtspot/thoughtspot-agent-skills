@@ -9,10 +9,10 @@ alone."
 
 The 2026-09-22 full audit (finding 9.3) found the **marker convention** carried by 2
 of 11 converters. That is narrower than "9 skills gave no such instruction", and the
-distinction matters: ``ts-convert-to-snowflake-sv`` and its CoCo mirror already held a
-strong prose gate ("Do **not** classify a formula as untranslatable based on function
-name recognition alone") plus a "Looks untranslatable / Actually translatable as"
-table, and ``from-looker`` stated the rule and checklisted it. What none of them had
+distinction matters: ``ts-convert-to-snowflake-sv`` and its (since retired) CoCo mirror
+already held a strong prose gate ("Do **not** classify a formula as untranslatable based
+on function name recognition alone") plus a "Looks untranslatable / Actually
+translatable as" table, and ``from-looker`` stated the rule and checklisted it. What none of them had
 was a *machine-checkable* marker, so no gate could tell a skill that instructs the
 model from one that does not — and the omission was invisible between full audits.
 
@@ -42,9 +42,9 @@ What this does NOT check, stated so the gate does not advertise more than it has
 * **Semantics.** A blockquote carrying the marker but saying the opposite ("decide from
   syntax alone, it is faster") passes. No text check can settle that; review does.
 
-``agents/databricks/`` (the Genie runtime) is deliberately out of scope — it sits
-outside the mirror/coverage tooling by design (``.claude/rules/runtime-coverage.md``),
-so its two converters are ungated here. BL-286 tracks that gap.
+The Databricks Genie runtime's two converter shells, once ungated here (BL-286), were
+retired with that runtime on 2026-11-08; every converter now lives under a runtime in
+``_dirs``.
 
 Exit codes:
   0 — every conversion skill carries a complete I7 gate

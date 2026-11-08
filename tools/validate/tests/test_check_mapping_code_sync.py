@@ -113,7 +113,7 @@ def test_disproved_name_inside_a_tuple_value_is_caught(tmp_path):
 def test_undocumented_source_construct_warns_but_does_not_fail(tmp_path):
     """The ZEROIFNULL/LOCATE case: code translates it, no doc row exists.
 
-    Soft, because the CoCo runtime reading only the doc is a coverage gap rather
+    Soft, because a construct missing from the doc is a coverage gap rather
     than a wrong formula.
     """
     root = _repo(tmp_path, "fake", 'M = {"ZEROIFNULL": "strpos"}\n',

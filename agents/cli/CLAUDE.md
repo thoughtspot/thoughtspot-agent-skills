@@ -34,7 +34,7 @@ Credential Manager, Linux Secret Service) managed by the `ts-profile-thoughtspot
 skill. The `ts` CLI reads credentials from the keychain automatically.
 
 Do NOT reference Snowflake Secrets, External Access Integrations, or stored
-procedures — those are for the Snowsight runtime only.
+procedures for ThoughtSpot access — those belonged to the retired Snowsight runtime.
 
 ## Reference paths
 
@@ -57,14 +57,9 @@ breaks the shared convention.
 - **Cortex Code CLI**: Uses the active connection (`cortex connections set`)
 - **Claude Code**: Uses `ts-profile-snowflake` skill (in `agents/claude/`)
 
-## Parity with other agents
+## No mirrors to keep in step
 
-Substantive skill changes must also be made in:
-- `agents/coco-snowsight/<skill>/SKILL.md` — if the skill has a Snowsight version
-
-See `agents/PARITY.md` for the full cross-agent mapping.
-
-## ts-setup-sv is NOT needed
-
-The `/ts-setup-sv` skill installs stored procedures for Snowsight. CLI users
-do NOT need it.
+This directory is the only copy of each skill. The CoCo Snowsight and Databricks
+Genie runtimes, which carried mirrors of some of these skills, were retired on
+2026-11-08 (archived at git tag `runtimes-archive-2026-11-08`), so a skill change no
+longer has a second copy to update. See `.claude/rules/runtime-coverage.md`.

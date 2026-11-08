@@ -22,10 +22,9 @@ Documented exceptions (`.claude/rules/ts-cli.md`, "Exceptions — direct API cal
 legitimate in"):
   - `references/open-items.md` — self-contained test scripts verifying unverified API
     behaviour before a CLI command exists. Temporary scaffolding, not skill logic.
-  - `agents/coco-snowsight/` — CoCo runs inside Snowsight with no `ts` CLI available;
-    it uses stored procedures instead. Out of scope for this validator's scan roots
-    anyway (only agents/cli/ and agents/claude/ are scanned), but excluded explicitly
-    here too in case the scan roots ever widen.
+
+(The second exception, `agents/coco-snowsight/`, went with that runtime's retirement on
+2026-11-08: every runtime left under `agents/` has the `ts` CLI.)
 
 Exit codes:
   0 — no inline `requests`/`urllib`-to-v2 anti-pattern in any scanned code fence
@@ -41,15 +40,13 @@ import re
 import sys
 from pathlib import Path
 
-from _dirs import COCO, CLI_RUNTIME_PATHS
+from _dirs import ALL_RUNTIME_PATHS
 
-# Runtimes that use the `ts` CLI at runtime — the anti-pattern applies to these only.
-# agents/coco-snowsight/ is deliberately excluded (see module docstring).
-SCAN_ROOTS = CLI_RUNTIME_PATHS
+# Every skill runtime uses the `ts` CLI at runtime, so the anti-pattern applies to all.
+SCAN_ROOTS = ALL_RUNTIME_PATHS
 
 # Reference files that are legitimate scratch/test-script surfaces per ts-cli.md.
 EXEMPT_FILENAMES = ("open-items.md",)
-EXEMPT_PATH_SEGMENTS = (COCO,)
 
 IMPORT_REQUESTS_RE = re.compile(r'(?:^|\s)import\s+requests\b')
 REQUESTS_CALL_RE = re.compile(
@@ -60,9 +57,7 @@ V2_ENDPOINT_MARKER = "/api/rest/2.0/"
 
 
 def _is_exempt(rel_path: Path) -> bool:
-    if rel_path.name in EXEMPT_FILENAMES:
-        return True
-    return any(seg in rel_path.parts for seg in EXEMPT_PATH_SEGMENTS)
+    return rel_path.name in EXEMPT_FILENAMES
 
 
 def _iter_fenced_blocks(text: str) -> list[list[tuple[int, str]]]:
