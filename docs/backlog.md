@@ -110,6 +110,7 @@ are roughly ordered by value÷effort.
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | 2026-11-15 |
 | BL-450 | Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden | 2026-11-15 |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
+| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
 
 ### Tier 2 — Schedule soon
 
@@ -294,7 +295,6 @@ are roughly ordered by value÷effort.
 | BL-457 | `check_mapping_currency`: anchor leading date must be at least the newest date in the body | 2026-11-30 |
 | BL-458 | Snowflake constraints attributed to Cortex Analyst unverified under Cortex Agents — live check first | 2026-11-30 |
 | BL-459 | Databricks Metric View Runtime 19: semiadditive default, derived names, window carry-overs (2026-09-22 13.15–13.18), `refresh_policy` | 2026-11-30 |
-| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
 | ~~BL-461~~ | ~~Audit rule D9 misses `sql_double_aggregate_op` and date variants~~ | RESOLVED (2026-10-30 — D9 matches every `sql_<type>_aggregate_op`, ts-audit 3.5.0) |
 | ~~BL-462~~ | ~~Audit rule P18 ignores `unique count` formulas~~ | RESOLVED (2026-10-30 — P18 also reads `unique count` / `unique_count_if` / `group_unique_count` formulas, ts-audit 3.5.0) |
 | BL-463 | pip-audit on the oldest and newest matrix legs; Python end-of-life check | 2026-11-30 |
@@ -351,6 +351,10 @@ are roughly ordered by value÷effort.
 | BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
 | BL-539 | Cascade delete reads 14531 on a Model as "no feedback": probe whether a Spotter-disabled Model still owns feedback, then keep the mapping with a test or make it unchecked (#692 accepted edge case) | 2026-12-31 |
 | BL-540 | Power BI `DISTINCTCOUNT` counts a BLANK key as one value; the `unique count` it maps to likely does not, so the plain row may be off by one with no note (#517 review) | 2026-12-31 |
+| BL-479 | Personalized Liveboard views undocumented; round-trips may drop them | 2026-11-30 |
+| BL-541 | Liveboard filters scoped to a tab or group (26.10 EA) are undocumented and stripped on import to a cluster without the feature; round-trips may lose them | 2026-12-15 |
+| BL-543 | Snowflake Semantic View LOD metrics (Preview): from-snowflake-sv fails on them; to-direction rows still say Untranslatable; from-rules line 548 contradicts the schema | 2026-12-15 |
+| BL-544 | Databricks Runtime 19 Metric View grammar rejected by `ts databricks parse-mv` (optional semiadditive, unitless ranges, plural units, optional names); tier table stops at 18.2 | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -433,7 +437,6 @@ are roughly ordered by value÷effort.
 | BL-446 | Tableau initial SQL dropped without a report | after 2026-10-29 audit fixes |
 | BL-477 | `ts model dictionary` writes `=`-prefixed descriptions as spreadsheet formulas (CSV and XLSX) | 2026-12-31 |
 | BL-478 | Two forks of the transitive formula-drop cascade; add `formula_common.cascade_drop` | 2026-12-31 |
-| BL-479 | Personalized Liveboard views undocumented; round-trips may drop them | 2026-12-31 |
 | BL-480 | Re-run the ThoughtSpot product-currency lens with SpotterCode authenticated | 2026-12-31 |
 | BL-481 | Databricks citations point at the old `business-semantics/` URL tree | 2026-12-31 |
 | BL-482 | Tableau geospatial census missing PARSE_WKT, NO_CUTOUTS, COLLECT | 2026-12-31 |
@@ -449,6 +452,8 @@ are roughly ordered by value÷effort.
 | BL-492 | from-dbt column-removal diff uncodified — `ts dbt diff-columns` | 2026-12-31 |
 | BL-493 | `smoke_ts_to_databricks.py` passes with the emitter skipped | 2026-12-31 |
 | BL-494 | `check_ossie_mapping_sync` runs nowhere | 2026-12-31 |
+| BL-542 | Native ThoughtSpot Semantic View / Metric View import is never mentioned by the from-sv, from-mv or link skills; re-check filtered-metric verdicts live | 2026-12-31 |
+| BL-545 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -15518,6 +15523,8 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Do.** Live check first: read the chart-type enum from the import validator on a 26.10+ cluster before emitting any new name. Then update the schema, the Tableau liveboard generator and the lint (axis-bearing types only in `_CHART_NEEDS_AXIS`), and resolve `ADVANCED_BUBBLE`.
 
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 13.4). Also record what landed since: gradient legends (Column, Bar, Line-column, Scatter, Bubble, Donut), outline encoding and chart caching (26.9); trellis and faceting modes (26.10); dashed/dotted future-date line styling and `rules_UNSTABLE` CSS for embedded charts (26.11). Release notes only.
+
 **Target:** 2026-11-15.
 
 ## BL-450 — Snowflake spec carry-overs from the 2026-09-22 sweep: Complete Schema, five mapping findings, `sample_values` `Tier 1`
@@ -15530,6 +15537,8 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 - 13.16 (2026-09-22 13.13): `check_sv_yaml.py:45` lists `sample_values` in `FORBIDDEN_FIELDS`; that sweep found it a valid spec key.
 
 **Do.** Correct the Complete Schema block first (BL-031 depends on it). Work each 2026-09-22 finding against the current spec and correct the mapping files; re-verify `sample_values` and either remove it from `FORBIDDEN_FIELDS` or record why it stays. Advance the five anchors when the edits land. The anchor-date validator is BL-457.
+
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 13.9). The Complete Schema also lacks root-level `facts` / `dimensions` and the LOD keys `lod_dimension_type` (`fixed` / `include` / `exclude`) and `lod_dimensions` (`{table, dimension}`), which the spec allows at root level only. Add them with a Preview marker; the LOD semantics themselves are BL-543.
 
 **Target:** 2026-11-15.
 
@@ -15632,13 +15641,15 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-30.
 
-## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 2`
+## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1`
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.13; Codification opportunity 5.
 
 **What.** About 20 current Tableau functions are unknown to the converter (CORR, COVAR(P), VAR(P), STDEVP, QUARTER, LOG2, SPACE, LTRIM/RTRIM_THIS, and connector functions such as GET_JSON_OBJECT, PARSE_URL*, XPATH_*, GROUP_CONCAT). They pass through verbatim, fail at import, and are dropped without a MIGRATION_LIMITATIONS entry — the 13.22 failure class. The 2026-08-26 census never diffed the Aggregate, Number, String or Date pages.
 
 **Do.** Add a generic survivor catch in `validate_output`: flag any UPPER_CASE identifier followed by `(` that survives translation. Map VAR/QUARTER/LOG2 only after a live check; never map STDEVP to stddev.
+
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, findings 13.15–13.17). Raised to Tier 1: this is the third census miss (2026-08-26 13.22, 13.25, now this), and the probe re-confirmed VAR, VARP, STDEVP, CORR, COVAR, COVARP and PERCENTILE, plus LOG2, SPACE and COLLECT, pass through with `validate_output` returning `[]`. Also: Tableau now documents `UNION` as a 16th spatial function, which the Geospatial Policy says it is not. Add it to the census, `_UNMAPPED_FUNCTIONS` (validate.py) and `_GEO_RE` (classify.py), change the count 15 → 16, and fix the "Classifier detection patterns" block, which still says "all 13" and omits PARSE_WKT and NO_CUTOUTS. The generic catch is the priority; the named additions are secondary.
 
 **Target:** 2026-11-30.
 
@@ -15836,7 +15847,7 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 
 **Target:** 2026-12-31.
 
-## BL-479 — personalized Liveboard views are undocumented and may be lost in round-trips `Tier 3`
+## BL-479 — personalized Liveboard views are undocumented and may be lost in round-trips `Tier 2`
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.2 (release notes only).
 
@@ -15844,7 +15855,9 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 
 **Do.** Verify live, then document; check the dependency-manager and migrate-orgs backup/restore paths.
 
-**Target:** 2026-12-31.
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 13.2). The feature moved from Early Access (26.8) to GA in 26.11 ("Improved portability of personalized Liveboard views"), so round-trips are now likely to meet it. Raised to Tier 2 and re-dated.
+
+**Target:** 2026-11-30 (was 2026-12-31).
 
 ## BL-480 — re-run the ThoughtSpot product-currency lens with SpotterCode authenticated `Tier 3`
 
@@ -15902,6 +15915,8 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 
 **Do.** Remove it, or point to `ts metadata search --name` filtered on `dataSourceName`.
 
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 14.2). `ts connections add-tables` pays the same COLUMN-level introspection, and the docstrings of `_fetch_connection_v2` and `get` still claim the hierarchy is populated for SERVICE_ACCOUNT connections, which the 2026-08-26 probe disproved (`.claude/rules/ts-cli.md`). Its "merge without delinking" promise rests on that empty data. Probe first whether the update endpoint replaces or merges the table list: if it replaces, this is a correctness bug, not a wasted call. Correct the docstrings; drop the fetch or refuse on an empty hierarchy. Overlaps BL-095.
+
 **Target:** 2026-12-31.
 
 ## BL-486 — ts-convert-from-looker computes the viz obj_id instead of reading it back `Tier 3`
@@ -15931,6 +15946,8 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 **What.** Newer sub-agent frontmatter options (`isolation: worktree`, `disallowedTools`, `maxTurns`) are unused; pr-reviewer's Bash runs in the shared checkout.
 
 **Do.** Evaluate `isolation: worktree` (and `disallowedTools`) for pr-reviewer; adopt or record why not.
+
+**Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 18.6). Also evaluate an agent-scoped `hooks:` block (a PreToolUse Bash guard that exits 2), which the sub-agent docs show for exactly this read-only-reporter case, for both pr-reviewer and conversion-consistency-auditor. Unverified: whether `permissionMode: plan` blocks mutating Bash.
 
 **Target:** 2026-12-31.
 
@@ -16835,5 +16852,65 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 3. Check the same question for the other converters' distinct-count rows (Tableau
    `COUNTD`, Qlik `Count(DISTINCT …)`, Sisense `count`, which is distinct in JAQL), which
    are believed to exclude NULL like SQL, and record the answer either way.
+
+**Target:** 2026-12-31.
+
+## BL-541 — Liveboard filters scoped to a tab or group are undocumented and stripped on import `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, finding 13.1 (release notes only).
+
+**What.** 26.10 added Liveboard contextual filtering (Early Access): filters and parameters scoped to a tab or a group. The notes say that importing such a Liveboard into a cluster without the feature removes the scoped filters. `thoughtspot-liveboard-tml.md` documents only Liveboard-level `filters[]` and `excluded_visualizations[]`. ts-dependency-manager (backup, repoint, rollback), ts-migrate-orgs and ts-publish-orgs all round-trip Liveboard TML, and a generator that rebuilds `filters[]` from the schema would drop them.
+
+**Do.** On a 26.10+ cluster with the feature on, build a Liveboard with a tab-scoped and a group-scoped filter, export it, and record the TML shape. Document it in the schema. Check that each round-trip path keeps it, and that a restore onto a cluster without the feature reports the loss rather than dropping it silently.
+
+**Target:** 2026-12-15.
+
+## BL-542 — the from-sv, from-mv and link skills never mention ThoughtSpot's native Semantic View / Metric View import `Tier 3`
+
+**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, finding 13.3 (release notes only).
+
+**What.** ThoughtSpot now imports Snowflake Semantic Views (Early Access; 26.11 adds re-sync that keeps custom Model settings, measures with dimension filters, hierarchies, parameterized queries) and Databricks Metric Views (26.10 Early Access) into Models natively. `ts-convert-from-snowflake-sv`, `ts-convert-from-databricks-mv` and `ts-link-semantic-layer` never mention this. The 26.11 "measures with dimension filters" note may also bear on our Untranslatable verdicts for filtered metrics.
+
+**Do.** Try the native import live on one SV and one MV. Add a short "when to use the native import instead" note to each skill, naming what the converter still adds (formula translation, invariant lint, fidelity gates). Re-check the filtered-metric verdicts live before reclassifying anything.
+
+**Target:** 2026-12-31.
+
+## BL-543 — Snowflake Semantic View LOD metrics: the from-converter fails on them and the to-direction rows are stale `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, findings 13.6, 13.7 and 13.8.
+
+**What.** Snowflake added LOD metrics to Semantic Views (Preview, release note 2026-11-02): `INCLUDE DIMENSIONS (d)` (query grain plus d, the semantics of `query_groups() + {d}`), `EXCLUDE DIMENSIONS (d)` (query grain minus d) and `FIXED DIMENSIONS (d)` (exactly d; `()` is the grand total). Per the docs, FIXED applies the filter **after** the LOD calculation and INCLUDE/EXCLUDE **before** it.
+- **From-direction (13.7).** Probed offline: `parse_sv_ddl` accepts the clauses, then `translate_sql_expr` raises `UntranslatableError: 'INCLUDE' follows an operand with no operator`. Every SV that adopts the feature loses those metrics, though each clause has a `group_aggregate` target. The YAML form (`lod_dimension_type` / `lod_dimensions`) is not in `ts-from-snowflake-rules.md`.
+- **To-direction (13.6).** `ts-snowflake-formula-translation.md` lines 779 and 786-791 mark `query_groups() + {attr}` and the `{}` (ignore query filters) argument Untranslatable; INCLUDE and FIXED are now candidate targets.
+- **From-rules (13.8).** `ts-from-snowflake-rules.md:548` says a fact never contains an aggregate. The 2026-07-29 correction to `snowflake-schema.md` never reached this file, and LOD facts are aggregates.
+
+**Trap.** Do not move the existing `{attr}` + `query_filters()` → `OVER (PARTITION BY attr)` rows (lines 850, 922) to FIXED: FIXED ignores WHERE, so the number changes under any filter.
+
+**Do.** Fix line 548 first. Then the parser, translator and from-rules, with tests; live-verify that FIXED's filter-after matches ThoughtSpot `{}` before calling it exact. Then the to-direction rows, carrying the constraints: Preview; not used by Cortex Analyst or Agents; not in materializations; no LOD inside LOD; INCLUDE/EXCLUDE only as the sole argument of an aggregate; `query_groups(a, b)` still has no equivalent. Mapping doc and translator move together (`check_mapping_code_sync.py`). The schema half is in BL-450.
+
+**Target:** 2026-12-15.
+
+## BL-544 — Databricks Runtime 19 Metric View grammar is rejected by `ts databricks parse-mv` `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, findings 13.10–13.14.
+
+**What.** On DBR 19+:
+- `semiadditive` is optional (default `last`). The repo calls it required (`databricks-metric-view.md` lines 167, 306, 390, 871, 882, 915; `ts-to-databricks-rules.md:449`; `ts-databricks-formula-translation.md:767-768`), and `mv_window.parse_window` rejects a window without it, so valid MVs lose their windowed measures.
+- Unitless ranges (`trailing 3`) and numeric offsets (`-1`, `3`) are allowed. `_RANGE_RE` and `_OFFSET_RE` require a unit, and `_OFFSET_RE` allows only negative offsets. A unitless range is row-positional, so it may match `moving_sum` more closely than the date forms; check live.
+- Plural units (`days`, `months`, `years`) are documented. `_VALID_UNITS` is singular only and still accepts `week` and `quarter`, which the reference no longer lists.
+- Field and measure `name` is optional, derived from `expr`. `mv_parse._parse_dimension` / `_parse_measure` (lines 218-246) send nameless entries to `unsupported[]`.
+- The schema's runtime tier table (lines 15-21) stops at 18.2+: no DBR 19, no 18.2 window parameters, no `refresh_policy` on materializations (`auto` / `incremental` / `incremental strict` / `full`).
+
+**Do.** Treat absent `semiadditive` as `last`; accept unitless ranges and both-sign offsets; normalise units against the vendor list, with a unit test pinned to it; derive names after a live check of the rule. Correct the docs with a DBR 19 tier, and document `refresh_policy`. The to-direction is unaffected.
+
+**Target:** 2026-12-15.
+
+## BL-545 — ts-object-model-aggregates Step 6 re-asks four questions for every candidate `Tier 3`
+
+**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, finding 14.1.
+
+**What.** Step 6 asks for the connection (with a fresh `ts connections list`), db and schema, and materialization again for each selected candidate.
+
+**Do.** After the first candidate, ask once "use the same settings as the previous candidate? [Y/n]", which keeps the no-silent-reuse rule (SKILL.md line 483) and matches the warehouse-reuse prompt at line 555. Skill PATCH bump.
 
 **Target:** 2026-12-31.
