@@ -196,7 +196,10 @@ just `mode: AXIS_DRIVEN`. (`type: FLAT` and `mode: AXIS_DRIVEN` are the only val
 **`x-axis`**, **`y-axis`**, **`slice`** and **`slice-with-color`**, and has no `trellis-by`.
 Those exports reference columns by display name, not GUID. That differs from the combo
 finding below, and nothing here establishes which form a fresh import accepts, so the
-capture-and-replay rule stands. The shelves of the other added types have not been read.
+capture-and-replay rule stands. A display-name export like these also cannot be replayed
+through the converters: `build_answer_explicit` (`tools/ts-cli/ts_cli/tableau/liveboard.py`)
+drops any `custom_chart_config` whose column references are not all GUIDs. The shelves of
+the other added types have not been read.
 
 ### Tableau alignment — why Muze is a closer migration target
 
