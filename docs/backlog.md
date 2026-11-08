@@ -111,7 +111,7 @@ are roughly ordered by value÷effort.
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
-| BL-545 | from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate | 2026-11-22 |
+| ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
 
 ### Tier 2 — Schedule soon
 
@@ -17011,7 +17011,9 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 
 **Target:** 2026-12-31.
 
-## BL-545 — from-powerbi and from-qlik have no working lint gate: positional files are rejected `Tier 1`
+## BL-545 — from-powerbi and from-qlik have no working lint gate: positional files are rejected — DONE `Tier 1`
+
+**Status:** DONE (2026-11-08; ts-convert-from-powerbi 1.1.10, ts-convert-from-qlik 1.2.2): both skills lint and import through `--dir out/` with `--pattern` (which also keeps `mapping.json` out of the import), and `check_skill_flag_usage.py` now fails a `ts` invocation passing more positional arguments than its typer signature declares. Power BI's model import uses `--order tableau`. Qlik's cannot: it writes `table.<name>.tml` / `model.<name>.tml`, and `--order tableau` ranks by suffix and would send the Model first, so it names each Table, then the Model, with `--file`. Same class, found while fixing it: from-sisense (1.0.7) read `--dir out/` unfiltered, so its `ALL_OR_NONE` import also sent `mapping.json` as a document; its Steps 2 and 3 now add `--pattern` too.
 
 **Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
 

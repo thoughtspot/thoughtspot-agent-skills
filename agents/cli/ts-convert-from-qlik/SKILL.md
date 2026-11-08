@@ -97,10 +97,20 @@ ThoughtSpot equivalent are flagged `NEEDS REVIEW` — never faked. Read `mapping
 ### Step 2 — Validate & import the model
 Lint, then import the tables + model, VALIDATE_ONLY first, then real:
 ```bash
-ts tml lint out/*.tml
-ts tml import out/*.table.tml out/*.model.tml --profile <name> --policy VALIDATE_ONLY
-ts tml import out/*.table.tml out/*.model.tml --profile <name>
+ts tml lint --dir out/ --pattern '*.tml'
+ts tml import --file out/table.<Table1>.tml --file out/table.<Table2>.tml \
+  --file out/model.<Model>.tml --profile <name> --policy VALIDATE_ONLY
+ts tml import --file out/table.<Table1>.tml --file out/table.<Table2>.tml \
+  --file out/model.<Model>.tml --profile <name>
 ```
+`ts tml lint` and `ts tml import` take files only through `--file` / `--dir`, never as
+bare arguments. Give the import one `--file` per `table.<name>.tml` that `build-model`
+wrote (its `Wrote table:` lines), then the `model.<name>.tml` last: `--file` keeps the
+order given, so the Tables go before the Model. Do not use `--dir out/ --order tableau`
+here. That order ranks files by a `.table.tml` / `.model.tml` **suffix**, and Qlik writes
+the type as a **prefix**, so it would send the Model first (and `--dir` alone would also
+send `mapping.json` as a document). The lint's `--pattern '*.tml'` is there for the same
+reason.
 If the engine rejects a formula, drop it (and any column that depends on it) and re-import —
 what lands is guaranteed to work, and the report records what was pruned.
 
@@ -108,12 +118,12 @@ what lands is guaranteed to work, and the report records what was pruned.
 ```bash
 ts qlik build-liveboard <app.qvf> --model-name "<Model name>" --output out/ \
   [--model-fqn <model-guid>] [--report-name "<Liveboard name>"]
-ts tml lint out/*.liveboard.tml                          # pre-import: flags any blank chart tile
-ts tml import out/*.liveboard.tml --profile <name>
+ts tml lint --dir out/ --pattern 'liveboard.*.tml'      # pre-import: flags any blank chart tile
+ts tml import --dir out/ --pattern 'liveboard.*.tml' --profile <name>
 ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; exit 1 = broken board
 ```
 
-> **Why the lint line is here and not in Step 2.** Step 2 lints `out/*.tml` *before the
+> **Why the lint line is here and not in Step 2.** Step 2 lints `out/` *before the
 > liveboard exists*, so it never sees the tile. The `chart_tiles_missing_axis` rule
 > (a chart type that needs an axis carrying neither `axis_configs` nor
 > `custom_chart_config` imports cleanly and renders **blank**) therefore had no gate on
@@ -149,6 +159,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.2 | 2026-11-08 | **The lint gate runs (BL-545).** Steps 2 and 3 passed TML files to `ts tml lint` and `ts tml import` as bare arguments, which neither command accepts (exit 2, "Got unexpected extra argument(s)"), so no model invariant was ever linted on this path. The globs were also wrong: `build-model` writes `table.<name>.tml` / `model.<name>.tml`, so `out/*.table.tml` matched nothing. Lint now reads `--dir out/ --pattern '*.tml'`; the model import names each Table, then the Model, with `--file`, because `--order tableau` ranks by suffix and would put a Qlik Model first; the liveboard steps use `--pattern 'liveboard.*.tml'`. VALIDATE_ONLY still runs first |
 | 1.2.1 | 2026-10-08 | Week-note follow-ups (ts-cli v0.174.1, #589 re-review). A `Weekday()` / `WeekStart()` call inside a field name (`[Weekday(x)]`) or a string literal no longer counts as a known week start, so the note is no longer wrongly "exact week start". The reason text reads "an unsupported literal …" |
 | 1.2.0 | 2026-10-07 | **`WeekStart` is exact for a known week start** (ts-cli v0.174.0, BL-373, live-verified 2026-10-07). A 3rd argument or `SET FirstWeekDay` other than 0 now emits a week start built on the fixed `day_number_of_week` (Sunday: `add_days(date(d), 0 - mod(day_number_of_week(d), 7))`); these were NEEDS REVIEW. A literal period offset `n` adds `7*n` days. A non-literal offset or first week day, or an unsupported literal (`1.5`, `+1`), is still NEEDS REVIEW with that reason. Known-start forms carry the note "exact week start (<day>)" instead of the Monday advisory |
 | 1.1.1 | 2026-10-07 | **Set Analysis silent wrong answers (ts-cli v0.171.0, BL-376..378).** Element values split on commas outside quotes only; search strings (wildcards, ranges, expression searches) are NEEDS REVIEW; a bracketed modifier field stays one reference; `Count` / `Avg` / `Min` / `Max` over a set use `else null` instead of `else 0`. Also NEEDS REVIEW now: set operators other than `+` between element sets, `P()` / `E()`, `$(…)` in a value, an empty set, and aggregations other than Sum / Avg / Count / Min / Max (they were read as `sum`); `Count(DISTINCT)` over a set is `unique count`; `{2023}` stays a number; `{1}` keeps the chart's grouping (`query_groups ( )`; it was a grand total); the aggregated expression is translated like any other (TOTAL / Aggr / unknown functions are NEEDS REVIEW); a bare value is quoted when the column is text. Advisory `review_notes`, with the status unchanged: Qlik's case-sensitive single-quoted match (BL-333), an `=` modifier replacing the selection where ThoughtSpot intersects, and a bare number on a field of unknown type |

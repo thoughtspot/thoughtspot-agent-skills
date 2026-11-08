@@ -1367,7 +1367,7 @@ single-page behavior (starting at offset 0).
 List/search users (by name or email; auto-paginated by default).
 
 ```bash
-ts users search --profile <name> [--name "%pattern%"] [--org <org> ...] [--status ACTIVE] [--limit <n>]
+ts users search --profile <name> [--name "%pattern%"] [--org <org> ...] [--account-status ACTIVE] [--limit <n>]
 ```
 
 Omit `--limit` to fetch the full result set (default). Pass `--limit` for the legacy
