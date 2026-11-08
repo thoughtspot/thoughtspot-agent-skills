@@ -20,7 +20,7 @@ def test_distinctcount_maps_to_unique_count():
     # BL-540: DISTINCTCOUNT also counts BLANK, so it carries a has-blank term; the
     # plain `unique count` is DISTINCTCOUNTNOBLANK (tests below).
     expr, status, _ = translate_dax("DISTINCTCOUNT('BU'[BU])")
-    assert status == "Migrated"
+    assert status == "Approximated"
     assert expr.startswith("(unique count([BU::BU]) + ")
     assert "unique_count" not in expr
 
@@ -259,8 +259,11 @@ def test_keywords_are_not_table_refs():
 
 def test_distinctcount_counts_blank_as_one_value():
     expr, status, note = translate_dax("DISTINCTCOUNT('BU'[BU])")
-    assert status == "Migrated", note
     assert expr == ("(unique count([BU::BU]) + max((if (isnull([BU::BU])) then 1 else 0)))")
+    # Approximated, not exact: a dimension row with no matching facts is BLANK in DAX
+    # and 1 here, and the form is unprobed inside group_aggregate (review, BL-540).
+    assert status == "Approximated", note
+    assert "no matching" in note and "group_aggregate" in note
 
 
 def test_distinctcountnoblank_is_plain_unique_count():
@@ -271,5 +274,5 @@ def test_distinctcountnoblank_is_plain_unique_count():
 
 def test_distinctcount_inside_divide():
     expr, status, _ = translate_dax("DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))")
-    assert status == "Migrated"
+    assert status == "Approximated"
     assert "unique count([Sales::Customer])" in expr and "isnull([Sales::Customer])" in expr

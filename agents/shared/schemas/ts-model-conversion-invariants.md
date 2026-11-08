@@ -230,8 +230,11 @@ exactly that pair after a demotion. `ts tml lint` and `check_tml.py` skip it.
 2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That matches SQL `COUNT(DISTINCT)`
 (Snowflake SV, Databricks MV, dbt), Tableau `COUNTD` (documented to ignore Null) and DAX
 `DISTINCTCOUNTNOBLANK`. DAX `DISTINCTCOUNT`, and a Power BI column summarised by
-`distinctCount`, count BLANK as one more value; they get the probed exact form
-`unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 )` (4 on those keys).
+`distinctCount`, count BLANK as one more value; they get the probed form
+`( unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 ) )` (4 on those keys),
+bracketed so it composes. It is **Approximated**, not exact: a dimension row with no
+matching facts is BLANK in DAX and 1 here, Power BI's blank row for unmatched relationship
+keys is not modelled, and it is unprobed inside `group_aggregate`.
 `formula_common.unique_count_formula(..., null_is_a_value=True)` writes it. Qlik
 `Count(DISTINCT …)` and Sisense `count` are believed to ignore NULL like SQL (Qlik has a
 separate `NullCount`) but neither was probed on its own platform.

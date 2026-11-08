@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.formula_common import distinct_count_formula_column, reselect_counted_columns
-from ts_cli.powerbi.functions import translate_dax
+from ts_cli.powerbi.functions import DISTINCTCOUNT_NOTE, translate_dax
 from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.powerbi.tables import (_AUTO_TABLE, _cardinality, _col_role, _dbname,
                                     _is_distinct_count, _slug, build_table_tml)
@@ -299,11 +299,11 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
     formulas, measure_rows = _build_formulas(tables, overrides, dropped_ids, force_physical, seen, columns)
     formulas[:0] = count_formulas
     measure_rows[:0] = [{"name": f["name"], "original_dax": "summarizeBy: distinctCount",
-                         "ts_formula": f["expr"], "status": "Migrated",
+                         "ts_formula": f["expr"], "status": "Approximated",
                          "note": "column's default distinct count -> unique count formula "
-                                 "(invariant I5), plus 1 when the key has a blank, as DAX "
-                                 "DISTINCTCOUNT counts (BL-540); the column is a measure, as "
-                                 "every summarized column is"} for f in count_formulas]
+                                 "(invariant I5); the column is a measure, as every "
+                                 "summarized column is. " + DISTINCTCOUNT_NOTE}
+                        for f in count_formulas]
     reselected = reselect_counted_columns(columns, formulas)
     if reselected:
         warnings.append("Distinct-count column(s) kept as attributes too, because each was "

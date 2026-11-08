@@ -447,6 +447,8 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
         return None, "NEEDS REVIEW", "empty measure expression"
 
     src, note_bits = _apply_calculate_rewrites(src, measure_dax, physical_cols)
+    if re.search(r"\bDISTINCTCOUNT\s*\(", src, re.I):
+        note_bits.append(DISTINCTCOUNT_NOTE)
 
     reason = _review_reason(src)
     if reason:
@@ -533,6 +535,15 @@ def _divide_repl(args):
     if len(args) == 3:
         return f"({_IF} ({args[1]} = 0) then {args[2]} else ({args[0]}) / ({args[1]}))"
     return None
+
+
+# Why DISTINCTCOUNT is Approximated, not exact (BL-540 review). Shared with the
+# summarizeBy distinctCount column's mapping row in build_model.
+DISTINCTCOUNT_NOTE = (
+    "DISTINCTCOUNT counts a blank key as one value; translated as unique count plus 1 when "
+    "the group holds a NULL. Differs from Power BI where a dimension row has no matching "
+    "facts (DAX: blank, here: 1) and for the blank row Power BI adds for unmatched "
+    "relationship keys; unprobed inside group_aggregate")
 
 
 def _distinctcount_repl(args):

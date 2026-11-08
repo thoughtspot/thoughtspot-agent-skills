@@ -143,8 +143,8 @@ def test_distinct_count_column_is_a_unique_count_formula():
     assert col["properties"] == {"column_type": "MEASURE", "aggregation": "SUM",
                                  "index_type": "DONT_INDEX"}
     f = next(f for f in model["formulas"] if f["id"] == "formula_CustomerKey")
-    assert f["expr"] == ("unique count ( [Fact::CustomerKey] ) + max ( if ( isnull "
-                         "( [Fact::CustomerKey] ) ) then 1 else 0 )")  # BL-540
+    assert f["expr"] == ("( unique count ( [Fact::CustomerKey] ) + max ( if ( isnull "
+                         "( [Fact::CustomerKey] ) ) then 1 else 0 ) )")  # BL-540
 
 
 def test_no_count_distinct_aggregation_anywhere_and_i5_clean():
@@ -169,5 +169,7 @@ def test_a_table_left_without_a_column_keeps_its_key_as_an_attribute():
 def test_distinct_count_column_is_reported_in_the_mapping():
     _, _, mapping = _build_distinct()
     row = next(r for r in mapping["measures"] if r["name"] == "CustomerKey")
-    assert row["status"] == "Migrated"
-    assert row["ts_formula"].startswith("unique count ( [Fact::CustomerKey] ) + max ( if ( isnull")
+    assert row["status"] == "Approximated"
+    assert row["ts_formula"].startswith("( unique count ( [Fact::CustomerKey] ) + max ( if ( isnull")
+    # names the case where it differs from Power BI (review, BL-540)
+    assert "no matching" in row["note"] and "blank row" in row["note"]

@@ -491,12 +491,15 @@ def unique_count_formula(operand: str, *, null_is_a_value: bool = False) -> str:
     (live 2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That is SQL's, Tableau's
     ``COUNTD`` and DAX ``DISTINCTCOUNTNOBLANK``'s reading. A source that counts NULL (BLANK)
     as one more value — DAX ``DISTINCTCOUNT`` — passes ``null_is_a_value=True`` and gets
-    ``unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 )``, probed the same day:
-    4 on those keys, and 1 for a group holding only NULL."""
+    ``( unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 ) )``, probed the same
+    day: 4 on those keys, and 1 for a group holding only NULL. It is bracketed so it
+    composes (as a divisor it must divide by the whole count). It is an approximation, not
+    exact: a dimension row with no matching facts is BLANK in DAX and 1 here, and it is
+    unprobed inside ``group_aggregate``."""
     base = aggregate_formula("COUNT_DISTINCT", operand)
     if not null_is_a_value:
         return base  # type: ignore[return-value]
-    return f"{base} + max ( if ( isnull ( {operand} ) ) then 1 else 0 )"
+    return f"( {base} + max ( if ( isnull ( {operand} ) ) then 1 else 0 ) )"
 
 
 def distinct_count_formula_column(
@@ -524,7 +527,8 @@ def distinct_count_formula_column(
                                           null_is_a_value=null_is_a_value)}, column)
 
 
-_UNIQUE_COUNT_HEAD_RE = re.compile(r"^\s*unique count \(\s*\[([^\[\]:]+)::([^\[\]]+)\]\s*\)")
+_UNIQUE_COUNT_HEAD_RE = re.compile(
+    r"^\s*(?:\(\s*)?unique count \(\s*\[([^\[\]:]+)::([^\[\]]+)\]\s*\)")
 
 
 def _counted_column(expr: str) -> tuple[str, str] | None:
