@@ -598,7 +598,11 @@ def _call_args(cur: _Cursor, resolver, agg: str | None = None) -> list[str]:
 
 
 def _call_count(cur: _Cursor, resolver) -> tuple[str, str]:
-    """-> (label, inner): label is COUNT or COUNT_DISTINCT."""
+    """-> (label, inner): label is COUNT or UNIQUE_COUNT (COUNT(DISTINCT …)).
+
+    An internal label, always emitted as ``unique count``. It was spelled
+    ``COUNT_DISTINCT`` until BL-447's review: the same string as the column aggregation
+    invariant I5 forbids, which check_converter_parity requirement C now flags."""
     kind, text = cur.peek()
     if kind == "op" and text == "*":
         cur.advance()
@@ -608,7 +612,7 @@ def _call_count(cur: _Cursor, resolver) -> tuple[str, str]:
         cur.advance()
         args = _call_args(cur, resolver)
         _need(args, 1, "COUNT(DISTINCT …)")
-        return "COUNT_DISTINCT", args[0]
+        return "UNIQUE_COUNT", args[0]
     args = _call_args(cur, resolver)
     _need(args, 1, "COUNT")
     return "COUNT", args[0]
@@ -623,7 +627,7 @@ _AGG_FN = {"SUM": "sum", "AVG": "average", "MIN": "min", "MAX": "max",
            "MEDIAN": "median"}
 _AGG_IF_FN = {"SUM": "sum_if", "COUNT": "count_if", "AVG": "average_if",
               "MIN": "min_if", "MAX": "max_if", "STDDEV": "stddev_if",
-              "VARIANCE": "variance_if", "COUNT_DISTINCT": "unique_count_if"}
+              "VARIANCE": "variance_if", "UNIQUE_COUNT": "unique_count_if"}
 # SUM(inner) OVER () is a grand total only when summing is the inner
 # aggregate's own roll-up; MIN/MAX likewise. SUM(AVG(x)) OVER () is a sum of
 # per-group averages, not an average — no group_aggregate equivalent.
@@ -631,7 +635,7 @@ _OVER_ROLLUP = {"SUM": {"SUM", "COUNT"}, "MIN": {"MIN"}, "MAX": {"MAX"}}
 
 
 def _emit_aggregate(label: str, inner: str) -> str:
-    if label == "COUNT_DISTINCT":
+    if label == "UNIQUE_COUNT":
         return f"unique count ( {inner} )"
     return _emit(_AGG_FN[label], [inner])
 
@@ -655,7 +659,7 @@ def _finish_aggregate(label: str, inner: str, cur: _Cursor, resolver) -> str:
     """An aggregate call's ')' has been consumed: apply FILTER/OVER/hook."""
     cond = _maybe_filter(cur, resolver)
     if cur.agg_hook is not None:
-        if label == "COUNT_DISTINCT":
+        if label == "UNIQUE_COUNT":
             raise UntranslatableError(
                 "COUNT(DISTINCT …) inside a windowed measure has no "
                 "moving_/cumulative_ equivalent")

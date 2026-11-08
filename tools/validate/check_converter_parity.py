@@ -37,12 +37,16 @@ not asserted of everything:
      or date key — or on a formula that only wraps one — is stored as an ATTRIBUTE
      and search lists the keys instead of counting them, with no error (live
      2026-10-29). A distinct count is ``formula_common.unique_count_formula``.
-     Checked as a forbidden OUTPUT, like A: a dict value or an assignment of the
-     string ``"COUNT_DISTINCT"``, comments ignored, strings kept (the mapping lives in
-     one). Comparisons (``== "COUNT_DISTINCT"``) are readers, not emitters, and pass.
-     Added 2026-11-08 (BL-447, audit 2026-10-29 codification opportunity 1); its first
-     run found ``sv_naming.py``, ``powerbi/tables.py``, ``sisense/functions.py`` (dead)
-     and ``dbt/tags.py``.
+     Checked as a forbidden OUTPUT, like A, and read from the AST: the string constant
+     ``"COUNT_DISTINCT"`` anywhere except inside a comparison (``== "COUNT_DISTINCT"``,
+     ``in ("COUNT_DISTINCT", …)`` — readers, not emitters), as a dict KEY, or in a
+     docstring. So a dict value, an assignment, a tuple return, a conditional expression,
+     a call argument, a list and a set all count. Added 2026-11-08 (BL-447, audit
+     2026-10-29 codification opportunity 1); its first run found ``sv_naming.py``,
+     ``powerbi/tables.py``, ``sisense/functions.py`` (dead) and ``dbt/tags.py``. The
+     first cut was a regex for ``: "…"`` and ``= "…"`` only, and missed a tuple return,
+     a call argument, a list and a set (BL-447 review); the AST version also caught the
+     Databricks translator's internal ``"COUNT_DISTINCT"`` label, renamed ``UNIQUE_COUNT``.
 
 Two holes in requirement B were found and closed on 2026-08-28, both of which had
 it reporting the opposite of the truth. They are worth recording because they are
@@ -124,12 +128,10 @@ CONVERTER_SKILL_GLOB = "ts-convert-*"
 SKILL_NAME_RE = re.compile(
     r"^ts-convert-(?P<direction>to|from)-(?P<platform>[a-z0-9][a-z0-9-]*)$")
 
-# Requirement C — the EXPECTED_DIVERGENCES key suffix, and the forbidden output: the
-# string "COUNT_DISTINCT" as a dict value (`"distinctcount": "COUNT_DISTINCT"`) or an
-# assigned value (`props["aggregation"] = "COUNT_DISTINCT"`, `aggregation="…"`), never
-# a comparison (`== "COUNT_DISTINCT"`, `!= …`).
+# Requirement C — the EXPECTED_DIVERGENCES key suffix. The forbidden output is read from
+# the AST (literal_count_distinct_hits): the string "COUNT_DISTINCT" anywhere but a
+# comparison, a dict key or a docstring.
 LITERAL_COUNT_DISTINCT = "literal:COUNT_DISTINCT"
-_LITERAL_COUNT_DISTINCT_RE = re.compile(r"""(?::|(?<![=!<>])=)\s*["']COUNT_DISTINCT["']""")
 
 # Platforms whose code location does not follow `ts_cli/<platform>/`.
 # A value of None means "no CLI module by design" — the converter is documented in
@@ -367,34 +369,51 @@ def discover_platforms(root: Path, direction: str | None = None) -> list[str]:
     return sorted(platforms)
 
 
-def strip_comments(source: str) -> str:
-    """`source` with comments blanked and everything else — strings included — kept
-    in place, so a hit's line number stays true. Raw text if it does not tokenize."""
-    lines = source.splitlines(keepends=True)
-    try:
-        comments = [tok.start for tok in tokenize.generate_tokens(io.StringIO(source).readline)
-                    if tok.type == tokenize.COMMENT]
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        return source
-    for row, col in comments:
-        line = lines[row - 1]
-        lines[row - 1] = line[:col] + ("\n" if line.endswith("\n") else "")
-    return "".join(lines)
+def _docstring_nodes(tree: ast.AST) -> set:
+    """The docstring Constant of every module, class and function in `tree`."""
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                docs.add(body[0].value)
+    return docs
+
+
+def _is_reader(node: ast.AST, parents: dict) -> bool:
+    """True when `node` sits in a comparison (`== "X"`, `in ("X", …)`) or is a dict KEY,
+    before reaching the enclosing statement: a lookup or test reads the value, it does
+    not emit it."""
+    child, parent = node, parents.get(node)
+    while parent is not None and not isinstance(parent, ast.stmt):
+        if isinstance(parent, ast.Compare):
+            return True
+        if isinstance(parent, ast.Dict) and any(k is child for k in parent.keys):
+            return True
+        child, parent = parent, parents.get(parent)
+    return False
 
 
 def literal_count_distinct_hits(files: list[Path]) -> list[str]:
-    """`ts_cli/...:line` for every requirement-C output in `files` (comments ignored)."""
+    """`ts_cli/...:line` for every requirement-C output in `files`: the string constant
+    "COUNT_DISTINCT" anywhere except a comparison, a dict key or a docstring — a dict
+    value, an assignment, a return (`return "MEASURE", "COUNT_DISTINCT"`), a conditional
+    expression, a call argument, a list or a set. Read from the AST, so comments never
+    count. A file that does not parse is a different validator's job and is skipped."""
     hits: list[str] = []
     for path in files:
-        try:
-            text = strip_comments(path.read_text(encoding="utf-8"))
-        except OSError:
+        tree = _parse(path)
+        if tree is None:
             continue
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        docs = _docstring_nodes(tree)
         rel = "/".join(path.parts[path.parts.index("ts_cli"):]) \
             if "ts_cli" in path.parts else path.name
-        for m in _LITERAL_COUNT_DISTINCT_RE.finditer(text):
-            hits.append(f"{rel}:{text.count(chr(10), 0, m.start()) + 1}")
-    return hits
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and node.value == "COUNT_DISTINCT"
+                    and node not in docs and not _is_reader(node, parents)):
+                hits.append(f"{rel}:{node.lineno}")
+    return sorted(set(hits), key=lambda h: (h.rsplit(":", 1)[0], int(h.rsplit(":", 1)[1])))
 
 
 def resolve_code_files(root: Path, platform: str) -> tuple[list[Path], bool]:

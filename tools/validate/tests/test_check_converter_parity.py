@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 VALIDATOR = Path(__file__).resolve().parents[1] / "check_converter_parity.py"
 
 
@@ -284,3 +286,42 @@ def test_a_to_only_converter_is_not_subject_to_requirement_c(tmp_path):
     (root / "agents" / "cli" / "ts-convert-to-fake" / "SKILL.md").write_text("x")
     result = _run(root)
     assert result.returncode == 0, result.stdout
+
+
+# Review of BL-447: the regex saw only `: "COUNT_DISTINCT"` and `= "COUNT_DISTINCT"`.
+# Requirement C now reads the AST, so every emitting shape is caught.
+@pytest.mark.parametrize("src", [
+    'def role(c):\n    return "MEASURE", "COUNT_DISTINCT"\n',          # tuple return
+    'agg = "COUNT_DISTINCT" if distinct else "SUM"\n',                # conditional expr
+    'emit(column, "COUNT_DISTINCT")\n',                               # call argument
+    'AGGS = {"COUNT_DISTINCT", "SUM"}\n',                             # set
+    'AGGS = ["SUM", "COUNT_DISTINCT"]\n',                             # list
+])
+def test_literal_count_distinct_in_any_emitting_shape_is_flagged(tmp_path, src):
+    result = _run(_repo(tmp_path, "fake", _HELPERS + src))
+    assert result.returncode == 1, (src, result.stdout)
+    assert "literal column aggregation COUNT_DISTINCT" in result.stdout
+
+
+def test_dict_keys_membership_tests_and_docstrings_are_not_flagged(tmp_path):
+    src = (_HELPERS
+           + '"""Module doc: a "COUNT_DISTINCT" column flips to an attribute."""\n'
+           + 'FN = {"COUNT_DISTINCT": "unique count"}\n'
+           + 'def f(agg):\n    """"COUNT_DISTINCT" is read here, never emitted."""\n'
+           + '    return agg in ("COUNT_DISTINCT", "COUNT")\n')
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 0, result.stdout
+
+
+def test_the_real_repo_passes_with_only_the_dbt_exemption():
+    """The validator over this repository: requirement C passes, and dbt is the one
+    platform it exempts (a dated entry ending with BL-447's dbt part)."""
+    root = Path(__file__).resolve().parents[3]
+    result = _run(root)
+    assert result.returncode == 0, result.stdout
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ccp_c", VALIDATOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert [k for k in mod.EXPECTED_DIVERGENCES if k[1] == mod.LITERAL_COUNT_DISTINCT] == [
+        ("dbt", mod.LITERAL_COUNT_DISTINCT)]
