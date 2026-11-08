@@ -2502,7 +2502,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 | Version | Date | Summary |
 |---|---|---|
 | 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, …) is excluded with the function named, not parked at import; DATETIME and `/* */` comments translate; UNION is the 16th spatial function (ts-cli v0.210.0, BL-460). |
-| 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, GET_JSON_OBJECT, …) is skipped with the function named, not passed through to fail import; UNION is the 16th spatial function (ts-cli v0.210.0, BL-460). |
 | 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
 | 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
 | 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |

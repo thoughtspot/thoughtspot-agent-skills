@@ -15765,7 +15765,7 @@ Follow-ups found here and **not filed** (reported for triage):
 
 **Target:** 2026-11-30.
 
-**Resolution (2026-11-08, partial — ts-cli 0.210.0, ts-convert-from-tableau 1.46.2).** The
+**Resolution (2026-11-08, partial — ts-cli 0.210.0, ts-convert-from-tableau 1.46.3).** The
 generic survivor catch and the UNION half are done; the mappings are not.
 
 - **Catch.** `tableau/validate.py::validate_output` now ends by checking every call left in
