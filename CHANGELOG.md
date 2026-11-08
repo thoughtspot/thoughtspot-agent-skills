@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-08
-- fix: ts-convert-from-powerbi and ts-convert-from-qlik ran `ts tml lint` / `ts tml import` with bare file arguments, which both reject, so neither had a lint gate; `check_skill_flag_usage.py` now also fails a `ts` command given more positional arguments than it declares (BL-545)
+- fix: ts-convert-from-powerbi and ts-convert-from-qlik ran `ts tml lint` / `ts tml import` with bare file arguments, which both reject, so neither had a lint gate, and ts-convert-from-sisense's unfiltered `--dir out/` imported `mapping.json` as a document; `check_skill_flag_usage.py` now also fails a `ts` command given more positional arguments than it declares (BL-545)
 - feat: the README's skills tables and counts are generated from each SKILL.md's frontmatter `metadata:` (`category`, `summary`, plus the Setup and Conversion columns) by `tools/validate/generate_readme_skills.py`; `--check` gates drift and invalid metadata in pre-commit and CI
 - chore: retire the CoCo Snowsight and Databricks Genie runtimes; the repo now serves CLI skills (Claude Code and Cortex Code CLI). Archived at tag runtimes-archive-2026-11-08
 - chore: bump ts-cli to v0.206.1

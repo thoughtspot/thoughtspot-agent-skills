@@ -16996,7 +16996,7 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 
 ## BL-545 — from-powerbi and from-qlik have no working lint gate: positional files are rejected — DONE `Tier 1`
 
-**Status:** DONE (2026-11-08; ts-convert-from-powerbi 1.1.10, ts-convert-from-qlik 1.2.2): both skills lint and import through `--dir out/` with `--pattern` (which also keeps `mapping.json` out of the import), and `check_skill_flag_usage.py` now fails a `ts` invocation passing more positional arguments than its typer signature declares. Power BI's model import uses `--order tableau`. Qlik's cannot: it writes `table.<name>.tml` / `model.<name>.tml`, and `--order tableau` ranks by suffix and would send the Model first, so it names each Table, then the Model, with `--file`.
+**Status:** DONE (2026-11-08; ts-convert-from-powerbi 1.1.10, ts-convert-from-qlik 1.2.2): both skills lint and import through `--dir out/` with `--pattern` (which also keeps `mapping.json` out of the import), and `check_skill_flag_usage.py` now fails a `ts` invocation passing more positional arguments than its typer signature declares. Power BI's model import uses `--order tableau`. Qlik's cannot: it writes `table.<name>.tml` / `model.<name>.tml`, and `--order tableau` ranks by suffix and would send the Model first, so it names each Table, then the Model, with `--file`. Same class, found while fixing it: from-sisense (1.0.7) read `--dir out/` unfiltered, so its `ALL_OR_NONE` import also sent `mapping.json` as a document; its Steps 2 and 3 now add `--pattern` too.
 
 **Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
 
