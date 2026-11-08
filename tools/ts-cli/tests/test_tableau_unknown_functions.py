@@ -392,21 +392,48 @@ class TestCatalogFamilies:
 
 class TestDatetime:
     """BL-460 review: DATETIME has a documented, live-verified pass-through
-    (tableau-formula-translation.md, verified 2026-06-15). The survivor catch took it
-    out of the parked-formula fix cycle, so the converter now applies it."""
+    (tableau-formula-translation.md, verified 2026-06-15), wired in. Re-review: only over
+    a [field] or a date expression — TO_TIMESTAMP reads a number as seconds since 1970
+    where Tableau reads days since 1899-12-30, and a string by the warehouse's format."""
 
-    def test_datetime_translates_to_the_documented_pass_through(self):
-        expr, errors, _ = translate_single("DATETIME([Order Date])")
-        assert errors == []
-        assert expr == 'sql_date_time_op ( "TO_TIMESTAMP({0})" , [Order Date] )'
+    @pytest.mark.parametrize("src,arg", [
+        ("DATETIME([Order Date])", "[Order Date]"),
+        ("datetime([Order Date])", "[Order Date]"),
+        ("DATETIME(DATE([Order Date]))", "date ( [Order Date])"),
+        ("DATETIME(TODAY())", "today ( )"),
+        ("DATETIME(DATEADD('day', 1, [Order Date]))", "add_days ( [Order Date] , 1 )"),
+    ])
+    def test_a_field_or_a_date_expression_translates(self, src, arg):
+        expr, errors, _ = translate_single(src)
+        assert (expr, errors) == (f'sql_date_time_op ( "TO_TIMESTAMP({{0}})" , {arg} )', [])
 
-    def test_in_any_spelling_and_over_a_literal(self):
-        expr, errors, _ = translate_single("datetime('2026-01-31 10:00:00')")
-        assert errors == []
-        assert expr == "sql_date_time_op ( \"TO_TIMESTAMP({0})\" , '2026-01-31 10:00:00' )"
+    @pytest.mark.parametrize("src", [
+        "DATETIME(43831)",                       # a day serial to Tableau, seconds to Snowflake
+        "DATETIME('2026-01-31 10:00:00')",       # a string: the warehouse's format rules
+        "DATETIME([Days] + 1)",                  # arithmetic: a number
+        "DATETIME( )",                           # whitespace-only
+        "DATETIME([a], [b])",                    # wrong arity
+    ])
+    def test_anything_else_is_skipped_for_review(self, src):
+        result = translate_formulas([_mk("F", src)])
+        assert result["translated"] == [], result["translated"]
+        reason = result["skipped"][0]["reason"]
+        assert "DATETIME is translated only with one argument" in reason, reason
+        assert "days since 1899-12-30" in reason
 
-    def test_wrong_arity_is_still_a_survivor(self):
-        assert any("DATETIME" in e for e in _errors("DATETIME([a], [b])"))
+
+class TestMappedFunctionInAnUnmappedForm:
+    """Re-review nit: a mapped function left in place because of its argument count is
+    not "no mapping"."""
+
+    @pytest.mark.parametrize("src,fn", [("LEFT([s])", "LEFT"), ("MID([s], 2)", "MID"),
+                                        ("ATAN2([y])", "ATAN2"), ("UPPER([a], [b])", "UPPER")])
+    def test_wrong_number_of_arguments_is_said(self, src, fn):
+        errors = translate_single(src)[1]
+        assert errors and errors[0].startswith(f"wrong number of arguments for {fn}"), errors
+
+    def test_a_function_never_seen_is_still_unknown(self):
+        assert translate_single("CORR([a], [b])")[1][0].startswith("untranslated Tableau function: CORR")
 
 
 class TestReviewNits:

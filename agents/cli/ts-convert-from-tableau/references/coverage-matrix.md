@@ -65,7 +65,7 @@ Use this as the canonical limitations reference.
 | 33 | `PI()/RADIANS()/DEGREES()` | `sql_double_op ( "PI()" )`; `( ( x * sql_double_op ( "PI()" ) ) / 180 )`; `( ( x * 180 ) / sql_double_op ( "PI()" ) )` | CLI-translated (v0.26.0); no native equivalent. The warehouse's PI and the bracketed product are exact; the 15-digit literal under a division lost seven digits (BL-364, BL-365, ts-cli 0.165.0) |
 | 34 | `INT(x)` | `( if ( x >= 0 ) then floor ( x ) else ceil ( x ) )` | Partial; truncate-toward-zero. Parenthesised since ts-cli 0.165.0: bare, `INT([x]) * 2` multiplied only the negative branch (#579 review) |
 | 35 | `FLOAT(x)/STR(x)` | `to_double(x)/to_string(x)` | |
-| 36 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` | Pass-through. CLI-translated only as of ts-cli v0.210.0 (BL-460 review): this row was documented but never wired in, so the converter emitted `DATETIME(` verbatim |
+| 36 | `DATETIME(expr)` cast | `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` | Pass-through. CLI-translated only as of ts-cli v0.210.0 (BL-460 review): this row was documented but never wired in, so the converter emitted `DATETIME(` verbatim. Over a `[field]` or a date expression only: a number (a day serial to Tableau, seconds since 1970 to `TO_TIMESTAMP`) or a string literal is skipped for review |
 | 37 | String concat (`+` on strings) | `concat ( a , b )` | TS `+` is numeric-only |
 | 38 | `SIGN(x)/SQUARE(x)` | `if/then` composite / `pow(x,2)` | CLI-translated (v0.26.0) |
 | 39 | `MIN/MAX` (scalar, 2-arg) | `least ( a , b )` / `greatest ( a , b )` | CLI-translated (since v0.17.0; scan-abort bug fixed v0.26.0); 2-arg form only — 1-arg is the aggregate `min()`/`max()` |

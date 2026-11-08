@@ -14,6 +14,7 @@ import re
 from ts_cli.formula_translate.catalog import is_known
 from ts_cli.formula_translate.refs import bracketed_name
 from ts_cli.tableau.literals import blank_literals_and_refs
+from ts_cli.tableau.functions import MAPPED_FUNCTIONS
 
 
 # ---------------------------------------------------------------------------
@@ -259,11 +260,23 @@ def validate_output(expr: str) -> list[str]:
         errors.append(f"field name contains '{ch}' — reference it by hand: {ref}")
     code = _code_only(expr)
     _named_checks(code, errors, reported)
-    for name in _unknown_calls(code, reported):
-        errors.append(
-            f"untranslated Tableau function: {name} (the converter has no mapping for it "
-            f"and it is not a ThoughtSpot formula function; translate it by hand, BL-460)")
+    errors.extend(_survivor_reason(name) for name in _unknown_calls(code, reported))
     return errors
+
+
+def _survivor_reason(name: str) -> str:
+    """Why a call left in the output is skipped: a mapped function in a form the
+    converter does not map, or a function it has never seen."""
+    if name.upper() == "DATETIME":
+        return ("DATETIME is translated only with one argument that is a [field] or a date "
+                "expression: Tableau reads a number as days since 1899-12-30 but the "
+                "warehouse's TO_TIMESTAMP as seconds since 1970, and a string by its own "
+                "format rules; translate this call by hand (BL-460)")
+    if name.upper() in MAPPED_FUNCTIONS:
+        return (f"wrong number of arguments for {name}: the converter maps {name} only "
+                f"in its documented form; translate this call by hand (BL-460)")
+    return (f"untranslated Tableau function: {name} (the converter has no mapping for it "
+            f"and it is not a ThoughtSpot formula function; translate it by hand, BL-460)")
 
 
 def _check_if_then_else_structure(expr: str, expr_stripped: str) -> list[str]:
