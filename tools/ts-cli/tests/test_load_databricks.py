@@ -124,6 +124,8 @@ class _Dbx:
         self.executed.append(statement)
         if statement.startswith("SHOW TABLES"):
             return {"result": {"data_array": [["s", t, "false"] for t in self.existing]}}
+        if statement.startswith("DESCRIBE HISTORY"):
+            return {"result": {"data_array": [["7", "2026-11-08T00:00:00.000Z"]]}}
         return {}
 
 
@@ -480,19 +482,6 @@ def test_infer_output_naming_a_missing_file_is_refused_not_schema_only(tmp_path)
         load_core.detect_source(tmp_path / "schema.json")
 
 
-def test_snowflake_refuses_a_data_table_whose_csv_is_not_where_it_reads(tmp_path, monkeypatch):
-    csvs = tmp_path / "csvs"
-    csvs.mkdir()
-    (csvs / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
-    (tmp_path / "schema.json").write_text(_json.dumps(load_core.infer_schema(csvs)))
-    monkeypatch.setattr(load_core, "load_snowflake_profile", lambda n: {"default_warehouse": "WH"})
-    called = []
-    monkeypatch.setattr(load_core, "_load_via_python", lambda *a, **k: called.append(a) or [])
-    result = CliRunner().invoke(load_core.app, ["snowflake", "--source", str(tmp_path / "schema.json"),
-                                                "--profile", "p", "--database", "D", "--schema", "S"])
-    assert result.exit_code != 0 and "ORDERS" in result.output and called == []
-
-
 # -- existing tables, partial failure ------------------------------------------------
 
 def test_existing_table_refused_by_default_before_anything_is_created(tmp_path, dbx):
@@ -527,7 +516,7 @@ def test_execution_failure_reports_what_was_written(tmp_path, dbx):
     result = _run(["--source", str(tmp_path), "--batch", "2"])
     assert result.exit_code != 0
     assert "Load stopped part-way" in result.stderr
-    assert "c.s.A (2 of 3 rows inserted)" in result.stderr
+    assert "c.s.A: created by this run, 2 of 3 rows inserted" in result.stderr
     assert "--if-exists replace" in result.stderr
     assert not any("`B`" in s for s in dbx.executed)
 
@@ -587,3 +576,308 @@ def test_dbx_exec_unlinks_the_body_file_on_failure(monkeypatch, outcome):
     with pytest.raises((SystemExit, FileNotFoundError)):
         load_mod._dbx_exec("prof", "wh1", "SELECT 1")
     assert not seen["path"].exists()
+
+
+
+# -- re-review round: one CSV per --source, whichever loader ------------------------
+
+def _sf_capture(monkeypatch):
+    """Stub the Snowflake profile and python loader; record what the loader would read."""
+    seen = {}
+    monkeypatch.setattr(load_core, "load_snowflake_profile", lambda n: {"default_warehouse": "WH"})
+    def fake_load(profile, tables, database, schema, wh, role, if_exists, csv_dir):
+        seen["paths"] = {t["table_name"]: load_core._sf_csv_path(t, csv_dir) for t in tables}
+        seen["tables"] = tables
+        return [{"table_name": t["table_name"], "status": "created", "rows_loaded": 0,
+                 "columns": len(t["columns"]), "source_file": t.get("file", "")} for t in tables]
+    monkeypatch.setattr(load_core, "_load_via_python", fake_load)
+    return seen
+
+
+def _sf_run(args):
+    return CliRunner().invoke(load_core.app, ["snowflake", "--profile", "p", "--database", "D",
+                                              "--schema", "S", *args])
+
+
+def test_infer_writes_an_absolute_data_file(tmp_path, monkeypatch):
+    (tmp_path / "csvs").mkdir()
+    (tmp_path / "csvs" / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    t = load_core.infer_schema(_Path("csvs"))["tables"][0]
+    assert _Path(t["data_file"]).is_absolute()
+    assert t["data_file"] == str((tmp_path / "csvs" / "orders.csv").resolve())
+
+
+def test_infer_output_saved_next_to_its_csvs_loads_from_any_directory(tmp_path, dbx, monkeypatch):
+    csvs = tmp_path / "csvs"
+    csvs.mkdir()
+    (csvs / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
+    monkeypatch.chdir(csvs)
+    (csvs / "schema.json").write_text(_json.dumps(load_core.infer_schema(_Path("."))))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "orders.csv").write_text("Order Id\n99\n", encoding="utf-8")   # a decoy
+    monkeypatch.chdir(elsewhere)
+    assert _run(["--source", str(csvs / "schema.json")]).exit_code == 0
+    assert "'Ng'" in " ".join(_inserts(dbx))
+    seen = _sf_capture(monkeypatch)
+    assert _sf_run(["--source", str(csvs / "schema.json")]).exit_code == 0
+    assert seen["paths"]["ORDERS"] == (csvs / "orders.csv").resolve()
+
+
+def test_a_relative_name_found_in_two_places_is_refused(tmp_path, monkeypatch):
+    jdir, cwd = tmp_path / "j", tmp_path / "cwd"
+    jdir.mkdir(), cwd.mkdir()
+    (jdir / "orders.csv").write_text("A\n1\n", encoding="utf-8")
+    (cwd / "orders.csv").write_text("A\n2\n", encoding="utf-8")
+    (jdir / "schema.json").write_text(_json.dumps({"tables": [
+        {"table_name": "ORDERS", "file": "orders.csv", "has_data": True,
+         "columns": [{"name": "A", "inferred_type": "INTEGER"}]}]}))
+    monkeypatch.chdir(cwd)
+    with pytest.raises(SystemExit, match="ambiguous"):
+        load_core.infer_schema(jdir / "schema.json")
+
+
+def test_both_loaders_read_the_one_file_a_relative_name_resolves_to(tmp_path, dbx, monkeypatch):
+    jdir, cwd = tmp_path / "j", tmp_path / "cwd"
+    jdir.mkdir(), cwd.mkdir()
+    (cwd / "orders.csv").write_text("A\n10\n", encoding="utf-8")     # only in the working dir
+    (jdir / "schema.json").write_text(_json.dumps({"tables": [
+        {"table_name": "ORDERS", "file": "orders.csv", "has_data": True,
+         "columns": [{"name": "A", "inferred_type": "INTEGER"}]}]}))
+    monkeypatch.chdir(cwd)
+    assert _run(["--source", str(jdir / "schema.json")]).exit_code == 0
+    assert _inserts(dbx)[0].endswith("VALUES (10)")
+    seen = _sf_capture(monkeypatch)
+    assert _sf_run(["--source", str(jdir / "schema.json")]).exit_code == 0
+    assert seen["paths"]["ORDERS"] == (cwd / "orders.csv").resolve()
+
+
+# -- header matching passes -----------------------------------------------------------
+
+def test_header_case_only_mismatch_matches_by_name():
+    # Name-only manifest columns: the old lookup missed both and read by position (swapped).
+    cols = [{"name": "Revenue"}, {"name": "Cost"}]
+    assert load_mod._header_index(["cost", "revenue"], cols, "f") == [1, 0]
+
+
+def test_a_case_insensitive_match_beats_a_sanitised_one():
+    # "a b" equals "A B" ignoring case; "A_B" equals it only once sanitised.
+    assert load_mod._header_index(["a b", "A_B"], [{"name": "A B"}, {"name": "X"}], "f") == [0, 1]
+
+
+def test_a_sanitised_header_never_shadows_another_headers_exact_name():
+    cols = [{"name": "CUSTOMER_ID"}, {"name": "Customer ID"}, {"name": "Amount"}]
+    header = ["Customer ID", "CUSTOMER_ID", "Amount"]
+    assert load_mod._header_index(header, cols, "f") == [1, 0, 2]
+
+
+def test_sanitised_forms_match_a_doubled_space():
+    assert load_mod._header_index(["Order  Date", "Id"], [{"name": "Id"}, {"name": "Order Date"}],
+                                  "f") == [1, 0]
+
+
+# -- ranges ---------------------------------------------------------------------------
+
+def test_integer_outside_bigint_loads_as_decimal_38_0(tmp_path, dbx):
+    (tmp_path / "t.csv").write_text("N\n5\n12345678901234567890123\n-9223372036854775809\n",
+                                    encoding="utf-8")
+    result = _run(["--source", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "`N` DECIMAL(38,0)" in _creates(dbx)[0]
+    assert "(12345678901234567890123)" in _inserts(dbx)[0]
+
+
+def test_bigint_column_within_range_stays_bigint(tmp_path, dbx):
+    (tmp_path / "t.csv").write_text("N\n5\n9223372036854775807\n", encoding="utf-8")
+    assert _run(["--source", str(tmp_path)]).exit_code == 0
+    assert "`N` BIGINT" in _creates(dbx)[0]
+
+
+def test_range_limits_are_refused():
+    for val, t in (("9223372036854775808", "BIGINT"), ("1" * 39, "DECIMAL(38,0)"),
+                   ("1e400", "DOUBLE"), ("2024-01-02 10:00:00+18:30", "TIMESTAMP"),
+                   ("2024-01-02 10:00:00-19:00", "TIMESTAMP")):
+        with pytest.raises(ValueError):
+            _sql_literal(val, t)
+    assert is_iso_timestamp("2024-01-02 10:00:00+18:00")
+    assert is_iso_timestamp("2024-01-02 10:00:00-18:00")
+    assert _sql_literal("1" * 38, "DECIMAL(38,0)") == "1" * 38
+
+
+# -- recovery advice after an append ---------------------------------------------------
+
+def test_failed_append_to_an_existing_table_points_to_delta_history_not_replace(tmp_path, dbx):
+    (tmp_path / "a.csv").write_text("V\n1\n2\n3\n", encoding="utf-8")
+    dbx.existing = ["a"]
+    dbx.fail_on, dbx.fail_at = "INSERT INTO", 2
+    result = _run(["--source", str(tmp_path), "--batch", "2", "--if-exists", "append"])
+    assert result.exit_code != 0
+    err = result.stderr
+    assert "existed before this run; 2 of 3 rows were appended" in err
+    assert "RESTORE TABLE `c`.`s`.`A` TO VERSION AS OF 7" in err
+    assert "Do not re-run with --if-exists replace" in err
+    assert "re-run with --if-exists replace to reload" not in err
+
+
+def test_failed_append_to_a_new_table_may_be_replaced(tmp_path, dbx):
+    (tmp_path / "a.csv").write_text("V\n1\n2\n3\n", encoding="utf-8")
+    dbx.fail_on, dbx.fail_at = "INSERT INTO", 2
+    result = _run(["--source", str(tmp_path), "--batch", "2", "--if-exists", "append"])
+    assert "created by this run" in result.stderr and "RESTORE" not in result.stderr
+
+
+# -- --generate-sample needs no data files, and means synthetic everywhere --------------
+
+def _manifest_with_missing_data(tmp_path):
+    m = tmp_path / "m.json"
+    m.write_text(_json.dumps({"tables": [{"table_name": "T", "data_file": "gone.csv", "rows": 3,
+        "columns": [{"name": "id", "type": "INTEGER"}, {"name": "region", "type": "VARCHAR(20)"}]}]}))
+    return m
+
+
+def test_generate_needs_no_data_files(tmp_path):
+    out = tmp_path / "out"
+    res = load_core.generate_all(_manifest_with_missing_data(tmp_path), rows=5, output_dir=out)
+    assert res[0]["rows"] == 3 and (out / "T.csv").is_file()
+
+
+def test_databricks_generate_sample_needs_no_data_files(tmp_path, dbx):
+    result = _run(["--source", str(_manifest_with_missing_data(tmp_path)), "--generate-sample"])
+    assert result.exit_code == 0, result.output
+    assert _json.loads(result.stdout)["loaded"][0]["rows"] == 3
+
+
+def test_snowflake_generate_sample_needs_no_data_files(tmp_path, monkeypatch):
+    seen = _sf_capture(monkeypatch)
+    result = _sf_run(["--source", str(_manifest_with_missing_data(tmp_path)), "--generate-sample"])
+    assert result.exit_code == 0, result.output
+    assert seen["paths"]["T"].is_file()
+
+
+def test_snowflake_generate_sample_replaces_source_data_and_says_so(tmp_path, monkeypatch):
+    (tmp_path / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
+    seen = _sf_capture(monkeypatch)
+    result = _sf_run(["--source", str(tmp_path), "--generate-sample", "--rows", "4"])
+    assert result.exit_code == 0, result.output
+    assert seen["paths"]["ORDERS"] != (tmp_path / "orders.csv").resolve()
+    assert len(seen["paths"]["ORDERS"].read_text().splitlines()) == 5      # header + 4
+    assert "SYNTHETIC" in result.stderr
+    out = _json.loads(result.stdout)["tables"][0]
+    assert out["data"] == "synthetic" and out["source_file"] is None
+
+
+def test_snowflake_reports_source_rows(tmp_path, monkeypatch):
+    (tmp_path / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
+    seen = _sf_capture(monkeypatch)
+    result = _sf_run(["--source", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert _json.loads(result.stdout)["tables"][0]["data"] == "source"
+    assert seen["paths"]["ORDERS"] == (tmp_path / "orders.csv").resolve()
+
+
+def test_snowflake_generate_sample_honours_a_tables_own_row_count(tmp_path, monkeypatch):
+    seen = _sf_capture(monkeypatch)
+    assert _sf_run(["--source", str(_schema_only(tmp_path)), "--generate-sample",
+                    "--rows", "4"]).exit_code == 0
+    pinned = tmp_path / "pin.json"
+    pinned.write_text(_json.dumps({"tables": [{"table_name": "P", "rows": 2,
+                                               "columns": [{"name": "id", "type": "INTEGER"}]}]}))
+    assert _sf_run(["--source", str(pinned), "--generate-sample", "--rows", "4"]).exit_code == 0
+    assert len(seen["paths"]["P"].read_text().splitlines()) == 3            # header + 2
+
+
+# -- strict decoding everywhere ------------------------------------------------------------
+
+def _cp1252_dir(tmp_path):
+    d = tmp_path / "cp"
+    d.mkdir()
+    (d / "sizes.csv").write_bytes("Name,Größe\nJosé,10\n".encode("cp1252"))
+    return d
+
+
+def test_infer_command_decodes_strictly_and_takes_an_encoding(tmp_path):
+    d = _cp1252_dir(tmp_path)
+    bad = CliRunner().invoke(load_core.app, ["infer", "--source", str(d)])
+    assert bad.exit_code != 0 and "0xF6" in bad.output
+    good = CliRunner().invoke(load_core.app, ["infer", "--source", str(d), "--encoding", "cp1252"])
+    assert good.exit_code == 0, good.output
+    assert [c["name"] for c in _json.loads(good.stdout)["tables"][0]["columns"]] == ["Name", "Größe"]
+
+
+def test_snowflake_inference_decodes_strictly(tmp_path, monkeypatch):
+    seen = _sf_capture(monkeypatch)
+    result = _sf_run(["--source", str(_cp1252_dir(tmp_path))])
+    assert result.exit_code != 0 and "not valid utf-8" in result.output and seen == {}
+
+
+def test_cp1252_column_name_survives_direct_and_through_schema_json(tmp_path, dbx):
+    d = _cp1252_dir(tmp_path)
+    assert _run(["--source", str(d), "--encoding", "cp1252"]).exit_code == 0
+    direct = list(dbx.executed)
+    dbx.executed.clear()
+    infer = CliRunner().invoke(load_core.app, ["infer", "--source", str(d), "--encoding", "cp1252"])
+    schema = _json.loads(infer.stdout)
+    assert schema["tables"][0]["columns"][1]["name"] == "Größe"
+    (tmp_path / "schema.json").write_text(_json.dumps(schema), encoding="utf-8")
+    assert _run(["--source", str(tmp_path / "schema.json"), "--encoding", "cp1252"]).exit_code == 0
+    assert dbx.executed == direct                              # identical DDL and rows
+    assert "('José', 10)" in _inserts(dbx)[0]
+    assert "�" not in " ".join(direct)
+
+
+# -- nits ---------------------------------------------------------------------------------
+
+def test_a_bad_value_in_a_later_table_stops_everything(tmp_path, dbx):
+    (tmp_path / "a.csv").write_text("V\n10\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("D\n2024-01-01\n2024-02-30\n", encoding="utf-8")
+    result = _run(["--source", str(tmp_path)])
+    assert result.exit_code != 0 and "b.csv" in result.output
+    assert dbx.executed == []
+
+
+def test_existing_tables_ignores_temporary_views(monkeypatch):
+    monkeypatch.setattr(load_mod, "_dbx_exec", lambda *a: {"result": {"data_array": [
+        ["s", "orders", "true"], ["s", "items", "false"]]}})
+    assert load_mod._existing_tables("p", "w", "c", "s", ["ORDERS", "ITEMS"]) == ["ITEMS"]
+
+
+def test_existing_tables_refuses_a_chunked_result_with_safe_advice(monkeypatch):
+    monkeypatch.setattr(load_mod, "_dbx_exec", lambda *a: {"result": {
+        "data_array": [["s", "x", "false"]], "next_chunk_index": 1}})
+    with pytest.raises(SystemExit, match="Check them yourself") as e:
+        load_mod._existing_tables("p", "w", "c", "s", ["ORDERS"])
+    assert "keeps existing rows" in str(e.value) and "drops them" in str(e.value)
+
+
+def test_decode_error_offset_counts_the_bom(tmp_path):
+    p = tmp_path / "t.csv"
+    raw = b"\xef\xbb\xbfA\nb\xe9\n"
+    p.write_bytes(raw)
+    at = raw.index(b"\xe9")                          # 6: the BOM's 3 bytes count
+    assert at == 6
+    with pytest.raises(SystemExit, match=f"line 2, byte offset {at}: 0xE9"):
+        load_core.read_csv_text(p)
+
+
+def test_a_table_name_with_no_letters_or_digits_is_refused(tmp_path, dbx):
+    (tmp_path / "€.csv").write_text("A\n10\n", encoding="utf-8")
+    result = _run(["--source", str(tmp_path)])
+    assert result.exit_code != 0 and "no letters or digits" in result.output
+    assert dbx.executed == []
+
+
+def test_zero_one_columns_infer_as_integer_and_true_false_as_boolean():
+    assert load_core._infer_type(["0", "1", "1", "0"]) == "INTEGER"
+    assert load_core._infer_type(["true", "False", "TRUE"]) == "BOOLEAN"
+
+
+def test_an_exact_match_beats_a_case_insensitive_one():
+    # Two headers differing only by case: each column takes its exact twin, not an ambiguity.
+    assert load_mod._header_index(["Name", "NAME"], [{"name": "NAME"}, {"name": "Name"}], "f") == [1, 0]
+
+
+def test_a_bom_never_reaches_the_inferred_column_name(tmp_path):
+    p = tmp_path / "t.csv"
+    p.write_bytes(b"\xef\xbb\xbfCost,Revenue\n1,2\n")
+    assert [c["name"] for c in load_core.infer_column_types(p)] == ["Cost", "Revenue"]

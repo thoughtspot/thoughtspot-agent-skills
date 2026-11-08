@@ -25,7 +25,7 @@ TIMESTAMP_STRICT_RE = re.compile(
 # optionally 'Z' or an offset written +HH:MM, +HHMM or ' +HH:MM'.
 TIMESTAMP_ISO_RE = re.compile(
     r"([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2})"
-    r"(?::([0-9]{2})(?:\.[0-9]+)?)?(?:Z| ?[+-][0-9]{2}:?[0-9]{2})?")
+    r"(?::([0-9]{2})(?:\.[0-9]+)?)?(?:Z| ?[+-]([0-9]{2}):?([0-9]{2}))?")
 
 
 def is_calendar_date(text: str) -> bool:
@@ -41,13 +41,17 @@ def is_calendar_date(text: str) -> bool:
 
 
 def is_iso_timestamp(text: str) -> bool:
-    """One of the `TIMESTAMP_ISO_RE` forms with a real day and an in-range time of day."""
+    """One of the `TIMESTAMP_ISO_RE` forms with a real day, an in-range time of day and an
+    offset within ±18:00."""
     m = TIMESTAMP_ISO_RE.fullmatch(text)
     if not m:
         return False
-    year, month, day, hour, minute, second = (int(g) if g else 0 for g in m.groups())
+    year, month, day, hour, minute, second, off_h, off_m = (int(g) if g else 0 for g in m.groups())
     try:
         datetime.date(year, month, day)
     except ValueError:
         return False
-    return hour < 24 and minute < 60 and second < 60
+    # An offset is at most 18:00 either way: DBSQL 2026.35 accepts +18:00 and -18:00 and
+    # refuses +18:30 and +19:00 (live-verified 2026-11-08).
+    offset_ok = off_m < 60 and off_h * 60 + off_m <= 18 * 60
+    return hour < 24 and minute < 60 and second < 60 and offset_ok

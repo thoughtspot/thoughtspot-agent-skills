@@ -27,11 +27,40 @@ def sanitise_name(name: str) -> str:
     return s.strip("_")
 
 
-def detect_source(path: Path) -> tuple[str, list[dict]]:
+def _resolve_data_path(named: str, base_dir: Path, what: str,
+                       require: bool = True) -> Optional[Path]:
+    """The absolute path of a data file a source JSON names.
+
+    An absolute path is used as is. A relative one is looked for next to the JSON and in the
+    working directory: if exactly one of those holds a file, it is used; if both do and they
+    are different files, the source is refused as ambiguous. (BL-550 re-review: the two
+    loaders used to resolve the same name to different files.) A file found in neither place
+    is refused when `require`, else None — `ts load generate` and `--generate-sample` read
+    no source rows, so they do not need it."""
+    rel = Path(named)
+    candidates = [rel] if rel.is_absolute() else [base_dir / rel, Path.cwd() / rel]
+    found: list[Path] = []
+    for c in candidates:
+        if c.is_file() and c.resolve() not in found:
+            found.append(c.resolve())
+    if len(found) > 1:
+        raise SystemExit(f"{what}: data file {named} is ambiguous — both {found[0]} and "
+                         f"{found[1]} exist. Give its absolute path.")
+    if found:
+        return found[0]
+    if not require:
+        return None
+    raise SystemExit(f"{what}: data file {named} not found "
+                     f"(looked next to the source JSON, {base_dir}, and in the working directory).")
+
+
+def detect_source(path: Path, require_data: bool = True) -> tuple[str, list[dict]]:
     """Auto-detect source type and return normalised file info list.
 
     Returns (source_type, file_infos) where source_type is one of:
       csv_dir, tableau_download, manifest, schema_only
+    Every `csv_path` is absolute (`_resolve_data_path`). With `require_data=False`, a data
+    file that is missing is treated as absent rather than refused.
     """
     if path.is_dir():
         csv_files = sorted(path.glob("*.csv"))
@@ -40,7 +69,7 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
         file_infos = []
         for f in csv_files:
             table_name = sanitise_name(f.stem)
-            file_infos.append({"csv_path": f, "table_name": table_name})
+            file_infos.append({"csv_path": f.resolve(), "table_name": table_name})
         return "csv_dir", file_infos
 
     if path.suffix.lower() == ".json":
@@ -51,7 +80,7 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
             for df in data["data_files"]:
                 if df.get("type") != "csv":
                     continue
-                csv_path = Path(df["path"])
+                csv_path = _resolve_data_path(df["path"], path.parent, f"{path.name}")
                 table_name = sanitise_name(csv_path.stem)
                 file_infos.append({"csv_path": csv_path, "table_name": table_name})
             if not file_infos:
@@ -59,39 +88,34 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
             return "tableau_download", file_infos
 
         if "tables" in data:
-            return _detect_tables_source(data["tables"], path.parent)
+            return _detect_tables_source(data["tables"], path.parent, require_data)
 
     raise SystemExit(f"Cannot detect source type for {path}. "
                      "Provide a CSV directory, Tableau download JSON, or manifest JSON.")
 
 
-def _table_data_path(t: dict, base_dir: Path) -> Optional[Path]:
+def _table_data_path(t: dict, base_dir: Path, require: bool = True) -> Optional[Path]:
     """The CSV a `tables[]` entry names, or None for a schema-only table.
 
     Two shapes name one: a manifest's `data_file`, and `ts load infer` output fed back as a
-    source — `file` with `has_data: true` (output from before `data_file` was added). A
-    relative path is taken from the working directory first, then next to the manifest; one
-    found in neither is refused, never read as schema-only (BL-550)."""
+    source — `file` with `has_data: true` (output from before `data_file` was added). Paths
+    resolve by `_resolve_data_path`; a missing one is refused when `require`, never read as
+    schema-only (BL-550)."""
     named = t.get("data_file") or (t.get("file") if t.get("has_data") else None)
     if not named:
         return None
-    path = Path(named)
-    if not path.is_absolute() and not path.exists() and (base_dir / path).exists():
-        path = base_dir / path
-    if not path.exists():
-        raise SystemExit(f"Table {t.get('table_name')}: data file {named} not found "
-                         f"(looked in the working directory and in {base_dir}).")
-    return path
+    return _resolve_data_path(named, base_dir, f"Table {t.get('table_name')}", require)
 
 
-def _detect_tables_source(tables: list[dict], base_dir: Path = Path(".")) -> tuple[str, list[dict]]:
+def _detect_tables_source(tables: list[dict], base_dir: Path = Path("."),
+                          require_data: bool = True) -> tuple[str, list[dict]]:
     """Normalise a `{"tables": [...]}` manifest into (source_type, file_infos).
 
     `manifest` when any table names a data file (see `_table_data_path`); otherwise
     `schema_only` (synthetic generation). Per-table `columns` and optional `rows` are
     carried through.
     """
-    paths = [_table_data_path(t, base_dir) for t in tables]
+    paths = [_table_data_path(t, base_dir, require_data) for t in tables]
     has_data = any(paths)
     file_infos = []
     for t, data_path in zip(tables, paths):
@@ -118,7 +142,9 @@ def _infer_type(values: list[str]) -> str:
 
     date_re = re.compile(r"\d{4}-\d{2}-\d{2}$")
     ts_re = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?")
-    bool_vals = {"true", "false", "0", "1"}
+    # Only true/false text is BOOLEAN; an all-0/1 column stays INTEGER (BL-550 re-review:
+    # flags, counts and ids of 0/1 were typed BOOLEAN and could not be summed).
+    bool_vals = {"true", "false"}
 
     for v in values:
         stripped = v.strip()
@@ -170,29 +196,30 @@ def read_csv_text(csv_path: Path, encoding: str = "utf-8") -> str:
     except LookupError:
         raise SystemExit(f"Unknown encoding {encoding!r}.") from None
     raw = Path(csv_path).read_bytes()
+    # The BOM is cut here, not by the utf-8-sig codec, whose error offsets then count from
+    # after the BOM and name the wrong byte.
+    skip = len(codecs.BOM_UTF8) if name == "utf-8" and raw.startswith(codecs.BOM_UTF8) else 0
     try:
-        return raw.decode("utf-8-sig" if name == "utf-8" else encoding)
+        return raw[skip:].decode(encoding)
     except UnicodeDecodeError as e:
-        line = raw.count(b"\n", 0, e.start) + 1
+        at = e.start + skip
+        line = raw.count(b"\n", 0, at) + 1
         raise SystemExit(
-            f"{csv_path}: line {line}, byte offset {e.start}: 0x{raw[e.start]:02X} is not valid "
-            f"{encoding}. If the file uses another encoding, pass it with --encoding "
-            f"(for example cp1252).") from None
+            f"{csv_path}: line {line}, byte offset {at}: 0x{raw[at]:02X} is not valid "
+            f"{encoding}. If the file uses another encoding, pass it with --encoding to "
+            f"ts load infer or ts load databricks (for example cp1252); ts load snowflake "
+            f"reads UTF-8 only, so convert the file first.") from None
 
 
 def infer_column_types(csv_path: Path, max_rows: int = 1000,
-                       encoding: Optional[str] = None) -> list[dict]:
+                       encoding: Optional[str] = "utf-8") -> list[dict]:
     """Infer column types from a CSV file by scanning sample rows.
 
-    Returns a list of dicts with keys: name, db_column_name, inferred_type. With `encoding`,
-    the file is decoded strictly (`read_csv_text`); without, as before (UTF-8, undecodable
-    bytes replaced).
+    Returns a list of dicts with keys: name, db_column_name, inferred_type. The file is
+    decoded strictly (`read_csv_text`), so a column name in another encoding is refused, or
+    read correctly with `encoding`, never replaced with U+FFFD.
     """
-    if encoding:
-        f = io.StringIO(read_csv_text(csv_path, encoding), newline="")
-    else:
-        f = open(csv_path, newline="", encoding="utf-8", errors="replace")
-    with f:
+    with io.StringIO(read_csv_text(csv_path, encoding or "utf-8"), newline="") as f:
         reader = csv_mod.reader(f)
         try:
             headers = next(reader)
@@ -226,13 +253,16 @@ def _count_csv_rows(csv_path: Path) -> int:
         return max(0, sum(1 for _ in f) - 1)
 
 
-def infer_schema(source_path: Path, encoding: Optional[str] = None) -> dict:
+def infer_schema(source_path: Path, encoding: Optional[str] = "utf-8",
+                 require_data: bool = True) -> dict:
     """Top-level inference: detect source, infer types, return full JSON output.
 
-    Each table with data carries `data_file`, the path of its CSV, so the output can be fed
-    back as `--source` (after a schema review) and still load that CSV's rows. `encoding`
-    is passed to `infer_column_types`."""
-    source_type, file_infos = detect_source(source_path)
+    Each table with data carries `data_file`, the absolute path of its CSV, so the output
+    can be fed back as `--source` (after a schema review) from any working directory and
+    still load that CSV's rows. `encoding` is passed to `infer_column_types`;
+    `require_data=False` lets a manifest name data files that are missing (see
+    `detect_source`)."""
+    source_type, file_infos = detect_source(source_path, require_data)
 
     tables = []
     for info in file_infos:
@@ -283,9 +313,11 @@ def infer_schema(source_path: Path, encoding: Optional[str] = None) -> dict:
 @app.command()
 def infer(
     source: str = typer.Option(..., "--source", "-s", help="Path to CSV directory, download JSON, or manifest JSON"),
+    encoding: str = typer.Option("utf-8", "--encoding",
+                                 help="CSV text encoding, decoded strictly (e.g. cp1252)"),
 ) -> None:
     """Infer table schemas from source data."""
-    result = infer_schema(Path(source))
+    result = infer_schema(Path(source), encoding=encoding)
     print(json.dumps(result, indent=2, default=str))
 
 
@@ -471,7 +503,7 @@ def generate_csv(table_schema: dict, rows: int, output_dir: Path, seed: int = 42
 
 def generate_all(source_path: Path, rows: int, output_dir: Path, seed: int = 42) -> list[dict]:
     """Generate CSVs for all tables in a schema/manifest file."""
-    schema = infer_schema(source_path)
+    schema = infer_schema(source_path, require_data=False)   # no source rows are read
     results = []
     for tbl in schema["tables"]:
         # A table may pin its own row count (e.g. a fleet-grain dimension wants 1 row so a
@@ -600,7 +632,7 @@ def _load_via_cli(profile: dict, tables: list[dict], database: str,
         ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
         _run_snow_sql(conn, ddl)
 
-        csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+        csv_path = _sf_csv_path(tbl, csv_dir)
         if csv_path.exists():
             stage_name = f"@{database}.{schema}.%{table_name}"
             subprocess.run(
@@ -720,7 +752,7 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
             ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
             cur.execute(ddl)
 
-            csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+            csv_path = _sf_csv_path(tbl, csv_dir)
             if csv_path.exists():
                 cur.execute(f"PUT file://{csv_path} @%{table_name}")
                 cur.execute(
@@ -742,16 +774,37 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
         conn.close()
 
 
+def _sf_csv_path(tbl: dict, csv_dir: Path) -> Path:
+    """The CSV a Snowflake load reads for one table: its resolved `data_file`, the same file
+    `ts load databricks` reads (BL-550 re-review), else `csv_dir / file`. That fallback is
+    unchanged, including its TypeError on a mixed manifest's table with no data file
+    (`file: None`), which is a known, separately tracked defect."""
+    if tbl.get("data_file"):
+        return Path(tbl["data_file"])
+    return csv_dir / tbl.get("file", f"{tbl['table_name']}.csv")
+
+
 def _refuse_unreadable_data(tables: list, csv_dir: Path) -> None:
-    """The Snowflake loaders read each table's CSV as csv_dir / file. A table with data whose
-    file is not there would be created empty with no error, so refuse it instead — a
-    `ts load infer` output fed back as --source reaches this path (BL-550 review)."""
+    """A table with data whose CSV cannot be read would be created empty with no error, so
+    refuse it instead (BL-550 review)."""
     unreadable = [t["table_name"] for t in tables
-                  if t.get("has_data") and not (csv_dir / (t.get("file") or "")).is_file()]
+                  if t.get("has_data") and not _sf_csv_path(t, csv_dir).is_file()]
     if unreadable:
-        raise SystemExit(
-            f"Table(s) {', '.join(unreadable)} have a data file that is not in {csv_dir}, "
-            "where ts load snowflake reads it. Move the CSV(s) there or pass the CSV directory.")
+        raise SystemExit(f"Table(s) {', '.join(unreadable)}: data file not found.")
+
+
+def _sf_synthesise(tables: list, rows: int) -> None:
+    """--generate-sample: every table gets synthetic rows, whatever data files the source
+    names — the same meaning as `ts load databricks --generate-sample` (BL-550 re-review).
+    A table may pin its own row count with `rows`. Each table is named on stderr."""
+    import tempfile
+    gen_dir = Path(tempfile.mkdtemp(prefix="ts_load_gen_"))
+    for tbl in tables:
+        n = int(tbl.get("rows", rows))
+        csv_path = generate_csv(tbl, rows=n, output_dir=gen_dir)
+        tbl.update(file=csv_path.name, data_file=str(csv_path), has_data=True)
+        typer.echo(f"  NOTICE: {tbl['table_name']} gets {n} SYNTHETIC rows "
+                   "(--generate-sample), not source data.", err=True)
 
 
 @app.command()
@@ -763,8 +816,10 @@ def snowflake(
     if_exists: str = typer.Option("error", "--if-exists", help="Action when table exists: error|skip|replace"),
     warehouse: Optional[str] = typer.Option(None, "--warehouse", "-w", help="Warehouse (default: from profile)"),
     role: Optional[str] = typer.Option(None, "--role", "-r", help="Role (default: from profile)"),
-    generate_sample: bool = typer.Option(False, "--generate-sample", help="Generate synthetic data for schema-only sources"),
-    rows: int = typer.Option(100, "--rows", help="Rows to generate (with --generate-sample)"),
+    generate_sample: bool = typer.Option(
+        False, "--generate-sample",
+        help="Insert synthetic rows for every table (required for a schema-only source)"),
+    rows: int = typer.Option(100, "--rows", help="Rows to generate per table (with --generate-sample)"),
 ) -> None:
     """Load CSV data into Snowflake tables."""
     if if_exists not in ("error", "skip", "replace"):
@@ -778,25 +833,17 @@ def snowflake(
         raise SystemExit("No warehouse specified. Use --warehouse or set default_warehouse in profile.")
 
     source_path = Path(source)
-    inferred = infer_schema(source_path)
+    inferred = infer_schema(source_path, require_data=not generate_sample)
 
     csv_dir = source_path if source_path.is_dir() else source_path.parent
+    if generate_sample:
+        _sf_synthesise(inferred["tables"], rows)
+    elif inferred["source_type"] == "schema_only":
+        raise SystemExit(
+            "Source is schema-only (no data files). "
+            "Use --generate-sample to generate synthetic data, or provide CSVs."
+        )
     _refuse_unreadable_data(inferred["tables"], csv_dir)
-
-    if inferred["source_type"] == "schema_only":
-        if not generate_sample:
-            raise SystemExit(
-                "Source is schema-only (no data files). "
-                "Use --generate-sample to generate synthetic data, or provide CSVs."
-            )
-        import tempfile
-        gen_dir = Path(tempfile.mkdtemp(prefix="ts_load_gen_"))
-        for tbl in inferred["tables"]:
-            generate_csv(tbl, rows=rows, output_dir=gen_dir)
-        csv_dir = gen_dir
-        for tbl in inferred["tables"]:
-            tbl["file"] = f"{tbl['table_name']}.csv"
-            tbl["has_data"] = True
 
     method = sf_profile.get("method", "python")
     if method == "cli":
@@ -806,6 +853,10 @@ def snowflake(
         table_results = _load_via_python(sf_profile, inferred["tables"], database,
                                           schema, wh, rl, if_exists, csv_dir)
 
+    for r in table_results:          # source or synthetic rows, as ts load databricks reports
+        r["data"] = "synthetic" if generate_sample else "source"
+        if generate_sample:
+            r["source_file"] = None
     output = {
         "database": database,
         "schema": schema,

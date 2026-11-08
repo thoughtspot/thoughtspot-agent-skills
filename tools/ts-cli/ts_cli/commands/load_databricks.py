@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv as csv_mod
 import io
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -83,6 +84,11 @@ def _col_type(col: dict) -> str:
     return col.get("inferred_type") or col.get("type") or "STRING"
 
 
+def _col_dbx_type(col: dict) -> str:
+    """The column's Databricks type: one planning chose (`dbx_type` key), else mapped."""
+    return col.get("dbx_type") or dbx_type(_col_type(col))
+
+
 def build_dbx_create_sql(fqtn: str, columns: list, replace: bool = False,
                          if_not_exists: bool = True) -> str:
     """CREATE TABLE DDL. Backtick-quotes identifiers and enables Delta **column mapping**
@@ -95,7 +101,7 @@ def build_dbx_create_sql(fqtn: str, columns: list, replace: bool = False,
         verb = "CREATE OR REPLACE TABLE"
     else:
         verb = "CREATE TABLE IF NOT EXISTS" if if_not_exists else "CREATE TABLE"
-    cols = ",\n  ".join(f"{dbx_ident(_col_name(c))} {dbx_type(_col_type(c))}" for c in columns)
+    cols = ",\n  ".join(f"{dbx_ident(_col_name(c))} {_col_dbx_type(c)}" for c in columns)
     return (f"{verb} {fqtn} (\n  {cols}\n) USING DELTA\n"
             "TBLPROPERTIES ('delta.columnMapping.mode' = 'name', "
             "'delta.minReaderVersion' = '2', 'delta.minWriterVersion' = '5')")
@@ -106,6 +112,11 @@ def build_dbx_create_sql(fqtn: str, columns: list, replace: bool = False,
 # truncated by the warehouse. Anything else in a numeric column is refused rather than
 # spliced raw, where `2024-01-02` would evaluate as arithmetic and text would be injected.
 _BIGINT_RE = re.compile(r"[+-]?[0-9]+")
+_BIGINT_MIN, _BIGINT_MAX = -(2 ** 63), 2 ** 63 - 1
+# A Snowflake INTEGER is NUMBER(38,0). A value outside BIGINT moves its column to
+# DECIMAL(38,0), which holds it exactly: CAST(9223372036854775808 AS BIGINT) silently wraps
+# to -9223372036854775808 on DBSQL 2026.35 (live-verified 2026-11-08), so BIGINT would not.
+_DECIMAL_38_0 = "DECIMAL(38,0)"
 _DOUBLE_RE = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _BOOL_TRUE = ("true", "1", "yes", "t", "y")
 _BOOL_FALSE = ("false", "0", "no", "f", "n")
@@ -118,18 +129,35 @@ def _dbx_quote(val: str) -> str:
     return str(val).replace("\\", "\\\\").replace("'", "\\'")
 
 
+def _is_bigint(v: str) -> bool:
+    return bool(_BIGINT_RE.fullmatch(v)) and _BIGINT_MIN <= int(v) <= _BIGINT_MAX
+
+
+def _is_decimal_38_0(v: str) -> bool:
+    return bool(_BIGINT_RE.fullmatch(v)) and len(v.lstrip("+-")) <= 38
+
+
+def _is_double(v: str) -> bool:
+    return bool(_DOUBLE_RE.fullmatch(v)) and math.isfinite(float(v))
+
+
+# Databricks type → (does this stripped, non-blank value fit it?, its literal).
+_TYPED_LITERALS = {
+    "BIGINT": (_is_bigint, lambda v: v),
+    _DECIMAL_38_0: (_is_decimal_38_0, lambda v: v),
+    "DOUBLE": (_is_double, lambda v: v),
+    "BOOLEAN": (lambda v: v.lower() in _BOOL_TRUE + _BOOL_FALSE,
+                lambda v: "true" if v.lower() in _BOOL_TRUE else "false"),
+    "DATE": (is_calendar_date, lambda v: f"DATE'{v}'"),
+    "TIMESTAMP": (is_iso_timestamp, lambda v: f"TIMESTAMP'{v}'"),
+}
+
+
 def _typed_literal(v: str, dtype: str) -> str:
     """A non-blank, stripped value of a non-STRING column → its literal, or ValueError."""
-    if dtype == "BIGINT" and _BIGINT_RE.fullmatch(v):
-        return v
-    if dtype == "DOUBLE" and _DOUBLE_RE.fullmatch(v):
-        return v
-    if dtype == "BOOLEAN" and v.lower() in _BOOL_TRUE + _BOOL_FALSE:
-        return "true" if v.lower() in _BOOL_TRUE else "false"
-    if dtype == "DATE" and is_calendar_date(v):
-        return f"DATE'{v}'"
-    if dtype == "TIMESTAMP" and is_iso_timestamp(v):
-        return f"TIMESTAMP'{v}'"
+    fits, render = _TYPED_LITERALS.get(dtype, (None, None))
+    if fits is not None and fits(v):
+        return render(v)
     raise ValueError(f"{v!r} is not a {dtype} value")
 
 
@@ -163,7 +191,7 @@ def _dbx_insert_prefix(fqtn: str, columns: list) -> str:
 
 def build_dbx_insert_sql(fqtn: str, columns: list, rows: list) -> str:
     """INSERT ... VALUES for a batch of rows (row = list of stringified cell values)."""
-    dtypes = [dbx_type(_col_type(c)) for c in columns]
+    dtypes = [_col_dbx_type(c) for c in columns]
     tuples = ", ".join(_dbx_row_tuple(r, columns, dtypes) for r in rows)
     return _dbx_insert_prefix(fqtn, columns) + tuples
 
@@ -181,7 +209,7 @@ def _render_batches(fqtn: str, columns: list, rows, batch: int,
     Every row is rendered before anything is returned, so a value that is not a valid
     literal fails here with its 1-based data-row number. One row larger than `max_bytes`
     still gets its own statement."""
-    dtypes = [dbx_type(_col_type(c)) for c in columns]
+    dtypes = [_col_dbx_type(c) for c in columns]
     prefix = _dbx_insert_prefix(fqtn, columns)
     prefix_bytes = len(prefix.encode("utf-8"))
     out: list[tuple[str, int]] = []
@@ -209,22 +237,47 @@ def build_dbx_insert_batches(fqtn: str, columns: list, rows, batch: int,
     return [sql for sql, _ in _render_batches(fqtn, columns, rows, batch, max_bytes)]
 
 
+_HEADER_PASSES = (
+    ("exact", lambda x: x.strip()),
+    ("case-insensitive", lambda x: x.strip().casefold()),
+    ("sanitised", sanitise_name),
+)
+
+
+def _match_headers(header: list, columns: list, csv_name: str) -> list:
+    """Each column's header position by name, or None. Three passes, each over headers no
+    earlier pass took: exact names, then case-insensitive, then the sanitised forms of both
+    sides (`Order Date` = `Order  Date`). So one header's sanitised form can never shadow
+    another header's exact name (`Customer ID` vs `CUSTOMER_ID`). Two free headers equal
+    under one pass for one column are refused as ambiguous."""
+    index: list = [None] * len(columns)
+    taken: set = set()
+    for label, key in _HEADER_PASSES:
+        for pos, c in enumerate(columns):
+            if index[pos] is not None:
+                continue
+            wanted = {key(k) for k in (c.get("name"), c.get("db_column_name")) if k} - {""}
+            hits = [i for i, h in enumerate(header) if i not in taken and key(h) in wanted]
+            if len(hits) > 1:
+                raise SystemExit(f"{csv_name}: column {c.get('name') or _col_name(c)!r} matches "
+                                 f"{len(hits)} headers ({label}): "
+                                 f"{', '.join(repr(header[i]) for i in hits)}.")
+            if hits:
+                index[pos] = hits[0]
+                taken.add(hits[0])
+    return index
+
+
 def _header_index(header: list, columns: list, csv_name: str) -> list[int]:
     """For each schema column, the header position its values come from.
 
-    Matched by name (the header cell, or its sanitised form, equal to the column's `name`
-    or `db_column_name`), so a manifest listing columns in another order still lands each
-    value in its own column. When some names do not match, a header of the same width is
-    taken positionally, as Snowflake's COPY INTO does — but only if every name that DID
-    match sits at its own position. A match that contradicts its position (Cost found
+    Matched by name (`_match_headers`), so a manifest listing columns in another order still
+    lands each value in its own column. When some names do not match, a header of the same
+    width is taken positionally, as Snowflake's COPY INTO does — but only if every name that
+    DID match sits at its own position. A match that contradicts its position (Cost found
     where Revenue would be read) is refused, never silently swapped."""
-    by_key: dict[str, int] = {}
-    for idx, h in enumerate(header):
-        for key in (h.strip(), sanitise_name(h)):
-            by_key.setdefault(key, idx)
-    index = [next((by_key[k] for k in (c.get("name"), c.get("db_column_name"))
-                   if k and k in by_key), None) for c in columns]
-    if None not in index and len(set(index)) == len(index):
+    index = _match_headers(header, columns, csv_name)
+    if None not in index:
         return index
     if len(header) != len(columns):
         raise SystemExit(f"{csv_name}: header has {len(header)} columns and the schema has "
@@ -237,6 +290,20 @@ def _header_index(header: list, columns: list, csv_name: str) -> list[int]:
                          f"that do sit at a different position: {'; '.join(clashes)}. Fix the "
                          "header or the schema's column order.")
     return list(range(len(columns)))
+
+
+def _widen_out_of_range_integers(columns: list, rows: list) -> list:
+    """Columns whose BIGINT would not hold every value become DECIMAL(38,0) (see
+    `_DECIMAL_38_0`). Returns new column dicts; values that are not integers are left for
+    `_sql_literal` to refuse."""
+    out = []
+    for pos, c in enumerate(columns):
+        if _col_dbx_type(c) == "BIGINT" and any(
+                _BIGINT_RE.fullmatch(v := r[pos].strip()) and not _BIGINT_MIN <= int(v) <= _BIGINT_MAX
+                for r in rows if r[pos].strip()):
+            c = {**c, "dbx_type": _DECIMAL_38_0}
+        out.append(c)
+    return out
 
 
 def _read_csv_rows(csv_path: Path, columns: list, encoding: str = "utf-8") -> list[list[str]]:
@@ -268,6 +335,9 @@ def _check_names(tables: list) -> None:
     are one table, and `Order Id` / `order_id` one column."""
     seen: dict[str, str] = {}
     for t in tables:
+        if not sanitise_name(t["table_name"]):
+            raise SystemExit(f"{t.get('file') or 'A table'}: its table name "
+                             f"{t['table_name']!r} has no letters or digits. Rename it.")
         key = t["table_name"].lower()
         if key in seen:
             raise SystemExit(f"Two tables both load as {t['table_name']}: "
@@ -333,8 +403,10 @@ def _existing_tables(cli_profile: str, warehouse_id: str, catalog: str, schema: 
                      f"SHOW TABLES IN {dbx_ident(catalog)}.{dbx_ident(schema)}")
     result = data.get("result") or {}
     if result.get("next_chunk_index") is not None:
-        raise SystemExit(f"{catalog}.{schema} lists too many tables to check in one result; "
-                         "pass --if-exists append or --if-exists replace.")
+        raise SystemExit(f"{catalog}.{schema} lists too many tables to check whether "
+                         f"{', '.join(wanted)} already exist. Check them yourself, then re-run "
+                         "with --if-exists append (keeps existing rows) or --if-exists replace "
+                         "(drops them), or load into a schema with fewer tables.")
     have = {str(r[1]).lower() for r in result.get("data_array") or []
             if len(r) > 2 and str(r[2]).lower() != "true"}
     return [w for w in wanted if w.lower() in have]
@@ -357,6 +429,7 @@ def _plan_dbx_table(tbl: dict, fqtn: str, generate_sample: bool, rows: int, seed
             raise SystemExit(f"{name}: no data file resolved for this table. Nothing was loaded.")
         csv_path = Path(tbl["data_file"])
         data_rows = _read_csv_rows(csv_path, cols, encoding)
+    cols = _widen_out_of_range_integers(cols, data_rows)
     try:
         batches = _render_batches(fqtn, cols, data_rows, batch)
     except ValueError as e:
@@ -373,20 +446,48 @@ def _resolve_if_exists(if_exists: Optional[str], replace: bool) -> str:
     return "replace" if replace else (if_exists or "error")
 
 
-def _report_partial(progress: list, cat: str, sch: str, mode: str) -> None:
+def _delta_version(cli_profile: str, warehouse_id: str, fqtn: str) -> Optional[str]:
+    """The table's current Delta version (`DESCRIBE HISTORY … LIMIT 1` puts it first,
+    live-verified 2026-11-08), recorded before appending so a failure can name the version
+    to restore. None when it cannot be read; the advice then points at the history."""
+    try:
+        rows = (_dbx_exec(cli_profile, warehouse_id, f"DESCRIBE HISTORY {fqtn} LIMIT 1")
+                .get("result") or {}).get("data_array") or []
+        return str(rows[0][0]) if rows and rows[0] else None
+    except (SystemExit, Exception):
+        return None
+
+
+def _recovery_advice(p: dict, cat: str, sch: str) -> str:
+    """How to undo one table's part of a failed load. A table this run created can simply
+    be reloaded with --if-exists replace. A table that existed before an append must NOT
+    be: replace would drop the rows it held before the load."""
+    name = f"{cat}.{sch}.{p['table']}"
+    if not p.get("pre_existing"):
+        return (f"{name}: created by this run, {p['inserted']} of {p['of']} rows inserted — "
+                "re-run with --if-exists replace to reload it.")
+    fq = dbx_fqtn(cat, sch, p["table"])
+    if p.get("version") is not None:
+        undo = f"RESTORE TABLE {fq} TO VERSION AS OF {p['version']}"
+    else:
+        undo = f"find the version before this load with DESCRIBE HISTORY {fq}, then RESTORE TABLE"
+    return (f"{name}: existed before this run; {p['inserted']} of {p['of']} rows were appended. "
+            f"To undo, {undo}, or DELETE the appended rows. Do not re-run with "
+            "--if-exists replace: it would drop the rows that were there before.")
+
+
+def _report_partial(progress: list, cat: str, sch: str) -> None:
     """After an execution failure: what is already in Databricks, and how to recover."""
     if not progress:
         typer.echo("  Load stopped before any table was written.", err=True)
         return
-    done = "; ".join(f"{cat}.{sch}.{p['table']} ({p['inserted']} of {p['of']} rows inserted)"
-                     for p in progress)
-    verb = "Written to (appended)" if mode == "append" else "Already created"
-    typer.echo(f"  Load stopped part-way. {verb}: {done}. Re-run with "
-               "--if-exists replace to reload these tables from scratch.", err=True)
+    typer.echo("  Load stopped part-way. Already written:", err=True)
+    for p in progress:
+        typer.echo(f"    {_recovery_advice(p, cat, sch)}", err=True)
 
 
 def _execute(plans: list, cli_profile: str, warehouse_id: str, cat: str, sch: str,
-             mode: str) -> list:
+             mode: str, pre_existing: frozenset = frozenset()) -> list:
     results, progress = [], []
     try:
         for plan in plans:
@@ -395,10 +496,13 @@ def _execute(plans: list, cli_profile: str, warehouse_id: str, cat: str, sch: st
             if plan["synthetic"]:
                 typer.echo(f"  NOTICE: {cat}.{sch}.{name} gets {plan['row_count']} SYNTHETIC "
                            "rows (--generate-sample), not source data.", err=True)
+            existed = mode == "append" and name.lower() in pre_existing
+            version = _delta_version(cli_profile, warehouse_id, fqtn) if existed else None
             _dbx_exec(cli_profile, warehouse_id, build_dbx_create_sql(
                 fqtn, plan["cols"], replace=(mode == "replace"),
                 if_not_exists=(mode == "append")))
-            entry = {"table": name, "inserted": 0, "of": plan["row_count"]}
+            entry = {"table": name, "inserted": 0, "of": plan["row_count"],
+                     "pre_existing": existed, "version": version}
             progress.append(entry)
             for sql, n in plan["batches"]:
                 _dbx_exec(cli_profile, warehouse_id, sql)
@@ -408,7 +512,7 @@ def _execute(plans: list, cli_profile: str, warehouse_id: str, cat: str, sch: st
                             "data": kind, "source_file": plan["file"]})
             typer.echo(f"  loaded {cat}.{sch}.{name} ({entry['inserted']} {kind} rows)", err=True)
     except (SystemExit, Exception):
-        _report_partial(progress, cat, sch, mode)
+        _report_partial(progress, cat, sch)
         raise
     return results
 
@@ -460,7 +564,9 @@ def databricks(
     SQL Statement Execution API (the `databricks` CLI; the token stays in ~/.databrickscfg).
     A table with a data file gets that file's own rows. A table without one is refused
     unless --generate-sample, which inserts synthetic rows for every table and names each
-    on stderr. Every value is checked before anything is created. The Databricks half of
+    on stderr. Before anything is created, every value is checked against its column type
+    and colliding names and (by default) existing tables are refused; a failure while
+    executing prints what was written and how to undo it. The Databricks half of
     ts-load-source-data.
     """
     import tempfile
@@ -468,7 +574,9 @@ def databricks(
         raise SystemExit("--batch must be at least 1.")
     mode = _resolve_if_exists(if_exists, replace)
     cli_profile, warehouse_id, cat, sch = _dbx_target(profile, catalog, schema)
-    tables = infer_schema(Path(source), encoding=encoding)["tables"]
+    # --generate-sample reads no source rows, so a data file need not exist (BL-550 re-review).
+    tables = infer_schema(Path(source), encoding=encoding,
+                          require_data=not generate_sample)["tables"]
     _check_names(tables)
     _refuse_tables_without_data(tables, generate_sample)
     with tempfile.TemporaryDirectory(prefix="dbxload_") as gen_dir:
@@ -478,11 +586,13 @@ def databricks(
 
     _dbx_exec(cli_profile, warehouse_id,
               f"CREATE SCHEMA IF NOT EXISTS {dbx_ident(cat)}.{dbx_ident(sch)}")
-    if mode == "error":
+    clash: list = []
+    if mode in ("error", "append"):
         clash = _existing_tables(cli_profile, warehouse_id, cat, sch, [p["name"] for p in plans])
-        if clash:
+        if clash and mode == "error":
             raise SystemExit(f"Table(s) already exist in {cat}.{sch}: {', '.join(clash)}. "
                              "Use --if-exists append or --if-exists replace. Nothing was loaded.")
-    results = _execute(plans, cli_profile, warehouse_id, cat, sch, mode)
+    results = _execute(plans, cli_profile, warehouse_id, cat, sch, mode,
+                       frozenset(c.lower() for c in clash))
     print(json.dumps({"loaded": results, "catalog": cat, "schema": sch,
                       "warehouse_id": warehouse_id}, indent=2))
