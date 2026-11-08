@@ -13,8 +13,8 @@ Load CSV data into Snowflake or Databricks, or provision tables with synthetic r
 ThoughtSpot to connect to. Supports four input modes: CSV directory, Tableau Cloud download
 output, manifest JSON, and schema-only with synthetic data generation. Both warehouses load
 a source's own rows, and both refuse a schema-only source unless `--generate-sample` asks
-for synthetic rows. The flag differs: Snowflake generates rows only for a schema-only
-source, while Databricks generates them for every table, replacing any data files.
+for synthetic rows. On both, `--generate-sample` means synthetic rows for every table,
+replacing any data files.
 
 Ask one question at a time for **dependent** decisions. Batch independent questions.
 
@@ -72,7 +72,9 @@ On skill invocation, display this plan:
 Ask: "Provide the path to your source data — a directory of CSV files, a JSON file
 from `ts tableau download`, or a manifest JSON."
 
-Run `ts load infer --source <path>` to auto-detect and display:
+Run `ts load infer --source <path>` to auto-detect and display (a CSV that is not UTF-8 is
+refused naming the line and byte: ask the user its encoding and re-run with
+`--encoding <codec>`, e.g. `cp1252`):
 
 ```
 Source type: {csv_dir | tableau_download | manifest | schema_only}
@@ -109,16 +111,20 @@ Supports **Snowflake** and **Databricks**. Prompt: `Load into Snowflake or Datab
   `"synthetic"` — report which to the user. A CSV that is not UTF-8 is refused naming the
   line and byte; ask the user its encoding and re-run with `--encoding <codec>` (e.g.
   `cp1252`). A value not valid for its column type (a decimal in a BIGINT column, an
-  impossible date) is refused before anything is created, naming the row and column; fix
-  the type in Step 5 and re-run. An existing table is refused unless `--if-exists append`
-  or `--if-exists replace`. If the load stops while executing, it prints the tables and
-  rows already written; offer a re-run with `--if-exists replace`.
-  **Where Databricks differs from Snowflake** (tell the user when it applies):
-  `--generate-sample` replaces every table's data, not only schema-only ones; a short row
+  impossible date, a TIMESTAMP offset beyond ±18:00) is refused before anything is
+  created, naming the row and column; fix the type in Step 5 and re-run. An integer column
+  with a value beyond BIGINT loads as DECIMAL(38,0). An existing table is refused unless
+  `--if-exists append` or `--if-exists replace`. If the load stops while executing, it
+  prints each table written and how to recover: offer `--if-exists replace` only for a
+  table this run created; for a table it appended to, relay the printed
+  `RESTORE TABLE … TO VERSION AS OF` / `DELETE` advice — replace would drop the rows that
+  were there before.
+  **Where Databricks differs from Snowflake** (tell the user when it applies): a short row
   is padded with NULL where Snowflake fails; a blank line is skipped where Snowflake does
   not skip it; `\N` stays the two characters where Snowflake reads NULL; a quoted empty
   field `""` is NULL where Snowflake keeps an empty string; CSV columns are matched by
-  header name where Snowflake reads by position. The full list is in the ts-cli README
+  header name where Snowflake reads by position; a TIMESTAMP offset is converted to UTC
+  where Snowflake's default TIMESTAMP drops it. The full list is in the ts-cli README
   (`ts load databricks`). **Caveat (live-verified):** for the
   ThoughtSpot model to bind, the connection must expose the new table — a SERVICE_ACCOUNT
   Databricks connection introspects it automatically, but an **OAuth/PKCE** connection returns
@@ -174,8 +180,8 @@ Type overrides? Enter column # and new type (e.g. "1 VARCHAR(20)"), or confirm (
 Repeat for each table. Save the confirmed schema — the `ts load infer` output with any
 type overrides applied — as `schema.json`, and pass it as `--source` in Step 6. Each table
 in it keeps `data_file`, the CSV it came from, so the loader reads that CSV's rows with the
-confirmed types. For Snowflake, save `schema.json` in the CSV directory: Snowflake reads
-each CSV from the directory holding the source, and refuses a table whose CSV is not there.
+confirmed types. `data_file` is an absolute path, so `schema.json` can be saved anywhere
+and both loaders read the same CSVs from it.
 
 For a schema-only source, Step 6 passes `--generate-sample --rows N` (Step 1's answer).
 
@@ -231,7 +237,7 @@ Next steps:
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-11-08 | **Databricks loads a CSV source's own rows** (ts-cli 0.212.0, BL-550): `ts load databricks` used to insert synthetic rows for every source. A table without a data file is now refused unless `--generate-sample`, which inserts synthetic rows for every table and names each on stderr. Step 2 documents `--encoding`, `--if-exists`, value checks before anything is created, the partial-load report and where Databricks differs from Snowflake. Step 1's "no" stops; Step 5 saves the reviewed `ts load infer` output, which Step 6 passes as `--source` so the CSVs load with the confirmed types (it used to be read as schema-only). Removes the Step 2 warning and the "Databricks always gets synthetic rows" wording from the description, summary and intro; adds the Databricks command to Step 6. |
+| 1.2.0 | 2026-11-08 | **Databricks loads a CSV source's own rows** (ts-cli 0.212.0, BL-550): `ts load databricks` used to insert synthetic rows for every source. A table without a data file is now refused unless `--generate-sample`, which on both loaders means synthetic rows for every table (Snowflake used to apply it only to a schema-only source). Step 1 handles a non-UTF-8 CSV with `--encoding`; Step 2 documents `--encoding`, `--if-exists`, what is checked before anything is created, the per-table recovery advice (replace only for a table this run created) and where Databricks differs from Snowflake. Step 1's "no" stops; Step 5 saves the reviewed `ts load infer` output, whose absolute `data_file` paths let Step 6 load the same CSVs into either warehouse from any directory. Removes the Step 2 warning and the "Databricks always gets synthetic rows" wording from the description, summary and intro; adds the Databricks command to Step 6. |
 | 1.1.1 | 2026-11-08 | Says what each warehouse actually gets: Snowflake loads a CSV's own rows (or synthetic rows for a schema-only source); `ts load databricks` reads only the source's schema and always inserts synthetic rows (BL-550). Corrected in the README summary (`metadata.summary`), `description`, the intro, Prerequisites (Databricks profile and CLI), the Step 0 overview (the target is Snowflake or Databricks, chosen, not Snowflake only) and Step 2's Databricks note. No behaviour change. |
 | 1.1.0 | 2026-07-16 | **Databricks loading** via `ts load databricks` (ts-cli v0.57.0) — infers schema, generates synthetic data, and provisions tables (Delta column-mapping preserves spaced column names 1:1) through the SQL Statement Execution API. Live-verified on ps-internal (created + populated `orders_demo`). Documents the OAuth/PKCE connection caveat: the new table must be selected in the ThoughtSpot connection UI before a model can bind (SERVICE_ACCOUNT connections introspect automatically). Prereq ts-cli v0.57.0 |
 | 1.0.0 | 2026-06-26 | Initial release — Snowflake loading with schema inference and synthetic data generation |
