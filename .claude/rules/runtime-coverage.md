@@ -31,11 +31,14 @@ Both were retired on **2026-11-08**:
   validators — runtime coverage, mirror sync and the parity matrix — that every skill
   change had to satisfy. The CoCo stage had already stopped being synced, so the
   overhead bought nothing.
-- **ThoughtSpot now imports Snowflake Semantic Views and Databricks Metric Views
-  natively**, which covers what an in-warehouse conversion runtime offered.
+- **Native import covers part of what they offered, not all of it.** ThoughtSpot's own
+  Snowflake Semantic View and Databricks Metric View import is Early Access, covers the
+  SV/MV → ThoughtSpot direction only, and is not yet verified live here (audit 2026-11-08
+  finding 13.3; BL-542). The reverse direction stays with the CLI converters
+  `ts-convert-to-snowflake-sv` and `ts-convert-to-databricks-mv`.
 
-The pre-retirement state is preserved at git tag **`runtimes-archive-2026-11-08`**,
-including the validators that served them (`check_runtime_coverage.py`,
+The pre-retirement state is preserved at git tag **`runtimes-archive-2026-11-08`**
+(commit `ad1dd15e`), including the validators that served them (`check_runtime_coverage.py`,
 `check_mirror_sync.py`, `generate_parity.py`) and `scripts/stage-sync.sh` /
 `scripts/deploy.sh`:
 

@@ -68,14 +68,17 @@ Claude Code changes (via symlinks) take effect immediately — no step needed fo
 On **2026-11-08** two runtimes were retired: **CoCo Snowsight** (`agents/coco-snowsight/`,
 stored-procedure skills for Snowsight Workspaces, deployed by stage sync) and **Databricks
 Genie** (`agents/databricks/`, Genie Code skills deployed as an Asset Bundle). Why: neither
-showed any usage signal; each carried a deployment step and validators (runtime coverage,
-mirror sync, the parity matrix) that taxed every change; and ThoughtSpot now imports
-Snowflake Semantic Views and Databricks Metric Views natively, which covers what those
-in-warehouse runtimes offered. Cortex Code **CLI** support is unaffected — it reads
-`agents/cli/` like Claude Code does.
+showed any usage signal, and each carried a deployment step and validators (runtime
+coverage, mirror sync, the parity matrix) that taxed every change. ThoughtSpot's own
+Semantic View / Metric View import covers part of what they offered, not all of it: it is
+Early Access, covers the SV/MV → ThoughtSpot direction only, and is not yet verified live
+here (audit 2026-11-08 finding 13.3; BL-542). The reverse direction stays with the CLI
+converters `ts-convert-to-snowflake-sv` and `ts-convert-to-databricks-mv`. Cortex Code
+**CLI** support is unaffected — it reads `agents/cli/` like Claude Code does.
 
 The pre-retirement state, including those validators and `scripts/stage-sync.sh` /
-`scripts/deploy.sh`, is preserved at git tag `runtimes-archive-2026-11-08`:
+`scripts/deploy.sh`, is preserved at git tag `runtimes-archive-2026-11-08` (commit
+`ad1dd15e`):
 
 ```bash
 git checkout runtimes-archive-2026-11-08 -- agents/coco-snowsight agents/databricks

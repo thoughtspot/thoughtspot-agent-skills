@@ -539,9 +539,12 @@ redone from the reference docs above.
 **Source:** Design spec `docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`
 **Affects:** All Databricks-related skills; future Genie Code skill runtime
 **Status:** RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`). The runtime was built as `agents/databricks/` and later retired with
-the CoCo Snowsight runtime: no usage signal, sync and validator overhead on every change,
-and ThoughtSpot now imports Metric Views natively. The CLI Databricks converters are
-unaffected. (Was: spec complete — ready for implementation planning.)
+the CoCo Snowsight runtime: no usage signal, and sync and validator overhead on every
+change. ThoughtSpot's native Metric View import covers only part of what the runtime
+offered — it is Early Access, MV → ThoughtSpot only, and not yet verified live here (audit
+2026-11-08 finding 13.3; BL-542) — so the ThoughtSpot → MV direction stays with the CLI
+converter `ts-convert-to-databricks-mv`. The CLI Databricks converters are unaffected.
+(Was: spec complete — ready for implementation planning.)
 
 ### Problem
 
