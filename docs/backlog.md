@@ -1883,10 +1883,11 @@ weighted-average asks are recurring. No date set.
 ## BL-040 — Databricks `shared/` should copy from canonical `agents/shared/` at deploy time
 
 **Source:** 2026-06-19 — discovered `agents/databricks/shared/schemas/` is a stale snapshot of `agents/shared/schemas/`, gitignored and drifting (missing range join docs, currency anchors, I11 invariant).
-**Affects:** `agents/databricks/deploy.sh`, `agents/databricks/shared/schemas/`
+**Affects:** `runtimes-archive-2026-11-08:agents/databricks/deploy.sh`, `agents/databricks/shared/schemas/`
 **Status:** DONE — `deploy.sh` already copies fresh from `agents/shared/` on every deploy
 (`rm -rf` + `cp`); the gitignored local `agents/databricks/shared/` is a deploy artifact,
-not a source of truth.
+not a source of truth. (2026-11-08: the Databricks Genie runtime, `deploy.sh` included,
+retired; read it with `git show` at the tag cited above.)
 
 ### Problem
 
@@ -1894,7 +1895,7 @@ not a source of truth.
 
 ### Approach
 
-Make `agents/databricks/deploy.sh` copy the relevant files from `agents/shared/` at deploy time (same pattern as CoCo's `stage-sync.sh`), eliminating the local copy as a source of truth. Remove `agents/databricks/shared/schemas/` from the repo and add the copy step to the deploy script.
+Make the Genie runtime's `deploy.sh` copy the relevant files from `agents/shared/` at deploy time (same pattern as CoCo's `stage-sync.sh`), eliminating the local copy as a source of truth. Remove `agents/databricks/shared/schemas/` from the repo and add the copy step to the deploy script.
 
 **Target:** Next time Databricks skills are actively worked on. No date set.
 
@@ -5742,8 +5743,9 @@ three coverage matrices corrected, seven skills PATCH-bumped, two follow-on entr
 this entry is the *code*.
 **Affects:** `tools/ts-cli/ts_cli/sv_sql.py`, `tools/ts-cli/ts_cli/databricks/mv_sql.py`,
 `tools/ts-cli/ts_cli/tableau/functions.py`, `tools/ts-cli/ts_cli/qlik/functions.py`,
-`tools/ts-cli/ts_cli/powerbi/functions.py`, plus the vendored
-`agents/databricks/notebooks/databricks_mv_lib.py` (regenerated, not hand-edited).
+`tools/ts-cli/ts_cli/powerbi/functions.py`, plus the Databricks Genie runtime's vendored
+`databricks_mv_lib.py` notebook (regenerated, not hand-edited; it was gitignored, so it is
+not in the `runtimes-archive-2026-11-08` tag that preserves the runtime retired 2026-11-08).
 **Status:** RESOLVED 2026-07-30 (ts-cli v0.126.1; five emitters fixed, qlik map audited
 end-to-end, 84 live probes on se-thoughtspot, nothing persisted).
 
@@ -5777,8 +5779,8 @@ Two corrections to this entry's own text, for the record:
   into `sql_string_op`. The *map value* was a non-existent name; the *emitted formula* was
   correct. That is why the fix keeps the marker-plus-post-pass architecture and adds a test
   asserting the marker never survives, rather than restructuring it.
-- **No vendored-lib commit was needed.** `agents/databricks/notebooks/databricks_mv_lib.py` is
-  gitignored (`.gitignore:63`) and `test_vendor_mv_lib.py` rebuilds it from source in-process,
+- **No vendored-lib commit was needed.** The Genie runtime's `databricks_mv_lib.py` notebook is
+  gitignored and `test_vendor_mv_lib.py` rebuilds it from source in-process,
   so the sync it enforces is automatic. It was regenerated locally anyway; nothing to commit.
 
 **Live verification (se-thoughtspot, 2026-07-30, `ts tml import --policy VALIDATE_ONLY`).**
@@ -5885,8 +5887,9 @@ need a template mechanism added.
 3. Unit tests per module: `tools/ts-cli/tests/` has **no** test asserting any of these six
    mappings today, which is why the bug survived. `test_sv_sql.py:90-92` asserts the *wrong*
    expectation (`starts_with ( [A::NAME] , 'A' )`) and must be updated.
-4. Re-run `agents/databricks/build_mv_lib.py` to regenerate the vendored lib
-   (`test_vendor_mv_lib.py` enforces the sync).
+4. Re-run `runtimes-archive-2026-11-08:agents/databricks/build_mv_lib.py` (retired with the
+   Genie runtime 2026-11-08) to regenerate the vendored lib (`test_vendor_mv_lib.py`
+   enforces the sync).
 5. Update each affected `references/coverage-matrix.md` to drop the "documentation
    corrected, CLI still wrong — see BL-171" caveats BL-170 added.
 6. Bump ts-cli version + the affected skills' versions.
@@ -9431,7 +9434,7 @@ further sites were found only on that second pass:
 | # | Site | Direction | Consequence |
 |---|---|---|---|
 | 4 | `sv_build_sv.py:537,569` | TS → Snowflake SV | **read** `properties.description` — the Snowflake mirror of site 3, missed on the first pass. Fixing sites 1–3 alone turned this into an active regression: `ts snowflake build-sv` emitted **zero** column comments for a Model built by our own converter, where the two bugs had previously cancelled |
-| 5 | `ts-from-snowflake-rules.md` (was line 962) | CoCo runtime | showed `description:` under `properties:` in the emitted-TML example. `agents/coco-snowsight/SETUP.md:51` stage-copies this file verbatim, and **CoCo has no `ts` CLI so it executes the doc** — so the CoCo path was emitting the broken nesting too |
+| 5 | `ts-from-snowflake-rules.md` (was line 962) | CoCo runtime | showed `description:` under `properties:` in the emitted-TML example. `runtimes-archive-2026-11-08:agents/coco-snowsight/SETUP.md:50` (line 51 when filed) stage-copied this file verbatim, and **CoCo had no `ts` CLI so it executed the doc** — so the CoCo path was emitting the broken nesting too (CoCo runtime retired 2026-11-08) |
 
 The correct narrative: the two *SKILL.md* files were right, and the *mapping doc that
 constitutes the CoCo implementation* was wrong. The lesson is that "the docs were right" is not
@@ -16265,7 +16268,9 @@ changes no finding.
 
 ## BL-505 — converters' fact detection does not use the shared table-role classifier `Tier 3`
 
-**Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: `agents/databricks/build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
+**Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: the Genie runtime's `build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
+
+**Note (2026-11-08):** the vendoring question is moot. The Databricks Genie runtime retired, and `build_mv_lib.py` with it (readable at `runtimes-archive-2026-11-08:agents/databricks/build_mv_lib.py`), so `mv_emit` can import `roles.py` like any other module. The join-walk constraint above is unaffected.
 
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.
@@ -16623,7 +16628,7 @@ delete path in the repo handles that differently:
 | `ts dependency apply-change` (`commands/dependency_apply.py`) | only Sets the plan lists | not checked |
 | `ts migrate` teardown (`commands/migrate.py`) | gated by `sets/discover.py` (BL-325) | not checked |
 | `ts dependency cascade-delete` (PR #692) | refused | refused |
-| ~~Databricks `ts_client.delete` (`agents/databricks/notebooks/ts_client.py`)~~ | retired with the Genie runtime 2026-11-08 | — |
+| ~~Databricks `ts_client.delete` (`runtimes-archive-2026-11-08:agents/databricks/notebooks/ts_client.py`)~~ | retired with the Genie runtime 2026-11-08 | — |
 
 `formula_translate/validate.py` deletes only the scratch Model it created, so it is out
 of scope.

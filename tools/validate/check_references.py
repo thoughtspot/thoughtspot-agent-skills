@@ -115,21 +115,13 @@ KNOWN_MISSING_BACKTICK_PATHS: dict[str, str] = {
     # (c) completed deletion — BL-109 is DONE and the file was the thing deleted
     "agents/claude/references/direct-api-auth.md":
         "completed deletion: BL-109 retired this file (DONE 2026-07-11)",
-    # (c) completed deletion — the CoCo Snowsight and Databricks Genie runtimes, retired
-    # 2026-11-08 and archived at git tag runtimes-archive-2026-11-08. Cited by backlog
-    # items and a review written while they existed.
-    "agents/coco-snowsight/SETUP.md": "completed deletion: CoCo runtime retired 2026-11-08",
-    "agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md":
-        "completed deletion: CoCo runtime retired 2026-11-08",
-    "agents/databricks/deploy.sh": "completed deletion: Genie runtime retired 2026-11-08",
-    "agents/databricks/build_mv_lib.py": "completed deletion: Genie runtime retired 2026-11-08",
-    "agents/databricks/notebooks/databricks_mv_lib.py":
-        "completed deletion: Genie runtime retired 2026-11-08 (was generated, never tracked)",
-    "agents/databricks/notebooks/ts_client.py":
-        "completed deletion: Genie runtime retired 2026-11-08",
-    "agents/databricks/shared/schemas/thoughtspot-model-tml.md":
-        "completed deletion: Genie runtime retired 2026-11-08 (was a generated deploy copy)",
 }
+# Deliberately NOT exempted: paths under the retired agents/coco-snowsight/ and
+# agents/databricks/ runtimes. An entry here applies in every scanned file, so it would
+# also pass a NEW citation of a retired path in a live skill or doc. Cite such a file as
+# `runtimes-archive-2026-11-08:<path>` instead — openable with `git show` — which this
+# check never treats as a repo path, because its first segment is not a top-level
+# directory. A file that was never tracked (a generated deploy copy) is named in prose.
 
 # Links whose targets exist locally but are deliberately untracked / gitignored at
 # HEAD — dead links for cloners. Tracked as acknowledged debt so the checker lands

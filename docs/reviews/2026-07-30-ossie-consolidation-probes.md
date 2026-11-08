@@ -60,9 +60,11 @@ than left as an implicit claim.
   exprs and every one is an aggregate expr (including both ratios — `sum ( … ) / unique count ( … )`
   and `safe_divide ( sum ( … ) , sum ( … ) )`), so the stamped `SUM` is genuinely inert *in those
   five cases*. Note now says so, and adds that a scalar `expr` would **not** have been benign.
-- **`agents/databricks/shared/schemas/thoughtspot-model-tml.md`** carries the same wrong sentence
-  but is **gitignored and generated** (`.gitignore:63`) — verified untracked, so it regenerates from
-  `agents/shared/`. No edit needed; recorded so a reader does not think it was missed.
+- **The Databricks Genie runtime's deploy copy of `thoughtspot-model-tml.md`** (under its
+  `shared/schemas/` directory) carries the same wrong sentence but is **gitignored and generated**
+  — verified untracked, so it regenerates from `agents/shared/`. No edit needed; recorded so a
+  reader does not think it was missed. (That runtime retired on 2026-11-08; the copy was never
+  tracked, so it is not in the `runtimes-archive-2026-11-08` tag either.)
 
 ---
 
