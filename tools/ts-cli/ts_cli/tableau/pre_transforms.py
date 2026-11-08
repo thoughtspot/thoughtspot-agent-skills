@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.formula_translate.refs import REF_GRAMMAR
+from ts_cli.formula_translate.refs import comment_pattern, strip_comment_matches
 from ts_cli.tableau.literals import mask_refs, unmask_refs
 from ts_cli.tableau.parsing import _extract_function_args
 
@@ -23,22 +23,17 @@ from ts_cli.tableau.parsing import _extract_function_args
 # [http://site]), a literal may hold `//` or `/*`, and only what is outside both is a
 # comment. The character toggle this replaced read the apostrophe in [Bob's Sales] as an
 # open literal, and the `//` in [http://site] as a comment (BL-460 review).
-_COMMENT_SCAN = re.compile(
-    rf"(?P<keep>{REF_GRAMMAR}|'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")"
-    r"|(?P<line>//[^\n]*)"
-    r"|(?P<block>/\*.*?\*/)",
-    re.S)
+# The shared scanner (formula_translate.refs.comment_pattern) with Tableau's literal
+# grammar: a quote is doubled inside a literal, and there is no backslash escape.
+_COMMENT_SCAN = comment_pattern(
+    ("//",), block=True, refs=True,
+    literal=r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
 
 
 def strip_comments(formula: str) -> str:
     """Strip Tableau comments (``//`` to the end of the line, ``/* … */`` blocks) outside
     string literals and ``[field]`` references."""
-    def _strip(m: re.Match) -> str:
-        if m.group("keep") is not None:
-            return m.group(0)
-        return "" if m.group("line") is not None else " "
-
-    return _COMMENT_SCAN.sub(_strip, formula).strip()
+    return strip_comment_matches(_COMMENT_SCAN, formula, line="").strip()
 
 
 # ---------------------------------------------------------------------------

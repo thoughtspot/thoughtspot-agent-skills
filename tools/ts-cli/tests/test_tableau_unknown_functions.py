@@ -441,3 +441,45 @@ class TestReviewNits:
         assert any("RUNNING_COUNT" in e for e in _errors("RUNNING_COUNT(SUM([x]))"))
         out = classify_formulas([_mk("Run Count", "RUNNING_COUNT(SUM([x]))")])
         assert out["formulas"][0]["tier"] == "untranslatable"
+
+
+class TestFormulaTranslateComments:
+    """BL-460 re-review item 3: `ts formula translate`'s comment stripper read `//` and
+    `/*` inside a `[field]` name as comments, for tableau, dax and qlik. It now uses the
+    same reference- and literal-aware scan as the converter."""
+
+    @staticmethod
+    def _t(src, dialect):
+        from ts_cli.formula_translate.engine import translate
+        return translate(src, dialect)
+
+    @pytest.mark.parametrize("dialect,src,names", [
+        ("tableau", "SUM([http://site]) + 1", ["http://site"]),
+        ("tableau", "SUM([a/*b]) + SUM([c*/d])", ["a/*b", "c*/d"]),
+        ("qlik", "Sum([http://site]) + 1", ["http://site"]),
+        ("qlik", "Sum([a/*b]) + Sum([c*/d])", ["a/*b", "c*/d"]),
+        ("dax", "SUM('T'[http://site]) + 1", ["http://site"]),
+    ])
+    def test_a_marker_inside_a_name_is_not_a_comment(self, dialect, src, names):
+        r = self._t(src, dialect)
+        assert r["status"] != "NEEDS_REVIEW", r
+        # DAX reports the source table-qualified ('T.http://site')
+        sources = [ref["source"].split(".", 1)[-1] if dialect == "dax" else ref["source"]
+                   for ref in r["references"]]
+        assert sources == names, r["references"]
+        assert "comments were removed before translating" not in r["notes"]
+
+    @pytest.mark.parametrize("dialect,src", [
+        ("tableau", "SUM([x]) // total"), ("tableau", "SUM([x]) /* it's [y] */"),
+        ("qlik", "Sum([x]) // total"), ("dax", "SUM('T'[x]) -- total"),
+        ("snowflake", "SUM(a) -- total"),
+    ])
+    def test_real_comments_are_still_stripped(self, dialect, src):
+        r = self._t(src, dialect)
+        assert r["status"] == "TRANSLATED", r
+        assert "comments were removed before translating" in r["notes"]
+        assert len(r["references"]) == 1, r["references"]
+
+    def test_a_sql_subscript_literal_keeps_its_dashes(self):
+        from ts_cli.formula_translate.engine import strip_comments
+        assert strip_comments("v['a--b'] -- c", "snowflake") == ("v['a--b']", True)

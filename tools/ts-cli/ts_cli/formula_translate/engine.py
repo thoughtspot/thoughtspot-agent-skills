@@ -19,7 +19,9 @@ from ts_cli.formula_translate.editor import editor_form
 from ts_cli.formula_translate.prompts import (
     ROLE_GRAIN_DIALECTS, build_needs_types, has_ratio, role_option,
 )
-from ts_cli.formula_translate.refs import bracketed_name, split_literals
+from ts_cli.formula_translate.refs import (
+    bracketed_name, comment_pattern, split_literals, strip_comment_matches,
+)
 from ts_cli.spotql_ops import formula_aggregation
 from ts_cli.formula_translate.traps import (
     detect_traps, is_downgrade, output_guard, repair_count_star,
@@ -38,19 +40,12 @@ def strip_comments(source: str, dialect: str) -> tuple[str, bool]:
     block = dialect in _BLOCK_COMMENT_DIALECTS
     if not markers and not block:
         return source, False
-    out: list[str] = []
     # In SQL `[` is a subscript (v['a--b']) whose literal is real; elsewhere it is a
-    # field reference whose name may hold a quote ([Bob's]).
-    for lit, seg in split_literals(source, brackets_are_code=dialect not in _SQL_DIALECTS):
-        if lit:
-            out.append(seg)
-            continue
-        if block:
-            seg = re.sub(r"/\*.*?\*/", " ", seg, flags=re.S)
-        for mk in markers:
-            seg = re.sub(re.escape(mk) + r"[^\n]*", " ", seg)
-        out.append(seg)
-    cleaned = re.sub(r"[ \t]+", " ", "".join(out)).strip()
+    # field reference whose name may hold a quote, `//` or `/*` ([Bob's], [http://site]):
+    # the scan keeps a reference whole, so a comment marker inside one is not a comment
+    # (BL-460 re-review: `[http://site] + 1` came out `[http:`).
+    pattern = comment_pattern(markers, block=block, refs=dialect not in _SQL_DIALECTS)
+    cleaned = re.sub(r"[ \t]+", " ", strip_comment_matches(pattern, source)).strip()
     return cleaned, cleaned != source.strip()
 
 DEFAULT_NAME = "Translated_Formula"  # coined: underscores, so editor + TML share it

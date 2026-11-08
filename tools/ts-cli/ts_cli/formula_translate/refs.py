@@ -15,6 +15,7 @@ with only PyYAML: keep both stdlib-only (`GATE_SHARED_MODULES` in
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Optional
 
 from ts_cli.formula_translate.context import ColumnContext
@@ -68,6 +69,36 @@ def split_literals(expr: str, brackets_are_code: bool = True) -> list[tuple[bool
     if pos < len(expr):
         out.append((False, expr[pos:]))
     return out
+
+
+@lru_cache(maxsize=None)
+def comment_pattern(line_markers: tuple[str, ...], *, block: bool, refs: bool,
+                    literal: str = _QUOTED.pattern) -> "re.Pattern[str]":
+    """One left-to-right scan for stripping comments: a ``[field]`` reference (when
+    ``refs``), a string literal, a line comment or a ``/* */`` block — whichever starts
+    first wins. A reference may hold ``//`` or ``/*`` (``[http://site]``,
+    ``[a/*b] + [c*/d]``) and a literal may hold either, so only what lies outside both is
+    a comment. ``literal`` is the dialect's literal grammar (Tableau doubles a quote and
+    has no backslash escape). Used by ``engine.strip_comments`` and the Tableau
+    converter's ``pre_transforms.strip_comments`` (BL-460 re-review)."""
+    keep = (REF_GRAMMAR + "|" if refs else "") + literal
+    alternatives = [rf"(?P<keep>{keep})"]
+    if line_markers:
+        markers = "|".join(re.escape(m) for m in line_markers)
+        alternatives.append(rf"(?P<line>(?:{markers})[^\n]*)")
+    if block:
+        alternatives.append(r"(?P<block>/\*.*?\*/)")
+    return re.compile("|".join(alternatives), re.S)
+
+
+def strip_comment_matches(pattern: "re.Pattern[str]", text: str, line: str = " ") -> str:
+    """``text`` with every comment ``pattern`` finds replaced (a line comment by ``line``,
+    a block by a space); references and literals are kept as written."""
+    def _sub(m: re.Match) -> str:
+        if m.group("keep") is not None:
+            return m.group(0)
+        return line if m.lastgroup == "line" else " "
+    return pattern.sub(_sub, text)
 
 
 def bracketed_name(expr: str) -> Optional[str]:
