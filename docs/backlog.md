@@ -159,7 +159,7 @@ are roughly ordered by value÷effort.
 | BL-030 | Model-coach: migrate to `ai/instructions` API | 2026-09-30 |
 | BL-032 | Databricks MV: parser for GA constructs (`materialization:`, `fields:`) | 2026-09-30 |
 | BL-031 | Snowflake to-SV: emit `facts[]` / `sample_values` / filter-labels | 2026-09-30 |
-| BL-005 | Databricks runtime: ThoughtSpot client + conversion skills | — |
+| ~~BL-005~~ | ~~Databricks runtime: ThoughtSpot client + conversion skills~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-011 | ts-object-connection-create skill + `ts connections create` CLI | — |
 | BL-014 | Databricks MV → ThoughtSpot mapping coverage review | — |
 | BL-015 | Pre-conversion audit/feasibility mode for SF SV and DBX MV | — |
@@ -190,8 +190,8 @@ are roughly ordered by value÷effort.
 | ~~BL-281~~ | ~~a `<relation join=...>` carrying no `<clause>` is dropped with no warning — the last `_extract_joins` exit with no diagnostic, in the function whose contract is to report what it skips~~ | DONE (2026-09-22) |
 | BL-282 | two DIFFERENT open items can share a `#N` inside one file with no gate — the novelty rule catches the cross-branch case, the within-file case is blocked by ts-audit's untagged verified/unverified double entries | next validator pass |
 | BL-285 | `check_i7_gate` checks the I7 marker is in the procedure body, not that it *precedes* the untranslatable classification step — finding 9.3 asked for "within N lines" of it; a gate in the wrong section still passes | next validator pass |
-| BL-286 | the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them | with the next Genie review |
-| BL-287 | CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half) | next mirror pass |
+| ~~BL-286~~ | ~~the Genie runtime's two converters (`agents/databricks/skills/ts-convert-*`) carry no I7 gate and are outside `_dirs`, so `check_i7_gate` cannot see them — audit 9.17 expected 9.3's fix to reach them~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
+| ~~BL-287~~ | ~~CoCo `ts-convert-from-snowflake-sv` changelog claims its I7 gate "mirrors the CLI skill v1.5.0", but CLI v1.5.0 covered N1/I5 and never had the gate — the CLI got it for the first time in PR #525 (audit 9.2, second half)~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-288 | `ts-object-model-coach` designs typed `model_instructions` categories (`exclusion_rules`, `aggregation_defaults`, …); one of its three candidate TML homes collides with the real free-text `data_model_instructions`. Consequence is **silent, not a type error**: the audit's coaching read (`@is_coached`, `audit/engine/fields.py`; `checks_ai` before the rule-catalog cut-over) returns False and `tml_probes` returns `[]`, so a fully coached Model draws a HIGH-severity A3 "no coaching configured", loses A5's 25-point AI weight, and `find_ai_surface_uses` goes blind to every column named in those rules | before any v1.1 TML write path |
 | ~~BL-289~~ | ~~CSR is retrievable (`ts security column-rules export`) but **not walked** — `ts metadata report` declares `csr_hits` at `report/__init__.py:203`, passes it at `:307`, and never appends to it, so the dependency walk reports CSR as "Not Checked" by construction~~ | DONE (2026-10-02, PR #506) — the report fetches CSR on the source's owning table, resolved from a column GUID's header `owner`; live-verified detecting a rule on embed-1 staging |
 | BL-290 | four `open-item #N` citations in `tools/ts-cli/` docstrings point at ts-dependency-manager items deleted in 2026-06 (`dependency/mutate.py:448` #12, `report/tml_probes.py:14` #7, `:44` #6, `:75` #10 — the last self-annotates "resolved 2026-05-28"); `check_open_item_citations` scans skill dirs only, so nothing sees them | next validator pass |
@@ -205,7 +205,7 @@ are roughly ordered by value÷effort.
 | BL-298 | the two sharing checks `ts-audit` advertises — S8 "Overly permissive sharing (FULL access to all users)" and S9 "Sharing to external groups" — **are not implemented anywhere**; grepping the audit module for `permission|shared_with|sharing|access_level` returns only those two description strings. The descriptions are corrected so reports stop mislabelling, but a security audit still silently omits sharing entirely | next ts-audit pass |
 | BL-307 | audit 9.1 — `ts-convert-from-looker` instructs `is_hidden: true` on every joined dimension PK (`step-6-model-joins.md:68`, SKILL.md:404, step-6:64/:132, step-5:264, coverage-matrix:36). **I11 says never set it during conversion**, and `thoughtspot-model-tml.md:243` repeats the prohibition. Every joined dimension's PK ships hidden, producing the locked-visualization and join-path failure I11 names. Remove the construct AND add an `is_hidden` rule to `tml_lint.py` under the CANONICAL-RULE-SET marker, which every converter already invokes | next converter pass |
 | BL-308 | audit 9.4 — `sisense/functions.py`'s `translate_agg` has **no live caller** (only a docstring mention), so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes. The semantic mapping itself is correct and should NOT be changed (Sisense `count` is a distinct count, `dupcount` the exact total — corrected 2026-08-26, finding 14.3). Two exits needed: wire it or delete it, and if wired, note that `aggregation: COUNT_DISTINCT` on a `column_id`-backed entry silently flips MEASURE to ATTRIBUTE on a non-numeric column (I5) | 2026-12-31 |
-| BL-309 | audit 9.5 — the CoCo `ts-convert-from-snowflake-sv` mirror carries **no I14 rule**: no role-play, alias-node or duplicate-join-pair guidance anywhere. The CLI primary added Step 7.5 plus a reference file at v1.20.0; CoCo has no `ts` CLI and executes the doc, so the rule must be prose there. An SV joining one fact to DIM_TIME on order date and ship date emits two joins on the same ordered pair and **the Model will not load** (observed at 21 joins across 7 pairs on a real customer SV). Also: `check_mirror_sync` collects only each ledger row's path and never compares the recorded CLI version against the actual one, so any SYNC-DEBT row acknowledges its mirror permanently | next mirror pass |
+| ~~BL-309~~ | ~~audit 9.5 — the CoCo `ts-convert-from-snowflake-sv` mirror carries **no I14 rule**: no role-play, alias-node or duplicate-join-pair guidance anywhere. The CLI primary added Step 7.5 plus a reference file at v1.20.0; CoCo has no `ts` CLI and executes the doc, so the rule must be prose there. An SV joining one fact to DIM_TIME on order date and ship date emits two joins on the same ordered pair and **the Model will not load** (observed at 21 joins across 7 pairs on a real customer SV). Also: `check_mirror_sync` collects only each ledger row's path and never compares the recorded CLI version against the actual one, so any SYNC-DEBT row acknowledges its mirror permanently~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-310 | audit 9.6 — `model_builder.filter_unresolvable_formulas` computes the drop set to a fixpoint via `_cascade_drop_dependents`, and three sibling skills instruct the executor to do it **by hand, one hop deep**, with the identical sentence (from-qlik:92, from-powerbi:86, from-sisense:78). With C referencing B referencing rejected A, B is dropped and C survives carrying a dangling `[formula_B]` — an I13 violation and a hard 14516 rejection, or a dangling `formula_id` and an I1 silent drop. Expose the retry loop as a shared command or helper the three skills invoke. This is BL-217's remainder and the prior sweep's 11.4 | next converter pass |
 | ~~BL-311~~ | ~~audit 13.2 — `ts-object-model-coach` open-item #4 defers Data Model Instructions to v1.1 and ships manual copy-paste, but the write API exists: `setNLInstructions` (`POST /api/rest/2.0/ai/instructions/set`, Beta 10.15.0.cl), whose **read twin this repo already calls** at `audit/context.py:145`. Needs a `ts` command, then replace the paste step. Second-order: 26.8.0.cl `ai/memory/export`/`import` (Spotter memory) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` move models between Orgs and silently leave it behind~~ | MERGED into BL-030 (2026-10-29, audit finding 5.2) |
 | BL-312 | audit 6.2 — `ts_cli/powerbi/parsing.py` is 300 statements, **266 missed (11%)**; its test file is 1.8 KB and exercises two private helpers added reactively in a PR review. Every front-door parse path is untested, in the module a whole converter depends on | 2026-11-30 (re-dated 2026-10-29, audit finding 6.6) |
@@ -302,7 +302,7 @@ are roughly ordered by value÷effort.
 | BL-465 | Repo no-Haiku rule cites a stale reason — re-derive | 2026-11-30 |
 | BL-466 | `check_harness_routing` matches Haiku pins exactly; add Haiku fixtures | 2026-11-30 |
 | BL-467 | Review/audit agents declare no `effort:`; auditor lists stale invariants | 2026-11-30 |
-| BL-468 | `repo-publisher` still runs the dormant stage sync; re-check its model pin | 2026-11-30 |
+| BL-468 | ~~`repo-publisher` still runs the dormant stage sync~~ (DONE 2026-11-08: step removed, CoCo runtime retired); re-check its model pin | 2026-11-30 |
 | BL-469 | `ts dbt create/update` token resolver lacks the derived env-var and Keychain-name fallbacks | 2026-11-30 |
 | BL-470 | Keyring fallbacks swallow backend errors as "no credential" | 2026-11-30 |
 | BL-471 | `check_backlog_integrity`: ISO-date targets, index/section status agreement, deleted-id gate; audit-row routing gate | 2026-11-30 |
@@ -459,7 +459,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Trigger |
 |---|---|---|
 | BL-016 | Conversion mapping-file naming consistency | cosmetic, low priority |
-| BL-025 | DBX Genie connection-selection parity | next Genie skill touch |
+| ~~BL-025~~ | ~~DBX Genie connection-selection parity~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-037 | Recipe skills for investigation patterns | demand-driven |
 | BL-038 | ts-recipe-formula-weighted-average | demand-driven |
 | BL-039 | ts-object-answer-promote: embedded Answers + sets | demand-driven |
@@ -534,11 +534,14 @@ redone from the reference docs above.
 
 ---
 
-## BL-005 — Databricks runtime: ThoughtSpot client + conversion skills `Tier 2`
+## BL-005 — Databricks runtime: ThoughtSpot client + conversion skills `Tier 2` — **RETIRED 2026-11-08**
 
 **Source:** Design spec `docs/superpowers/specs/2026-06-11-databricks-ts-client-design.md`
 **Affects:** All Databricks-related skills; future Genie Code skill runtime
-**Status:** Spec complete — ready for implementation planning
+**Status:** RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`). The runtime was built as `agents/databricks/` and later retired with
+the CoCo Snowsight runtime: no usage signal, sync and validator overhead on every change,
+and ThoughtSpot now imports Metric Views natively. The CLI Databricks converters are
+unaffected. (Was: spec complete — ready for implementation planning.)
 
 ### Problem
 
@@ -1275,11 +1278,12 @@ pass-through. Note as a product input; not implementable in the skill.
 
 ---
 
-## BL-025 — Review connection-selection parity for the Databricks Genie agent skill `Tier 4`
+## BL-025 — Review connection-selection parity for the Databricks Genie agent skill `Tier 4` — **RETIRED 2026-11-08**
 
 **Source:** Live Tableau migration session (2026-06-16) — connection-identification feature (PR #88)
 **Affects:** agents/databricks/skills/ts-convert-from-databricks-mv (Genie Code runtime)
-**Status:** Open
+**Status:** RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`). The Genie skill no longer exists; the CLI from-* skills already carry
+the prompt (PR #88).
 **Related:** PR #88 (connection-identification prompt in the three CLI from-* skills)
 
 ### Problem
@@ -7529,11 +7533,13 @@ maintained signal list, and failing loudly when a converter matches none of them
 
 ---
 
-## BL-286 — the Genie runtime's converters are ungated for I7 `Tier 2`
+## BL-286 — the Genie runtime's converters are ungated for I7 `Tier 2` — **RETIRED 2026-11-08**
 
 **Filed:** 2026-09-22 while routing audit finding 9.3 (PR #525).
 **Affects:** `agents/databricks/skills/ts-convert-from-databricks-mv`,
 `agents/databricks/skills/ts-convert-to-databricks-mv`.
+**Status:** RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`). Both Genie converter shells went with the runtime; every converter
+left is under `agents/cli/`, which `check_i7_gate` covers.
 
 `check_i7_gate` scopes to `_dirs.ALL_RUNTIMES`, which deliberately excludes
 `agents/databricks/` (`.claude/rules/runtime-coverage.md`: that runtime sits outside the
@@ -8931,6 +8937,11 @@ translates by reading those tables directly** (`agents/coco-snowsight/
 ts-convert-from-snowflake-sv/SKILL.md` marks it MANDATORY under I7). So the CLI
 handles these twelve and CoCo cannot — the two runtimes silently disagree on
 coverage, and a reviewer reading only the doc understates what the CLI does.
+
+**2026-11-08:** the CoCo runtime is retired (tag `runtimes-archive-2026-11-08`), so the
+runtime disagreement is gone. The item stays open for the other half: the doc is still
+what the model reads under I7 and what a reviewer checks against, and it understates
+the CLI.
 
 **Update 2026-08-28 — eight closed, four remain, and the residue is worse than
 this item first stated.** Checking each emitted TS name against the catalog rather
@@ -15743,6 +15754,8 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 **What.** Step 5 runs `stage-sync.sh` after merge, which the root CLAUDE.md declares dormant; without `.snowflake-deploy-sha` that is a full upload. The agent's `# reason:` pin justification depends on this step.
 
 **Do.** Remove the step or make it opt-in, then re-check whether the model pin is still justified and update or drop its reason.
+
+**Status (2026-11-08):** the stage-sync half is DONE — Step 5 is removed from `.claude/agents/repo-publisher.md`, because the CoCo Snowsight runtime it served was retired (tag `runtimes-archive-2026-11-08`). The model-pin half is still open: the `# reason:` comment still cites the stage-sync sequence, so re-check whether the pin is justified and update or drop it.
 
 **Target:** 2026-11-30.
 
