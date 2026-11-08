@@ -85,12 +85,46 @@ def test_i5_count_distinct_on_physical_column_is_flagged():
     assert any(f.startswith("I5:") and "Amount" in f for f in findings)
 
 
-def test_i5_does_not_flag_formula_columns():
-    # A formula column may legitimately resolve to a unique count; only physical
-    # columns are checked for COUNT_DISTINCT.
+def test_i5_does_not_flag_an_aggregate_formula_column():
+    # An aggregate formula (`sum(...)`) carrying COUNT_DISTINCT is not the I5 shape:
+    # ThoughtSpot ignores a formula measure's aggregation there.
     data = _clean_model()
     data["model"]["columns"][1]["properties"] = {"aggregation": "COUNT_DISTINCT"}
     assert lint_tml(data) == []
+
+
+def _bare_formula_model(expr="[ORDERS::CUSTOMER_ID]", props=None):
+    data = _clean_model()
+    data["model"]["formulas"].append({"id": "f_cust", "name": "Customers", "expr": expr})
+    data["model"]["columns"].append({
+        "name": "Customers", "formula_id": "f_cust",
+        "properties": props or {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"}})
+    return data
+
+
+def test_i5_flags_a_formula_that_only_wraps_a_column():
+    # BL-447 (audit 2026-10-29 finding 9.1, path B): the live probe demoted a scalar
+    # formula `[T::col]` carrying COUNT_DISTINCT to ATTRIBUTE, exactly like the column.
+    findings = [f for f in lint_tml(_bare_formula_model()) if f.startswith("I5")]
+    assert len(findings) == 1 and "Customers" in findings[0], findings
+    assert "unique count ( [ORDERS::CUSTOMER_ID] )" in findings[0]
+
+
+def test_i5_follows_a_chain_of_wrapping_formulas():
+    data = _bare_formula_model(expr="[f_inner]")
+    data["model"]["formulas"].append({"id": "f_inner", "name": "Inner", "expr": " [ORDERS::CUSTOMER_ID] "})
+    data["model"]["columns"].append({"name": "Inner", "formula_id": "f_inner",
+                                     "properties": {"column_type": "ATTRIBUTE"}})
+    assert [f for f in lint_tml(data) if f.startswith("I5") and "Customers" in f]
+
+
+def test_i5_leaves_unique_count_and_declared_attribute_formulas_alone():
+    assert not [f for f in lint_tml(_bare_formula_model("unique count ( [ORDERS::CUSTOMER_ID] )"))
+                if f.startswith("I5")]
+    attr = _bare_formula_model(props={"column_type": "ATTRIBUTE", "aggregation": "COUNT_DISTINCT"})
+    assert not [f for f in lint_tml(attr) if f.startswith("I5")]
+    other = _bare_formula_model(props={"column_type": "MEASURE", "aggregation": "SUM"})
+    assert not [f for f in lint_tml(other) if f.startswith("I5")]
 
 
 def test_i8_duplicate_column_id_is_flagged():

@@ -111,3 +111,61 @@ def test_many_to_many_relationship_is_skipped_and_flagged():
     row = mapping["relationships"][0]
     assert row["status"] == "NEEDS REVIEW" and "bridge table" in row["note"]
     assert not [f for f in lint_tml(model_doc) if f.startswith("I20")]
+
+
+# --- summarizeBy distinctCount -> unique count formula (invariant I5, BL-447) ---
+
+def _distinct_inv():
+    inv = _inv()
+    inv["tables"][0]["columns"].append(
+        {"name": "CustomerKey", "dataType": "string", "summarizeBy": "distinctCount"})
+    # A bridge table whose only column is a distinct-counted key.
+    inv["tables"].append({"name": "Bridge", "columns": [
+        {"name": "BridgeKey", "dataType": "string", "summarizeBy": "distinctCount"}],
+        "measures": []})
+    return inv
+
+
+def _build_distinct():
+    files, mapping = assemble(_distinct_inv(), {}, "MyConn", "db1", "sch1", "LEFT_OUTER", False)
+    model = next(tml for fn, tml in files if fn.endswith(".model.tml"))["model"]
+    tables = {tml["table"]["name"]: tml["table"] for fn, tml in files if fn.endswith(".table.tml")}
+    return model, tables, mapping
+
+
+def test_distinct_count_column_is_a_unique_count_formula():
+    # Before BL-447 this was `column_id: Fact::CustomerKey` with COUNT_DISTINCT, which
+    # ThoughtSpot stores as an ATTRIBUTE on a text key: the count was silently lost.
+    model, _, _ = _build_distinct()
+    by_name = {c["name"]: c for c in model["columns"]}
+    col = by_name["CustomerKey"]
+    assert "column_id" not in col and col["formula_id"] == "formula_CustomerKey"
+    assert col["properties"] == {"column_type": "MEASURE", "aggregation": "SUM",
+                                 "index_type": "DONT_INDEX"}
+    f = next(f for f in model["formulas"] if f["id"] == "formula_CustomerKey")
+    assert f["expr"] == "unique count ( [Fact::CustomerKey] )"
+
+
+def test_no_count_distinct_aggregation_anywhere_and_i5_clean():
+    from ts_cli.tml_lint import lint_tml
+    model, tables, _ = _build_distinct()
+    every_col = model["columns"] + [c for t in tables.values() for c in t["columns"]]
+    assert not [c for c in every_col if (c.get("properties") or {}).get("aggregation") == "COUNT_DISTINCT"]
+    assert tables["Fact"]["columns"][-1]["properties"] == {"column_type": "ATTRIBUTE"}
+    assert not [f for f in lint_tml({"model": model}) if f.startswith(("I5", "I1"))]
+
+
+def test_a_table_left_without_a_column_keeps_its_key_as_an_attribute():
+    model, _, mapping = _build_distinct()
+    bridge = [c for c in model["columns"] if str(c.get("column_id", "")).startswith("Bridge::")]
+    assert bridge == [{"name": "BridgeKey (Bridge)", "column_id": "Bridge::BridgeKey",
+                       "properties": {"column_type": "ATTRIBUTE"}}]
+    assert any("BridgeKey (Bridge)" in w for w in mapping["warnings"])
+    # Fact keeps Amount and DimId, so its count adds nothing.
+    assert not any(c.get("column_id") == "Fact::CustomerKey" for c in model["columns"])
+
+
+def test_distinct_count_column_is_reported_in_the_mapping():
+    _, _, mapping = _build_distinct()
+    row = next(r for r in mapping["measures"] if r["name"] == "CustomerKey")
+    assert row["status"] == "Migrated" and row["ts_formula"] == "unique count ( [Fact::CustomerKey] )"

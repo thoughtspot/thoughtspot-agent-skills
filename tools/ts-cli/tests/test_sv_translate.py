@@ -1339,7 +1339,10 @@ class TestFactDefaultAggregation:
         f = self._facts(self.RENAMED)["UNIQUE_CUSTOMERS"]
         assert f["column_type"] == "MEASURE"
         assert any("default_aggregation 'count_distinct'" in a for a in f["annotations"]), f
-        assert f["aggregation"] is not None, "the declared count_distinct was lost (BL-448)"
+        # The declared count_distinct was lost (summed) before BL-448; since BL-447
+        # it is carried as a `unique count` formula, never a COUNT_DISTINCT column.
+        assert f["output_kind"] == "formula", f
+        assert f["ts_expr"] == "unique count ( [SALES::customer_id] )"
 
     def test_renamed_passthrough_fact_does_not_take_another_facts_default(self):
         facts = self._facts(self.RENAMED)
@@ -1348,3 +1351,94 @@ class TestFactDefaultAggregation:
         assert facts["TOTAL_COST"]["aggregation"] is None, facts["TOTAL_COST"]
         assert not any("default_aggregation" in a for a in facts["TOTAL_COST"]["annotations"])
         assert facts["COSTS"]["aggregation"] == "AVERAGE"
+
+
+class TestDistinctCountFact:
+    """BL-447 / I5: a fact Cortex Analyst answers with ``count_distinct`` becomes a
+    ``unique count`` formula in every fact form. ``aggregation: COUNT_DISTINCT`` on a
+    column, or on a formula that only wraps one, is stored as an ATTRIBUTE by
+    ThoughtSpot on a text or date column (live 2026-10-29), so search lists the values
+    instead of counting them, silently."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID), C as DB.SCH.CUSTOMERS primary key (CUSTOMER_ID) )
+\trelationships ( S_TO_C as S(CUSTOMER_ID) references C(CUSTOMER_ID) )
+\tfacts ( S.UNIQUE_CUSTOMERS as s.customer_id, S.BUYER as customer_id,
+\t        S.BASKET_KEY as order_id * 1000 + line_no, S.GROSS as gross,
+\t        C.HEADCOUNT as c.customer_id )
+\tdimensions ( S.REGION as region )
+\tmetrics ( S.BUYERS as COUNT(DISTINCT s.buyer), S.ROW_BUYERS as COUNT(s.buyer),
+\t          S.BASKETS as COUNT(DISTINCT s.basket_key) )
+\twith extension (CA='{"tables":[{"name":"S","facts":[{"name":"UNIQUE_CUSTOMERS","default_aggregation":"count_distinct"},{"name":"BUYER","default_aggregation":"count_distinct"},{"name":"BASKET_KEY","default_aggregation":"count_distinct"},{"name":"GROSS","default_aggregation":"sum"}]},{"name":"C","facts":[{"name":"HEADCOUNT","default_aggregation":"count_distinct"}]}]}');"""
+
+    TABLES = {"S": {"name": "SALES", "fqn": "guid-s"},
+              "C": {"name": "CUSTOMERS", "fqn": "guid-c"}}
+
+    def _out(self):
+        return {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+
+    def test_passthrough_fact_is_a_unique_count_formula(self):
+        e = self._out()["UNIQUE_CUSTOMERS"]
+        assert (e["output_kind"], e["column_type"], e["aggregation"]) == ("formula", "MEASURE", None)
+        assert e["ts_expr"] == "unique count ( [SALES::customer_id] )"
+
+    def test_renamed_fact_is_a_unique_count_formula(self):
+        # `T.COL as col` used to be a formula `[SALES::customer_id]` carrying
+        # aggregation COUNT_DISTINCT — the silent path (audit 9.1, path B).
+        e = self._out()["BUYER"]
+        assert (e["output_kind"], e["aggregation"]) == ("formula", None)
+        assert e["ts_expr"] == "unique count ( [SALES::customer_id] )"
+
+    def test_computed_fact_counts_its_expression(self):
+        e = self._out()["BASKET_KEY"]
+        assert e["aggregation"] is None
+        assert e["ts_expr"].startswith("unique count ( ") and "[SALES::order_id]" in e["ts_expr"]
+
+    def test_other_defaults_unchanged(self):
+        e = self._out()["GROSS"]
+        assert e["aggregation"] == "SUM" and e["ts_expr"] == "[SALES::gross]"
+
+    def test_a_metric_over_the_fact_reads_its_row_value(self):
+        # The fact's own formula is now an aggregate; `[formula_Buyer]` inside
+        # COUNT(DISTINCT …) would nest one aggregate in another.
+        # It stays a formula (in parentheses), as it was before: a bare [T::c] would
+        # make COUNT(s.buyer) a physical COUNT column, demoted on text (BL-265).
+        out = self._out()
+        assert out["BUYERS"]["ts_expr"] == "unique count ( ( [SALES::customer_id] ) )"
+        assert out["ROW_BUYERS"]["output_kind"] == "formula", out["ROW_BUYERS"]
+        assert out["ROW_BUYERS"]["ts_expr"] == "count ( ( [SALES::customer_id] ) )"
+        assert "formula_" not in out["BASKETS"]["ts_expr"], out["BASKETS"]
+        assert "[SALES::order_id]" in out["BASKETS"]["ts_expr"]
+
+    def _model(self):
+        from ts_cli.sv_build_model import build_model_tml_sv
+        parsed = parse_sv_ddl(self.DDL)
+        doc, info = build_model_tml_sv(
+            model_name="Probe", parsed=parsed,
+            translated_doc=translate_sv_formulas(parsed), tables=self.TABLES)
+        return doc["model"], info
+
+    def test_model_has_no_count_distinct_aggregation_and_lints_clean(self):
+        from ts_cli.tml_lint import lint_tml
+        model, _ = self._model()
+        assert not [c for c in model["columns"]
+                    if (c.get("properties") or {}).get("aggregation") == "COUNT_DISTINCT"]
+        findings = lint_tml({"model": model})
+        assert not [f for f in findings if f.startswith(("I5", "I1", "I13"))], findings
+        by_name = {c["name"]: c for c in model["columns"]}
+        uc = by_name["Unique Customers"]
+        assert uc["formula_id"] == "formula_Unique Customers"
+        assert uc["properties"]["aggregation"] == "SUM"
+        assert uc["properties"]["index_type"] == "DONT_INDEX"
+
+    def test_a_table_left_without_a_column_is_selected_again(self):
+        # CUSTOMERS' only construct is the count; as a formula it leaves the table
+        # with no column_id entry, which ThoughtSpot refuses at import.
+        model, info = self._model()
+        cust = [c for c in model["columns"] if str(c.get("column_id", "")).startswith("CUSTOMERS::")]
+        assert cust == [{"name": "customer_id", "column_id": "CUSTOMERS::customer_id",
+                         "properties": {"column_type": "ATTRIBUTE"}}], cust
+        assert info["reselected_columns"] == ["customer_id"]
+        # SALES keeps its own columns, so nothing is added there.
+        assert all(not str(c.get("column_id", "")).startswith("SALES::customer_id")
+                   for c in model["columns"])

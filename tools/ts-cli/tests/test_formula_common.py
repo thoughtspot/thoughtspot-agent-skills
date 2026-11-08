@@ -198,3 +198,47 @@ class TestPassThroughQuotingIsUniform:
         for rel in ("sv_sql.py", "databricks/mv_sql.py"):
             text = (root / rel).read_text(encoding="utf-8")
             assert 'sql_string_op ( \\"' in text or 'sql_string_op ( "' in text, rel
+
+
+# --- distinct counts as formulas (invariant I5, BL-447) ---------------------------
+
+def test_aggregate_formula_is_the_one_spelling():
+    from ts_cli.formula_common import aggregate_formula, unique_count_formula
+    assert aggregate_formula("COUNT_DISTINCT", "[T::c]") == "unique count ( [T::c] )"
+    assert aggregate_formula("std_deviation", "[T::c]") == "stddev ( [T::c] )"
+    assert aggregate_formula("NONE", "[T::c]") is None
+    assert unique_count_formula("[T::a] + 1") == "unique count ( [T::a] + 1 )"
+
+
+def test_distinct_count_formula_column_keeps_name_and_metadata():
+    from ts_cli.formula_common import distinct_count_formula_column
+    f, col = distinct_count_formula_column(
+        "Customers", "SALES::CUST", "formula_Customers",
+        properties={"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT",
+                    "synonyms": ["buyers"]},
+        description="Distinct customers")
+    assert f == {"id": "formula_Customers", "name": "Customers",
+                 "expr": "unique count ( [SALES::CUST] )"}
+    assert col == {"name": "Customers", "formula_id": "formula_Customers",
+                   "description": "Distinct customers",
+                   "properties": {"column_type": "MEASURE", "aggregation": "SUM",
+                                  "synonyms": ["buyers"], "index_type": "DONT_INDEX"}}
+
+
+def test_reselect_counted_columns_only_for_a_table_left_unselected():
+    from ts_cli.formula_common import reselect_counted_columns
+    formulas = [{"id": "f1", "expr": "unique count ( [BRIDGE::KEY] )"},
+                {"id": "f2", "expr": "unique count ( [SALES::CUST] )"},
+                {"id": "f3", "expr": "unique count ( [OTHER::KEY] + 1 )"}]
+    columns = [{"name": "KEY", "formula_id": "f1"},
+               {"name": "Customers", "formula_id": "f2"},
+               {"name": "Amount", "column_id": "SALES::AMOUNT"},
+               {"name": "Expr", "formula_id": "f3"}]
+    added = reselect_counted_columns(columns, formulas)
+    # BRIDGE had no column_id entry left; its count's display name is taken, so the
+    # column is disambiguated by its table. SALES still has AMOUNT; f3 counts an
+    # expression, not a column, so nothing is guessed for OTHER.
+    assert added == ["KEY (BRIDGE)"]
+    assert columns[-1] == {"name": "KEY (BRIDGE)", "column_id": "BRIDGE::KEY",
+                           "properties": {"column_type": "ATTRIBUTE"}}
+    assert reselect_counted_columns(columns, formulas) == []      # idempotent

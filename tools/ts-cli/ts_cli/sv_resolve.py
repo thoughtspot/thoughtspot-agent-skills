@@ -18,7 +18,8 @@ import re
 from typing import Callable
 
 from ts_cli.formula_common import UntranslatableError, bare_column_name
-from ts_cli.sv_naming import build_node_id_map, construct_formula_id, metric_ref
+from ts_cli.sv_naming import (build_node_id_map, construct_formula_id,
+                              fact_counts_distinct, metric_ref)
 from ts_cli.sv_sql import translate_sql_expr
 from ts_cli.sv_window import _AGG_TO_GROUP
 
@@ -354,6 +355,22 @@ def make_resolver(
             return f"[{table}::{bare}]"
         return f"[{construct_formula_id(dim, promote_synonym=promote_synonym)}]"
 
+    def _row_value(fact: dict, key: str) -> str:
+        """The row-level value of a computed fact emitted as a distinct count.
+
+        Its formula is ``unique count ( … )`` — an aggregate — so a metric over it
+        (``COUNT(DISTINCT s.customer)``) referencing ``[formula_<id>]`` would nest one
+        aggregate in another. The expression is inlined instead, translated with the
+        fact's own table as the default, as `_translate_fact` does. It stays in
+        parentheses even for a rename (``( [T::c] )``): a bare ``[T::c]`` would let
+        the simple-aggregate classifier turn ``COUNT(s.fact)`` into a physical COUNT
+        column, which ThoughtSpot demotes on a text column (BL-265), where it used to
+        be a formula."""
+        inner = make_resolver(
+            parsed, fact["alias_table"], annotations=annotations,
+            promote_synonym=promote_synonym, _resolving=_resolving | {key})
+        return f"( {translate_sql_expr(fact['expr'], inner)} )"
+
     def resolve(ident: str) -> str:
         parts = ident.split(".")
         if len(parts) == 1:
@@ -377,6 +394,11 @@ def make_resolver(
                 return _physical_ref(metric, col)
 
             # Step 2 — a computed fact is a formula; reference it by minted id.
+            # Except a distinct-count fact: its formula is `unique count ( … )`, an
+            # aggregate, so a reference reads its row value instead (BL-447).
+            if fact is not None and fact_counts_distinct(fact, parsed) \
+                    and key not in _resolving:
+                return _row_value(fact, key)
             if fact is not None:
                 return f"[{construct_formula_id(fact, promote_synonym=promote_synonym)}]"
 

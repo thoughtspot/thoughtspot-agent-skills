@@ -23,8 +23,20 @@ _TML_TYPE = {
 _AGG = {
     "sum": "SUM", "average": "AVERAGE", "avg": "AVERAGE",
     "min": "MIN", "max": "MAX", "count": "COUNT",
-    "distinctcount": "COUNT_DISTINCT",
 }
+
+# summarizeBy distinctCount is NOT a column aggregation (invariant I5): ThoughtSpot
+# stores a COUNT_DISTINCT measure on a text or date column as an ATTRIBUTE, so search
+# lists the keys instead of counting them, silently. The Table column stays an
+# attribute, and the Model carries a `unique count` formula under the column's name
+# (build_model._build_physical_columns, BL-447).
+_DISTINCT_COUNT = "distinctcount"
+
+
+def _is_distinct_count(col):
+    """True for a physical column whose default summarization is a distinct count."""
+    return (not col.get("calculated")
+            and (col.get("summarizeBy") or "").strip().lower() == _DISTINCT_COUNT)
 
 # Power BI auto-generated date tables (the implicit date hierarchy behind every
 # date column). They are internal artifacts, not real source tables, so they and
@@ -56,9 +68,12 @@ def _col_role(col):
     """Infer (column_type, aggregation) for a parsed Power BI column.
 
     summarizeBy drives it when present; otherwise numeric non-keys are SUM
-    measures and everything else is an attribute (keys included)."""
+    measures and everything else is an attribute (keys included). A distinct count
+    is an attribute here; the Model counts it with a formula (see _DISTINCT_COUNT)."""
     summ = (col.get("summarizeBy") or "").strip().lower()
     dt = (col.get("dataType") or "").strip().lower()
+    if summ == _DISTINCT_COUNT:
+        return "ATTRIBUTE", None
     if summ in ("none", "default", ""):
         if summ in ("none", "default"):
             return "ATTRIBUTE", None

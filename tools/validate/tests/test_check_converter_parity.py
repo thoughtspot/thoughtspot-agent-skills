@@ -246,3 +246,41 @@ def test_real_repo_passes(tmp_path):
     repo_root = Path(__file__).resolve().parents[3]
     result = _run(repo_root)
     assert result.returncode == 0, result.stdout
+
+
+# --- Requirement C: no literal COUNT_DISTINCT column aggregation (I5, BL-447) ---
+
+def test_literal_count_distinct_mapping_is_flagged(tmp_path):
+    """The shape all three converters shipped: a source aggregation mapped to the
+    column aggregation COUNT_DISTINCT (powerbi/tables.py, sv_naming.py, sisense)."""
+    root = _repo(tmp_path, "fake", _HELPERS + '_AGG = {"distinctcount": "COUNT_DISTINCT"}\n')
+    result = _run(root)
+    assert result.returncode == 1
+    assert "literal column aggregation COUNT_DISTINCT" in result.stdout
+    assert "ts_cli/fake/functions.py:3" in result.stdout
+
+
+def test_literal_count_distinct_assignment_is_flagged(tmp_path):
+    for src in ('props["aggregation"] = "COUNT_DISTINCT"\n',
+                "col = dict(aggregation='COUNT_DISTINCT')\n"):
+        root = _repo(tmp_path / str(abs(hash(src))), "fake", _HELPERS + src)
+        assert _run(root).returncode == 1, src
+
+
+def test_readers_comments_and_the_formula_are_not_flagged(tmp_path):
+    src = (_HELPERS
+           + 'if props.get("aggregation") == "COUNT_DISTINCT":\n    pass\n'
+           + 'if agg != "COUNT_DISTINCT":\n    pass\n'
+           + '# "count": "COUNT_DISTINCT" was the old, wrong mapping\n'
+           + 'FN = {"count": "unique count"}\n')
+    result = _run(_repo(tmp_path, "fake", src))
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_to_only_converter_is_not_subject_to_requirement_c(tmp_path):
+    root = _repo(tmp_path, "fake", _HELPERS + 'M = {"count_distinct": "COUNT_DISTINCT"}\n',
+                 skill=False)
+    (root / "agents" / "cli" / "ts-convert-to-fake").mkdir(parents=True)
+    (root / "agents" / "cli" / "ts-convert-to-fake" / "SKILL.md").write_text("x")
+    result = _run(root)
+    assert result.returncode == 0, result.stdout

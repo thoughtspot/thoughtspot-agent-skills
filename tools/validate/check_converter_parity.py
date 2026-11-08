@@ -31,6 +31,18 @@ not asserted of everything:
      ``sql_*_op`` pass-through, not emitted bare.
   B. Emits formulas -> must use ``resolve_name_collisions`` **and**
      ``fix_double_aggregation``.
+  C. Has a ``from`` converter -> must not map a source aggregation to the literal
+     column aggregation ``COUNT_DISTINCT`` (invariant I5). ThoughtSpot types a
+     physical MEASURE by its data type, so ``aggregation: COUNT_DISTINCT`` on a text
+     or date key — or on a formula that only wraps one — is stored as an ATTRIBUTE
+     and search lists the keys instead of counting them, with no error (live
+     2026-10-29). A distinct count is ``formula_common.unique_count_formula``.
+     Checked as a forbidden OUTPUT, like A: a dict value or an assignment of the
+     string ``"COUNT_DISTINCT"``, comments ignored, strings kept (the mapping lives in
+     one). Comparisons (``== "COUNT_DISTINCT"``) are readers, not emitters, and pass.
+     Added 2026-11-08 (BL-447, audit 2026-10-29 codification opportunity 1); its first
+     run found ``sv_naming.py``, ``powerbi/tables.py``, ``sisense/functions.py`` (dead)
+     and ``dbt/tags.py``.
 
 Two holes in requirement B were found and closed on 2026-08-28, both of which had
 it reporting the opposite of the truth. They are worth recording because they are
@@ -109,7 +121,15 @@ import tokenize
 from pathlib import Path
 
 CONVERTER_SKILL_GLOB = "ts-convert-*"
-SKILL_NAME_RE = re.compile(r"^ts-convert-(?:to|from)-(?P<platform>[a-z0-9][a-z0-9-]*)$")
+SKILL_NAME_RE = re.compile(
+    r"^ts-convert-(?P<direction>to|from)-(?P<platform>[a-z0-9][a-z0-9-]*)$")
+
+# Requirement C — the EXPECTED_DIVERGENCES key suffix, and the forbidden output: the
+# string "COUNT_DISTINCT" as a dict value (`"distinctcount": "COUNT_DISTINCT"`) or an
+# assigned value (`props["aggregation"] = "COUNT_DISTINCT"`, `aggregation="…"`), never
+# a comparison (`== "COUNT_DISTINCT"`, `!= …`).
+LITERAL_COUNT_DISTINCT = "literal:COUNT_DISTINCT"
+_LITERAL_COUNT_DISTINCT_RE = re.compile(r"""(?::|(?<![=!<>])=)\s*["']COUNT_DISTINCT["']""")
 
 # Platforms whose code location does not follow `ts_cli/<platform>/`.
 # A value of None means "no CLI module by design" — the converter is documented in
@@ -158,6 +178,14 @@ EXPECTED_DIVERGENCES: dict[tuple[str, str], str] = {
     # the entry exempted a converter that was never diverging. See B1 in the module
     # docstring: the gate manufactured this divergence, and it was then cited as
     # precedent for exempting domo the same way.
+
+    # --- Requirement C: a literal COUNT_DISTINCT column aggregation ---
+    ("dbt", "literal:COUNT_DISTINCT"):
+        "Dated 2026-11-08, ends with BL-447's dbt part. dbt/tags.py is ThoughtSpot's "
+        "own two-way ts_* tag vocabulary, and converting ts_aggregation: count_distinct "
+        "safely needs the existing Model read on update plus three more constraints "
+        "(BL-447); until then the dbt lint gate reports I5 as advisory, the temporary "
+        "exception recorded under invariant I5.",
 }
 
 # Design notes on requirement A, deliberately NOT gate exemptions.
@@ -285,11 +313,12 @@ def _unreachable_divergences() -> list[str]:
     """
     consultable = set(FORMULA_COLUMN_HELPERS) | {
         f"emits:{fn}" for fn in NONEXISTENT_TS_FUNCTIONS
-    }
+    } | {LITERAL_COUNT_DISTINCT}
     return [
         f"EXPECTED_DIVERGENCES has an entry no check consults: {key!r}. "
         f"Requirement B keys are (platform, helper) for {FORMULA_COLUMN_HELPERS}; "
-        f"requirement A keys are (platform, 'emits:<fn>'). Fix the key, or move the "
+        f"requirement A keys are (platform, 'emits:<fn>'); requirement C keys are "
+        f"(platform, {LITERAL_COUNT_DISTINCT!r}). Fix the key, or move the "
         f"note to HELPER_IMPLEMENTATION_NOTES if it is commentary rather than an "
         f"exemption."
         for key in sorted(EXPECTED_DIVERGENCES)
@@ -320,11 +349,12 @@ def delegates_to_shared_emitter(files: list[Path]) -> bool:
     return False
 
 
-def discover_platforms(root: Path) -> list[str]:
+def discover_platforms(root: Path, direction: str | None = None) -> list[str]:
     """Platform tokens from agents/cli/ts-convert-*, deduped.
 
     Both directions of a symmetric pair (to-/from-) share one platform and one code
     location, so `snowflake-sv` appears once even though two skills reference it.
+    `direction` ("from" or "to") keeps only platforms with a skill in that direction.
     """
     skills_dir = root / "agents" / "cli"
     platforms: set[str] = set()
@@ -332,9 +362,39 @@ def discover_platforms(root: Path) -> list[str]:
         if not path.is_dir():
             continue
         match = SKILL_NAME_RE.match(path.name)
-        if match:
+        if match and direction in (None, match.group("direction")):
             platforms.add(match.group("platform"))
     return sorted(platforms)
+
+
+def strip_comments(source: str) -> str:
+    """`source` with comments blanked and everything else — strings included — kept
+    in place, so a hit's line number stays true. Raw text if it does not tokenize."""
+    lines = source.splitlines(keepends=True)
+    try:
+        comments = [tok.start for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if tok.type == tokenize.COMMENT]
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return source
+    for row, col in comments:
+        line = lines[row - 1]
+        lines[row - 1] = line[:col] + ("\n" if line.endswith("\n") else "")
+    return "".join(lines)
+
+
+def literal_count_distinct_hits(files: list[Path]) -> list[str]:
+    """`ts_cli/...:line` for every requirement-C output in `files` (comments ignored)."""
+    hits: list[str] = []
+    for path in files:
+        try:
+            text = strip_comments(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        rel = "/".join(path.parts[path.parts.index("ts_cli"):]) \
+            if "ts_cli" in path.parts else path.name
+        for m in _LITERAL_COUNT_DISTINCT_RE.finditer(text):
+            hits.append(f"{rel}:{text.count(chr(10), 0, m.start()) + 1}")
+    return hits
 
 
 def resolve_code_files(root: Path, platform: str) -> tuple[list[Path], bool]:
@@ -367,11 +427,13 @@ def read_all(files: list[Path]) -> str:
 
 
 def check_platform(platform: str, files: list[Path],
-                   inherited: frozenset[str] = frozenset()) -> tuple[list[str], list[str]]:
+                   inherited: frozenset[str] = frozenset(),
+                   has_from: bool = True) -> tuple[list[str], list[str]]:
     """Return (failures, notes) for one platform.
 
     `inherited` names the helpers a converter gets for free by delegating to the
     shared emitter (B1) — computed once by the caller from `model_builder` itself.
+    `has_from` says the platform has a `ts-convert-from-*` skill (requirement C).
     """
     failures: list[str] = []
     notes: list[str] = []
@@ -426,6 +488,25 @@ def check_platform(platform: str, files: list[Path],
                 f"and rewrite via formula_common.wrap_passthrough_calls."
             )
 
+    # Requirement C — no source aggregation mapped to the literal COUNT_DISTINCT
+    hits = literal_count_distinct_hits(files) if has_from else []
+    if not has_from:
+        notes.append("no from-converter — literal COUNT_DISTINCT requirement N/A")
+    elif not hits:
+        notes.append("literal COUNT_DISTINCT: none")
+    elif (platform, LITERAL_COUNT_DISTINCT) in EXPECTED_DIVERGENCES:
+        notes.append(f"literal COUNT_DISTINCT: expected-divergence ({', '.join(hits)})")
+    else:
+        failures.append(
+            f"{platform}: maps a source aggregation to the literal column aggregation "
+            f"COUNT_DISTINCT ({', '.join(hits)}). ThoughtSpot stores a COUNT_DISTINCT "
+            f"measure over a text or date column as an ATTRIBUTE, so search lists the "
+            f"keys instead of counting them, silently (invariant I5, live 2026-10-29). "
+            f"Emit formula_common.unique_count_formula('[T::c]') as a formula column "
+            f"(distinct_count_formula_column), or add a justified, dated entry to "
+            f"EXPECTED_DIVERGENCES."
+        )
+
     # Requirement B — formula emission needs the collision/aggregation helpers
     if any(marker in source for marker in FORMULA_EMISSION_MARKERS):
         for helper in FORMULA_COLUMN_HELPERS:
@@ -451,6 +532,7 @@ def main() -> int:
         return 0
 
     inherited = frozenset(shared_emitter_helpers(root))
+    from_platforms = set(discover_platforms(root, "from"))
     if args.verbose:
         print(f"  model_builder.{SHARED_EMITTER_SYMBOL} applies: "
               f"{', '.join(sorted(inherited)) or '(none)'}")
@@ -470,7 +552,8 @@ def main() -> int:
             )
             continue
 
-        platform_failures, notes = check_platform(platform, files, inherited)
+        platform_failures, notes = check_platform(
+            platform, files, inherited, has_from=platform in from_platforms)
         failures.extend(platform_failures)
 
         if args.verbose:
@@ -479,14 +562,14 @@ def main() -> int:
                 print(f"      {note}")
 
     if failures:
-        print("FAIL  converter parity — a converter emits a non-existent ThoughtSpot\n      function, or skips a shared correctness helper:")
+        print("FAIL  converter parity — a converter emits a non-existent ThoughtSpot\n      function or a literal COUNT_DISTINCT aggregation, or skips a shared\n      correctness helper:")
         for failure in failures:
             print(f"  - {failure}")
         return 1
 
     divergences = len(EXPECTED_DIVERGENCES)
     print(f"PASS  converter parity: {len(platforms)} converter platform(s) checked, "
-          f"{divergences} documented divergence(s) outstanding (BL-217 part 2).")
+          f"{divergences} documented divergence(s) outstanding (BL-217 part 2, BL-447).")
     return 0
 
 

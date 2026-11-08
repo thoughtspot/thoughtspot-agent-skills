@@ -65,7 +65,7 @@ confidently read rather than guessing).
 
 > **MANDATORY (I7) — before classifying any JAQL formula as untranslatable, open
 > [`../../shared/mappings/sisense/sisense-formula-translation.md`](../../shared/mappings/sisense/sisense-formula-translation.md)
-> and check its `AGG_MAP` aggregation table, its `FUNCTION_MAP` function table, and the
+> and check its "Aggregations — plain JAQL `agg`" table, its `FUNCTION_MAP` function table, and the
 > Approximated table. Do not decide from syntax alone.**
 > See `../../shared/schemas/ts-model-conversion-invariants.md` (I7).
 

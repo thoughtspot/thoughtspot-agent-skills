@@ -33,6 +33,7 @@ Mapped: **Mapped** (deterministic) · **Approximated** (mapped with a caveat).
 | Tables / columns / data types | Mapped | Table TML bound to an existing connection; `db_column_name` on every column |
 | Relationships → joins | Mapped | real cardinality from `fromCardinality`/`toCardinality`; `MANY_TO_ONE` default. A **many-to-many** relationship is left out and flagged NEEDS REVIEW: a Model join cannot be `MANY_TO_MANY` (14528, lint I20), and emitting `MANY_TO_ONE` would fan out silently — model a bridge table |
 | `summarizeBy` (Sum/Average/…) | Mapped | drives MEASURE aggregation (AVG vs SUM) |
+| `summarizeBy: distinctCount` | Mapped | the Model column becomes a `unique count ( [t::c] )` formula column under the column's own name; the Table column stays an attribute. Never `aggregation: COUNT_DISTINCT`, which ThoughtSpot stores as an attribute on a text or date key (invariant I5, BL-447 — the column form shipped until this release). If it was its table's only column, the key is also kept as an attribute (a Model must select one column per table) |
 | Calc column used as a join key | Mapped | materialized as a physical column (joins are physical) |
 
 ### Visuals & report

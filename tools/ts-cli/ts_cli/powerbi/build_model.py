@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_common import distinct_count_formula_column, reselect_counted_columns
 from ts_cli.powerbi.functions import translate_dax
 from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.powerbi.tables import (_AUTO_TABLE, _cardinality, _col_role, _dbname,
-                                    _slug, build_table_tml)
+                                    _is_distinct_count, _slug, build_table_tml)
 
 
 def _drop_auto_date_tables(model_json):
@@ -96,10 +97,14 @@ def _build_joins(rels, table_names, dropped_ids, join_type):
     return joins_by_src, rel_rows
 
 
-def _build_physical_columns(tables, dropped_ids, force_physical, warnings):
+def _build_physical_columns(tables, dropped_ids, force_physical, warnings, count_formulas):
     """Every physical column -> model columns[], keeping column_id stable and only
     disambiguating colliding display names (a join references column_id, so dropping a
-    column would break a join). Returns (columns, seen_display_names_lower)."""
+    column would break a join). Returns (columns, seen_display_names_lower).
+
+    A column whose summarizeBy is distinctCount becomes a `unique count` formula column
+    under its own name, its formula appended to ``count_formulas`` (invariant I5: a
+    COUNT_DISTINCT column on a text or date key is stored as an attribute)."""
     seen, columns, renamed = set(), [], []
     for t in tables:
         for c in t.get("columns", []):
@@ -117,6 +122,11 @@ def _build_physical_columns(tables, dropped_ids, force_physical, warnings):
                     i += 1
                 renamed.append(f"{colid} -> '{disp}'")
             seen.add(disp.lower())
+            if _is_distinct_count(c):
+                formula, column = distinct_count_formula_column(disp, colid, f"formula_{disp}")
+                count_formulas.append(formula)
+                columns.append(column)
+                continue
             if c.get("calculated"):       # materialized join-key calc column -> attribute
                 ctype, agg = "ATTRIBUTE", None
             else:
@@ -280,8 +290,21 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
             entry["joins"] = joins_by_src[t["name"]]
         model_tables.append(entry)
 
-    columns, seen = _build_physical_columns(tables, dropped_ids, force_physical, warnings)
+    count_formulas = []
+    columns, seen = _build_physical_columns(tables, dropped_ids, force_physical, warnings,
+                                            count_formulas)
     formulas, measure_rows = _build_formulas(tables, overrides, dropped_ids, force_physical, seen, columns)
+    formulas[:0] = count_formulas
+    measure_rows[:0] = [{"name": f["name"], "original_dax": "summarizeBy: distinctCount",
+                         "ts_formula": f["expr"], "status": "Migrated",
+                         "note": "column's default distinct count -> unique count formula "
+                                 "(invariant I5); the column is a measure, as every "
+                                 "summarized column is"} for f in count_formulas]
+    reselected = reselect_counted_columns(columns, formulas)
+    if reselected:
+        warnings.append("Distinct-count column(s) kept as attributes too, because each was "
+                        "its table's only column (a Model must select one per table): "
+                        + ", ".join(reselected))
     _cascade_flag(formulas, measure_rows, columns)
     formulas = _topo_sort_formulas(formulas)
     # Every MEASURE formula column declares an aggregation, resolved through the final

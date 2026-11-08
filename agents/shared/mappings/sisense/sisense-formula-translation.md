@@ -2,7 +2,7 @@
 # Sisense JAQL → ThoughtSpot formula translation
 
 The translation map behind `ts sisense build-model`. The authoritative source is
-`tools/ts-cli/ts_cli/sisense/functions.py` (`AGG_MAP` / `FUNCTION_MAP` / `UNSUPPORTED`); this
+`tools/ts-cli/ts_cli/sisense/functions.py` (`FUNCTION_MAP` / `UNSUPPORTED`); this
 doc must agree with the code. Strategy (unchanged from the standalone converter):
 deterministically translate the common subset; emit everything else as **NEEDS REVIEW** with
 the original Sisense formula preserved — never faked. Coverage → status:
@@ -19,16 +19,19 @@ backslash doubled, and every product under a division bracketed (`( a * b ) / c`
 translator's last step, `formula_text.ts_finalize_formula`. Copying `'O''Brien'` across was a silent
 wrong answer.
 
-## Aggregations (`AGG_MAP`) — plain JAQL `agg`, no formula
+## Aggregations — plain JAQL `agg`, no formula
 
-A simple measure's JAQL `agg` becomes a TML column `aggregation:` keyword.
+How a simple measure's JAQL `agg` reads in ThoughtSpot. **The CLI has no code path that emits
+these** (BL-308): the `AGG_MAP` / `translate_agg` that once described one had no caller and
+was deleted on 2026-11-08 (BL-447), because it mapped `count` to `aggregation: COUNT_DISTINCT`,
+invariant I5's forbidden form. Use this table when building such a measure by hand.
 
-| Sisense `agg` | ThoughtSpot aggregation | Status | Notes |
+| Sisense `agg` | ThoughtSpot | Status | Notes |
 |---|---|---|---|
 | `sum` | `SUM` | Migrated | |
 | `avg` | `AVERAGE` | Migrated | |
-| `count` | `COUNT_DISTINCT` | Migrated | Sisense `count` is a **distinct** count (`functions.py:29`) — see the note on the row below. |
-| `countduplicates` / `dupcount` | `COUNT` | **Migrated** | **Exact, not approximated** (corrected 2026-08-26, finding 14.3). Sisense `count` returns *unique* values while `dupCount` returns the *total* including duplicates, so they map **opposite to the intuitive reading** — `count` → `COUNT_DISTINCT`, `countduplicates` → `COUNT`. Both are exact. This doc declares `sisense/functions.py` authoritative; the code had it right and these rows had it backwards. |
+| `count` | `unique count ( [T::col] )` **formula** | Migrated | Sisense `count` is a **distinct** count — see the note on the row below. Never the column aggregation `COUNT_DISTINCT`: ThoughtSpot stores that as an attribute on a text or date column, so search lists the values instead of counting them (I5, live 2026-10-29). |
+| `countduplicates` / `dupcount` | `COUNT` | **Migrated** | **Exact, not approximated** (corrected 2026-08-26, finding 14.3). Sisense `count` returns *unique* values while `dupCount` returns the *total* including duplicates, so they map **opposite to the intuitive reading** — `count` → `unique count`, `countduplicates` → `COUNT`. Both are exact. |
 | `min` | `MIN` | Migrated | |
 | `max` | `MAX` | Migrated | |
 | `stdev` | `STD_DEVIATION` | Migrated | sample standard deviation |
@@ -42,8 +45,8 @@ Used inside a JAQL `formula`. Function names are rewritten in the resolved expre
 | Sisense function | ThoughtSpot | Notes |
 |---|---|---|
 | `sum` / `avg`(`average`) / `min` / `max` | `sum` / `average` / `min` / `max` | aggregation |
-| `count` | `unique count` | Sisense `count` is **distinct** (`functions.py:45`) — NOT `count` |
-| `countduplicates` / `dupcount` | `count` | Sisense `dupCount` is the **exact total** including duplicates (`functions.py:46-47`); ThoughtSpot `count` is also a total, so the translation is exact. Documented here from 2026-08-26: finding 14.3 removed it from the Approximated table (correctly — it is not approximated) and it briefly appeared in neither table. |
+| `count` | `unique count` | Sisense `count` is **distinct** (`FUNCTION_MAP` in `functions.py`) — NOT `count` |
+| `countduplicates` / `dupcount` | `count` | Sisense `dupCount` is the **exact total** including duplicates (`FUNCTION_MAP` in `functions.py`); ThoughtSpot `count` is also a total, so the translation is exact. Documented here from 2026-08-26: finding 14.3 removed it from the Approximated table (correctly — it is not approximated) and it briefly appeared in neither table. |
 | `abs` | `abs` | |
 | `round` | `round` | 1-arg direct; 2-arg is Approximated (see below) |
 | `ceiling` | `ceil` | |

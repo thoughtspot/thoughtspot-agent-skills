@@ -44,7 +44,7 @@ offline path is the intended v1 surface.
 
 ## #4 — JAQL formula subset breadth — TO VERIFY on real dashboards
 
-The deterministic `FUNCTION_MAP` / `AGG_MAP` in `ts_cli/sisense/functions.py` covers the common
+The deterministic `FUNCTION_MAP` in `ts_cli/sisense/functions.py` covers the common
 subset observed in the sample bundles. Against a broader set of real customer dashboards, some
 functions currently emitted as Migrated may still be rejected by the ThoughtSpot engine (e.g.
 `median`, `stddev`/`variance` argument shapes), and some now marked NEEDS REVIEW may turn out to

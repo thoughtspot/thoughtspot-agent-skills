@@ -129,9 +129,15 @@ def fact_column_type(fact: dict) -> str:
 # default answer the same. Snowflake's SQL ignores it (verified 2026-10-05).
 CA_FACT_AGGREGATION = {
     "sum": "SUM", "avg": "AVERAGE", "average": "AVERAGE", "min": "MIN", "max": "MAX",
-    "count": "COUNT", "count_distinct": "COUNT_DISTINCT",
+    "count": "COUNT",
     "stddev": "STD_DEVIATION", "variance": "VARIANCE",
 }
+
+# A distinct count is NOT a column aggregation here (invariant I5): ThoughtSpot stores
+# a COUNT_DISTINCT measure over a text or date column as an ATTRIBUTE, for a column
+# and for a formula that only wraps one. The fact becomes a `unique count` formula
+# instead (sv_translate._translate_fact; BL-447).
+CA_FACT_DISTINCT_COUNTS = frozenset({"count_distinct"})
 
 
 def fact_default_aggregations(parsed: dict) -> dict[tuple[str, str], str]:
@@ -165,16 +171,40 @@ def fact_aggregation(
     ``alias_table`` / ``alias_name`` are not that name for a pass-through fact: there
     they are the physical column it aliases (``sv_parse._resolve_rhs_alias``). Keying
     on them lost a renamed fact's own default, and gave it the default of any fact
-    *declared* under its physical column's name (BL-448)."""
-    declared = fact_default_aggregations(parsed).get((str(fact.get("source_table") or "").upper(),
-                             str(fact.get("source_column") or "").upper()))
+    *declared* under its physical column's name (BL-448).
+
+    A declared ``count_distinct`` returns no aggregation: see
+    :func:`fact_counts_distinct`, which turns the fact into a formula."""
+    declared = _declared_default(fact, parsed)
     if not declared or col_type != "MEASURE":
         return None, []
+    if declared.strip().lower() in CA_FACT_DISTINCT_COUNTS:
+        return None, [f"default_aggregation '{declared}' (CA extension) → "
+                      f"unique count formula (I5)"]
     agg = CA_FACT_AGGREGATION.get(declared.strip().lower())
     if agg is None:
         return None, [f"⚑ default_aggregation '{declared}' has no ThoughtSpot column "
                       f"aggregation — kept SUM; Cortex Analyst answers this fact differently"]
     return agg, [f"default_aggregation '{declared}' (CA extension) → {agg}"]
+
+
+def _declared_default(fact: dict, parsed: dict) -> str | None:
+    """The fact's CA ``default_aggregation``, looked up by its DECLARED name (BL-448)."""
+    return fact_default_aggregations(parsed).get(
+        (str(fact.get("source_table") or "").upper(),
+         str(fact.get("source_column") or "").upper()))
+
+
+def fact_counts_distinct(fact: dict, parsed: dict) -> bool:
+    """True when Cortex Analyst answers this fact with a distinct count — a MEASURE
+    fact whose declared ``default_aggregation`` is ``count_distinct``.
+
+    Such a fact is emitted as ``unique count ( <row value> )`` (I5), so it is an
+    AGGREGATE formula: another construct that references it must read its row-level
+    value instead, never its formula id (``sv_resolve.make_resolver`` step 2)."""
+    declared = _declared_default(fact, parsed)
+    return (bool(declared) and declared.strip().lower() in CA_FACT_DISTINCT_COUNTS
+            and fact_column_type(fact) == "MEASURE")
 
 
 def metric_ref(resolve, formula_id: str) -> str:
