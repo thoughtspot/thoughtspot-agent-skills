@@ -12,6 +12,7 @@ import re
 # drift-tested against it (tests/test_formula_translate.py::TestCatalog). It is the
 # same source `ts formula translate`'s output guard checks, not a second list.
 from ts_cli.formula_translate.catalog import is_known
+from ts_cli.formula_translate.refs import bracketed_name
 from ts_cli.tableau.literals import blank_literals_and_refs
 
 
@@ -250,6 +251,12 @@ def validate_output(expr: str) -> list[str]:
             lead = _LEAD_NAME.match(m.group(0))
             if lead:  # a pattern matching at punctuation names no function to dedupe
                 reported.add(lead.group(0).upper())
+    ref = bracketed_name(expr)
+    if ref:
+        # scope_columns reads `[^\]]+`, so it cannot scope such a name, and how ThoughtSpot
+        # escapes a bracket inside a reference is unverified (BL-460 review).
+        ch = "[" if "[" in ref[1:-1].replace("]]", "]") else "]"
+        errors.append(f"field name contains '{ch}' — reference it by hand: {ref}")
     code = _code_only(expr)
     _named_checks(code, errors, reported)
     for name in _unknown_calls(code, reported):

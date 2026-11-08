@@ -280,22 +280,61 @@ class TestVerifyGate:
 
 
 class TestFieldNamesHoldingBrackets:
-    """BL-460 review: a field name is free text and may hold `[` as well as `(`. One
-    reference grammar (formula_translate.refs.REF_GRAMMAR: `[` allowed inside, `]`
-    doubled) is used by validate, classify and `ts formula translate`'s guard."""
+    """BL-460 re-review (blocker). A field name may hold `[` or a doubled `]]`. The
+    scanners read such a name whole (formula_translate.refs.REF_GRAMMAR), but no resolver
+    can: `_BRACKET` / `scope_columns` read a name with no bracket in it, so they resolved
+    a PIECE of it — `[Revenue (net) [EUR]]]` came back TRANSLATED as
+    `sum ( [Revenue (net) [FX::EUR]]])`. How ThoughtSpot escapes a bracket inside a
+    reference is unverified, so such a name is refused: NEEDS_REVIEW in
+    `ts formula translate`, a skip with a reason in the converter."""
 
-    @pytest.mark.parametrize("src", [
-        "SUM([Revenue (net) [EUR]]])",
-        "SUM([Bob's [x] (Sales)])",
-        "COUNTD([Orders [CORR (y)]]])",
+    COLUMNS = ('{"Revenue (net) [EUR]": "ORDERS.Revenue (net) [EUR]", "EUR": "FX.EUR", '
+               '"USD": "FX.USD", "%": "T.PCT", "Profit": "ORDERS.Profit", '
+               '"Revenue (net)": "ORDERS.Revenue (net)"}')
+    NAMES = ["[Revenue (net) [EUR]]]", "[Sales [USD]]]", "[Margin [%] (est)]",
+             "[Profit]] Margin]"]
+
+    def _translate(self, src, dialect):
+        from ts_cli.formula_translate.context import ColumnContext, parse_columns_json
+        from ts_cli.formula_translate.engine import translate
+        return translate(src, dialect, ColumnContext(parse_columns_json(self.COLUMNS), level=1))
+
+    @pytest.mark.parametrize("dialect,template", [
+        ("tableau", "SUM({})"), ("qlik", "Sum({})"), ("thoughtspot", "sum ( {} )"),
+        ("dax", "SUM('Orders'{})"),
     ])
-    def test_converter_does_not_read_a_call_out_of_the_name(self, src):
-        expr, errors, _ = translate_single(src)
-        assert errors == [], (src, expr, errors)
+    @pytest.mark.parametrize("name", NAMES)
+    def test_formula_translate_refuses_and_resolves_nothing(self, dialect, template, name):
+        r = self._translate(template.format(name), dialect)
+        assert r["status"] == "NEEDS_REVIEW" and r["formula"] is None, r
+        assert r["references"] == [], r["references"]   # no piece of the name resolved
+        assert any("bracket" in n for n in r["notes"]), r["notes"]
 
-    def test_formula_translate_guard_does_not_either(self):
+    def test_a_parenthesis_alone_still_resolves(self):
+        r = self._translate("SUM([Revenue (net)])", "tableau")
+        assert (r["status"], r["formula"]) == ("TRANSLATED", "sum ( [ORDERS::Revenue (net)])")
+
+    def test_output_guard_backstop(self):
         from ts_cli.formula_translate.traps import output_guard
-        assert output_guard("sum ( [T::Revenue (net) [EUR]]] )") is None
+        assert "bracket" in output_guard("sum ( [T::Revenue (net) [EUR]]] )")
+        assert output_guard("sum ( [T::Revenue (net)] )") is None
+
+    @pytest.mark.parametrize("name,ch", [("[Revenue (net) [EUR]]]", "["),
+                                         ("[Sales [USD]]]", "["),
+                                         ("[Margin [%] (est)]", "["),
+                                         ("[Profit]] Margin]", "]")])
+    def test_converter_skips_with_the_reason(self, name, ch):
+        scoped = {"Revenue (net) [EUR]": "ORDERS", "EUR": "FX", "USD": "FX", "%": "T",
+                  "Profit": "ORDERS"}
+        result = translate_formulas([_mk("F", f"SUM({name})")], scoped_columns=scoped)
+        assert result["translated"] == [], result["translated"]
+        reason = result["skipped"][0]["reason"]
+        assert f"field name contains '{ch}' — reference it by hand" in reason, reason
+        # and no function is read out of the name
+        assert "untranslated Tableau function" not in reason, reason
+
+    def test_converter_does_not_read_a_call_out_of_a_bracket_free_name(self):
+        assert translate_single("SUM([Bob's (Sales) CORR (y)])")[1] == []
 
 
 class TestClassifyReadsCodeNotNames:

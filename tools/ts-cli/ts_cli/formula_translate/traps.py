@@ -32,7 +32,7 @@ from ts_cli.formula_week import (
     WEEK_DIFF_DAYS_PREFIX, WEEK_START_MISMATCH_PREFIX, week_diff_days_note, week_start_note)
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.catalog import is_known
-from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
+from ts_cli.formula_translate.refs import REF_GRAMMAR, bracketed_name, split_literals
 
 # Dialects whose string comparison is case-sensitive by default (OI-4 applies).
 CASE_SENSITIVE_DIALECTS = {"tableau", "snowflake", "databricks"}
@@ -145,6 +145,22 @@ def leftover_sql(expr: str) -> Optional[str]:
     return None
 
 
+def _text_defect(expr: str) -> Optional[str]:
+    """A defect in how ``expr``'s literals and references are written, or None."""
+    from ts_cli.formula_text import ts_literals_unbalanced
+    if ts_literals_unbalanced(expr):
+        return ("a string literal does not close where ThoughtSpot would read it (a "
+                "backslash-escaped quote, 'it\\'s', or an unbalanced quote): write a quote "
+                "inside text as a double-quoted literal, \"it's\" (BL-365)")
+    ref = bracketed_name(expr)
+    if ref:
+        # Backstop for every dialect (engine refuses the bracket-reference dialects before
+        # translating): a resolver splits such a name and resolves a piece of it.
+        return (f"the output holds a field name containing a bracket ({ref}); it cannot be "
+                "resolved safely — reference it by hand")
+    return None
+
+
 def output_guard(expr: str, allow: frozenset = frozenset(), source: str = "") -> Optional[str]:
     """Why ``expr`` cannot be a valid ThoughtSpot formula, or None.
 
@@ -154,11 +170,9 @@ def output_guard(expr: str, allow: frozenset = frozenset(), source: str = "") ->
     bare ``TOTAL``, ``==``, ``+`` beside a string literal (ThoughtSpot concatenates with
     ``concat``), and the leftover SQL keywords of ``leftover_sql``.
     """
-    from ts_cli.formula_text import ts_literals_unbalanced
-    if ts_literals_unbalanced(expr):
-        return ("a string literal does not close where ThoughtSpot would read it (a "
-                "backslash-escaped quote, 'it\\'s', or an unbalanced quote): write a quote "
-                "inside text as a double-quoted literal, \"it's\" (BL-365)")
+    text_defect = _text_defect(expr)
+    if text_defect:
+        return text_defect
     code = _code(expr)
     for m in _CALL.finditer(code):
         name = m.group(1)

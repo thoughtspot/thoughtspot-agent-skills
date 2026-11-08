@@ -20,11 +20,20 @@ from typing import Optional
 from ts_cli.formula_translate.context import ColumnContext
 
 _QUOTED = re.compile(r"('(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\")")
-# One `[field]` reference. A name is free text: it may hold `(`, a quote or `[`
-# (`[Revenue (net) [EUR]]]`), and a `]` inside it is doubled (Tableau and DAX both escape
-# it that way). The one grammar for a reference: tableau/literals.py and traps._code use
-# it too, so no scan reads a function name out of a column name (BL-460 review).
+# One `[field]` reference as a SCANNER must see it, so that no scan reads a function
+# name, a keyword or a comment out of a column name. A name is free text: it may hold `(`,
+# a quote or `[` (`[Revenue (net) [EUR]]]`), and a `]` inside it is doubled (Tableau, DAX
+# and Qlik escape it that way). The scanners share it: split_literals below,
+# traps._code, tableau/literals.py and the comment strippers (BL-460 review).
+#
+# The RESOLVERS do not: _BRACKET (bracket_refs, qualify_refs) and the converter's
+# scope_columns read `[^[\]]+` / `[^\]]+`, a name with no bracket in it. A name that
+# holds one is therefore never resolved: `bracketed_name` finds it first, and
+# `ts formula translate` returns NEEDS_REVIEW / the converter skips the formula. How
+# ThoughtSpot escapes a bracket inside `[T::col]` is unverified, so there is no safe
+# output to resolve it to.
 REF_GRAMMAR = r"\[(?:[^\]]|\]\])*\]"
+_REF = re.compile(REF_GRAMMAR)
 # A bracketed reference is code even when its name holds a quote ([Bob's Sales::x],
 # BL-369): matched first at its own position so its apostrophe never opens a literal.
 _QUOTED_OR_BRACKET = re.compile(rf"({REF_GRAMMAR})|" + _QUOTED.pattern)
@@ -59,6 +68,21 @@ def split_literals(expr: str, brackets_are_code: bool = True) -> list[tuple[bool
     if pos < len(expr):
         out.append((False, expr[pos:]))
     return out
+
+
+def bracketed_name(expr: str) -> Optional[str]:
+    """The first ``[field]`` reference outside string literals whose name holds ``[`` or
+    ``]`` once a doubled ``]]`` is read as one ``]`` (``[Sales [USD]]]``,
+    ``[Profit]] Margin]``), or None. No resolver here can read such a name (see
+    REF_GRAMMAR), so a caller refuses the formula rather than resolve a piece of it."""
+    for lit, seg in split_literals(expr):
+        if lit:
+            continue
+        for m in _REF.finditer(seg):
+            name = m.group(0)[1:-1].replace("]]", "]")
+            if "[" in name or "]" in name:
+                return m.group(0)
+    return None
 
 
 def _map_code(expr: str, fn) -> str:

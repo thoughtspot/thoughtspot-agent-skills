@@ -10,7 +10,8 @@ import re
 from typing import Any, Optional
 
 from ts_cli.formula_translate.adapters import (
-    ADAPTERS, APPROXIMATED, NEEDS_REVIEW, TRANSLATED, TRANSLATOR_INFO, normalise_dialect,
+    ADAPTERS, APPROXIMATED, NEEDS_REVIEW, TRANSLATED, TRANSLATOR_INFO, RawResult,
+    normalise_dialect,
 )
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.defects import find_defects
@@ -18,7 +19,7 @@ from ts_cli.formula_translate.editor import editor_form
 from ts_cli.formula_translate.prompts import (
     ROLE_GRAIN_DIALECTS, build_needs_types, has_ratio, role_option,
 )
-from ts_cli.formula_translate.refs import split_literals
+from ts_cli.formula_translate.refs import bracketed_name, split_literals
 from ts_cli.spotql_ops import formula_aggregation
 from ts_cli.formula_translate.traps import (
     detect_traps, is_downgrade, output_guard, repair_count_star,
@@ -126,6 +127,36 @@ def _run_adapter(source: str, dialect: str, ctx: ColumnContext,
     return adapter(source, ctx)
 
 
+# Dialects whose `[...]` is a field reference. Not SQL (`v['a']` is a subscript) and not
+# Excel / Sheets (structured references nest brackets: `Table1[[#This Row],[Sales]]`).
+_BRACKET_REF_DIALECTS = {"tableau", "dax", "qlik", "sisense", "thoughtspot"}
+
+
+def _bracketed_name_note(source: str, dialect: str) -> Optional[str]:
+    """Why ``source`` is refused before translating, or None: a field name holding a
+    bracket, which no resolver can read whole (``[Revenue (net) [EUR]]]`` resolved its
+    inner ``[EUR]`` to another table's column and came back TRANSLATED, BL-460 review)."""
+    if dialect not in _BRACKET_REF_DIALECTS:
+        return None
+    ref = bracketed_name(source)
+    if ref is None:
+        return None
+    return (f"field name contains a bracket: {ref} — it cannot be resolved safely "
+            "(how ThoughtSpot escapes a bracket inside a reference is unverified); "
+            "reference it by hand")
+
+
+def _refuse_or_adapt(source: str, dialect: str, ctx: ColumnContext,
+                     sisense_context: Optional[dict], tableau_role: Optional[str],
+                     first_week_day: Optional[int]):
+    """The adapter's result, or a refusal decided before it runs (so no piece of a
+    bracketed field name is resolved or recorded)."""
+    refused = _bracketed_name_note(source, dialect)
+    if refused:
+        return RawResult(None, NEEDS_REVIEW, [refused])
+    return _run_adapter(source, dialect, ctx, sisense_context, tableau_role, first_week_day)
+
+
 def _post_process(raw, dialect: str, source: str, ctx: ColumnContext):
     """COUNT(*) repair, leftover-keyword guard, traps. Returns (expr, status, notes, traps)."""
     out, status, notes = raw.expr, raw.status, list(raw.notes)
@@ -179,7 +210,8 @@ def translate(expr: str, dialect: str, ctx: Optional[ColumnContext] = None, *,
     source, had_comments = strip_comments(source, dialect)
     if not source:
         raise ValueError("the formula is only a comment")
-    raw = _run_adapter(source, dialect, ctx, sisense_context, tableau_role, first_week_day)
+    raw = _refuse_or_adapt(source, dialect, ctx, sisense_context, tableau_role,
+                           first_week_day)
     if had_comments:
         raw.notes.append("comments were removed before translating")
     out, status, notes, traps = _post_process(raw, dialect, source, ctx)
