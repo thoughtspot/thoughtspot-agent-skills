@@ -223,11 +223,15 @@ def validate_meta(skill_dir: Path, meta: object) -> List[str]:
     if not isinstance(meta, dict):
         return ["frontmatter has no `metadata:` mapping (needs at least category and summary)"]
     # The Agent Skills spec defines `metadata` as a string-to-string map, and the
-    # runtimes were only verified loading string values. An empty value (`key:`) is
-    # null, reported as missing below when the key is required.
-    errors = [f"metadata.{k} must be a string (`metadata` is a string-to-string map), "
-              f"got {type(v).__name__} {v!r}"
-              for k, v in meta.items() if v is not None and not isinstance(v, str)]
+    # runtimes were only verified loading string values. Keys too: YAML reads an
+    # unquoted `yes:` as True and `1:` as 1. An empty value (`key:`) is null, reported
+    # as missing below when the key is required.
+    errors = [f"metadata key {k!r} must be a string (`metadata` is a string-to-string map); "
+              f"YAML read it as {type(k).__name__}, so quote it"
+              for k in meta if not isinstance(k, str)]
+    errors += [f"metadata.{k} must be a string (`metadata` is a string-to-string map), "
+               f"got {type(v).__name__} {v!r}"
+               for k, v in meta.items() if v is not None and not isinstance(v, str)]
     category = meta.get("category")
     if _blank(category):
         return errors + [f"metadata.category is missing; set one of: {', '.join(_BY_NAME)}"]

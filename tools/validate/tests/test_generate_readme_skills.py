@@ -255,6 +255,23 @@ def test_a_non_string_required_value_is_reported_once(tree, capsys):
     assert out.count(f"FAIL  {rel}: metadata.platform") == 1
 
 
+def test_a_list_valued_category_is_a_fail_line_not_a_type_error(tree, capsys):
+    """A list is unhashable: a membership test against the category names would raise
+    TypeError and crash the gate instead of naming the file."""
+    rel = _set_meta(tree, "ts-audit", 'metadata:\n  category: [Setup]\n  summary: "Scan"\n')
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata.category must be a string" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("line, shown", [("yes: x", "True"), ("1: x", "1")], ids=["yes", "int"])
+def test_a_non_string_metadata_key_fails_naming_the_file(tree, capsys, line, shown):
+    """YAML 1.1 reads an unquoted `yes` key as True and `1` as an int."""
+    rel = _set_meta(tree, "ts-audit",
+                    f'metadata:\n  category: "Platform & Governance"\n  {line}\n  summary: "Scan"\n')
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata key {shown} must be a string" in capsys.readouterr().out
+
+
 # ── failure modes ──────────────────────────────────────────────────────────────
 
 
