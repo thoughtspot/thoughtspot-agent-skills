@@ -242,6 +242,12 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("COT", lambda a: f"( 1 / tan ( {a[0]} ) )" if len(a) == 1 else None),
 
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
+    # DATETIME(expr): the cast to a timestamp, as the warehouse's own TO_TIMESTAMP. The
+    # mapping doc's form ("Formerly untranslatable, now mapped"), verified on se-thoughtspot
+    # 2026-06-15 but never wired in: it passed through verbatim until the BL-460 catch
+    # skipped it, which took it out of the parked-formula fix cycle too (BL-460 review).
+    ("DATETIME", lambda a: (f'sql_date_time_op ( "TO_TIMESTAMP({{0}})" , {a[0]} )'
+                            if len(a) == 1 else None)),
 
     # Pass-through rescues (tableau-formula-translation.md "Functions with no
     # native ThoughtSpot equivalent — pass-through", lines ~989-995) — no

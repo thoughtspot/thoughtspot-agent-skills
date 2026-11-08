@@ -349,3 +349,22 @@ class TestCatalogFamilies:
         for name in ("cumulative_count", "moving_count", "moving_stddev", "group_concat"):
             assert not is_known(name), name
             assert output_guard(f"{name} ( [T::a] )"), name
+
+
+class TestDatetime:
+    """BL-460 review: DATETIME has a documented, live-verified pass-through
+    (tableau-formula-translation.md, verified 2026-06-15). The survivor catch took it
+    out of the parked-formula fix cycle, so the converter now applies it."""
+
+    def test_datetime_translates_to_the_documented_pass_through(self):
+        expr, errors, _ = translate_single("DATETIME([Order Date])")
+        assert errors == []
+        assert expr == 'sql_date_time_op ( "TO_TIMESTAMP({0})" , [Order Date] )'
+
+    def test_in_any_spelling_and_over_a_literal(self):
+        expr, errors, _ = translate_single("datetime('2026-01-31 10:00:00')")
+        assert errors == []
+        assert expr == "sql_date_time_op ( \"TO_TIMESTAMP({0})\" , '2026-01-31 10:00:00' )"
+
+    def test_wrong_arity_is_still_a_survivor(self):
+        assert any("DATETIME" in e for e in _errors("DATETIME([a], [b])"))
