@@ -350,6 +350,7 @@ are roughly ordered by value÷effort.
 | BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
 | BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
 | BL-539 | Cascade delete reads 14531 on a Model as "no feedback": probe whether a Spotter-disabled Model still owns feedback, then keep the mapping with a test or make it unchecked (#692 accepted edge case) | 2026-12-31 |
+| BL-540 | Power BI `DISTINCTCOUNT` counts a BLANK key as one value; the `unique count` it maps to likely does not, so the plain row may be off by one with no note (#517 review) | 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -16805,5 +16806,34 @@ delete removes the feedback without listing or backing it up. Unverified either 
    says a "Model's or View's" feedback (Models only since #692).
 
 Related: BL-513 (every delete path agreeing on Sets and feedback) may absorb the helper.
+
+**Target:** 2026-12-31.
+
+## BL-540 — Power BI `DISTINCTCOUNT` → `unique count`: a BLANK key is one more value in DAX `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** the PR #517 re-review (2026-11-07), should-fix 4. #517
+documents the difference on the gated `unique_count_if` path; this item is the plain row
+that already ships on `main`.
+
+**What.** `DISTINCTCOUNT(t[c])` maps to `unique count ( [t::c] )`, marked **Mapped**
+(`powerbi-formula-translation.md` row `DISTINCTCOUNT`, `coverage-matrix.md`,
+`AGG_MAP` in `tools/ts-cli/ts_cli/powerbi/functions.py`). Microsoft documents that
+`DISTINCTCOUNT` counts BLANK as a value, which is why `DISTINCTCOUNTNOBLANK` exists.
+`unique count` is expected to compile to `COUNT(DISTINCT …)`, which ignores NULL. If so,
+every converted distinct count over a key column that contains blanks is one lower than
+Power BI's, labelled Mapped, with no note. Not verified live.
+
+**Do.**
+
+1. Probe on a scratch Model over a column with NULLs: `unique count` result and the
+   generated SQL (`ts-object-model-agentql-query` / `agentql generate-sql`).
+2. If NULLs are excluded: map `DISTINCTCOUNTNOBLANK` → `unique count` as Mapped, and
+   either translate `DISTINCTCOUNT` exactly (e.g. `unique count` plus a has-null term,
+   probed) or downgrade it to Approximated with a note saying it can be one lower.
+   Update the mapping doc, the coverage matrix and the translator together
+   (`check_mapping_code_sync.py`), with tests.
+3. Check the same question for the other converters' distinct-count rows (Tableau
+   `COUNTD`, Qlik `Count(DISTINCT …)`, Sisense `count`, which is distinct in JAQL), which
+   are believed to exclude NULL like SQL, and record the answer either way.
 
 **Target:** 2026-12-31.
