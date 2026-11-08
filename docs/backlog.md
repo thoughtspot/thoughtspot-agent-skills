@@ -147,19 +147,19 @@ are roughly ordered by value÷effort.
 | BL-122 | Cross-skill prompt/discovery extraction | next converter edit |
 | BL-127 | Roll out context-budget rule to all conversion skills | next converter edit |
 | BL-129 | One-pass CLI guidance + batch ops across converters | next converter edit |
-| BL-130 | Canonical data-type audit across converters (DATE_TIME) | 2026-09-30 |
-| BL-095 | connections add-tables missing authenticationType | 2026-08-31 |
+| BL-130 | Canonical data-type audit across converters (DATE_TIME) | 2026-12-15 |
+| BL-095 | connections add-tables missing authenticationType | 2026-12-31 |
 | BL-120 | Live e2e verification for ts-convert-from-qlik | first live pass |
 | BL-115 | Smoke test for ts-convert-from-looker | first live pass |
 | BL-126 | Migrate AgentQL smoke test from champ-staging to se-thoughtspot | blocked on instance |
 | BL-135 | Live e2e verification for ts-object-model-alias | first live pass |
-| BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-09-30 |
-| BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-10-31 |
-| BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2026-09-30 |
+| BL-076 | Smoke test backfills: answer-promote + from-tableau | 2026-12-15 |
+| BL-084 | Codify profile substrate as `ts profiles add/update/remove` | 2026-12-31 |
+| BL-071 | Tableau user-function → ThoughtSpot RLS variables | 2027-01-31 |
 | BL-073 | ~~ts-audit / ts-cli round-trip batching (perf)~~ | DONE |
-| BL-030 | Model-coach: migrate to `ai/instructions` API | 2026-09-30 |
-| BL-032 | Databricks MV: parser for GA constructs (`materialization:`, `fields:`) | 2026-09-30 |
-| BL-031 | Snowflake to-SV: emit `facts[]` / `sample_values` / filter-labels | 2026-09-30 |
+| BL-030 | Model-coach: migrate to `ai/instructions` API | 2026-12-31 |
+| BL-032 | Databricks MV: parser for GA constructs (`materialization:`, `fields:`) | 2026-12-31 |
+| BL-031 | Snowflake to-SV: emit `facts[]` / `sample_values` / filter-labels | 2026-12-15 |
 | ~~BL-005~~ | ~~Databricks runtime: ThoughtSpot client + conversion skills~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-011 | ts-object-connection-create skill + `ts connections create` CLI | — |
 | BL-014 | Databricks MV → ThoughtSpot mapping coverage review | — |
@@ -1492,7 +1492,7 @@ from `ts-link-semantic-layer`, behind the BL-318 keep/discard check.
 
 **Note (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 5.2) — BL-311 merged in.** `setNLInstructions` is still implemented only as the private `_set_instructions` in `link.py`, and model-coach still ships the manual-paste step while citing an open item this section records as verified. Add a public `ts models instructions get|set` with get-and-merge (the replace-vs-append question above), call it from `ts link` and switch model-coach to it. BL-311 was a duplicate of this item and is closed into it; its second-order point comes with it: `ai/memory/export`/`import` (Spotter memory, 26.8.0.cl) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` leave it behind when they move a Model. The overdue target below is re-dated or closed under BL-476, not here.
 
-**Target:** 2026-09-30.
+**Target:** 2026-12-31. *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -1530,7 +1530,7 @@ information to scope them.
    and populate `sample_values` for dimensions; stop stripping the now-valid fields.
 3. Bump the `snowflake-schema.md` currency anchor to a live-verified date.
 
-**Target:** 2026-09-30.
+**Target:** 2026-12-15 (after BL-450's Complete Schema correction, which it reads as its spec). *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -1624,7 +1624,7 @@ underpins a large translation block but is marked **Experimental** in current do
    — this is a resolved refinement, not an open divergence or blocker. Full evidence:
    `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md` (A3).
 
-**Target:** 2026-09-30.
+**Target:** 2026-12-31. *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -2593,7 +2593,7 @@ translation exists yet.
   to `tableau-formula-translation.md`, and move the rows in coverage-matrix.md from
   "Rejected at Translate Time" (U7 / U9) into "Mapped Constructs"
 
-**Target:** 2026-09-30.
+**Target:** 2027-01-31. *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -2732,7 +2732,7 @@ backfilled. Remove both ALLOWLIST entries when the smokes land.
 **Park note (2026-07-23):** deferred; the Tableau half needs a committed `.twb` fixture plus
 an E2E import test written against it before this can close.
 
-**Target:** 2026-09-30.
+**Target:** 2026-12-15. *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -2935,7 +2935,7 @@ reference and swap the inline JSON-parse for `ts profiles list --json`. (BL-122'
 11.3 note is corrected separately — see that entry — and cross-references this one
 rather than duplicating the adopter list.)
 
-**Target:** 2026-10-31.
+**Target:** 2026-12-31. *(Re-dated 2026-11-08: the earlier target (2026-10-31) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -3135,7 +3135,7 @@ Two distinct findings:
    2026-07-08. Re-verify after the fix in (1) lands and on a newer cloud build before
    assuming the CLI fix alone resolves it; incident GUIDs are in the claim matrix.
 
-**Target:** (2) re-check on next se-thoughtspot build update.
+**Target:** 2026-12-31. *(Re-dated 2026-11-08: the earlier target ((2) re-check on next se-thoughtspot build update) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
@@ -3952,7 +3952,7 @@ local lint does NOT catch.
 
 **Approach:** grep each converter's type-map module against the Table-TML schema type table; add a unit test
 per converter asserting each source type → a schema-valid TS type. Consider a shared validator.
-**Target:** 2026-09-30.
+**Target:** 2026-12-15. *(Re-dated 2026-11-08: the earlier target (2026-09-30) lapsed with the item not started or not finished; no change in scope.)*
 
 ---
 
