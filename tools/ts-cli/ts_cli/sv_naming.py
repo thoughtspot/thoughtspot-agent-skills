@@ -158,9 +158,16 @@ def fact_aggregation(
 ) -> tuple[str | None, list[str]]:
     """(aggregation, annotations) for a fact from its declared ``default_aggregation``
     in the parsed SV's CA extension. None keeps ThoughtSpot's SUM. Only a MEASURE fact
-    takes one — an ATTRIBUTE is not aggregated."""
-    declared = fact_default_aggregations(parsed).get((str(fact.get("alias_table", "")).upper(),
-                             str(fact.get("alias_name", "")).upper()))
+    takes one — an ATTRIBUTE is not aggregated.
+
+    The CA JSON names a fact by its **declared** name — the left-hand side
+    ``TABLE.NAME`` of ``TABLE.NAME as …`` (``source_table`` / ``source_column``).
+    ``alias_table`` / ``alias_name`` are not that name for a pass-through fact: there
+    they are the physical column it aliases (``sv_parse._resolve_rhs_alias``). Keying
+    on them lost a renamed fact's own default, and gave it the default of any fact
+    *declared* under its physical column's name (BL-448)."""
+    declared = fact_default_aggregations(parsed).get((str(fact.get("source_table") or "").upper(),
+                             str(fact.get("source_column") or "").upper()))
     if not declared or col_type != "MEASURE":
         return None, []
     agg = CA_FACT_AGGREGATION.get(declared.strip().lower())

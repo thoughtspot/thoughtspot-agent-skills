@@ -1323,3 +1323,28 @@ class TestFactDefaultAggregation:
         assert _column_props(f, is_formula=True)["aggregation"] == "AVERAGE"
         g = self._facts()["GROSS_PROFIT"]
         assert _column_props(g, is_formula=True)["aggregation"] == "SUM"
+
+    # BL-448: the CA extension names a fact by its DECLARED name. A pass-through fact
+    # that renames its column (`S.UNIQUE_CUSTOMERS as s.customer_id`) parses with
+    # alias_name = the physical column, and the lookup was keyed on that, so the
+    # renamed fact lost its own default and could take another fact's.
+    RENAMED = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID) )
+\tfacts ( S.UNIQUE_CUSTOMERS as s.customer_id, S.TOTAL_COST as s.costs,
+\t        S.COSTS as gross - margin )
+\tdimensions ( S.REGION as region )
+\twith extension (CA='{"tables":[{"name":"S","dimensions":[{"name":"REGION"}],"facts":[{"name":"UNIQUE_CUSTOMERS","default_aggregation":"count_distinct"},{"name":"COSTS","default_aggregation":"avg"}]}]}');"""
+
+    def test_renamed_passthrough_fact_takes_its_own_default(self):
+        f = self._facts(self.RENAMED)["UNIQUE_CUSTOMERS"]
+        assert f["column_type"] == "MEASURE"
+        assert any("default_aggregation 'count_distinct'" in a for a in f["annotations"]), f
+        assert f["aggregation"] is not None, "the declared count_distinct was lost (BL-448)"
+
+    def test_renamed_passthrough_fact_does_not_take_another_facts_default(self):
+        facts = self._facts(self.RENAMED)
+        # TOTAL_COST aliases physical column `costs`; the `avg` belongs to the fact
+        # DECLARED as COSTS, which is a different construct.
+        assert facts["TOTAL_COST"]["aggregation"] is None, facts["TOTAL_COST"]
+        assert not any("default_aggregation" in a for a in facts["TOTAL_COST"]["annotations"])
+        assert facts["COSTS"]["aggregation"] == "AVERAGE"
