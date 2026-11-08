@@ -358,6 +358,7 @@ are roughly ordered by value÷effort.
 | BL-546 | `ts tml import` GUID back-fill matches by name across every LOGICAL_TABLE subtype and connection | 2026-12-15 |
 | BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
 | BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
+| BL-550 | `ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -17049,3 +17050,13 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 - **`conversion-consistency-auditor.md:89`** still scopes checks to "I1–I7 and N1".
 
 **Target:** 2026-12-31.
+
+## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** review of the README skills-metadata branch (`feat/skill-category-metadata`): ts-load-source-data's summary said it loads CSV data into Snowflake or Databricks, and for Databricks the code does not.
+
+**What.** `ts load databricks --source <path>` calls `infer_schema(source)` and then, for every table, `generate_csv(...)` and INSERTs those synthetic rows (`tools/ts-cli/ts_cli/commands/load.py`, the `databricks` command, around lines 902-921). A CSV directory passed as `--source` contributes its columns and nothing else, yet the command prints `loaded <catalog>.<schema>.<table> (N rows)` and its JSON reports `rows`, indistinguishable from a real load. Only `ts load snowflake` copies a CSV's own rows (`COPY INTO`, around lines 557 and 671-673), and it refuses a schema-only source unless `--generate-sample` is passed. A user loading real data into Databricks gets fabricated values in ThoughtSpot with no warning. The skill now says so (ts-load-source-data 1.1.1, Step 2); the CLI still does not.
+
+**Do.** Either load the real rows (INSERT the parsed CSV rows in batches, as the synthetic path already does, or stage and `COPY INTO`), or refuse a source that has data files unless an explicit flag asks for synthetic rows, and warn on stderr whenever synthetic rows are inserted. Match Snowflake's `--generate-sample` contract so the two loaders agree. Add a unit test that a CSV source's own values reach the INSERT, or that the command refuses.
+
+**Target:** 2026-12-15.
