@@ -1442,3 +1442,45 @@ class TestDistinctCountFact:
         # SALES keeps its own columns, so nothing is added there.
         assert all(not str(c.get("column_id", "")).startswith("SALES::customer_id")
                    for c in model["columns"])
+
+
+class TestMetricOverPassthroughDistinctCountFact:
+    """Review blocker on BL-447: a COUNT/MIN/MAX metric over a PASS-THROUGH distinct-count
+    fact resolved the fact at step 1 to a bare `[T::c]`, so the simple-aggregate
+    classifier made the metric a physical `column_id` measure (aggregation COUNT/MIN),
+    which ThoughtSpot demotes on a text or date key (BL-265). Before BL-447 the fact
+    itself held that column_id, so the metric was promoted to a formula (I8)."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( O as DB.SCH.ORDERS primary key (ORDER_ID) )
+\tfacts ( O.CUSTOMER_ID as o.customer_id, O.AMOUNT as o.amount )
+\tdimensions ( O.REGION as region )
+\tmetrics ( O.ORDER_LINES as COUNT(o.customer_id), O.FIRST_CUSTOMER as MIN(o.customer_id),
+\t          O.TOTAL as SUM(o.amount) )
+\twith extension (CA='{"tables":[{"name":"O","facts":[{"name":"CUSTOMER_ID","default_aggregation":"count_distinct"}]}]}');"""
+
+    def _out(self):
+        return {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+
+    def test_count_and_min_over_the_fact_stay_formulas(self):
+        out = self._out()
+        for name, fn in (("ORDER_LINES", "count"), ("FIRST_CUSTOMER", "min")):
+            e = out[name]
+            assert e["output_kind"] == "formula", e
+            assert e["ts_expr"] == f"{fn} ( ( [ORDERS::customer_id] ) )", e
+
+    def test_a_metric_over_an_ordinary_passthrough_fact_is_unchanged(self):
+        e = self._out()["TOTAL"]
+        assert (e["output_kind"], e["table"], e["column"], e["aggregation"]) == \
+            ("column", "ORDERS", "amount", "SUM")
+
+    def test_no_physical_measure_on_the_counted_key(self):
+        from ts_cli.sv_build_model import build_model_tml_sv
+        parsed = parse_sv_ddl(self.DDL)
+        doc, _ = build_model_tml_sv(model_name="M", parsed=parsed,
+                                    translated_doc=translate_sv_formulas(parsed),
+                                    tables={"O": {"name": "ORDERS", "fqn": "g"}})
+        measures_on_key = [c for c in doc["model"]["columns"]
+                           if c.get("column_id") == "ORDERS::customer_id"
+                           and c["properties"].get("column_type") == "MEASURE"]
+        assert measures_on_key == [], measures_on_key

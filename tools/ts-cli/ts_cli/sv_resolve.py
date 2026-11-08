@@ -388,8 +388,14 @@ def make_resolver(
             metric = metric_idx.get(key)
 
             # Step 1 — a passthrough construct IS the physical column it aliases.
+            # A distinct-count passthrough's column is held by no Model column (the
+            # fact is a `unique count` formula), so a bare `[T::c]` would let the
+            # simple-aggregate classifier turn COUNT/MIN/MAX(fact) into a physical
+            # measure on the key, demoted on a text or date column (BL-265). The
+            # parentheses keep such a metric a formula, as `_row_value` does (BL-447).
             if fact is not None and fact.get("expr") is None:
-                return _physical_ref(fact, col)
+                ref = _physical_ref(fact, col)
+                return f"( {ref} )" if fact_counts_distinct(fact, parsed) else ref
             if metric is not None and metric.get("expr") is None:
                 return _physical_ref(metric, col)
 
