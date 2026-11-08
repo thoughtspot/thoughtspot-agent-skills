@@ -5334,7 +5334,8 @@ standalone split PR.
 `check_coverage_matrix.py`, `check_skill_naming.py`, `check_no_inline_requests.py`,
 `check_file_size.py`, `check_sv_yaml.py`, `check_version_sync.py`, `check_yaml.py`,
 `generate_parity.py`), `tools/validate/tests/`, `tools/smoke-tests/smoke_ts_convert_from_qlik.py`.
-**Status:** OPEN.
+**Status:** OPEN. (2026-11-08: `check_runtime_coverage.py` and `generate_parity.py` were
+retired with the CoCo/Genie runtimes, so eight gates remain in scope.)
 
 Ten `tools/validate/` gates have zero tests of their own -- including five non-trivial
 ones (`check_consistency.py` at 295 lines, `check_runtime_coverage.py`,
@@ -15201,7 +15202,8 @@ empty-value fix in `check_secrets.py` and `check_customer_references.py`).
   `tools/validate/check_sv_yaml.py` test `if args.file:`, so `--file ""` falls through to the
   whole-repo scan and reports that instead (measured: "All 17 TML block(s) valid", exit 0).
 - **A missing own input reads as nothing to check.** `check_converter_parity.py`,
-  `check_coverage_matrix.py`, `check_mapping_code_sync.py`, `check_runtime_coverage.py` and
+  `check_coverage_matrix.py`, `check_mapping_code_sync.py`, `check_runtime_coverage.py` (since
+  retired with the CoCo/Genie runtimes, 2026-11-08) and
   `check_skill_naming.py` print "Nothing to check" and exit 0 when they find no skills to read,
   and `check_internal_imports.py` does the same when its scan root is missing, so a wrong
   `--root` or a moved directory passes.
@@ -15304,7 +15306,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Do.** As spec C3 describes: a meta-check that every gate in `tools/validate/checks.py` (and pr_ready's PR-only/every-PR gates) has a known-bad fixture, with the uncovered ones listed in one dated follow-up; `check_module_health` compares complexity values per function (refactors that move keys pass); `check_file_size` fails a raise against base unless labelled with a cited BL; `pr-ready` warns when a PR edits a gate and product code together.
 
-**Also covers (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 6.4):** three blocking gates have no self-test today — `check_harness_routing`, `generate_parity --check` and `suggest_dependency_types`; the meta-check should list them until they do. The Haiku fixtures for `check_harness_routing` are BL-466.
+**Also covers (2026-10-29 full audit, `docs/audit/2026-10-29-full.md` finding 6.4):** three blocking gates have no self-test today — `check_harness_routing`, `generate_parity --check` (retired 2026-11-08 with the CoCo/Genie runtimes, so now two) and `suggest_dependency_types`; the meta-check should list them until they do. The Haiku fixtures for `check_harness_routing` are BL-466.
 
 **Target:** 2026-12-31.
 
@@ -16614,7 +16616,7 @@ delete path in the repo handles that differently:
 | `ts dependency apply-change` (`commands/dependency_apply.py`) | only Sets the plan lists | not checked |
 | `ts migrate` teardown (`commands/migrate.py`) | gated by `sets/discover.py` (BL-325) | not checked |
 | `ts dependency cascade-delete` (PR #692) | refused | refused |
-| Databricks `ts_client.delete` (`agents/databricks/notebooks/ts_client.py`) | not checked | not checked |
+| ~~Databricks `ts_client.delete` (`agents/databricks/notebooks/ts_client.py`)~~ | retired with the Genie runtime 2026-11-08 | — |
 
 `formula_translate/validate.py` deletes only the scratch Model it created, so it is out
 of scope.
