@@ -41,7 +41,7 @@ def _triggers() -> list[tuple[int, str]]:
     lines = PRE_COMMIT.read_text(encoding="utf-8").splitlines()
     found = [(n, m.group("cond")) for n, line in enumerate(lines, 1)
              if (m := _TRIGGER.match(line))]
-    assert len(found) >= 36, f"expected the hook's ~39 triggers, parsed {len(found)}"
+    assert len(found) >= 37, f"expected the hook's ~39 triggers, parsed {len(found)}"
     return found
 
 
@@ -106,7 +106,7 @@ def test_every_trigger_fires_on_a_staged_list_over_64_kib(tmp_path):
         + "\n".join(quiet)
     # A trigger no tracked path matches is not exercised here; there should be none.
     assert not unmatched, "triggers no tracked path matches:\n" + "\n".join(unmatched)
-    assert exercised >= 36
+    assert exercised >= 37
 
 
 def test_the_old_pipe_form_misfires_on_the_same_input(tmp_path):
