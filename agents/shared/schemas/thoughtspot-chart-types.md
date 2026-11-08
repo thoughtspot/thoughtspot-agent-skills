@@ -5,9 +5,9 @@
 _First verified live on se-thoughtspot 2026-06-16 against model `P1-UK-Bank-Customers`
 (liveboard `5db36c15-00a5-45bb-b764-2fffd2fcb269`): the enum was read from the import
 validator's own error message (the authoritative source), and 24 types were imported +
-round-tripped to confirm they bind. **Re-read 2026-11-08** (BL-449) the same way on two
-internal dev-build clusters (profiles `spotql-setops` and `semantic-sql`, identical lists);
-see "Provenance" below for what that does and does not prove._
+round-tripped to confirm they bind. **Re-read 2026-11-08** (BL-449) the same way on
+internal dev builds that report no release version; see "Provenance" below for what that
+does and does not prove._
 
 ## The authoritative `answer.chart.type` enum (52 values)
 
@@ -28,8 +28,8 @@ STACKED_BAR, STACKED_COLUMN, TREEMAP, WATERFALL, WHISKER_SCATTER
 
 **Provenance.** Method: `ts tml import --policy VALIDATE_ONLY` of an Answer whose
 `chart.type` is not a real value; the error (code 14528) lists every allowed value.
-VALIDATE_ONLY creates nothing. Both clusters report `release_version: test`, so this is
-the enum in **current product code, not in a named release**. A value can be here and still
+VALIDATE_ONLY creates nothing. The builds report no release version, so this is the
+enum in **current product code, not in a named release**. A value can be here and still
 be rejected by your cluster, and one rejected value fails the whole import. The 44 values
 read on 2026-06-16 from the SE demo cluster (a release build) are all still present. The 8
 added since are `ADVANCED_*` types (see "Which types the new library covers" below).
@@ -90,8 +90,7 @@ ThoughtSpot has two charting libraries:
   **`ADVANCED_*`** type names with `chart.custom_chart_config`. _(Note: the TML enum and
   ThoughtSpot's own internal error messages call these "advanced" / the Legacy ones
   "standard". The release notes say "new charts library". **Muze** is the engine's name,
-  as in the cluster's `muze*` config flags and the `MUZE_STUDIO` type. The literal
-  `ADVANCED_*` enum values are unchanged.)_
+  as in the `MUZE_STUDIO` type. The literal `ADVANCED_*` enum values are unchanged.)_
 
 ### Status
 
@@ -107,11 +106,8 @@ per chart. A Tableau viz with a third axis, or with two dimensions on Color, doe
 one new-library chart.
 
 The `newChartsLibrary` property on `SearchViewConfig` / `LiveboardViewConfig` (Visual
-Embed SDK) controls enablement in an embed. The dev builds read on 2026-11-08 also carry
-one enablement flag per added type (`muzeWaterfallChartEnabled`, `muzeDonutChartEnabled`,
-…, all on there). So the enum alone may not show whether a type is switched on for a
-cluster. How a tile of a switched-off type renders is unverified. _The shelf-model findings below were verified live on
-se-thoughtspot 2026-06-17 unless dated otherwise._
+Embed SDK) controls enablement in an embed. _The shelf-model findings below were verified
+live on se-thoughtspot 2026-06-17 unless dated otherwise._
 
 ### Which types the new library covers
 
@@ -124,7 +120,7 @@ without the prefix, except `ADVANCED_DONUT`, whose twin is `PIE`:
 | `WATERFALL`, `PARETO`, `FUNNEL`, `HEATMAP` | same name | 26.10 | enum, plus a VALIDATE_ONLY import with and without `axis_configs` (both accepted), dev build, 2026-11-08. Not imported or rendered |
 | `SCATTER`, `BUBBLE` | same name | not stated | as above. Three existing `ADVANCED_SCATTER` Answers on the dev build export a `custom_chart_config` (shelves below) |
 | `DONUT` | `PIE` | not stated | as above |
-| `CANDLESTICK` | `CANDLESTICK` | **no release note found** | enum only (dev build). Treat it as unreleased |
+| `CANDLESTICK` | `CANDLESTICK` | **no release note** | in the enum on a dev build; no release note — do not emit |
 
 These have **no** `ADVANCED_*` twin and stay on Legacy: `TREEMAP`, `SANKEY`, `SPIDER_WEB`,
 `WHISKER_SCATTER`, every `GEO_*`, `KPI`, `GRID_TABLE`. (`CUSTOM_CHART` and `MUZE_STUDIO`
