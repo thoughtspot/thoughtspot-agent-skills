@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.tableau.literals import mask_refs, unmask_refs
 from ts_cli.tableau.parsing import _extract_function_args
 
 
@@ -40,6 +41,35 @@ def strip_comments(formula: str) -> str:
             result.append(c)
             i += 1
     return ''.join(result).strip()
+
+
+# ---------------------------------------------------------------------------
+# Pre-0c. One spelling per Tableau function (BL-460 review)
+# ---------------------------------------------------------------------------
+#
+# Tableau function names are case-insensitive, so `log2(` and `LOG2(` are one call. Every
+# mapping here matches case-insensitively and emits lower case, and the survivor catch in
+# validate.py reads a lower-case name as converter output. A source written in lower case
+# leaked through it: `log2(` (a ThoughtSpot name, though LOG2 is unmapped until a live
+# check) and `group_concat(` passed while `LOG2(` was skipped. Upper-casing every call name
+# in the source first gives one spelling: whatever comes out in lower case, the converter
+# wrote. Operators keep their case; [field] references are masked, and string literals are
+# already placeholders when this runs.
+_SOURCE_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)(\s*\()")
+_KEEP_CASE = frozenset(
+    {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
+
+
+def upper_call_names(expr: str) -> str:
+    """Upper-case every function name called in a Tableau source ``expr`` (not operators,
+    not inside ``[field]`` references). Run on the literal-masked source."""
+    masked, refs = mask_refs(expr)
+
+    def _upper(m: re.Match) -> str:
+        name = m.group(1)
+        return m.group(0) if name.lower() in _KEEP_CASE else name.upper() + m.group(2)
+
+    return unmask_refs(_SOURCE_CALL.sub(_upper, masked), refs)
 
 
 # ---------------------------------------------------------------------------

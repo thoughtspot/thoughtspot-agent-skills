@@ -74,10 +74,27 @@ class TestReproduction:
         expr, errors, _ = translate_single("SUM(VAR([Sales])) / COUNTD([Customer])")
         assert any("VAR" in e for e in errors), (expr, errors)
 
-    def test_any_case_is_caught(self):
-        """Tableau is case-insensitive, so `var(` and `Corr(` are the same calls."""
-        assert any("var" in e for e in _errors("var([Sales])"))
-        assert any("Corr" in e for e in _errors("Corr([Sales], [Profit])"))
+    @pytest.mark.parametrize("fn", ["VAR", "LOG2", "CORR", "GROUP_CONCAT"])
+    def test_any_case_is_caught(self, fn):
+        """Tableau is case-insensitive: every spelling is the same call and gets the same
+        verdict. `log2(` and `group_concat(` used to pass (a ThoughtSpot name, and the
+        catalog's old `group_` prefix rule) while `LOG2(` / `GROUP_CONCAT(` were skipped."""
+        args = "([Sales], [Profit])" if fn == "CORR" else "([Sales])"
+        verdicts = {}
+        for spelling in (fn, fn.lower(), fn.capitalize()):
+            errors = _errors(spelling + args)
+            assert errors, f"{spelling}{args} passed through"
+            verdicts[spelling] = errors
+        assert len({tuple(v) for v in verdicts.values()}) == 1, verdicts
+        assert fn in verdicts[fn][0], verdicts[fn]
+
+    def test_lower_case_mapped_functions_still_translate(self):
+        for src, out in (("sum([x])", "sum ( [x])"), ("countd([x])", "unique count ( [x])"),
+                         ("zn([x]) + 1", "[x] + 1"),  # a measure's ifnull(x, 0) is stripped
+                         ("datediff('day', [a], [b])", "diff_days ( [b] , [a] )"),
+                         ("if [x] > 1 then 'a' else 'b' end", "if ( [x] > 1 ) then 'a' else 'b'")):
+            expr, errors, _ = translate_single(src)
+            assert (expr, errors) == (out, []), src
 
     def test_one_reason_per_function(self):
         """A function a specific check already names is not reported twice."""
@@ -309,3 +326,26 @@ class TestClassifyReadsCodeNotNames:
 
     def test_parameter_reference_still_tiers(self):
         assert self._tier("SUM([Sales]) * [Parameters].[Rate]") == "parameter_ref"
+
+
+class TestCatalogFamilies:
+    """BL-460 review: the catalog accepted any `cumulative_` / `moving_` / `group_`
+    name. It now accepts the documented members only, shared with `ts formula
+    translate`'s output guard."""
+
+    def test_documented_members_are_known(self):
+        from ts_cli.formula_translate.catalog import is_known
+        for name in ("group_aggregate", "group_sum", "group_average", "group_count",
+                     "group_max", "group_min", "group_unique_count", "group_stddev",
+                     "group_variance", "cumulative_sum", "cumulative_average",
+                     "cumulative_max", "cumulative_min", "moving_sum", "moving_average",
+                     "moving_max", "moving_min"):
+            assert is_known(name), name
+
+    def test_disproved_and_invented_members_are_not(self):
+        from ts_cli.formula_translate.catalog import is_known
+        from ts_cli.formula_translate.traps import output_guard
+        # cumulative_count / moving_count / moving_stddev: rejected live 2026-07-30
+        for name in ("cumulative_count", "moving_count", "moving_stddev", "group_concat"):
+            assert not is_known(name), name
+            assert output_guard(f"{name} ( [T::a] )"), name

@@ -44,6 +44,7 @@ from ts_cli.tableau.pre_transforms import (  # noqa: F401
     rewrite_csq_aliases,
     rewrite_date_arithmetic,
     strip_comments,
+    upper_call_names,
 )
 from ts_cli.tableau.conditionals import (  # noqa: F401
     _AGG_IF_MAP,
@@ -177,6 +178,10 @@ def translate_single(
     # must run before every other pass so THEN-folding / bare END-CASE-WHEN
     # stripping / keyword validation never see literal content.
     expr, literal_registry = mask_literals(expr)
+
+    # Pre-0c. One spelling per function: `log2(` is `LOG2(` (BL-460 review). After the
+    # literal mask, so no literal's text changes case.
+    expr = upper_call_names(expr)
 
     # Pre-1. Rewrite Custom SQL Query aliases (BL-057)
     if csq_to_table:
