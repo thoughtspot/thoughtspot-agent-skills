@@ -128,6 +128,17 @@ def test_missing_axis_exempts_tables_kpi_pie_geo():
         assert chart_tiles_missing_axis(doc) == [], ct
 
 
+def test_missing_axis_does_not_flag_the_unrendered_new_library_types():
+    # In the enum since 2026-11-08 (BL-449) but never rendered, and the chart-types schema
+    # records that an ADVANCED_* tile with neither block auto-resolves. Flagging them on
+    # their Legacy twin's say-so would fail verify-render on a Liveboard that may render.
+    for ct in ("ADVANCED_SCATTER", "ADVANCED_BUBBLE", "ADVANCED_WATERFALL",
+               "ADVANCED_PARETO", "ADVANCED_CANDLESTICK", "ADVANCED_DONUT",
+               "ADVANCED_FUNNEL", "ADVANCED_HEATMAP", "ADVANCED_PIVOT_TABLE"):
+        doc = {"answer": {"name": ct, "chart": {"type": ct}}}
+        assert chart_tiles_missing_axis(doc) == [], ct
+
+
 def test_missing_axis_liveboard_flags_only_the_blank_chart_tiles():
     doc = {"liveboard": {"visualizations": [
         {"answer": {"name": "good line", "chart": {"type": "LINE", "axis_configs": [{"x": ["m"]}]}}},

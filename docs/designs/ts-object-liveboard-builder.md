@@ -141,12 +141,13 @@ Each kept intent + the column roles + cardinality select a chart type from the *
 TREEMAP; correlation → SCATTER, +magnitude → BUBBLE; concentration → PARETO; flow → SANKEY;
 geo → GEO_AREA (only if a column is geo-tagged, else fall back to BAR + flag).
 
-**Muze charting library (`ADVANCED_*`, early access).** When the target cluster has it
-enabled, the builder can emit Muze (`ADVANCED_*`) types whose `custom_chart_config` shelf
+**New charts library (Muze, `ADVANCED_*`).** _(2026-11-08: GA and the product default
+since 26.7 per release notes, no longer early access — see the chart-types reference, BL-449.)_
+The builder can emit Muze (`ADVANCED_*`) types whose `custom_chart_config` shelf
 model (`x-axis` / `y-axis` / `slice-with-color` / `trellis-by`) maps **cleanly onto this
 engine's output** — series and small-multiples become first-class shelves rather than
 implicit extra columns. Default to Legacy types for portability; make Muze an opt-in target.
-See the chart-types reference "Muze charting library" section for the verified encoding rules
+See the chart-types reference "The new charts library" section for the verified encoding rules
 (don't mix `custom_chart_config` with a Legacy type).
 
 ### 6.8 Board composition

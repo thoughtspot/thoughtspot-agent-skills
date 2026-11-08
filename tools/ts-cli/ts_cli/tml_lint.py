@@ -46,6 +46,13 @@ from ts_cli.tml_join_graph import (
 # definition. A converter copying the list is the drift class BL-217 exists to stop --
 # and 17.3 is what a missing copy looks like (Qlik emitted four of these types with no
 # axis encoding at all, so its boards imported and rendered blank).
+# The ADVANCED_* members are the phase-1 cartesian types only. The new-library types in the
+# enum since 2026-11-08 (ADVANCED_SCATTER, _BUBBLE, _WATERFALL, _PARETO, _CANDLESTICK, ...)
+# are deliberately NOT derived from their Legacy twins: none has been rendered, and the
+# chart-types schema records that an ADVANCED_* tile with neither block auto-resolves
+# (2026-06-17), so whether a bare one draws blank is unknown. Add one only after a render
+# check shows it blank (BL-449). verify-render shares this set, so a guess here would fail
+# a Liveboard that renders.
 _CHART_NEEDS_AXIS = frozenset({
     "LINE", "COLUMN", "BAR", "AREA",
     "STACKED_COLUMN", "STACKED_BAR", "STACKED_AREA",
