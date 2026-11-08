@@ -108,7 +108,7 @@ are roughly ordered by value÷effort.
 | BL-447 | I5: Snowflake SV formula-path and Power BI distinct counts demoted to ATTRIBUTE on text/date columns; `check_converter_parity` requirements C (no literal `COUNT_DISTINCT`) and D (lint before import); Tableau merge-mode lint | 2026-11-15 |
 | BL-448 | Renamed pass-through Snowflake SV fact takes the wrong aggregation (sums customer ids where Cortex Analyst counts distinct) | 2026-11-15 |
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | 2026-11-15 |
-| BL-450 | Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden | 2026-11-15 |
+| ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
@@ -15613,7 +15613,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-15.
 
-## BL-450 — Snowflake spec carry-overs from the 2026-09-22 sweep: Complete Schema, five mapping findings, `sample_values` `Tier 1`
+## BL-450 — Snowflake spec carry-overs from the 2026-09-22 sweep: Complete Schema, five mapping findings, `sample_values` — DONE `Tier 1`
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, findings 13.4, 13.5 (the backlog half) and 13.16; carry-overs of `docs/audit/2026-09-22-full.md` findings 13.7, 13.8, 13.9, 13.10, 13.11, 13.12, 13.13 and 13.14, unrouted for five weeks.
 
@@ -15625,6 +15625,23 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 **Do.** Correct the Complete Schema block first (BL-031 depends on it). Work each 2026-09-22 finding against the current spec and correct the mapping files; re-verify `sample_values` and either remove it from `FORBIDDEN_FIELDS` or record why it stays. Advance the five anchors when the edits land. The anchor-date validator is BL-457.
 
 **Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, finding 13.9). The Complete Schema also lacks root-level `facts` / `dimensions` and the LOD keys `lod_dimension_type` (`fixed` / `include` / `exclude`) and `lod_dimensions` (`{table, dimension}`), which the spec allows at root level only. Add them with a Preview marker; the LOD semantics themselves are BL-543.
+
+**Done 2026-11-08** (branch `fix/bl-450-snowflake-spec`). Every item was checked against the published pages (read 2026-11-08) and live on Snowflake 10.40.103: real creates in `AGENT_SKILLS.PUBLIC`, read back with `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW` and `GET_DDL`, all probe objects dropped. What landed:
+- The Complete Schema is corrected, and all four audit items are confirmed. It also gains root-level LOD `facts` / `dimensions` (Preview; semantics stay with BL-543), legacy `custom_instructions` (mutually exclusive with `module_custom_instructions`), and the undocumented table-level `constraints:` that range joins need.
+- 13.8: the READ_YAML vs GET_DDL comparison is done. Moving the parser is left as a code decision.
+- 13.9 and 13.12 are corrected.
+- 13.10: re-run on the superhero fixture. Bridge traversal works with or without the composite PK, so this was platform drift, not a modelling gap.
+- 13.11: wrapper-view guidance narrowed.
+- 13.13: `sample_values` removed from `FORBIDDEN_FIELDS`, with tests.
+- The five anchors advanced. The validator half stays with BL-457.
+
+The audit was wrong on three points. `onboarding_question` is silently dropped, not a parse error. `access_modifier` on a dimension works live (a PRIVATE dimension), although the docs say it cannot. The "parse error" keys (`relationship_type`, `join_type`, `default_aggregation`, `measures`) are silently parked in the Cortex Analyst extension instead.
+
+Follow-ups found here and **not filed** (reported for triage):
+- The GET_DDL parser lets an LOD fact hijack the dimensions block, and leaks `WITH TAG` into `expr`.
+- `sv_parse.py` still emits the stale "unverified" `sample_values` / `is_enum` warning.
+- The to-snowflake-sv `coverage-matrix.md` L11 claims an emitted standalone filter.
+- The from-rules DDL template labels the two sides of a dimension entry the reverse of the CREATE grammar.
 
 **Target:** 2026-11-15.
 

@@ -1,4 +1,4 @@
-<!-- currency: snowflake — 2026-07 (formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5; 2026-07-30: Identifier Resolution Algorithm sharpened after BL-178 — passthrough facts take step 1, the step-2 id is derived from the display name by the SAME function build-model mints with, and the facts/metrics maps are keyed on DECLARED names; all three live-verified on se-thoughtspot 2026-07-30; 2026-09-14: the `ai_sql_generation` / `ai_question_categorization` DDL spelling corrected to drop the `=` — Snowflake REJECTS the `=` form (`syntax error ... unexpected '='`) and GET_DDL emits the bare form; the clause ORDER is also load-bearing and now documented: comment -> ai_sql_generation -> ai_verified_queries, every other order rejected. Both live-verified on thoughtspot_partner.ap-southeast-2 — BL-254 / BL-268) -->
+<!-- currency: snowflake — 2026-11 (2026-11-08 BL-450: READ_YAML vs GET_DDL losslessness compared live on Snowflake 10.40.103 (finding 13.8) — no construct lost either way, two silent GET_DDL parse failures found (LOD hijacks the dimensions block, WITH TAG leaks into expr); sample_values / is_enum / MAX_STALENESS / WITH TAG / PRIVATE dimension / LOD fact token shapes live-verified; ADD MATERIALIZATION in GET_DDL still unverified; Snowflake delta 2026-07..2026-11 also swept by docs/audit/2026-11-08-external.md, its open items routed to BL-543 (LOD) and BL-458 (Cortex Agents); prior 2026-07: formula composition + TML import behaviours validated on SE cluster 2026-07-10 — two-pass import requirement, if() parens mandatory, BOOL column support; correction 2026-07: SQL-query logical-table `tables()` form + "→ ThoughtSpot SQL View TML" rule added, GA 2026-06-26 — finding 13.5; ai_sql_generation/ai_question_categorization corrected to free-text instruction strings — finding 13.6; sample_values/is_enum dimension clauses documented — finding 13.7; 2026-07-29 full sweep: new PARSER PREREQUISITE for MAX_STALENESS/materialization DDL clause shape, not yet live-verified — finding 13.5; 2026-07-30: Identifier Resolution Algorithm sharpened after BL-178 — passthrough facts take step 1, the step-2 id is derived from the display name by the SAME function build-model mints with, and the facts/metrics maps are keyed on DECLARED names; all three live-verified on se-thoughtspot 2026-07-30; 2026-09-14: the `ai_sql_generation` / `ai_question_categorization` DDL spelling corrected to drop the `=` — Snowflake REJECTS the `=` form (`syntax error ... unexpected '='`) and GET_DDL emits the bare form; the clause ORDER is also load-bearing and now documented: comment -> ai_sql_generation -> ai_verified_queries, every other order rejected. Both live-verified on thoughtspot_partner.ap-southeast-2 — BL-254 / BL-268) -->
 
 # Reverse Mapping Rules Reference
 
@@ -13,14 +13,8 @@ real format (from Snowflake) is:
 
 ```sql
 create or replace semantic view DB.SCHEMA.VIEW_NAME
-    -- Materialization eligibility (public preview, release 10.24, Jul 2026) —
-    -- PARSER PREREQUISITE: assumed to surface as MAX_STALENESS = <seconds> somewhere in
-    -- the CREATE header (mirroring YAML top-level max_staleness:), not yet confirmed
-    -- against a live GET_DDL round-trip. Whether a materialization added later via
-    -- `ALTER SEMANTIC VIEW ... ADD MATERIALIZATION (REFRESH_MODE = ... [, IMMUTABLE WHERE
-    -- ...])` also surfaces in GET_DDL output (and in what shape) is likewise unverified —
-    -- verify both before freezing the parser grammar (BL-100). → ThoughtSpot: no
-    -- equivalent; handling once verified is parse-and-drop (see note below).
+    -- (MAX_STALENESS is NOT in the header — live 2026-11-08 it follows `comment=` near
+    -- the end; see below.)
     tables (
         -- Default alias = last segment of the table name
         DB.SCHEMA.TABLE_NAME [primary key (COL)],
@@ -36,6 +30,11 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         -- Range constraint (for range/temporal joins — half-open interval)
         DB.SCHEMA.TABLE primary key (COL) unique (START_COL, END_COL)
             constraint CONSTRAINT_NAME distinct range between START_COL and END_COL exclusive,
+        -- Object tags (GA 2026-05-05). LIVE-VERIFIED 2026-11-08 on tables, dimensions and
+        -- the view itself: uppercase `WITH TAG`, after synonyms and before comment; the
+        -- view-level one closes the DDL after `with extension (...)`. Fact and metric
+        -- entries take the same clause per the CREATE grammar (not exercised live).
+        ALIAS as DB.SCHEMA.TABLE primary key (COL) with synonyms=('...') WITH TAG (TAG_DB.TAG_SCHEMA.TAG_NAME='value') comment='...',
         ...
     )
     relationships (
@@ -58,28 +57,33 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         PRIVATE EXPR as view_alias.FACT_NAME,
         -- Format 4: Filter-labeled fact (boolean expr, available as WHERE clause)
         TABLE.FACT_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
+        -- Format 5: root-level LOD fact (Preview). LIVE-VERIFIED 2026-11-08: unqualified
+        -- name, and the `fixed|include|exclude dimensions (...)` clause sits INSIDE the
+        -- facts block. Parser hazard: see "READ_YAML vs GET_DDL" below. Semantics: BL-543.
+        FACT_NAME as COUNT(orders.order_id) fixed dimensions (CUSTOMERS.CUSTOMER_ID) [with synonyms=(...)] [comment='...'],
         ...
     )
     dimensions (
         -- All dimensions at view level (NOT nested per-table)
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME [comment='...'] [with synonyms=(...)],
-        -- Visibility modifier: PRIVATE dims are hidden from Cortex Analyst
+        -- Visibility modifier: PRIVATE dims are hidden from Cortex Analyst. Undocumented
+        -- (CREATE SEMANTIC VIEW says dimensions cannot be private), but LIVE-VERIFIED
+        -- 2026-11-08: both DDL `PRIVATE` and YAML `access_modifier: private_access`
+        -- produce this shape, and a query naming the dimension fails 000904.
         PRIVATE TABLE_REF.VIEW_COL as view_alias.DIM_NAME,
         -- Cortex Search Service on a dimension
         TABLE_REF.VIEW_COL as view_alias.DIM_NAME with cortex search service SVC_NAME,
         -- Filter-labeled dimension (boolean expr, available as WHERE clause)
         TABLE_REF.DIM_NAME labels = (filter) as BOOLEAN_EXPR [comment='...'],
-        -- Sample values (Snowflake best practice; improves Cortex Analyst accuracy) —
-        -- PARSER PREREQUISITE: this DDL clause shape is assumed from the YAML spec
-        -- (expected to parallel `with synonyms=(...)`), not yet confirmed against a
-        -- live GET_DDL round-trip — verify before freezing parser grammar (BL-100).
-        -- → ThoughtSpot: no equivalent; see note below.
-        TABLE_REF.VIEW_COL as view_alias.DIM_NAME with sample values ('val1', 'val2', ...),
-        -- is_enum indicator (GA 2026-06-25; marks dimension as enumerable) —
-        -- PARSER PREREQUISITE: DDL clause shape assumed from the YAML spec, not yet
-        -- confirmed against a live GET_DDL round-trip — verify before freezing parser
-        -- grammar (BL-100). → ThoughtSpot: no equivalent; see note below.
-        TABLE_REF.VIEW_COL as view_alias.DIM_NAME is_enum,
+        -- Sample values + is_enum (GA 2026-06-25; Cortex Analyst accuracy aids).
+        -- LIVE-VERIFIED 2026-11-08 (BL-450): GET_DDL emits `sample_values (...)` with an
+        -- underscore and no `with`, then a bare `is_enum`, after any WITH TAG clause. Time
+        -- dimensions carry sample_values the same way (they get no is_enum: on a time
+        -- dimension it lives only in the CA extension). → ThoughtSpot: no equivalent; see
+        -- note below.
+        TABLE_REF.VIEW_COL as view_alias.DIM_NAME sample_values ('val1', 'val2', ...) is_enum,
+        -- Root-level LOD dimension (Preview; BL-543) — same shape as a Format 5 fact
+        DIM_NAME as COUNT(orders.order_id) fixed dimensions (CUSTOMERS.REGION),
         ...
     )
     -- Uniqueness constraints (inline on tables; range constraints defined in tables() block)
@@ -94,6 +98,10 @@ create or replace semantic view DB.SCHEMA.VIEW_NAME
         ...
     )
     comment='top-level view description'
+    -- Materialization eligibility (Preview). LIVE-VERIFIED 2026-11-08: a quoted interval
+    -- with a thousands separator, after comment= and before the ai_* clauses
+    -- (`max_staleness: 7200` in YAML). → ThoughtSpot: no equivalent — parse and drop.
+    MAX_STALENESS = '7,200 seconds'
     -- Cortex Analyst clauses (optional; may appear after comment)
     -- Corrected 2026-07 (finding 13.6): free-text instruction strings, NOT ON/OFF
     -- toggles (Jan 12 2026 "custom instructions" release) — see snowflake-schema.md
@@ -168,25 +176,74 @@ create or replace semantic view BIRD_FINANCIAL_SV
   (see `ts-object-model-coach` references/open-items.md #4), so this is currently a
   reporting/handoff step, not a structural TML mapping — see coverage-matrix.md L1 for
   the tracked limitation and the `/ts-object-model-coach` workaround.
-- `with sample values (...)` and an `is_enum` indicator (GA 2026-06-25) may appear on a
+- `sample_values (...)` and an `is_enum` indicator (GA 2026-06-25) may appear on a
   dimension entry — Cortex-Analyst-only NL-parsing aids with no ThoughtSpot equivalent.
   → ThoughtSpot: parse but do not attempt to emit; `sample_values` improves NL parsing,
   `is_enum` marks the dimension as enumerable — both are informational only.
-  **Verification status:** the DDL clause shape for both is assumed from the YAML spec
-  (`snowflake-schema.md`), not yet confirmed against a live `GET_DDL` round-trip. This
-  is a parser prerequisite for BL-100 codification — verify the actual DDL token shape
-  against a live semantic view carrying `sample values`/`is_enum` before freezing the
-  parser grammar.
-- `MAX_STALENESS = <seconds>` may appear on a materialization-eligible semantic view
-  (public preview, release 10.24, Jul 2026) — mirrors YAML top-level `max_staleness:`
-  (see snowflake-schema.md). → ThoughtSpot: no equivalent — parse and drop once the
-  token shape is confirmed.
-  **Verification status: PARSER PREREQUISITE.** Neither the `MAX_STALENESS` clause shape
-  nor whether a materialization added afterward via `ALTER SEMANTIC VIEW ... ADD
-  MATERIALIZATION (...)` surfaces in `GET_DDL` output at all (and in what shape) has been
-  confirmed against a live round-trip. This must be resolved before BL-100 freezes the
-  parser grammar — an unanticipated clause here is exactly the failure mode a frozen
-  grammar can't recover from.
+  **Verification status: VERIFIED live 2026-11-08 (BL-450)** on Snowflake 10.40.103. A
+  view created from YAML with both keys reads back from `GET_DDL` as
+  `... as C_MKTSEGMENT sample_values ('BUILDING', 'MACHINERY') is_enum`. That is an
+  underscore, no `with`, and a bare `is_enum`, exactly the forms `sv_parse.py`'s
+  `_SAMPLE_VALUES_RE` and `_IS_ENUM_RE` accept. BL-197 had already found the underscore
+  form. A time dimension carries `sample_values` the same way. The parser still warns
+  "DDL clause shape unverified" on both, and that warning is now stale. Retiring it is a
+  code change, left for a follow-up.
+- `MAX_STALENESS = '<n> seconds'` appears on a materialization-eligible semantic view
+  (Preview). It mirrors YAML top-level `max_staleness:` (see snowflake-schema.md).
+  → ThoughtSpot: no equivalent — parse and drop.
+  **Verification status: shape VERIFIED live 2026-11-08 (BL-450).** `max_staleness: 7200`
+  reads back as `MAX_STALENESS = '7,200 seconds'`. That is a quoted string with a
+  thousands separator, not a bare integer. It sits after the top-level `comment='...'` and
+  before `ai_sql_generation`. Fed the live DDL offline, `parse_sv_ddl` still reads the
+  top-level comment correctly and drops the clause, which is the intended handling. **Still
+  unverified:** whether a materialization added later with `ALTER SEMANTIC VIEW ... ADD
+  MATERIALIZATION` shows up in `GET_DDL` at all. The test added none, because that needs a
+  warehouse grant and the ADD SEMANTIC VIEW MATERIALIZATION privilege. Keep that half
+  open for BL-100.
+
+### READ_YAML vs GET_DDL (audit 2026-09-22 finding 13.8)
+
+`SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW('<db>.<schema>.<view>')` returns a semantic view as
+YAML. It is a function, so call it with `SELECT`
+([reference](https://docs.snowflake.com/en/sql-reference/functions/system_read_yaml_from_semantic_view),
+read 2026-11-08). It has existed since the 9.x releases, and the from-direction has never
+used it. Everything above regex-parses `GET_DDL`.
+
+**Losslessness comparison, live 2026-11-08 (Snowflake 10.40.103).** One view was built to
+carry every clause this parser depends on, then read back both ways. The view had tables
+with PK, UK, synonyms, comment and tags; a relationship; facts; dimensions with synonyms,
+tags, `sample_values` and `is_enum`; a time dimension; private dimensions; table metrics; a
+derived metric; a root-level LOD fact and an LOD dimension; verified queries; both AI
+instruction modules; `max_staleness`; standalone filters; and legacy keys. **Neither output
+lost a construct.** They differ in how they carry it:
+
+| Construct | `GET_DDL` | `READ_YAML` |
+|---|---|---|
+| Time vs. plain dimension | Both inside `dimensions (...)`. The split exists only in the CA extension JSON | Separate `time_dimensions:` |
+| Data types | Absent | Resolved type per field (`VARCHAR(25)`, `NUMBER(12,2)`) |
+| LOD facts / dimensions | `NAME as AGG(...) fixed dimensions (...)` inside the facts / dimensions blocks | `lod_dimension_type` + `lod_dimensions` |
+| Tags | Inline `WITH TAG (db.schema.tag='v')` | Structured list |
+| Non-native keys (standalone `filters:`, legacy keys) | One escaped JSON string in `with extension (CA='...')` | Merged back into the YAML |
+| `max_staleness` | `MAX_STALENESS = '7,200 seconds'` | `max_staleness: 7200 seconds` |
+
+**The comparison found two silent `GET_DDL` parse failures.** Both affect clauses this repo
+already meets, and neither can happen with `READ_YAML`'s structured keys. Both are code
+defects and were not fixed here; they are recorded as follow-ups:
+
+1. **An LOD entry hijacks the dimensions block.** A root-level LOD fact carries
+   `... fixed dimensions (T.D)` inside the facts block, so it comes before the real
+   `dimensions (` keyword. `parse_sv_ddl` then extracts the LOD's dimension list *as the
+   dimensions block*. Every real dimension disappears, one phantom dimension with
+   `expr: None` takes their place, and the parser emits no warning or unsupported entry.
+   Remove the LOD fact, and the same DDL yields all four dimensions. This is worse than
+   the loud LOD failure BL-543 records.
+2. **`WITH TAG (...)` is not stripped from a dimension entry.** It is read as part of
+   `expr` (`"C_NAME WITH TAG (DB.SCH.TAG='probe')"`).
+
+**Verdict.** For the clauses this parser depends on, `READ_YAML` is at least as complete as
+`GET_DDL` and is structurally safer. Whether to move the parser onto it is a code decision
+with its own tests, and it is not made here. The two failures above should be fixed (or
+avoided by switching) before an SV with LOD metrics or tags reaches the from-direction.
 
 ---
 
