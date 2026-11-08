@@ -5276,7 +5276,9 @@ quality" surface:
    handlers) -- a tokenizer bug fixed in one silently persists in the other. Extract to
    a shared `sql_common.py`. **Must stay stdlib-only** (no third-party deps) to preserve
    Genie-vendorability -- `agents/databricks/` concatenates modules for Genie Code,
-   which can't `pip install`.
+   which can't `pip install`. *(2026-11-08: no longer required. The Databricks Genie
+   runtime retired, so nothing vendors these modules; `sql_common.py` is an ordinary
+   ts-cli module and may use ts-cli's own dependencies.)*
 2. `io_helpers.py:76`'s `run_tml_import` shells out via
    `bash -c "source ~/.zshenv && ts tml import ..."` -- hard-requires `~/.zshenv` and
    `ts` on the subprocess PATH, so it fails outright on fresh Linux installs and on
@@ -7084,7 +7086,11 @@ same content with the source of truth moved to where it cannot drift.
    costs context on every session that loads the skill.
 2. Write `tools/validate/generate_skill_personas.py`, following the
    `generate_parity.py` / `generate_quality_gates.py` pattern including the `--check` mode, to
-   emit the per-skill entries in `docs/skill-personas.md`.
+   emit the per-skill entries in `docs/skill-personas.md`. *(2026-11-08: `generate_parity.py`
+   is deleted — it retired with the CoCo Snowsight and Databricks Genie runtimes, readable at
+   `runtimes-archive-2026-11-08:tools/validate/generate_parity.py` — so follow
+   `generate_quality_gates.py` or `generate_open_items_index.py`. Step 4 also shrinks: with
+   the runtimes gone there are no mirror copies or `synced-from` markers to update.)*
 3. Wire `--check` into `scripts/pre-commit.sh` and `.github/workflows/validate.yml` gated on
    `SKILL.md` / `docs/skill-personas.md` changes, so adding a skill without persona
    metadata fails the same way a missing coverage matrix does.
@@ -8526,7 +8532,9 @@ re-litigates fixes that were already paid for — and regressions land looking g
    justification per exemption, matching `check_runtime_coverage.py`'s convention — Sisense
    translates no string functions, so it needs no pass-through and should say so rather
    than silently pass. This is the two-bucket rule's automated-check bucket: it is the
-   thing that would have caught #440 before review.
+   thing that would have caught #440 before review. *(2026-11-08: `check_runtime_coverage.py`
+   is deleted, retired with the CoCo/Genie runtimes; `check_converter_parity.py`'s own
+   `EXPECTED_DIVERGENCES` now carries the convention.)*
 2. **Consolidate onto the shared helper.** Move Tableau's hand-rolled lambdas onto
    `wrap_passthrough_calls` + `PASSTHROUGH_MAP` so one mechanism serves every converter,
    then close the `resolve_name_collisions` / `fix_double_aggregation` gaps in Qlik and
@@ -9125,7 +9133,8 @@ the scoped hard-fail on PRs exactly as it is — it is doing its job; it is simp
 freshness guarantee, and the catalog's own header should not imply that it is.
 
 **Worth checking in the same pass:** whether any other generated artefact is gated the same
-scoped way and therefore has the same hole. `generate_parity.py --check` and
+scoped way and therefore has the same hole. `generate_parity.py --check` (retired with the
+CoCo/Genie runtimes 2026-11-08, so no longer a candidate) and
 `generate_open_items_index.py --check` are the obvious candidates — both are generators with a
 `--check` mode, and if either is only wired to a scoped trigger it shares this defect.
 
@@ -9661,6 +9670,11 @@ a `model_tables[]` item** rather than at `model:` level.
 column *root* rather than under `properties` — so BL-232's prescribed structural search
 (inspect `columns[].properties`) is blind to it by construction. I15's search paragraph has
 been amended to say compare keys in both directions.
+
+*(2026-11-08: no runtime executes this doc any more — CoCo Snowsight and Databricks Genie
+both retired. The item still stands: `ts-convert-from-databricks-mv` points the model at
+this doc, so a template the model copies when it writes TML by hand is still a template
+that teaches the wrong shape.)*
 
 **Why it is ungated.** `check_tml._is_template_block` skips any block containing a
 `{placeholder}`, so `check_tml.py --root .` validates 16 blocks repo-wide out of ~156
@@ -14738,6 +14752,11 @@ ts_cli/audit); a renamed file's old path; and non-Python reads: 118 tracked file
 quest (README.md, the hook, pages.yml, its own JS/YAML/TMJ), erd (its examples, which must match
 a fresh render) and formula-fidelity (cases, runs). validate reads the whole repo.
 
+**Note (2026-11-08):** the `databricks` suite is gone — `agents/databricks/tests/` retired
+with the Genie runtime, as did `test_vendor_mv_lib.py`, the ts-cli test that read
+`agents/databricks` by path. The hook now runs two pytest invocations (ts-cli and its
+sibling `tools/` suites; erd). The derived-map approach below is unchanged.
+
 **Do.** Derive the map rather than write it: run each suite under an audit hook (a sitecustomize
 that records every tracked file opened, as the reviews did), commit the result as data, and
 select a suite when any staged path (by both names of a rename) is one it read, or Python
@@ -15276,7 +15295,7 @@ the scrub case-insensitive and accept `/` in the Windows form; a test for each.
 **Filed:** 2026-10-28. **Source:** found while fixing BL-402 gap 1 in the PR-quality build's
 final fix wave; pre-existing on `main`.
 
-**What.** On a commit to `main` that stages anything under `agents/(cli|claude|coco-snowsight)/`,
+**What.** On a commit to `main` that stages anything under `agents/(cli|claude)/`,
 `scripts/pre-commit.sh` builds the skill inventory with three assignments of the shape
 `ADDING=$(git diff --cached --name-only --diff-filter=A | grep -E '…SKILL\.md$' | sed … | sort)`.
 The hook runs under `set -euo pipefail`, so when a `grep` matches nothing the pipeline fails,
@@ -15287,9 +15306,14 @@ by a commit that adds one SKILL.md, deletes another and edits a third. It fails 
 commit to `main` is refused), but with no reason given, and the audit it exists for never shows.
 
 **Reproduction** (the hook's own pipeline, git's output replaced by `printf`), on /bin/bash 3.2:
-`set -euo pipefail; ADDING=$(printf 'agents/cli/ts-x/references/a.md\n' | grep -E '^agents/(cli|claude|coco-snowsight)/[^/]+/SKILL\.md$' | sed 's|agents/||;s|/SKILL\.md||' | sort); echo reached`
+`set -euo pipefail; ADDING=$(printf 'agents/cli/ts-x/references/a.md\n' | grep -E '^agents/(cli|claude)/[^/]+/SKILL\.md$' | sed 's|agents/||;s|/SKILL\.md||' | sort); echo reached`
 exits 1 and never prints `reached`. With `|| true` after the assignment it prints `reached`,
 with `ADDING` empty.
+
+*(2026-11-08: the hook's runtime alternation lost `coco-snowsight` when that runtime
+retired; the trigger, the three assignments and the repro above now read `(cli|claude)`.
+Re-run on the branch that retired it: still exits 1 without printing `reached`, so the bug
+stands.)*
 
 **Do.** End each of the three assignments with `|| true` (the variable keeps the substitution's
 output, empty here), or give each `grep` its own `|| true` inside the pipeline; the `-vxF`
@@ -15924,6 +15948,8 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.14.
 
 **What.** The classifier-pattern block (around :1226 of the Tableau mapping doc — the copy a CoCo reader executes) still says "all 13" and omits PARSE_WKT and NO_CUTOUTS. COLLECT, a spatial-only aggregate, is missing from the "15 spatial functions" census, `_GEO_RE` and `_UNMAPPED_FUNCTIONS`.
+
+**Note (2026-11-08):** no CoCo reader executes the doc any more; that runtime retired. The doc still matters as the copy the model reads when it classifies a Tableau calc itself, so the item stands unchanged.
 
 **Do.** Add the three and correct the count to 16 in the doc and both code sites.
 
