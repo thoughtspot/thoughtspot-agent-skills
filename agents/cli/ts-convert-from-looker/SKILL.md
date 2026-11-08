@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-looker
 description: Convert a Looker semantic model (LookML project) into ThoughtSpot — parses model + view .lkml files, generates Table TML and Model TML per explore, validates invariants, and imports. Optionally converts LookML dashboards to ThoughtSpot Liveboards. Direction is always Looker → ThoughtSpot.
+metadata:
+  category: Conversion
+  platform: Looker
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Looker LookML project (model + view files) into ThoughtSpot Table and Model TMLs, with optional dashboard-to-liveboard migration"
 ---
 
 # LookML → ThoughtSpot

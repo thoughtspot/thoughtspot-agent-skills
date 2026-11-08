@@ -1,6 +1,10 @@
 ---
 name: ts-migrate-orgs
 description: Move a tenant Org's bespoke content off its own Table/Model copies onto a governed published Model, then retire the old Org. Use when migrating tenants to the single-model publishing pattern, when a tenant's Answers and Liveboards must be repointed at published objects, or when sizing how many tenants a Sets dependency blocks.
+metadata:
+  category: Setup
+  subcategory: Tenancy
+  summary: "Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback"
 ---
 
 # Migrate a tenant Org onto the published model

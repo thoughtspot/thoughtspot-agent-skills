@@ -1,6 +1,11 @@
 ---
 name: ts-convert-to-dbt
 description: Generate a dbt project (models + schema.yml) from a ThoughtSpot Table/Model TML. Use when ThoughtSpot is the source and the goal is dbt project files — a new dbt project scaffolded from a Model's tables, joins, and column properties, tagged with ThoughtSpot's own ts_* metadata so a later sync back into ThoughtSpot preserves them. Direction is always ThoughtSpot → dbt. Not for dbt → ThoughtSpot (see ts-convert-from-dbt). Reads the Model via `ts tml export`, then generates or updates the dbt project files offline (Case A new project; Case B diff + sync into an existing project, optionally updating ts_* tags and descriptions on existing models); optionally commits/pushes and triggers a dbt Cloud job. It does not import anything into ThoughtSpot — that return leg is ts-convert-from-dbt.
+metadata:
+  category: Conversion
+  platform: dbt
+  coverage: "references/coverage-matrix.md"
+  summary: "Generate a dbt project from a ThoughtSpot Model — staging models plus a `schema.yml` carrying ThoughtSpot's own `ts_*` metadata tags, either scaffolding a new project or diffing and syncing into an existing one"
 ---
 
 # ThoughtSpot → dbt

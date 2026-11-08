@@ -1,6 +1,10 @@
 ---
 name: ts-profile-databricks
 description: Set up and manage Databricks connection profiles. Use when configuring a new Databricks workspace, updating credentials, or testing whether an existing profile is working. Supports Service Principal (OAuth M2M) and Personal Access Token auth. Credentials are stored securely in the OS keychain.
+metadata:
+  category: Setup
+  subcategory: Credentials
+  summary: "Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile"
 ---
 
 # Databricks Profile Setup

@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-tableau
 description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + model TMLs, validates and imports. Optionally migrates dashboards to liveboards with layout approximation. Direction is always Tableau → ThoughtSpot. Not for ThoughtSpot → Tableau or standalone TML exports.
+metadata:
+  category: Conversion
+  platform: Tableau
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration"
 ---
 
 # Tableau Workbook → ThoughtSpot

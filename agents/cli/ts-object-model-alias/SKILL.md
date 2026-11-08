@@ -1,6 +1,9 @@
 ---
 name: ts-object-model-alias
 description: Manage column aliases on a ThoughtSpot Model — language localization, tenant-based renaming, and combined tenant + locale matrices — via the `ts alias export/translate/build/import` CLI pipeline.
+metadata:
+  category: Semantic Authoring
+  summary: "Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline"
 ---
 
 # ThoughtSpot: Manage Column Aliases

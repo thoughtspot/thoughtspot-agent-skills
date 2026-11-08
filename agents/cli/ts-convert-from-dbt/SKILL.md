@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-dbt
 description: Sync dbt models into ThoughtSpot as Tables and a Model, using ThoughtSpot's native dbt integration. Use when dbt (Cloud or Core) is the source and the goal is ThoughtSpot objects generated from dbt models — either a first import or a resync after the dbt project changes. Direction is always dbt → ThoughtSpot. Not for ThoughtSpot → dbt (see ts-convert-to-dbt), and not a client-side SQL/DDL parser — Table generation happens inside ThoughtSpot's servers via the dbt connection object, and the Model either does too or is assembled from dbt's own structured metadata (ts_* tags, relationships tests, MetricFlow metrics) by `ts dbt build-model` for multi-fact projects.
+metadata:
+  category: Conversion
+  platform: dbt
+  coverage: "references/coverage-matrix.md"
+  summary: "Sync dbt models (Cloud or Core) into ThoughtSpot as Tables and a Model via the native dbt integration — first import or resync, with `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics assembled client-side when the server-side generator would drop them"
 ---
 
 # dbt → ThoughtSpot Tables + Model

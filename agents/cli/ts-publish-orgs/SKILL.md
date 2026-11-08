@@ -1,6 +1,9 @@
 ---
 name: ts-publish-orgs
 description: Publish ThoughtSpot Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them — defining the template variables and metadata parameterization that publishing requires — via the `ts publish export/resolve/apply/verify/rollback` CLI pipeline.
+metadata:
+  category: "Platform & Governance"
+  summary: "Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline"
 ---
 
 # ThoughtSpot: Publish Objects to Orgs

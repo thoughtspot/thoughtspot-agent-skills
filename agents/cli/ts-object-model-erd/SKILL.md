@@ -1,6 +1,9 @@
 ---
 name: ts-object-model-erd
 description: Render an existing ThoughtSpot Model (Model TML + its Table TMLs) into an interactive, self-contained HTML ERD — tables, joins, columns, findings and row-level security — that opens in any browser and is shareable without a ThoughtSpot login. Use when someone wants to chart, visualise, diagram, or review the structure of a Model. Not for editing models or generating TML.
+metadata:
+  category: Semantic Authoring
+  summary: "Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login"
 ---
 
 # ThoughtSpot: Model ERD

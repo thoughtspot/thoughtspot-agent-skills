@@ -1,6 +1,11 @@
 ---
 name: ts-convert-to-databricks-mv
 description: Convert or export a ThoughtSpot Worksheet or Model into a Databricks Metric View. Use when ThoughtSpot is the source and the goal is a Databricks Metric View — whether converting metrics and formulas for Databricks AI/BI access, generating CREATE VIEW WITH METRICS DDL, writing a .sql file for later execution, or publishing ThoughtSpot semantics to Unity Catalog. Direction is always ThoughtSpot → Databricks. Not for Databricks → ThoughtSpot, standalone TML exports, or adding synonyms/AI context to ThoughtSpot models.
+metadata:
+  category: Conversion
+  platform: Databricks
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source)"
 ---
 
 # ThoughtSpot → Databricks Metric View

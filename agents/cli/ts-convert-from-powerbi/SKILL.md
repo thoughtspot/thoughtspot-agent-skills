@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-powerbi
 description: Convert or import a Power BI report into ThoughtSpot — parses the Power BI Project (.pbip) TMDL semantic model and PBIR report, generates Table + Model TML and Answers/tabbed Liveboards, translates DAX (including CALCULATE(ALL) → group_aggregate, and time-intelligence rebuilt with parameters), validates and imports. Direction is always Power BI → ThoughtSpot. Not for ThoughtSpot → Power BI or standalone TML exports.
+metadata:
+  category: Conversion
+  platform: Power BI
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Power BI project (`.pbip`: TMDL semantic model + PBIR report) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating DAX measures and flagging time-intelligence for Spotter"
 ---
 
 # Power BI Report → ThoughtSpot

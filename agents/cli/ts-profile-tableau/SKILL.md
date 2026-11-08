@@ -1,6 +1,10 @@
 ---
 name: ts-profile-tableau
 description: Set up and manage Tableau Server/Cloud connection profiles. Use when configuring a new Tableau instance for workbook migration, updating credentials, or testing whether an existing profile is working. Supports password and Personal Access Token (PAT) auth. Credentials are stored securely in the OS keychain.
+metadata:
+  category: Setup
+  subcategory: Credentials
+  summary: "Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth"
 ---
 
 # Tableau Profile Setup

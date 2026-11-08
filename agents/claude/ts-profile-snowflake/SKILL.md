@@ -1,6 +1,10 @@
 ---
 name: ts-profile-snowflake
 description: Set up and manage Snowflake connection profiles. Use when configuring a new Snowflake connection, updating credentials, or testing whether an existing profile is working. Supports Python connector (key pair or password) and Snowflake CLI. Credentials are stored securely in the OS keychain.
+metadata:
+  category: Setup
+  subcategory: Credentials
+  summary: "Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively)"
 ---
 
 # Snowflake Setup

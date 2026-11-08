@@ -1,6 +1,10 @@
 ---
 name: ts-load-source-data
 description: Load source data (CSV, Tableau download, manifest) into a warehouse. Infers schema, generates synthetic data for schema-only sources, and provisions tables. Snowflake and Databricks supported.
+metadata:
+  category: Setup
+  subcategory: Data
+  summary: "Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to"
 ---
 
 # Load Source Data

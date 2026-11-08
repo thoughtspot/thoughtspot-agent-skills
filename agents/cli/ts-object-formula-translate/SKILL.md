@@ -1,6 +1,9 @@
 ---
 name: ts-object-formula-translate
 description: Translate one formula written for another tool (Tableau, Power BI DAX, Qlik, Sisense, Snowflake SQL, Databricks SQL, Excel / Google Sheets, Sigma, Omni) into a ThoughtSpot formula, with its classification, the traps that applied, a TML snippet, and optional proof that ThoughtSpot compiles it against a Model. Use when someone pastes a calculated field, measure, expression or spreadsheet formula and asks for the ThoughtSpot equivalent, "how do I write this in ThoughtSpot", or whether a function exists in ThoughtSpot. Not for converting whole workbooks or models (the ts-convert-from-* skills), and never edits an existing Model.
+metadata:
+  category: Semantic Authoring
+  summary: "Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model"
 ---
 
 # ThoughtSpot: Formula Translate
