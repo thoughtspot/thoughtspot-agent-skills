@@ -474,7 +474,7 @@ are roughly ordered by value÷effort.
 | BL-119 | Smoke test for ts-convert-from-sisense | first Sisense bundle |
 | ~~BL-134~~ | ~~Smoke test for ts-object-model-alias~~ | DONE (feat/ts-object-model-alias) |
 | BL-236 | `lint_tml` crashes on a non-string `joins[].with` instead of reporting it | next validator pass |
-| BL-237 | two sites still classify `data_panel_column_groups` as a `properties` key | next Snowflake pass |
+| BL-237 | `sv_build_sv.py` still classifies `data_panel_column_groups` as a `properties` key | next Snowflake pass |
 | BL-239 | `ts-from-databricks-rules.md` TML templates put nested keys at the column root | next Databricks pass |
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
@@ -9566,33 +9566,40 @@ Pre-existing — untouched by the BL-232 fix, which only added a call after it.
 
 ---
 
-## BL-237 — two sites still classify `data_panel_column_groups` as a `properties` key `Tier 3`
+## BL-237 — `sv_build_sv.py` still classifies `data_panel_column_groups` as a `properties` key `Tier 3`
 
 **Filed:** 2026-09-02.
 **Source:** refute-briefed review of PR #499 (BL-232's fix), which correctly refused the
 exclusion made when I15 was written.
-**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py:728` (`_UNMAPPED_PROP_KEYS`),
-`agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md:962`.
+**Affects:** `tools/ts-cli/ts_cli/sv_build_sv.py` (`_UNMAPPED_PROP_KEYS`, read by
+`_collect_unmapped_props`; line 728 when filed, 459 on 2026-11-08).
+
+**2026-11-08 — one site left, not two.** As filed, this item had a second site: the CoCo
+Snowsight `ts-convert-to-snowflake-sv` SKILL.md listed the key among the unmapped
+*properties* in its column-mapping step. That file retired with the CoCo runtime on
+2026-11-08; the line as filed is readable with
+`git show runtimes-archive-2026-11-08:agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md`
+(line 962). `sv_build_sv.py` is the only live site.
 
 `docs/reviews/2026-07-30-tml-census.md:150` settles the placement: 9 sightings of
 `model.columns[].data_panel_column_groups` across 3 of 143 real Models, at the **column
 root**, with **zero** `properties.`-level sightings anywhere in the census. `ts tml lint`
 I15 now treats it as root-only on that basis.
 
-Two sites still say otherwise. `_UNMAPPED_PROP_KEYS` lists it among properties keys and is
-read via `_collect_unmapped_props(col_name, props, ...)`, so `build-sv`'s Unmapped
+`sv_build_sv.py` still says otherwise. `_UNMAPPED_PROP_KEYS` lists it among properties keys
+and is read via `_collect_unmapped_props(col_name, props, ...)`, so `build-sv`'s Unmapped
 Properties Report has **never** reported it against real exported TML — it looks for the
-key in a dict it never appears in. The CoCo SKILL.md carries the same claim.
+key in a dict it never appears in.
 
-**Why this is worth its own item.** It is the identical doc-vs-code split that produced
-BL-232's fifth site (a mapping doc CoCo executes disagreeing with the schema), caught this
-time before it shipped a data loss rather than after. Left unfixed it will be cited as
-precedent for the wrong placement.
+**Why this is worth its own item.** It is the same wrong-level placement that produced
+BL-232 (a key read from or written to `properties` when it lives at the column root),
+caught this time before it shipped a data loss rather than after. Left unfixed it will be
+cited as precedent for the wrong placement.
 
 **Approach:** read `data_panel_column_groups` from the column root in
-`_collect_unmapped_props` (it needs the column dict, not just `props`), drop it from
-`_UNMAPPED_PROP_KEYS`, and correct the CoCo SKILL.md line. Add a test asserting the
-Unmapped Properties Report actually reports it from a root-level sighting.
+`_collect_unmapped_props` (it needs the column dict, not just `props`) and drop it from
+`_UNMAPPED_PROP_KEYS`. Add a test asserting the Unmapped Properties Report actually reports
+it from a root-level sighting.
 
 **Target:** next Snowflake pass.
 
