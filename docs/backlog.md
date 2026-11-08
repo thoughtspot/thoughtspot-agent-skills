@@ -111,6 +111,7 @@ are roughly ordered by value÷effort.
 | BL-450 | Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden | 2026-11-15 |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
+| BL-545 | from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate | 2026-11-22 |
 
 ### Tier 2 — Schedule soon
 
@@ -354,6 +355,9 @@ are roughly ordered by value÷effort.
 | BL-479 | Personalized Liveboard views undocumented; round-trips may drop them | 2026-11-30 |
 | BL-541 | Liveboard filters scoped to a tab or group (26.10 EA) are undocumented and stripped on import to a cluster without the feature; round-trips may lose them | 2026-12-15 |
 | BL-543 | Snowflake Semantic View LOD metrics (Preview): from-snowflake-sv fails on them; to-direction rows still say Untranslatable; from-rules line 548 contradicts the schema | 2026-12-15 |
+| BL-546 | `ts tml import` GUID back-fill matches by name across every LOGICAL_TABLE subtype and connection | 2026-12-15 |
+| BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
+| BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -453,6 +457,7 @@ are roughly ordered by value÷effort.
 | BL-494 | `check_ossie_mapping_sync` runs nowhere | 2026-12-31 |
 | BL-542 | Native ThoughtSpot Semantic View / Metric View import is never mentioned by the from-sv, from-mv or link skills; re-check filtered-metric verdicts live | 2026-12-31 |
 | BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
+| BL-549 | Converter-audit warnings on main, 2026-11-08 (dbt I11/I22, Sisense count row, snowflake-sv I7/I21, Tableau PT1, invariants I9 vs I13 and I3, Looker citation scope) | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -16973,5 +16978,63 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 **What.** Step 6 asks for the connection (with a fresh `ts connections list`), db and schema, and materialization again for each selected candidate.
 
 **Do.** After the first candidate, ask once "use the same settings as the previous candidate? [Y/n]", which keeps the no-silent-reuse rule (SKILL.md line 483) and matches the warehouse-reuse prompt at line 555. Skill PATCH bump.
+
+**Target:** 2026-12-31.
+
+## BL-545 — from-powerbi and from-qlik have no working lint gate: positional files are rejected `Tier 1`
+
+**Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
+
+**What.** `ts-convert-from-powerbi/SKILL.md:89-91,123-124` and `ts-convert-from-qlik/SKILL.md:95-97,106-107` run `ts tml lint out/*.tml` and `ts tml import out/*.table.tml out/*.model.tml …`. Neither command takes positional arguments; both accept only `--file` (repeatable) and `--dir` (`tools/ts-cli/ts_cli/commands/tml.py`, `import_tml` and `lint_tml_cmd`). The auditor reproduced exit 2, "Got unexpected extra argument(s)". Neither builder lints in its own code, so as written these two converters run none of the lint invariants. That includes the silent wrong-number ones (I1, I5, I15).
+
+**Do.** Use the form from-sisense uses: `ts tml lint --dir out/`, then `ts tml import --dir out/ --order tableau …`. Check that `--order` places tables before the Model and the Liveboard last, and use `--file` where only the liveboard should be read. PATCH-bump both skills. Close the class too: extend `check_skill_flag_usage.py` (it checks only `--flags` today) to fail a `ts` command written with positional arguments its typer signature lacks.
+
+**Target:** 2026-11-22.
+
+## BL-546 — `ts tml import` GUID back-fill can return another object's GUID `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
+
+**What.** When ThoughtSpot returns no GUID, `ts tml import` searches `type: LOGICAL_TABLE` by the TML's `name:` with no subtype and no connection filter, and takes the first exact match in server order (`tools/ts-cli/ts_cli/commands/tml.py`, the back-fill loop after `tml_import_failures`). The reviewer's mocked run showed a same-named Model winning over the imported Table. Since #716, `thoughtspot-table-tml.md` documents the risk and the scoped confirm step; the code is unchanged.
+
+**Do.** Scope the back-fill by the imported TML's kind (Table → `ONE_TO_ONE_LOGICAL` plus its `connection.name`; Model → `WORKSHEET`), reusing `tables._find_guid_by_name`'s filter. If more than one candidate remains, leave the GUID empty and warn on stderr rather than guess. Add unit tests for a same-named Model and a same-named Table on another connection.
+
+**Target:** 2026-12-15.
+
+## BL-547 — from-tableau blend-merged Model template declares a list parameter `VARCHAR` `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
+
+**What.** `ts-convert-from-tableau/references/step-5-tml-generation.md:279`, in the hand-assembly template "Used directly for blend-merged models", has `data_type: VARCHAR` on a list parameter. That is I10's own WRONG example. It contradicts the same file's line 324 and the code (`tableau/twb.py` emits CHAR), and ThoughtSpot rejects it at import ("Invalid parameter"). Line 1046 needs the same check.
+
+**Do.** Change the type to `CHAR` and give each `list_choice` a `display_name:`. Run `ts tml lint` over the template's YAML to confirm. Skill PATCH bump.
+
+**Target:** 2026-12-15.
+
+## BL-548 — from-looker Model template hides every dimension primary key `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
+
+**What.** `ts-convert-from-looker/references/step-6-model-joins.md:64-68,132` and `SKILL.md:356,377,411` tell the model to set `is_hidden: true` on every dimension primary key. I11 forbids hiding columns the source exposed. Looker has no CLI builder, so the model follows this template on every conversion with joins.
+
+**Do.** Drop the `is_hidden: true` lines and the "keep hidden" guidance, or record an I11 exception with its justification in the invariants doc. Skill PATCH bump.
+
+**Target:** 2026-12-15.
+
+## BL-549 — Converter-audit warnings on main, 2026-11-08 `Tier 3`
+
+**Filed:** 2026-11-08. **Source:** conversion-consistency audit run on PR #716 (2026-11-08); every finding was already on `main` before that PR.
+
+Each is a doc or template fix unless noted. None is known to produce a wrong number today.
+
+- **from-dbt, I11.** It honours `ts_hidden` (`dbt/tags.py`) with no I11 exception. Record the exception: the tag is ThoughtSpot's own and is set deliberately.
+- **from-dbt, I22.** It injects `rls_rules` into Table TML by export, inject and re-import. The import gate lints the Model alone (`dbt/import_gate.py`), so I22's cross-file check never runs.
+- **from-sisense, I5.** `sisense-formula-translation.md:30` maps `count` to column `aggregation: COUNT_DISTINCT`, I5's forbidden form. The code is clean, because `functions.AGG_MAP` / `translate_agg` have no callers. Fix the row and delete the dead map.
+- **from-snowflake-sv, I7.** The gate at `SKILL.md:795` names "the reverse-translation tables", which is not a heading. Name the real sections, as the `to` sibling does.
+- **from-snowflake-sv, I21.** `SKILL.md:635-636` puts `referencing_join` on the `to_table` entry. The shared rule and I21 put it on the FROM entry, and the destination entry fails with error 14504. This affects only a hand-assembled Scenario A Model.
+- **from-tableau, PT1.** Aggregate pass-throughs have no flag-for-review marker: `tableau-formula-translation.md` RANK_DENSE, SIZE and INDEX/LOOKUP/FIRST/LAST rows, and `coverage-matrix.md:115-123`.
+- **Invariants doc.** I9 says "inline the expression", while I13, `ts-tml-import-gate.md:24` and the root CLAUDE.md say id-references. I8's correct example omits `index_type: DONT_INDEX` (I3). The ID list at line 8 and several "Applies to" lists are stale (3–6 converters named; 11 exist).
+- **from-looker.** `SKILL.md:25` scopes the invariants as "I1–I8". `SKILL.md:561` searches `--subtype MODEL`, but Models are `WORKSHEET` in this CLI; verify that.
+- **`conversion-consistency-auditor.md:89`** still scopes checks to "I1–I7 and N1".
 
 **Target:** 2026-12-31.
