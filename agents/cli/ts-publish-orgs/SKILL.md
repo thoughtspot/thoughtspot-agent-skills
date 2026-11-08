@@ -1,6 +1,6 @@
 ---
 name: ts-publish-orgs
-description: Publish ThoughtSpot Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them — defining the template variables and metadata parameterization that publishing requires — via the `ts publish export/resolve/apply/verify/rollback` CLI pipeline.
+description: Publish ThoughtSpot Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them — defining the template variables and metadata parameterization that publishing requires — via the `ts publish export/resolve/apply/rollback` CLI pipeline.
 metadata:
   category: "Platform & Governance"
   summary: "Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export` → `resolve` → `apply` pipeline, with `rollback` to undo and `status` to verify"
@@ -12,8 +12,8 @@ Orgs Publishing keeps **one** object in the Primary Org and makes it visible in 
 Orgs. There is no copy, no new GUID, and no GUID mapping. Per-tenant variation comes
 entirely from **template variables** substituted at runtime.
 
-This skill drives the `ts publish` pipeline (`export` → `resolve` → `apply` → `verify`,
-with `rollback` to undo) and the variable work publishing depends on.
+This skill drives the `ts publish` pipeline (`export` → `resolve` → `apply`, checked with
+`status`, with `rollback` to undo) and the variable work publishing depends on.
 
 **The thing to understand before starting:** variable definition is not a preliminary to
 publishing, it *is* the work. An object with no variable in its dependency tree cannot be
@@ -501,6 +501,6 @@ record of the original static values.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.1 | 2026-11-08 | README summary (`metadata.summary`) no longer lists a `ts publish verify` command, which does not exist: Step 11 verifies with `ts publish status`. No behaviour change. |
+| 1.1.1 | 2026-11-08 | No longer names a `ts publish verify` command, which does not exist (the registered commands are export, resolve, apply, rollback and run, plus push, unpush and status): removed from the README summary (`metadata.summary`), the `description` and the intro. Step 11 verifies with `ts publish status`, unchanged. Audit 2026-09-22 finding 11.5; its validator half is BL-551. No behaviour change. |
 | 1.1.0 | 2026-07-27 | Correct Step 12's column-security guidance: CSR *can* be defined on published objects but is Org-scoped, and the mechanism is chosen by audience not publication state; hand off to `/ts-security-columns` |
 | 1.0.0 | 2026-07-26 | Initial release |

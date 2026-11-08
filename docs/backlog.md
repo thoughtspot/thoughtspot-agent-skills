@@ -459,6 +459,7 @@ are roughly ordered by value÷effort.
 | BL-542 | Native ThoughtSpot Semantic View / Metric View import is never mentioned by the from-sv, from-mv or link skills; re-check filtered-metric verdicts live | 2026-12-31 |
 | BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 | BL-549 | Converter-audit warnings on main, 2026-11-08 (dbt I11/I22, Sisense count row, snowflake-sv I7/I21, Tableau PT1, invariants I9 vs I13 and I3, Looker citation scope) | 2026-12-31 |
+| BL-551 | No check that each `ts <group> <cmd>` a SKILL.md names in frontmatter or prose is a registered command (validator half of audit 2026-09-22 finding 11.5) | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17060,3 +17061,13 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **Do.** Either load the real rows (INSERT the parsed CSV rows in batches, as the synthetic path already does, or stage and `COPY INTO`), or refuse a source that has data files unless an explicit flag asks for synthetic rows, and warn on stderr whenever synthetic rows are inserted. Match Snowflake's `--generate-sample` contract so the two loaders agree. Add a unit test that a CSV source's own values reach the INSERT, or that the command refuses.
 
 **Target:** 2026-12-15.
+
+## BL-551 — Check that every `ts <group> <cmd>` a SKILL.md names is a registered command `Tier 3`
+
+**Filed:** 2026-11-08. **Source:** audit 2026-09-22 finding 11.5 (`docs/audit/2026-09-22-full.md:279`). Its outcome had two halves, "correct the description" and "add a command-name check scoped to frontmatter and prose", and neither was routed to a backlog item or a PR: it went 47 days unrouted. The description half is now done (ts-publish-orgs 1.1.1, 2026-11-08); this is the validator half.
+
+**What.** ts-publish-orgs advertised a `ts publish verify` command in its frontmatter `description`, its intro and its README summary. No such command exists: the registered set is export, resolve, apply, rollback and run, plus push, unpush and status. A user acting on the description gets a click error. Nothing could catch it: `check_skill_flag_usage.py` checks flags, never command names, and only on the command lines it extracts, not frontmatter or prose.
+
+**Do.** Add a validator, or a second rule in `check_skill_flag_usage.py`, that extracts every backticked `ts <group> <cmd>` from SKILL.md frontmatter (`description`, `metadata.summary`) and prose, including the slash form (`ts publish export/resolve/apply`), resolves each against the Typer app registered in `ts_cli/cli.py`, and fails on an unknown command. Let deliberate forward-references and deprecated mentions through a dated allowlist with a reason each; the audit found a green baseline apart from this case.
+
+**Target:** 2026-12-31.
