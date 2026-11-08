@@ -26,7 +26,7 @@ or patch files there directly.
 | Changed area | Also update |
 |---|---|
 | Any SKILL.md (new command or step) | README.md skills table; agents/cli/SETUP.md if install/symlink step changed; bump version in SKILL.md ## Changelog |
-| agents/shared/* | worked example if output changes; `agents/shared/CLAUDE.md` directory map if a file is added (`check_consistency.py` enforces it) |
+| agents/shared/* | worked example if output changes; `agents/shared/CLAUDE.md` directory map if a file is added (`check_consistency.py` enforces it for `*.md` files only — a `.py`, `.js` or `.css` added under `agents/shared/`, as in `erd/`, is not checked) |
 | tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md that uses that command; CHANGELOG.md entry if version bumped |
 | agents/claude/ skill logic | Corresponding agents/cli/ skill if logic applies |
 | agents/cli/ skill logic | Corresponding agents/claude/ skill if logic applies |
