@@ -273,7 +273,11 @@ def _plan_dbx_table(tbl: dict, fqtn: str, csv_paths: dict, generate_sample: bool
     when `--generate-sample` asks for them. Nothing is executed here, so a bad value
     fails before any table is created."""
     name, cols = tbl["table_name"], tbl["columns"]
-    synthetic = generate_sample or not tbl.get("has_data") or name not in csv_paths
+    synthetic = generate_sample or not tbl.get("has_data")
+    if not synthetic and name not in csv_paths:
+        # Never fall back to synthetic rows for a table that has data: that is BL-550.
+        raise SystemExit(f"{name}: the source names a data file for this table, but no CSV "
+                         "path resolved for it. Nothing was loaded.")
     if synthetic:
         n = int(tbl.get("rows", rows))   # a table may pin its own row count in the manifest
         csv_path = generate_csv(tbl, rows=n, output_dir=gen_dir, seed=seed)

@@ -228,3 +228,12 @@ def test_sql_literal_rejects_non_literals():
             _sql_literal(val, t)
     assert _sql_literal(" 1e3 ", "DOUBLE") == "1e3"
     assert _sql_literal("2024-01-02'x", "DATE") == "DATE'2024-01-02\\'x'"
+
+
+def test_table_with_data_but_no_resolved_csv_is_refused_not_synthesised(tmp_path, dbx, monkeypatch):
+    (tmp_path / "orders.csv").write_text(_ORDERS_CSV, encoding="utf-8")
+    monkeypatch.setattr(load_mod, "_csv_paths_by_table", lambda source_path: {})
+    result = _run(["--source", str(tmp_path)])
+    assert result.exit_code != 0
+    assert "no CSV path resolved" in result.output
+    assert dbx == []
