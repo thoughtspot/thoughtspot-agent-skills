@@ -260,3 +260,52 @@ class TestVerifyGate:
         errors = self._structural_errors(report)
         assert "Total Amount" in errors and "Corr Amount" not in errors, errors
         assert report["ok"] is False
+
+
+class TestFieldNamesHoldingBrackets:
+    """BL-460 review: a field name is free text and may hold `[` as well as `(`. One
+    reference grammar (formula_translate.refs.REF_GRAMMAR: `[` allowed inside, `]`
+    doubled) is used by validate, classify and `ts formula translate`'s guard."""
+
+    @pytest.mark.parametrize("src", [
+        "SUM([Revenue (net) [EUR]]])",
+        "SUM([Bob's [x] (Sales)])",
+        "COUNTD([Orders [CORR (y)]]])",
+    ])
+    def test_converter_does_not_read_a_call_out_of_the_name(self, src):
+        expr, errors, _ = translate_single(src)
+        assert errors == [], (src, expr, errors)
+
+    def test_formula_translate_guard_does_not_either(self):
+        from ts_cli.formula_translate.traps import output_guard
+        assert output_guard("sum ( [T::Revenue (net) [EUR]]] )") is None
+
+
+class TestClassifyReadsCodeNotNames:
+    """BL-460 review: classify's tier regexes read comments-stripped text with literals
+    and references blanked, the same masking validate uses."""
+
+    @staticmethod
+    def _tier(formula):
+        return classify_formulas([_mk("F", formula)])["formulas"][0]["tier"]
+
+    @pytest.mark.parametrize("formula,tier", [
+        ("SUM([RUNNING_SUM (legacy)])", "native"),              # field name, was cumulative
+        ("IF [s] = 'RANK(' THEN 1 ELSE 0 END", "native"),       # literal, was pass_through
+        ("SUM([x]) // was RUNNING_SUM([x])", "native"),         # comment, was cumulative
+        ("CORR([Area (sq ft)], [x])", "untranslatable"),        # field name, was geospatial
+    ])
+    def test_names_literals_and_comments_do_not_decide_a_tier(self, formula, tier):
+        assert self._tier(formula) == tier
+
+    def test_every_window_member_is_window_ambiguous(self):
+        # WINDOW_CORR and WINDOW_STDEVP were outside the hand list: plain "untranslatable"
+        for f in ("WINDOW_CORR(SUM([a]), SUM([b]))", "WINDOW_STDEVP(SUM([a]))",
+                  "WINDOW_SUM(SUM([a]))"):
+            assert self._tier(f) == "window_ambiguous", f
+
+    def test_collect_is_geospatial(self):
+        assert self._tier("COLLECT([Geometry])") == "geospatial"
+
+    def test_parameter_reference_still_tiers(self):
+        assert self._tier("SUM([Sales]) * [Parameters].[Rate]") == "parameter_ref"

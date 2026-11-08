@@ -13,8 +13,15 @@ does with it.
 """
 from __future__ import annotations
 import re
+from ts_cli.tableau.literals import blank_literals_and_refs, mask_literals
+from ts_cli.tableau.pre_transforms import strip_comments
 from ts_cli.tableau.sets import classify_sets
-from ts_cli.tableau.validate import RANK_VARIANTS, RUNNING_FUNCTIONS, SPATIAL_FUNCTIONS
+from ts_cli.tableau.validate import (
+    RANK_VARIANTS,
+    RUNNING_FUNCTIONS,
+    SPATIAL_FUNCTIONS,
+    _WINDOW_TABLECALC_RE,
+)
 from ts_cli.tableau_translate import translate_formulas
 
 TRANSLATABLE_TIERS = {
@@ -29,16 +36,33 @@ UNTRANSLATABLE_TIERS = {
 # All 16 spatial functions, built from validate.SPATIAL_FUNCTIONS. This was a second
 # hand-kept copy, and it went stale twice: NO_CUTOUTS and PARSE_WKT (finding 13.22),
 # then UNION (13.15). The RUNNING_* and RANK_* member lists come from validate.py too.
-_GEO_RE = re.compile(rf"\b({'|'.join(SPATIAL_FUNCTIONS)})\s*\(", re.I)
+# COLLECT is the spatial aggregate (Tableau's Aggregate page, spatial fields only): the
+# same verdict, so the same tier (BL-460 review).
+_GEO_RE = re.compile(rf"\b({'|'.join(SPATIAL_FUNCTIONS + ('COLLECT',))})\s*\(", re.I)
 _LOD_RE = re.compile(r"\{\s*(FIXED|INCLUDE|EXCLUDE)\b", re.I)
 _RUNNING_RE = re.compile(rf"\bRUNNING_({'|'.join(RUNNING_FUNCTIONS)})\s*\(", re.I)
-_WINDOW_RE = re.compile(r"\bWINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(", re.I)
+# The WINDOW_* family, not a member list: validate.py rejects every WINDOW_* call, so a
+# member missing from a list here (WINDOW_CORR, WINDOW_STDEVP, ...) tiered plain
+# "untranslatable" instead of window_ambiguous (BL-460 review).
+_WINDOW_RE = _WINDOW_TABLECALC_RE
 _RANK_RE = re.compile(rf"\b(RANK(_({'|'.join(RANK_VARIANTS)}))?|TOTAL)\s*\(", re.I)
 _ROWOFFSET_RE = re.compile(r"\b(INDEX|LOOKUP|FIRST|LAST|SIZE)\s*\(", re.I)
 _PARAM_RE = re.compile(r"\[Parameters\]\.\[", re.I)
 
 
+def _code(expr: str) -> str:
+    """The text the tier regexes read: comments stripped, then string literals and
+    ``[field]`` references blanked with the grammar validate.py uses, so a field name
+    (``[RUNNING_SUM (legacy)]``, ``[Area (sq ft)]``), a literal or a comment never
+    decides a tier (BL-460 review)."""
+    return blank_literals_and_refs(strip_comments(expr))
+
+
 def _translatable_tier(expr: str) -> str:
+    # [Parameters].[ is a reference, so it is read with the references kept and only
+    # the literals masked.
+    params_text = mask_literals(strip_comments(expr))[0]
+    expr = _code(expr)
     if _LOD_RE.search(expr):
         return "lod"
     if _RUNNING_RE.search(expr):
@@ -50,12 +74,13 @@ def _translatable_tier(expr: str) -> str:
         return "row_offset_native"
     if _RANK_RE.search(expr):
         return "pass_through"
-    if _PARAM_RE.search(expr):
+    if _PARAM_RE.search(params_text):
         return "parameter_ref"
     return "native"
 
 
 def _untranslatable_tier(expr: str, reason: str) -> str:
+    expr = _code(expr)
     if _GEO_RE.search(expr):
         return "geospatial"
     low = (reason or "").lower()

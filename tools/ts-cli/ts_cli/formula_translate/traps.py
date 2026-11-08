@@ -32,7 +32,7 @@ from ts_cli.formula_week import (
     WEEK_DIFF_DAYS_PREFIX, WEEK_START_MISMATCH_PREFIX, week_diff_days_note, week_start_note)
 from ts_cli.formula_translate.context import ColumnContext
 from ts_cli.formula_translate.catalog import is_known
-from ts_cli.formula_translate.refs import split_literals
+from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
 
 # Dialects whose string comparison is case-sensitive by default (OI-4 applies).
 CASE_SENSITIVE_DIALECTS = {"tableau", "snowflake", "databricks"}
@@ -96,11 +96,15 @@ def is_downgrade(trap: str) -> bool:
     return trap.startswith(DOWNGRADE_TRAP_PREFIXES)
 
 
+_REF = re.compile(REF_GRAMMAR)
+
+
 def _code(expr: str) -> str:
     """``expr`` with string literals blanked to ``''`` and ``[…]`` references to ``[]``, so
-    keyword and function checks never fire on a literal or a column name (``[Over Budget]``)."""
+    keyword and function checks never fire on a literal or a column name (``[Over Budget]``;
+    ``[Revenue (net) [EUR]]]``, which a ``[^\\[\\]]*`` reference pattern split, BL-460)."""
     out = "".join("''" if lit else seg for lit, seg in split_literals(expr))
-    return re.sub(r"\[[^\[\]]*\]", "[]", out)
+    return _REF.sub("[]", out)
 
 
 def _round_has_increment(code: str) -> bool:

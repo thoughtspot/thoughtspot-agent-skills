@@ -12,7 +12,7 @@ import re
 # drift-tested against it (tests/test_formula_translate.py::TestCatalog). It is the
 # same source `ts formula translate`'s output guard checks, not a second list.
 from ts_cli.formula_translate.catalog import is_known
-from ts_cli.formula_translate.refs import split_literals
+from ts_cli.tableau.literals import blank_literals_and_refs
 
 
 # ---------------------------------------------------------------------------
@@ -187,17 +187,15 @@ _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 # their own checks above and in validate_pre_import.
 _CONTROL_WORDS = frozenset(
     {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
-# A [field] or [TABLE::column] reference; its name may hold "(" (`[Area (sq ft)]`).
-_REF_RE = re.compile(r"\[(?:[^\[\]]|\]\])*\]")
 _LEAD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _code_only(expr: str) -> str:
     """``expr`` with string literals and ``[…]`` references blanked, so a function
-    name is never read out of a column name (``[VAR (x)]``), a literal (``'CORR('``)
-    or a ``sql_*_op`` template (``"COUNT(*) OVER ()"``)."""
-    code = "".join(" " if lit else seg for lit, seg in split_literals(expr))
-    return _REF_RE.sub(" ", code)
+    name is never read out of a column name (``[VAR (x)]``, ``[Revenue (net) [EUR]]]``),
+    a literal (``'CORR('``) or a ``sql_*_op`` template (``"COUNT(*) OVER ()"``). The
+    Tableau literal grammar (``literals.blank_literals_and_refs``), shared with classify."""
+    return blank_literals_and_refs(expr)
 
 
 def _unknown_calls(code: str, reported: set[str]) -> list[str]:

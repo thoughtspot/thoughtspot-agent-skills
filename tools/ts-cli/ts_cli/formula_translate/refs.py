@@ -20,9 +20,14 @@ from typing import Optional
 from ts_cli.formula_translate.context import ColumnContext
 
 _QUOTED = re.compile(r"('(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\")")
+# One `[field]` reference. A name is free text: it may hold `(`, a quote or `[`
+# (`[Revenue (net) [EUR]]]`), and a `]` inside it is doubled (Tableau and DAX both escape
+# it that way). The one grammar for a reference: tableau/literals.py and traps._code use
+# it too, so no scan reads a function name out of a column name (BL-460 review).
+REF_GRAMMAR = r"\[(?:[^\]]|\]\])*\]"
 # A bracketed reference is code even when its name holds a quote ([Bob's Sales::x],
 # BL-369): matched first at its own position so its apostrophe never opens a literal.
-_QUOTED_OR_BRACKET = re.compile(r"(\[[^\[\]]*\])|" + _QUOTED.pattern)
+_QUOTED_OR_BRACKET = re.compile(rf"({REF_GRAMMAR})|" + _QUOTED.pattern)
 _BRACKET = re.compile(r"\[([^\[\]]+)\]")
 
 # Words that are never a field when they appear bare (Qlik output).
