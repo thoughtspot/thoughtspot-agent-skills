@@ -12149,10 +12149,18 @@ should surface those edits and ask whether to keep or discard them. Today:
 |---|---|---|---|
 | snowflake-sv (CLI) A/B | No (tables only) | New object, or overwrite via `--existing-guid` | Lost |
 | snowflake-sv (CLI) Mode C | Manual GUID/name | In place | Documented as preserved; **code overwrites** — BL-319 |
-| snowflake-sv (CoCo) Mode C | Manual GUID/name | In place, deep-copy | Preserved (reference behaviour) |
-| databricks-mv (CLI + Genie) | No; no update mode | New object or overwrite | Lost |
+| snowflake-sv (CoCo) Mode C — runtime retired 2026-11-08 | Manual GUID/name | In place, deep-copy | Preserved (reference behaviour; see the note below the table) |
+| databricks-mv (CLI; Genie until 2026-11-08) | No; no update mode | New object or overwrite | Lost |
 | tableau | Model pick for liveboards only | Merge mode adds new formulas | Preserved (additive), but source changes to existing columns never applied |
 | looker / powerbi / qlik / sisense | No | Always a new object (no `guid` emitted) | Duplicate |
+
+**Where the reference behaviour lives now (2026-11-08).** The CoCo Snowsight runtime
+retired, so its Mode C is no longer in the tree. Read it at
+`runtimes-archive-2026-11-08:agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md`
+(`git show`), section "Mode C workflow — Update existing ThoughtSpot Model", Step C5:
+deep-copy the exported Model TML, apply only the confirmed changes, never touch
+`ai_context` or Instructions, and import with `no_create_new` set so the GUID is updated
+in place.
 
 Only one shared helper exists (`model_builder.merge_formulas_into_model`, Tableau-only,
 formulas-only). Table RLS survives only where a skill edits the *exported* Table TML;
@@ -12167,7 +12175,8 @@ skills that emit fresh Table TML never look at an existing table.
    kind (description, synonyms, ai_context, rls_rules, formula, column, parameter, join,
    instructions).
 3. One prompt: keep all TS-side edits (default) / discard all / per-item. Apply to a
-   deep copy of the exported TML (the CoCo Mode C pattern), never a regenerate.
+   deep copy of the exported TML (the CoCo Mode C pattern, archived as noted above),
+   never a regenerate.
 4. Adopt in every `ts-convert-from-*` **and** `ts-link-semantic-layer` from its first
    version. Subsumes the "never overwritten" rules of BL-021 Mode D; BL-021 keeps the
    selective-sync UX on top.
@@ -12192,7 +12201,10 @@ model from `parsed.json`/`translated.json` (`sv_build_model.py:395-438`) and onl
 the GUID at the root (`:436-437`); `commands/snowflake.py` never exports the existing
 model. So the user's per-column KEEP/MERGE answers, `ai_context`, TS-added formulas,
 columns, parameters and joins are absent from the imported document. The CoCo mirror
-does this correctly (deep-copy + `no_create_new`).
+did this correctly (deep-copy + `no_create_new`). That runtime retired on 2026-11-08; its
+implementation is at
+`runtimes-archive-2026-11-08:agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md`,
+section "Mode C workflow", Step C5.
 
 **Approach.** Give `build-model` a `--merge-into <exported.json>` path (or a separate
 `ts snowflake apply-update`) that applies the C4 decisions to a deep copy; test that an
