@@ -2,8 +2,8 @@
 
 # ThoughtSpot Model TML — Construction Reference
 
-How to construct a valid ThoughtSpot Model TML for import via the REST API or
-stored procedures. Platform-agnostic — applies to any source (Snowflake, Databricks,
+How to construct a valid ThoughtSpot Model TML for import with `ts tml import` or the
+REST API. Platform-agnostic — applies to any source (Snowflake, Databricks,
 Redshift, standalone model creation, etc.).
 
 For Table TML construction, see [thoughtspot-table-tml.md](thoughtspot-table-tml.md).

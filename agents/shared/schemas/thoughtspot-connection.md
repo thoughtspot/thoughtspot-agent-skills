@@ -65,7 +65,8 @@ ts metadata search --name "%{table}%" --profile {profile}
 Full probe table: `.claude/rules/ts-cli.md`.
 
 `name` is what goes into `connection.name` in Table TML. Copy it verbatim —
-ThoughtSpot will return "connection not found" if the case is wrong.
+ThoughtSpot will return "connection not found" if the case is wrong. When an import
+reports "connection not found", run `ts connections list` to see the exact names.
 
 ### Filter by warehouse type
 
@@ -74,15 +75,6 @@ ts connections list --type SNOWFLAKE --profile {profile}
 ts connections list --type BIGQUERY --profile {profile}
 ts connections list --type DATABRICKS --profile {profile}
 ```
-
-### CoCo / stored procedure workflow
-
-```sql
-CALL SKILLS.PUBLIC.TS_LIST_CONNECTIONS('{profile_name}');
-```
-
-Returns the same connection list as the CLI. If the connection name used in Table
-TML returns "connection not found", call this to see the available names.
 
 ---
 
