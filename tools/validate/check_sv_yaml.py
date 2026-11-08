@@ -2,10 +2,11 @@
 """
 check_sv_yaml.py — validate Snowflake Semantic View YAML structure.
 
-Checks all rules from agents/shared/schemas/snowflake-schema.md:
+Checks the structural subset of the rules in agents/shared/schemas/snowflake-schema.md:
   - required top-level fields (name, tables)
   - name is a valid Snowflake identifier
-  - forbidden fields absent (relationship_type, join_type, default_aggregation, sample_values)
+  - forbidden fields absent on table and relationship entries
+    (relationship_type, join_type, default_aggregation — see FORBIDDEN_FIELDS)
   - 'metrics' keyword used (not 'measures')
   - metrics entries have NO data_type (causes Cortex error 392700)
   - dimensions/time_dimensions have valid data_type
@@ -41,8 +42,26 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
+# The converter's own emitted subset, not Snowflake's limit. The spec accepts any
+# Snowflake data type (its examples use VARCHAR(25), NUMBER(4,0)); this repo emits only
+# these five, so a repo example using anything else has drifted from the converter.
 VALID_DATA_TYPES = {"TEXT", "NUMBER", "DATE", "TIMESTAMP", "BOOLEAN"}
-FORBIDDEN_FIELDS = {"relationship_type", "join_type", "default_aggregation", "sample_values"}
+
+# Keys that are NOT semantic view keys. Applied to tables[] and relationships[] entries.
+#
+# Why they are forbidden (re-verified live 2026-11-08, BL-450, Snowflake 10.40.103):
+# SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML does not reject them. It parks them in the
+# Cortex Analyst extension (`with extension (CA='...')`), where they have no effect,
+# and nothing flags them. So this check exists precisely because Snowflake will NOT
+# catch them, which matters more than a parse error would.
+#
+# `sample_values` was removed from this set (BL-450; audit 2026-09-22 finding 13.13).
+# It IS a spec key on dimensions and time_dimensions. Live, it compiles to
+# `sample_values ('a', 'b')` in GET_DDL and round-trips through READ_YAML. The set was
+# only ever applied to table and relationship entries, never to the dimension entries
+# where the key legitimately lives, so listing it here said "forbidden" about a valid key
+# while checking a place nobody puts it.
+FORBIDDEN_FIELDS = {"relationship_type", "join_type", "default_aggregation"}
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # SQL function/keyword prefixes that appear before '.' in expr — not table refs
