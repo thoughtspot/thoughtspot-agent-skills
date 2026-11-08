@@ -470,8 +470,10 @@ _AGG_TO_FORMULA_FN = {
 
 def aggregate_formula(aggregation: str | None, operand: str) -> str | None:
     """``fn ( operand )`` for a column-aggregation enum value, or None when the
-    value has no formula function. THE one spelling of an aggregation as a formula,
-    so every converter writes ``unique count`` (with its space) the same way."""
+    value has no formula function. The shared spelling of an aggregation as a formula
+    (``unique count``, with its space). Today the Snowflake SV and Power BI builders and
+    :func:`promote_duplicate_column_ids` use it; Tableau, Qlik, Sisense, the Databricks
+    MV translator and dbt MetricFlow still write ``unique count`` from their own maps."""
     fn = _AGG_TO_FORMULA_FN.get((aggregation or "").upper())
     return f"{fn} ( {operand} )" if fn else None
 

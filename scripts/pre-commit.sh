@@ -268,7 +268,8 @@ if grep -qE '(\.claude/agents/|\.claude/rules/model-routing\.md|tools/validate/c
 fi
 
 # Converter parity (BL-217) — a converter must not emit a ThoughtSpot function that
-# does not exist, and must adopt the shared formula helpers. Runs when any converter
+# does not exist, must adopt the shared formula helpers, and (requirement C, BL-447) must
+# not map a source aggregation to the literal COUNT_DISTINCT. Runs when any converter
 # package, any converter skill, or the validator itself is touched. Scope is
 # discovered from agents/cli/ts-convert-*, so a NEW converter is covered with no edit.
 if grep -qE '(agents/cli/ts-convert-|tools/ts-cli/ts_cli/|tools/validate/check_converter_parity\.py)' <<< "$STAGED"; then

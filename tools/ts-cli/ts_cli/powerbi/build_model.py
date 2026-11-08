@@ -102,9 +102,12 @@ def _build_physical_columns(tables, dropped_ids, force_physical, warnings, count
     disambiguating colliding display names (a join references column_id, so dropping a
     column would break a join). Returns (columns, seen_display_names_lower).
 
-    A column whose summarizeBy is distinctCount becomes a `unique count` formula column
+    A column whose summarizeBy is distinctCount becomes a distinct-count formula column
     under its own name, its formula appended to ``count_formulas`` (invariant I5: a
-    COUNT_DISTINCT column on a text or date key is stored as an attribute)."""
+    COUNT_DISTINCT column on a text or date key is stored as an attribute). The formula is
+    DISTINCTCOUNT's blank-aware form, ``( unique count ( x ) + max ( if ( isnull ( x ) )
+    then 1 else 0 ) )`` (BL-540), and its mapping row is Approximated with
+    functions.DISTINCTCOUNT_NOTE."""
     seen, columns, renamed = set(), [], []
     for t in tables:
         for c in t.get("columns", []):

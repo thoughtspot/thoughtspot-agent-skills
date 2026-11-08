@@ -214,16 +214,25 @@ the literal `COUNT_DISTINCT`); the Snowflake SV, Power BI and Sisense hits were 
 `aggregation: COUNT_DISTINCT` — there is no measure to demote, and ThoughtSpot's own exports carry
 exactly that pair after a demotion. `ts tml lint` and `check_tml.py` skip it.
 
-**Applies to:** All source dialects. The one spelling is `formula_common.unique_count_formula`.
+**Applies to:** All source dialects. `formula_common.unique_count_formula` is the shared
+spelling; today the Snowflake SV and Power BI builders emit through it (and both SV and
+Databricks MV duplicate-column promotion through `aggregate_formula`). Tableau, Qlik, Sisense,
+the Databricks MV translator and dbt MetricFlow still write `unique count` from their own
+function maps.
 - Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
 - Snowflake SV: `COUNT(DISTINCT col)` metrics → `unique count ( [TABLE::col] )` formula; a fact
   whose Cortex Analyst `default_aggregation` is `count_distinct` → `unique count ( <row value> )`
   in every fact form (BL-447)
 - Databricks MV: `COUNT(DISTINCT col)` → `unique count ( [TABLE::col] )` formula
-- Power BI: `DISTINCTCOUNT` and a column whose `summarizeBy` is `distinctCount` → a formula
-  under the column's own name (BL-447), counting BLANK as a value (BL-540);
-  `DISTINCTCOUNTNOBLANK` → plain `unique count`
-- Qlik `Count(DISTINCT x)`, Sisense `count` → `unique count` formula
+- Power BI: a `DISTINCTCOUNT` measure → a formula under the measure's own name; a column
+  whose `summarizeBy` is `distinctCount` → a formula under the column's own name (BL-447).
+  Both count BLANK as a value, Approximated (BL-540); `DISTINCTCOUNTNOBLANK` → plain
+  `unique count`
+- Qlik: a measure that is exactly `Count(DISTINCT x)` → `unique count ( x )`. A
+  `Count(DISTINCT …)` nested inside a larger expression is not handled the same way yet
+- Sisense `count` (a distinct count in JAQL) → `unique count` formula
+- Looker `type: count_distinct` → `unique count()` formula, by the skill's instructions
+  (`lookml-tml-rules.md`); Looker ships no CLI module, so no code gate covers it
 - dbt `ts_aggregation: count_distinct` → still a column for now; the exception above
 
 **NULL is not counted.** `unique count` compiles to SQL `count(DISTINCT …)` (live-probed
