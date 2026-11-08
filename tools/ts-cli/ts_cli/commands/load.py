@@ -1,7 +1,9 @@
 """ts load — source data loading commands for warehouse provisioning."""
 from __future__ import annotations
 
+import codecs
 import csv as csv_mod
+import io
 import json
 import math
 import re
@@ -57,24 +59,45 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
             return "tableau_download", file_infos
 
         if "tables" in data:
-            return _detect_tables_source(data["tables"])
+            return _detect_tables_source(data["tables"], path.parent)
 
     raise SystemExit(f"Cannot detect source type for {path}. "
                      "Provide a CSV directory, Tableau download JSON, or manifest JSON.")
 
 
-def _detect_tables_source(tables: list[dict]) -> tuple[str, list[dict]]:
+def _table_data_path(t: dict, base_dir: Path) -> Optional[Path]:
+    """The CSV a `tables[]` entry names, or None for a schema-only table.
+
+    Two shapes name one: a manifest's `data_file`, and `ts load infer` output fed back as a
+    source — `file` with `has_data: true` (output from before `data_file` was added). A
+    relative path is taken from the working directory first, then next to the manifest; one
+    found in neither is refused, never read as schema-only (BL-550)."""
+    named = t.get("data_file") or (t.get("file") if t.get("has_data") else None)
+    if not named:
+        return None
+    path = Path(named)
+    if not path.is_absolute() and not path.exists() and (base_dir / path).exists():
+        path = base_dir / path
+    if not path.exists():
+        raise SystemExit(f"Table {t.get('table_name')}: data file {named} not found "
+                         f"(looked in the working directory and in {base_dir}).")
+    return path
+
+
+def _detect_tables_source(tables: list[dict], base_dir: Path = Path(".")) -> tuple[str, list[dict]]:
     """Normalise a `{"tables": [...]}` manifest into (source_type, file_infos).
 
-    `manifest` when any table has a `data_file` (load its CSV); otherwise `schema_only`
-    (synthetic generation). Per-table `columns` and optional `rows` are carried through.
+    `manifest` when any table names a data file (see `_table_data_path`); otherwise
+    `schema_only` (synthetic generation). Per-table `columns` and optional `rows` are
+    carried through.
     """
-    has_data = any(t.get("data_file") for t in tables)
+    paths = [_table_data_path(t, base_dir) for t in tables]
+    has_data = any(paths)
     file_infos = []
-    for t in tables:
+    for t, data_path in zip(tables, paths):
         info: dict[str, Any] = {"table_name": t["table_name"], "columns": t.get("columns", [])}
-        if has_data and t.get("data_file"):
-            info["csv_path"] = Path(t["data_file"])
+        if data_path is not None:
+            info["csv_path"] = data_path
         if t.get("rows") is not None:
             info["rows"] = t["rows"]
         file_infos.append(info)
@@ -138,12 +161,38 @@ def _infer_type(values: list[str]) -> str:
     return f"VARCHAR({varchar_len})"
 
 
-def infer_column_types(csv_path: Path, max_rows: int = 1000) -> list[dict]:
+def read_csv_text(csv_path: Path, encoding: str = "utf-8") -> str:
+    """A CSV's text, decoded strictly. UTF-8 is read as utf-8-sig, so a byte-order mark never
+    reaches the first header name. A byte that does not decode is refused, naming the file,
+    line and byte offset, instead of being replaced with U+FFFD (BL-550 review)."""
+    try:
+        name = codecs.lookup(encoding).name
+    except LookupError:
+        raise SystemExit(f"Unknown encoding {encoding!r}.") from None
+    raw = Path(csv_path).read_bytes()
+    try:
+        return raw.decode("utf-8-sig" if name == "utf-8" else encoding)
+    except UnicodeDecodeError as e:
+        line = raw.count(b"\n", 0, e.start) + 1
+        raise SystemExit(
+            f"{csv_path}: line {line}, byte offset {e.start}: 0x{raw[e.start]:02X} is not valid "
+            f"{encoding}. If the file uses another encoding, pass it with --encoding "
+            f"(for example cp1252).") from None
+
+
+def infer_column_types(csv_path: Path, max_rows: int = 1000,
+                       encoding: Optional[str] = None) -> list[dict]:
     """Infer column types from a CSV file by scanning sample rows.
 
-    Returns a list of dicts with keys: name, db_column_name, inferred_type.
+    Returns a list of dicts with keys: name, db_column_name, inferred_type. With `encoding`,
+    the file is decoded strictly (`read_csv_text`); without, as before (UTF-8, undecodable
+    bytes replaced).
     """
-    with open(csv_path, newline="", encoding="utf-8", errors="replace") as f:
+    if encoding:
+        f = io.StringIO(read_csv_text(csv_path, encoding), newline="")
+    else:
+        f = open(csv_path, newline="", encoding="utf-8", errors="replace")
+    with f:
         reader = csv_mod.reader(f)
         try:
             headers = next(reader)
@@ -177,8 +226,12 @@ def _count_csv_rows(csv_path: Path) -> int:
         return max(0, sum(1 for _ in f) - 1)
 
 
-def infer_schema(source_path: Path) -> dict:
-    """Top-level inference: detect source, infer types, return full JSON output."""
+def infer_schema(source_path: Path, encoding: Optional[str] = None) -> dict:
+    """Top-level inference: detect source, infer types, return full JSON output.
+
+    Each table with data carries `data_file`, the path of its CSV, so the output can be fed
+    back as `--source` (after a schema review) and still load that CSV's rows. `encoding`
+    is passed to `infer_column_types`."""
     source_type, file_infos = detect_source(source_path)
 
     tables = []
@@ -198,20 +251,26 @@ def infer_schema(source_path: Path) -> dict:
         if source_type == "manifest" and info.get("columns"):
             csv_path = info.get("csv_path")
             row_count = _count_csv_rows(csv_path) if csv_path else 0
-            tables.append({
+            entry = {
                 "file": csv_path.name if csv_path else None,
                 "table_name": info["table_name"],
                 "row_count": row_count,
                 "columns": info["columns"],
                 "has_data": csv_path is not None,
-            })
+            }
+            if csv_path is not None:
+                entry["data_file"] = str(csv_path)
+            tables.append(entry)
             continue
 
-        csv_path = info["csv_path"]
-        columns = infer_column_types(csv_path)
+        csv_path = info.get("csv_path")
+        if csv_path is None:
+            raise SystemExit(f"Table {info['table_name']}: no data file and no columns.")
+        columns = infer_column_types(csv_path, encoding=encoding)
         row_count = _count_csv_rows(csv_path)
         tables.append({
             "file": csv_path.name,
+            "data_file": str(csv_path),
             "table_name": info["table_name"],
             "row_count": row_count,
             "columns": columns,
@@ -294,98 +353,93 @@ def _explicit_generator(col: dict, rng):
     return None
 
 
-def _pick_generator(col_name: str, col_type: str, rng):
-    """Return a generator function for a column based on name and type patterns."""
-    lower = col_name.lower()
+def _type_class(col_type: str) -> str:
+    """bool | timestamp | date | int | float | string — the column TYPE decides first."""
+    t = (col_type or "").upper()
+    if "BOOL" in t:
+        return "bool"
+    if t.startswith("TIMESTAMP") or "DATETIME" in t:
+        return "timestamp"
+    if t.startswith("DATE"):
+        return "date"
+    if _is_int_type(t):
+        return "int"
+    if _is_float_type(t):
+        return "float"
+    return "string"
 
-    if ("id" in lower or "key" in lower) and _is_int_type(col_type):
-        counter = [0]
-        def gen_seq():
-            counter[0] += 1
-            return str(counter[0])
-        return gen_seq
 
-    if "email" in lower:
-        def gen_email():
-            return f"user_{rng.randint(1, 9999)}@example.com"
-        return gen_email
+def _gen_seq():
+    counter = [0]
+    def gen():
+        counter[0] += 1
+        return str(counter[0])
+    return gen
 
-    if any(w in lower for w in ("name", "customer")) and not _is_int_type(col_type) and not _is_float_type(col_type):
-        def gen_name():
-            return f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"
-        return gen_name
 
-    if any(w in lower for w in ("date", "_at", "_on")) or "DATE" in col_type:
-        def gen_date():
-            y = rng.randint(2023, 2025)
-            m = rng.randint(1, 12)
-            d = rng.randint(1, 28)
-            return f"{y}-{m:02d}-{d:02d}"
-        return gen_date
+def _gen_date(rng, with_time: bool):
+    def gen():
+        d = f"{rng.randint(2023, 2025)}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"
+        if not with_time:
+            return d
+        return f"{d} {rng.randint(0, 23):02d}:{rng.randint(0, 59):02d}:{rng.randint(0, 59):02d}"
+    return gen
 
+
+def _numeric_generator(lower: str, kind: str, rng):
+    if kind == "int":
+        if "id" in lower or "key" in lower:
+            return _gen_seq()
+        if any(w in lower for w in ("quantity", "count", "qty")):
+            return lambda: str(rng.randint(1, 100))
+        return lambda: str(rng.randint(1, 1000))
     if any(w in lower for w in ("price", "amount", "cost", "sales", "revenue")):
-        def gen_money():
-            return f"{rng.uniform(1, 10000):.2f}"
-        return gen_money
-
-    if any(w in lower for w in ("quantity", "count", "qty")):
-        def gen_qty():
-            return str(rng.randint(1, 100))
-        return gen_qty
-
-    if any(w in lower for w in ("status", "state", "type", "category")):
-        def gen_cat():
-            return rng.choice(_STATUSES)
-        return gen_cat
-
-    if any(w in lower for w in ("city",)):
-        def gen_city():
-            return rng.choice(_CITIES)
-        return gen_city
-
-    if any(w in lower for w in ("region",)):
-        def gen_region():
-            return rng.choice(_REGIONS)
-        return gen_region
-
-    if "phone" in lower:
-        def gen_phone():
-            return f"555-{rng.randint(0, 9999):04d}"
-        return gen_phone
-
+        return lambda: f"{rng.uniform(1, 10000):.2f}"
     if any(w in lower for w in ("percent", "ratio", "rate")):
-        def gen_pct():
-            return f"{rng.uniform(0, 1):.4f}"
-        return gen_pct
+        return lambda: f"{rng.uniform(0, 1):.4f}"
+    return lambda: f"{rng.uniform(0, 1000):.2f}"
 
-    if "BOOL" in col_type.upper():   # matches BOOL and BOOLEAN
-        def gen_bool():
-            return rng.choice(["true", "false"])
-        return gen_bool
-    if _is_int_type(col_type):
-        def gen_int():
-            return str(rng.randint(1, 1000))
-        return gen_int
-    if _is_float_type(col_type):
-        def gen_float():
-            return f"{rng.uniform(0, 1000):.2f}"
-        return gen_float
-    if "TIMESTAMP" in col_type:
-        def gen_ts():
-            y = rng.randint(2023, 2025)
-            m = rng.randint(1, 12)
-            d = rng.randint(1, 28)
-            h = rng.randint(0, 23)
-            mi = rng.randint(0, 59)
-            s = rng.randint(0, 59)
-            return f"{y}-{m:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
-        return gen_ts
 
+def _string_generator(lower: str, rng):
+    """Name-driven values for a text column (the only class where a name can choose freely).
+    The first rule whose keyword appears in the name wins, in this order."""
+    rules = (
+        (("email",), lambda: lambda: f"user_{rng.randint(1, 9999)}@example.com"),
+        (("name", "customer"), lambda: lambda: f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"),
+        (("date", "_at", "_on"), lambda: _gen_date(rng, with_time=False)),
+        (("price", "amount", "cost", "sales", "revenue"), lambda: lambda: f"{rng.uniform(1, 10000):.2f}"),
+        (("quantity", "count", "qty"), lambda: lambda: str(rng.randint(1, 100))),
+        (("status", "state", "type", "category"), lambda: lambda: rng.choice(_STATUSES)),
+        (("city",), lambda: lambda: rng.choice(_CITIES)),
+        (("region",), lambda: lambda: rng.choice(_REGIONS)),
+        (("phone",), lambda: lambda: f"555-{rng.randint(0, 9999):04d}"),
+        (("percent", "ratio", "rate"), lambda: lambda: f"{rng.uniform(0, 1):.4f}"),
+    )
+    for words, make in rules:
+        if any(w in lower for w in words):
+            return make()
     counter = [0]
     def gen_default():
         counter[0] += 1
         return f"val_{counter[0]:05d}"
     return gen_default
+
+
+def _pick_generator(col_name: str, col_type: str, rng):
+    """Return a generator function for a column: its TYPE first, then its name.
+
+    The type decides the kind of value, so a name can never produce a value the column cannot
+    hold (`has_email BOOLEAN` used to get an email address, `update_count BIGINT` a date);
+    within a type, the name picks a realistic shape (sequential ids, money, quantities)."""
+    lower = col_name.lower()
+    kind = _type_class(col_type)
+    if kind == "bool":
+        return lambda: rng.choice(["true", "false"])
+    if kind in ("date", "timestamp"):
+        return _gen_date(rng, with_time=(kind == "timestamp"))
+    if kind in ("int", "float"):
+        return _numeric_generator(lower, kind, rng)
+    return _string_generator(lower, rng)
 
 
 def generate_csv(table_schema: dict, rows: int, output_dir: Path, seed: int = 42) -> Path:
@@ -688,6 +742,18 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
         conn.close()
 
 
+def _refuse_unreadable_data(tables: list, csv_dir: Path) -> None:
+    """The Snowflake loaders read each table's CSV as csv_dir / file. A table with data whose
+    file is not there would be created empty with no error, so refuse it instead — a
+    `ts load infer` output fed back as --source reaches this path (BL-550 review)."""
+    unreadable = [t["table_name"] for t in tables
+                  if t.get("has_data") and not (csv_dir / (t.get("file") or "")).is_file()]
+    if unreadable:
+        raise SystemExit(
+            f"Table(s) {', '.join(unreadable)} have a data file that is not in {csv_dir}, "
+            "where ts load snowflake reads it. Move the CSV(s) there or pass the CSV directory.")
+
+
 @app.command()
 def snowflake(
     source: str = typer.Option(..., "--source", "-s", help="Path to CSV directory, download JSON, or manifest JSON"),
@@ -715,6 +781,7 @@ def snowflake(
     inferred = infer_schema(source_path)
 
     csv_dir = source_path if source_path.is_dir() else source_path.parent
+    _refuse_unreadable_data(inferred["tables"], csv_dir)
 
     if inferred["source_type"] == "schema_only":
         if not generate_sample:
