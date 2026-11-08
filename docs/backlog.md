@@ -354,7 +354,6 @@ are roughly ordered by value÷effort.
 | BL-479 | Personalized Liveboard views undocumented; round-trips may drop them | 2026-11-30 |
 | BL-541 | Liveboard filters scoped to a tab or group (26.10 EA) are undocumented and stripped on import to a cluster without the feature; round-trips may lose them | 2026-12-15 |
 | BL-543 | Snowflake Semantic View LOD metrics (Preview): from-snowflake-sv fails on them; to-direction rows still say Untranslatable; from-rules line 548 contradicts the schema | 2026-12-15 |
-| BL-544 | Databricks Runtime 19 Metric View grammar rejected by `ts databricks parse-mv` (optional semiadditive, unitless ranges, plural units, optional names); tier table stops at 18.2 | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -453,7 +452,7 @@ are roughly ordered by value÷effort.
 | BL-493 | `smoke_ts_to_databricks.py` passes with the emitter skipped | 2026-12-31 |
 | BL-494 | `check_ossie_mapping_sync` runs nowhere | 2026-12-31 |
 | BL-542 | Native ThoughtSpot Semantic View / Metric View import is never mentioned by the from-sv, from-mv or link skills; re-check filtered-metric verdicts live | 2026-12-31 |
-| BL-545 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
+| BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -15639,6 +15638,8 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Do.** Live-verify the semiadditive default and the derived-name rule. Keep the pre-19 facts and add a Runtime 19 row; treat absent `semiadditive` as `last` with a runtime warning (doc and parser together); accept derived names; fix `_VALID_UNITS` and accept unitless and multi-entry windows or report them; document `refresh_policy` and parameter window sizes. Advance the Databricks schema anchor when done.
 
+**Re-confirmed 2026-11-08** (`docs/audit/2026-11-08-external.md`, findings 13.10–13.14; the sweep proposed a new item, folded in here). Two details to add: `_OFFSET_RE` allows only negative offsets, though 19+ accepts positive ones (`3`); and a unitless range is row-positional, so it may match ThoughtSpot `moving_sum` more closely than the date-interval forms (no E1 density caveat) — check live, it may be newly exact. Pin `_VALID_UNITS` to the vendor's unit list with a unit test.
+
 **Target:** 2026-11-30.
 
 ## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1`
@@ -16890,22 +16891,7 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 
 **Target:** 2026-12-15.
 
-## BL-544 — Databricks Runtime 19 Metric View grammar is rejected by `ts databricks parse-mv` `Tier 2`
-
-**Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, findings 13.10–13.14.
-
-**What.** On DBR 19+:
-- `semiadditive` is optional (default `last`). The repo calls it required (`databricks-metric-view.md` lines 167, 306, 390, 871, 882, 915; `ts-to-databricks-rules.md:449`; `ts-databricks-formula-translation.md:767-768`), and `mv_window.parse_window` rejects a window without it, so valid MVs lose their windowed measures.
-- Unitless ranges (`trailing 3`) and numeric offsets (`-1`, `3`) are allowed. `_RANGE_RE` and `_OFFSET_RE` require a unit, and `_OFFSET_RE` allows only negative offsets. A unitless range is row-positional, so it may match `moving_sum` more closely than the date forms; check live.
-- Plural units (`days`, `months`, `years`) are documented. `_VALID_UNITS` is singular only and still accepts `week` and `quarter`, which the reference no longer lists.
-- Field and measure `name` is optional, derived from `expr`. `mv_parse._parse_dimension` / `_parse_measure` (lines 218-246) send nameless entries to `unsupported[]`.
-- The schema's runtime tier table (lines 15-21) stops at 18.2+: no DBR 19, no 18.2 window parameters, no `refresh_policy` on materializations (`auto` / `incremental` / `incremental strict` / `full`).
-
-**Do.** Treat absent `semiadditive` as `last`; accept unitless ranges and both-sign offsets; normalise units against the vendor list, with a unit test pinned to it; derive names after a live check of the rule. Correct the docs with a DBR 19 tier, and document `refresh_policy`. The to-direction is unaffected.
-
-**Target:** 2026-12-15.
-
-## BL-545 — ts-object-model-aggregates Step 6 re-asks four questions for every candidate `Tier 3`
+## BL-544 — ts-object-model-aggregates Step 6 re-asks four questions for every candidate `Tier 3`
 
 **Filed:** 2026-11-08. **Source:** `docs/audit/2026-11-08-external.md`, finding 14.1.
 
