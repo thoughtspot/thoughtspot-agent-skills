@@ -216,8 +216,9 @@ fi
 # summary, and the Setup / Conversion columns) by generate_readme_skills.py. The tables
 # were hand-kept and their counts drifted (the README once said 32 skills while its
 # tables held 36). --check fails on drift or invalid metadata, naming the file. Runs
-# when a SKILL.md, README.md or the generator changes.
-if grep -qE '(^agents/(cli|claude)/[^/]+/SKILL\.md$|^README\.md$|^tools/validate/generate_readme_skills\.py$)' <<< "$STAGED"; then
+# when a SKILL.md, a coverage matrix it links, README.md, the generator or the _dirs /
+# _git helpers it discovers skills with changes.
+if grep -qE '(^agents/(cli|claude)/[^/]+/(SKILL|references/coverage-matrix)\.md$|^README\.md$|^tools/validate/(generate_readme_skills|_dirs|_git)\.py$)' <<< "$STAGED"; then
   run_check "readme skills tables" "tools/validate/generate_readme_skills.py --root . --check"
 fi
 

@@ -40,7 +40,8 @@ entry that is not a tracked skill in that table fails `--check`.
 
 A summary or field containing `|` or a line break is refused, not escaped: either
 would split the README table cell, and an escaped pipe has no spelling that is
-valid in every YAML quoting style.
+valid in every YAML quoting style. Raw HTML (`<`) is refused too. A `coverage`
+path must stay under the skill's directory.
 
 Usage:
     python3 tools/validate/generate_readme_skills.py              # rewrite README.md
@@ -196,7 +197,25 @@ def _field_errors(key: str, value: str) -> List[str]:
                    "rephrase it (the generator refuses rather than escapes it)")
     if "\n" in value or "\r" in value:
         out.append(f"metadata.{key} contains a line break; a README table cell is one line")
+    if "<" in value:
+        out.append(f"metadata.{key} contains '<', i.e. raw HTML, which the README would render "
+                   "as markup; write it in markdown")
     return out
+
+
+def _coverage_errors(skill_dir: Path, value: str) -> List[str]:
+    if value == NO_COVERAGE:
+        return []
+    target = skill_dir / value  # an absolute `value` replaces skill_dir entirely
+    try:
+        target.resolve().relative_to(skill_dir.resolve())
+    except ValueError:
+        return [f"metadata.coverage {value!r} points outside the skill's directory; "
+                "it must be a path under it"]
+    if not target.is_file():
+        return [f"metadata.coverage {value!r} is not a file under the skill's directory "
+                f"(use {NO_COVERAGE!r} if the skill has no coverage matrix)"]
+    return []
 
 
 def validate_meta(skill_dir: Path, meta: object) -> List[str]:
@@ -228,10 +247,8 @@ def validate_meta(skill_dir: Path, meta: object) -> List[str]:
         if not isinstance(value, str):
             continue  # reported above
         errors.extend(_field_errors(key, value))
-        if key == "coverage" and isinstance(value, str) and value != NO_COVERAGE \
-                and not (skill_dir / value).is_file():
-            errors.append(f"metadata.coverage {value!r} is not a file under the skill's "
-                          f"directory (use {NO_COVERAGE!r} if the skill has no coverage matrix)")
+        if key == "coverage":
+            errors.extend(_coverage_errors(skill_dir, value))
     return errors
 
 

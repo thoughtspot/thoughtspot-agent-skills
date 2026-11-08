@@ -327,11 +327,41 @@ def test_coverage_path_that_does_not_exist_fails(tree, capsys):
     assert f"FAIL  {rel}: metadata.coverage 'references/nope.md' is not a file" in capsys.readouterr().out
 
 
+def test_coverage_path_that_is_a_directory_fails(tree, capsys):
+    rel = _set_meta(tree, "ts-convert-to-acme",
+                    'metadata:\n  category: Conversion\n  platform: Acme\n'
+                    '  coverage: references\n  summary: "Convert"\n')
+    assert (tree / "agents/cli/ts-convert-to-acme/references").is_dir()
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata.coverage 'references' is not a file" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("path", ["../ts-convert-from-acme/references/coverage-matrix.md", "/etc/hosts"],
+                         ids=["dot-dot", "absolute"])
+def test_coverage_path_outside_the_skill_dir_fails_even_if_the_file_exists(tree, capsys, path):
+    rel = _set_meta(tree, "ts-convert-to-acme",
+                    f'metadata:\n  category: Conversion\n  platform: Acme\n'
+                    f'  coverage: "{path}"\n  summary: "Convert"\n')
+    target = Path(path) if path.startswith("/") else tree / "agents/cli/ts-convert-to-acme" / path
+    assert target.is_file(), "the escape must point at a real file, or is_file alone would catch it"
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata.coverage {path!r} points outside the skill's directory" \
+           in capsys.readouterr().out
+
+
+def test_whitespace_only_summary_is_missing(tree, capsys):
+    rel = _set_meta(tree, "ts-object-model-agentql-query", 'metadata:\n  category: Query\n  summary: "   "\n')
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: metadata.summary is missing" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("summary, message", [
     ('"Search | set | remove"', "metadata.summary contains '|'"),
     ('"Line one\\nline two"', "metadata.summary contains a line break"),
     ("|\n    Line one\n    line two", "metadata.summary contains a line break"),
-], ids=["pipe", "escaped-newline", "literal-block"])
+    ('"Line one\\rline two"', "metadata.summary contains a line break"),
+    ('"Query a <b>Model</b>"', "metadata.summary contains '<', i.e. raw HTML"),
+], ids=["pipe", "escaped-newline", "literal-block", "carriage-return", "raw-html"])
 def test_pipe_or_newline_in_summary_is_refused(tree, capsys, summary, message):
     rel = _set_meta(tree, "ts-object-model-agentql-query",
                     f"metadata:\n  category: Query\n  summary: {summary}\n")
@@ -361,6 +391,40 @@ def test_missing_anchor_fails_naming_readme(tree, capsys):
     readme.write_text(_readme(tree).replace('<a id="recipes"></a>\n', ""), encoding="utf-8")
     assert _run(tree, "--check") == 1
     assert 'FAIL  README.md: no <a id="recipes"></a> anchor' in capsys.readouterr().out
+
+
+def test_end_marker_before_begin_fails_naming_readme(tree, capsys):
+    begin, end = "<!-- BEGIN GENERATED: skills-query -->", "<!-- END GENERATED: skills-query -->"
+    readme = tree / "README.md"
+    readme.write_text(_readme(tree).replace(f"{begin}\n{end}", f"{end}\n{begin}"), encoding="utf-8")
+    before = _readme(tree)
+    assert _run(tree) == 1
+    assert "FAIL  README.md: the GENERATED block 'skills-query' has its END marker before its BEGIN" \
+           in capsys.readouterr().out
+    assert _readme(tree) == before
+
+
+# ── rendering details ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("target, rendered", [
+    ("#usage", "#usage"),
+    ("/docs/guide.md", "/docs/guide.md"),
+    ("https://example.com/a", "https://example.com/a"),
+    ("references/x.md", "agents/cli/ts-audit/references/x.md"),
+    ("../ts-load-source-data/SKILL.md", "agents/cli/ts-load-source-data/SKILL.md"),
+    ("./references/../references/y.md#part", "agents/cli/ts-audit/references/y.md#part"),
+], ids=["anchor", "root-absolute", "url", "relative", "normpath-dotdot", "normpath-dot"])
+def test_summary_links_rebase_only_relative_targets_and_normalise_them(target, rendered):
+    assert g.rebase_links(f"see [x]({target})", "agents/cli/ts-audit") == f"see [x]({rendered})"
+
+
+@pytest.mark.parametrize("total, text", [(1, "1 skill across six categories"),
+                                         (2, "2 skills across six categories"),
+                                         (0, "0 skills across six categories")],
+                         ids=["one", "two", "zero"])
+def test_the_total_is_singular_only_for_one(total, text):
+    assert g.render_total(total) == text
 
 
 # ── tracked skills only ────────────────────────────────────────────────────────
