@@ -330,6 +330,7 @@ EXPECTED_GATES = {
     ("generate_agentql_offline.py", "gate"),
     ("generate_open_items_index.py", "gate"),
     ("generate_quality_gates.py", "gate"),
+    ("generate_readme_skills.py", "gate"),
     ("suggest_dependency_types.py", "soft"),
     ("suggest_repo_changelog.py", "gate"),
     ("suggest_skill_version.py", "soft"),
