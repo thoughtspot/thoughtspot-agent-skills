@@ -116,8 +116,10 @@ def _chart_config(chart_type: str, chart: Chart) -> dict[str, Any]:
     chart_tiles_missing_axis, #431). This builder emitted `{"type": chart_type}` alone
     while _CHART_MAP produces COLUMN/BAR/LINE/LINE_COLUMN -- four such types -- so every
     Qlik board with one shipped empty (audit finding 17.3). Tableau / PowerBI / Sisense
-    all satisfy the invariant via tableau.liveboard.build_answer; only this hand-rolled
-    path did not.
+    go through tableau.liveboard.build_answer, which encodes the cartesian, pie, pivot
+    and KPI types but, today, NOT SCATTER, BUBBLE, WATERFALL, PARETO, CANDLESTICK or
+    WHISKER_SCATTER: those leave build_answer with no encoding and fail the same check.
+    This path encodes every CHART_NEEDS_AXIS type that has a measure, SCATTER included.
 
     Encoding is structural: dimensions on x, measures on y, matching build_answer's own
     fallback. It makes the tile render rather than claiming semantic fidelity -- Qlik set
