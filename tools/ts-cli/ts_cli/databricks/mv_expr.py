@@ -1,8 +1,8 @@
 """Metric View dimension/measure SQL expression classification.
 
 Pure functions: expression text in, classification dict out. No I/O, no
-network calls — trivially unit-testable. stdlib only (Genie-vendorable —
-see package docstring).
+network calls — trivially unit-testable. stdlib only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 Classification rules: agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md
 (Dimension / Measure classification sections). Classification only;

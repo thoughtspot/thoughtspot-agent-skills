@@ -2,7 +2,8 @@
 
 Relocated from ts_cli/tableau/ (BL-063 PR 5): these were never Tableau-specific;
 Databricks build-model and the dependency/tables commands use them too. Pure
-functions, stdlib + PyYAML only — part of the Genie-vendorable closure.
+functions, stdlib + PyYAML only (a retired Genie-runtime constraint, no longer
+required — see ``ts_cli/databricks/__init__.py``).
 """
 from __future__ import annotations
 

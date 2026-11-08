@@ -3,7 +3,8 @@
 Split out of mv_translate.py to keep both files under the file-size warn
 line (BL-063 PR3) — pure function move, no behavior change. Pure functions:
 parsed window measure + dimensions + alias->table map in, translated entry
-dict out. No I/O, no network calls. stdlib only (Genie-vendorable).
+dict out. No I/O, no network calls. stdlib only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 Decision-tree rules: agents/shared/mappings/ts-databricks/
 ts-from-databricks-rules.md (window decision tree section). BL-098 items 1-2

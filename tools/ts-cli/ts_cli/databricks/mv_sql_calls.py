@@ -5,7 +5,8 @@ already-translated argument texts — and is listed by name in ``mv_sql._EXACT_F
 whose ``EXACT_FORM_EMITS`` declares what each can emit (``check_mapping_code_sync.py``
 requirement D). Semantics are Databricks' own, probed on the M2 SQL warehouse 2026-10-07
 (``docs/reviews/2026-10-07-fidelity-m2-databricks.md``, "After fixes"). Pure functions,
-stdlib only; vendored into the Genie notebook, so every top-level name is ``mvc_``-prefixed.
+stdlib only. Every top-level name is ``mvc_``-prefixed because the retired Genie runtime
+vendored this module into one shared namespace (no longer required — see the package docstring).
 """
 from __future__ import annotations
 

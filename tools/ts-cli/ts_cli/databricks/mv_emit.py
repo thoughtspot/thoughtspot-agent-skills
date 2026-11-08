@@ -8,9 +8,8 @@ live in mv_emit_base.py, join assembly in mv_emit_joins.py, column
 classification + non-window/LOD emitters in mv_emit_classify.py, and
 window-measure emission in mv_emit_window.py -- all four split out of this
 module under the file-size gate (tools/validate/check_file_size.py). Every
-name moved out is re-exported below so existing callers/tests (and the
-Genie-vendored closure) keep importing from `ts_cli.databricks.mv_emit`
-unchanged.
+name moved out is re-exported below so existing callers/tests keep importing
+from `ts_cli.databricks.mv_emit` unchanged.
 
 Pure: stdlib + (PyYAML only in build_view). No I/O here.
 """
@@ -261,7 +260,8 @@ def _combine_filters(filter_exprs: list) -> str | None:
     return " AND ".join(f"({e})" for e in filter_exprs)
 
 
-# _EMITTED_* avoids a vendoring name clash with mv_expr.py's own _MEASURE_REF_RE (BL-063 PR 14).
+# _EMITTED_* avoids a name clash with mv_expr.py's own _MEASURE_REF_RE (BL-063 PR 14) in the
+# retired Genie runtime's single vendored namespace — see the package docstring.
 _EMITTED_MEASURE_REF_RE = re.compile(r"MEASURE\(([A-Za-z0-9_]+)\)")
 _EMITTED_ANY_VALUE_REF_RE = re.compile(r"ANY_VALUE\(([A-Za-z0-9_]+)\)")
 

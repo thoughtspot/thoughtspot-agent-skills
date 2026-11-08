@@ -4,9 +4,9 @@ expression translators.
 One copy, so the two SQL engines cannot drift (BL-217). Every form here was chosen against
 live evidence from formula fidelity M0 (Snowflake) and M2 (Databricks); the reasons sit with
 each function. Pure functions over the translators' token-joined text and ``units`` lists
-(the flat list ``_expr_units`` builds before joining). stdlib only — vendored into the
-Databricks Genie notebook (``agents/databricks/build_mv_lib.py``), so every top-level name
-here must be unique across that closure.
+(the flat list ``_expr_units`` builds before joining). stdlib only, with every top-level
+name unique across the Databricks modules — both constraints from the retired Genie
+runtime's vendored notebook, no longer required (see ``ts_cli/databricks/__init__.py``).
 
 Division (BL-357, user decision 2026-10-07: *return zero only when the source asks for zero*):
 

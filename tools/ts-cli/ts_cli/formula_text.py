@@ -1,9 +1,10 @@
 """ThoughtSpot formula TEXT: how a string literal is spelled, how `a * b / c` groups, how a
 SQL source literal decodes, and the trigonometry forms (BL-364, BL-365).
 
-Split from ``formula_common`` (its line-count gate). Pure functions, stdlib only — part of the
-Genie-vendorable closure (``agents/databricks/build_mv_lib.py``). Every text translator calls
-``ts_finalize_formula`` as its last step; never fork these into a platform module.
+Split from ``formula_common`` (its line-count gate). Pure functions, stdlib only (a retired
+Genie-runtime constraint, no longer required — see ``ts_cli/databricks/__init__.py``).
+Every text translator calls ``ts_finalize_formula`` as its last step; never fork these into
+a platform module.
 """
 from __future__ import annotations
 

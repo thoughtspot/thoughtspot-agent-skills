@@ -2,7 +2,8 @@
 (`ts databricks translate-formulas`).
 
 Pure functions: parse-mv dict + alias->table map in, JSON-ready dict out.
-No I/O, no network calls. stdlib only (Genie-vendorable).
+No I/O, no network calls. stdlib only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 Mapping rules: agents/shared/mappings/ts-databricks/
 ts-databricks-formula-translation.md and ts-from-databricks-rules.md

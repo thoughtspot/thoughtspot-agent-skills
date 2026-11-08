@@ -1,6 +1,7 @@
 """TS-formula tokenizer + recursive-descent parser → dict-AST (reverse direction).
 
-Pure: stdlib only. No I/O. Vendored into the Genie notebook.
+Pure: stdlib only. No I/O. (It was vendored into the retired Genie runtime's notebook —
+see the package docstring.)
 """
 from __future__ import annotations
 
@@ -8,8 +9,8 @@ import re
 
 # UntranslatableError's canonical home is ts_cli/formula_common.py (BL-063
 # PR 14) — mv_sql.py (the forward direction) raises the same exception for
-# the same concept, and vendoring both into one Genie-notebook namespace
-# would otherwise define the class twice under one name. Re-exported here so
+# the same concept, and vendoring both into the retired Genie runtime's one
+# notebook namespace would have defined the class twice under one name. Re-exported here so
 # existing `from ts_cli.databricks.mv_emit_expr import UntranslatableError`
 # call sites are unaffected.
 from ts_cli.formula_common import UntranslatableError
@@ -22,7 +23,7 @@ _KW = {"if", "then", "else", "and", "or", "not", "in", "between",
 # order matters: multi-char ops before single-char. Named _FORMULA_TOKEN_RE
 # (not _TOKEN_RE) to avoid an accidental top-level name clash with
 # mv_sql.py's own (differently-shaped, SQL-grammar) _TOKEN_RE when both
-# modules are vendored into one Genie-notebook namespace (BL-063 PR 14) —
+# modules were vendored into the retired Genie runtime's one namespace (BL-063 PR 14) —
 # these tokenize two different grammars and are not the same concept, unlike
 # UntranslatableError above, so they are renamed rather than unified.
 _FORMULA_TOKEN_RE = re.compile(r"""
@@ -58,8 +59,8 @@ def _word_tokens(word: str) -> list[tuple[str, str]]:
 def tokenize_formula(expr: str) -> list[tuple[str, str]]:
     """Tokenize ThoughtSpot formula text. Named `tokenize_formula` (not
     `tokenize`) to avoid an accidental top-level name clash with mv_sql.py's
-    own `tokenize` (SQL grammar) when both modules are vendored into one
-    Genie-notebook namespace (BL-063 PR 14) — see `_FORMULA_TOKEN_RE`."""
+    own `tokenize` (SQL grammar) when both modules were vendored into the retired
+    Genie runtime's one namespace (BL-063 PR 14) — see `_FORMULA_TOKEN_RE`."""
     toks: list[tuple[str, str]] = []
     i = 0
     n = len(expr)
