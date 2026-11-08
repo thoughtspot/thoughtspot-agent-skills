@@ -206,7 +206,8 @@ if grep -qE '^tools/quest/|ts-object-model-agentql-query/references/(lesson-sql|
 fi
 
 # Cross-file consistency — runs when agents/, README.md, or SETUP.md are touched
-# Ensures README skills table, SETUP.md symlink/stage steps stay in sync with repo structure
+# Ensures README skills table, SETUP.md symlink steps and the agents/shared/CLAUDE.md
+# directory map stay in sync with repo structure
 if grep -qE '(^agents/|README\.md|SETUP\.md)' <<< "$STAGED"; then
   run_check "consistency"        "tools/validate/check_consistency.py --root . --staged"
 fi
@@ -418,8 +419,8 @@ fi
 # is its own bare "tests" package (tests/__init__.py with no distinguishing parent
 # package) — same as tools/ts-cli/tests. pytest's conftest module registration collides
 # (ImportPathMismatchError / "Plugin already registered under a different name") if two
-# same-named "tests" packages are collected in a single invocation. tools/validate/tests has no __init__.py, so it can safely share an
-# invocation with tools/ts-cli/tests.
+# same-named "tests" packages are collected in a single invocation. tools/validate/tests
+# has no __init__.py, so it can safely share an invocation with tools/ts-cli/tests.
 #
 # Exit code is checked directly — NOT grepped from the summary line. A failing run's
 # "3 failed, 898 passed" text still contains the word "passed", which previously made

@@ -186,7 +186,8 @@ Modes: **Build** (full), **Enrich-only** (stages 1–2, 5-measures, 7 — no liv
 Extract the liveboard mechanics into shared references consumed by **both** skills:
 
 - `agents/shared/schemas/thoughtspot-chart-types.md` — the verified enum + intent mapping
-  (**done** — promoted to shared, cited by `ts-convert-from-tableau`, on the coco stage list).
+  (**done** — promoted to shared, cited by `ts-convert-from-tableau`, listed in
+  `agents/shared/CLAUDE.md`).
 - `agents/shared/mappings/analytics/kpi-library.md` — domain → KPI patterns (§6.5).
 - `agents/shared/mappings/analytics/chart-selection.md` — intent + roles + cardinality →
   chart type (§6.7), the decision logic.
@@ -240,8 +241,8 @@ The biggest risk is a confident-but-wrong "expert" board. Guardrails:
 ## 11. Plan of action (phasing)
 
 - **Phase 0 — foundations (this PR):** verified chart-types reference promoted to
-  `agents/shared/schemas/thoughtspot-chart-types.md`, cited by `ts-convert-from-tableau`, on
-  the coco stage list (done) + this design.
+  `agents/shared/schemas/thoughtspot-chart-types.md`, cited by `ts-convert-from-tableau`
+  (done) + this design.
 - **Phase 1 — shared library:** author `chart-selection.md` + `kpi-library.md` (seed with
   2–3 domains: banking, retail, generic). Refactor Tableau Step 10a to also cite
   `chart-selection.md`.
