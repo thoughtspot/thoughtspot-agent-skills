@@ -881,3 +881,12 @@ def test_a_bom_never_reaches_the_inferred_column_name(tmp_path):
     p = tmp_path / "t.csv"
     p.write_bytes(b"\xef\xbb\xbfCost,Revenue\n1,2\n")
     assert [c["name"] for c in load_core.infer_column_types(p)] == ["Cost", "Revenue"]
+
+
+def test_failed_append_before_any_row_says_the_table_is_unchanged(tmp_path, dbx):
+    (tmp_path / "a.csv").write_text("V\n1\n2\n", encoding="utf-8")
+    dbx.existing = ["a"]
+    dbx.fail_on, dbx.fail_at = "INSERT INTO", 1
+    result = _run(["--source", str(tmp_path), "--if-exists", "append"])
+    assert "no rows were appended, so it is unchanged" in result.stderr
+    assert "RESTORE" not in result.stderr

@@ -466,6 +466,9 @@ def _recovery_advice(p: dict, cat: str, sch: str) -> str:
     if not p.get("pre_existing"):
         return (f"{name}: created by this run, {p['inserted']} of {p['of']} rows inserted — "
                 "re-run with --if-exists replace to reload it.")
+    if p["inserted"] == 0:
+        return (f"{name}: existed before this run and no rows were appended, so it is "
+                "unchanged. Do not re-run with --if-exists replace: it would drop its rows.")
     fq = dbx_fqtn(cat, sch, p["table"])
     if p.get("version") is not None:
         undo = f"RESTORE TABLE {fq} TO VERSION AS OF {p['version']}"
