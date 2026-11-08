@@ -1354,7 +1354,7 @@ cluster. Diagnostics go to stderr; the JSON goes to stdout.
 List/search orgs (auto-paginated by default).
 
 ```bash
-ts orgs search --profile <name> [--account-status ACTIVE] [--name "%pattern%"] [--limit <n>]
+ts orgs search --profile <name> [--status ACTIVE] [--name "%pattern%"] [--limit <n>]
 ```
 
 Omit `--limit` to fetch the full result set (default). Pass `--limit` for the legacy
