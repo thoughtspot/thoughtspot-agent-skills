@@ -107,7 +107,7 @@ are roughly ordered by value÷effort.
 | ~~BL-359~~ | ~~Databricks `CAST(x AS BIGINT)` → `to_integer`, which compiles to a 32-bit `CAST(… as int)`: 1e12 comes back 2147483647 (silent, fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | BL-447 | I5: Snowflake SV formula-path and Power BI distinct counts demoted to ATTRIBUTE on text/date columns; `check_converter_parity` requirements C (no literal `COUNT_DISTINCT`) and D (lint before import); Tableau merge-mode lint | 2026-11-15 |
 | BL-448 | Renamed pass-through Snowflake SV fact takes the wrong aggregation (sums customer ids where Cortex Analyst counts distinct) | 2026-11-15 |
-| BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema, lint and generator classification done 2026-11-08 (ts-cli v0.211.0); flipping the default library open |
+| BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema and generator classification done 2026-11-08 (ts-cli v0.211.0); lint unchanged pending a render check; flipping the default library open |
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
@@ -15601,7 +15601,7 @@ Until then the dbt lint gate reports I5 as advisory, so these columns import as 
 
 **Target:** 2026-11-15.
 
-## BL-449 — `thoughtspot-chart-types.md` still treats the new charts library as phase 1 and defaults to Legacy `Tier 1` — **PARTIAL 2026-11-08: enum, schema, lint and generator classification done; switching the default library open**
+## BL-449 — `thoughtspot-chart-types.md` still treats the new charts library as phase 1 and defaults to Legacy `Tier 1` — **PARTIAL 2026-11-08: enum, schema and generator classification done; the lint is unchanged pending a render check; switching the default library open**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.1 (public release notes only — see 13.3).
 
