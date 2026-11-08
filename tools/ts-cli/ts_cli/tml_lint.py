@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ts_cli.chart_types import with_new_library_twins
 from ts_cli.tml_join_graph import (
     JoinGraph, ambiguous_paths, directed_cycles, node_id, on_clause_refs, on_clause_tables,
 )
@@ -46,15 +47,16 @@ from ts_cli.tml_join_graph import (
 # definition. A converter copying the list is the drift class BL-217 exists to stop --
 # and 17.3 is what a missing copy looks like (Qlik emitted four of these types with no
 # axis encoding at all, so its boards imported and rendered blank).
-_CHART_NEEDS_AXIS = frozenset({
+# Legacy types only: each new-library (ADVANCED_*) type is classified like its Legacy twin
+# (ADVANCED_SCATTER needs an axis like SCATTER; ADVANCED_DONUT is exempt like PIE), so the
+# set follows the enum in ts_cli/chart_types.py rather than a hand-kept list (BL-449).
+_LEGACY_CHART_NEEDS_AXIS = frozenset({
     "LINE", "COLUMN", "BAR", "AREA",
     "STACKED_COLUMN", "STACKED_BAR", "STACKED_AREA",
     "LINE_COLUMN", "LINE_STACKED_COLUMN",
     "SCATTER", "BUBBLE", "WATERFALL", "PARETO", "WHISKER_SCATTER", "CANDLESTICK",
-    "ADVANCED_LINE", "ADVANCED_COLUMN", "ADVANCED_BAR", "ADVANCED_AREA",
-    "ADVANCED_STACKED_COLUMN", "ADVANCED_STACKED_BAR", "ADVANCED_STACKED_AREA",
-    "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN",
 })
+_CHART_NEEDS_AXIS = with_new_library_twins(_LEGACY_CHART_NEEDS_AXIS)
 CHART_NEEDS_AXIS = _CHART_NEEDS_AXIS
 
 

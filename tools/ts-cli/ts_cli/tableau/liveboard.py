@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from ts_cli.chart_types import legacy_twin, with_new_library_twins
 from ts_cli.tml_common import derive_viz_obj_id
 
 # Tableau mark class → ThoughtSpot chart type. Unknown marks default to GRID_TABLE.
@@ -33,8 +34,12 @@ _NON_VISUAL = {"", "filter", "legend", "color", "paramctrl", "bitmap", "web",
                "extension", "flipboard", "flipboard-nav"}
 
 # Minimum measure count a chart type needs to render (flag, never silently downgrade).
-CHART_NEEDS = {"LINE_COLUMN": 2, "LINE_STACKED_COLUMN": 2, "SCATTER": 2,
-               "ADVANCED_LINE_COLUMN": 2, "ADVANCED_BUBBLE": 2}
+# Legacy types only; each new-library (ADVANCED_*) twin inherits its Legacy twin's floor
+# (ts_cli/chart_types.py). The hand-kept ADVANCED_* entries had drifted: ADVANCED_BUBBLE
+# had a floor that BUBBLE lacked, and ADVANCED_SCATTER had none at all (BL-449).
+_LEGACY_CHART_NEEDS = {"LINE_COLUMN": 2, "LINE_STACKED_COLUMN": 2, "SCATTER": 2, "BUBBLE": 2}
+CHART_NEEDS = {t: _LEGACY_CHART_NEEDS[legacy_twin(t)]
+               for t in with_new_library_twins(_LEGACY_CHART_NEEDS)}
 
 
 def slugify(name: str) -> str:
@@ -92,12 +97,15 @@ def auto_name(cols: list[str], measure_names: set) -> Optional[str]:
     return None
 
 
-_CARTESIAN = ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR",
-              "LINE_COLUMN", "LINE_STACKED_COLUMN",
-              # Muze (ADVANCED_*) cartesian types accept axis_configs by display name on a
-              # fresh import (live-verified) — they auto-resolve line-vs-column for combos.
-              "ADVANCED_COLUMN", "ADVANCED_BAR", "ADVANCED_LINE", "ADVANCED_AREA",
-              "ADVANCED_STACKED_COLUMN", "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN")
+# Types laid out as x = category, y = measures, color = series. Legacy types only; the
+# new-library (ADVANCED_*) twins come from ts_cli/chart_types.py. Those accept axis_configs
+# by display name on a fresh import (live-verified) and auto-resolve line-vs-column for
+# combos. The hand-kept list had left out STACKED_AREA, ADVANCED_STACKED_AREA and
+# ADVANCED_STACKED_BAR, so their tiles got no encoding and failed the lint's blank-chart
+# check (BL-449).
+_CARTESIAN = with_new_library_twins((
+    "COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR", "STACKED_AREA",
+    "LINE_COLUMN", "LINE_STACKED_COLUMN"))
 
 # Date/time bucket keyword (in a `[Col].<bucket>` search token) → the label ThoughtSpot
 # renames the output column to (e.g. `[Order Date].monthly` → output column `Month(Order Date)`).
@@ -363,8 +371,9 @@ def _chart_needs(ct: str) -> int:
     if ct in CHART_NEEDS:
         return CHART_NEEDS[ct]
     # KPI is valid on a single value — a measure OR a PASS/FAIL grade attribute — so it
-    # needs no measure (GRID/PIVOT likewise); everything else needs at least one.
-    return 0 if ct in ("GRID_TABLE", "PIVOT_TABLE", "KPI") else 1
+    # needs no measure (GRID/PIVOT likewise, ADVANCED_PIVOT_TABLE like its twin);
+    # everything else needs at least one.
+    return 0 if legacy_twin(ct) in ("GRID_TABLE", "PIVOT_TABLE", "KPI") else 1
 
 
 def _infer_chart_type(cols: list[str], measure_names: set, buckets: dict,

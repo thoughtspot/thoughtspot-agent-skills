@@ -740,7 +740,10 @@ For **answer / liveboard** TML, lint also flags a **chart tile with no axis enco
 LINE/COLUMN/BAR/combo whose `chart.type` is set but which carries neither `chart.axis_configs`
 nor a `custom_chart_config`. Such a tile imports cleanly yet renders blank (the
 hand-authored-off-skill failure); the converter's `build-liveboard` always emits the encoding,
-so its absence flags a hand-drawn tile before it ever reaches ThoughtSpot.
+so its absence flags a hand-drawn tile before it ever reaches ThoughtSpot. A new-charts-library
+type (`ADVANCED_*`) is checked like its Legacy twin: `ADVANCED_SCATTER` needs an encoding like
+`SCATTER`, and `ADVANCED_DONUT` is exempt like `PIE` (twins and the enum:
+`ts_cli/chart_types.py`, `agents/shared/schemas/thoughtspot-chart-types.md`).
 
 **Output:** JSON `{"clean": bool, "results": [{index, type, name, findings: [...]}]}`.
 **Exit code** is `1` if any document has findings, else `0` — so it composes with `&&`.

@@ -128,6 +128,22 @@ def test_missing_axis_exempts_tables_kpi_pie_geo():
         assert chart_tiles_missing_axis(doc) == [], ct
 
 
+def test_missing_axis_flags_the_axis_bearing_new_library_types():
+    # In the enum since the 2026-11-08 read (BL-449): each is axis-bearing like its Legacy
+    # twin, so a bare tile of one is the same blank-chart failure.
+    for ct in ("ADVANCED_SCATTER", "ADVANCED_BUBBLE", "ADVANCED_WATERFALL",
+               "ADVANCED_PARETO", "ADVANCED_CANDLESTICK"):
+        doc = {"answer": {"name": ct, "chart": {"type": ct}}}
+        assert chart_tiles_missing_axis(doc) == [{"visual": ct, "chart_type": ct}], ct
+
+
+def test_missing_axis_exempts_the_non_axis_new_library_types():
+    # Twins of PIE, FUNNEL, HEATMAP and PIVOT_TABLE, which the lint exempts.
+    for ct in ("ADVANCED_DONUT", "ADVANCED_FUNNEL", "ADVANCED_HEATMAP", "ADVANCED_PIVOT_TABLE"):
+        doc = {"answer": {"name": ct, "chart": {"type": ct}}}
+        assert chart_tiles_missing_axis(doc) == [], ct
+
+
 def test_missing_axis_liveboard_flags_only_the_blank_chart_tiles():
     doc = {"liveboard": {"visualizations": [
         {"answer": {"name": "good line", "chart": {"type": "LINE", "axis_configs": [{"x": ["m"]}]}}},

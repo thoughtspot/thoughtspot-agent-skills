@@ -235,6 +235,37 @@ def test_build_from_spec_chart_floor_flags_not_downgrades():
     assert "needs 2 measure" in row["note"]
 
 
+def _one_measure_visual(ts_chart):
+    # A source-resolved ts_chart wins over the mark (the Power BI path); the mark only
+    # has to be a visual one.
+    return {"mark": "bar", "ts_chart": ts_chart, "fields": [
+        {"name": "Region", "shelf": "columns", "measure": False},
+        {"name": "Total Sales", "measure": True}]}
+
+
+def test_measure_floor_covers_bubble_and_new_library_twins():
+    # BUBBLE had no floor while ADVANCED_BUBBLE did; ADVANCED_SCATTER and
+    # ADVANCED_LINE_STACKED_COLUMN had none while their Legacy twins did (BL-449).
+    for t in ("BUBBLE", "ADVANCED_BUBBLE", "ADVANCED_SCATTER", "ADVANCED_LINE_STACKED_COLUMN"):
+        r = lb.build_from_spec(_spec(dashboards=[{"name": "P", "visuals": [_one_measure_visual(t)]}]))
+        row = r["visual_rows"][0]
+        assert row["ts_chart"] == t, t                 # flagged, never downgraded
+        assert row["status"] == "NEEDS REVIEW", t
+        assert "needs 2 measure" in row["note"], t
+
+
+def test_stacked_area_and_advanced_stacked_bar_get_an_axis_encoding():
+    # All three are in the lint's axis set, but build_answer gave them no axis_configs,
+    # so the converter's own tile failed `ts tml lint` as blank (BL-449).
+    from ts_cli.tml_lint import chart_tiles_missing_axis
+    for t in ("STACKED_AREA", "ADVANCED_STACKED_AREA", "ADVANCED_STACKED_BAR"):
+        a = lb.build_answer("t", "t", "M", None, ["Month", "Segment", "Sales"], t, {"Sales"},
+                            ["Category", "Series", "Values"])
+        assert a["answer"]["chart"]["axis_configs"] == [
+            {"x": ["Month"], "y": ["Sales"], "color": ["Segment"]}], t
+        assert chart_tiles_missing_axis(a) == [], t
+
+
 def test_build_from_spec_skips_filter_zone():
     spec = _spec(dashboards=[{"name": "P", "visuals": [{"mark": "filter", "fields": []}]}])
     r = lb.build_from_spec(spec)
