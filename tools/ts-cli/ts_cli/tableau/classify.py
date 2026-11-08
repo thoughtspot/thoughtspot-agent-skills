@@ -14,6 +14,7 @@ does with it.
 from __future__ import annotations
 import re
 from ts_cli.tableau.sets import classify_sets
+from ts_cli.tableau.validate import RANK_VARIANTS, RUNNING_FUNCTIONS, SPATIAL_FUNCTIONS
 from ts_cli.tableau_translate import translate_formulas
 
 TRANSLATABLE_TIERS = {
@@ -25,17 +26,14 @@ UNTRANSLATABLE_TIERS = {
     "circular", "orphan", "parameter_query",
 }
 
-# All 15 spatial functions (help.tableau.com Spatial Functions, re-verified
-# 2026-08-26). NO_CUTOUTS and PARSE_WKT were missing here AND in validate.py's
-# _UNMAPPED_FUNCTIONS -- two sites, one stale census (audit finding 13.22).
-_GEO_RE = re.compile(
-    r"\b(MAKEPOINT|MAKELINE|BUFFER|OUTLINE|DISTANCE|AREA|LENGTH|INTERSECTS|"
-    r"SHAPETYPE|DIFFERENCE|INTERSECTION|SYMDIFFERENCE|VALIDATE|"
-    r"NO_CUTOUTS|PARSE_WKT)\s*\(", re.I)
+# All 16 spatial functions, built from validate.SPATIAL_FUNCTIONS. This was a second
+# hand-kept copy, and it went stale twice: NO_CUTOUTS and PARSE_WKT (finding 13.22),
+# then UNION (13.15). The RUNNING_* and RANK_* member lists come from validate.py too.
+_GEO_RE = re.compile(rf"\b({'|'.join(SPATIAL_FUNCTIONS)})\s*\(", re.I)
 _LOD_RE = re.compile(r"\{\s*(FIXED|INCLUDE|EXCLUDE)\b", re.I)
-_RUNNING_RE = re.compile(r"\bRUNNING_(SUM|AVG|MAX|MIN|COUNT)\s*\(", re.I)
+_RUNNING_RE = re.compile(rf"\bRUNNING_({'|'.join(RUNNING_FUNCTIONS)})\s*\(", re.I)
 _WINDOW_RE = re.compile(r"\bWINDOW_(SUM|AVG|MAX|MIN|COUNT|STDEV|VAR|MEDIAN|PERCENTILE)\s*\(", re.I)
-_RANK_RE = re.compile(r"\b(RANK(_UNIQUE|_MODIFIED|_DENSE|_PERCENTILE)?|TOTAL)\s*\(", re.I)
+_RANK_RE = re.compile(rf"\b(RANK(_({'|'.join(RANK_VARIANTS)}))?|TOTAL)\s*\(", re.I)
 _ROWOFFSET_RE = re.compile(r"\b(INDEX|LOOKUP|FIRST|LAST|SIZE)\s*\(", re.I)
 _PARAM_RE = re.compile(r"\[Parameters\]\.\[", re.I)
 

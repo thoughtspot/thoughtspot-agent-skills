@@ -8,6 +8,12 @@ from __future__ import annotations
 
 import re
 
+# The ThoughtSpot function catalog, vendored from thoughtspot-formula-patterns.md and
+# drift-tested against it (tests/test_formula_translate.py::TestCatalog). It is the
+# same source `ts formula translate`'s output guard checks, not a second list.
+from ts_cli.formula_translate.catalog import is_known
+from ts_cli.formula_translate.refs import split_literals
+
 
 # ---------------------------------------------------------------------------
 # 15. Validation
@@ -29,6 +35,32 @@ _FORBIDDEN_PATTERNS = [
      "untranslated 'ROUND(' (digit count is not an integer literal — ThoughtSpot round() takes an increment, BL-331)"),
 ]
 
+# Spatial: the full 16-function Tableau set (help.tableau.com Spatial Functions,
+# re-verified 2026-11-08, when UNION had gained its own entry: finding 13.15). The
+# census was 13 and function-list-driven until 2026-08-26 (PARSE_WKT and NO_CUTOUTS,
+# finding 13.22), and classify.py's _GEO_RE was a second copy that drifted with it.
+# _GEO_RE is now built from this tuple, so the two sites cannot disagree again. No
+# ThoughtSpot spatial data type or constructors exist. See "Geospatial Policy" in
+# tableau-formula-translation.md.
+SPATIAL_FUNCTIONS = (
+    "MAKEPOINT", "MAKELINE", "BUFFER", "OUTLINE", "PARSE_WKT",
+    "DISTANCE", "AREA", "LENGTH", "INTERSECTS", "SHAPETYPE",
+    "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "UNION", "VALIDATE", "NO_CUTOUTS",
+)
+
+# Tableau families the mapping doc gives a ThoughtSpot form for, but the CLI does not
+# convert: RANK_* (rank / rank_percentile / a pass-through) and RUNNING_* (cumulative_*,
+# which needs the worksheet sort attribute). classify.py tiers them translatable
+# (pass_through / cumulative), so they reach import, and if they fail there they go to
+# the skill's parked-formula fix cycle (Step 12.5), which applies the documented form.
+# The BL-460 survivor catch leaves them alone: the converter knows them. One tuple
+# each, shared by classify.py's _RANK_RE / _RUNNING_RE and by _RANK_UNKNOWN_RE below.
+RANK_VARIANTS = ("UNIQUE", "MODIFIED", "DENSE", "PERCENTILE")
+RUNNING_FUNCTIONS = ("SUM", "AVG", "MAX", "MIN", "COUNT")
+_DOCUMENTED_NOT_CONVERTED = re.compile(
+    rf"RANK(?:_(?:{'|'.join(RANK_VARIANTS)}))?|RUNNING_(?:{'|'.join(RUNNING_FUNCTIONS)})",
+    re.IGNORECASE)
+
 # Tableau functions with no ThoughtSpot equivalent (or not yet implemented).
 # Formulas containing them are skipped with a reason instead of failing at
 # TML import, where the retry loop silently drops them.
@@ -48,18 +80,7 @@ _UNMAPPED_FUNCTIONS = [
     # ACOS/ASIN/ATAN/COT now translate (BL-072, ts-cli v0.88.0 — see
     # functions.py) and were removed from this list.
     "DATEPART", "DATENAME", "DATETRUNC", "DATEADD", "DATEDIFF",  # survivors = unknown unit
-    # Spatial — full 15-function Tableau set (help.tableau.com Spatial Functions,
-    # re-verified 2026-08-26; the census said 13 and was function-list-driven rather
-    # than page-driven, so NO_CUTOUTS and PARSE_WKT matched no _UNMAPPED_RE and were
-    # emitted verbatim into model TML -- a silent pass-through that fails import
-    # opaquely instead of being skipped with a reason. PARSE_WKT is the likelier of
-    # the two in real workbooks. Audit finding 13.22; classify.py's _GEO_RE was the
-    # second stale copy.) No ThoughtSpot spatial data type or constructors exist.
-    # See "Geospatial Policy" in tableau-formula-translation.md.
-    "MAKEPOINT", "MAKELINE", "DISTANCE", "BUFFER", "AREA",
-    "INTERSECTS", "LENGTH", "SHAPETYPE", "OUTLINE",
-    "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
-    "NO_CUTOUTS", "PARSE_WKT",
+    *SPATIAL_FUNCTIONS,
     # Spatial hex-binning — same verdict, different page. HEXBINX/HEXBINY have no
     # ThoughtSpot equivalent (audit finding 13.27).
     "HEXBINX", "HEXBINY",
@@ -128,44 +149,109 @@ _RAWSQL_RE = re.compile(r"\b(RAWSQL(?:AGG)?_[A-Z]+)\s*\(", re.IGNORECASE)
 # pass-through; RANK_PERCENTILE -> native rank_percentile()). Anything else is a
 # member the census has not seen (audit finding 13.26).
 _RANK_UNKNOWN_RE = re.compile(
-    r"\b(RANK_(?!UNIQUE\b|MODIFIED\b|DENSE\b|PERCENTILE\b)[A-Z_]+)\s*\(",
+    rf"\b(RANK_(?!(?:{'|'.join(RANK_VARIANTS)})\b)[A-Z_]+)\s*\(",
     re.IGNORECASE)
+
+# Family catches: (pattern whose group 1 is the function name, message template).
+_FAMILY_CHECKS = (
+    (_WINDOW_TABLECALC_RE, "Tableau table calc has no ThoughtSpot formula equivalent: {}"),
+    # Analytics-extension families (MODEL_*/SCRIPT_*) — finding 13.25.
+    (_MODEL_EXT_RE, "Tableau analytics-extension function has no ThoughtSpot equivalent: {} "
+                    "(external R/Python via an analytics extension)"),
+    (_RAWSQL_RE, "Tableau pass-through SQL has no ThoughtSpot equivalent: {} "
+                 "(embeds raw warehouse SQL — not portable)"),
+    # A RANK_* member with no documented disposition (finding 13.26).
+    (_RANK_UNKNOWN_RE, "Tableau rank variant has no documented ThoughtSpot mapping: {} "
+                       "(RANK/RANK_UNIQUE/RANK_DENSE/RANK_MODIFIED/RANK_PERCENTILE are "
+                       "mapped; this one is not)"),
+)
+
+# ---------------------------------------------------------------------------
+# BL-460: the generic survivor catch
+# ---------------------------------------------------------------------------
+#
+# Every list and family above was added after a census found a function passing
+# through verbatim (13.22, 13.25, 13.26, 13.20), and the third census miss found ~20
+# more (CORR, COVAR(P), VAR(P), STDEVP, QUARTER, LOG2, SPACE, LTRIM_THIS, COLLECT,
+# PERCENTILE, GET_JSON_OBJECT, PARSE_URL*, XPATH_*, GROUP_CONCAT …: 13.16/13.17). So
+# the last check asks the question the lists approximate: is every call left in the
+# output a ThoughtSpot function? The answer comes from the formula catalog (`is_known`).
+#
+# Exact spelling, as in `formula_translate.traps.output_guard`: every function this
+# converter emits is lower case, so an upper- or mixed-case call is untranslated
+# Tableau even when its lower-case form is a ThoughtSpot function. That is what
+# keeps LOG2 out until log2 is live-checked (BL-460).
+_CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+# Operators and control words, not functions. The converter leaves Tableau's upper-case
+# AND / OR / NOT in place (ThoughtSpot accepts them), and IF/CASE/WHEN/END/ELSEIF have
+# their own checks above and in validate_pre_import.
+_CONTROL_WORDS = frozenset(
+    {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
+# A [field] or [TABLE::column] reference; its name may hold "(" (`[Area (sq ft)]`).
+_REF_RE = re.compile(r"\[(?:[^\[\]]|\]\])*\]")
+_LEAD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _code_only(expr: str) -> str:
+    """``expr`` with string literals and ``[…]`` references blanked, so a function
+    name is never read out of a column name (``[VAR (x)]``), a literal (``'CORR('``)
+    or a ``sql_*_op`` template (``"COUNT(*) OVER ()"``)."""
+    code = "".join(" " if lit else seg for lit, seg in split_literals(expr))
+    return _REF_RE.sub(" ", code)
+
+
+def _unknown_calls(code: str, reported: set[str]) -> list[str]:
+    """Calls in ``code`` that are no ThoughtSpot function, in order, each once —
+    leaving out control words, the documented RANK_*/RUNNING_* families, and any
+    name a more specific check already reported."""
+    found: dict[str, None] = {}
+    for m in _CALL_RE.finditer(code):
+        name = m.group(1)
+        if (name.lower() in _CONTROL_WORDS or is_known(name)
+                or _DOCUMENTED_NOT_CONVERTED.fullmatch(name)
+                or name.upper() in reported):
+            continue
+        found.setdefault(name, None)
+    return list(found)
+
+
+def _named_checks(code: str, errors: list[str], reported: set[str]) -> None:
+    """The named-list and family checks, run on ``code`` (literals and refs blanked).
+    Appends to ``errors`` and records each reported name in ``reported``."""
+    for pattern, fn in _UNMAPPED_RE:
+        if pattern.search(code):
+            errors.append(f"unmapped Tableau function: {fn}")
+            reported.add(fn)
+    for pattern, fn in _TABLE_CALC_RE:
+        if pattern.search(code):
+            errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
+            reported.add(fn)
+    for pattern, message in _FAMILY_CHECKS:
+        for fn in sorted({m.group(1).upper() for m in pattern.finditer(code)}):
+            errors.append(message.format(fn))
+            reported.add(fn)
 
 
 def validate_output(expr: str) -> list[str]:
     """Check for forbidden patterns in a translated expression.
 
-    Returns a list of validation error strings. Empty = clean.
+    Returns a list of validation error strings. Empty = clean. The function-name
+    checks read ``expr`` with its literals and ``[…]`` references blanked, so a
+    column named ``[Area (sq ft)]`` is not the spatial ``AREA(``.
     """
     errors: list[str] = []
+    reported: set[str] = set()
     for pattern, desc in _FORBIDDEN_PATTERNS:
-        if pattern.search(expr):
+        m = pattern.search(expr)
+        if m:
             errors.append(f"Contains {desc}")
-    for pattern, fn in _UNMAPPED_RE:
-        if pattern.search(expr):
-            errors.append(f"unmapped Tableau function: {fn}")
-    for pattern, fn in _TABLE_CALC_RE:
-        if pattern.search(expr):
-            errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
-    window_fns = {m.group(1).upper() for m in _WINDOW_TABLECALC_RE.finditer(expr)}
-    for fn in sorted(window_fns):
-        errors.append(f"Tableau table calc has no ThoughtSpot formula equivalent: {fn}")
-    # Analytics-extension families (MODEL_*/SCRIPT_*) — external R/Python, no
-    # ThoughtSpot equivalent of any kind (finding 13.25).
-    for fn in sorted({m.group(1).upper() for m in _MODEL_EXT_RE.finditer(expr)}):
+            reported.add(_LEAD_NAME.match(m.group(0)).group(0).upper())
+    code = _code_only(expr)
+    _named_checks(code, errors, reported)
+    for name in _unknown_calls(code, reported):
         errors.append(
-            f"Tableau analytics-extension function has no ThoughtSpot equivalent: {fn} "
-            f"(external R/Python via an analytics extension)")
-    for fn in sorted({m.group(1).upper() for m in _RAWSQL_RE.finditer(expr)}):
-        errors.append(
-            f"Tableau pass-through SQL has no ThoughtSpot equivalent: {fn} "
-            f"(embeds raw warehouse SQL — not portable)")
-    # A RANK_* member with no documented disposition (finding 13.26).
-    for fn in sorted({m.group(1).upper() for m in _RANK_UNKNOWN_RE.finditer(expr)}):
-        errors.append(
-            f"Tableau rank variant has no documented ThoughtSpot mapping: {fn} "
-            f"(RANK/RANK_UNIQUE/RANK_DENSE/RANK_MODIFIED/RANK_PERCENTILE are mapped; "
-            f"this one is not)")
+            f"untranslated Tableau function: {name} (the converter has no mapping for it "
+            f"and it is not a ThoughtSpot formula function; translate it by hand, BL-460)")
     return errors
 
 
