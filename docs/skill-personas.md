@@ -85,8 +85,9 @@ Credentials, data loading, and tenancy configuration.
 - **Who asks.** PS and SRE consolidating an embedded or multi-tenant deployment.
 - **Use when** repointing a tenant's Answers and Liveboards at published objects, or
   sizing how many tenants a Sets dependency blocks.
-- **Watch for** the resumable pipeline. Backup, lift, rename, repoint and cleanup are
-  separate stages by design; do not treat a partial run as a failed one.
+- **Watch for** the resumable pipeline. Backup, rewrite Views, rewrite content, move
+  shielded content and share grants (the last two on new-Org runs only) are separate
+  stages by design; do not treat a partial run as a failed one.
 
 ---
 

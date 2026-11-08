@@ -57,6 +57,7 @@ meaningless until merge. Bumping at PR time keeps the changelog tied to actual r
 - Updating a cross-reference path that was broken (fix the path, PATCH bump on next merge)
 - Updating shared reference files (schemas, mappings) — those don't have their own version; bump the skill(s) that reference them if the change affects skill behaviour
 - Mid-wip refinements that the user will see as one shipped change
+- Frontmatter `metadata:`-only changes (`category`, `subcategory`, `platform`, `coverage`, `summary` and the like): they feed the generated README tables, not the skill's behaviour. A summary corrected because it misdescribes the skill is a fix like any other, so PATCH. In a terminal, `suggest_skill_version.py` still offers a PATCH row for a metadata-only diff; choose skip
 
 ## Validator
 

@@ -22,11 +22,11 @@ Re-run to refresh. Do not edit manually.
 > refresh whenever anyone regenerates and may lag reality in between. For an
 > authoritative answer, run `git log -1 -- tools/validate/<validator>.py`.
 
-**54 gates** across pre-commit and CI.
+**55 gates** across pre-commit and CI.
 
 | Runs in | Count |
 |---|---|
-| Pre-commit + CI | 47 |
+| Pre-commit + CI | 48 |
 | Pre-commit only | 4 |
 | CI only | 3 |
 
@@ -83,11 +83,12 @@ Re-run to refresh. Do not edit manually.
 | 47 | `agentql offline bundle` | generate_agentql_offline.py — bundle the ts-object-model-agentql-query skill's canonical reference library into ONE offl... | Pattern: `ts-object-model-agentql-query/` (pre-commit, CI) |  | gate | 2026-10-19 |
 | 48 | `open items index` | generate_open_items_index.py — scan all open-items.md files and produce a cross-skill index at docs/open-items-index.md. | Open-items files staged (pre-commit, CI) |  | gate | 2026-11-08 |
 | 49 | `quality gates catalog` | generate_quality_gates.py — auto-generate docs/quality-gates.md from the repo's actual quality infrastructure. | Validators or pre-commit infrastructure staged (pre-commit, CI) | Quality gates catalog — re-generated from pre-commit.sh + validate.yml + validator docstrings. Staleness check when any source of truth changes. | gate | 2026-11-08 |
-| 50 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit, CI) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-08-26 |
-| 51 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-10-23 |
-| 52 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-08-26 |
-| 53 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
-| 54 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
+| 50 | `readme skills tables` | generate_readme_skills.py — generate README.md's skills tables from the `metadata:` block in each skill's SKILL.md front... | Skill files staged (pre-commit, CI) | README skills tables — generated from each SKILL.md's `metadata:` block (category, summary, and the Setup / Conversion columns) by generate_readme_ski | gate | 2026-11-08 |
+| 51 | `suggest dependency types` | suggest_dependency_types.py — soft pre-commit nudge for the ts-dependency-manager skill. | Open-items files staged (pre-commit, CI) | ts-dependency-manager: soft nudge if SKILL.md or open-items.md is staged without also staging references/dependency-types.md. Never blocks. (TTY only) | soft | 2026-08-26 |
+| 52 | `repo changelog` | suggest_repo_changelog.py — interactively propose a CHANGELOG.md entry for significant staged changes. | Every commit (pre-commit, CI) |  | gate | 2026-10-23 |
+| 53 | `suggest skill version` | suggest_skill_version.py — interactively propose a changelog entry for staged SKILL.md changes. | Skill files staged (pre-commit) | Skill versioning — runs when any SKILL.md is touched Step 1: interactively suggest a changelog entry if one is missing (TTY only) Step 2: validate tha | soft | 2026-08-26 |
+| 54 | `unit tests (erd)` |  | Python files staged (pre-commit) |  | gate |  |
+| 55 | `unit tests (ts-cli)` |  | Python files staged (pre-commit) |  | gate |  |
 
 ## Enforcement model
 

@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-sisense
 description: Convert or import a Sisense dashboard into ThoughtSpot — parses a captured OFFLINE Sisense bundle JSON ({dashboard, widgets, datamodel}), generates Table + Model TML and Answers/tabbed Liveboard, translates JAQL (aggregations + the deterministic formula subset), validates and imports. Direction is always Sisense → ThoughtSpot. Not for ThoughtSpot → Sisense, and not a live Sisense fetch — the input is a bundle already on disk.
+metadata:
+  category: Conversion
+  platform: Sisense
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a captured offline Sisense bundle (`{dashboard, widgets, datamodel}`) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating JAQL aggregations and the deterministic formula subset"
 ---
 
 # Sisense Dashboard → ThoughtSpot

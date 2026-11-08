@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-snowflake-sv
 description: Convert or import a Snowflake Semantic View into ThoughtSpot as a Model. Use when Snowflake is the source and the goal is a ThoughtSpot Model — whether migrating Snowflake metrics and semantic definitions into ThoughtSpot or making a Semantic View available for Spotter and search-based analytics. Direction is always Snowflake → ThoughtSpot. Not for ThoughtSpot → Snowflake, standalone DDL generation, or adding AI context to existing ThoughtSpot models.
+metadata:
+  category: Conversion
+  platform: Snowflake
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing)"
 ---
 
 # Snowflake Semantic View → ThoughtSpot Model

@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-tableau
 description: Convert or import a Tableau workbook (.twb or .twbx) into ThoughtSpot — parses TWB XML, generates table + model TMLs, validates and imports. Optionally migrates dashboards to liveboards with layout approximation. Direction is always Tableau → ThoughtSpot. Not for ThoughtSpot → Tableau or standalone TML exports.
+metadata:
+  category: Conversion
+  platform: Tableau
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration"
 ---
 
 # Tableau Workbook → ThoughtSpot
@@ -2497,7 +2502,5 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 | 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
 | 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
 | 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
-| 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
-| 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 
-**Older entries (v1.0.0–v1.44.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.44.4):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

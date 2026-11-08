@@ -1,6 +1,9 @@
 ---
 name: ts-recipe-formula-business-days-snowflake
 description: Creates three Snowflake scalar UDFs for calculating business-day (weekday-only) date differences and elapsed time, then shows the ThoughtSpot formula syntax to use them in any Model. Use this skill whenever the user asks about weekday date calculations, business day counts, working day differences, SLA tracking, ticket age, order fulfillment time, or wants to exclude weekends from any date difference in ThoughtSpot or Snowflake. ThoughtSpot's built-in diff_days/diff_hours/diff_minutes count calendar days — if a user needs weekday-only equivalents, invoke this skill.
+metadata:
+  category: Recipes
+  summary: "Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax"
 ---
 
 # ThoughtSpot + Snowflake: Business Day UDFs

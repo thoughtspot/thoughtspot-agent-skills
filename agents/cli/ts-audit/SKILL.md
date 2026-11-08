@@ -1,6 +1,9 @@
 ---
 name: ts-audit
 description: Scan a ThoughtSpot environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — and generate a prioritised audit report with actionable recommendations linking to existing skills.
+metadata:
+  category: "Platform & Governance"
+  summary: "Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings"
 ---
 
 # ThoughtSpot: Environment Audit

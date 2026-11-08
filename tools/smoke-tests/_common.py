@@ -6,14 +6,33 @@ Handles:
   - Snowflake connection loading (from ~/.claude/snowflake-profiles.json)
   - Consistent PASS/FAIL/SKIP step reporting
   - Cleanup registries
+  - Reading a SKILL.md's body without its frontmatter (doc-sync checks)
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+_FRONTMATTER = re.compile(r"\A---\n.*?\n---[ \t]*\n", re.DOTALL)
+
+
+def skill_body(skill_md: Path) -> str:
+    """A SKILL.md's text after its `---` frontmatter.
+
+    Doc-sync smoke tests assert that a skill's instructions say something. The
+    frontmatter carries `metadata.summary`, the one-line README blurb, so matching the
+    whole file would let that summary satisfy a check the procedure no longer meets.
+    A file with no frontmatter raises rather than being read whole.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    m = _FRONTMATTER.match(text)
+    if not m:
+        raise ValueError(f"{skill_md}: no `---` frontmatter block at the top")
+    return text[m.end():]
 
 
 # ---------------------------------------------------------------------------

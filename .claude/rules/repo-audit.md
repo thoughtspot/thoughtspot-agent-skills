@@ -40,7 +40,7 @@ for new codification opportunities.
 | # | Angle | What it checks | Enforcement today |
 |---|---|---|---|
 | 1 | Legacy / dead files | Untracked build artifacts, orphaned dirs, stale references, dead code | `check_references` (broken links) + `vulture` (dead-code report, sweep) + MANUAL |
-| 2 | README / SETUP accuracy | Skills table, symlink steps and the `agents/shared/` directory map match repo reality | `check_consistency` |
+| 2 | README / SETUP accuracy | Skills table, symlink steps and the `agents/shared/` directory map match repo reality | `check_consistency` + `generate_readme_skills --check` (the skills tables and counts are generated from SKILL.md metadata) |
 | 3 | open-items truthfulness | No shipped-unverified assumptions hiding in open-items; cross-skill index current | `check_open_items` + `generate_open_items_index --check` |
 | 4 | Tools quality | `tools/` code health, error handling, dead code, function/module complexity | `check_module_health` (complexity ratchet — blocks new/worsening god-functions vs a baseline) + `check_file_size` (line-count gate on ts_cli modules and the audit report's JS — warn 500 / fail 1000, plus a function-length gate on column-0 JS function declarations, warn 150 / fail 250) + MANUAL (error handling, dead code) |
 | 5 | ts-cli gaps | Operations skills need but the CLI lacks; inline `requests` anti-pattern | MANUAL (+ `check_patterns`) |

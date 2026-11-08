@@ -1,6 +1,10 @@
 ---
 name: ts-setup-tenancy
 description: Stand up a reproducible multi-tenancy test environment on a ThoughtSpot cluster — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Use when you need an environment to try publishing, aliasing, column security or the Org migration against, or to reproduce a bug that needs several Orgs. Builds a chosen scenario (topology / per-org / published / mixed), verifies it, and can tear it down.
+metadata:
+  category: Setup
+  subcategory: Tenancy
+  summary: "Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them"
 ---
 
 # ThoughtSpot: Set Up a Multi-Tenancy Test Environment

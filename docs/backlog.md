@@ -358,6 +358,7 @@ are roughly ordered by value÷effort.
 | BL-546 | `ts tml import` GUID back-fill matches by name across every LOGICAL_TABLE subtype and connection | 2026-12-15 |
 | BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
 | BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
+| BL-550 | `ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -458,6 +459,7 @@ are roughly ordered by value÷effort.
 | BL-542 | Native ThoughtSpot Semantic View / Metric View import is never mentioned by the from-sv, from-mv or link skills; re-check filtered-metric verdicts live | 2026-12-31 |
 | BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 | BL-549 | Converter-audit warnings on main, 2026-11-08 (dbt I11/I22, Sisense count row, snowflake-sv I7/I21, Tableau PT1, invariants I9 vs I13 and I3, Looker citation scope) | 2026-12-31 |
+| BL-551 | No check that each `ts <group> <cmd>` a SKILL.md names in frontmatter or prose is a registered command (validator half of audit 2026-09-22 finding 11.5) | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -7063,6 +7065,17 @@ and `CLAUDE.md` returned zero hits, and only 5 of 28 CLI skills carried a `When 
 **Affects:** `docs/skill-personas.md`, a new `tools/validate/generate_skill_personas.py`,
 `scripts/pre-commit.sh`, and the frontmatter of every `agents/*/*/SKILL.md`.
 **Status:** OPEN.
+
+**2026-11-08: a `metadata:` namespace now exists; build on it.** The README skills tables are
+generated (`tools/validate/generate_readme_skills.py`): every `SKILL.md` frontmatter carries a
+`metadata:` block (`category`, `summary`, plus `subcategory` / `platform` / `coverage` where the
+table has those columns), and the six category "problem it solves" cells that the scope note
+below calls hand-written and not generator scope now live in that generator's `CATEGORIES`
+constant. So step 1's `personas` and `use-when` keys should go under `metadata:`, not top-level
+frontmatter. One constraint carries over: the Agent Skills spec defines `metadata` as a
+string-to-string map and `generate_readme_skills.py --check` fails any non-string value, so a
+list of personas must be one delimited string (e.g. `personas: "se, admin"`) unless that rule is
+revisited deliberately.
 
 **Scope narrowed 2026-07-30**, the same day it was filed. The README "Which skill do I need?" routing
 table this entry originally also covered was **removed** on review: at 18 rows it restated the
@@ -17036,5 +17049,25 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 - **Invariants doc.** I9 says "inline the expression", while I13, `ts-tml-import-gate.md:24` and the root CLAUDE.md say id-references. I8's correct example omits `index_type: DONT_INDEX` (I3). The ID list at line 8 and several "Applies to" lists are stale (3–6 converters named; 11 exist).
 - **from-looker.** `SKILL.md:25` scopes the invariants as "I1–I8". `SKILL.md:561` searches `--subtype MODEL`, but Models are `WORKSHEET` in this CLI; verify that.
 - **`conversion-consistency-auditor.md:89`** still scopes checks to "I1–I7 and N1".
+
+**Target:** 2026-12-31.
+
+## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones `Tier 2`
+
+**Filed:** 2026-11-08. **Source:** review of the README skills-metadata branch (`feat/skill-category-metadata`): ts-load-source-data's summary said it loads CSV data into Snowflake or Databricks, and for Databricks the code does not.
+
+**What.** `ts load databricks --source <path>` calls `infer_schema(source)` and then, for every table, `generate_csv(...)` and INSERTs those synthetic rows (`tools/ts-cli/ts_cli/commands/load.py`, the `databricks` command, around lines 902-921). A CSV directory passed as `--source` contributes its columns and nothing else, yet the command prints `loaded <catalog>.<schema>.<table> (N rows)` and its JSON reports `rows`, indistinguishable from a real load. Only `ts load snowflake` copies a CSV's own rows (`COPY INTO`, around lines 557 and 671-673), and it refuses a schema-only source unless `--generate-sample` is passed. A user loading real data into Databricks gets fabricated values in ThoughtSpot with no warning. The skill now says so (ts-load-source-data 1.1.1, Step 2); the CLI still does not.
+
+**Do.** Either load the real rows (INSERT the parsed CSV rows in batches, as the synthetic path already does, or stage and `COPY INTO`), or refuse a source that has data files unless an explicit flag asks for synthetic rows, and warn on stderr whenever synthetic rows are inserted. Match Snowflake's `--generate-sample` contract so the two loaders agree. Add a unit test that a CSV source's own values reach the INSERT, or that the command refuses.
+
+**Target:** 2026-12-15.
+
+## BL-551 — Check that every `ts <group> <cmd>` a SKILL.md names is a registered command `Tier 3`
+
+**Filed:** 2026-11-08. **Source:** audit 2026-09-22 finding 11.5 (`docs/audit/2026-09-22-full.md:279`). Its outcome had two halves, "correct the description" and "add a command-name check scoped to frontmatter and prose", and neither was routed to a backlog item or a PR: it went 47 days unrouted. The description half is now done (ts-publish-orgs 1.1.1, 2026-11-08); this is the validator half.
+
+**What.** ts-publish-orgs advertised a `ts publish verify` command in its frontmatter `description`, its intro and its README summary. No such command exists: the registered set is export, resolve, apply, rollback and run, plus push, unpush and status. A user acting on the description gets a click error. Nothing could catch it: `check_skill_flag_usage.py` checks flags, never command names, and only on the command lines it extracts, not frontmatter or prose.
+
+**Do.** Add a validator, or a second rule in `check_skill_flag_usage.py`, that extracts every backticked `ts <group> <cmd>` from SKILL.md frontmatter (`description`, `metadata.summary`) and prose, including the slash form (`ts publish export/resolve/apply`), resolves each against the Typer app registered in `ts_cli/cli.py`, and fails on an unknown command. Let deliberate forward-references and deprecated mentions through a dated allowlist with a reason each; the audit found a green baseline apart from this case.
 
 **Target:** 2026-12-31.

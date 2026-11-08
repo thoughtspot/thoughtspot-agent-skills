@@ -22,6 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ts-cli"))
 
 from ts_cli.tenancy_spec import parse_spec, validate_spec  # noqa: E402
 
+# The body only: the frontmatter's README summary must not satisfy a doc-sync check.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import skill_body  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 SKILL = REPO / "agents" / "cli" / "ts-setup-tenancy"
 REFERENCE = REPO / "tools" / "fixtures" / "tenancy-reference.yaml"
@@ -64,7 +68,7 @@ def test_tenant_orgs_do_not_discriminate_and_the_docs_say_so():
     else:
         return   # a topology where tenants DO discriminate needs no warning
 
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    text = skill_body(SKILL / "SKILL.md")
     assert "do NOT discriminate" in text or "does NOT discriminate" in text, \
         "the tenant Orgs cannot tell the test users apart, and SKILL.md must say so"
 
@@ -72,7 +76,7 @@ def test_tenant_orgs_do_not_discriminate_and_the_docs_say_so():
 def test_every_scenario_is_documented_in_both_places():
     """A scenario named in the skill but absent from the reference (or vice versa) means
     someone picks an option with no explanation of what it builds."""
-    skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    skill = skill_body(SKILL / "SKILL.md")
     ref = (SKILL / "references" / "scenarios.md").read_text(encoding="utf-8")
     for scenario in SCENARIOS:
         assert scenario in skill, f"{scenario} missing from SKILL.md"
@@ -92,7 +96,7 @@ def test_the_scenarios_reference_maps_each_one_to_a_migration_phase():
 def test_the_skill_separates_test_setup_from_production():
     """These environments are disposable and opinionated; onboarding a real client is
     neither. Conflating them is how someone tears down a live tenant."""
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    text = skill_body(SKILL / "SKILL.md")
     assert "Production is different" in text
     assert "BL-143" in text, "must point at where production onboarding actually lives"
 
@@ -100,18 +104,20 @@ def test_the_skill_separates_test_setup_from_production():
 def test_the_skill_never_asks_for_a_password_in_conversation():
     """`.claude/rules/security.md`: a credential must never appear in a message. The skill
     directs the operator to export it in their own terminal and passes the variable NAME."""
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    text = skill_body(SKILL / "SKILL.md")
     assert "--password-env" in text
     assert "never taken in conversation" in text or "never a flag" in text
-    # No prompt that would invite a secret into the transcript.
+    # No prompt that would invite a secret into the transcript -- anywhere in the file:
+    # an absence check reads the frontmatter too, where a description could reintroduce it.
+    whole = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert not re.search(r"(enter|paste|provide|type).{0,20}(password|secret|token)",
-                         text, re.I)
+                         whole, re.I)
 
 
 def test_teardown_is_documented_with_all_three_gates():
     """Refusals are the rail working. A reader who does not know the three gates will read
     a refusal as a bug and reach for a bigger hammer."""
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    text = skill_body(SKILL / "SKILL.md")
     assert "--dry-run" in text and "--yes" in text and "--org" in text
     assert "marker" in text.lower()
     assert "Primary is never deleted" in text
@@ -120,7 +126,7 @@ def test_teardown_is_documented_with_all_three_gates():
 def test_the_skill_hands_off_rather_than_reimplementing():
     """It orchestrates shipped skills. If it started duplicating them, the two would
     drift and the environment would stop matching what the skills actually do."""
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    text = skill_body(SKILL / "SKILL.md")
     for target in ("/ts-publish-orgs", "/ts-object-model-alias", "/ts-security-columns",
                    "/ts-load-source-data"):
         assert target in text, f"{target} should be handed off to, not reimplemented"

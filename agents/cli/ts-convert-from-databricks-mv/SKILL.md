@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-databricks-mv
 description: Convert or import a Databricks Metric View into ThoughtSpot as a Model. Use when Databricks is the source and the goal is a ThoughtSpot Model — whether migrating Databricks metrics and semantic definitions into ThoughtSpot or making a Metric View available for Spotter and search-based analytics. Direction is always Databricks → ThoughtSpot. Not for ThoughtSpot → Databricks, standalone DDL generation, or adding AI context to existing ThoughtSpot models.
+metadata:
+  category: Conversion
+  platform: Databricks
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas)"
 ---
 
 # Databricks Metric View → ThoughtSpot Model

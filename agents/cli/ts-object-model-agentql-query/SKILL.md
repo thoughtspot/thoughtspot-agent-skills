@@ -1,6 +1,9 @@
 ---
 name: ts-object-model-agentql-query
 description: Ask a question of a ThoughtSpot Model and get the answer as data — write AgentQL (Semantic SQL), validate it to warehouse SQL, execute it, and review the results. Use this whenever someone wants to query a ThoughtSpot Model with AgentQL, turn a natural-language question into AgentQL, see the SQL ThoughtSpot generates for a question, pull rows from a Model programmatically, learn how the AgentQL APIs behave, take a guided hands-on course in AgentQL, or build a question set to accuracy-test / regression-test / feature-test AgentQL. Triggers on "query this model", "ask the model", "run AgentQL", "what SQL does ThoughtSpot generate", "get the data for…", "teach me AgentQL", even when AgentQL isn't named explicitly.
+metadata:
+  category: Query
+  summary: 'Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Ask for the [**guided course**](references/learning-path.md) ("teach me AgentQL"), play [**AgentQL Quest**](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/) in your browser, or read [**Why AgentQL**](references/architecture.md).'
 ---
 
 # ThoughtSpot: Query a Model with AgentQL

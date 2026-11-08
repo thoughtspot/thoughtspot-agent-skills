@@ -1,6 +1,9 @@
 ---
 name: ts-object-model-aggregates
 description: Audit a ThoughtSpot Model's Liveboards and Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing). Analyses which query shapes repeat, profiles compression against the warehouse, presents a marginal-gain curve, and creates warehouse DDL + aggregate Model TML + the aggregated_models association with confirmation gates.
+metadata:
+  category: Semantic Authoring
+  summary: "Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified"
 ---
 
 # ThoughtSpot: Aggregate Model Advisor

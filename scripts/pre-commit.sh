@@ -212,6 +212,16 @@ if grep -qE '(^agents/|README\.md|SETUP\.md)' <<< "$STAGED"; then
   run_check "consistency"        "tools/validate/check_consistency.py --root . --staged"
 fi
 
+# README skills tables — generated from each SKILL.md's `metadata:` block (category,
+# summary, and the Setup / Conversion columns) by generate_readme_skills.py. The tables
+# were hand-kept and their counts drifted (the README once said 32 skills while its
+# tables held 36). --check fails on drift or invalid metadata, naming the file. Runs
+# when a SKILL.md, a coverage matrix it links, README.md, the generator or the _dirs /
+# _git helpers it discovers skills with changes.
+if grep -qE '(^agents/(cli|claude)/[^/]+/(SKILL|references/coverage-matrix)\.md$|^README\.md$|^tools/validate/(generate_readme_skills|_dirs|_git)\.py$)' <<< "$STAGED"; then
+  run_check "readme skills tables" "tools/validate/generate_readme_skills.py --root . --check"
+fi
+
 # Skill versioning — runs when any SKILL.md is touched
 # Step 1: interactively suggest a changelog entry if one is missing (TTY only)
 # Step 2: validate that every staged skill has a changelog entry

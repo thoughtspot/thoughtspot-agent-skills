@@ -1,6 +1,11 @@
 ---
 name: ts-convert-from-qlik
 description: Convert or import a Qlik Sense app into ThoughtSpot — parses a Qlik app (offline .qvf, or an exported Qlik Engine artifacts directory) into tables, columns, master measures and sheets, generates Table + Model TML and a tabbed Liveboard, translates Qlik measure expressions to ThoughtSpot formulas, validates and imports. Direction is always Qlik → ThoughtSpot. Not for ThoughtSpot → Qlik or standalone TML exports.
+metadata:
+  category: Conversion
+  platform: Qlik
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a Qlik Sense app (offline .qvf or Qlik Engine artifacts) into ThoughtSpot Table + Model TML and a tabbed Liveboard, flagging Set Analysis / variables for review"
 ---
 
 # Qlik Sense → ThoughtSpot

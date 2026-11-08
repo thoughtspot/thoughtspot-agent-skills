@@ -137,6 +137,8 @@ CHECKS: Tuple[Check, ...] = (
            ("open items index", ("--root", ".", "--check"))),
     _check("agentql-offline", "generate_agentql_offline.py", ("--root", ".", "--check"),
            ("agentql offline bundle", ("--root", ".", "--check"))),
+    _check("readme-skills", "generate_readme_skills.py", ("--root", ".", "--check"),
+           ("readme skills tables", ("--root", ".", "--check"))),
     _check("agentql-quest", "check_agentql_quest.py", _ROOT, ("agentql quest", _ROOT)),
     _check("internal-imports", "check_internal_imports.py", _ROOT, ("internal imports", _ROOT)),
     _check("audit-catalog", "check_audit_catalog.py", _BASE,

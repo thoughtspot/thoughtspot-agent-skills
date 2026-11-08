@@ -8,10 +8,13 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-35 skills across six categories. Every skill runs in both Claude Code and Cortex Code
+The catalog has <!-- BEGIN GENERATED: skills-total -->35 skills across six categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
 CLI except `ts-profile-snowflake`, which is Claude Code only (Cortex Code manages Snowflake
 connections natively). For why an individual skill exists, who tends to need it, and
 when to reach for it, see [skill personas](docs/skill-personas.md).
+
+<!-- BEGIN GENERATED: skills-overview -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
 
 | Category | Problem it solves | Skills |
 |---|---|:-:|
@@ -22,11 +25,16 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
 | [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
 
+<!-- END GENERATED: skills-overview -->
+
 <a id="setup"></a>
 <details open>
 <summary><strong>Setup</strong> — Credentials, data loading, and tenancy configuration</summary>
 
 &nbsp;
+
+<!-- BEGIN GENERATED: skills-setup -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
 
 | Skill | What it does | Category |
 |---|---|---|
@@ -34,9 +42,11 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials |
 | [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials |
 | [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials |
-| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data |
+| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake, or provision Snowflake or Databricks tables with synthetic rows generated from a schema, for ThoughtSpot to connect to | Data |
 | [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) | Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them | Tenancy |
-| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy |
+| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable `backup` → `rewrite_views` → `rewrite_content` → `move_shielded` → `share_grants` (the last two on new-Org runs only), with the untouched source Org as the rollback | Tenancy |
+
+<!-- END GENERATED: skills-setup -->
 
 </details>
 
@@ -45,6 +55,9 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 <summary><strong>Conversion</strong> — Move semantic models between ThoughtSpot and external platforms</summary>
 
 &nbsp;
+
+<!-- BEGIN GENERATED: skills-conversion -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
 
 | Skill | What it does | Platform | Coverage |
 |---|---|---|---|
@@ -61,6 +74,8 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | Tableau | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
 | [`ts-link-semantic-layer`](agents/cli/ts-link-semantic-layer/SKILL.md) | **Link, don't convert:** register a Snowflake Semantic View, Databricks Metric View, Honeydew, Cube or Kyvos object as one Table plus a thin, formula-free Model, so the platform generates the SQL from its own definitions. Carries descriptions, synonyms, ai_context and Spotter instructions; one switch sets measures to `AGGREGATE` or their standard aggregation | Any semantic layer | — |
 
+<!-- END GENERATED: skills-conversion -->
+
 </details>
 
 <a id="semantic-authoring"></a>
@@ -68,6 +83,9 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 <summary><strong>Semantic Authoring</strong> — Build, optimize, and prepare Models for production</summary>
 
 &nbsp;
+
+<!-- BEGIN GENERATED: skills-semantic-authoring -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
 
 | Skill | What it does |
 |---|---|
@@ -80,6 +98,8 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-object-formula-translate`](agents/cli/ts-object-formula-translate/SKILL.md) | Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model |
 | [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars |
 
+<!-- END GENERATED: skills-semantic-authoring -->
+
 </details>
 
 <a id="platform--governance"></a>
@@ -88,13 +108,18 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
+<!-- BEGIN GENERATED: skills-platform-governance -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
+
 | Skill | What it does |
 |---|---|
-| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline |
+| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export` → `resolve` → `apply` pipeline, with `rollback` to undo and `status` to verify |
 | [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` |
 | [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
 | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) |
 | [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
+
+<!-- END GENERATED: skills-platform-governance -->
 
 </details>
 
@@ -104,9 +129,14 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
+<!-- BEGIN GENERATED: skills-query -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
+
 | Skill | What it does |
 |---|---|
 | [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) | Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Ask for the [**guided course**](agents/cli/ts-object-model-agentql-query/references/learning-path.md) ("teach me AgentQL"), play [**AgentQL Quest**](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/) in your browser, or read [**Why AgentQL**](agents/cli/ts-object-model-agentql-query/references/architecture.md). |
+
+<!-- END GENERATED: skills-query -->
 
 </details>
 
@@ -116,10 +146,15 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
+<!-- BEGIN GENERATED: skills-recipes -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
+
 | Skill | What it builds |
 |---|---|
 | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings |
+
+<!-- END GENERATED: skills-recipes -->
 
 </details>
 

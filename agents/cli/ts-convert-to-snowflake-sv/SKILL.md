@@ -1,6 +1,11 @@
 ---
 name: ts-convert-to-snowflake-sv
 description: Convert or export a ThoughtSpot Worksheet or Model into a Snowflake Semantic View. Use when ThoughtSpot is the source and the goal is a Snowflake Semantic View — whether converting metrics and formulas for Cortex Analyst access, generating CREATE SEMANTIC VIEW DDL, writing a .sql file for later execution, or updating an existing Snowflake SV from a changed model. Direction is always ThoughtSpot → Snowflake. Not for Snowflake → ThoughtSpot, standalone TML exports, or adding synonyms/AI context to ThoughtSpot models.
+metadata:
+  category: Conversion
+  platform: Snowflake
+  coverage: "references/coverage-matrix.md"
+  summary: "Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing)"
 ---
 
 # ThoughtSpot → Snowflake Semantic View

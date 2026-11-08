@@ -1,6 +1,11 @@
 ---
 name: ts-link-semantic-layer
 description: Link a semantic-layer object (Snowflake Semantic View, Databricks Metric View, Honeydew, Cube, Kyvos) into ThoughtSpot for direct query, WITHOUT converting it. Creates one Table over the semantic object and a thin Model that references only that Table (no joins, no formulas), carrying column roles, measure aggregation, descriptions, synonyms, ai_context and Spotter instructions, so the platform generates the SQL from its own definitions. Use when someone wants ThoughtSpot or Spotter to query a semantic view / metric view / semantic model as-is, "Semantic SQL", "link", "register", or "query the semantic layer directly". Not for translating the semantics into ThoughtSpot joins and formulas; that is the ts-convert-from-* skills.
+metadata:
+  category: Conversion
+  platform: Any semantic layer
+  coverage: none
+  summary: "**Link, don't convert:** register a Snowflake Semantic View, Databricks Metric View, Honeydew, Cube or Kyvos object as one Table plus a thin, formula-free Model, so the platform generates the SQL from its own definitions. Carries descriptions, synonyms, ai_context and Spotter instructions; one switch sets measures to `AGGREGATE` or their standard aggregation"
 ---
 
 # ThoughtSpot: Link a Semantic Layer
