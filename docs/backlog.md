@@ -812,6 +812,8 @@ Add an **Audit mode** to both converters, mirroring the Tableau pattern:
 
 ## BL-016 — Conversion mapping-file naming/structure consistency `Tier 4`
 
+*(2026-11-08: the CoCo mirror retired; "coco mirror references" below no longer applies.)*
+
 **Source:** Observed during BL-009 Phase 1 (2026-06-12)
 **Affects:** agents/shared/mappings/tableau/, ts-snowflake/, ts-databricks/
 **Status:** Not started
@@ -3281,13 +3283,13 @@ fixtures, the LLM handling only the judgment residue (`unsupported[]`/`skipped[]
 steps); (b) **empirical semantic verification** — claim-matrix deep-dives with live
 fixture number-matching on both platforms (BL-063 PR1/PR1.5 pattern), findings recorded
 in the mapping docs with citation-rich currency anchors; (c) **runtime vendoring** where
-a runtime can't call ts-cli (Genie `build_mv_lib` concatenation pattern).
+a runtime can't call ts-cli (Genie `build_mv_lib` concatenation pattern). *(2026-11-08: bar (c) is moot — the Genie and CoCo runtimes retired; every remaining runtime calls ts-cli.)*
 
 Per-converter gap against that bar:
 
 | Converter | Codification | Empirical verification | Notes |
 |---|---|---|---|
-| ts-convert-from-snowflake-sv | **Shipped** — `ts snowflake parse-sv` / `translate-formulas` / `build-model` (+ `introspect`) | Partial — 2026-07-10 SE-cluster formula-composition/TML-import batch, but no per-construct claim matrix | Skill rewired onto the pipeline. CoCo mirror keeps the doc-driven path (no shell) — docs stay authoritative for it. |
+| ts-convert-from-snowflake-sv | **Shipped** — `ts snowflake parse-sv` / `translate-formulas` / `build-model` (+ `introspect`) | Partial — 2026-07-10 SE-cluster formula-composition/TML-import batch, but no per-construct claim matrix | Skill rewired onto the pipeline. CoCo mirror kept the doc-driven path (retired 2026-11-08). |
 | ts-convert-to-snowflake-sv | **Shipped** — `ts snowflake introspect` / `build-sv` | Inaugural anchor only (2026-06, never swept) | DDL emission codified; skill rewired. |
 | ts-convert-to-databricks-mv | **Shipped** — `ts databricks build-mv` | Window emission tables live-verified (PR1) | MV YAML emission codified; skill rewired. |
 | ts-convert-from-tableau | **Done** (full `ts tableau` pipeline) | Doc-driven sweeps only — no fixture number-match has ever run | Only the fidelity leg is missing; needs live Tableau Server access (often unavailable — see feedback memory). Scope as opportunistic. |
@@ -4100,6 +4102,8 @@ No such instance was available during Tasks 1–6.
 ---
 
 ## BL-136 — Generic warehouse row-source for governance tables (Snowflake + Databricks) `Tier 2`
+
+*(2026-11-08: the `agents/databricks/` Genie runtime cited below as rationale retired; Databricks stays first-class through `ts-profile-databricks`, `ts load databricks` and the CLI converters, so the item stands.)*
 
 **Affects:** `ts alias translate --source db`; `ts publish export --objects-table`,
 `ts publish resolve --source db --init-table`, `ts publish run --objects-table/--values-table`;
@@ -8939,6 +8943,8 @@ is lost; it moves to where history lives.
 
 ## BL-226 -- sv_sql.py translates 12 Snowflake constructs no mapping doc records, so CoCo cannot translate them `Tier 2`
 
+*(2026-11-08: the CoCo runtime retired, so the title's "CoCo cannot translate them" no longer applies; see the note below for why the item stands.)*
+
 Filed 2026-08-28, surfaced by the new `check_mapping_code_sync.py` gate on its
 first run. The doc/code drift is not symmetric and this is the code-ahead side:
 
@@ -9135,7 +9141,7 @@ freshness guarantee, and the catalog's own header should not imply that it is.
 **Worth checking in the same pass:** whether any other generated artefact is gated the same
 scoped way and therefore has the same hole. `generate_parity.py --check` (retired with the
 CoCo/Genie runtimes 2026-11-08, so no longer a candidate) and
-`generate_open_items_index.py --check` are the obvious candidates — both are generators with a
+`generate_open_items_index.py --check` are the obvious candidates (2026-11-08: `generate_parity.py` is deleted, so only the second remains) — both are generators with a
 `--check` mode, and if either is only wired to a scoped trigger it shares this defect.
 
 **Target:** next validator pass.
@@ -16311,7 +16317,7 @@ changes no finding.
 
 **Status (2026-11-04, audit backlog PR 3 — attempted, reverted):** making `mv_emit_window._join_target_tables` read direction from cardinality, as the classifier does, broke the emitted Metric Views: `mv_emit_joins.build_joins` walks only the joins a table declares, so a fact that a dimension's ONE_TO_MANY join points to could no longer reach that dimension, and a ONE_TO_ONE / MANY_TO_MANY partner holding a measure became an extra, near-empty Metric View. On the SE demo sample 5 of 144 Models changed, all for the worse (one lost its fact entirely, one went from 0 skipped columns to 29); 8 sample joins are ONE_TO_MANY declared on the dimension. The fix must change the join walk with the direction (walk a ONE_TO_MANY join from either end) and be tested on emitted Metric Views, not on `detect_fact_tables` alone. The classifier can be vendored: the Genie runtime's `build_mv_lib.py` reads each CLOSURE entry by path, and adding `agents/shared/erd/roles.py` builds and passes its duplicate-name check (review of PR 3), so importing it is open, not ruled out. Formula measures should keep counting toward a table there.
 
-**Note (2026-11-08):** the vendoring question is moot. The Databricks Genie runtime retired, and `build_mv_lib.py` with it (readable at `runtimes-archive-2026-11-08:agents/databricks/build_mv_lib.py`), so `mv_emit` can import `roles.py` like any other module. The join-walk constraint above is unaffected.
+**Note (2026-11-08):** the vendoring question is moot. The Databricks Genie runtime retired, and `build_mv_lib.py` with it (readable at `runtimes-archive-2026-11-08:agents/databricks/build_mv_lib.py`), so no vendoring constraint remains. `roles.py` is still outside the `ts_cli` package, though: `mv_emit` can reach it only through `ts_cli.audit.erd`'s load-by-path (which needs ts-cli installed editable from a checkout, and would make `ts databricks build-mv` depend on that), or the classifier moves into the package. The join-walk constraint above is unaffected.
 
 **Filed:** 2026-11-01. **Source:** roadmap PR 4.1 (table roles from join direction), whose
 design scoped the classifier to the audit and the ERD.

@@ -6,7 +6,7 @@ Checks:
   1. README.md skills tables — every skill in agents/cli/ and agents/claude/ is listed
   2. SETUP.md symlink steps — every agents/cli/ and agents/claude/ skill has an ln -s step in its runtime's SETUP.md
   3. README.md structure section — scripts/ and every subdirectory of tools/ is mentioned
-  4. agents/shared/CLAUDE.md coverage — every tracked file in agents/shared/ is listed there
+  4. agents/shared/CLAUDE.md coverage — every tracked *.md file in agents/shared/ is listed there
 
 (The agents/coco-snowsight/SETUP.md stage-copy-list check went with the CoCo Snowsight
 runtime's retirement on 2026-11-08.)
@@ -162,12 +162,12 @@ def check_readme_structure(repo_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 4: agents/shared/CLAUDE.md lists every tracked file in agents/shared/
+# Check 4: agents/shared/CLAUDE.md lists every tracked *.md file in agents/shared/
 # ---------------------------------------------------------------------------
 
 def check_shared_claude_md(repo_root: Path) -> list[str]:
     """
-    Every tracked file in agents/shared/ (excluding CLAUDE.md itself) must be
+    Every tracked *.md file in agents/shared/ (excluding CLAUDE.md itself) must be
     mentioned by filename in agents/shared/CLAUDE.md's directory map.
     Catches schema or mapping files added without updating the directory listing.
     """

@@ -122,6 +122,10 @@ KNOWN_MISSING_BACKTICK_PATHS: dict[str, str] = {
 # `runtimes-archive-2026-11-08:<path>` instead — openable with `git show` — which this
 # check never treats as a repo path, because its first segment is not a top-level
 # directory. A file that was never tracked (a generated deploy copy) is named in prose.
+# One residual route: git_ignored() skips any path .gitignore matches, and .gitignore
+# still ignores the retired generated locations agents/databricks/shared/ and
+# agents/databricks/notebooks/databricks_mv_lib.py, so a citation of those two passes.
+# Neither is a live path, and nothing cites them today.
 
 # Links whose targets exist locally but are deliberately untracked / gitignored at
 # HEAD — dead links for cloners. Tracked as acknowledged debt so the checker lands
