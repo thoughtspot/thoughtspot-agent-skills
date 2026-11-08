@@ -110,6 +110,13 @@ passes silently *without* one. The rule is discarded before keyword validation.
 
 Silent in the direction that removes security.
 
+> **Historical (2026-11-08).** The next two paragraphs walk the writes of the earlier
+> eight-step scaffolding engine (lift scaffolding Tables and Models, rename, repoint, clean
+> up). The current engine replaced it with `backup` → `rewrite_views` → `rewrite_content`,
+> plus `move_shielded` → `share_grants` on new-Org runs (`tools/ts-cli/ts_cli/migrate/apply_plan.py`).
+> The walk has not been redone for the current engine, so re-check what `apply` writes before
+> relying on the conclusion. The dead-guard lesson stands either way.
+
 **`apply` is not exposed to it. An earlier guard that claimed to mitigate it was dead code
 that could never fire.** Walking every write `apply` makes: the only Table TML it
 writes is the lifted scaffolding, which is disposable, never queried, and deleted at
