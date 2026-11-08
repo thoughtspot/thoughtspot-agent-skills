@@ -91,10 +91,16 @@ NEEDS REVIEW — never faked. Read `mapping.json`.
 ### Step 2 — Validate & import the model
 Lint and import the tables + model, VALIDATE_ONLY first, then real:
 ```bash
-ts tml lint out/*.tml
-ts tml import out/*.table.tml out/*.model.tml --profile <name> --policy VALIDATE_ONLY
-ts tml import out/*.table.tml out/*.model.tml --profile <name>
+ts tml lint --dir out/ --pattern '*.tml'
+ts tml import --dir out/ --pattern '*.table.tml' --pattern '*.model.tml' --order tableau \
+  --profile <name> --policy VALIDATE_ONLY
+ts tml import --dir out/ --pattern '*.table.tml' --pattern '*.model.tml' --order tableau \
+  --profile <name>
 ```
+`ts tml lint` and `ts tml import` take files only through `--file` / `--dir`, never as
+bare arguments. `--pattern` keeps `mapping.json` out (`--dir` alone reads every `.json`
+file as a document) and any liveboard from an earlier run; `--order tableau` sends the
+Tables before the Model.
 If the engine rejects a formula, drop it (and any column that depends on it) and re-import —
 what lands is guaranteed to work, and the report records what was pruned.
 
@@ -125,8 +131,8 @@ non-rendering tiles — resolve them here, re-import (Step 2), and only then bui
 ### Step 4 — Build, import & VERIFY the liveboard
 ```bash
 ts powerbi build-liveboard <path-to-.pbip> --model-name "<Model name>" --output out/
-ts tml lint out/*.liveboard.tml                          # pre-import: flags any blank chart tile
-ts tml import out/*.liveboard.tml --profile <name>
+ts tml lint --dir out/ --pattern '*.liveboard.tml'      # pre-import: flags any blank chart tile
+ts tml import --dir out/ --pattern '*.liveboard.tml' --profile <name>
 ts tml verify-render <liveboard-guid> --profile <name>   # REQUIRED gate; exit 1 = broken board
 ```
 `build-liveboard` emits renderable tiles: report pages become tabs (PBI `pageOrder`; a Tooltip
@@ -150,6 +156,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.10 | 2026-11-08 | **The lint gate runs (BL-545).** Steps 2 and 4 passed TML files to `ts tml lint` and `ts tml import` as bare arguments, which neither command accepts (exit 2, "Got unexpected extra argument(s)"), so no model invariant was ever linted on this path. Both now read `--dir out/` filtered by `--pattern`, which also keeps `mapping.json` out of the import, and the model import uses `--order tableau` so the Tables go before the Model. VALIDATE_ONLY still runs first |
 | 1.1.9 | 2026-11-04 | **Measure formulas declare an aggregation.** Every MEASURE formula column, time-intelligence measures included, now carries `aggregation:` (`spotql_ops.formula_aggregation`): SUM for an aggregate DAX measure, where ThoughtSpot ignores it, and for a bare `group_aggregate` the re-aggregation its inner aggregate implies (AVERAGE for an average, an inner `[formula_X]` measure resolved first). Ruled required by the product owner; the importer accepted it absent, so earlier Models still import (BL-509). |
 | 1.1.8 | 2026-10-22 | **Many-to-many relationships are no longer emitted as joins (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so a Power BI many-to-many relationship made the whole Model fail. It is now left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table; emitting it as `MANY_TO_ONE` instead would have fanned out and inflated totals silently. `ts tml lint` gains I20 to catch the shape anywhere. |
 | 1.1.7 | 2026-10-07 | **DAX keywords are never table names (ts-cli v0.171.0, BL-375).** `NOT [Measure]` kept its `NOT` — it had become the bare measure, flipping the boolean — and `VAR … RETURN` is NEEDS REVIEW again |
