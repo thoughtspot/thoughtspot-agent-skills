@@ -164,12 +164,17 @@ def _sub_col_refs(src: str, repl) -> str:
 
 def _split_args(s):
     """Split a function-call argument string on top-level commas (respecting
-    nested parens and brackets). Returns the list of trimmed arg strings."""
+    nested parens, brackets and braces). Returns the list of trimmed arg strings.
+
+    Braces matter: DAX writes a value set as `T[Stage] IN {"Early","On Time"}`, and
+    without tracking them the commas inside the set split it into arguments that are not
+    arguments, so any CALCULATE carrying an IN-set is read wrongly.
+    """
     args, depth, cur = [], 0, []
     for ch in s:
-        if ch in "([":
+        if ch in "([{":
             depth += 1
-        elif ch in ")]":
+        elif ch in ")]}":
             depth -= 1
         if ch == "," and depth == 0:
             args.append("".join(cur).strip())
@@ -359,12 +364,21 @@ def _expand_functions(expr):
     return expr
 
 
+# A DAX "double" string literal: no backslash escapes, "" is one embedded quote.
+DAX_STRING = re.compile(r'"((?:[^"]|"")*)"')
+
+
+def dax_string_value(m: re.Match) -> str:
+    """The text a ``DAX_STRING`` match denotes. The single DAX literal decoder, shared
+    with the gated-measure parser so neither invents its own escapes (BL-365)."""
+    return m.group(1).replace('""', '"')
+
+
 def _normalize_operators(expr):
     """DAX string literals + operators -> ThoughtSpot. Returns (expr, concat_note|None)."""
     # DAX "double" string literals ("" is an embedded quote) -> SQL-standard 'single',
     # printed in ThoughtSpot's exact form at the end by ts_finalize_formula (BL-365).
-    expr = re.sub(r'"((?:[^"]|"")*)"', lambda m: sql_std_literal(m.group(1).replace('""', '"')),
-                  expr)
+    expr = DAX_STRING.sub(lambda m: sql_std_literal(dax_string_value(m)), expr)
     expr = expr.replace("<>", "!=")
     expr = expr.replace("&&", " and ").replace("||", " or ")
     expr = re.sub(r"\bNOT\b", "not", expr)
@@ -445,6 +459,15 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
 
     reason = _review_reason(src)
     if reason:
+        # Two of the shapes the gate rejects are mechanical and fully described by the
+        # DAX: a gated distinct count and a gated ratio over the same grain. Recognising
+        # them here is the difference between a migrated measure and a human retyping
+        # what the expression already says. Anything still unrecognised keeps its
+        # NEEDS REVIEW, so nothing is ever guessed.
+        from ts_cli.powerbi.gated import translate as _translate_gated
+        g_expr, g_status, g_note = _translate_gated(src, home_table)
+        if g_expr:
+            return g_expr, g_status, g_note
         return None, "NEEDS REVIEW", reason
 
     # Qualify Table[Col] -> [Table::Col] BEFORE expanding IF/DIVIDE/... so the "then"/
