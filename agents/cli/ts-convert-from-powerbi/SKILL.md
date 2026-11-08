@@ -44,8 +44,11 @@ Ask one question at a time for **dependent** decisions (where the next depends o
   `pbi-tools extract`.
 - The source tables already exist in a warehouse and a ThoughtSpot connection exposes them.
   This skill creates ThoughtSpot *logical* objects (Table, Model, Answers, Liveboard) over
-  existing physical tables; it does not load data. For a demo, `ts load databricks` can
-  provision synthetic tables aligned to the model.
+  existing physical tables; it does not load data. For a demo, synthetic tables aligned to
+  the model can be provisioned from a schema-only manifest with
+  `ts load databricks --source <schema.json> --profile <p> --catalog <CAT> --schema <SCH> --generate-sample`
+  (or `ts load snowflake … --generate-sample`). Both loaders refuse a schema-only source
+  without `--generate-sample`.
 
 ## Core rule — tiles come from the tool, never by hand
 
@@ -156,6 +159,7 @@ user as the deliverable.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.12 | 2026-11-08 | The demo-provisioning note names `--generate-sample`: `ts load databricks` now refuses a schema-only source without it, as `ts load snowflake` already did (ts-cli 0.212.0, BL-550). Version may be renumbered at merge (another open branch takes 1.1.11) |
 | 1.1.10 | 2026-11-08 | **The lint gate runs (BL-545).** Steps 2 and 4 passed TML files to `ts tml lint` and `ts tml import` as bare arguments, which neither command accepts (exit 2, "Got unexpected extra argument(s)"), so no model invariant was ever linted on this path. Both now read `--dir out/` filtered by `--pattern`, which also keeps `mapping.json` out of the import, and the model import uses `--order tableau` so the Tables go before the Model. VALIDATE_ONLY still runs first |
 | 1.1.9 | 2026-11-04 | **Measure formulas declare an aggregation.** Every MEASURE formula column, time-intelligence measures included, now carries `aggregation:` (`spotql_ops.formula_aggregation`): SUM for an aggregate DAX measure, where ThoughtSpot ignores it, and for a bare `group_aggregate` the re-aggregation its inner aggregate implies (AVERAGE for an average, an inner `[formula_X]` measure resolved first). Ruled required by the product owner; the importer accepted it absent, so earlier Models still import (BL-509). |
 | 1.1.8 | 2026-10-22 | **Many-to-many relationships are no longer emitted as joins (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so a Power BI many-to-many relationship made the whole Model fail. It is now left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table; emitting it as `MANY_TO_ONE` instead would have fanned out and inflated totals silently. `ts tml lint` gains I20 to catch the shape anywhere. |
