@@ -3020,27 +3020,46 @@ ts load snowflake --source ./csvs/ --profile Production \
 
 ### `ts load databricks`
 
-Provision table(s) + synthetic data into a Databricks `catalog.schema` (Unity Catalog), so a
+Provision table(s) in a Databricks `catalog.schema` (Unity Catalog) and load their rows, so a
 ThoughtSpot Databricks connection can bind a model over them. Auth via a Databricks profile in
 `~/.claude/databricks-profiles.json` (`dbx_profile`, `sql_warehouse_http_path`, `catalog`,
 `schema`); the token lives in `~/.databrickscfg` (`databricks auth login`), never in the
 profile file. Execution goes through the `databricks` CLI's SQL Statement Execution API.
 
 ```
-ts load databricks --source ./orders_demo_schema.json --profile sisense-dbx --rows 200
+ts load databricks --source ./csvs/ --profile Production --catalog main --schema sales
+ts load databricks --source ./orders_demo_schema.json --profile Production --rows 200
 ```
 
-Infers the schema from `--source` (manifest / schema JSON / CSV dir), generates deterministic
-synthetic rows, then `CREATE TABLE` (Delta **column mapping** enabled — preserves column names
-with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
+Infers the schema from `--source`, then `CREATE TABLE` (Delta **column mapping** enabled —
+preserves column names with spaces/special chars like `Order Date` 1:1) + batched `INSERT`.
+Rows follow the same contract as `ts load snowflake`:
+
+- **A table with a data file** (CSV dir, Tableau download, manifest `data_file`) gets **that
+  file's own rows**. Values are typed per the inferred column type: an empty cell is `NULL`,
+  strings are backslash-escaped (Databricks reads a doubled quote `''` as two concatenated
+  literals, dropping the quote), and a value that is not a valid number or boolean for its
+  column is refused, naming the row and column, before any table is created.
+- **Synthetic rows** are inserted only for a schema-only table (no data file), or for every
+  table with `--generate-sample`. Each such table gets a `NOTICE: … SYNTHETIC rows` line on
+  stderr. Unlike `ts load snowflake`, a schema-only source does not need the flag.
+
+Each `INSERT` holds at most `--batch` rows and about 1 MiB of SQL. Every statement is rendered
+before the first one runs, so a bad value leaves nothing half-loaded.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--source`, `-s` | — | Schema/manifest JSON or CSV dir (required) |
+| `--source`, `-s` | — | CSV directory, Tableau download JSON, or manifest/schema JSON (required) |
 | `--profile`, `-p` | — | Databricks profile name (required) |
 | `--catalog` / `--schema` | from profile | Override target catalog/schema |
-| `--rows`, `-r` | `100` | Synthetic rows per table |
-| `--batch` | `200` | Rows per `INSERT` statement |
+| `--generate-sample` | `false` | Insert synthetic rows even for tables that have a data file |
+| `--rows`, `-r` | `100` | Synthetic rows per table (schema-only tables, or with `--generate-sample`) |
+| `--seed` | `42` | Deterministic synthetic-data seed |
+| `--batch` | `200` | Max rows per `INSERT` statement |
+| `--replace` | `false` | `CREATE OR REPLACE` the table (without it, an existing table is appended to) |
+
+**Output:** JSON with `loaded[]` (`table`, `rows` — the rows actually inserted, `data` —
+`source` or `synthetic`, `source_file`), `catalog`, `schema`, `warehouse_id`.
 
 > **Connection caveat (live-verified):** for a ThoughtSpot model to bind to the new table, the
 > connection must expose it. A **SERVICE_ACCOUNT** Databricks connection introspects it

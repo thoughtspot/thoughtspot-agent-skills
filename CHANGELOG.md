@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-08
+- fix: `ts load databricks` loads a CSV source's own rows instead of synthetic ones, and backslash-escapes quotes (a doubled quote dropped the apostrophe on Databricks). Synthetic rows only for a schema-only table or with the new `--generate-sample`, each named on stderr (ts-load-source-data 1.2.0, BL-550)
+- chore: bump ts-cli to v0.212.0
 - feat: the README's skills tables and counts are generated from each SKILL.md's frontmatter `metadata:` (`category`, `summary`, plus the Setup and Conversion columns) by `tools/validate/generate_readme_skills.py`; `--check` gates drift and invalid metadata in pre-commit and CI
 - chore: retire the CoCo Snowsight and Databricks Genie runtimes; the repo now serves CLI skills (Claude Code and Cortex Code CLI). Archived at tag runtimes-archive-2026-11-08
 - chore: bump ts-cli to v0.206.1
