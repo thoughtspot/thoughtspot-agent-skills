@@ -371,9 +371,10 @@ def _chart_needs(ct: str) -> int:
     if ct in CHART_NEEDS:
         return CHART_NEEDS[ct]
     # KPI is valid on a single value — a measure OR a PASS/FAIL grade attribute — so it
-    # needs no measure (GRID/PIVOT likewise, ADVANCED_PIVOT_TABLE like its twin);
-    # everything else needs at least one.
-    return 0 if legacy_twin(ct) in ("GRID_TABLE", "PIVOT_TABLE", "KPI") else 1
+    # needs no measure (GRID/PIVOT likewise); everything else needs at least one.
+    # ADVANCED_PIVOT_TABLE keeps the floor of 1: it resolves its rows/columns/values
+    # differently from PIVOT_TABLE (chart-types schema), so the twin rule is not applied.
+    return 0 if ct in ("GRID_TABLE", "PIVOT_TABLE", "KPI") else 1
 
 
 def _infer_chart_type(cols: list[str], measure_names: set, buckets: dict,

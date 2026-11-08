@@ -99,9 +99,17 @@ def test_axis_set_holds_only_the_phase_1_new_library_types():
         "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN"}
 
 
-@pytest.mark.parametrize("adv", sorted(ct.NEW_LIBRARY_TYPES))
-def test_measure_floor_matches_each_new_library_types_twin(adv):
-    assert lb._chart_needs(adv) == lb._chart_needs(ct.legacy_twin(adv))
+@pytest.mark.parametrize("adv", sorted(t for t in ct.NEW_LIBRARY_TYPES
+                                        if ct.legacy_twin(t) in lb._LEGACY_CHART_NEEDS))
+def test_measure_floor_matches_the_twin_for_the_explicit_floors(adv):
+    assert lb._chart_needs(adv) == lb._chart_needs(ct.legacy_twin(adv)) == 2
+
+
+def test_advanced_pivot_table_floor_is_not_coupled_to_pivot_table():
+    # PIVOT_TABLE needs no measure; ADVANCED_PIVOT_TABLE resolves differently (chart-types
+    # schema) and keeps main's floor of 1 until a live check says otherwise.
+    assert lb._chart_needs("PIVOT_TABLE") == 0
+    assert lb._chart_needs("ADVANCED_PIVOT_TABLE") == 1
 
 
 @pytest.mark.parametrize("adv", sorted(ct.NEW_LIBRARY_TYPES))
