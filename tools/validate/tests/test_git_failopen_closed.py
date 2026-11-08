@@ -35,6 +35,7 @@ VALIDATORS = [
     ("check_skill_versions", ["--staged"]),
     ("check_yaml", ["--staged"]),
     ("check_slash_command_refs", []),
+    ("generate_readme_skills", ["--check"]),
 ]
 
 

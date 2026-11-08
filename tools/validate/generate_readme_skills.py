@@ -50,7 +50,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from _dirs import runtime_globs
+from _dirs import ALL_RUNTIME_PATHS, runtime_globs
+from _git import GitEnumerationError, tracked_relpaths
 
 try:
     import yaml
@@ -192,12 +193,26 @@ def validate_meta(skill_dir: Path, meta: object) -> List[str]:
     return errors
 
 
+def skill_files(root: Path) -> List[Path]:
+    """Every git-tracked `agents/<runtime>/<skill>/SKILL.md`, sorted.
+
+    Untracked skill directories are skipped, as `check_consistency` skips them: a
+    wip skill is gitignored on `main` and sits on disk there by design (CLAUDE.md
+    "Branching conventions"), so counting it would fail the gate for anyone with one
+    checked out. Same approach as `check_consistency` (glob on disk, keep what
+    `git ls-files` lists), through the shared `_git` helper rather than that
+    validator's private copy. A git failure raises, never reads as "no skills"."""
+    tracked = set(tracked_relpaths(root, ALL_RUNTIME_PATHS))
+    return sorted(p for p in runtime_globs(root, "*/SKILL.md")
+                  if p.relative_to(root).as_posix() in tracked)
+
+
 def load_skills(root: Path) -> Tuple[List[Skill], List[str]]:
-    """Every SKILL.md under the runtime dirs, and every problem found, each problem
-    prefixed with the repo-relative path of the file it is in."""
+    """Every tracked SKILL.md under the runtime dirs, and every problem found, each
+    problem prefixed with the repo-relative path of the file it is in."""
     skills: List[Skill] = []
     errors: List[str] = []
-    for path in sorted(runtime_globs(root, "*/SKILL.md")):
+    for path in skill_files(root):
         rel = path.relative_to(root).as_posix()
         m = _FRONTMATTER.match(path.read_text(encoding="utf-8"))
         if not m:
@@ -314,7 +329,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     root = Path(args.root).resolve()
     readme = root / "README.md"
-    skills, errors = load_skills(root)
+    try:
+        skills, errors = load_skills(root)
+    except GitEnumerationError as exc:
+        print(f"FAIL  cannot list tracked SKILL.md files, so nothing was checked: {exc}")
+        return 1
     if not readme.is_file():
         errors.append("README.md: not found")
     if errors:

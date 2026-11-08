@@ -10,6 +10,7 @@ renaming one should fail here, not pass silently.
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -96,11 +97,18 @@ def _write_skill(root: Path, runtime: str, name: str, meta: str) -> Path:
     return path
 
 
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
+    """A git repo with every skill and the README staged: only tracked skills count."""
     for runtime, name, meta in SKILLS:
         _write_skill(tmp_path, runtime, name, meta)
     (tmp_path / "README.md").write_text(_README, encoding="utf-8")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
     return tmp_path
 
 
@@ -271,3 +279,27 @@ def test_missing_anchor_fails_naming_readme(tree, capsys):
     readme.write_text(_readme(tree).replace('<a id="recipes"></a>\n', ""), encoding="utf-8")
     assert _run(tree, "--check") == 1
     assert 'FAIL  README.md: no <a id="recipes"></a> anchor' in capsys.readouterr().out
+
+
+# ── tracked skills only ────────────────────────────────────────────────────────
+
+
+def test_untracked_skill_is_skipped_and_the_same_skill_tracked_fails(tree, capsys):
+    """A gitignored wip skill sits on disk in the main checkout by design; it must not
+    fail the gate. The moment it is tracked, its missing metadata must."""
+    assert _run(tree) == 0
+    rel = _set_meta(tree, "ts-object-wip-thing", "")
+    assert _run(tree, "--check") == 0, "an untracked skill dir with no metadata must not fail"
+    assert "ts-object-wip-thing" not in _readme(tree)
+    _git(tree, "add", rel)
+    capsys.readouterr()
+    assert _run(tree, "--check") == 1
+    assert f"FAIL  {rel}: frontmatter has no `metadata:` mapping" in capsys.readouterr().out
+
+
+def test_not_a_git_repo_fails_rather_than_finding_no_skills(tmp_path, capsys):
+    for runtime, name, meta in SKILLS:
+        _write_skill(tmp_path, runtime, name, meta)
+    (tmp_path / "README.md").write_text(_README, encoding="utf-8")
+    assert _run(tmp_path, "--check") == 1
+    assert "FAIL  cannot list tracked SKILL.md files" in capsys.readouterr().out
