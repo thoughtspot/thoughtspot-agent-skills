@@ -7,6 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-11-08
 - chore: retire the CoCo Snowsight and Databricks Genie runtimes; the repo now serves CLI skills (Claude Code and Cortex Code CLI). Archived at tag runtimes-archive-2026-11-08
+- chore: bump ts-cli to v0.206.1
 
 ## 2026-11-05
 - feat(dependency): ts-dependency-manager mode D, Delete with dependents (administrators only) — a server-side cascade delete behind `ts dependency cascade-preview` (dry run) and `cascade-delete` (role check, single object, typed DELETE, same-cluster backup, re-check against the backup, never re-sent after it may have reached the server; refuses a delete that would also remove unlisted Sets or Spotter feedback, or a published object). Folds in the separate `ts-dependency-cleanup` skill proposed in PR #666, through the `ts` CLI instead of raw `curl`; carries over its rollback re-linking, SQL View restore order and failing rollback exit code. `client.py` no longer labels a form body as JSON. ts-dependency-manager 1.6.0. `ts dependency rollback` now refuses a backup whose manifest records no `base_url` (only hand-written backups from before July lack it); add the cluster's URL to its `manifest.json` to roll one back
