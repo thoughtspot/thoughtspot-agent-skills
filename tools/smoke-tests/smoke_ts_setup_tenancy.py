@@ -107,9 +107,11 @@ def test_the_skill_never_asks_for_a_password_in_conversation():
     text = skill_body(SKILL / "SKILL.md")
     assert "--password-env" in text
     assert "never taken in conversation" in text or "never a flag" in text
-    # No prompt that would invite a secret into the transcript.
+    # No prompt that would invite a secret into the transcript -- anywhere in the file:
+    # an absence check reads the frontmatter too, where a description could reintroduce it.
+    whole = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert not re.search(r"(enter|paste|provide|type).{0,20}(password|secret|token)",
-                         text, re.I)
+                         whole, re.I)
 
 
 def test_teardown_is_documented_with_all_three_gates():

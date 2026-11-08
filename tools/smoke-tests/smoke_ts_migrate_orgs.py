@@ -32,8 +32,15 @@ NOTES = SKILL / "references" / "migration-notes.md"
 
 
 def _skill_text():
-    # The body only: the frontmatter's README summary must not satisfy a doc-sync check.
+    # For PRESENCE checks: the body only, so the frontmatter's README summary cannot
+    # satisfy a check the procedure itself no longer meets.
     return skill_body(SKILL / "SKILL.md")
+
+
+def _skill_file():
+    # For ABSENCE checks: the whole file, frontmatter included, so a retired claim cannot
+    # come back through the description or the README summary.
+    return (SKILL / "SKILL.md").read_text(encoding="utf-8")
 
 
 def _row(model, tenant, published, status="MATCHED"):
@@ -78,7 +85,7 @@ def test_the_skill_documents_the_engines_step_count():
     """A skill still describing the scaffolding dance would have an operator looking for
     steps the engine no longer runs."""
     assert len(STEP_ORDER) == 5
-    text = _skill_text()
+    text = _skill_file()
     # The DELETED step names, not the word "scaffolding" -- the changelog legitimately
     # says "no scaffolding", and a test that cannot tell those apart is noise.
     for gone in ("lift_scaffolding", "cleanup_models", "cleanup_connection",
