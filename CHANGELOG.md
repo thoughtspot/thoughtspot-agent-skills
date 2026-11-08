@@ -7,7 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-11-08
 - fix(charts): the chart-type enum re-read live on a dev build (52 values; 44 from a release build) is in `ts_cli/chart_types.py`, gated against `thoughtspot-chart-types.md`; converter chart maps are gated against the release-build 44. The build-liveboard measure floor and cartesian layout classify `ADVANCED_*` types like their Legacy twins; `ts tml lint` is unchanged. The measure floor now covers `BUBBLE` and `ADVANCED_SCATTER`. `STACKED_AREA`, `ADVANCED_STACKED_AREA` and `ADVANCED_STACKED_BAR` tiles get an axis encoding. Emitted chart names are unchanged; the Tableau skill's library prompt describes the new library as GA and the product default per release notes, which the target cluster must have enabled (ts-convert-from-tableau 1.46.2, BL-449)
-- chore: bump ts-cli to v0.211.0
+- chore: bump ts-cli to v0.209.0
 - fix: ts-convert-from-powerbi and ts-convert-from-qlik ran `ts tml lint` / `ts tml import` with bare file arguments, which both reject, so neither had a lint gate, and ts-convert-from-sisense's unfiltered `--dir out/` imported `mapping.json` as a document; `check_skill_flag_usage.py` now also fails a `ts` command given more positional arguments than it declares (BL-545)
 - feat: the README's skills tables and counts are generated from each SKILL.md's frontmatter `metadata:` (`category`, `summary`, plus the Setup and Conversion columns) by `tools/validate/generate_readme_skills.py`; `--check` gates drift and invalid metadata in pre-commit and CI
 - chore: retire the CoCo Snowsight and Databricks Genie runtimes; the repo now serves CLI skills (Claude Code and Cortex Code CLI). Archived at tag runtimes-archive-2026-11-08
