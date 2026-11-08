@@ -332,9 +332,9 @@ whose `expr` contains `LEAST(...)` or `GREATEST(...)`, classify the result as a
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
 | `year ( [date] )` → `YEAR(date)` | `YEAR(date)` → `year ( [date] )` |
-| `year ( [date] , fiscal )` → **Untranslatable at expr level** — see `custom_instructions` mitigation below | — |
+| `year ( [date] , fiscal )` → **Untranslatable at expr level** — see the `module_custom_instructions` mitigation below | — |
 | `quarter_number ( [date] )` → `QUARTER(date)` | `QUARTER(date)` → `quarter_number ( [date] )` |
-| `quarter_number ( [date] , fiscal )` → **Untranslatable at expr level** — see `custom_instructions` mitigation below | — |
+| `quarter_number ( [date] , fiscal )` → **Untranslatable at expr level** — see the `module_custom_instructions` mitigation below | — |
 | `month ( [date] )` → `MONTH(date)` | `MONTH(date)` → `month ( [date] )` |
 | `day ( [date] )` → `DAY(date)` | `DAY(date)` → `day ( [date] )` |
 | `hour_of_day ( [date] )` → `HOUR(date)` | `HOUR(date)` → `hour_of_day ( [date] )` |
@@ -367,15 +367,20 @@ remain **untranslatable at the expression level** — there is no fiscal calenda
 in Snowflake SV `expr` syntax. The column's `expr` is still omitted from the YAML.
 
 **Mitigation (do this instead of a bare OMIT):** log the formula in the Unmapped Report
-*and* surface a suggested `custom_instructions` (or `module_custom_instructions.sql_generation`)
-snippet so Cortex Analyst can approximate fiscal-year grouping at the SQL-generation layer.
-This is the spec's own example use case for `custom_instructions` — see
-[snowflake-schema.md](../../schemas/snowflake-schema.md):
+*and* surface a suggested `module_custom_instructions.sql_generation` snippet so Cortex
+Analyst can approximate fiscal-year grouping at the SQL-generation layer. This is the
+spec's own example: its complete example puts this exact instruction under
+`module_custom_instructions.sql_generation`. See
+[snowflake-schema.md](../../schemas/snowflake-schema.md). Do **not** suggest the top-level
+`custom_instructions` key. The spec marks it legacy, and it cannot coexist with
+`module_custom_instructions`: a view that sets both fails with 392410 (live 2026-11-08,
+BL-450). In DDL the same text is `AI_SQL_GENERATION '<text>'`.
 
 ```yaml
-custom_instructions: >
-  Always use fiscal year (April-March) for date grouping unless the user
-  explicitly asks for calendar year.
+module_custom_instructions:
+  sql_generation: >
+    Always use fiscal year (April-March) for date grouping unless the user
+    explicitly asks for calendar year.
 ```
 
 This is a Cortex-Analyst-level mitigation, not an expression-level translation — it
@@ -821,10 +826,15 @@ only this one*, and no metric expression can suppress an enclosing filter — th
 limitation that keeps `{}` untranslatable. So the two rows share one real blocker
 (suppression), and it is not the one previously stated.
 
-**Entity-level `filters:` is not a substitute.** A semantic view's `filters:` block is
-**AI-optional** — Cortex Analyst decides whether to apply it — whereas a ThoughtSpot
-hardcoded filter is always applied. See
-[snowflake-schema.md](../../schemas/snowflake-schema.md) `filters:` and
+**Standalone `filters:` is not a substitute.** A semantic view's standalone `filters:`
+block is **AI-optional**: Cortex Analyst decides whether to apply it, whereas a ThoughtSpot
+hardcoded filter is always applied. Corrected 2026-11-08 (BL-450; audit 2026-09-22 finding
+13.12): this paragraph used to call that block "entity-level". In the spec, *entity-level*
+filters are a different construct, `labels: [filter]` on a dimension or fact. Neither kind
+is always-applied, so the verdict above stands. Snowflake itself recommends entity-level
+filters over the standalone block. The semantic SQL compiler uses only entity-level
+filters, and live the standalone block is stored only in the Cortex Analyst extension.
+See [snowflake-schema.md](../../schemas/snowflake-schema.md) `filters:` and
 [ts-snowflake-properties.md](ts-snowflake-properties.md) "Model-Level Filters".
 
 ### Translatable LOD Patterns

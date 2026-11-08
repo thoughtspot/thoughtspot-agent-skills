@@ -347,14 +347,17 @@ dimensions:                       # Optional. PREVIEW. Root-level dimensions fol
 
 ### Advanced constructs — DDL vs YAML coverage
 
-> **Currency note — verified 2026-07-01 against the published
-> [semantic-view YAML spec](https://docs.snowflake.com/en/user-guide/views-semantic/semantic-view-yaml-spec).**
+> **Currency note — re-verified 2026-11-08 (BL-450)** against the published
+> [semantic-view YAML spec](https://docs.snowflake.com/en/user-guide/views-semantic/semantic-view-yaml-spec)
+> and the CREATE / ALTER SEMANTIC VIEW pages, and live on Snowflake 10.40.103 (first verified 2026-07-01).
 > The published YAML spec has **expanded**: several constructs once exclusive to the DDL
 > form are now expressible in YAML. The `YAML?` column below reflects the **spec's
 > capability**, not the converter's current behaviour — the to-snowflake-sv converter does
-> **not yet emit** the newly-YAML-capable constructs; that change is pending a live
-> `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` round-trip test (**BL-031**). The from-snowflake-sv
-> direction parses DDL via `GET_DDL` and is unaffected.
+> **not yet emit** the newly-YAML-capable constructs (**BL-031**). When BL-031 runs its live
+> round-trip, it must read `GET_DDL` back. A verify-only pass proves nothing about key names
+> (see "Complete Schema"). The from-snowflake-sv direction parses DDL via `GET_DDL`.
+> `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW` returns the same view as structured YAML. See
+> ts-from-snowflake-rules.md "READ_YAML vs GET_DDL" (finding 13.8).
 
 | Construct | DDL syntax | YAML? | Notes |
 |---|---|---|---|
@@ -368,22 +371,32 @@ dimensions:                       # Optional. PREVIEW. Root-level dimensions fol
 | `AI_SQL_GENERATION` | `AI_SQL_GENERATION '<free-text instructions>'` (**no `=`** — the `=` form is rejected; BL-254) | ✅ now — `module_custom_instructions.sql_generation` | Free-text instruction string (Jan 12 2026 "custom instructions" release), scoped to SQL generation only |
 | `AI_QUESTION_CATEGORIZATION` | `AI_QUESTION_CATEGORIZATION '<free-text instructions>'` (**no `=`** — the `=` form is rejected; BL-254) | ✅ now — `module_custom_instructions.question_categorization` | Free-text instruction string, scoped to question categorization only |
 | `ai_verified_queries` | `ai_verified_queries ( 'query' verified_by = '...' )` | ✅ now — `verified_queries[]` | Top-level array; verified queries (→ NLS Feedback TML on the TS side) |
-| `using <relationship>` | on metrics | ✅ **Preview (available to all accounts)** — `using_relationships` | Relationship path for cross-table metrics. Shipped Preview 2026-03-13; the YAML spec still badges it "Preview Feature — Available to all accounts" and no GA announcement was found through Aug 2026 (status qualifier added 2026-08-26, finding 13.10). Material because BL-031 reads this table to decide what the converter may emit, and the neighbouring Materializations row is qualified while this one was not. |
+| `using <relationship>` | on metrics | ✅ **Preview (available to all accounts)** — `using_relationships` | Relationship path for cross-table metrics. Shipped Preview 2026-03-13. The YAML spec and the CREATE page still badge it "Preview Feature — Open, available to all accounts" (re-checked 2026-11-08; status qualifier added 2026-08-26, finding 13.10). Material because BL-031 reads this table to decide what the converter may emit, and the neighbouring Materializations row is qualified while this one was not. |
 | root-level derived `METRICS` | `METRICS ( alias.NAME as EXPR, ... )` with `table_alias` omitted from the metric name | ✅ now — root-level `metrics:` | Combines per-table metrics across logical tables. **`using_relationships` is NOT valid here** — it is a table-level metric key only (corrected 2026-08-26, audit 13.6). The one exception to Key Structural Rule #1 — see "Derived Metrics" below. Not yet emitted by the to-snowflake-sv converter (BL-031). |
 | **LOD metrics** — `FIXED` / `INCLUDE` / `EXCLUDE DIMENSIONS (...)` | `AGG(expr) FIXED DIMENSIONS (t.d, ...)` as a row-level fact/dimension expression, or wrapped inline in a metric `expr` | ✅ **Preview** — root-level `facts:` / `dimensions:` entries with `lod_dimension_type` + `lod_dimensions`, or inline in a metric `expr` | "Preview Feature — Open". Root level only: the LOD keys under `tables[].facts` / `tables[].dimensions` fail with 392421, and a root-level fact without `lod_dimension_type` fails with 392422 (both live 2026-11-08). Cortex Analyst and Cortex Agents do not use LOD metrics yet. Semantics and converter support: **BL-543** (not implemented). |
-| named standalone `filters` | *(DDL clause not yet verified)* | ✅ now — per-table `filters:` | Standalone boolean filter (name/synonyms/description/expr) used by Cortex Analyst; AI-optional, not always-applied like a ThoughtSpot model-level filter — see ts-snowflake-properties.md "Model-Level Filters" |
+| named standalone `filters` | *(none — live 2026-11-08: the block is stored only in the CA extension JSON; there is no DDL clause)* | ✅ now — per-table `filters:` | Standalone boolean filter (name/synonyms/description/expr). The spec says it is "supported for Cortex Analyst SQL generation, but the Snowflake semantic SQL compiler uses entity-level filters (defined with labels)" and recommends `labels: [filter]` instead. AI-optional, not always-applied like a ThoughtSpot model-level filter. See ts-snowflake-properties.md "Model-Level Filters". |
 | `tags` (object tagging) | `WITH TAG (fully.qualified.tag = 'value', ...)` | ✅ now — `tags:` at root/table/dimension/time_dimension/fact/metric levels | GA 2026-05-05. A **list** of `{name: {database, schema, tag}, value}` objects. The map form fails with 392400. Round-trip verified live at every level on 2026-11-08 (BL-450). |
-| **Materializations** — enables incremental/full refresh caching of a semantic view | `CREATE ... MAX_STALENESS = <seconds>` at creation time; `ALTER SEMANTIC VIEW ... ADD MATERIALIZATION (REFRESH_MODE = AUTO \| FULL \| INCREMENTAL [, IMMUTABLE WHERE <expr>])` to add/configure one after creation | ⚠ partial — top-level `max_staleness:` only (creation-time eligibility) | **PUBLIC PREVIEW (release 10.24, Jul 9-15 2026).** `max_staleness:` in YAML makes the view materialization-eligible at CREATE time. The `ALTER ... ADD MATERIALIZATION` refresh-mode/immutable-where configuration is DDL-only today — no YAML equivalent documented. GET_DDL token shape for a materialized view is not yet live-verified — see ts-from-snowflake-rules.md "PARSER PREREQUISITE" entry (BL-100). |
+| **Materializations** — pre-computed dimensions + metrics, refreshed to keep within `MAX_STALENESS` | `CREATE ... MAX_STALENESS = <integer>` (or `ALTER ... SET MAX_STALENESS`) first, then `ALTER SEMANTIC VIEW <sv> ADD MATERIALIZATION <m> WAREHOUSE = <wh> [REFRESH_MODE = AUTO \| FULL \| INCREMENTAL] [IMMUTABLE WHERE (<cond>)] AS DIMENSIONS ... METRICS ... [WHERE (<filter>)]` | ⚠ partial — `max_staleness:` in the SV YAML, plus a **separate** YAML document applied by `SYSTEM$MANAGE_SEMANTIC_VIEW_MATERIALIZATIONS_FROM_YAML` | **"Preview Feature — Open"** ([materializations](https://docs.snowflake.com/en/user-guide/views-semantic/materializations) and [the procedure](https://docs.snowflake.com/en/sql-reference/stored-procedures/system_manage_semantic_view_materializations_from_yaml), read 2026-11-08). Corrected 2026-11-08 (finding 13.9): this row used to call materialization config "DDL-only — no YAML equivalent documented". The procedure takes `materializations: [{name, warehouse, dimensions: [{table, name}], metrics: [{table, name}]}]`. It syncs declaratively: it creates missing entries, replaces changed ones, drops any not listed (`[]` drops all), and is idempotent. That YAML is its own document, not keys inside the SV spec, and it has **no key for `REFRESH_MODE`, `IMMUTABLE WHERE` or the materialization `WHERE`**, so those three stay DDL-only. Live 2026-11-08: `max_staleness: 7200` reads back as `MAX_STALENESS = '7,200 seconds'` in `GET_DDL` (between `comment=` and `ai_sql_generation`) and as `max_staleness: 7200 seconds` in READ_YAML. Whether an added materialization appears in `GET_DDL` was not tested (see ts-from-snowflake-rules.md, BL-100). Materializations benefit Semantic SQL only. Cortex Analyst and Cortex Agents run physical SQL and do not use them. `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`'s 4th argument (`create_or_alter`) keeps the existing materializations through a re-create. |
 
-### What is NOT supported in YAML
+### Keys that are not semantic view keys — omit them
 
-The following fields are **not** part of the YAML schema. Including them causes a parse error:
+These keys are **not** part of the semantic view YAML schema. **They do not cause a parse
+error.** Corrected 2026-11-08 (BL-450): this section used to say they did. Live, the
+procedure accepts each one, then either stores it in the Cortex Analyst extension
+(`with extension (CA='...')`, which READ_YAML hands back) or drops it. The semantic view
+never applies it, and nothing reports that. Omit them anyway. `check_sv_yaml.py` flags the
+first three when they sit on a table or relationship entry.
 
-| Field | Notes |
-|---|---|
-| `relationship_type` | Not supported — omit entirely (verified still-correct 2026-06-17: the spec states semantic views don't use it) |
-| `join_type` | Not supported — omit entirely (verified still-correct 2026-06-17) |
-| `default_aggregation` | Not supported in `metrics` — omit entirely |
+| Key | Why it looks valid | What actually happens (live 2026-11-08) |
+|---|---|---|
+| `relationship_type` | Legacy semantic models used it. Even the `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` page's own example sets `relationship_type: many_to_one` | Kept in the CA extension and not used. The spec says relationship type "is automatically inferred from the data and primary key definitions" |
+| `join_type` | Legacy semantic models | Kept in the CA extension and not used |
+| `default_aggregation` (metric) | Legacy semantic models | Kept in the CA extension and not applied |
+| `measures` (instead of `metrics`) | Common BI vocabulary | Kept in the CA extension. The view has no such metrics |
+| `unique` on a dimension / time_dimension | Legacy semantic models | Kept in the CA extension, and also turned into a table-level `unique (<DIMENSION_NAME>)` constraint. Use table-level `unique_keys:` |
+| `onboarding_question` on a verified query | It is the DDL keyword (`ONBOARDING_QUESTION`) | Dropped outright. The query is stored with `ONBOARDING_QUESTION false`. The YAML key is `use_as_onboarding_question` |
+| `data_type` on a metric | Dimensions and facts carry one | Kept in the CA extension. Cortex Analyst then rejects the view at query time with 392700 |
+| `sample_values` on a **table** | It *is* valid on dimensions and time_dimensions | Kept in the CA extension only |
 
 ---
 
@@ -559,8 +572,8 @@ Run all checks before calling `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`:
 | Case-sensitive identifiers | Lowercase schemas/tables detected via SHOW and wrapped in `'"value"'` in `base_table`; lowercase columns double-quoted inline in `expr` |
 | Reserved words quoted | Column names that are SQL reserved words are double-quoted in `expr` |
 | Join key identifiers | `primary_key.columns` and `relationship_columns` use bare identifiers — wrapper views (Step 5) ensure all are uppercase before this point |
-| Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation` |
-| Valid `data_type` | Dimensions/time_dimensions only: one of `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. **Never on metrics** — causes Cortex error 392700. |
+| Unsupported fields absent | No `relationship_type`, `join_type`, `default_aggregation`, `measures`, dimension-level `unique`, or verified-query `onboarding_question`. None of them errors at create time; see "Keys that are not semantic view keys" |
+| Valid `data_type` | Dimensions/time_dimensions only: one of `TEXT`, `NUMBER`, `DATE`, `TIMESTAMP`, `BOOLEAN`. This is the converter's own subset, which `check_sv_yaml.py` enforces. Snowflake itself accepts any data type, e.g. `VARCHAR(25)`. **Never on metrics** — causes Cortex error 392700. |
 | No untranslatable formulas | Columns with untranslatable ThoughtSpot formulas are **omitted** entirely |
 
 ---
@@ -652,17 +665,32 @@ $$);
 **Notes:**
 - `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` is a **stored procedure** — use `CALL`, not `SELECT`.
 - First argument is the fully-qualified target schema: `'DATABASE.SCHEMA'`
-- Third argument `TRUE` enables dry-run validation without creating the view
+- Third argument `TRUE` (`verify_only`) enables dry-run validation without creating the view.
+  **It does not catch a wrong key name.** Unknown keys pass and are parked in the CA extension
+  (see "Complete Schema"), so read `GET_DDL` back after a real create.
+- Optional fourth argument `create_or_alter` (default `FALSE`): `TRUE` uses
+  `CREATE OR ALTER SEMANTIC VIEW` semantics, which keep the existing materializations
+  where the change allows.
 - The `$$` dollar-quoting allows the YAML to contain single quotes safely
+- `SYSTEM$READ_YAML_FROM_SEMANTIC_VIEW('<db>.<schema>.<view>')` (a function — use `SELECT`)
+  returns an existing view as YAML. It is the inverse of this procedure.
 
-To drop an existing view before recreating:
+**An existing view of the same name is replaced, not an error.** Per the
+[procedure page](https://docs.snowflake.com/en/sql-reference/stored-procedures/system_create_semantic_view_from_yaml)
+(read 2026-11-08), the procedure "attempts to replace that semantic view and copy the
+grants from that semantic view", which "has the same effect as running CREATE OR REPLACE
+SEMANTIC VIEW … COPY GRANTS". The replace needs the OWNERSHIP privilege on the existing
+view. Corrected 2026-11-08 (BL-450): this section used to say to expect an "already
+exists" error. The YAML path keeps grants. Hand-written `CREATE OR REPLACE` DDL does not,
+unless it adds `COPY GRANTS`.
+
+To drop an existing view explicitly:
 ```sql
 DROP SEMANTIC VIEW IF EXISTS {database}.{schema}.{name};
 ```
 
 Do NOT use `INFORMATION_SCHEMA.SEMANTIC_VIEWS` — the column names vary by Snowflake
-version. Instead, proceed with the CREATE call and handle the "already exists"
-error if returned.
+version. Use `SHOW SEMANTIC VIEWS` if you need to check for one.
 
 ---
 
@@ -715,32 +743,50 @@ control the source tables and have verified no downstream dependencies.
 
 ---
 
-### Bridge / junction tables and multi-hop traversal
+### Bridge / junction tables and many-to-many traversal
 
-Snowflake Semantic Views cannot traverse a two-hop path through a bridge table at
-query time. If the model contains a many-to-many pattern like:
+> **Corrected 2026-11-08 (BL-450; audit 2026-09-22 finding 13.10).** This section used to
+> say Semantic Views "cannot traverse a two-hop path through a bridge table", and it sent
+> many-to-many conversions to raw SQL. **That is no longer true.** The
+> [YAML spec](https://docs.snowflake.com/en/user-guide/views-semantic/semantic-view-yaml-spec)
+> now has a "Many-to-many relationships via bridge tables" section, and the
+> [SQL guide](https://docs.snowflake.com/en/user-guide/views-semantic/sql) has a matching
+> one. Both were read 2026-11-08. Declare one relationship from the bridge to each entity,
+> and give the bridge a **composite** `primary_key`. The system "infers the many-to-many path
+> from the relationship graph and automatically handles deduplication to prevent fanout
+> double-counting".
 
-```
-superhero ← hero_power → superpower
-```
+**Re-run on the original fixture, live 2026-11-08 (Snowflake 10.40.103).** The superhero
+fixture (`BIRD.SUPERHERO_SV`, `superhero ← hero_power → superpower`) was rebuilt as two
+semantic views. One had the spec's composite key on the bridge
+(`primary_key: {columns: [HP_HERO_ID, HP_POWER_ID]}`; its 5,825 rows are all distinct on
+that pair). The other had **no** bridge key, as the original did. Every query shape this
+section said would fail works in **both** views, through Semantic SQL
+(`SEMANTIC_VIEW(...)`):
 
-Queries that request dimensions from both ends (e.g. `superhero_name` + `power_name`)
-fail with:
+| Query | Result in both views |
+|---|---|
+| `superhero_name` + `power_name` (dimensions from both ends) | Rows returned |
+| `superhero_name` + a superpower count metric | Rows returned |
+| `power_name` + a distinct-hero count metric | Agility 239, Flight 208. Matches a hand-written join |
+| `power_name` + `SUM(HEIGHT_CM)` on superhero | Agility 51,072, Flight 30,511. Matches a hand-written join, so no fan-out |
+| `superhero_name` + `power_name` + a bridge `COUNT(*)` | 1 per pair |
 
-```
-Invalid fact specified: The fact entity 'SUPERPOWER' must be related to and have
-an equal or lower level of granularity compared to the base metric or fact entity.
-```
+The bare-bridge control also works, so the composite key is not what changed. The platform
+changed after the original write-up. Declare the composite key anyway, as the spec's
+example does.
 
-**What still works:** Queries anchored at one end of the bridge:
-- `superhero_name` + any lookup dimension (race, alignment, gender, publisher, colour)
-- `superhero_name` + `attribute_name` + `attribute_value` (via `hero_attribute`)
+**Converter guidance:** a many-to-many path through a bridge is expressible. Do not route it
+to raw SQL. Emit both bridge relationships and the bridge's composite `primary_key`.
 
-**What doesn't work:** Any query that tries to reach a table on the far side of a
-bridge via the bridge table (e.g. `superhero_name` + `power_name`).
-
-**Workaround:** Use direct SQL against the physical tables with explicit JOINs and
-properly quoted case-sensitive identifiers (see case-sensitivity rules in Step 5).
+**Not covered by this re-run:**
+- Cortex Analyst and Cortex Agents generate their own physical SQL, and they were not
+  tested. BL-458 tracks the constraints attributed to Cortex Analyst.
+- The original failure's error was not reproduced on 10.40.103:
+  `Invalid fact specified: The fact entity 'SUPERPOWER' must be related to and have an
+  equal or lower level of granularity compared to the base metric or fact entity.`
+  If it comes back, the cause is a granularity conflict between the requested fields, not
+  bridge traversal as such (see "`SELECT *` on a multi-fact semantic view" below).
 
 ### Symmetric join keys (same column name on both FK and PK sides)
 
@@ -789,10 +835,21 @@ relationships:
     right_column: ACCOUNT_ID        # PK stays unchanged
 ```
 
-When a physical table is aliased multiple times (e.g. `DISTRICT` used as both
-`client_district` and `account_district`), create **two separate wrapper views** with
-distinct PK column names (`CLIENT_DISTRICT_ID` and `ACCOUNT_DISTRICT_ID`) so each alias
-can satisfy Cortex's unique-name requirement independently.
+**Role-playing tables (one physical table under several logical names).** The base case
+needs **no wrapper views** (narrowed 2026-11-08, BL-450; audit 2026-09-22 finding 13.11).
+The spec's "Role-playing tables" section gives two logical names over the same
+`base_table`, each with the same PK column. That works live on 2026-11-08: TPCH `NATION`
+served as both `customer_nation` and `supplier_nation`, and Semantic SQL counts matched a
+direct join. It still worked with each role's PK exposed as a dimension under its own name
+(`cust_nation_key` and `supp_nation_key`, both `expr: N_NATIONKEY`).
+
+Two separate wrapper views with distinct PK column names (e.g. `DISTRICT` as
+`client_district` / `account_district` → `CLIENT_DISTRICT_ID` / `ACCOUNT_DISTRICT_ID`) are
+needed **only when the join keys must be exposed as dimensions named after the physical
+column**. That is the Cortex Analyst constraint described above: it resolves join keys
+by dimension name, and that name must be globally unique. This constraint is attributed to
+Cortex Analyst and is unverified under Cortex Agents (BL-458). Create the wrapper views
+only in that case. They need DDL rights on the source, which a consultant may not have.
 
 **Note:** This also applies to `primary_key` columns — the PK column must also be
 exposed as a dimension with a name matching snake_case(pk_column). For example, if

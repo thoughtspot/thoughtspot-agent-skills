@@ -251,8 +251,11 @@ the alternate `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` YAML path.
 prior relationship (two join paths between the same pair), use
 `{LEFT_TABLE}_{LEFT_COL}_to_{RIGHT_TABLE}` instead. See Step 7 for the full algorithm.
 
-**Do not include** `relationship_type` or `join_type` — these fields are not supported
-and will cause a parse error.
+**Do not include** `relationship_type` or `join_type`. They are not semantic view keys.
+Corrected 2026-11-08 (BL-450): they do **not** cause a parse error. Live, the procedure
+accepts both and parks them in the Cortex Analyst extension, where they have no effect,
+and nothing flags them. Relationship type is inferred from the declared keys. See
+snowflake-schema.md "Keys that are not semantic view keys".
 
 **Join type mapping (TS → SV):**
 
