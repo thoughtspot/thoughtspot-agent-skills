@@ -99,8 +99,8 @@ Widgets become Answers on the tabbed Liveboard: the Sisense widget type picks th
 (`chart/column`→COLUMN, `indicator`→KPI, `pivot`→PIVOT_TABLE, …); JAQL panels map to roles
 (Categories→x, Break-by→color, Values→y); a date `level` becomes a matching date bucket
 (`months`→MONTHLY) so it sorts chronologically; a per-attribute top-N is baked into the
-widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→IN,
-exclude→NOT_IN, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
+widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→`in`,
+exclude→`not in`, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
 
 Each Answer is emitted via the shared emitter's `build_answer` using the Sisense-resolved
 chart type directly, so the widget-type mapping wins and the Approximated / NEEDS REVIEW
@@ -118,6 +118,80 @@ ts tml verify-render <liveboard-guid> --profile <name>    # post-import gate; ex
 > `axis_configs`, so nothing is expected to fire; the gate is here so a future change to
 > the shared emitter cannot ship blank boards unnoticed.
 
+### Step 3 (alternative) — Bind to an EXISTING Model
+
+Use this instead of Steps 1–3 when the Model already exists — designed by hand, or built
+earlier from the same warehouse — and the dashboards must land on it. Export the Model WITH its
+`obj_id` (the only exact viz binding: a Model can carry a custom obj_id no name derivation
+reproduces) and its Tables (`--associated`: their `db_column_name` maps the warehouse columns a
+Sisense dim names onto Table columns a designer may have renamed), then build against it:
+
+```bash
+ts tml export <model-guid> --include-obj-id --associated --profile <name> > target-model.json
+ts sisense build-liveboard --input <bundle.json> --target-model target-model.json --out out/ \
+  [--drill <drill-dashboard>.dash ...] [--overrides overrides.json] [--report-name "<name>"]
+```
+
+What it does, all deterministic:
+
+| Sisense | ThoughtSpot |
+|---|---|
+| `[Table.column]` | The Model column exposing exactly that table instance + column. A role-playing copy (two date tables, two copies of one dimension) resolves by name, else by the **foreign-key column** the Sisense relation uses — never by bare column name |
+| `count` (a DISTINCT count) | `unique count [X]`; over a key the Model hides, the Model formula `unique count ( [inst::col] )` |
+| Widget-level filter | Search filter: members `[X] = 'a' [X] = 'b'` (ORed), excludes `[X] != 'a'` (ANDed), ranges `>= > <= <`. Never `in (...)` / `not in (...)` — search ignores both silently |
+| WidgetsTabber (daily/weekly/… tabs) | The active tab's widget only, grain suffix dropped from its title; a hidden tab that is the same chart (type, fields, filters) at another date level is the chart's own date-bucket control, reported `Merged`. Any other tab becomes a tile of its own |
+| Top / bottom N | `top N` / `bottom N`, when it ranks the widget's only dimension by its only measure |
+| Disabled widget or dashboard filter | Not applied (it is off in Sisense); reported |
+| Value / axis titles | `custom_name` |
+| Number display (full values) | Every measure column gets a full-value NUMBER format (no `K`/`M` abbreviation); `%` columns and Model columns with their own format (a percent pattern, a currency) keep theirs |
+| Rich-text widget, tab-set title | Section-header note tile |
+| Columnar layout | Tile grid (rows fill 12 columns; a merged tab's width goes to the kept one) |
+| Jump-to-dashboard drill | A details table from the drill dashboard's first widget with fields (pass it with `--drill`), keeping that widget's own filters and the filters every source widget shares; users narrow it with right-click → Filter |
+| Dashboard filter (a cascading group gives one chip per level) | Chip (`oper: in` / `not in`, top-level `values`). A chip on a column a tile filters itself lists that tile in `excluded_visualizations` (in Sisense the widget's own filter takes priority; a ThoughtSpot chip would replace it), and so does a widget set to ignore that filter. A range filter becomes a `generic_filter`. A dimension with several role copies binds to the copy reaching the most tiles, then the shortest join path |
+
+The rule is an allowlist: a widget, filter or chip is carried only when every setting on it is
+one the converter reads and has verified. Everything else is **NEEDS REVIEW** in
+`out/migration-report.json` with the reason, on the chip AND on every tile it affects — never
+guessed. That includes:
+
+- a filter it cannot carry: relative-date, unrecognised settings, any date value (no search form
+  for one is verified), a null or backslash value, two filters on one column, any range chip
+  (not yet verified on a live Liveboard);
+- a top/bottom N that does not rank the widget's only dimension by its only measure;
+- a role-played table whose copy Sisense would join differently, or cannot be decided;
+- a drill dashboard's own filters, or a source filter the drill table does not carry;
+- a second aggregation of one column, an aggregation differing from the Model formula it binds,
+  a quick function (e.g. Contribution), a disabled plotted field, a secondary value, a percent
+  display on a column with no format, a weekly bucket with a Sisense week start;
+- a chip a tile receives differently than in Sisense: Highlight mode on a plotted column, a
+  different role-played copy, or a tile whose facts or path cannot be determined;
+- a table the widget's facts cannot reach, and an override naming a column the Model lacks.
+
+```json
+{"field_map":  {"[legacy_events.event_id]": "Event Count"},
+ "filter_map": {"[Start_Date.id_]": "[Visit Started?] = true"}}
+```
+
+`field_map` binds a Sisense dim to a Model column (a source table the connection cannot see, a
+formula field); `filter_map` replaces a Sisense filter with a search fragment (a filter on a key
+the Model hides). Typical causes: a Sisense table missing from the Model, a hidden key, a filter
+the Model expresses as a flag.
+
+**Gate before import:** every NEEDS REVIEW row in `migration-report.json` is either resolved
+(an override, a Model change, a rebuild) or shown to the user and explicitly accepted by them.
+Do not import while any row is neither. Then lint, import and verify:
+
+```bash
+ts tml lint --dir out/
+ts tml import --dir out/ --policy ALL_OR_NONE --profile <name>
+ts tml verify-render <liveboard-guid> --profile <name>     # add --strict-data to gate on suspect tiles
+```
+
+`verify-render` lists `suspect_tiles`: a tile answering 0, nothing, or one all-NULL group. That is
+the shape of a query that could not combine two facts — a measure filter on one fact with an
+attribute from another returns no error, just a wrong 0. A real zero is possible, so read each one
+against the source before accepting it.
+
 ### Step 4 — Migration report
 `mapping.json` accounts for every table, measure, and widget with a status (Migrated /
 Approximated / NEEDS REVIEW / Skipped), plus `warnings`. Hand it to the user as the
@@ -130,6 +204,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-11-05 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Client > Program > Drug) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. It carries a widget, filter or chip only when every setting on it is one it reads and has verified; anything else is NEEDS REVIEW on the chip and every tile it affects, never a silently wrong tile. |
 | 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
 | 1.0.4 | 2026-10-21 | **Join direction is deterministic and fact → dimension (ts-cli v0.179.0, BL-398).** The source side of each join was picked by a sort over a set, so on tied connection counts the join graph varied run to run and two facts sharing dimensions could fail `ts tml lint` I17. Tables are now ranked once (distinct join keys, shared keys, measures, connections, name). Coverage matrix updated |

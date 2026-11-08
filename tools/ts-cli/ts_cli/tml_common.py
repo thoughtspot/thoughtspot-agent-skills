@@ -227,8 +227,15 @@ def derive_viz_obj_id(model_name: str, model_fqn: str) -> str:
 
     No new CLI flag was needed to fix it: `obj_id` is derivable from the
     `--model-fqn` GUID the commands already accept.
+
+    The server also drops parentheses and commas when it generates the id:
+    "Sample ECommerce (Sisense)" -> "SampleECommerceSisense-94a65744" and
+    "Acme Model (Draft, Prod)" -> "AcmeModelDraftProd-a1b2c3d4" (live-verified 2026-10-27); keeping them
+    failed the import with "No table with object_id ... found". Other punctuation is unverified,
+    and a Model created with a CUSTOM obj_id cannot be derived at all — when the Model's TML is
+    at hand, use its exported root `obj_id` (`ts tml export --include-obj-id`) instead.
     """
-    slug = "".join(model_name.split())
+    slug = re.sub(r"[\s(),]+", "", model_name)
     guid8 = (model_fqn or "").split("-")[0]
     return f"{slug}-{guid8}" if guid8 else slug
 

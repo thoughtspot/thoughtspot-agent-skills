@@ -82,8 +82,15 @@ def _parse_table(t: dict, tables: list, col_by_oid: dict, table_by_oid: dict) ->
     tables.append({
         "id": t_id,
         "name": t.get("displayName") or t.get("name") or t_id,
+        "jaql_name": t.get("name") or t_id,   # the table name JAQL dims use ([name.column])
         "columns": _parse_columns(t, col_by_oid, t_id),
         "sql_expression": t.get("expression") if t.get("type") == "custom" else None,
+        # Sisense calculated columns added on the table (`tupleTransformations` add-column):
+        # names only, for binding; the model path reads `columns[].calculated` as before
+        "calculated_columns": sorted({n for tt in t.get("tupleTransformations") or []
+                                      if tt.get("type") == "add-column"
+                                      for n in ((tt.get("arguments") or {}).get("id"),
+                                                (tt.get("arguments") or {}).get("name")) if n}),
     })
     if t_oid:
         table_by_oid[t_oid] = t_id
@@ -160,8 +167,12 @@ def _jaql_to_field(jaql: dict) -> dict | None:
         kind, f = "measure", None
     else:
         kind, f = "dimension", None
-    return {"kind": kind, "dim": dim, "agg": agg, "title": jaql.get("title") or "",
-            "formula": f, "level": jaql.get("level")}
+    out = {"kind": kind, "dim": dim, "agg": agg, "title": jaql.get("title") or "",
+           "formula": f, "level": jaql.get("level")}
+    for key in ("datatype", "firstday", "dateTimeLevel"):
+        if jaql.get(key):
+            out[key] = jaql[key]
+    return out
 
 
 def _classify_member(f: dict, dim) -> dict | None:
@@ -199,6 +210,26 @@ def _classify_range(f: dict, dim) -> dict | None:
             "values": [f[k] for k in ("from", "to", "equals") if k in f], "raw": f}
 
 
+# Filter keys each kind is READ for; anything else on a filter is recorded in ``unsupported``
+# so a consumer that claims fidelity can refuse it instead of carrying a filter it cannot read.
+_COMMON_FILTER_KEYS = frozenset({"explicit", "multiSelection", "level", "all"})
+_KIND_FILTER_KEYS = {
+    "member": {"members"},
+    "exclude": {"exclude", "isCondition"},
+    "relative_date": {"last", "next"},
+    "top_n": {"top", "bottom", "by"},
+    "range": {"from", "to", "fromNotEqual", "toNotEqual", "equals", "isBetween"},
+    "unknown": set(),
+}
+
+
+def _unsupported_keys(kind: str, f: dict) -> list:
+    keys = set(f) - _COMMON_FILTER_KEYS - _KIND_FILTER_KEYS.get(kind, set())
+    if kind == "exclude":
+        keys |= {f"exclude.{k}" for k in (f.get("exclude") or {}) if k != "members"}
+    return sorted(keys)
+
+
 # Ordered so the first matching kind wins (member > exclude > relative_date > top_n > range).
 _FILTER_CLASSIFIERS = (_classify_member, _classify_exclude, _classify_relative_date,
                        _classify_top_n, _classify_range)
@@ -221,48 +252,245 @@ def _classify_filter(jaql: dict) -> dict | None:
     for classify in _FILTER_CLASSIFIERS:
         hit = classify(f, dim)
         if hit is not None:
-            return hit
-    return {"kind": "unknown", "dim": dim, "operator": ",".join(f.keys()), "values": [], "raw": f}
+            break
+    else:
+        hit = {"kind": "unknown", "dim": dim, "operator": ",".join(f.keys()), "values": [], "raw": f}
+    if jaql.get("level"):   # a date filter's grain: members are period starts, not days
+        hit["level"] = jaql["level"]
+    if jaql.get("datatype"):
+        hit["datatype"] = jaql["datatype"]
+    if jaql.get("agg") or jaql.get("formula"):   # a measure filter, not a row-level one
+        hit["agg"] = jaql.get("agg") or "formula"
+    unsupported = _unsupported_keys(hit["kind"], f)
+    if unsupported:
+        hit["unsupported"] = unsupported
+    return hit
+
+
+# Panel-item and JAQL keys the parser reads or that only affect presentation. Anything else is
+# recorded per widget in ``unsupported`` (a consumer claiming fidelity refuses the widget).
+_ITEM_KEYS = frozenset({"jaql", "instanceid", "format", "disabled", "panel", "field", "hierarchies",
+                        "categoriesSorting", "originalJaql", "quickFunction"})
+_JAQL_KEYS = frozenset({"table", "column", "dim", "datatype", "columnTitle", "tableTitle", "merged",
+                        "isDashboardFilter", "datasource", "locale", "title", "collapsed", "panel",
+                        "instanceid", "filter", "isPrimary", "level", "agg", "isWidgetFilter", "type",
+                        "formula", "context", "sort", "sortDetails", "firstday", "dateTimeLevel"})
+
+
+def _item_unsupported(item: dict, jaql: dict) -> list:
+    return sorted({f"item.{k}" for k in item if k not in _ITEM_KEYS}
+                  | {f"jaql.{k}" for k in jaql if k not in _JAQL_KEYS})
+
+
+def _parse_item(pname: str, item: dict, acc: dict) -> None:
+    """One panel item -> fields / filters. A disabled FILTER is off in Sisense (no filtering),
+    so it is recorded in ``disabled_filters`` and not applied; a disabled plotted item is kept
+    with ``disabled: true`` for the consumer to decide."""
+    jaql = item.get("jaql") or {}
+    acc["unsupported"].update(_item_unsupported(item, jaql))
+    field = _jaql_to_field(jaql)
+    if field:
+        field["panel"] = pname
+        if item.get("quickFunction"):
+            field["quick_function"] = item["quickFunction"]
+        if item.get("disabled") and pname.lower() != "filters":
+            field["disabled"] = True
+        mask = (item.get("format") or {}).get("mask") or {}
+        if mask.get("percent"):
+            field["percent"] = True
+        acc["fields"].append(field)
+    if jaql.get("filter"):
+        if item.get("disabled"):
+            acc["disabled_filters"].append(jaql.get("dim") or jaql.get("title") or "?")
+            return
+        sf = _classify_filter(jaql)
+        if sf:
+            acc["filters"].append(sf)
 
 
 def parse_widget(widget: dict, warnings: list) -> dict:
-    fields: list[dict] = []
-    filters: list[dict] = []
+    acc = {"fields": [], "filters": [], "disabled_filters": [], "unsupported": set()}
     try:
         for pname, item in _items(widget):
-            jaql = item.get("jaql") or {}
-            field = _jaql_to_field(jaql)
-            if field:
-                field["panel"] = pname
-                fields.append(field)
-            if jaql.get("filter"):
-                sf = _classify_filter(jaql)
-                if sf:
-                    filters.append(sf)
+            _parse_item(pname, item, acc)
     except Exception as e:  # never let one malformed widget abort the parse
         warnings.append(f"Could not fully parse widget {widget.get('oid', '?')}: {e}")
-    return {
+        acc["unsupported"].add(f"unreadable item ({type(e).__name__}: {e})")   # partly read: flag it
+    out = {
         "oid": widget.get("oid") or "",
         "title": widget.get("title") or "",
         "wtype": widget.get("type") or "",
         "subtype": widget.get("subtype") or "",
-        "fields": fields,
-        "filters": filters,
+        "fields": acc["fields"],
+        "filters": acc["filters"],
     }
+    source = (widget.get("datasource") or {}).get("title") if isinstance(widget.get("datasource"), dict) else None
+    if source:
+        out["datasource"] = source
+    try:
+        out.update(_widget_extras(widget))
+        out.update(_dashboard_filter_settings(widget))
+    except Exception as e:  # a malformed setting flags the widget instead of aborting the parse
+        warnings.append(f"Could not read the settings of widget {widget.get('oid', '?')}: {e}")
+        acc["unsupported"].add(f"unreadable setting ({type(e).__name__}: {e})")
+    for key in ("disabled_filters", "unsupported"):
+        if acc[key]:
+            out[key] = sorted(acc[key]) if key == "unsupported" else acc[key]
+    return out
+
+
+def _dashboard_filter_settings(widget: dict) -> dict:
+    """How dashboard filters reach this widget: ``filters_mode`` (Sisense ``filter`` slices,
+    ``select`` is Highlight) and ``ignore`` ({all, dimensions, ids}) — only when not the default."""
+    out: dict = {}
+    mode = (widget.get("options") or {}).get("dashboardFiltersMode")
+    if mode and mode != "filter":
+        out["filters_mode"] = mode
+    ig = (widget.get("metadata") or {}).get("ignore") or {}
+    if ig.get("all") or ig.get("dimensions") or ig.get("ids"):
+        out["ignore"] = {"all": bool(ig.get("all")), "dimensions": list(ig.get("dimensions") or []),
+                         "ids": list(ig.get("ids") or [])}
+    return out
+
+
+def _widget_extras(widget: dict) -> dict:
+    """Presentation keys the liveboard layer needs: tab-set config, rich-text content and
+    jump-to-dashboard drill targets. Only present when the widget carries them."""
+    wtype, style = widget.get("type") or "", widget.get("style") or {}
+    extras: dict = {}
+    if wtype == "WidgetsTabber":
+        extras["tabber"] = _tabber(style)
+    if wtype == "richtexteditor":
+        content = style.get("content") or {}
+        extras["richtext"] = {"html": content.get("html") or "", "bg_color": content.get("bgColor") or ""}
+    drill = widget.get("drillToDashboardConfig") or {}
+    targets = _drill_targets(drill)
+    if targets:
+        extras["drill_targets"] = targets
+        changed = _drill_filter_settings(drill)
+        if changed:
+            extras["drill_filter_settings"] = changed
+    return extras
+
+
+# Jump-to-dashboard settings that change which filters reach the drilled dashboard, and their
+# defaults; any other value is recorded so a consumer can refuse to assume the default.
+_DRILL_FILTER_DEFAULTS = {"includeFilterDims": [], "excludeFilterDims": [], "includeDashFilterDims": [],
+                          "excludeDashFilterDims": [], "resetDashFiltersAfterJTD": False,
+                          "mergeTargetDashboardFilters": False}
+
+
+def _drill_filter_settings(drill: dict) -> list:
+    return sorted(k for k, default in _DRILL_FILTER_DEFAULTS.items() if k in drill and drill[k] not in (default, None))
+
+
+def _tabber(style: dict) -> dict:
+    tabs = [{"title": t.get("title") or "", "show": list(t.get("displayWidgetIds") or [])}
+            for t in style.get("tabs") or []]
+    try:
+        active = int(style.get("activeTab") or 0)
+    except (TypeError, ValueError):
+        active = 0
+    return {"tabs": tabs, "active": active if 0 <= active < len(tabs) else 0}
+
+
+def _drill_targets(drill: dict) -> list:
+    if drill.get("enabled", True) is False:
+        return []
+    return [t for t in (d.get("dashboardTitle") or d.get("caption") or ""
+                        for d in drill.get("dashboardIds") or [] if isinstance(d, dict)) if t]
+
+
+def _dashboard_filter(f: dict, dash_filters: list, disabled: list) -> None:
+    """One dashboard filter (a cascading group has no jaql of its own, only levels[]) -> one
+    entry per level; a switched-off one performs no filtering in Sisense, so it is listed apart."""
+    for jaql in f.get("levels") or [f.get("jaql") or f]:
+        if f.get("disabled") or jaql.get("disabled"):
+            disabled.append(jaql.get("dim") or jaql.get("title") or "?")
+            continue
+        sf = _classify_filter(jaql)
+        if sf:
+            sf["instanceids"] = [i for i in (f.get("instanceid"), jaql.get("instanceid")) if i]
+            extra = sorted(f"jaql.{k}" for k in jaql if k not in _JAQL_KEYS)
+            if extra:
+                sf["unsupported"] = sorted(set(sf.get("unsupported", [])) | set(extra))
+            dash_filters.append(sf)
+
+
+def _dashboard_filters(raw: dict, warnings: list) -> tuple:
+    """-> (filters, disabled dims, unreadable dims). One malformed filter must not abort the
+    parse, nor vanish: it is listed so the consumer can report it."""
+    dash_filters, disabled, unreadable = [], [], []
+    for f in raw.get("filters", []) or []:
+        try:
+            _dashboard_filter(f, dash_filters, disabled)
+        except Exception as e:
+            warnings.append(f"Could not parse a dashboard filter: {e}")
+            unreadable.append(str((f.get("jaql") or {}).get("dim") or "?") if isinstance(f, dict) else "?")
+    return dash_filters, disabled, unreadable
 
 
 def parse_dashboard(raw: dict, warnings: list) -> dict:
-    dash_filters: list[dict] = []
-    for f in raw.get("filters", []) or []:
-        sf = _classify_filter(f.get("jaql") or f)
-        if sf:
-            dash_filters.append(sf)
-    return {
+    dash_filters, disabled, unreadable = _dashboard_filters(raw, warnings)
+    try:
+        layout = _parse_layout(raw.get("layout") or {})
+    except Exception as e:  # layout is presentation: a bad one is reported, the board still builds
+        warnings.append(f"Could not read the dashboard layout: {e}")
+        layout = []
+    out = {
         "oid": raw.get("oid") or raw.get("_id") or "",
         "title": raw.get("title") or "",
         "datasource": (raw.get("datasource") or {}).get("title") or "",
         "filters": dash_filters,
+        "layout": layout,
     }
+    if disabled:
+        out["disabled_filters"] = disabled
+    if unreadable:
+        out["unreadable_filters"] = unreadable
+    combined = sorted(k for k in ("filterRelations", "filterToDatasourceMapping") if raw.get(k))
+    if combined:                       # filters combined other than by AND, or mapped per data source
+        out["filter_settings"] = combined
+    return out
+
+
+def _pct(w) -> float:
+    """Sisense layout width (number, or '50' / '50%') -> percent; 100 when unreadable."""
+    try:
+        return float(str(w if w is not None else 100).replace("%", "").strip())
+    except (TypeError, ValueError):
+        return 100.0
+
+
+def _px(h) -> int:
+    """Sisense element height ('140px' or 140) -> pixels; 0 when unreadable."""
+    try:
+        return int(float(str(h).replace("px", "").strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_layout(layout: dict) -> list:
+    """Sisense columnar layout -> rows of placed widgets, top to bottom.
+
+    Each row is ``[{"oid", "width_pct", "height_px", "col_pct"}]`` where ``width_pct`` is the
+    subcell width within its layout column and ``col_pct`` the layout column's own width; a
+    multi-column dashboard lists each column's rows in turn (``col`` index on each row).
+    """
+    rows = []
+    for ci, col in enumerate(layout.get("columns") or []):
+        col_pct = _pct(col.get("width"))
+        for cell in col.get("cells") or []:
+            row = []
+            for sub in cell.get("subcells") or []:
+                width = _pct(sub.get("width"))
+                for el in sub.get("elements") or []:
+                    if el.get("widgetid"):
+                        row.append({"oid": el["widgetid"], "width_pct": width,
+                                    "height_px": _px(el.get("height")), "col_pct": col_pct})
+            if row:
+                rows.append({"col": ci, "items": row})
+    return rows
 
 
 def parse_inventory(bundle: dict) -> dict:

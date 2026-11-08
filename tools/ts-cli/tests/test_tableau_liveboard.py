@@ -255,3 +255,20 @@ def test_build_from_spec_override_and_extra_visual():
     names = [a["answer"]["name"] for a in r["answers"]]
     assert "Custom" in names and "Added KPI" in names
     assert any(row["note"] == "added tile" or "added" in row["note"] for row in r["visual_rows"])
+
+
+def test_derive_viz_obj_id_drops_parentheses_and_commas():
+    # the server strips these when it generates the id (live-verified 2026-10-27); keeping them
+    # failed the import with "No table with object_id ... found"
+    from ts_cli.tml_common import derive_viz_obj_id
+    assert derive_viz_obj_id("Acme Model (Draft, Prod)", "a1b2c3d4-0000") == "AcmeModelDraftProd-a1b2c3d4"
+    assert derive_viz_obj_id("Amazon Sales data", "fdea93b4-a80f") == "AmazonSalesdata-fdea93b4"
+
+
+def test_output_name_for_aggregation_keyword_tokens():
+    toks = {"Cases": "unique count [Cases]", "Rows": "count [Rows]", "Cost": "sum [Cost]",
+            "Age": "average [Age]", "Lo": "min [Lo]", "Hi": "max [Hi]", "Day": "[Day].monthly"}
+    assert {c: lb._output_name(c, toks) for c in toks} == {
+        "Cases": "Unique Number of Cases", "Rows": "Number of Rows", "Cost": "Total Cost",
+        "Age": "Average Age", "Lo": "Minimum Lo", "Hi": "Maximum Hi", "Day": "Month(Day)"}
+    assert lb._output_name("Plain", {}) == "Plain"

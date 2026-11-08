@@ -159,3 +159,26 @@ def test_render_summary_ok_when_data_loads_and_no_blanks():
     s = render_summary("g", board, None, [])
     assert s["ok"] is True
     assert s["blank_chart_tiles"] == []
+
+
+def test_suspect_tiles_flags_silent_wrong_answer_shapes():
+    from ts_cli.render_check import suspect_tiles
+    body = {"contents": [
+        {"visualization_name": "ok", "data_rows": [[12]]},
+        {"visualization_name": "zero", "data_rows": [[0]]},
+        {"visualization_name": "null group", "data_rows": [[None, 0]]},
+        {"visualization_name": "empty", "data_rows": []},
+        {"visualization_name": "grouped", "data_rows": [["a", 0], ["b", 3]]},
+    ]}
+    assert suspect_tiles(body) == [{"visual": "zero", "reason": "all_zero"},
+                                   {"visual": "null group", "reason": "single_null_group"},
+                                   {"visual": "empty", "reason": "empty"}]
+
+
+def test_suspect_tiles_are_advisory_unless_strict():
+    from ts_cli.render_check import render_summary
+    board = {"rendered": True, "tiles": 1, "error": None}
+    sus = [{"visual": "zero", "reason": "all_zero"}]
+    assert render_summary("g", board, suspect=sus)["ok"] is True
+    assert render_summary("g", board, suspect=sus, strict_data=True)["ok"] is False
+    assert render_summary("g", board)["suspect_tiles"] == []
