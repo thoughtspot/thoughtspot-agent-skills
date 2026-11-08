@@ -138,6 +138,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.8 | 2026-11-08 | **The aggregation table no longer maps `count` to `COUNT_DISTINCT` (BL-447).** Sisense `count` is a distinct count; the mapping doc and coverage matrix now give the `unique count` formula, as invariant I5 requires. The uncalled `AGG_MAP` / `translate_agg` behind that row was deleted; no Model output changes |
 | 1.0.7 | 2026-11-08 | **Lint and import read TML only (BL-545).** Steps 2 and 3 read `--dir out/` with no filter, which also reads `mapping.json` as a document, so the `ALL_OR_NONE` import sent it to ThoughtSpot beside the Tables and Model. Both steps now add `--pattern`: Step 2 imports `*.table.tml` and `*.model.tml`, Step 3 imports every `*.tml` (Tables, Model, Liveboard and its Answers) |
 | 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
 | 1.0.5 | 2026-10-22 | **An explicit many-to-many relation is no longer emitted as a join (BL-397).** ThoughtSpot rejects a `MANY_TO_MANY` Model join at import (error 14528), so it is left out and flagged NEEDS REVIEW, pointing at a warehouse bridge table. Sisense v2 bundles rarely carry cardinality; the default case is unchanged. |
