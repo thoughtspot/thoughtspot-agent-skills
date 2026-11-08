@@ -220,7 +220,7 @@ def _resolve_double_aggregation(
     # it propagates user-applied runtime filters into the inner aggregation.
     inner_ts = translate_sql_expr(inner_metric["expr"], inner_resolver)
     _flush()
-    if set(re.findall(r"\[([^\[\]]+)\]", inner_ts)) == {group_key_ref}:
+    if {r.lower() for r in re.findall(r"\[([^\[\]]+)\]", inner_ts)} == {group_key_ref.lower()}:
         annotate(
             f"⚑ metric '{inner_name}' reads only {group_key_ref}, the grouping "
             f"column implied by relationship '{rel_name}' — double aggregation "
@@ -228,6 +228,22 @@ def _resolve_double_aggregation(
         return None
     annotate(marker)
     return f"group_aggregate ( {inner_ts} , {{{group_key}}} , query_filters ( ) )"
+
+
+def _distinct_count_keys(parsed: dict, alias_map: dict[str, str]) -> frozenset:
+    """``{"node::col"}`` (lower case) for every physical column a distinct-count fact
+    counts — a pass-through's aliased column or a rename's bare column. Such a fact is a
+    `unique count` formula, not a column, so the fact itself no longer holds the key."""
+    keys = set()
+    for fact in parsed.get("facts") or []:
+        if not fact.get("alias_table") or not fact_counts_distinct(fact, parsed):
+            continue
+        col = (fact.get("alias_name") if fact.get("expr") is None
+               else bare_column_name(fact["expr"], fact.get("alias_table")))
+        if col:
+            table = alias_map.get(fact["alias_table"].lower(), fact["source_table"])
+            keys.add(f"{table}::{col}".lower())
+    return frozenset(keys)
 
 
 def make_resolver(
@@ -360,12 +376,14 @@ def make_resolver(
 
         Its formula is ``unique count ( … )`` — an aggregate — so a metric over it
         (``COUNT(DISTINCT s.customer)``) referencing ``[formula_<id>]`` would nest one
-        aggregate in another. The expression is inlined instead, translated with the
-        fact's own table as the default, as `_translate_fact` does. It stays in
-        parentheses even for a rename (``( [T::c] )``): a bare ``[T::c]`` would let
-        the simple-aggregate classifier turn ``COUNT(s.fact)`` into a physical COUNT
-        column, which ThoughtSpot demotes on a text column (BL-265), where it used to
-        be a formula."""
+        aggregate in another. A rename reads its bare column, as a pass-through does;
+        a computed fact is inlined in parentheses, translated with the fact's own table
+        as the default, as `_translate_fact` does. A COUNT/MIN/MAX of either stays a
+        formula because `_try_simple_agg_column` refuses ``distinct_count_keys``."""
+        bare = bare_column_name(fact["expr"], fact.get("alias_table"))
+        if bare:
+            table = alias_map.get(fact["alias_table"].lower(), fact["source_table"])
+            return f"[{table}::{bare}]"
         inner = make_resolver(
             parsed, fact["alias_table"], annotations=annotations,
             promote_synonym=promote_synonym, _resolving=_resolving | {key})
@@ -388,14 +406,11 @@ def make_resolver(
             metric = metric_idx.get(key)
 
             # Step 1 — a passthrough construct IS the physical column it aliases.
-            # A distinct-count passthrough's column is held by no Model column (the
-            # fact is a `unique count` formula), so a bare `[T::c]` would let the
-            # simple-aggregate classifier turn COUNT/MIN/MAX(fact) into a physical
-            # measure on the key, demoted on a text or date column (BL-265). The
-            # parentheses keep such a metric a formula, as `_row_value` does (BL-447).
+            # A distinct-count passthrough resolves to its bare column too; it is
+            # `_try_simple_agg_column` that keeps COUNT/MIN/MAX of it a formula
+            # (resolve.distinct_count_keys, BL-447).
             if fact is not None and fact.get("expr") is None:
-                ref = _physical_ref(fact, col)
-                return f"( {ref} )" if fact_counts_distinct(fact, parsed) else ref
+                return _physical_ref(fact, col)
             if metric is not None and metric.get("expr") is None:
                 return _physical_ref(metric, col)
 
@@ -437,6 +452,7 @@ def make_resolver(
             f"cannot resolve multi-part identifier '{ident}'")
 
     resolve.metric_refs = set()  # metric refs handed out (sv_naming.metric_ref)
+    resolve.distinct_count_keys = _distinct_count_keys(parsed, alias_map)
     return resolve
 
 
@@ -507,6 +523,13 @@ def _try_simple_agg_column(
         return None
     resolved = resolver(col_ref)
     rm = re.match(r"\[([^:]+)::([^\]]+)\]", resolved)
-    if rm:
-        return rm.group(1), rm.group(2), agg
-    return None
+    if not rm:
+        return None
+    # A distinct-count fact's key is not a Model column of its own (the fact is a
+    # `unique count` formula), so a physical COUNT/MIN/MAX column on it is a measure
+    # on the key, which ThoughtSpot demotes on a text or date column (BL-265).
+    # Refused whether the metric names the fact, its declared name, or the bare
+    # column unqualified; the metric then becomes a formula (BL-447).
+    if f"{rm.group(1)}::{rm.group(2)}".lower() in getattr(resolver, "distinct_count_keys", ()):
+        return None
+    return rm.group(1), rm.group(2), agg

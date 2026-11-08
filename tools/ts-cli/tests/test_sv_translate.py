@@ -1401,12 +1401,13 @@ class TestDistinctCountFact:
     def test_a_metric_over_the_fact_reads_its_row_value(self):
         # The fact's own formula is now an aggregate; `[formula_Buyer]` inside
         # COUNT(DISTINCT …) would nest one aggregate in another.
-        # It stays a formula (in parentheses), as it was before: a bare [T::c] would
-        # make COUNT(s.buyer) a physical COUNT column, demoted on text (BL-265).
+        # The reference is the bare column; COUNT(s.buyer) stays a formula because the
+        # simple-aggregate classifier refuses a distinct-count fact's key (a physical
+        # COUNT column on it is demoted on text, BL-265).
         out = self._out()
-        assert out["BUYERS"]["ts_expr"] == "unique count ( ( [SALES::customer_id] ) )"
+        assert out["BUYERS"]["ts_expr"] == "unique count ( [SALES::customer_id] )"
         assert out["ROW_BUYERS"]["output_kind"] == "formula", out["ROW_BUYERS"]
-        assert out["ROW_BUYERS"]["ts_expr"] == "count ( ( [SALES::customer_id] ) )"
+        assert out["ROW_BUYERS"]["ts_expr"] == "count ( [SALES::customer_id] )"
         assert "formula_" not in out["BASKETS"]["ts_expr"], out["BASKETS"]
         assert "[SALES::order_id]" in out["BASKETS"]["ts_expr"]
 
@@ -1467,7 +1468,45 @@ class TestMetricOverPassthroughDistinctCountFact:
         for name, fn in (("ORDER_LINES", "count"), ("FIRST_CUSTOMER", "min")):
             e = out[name]
             assert e["output_kind"] == "formula", e
-            assert e["ts_expr"] == f"{fn} ( ( [ORDERS::customer_id] ) )", e
+            assert e["ts_expr"] == f"{fn} ( [ORDERS::customer_id] )", e
+
+    # Re-review blocker: an UNQUALIFIED reference resolves through the one-part branch,
+    # which never consults the fact index, so it became a physical measure on the key.
+    UNQUALIFIED = DDL.replace(
+        "metrics ( O.ORDER_LINES as COUNT(o.customer_id), O.FIRST_CUSTOMER as MIN(o.customer_id),\n\t          O.TOTAL as SUM(o.amount) )",
+        "metrics ( O.ORDER_LINES as COUNT(customer_id), O.FIRST_CUSTOMER as MIN(customer_id),\n\t          O.LAST_CUSTOMER as MAX(customer_id), O.TOTAL as SUM(amount) )")
+
+    def test_unqualified_count_min_max_stay_formulas(self):
+        assert self.UNQUALIFIED != self.DDL
+        out = {e["name"]: e for e in
+               translate_sv_formulas(parse_sv_ddl(self.UNQUALIFIED))["translated"]}
+        for name, fn in (("ORDER_LINES", "count"), ("FIRST_CUSTOMER", "min"),
+                         ("LAST_CUSTOMER", "max")):
+            assert (out[name]["output_kind"], out[name]["ts_expr"]) == \
+                ("formula", f"{fn} ( [ORDERS::customer_id] )"), out[name]
+        assert (out["TOTAL"]["output_kind"], out["TOTAL"]["aggregation"]) == ("column", "SUM")
+
+    WINDOWS = DDL.replace(
+        "O.TOTAL as SUM(o.amount) )",
+        "O.TOTAL as SUM(o.amount),\n"
+        "\t          O.PER_CUST as SUM(o.amount) OVER (PARTITION BY o.customer_id),\n"
+        "\t          O.RUNNING as SUM(o.amount) OVER (ORDER BY o.customer_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),\n"
+        "\t          O.MOVING as SUM(o.amount) OVER (ORDER BY o.customer_id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) )")
+
+    def test_window_positions_take_the_bare_column(self):
+        # PARTITION BY / ORDER BY / moving: `group_sum ( … , [T::c] )` is the
+        # documented form; a parenthesised `( [T::c] )` never was.
+        assert self.WINDOWS != self.DDL
+        out = {e["name"]: e for e in
+               translate_sv_formulas(parse_sv_ddl(self.WINDOWS))["translated"]}
+        for name in ("PER_CUST", "RUNNING", "MOVING"):
+            expr = out[name]["ts_expr"] or ""
+            assert "[ORDERS::customer_id]" in expr and "( [ORDERS::customer_id] )" not in expr, \
+                (name, expr)
+        assert out["PER_CUST"]["ts_expr"] == "group_sum ( [ORDERS::amount] , [ORDERS::customer_id] )"
+
+
+
 
     def test_a_metric_over_an_ordinary_passthrough_fact_is_unchanged(self):
         e = self._out()["TOTAL"]
@@ -1484,3 +1523,24 @@ class TestMetricOverPassthroughDistinctCountFact:
                            if c.get("column_id") == "ORDERS::customer_id"
                            and c["properties"].get("column_type") == "MEASURE"]
         assert measures_on_key == [], measures_on_key
+
+
+class TestDistinctCountDegeneracyGuard:
+    """Re-review (b): a COUNT metric over a distinct-count fact that is also the
+    relationship's key, re-aggregated across that relationship, groups a measure by
+    itself (always 1). Base skipped it with a ⚑ note; the parenthesised reference
+    bypassed the guard, and the fallback compared refs case-sensitively."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID), C as DB.SCH.CUSTOMERS primary key (CUSTOMER_ID) )
+\trelationships ( S_TO_C as S(CUSTOMER_ID) references C(CUSTOMER_ID) )
+\tfacts ( S.AMOUNT as s.amount, C.HEADCOUNT as c.customer_id )
+\tdimensions ( S.REGION as region )
+\tmetrics ( C.N_CUST as COUNT(c.headcount), S.AVG_N as AVG(c.n_cust) )
+\twith extension (CA='{"tables":[{"name":"C","facts":[{"name":"HEADCOUNT","default_aggregation":"count_distinct"}]}]}');"""
+
+    def test_grouping_a_measure_by_itself_is_skipped(self):
+        out = {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+        e = out["AVG_N"]
+        assert any("grouping a measure by itself" in a for a in e["annotations"]), e
+        assert "group_aggregate ( count" not in (e["ts_expr"] or ""), e

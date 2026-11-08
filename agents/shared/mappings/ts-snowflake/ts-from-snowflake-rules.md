@@ -343,13 +343,18 @@ forms emitted it on a formula column, the silent case. Each form now becomes:
 | rename `T.NAME as col` | `unique count ( [T::col] )` |
 | computed `T.NAME as a - b` | `unique count ( [T::a] - [T::b] )` (an expression argument compiles to `count(DISTINCT (…))`, live 2026-11-08) |
 
-Another construct that references such a fact, in **any** of the three forms, reads its **row
-value** inlined in parentheses: `COUNT(DISTINCT t.name)` → `unique count ( ( [T::col] ) )`,
-`COUNT(t.name)` → `count ( ( [T::col] ) )`. Never `[formula_<id>]`, which is now an
-aggregate, and never a bare `[T::col]`: for a pass-through, nothing else holds that column,
-so a bare reference made `COUNT`/`MIN`/`MAX` of the fact a physical measure on the key,
-which ThoughtSpot demotes on a text or date column (BL-265). The parentheses keep the metric
-a formula, as it was before BL-447. If the count was the only column its table had, build-model also
+Another construct that references such a fact reads its **row value**, never
+`[formula_<id>]`, which is now an aggregate. A pass-through or a rename reads its bare column
+(`COUNT(DISTINCT t.name)` → `unique count ( [T::col] )`; so does a window's `PARTITION BY` /
+`ORDER BY`, as `group_sum ( … , [T::col] )`); a computed fact is inlined in parentheses
+(`unique count ( ( [T::a] - [T::b] ) )`). A simple `COUNT` / `MIN` / `MAX` metric over the
+fact's column is **never** emitted as a physical measure on that column, whether it names the
+fact, its declared name or the bare column unqualified: it becomes a formula,
+`count ( [T::col] )`. The fact no longer holds the column, so a physical `COUNT`/`MIN`/`MAX`
+there is a measure on the key, which ThoughtSpot demotes on a text or date column (BL-265);
+before BL-447 the fact held the column and such a metric was promoted to a formula (I8). A
+metric that re-aggregates one of these across the relationship whose key it counts (grouping
+a measure by itself) is skipped with a ⚑ note, as before. If the count was the only column its table had, build-model also
 selects that physical column as an `ATTRIBUTE` (reported as `reselected_columns`), because
 ThoughtSpot refuses a Model that selects no column of a table. The CA extension names a fact
 by its **declared** name (`T.NAME`), never the physical column a pass-through aliases (BL-448).
