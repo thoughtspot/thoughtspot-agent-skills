@@ -14648,8 +14648,9 @@ resubmission should start from current `main` and answer each item below.
 6. Open items #8 and #12 lead with superseded first headings and no forward pointer;
    `check_open_items.py` reads only the first.
 7. Register the skill in `REQUIRED_EXTRA_ARGS` (`--column-guid`), regenerate
-   `docs/open-items-index.md`, add the `agents/PARITY.md` row. Without the first, the
-   runner silently SKIPs the smoke test of a destructive skill.
+   `docs/open-items-index.md`. Without the first, the runner silently SKIPs the smoke
+   test of a destructive skill. (This also asked for a parity-matrix row; the matrix was
+   retired with the CoCo and Databricks runtimes on 2026-11-08.)
 8. Submit the skill on its own. The original diff was roughly one-third skill and
    two-thirds unrelated backlog, session and validator changes.
 

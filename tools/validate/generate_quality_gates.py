@@ -584,16 +584,10 @@ def _humanise_trigger(pattern: str) -> str:
         return "Skill or smoke-test files staged"
     if "SKILL" in p and "skill-naming" in p:
         return "Skill files or naming rule staged"
-    if "SKILL" in p and "runtime-coverage" in p:
-        return "Skill files or coverage rule staged"
-    if "SKILL" in p and "PARITY" in p:
-        return "Skill files or PARITY.md staged"
     if "SKILL" in p and "commands/" in p:
         return "Skill docs or ts-cli commands staged"
     if "SKILL" in p:
         return "Skill files staged"
-    if "coco-snowsight" in p and "SYNC-DEBT" in p:
-        return "CoCo mirrors or SYNC-DEBT.md staged"
     if "ts-cli/ts_cli" in p and "(py|js)" in p:
         return "ts-cli Python or report JS staged"
     if "ts-cli/ts_cli" in p and "\\.py" in p:

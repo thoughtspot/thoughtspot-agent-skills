@@ -240,26 +240,6 @@ if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/ski
   run_check "skill naming"       "tools/validate/check_skill_naming.py --root ."
 fi
 
-# Runtime coverage — CoCo's divergences are documented in EXPECTED_DIVERGENCES
-# (see .claude/rules/runtime-coverage.md).
-# Runs whenever a skill file is added or renamed in any runtime, or when the
-# rule/validator itself changes.
-if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|\.claude/rules/runtime-coverage\.md|tools/validate/check_runtime_coverage\.py)' <<< "$STAGED"; then
-  run_check "runtime coverage"   "tools/validate/check_runtime_coverage.py --root ."
-fi
-
-# Parity matrix — generated from the filesystem, must match committed PARITY.md
-# Runs when any skill file is added/renamed or PARITY.md itself changes
-if grep -qE '(agents/(cli|claude|coco-snowsight)/.*/SKILL\.md|agents/PARITY\.md)' <<< "$STAGED"; then
-  run_check "parity matrix"      "tools/validate/generate_parity.py --check"
-fi
-
-# Mirror sync — check synced-from markers against CLI source versions
-# Runs when any mirror file or SYNC-DEBT.md changes
-if grep -qE '(agents/coco-snowsight/|agents/SYNC-DEBT\.md)' <<< "$STAGED"; then
-  run_check "mirror sync"         "tools/validate/check_mirror_sync.py"
-fi
-
 # Coverage matrix — every ts-convert-* skill must have references/coverage-matrix.md
 # Runs when a converter skill is touched or the validator itself changes
 if grep -qE '(agents/cli/ts-convert-|tools/validate/check_coverage_matrix\.py)' <<< "$STAGED"; then
@@ -292,8 +272,8 @@ fi
 
 # Mapping/code sync — the mapping doc and its Python translator are two hand-kept
 # copies of one ruleset, and until this gate nothing compared them: check_formula_catalog
-# reads only *.md, check_mirror_sync compares only version markers. sv_sql.py emitted the
-# six BL-171 functions for three CLI versions AFTER the doc rows were corrected.
+# reads only *.md. sv_sql.py emitted the six BL-171 functions for three CLI versions
+# AFTER the doc rows were corrected.
 #
 # Triggered by the UNION of both sides' patterns, because either side can drift alone:
 # the translator Python, the mapping docs, the catalog itself, a converter skill (scope
