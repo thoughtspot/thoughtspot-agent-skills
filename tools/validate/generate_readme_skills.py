@@ -12,7 +12,9 @@ source of truth for its README row:
       platform: Snowflake                        # Conversion only
       coverage: "references/coverage-matrix.md"  # Conversion only; relative to the skill dir, or none
       subcategory: Credentials                   # Setup only
-      order: 3                                   # optional; see "Row order" below
+
+Every metadata value must be a string: the Agent Skills spec defines `metadata`
+as a string-to-string map, and a non-string value fails `--check`.
 
 A summary is moved verbatim from the README cell, markdown included, except that
 its relative links are written from the skill's directory, as every link in a
@@ -27,13 +29,14 @@ everything else (the prose between the tables included) as written:
 
 each closed by the matching `<!-- END GENERATED: <name> -->`.
 
-Row order: skills with an integer `metadata.order` come first, ascending (an
-order must be unique within its table); the rest follow by the table's rule:
-Setup by subcategory then skill name, Conversion by platform (to- before from-,
-non-converters such as ts-link-semantic-layer last), every other table by skill
-name. Setup, Semantic Authoring and Platform & Governance keep a curated order
-that no rule reproduces, so every skill in them carries `order`; a skill added
-there without one lands after them.
+Row order: the order of CATEGORIES sets the overview's rows only (the sections
+themselves sit where README.md's hand-written prose puts them). Within a table,
+the skills CURATED_ORDER lists for it come first, in that order: Setup, Semantic
+Authoring and Platform & Governance keep a curated order no rule reproduces. Every
+other skill follows by the table's rule: Setup by subcategory then skill name,
+Conversion by platform (to- before from-, non-converters such as
+ts-link-semantic-layer last), every other table by skill name. A CURATED_ORDER
+entry that is not a tracked skill in that table fails `--check`.
 
 A summary or field containing `|` or a line break is refused, not escaped: either
 would split the README table cell, and an escaped pipe has no spelling that is
@@ -70,7 +73,6 @@ class Skill:
     name: str                 # the skill's directory name, which is its slash command
     rel_dir: str              # e.g. "agents/cli/ts-audit"
     meta: Dict[str, str]
-    order: Optional[int] = None  # metadata.order, when set
 
     def get(self, key: str) -> str:
         return self.meta.get(key, "")
@@ -138,6 +140,26 @@ CATEGORIES: Tuple[Category, ...] = (
 )
 _BY_NAME = {c.name: c for c in CATEGORIES}
 
+#: Curated row order for the tables whose order no rule reproduces. Listed skills come
+#: first, in this order; a skill not listed follows, by its table's rule. Kept here
+#: rather than as a per-skill `metadata.order`: the Agent Skills spec defines
+#: `metadata` as a string-to-string map, so an integer there is untested ground.
+CURATED_ORDER: Dict[str, Tuple[str, ...]] = {
+    "Setup": (
+        "ts-profile-thoughtspot", "ts-profile-snowflake", "ts-profile-databricks",
+        "ts-profile-tableau", "ts-load-source-data", "ts-setup-tenancy", "ts-migrate-orgs",
+    ),
+    "Semantic Authoring": (
+        "ts-object-model-coach", "ts-object-set-manager", "ts-object-model-erd",
+        "ts-object-model-aggregates", "ts-object-model-alias", "ts-object-answer-promote",
+        "ts-object-formula-translate", "ts-object-calendar-builder",
+    ),
+    "Platform & Governance": (
+        "ts-publish-orgs", "ts-security-columns", "ts-audit", "ts-dependency-manager",
+        "ts-variable-timezone",
+    ),
+}
+
 #: `metadata.coverage` value for a Conversion skill with no coverage matrix.
 NO_COVERAGE = "none"
 
@@ -167,9 +189,7 @@ def _blank(value: object) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def _field_errors(key: str, value: object) -> List[str]:
-    if not isinstance(value, str):
-        return [f"metadata.{key} must be a string, got {type(value).__name__}"]
+def _field_errors(key: str, value: str) -> List[str]:
     out = []
     if "|" in value:
         out.append(f"metadata.{key} contains '|', which would split the README table cell; "
@@ -183,21 +203,30 @@ def validate_meta(skill_dir: Path, meta: object) -> List[str]:
     """Problems with one skill's `metadata:` block, without the file prefix."""
     if not isinstance(meta, dict):
         return ["frontmatter has no `metadata:` mapping (needs at least category and summary)"]
+    # The Agent Skills spec defines `metadata` as a string-to-string map, and the
+    # runtimes were only verified loading string values. An empty value (`key:`) is
+    # null, reported as missing below when the key is required.
+    errors = [f"metadata.{k} must be a string (`metadata` is a string-to-string map), "
+              f"got {type(v).__name__} {v!r}"
+              for k, v in meta.items() if v is not None and not isinstance(v, str)]
     category = meta.get("category")
     if _blank(category):
-        return [f"metadata.category is missing; set one of: {', '.join(_BY_NAME)}"]
-    if not isinstance(category, str) or category not in _BY_NAME:
-        return [f"metadata.category {category!r} is not one of: {', '.join(_BY_NAME)}"]
-    errors: List[str] = []
-    # bool is an int subclass, so `order: true` would otherwise read as 1.
-    if "order" in meta and (not isinstance(meta["order"], int) or isinstance(meta["order"], bool)):
-        errors.append(f"metadata.order must be an integer, got {meta['order']!r}")
-    for key in _BY_NAME[category].required:
+        return errors + [f"metadata.category is missing; set one of: {', '.join(_BY_NAME)}"]
+    if not isinstance(category, str):
+        return errors
+    if category not in _BY_NAME:
+        return errors + [f"metadata.category {category!r} is not one of: {', '.join(_BY_NAME)}"]
+    required = _BY_NAME[category].required
+    errors += [f"metadata.{k} has no value (`metadata` is a string-to-string map)"
+               for k, v in meta.items() if v is None and k not in required]
+    for key in required:
         value = meta.get(key)
         if _blank(value):
             extra = "" if key == "summary" else f" (required for category {category})"
             errors.append(f"metadata.{key} is missing{extra}")
             continue
+        if not isinstance(value, str):
+            continue  # reported above
         errors.extend(_field_errors(key, value))
         if key == "coverage" and isinstance(value, str) and value != NO_COVERAGE \
                 and not (skill_dir / value).is_file():
@@ -242,27 +271,28 @@ def load_skills(root: Path) -> Tuple[List[Skill], List[str]]:
         if problems:
             errors.extend(f"{rel}: {p}" for p in problems)
             continue
-        skills.append(Skill(path.parent.name, path.parent.relative_to(root).as_posix(),
-                            {k: v for k, v in meta.items() if isinstance(v, str)},
-                            meta.get("order")))
-    return skills, errors + duplicate_order_errors(skills)
+        skills.append(Skill(path.parent.name, path.parent.relative_to(root).as_posix(), dict(meta)))
+    # A skill with broken metadata is missing from `skills`, so its CURATED_ORDER entry
+    # would read as unknown too; report the root cause alone.
+    return skills, errors or curated_order_errors(skills)
 
 
-def duplicate_order_errors(skills: Sequence[Skill]) -> List[str]:
-    """One error per file whose `order` another skill in the same table also uses:
-    a tie would fall back to the table's rule, so the curated order would be
-    whatever that rule happens to give."""
-    users: Dict[Tuple[str, int], List[Skill]] = {}
-    for s in skills:
-        if s.order is not None:
-            users.setdefault((s.get("category"), s.order), []).append(s)
+def curated_order_errors(skills: Sequence[Skill]) -> List[str]:
+    """A CURATED_ORDER entry naming no tracked skill in that table, or named twice,
+    would silently stop placing anything; each is an error naming the entry."""
+    in_table = {(s.get("category"), s.name) for s in skills}
     errors = []
-    for (category, order), group in sorted(users.items()):
-        if len(group) > 1:
-            for s in group:
-                others = ", ".join(o.name for o in group if o is not s)
-                errors.append(f"{s.rel_path}: metadata.order {order} is also used by {others} "
-                              f"in the {category} table; each order must be unique within a table")
+    for category, names in CURATED_ORDER.items():
+        where = f"{GENERATOR}: CURATED_ORDER[{category!r}]"
+        if category not in _BY_NAME:
+            errors.append(f"{where} names a category that is not one of: {', '.join(_BY_NAME)}")
+            continue
+        for i, name in enumerate(names):
+            if name in names[:i]:
+                errors.append(f"{where} lists {name!r} twice")
+            elif (category, name) not in in_table:
+                errors.append(f"{where} lists {name!r}, which is not a tracked skill "
+                              f"in the {category} table")
     return errors
 
 
@@ -292,8 +322,11 @@ def _cell(skill: Skill, key: str) -> str:
 
 
 def row_key(category: Category, skill: Skill) -> tuple:
-    """Skills with `metadata.order` first, ascending; then the rest by the table's rule."""
-    return (skill.order is None, skill.order or 0, category.order(skill))
+    """The skills CURATED_ORDER lists for this table first, in its order; then the
+    rest by the table's rule."""
+    listed = CURATED_ORDER.get(category.name, ())
+    position = listed.index(skill.name) if skill.name in listed else len(listed)
+    return (position, category.order(skill))
 
 
 def render_category_table(category: Category, skills: Sequence[Skill]) -> str:

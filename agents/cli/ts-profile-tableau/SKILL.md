@@ -4,7 +4,6 @@ description: Set up and manage Tableau Server/Cloud connection profiles. Use whe
 metadata:
   category: Setup
   subcategory: Credentials
-  order: 4
   summary: "Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth"
 ---
 

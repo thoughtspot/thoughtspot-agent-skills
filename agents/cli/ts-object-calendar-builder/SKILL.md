@@ -3,7 +3,6 @@ name: ts-object-calendar-builder
 description: Build ThoughtSpot custom calendars that the native API cannot express — week-aligned fiscal years, 4-4-5 / 4-5-4 / 5-4-4 / 13-period patterns with correct 52/53-week tiling, localized or abbreviated labels, calendar-year vs fiscal-year month labelling, and RLS union calendars spanning multiple tenants. Use whenever someone asks for a retail calendar, a 4-4-5 or 4-5-4 calendar, a fiscal calendar starting on a specific weekday ("first Monday of February"), a 13-period calendar, a custom calendar table for Snowflake, or a per-group calendar resolved by row-level security. Also use when an existing calendar's month labels show the wrong year. Not for standard month-offset fiscal calendars, which the ThoughtSpot API already handles natively.
 metadata:
   category: Semantic Authoring
-  order: 8
   summary: "Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars"
 ---
 

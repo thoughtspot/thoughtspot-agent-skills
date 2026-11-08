@@ -4,7 +4,6 @@ description: Move a tenant Org's bespoke content off its own Table/Model copies 
 metadata:
   category: Setup
   subcategory: Tenancy
-  order: 7
   summary: "Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback"
 ---
 

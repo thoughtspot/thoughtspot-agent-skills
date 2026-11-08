@@ -4,7 +4,6 @@ description: Stand up a reproducible multi-tenancy test environment on a Thought
 metadata:
   category: Setup
   subcategory: Tenancy
-  order: 6
   summary: "Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them"
 ---
 

@@ -4,7 +4,6 @@ description: Load source data (CSV, Tableau download, manifest) into a warehouse
 metadata:
   category: Setup
   subcategory: Data
-  order: 5
   summary: "Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to"
 ---
 

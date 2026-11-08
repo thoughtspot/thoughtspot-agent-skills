@@ -17,6 +17,8 @@ import pytest
 
 import generate_readme_skills as g
 
+REAL_CURATED_ORDER = dict(g.CURATED_ORDER)
+
 # (runtime, skill, metadata block). Two Conversion converters on one platform and a
 # non-converter cover the Conversion sort; Setup has two subcategories.
 SKILLS = [
@@ -97,6 +99,13 @@ def _write_skill(root: Path, runtime: str, name: str, meta: str) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def _no_curated_order(monkeypatch):
+    """The shipped CURATED_ORDER names real skills this throwaway repo does not have;
+    each test starts with none and sets its own."""
+    monkeypatch.setattr(g, "CURATED_ORDER", {})
+
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
@@ -173,7 +182,7 @@ def test_row_order_is_the_documented_sort(tree):
     assert conversion == ["ts-convert-to-acme", "ts-convert-from-acme", "ts-link-semantic-layer"]
 
 
-# ── metadata.order ─────────────────────────────────────────────────────────────
+# ── curated row order ──────────────────────────────────────────────────────────
 
 
 def _setup_rows(root: Path) -> list:
@@ -181,48 +190,69 @@ def _setup_rows(root: Path) -> list:
             if ln.startswith("| [`")]
 
 
-def test_order_wins_over_the_tables_rule(tree):
-    """Without `order` Setup reads snowflake, thoughtspot, load-source-data. With it,
-    ordered rows come first by `order`; the unordered one follows by the rule."""
-    _set_meta(tree, "ts-load-source-data",
-              'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load CSV data"\n')
-    _set_meta(tree, "ts-profile-thoughtspot",
-              'metadata:\n  category: Setup\n  subcategory: Credentials\n  order: 2\n'
-              '  summary: "Add ThoughtSpot profiles"\n')
+def test_curated_order_wins_over_the_tables_rule(tree, monkeypatch):
+    """By the rule Setup reads snowflake, thoughtspot, load-source-data. Listed skills
+    come first in list order; the unlisted one follows by the rule."""
+    monkeypatch.setattr(g, "CURATED_ORDER", {"Setup": ("ts-load-source-data", "ts-profile-thoughtspot")})
     assert _run(tree) == 0
     assert _setup_rows(tree) == ["ts-load-source-data", "ts-profile-thoughtspot", "ts-profile-snowflake"]
     assert _run(tree, "--check") == 0
 
 
-def test_duplicate_order_within_a_table_fails_naming_both_files(tree, capsys):
-    a = _set_meta(tree, "ts-load-source-data",
-                  'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load"\n')
-    b = _set_meta(tree, "ts-profile-thoughtspot",
-                  'metadata:\n  category: Setup\n  subcategory: Credentials\n  order: 1\n  summary: "Add"\n')
+@pytest.mark.parametrize("entry", ["ts-no-such-skill", "ts-audit", "ts-object-wip-thing"],
+                         ids=["unknown", "other-table", "untracked"])
+def test_curated_entry_that_is_not_a_tracked_skill_in_the_table_fails(tree, monkeypatch, capsys, entry):
+    _set_meta(tree, "ts-object-wip-thing", 'metadata:\n  category: Setup\n  subcategory: Data\n'
+                                           '  summary: "On disk, never git-added"\n')
+    monkeypatch.setattr(g, "CURATED_ORDER", {"Setup": ("ts-profile-thoughtspot", entry)})
     before = _readme(tree)
     assert _run(tree, "--check") == 1
-    out = capsys.readouterr().out
-    assert f"FAIL  {a}: metadata.order 1 is also used by ts-profile-thoughtspot in the Setup table" in out
-    assert f"FAIL  {b}: metadata.order 1 is also used by ts-load-source-data in the Setup table" in out
+    assert (f"FAIL  tools/validate/generate_readme_skills.py: CURATED_ORDER['Setup'] lists {entry!r}, "
+            "which is not a tracked skill in the Setup table") in capsys.readouterr().out
     assert _run(tree) == 1
     assert _readme(tree) == before
 
 
-def test_the_same_order_in_two_different_tables_is_fine(tree):
-    _set_meta(tree, "ts-load-source-data",
-              'metadata:\n  category: Setup\n  subcategory: Data\n  order: 1\n  summary: "Load"\n')
-    _set_meta(tree, "ts-audit", 'metadata:\n  category: "Platform & Governance"\n  order: 1\n  summary: "Scan"\n')
-    assert _run(tree) == 0
-    assert _run(tree, "--check") == 0
-
-
-@pytest.mark.parametrize("value", ["2.5", '"3"', "true", "", "[1]"],
-                         ids=["float", "string", "bool", "empty", "list"])
-def test_non_integer_order_fails_naming_the_file(tree, capsys, value):
-    rel = _set_meta(tree, "ts-audit",
-                    f'metadata:\n  category: "Platform & Governance"\n  order: {value}\n  summary: "Scan"\n')
+def test_curated_entry_listed_twice_fails(tree, monkeypatch, capsys):
+    monkeypatch.setattr(g, "CURATED_ORDER", {"Setup": ("ts-load-source-data", "ts-load-source-data")})
     assert _run(tree, "--check") == 1
-    assert f"FAIL  {rel}: metadata.order must be an integer" in capsys.readouterr().out
+    assert "CURATED_ORDER['Setup'] lists 'ts-load-source-data' twice" in capsys.readouterr().out
+
+
+def test_curated_order_for_an_unknown_category_fails(tree, monkeypatch, capsys):
+    monkeypatch.setattr(g, "CURATED_ORDER", {"Misc": ("ts-audit",)})
+    assert _run(tree, "--check") == 1
+    assert "CURATED_ORDER['Misc'] names a category that is not one of" in capsys.readouterr().out
+
+
+def test_the_real_curated_order_names_real_skills_in_its_tables():
+    """The shipped lists are checked by the README gate on the real repo; this pins the
+    three curated tables and nothing else, so a list dropped or added is a visible edit."""
+    assert set(REAL_CURATED_ORDER) == {"Setup", "Semantic Authoring", "Platform & Governance"}
+
+
+# ── metadata values are strings ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("line", ["order: 3", "platform: 2.5", "flag: true", "tags: [a, b]",
+                                  "extra: {k: v}", "note:"],
+                         ids=["int", "float", "bool", "list", "map", "null"])
+def test_a_non_string_metadata_value_fails_naming_the_file(tree, capsys, line):
+    rel = _set_meta(tree, "ts-audit",
+                    f'metadata:\n  category: "Platform & Governance"\n  {line}\n  summary: "Scan"\n')
+    assert _run(tree, "--check") == 1
+    out = capsys.readouterr().out
+    key = line.split(":")[0]
+    assert f"FAIL  {rel}: metadata.{key} " in out
+    assert "string-to-string map" in out
+
+
+def test_a_non_string_required_value_is_reported_once(tree, capsys):
+    rel = _set_meta(tree, "ts-convert-to-acme",
+                    'metadata:\n  category: Conversion\n  platform: 7\n  coverage: none\n  summary: "Convert"\n')
+    assert _run(tree, "--check") == 1
+    out = capsys.readouterr().out
+    assert out.count(f"FAIL  {rel}: metadata.platform") == 1
 
 
 # ── failure modes ──────────────────────────────────────────────────────────────

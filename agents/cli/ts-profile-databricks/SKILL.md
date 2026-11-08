@@ -4,7 +4,6 @@ description: Set up and manage Databricks connection profiles. Use when configur
 metadata:
   category: Setup
   subcategory: Credentials
-  order: 3
   summary: "Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile"
 ---
 

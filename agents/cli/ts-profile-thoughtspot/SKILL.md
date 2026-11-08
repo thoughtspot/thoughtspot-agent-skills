@@ -4,7 +4,6 @@ description: Set up and manage ThoughtSpot connection profiles. Use when configu
 metadata:
   category: Setup
   subcategory: Credentials
-  order: 1
   summary: "Add, update, test, or delete ThoughtSpot profiles"
 ---
 
