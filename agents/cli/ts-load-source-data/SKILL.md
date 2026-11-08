@@ -1,18 +1,19 @@
 ---
 name: ts-load-source-data
-description: Load source data (CSV, Tableau download, manifest) into Snowflake, or provision Snowflake or Databricks tables with synthetic rows. Infers schema, generates synthetic data for schema-only sources, and provisions tables. Databricks always gets synthetic rows, never the source's own.
+description: Load source data (CSV, Tableau download, manifest) into Snowflake or Databricks tables for ThoughtSpot to connect to. Infers schema, loads the source's own rows, generates synthetic data for schema-only sources, and provisions tables.
 metadata:
   category: Setup
   subcategory: Data
-  summary: "Load CSV data into Snowflake, or provision Snowflake or Databricks tables with synthetic rows generated from a schema, for ThoughtSpot to connect to"
+  summary: "Load CSV data into Snowflake or Databricks, or provision tables with synthetic rows generated from a schema, for ThoughtSpot to connect to"
 ---
 
 # Load Source Data
 
-Load CSV data into Snowflake, or provision Snowflake or Databricks tables with synthetic
-rows, for ThoughtSpot to connect to. Supports four input modes: CSV directory, Tableau
-Cloud download output, manifest JSON, and schema-only with synthetic data generation.
-Databricks reads only the source's schema: its rows are always synthetic.
+Load CSV data into Snowflake or Databricks, or provision tables with synthetic rows, for
+ThoughtSpot to connect to. Supports four input modes: CSV directory, Tableau Cloud download
+output, manifest JSON, and schema-only with synthetic data generation. Both warehouses load
+a source's own rows; synthetic rows are used only for a schema-only source, or when asked
+for with `--generate-sample`.
 
 Ask one question at a time for **dependent** decisions. Batch independent questions.
 
@@ -30,7 +31,8 @@ Ask one question at a time for **dependent** decisions. Batch independent questi
 ## Prerequisites
 
 - A warehouse profile: Snowflake (`/ts-profile-snowflake`) or Databricks (`/ts-profile-databricks`)
-- `ts` CLI installed: `pip install -e tools/ts-cli` (v0.15.0+)
+- `ts` CLI installed: `pip install -e tools/ts-cli` (v0.15.0+; v0.212.0+ for Databricks, which
+  earlier inserted synthetic rows even for a CSV source)
 - Snowflake, `method:python` profiles: `pip install snowflake-connector-python`
 - Snowflake, `method:cli` profiles: `snow` CLI installed and configured
 - Databricks: the `databricks` CLI authenticated (`databricks auth login`)
@@ -90,16 +92,20 @@ If yes, how many rows per table? [100]:
 Supports **Snowflake** and **Databricks**. Prompt: `Load into Snowflake or Databricks?`
 
 - **Snowflake:** `ts load snowflake` (see Step 3, Snowflake profile).
-- **Databricks:** `ts load databricks --source <schema.json> --profile <dbx-profile> [--rows N]`.
+- **Databricks:** `ts load databricks --source <path> --profile <dbx-profile> --catalog <CAT> --schema <SCH>`.
   Requires a Databricks profile in `~/.claude/databricks-profiles.json`
   (`dbx_profile`, `sql_warehouse_http_path`, `catalog`, `schema`) and the `databricks` CLI
   authenticated (`databricks auth login` — the token lives in `~/.databrickscfg`, never in a
-  profile file). Infers the schema, generates synthetic rows, and runs `CREATE TABLE`
-  (Delta **column mapping** on, so column names with spaces like `Order Date` are preserved
-  1:1) + `INSERT` via the SQL Statement Execution API. **A CSV source's own rows are not
-  loaded:** only its schema is read, the rows are synthetic, and the command still reports
-  `loaded … (N rows)` (BL-550). Say so to the user before loading a CSV source into
-  Databricks. **Caveat (live-verified):** for the
+  profile file). Infers the schema and runs `CREATE TABLE` (Delta **column mapping** on, so
+  column names with spaces like `Order Date` are preserved 1:1) + batched `INSERT` via the
+  SQL Statement Execution API. A table with a data file gets **that file's own rows**; a
+  schema-only table gets synthetic rows (`--rows N`, default 100). To insert synthetic rows
+  for a CSV source as well, pass `--generate-sample`. Each table that gets synthetic rows is
+  named in a `NOTICE: … SYNTHETIC rows` line on stderr, and the JSON output marks each table
+  `"data": "source"` or `"synthetic"` — report which to the user. A value that is not valid
+  for its inferred numeric or boolean type stops the load before any table is created,
+  naming the row and column; fix the type in Step 5 and re-run. Without `--replace`, an
+  existing table is appended to. **Caveat (live-verified):** for the
   ThoughtSpot model to bind, the connection must expose the new table — a SERVICE_ACCOUNT
   Databricks connection introspects it automatically, but an **OAuth/PKCE** connection returns
   an empty API hierarchy (a ThoughtSpot limitation), so the newly-created table must be
@@ -160,11 +166,14 @@ with the confirmed schema.
 
 ## Step 6 — Load Data
 
-Run `ts load snowflake` with the confirmed schema:
+Run the loader for the warehouse chosen in Step 2, with the confirmed schema:
 
 ```bash
 ts load snowflake --source <path> --profile <name> \
     --database <DB> --schema <SCH> --if-exists error
+
+ts load databricks --source <path> --profile <name> \
+    --catalog <CAT> --schema <SCH>
 ```
 
 Show progress per table:
@@ -204,6 +213,7 @@ Next steps:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-11-08 | **Databricks loads a CSV source's own rows** (ts-cli 0.212.0, BL-550): `ts load databricks` used to insert synthetic rows for every source. Synthetic rows now only for a schema-only table or with the new `--generate-sample`, each named on stderr. Removes the Step 2 warning and the "Databricks always gets synthetic rows" wording from the description, summary, intro and Step 2; adds the Databricks command to Step 6. |
 | 1.1.1 | 2026-11-08 | Says what each warehouse actually gets: Snowflake loads a CSV's own rows (or synthetic rows for a schema-only source); `ts load databricks` reads only the source's schema and always inserts synthetic rows (BL-550). Corrected in the README summary (`metadata.summary`), `description`, the intro, Prerequisites (Databricks profile and CLI), the Step 0 overview (the target is Snowflake or Databricks, chosen, not Snowflake only) and Step 2's Databricks note. No behaviour change. |
 | 1.1.0 | 2026-07-16 | **Databricks loading** via `ts load databricks` (ts-cli v0.57.0) — infers schema, generates synthetic data, and provisions tables (Delta column-mapping preserves spaced column names 1:1) through the SQL Statement Execution API. Live-verified on ps-internal (created + populated `orders_demo`). Documents the OAuth/PKCE connection caveat: the new table must be selected in the ThoughtSpot connection UI before a model can bind (SERVICE_ACCOUNT connections introspect automatically). Prereq ts-cli v0.57.0 |
 | 1.0.0 | 2026-06-26 | Initial release — Snowflake loading with schema inference and synthetic data generation |
