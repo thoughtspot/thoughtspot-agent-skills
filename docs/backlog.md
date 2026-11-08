@@ -358,7 +358,7 @@ are roughly ordered by value÷effort.
 | BL-546 | `ts tml import` GUID back-fill matches by name across every LOGICAL_TABLE subtype and connection | 2026-12-15 |
 | BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
 | BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
-| BL-550 | `ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file | 2026-12-15 |
+| ~~BL-550~~ | ~~`ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file~~ | DONE (2026-11-08) |
 
 ### Tier 3 — Opportunistic
 
@@ -17052,7 +17052,7 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 
 **Target:** 2026-12-31.
 
-## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones `Tier 2`
+## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones — DONE `Tier 2`
 
 **Filed:** 2026-11-08. **Source:** review of the README skills-metadata branch (`feat/skill-category-metadata`): ts-load-source-data's summary said it loads CSV data into Snowflake or Databricks, and for Databricks the code does not.
 
@@ -17061,6 +17061,8 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **Do.** Either load the real rows (INSERT the parsed CSV rows in batches, as the synthetic path already does, or stage and `COPY INTO`), or refuse a source that has data files unless an explicit flag asks for synthetic rows, and warn on stderr whenever synthetic rows are inserted. Match Snowflake's `--generate-sample` contract so the two loaders agree. Add a unit test that a CSV source's own values reach the INSERT, or that the command refuses.
 
 **Target:** 2026-12-15.
+
+**Done (2026-11-08, ts-cli 0.212.0, ts-load-source-data 1.2.0).** The first option: real rows by INSERT. A table with a data file gets that file's own rows; synthetic rows only for a schema-only table or with the new `--generate-sample`, each named by a `NOTICE` on stderr, and the JSON marks each table `"data": "source"` or `"synthetic"`. Two differences from Snowflake remain, both deliberate: a schema-only source still gets synthetic rows without the flag (the shipped behaviour), and on Databricks the flag also forces synthetic rows for a source that has data files, where Snowflake ignores it. The fix also found that the shared literal helper escaped a quote by doubling it, which Databricks reads as two concatenated literals (`'O''Brien'` → `OBrien`, live-verified on DBSQL 2026.35); it now backslash-escapes. Live-verified on `agent_skills.audit_probe`: a 3-row CSV with an apostrophe, a backslash, embedded double quotes and empty cells round-tripped exactly. The loader moved to `commands/load_databricks.py` under the file-size gate.
 
 ## BL-551 — Check that every `ts <group> <cmd>` a SKILL.md names is a registered command `Tier 3`
 
