@@ -2,17 +2,19 @@
 
 ``CHART_TYPE_ENUM`` is the one code copy of the enum in
 ``agents/shared/schemas/thoughtspot-chart-types.md``, which records how and where it was
-read: the import validator's own error message, last on 2026-11-08 (BL-449), on a dev
-build whose release version is unreadable. A value here can still be rejected by an
-older cluster. ``tests/test_chart_types.py`` fails when this list and the doc disagree.
+read: the import validator's own error message, last on 2026-11-08 (BL-449), on internal
+dev builds that report no release version. A value here can still be rejected by an older
+cluster. ``tests/test_chart_types.py`` fails when this list and the doc disagree.
 
 The ``ADVANCED_*`` values are the new charts library (Muze). Each one has a Legacy twin:
-its own name without the prefix, except ``ADVANCED_DONUT``, whose twin is ``PIE``. Code
-that classifies chart types (which need an axis encoding, which need a second measure,
-which take the cartesian axis layout) lists Legacy types only and derives the new-library
-members with ``with_new_library_twins``. Hand-kept ``ADVANCED_*`` lists drifted apart: the
-lint held nine, the Tableau generator a different eight, one of them missing from the
-documented enum.
+its own name without the prefix (inferred from the names), except ``ADVANCED_DONUT``,
+whose twin is ``PIE`` (release notes). The Tableau generator's measure floor and cartesian
+axis layout list Legacy types only and derive their new-library members with
+``with_new_library_twins``; its hand-kept ``ADVANCED_*`` lists had drifted from each other
+and from the documented enum. The lint's axis set (``tml_lint.CHART_NEEDS_AXIS``, shared
+with verify-render) deliberately does NOT use the twin rule: the types added on
+2026-11-08 have never been rendered, so whether a bare tile of one draws blank is
+unknown.
 
 Pure constants and functions, no I/O.
 """
