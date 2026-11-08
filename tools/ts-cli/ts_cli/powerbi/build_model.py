@@ -123,7 +123,10 @@ def _build_physical_columns(tables, dropped_ids, force_physical, warnings, count
                 renamed.append(f"{colid} -> '{disp}'")
             seen.add(disp.lower())
             if _is_distinct_count(c):
-                formula, column = distinct_count_formula_column(disp, colid, f"formula_{disp}")
+                # summarizeBy distinctCount is DISTINCTCOUNT: a BLANK key is one more
+                # value, which `unique count` alone does not count (BL-540).
+                formula, column = distinct_count_formula_column(
+                    disp, colid, f"formula_{disp}", null_is_a_value=True)
                 count_formulas.append(formula)
                 columns.append(column)
                 continue
@@ -298,8 +301,9 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
     measure_rows[:0] = [{"name": f["name"], "original_dax": "summarizeBy: distinctCount",
                          "ts_formula": f["expr"], "status": "Migrated",
                          "note": "column's default distinct count -> unique count formula "
-                                 "(invariant I5); the column is a measure, as every "
-                                 "summarized column is"} for f in count_formulas]
+                                 "(invariant I5), plus 1 when the key has a blank, as DAX "
+                                 "DISTINCTCOUNT counts (BL-540); the column is a measure, as "
+                                 "every summarized column is"} for f in count_formulas]
     reselected = reselect_counted_columns(columns, formulas)
     if reselected:
         warnings.append("Distinct-count column(s) kept as attributes too, because each was "

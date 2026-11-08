@@ -84,7 +84,7 @@ double-quoted strings. If a formula contains both single quotes and curly braces
 |---|---|---|
 | `sum` | `sum ( [TABLE::col] )` | Sum of all values |
 | `count` | `count ( [TABLE::col] )` | Count of non-null values |
-| `unique count` | `unique count ( [TABLE::col] )` | **Distinct count — use this form.** Note the space, not an underscore. `count_distinct` is **not a valid TS formula function** — it is rejected by the formula parser ("Search did not find count_distinct(...)"). Use `unique count` exclusively. |
+| `unique count` | `unique count ( [TABLE::col] )` | **Distinct count — use this form.** Note the space, not an underscore. `count_distinct` is **not a valid TS formula function** — it is rejected by the formula parser ("Search did not find count_distinct(...)"). Use `unique count` exclusively. Compiles to SQL `count(DISTINCT col)`, so **NULL is not counted**; an expression argument works (`unique count ( [T::c] + 1 )` → `count(DISTINCT (c + 1))`). To count NULL as one more value (DAX `DISTINCTCOUNT`): `unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 )`. All live-probed 2026-11-08 (BL-540). |
 | `average` | `average ( [TABLE::col] )` | Mean |
 | `min` | `min ( [TABLE::col] )` | Minimum |
 | `max` | `max ( [TABLE::col] )` | Maximum |

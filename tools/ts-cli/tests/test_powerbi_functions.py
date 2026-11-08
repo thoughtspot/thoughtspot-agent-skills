@@ -17,9 +17,12 @@ def test_distinctcount_maps_to_unique_count():
     # BL-171: the ThoughtSpot function is `unique count` — with a SPACE.
     # `unique_count(` is rejected with error_code 14516 (live-verified
     # 2026-07-30, se-thoughtspot). Only the *_if variants use an underscore.
+    # BL-540: DISTINCTCOUNT also counts BLANK, so it carries a has-blank term; the
+    # plain `unique count` is DISTINCTCOUNTNOBLANK (tests below).
     expr, status, _ = translate_dax("DISTINCTCOUNT('BU'[BU])")
     assert status == "Migrated"
-    assert expr == "unique count([BU::BU])"
+    assert expr.startswith("(unique count([BU::BU]) + ")
+    assert "unique_count" not in expr
 
 
 def test_divide_to_safe_divide():
@@ -247,3 +250,26 @@ def test_var_return_stays_needs_review():
 def test_keywords_are_not_table_refs():
     from ts_cli.powerbi.functions import dax_col_refs
     assert [(t, c) for _s, _e, t, c in dax_col_refs("NOT [c] && TRUE [d] || T[e]")] == [("T", "e")]
+
+
+# --- BL-540: DAX DISTINCTCOUNT counts BLANK as a value; unique count does not ------
+# Live probe 2026-11-08 (keys a,a,b,NULL,NULL,c): `unique count` compiled to
+# count(DISTINCT k) = 3, DAX DISTINCTCOUNT = 4. The exact form below returned 4, and 1
+# for a group holding only the blank key.
+
+def test_distinctcount_counts_blank_as_one_value():
+    expr, status, note = translate_dax("DISTINCTCOUNT('BU'[BU])")
+    assert status == "Migrated", note
+    assert expr == ("(unique count([BU::BU]) + max((if (isnull([BU::BU])) then 1 else 0)))")
+
+
+def test_distinctcountnoblank_is_plain_unique_count():
+    expr, status, _ = translate_dax("DISTINCTCOUNTNOBLANK('BU'[BU])")
+    assert status == "Migrated"
+    assert expr == "unique count([BU::BU])"
+
+
+def test_distinctcount_inside_divide():
+    expr, status, _ = translate_dax("DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))")
+    assert status == "Migrated"
+    assert "unique count([Sales::Customer])" in expr and "isnull([Sales::Customer])" in expr

@@ -221,9 +221,20 @@ exactly that pair after a demotion. `ts tml lint` and `check_tml.py` skip it.
   in every fact form (BL-447)
 - Databricks MV: `COUNT(DISTINCT col)` → `unique count ( [TABLE::col] )` formula
 - Power BI: `DISTINCTCOUNT` and a column whose `summarizeBy` is `distinctCount` → a formula
-  column under the column's own name (BL-447)
+  under the column's own name (BL-447), counting BLANK as a value (BL-540);
+  `DISTINCTCOUNTNOBLANK` → plain `unique count`
 - Qlik `Count(DISTINCT x)`, Sisense `count` → `unique count` formula
 - dbt `ts_aggregation: count_distinct` → still a column for now; the exception above
+
+**NULL is not counted.** `unique count` compiles to SQL `count(DISTINCT …)` (live-probed
+2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That matches SQL `COUNT(DISTINCT)`
+(Snowflake SV, Databricks MV, dbt), Tableau `COUNTD` (documented to ignore Null) and DAX
+`DISTINCTCOUNTNOBLANK`. DAX `DISTINCTCOUNT`, and a Power BI column summarised by
+`distinctCount`, count BLANK as one more value; they get the probed exact form
+`unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 )` (4 on those keys).
+`formula_common.unique_count_formula(..., null_is_a_value=True)` writes it. Qlik
+`Count(DISTINCT …)` and Sisense `count` are believed to ignore NULL like SQL (Qlik has a
+separate `NullCount`) but neither was probed on its own platform.
 
 **Correct pattern:**
 ```yaml

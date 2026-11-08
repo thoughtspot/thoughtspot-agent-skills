@@ -22,7 +22,8 @@ wrong answer.
 |---|---|---|
 | `SUM(t[c])` / `AVERAGE` / `MIN` / `MAX` | `sum([t::c])` / `average` / `min` / `max` | |
 | `COUNT` / `COUNTA` | `count([t::c])` | |
-| `DISTINCTCOUNT(t[c])` | `unique count([t::c])` | The name has a **SPACE**. `unique_count(` does not exist and is rejected with `Search did not find "unique_count ("` (error_code 14516, live-verified 2026-07-30 on se-thoughtspot — BL-171). Only the conditional variants carry an underscore (`unique_count_if`) |
+| `DISTINCTCOUNT(t[c])` | `unique count([t::c]) + max(if (isnull([t::c])) then 1 else 0)` | DAX counts BLANK as one more value; `unique count` compiles to SQL `count(DISTINCT …)`, which ignores NULL, so it alone is **one lower** whenever the column has a blank. The `max(if (isnull …))` term adds that one back, per group. Live-probed 2026-11-08 on an internal cluster (keys a, a, b, NULL, NULL, c): `unique count` = 3, this form = 4 (DAX's answer), and 1 for a group holding only the blank key (BL-540). Before ts-cli 0.209.0 the plain form shipped as Mapped. Not modelled: the blank row Power BI adds to a table for relationship keys with no match. The name has a **SPACE**: `unique_count(` does not exist and is rejected with `Search did not find "unique_count ("` (error_code 14516, live-verified 2026-07-30 on se-thoughtspot, BL-171). Only the conditional variants carry an underscore (`unique_count_if`) |
+| `DISTINCTCOUNTNOBLANK(t[c])` | `unique count([t::c])` | Skips BLANK, exactly as `unique count` skips NULL (live-probed 2026-11-08, BL-540) |
 | `DIVIDE(a, b)` | `safe_divide(a, b)` | avoids /0 |
 | `IF(c, x, y)` / nested | `if (c) then x else y` | |
 | `ROUND(x, n)` | `round(x, 10^-n)` | TS 2nd arg is an **increment**, not digit count; `round(x,0)`=null (trap) |

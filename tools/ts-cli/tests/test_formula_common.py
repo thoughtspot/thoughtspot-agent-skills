@@ -242,3 +242,21 @@ def test_reselect_counted_columns_only_for_a_table_left_unselected():
     assert columns[-1] == {"name": "KEY (BRIDGE)", "column_id": "BRIDGE::KEY",
                            "properties": {"column_type": "ATTRIBUTE"}}
     assert reselect_counted_columns(columns, formulas) == []      # idempotent
+
+
+def test_unique_count_can_count_null_as_a_value():
+    # BL-540, live 2026-11-08: unique count -> count(DISTINCT k) ignores NULL (3 on
+    # a,a,b,NULL,NULL,c); this form returned 4, as DAX DISTINCTCOUNT does.
+    from ts_cli.formula_common import unique_count_formula
+    assert unique_count_formula("[T::k]", null_is_a_value=True) == (
+        "unique count ( [T::k] ) + max ( if ( isnull ( [T::k] ) ) then 1 else 0 )")
+
+
+def test_reselect_matches_the_null_counting_form_too():
+    from ts_cli.formula_common import distinct_count_formula_column, reselect_counted_columns
+    f, col = distinct_count_formula_column("K", "BRIDGE::K", "formula_K", null_is_a_value=True)
+    columns = [col]
+    assert reselect_counted_columns(columns, [f]) == ["K (BRIDGE)"]
+    # A formula that merely starts like one is not a count of the column.
+    g = {"id": "g", "expr": "unique count ( [OTHER::K] ) + 1"}
+    assert reselect_counted_columns([{"name": "G", "formula_id": "g"}], [g]) == []

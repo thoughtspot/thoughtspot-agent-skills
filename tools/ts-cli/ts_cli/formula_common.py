@@ -476,7 +476,7 @@ def aggregate_formula(aggregation: str | None, operand: str) -> str | None:
     return f"{fn} ( {operand} )" if fn else None
 
 
-def unique_count_formula(operand: str) -> str:
+def unique_count_formula(operand: str, *, null_is_a_value: bool = False) -> str:
     """A distinct count as a formula: ``unique count ( operand )`` (invariant I5).
 
     A source's distinct count must never become ``aggregation: COUNT_DISTINCT``:
@@ -485,14 +485,24 @@ def unique_count_formula(operand: str) -> str:
     them, with no error (live-probed 2026-10-29). A formula column carrying it over a
     bare ``[T::c]`` is demoted the same way. The formula works for every type, and on
     an expression too (``unique count ( [T::c] + 1 )`` compiles to
-    ``count(DISTINCT (c + 1))``, live 2026-11-08). It compiles to SQL
-    ``COUNT(DISTINCT …)``, which ignores NULL (BL-540)."""
-    return aggregate_formula("COUNT_DISTINCT", operand)  # type: ignore[return-value]
+    ``count(DISTINCT (c + 1))``, live 2026-11-08).
+
+    ``unique count`` compiles to SQL ``count(DISTINCT …)``, which **ignores NULL**
+    (live 2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That is SQL's, Tableau's
+    ``COUNTD`` and DAX ``DISTINCTCOUNTNOBLANK``'s reading. A source that counts NULL (BLANK)
+    as one more value — DAX ``DISTINCTCOUNT`` — passes ``null_is_a_value=True`` and gets
+    ``unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 )``, probed the same day:
+    4 on those keys, and 1 for a group holding only NULL."""
+    base = aggregate_formula("COUNT_DISTINCT", operand)
+    if not null_is_a_value:
+        return base  # type: ignore[return-value]
+    return f"{base} + max ( if ( isnull ( {operand} ) ) then 1 else 0 )"
 
 
 def distinct_count_formula_column(
     name: str, column_id: str, formula_id: str,
     properties: dict | None = None, description: str | None = None,
+    *, null_is_a_value: bool = False,
 ) -> tuple[dict, dict]:
     """``(formula, column)`` for a Model column that counts distinct values of the
     physical column ``column_id`` — the I5 form of a source column whose default
@@ -500,8 +510,8 @@ def distinct_count_formula_column(
     that names it still finds it, now as the count. ``properties`` carries over except
     the aggregation; the column is a MEASURE declaring SUM (ThoughtSpot ignores it on
     an aggregate formula; the 2026-11-02 convention) with ``index_type: DONT_INDEX``
-    (I3). Pair with :func:`reselect_counted_columns` once the Model's columns are
-    assembled."""
+    (I3). ``null_is_a_value`` as for :func:`unique_count_formula`. Pair with
+    :func:`reselect_counted_columns` once the Model's columns are assembled."""
     props = {k: v for k, v in (properties or {}).items() if k != "aggregation"}
     props.update({"column_type": "MEASURE", "aggregation": "SUM"})
     props.setdefault("index_type", "DONT_INDEX")
@@ -510,11 +520,22 @@ def distinct_count_formula_column(
         column["description"] = description
     column["properties"] = props
     return ({"id": formula_id, "name": name,
-             "expr": unique_count_formula(f"[{column_id}]")}, column)
+             "expr": unique_count_formula(f"[{column_id}]",
+                                          null_is_a_value=null_is_a_value)}, column)
 
 
-_BARE_UNIQUE_COUNT_RE = re.compile(
-    r"^\s*unique count \(\s*\[([^\[\]:]+)::([^\[\]]+)\]\s*\)\s*$")
+_UNIQUE_COUNT_HEAD_RE = re.compile(r"^\s*unique count \(\s*\[([^\[\]:]+)::([^\[\]]+)\]\s*\)")
+
+
+def _counted_column(expr: str) -> tuple[str, str] | None:
+    """``(table, column)`` when ``expr`` is exactly a :func:`unique_count_formula` of one
+    ``[T::c]`` (either NULL reading), else None."""
+    m = _UNIQUE_COUNT_HEAD_RE.match(expr or "")
+    if not m:
+        return None
+    ref = f"[{m.group(1)}::{m.group(2)}]"
+    forms = (unique_count_formula(ref), unique_count_formula(ref, null_is_a_value=True))
+    return (m.group(1), m.group(2)) if expr.strip() in forms else None
 
 
 def reselect_counted_columns(columns: list[dict], formulas: list[dict]) -> list[str]:
@@ -532,11 +553,11 @@ def reselect_counted_columns(columns: list[dict], formulas: list[dict]) -> list[
     taken = {str(c.get("name", "")).lower() for c in columns if isinstance(c, dict)}
     added: list[str] = []
     for c in list(columns):
-        m = _BARE_UNIQUE_COUNT_RE.match(by_id.get(c.get("formula_id"), "")) \
+        counted = _counted_column(by_id.get(c.get("formula_id"), "")) \
             if isinstance(c, dict) else None
-        if not m or m.group(1) in selected:
+        if not counted or counted[0] in selected:
             continue
-        table, col = m.group(1), m.group(2)
+        table, col = counted
         name, n = col, 2
         while name.lower() in taken:
             name = f"{col} ({table})" if n == 2 else f"{col} ({table} {n - 1})"
