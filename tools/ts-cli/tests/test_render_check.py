@@ -128,18 +128,13 @@ def test_missing_axis_exempts_tables_kpi_pie_geo():
         assert chart_tiles_missing_axis(doc) == [], ct
 
 
-def test_missing_axis_flags_the_axis_bearing_new_library_types():
-    # In the enum since the 2026-11-08 read (BL-449): each is axis-bearing like its Legacy
-    # twin, so a bare tile of one is the same blank-chart failure.
+def test_missing_axis_does_not_flag_the_unrendered_new_library_types():
+    # In the enum since 2026-11-08 (BL-449) but never rendered, and the chart-types schema
+    # records that an ADVANCED_* tile with neither block auto-resolves. Flagging them on
+    # their Legacy twin's say-so would fail verify-render on a Liveboard that may render.
     for ct in ("ADVANCED_SCATTER", "ADVANCED_BUBBLE", "ADVANCED_WATERFALL",
-               "ADVANCED_PARETO", "ADVANCED_CANDLESTICK"):
-        doc = {"answer": {"name": ct, "chart": {"type": ct}}}
-        assert chart_tiles_missing_axis(doc) == [{"visual": ct, "chart_type": ct}], ct
-
-
-def test_missing_axis_exempts_the_non_axis_new_library_types():
-    # Twins of PIE, FUNNEL, HEATMAP and PIVOT_TABLE, which the lint exempts.
-    for ct in ("ADVANCED_DONUT", "ADVANCED_FUNNEL", "ADVANCED_HEATMAP", "ADVANCED_PIVOT_TABLE"):
+               "ADVANCED_PARETO", "ADVANCED_CANDLESTICK", "ADVANCED_DONUT",
+               "ADVANCED_FUNNEL", "ADVANCED_HEATMAP", "ADVANCED_PIVOT_TABLE"):
         doc = {"answer": {"name": ct, "chart": {"type": ct}}}
         assert chart_tiles_missing_axis(doc) == [], ct
 

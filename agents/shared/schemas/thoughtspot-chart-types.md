@@ -130,11 +130,13 @@ These have **no** `ADVANCED_*` twin and stay on Legacy: `TREEMAP`, `SANKEY`, `SP
 `WHISKER_SCATTER`, every `GEO_*`, `KPI`, `GRID_TABLE`. (`CUSTOM_CHART` and `MUZE_STUDIO`
 are the custom-visual hooks.)
 
-`tools/ts-cli/ts_cli/chart_types.py` holds the twin rule (`legacy_twin()`). The axis-encoding lint
-(`tml_lint.CHART_NEEDS_AXIS`) and the Tableau generator's measure floor (`CHART_NEEDS`)
-derive their `ADVANCED_*` members from it. A new-library type is therefore classified
-exactly like its Legacy twin: `ADVANCED_SCATTER` needs an axis like `SCATTER`, and
-`ADVANCED_DONUT` is exempt like `PIE`.
+`tools/ts-cli/ts_cli/chart_types.py` holds the twin rule (`legacy_twin()`). The Tableau
+generator's cartesian layout and measure floor derive their `ADVANCED_*` members from it.
+The axis-encoding lint (`tml_lint.CHART_NEEDS_AXIS`, shared with `ts tml verify-render`)
+does **not**. It flags a bare tile of the phase-1 cartesian `ADVANCED_*` types only. The
+types added since have not been rendered, and an `ADVANCED_*` tile with neither block
+auto-resolves (see "Verified rules" below), so whether a bare one draws blank is unknown.
+The same question stands for the phase-1 types the lint already flags.
 
 ### Added since 26.9 — release notes only, TML shape not captured
 

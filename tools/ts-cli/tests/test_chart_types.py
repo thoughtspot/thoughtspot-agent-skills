@@ -8,9 +8,10 @@ Three things are pinned here:
    classify, is in that enum: one value outside it fails the WHOLE import, PARTIAL policy
    included. ``ADVANCED_BUBBLE`` sat in ``tableau/liveboard.py`` for months while the
    schema's enum did not list it; this is the check that would have said so.
-3. A new-library (``ADVANCED_*``) type is classified exactly like its Legacy twin, by the
-   lint's axis set and by the generator's measure floor and cartesian layout. Before this,
-   each held a hand-kept list of ``ADVANCED_*`` names, and the lists disagreed.
+3. The Tableau generator's measure floor and cartesian layout classify a new-library
+   (``ADVANCED_*``) type like its Legacy twin. Before this, each held a hand-kept list of
+   ``ADVANCED_*`` names, and the lists disagreed. The lint's axis set is NOT twin-derived:
+   it is pinned to the phase-1 members until a render check shows a bare added type blank.
 """
 import re
 from pathlib import Path
@@ -89,9 +90,13 @@ def test_with_new_library_twins_adds_only_twins_of_members():
     assert got == {"PIE", "SCATTER", "ADVANCED_DONUT", "ADVANCED_SCATTER"}
 
 
-@pytest.mark.parametrize("adv", sorted(ct.NEW_LIBRARY_TYPES))
-def test_axis_set_classifies_each_new_library_type_like_its_twin(adv):
-    assert (adv in tml_lint.CHART_NEEDS_AXIS) == (ct.legacy_twin(adv) in tml_lint.CHART_NEEDS_AXIS)
+def test_axis_set_holds_only_the_phase_1_new_library_types():
+    # verify-render shares this set. The types added since 2026-11-08 stay out until a
+    # render check shows a bare tile of one drawing blank (BL-449).
+    assert {t for t in tml_lint.CHART_NEEDS_AXIS if t in ct.NEW_LIBRARY_TYPES} == {
+        "ADVANCED_LINE", "ADVANCED_COLUMN", "ADVANCED_BAR", "ADVANCED_AREA",
+        "ADVANCED_STACKED_COLUMN", "ADVANCED_STACKED_BAR", "ADVANCED_STACKED_AREA",
+        "ADVANCED_LINE_COLUMN", "ADVANCED_LINE_STACKED_COLUMN"}
 
 
 @pytest.mark.parametrize("adv", sorted(ct.NEW_LIBRARY_TYPES))
