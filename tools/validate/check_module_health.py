@@ -45,9 +45,6 @@ BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 INCLUDE_ROOTS = ["tools/ts-cli/ts_cli", "agents"]
 EXCLUDE_PARTS = ("/tests/", "/smoke-tests/", "/node_modules/", "/.git/")
-# Deploy-time generated, gitignored (.gitignore), vendored copies of already-baselined
-# ts_cli functions built by agents/databricks/build_mv_lib.py — not source to scan.
-EXCLUDE_FILES = ("agents/databricks/notebooks/databricks_mv_lib.py",)
 
 
 def _iter_py_files(root):
@@ -62,8 +59,6 @@ def _iter_py_files(root):
                 fp = os.path.join(dirpath, fn)
                 rel = os.path.relpath(fp, root)
                 if any(part in "/" + rel for part in EXCLUDE_PARTS):
-                    continue
-                if rel in EXCLUDE_FILES:
                     continue
                 yield fp, rel
 

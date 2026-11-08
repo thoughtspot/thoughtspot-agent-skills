@@ -147,11 +147,10 @@ jobs:
           fi
 
       - name: Run unit + validator tests
-        # Three separate invocations: agents/cli/ts-object-model-erd/tests and
-        # agents/databricks/tests are each their own bare "tests" package
-        # (tests/__init__.py, no distinguishing parent package) — same as
-        # tools/ts-cli/tests. Combining same-named "tests" packages in one pytest
-        # invocation collides on conftest module registration
+        # Two separate invocations: agents/cli/ts-object-model-erd/tests is its own
+        # bare "tests" package (tests/__init__.py, no distinguishing parent package)
+        # — same as tools/ts-cli/tests. Combining same-named "tests" packages in one
+        # pytest invocation collides on conftest module registration
         # (ImportPathMismatchError / "Plugin already registered under a different
         # name"). tools/validate/tests has no __init__.py, so it can safely share
         # an invocation with tools/ts-cli/tests.
@@ -159,7 +158,6 @@ jobs:
         run: |
           pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
-          pytest agents/databricks/tests/ -q
 
       - name: Check the CI gate covers every job
         # The aggregate `validate` job is only a gate if every non-schedule job is in its
@@ -216,11 +214,10 @@ jobs:
           pip install -e tools/ts-cli
 
       - name: Run unit + validator tests
-        # Same three invocations as `suite` (see that job for why they're split).
+        # Same two invocations as `suite` (see that job for why they're split).
         run: |
           pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q
           pytest agents/cli/ts-object-model-erd/tests/ -q
-          pytest agents/databricks/tests/ -q
 
   # THE REQUIRED STATUS CHECK. Branch protection requires exactly one context on `main`,
   # and before this job that context was the single-interpreter suite — so a red

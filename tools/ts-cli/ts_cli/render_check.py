@@ -17,8 +17,9 @@ import json
 from typing import Any, Optional
 
 # The blank-chart detector lives in tml_lint (it is fundamentally a pre-import lint over
-# the TML dict, and tml_lint must stay self-contained for the Databricks-Genie vendored
-# closure, which strips cross-module ts_cli imports). Re-exported here so the post-import
+# the TML dict, and tml_lint was kept self-contained for the retired Databricks Genie
+# runtime's vendored closure, which stripped cross-module ts_cli imports — no longer
+# required, see ts_cli/databricks/__init__.py). Re-exported here so the post-import
 # render path (`ts tml verify-render`) and its tests can import it from render_check.
 from ts_cli.tml_lint import chart_tiles_missing_axis  # noqa: F401  (re-export)
 

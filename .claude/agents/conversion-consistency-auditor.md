@@ -26,7 +26,6 @@ audited and nothing reported a gap. Same failure `_dirs.py` was created to end
 
 ```bash
 ls -d agents/cli/ts-convert-*/                          # every converter
-ls -d agents/coco-snowsight/ts-convert-*/ 2>/dev/null   # CoCo mirrors, if any
 ls -d agents/shared/mappings/*/                         # every mapping family
 grep -nE '^### (I|PT|N)[0-9]+' \
   agents/shared/schemas/ts-model-conversion-invariants.md   # every invariant
@@ -141,37 +140,6 @@ classification step, report FAIL with the first "untranslatable" mention.
 Scan the model name instruction in the skill. If `TEST_SV_`, `TEST_MV_`, or any
 `TEST_` prefix appears in a recommended/default model name (not in a "do not do this"
 warning), report FAIL.
-
-## Mirror parity — coco-snowsight `SKILL.md`
-
-Each from-skill may be mirrored into CoCo, and those mirrors must carry the same
-invariant guidance. The rule must be present and must cite the invariants doc.
-
-Pair them by name rather than from a table here — a mirror added or retired must not
-need an edit in this file:
-
-```bash
-for c in agents/cli/ts-convert-*/; do
-  n=$(basename "$c")
-  m="agents/coco-snowsight/$n/SKILL.md"
-  [ -f "$m" ] && echo "MIRROR  $n -> $m" || echo "no mirror  $n"
-done
-```
-
-A converter with no mirror is not a finding on its own — most have none by design.
-`EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` records which
-absences are intentional and why; consult it rather than inferring.
-
-For each mirror that exists, confirm:
-- **N1** — no `TEST_*` prefix in the recommended/default model name.
-- **I1–I6** — the mirror states each rule, or carries a callout citing
-  `ts-model-conversion-invariants.md` (coco path: `../../shared/schemas/...`).
-  I3 stays advisory here too (`[WARN]`).
-- **I7** — a `MANDATORY` formula-reference gate precedes the untranslatable classification.
-
-Report a mirror that is missing any invariant its CLI primary enforces as `[FAIL]`, citing the
-mirror's `file:line` and the missing invariant ID. A mirror that is simply terser (rule present
-but condensed) is a PASS.
 
 ## Formula-parity check
 

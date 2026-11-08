@@ -9,28 +9,23 @@ These rules give a consistent answer to both.
 
 Work through these questions in order. Stop at the first match.
 
-### 1. Is it used by both the Claude skill AND the CoCo skill?
+### 1. Is it a lookup table, schema reference, or worked example used by 2+ skills?
 **→ agents/shared/**
 
 Examples: formula translation tables, TML schema references, property mapping rules,
-worked examples. Both runtimes read these files; putting the content in either
-`agents/cli/` or `agents/coco-snowsight/` means the other runtime gets a stale copy.
+worked examples. If more than one skill references it, the content belongs in shared/
+so there is one source of truth. Duplicating content across SKILL.md files means rule
+changes require touching multiple files — and they will drift.
 
-### 2. Is it a lookup table, schema reference, or worked example used by 2+ skills?
-**→ agents/shared/**
-
-Even if only one runtime currently uses it, if more than one skill references it the
-content belongs in shared/ so there is one source of truth. Duplicating content across
-SKILL.md files means rule changes require touching multiple files — and they will drift.
-
-### 3. Is it procedural step logic specific to one skill, but too large for SKILL.md?
-**→ agents/cli/<skill>/references/ or agents/coco-snowsight/<skill>/references/**
+### 2. Is it procedural step logic specific to one skill, but too large for SKILL.md?
+**→ agents/cli/<skill>/references/** (or `agents/claude/<skill>/references/` for the
+Claude-only annex)
 
 Skill-local reference files: lookup tables, test scripts, open-items tracking. Used only
-by one skill, not shared across skills or runtimes. SKILL.md references them with a link.
+by one skill, not shared across skills. SKILL.md references them with a link.
 The `references/open-items.md` pattern is the canonical example.
 
-### 4. Everything else
+### 3. Everything else
 **→ inline in SKILL.md**
 
 Step-by-step procedural logic, decision trees, runtime-specific instructions, anything
@@ -73,16 +68,6 @@ If the formula is a worked example showing how a specific model was translated:
 → **agents/shared/worked-examples/snowflake/** if verified against a live instance,
 or **agents/cli/<skill>/references/** if it is a skill-local test case.
 
-### "Should this go in the CoCo SKILL.md or the Claude SKILL.md or both?"
-
-If the logic is the same in both runtimes (same rules, same mapping, same output):
-→ Put the **rules and reference** in agents/shared/ and link from both SKILL.md files.
-The SKILL.md files then contain only the runtime-specific *invocation* (how to call an
-API vs. how to call a stored procedure).
-
-If the logic is runtime-specific (e.g., stored procedure name, interactive prompt wording):
-→ Keep it in the individual SKILL.md. Do not put CoCo stored procedure names in shared/.
-
 ### "This SKILL.md is getting long — should I split it?"
 
 Check the nature of the long sections:
@@ -100,6 +85,5 @@ connection object). One file per object type, per platform.
 New platforms get a new subdirectory (e.g., mappings/ts-databricks/), not new files
 in the Snowflake mapping directory.
 
-When you add to either: update the agents/coco-snowsight/SETUP.md stage copy list so it stays
-accurate. The stage sync itself is dormant — see "CoCo stage sync is dormant" in the root
-CLAUDE.md.
+When you add to either: add the file to the directory map in `agents/shared/CLAUDE.md`
+(`check_consistency.py` fails the commit until you do).

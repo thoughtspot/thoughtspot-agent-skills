@@ -11,12 +11,12 @@ a live ThoughtSpot or Snowflake instance.
 ### `check_references.py`
 
 Verifies every file path referenced in `SKILL.md` files actually exists in the repo.
-Resolves runtime-specific path prefixes back to repo paths before checking:
+Resolves the `~/.claude/...` install prefixes back to repo paths before checking (every
+other relative link resolves against the citing file's own directory):
 
 - `~/.claude/shared/` → `agents/shared/`
 - `~/.claude/mappings/` → `agents/shared/mappings/`
 - `~/.claude/skills/` → `agents/cli/` (Claude-only skills like ts-profile-snowflake remain under `agents/claude/`)
-- `../../shared/` (CoCo) → `agents/shared/`
 
 ```bash
 python tools/validate/check_references.py

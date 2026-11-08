@@ -89,13 +89,6 @@ create or replace semantic view BIRD_SUPERHEROS_SV
 
 ## ThoughtSpot Table Objects Found
 
-**CoCo:**
-```sql
-CALL SKILLS.PUBLIC.TS_SEARCH_MODELS('{profile_name}', 'SUPERHERO_SV', FALSE);
--- (repeat per table name as needed)
-```
-
-**Claude Code:**
 ```bash
 ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '%SUPERHERO_SV%' --profile se-thoughtspot
 # (repeat per table name as needed)

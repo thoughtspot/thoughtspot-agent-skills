@@ -8,8 +8,8 @@ test itself must not be run destructively outside an authorized live session.
 
 The smoke test script lives in tools/smoke-tests/, not inside the `ts_cli` package
 (smoke tests are standalone scripts — see `.claude/rules/ts-cli.md`), so this test
-reaches outside `ts_cli/` for its subject the same way `test_vendor_mv_lib.py` reaches
-into `agents/databricks/` and `test_worked_examples.py` reaches into `tools/validate/`.
+reaches outside `ts_cli/` for its subject the same way `test_worked_examples.py` reaches
+into `tools/validate/`.
 """
 from __future__ import annotations
 

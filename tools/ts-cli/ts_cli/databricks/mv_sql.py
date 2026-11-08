@@ -2,7 +2,7 @@
 
 Pure functions: SQL text + a column resolver in, TS formula text out. No
 I/O, no network calls — trivially unit-testable. stdlib only
-(Genie-vendorable — see package docstring).
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 The function map below IS agents/shared/mappings/ts-databricks/
 ts-databricks-formula-translation.md encoded as data — the same relationship
@@ -36,8 +36,8 @@ from ts_cli.databricks.mv_sql_constructs import (
 )
 # UntranslatableError's canonical home is ts_cli/formula_common.py (BL-063
 # PR 14) — mv_emit_expr.py (the reverse direction) raises the same exception
-# for the same concept, and vendoring both into one Genie-notebook namespace
-# would otherwise define the class twice under one name. Re-exported here so
+# for the same concept, and vendoring both into the retired Genie runtime's one
+# notebook namespace would have defined the class twice under one name. Re-exported here so
 # existing `from ts_cli.databricks.mv_sql import UntranslatableError` call
 # sites are unaffected.
 from ts_cli.formula_common import (

@@ -1,18 +1,18 @@
 # thoughtspot-agent-skills
 
 A collection of skills and tools for creating semantic models in ThoughtSpot and Snowflake,
-packaged for multiple runtimes: **CLI** (Claude Code + Cortex Code CLI, via symlinks) and
-**Snowsight** (via Snowflake internal stage). All runtimes consume the same shared reference library.
+packaged for one runtime, the **CLI**: the same skill files serve Claude Code and Cortex Code
+CLI via symlinks, and both read the same shared reference library. (Two other runtimes were
+retired on 2026-11-08 — see "Retired runtimes" below.)
 
 ## Directory map
 
 ```
 agents/cli/            — Canonical CLI skills (Claude Code + Cortex Code CLI); symlinked into both ~/.claude/skills/ and ~/.snowflake/cortex/skills/
 agents/claude/         — Claude Code-only skills (ts-profile-snowflake); symlinked into ~/.claude/skills/
-agents/coco-snowsight/ — Snowflake Cortex skills (Snowsight); deployed via snow stage copy
-agents/shared/         — Reference files consumed by ALL runtimes (schemas, mappings, worked examples)
+agents/shared/         — Reference files the skills read (schemas, mappings, worked examples)
 tools/ts-cli/          — Python CLI used by CLI skills at runtime for ThoughtSpot API calls
-scripts/               — Deployment helpers (deploy.sh, stage-sync.sh)
+scripts/               — Git hooks and local check runners (pre-commit.sh, pr-ready.sh, check-pr.sh)
 ```
 
 ## Symlink contract
@@ -26,21 +26,20 @@ or patch files there directly.
 | Changed area | Also update |
 |---|---|
 | Any SKILL.md (new command or step) | README.md skills table; agents/cli/SETUP.md if install/symlink step changed; bump version in SKILL.md ## Changelog |
-| agents/shared/* | worked example if output changes. **No stage sync required** — see "CoCo stage sync is dormant" below |
+| agents/shared/* | worked example if output changes; `agents/shared/CLAUDE.md` directory map if a file is added (`check_consistency.py` enforces it for `*.md` files only — a `.py`, `.js` or `.css` added under `agents/shared/`, as in `erd/`, is not checked) |
 | tools/ts-cli command interface | tools/ts-cli/README.md; any SKILL.md that uses that command; CHANGELOG.md entry if version bumped |
-| agents/claude/ skill logic | Corresponding agents/cli/ and agents/coco-snowsight/ skill if logic applies |
-| agents/cli/ skill logic | Corresponding agents/claude/ skill and agents/coco-snowsight/ skill if logic applies |
-| agents/coco-snowsight/ skill logic | Corresponding agents/claude/ and agents/cli/ skill if logic applies to those runtimes |
+| agents/claude/ skill logic | Corresponding agents/cli/ skill if logic applies |
+| agents/cli/ skill logic | Corresponding agents/claude/ skill if logic applies |
 | Credential storage steps | agents/cli/ts-profile-thoughtspot/SKILL.md; agents/claude/ts-profile-snowflake/SKILL.md; .claude/rules/security.md |
-| Add a new skill | README.md; agents/cli/SETUP.md (symlink step); agents/coco-snowsight/SETUP.md (stage copy list); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry; **skill name must match a family in `.claude/rules/skill-naming.md`** (or extend the rule with a new family in the same PR) — families today: `ts-object-*`, `ts-profile-*`, `ts-convert-*`, `ts-dependency-*`, `ts-variable-*`, `ts-setup-*`, `ts-recipe-*`, `ts-audit`, `ts-load-*`, `ts-publish-*`, `ts-security-*`, `ts-migrate-*`, `ts-link-*`; **runtime coverage**: CoCo Snowsight divergence requires an entry in `EXPECTED_DIVERGENCES` in `tools/validate/check_runtime_coverage.py` with a one-line justification |
+| Add a new skill | README.md (skills table and the category counts above it); agents/cli/SETUP.md (symlink step); **tools/smoke-tests/smoke_<skill>.py** (or add to ALLOWLIST in tools/validate/check_smoke_tests.py with justification); add ## Changelog starting at 1.0.0; CHANGELOG.md entry; **skill name must match a family in `.claude/rules/skill-naming.md`** (or extend the rule with a new family in the same PR) — families today: `ts-object-*`, `ts-profile-*`, `ts-convert-*`, `ts-dependency-*`, `ts-variable-*`, `ts-setup-*`, `ts-recipe-*`, `ts-audit`, `ts-load-*`, `ts-publish-*`, `ts-security-*`, `ts-migrate-*`, `ts-link-*` |
 | Enumerate `ts tml lint`'s rule set anywhere | **Don't.** It is declared once, in `tml_lint.py`'s `CANONICAL-RULE-SET` marker, and `check_lint_invariant_list.py` fails any other copy. Name the concept ("the model invariants") and link to `ts-model-conversion-invariants.md`. Adding a rule means updating the marker only — the gate checks it against the findings the code emits |
 | `ts-object-model-agentql-query/SKILL.md` or any of its `references/*.md` | **Regenerate the offline bundle:** `python3 tools/validate/generate_agentql_offline.py`. `references/agentql-offline.md` is a generated single-document bundle of the whole skill library (for offline reading and the course's offline mode); `generate_agentql_offline.py --check` gates it in pre-commit and CI, so a changed source with a stale bundle fails. Never edit `agentql-offline.md` by hand |
-| Add a new shared schema/mapping | agents/coco-snowsight/SETUP.md stage copy list; all SKILL.md files that reference it |
+| Add a new shared schema/mapping | agents/shared/CLAUDE.md directory map; all SKILL.md files that reference it |
 | `.mcp.json` (MCP server wiring) or `.claude/rules/api-research.md` | Update the other if precedence/usage rules change; check that `CLAUDE.md` "open-items.md pattern" and `.claude/rules/ts-cli.md` (v1 migration trigger, "When a skill needs an API call") still reference the rule correctly |
 | ts-dependency-manager: changes to Step 4 walking, Step 5 impact-report, or any open-items.md status | Also update agents/cli/ts-dependency-manager/references/dependency-types.md (status table, hierarchy, or sample output as relevant) — these must stay in sync; pre-commit prompts soft when one changes without the other |
 | ts-convert-* skill: new mapped/unmapped construct | Update `references/coverage-matrix.md` in that skill (pre-commit validator `check_coverage_matrix.py` enforces existence) |
 | `docs/ossie/*` or anything describing ThoughtSpot↔Ossie construct/function mapping | **The converter itself lives upstream in [apache/ossie-converters](https://github.com/apache/ossie-converters) `thoughtspot/` — never vendor it here.** (It was in `apache/ossie` under `converters/thoughtspot/` until the 2026-10-21 repo split, ossie#523; the spec stays in `apache/ossie` and the new repo carries it as an `ossie` submodule.) Its `expressions/catalog.py` is the single source for that direction and generates its own reference docs, so the risk is not code duplication but *knowledge* duplication: `docs/ossie/ts-ossie-function-mapping.md` and the upstream catalog are two hand-maintained accounts of one ruleset. When either moves, check the other — `check_ossie_mapping_sync.py` compares the two and fails on a construct they classify differently — and re-run `tools/ossie-roundtrip` against a converter working tree before opening a PR upstream |
-| A formula mapping doc (`agents/shared/mappings/<platform>/*-formula-translation.md`) **or** its Python translator (`ts_cli/<platform>/`, `ts_cli/sv_*.py`) | **Update the other side.** These are two hand-maintained copies of one ruleset with two different consumers: the CLI runs the Python, and **CoCo Snowsight has no `ts` CLI so it executes the doc** by reading the tables. `check_mapping_code_sync.py` gates the dangerous direction (a translator emitting a function the catalog disproves — BL-171 escaped for three CLI versions this way) and warns on the other (a construct the code translates and no doc records). A new emitted TS function also needs a row in `agents/shared/schemas/thoughtspot-formula-patterns.md`, verified live |
+| A formula mapping doc (`agents/shared/mappings/<platform>/*-formula-translation.md`) **or** its Python translator (`ts_cli/<platform>/`, `ts_cli/sv_*.py`) | **Update the other side.** These are two hand-maintained copies of one ruleset with two different consumers: the CLI runs the Python, and **the model reads the doc** whenever it translates or judges an expression itself (every converter's I7 gate sends it there), as does anyone reviewing a translation. `check_mapping_code_sync.py` gates the dangerous direction (a translator emitting a function the catalog disproves — BL-171 escaped for three CLI versions this way) and warns on the other (a construct the code translates and no doc records). A new emitted TS function also needs a row in `agents/shared/schemas/thoughtspot-formula-patterns.md`, verified live |
 | A deliberate transformation between the Tableau **parse** and the emitted **TML** — a rename, a drop, a filter, a synthesised column | **Also teach `ts_cli/tableau/verify.py`.** It diffs the pre-conversion parse against post-conversion output, so anything deliberate between those two points reads as a *defect* and hard-fails the skill's Step 6 fidelity gate on correct output. Three instances so far: the name-clash rename (`_expected_model_names`), SQL View disambiguation (#529 — `verify_conversion` re-runs the idempotent pass), and the pseudo-field formula drop (#532). Declare it in the matching check's expected-absence set — **and add a test proving the gate still fires for a genuine drop**, because a change that merely silences the check is worse than the false positive it removes. Not yet mechanically enforced: BL-314 |
 | Add a new agent (`.claude/agents/`) or workflow stage (`.claude/workflows/`) | Tier it per `.claude/rules/model-routing.md`: classify by work shape, reach for the effort dial; a `model:` pin needs a `# reason:` comment beside it in the frontmatter (enforced by `check_harness_routing.py` — there is no assignments table to update, dropped 2026-08-28) |
 | Add a new `ts-convert-*` skill | **Nothing to register for angle 9** — the `conversion-consistency-auditor` globs `agents/cli/ts-convert-*` and classifies by the `from`/`to` direction token, so a new converter is audited from its first commit. Do NOT add it to a list in that agent; there is deliberately no list. Import the shared helpers in `ts_cli/formula_common.py` rather than re-implementing them (BL-217) — re-implementation is itself an angle-9 finding |
@@ -64,20 +63,29 @@ Workflow for every change:
 
 Claude Code changes (via symlinks) take effect immediately — no step needed for `agents/claude/` only.
 
-## CoCo stage sync is dormant
+## Retired runtimes
 
-`agents/coco-snowsight/` skills remain in the repo and are still validated (naming, runtime
-coverage, mirror sync). **What has stopped is the deployment step.** The Snowflake stage is no
-longer kept in step with `main`, so a change to `agents/shared/` or `agents/coco-snowsight/`
-does **not** require `./scripts/stage-sync.sh` after merge, and the stage being behind is the
-expected state rather than a pending task.
+On **2026-11-08** two runtimes were retired: **CoCo Snowsight** (`agents/coco-snowsight/`,
+stored-procedure skills for Snowsight Workspaces, deployed by stage sync) and **Databricks
+Genie** (`agents/databricks/`, Genie Code skills deployed as an Asset Bundle). Why: neither
+showed any usage signal, and each carried a deployment step and validators (runtime
+coverage, mirror sync, the parity matrix) that taxed every change. ThoughtSpot's own
+Semantic View / Metric View import covers part of what they offered, not all of it: it is
+Early Access, covers the SV/MV → ThoughtSpot direction only, and is not yet verified live
+here (audit 2026-11-08 finding 13.3; BL-542). The reverse direction stays with the CLI
+converters `ts-convert-to-snowflake-sv` and `ts-convert-to-databricks-mv`. Cortex Code
+**CLI** support is unaffected — it reads `agents/cli/` like Claude Code does.
 
-`scripts/stage-sync.sh` and `agents/coco-snowsight/SETUP.md` are unchanged and still work. To
-resume, run the sync and seed `.snowflake-deploy-sha` first — without it the script
-full-uploads every staged file rather than the changed ones.
+The pre-retirement state, including those validators and `scripts/stage-sync.sh` /
+`scripts/deploy.sh`, is preserved at git tag `runtimes-archive-2026-11-08` (commit
+`ad1dd15e`):
 
-Revisit if the CoCo runtime is either picked back up or retired outright; it is currently
-neither.
+```bash
+git checkout runtimes-archive-2026-11-08 -- agents/coco-snowsight agents/databricks
+```
+
+Adding any runtime back is a deliberate decision, not a restore — see
+`.claude/rules/runtime-coverage.md`.
 
 ## Branching conventions
 
@@ -90,14 +98,13 @@ These branches are pushed to remote for backup but never merged to main until ve
 
 **Working on a wip branch:**
 - Pre-commit hook runs on every commit (same as main)
-- `deploy.sh` is blocked on non-main branches — use `stage-sync.sh` to test CoCo content
-- Validators can be run manually before a stage sync: `python3 tools/validate/check_*.py --root .`
+- Validators can be run manually: `python3 tools/validate/check_*.py --root .`
 - Merge criteria: all `references/open-items.md` items are VERIFIED, smoke tests pass, all validators clean
 
 **Starting a new wip skill:**
 1. `git checkout -b wip/<skill-name>` from current main
 2. Remove the skill's `.gitignore` entry on that branch only
-3. Update README.md, SETUP.md, and coco-snowsight/SETUP.md to include the skill (`check_consistency.py` enforces this)
+3. Update README.md and agents/cli/SETUP.md to include the skill (`check_consistency.py` enforces this)
 4. `git push -u origin wip/<skill-name>`
 
 **Session-start protocol:** see `.claude/rules/branching.md` — check your branch before making any edits.

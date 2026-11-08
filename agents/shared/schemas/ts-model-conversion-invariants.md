@@ -630,8 +630,9 @@ as consistent and is wrong for exactly one of them.
 
 **Evidence (BL-232, 2026-09-02).** `description` was emitted under `properties` by
 **five** sites — `mv_build_model.py`, `sv_build_model.py` (writers), `mv_emit_classify.py`,
-`sv_build_sv.py` (readers) and `ts-from-snowflake-rules.md` (the doc CoCo executes, since
-it has no `ts` CLI). Converting a real Metric View sent 19 of 19 descriptions and stored
+`sv_build_sv.py` (readers) and `ts-from-snowflake-rules.md` (a mapping doc that the CoCo
+Snowsight runtime, which had no `ts` CLI, executed as its implementation; that runtime
+retired on 2026-11-08). Converting a real Metric View sent 19 of 19 descriptions and stored
 0; relocating them and re-importing the same GUID restored all 19. Synonyms survived both
 runs, which is what isolated the cause.
 
@@ -824,8 +825,10 @@ declaring table and fails under its destination).
 
 **Enforced by:** `ts tml lint`, cross-file like I16 — only when the entry's Table TML is
 linted in the same batch (`--dir`, or `--file table.tml --file model.tml`). A Model linted
-alone has no ground truth for what its Tables declare. The CoCo pre-import checklist's
-`referencing_join` row checks the name; this adds which table must own it.
+alone has no ground truth for what its Tables declare, so nothing automated checks I21
+there. The lint covers both halves of the rule: a misspelled name and a correct name under
+the wrong entry are each a join that entry's Table TML does not declare. (Until
+2026-11-08 the retired CoCo runtime's pre-import checklist also checked the name.)
 
 
 ### I22 — An RLS rule's joins do not close a cycle with the Model's joins

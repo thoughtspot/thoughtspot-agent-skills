@@ -1,7 +1,7 @@
 """Table TML assembly and TML-invariant validation for Databricks conversions.
 
-Pure functions: dicts in, dicts out. No I/O, no network, stdlib only —
-Genie-vendorable (BL-063 PR 5).
+Pure functions: dicts in, dicts out. No I/O, no network, stdlib only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 Type mapping is agents/shared/mappings/ts-databricks/ts-from-databricks-rules.md
 (§Data Type Mapping) encoded as data — extend doc and map together, never one alone.

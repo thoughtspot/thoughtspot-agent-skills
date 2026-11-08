@@ -338,8 +338,8 @@ Snowflake connections natively via `cortex connections set`.
 
 ### No stored procedures needed
 
-CLI skills call the ThoughtSpot API directly. You do NOT need `/ts-setup-sv`
-or any stored procedures unless you also use Snowsight Workspaces.
+CLI skills call the ThoughtSpot API through the `ts` CLI. Nothing needs installing in
+Snowflake beyond the objects a skill itself creates (a Semantic View, a UDF).
 
 ---
 

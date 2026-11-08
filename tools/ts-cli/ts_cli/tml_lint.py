@@ -263,10 +263,9 @@ def lint_tml(data: dict) -> list[str]:
 # `data_panel_column_groups` is root-level, settled by census rather than by the
 # doc-vs-code split it first looked like: docs/reviews/2026-07-30-tml-census.md:150
 # records `model.columns[].data_panel_column_groups` 9 times across 3 of 143 real
-# Models, at the column ROOT, with zero `properties.`-level sightings. (Two sites
-# still call it a properties key — sv_build_sv.py's _UNMAPPED_PROP_KEYS and a CoCo
-# SKILL.md — tracked as BL-237, the same doc-vs-code split that produced BL-232's
-# fifth site.)
+# Models, at the column ROOT, with zero `properties.`-level sightings. (One site
+# still calls it a properties key — sv_build_sv.py's _UNMAPPED_PROP_KEYS — tracked
+# as BL-237. A second, a CoCo SKILL.md, retired with that runtime on 2026-11-08.)
 _COLUMN_ROOT_ONLY_KEYS = (
     "description", "name", "column_id", "formula_id", "data_panel_column_groups",
 )

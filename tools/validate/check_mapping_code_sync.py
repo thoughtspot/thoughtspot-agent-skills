@@ -9,7 +9,8 @@ had its own gate and both passed while disagreeing:
 * ``check_formula_catalog.py`` reads ``mapping_dir.rglob("*.md")`` — **markdown only**.
   It never opens a ``.py``, so a translator emitting a non-existent ThoughtSpot
   function is invisible to it.
-* ``check_mirror_sync.py`` compares ``synced-from`` **version markers**, not content.
+* ``check_mirror_sync.py`` (retired with the CoCo Snowsight runtime on 2026-11-08)
+  compared ``synced-from`` **version markers**, not content.
 * Only two platforms ever grew an in-process cross-check by hand
   (``test_qlik_functions.py::TestMapIntegrity``, and the domo equivalent added in
   PR #440). Every other converter had none.
@@ -17,17 +18,20 @@ had its own gate and both passed while disagreeing:
 The cost of that gap is on the record. ``sv_sql.py`` emitted the six BL-171
 string functions — ``upper``/``lower``/``trim``/``ltrim``/``rtrim``/``replace``,
 live-disproved on se-thoughtspot, rejected at import with error_code 14516 — for
-**three CLI versions after the mapping rows had already been corrected**
-(``agents/SYNC-DEBT.md`` records the v1.19.2 → v1.19.5 lag). The doc was right, the
+**three CLI versions after the mapping rows had already been corrected** (the retired
+CoCo mirror ledger recorded the v1.19.2 → v1.19.5 lag). The doc was right, the
 code was wrong, and the doc-only gate could not see it. PR #440 then shipped the
 same class in a new converter.
 
 Why the doc cannot simply be generated from the code, or vice versa: the doc is
-**executable in its own right**. The CoCo Snowsight runtime has no shell and no
-``ts`` CLI, so there the *model* performs the translation by reading these tables
-(``agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md`` marks it MANDATORY
-under I7). The Python serves the CLI runtime. Two consumers, two representations,
-one ruleset — so the only durable answer is to assert they agree.
+**read in its own right**. It is the reference the model works from whenever it
+translates or judges an expression itself (every converter skill's I7 gate makes it
+open the formula-translation doc before calling anything untranslatable), and the
+reference a reviewer checks a translation against. The Python serves the CLI's
+deterministic path. (Until 2026-11-08 the doc was also *executed*: the retired CoCo
+Snowsight runtime had no ``ts`` CLI, so its model translated by reading these tables.)
+Two consumers, two representations, one ruleset — so the only durable answer is to
+assert they agree.
 
 Requirements
 ------------
@@ -40,8 +44,8 @@ BL-171 generalised from the two hand-written tests to every converter.
 
 **B — a source construct the code translates should appear in the platform's doc.**
 (soft) Catches the code-ahead-of-doc direction: ``sv_sql.py:307`` maps
-``LOCATE -> strpos`` and no Snowflake mapping doc mentions ``LOCATE``, so the CoCo
-runtime — which has only the doc — cannot translate it.
+``LOCATE -> strpos`` and no Snowflake mapping doc mentions ``LOCATE``, so a reader
+working from the doc — the model, or a reviewer — cannot see that it translates.
 
 **D — handler-dispatched constructs declare what they emit, and the doc rows say it.** (gate)
 A dispatch map whose values are *functions* — ``EXACT_FORM_CALLS`` in ``sv_sql_exact.py``,
@@ -298,8 +302,8 @@ def check_platform(platform: str, code_files: list[Path], doc_text: str,
             if doc_text and name.lower() not in doc_text.lower():
                 warnings.append(
                     f"{rel}:{lineno}: translates `{name}`, which no {platform} mapping "
-                    f"doc mentions. The CoCo runtime reads only the doc, so it cannot "
-                    f"translate this construct. Add a row."
+                    f"doc mentions, so a reader working from the doc cannot see that it "
+                    f"translates. Add a row."
                 )
 
         errors.extend(exact_form_errors(path, rel, doc_text, valid, nonexistent))
@@ -357,7 +361,8 @@ def exact_form_errors(path: Path, rel, doc_text: str, valid: set[str],
         rows = [ln for ln in lines if f"{key.lower()}(" in ln]
         if not rows:
             errors.append(f"{rel}: `{key}` is handled by a dispatched handler but no mapping "
-                          f"doc line names `{key}(` — the CoCo runtime cannot translate it.")
+                          f"doc line names `{key}(` — a reader working from the doc cannot "
+                          f"see how it translates.")
             continue
         text = "\n".join(rows)
         for name in names:

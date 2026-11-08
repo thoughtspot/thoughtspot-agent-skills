@@ -1,8 +1,8 @@
 """Databricks Metric View YAML -> structured dict (`ts databricks parse-mv`).
 
 Pure functions: YAML text in, JSON-ready dict out. No I/O, no network calls —
-trivially unit-testable. stdlib + PyYAML only (Genie-vendorable — see
-package docstring).
+trivially unit-testable. stdlib + PyYAML only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 This module owns source classification, the joins walk, and the top-level
 assembly; expression classification lives in mv_expr.py and window-spec

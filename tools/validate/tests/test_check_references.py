@@ -1,7 +1,7 @@
 """check_references must validate references/*.md and docs/**/*.md links, not just
 SKILL.md (audit finding 1.4) — and must resolve links relative to each file's OWN
-directory rather than misapplying the SKILL.md-depth-sensitive prefix maps to a
-references/*.md file (one level deeper) or a docs/*.md file (outside agents/ entirely).
+directory, so a references/*.md file (one level deeper than SKILL.md) or a docs/*.md
+file (outside agents/ entirely) is checked at its real depth.
 """
 import subprocess
 import sys
@@ -35,22 +35,7 @@ def _make_repo(tmp_path):
     return repo
 
 
-# ── direct unit tests for _file_class / resolve_path (no git needed) ──────────
-
-
-def test_file_class_skill_md_is_skill(tmp_path):
-    p = tmp_path / "agents" / "cli" / "ts-x" / "SKILL.md"
-    assert check_references._file_class(p, tmp_path) == "skill"
-
-
-def test_file_class_references_md_is_reference(tmp_path):
-    p = tmp_path / "agents" / "cli" / "ts-x" / "references" / "foo.md"
-    assert check_references._file_class(p, tmp_path) == "reference"
-
-
-def test_file_class_docs_md_is_doc(tmp_path):
-    p = tmp_path / "docs" / "foo.md"
-    assert check_references._file_class(p, tmp_path) == "doc"
+# ── direct unit tests for resolve_path (no git needed) ─────────────────────────
 
 
 def test_reference_file_resolves_relative_link_from_its_own_depth(tmp_path):
@@ -64,23 +49,17 @@ def test_reference_file_resolves_relative_link_from_its_own_depth(tmp_path):
     assert resolved == (tmp_path / "agents" / "shared" / "target.md").resolve()
 
 
-def test_reference_file_does_not_get_coco_prefix_map_applied(tmp_path):
-    # A CoCo SKILL.md at agents/coco-snowsight/ts-y/SKILL.md correctly reaches
-    # agents/shared/ with "../../shared/..." (COCO_PREFIX_MAP). A references/*.md
-    # file one level deeper must NOT have that same shorthand silently remapped —
-    # doing so would misresolve (or falsely validate) a link that is actually wrong
-    # for its depth. Here "../../shared/target.md" from the deeper references/ file
-    # must resolve via plain relative resolution (not the prefix map), landing
-    # somewhere other than agents/shared/target.md.
+def test_reference_file_link_written_for_skill_md_depth_misses(tmp_path):
+    # "../../shared/target.md" is right from a SKILL.md (agents/cli/ts-y/ -> agents/)
+    # but one level short from references/: it must resolve at the references/ file's
+    # real depth (agents/cli/shared/), not silently to agents/shared/target.md.
     (tmp_path / "agents" / "shared").mkdir(parents=True)
     (tmp_path / "agents" / "shared" / "target.md").write_text("x\n")
-    ref_file = tmp_path / "agents" / "coco-snowsight" / "ts-y" / "references" / "note.md"
+    ref_file = tmp_path / "agents" / "cli" / "ts-y" / "references" / "note.md"
     ref_file.parent.mkdir(parents=True)
     resolved = check_references.resolve_path("../../shared/target.md", ref_file, tmp_path)
-    # Plain relative resolution (NOT the COCO_PREFIX_MAP substitution) — two levels
-    # up from references/ lands at agents/coco-snowsight/, not agents/.
     assert resolved != (tmp_path / "agents" / "shared" / "target.md").resolve()
-    assert resolved == (tmp_path / "agents" / "coco-snowsight" / "shared" / "target.md").resolve()
+    assert resolved == (tmp_path / "agents" / "cli" / "shared" / "target.md").resolve()
 
 
 def test_doc_file_resolves_relative_to_its_own_directory(tmp_path):

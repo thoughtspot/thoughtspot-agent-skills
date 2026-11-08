@@ -219,7 +219,7 @@ def test_a_failing_check_exits_1(env, capsys):
 
 
 def test_a_failing_pytest_exits_1(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (1, "1 failed\n")}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (1, "1 failed\n")}
     assert _main(env, "--no-review") == 1
 
 
@@ -272,17 +272,17 @@ _SKIPS = ("....s.s\n"
 
 
 def test_a_skip_for_a_missing_module_is_fail_and_listed(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (0, _SKIPS)}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (0, _SKIPS)}
     assert _main(env, "--no-review") == 1
     text = _evidence(env)[1]
     section = text.split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "tools/a/test_x.py:10: could not import 'openpyxl'" in section, section
     assert "missing module" in section and "counted as FAIL" in section, section
-    assert "| pytest | `pytest agents/databricks/tests/ -q` | FAIL |" in text
+    assert "| pytest | `pytest agents/cli/ts-object-model-erd/tests/ -q` | FAIL |" in text
 
 
 def test_other_skips_are_listed_and_do_not_fail(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (
         0, "..s\nSKIPPED [2] tools/b/test_y.py:20: $DATA not set\n2 passed, 2 skipped in 0.1s\n")}
     assert _main(env, "--no-review") == 0
     section = _evidence(env)[1].split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
@@ -298,27 +298,27 @@ _COLOURED = ("\x1b[33m..s\x1b[0m\n"
 def test_coloured_skip_lines_are_still_read(env, capsys):
     # FORCE_COLOR / PY_COLORS colour SKIPPED even when piped; --color=no is passed,
     # and ANSI is stripped anyway, so a missing-module skip still FAILs.
-    env.commands.answers = {"pytest agents/databricks/tests/": (0, _COLOURED)}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (0, _COLOURED)}
     assert _main(env, "--no-review") == 1
     assert "No module named 'openpyxl'" in _evidence(env)[1]
 
 
 def test_skips_with_no_skip_report_are_unverifiable_not_zero(env, capsys):
     # e.g. PYTEST_ADDOPTS=--no-summary: the stats line says 4 skipped, -rs lists none.
-    env.commands.answers = {"pytest agents/databricks/tests/": (0, "....ssss\n4 passed, 4 skipped in 0.2s\n")}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (0, "....ssss\n4 passed, 4 skipped in 0.2s\n")}
     assert _main(env, "--no-review") == 1
     section = _evidence(env)[1].split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "reported 4 skipped but its -rs report lists 0" in section, section
 
 
 def test_a_skip_count_mismatch_is_fail(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (
         0, "SKIPPED [1] a.py:1: $D unset\n3 passed, 2 skipped in 0.2s\n")}
     assert _main(env, "--no-review") == 1
 
 
 def test_a_missing_stats_line_is_unverifiable(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (0, "....\n")}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (0, "....\n")}
     assert _main(env, "--no-review") == 1
     assert "stats line was not found" in _evidence(env)[1]
 
@@ -342,7 +342,7 @@ def test_pytest_runs_without_pytest_addopts(env, monkeypatch, capsys):
     ("$FORMULA_FIDELITY_DATA not set", False),
 ])
 def test_which_skips_are_a_missing_tool(env, capsys, reason, missing):
-    env.commands.answers = {"pytest agents/databricks/tests/": (
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (
         0, f"SKIPPED [1] t.py:1: {reason}\n1 passed, 1 skipped in 0.1s\n")}
     assert _main(env, "--no-review") == (1 if missing else 0)
     text = _evidence(env)[1]
@@ -352,7 +352,7 @@ def test_which_skips_are_a_missing_tool(env, capsys, reason, missing):
 
 def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
     # "Install what CI installs" is only a remedy if it says what that is, exactly.
-    env.commands.answers = {"pytest agents/databricks/tests/": (0, _SKIPS)}
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (0, _SKIPS)}
     assert _main(env, "--no-review") == 1
     err = capsys.readouterr().err
     assert pr_ready.SUITE_PIP_INSTALLS, "no remedy to print"
@@ -421,7 +421,7 @@ def test_a_missing_pyyaml_targets_checks_python_when_it_is_set(monkeypatch, tmp_
 
 
 def test_no_install_remedy_without_a_missing_module(env, capsys):
-    env.commands.answers = {"pytest agents/databricks/tests/": (
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (
         0, "..s\nSKIPPED [1] tools/b/test_y.py:20: $DATA not set\n2 passed, 1 skipped in 0.1s\n")}
     assert _main(env, "--no-review") == 0
     assert "pip install" not in capsys.readouterr().err

@@ -9,7 +9,7 @@ shipped (2026-05-05, v1.2.0 / v1.4.0) — dead design docs nobody would ever ope
 again, discovered only by a repo-wide grep during the audit sweep. This validator
 makes that discovery permanent instead of relying on the next audit to notice.
 
-Scope: every `agents/{cli,claude,coco-snowsight}/**/references/*.md` file (the
+Scope: every `agents/{cli,claude}/**/references/*.md` file (the
 `**` also catches `agents/claude/references/*.md`, which sits directly under the
 runtime root rather than under a per-skill directory).
 
@@ -67,12 +67,12 @@ def _is_excluded(path: Path) -> bool:
 
 
 def find_reference_files(repo_root: Path) -> list[Path]:
-    """Every references/*.md file across the three skill runtimes.
+    """Every references/*.md file across the skill runtimes.
 
     Uses rglob("references/*.md") per runtime root rather than a fixed-depth glob
     so it also matches agents/claude/references/*.md, which sits directly under
     the runtime root (no per-skill directory) rather than nested one level deeper
-    like the cli/coco-snowsight skills.
+    like the cli skills.
     """
     files: list[Path] = []
     for runtime in ALL_RUNTIMES:

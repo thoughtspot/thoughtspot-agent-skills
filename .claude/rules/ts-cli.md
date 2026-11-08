@@ -31,11 +31,12 @@ iterative retry, double-aggregation detection) that manual scripts will miss.
 Do not work around it with manual scripting — that hides the bug and ensures the next
 migration hits the same issue.
 
-**Exceptions — direct API calls are legitimate in:**
+**Exception — direct API calls are legitimate in one place:**
 - `references/open-items.md` — self-contained test scripts to verify unverified API behaviour
   before a CLI command is written. These are temporary scaffolding, not skill logic.
-- `agents/coco-snowsight/` — CoCo runs inside Snowsight and cannot install or invoke the `ts` CLI.
-  CoCo skills use stored procedures (`TS_EXPORT_TML`, `TS_IMPORT_TML`, etc.) instead.
+
+(The retired CoCo Snowsight runtime, which had no `ts` CLI and called stored procedures
+instead, was the second exception until 2026-11-08. Every skill runtime left has the CLI.)
 
 ---
 
@@ -124,7 +125,8 @@ builds (returns 404) and has been **migrated to the v2 endpoint**
 
 - `ts connections get` / `ts connections add-tables` — `_fetch_connection_v2` +
   `_adapt_v2_databases` in `tools/ts-cli/ts_cli/commands/connections.py`
-- `connections_get` in `agents/databricks/notebooks/ts_client.py`
+- (the Databricks Genie runtime's notebook client was migrated too, and retired with
+  that runtime on 2026-11-08)
 
 **Caveat — live-verified 2026-08-26 on se-thoughtspot.** v2 `connection/search`
 returns connection metadata with an **empty** warehouse database/table/column hierarchy.

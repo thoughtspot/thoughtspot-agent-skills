@@ -2,8 +2,9 @@
 
 One detector and one wording per note, imported by every translator's reporting path
 and by ``ts formula translate``'s traps. Split out of ``formula_common`` under the
-file-size gate; same contract — pure functions, stdlib only, Genie-vendorable (listed
-in ``agents/databricks/build_mv_lib.py``). Never fork these into a platform module.
+file-size gate; same contract — pure functions, stdlib only (a retired Genie-runtime
+constraint, no longer required — see ``ts_cli/databricks/__init__.py``). Never fork these
+into a platform module.
 """
 from __future__ import annotations
 

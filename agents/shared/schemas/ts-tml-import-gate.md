@@ -39,9 +39,8 @@ ts tml lint --dir <dir>            # every *.tml in a directory
 ```
 
 Do not import until it reports `"clean": true`. Fix any finding and re-lint.
-Automated builders (`ts databricks build-model`, the Genie `databricks_mv_lib`
-notebook) already run these checks on what they write — re-lint whenever a TML
-file has been hand-edited afterwards.
+Automated builders (`ts databricks build-model`) already run these checks on what
+they write — re-lint whenever a TML file has been hand-edited afterwards.
 
 ## 2. Updating vs creating (`guid` placement)
 

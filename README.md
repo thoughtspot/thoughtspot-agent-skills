@@ -2,41 +2,41 @@
 
 AI agent skills for working with ThoughtSpot — platform conversion, semantic
 model authoring, multi-tenancy governance, and data querying. Packaged for
-**Claude Code**, **Cortex Code CLI**, **Snowsight**, and **Databricks**.
+**Claude Code** and **Cortex Code CLI**.
 
 ---
 
 ## Skills
 
-32 skills across six categories. Each ✓ in the runtime columns links to the
-SKILL.md for that runtime. For why an individual skill exists, who tends to need it,
-and when to reach for it, see [skill personas](docs/skill-personas.md).
+35 skills across six categories. Every skill runs in both Claude Code and Cortex Code
+CLI except `ts-profile-snowflake`, which is Claude Code only (Cortex Code manages Snowflake
+connections natively). For why an individual skill exists, who tends to need it, and
+when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Category | Problem it solves | Skills |
 |---|---|:-:|
-| [Setup](#setup) | Nothing else runs until credentials and data exist | 8 |
-| [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 10 |
-| [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 6 |
+| [Setup](#setup) | Nothing else runs until credentials and data exist | 7 |
+| [Conversion](#conversion) | The semantics already exist elsewhere, and rebuilding them by hand is what stalls a migration | 12 |
+| [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 8 |
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
 | [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
 
 <a id="setup"></a>
 <details open>
-<summary><strong>Setup</strong> — Credentials, infrastructure, data loading, and tenancy configuration</summary>
+<summary><strong>Setup</strong> — Credentials, data loading, and tenancy configuration</summary>
 
 &nbsp;
 
-| Skill | What it does | Category | CLI | Snowsight | DBX |
-|---|---|---|:-:|:-:|:-:|
-| [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles | Credentials | [✓](agents/cli/ts-profile-thoughtspot/SKILL.md) | [✓](agents/coco-snowsight/ts-profile-thoughtspot/SKILL.md) | — |
-| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials | [✓](agents/claude/ts-profile-snowflake/SKILL.md) | — | — |
-| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials | [✓](agents/cli/ts-profile-databricks/SKILL.md) | — | — |
-| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials | [✓](agents/cli/ts-profile-tableau/SKILL.md) | — | — |
-| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data | [✓](agents/cli/ts-load-source-data/SKILL.md) | — | — |
-| [`ts-setup-sv`](agents/coco-snowsight/ts-setup-sv/SKILL.md) | Install or upgrade stored procedures required by Snowsight skills | Infrastructure | — | [✓](agents/coco-snowsight/ts-setup-sv/SKILL.md) | — |
-| [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) | Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them | Tenancy | [✓](agents/cli/ts-setup-tenancy/SKILL.md) | — | — |
-| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy | [✓](agents/cli/ts-migrate-orgs/SKILL.md) | — | — |
+| Skill | What it does | Category |
+|---|---|---|
+| [`ts-profile-thoughtspot`](agents/cli/ts-profile-thoughtspot/SKILL.md) | Add, update, test, or delete ThoughtSpot profiles | Credentials |
+| [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials |
+| [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials |
+| [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials |
+| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data |
+| [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) | Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them | Tenancy |
+| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy |
 
 </details>
 
@@ -46,20 +46,20 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
-| Skill | What it does | Platform | Coverage | CLI | Snowsight | DBX |
-|---|---|---|---|:-:|:-:|:-:|
-| [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | Databricks | [coverage](agents/cli/ts-convert-to-databricks-mv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | — | [✓](agents/databricks/skills/ts-convert-to-databricks-mv/SKILL.md) |
-| [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | Databricks | [coverage](agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | — | [✓](agents/databricks/skills/ts-convert-from-databricks-mv/SKILL.md) |
-| [`ts-convert-to-dbt`](agents/cli/ts-convert-to-dbt/SKILL.md) | Generate a dbt project from a ThoughtSpot Model — staging models plus a `schema.yml` carrying ThoughtSpot's own `ts_*` metadata tags, either scaffolding a new project or diffing and syncing into an existing one | dbt | [coverage](agents/cli/ts-convert-to-dbt/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-to-dbt/SKILL.md) | — | — |
-| [`ts-convert-from-dbt`](agents/cli/ts-convert-from-dbt/SKILL.md) | Sync dbt models (Cloud or Core) into ThoughtSpot as Tables and a Model via the native dbt integration — first import or resync, with `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics assembled client-side when the server-side generator would drop them | dbt | [coverage](agents/cli/ts-convert-from-dbt/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-dbt/SKILL.md) | — | — |
-| [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) | Convert a Looker LookML project (model + view files) into ThoughtSpot Table and Model TMLs, with optional dashboard-to-liveboard migration | Looker | [coverage](agents/cli/ts-convert-from-looker/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-looker/SKILL.md) | — | — |
-| [`ts-convert-from-powerbi`](agents/cli/ts-convert-from-powerbi/SKILL.md) | Convert a Power BI project (`.pbip`: TMDL semantic model + PBIR report) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating DAX measures and flagging time-intelligence for Spotter | Power BI | [coverage](agents/cli/ts-convert-from-powerbi/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-powerbi/SKILL.md) | — | — |
-| [`ts-convert-from-qlik`](agents/cli/ts-convert-from-qlik/SKILL.md) | Convert a Qlik Sense app (offline .qvf or Qlik Engine artifacts) into ThoughtSpot Table + Model TML and a tabbed Liveboard, flagging Set Analysis / variables for review | Qlik | [coverage](agents/cli/ts-convert-from-qlik/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-qlik/SKILL.md) | — | — |
-| [`ts-convert-from-sisense`](agents/cli/ts-convert-from-sisense/SKILL.md) | Convert a captured offline Sisense bundle (`{dashboard, widgets, datamodel}`) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating JAQL aggregations and the deterministic formula subset | Sisense | [coverage](agents/cli/ts-convert-from-sisense/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-sisense/SKILL.md) | — | — |
-| [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | [✓](agents/coco-snowsight/ts-convert-to-snowflake-sv/SKILL.md) | — |
-| [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | [✓](agents/coco-snowsight/ts-convert-from-snowflake-sv/SKILL.md) | — |
-| [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | Tableau | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) | [✓](agents/cli/ts-convert-from-tableau/SKILL.md) | — | — |
-| [`ts-link-semantic-layer`](agents/cli/ts-link-semantic-layer/SKILL.md) | **Link, don't convert:** register a Snowflake Semantic View, Databricks Metric View, Honeydew, Cube or Kyvos object as one Table plus a thin, formula-free Model, so the platform generates the SQL from its own definitions. Carries descriptions, synonyms, ai_context and Spotter instructions; one switch sets measures to `AGGREGATE` or their standard aggregation | Any semantic layer | — | [✓](agents/cli/ts-link-semantic-layer/SKILL.md) | — | — |
+| Skill | What it does | Platform | Coverage |
+|---|---|---|---|
+| [`ts-convert-to-databricks-mv`](agents/cli/ts-convert-to-databricks-mv/SKILL.md) | Convert a ThoughtSpot model to a Databricks Metric View (v0.1 single-source or v1.1 multi-source) | Databricks | [coverage](agents/cli/ts-convert-to-databricks-mv/references/coverage-matrix.md) |
+| [`ts-convert-from-databricks-mv`](agents/cli/ts-convert-from-databricks-mv/SKILL.md) | Convert a Databricks Metric View into a ThoughtSpot Model (dimensions → attributes, measures → measures/formulas) | Databricks | [coverage](agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md) |
+| [`ts-convert-to-dbt`](agents/cli/ts-convert-to-dbt/SKILL.md) | Generate a dbt project from a ThoughtSpot Model — staging models plus a `schema.yml` carrying ThoughtSpot's own `ts_*` metadata tags, either scaffolding a new project or diffing and syncing into an existing one | dbt | [coverage](agents/cli/ts-convert-to-dbt/references/coverage-matrix.md) |
+| [`ts-convert-from-dbt`](agents/cli/ts-convert-from-dbt/SKILL.md) | Sync dbt models (Cloud or Core) into ThoughtSpot as Tables and a Model via the native dbt integration — first import or resync, with `ts_join_*` graphs, `ts_rls_rules` and MetricFlow metrics assembled client-side when the server-side generator would drop them | dbt | [coverage](agents/cli/ts-convert-from-dbt/references/coverage-matrix.md) |
+| [`ts-convert-from-looker`](agents/cli/ts-convert-from-looker/SKILL.md) | Convert a Looker LookML project (model + view files) into ThoughtSpot Table and Model TMLs, with optional dashboard-to-liveboard migration | Looker | [coverage](agents/cli/ts-convert-from-looker/references/coverage-matrix.md) |
+| [`ts-convert-from-powerbi`](agents/cli/ts-convert-from-powerbi/SKILL.md) | Convert a Power BI project (`.pbip`: TMDL semantic model + PBIR report) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating DAX measures and flagging time-intelligence for Spotter | Power BI | [coverage](agents/cli/ts-convert-from-powerbi/references/coverage-matrix.md) |
+| [`ts-convert-from-qlik`](agents/cli/ts-convert-from-qlik/SKILL.md) | Convert a Qlik Sense app (offline .qvf or Qlik Engine artifacts) into ThoughtSpot Table + Model TML and a tabbed Liveboard, flagging Set Analysis / variables for review | Qlik | [coverage](agents/cli/ts-convert-from-qlik/references/coverage-matrix.md) |
+| [`ts-convert-from-sisense`](agents/cli/ts-convert-from-sisense/SKILL.md) | Convert a captured offline Sisense bundle (`{dashboard, widgets, datamodel}`) into ThoughtSpot Table + Model TMLs and Answers/tabbed Liveboard, translating JAQL aggregations and the deterministic formula subset | Sisense | [coverage](agents/cli/ts-convert-from-sisense/references/coverage-matrix.md) |
+| [`ts-convert-to-snowflake-sv`](agents/cli/ts-convert-to-snowflake-sv/SKILL.md) | Convert a ThoughtSpot model to a Snowflake Semantic View (single, split by domain, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-to-snowflake-sv/references/coverage-matrix.md) |
+| [`ts-convert-from-snowflake-sv`](agents/cli/ts-convert-from-snowflake-sv/SKILL.md) | Convert a Snowflake Semantic View into a ThoughtSpot Model (single, merge multiple, or update existing) | Snowflake | [coverage](agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md) |
+| [`ts-convert-from-tableau`](agents/cli/ts-convert-from-tableau/SKILL.md) | Convert a Tableau workbook (.twb/.twbx) into ThoughtSpot table + model TMLs, with optional dashboard-to-liveboard migration | Tableau | [coverage](agents/cli/ts-convert-from-tableau/references/coverage-matrix.md) |
+| [`ts-link-semantic-layer`](agents/cli/ts-link-semantic-layer/SKILL.md) | **Link, don't convert:** register a Snowflake Semantic View, Databricks Metric View, Honeydew, Cube or Kyvos object as one Table plus a thin, formula-free Model, so the platform generates the SQL from its own definitions. Carries descriptions, synonyms, ai_context and Spotter instructions; one switch sets measures to `AGGREGATE` or their standard aggregation | Any semantic layer | — |
 
 </details>
 
@@ -69,16 +69,16 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
-| Skill | What it does | CLI | Snowsight | DBX |
-|---|---|:-:|:-:|:-:|
-| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements | [✓](agents/cli/ts-object-model-coach/SKILL.md) | — | — |
-| [`ts-object-set-manager`](agents/cli/ts-object-set-manager/SKILL.md) | Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only) | [✓](agents/cli/ts-object-set-manager/SKILL.md) | — | — |
-| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login | [✓](agents/cli/ts-object-model-erd/SKILL.md) | — | — |
-| [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified | [✓](agents/cli/ts-object-model-aggregates/SKILL.md) | — | — |
-| [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) | Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline | [✓](agents/cli/ts-object-model-alias/SKILL.md) | — | — |
-| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model | [✓](agents/cli/ts-object-answer-promote/SKILL.md) | — | — |
-| [`ts-object-formula-translate`](agents/cli/ts-object-formula-translate/SKILL.md) | Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model | [✓](agents/cli/ts-object-formula-translate/SKILL.md) | — | — |
-| [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars | [✓](agents/cli/ts-object-calendar-builder/SKILL.md) | — | — |
+| Skill | What it does |
+|---|---|
+| [`ts-object-model-coach`](agents/cli/ts-object-model-coach/SKILL.md) | Prepare a Model for Spotter — review AI Context, synonyms, mine dependent objects, generate improvements |
+| [`ts-object-set-manager`](agents/cli/ts-object-set-manager/SKILL.md) | Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only) |
+| [`ts-object-model-erd`](agents/cli/ts-object-model-erd/SKILL.md) | Render a Model into a self-contained HTML ERD — tables, joins, columns, RLS, findings — shareable without ThoughtSpot login |
+| [`ts-object-model-aggregates`](agents/cli/ts-object-model-aggregates/SKILL.md) | Audit a Model's Liveboards/Answers to recommend, generate, and wire aggregate Models (26.6 aggregate-aware routing) — signature mining, cost-based candidate ranking, gated DDL/TML generation ⚠️ pre-merge, open items unverified |
+| [`ts-object-model-alias`](agents/cli/ts-object-model-alias/SKILL.md) | Manage column aliases on a Model — language localization, tenant-based renaming, and combined tenant + locale matrices, via the `ts alias export/translate/build/import` pipeline |
+| [`ts-object-answer-promote`](agents/cli/ts-object-answer-promote/SKILL.md) | Promote formulas and parameters from a saved Answer into a Model |
+| [`ts-object-formula-translate`](agents/cli/ts-object-formula-translate/SKILL.md) | Translate one formula from Tableau, DAX, Qlik, Sisense, Snowflake/Databricks SQL, Excel/Sheets, Sigma or Omni into ThoughtSpot — classification, traps, TML snippet, and optional compile/execute proof against a scratch copy of a Model |
+| [`ts-object-calendar-builder`](agents/cli/ts-object-calendar-builder/SKILL.md) | Build week-aligned 4-4-5 / 4-5-4 / 5-4-4 / 13-period custom calendars with correct 52/53-week tiling, custom labels and RLS union calendars |
 
 </details>
 
@@ -88,13 +88,13 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
-| Skill | What it does | CLI | Snowsight | DBX |
-|---|---|:-:|:-:|:-:|
-| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline | [✓](agents/cli/ts-publish-orgs/SKILL.md) | — | — |
-| [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` | [✓](agents/cli/ts-security-columns/SKILL.md) | — | — |
-| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings | [✓](agents/cli/ts-audit/SKILL.md) | — | — |
-| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) | [✓](agents/cli/ts-dependency-manager/SKILL.md) | — | — |
-| [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 | [✓](agents/cli/ts-variable-timezone/SKILL.md) | — | — |
+| Skill | What it does |
+|---|---|
+| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline |
+| [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` |
+| [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
+| [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) |
+| [`ts-variable-timezone`](agents/cli/ts-variable-timezone/SKILL.md) | Search, set, or remove timezone values for the `ts_user_timezone` variable at org or user level ⚠️ Beta in 26.5, EA in 26.6 |
 
 </details>
 
@@ -104,9 +104,9 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
-| Skill | What it does | CLI | Snowsight | DBX |
-|---|---|:-:|:-:|:-:|
-| [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) | Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Ask for the [**guided course**](agents/cli/ts-object-model-agentql-query/references/learning-path.md) ("teach me AgentQL"), play [**AgentQL Quest**](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/) in your browser, or read [**Why AgentQL**](agents/cli/ts-object-model-agentql-query/references/architecture.md). | [✓](agents/cli/ts-object-model-agentql-query/SKILL.md) | — | — |
+| Skill | What it does |
+|---|---|
+| [`ts-object-model-agentql-query`](agents/cli/ts-object-model-agentql-query/SKILL.md) | Query a Model with AgentQL — write Semantic SQL, validate to warehouse SQL, execute, and review results. New to AgentQL? Ask for the [**guided course**](agents/cli/ts-object-model-agentql-query/references/learning-path.md) ("teach me AgentQL"), play [**AgentQL Quest**](https://thoughtspot.github.io/thoughtspot-agent-skills/agentql-quest/) in your browser, or read [**Why AgentQL**](agents/cli/ts-object-model-agentql-query/references/architecture.md). |
 
 </details>
 
@@ -116,10 +116,10 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 &nbsp;
 
-| Skill | What it builds | CLI | Snowsight | DBX |
-|---|---|:-:|:-:|:-:|
-| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax | [✓](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | — | — |
-| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings | [✓](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | — | — |
+| Skill | What it builds |
+|---|---|
+| [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
+| [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings |
 
 </details>
 
@@ -127,21 +127,21 @@ and when to reach for it, see [skill personas](docs/skill-personas.md).
 
 ## Getting Started
 
-### 1. Pick your runtime
+### 1. Setup guide
 
-| Runtime | Best for | Setup guide |
-|---|---|---|
-| **CLI** — Claude Code + Cortex Code CLI | Full skill catalog, local development, interactive use | [agents/cli/SETUP.md](agents/cli/SETUP.md) |
-| **Snowsight** — Snowflake Workspaces | Snowflake-native users, no local install needed | [agents/coco-snowsight/SETUP.md](agents/coco-snowsight/SETUP.md) |
-| **Databricks** — Genie Code | Databricks-native users, Asset Bundle deployment | [agents/databricks/SETUP.md](agents/databricks/SETUP.md) |
+The skills live in `agents/cli/` (plus one Claude Code-only skill in `agents/claude/`),
+and the same files serve **Claude Code** and **Cortex Code CLI**: each tool reads them
+through symlinks in its own skills folder, and both run the `ts` CLI below. [agents/cli/SETUP.md](agents/cli/SETUP.md) covers
+prerequisites, installation, credential configuration, and verification for both.
 
-Each setup guide covers prerequisites, installation, credential configuration, and
-verification steps for that runtime.
+> **Snowsight and Databricks Genie runtimes retired (2026-11-08).** This repo used to
+> also ship stored-procedure skills for Snowsight Workspaces and Genie Code skills for
+> Databricks. Both were retired; their last state is kept at git tag
+> `runtimes-archive-2026-11-08`. To work with Snowflake Semantic Views or Databricks
+> Metric Views, use the [conversion skills](#conversion) above, or link them for direct
+> query without converting with [`ts-link-semantic-layer`](agents/cli/ts-link-semantic-layer/SKILL.md).
 
-### 2. CLI quick start
-
-Most users start here. Snowsight and Databricks users — follow the setup guide for
-your runtime instead.
+### 2. Quick start
 
 ```bash
 # Clone
@@ -193,19 +193,17 @@ thoughtspot-agent-skills/
 ├── agents/
 │   ├── cli/        — Canonical CLI skills (Claude Code + Cortex Code CLI)
 │   ├── claude/     — Claude Code-only skills (ts-profile-snowflake)
-│   ├── coco-snowsight/ — Snowsight Workspace skills (stored procedures)
-│   ├── databricks/ — Databricks runtime (Genie Code, Asset Bundles)
-│   └── shared/     — Shared reference files used by all runtimes
+│   └── shared/     — Shared reference files the skills read
 │       ├── mappings/ts-snowflake/       — Column, join, formula, and property mapping rules
 │       ├── mappings/ts-databricks/      — ThoughtSpot ↔ Databricks Metric View mapping rules
 │       ├── mappings/tableau/            — Tableau → ThoughtSpot formula and TML rules
 │       ├── mappings/looker/             — LookML → ThoughtSpot formula and TML rules
 │       ├── schemas/                     — Platform schema references (ThoughtSpot TML, Snowflake SV)
 │       └── worked-examples/snowflake/   — End-to-end conversion examples
-├── scripts/        — Deployment helpers (pre-commit hook, deploy gate, stage sync)
+├── scripts/        — Git hooks and local check runners (pre-commit, commit-msg, pre-push, pr-ready, check-pr)
 └── tools/
     ├── ts-cli/     — ThoughtSpot CLI used by CLI skills at runtime
-    ├── validate/   — Static validators (runtime coverage, consistency)
+    ├── validate/   — Static validators (consistency, references, naming, TML, ...)
     ├── fixtures/   — Captured cluster topologies for `ts tenancy` (reference multi-tenancy environment)
     ├── smoke-tests/ — End-to-end smoke tests requiring live credentials
     ├── ossie-roundtrip/ — Round-trips real Models through the Apache Ossie converter (lives upstream)
@@ -245,9 +243,8 @@ pre-push hook.
 
 | Resource | What it covers |
 |---|---|
-| [Quality gates catalog](docs/quality-gates.md) | All 37 validators — what each checks, when it runs, why it exists |
+| [Quality gates catalog](docs/quality-gates.md) | Every validator and gate — what each checks, when it runs, why it exists |
 | [Open items index](docs/open-items-index.md) | Cross-skill tracker of unverified assumptions and pending tests |
-| [Parity matrix](agents/PARITY.md) | Skill coverage across runtimes (CLI / CoCo / Databricks) |
 | [Backlog](docs/backlog.md) | Dated work items (`BL-NNN`) from audits and reviews |
 | [CLAUDE.md](CLAUDE.md) | Repo conventions, change-impact map, commit protocol |
 

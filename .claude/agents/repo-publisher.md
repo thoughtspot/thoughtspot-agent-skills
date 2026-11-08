@@ -1,19 +1,23 @@
 ---
 name: repo-publisher
-description: Commit, push a feature branch, open a PR, and — after that PR merges — sync changed CoCo/shared files to the Snowflake stage, in the correct order. Use this instead of running git and stage-sync manually to avoid partial publishes.
+description: Commit, push a feature branch, and open a PR whose body is the filled template with a current pr-ready evidence block, in the correct order. Use this instead of running git and gh manually to avoid partial publishes.
 model: sonnet
-# reason: the risk in this long prescribed commit -> PR -> stage-sync sequence is a
-# PARTIAL PUBLISH, not shallow reasoning -- capability headroom buys nothing here,
+# reason: the risk in this prescribed commit -> push -> PR sequence (confidentiality
+# scan, filled template, evidence block for the head being published; it stops before
+# merge) is a PARTIAL PUBLISH -- a pushed branch with no PR, or a PR whose body does
+# not match its head -- not shallow reasoning. Capability headroom buys nothing here,
 # so this is a requirement the effort dial cannot serve (model-routing.md corollary;
 # audit finding 18.3 moved the only other pinned agent OFF its pin for lacking one).
+# Whether the pin is still justified at all is BL-468's open half.
 ---
 
 # Repo Publisher
 
-Handles the full commit → branch → PR → (post-merge) stage-sync sequence in a single
-orchestrated flow. Partial publishes (a PR merged to main but the stage sync forgotten,
-or a stage synced from content that was never actually merged) are the most common
-source of CoCo skill drift. This agent prevents that.
+Handles the full commit → branch → PR sequence in a single orchestrated flow, with the
+confidentiality scan and the evidence check that a hand-run publish tends to skip.
+(It used to finish with a post-merge Snowflake stage sync for the CoCo Snowsight runtime;
+that step went when the runtime was retired on 2026-11-08 — see
+`.claude/rules/runtime-coverage.md`.)
 
 `main` has branch protection with `enforce_admins` (see CLAUDE.md "Commit + deploy
 protocol" and `.claude/rules/branching.md`) — there is no direct-push path to `main`,
@@ -66,7 +70,7 @@ git commit -m "<descriptive message>"
 Commit message format: `<verb>: <what changed> — <why if non-obvious>`
 Examples:
 - `fix: ts-convert-from-snowflake-sv join cardinality default — was MANY_TO_MANY, should be MANY_TO_ONE`
-- `add: ts-object-model-builder skill (Claude + CoCo)`
+- `add: ts-object-model-builder skill`
 - `update: formula translation reference — add safe_divide pattern`
 
 ### Step 4: Build the PR body from the template, then push and open the PR
@@ -140,48 +144,18 @@ Report the PR URL to the user. **Do not merge it.** Merging is a separate, expli
 decision — by the user, or by a follow-up instruction naming this PR — made once CI
 (`validate`) is green and the branch is up to date, per branch protection.
 
-### Step 5: Sync to Snowflake stage (conditional — only AFTER the PR has merged)
-
-Stage sync must never run before the PR merges: the stage should only ever serve what
-`main` has actually published. Confirm the merge first, e.g.:
-
-```bash
-gh pr view <number> --json state,mergedAt
-```
-
-Once merged:
-
-```bash
-git checkout main && git pull
-```
-
-Check which files the merge introduced:
-
-```bash
-git diff <pre-merge-sha>..main --name-only | grep -E "^agents/(coco-snowsight|shared)/"
-```
-
-If any match:
-
-```bash
-./scripts/stage-sync.sh
-```
-
-If no CoCo/shared files changed: skip stage sync and report "No stage sync needed."
-
-### Step 6: Report
+### Step 5: Report
 
 ```
 repo-publisher summary
 ======================
 Committed:  <list of files>
 Branch:     <branch> → PR #<number> (<url>)
-Merged:     <yes, SHA: abc1234 | not yet — stage sync pending merge>
-Stage sync: <list of files uploaded> | No sync needed | Deferred until merge
+Merged:     not yet — merging is the user's decision (see Step 4)
 
 Next steps (if applicable):
-- Reload your Snowsight Workspace to pick up skill changes
-- Run /ts-setup-sv if stored procedures changed
+- After the PR merges, for tools/ts-cli/ changes: `pip install -e tools/ts-cli` in the
+  affected environment (CLAUDE.md "Commit + deploy protocol")
 ```
 
 ## Guardrails
@@ -193,6 +167,4 @@ Next steps (if applicable):
   `.github/pull_request_template.md`, filled, with the evidence block for the head
   being published (Step 4)
 - Never merge the PR — that decision belongs to the user
-- Never run stage-sync before the PR has actually merged into `main`
-- If `./scripts/stage-sync.sh` fails, report the error and stop — do not mark publish as complete
 - If working tree has unrelated changes, commit only the files relevant to this publish and leave the rest staged/unstaged

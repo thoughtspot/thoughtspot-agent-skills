@@ -1,6 +1,6 @@
 """Metric View YAML doc -> CREATE VIEW WITH METRICS DDL + summary (Task 11).
 
-Pure: stdlib + PyYAML only (Genie-vendorable, no HTTP/auth/typer deps). The
+Pure: stdlib + PyYAML only, no HTTP/auth/typer deps. The
 MV YAML body is NOT ThoughtSpot TML, so `ts_cli.tml_common.dump_tml_yaml` is
 NOT reused here -- this module is the one place a Metric View body is dumped,
 via `yaml.safe_dump` directly (databricks-metric-view.md "DDL Syntax").
@@ -36,7 +36,7 @@ def build_view_ddl(yaml_doc: dict, *, catalog: str, schema: str, view_name: str)
 def default_view_name(model_name: str, source_table: str) -> str:
     """Default snake_case view name: `{model}_{fact}_mv` (matches the
     `dunder_mifflin_sales_mv`-style worked-example naming when model + fact
-    combine). Callers (the `build-mv` command, the Genie skill) may override
+    combine). Callers (the `build-mv` command) may override
     this per-invocation.
     """
     return f"{to_snake(model_name)}_{to_snake(source_table)}_mv"

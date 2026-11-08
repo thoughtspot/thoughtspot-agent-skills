@@ -257,11 +257,12 @@ def test_path_qualified_backtick_form_is_caught(tmp_path):
 # ── cross-runtime name collision (B2) ──────────────────────────────────────
 
 def test_same_name_in_two_runtimes_resolves_against_the_copy_that_has_items(tmp_path):
-    """cli and coco both carry ts-convert-from-snowflake-sv; only cli has open-items."""
+    """cli and claude both carry the skill; only cli has open-items (the shape three
+    skills had while the retired CoCo runtime mirrored them)."""
     skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
           items=[2, 3, 4, 5], runtime="cli")
     skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
-          items=None, runtime="coco-snowsight")
+          items=None, runtime="claude")
     p = shared_file(tmp_path, "See ts-convert-from-snowflake-sv open-item #3 for the finding.\n")
     known = known_map(tmp_path)
     assert c.check_shared(p, tmp_path, known) == []
@@ -271,7 +272,7 @@ def test_same_name_in_two_runtimes_still_fails_on_a_real_dangler(tmp_path):
     skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
           items=[2, 3], runtime="cli")
     skill(tmp_path, "ts-convert-from-snowflake-sv", {"SKILL.md": "x\n"},
-          items=None, runtime="coco-snowsight")
+          items=None, runtime="claude")
     p = shared_file(tmp_path, "See ts-convert-from-snowflake-sv open-item #99.\n")
     known = known_map(tmp_path)
     problems = c.check_shared(p, tmp_path, known)

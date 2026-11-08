@@ -4,8 +4,9 @@ model builders.
 Relocated from ts_cli/model_builder.py + ts_cli/tableau/naming.py (BL-063 PR 5) —
 these encode ThoughtSpot TML semantics (formula_ cross-reference prefix,
 double-aggregation collapse, column/formula/parameter collision rules), not any
-source platform's. Pure functions, stdlib only — part of the Genie-vendorable
-closure. Never fork these into a platform module; import them.
+source platform's. Pure functions, stdlib only (a constraint from the retired Genie
+runtime's vendored closure, no longer required — see ``ts_cli/databricks/__init__.py``).
+Never fork these into a platform module; import them.
 """
 from __future__ import annotations
 
@@ -306,15 +307,14 @@ class UntranslatableError(Exception):
     """A formula/expression construct has no deterministic translation to the
     other platform's syntax.
 
-    Canonical home (BL-063 PR 14 — Genie vendor wiring): both the reverse
+    Canonical home (BL-063 PR 14 — retired Genie vendor wiring): both the reverse
     (Databricks-SQL -> ThoughtSpot formula, `mv_sql.py`) and forward
     (ThoughtSpot formula -> Databricks-SQL, `mv_emit_expr.py`) directions
     raise this SAME exception type for the same concept — "no documented
     deterministic mapping exists" — so a single `except UntranslatableError`
-    catches either direction's failures. Concatenating both modules into one
-    vendored Genie notebook namespace (`agents/databricks/build_mv_lib.py`)
-    would otherwise define the class twice under one name, which
-    `assert_no_duplicate_top_level_names` rejects. `mv_sql.py` and
+    catches either direction's failures. Concatenating both modules into the
+    retired Genie runtime's one vendored notebook namespace would have defined
+    the class twice under one name, which that runtime's build rejected. `mv_sql.py` and
     `mv_emit_expr.py` both re-export this name (`from ts_cli.formula_common
     import UntranslatableError`) so existing `from
     ts_cli.databricks.mv_sql import UntranslatableError` / `from

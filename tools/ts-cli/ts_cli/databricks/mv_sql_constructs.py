@@ -3,7 +3,8 @@
 Split out of mv_sql.py to keep both files under the file-size warn line
 (BL-063 PR3) — pure function move, no behavior change. Pure functions: SQL
 cursor + column resolver in, TS formula text out. No I/O, no network calls.
-stdlib only (Genie-vendorable — see package docstring).
+stdlib only (a retired Genie-runtime constraint, no longer required — see the
+package docstring).
 
 Circular-import seam: this module is a callee of mv_sql._keyword_construct,
 but its own handlers need mv_sql's expression-parsing primitives

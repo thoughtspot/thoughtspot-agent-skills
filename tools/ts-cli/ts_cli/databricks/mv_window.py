@@ -1,8 +1,8 @@
 """Metric View window-spec parsing (measures[].window).
 
 Pure functions: window block in, parsed dict out. No I/O, no network calls —
-trivially unit-testable. stdlib only (Genie-vendorable — see package
-docstring).
+trivially unit-testable. stdlib only
+(a retired Genie-runtime constraint, no longer required — see the package docstring).
 
 All five range values live-verified 2026-07-08/09; see
 docs/audit/2026-07-08-dbx-window-claim-matrix.md and

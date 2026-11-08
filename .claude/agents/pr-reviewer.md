@@ -208,7 +208,7 @@ inputs wrong after its fix, and #440 took five or more rounds (spec §1, F9).
 - For each bug the diff fixes, name the class it belongs to, then search for
   siblings: the same pattern in the other converters (`agents/cli/ts-convert-*`,
   `tools/ts-cli/ts_cli/*/`), the other call sites of the changed function, the
-  mapping doc's other rows, the CoCo mirror.
+  mapping doc's other rows.
 - Construct inputs beyond the one in the PR and run them through the fixed path.
 - Check that the new test would fail on the old code for a reason other than the
   exact literal it was written against.

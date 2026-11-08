@@ -2,8 +2,8 @@
 
 # ThoughtSpot Table TML — Construction Reference
 
-How to construct a valid ThoughtSpot Table TML for import via the REST API or
-stored procedures. Platform-agnostic — applies to any source (Snowflake, Databricks,
+How to construct a valid ThoughtSpot Table TML for import with `ts tml import` or the
+REST API. Platform-agnostic — applies to any source (Snowflake, Databricks,
 Redshift, etc.).
 
 For parsing TML that was **exported** from ThoughtSpot (PyYAML pitfalls,
@@ -210,17 +210,23 @@ future updates.
 
 ### Retrieving the GUID after import
 
-**CLI workflow:** `ts tml import` often returns an empty `object` list even on success.
-Retrieve the GUID by searching immediately after import:
+Read the GUID from the `ts tml import` output: `response.object[0].header.id_guid`, or
+`response.header.id_guid` in the flat response shape (`tml_common.extract_imported_guid`
+reads both). ThoughtSpot often returns no GUID even on success; `ts tml import` then
+back-fills one by searching for the TML's `name:` and taking the first exact match.
+
+That search is scoped to neither a subtype nor a connection: it searches every
+`LOGICAL_TABLE` (Tables, Models, Worksheets, Views) on every connection and takes the
+first exact name match in server order. So if **anything** else already carries the same
+name — a Model, a View, or a Table on another connection — the back-filled GUID can be
+that object's. Whenever the name may not be unique, confirm with a lookup scoped to both
+subtype and connection (see [thoughtspot-connection.md](thoughtspot-connection.md)):
 
 ```bash
-ts metadata search --subtype ONE_TO_ONE_LOGICAL --name '{table_name}' --profile {profile}
+ts metadata search --subtype ONE_TO_ONE_LOGICAL --connection '{connection_name}' --name '{table_name}' --profile {profile}
 ```
 
-**CoCo / stored procedure workflow:** Use `RESULT_SCAN` of the import call — do NOT
-search by name. `TS_SEARCH_MODELS` returns tables from ALL connections; you cannot
-distinguish newly-created tables from pre-existing ones with the same name. See the
-CoCo SKILL.md for the `OBJECT_AGG` extraction pattern.
+`ts tables create` already does this scoped lookup itself (`_find_guid_by_name`).
 
 ### Transient JDBC errors
 

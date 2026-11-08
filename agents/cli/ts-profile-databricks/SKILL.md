@@ -309,8 +309,8 @@ If it reports an empty secret, the user has not run `source ~/.zshenv` yet.
 > credential store, surviving backups and `rsync`.
 
 **Only if the user specifically needs a named CLI profile** (e.g. to pass
-`--profile {dbx_profile}` or set `DATABRICKS_CONFIG_PROFILE` for
-`agents/databricks/deploy.sh`), tell them how to add it themselves and name the
+`--profile {dbx_profile}` to the `databricks` CLI, or set `DATABRICKS_CONFIG_PROFILE`
+for a tool that reads it), tell them how to add it themselves and name the
 trade-off — do **not** write the secret to the file on their behalf:
 
 ```
@@ -325,8 +325,8 @@ named profile, add this yourself and keep the file at chmod 600:
   auth_type = oauth-m2m
 ```
 
-Note that `deploy.sh` only passes `--profile` when `DATABRICKS_CONFIG_PROFILE` is
-set; with it unset, the CLI picks up the env vars above and no profile is needed.
+With no profile named, the `databricks` CLI picks up the env vars above and no
+profile is needed.
 
 #### A-SP5 — Collect Workspace Defaults
 
@@ -853,6 +853,7 @@ warehouse_id = profile["sql_warehouse_http_path"].rstrip("/").split("/")[-1]
 
 | Version | Date | Summary |
 |---|---|---|
+| 2.0.1 | 2026-11-08 | The named-CLI-profile guidance no longer cites the Databricks Genie runtime's `deploy.sh` (retired 2026-11-08); it now speaks of the `databricks` CLI and any tool that reads `DATABRICKS_CONFIG_PROFILE` |
 | 2.0.0 | 2026-08-26 | Stop writing credentials to `~/.databrickscfg` — the CLI reads `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET`/`DATABRICKS_TOKEN` from the environment, so the secret stays in the keychain (live-verified). A named CLI profile is now opt-in and user-written |
 | 1.1.1 | 2026-07-22 | Relax prompt-batching: credential flows are mostly sequential, but independent inputs can now be batched (BL-074) |
 | 1.1.0 | 2026-07-13 | Adopt `ts profiles add/update/remove` CLI commands — replaces hand-coded slug derivation, keychain commands, env var naming, and profile JSON I/O |

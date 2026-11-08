@@ -193,7 +193,7 @@ def generate_index(repo_root: Path) -> str:
             repo_root.glob(f"agents/{runtime}/*/references/open-items.md")
         )
 
-    # Deduplicate by skill name (same skill might appear in cli + coco)
+    # Deduplicate by skill name (the same skill could appear in more than one runtime)
     seen_skills: set[str] = set()
     unique_files: list[tuple[str, Path]] = []
     for f in files:
