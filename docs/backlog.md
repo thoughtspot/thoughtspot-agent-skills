@@ -7064,6 +7064,17 @@ and `CLAUDE.md` returned zero hits, and only 5 of 28 CLI skills carried a `When 
 `scripts/pre-commit.sh`, and the frontmatter of every `agents/*/*/SKILL.md`.
 **Status:** OPEN.
 
+**2026-11-08: a `metadata:` namespace now exists; build on it.** The README skills tables are
+generated (`tools/validate/generate_readme_skills.py`): every `SKILL.md` frontmatter carries a
+`metadata:` block (`category`, `summary`, plus `subcategory` / `platform` / `coverage` where the
+table has those columns), and the six category "problem it solves" cells that the scope note
+below calls hand-written and not generator scope now live in that generator's `CATEGORIES`
+constant. So step 1's `personas` and `use-when` keys should go under `metadata:`, not top-level
+frontmatter. One constraint carries over: the Agent Skills spec defines `metadata` as a
+string-to-string map and `generate_readme_skills.py --check` fails any non-string value, so a
+list of personas must be one delimited string (e.g. `personas: "se, admin"`) unless that rule is
+revisited deliberately.
+
 **Scope narrowed 2026-07-30**, the same day it was filed. The README "Which skill do I need?" routing
 table this entry originally also covered was **removed** on review: at 18 rows it restated the
 skills catalogue immediately below it in a second format, which is duplication a generator would
