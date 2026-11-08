@@ -105,7 +105,7 @@ These branches are pushed to remote for backup but never merged to main until ve
 **Starting a new wip skill:**
 1. `git checkout -b wip/<skill-name>` from current main
 2. Remove the skill's `.gitignore` entry on that branch only
-3. Update README.md and agents/cli/SETUP.md to include the skill (`check_consistency.py` enforces this)
+3. Add a `metadata:` block (`category`, `summary`, and the table's own fields; see "Add a new skill" above) to the skill's SKILL.md frontmatter and run `python3 tools/validate/generate_readme_skills.py` to add it to the README tables; add its `ln -s` step to agents/cli/SETUP.md (`check_consistency.py` enforces this)
 4. `git push -u origin wip/<skill-name>`
 
 **Session-start protocol:** see `.claude/rules/branching.md` — check your branch before making any edits.
