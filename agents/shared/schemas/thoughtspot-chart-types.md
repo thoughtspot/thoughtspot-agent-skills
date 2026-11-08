@@ -1,34 +1,49 @@
-<!-- currency: thoughtspot — 2026-07 (validated in 2026-07-11 external sweep — no changes needed) -->
+<!-- currency: thoughtspot — 2026-11 (enum re-read live 2026-11-08 from the import validator on a dev build; library status, limits and 26.9–26.11 features from release notes only, BL-449) -->
 
 # ThoughtSpot Chart Types — verified enum + intent mapping
 
-_Verified live on se-thoughtspot 2026-06-16 against model `P1-UK-Bank-Customers`
-(liveboard `5db36c15-00a5-45bb-b764-2fffd2fcb269`). The enum was read from the import
+_First verified live on se-thoughtspot 2026-06-16 against model `P1-UK-Bank-Customers`
+(liveboard `5db36c15-00a5-45bb-b764-2fffd2fcb269`): the enum was read from the import
 validator's own error message (the authoritative source), and 24 types were imported +
-round-tripped to confirm they bind._
+round-tripped to confirm they bind. **Re-read 2026-11-08** (BL-449) the same way on two
+internal dev-build clusters (profiles `spotql-setops` and `semantic-sql`, identical lists);
+see "Provenance" below for what that does and does not prove._
 
-## The authoritative `answer.chart.type` enum (44 values)
+## The authoritative `answer.chart.type` enum (52 values)
 
 ```
-ADVANCED_AREA, ADVANCED_BAR, ADVANCED_COLUMN, ADVANCED_LINE, ADVANCED_LINE_COLUMN,
-ADVANCED_LINE_STACKED_COLUMN, ADVANCED_PIVOT_TABLE, ADVANCED_STACKED_AREA,
-ADVANCED_STACKED_BAR, ADVANCED_STACKED_COLUMN, AREA, BAR, BUBBLE, CANDLESTICK, COLUMN,
-CUSTOM_CHART, FUNNEL, GEO_AREA, GEO_BUBBLE, GEO_EARTH_AREA, GEO_EARTH_BAR,
-GEO_EARTH_BUBBLE, GEO_EARTH_GRAPH, GEO_EARTH_HEATMAP, GEO_HEATMAP, GRID_TABLE, HEATMAP,
-KPI, LINE, LINE_COLUMN, LINE_STACKED_COLUMN, MUZE_STUDIO, PARETO, PIE, PIVOT_TABLE,
-SANKEY, SCATTER, SPIDER_WEB, STACKED_AREA, STACKED_BAR, STACKED_COLUMN, TREEMAP,
-WATERFALL, WHISKER_SCATTER
+ADVANCED_AREA, ADVANCED_BAR, ADVANCED_BUBBLE, ADVANCED_CANDLESTICK, ADVANCED_COLUMN,
+ADVANCED_DONUT, ADVANCED_FUNNEL, ADVANCED_HEATMAP, ADVANCED_LINE, ADVANCED_LINE_COLUMN,
+ADVANCED_LINE_STACKED_COLUMN, ADVANCED_PARETO, ADVANCED_PIVOT_TABLE, ADVANCED_SCATTER,
+ADVANCED_STACKED_AREA, ADVANCED_STACKED_BAR, ADVANCED_STACKED_COLUMN, ADVANCED_WATERFALL,
+AREA, BAR, BUBBLE, CANDLESTICK, COLUMN, CUSTOM_CHART, FUNNEL, GEO_AREA, GEO_BUBBLE,
+GEO_EARTH_AREA, GEO_EARTH_BAR, GEO_EARTH_BUBBLE, GEO_EARTH_GRAPH, GEO_EARTH_HEATMAP,
+GEO_HEATMAP, GRID_TABLE, HEATMAP, KPI, LINE, LINE_COLUMN, LINE_STACKED_COLUMN,
+MUZE_STUDIO, PARETO, PIE, PIVOT_TABLE, SANKEY, SCATTER, SPIDER_WEB, STACKED_AREA,
+STACKED_BAR, STACKED_COLUMN, TREEMAP, WATERFALL, WHISKER_SCATTER
 ```
+
+`tools/ts-cli/ts_cli/chart_types.py` carries this list as `CHART_TYPE_ENUM`, and
+`tools/ts-cli/tests/test_chart_types.py` fails when the two disagree. Change both together.
+
+**Provenance.** Method: `ts tml import --policy VALIDATE_ONLY` of an Answer whose
+`chart.type` is not a real value; the error (code 14528) lists every allowed value.
+VALIDATE_ONLY creates nothing. Both clusters report `release_version: test`, so this is
+the enum in **current product code, not in a named release**. A value can be here and still
+be rejected by your cluster, and one rejected value fails the whole import. The 44 values
+read on 2026-06-16 from the SE demo cluster (a release build) are all still present. The 8
+added since are `ADVANCED_*` types (see "Which types the new library covers" below).
 
 - **`GAUGE` is NOT a valid type** — it was rejected, and one bad enum value fails the
   whole import (even under `--policy PARTIAL`). Validate the type before import.
 - `TABLE` is not in the enum. For a tabular tile, **omit the `chart` block and set
   `display_mode: TABLE_MODE`** (the export then shows a default `chart.type` but renders as
   a table). `GRID_TABLE` / `PIVOT_TABLE` are the chart-engine table types.
-- `ADVANCED_*` are the **Muze charting library** (phase 1 GA since 26.6.0.cl — see the
-  dedicated section below). They use a different encoding block (`custom_chart_config`,
-  not `axis_configs`). Legacy (plain) names remain the portable default for clusters that
-  haven't adopted Muze yet.
+- `ADVANCED_*` are the **new charts library** (Muze). It is GA and the product default
+  since 26.7 (release notes). See the dedicated section below. These types use a different
+  encoding block (`custom_chart_config`, not `axis_configs`). The plain names are the Legacy
+  library. They still import everywhere, but they are no longer what the product draws by
+  default.
 - `CUSTOM_CHART` / `MUZE_STUDIO` are extension/custom-viz hooks — not general-purpose.
 - `GEO_EARTH_*` are the 3-D globe variants of the geo charts.
 
@@ -65,37 +80,78 @@ WATERFALL, WHISKER_SCATTER
 anchor column is geo-tagged in ThoughtSpot. `CANDLESTICK`/`WHISKER_SCATTER` import but only
 render meaningfully with OHLC / distribution-shaped inputs.
 
-## Muze charting library (`ADVANCED_*` types) — phase 1 GA
+## The new charts library (Muze, `ADVANCED_*` types) — GA, the product default since 26.7
 
 ThoughtSpot has two charting libraries:
 
 - **Legacy** — the original charts. In TML these are the plain type names (`COLUMN`, `BAR`,
   `LINE`, …) with `chart.axis_configs`.
-- **Muze** — ThoughtSpot's newer charting engine. In TML these are the **`ADVANCED_*`** type
-  names with `chart.custom_chart_config`. _(Note: the TML enum and ThoughtSpot's own internal
-  error messages call these "advanced" / the Legacy ones "standard" — the **branded** library
-  names are **Muze** and **Legacy**, but the literal `ADVANCED_*` enum values are unchanged.)_
+- **New charts library (Muze)** — ThoughtSpot's newer charting engine. In TML these are the
+  **`ADVANCED_*`** type names with `chart.custom_chart_config`. _(Note: the TML enum and
+  ThoughtSpot's own internal error messages call these "advanced" / the Legacy ones
+  "standard". The release notes say "new charts library". **Muze** is the engine's name,
+  as in the cluster's `muze*` config flags and the `MUZE_STUDIO` type. The literal
+  `ADVANCED_*` enum values are unchanged.)_
 
-Muze reached **phase 1 GA** in ThoughtSpot Cloud 26.6.0.cl. The `newChartsLibrary` property
-on `SearchViewConfig` / `LiveboardViewConfig` controls enablement. _All findings below
-verified live on se-thoughtspot 2026-06-17._
+### Status
 
-### Scope — which types the Muze library covers
+| When | What | Source |
+|---|---|---|
+| 26.6.0.cl | Phase 1 GA: the cartesian + pivot types | this doc's 2026-06-17 edition, whose shelf findings were verified live on the SE demo cluster |
+| 26.7 | GA, and the **product default**; the admin default is instance-wide | release notes only |
+| 26.10 | Adds waterfall, pareto, funnel and heatmap | release notes only |
+| (not stated) | Also covers donut, scatter and bubble | release notes only |
 
-The `ADVANCED_*` (Muze) family is currently **only the cartesian + pivot types** (10 of them):
+**Limits** (release notes only): at most **2 axes** and **one slice-by-color attribute**
+per chart. A Tableau viz with a third axis, or with two dimensions on Color, does not fit
+one new-library chart.
 
-```
-ADVANCED_COLUMN  ADVANCED_BAR  ADVANCED_LINE  ADVANCED_AREA
-ADVANCED_STACKED_COLUMN  ADVANCED_STACKED_BAR  ADVANCED_STACKED_AREA
-ADVANCED_LINE_COLUMN  ADVANCED_LINE_STACKED_COLUMN  ADVANCED_PIVOT_TABLE
-```
+The `newChartsLibrary` property on `SearchViewConfig` / `LiveboardViewConfig` (Visual
+Embed SDK) controls enablement in an embed. The dev builds read on 2026-11-08 also carry
+one enablement flag per added type (`muzeWaterfallChartEnabled`, `muzeDonutChartEnabled`,
+…, all on there). So the enum alone may not show whether a type is switched on for a
+cluster. How a tile of a switched-off type renders is unverified. _The shelf-model findings below were verified live on
+se-thoughtspot 2026-06-17 unless dated otherwise._
 
-There is **no** `ADVANCED_SCATTER`, `ADVANCED_PIE`, `ADVANCED_HEATMAP`, `ADVANCED_SANKEY`,
-etc. So Muze charting applies to bar/line/area/column/combo/pivot migrations; every other
-intent (composition, correlation, flow, geo, distribution, funnel, …) stays on Legacy charts.
+### Which types the new library covers
 
-The Legacy and Muze types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`, etc.). The
-important difference is **how the encoding (which column goes on which shelf) is expressed**:
+18 `ADVANCED_*` types (enum read 2026-11-08). Each has a Legacy twin, which is its name
+without the prefix, except `ADVANCED_DONUT`, whose twin is `PIE`:
+
+| `ADVANCED_` + | Legacy twin | Release (per release notes) | Verified live |
+|---|---|---|---|
+| `COLUMN`, `BAR`, `LINE`, `AREA`, `STACKED_COLUMN`, `STACKED_BAR`, `STACKED_AREA`, `LINE_COLUMN`, `LINE_STACKED_COLUMN`, `PIVOT_TABLE` | same name | 26.6.0.cl (phase 1) | enum + import round trip, SE demo cluster (release build), 2026-06 |
+| `WATERFALL`, `PARETO`, `FUNNEL`, `HEATMAP` | same name | 26.10 | enum, plus a VALIDATE_ONLY import with and without `axis_configs` (both accepted), dev build, 2026-11-08. Not imported or rendered |
+| `SCATTER`, `BUBBLE` | same name | not stated | as above. Three existing `ADVANCED_SCATTER` Answers on the dev build export a `custom_chart_config` (shelves below) |
+| `DONUT` | `PIE` | not stated | as above |
+| `CANDLESTICK` | `CANDLESTICK` | **no release note found** | enum only (dev build). Treat it as unreleased |
+
+These have **no** `ADVANCED_*` twin and stay on Legacy: `TREEMAP`, `SANKEY`, `SPIDER_WEB`,
+`WHISKER_SCATTER`, every `GEO_*`, `KPI`, `GRID_TABLE`. (`CUSTOM_CHART` and `MUZE_STUDIO`
+are the custom-visual hooks.)
+
+`tools/ts-cli/ts_cli/chart_types.py` holds the twin rule (`legacy_twin()`). The axis-encoding lint
+(`tml_lint.CHART_NEEDS_AXIS`) and the Tableau generator's measure floor (`CHART_NEEDS`)
+derive their `ADVANCED_*` members from it. A new-library type is therefore classified
+exactly like its Legacy twin: `ADVANCED_SCATTER` needs an axis like `SCATTER`, and
+`ADVANCED_DONUT` is exempt like `PIE`.
+
+### Added since 26.9 — release notes only, TML shape not captured
+
+| Release | Feature |
+|---|---|
+| 26.9 | Gradient legends (Column, Bar, Line-column, Scatter, Bubble, Donut); outline encoding; chart caching |
+| 26.10 | Trellis and faceting modes (the `trellis-by` shelf below predates this; how the new modes appear in TML is unverified) |
+| 26.11 | Dashed / dotted line styling for future dates; `rules_UNSTABLE` CSS for embedded charts |
+
+None of these were exported or imported here. Capture a real export before emitting any of
+them. Until then, a generator should leave them at product defaults.
+
+### Legacy ↔ new library: how the encoding differs
+
+The Legacy and new-library types map 1:1 by intent (`COLUMN` ↔ `ADVANCED_COLUMN`, `PIE` ↔
+`ADVANCED_DONUT`, …). The important difference is **how the encoding (which column goes on
+which shelf) is expressed**:
 
 | | Legacy chart (`COLUMN`, `BAR`, …) | Muze chart (`ADVANCED_*`) |
 |---|---|---|
@@ -133,6 +189,12 @@ Shelf keys (cartesian types): **`x-axis`**, **`y-axis`**, **`slice-with-color`**
 (series/color), **`trellis-by`** (facets / small multiples). Each populated shelf carries
 `axes: [{type: FLAT, column: <display name>}]` + `mode: AXIS_DRIVEN`; an empty shelf carries
 just `mode: AXIS_DRIVEN`. (`type: FLAT` and `mode: AXIS_DRIVEN` are the only values observed.)
+
+`ADVANCED_SCATTER` (read-only export of three existing Answers, dev build, 2026-11-08) uses
+**`x-axis`**, **`y-axis`**, **`slice`** and **`slice-with-color`**, and has no `trellis-by`.
+Those exports reference columns by display name, not GUID. That differs from the combo
+finding below, and nothing here establishes which form a fresh import accepts, so the
+capture-and-replay rule stands. The shelves of the other added types have not been read.
 
 ### Tableau alignment — why Muze is a closer migration target
 
@@ -192,14 +254,24 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 
 ### Guidance for generators (Tableau skill, liveboard-builder)
 
-- **Default to Legacy charts, but PROMPT the user to choose** Legacy vs Muze before generating
-  chart TML. Legacy is the portable default (works on every cluster); Muze is phase 1 GA
-  (26.6.0.cl+) but may not be enabled on older clusters.
-- When the user picks **Muze**: emit `ADVANCED_*` + `custom_chart_config` for the
-  cartesian/pivot intents (bar/column/line/area/stacked/combo/pivot), and **fall back to the
-  Legacy type** for any intent with no Muze equivalent (pie, scatter/bubble, heatmap,
-  treemap, sankey, funnel, waterfall, pareto, spider, geo, candlestick, KPI). Map Tableau's
-  Color shelf → `slice-with-color` and small multiples → `trellis-by` for a closer migration.
+- **The new library is the product default (26.7+), so a Legacy tile is now an opt-out,
+  not a neutral default.** The repo's generators still emit Legacy names by default (the
+  Tableau skill asks, Legacy first). Two things hold the switch back (BL-449):
+  1. The added types are verified only in a dev build's enum, whose release cannot be
+     read. Emitting one into a cluster on an earlier release fails the **whole** import.
+  2. `ADVANCED_*` + `axis_configs` loses the encoding on export (below), so a Tableau Color
+     split survives only through a captured `custom_chart_config`. Render fidelity of the
+     default path has not been checked.
+
+  Read the enum on a release build that reports its version, then flip the default.
+- When the user picks the **new library**: emit `ADVANCED_*` for the phase-1
+  cartesian/pivot intents (bar/column/line/area/stacked/combo/pivot), and **keep the Legacy
+  type** for everything else: pie, scatter/bubble, heatmap, treemap, sankey, funnel,
+  waterfall, pareto, spider, geo, candlestick, KPI. Waterfall, pareto, funnel, heatmap,
+  donut, scatter and bubble now have `ADVANCED_*` twins, but those stay unused until
+  verified on a named release. Map Tableau's Color shelf → `slice-with-color` and small
+  multiples → `trellis-by` for a closer migration. Respect the limits: at most 2 axes and
+  one slice-by-color attribute.
 - The shelf model is also a cleaner fit for the liveboard-builder's intent → encoding step
   (series and small-multiples become first-class shelves rather than implicit extra columns).
 - `client_state_v2` differs slightly between the two (the Muze export omits
