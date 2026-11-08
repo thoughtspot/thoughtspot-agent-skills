@@ -643,6 +643,16 @@ def _build_model_summary(
         "import_status": import_status,
         "model_guid": model_guid,
     }
+    reselected = build_info.get("reselected_columns") or []
+    if reselected:
+        # BL-447: a distinct-count fact is a `unique count` formula, so a table whose only
+        # column it was would be left with none selected, which ThoughtSpot refuses.
+        summary["reselected_columns"] = {
+            "columns": reselected,
+            "reason": ("each was its table's only column before a distinct-count fact "
+                       "became a unique count formula; kept as an attribute because "
+                       "ThoughtSpot refuses a Model that selects no column of a table"),
+        }
     if import_error is not None:
         summary["import_error"] = import_error
     return summary

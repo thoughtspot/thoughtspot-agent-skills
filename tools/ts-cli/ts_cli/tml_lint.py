@@ -161,7 +161,9 @@ def _wrapped_column(formula_id: Any, exprs: dict) -> str | None:
     return None
 
 
-def _check_i5(columns: list, formulas: list) -> list[str]:
+def check_i5(columns: list, formulas: list) -> list[str]:
+    """Invariant I5 findings for a Model's `columns[]` / `formulas[]`. The one copy:
+    `tools/validate/check_tml.py` imports it rather than keeping its own (BL-447 review)."""
     # I5 — a COUNT_DISTINCT aggregation on a physical column, or on a formula column whose
     # expr only wraps one ([T::c]), flips MEASURE → ATTRIBUTE silently on a VARCHAR/DATE
     # column (live 2026-10-29: the formula probe was demoted like the column). Numeric
@@ -257,7 +259,7 @@ def lint_tml(data: dict) -> list[str]:
                 f"joins silently fail at query time ('{t.get('name')} does not exist in schema')."
             )
 
-    findings.extend(_check_i5(columns, formulas))
+    findings.extend(check_i5(columns, formulas))
 
     # I8 — every column_id in columns[] must be unique. A duplicate is a HARD import
     # rejection ("columns should have unique column_id values"). When a source defines

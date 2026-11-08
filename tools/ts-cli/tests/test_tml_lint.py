@@ -596,3 +596,13 @@ def test_i5_skips_declared_attribute():
     assert not [f for f in lint_tml(doc) if f.startswith("I5")]
     doc["model"]["columns"][0]["properties"]["column_type"] = "MEASURE"
     assert [f for f in lint_tml(doc) if f.startswith("I5")]
+
+
+def test_i5_wrapper_chain_cycle_terminates_without_a_finding():
+    # The seen-set guard in tml_lint._wrapped_column: f_a -> [f_b] -> [f_a] must stop,
+    # not loop, and a cycle wraps no column, so there is nothing to report.
+    data = _bare_formula_model(expr="[f_b]")
+    data["model"]["formulas"].append({"id": "f_b", "name": "B", "expr": "[f_cust]"})
+    data["model"]["columns"].append({"name": "B", "formula_id": "f_b",
+                                     "properties": {"column_type": "ATTRIBUTE"}})
+    assert not [f for f in lint_tml(data) if f.startswith("I5")]
