@@ -23,13 +23,17 @@ from ts_cli.migrate.apply_plan import (  # noqa: E402
 )
 from ts_cli.migrate.schema import ColumnMappingRow, SET_BLOCKER  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import skill_body  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 SKILL = REPO / "agents" / "cli" / "ts-migrate-orgs"
 NOTES = SKILL / "references" / "migration-notes.md"
 
 
 def _skill_text():
-    return (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    # The body only: the frontmatter's README summary must not satisfy a doc-sync check.
+    return skill_body(SKILL / "SKILL.md")
 
 
 def _row(model, tenant, published, status="MATCHED"):

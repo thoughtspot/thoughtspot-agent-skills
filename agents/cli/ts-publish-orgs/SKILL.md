@@ -3,7 +3,7 @@ name: ts-publish-orgs
 description: Publish ThoughtSpot Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them — defining the template variables and metadata parameterization that publishing requires — via the `ts publish export/resolve/apply/verify/rollback` CLI pipeline.
 metadata:
   category: "Platform & Governance"
-  summary: "Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline"
+  summary: "Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export` → `resolve` → `apply` pipeline, with `rollback` to undo and `status` to verify"
 ---
 
 # ThoughtSpot: Publish Objects to Orgs
@@ -501,5 +501,6 @@ record of the original static values.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-11-08 | README summary (`metadata.summary`) no longer lists a `ts publish verify` command, which does not exist: Step 11 verifies with `ts publish status`. No behaviour change. |
 | 1.1.0 | 2026-07-27 | Correct Step 12's column-security guidance: CSR *can* be defined on published objects but is Org-scoped, and the mechanism is chosen by audience not publication state; hand off to `/ts-security-columns` |
 | 1.0.0 | 2026-07-26 | Initial release |

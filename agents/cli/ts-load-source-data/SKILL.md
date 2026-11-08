@@ -4,7 +4,7 @@ description: Load source data (CSV, Tableau download, manifest) into a warehouse
 metadata:
   category: Setup
   subcategory: Data
-  summary: "Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to"
+  summary: "Load CSV data into Snowflake or Databricks (or generate synthetic data from schema definitions) for ThoughtSpot to connect to"
 ---
 
 # Load Source Data
@@ -199,5 +199,6 @@ Next steps:
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-11-08 | README summary (`metadata.summary`) says it loads into Snowflake or Databricks; Databricks loading shipped in 1.1.0. No behaviour change. |
 | 1.1.0 | 2026-07-16 | **Databricks loading** via `ts load databricks` (ts-cli v0.57.0) — infers schema, generates synthetic data, and provisions tables (Delta column-mapping preserves spaced column names 1:1) through the SQL Statement Execution API. Live-verified on ps-internal (created + populated `orders_demo`). Documents the OAuth/PKCE connection caveat: the new table must be selected in the ThoughtSpot connection UI before a model can bind (SERVICE_ACCOUNT connections introspect automatically). Prereq ts-cli v0.57.0 |
 | 1.0.0 | 2026-06-26 | Initial release — Snowflake loading with schema inference and synthetic data generation |

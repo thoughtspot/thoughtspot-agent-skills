@@ -42,9 +42,9 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-profile-snowflake`](agents/claude/ts-profile-snowflake/SKILL.md) | Add, update, test, or delete Snowflake profiles (Claude Code only — Cortex Code manages connections natively) | Credentials |
 | [`ts-profile-databricks`](agents/cli/ts-profile-databricks/SKILL.md) | Add, update, test, or delete Databricks profiles — Service Principal (OAuth M2M), PAT, or existing CLI profile | Credentials |
 | [`ts-profile-tableau`](agents/cli/ts-profile-tableau/SKILL.md) | Add, update, test, or delete Tableau Server/Cloud profiles — password or PAT auth | Credentials |
-| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data |
+| [`ts-load-source-data`](agents/cli/ts-load-source-data/SKILL.md) | Load CSV data into Snowflake or Databricks (or generate synthetic data from schema definitions) for ThoughtSpot to connect to | Data |
 | [`ts-setup-tenancy`](agents/cli/ts-setup-tenancy/SKILL.md) | Stand up a reproducible multi-tenancy **test environment** — Orgs, per-Org groups and users, warehouse tables, and optionally a published Model with per-tenant aliases and column security. Four scenarios (`topology` / `per-org` / `published` / `mixed`) covering the pre-migration state, the post-migration target, and the transition between them | Tenancy |
-| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback | Tenancy |
+| [`ts-migrate-orgs`](agents/cli/ts-migrate-orgs/SKILL.md) | Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable `backup` → `rewrite_views` → `rewrite_content` → `move_shielded` → `share_grants` (the last two on new-Org runs only), with the untouched source Org as the rollback | Tenancy |
 
 <!-- END GENERATED: skills-setup -->
 
@@ -113,7 +113,7 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it does |
 |---|---|
-| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export/resolve/apply/verify/rollback` pipeline |
+| [`ts-publish-orgs`](agents/cli/ts-publish-orgs/SKILL.md) | Publish Tables, Models, Answers and Liveboards from the Primary Org to target Orgs without copying them, defining the template variables and parameterization publishing requires, via the `ts publish export` → `resolve` → `apply` pipeline, with `rollback` to undo and `status` to verify |
 | [`ts-security-columns`](agents/cli/ts-security-columns/SKILL.md) | Restrict which columns a group can see on a Table or Model — chooses between the two mechanisms (column security rules and column-level sharing) **per Org**, explains the trade-off, and drives `ts share` / `ts security column-rules` |
 | [`ts-audit`](agents/cli/ts-audit/SKILL.md) | Scan an environment across five angles — AI Readiness, Data Modeling, Human Readiness, Performance, Security — with per-model scorecards and prioritised findings |
 | [`ts-dependency-manager`](agents/cli/ts-dependency-manager/SKILL.md) | Audit dependencies, safely remove or repoint columns across Models, Views, Answers, Liveboards, or delete an object with everything built on it (administrators only, dry run first) |

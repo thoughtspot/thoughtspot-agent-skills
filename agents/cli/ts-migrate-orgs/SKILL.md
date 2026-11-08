@@ -4,7 +4,7 @@ description: Move a tenant Org's bespoke content off its own Table/Model copies 
 metadata:
   category: Setup
   subcategory: Tenancy
-  summary: "Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable backup → lift → rename → repoint → cleanup with the untouched source Org as the rollback"
+  summary: "Move a tenant Org's bespoke content off its own Table/Model copies onto a **governed published Model**, then retire the old Org. The counterpart to `ts-publish-orgs`: sizes Sets blockers, audits the column mapping, then runs a resumable `backup` → `rewrite_views` → `rewrite_content` → `move_shielded` → `share_grants` (the last two on new-Org runs only), with the untouched source Org as the rollback"
 ---
 
 # Migrate a tenant Org onto the published model
@@ -300,6 +300,7 @@ cutover it holds nothing but this migration's output.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.0.3 | 2026-11-08 | README summary (`metadata.summary`) names the engine's real steps, `backup` → `rewrite_views` → `rewrite_content` → `move_shielded` → `share_grants`, instead of the retired lift → rename → repoint → cleanup sequence. No behaviour change. |
 | 3.0.2 | 2026-10-02 | Step 1 explains how Sets are found: the shared per-Model cohort listing (BL-325). It also covers `models_incomplete` / `discovery_notes`, and the refusal of `--sets-scan` files that predate this fix |
 | 3.0.1 | 2026-07-28 | For aliases the Org of the session is what matters, not admin-vs-user — `TS_WILDCARD_ALL` covers admins too |
 | 3.0.0 | 2026-07-28 | Step 7 is a command, not prose: `ts migrate aliases` derives the wave's aliases from the approved mapping and REFUSES a partial export |
