@@ -23,8 +23,11 @@ MUZE_STUDIO, PARETO, PIE, PIVOT_TABLE, SANKEY, SCATTER, SPIDER_WEB, STACKED_AREA
 STACKED_BAR, STACKED_COLUMN, TREEMAP, WATERFALL, WHISKER_SCATTER
 ```
 
-`tools/ts-cli/ts_cli/chart_types.py` carries this list as `CHART_TYPE_ENUM`, and
-`tools/ts-cli/tests/test_chart_types.py` fails when the two disagree. Change both together.
+`tools/ts-cli/ts_cli/chart_types.py` carries this list as `CHART_TYPE_ENUM`, split into
+`RELEASE_BUILD_CHART_TYPES` (the 44 read on a release build) and `DEV_BUILD_CHART_TYPES`
+(the 8 added since). `tools/ts-cli/tests/test_chart_types.py` fails when the code and this
+block disagree, and when a converter's chart map emits a value outside the release-build
+44. Change the code and this block together.
 
 **Provenance.** Method: `ts tml import --policy VALIDATE_ONLY` of an Answer whose
 `chart.type` is not a real value; the error (code 14528) lists every allowed value.
@@ -96,7 +99,7 @@ ThoughtSpot has two charting libraries:
 
 | When | What | Source |
 |---|---|---|
-| 26.6.0.cl | Phase 1 GA: the cartesian + pivot types | this doc's 2026-06-17 edition, whose shelf findings were verified live on the SE demo cluster |
+| 26.6.0.cl | Phase 1 GA: the cartesian + pivot types | release not sourced; the types were verified live on the SE demo cluster, 2026-06-17 |
 | 26.7 | GA, and the **product default**; the admin default is instance-wide | release notes only |
 | 26.10 | Adds waterfall, pareto, funnel and heatmap | release notes only |
 | (not stated) | Also covers donut, scatter and bubble | release notes only |
@@ -112,15 +115,16 @@ live on se-thoughtspot 2026-06-17 unless dated otherwise._
 ### Which types the new library covers
 
 18 `ADVANCED_*` types (enum read 2026-11-08). Each has a Legacy twin, which is its name
-without the prefix, except `ADVANCED_DONUT`, whose twin is `PIE`:
+without the prefix, except `ADVANCED_DONUT`, whose twin is `PIE`. Only DONUT↔PIE comes
+from the release notes; the other pairings are inferred from the names:
 
 | `ADVANCED_` + | Legacy twin | Release (per release notes) | Verified live |
 |---|---|---|---|
-| `COLUMN`, `BAR`, `LINE`, `AREA`, `STACKED_COLUMN`, `STACKED_BAR`, `STACKED_AREA`, `LINE_COLUMN`, `LINE_STACKED_COLUMN`, `PIVOT_TABLE` | same name | 26.6.0.cl (phase 1) | enum + import round trip, SE demo cluster (release build), 2026-06 |
-| `WATERFALL`, `PARETO`, `FUNNEL`, `HEATMAP` | same name | 26.10 | enum, plus a VALIDATE_ONLY import with and without `axis_configs` (both accepted), dev build, 2026-11-08. Not imported or rendered |
-| `SCATTER`, `BUBBLE` | same name | not stated | as above. Three existing `ADVANCED_SCATTER` Answers on the dev build export a `custom_chart_config` (shelves below) |
-| `DONUT` | `PIE` | not stated | as above |
-| `CANDLESTICK` | `CANDLESTICK` | **no release note** | in the enum on a dev build; no release note — do not emit |
+| `COLUMN`, `BAR`, `LINE`, `AREA`, `STACKED_COLUMN`, `STACKED_BAR`, `STACKED_AREA`, `LINE_COLUMN`, `LINE_STACKED_COLUMN`, `PIVOT_TABLE` | same name (inferred) | 26.6.0.cl (phase 1) | enum + import round trip, SE demo cluster (release build), 2026-06 |
+| `WATERFALL`, `PARETO`, `FUNNEL`, `HEATMAP` | same name (inferred) | 26.10 | enum, plus a VALIDATE_ONLY import with and without `axis_configs` (both accepted), dev build, 2026-11-08. Not imported or rendered |
+| `SCATTER`, `BUBBLE` | same name (inferred) | not stated | as above. Three existing `ADVANCED_SCATTER` Answers on the dev build export a `custom_chart_config` (shelves below) |
+| `DONUT` | `PIE` (release notes) | not stated | as above |
+| `CANDLESTICK` | `CANDLESTICK` (inferred) | **no release note** | in the enum on a dev build; no release note — do not emit |
 
 These have **no** `ADVANCED_*` twin and stay on Legacy: `TREEMAP`, `SANKEY`, `SPIDER_WEB`,
 `WHISKER_SCATTER`, every `GEO_*`, `KPI`, `GRID_TABLE`. (`CUSTOM_CHART` and `MUZE_STUDIO`

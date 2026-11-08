@@ -4,9 +4,9 @@ Three things are pinned here:
 
 1. ``CHART_TYPE_ENUM`` equals the enum block in the shared schema doc, so the doc (which
    records how and where the enum was read live) and the code cannot drift apart.
-2. Every chart type a converter can emit, or that the lint and the Tableau generator
-   classify, is in that enum: one value outside it fails the WHOLE import, PARTIAL policy
-   included. ``ADVANCED_BUBBLE`` sat in ``tableau/liveboard.py`` for months while the
+2. Every chart type a converter can emit is among the 44 read on a release build, and
+   every type the lint and the Tableau generator classify is in the enum: one value a
+   cluster does not accept fails the WHOLE import, PARTIAL policy included. ``ADVANCED_BUBBLE`` sat in ``tableau/liveboard.py`` for months while the
    schema's enum did not list it; this is the check that would have said so.
 3. The Tableau generator's measure floor and cartesian layout classify a new-library
    (``ADVANCED_*``) type like its Legacy twin. Before this, each held a hand-kept list of
@@ -45,7 +45,10 @@ def test_code_enum_matches_the_schema_doc():
 def test_enum_holds_the_new_library_types_read_live_2026_11_08():
     added = {"ADVANCED_BUBBLE", "ADVANCED_CANDLESTICK", "ADVANCED_DONUT", "ADVANCED_FUNNEL",
              "ADVANCED_HEATMAP", "ADVANCED_PARETO", "ADVANCED_SCATTER", "ADVANCED_WATERFALL"}
-    assert added <= ct.CHART_TYPE_ENUM
+    assert ct.DEV_BUILD_CHART_TYPES == added
+    assert len(ct.RELEASE_BUILD_CHART_TYPES) == 44
+    assert not (ct.RELEASE_BUILD_CHART_TYPES & ct.DEV_BUILD_CHART_TYPES)
+    assert ct.CHART_TYPE_ENUM == ct.RELEASE_BUILD_CHART_TYPES | added
     assert len(ct.NEW_LIBRARY_TYPES) == 18
     assert "GAUGE" not in ct.CHART_TYPE_ENUM and "TABLE" not in ct.CHART_TYPE_ENUM
 
@@ -66,7 +69,9 @@ def _converter_chart_maps():
 
 @pytest.mark.parametrize("name", sorted(_converter_chart_maps()))
 def test_every_converter_chart_map_emits_enum_values_only(name):
-    assert _converter_chart_maps()[name] - ct.CHART_TYPE_ENUM == set()
+    # Against the release-build 44, not the dev-build 52: a dev-build-only type in a
+    # converter map would fail the whole import on every release seen so far.
+    assert _converter_chart_maps()[name] - ct.RELEASE_BUILD_CHART_TYPES == set()
 
 
 def test_classification_sets_hold_enum_values_only():

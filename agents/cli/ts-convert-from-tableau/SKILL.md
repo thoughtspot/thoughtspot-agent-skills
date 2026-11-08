@@ -34,7 +34,7 @@ the count-column + bin-style + cohort-handling decisions, or theme + parameter-c
 | [../../shared/schemas/thoughtspot-sql-view-tml.md](../../shared/schemas/thoughtspot-sql-view-tml.md) | SQL View TML structure — for custom SQL datasources |
 | [../../shared/schemas/thoughtspot-liveboard-tml.md](../../shared/schemas/thoughtspot-liveboard-tml.md) | Liveboard TML structure reference |
 | [../../shared/schemas/thoughtspot-answer-tml.md](../../shared/schemas/thoughtspot-answer-tml.md) | Answer/visualization TML structure |
-| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (52 values) + analytical-intent → chart-type mapping |
+| [../../shared/schemas/thoughtspot-chart-types.md](../../shared/schemas/thoughtspot-chart-types.md) | Verified `answer.chart.type` enum (52 values, dev build) + analytical-intent → chart-type mapping |
 | [../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md) | Step 10a — durable dual-axis combo (line+column) via `custom_chart_config` |
 | [../ts-profile-thoughtspot/SKILL.md](../ts-profile-thoughtspot/SKILL.md) | ThoughtSpot auth setup |
 | [../../../tools/ts-cli/README.md](../../../tools/ts-cli/README.md) | `ts spotter answer` — the Spotter last-mile command (Step 12.6) |
@@ -1928,9 +1928,10 @@ Legacy**:
 ```
 Which charting library should the liveboard use?
   L  Legacy charts — the plain chart types; import on every cluster        (default)
-  M  New charts library (Muze) — GA and the product default since 26.7.
-     Closer to Tableau's shelves (Color → slice-with-color, small multiples
-     → trellis-by) for a more faithful migration.
+  M  New charts library (Muze) — GA and the product default since 26.7 per
+     release notes; the target cluster must have it enabled. Closer to
+     Tableau's shelves (Color → slice-with-color, small multiples →
+     trellis-by) for a more faithful migration.
 
 Enter L / M:
 ```
@@ -1973,7 +1974,7 @@ UI, export (now has real GUIDs), replay on re-import. On **Legacy** (or pre-Muze
 split into separate COLUMN + LINE tiles and flag the merged axis as a gap. Full detail:
 [`../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md`](../../shared/worked-examples/tableau/combo-dual-axis-custom-chart-config.md).
 
-For the **authoritative `answer.chart.type` enum (52 valid values)**, per-type shelf shapes,
+For the **authoritative `answer.chart.type` enum (52 valid values on a dev build)**, per-type shelf shapes,
 the geo/candlestick caveats, and a full **analytical-intent → chart-type** mapping (for
 choosing a better chart than the source used), see
 [`../../shared/schemas/thoughtspot-chart-types.md`](../../shared/schemas/thoughtspot-chart-types.md).
@@ -2500,7 +2501,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default (26.7+), not early access; enum is 52 values. Legacy stays the default (BL-449). |
+| 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
 | 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
 | 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
 | 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
