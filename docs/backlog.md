@@ -15806,7 +15806,7 @@ recommended formula; both are noise questions for roadmap PR 2.3.
 
 **Do.** Remove the step or make it opt-in, then re-check whether the model pin is still justified and update or drop its reason.
 
-**Status (2026-11-08):** the stage-sync half is DONE — Step 5 is removed from `.claude/agents/repo-publisher.md`, because the CoCo Snowsight runtime it served was retired (tag `runtimes-archive-2026-11-08`). The model-pin half is still open: the `# reason:` comment still cites the stage-sync sequence, so re-check whether the pin is justified and update or drop it.
+**Status (2026-11-08):** the stage-sync half is DONE — Step 5 is removed from `.claude/agents/repo-publisher.md`, because the CoCo Snowsight runtime it served was retired (tag `runtimes-archive-2026-11-08`). The model-pin half is still open: re-check whether the pin is justified and keep or drop it. Its `# reason:` text no longer cites stage sync — rewritten the same day for the remaining commit → push → PR sequence (the agent stops before merge), with the pin itself left in place for this item to decide.
 
 **Target:** 2026-11-30.
 

@@ -2,10 +2,13 @@
 name: repo-publisher
 description: Commit, push a feature branch, and open a PR whose body is the filled template with a current pr-ready evidence block, in the correct order. Use this instead of running git and gh manually to avoid partial publishes.
 model: sonnet
-# reason: the risk in this long prescribed commit -> PR -> stage-sync sequence is a
-# PARTIAL PUBLISH, not shallow reasoning -- capability headroom buys nothing here,
+# reason: the risk in this prescribed commit -> push -> PR sequence (confidentiality
+# scan, filled template, evidence block for the head being published; it stops before
+# merge) is a PARTIAL PUBLISH -- a pushed branch with no PR, or a PR whose body does
+# not match its head -- not shallow reasoning. Capability headroom buys nothing here,
 # so this is a requirement the effort dial cannot serve (model-routing.md corollary;
 # audit finding 18.3 moved the only other pinned agent OFF its pin for lacking one).
+# Whether the pin is still justified at all is BL-468's open half.
 ---
 
 # Repo Publisher
