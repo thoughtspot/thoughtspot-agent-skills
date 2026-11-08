@@ -57,6 +57,15 @@ hyperd.log
 # Per-machine smoke test configuration (model names, connection details, etc.)
 tools/smoke-tests/smoke-config.local.json
 
+# Leftovers from the CoCo Snowsight and Databricks Genie runtimes, retired 2026-11-08
+# (tag runtimes-archive-2026-11-08). Nothing generates these any more; they stay
+# ignored so a checkout that still has them on disk cannot commit them by accident:
+# the CoCo stage-sync state file, the Genie bundle's deploy-time copy of agents/shared/,
+# and the Genie notebook build_mv_lib.py generated from tools/ts-cli.
+.snowflake-deploy-sha
+agents/databricks/shared/
+agents/databricks/notebooks/databricks_mv_lib.py
+
 # uv lockfile (local tool installs — not a project-level lockfile)
 uv.lock
 
