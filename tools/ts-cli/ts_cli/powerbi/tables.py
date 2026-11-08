@@ -27,10 +27,16 @@ _AGG = {
 
 # summarizeBy distinctCount is NOT a column aggregation (invariant I5): ThoughtSpot
 # stores a COUNT_DISTINCT measure on a text or date column as an ATTRIBUTE, so search
-# lists the keys instead of counting them, silently. The Table column stays an
-# attribute, and the Model carries a `unique count` formula under the column's name
-# (build_model._build_physical_columns, BL-447).
+# lists the keys instead of counting them, silently. The column stays an attribute
+# (Table and Model), and the Model gains a separate `unique count` formula column,
+# distinct_count_name() (build_model._build_physical_columns, BL-447).
 _DISTINCT_COUNT = "distinctcount"
+
+
+def distinct_count_name(column_name):
+    """The display name of the distinct-count formula column a `summarizeBy:
+    distinctCount` column gains (build_model); the column itself keeps its own name."""
+    return f"{column_name} (Distinct Count)"
 
 
 def _is_distinct_count(col):

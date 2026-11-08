@@ -511,8 +511,11 @@ def distinct_count_formula_column(
 ) -> tuple[dict, dict]:
     """``(formula, column)`` for a Model column that counts distinct values of the
     physical column ``column_id`` — the I5 form of a source column whose default
-    summarisation is a distinct count. The column keeps its display name, so content
-    that names it still finds it, now as the count. ``properties`` carries over except
+    summarisation is a distinct count. ``name`` is the caller's choice, and the key
+    usually needs keeping beside it: Power BI keeps the key as an ATTRIBUTE under its own
+    name, so a visual that groups by it still groups, and names this column
+    ``<key> (Distinct Count)`` (giving the count the key's own name turned every grouping
+    into one total row, BL-447 re-review). ``properties`` carries over except
     the aggregation; the column is a MEASURE declaring SUM (ThoughtSpot ignores it on
     an aggregate formula; the 2026-11-02 convention) with ``index_type: DONT_INDEX``
     (I3). ``null_is_a_value`` as for :func:`unique_count_formula`. Pair with

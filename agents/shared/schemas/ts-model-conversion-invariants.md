@@ -225,7 +225,8 @@ function maps.
   in every fact form (BL-447)
 - Databricks MV: `COUNT(DISTINCT col)` → `unique count ( [TABLE::col] )` formula
 - Power BI: a `DISTINCTCOUNT` measure → a formula under the measure's own name; a column
-  whose `summarizeBy` is `distinctCount` → a formula under the column's own name (BL-447).
+  whose `summarizeBy` is `distinctCount` stays an attribute under its own name and gains a
+  separate formula column `<column> (Distinct Count)` (BL-447).
   Both count BLANK as a value, Approximated (BL-540); `DISTINCTCOUNTNOBLANK` → plain
   `unique count`
 - Qlik: a measure that is exactly `Count(DISTINCT x)` → `unique count ( x )`. A

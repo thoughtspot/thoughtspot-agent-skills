@@ -133,16 +133,20 @@ def _build_distinct():
     return model, tables, mapping
 
 
-def test_distinct_count_column_is_a_unique_count_formula():
-    # Before BL-447 this was `column_id: Fact::CustomerKey` with COUNT_DISTINCT, which
-    # ThoughtSpot stores as an ATTRIBUTE on a text key: the count was silently lost.
+def test_distinct_count_column_keeps_the_key_and_adds_a_count():
+    # Re-review: the Model column `CustomerKey` had BECOME the count, so a visual that
+    # grouped by CustomerKey got one total row, marked Migrated. The key stays an
+    # attribute under its own name; the distinct count is a separate formula column.
+    # (Before BL-447 the column was `column_id` + COUNT_DISTINCT, demoted on a text key.)
     model, _, _ = _build_distinct()
     by_name = {c["name"]: c for c in model["columns"]}
-    col = by_name["CustomerKey"]
-    assert "column_id" not in col and col["formula_id"] == "formula_CustomerKey"
-    assert col["properties"] == {"column_type": "MEASURE", "aggregation": "SUM",
-                                 "index_type": "DONT_INDEX"}
-    f = next(f for f in model["formulas"] if f["id"] == "formula_CustomerKey")
+    assert by_name["CustomerKey"] == {"name": "CustomerKey", "column_id": "Fact::CustomerKey",
+                                      "properties": {"column_type": "ATTRIBUTE"}}
+    count = by_name["CustomerKey (Distinct Count)"]
+    assert count["formula_id"] == "formula_CustomerKey (Distinct Count)"
+    assert count["properties"] == {"column_type": "MEASURE", "aggregation": "SUM",
+                                   "index_type": "DONT_INDEX"}
+    f = next(f for f in model["formulas"] if f["id"] == count["formula_id"])
     assert f["expr"] == ("( unique count ( [Fact::CustomerKey] ) + max ( if ( isnull "
                          "( [Fact::CustomerKey] ) ) then 1 else 0 ) )")  # BL-540
 
@@ -156,19 +160,18 @@ def test_no_count_distinct_aggregation_anywhere_and_i5_clean():
     assert not [f for f in lint_tml({"model": model}) if f.startswith(("I5", "I1"))]
 
 
-def test_a_table_left_without_a_column_keeps_its_key_as_an_attribute():
+def test_a_one_column_table_keeps_its_key_too():
     model, _, mapping = _build_distinct()
     bridge = [c for c in model["columns"] if str(c.get("column_id", "")).startswith("Bridge::")]
-    assert bridge == [{"name": "BridgeKey (Bridge)", "column_id": "Bridge::BridgeKey",
+    assert bridge == [{"name": "BridgeKey", "column_id": "Bridge::BridgeKey",
                        "properties": {"column_type": "ATTRIBUTE"}}]
-    assert any("BridgeKey (Bridge)" in w for w in mapping["warnings"])
-    # Fact keeps Amount and DimId, so its count adds nothing.
-    assert not any(c.get("column_id") == "Fact::CustomerKey" for c in model["columns"])
+    assert any(c["name"] == "BridgeKey (Distinct Count)" for c in model["columns"])
+    assert not any("kept as attributes" in w for w in mapping["warnings"])
 
 
 def test_distinct_count_column_is_reported_in_the_mapping():
     _, _, mapping = _build_distinct()
-    row = next(r for r in mapping["measures"] if r["name"] == "CustomerKey")
+    row = next(r for r in mapping["measures"] if r["name"] == "CustomerKey (Distinct Count)")
     assert row["status"] == "Approximated"
     assert row["ts_formula"].startswith("( unique count ( [Fact::CustomerKey] ) + max ( if ( isnull")
     # names the case where it differs from Power BI (review, BL-540)
