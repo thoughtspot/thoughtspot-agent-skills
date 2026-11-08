@@ -1,6 +1,6 @@
 # Skill Naming Convention
 
-Every skill directory under `agents/cli/` and `agents/coco-snowsight/` must match one
+Every skill directory under `agents/cli/` and `agents/claude/` must match one
 of the documented family patterns below. The pattern is enforced by
 `tools/validate/check_skill_naming.py` and runs in the pre-commit hook on every
 commit that adds or renames a skill directory.
@@ -29,7 +29,7 @@ extend the rule with a new one.
 | 3 | `ts-convert-*` | `ts-convert-{direction}-{format}` | Cross-platform schema conversion. Third token is `to` or `from`; fourth is the target/source format. | `ts-convert-to-snowflake-sv`, `ts-convert-from-snowflake-sv`, `ts-convert-from-tableau` |
 | 4 | `ts-dependency-*` | `ts-dependency-{verb}` | Cross-object dependency-graph operation (walk, rewrite, cleanup). | `ts-dependency-manager` |
 | 5 | `ts-variable-*` | `ts-variable-{specifier}` | Manage a specific platform variable across all its operations (search, set, remove). Second token is the variable's short name. | `ts-variable-timezone` *(planned)* |
-| 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure — or stand up a reproducible environment — used by other skills. | `ts-setup-sv`, `ts-setup-tenancy` |
+| 6 | `ts-setup-*` | `ts-setup-{specifier}` | Install or upgrade a toolset / stored procedures / shared infrastructure — or stand up a reproducible environment — used by other skills. | `ts-setup-tenancy` (`ts-setup-sv` retired with the CoCo runtime, 2026-11-08) |
 | 7 | `ts-recipe-*` | `ts-recipe-{ts-artifact-type}-{concept}[-{platform}]` | Build a specific analytical capability in ThoughtSpot. Second token is the primary ThoughtSpot artifact produced (`formula`, `answer`, `liveboard`, `model`). Third+ tokens describe the concept (`business-days`, `hms-display`, `abc-analysis`). Optional platform suffix (`-snowflake`, `-databricks`) present only when the recipe deploys to an external platform; omitted for pure-ThoughtSpot recipes. | `ts-recipe-formula-business-days-snowflake` |
 | 8 | `ts-audit` | `ts-audit` | Read-only health assessment of a ThoughtSpot environment or individual objects. Scans across multiple angles (AI readiness, data modeling, performance, security) and produces a prioritised report with actionable recommendations. Distinct from `ts-dependency-*` which actively modifies the dependency graph. | `ts-audit` |
 | 9 | `ts-load-*` | `ts-load-{specifier}` | Load source data into a warehouse. Specifier describes the data domain or purpose. | `ts-load-source-data` |
@@ -91,9 +91,9 @@ that hasn't been written yet.
 
 → **`ts-setup-*`**. Pattern: `ts-setup-{specifier}`.
 
-Specifier identifies what's being installed or stood up (`sv` = the
-semantic-view toolset, `tenancy` = the multi-tenancy test environment,
-`databricks` = the Databricks toolset, etc.). This is distinct
+Specifier identifies what's being installed or stood up (`tenancy` = the
+multi-tenancy test environment; the retired `ts-setup-sv` used `sv` for the
+semantic-view stored procedures). This is distinct
 from `ts-profile-*` — profile is about credentials, setup is about
 deploying executable code, shared schema files, or disposable test
 environments that **other skills use** (`ts-setup-tenancy` builds the
@@ -248,19 +248,21 @@ skill can't be renamed. Mass-allowlisting is a smell.
 
 ---
 
-## Cross-runtime coverage
+## Runtime coverage
 
-The same family rule applies to **every runtime** the repo serves:
+The same family rule applies to **every skill directory** the repo serves — the list
+lives once, in `tools/validate/_dirs.py`:
 
-| Runtime | Layout | Validator check |
+| Directory | Layout | Validator check |
 |---|---|---|
 | `agents/cli/` | `<skill>/SKILL.md` | Directory name |
-| `agents/coco-snowsight/` | `<skill>/SKILL.md` | Directory name |
+| `agents/claude/` | `<skill>/SKILL.md` | Directory name |
 
-Where a skill exists in multiple runtimes, all copies must share the same
-name — `agents/cli/ts-convert-to-snowflake-sv` and
-`agents/coco-snowsight/ts-convert-to-snowflake-sv` are the same skill.
-The validator catches new skills added to ANY of these locations.
+If a skill is ever carried by more than one runtime, every copy shares one name: the
+slash command is the directory name, so two names are two skills to the user. (Until
+2026-11-08 the retired CoCo Snowsight runtime carried same-named copies of the Snowflake
+converters; see [runtime-coverage.md](runtime-coverage.md).) The validator catches new
+skills added to any directory `_dirs.py` lists.
 
 ---
 

@@ -18,7 +18,7 @@ titles vary by region and account team.
 
 ## Setup
 
-Credentials, infrastructure, data loading, and tenancy configuration.
+Credentials, data loading, and tenancy configuration.
 
 ### `ts-profile-thoughtspot`
 
@@ -65,13 +65,6 @@ Credentials, infrastructure, data loading, and tenancy configuration.
 - **Who asks.** SE building a POC, PS standing up a test environment.
 - **Use when** you have structure but no data, or data but no tables. Snowflake and
   Databricks are supported.
-
-### `ts-setup-sv`
-
-- **Business problem.** The Snowsight runtime needs stored procedures installed before the
-  semantic view skills work, and a stale procedure fails in a confusing way.
-- **Who asks.** Anyone running skills inside Snowflake Workspaces.
-- **Use when** prompted by another skill, or once after `ts-profile-thoughtspot`.
 
 ### `ts-setup-tenancy`
 

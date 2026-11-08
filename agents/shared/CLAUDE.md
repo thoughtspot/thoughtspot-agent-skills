@@ -1,15 +1,16 @@
 # Shared Reference Files — Conventions
 
-Loaded when editing agents/shared/. These files are consumed by BOTH runtimes.
+Loaded when editing agents/shared/. These files are read by every CLI skill, in both
+host tools.
 
-## Dual-runtime impact
+## Impact
 
-Changes here affect:
-- **Claude Code** — immediately, via `~/.claude/shared/` symlink
-- **CoCo** — only after `./scripts/stage-sync.sh` (or manual `snow stage copy`)
+Changes here take effect immediately, with no deploy step:
+- **Claude Code** — via the `~/.claude/shared/` symlink
+- **Cortex Code CLI** — via the `~/.snowflake/cortex/shared/` symlink
 
-Do not skip the stage push. Claude Code will pick up your changes automatically;
-CoCo will not.
+(Until 2026-11-08 a CoCo Snowsight runtime also read these files from a Snowflake stage,
+which needed a manual sync. It was retired — see `.claude/rules/runtime-coverage.md`.)
 
 ## Directory map
 
@@ -113,9 +114,8 @@ cross-referenced to this file.
 ## Adding new mappings
 
 1. Add the rule to the relevant mapping file
-2. Push to stage: `./scripts/stage-sync.sh`
-3. Update the worked example if the rule changes existing output
-4. Run `python tools/validate/check_yaml.py` to confirm YAML blocks still parse
+2. Update the worked example if the rule changes existing output
+3. Run `python tools/validate/check_yaml.py` to confirm YAML blocks still parse
 
 ## Future platforms
 

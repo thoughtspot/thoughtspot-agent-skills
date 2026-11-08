@@ -513,7 +513,7 @@ passed as a single-line string to ThoughtSpot. Do NOT quote the `expr:` value in
 (e.g. `expr: "last_value(...)"`) when it contains curly braces — YAML may still
 misparse the `{` as a flow sequence start even inside double quotes in some parsers.
 
-**Note for Snowflake/CoCo context:** `>-` block scalars are NOT allowed in Snowflake
+**Note for Snowflake context:** `>-` block scalars are NOT allowed in Snowflake
 Semantic View YAML (`CREATE SEMANTIC VIEW` DDL), but ARE valid in ThoughtSpot TML YAML.
 Do not confuse the two contexts.
 
@@ -884,10 +884,9 @@ and common import errors, see the platform-agnostic schema references:
 - **[../../schemas/thoughtspot-model-tml.md](../../schemas/thoughtspot-model-tml.md)** — Model TML structure, join scenarios, formula visibility, self-validation checklist
 - **[../../schemas/thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md)** — ThoughtSpot formula syntax, function categories, LOD/window/semi-additive patterns, YAML encoding
 
-**Snowflake / CoCo-specific notes:**
-
-- Do NOT search for a connection GUID — `TS_SEARCH_MODELS` only finds data objects, not connections. Use the connection name provided by the user directly.
-- **GUID after import (CoCo workflow):** Do NOT search by name after import. `TS_SEARCH_MODELS` returns tables from ALL connections, making it impossible to identify newly-created tables by name. Use the `OBJECT_AGG` extraction pattern from `RESULT_SCAN` — see the CoCo SKILL.md Step 4B.
+**Snowflake-specific note:** do NOT search for a connection GUID — use the connection
+name the user provides. `ts` commands take the connection's display name, never a GUID
+(`.claude/rules/ts-cli.md`, "ts-cli output conventions").
 
 ---
 
