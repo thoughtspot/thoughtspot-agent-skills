@@ -83,6 +83,10 @@ Hand-written Setup intro.
 <!-- BEGIN GENERATED: skills-recipes -->
 <!-- END GENERATED: skills-recipes -->
 
+<a id="custom-charts"></a>
+<!-- BEGIN GENERATED: skills-custom-charts -->
+<!-- END GENERATED: skills-custom-charts -->
+
 ## Getting Started
 
 Hand-written prose stays exactly as it is.
@@ -146,7 +150,7 @@ def test_regenerated_tree_passes_check(tree, capsys):
     text = _readme(tree)
     assert "Hand-written Setup intro." in text
     assert text.endswith("## Getting Started\n\nHand-written prose stays exactly as it is.\n")
-    assert "The catalog has <!-- BEGIN GENERATED: skills-total -->10 skills across six categories" in text
+    assert "The catalog has <!-- BEGIN GENERATED: skills-total -->10 skills across seven categories" in text
 
 
 def test_rendered_rows_counts_and_links(tree):
@@ -436,9 +440,9 @@ def test_summary_links_rebase_only_relative_targets_and_normalise_them(target, r
     assert g.rebase_links(f"see [x]({target})", "agents/cli/ts-audit") == f"see [x]({rendered})"
 
 
-@pytest.mark.parametrize("total, text", [(1, "1 skill across six categories"),
-                                         (2, "2 skills across six categories"),
-                                         (0, "0 skills across six categories")],
+@pytest.mark.parametrize("total, text", [(1, "1 skill across seven categories"),
+                                         (2, "2 skills across seven categories"),
+                                         (0, "0 skills across seven categories")],
                          ids=["one", "two", "zero"])
 def test_the_total_is_singular_only_for_one(total, text):
     assert g.render_total(total) == text

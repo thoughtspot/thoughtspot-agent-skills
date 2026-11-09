@@ -1,0 +1,14 @@
+// Search: [product] [item type] [sales] [quantity purchased]. One lane per product family (derived from item type), price per unit across.
+document.getElementById('chart')?.style.setProperty('color-scheme', (([r, g, b]) => r * .299 + g * .587 + b * .114 > 140)(getComputedStyle(document.body).color.match(/\d+/g)) ? 'dark' : 'light');
+const FAM = { Outerwear: ['Jackets', 'Vests', 'Sweatshirts', 'Sweaters'], 'Tops and dresses': ['Shirts', 'Dresses'], Bottoms: ['Pants', 'Jeans', 'Shorts', 'Skirts'], 'Swim and basics': ['Swimwear', 'Underwear', 'Socks'], Accessories: ['Bags', 'Headwear'] };
+const U = (c) => c?.value?.() ?? c?.value ?? c, fam = (t) => Object.keys(FAM).find((f) => FAM[f].includes(U(t))) ?? 'Other', MAYA = 'https://cdn.jsdelivr.net/npm/mayacharts@0.18.1/dist/maya.core.global.js';
+const derive = (d) => {
+  if (!d?.data?.length) return {};
+  const [p, t, s, q] = [/product/i, /item/i, /sales/i, /quantity|units/i].map((re) => d.schema.findIndex((c) => re.test(c.name))), O = [...Object.keys(FAM), 'Other'];
+  const rows = d.data.filter((r) => Number(U(r[q])) > 0).map((r) => [U(r[p]), U(r[t]), fam(r[t]), Number(U(r[s])) / Number(U(r[q]))]).sort((a, b) => O.indexOf(a[2]) - O.indexOf(b[2])), ps = rows.map((r) => r[3]).sort((a, b) => a - b), usd = (n) => '$' + n.toFixed(2);
+  return { table: { schema: [{ name: 'product', type: 'dimension' }, { name: 'item type', type: 'dimension' }, { name: 'Family', type: 'dimension' }, { name: 'Price', type: 'measure' }], data: rows }, subtitle: ps.length + ' products, ' + usd(ps[0]) + ' to ' + usd(ps[ps.length - 1]) + ' a unit, median ' + usd(ps[Math.floor((ps.length - 1) / 2)]) };
+};
+const go = () => { const d = derive(viz?.getDataFromSearchQuery?.()?.getData()); maya.host.thoughtspot({ events: viz?.events, getDataFromSearchQuery: () => ({ getData: () => d.table }) },
+  { type: 'beeswarm', x: 'Family', y: 'Price', series: 'Family', name: 'product', select: 'multi', tooltip: { fields: ['item type'] }, subtitle: d.subtitle, titles: { Price: 'Price per unit' },
+    colors: { Outerwear: '#D1543A', 'Tops and dresses': '#2A6FD0', Bottoms: '#0F9D8A', 'Swim and basics': '#D99A00', Accessories: '#C2477A' }, format: { Price: { style: 'currency', currency: 'USD', maximumFractionDigits: 2 } }, text: { noData: 'No rows yet: bind [product] [item type] [sales] [quantity purchased]' } }); };
+if (window.maya?.host) go(); else { const s = document.querySelector('script[src="' + MAYA + '"]') ?? document.head.appendChild(Object.assign(document.createElement('script'), { src: MAYA, integrity: 'sha384-KZQbG8OHSEU86UWT5Pp3LATC64UAhHxwg1UMKN/lZtsu02CeDifcSVWCewQO2h/6', crossOrigin: 'anonymous' })); s.addEventListener('load', go); s.addEventListener('error', () => { (document.getElementById('chart') ?? document.body).textContent = 'MayaCharts could not load from ' + MAYA; viz?.events?.emitRenderCompletedEvent?.(); }); }

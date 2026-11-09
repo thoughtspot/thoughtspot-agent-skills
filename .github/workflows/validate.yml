@@ -172,6 +172,40 @@ jobs:
         run: |
           python3 tools/validate/check_audit_workflow_permissions.py --root .
 
+      # The chart-builder smoke suites render a fixture chart in a real browser. In CI
+      # a missing browser fails them rather than skipping (they read CI), so the render
+      # is proven on every PR. Node is pinned here rather than taken from the runner image,
+      # npm's cache is restored from the lockfile, and the browser is cached under a key
+      # from the lockfile (it pins Playwright's exact version, so the key changes exactly
+      # when the browser build does). On a cache hit nothing is fetched from Playwright's
+      # CDN or apt, so an outage there cannot fail unrelated PRs; ubuntu-latest already
+      # carries Chromium's system libraries (it ships Google Chrome).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: ${{ !cancelled() }}
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agents/cli/ts-object-answer-chart-builder/helpers/package-lock.json
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: playwright-cache
+        if: ${{ !cancelled() }}
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('agents/cli/ts-object-answer-chart-builder/helpers/package-lock.json') }}
+
+      - name: Install the chart helpers' Node packages
+        # --ignore-scripts: no package install script runs; Playwright needs none.
+        if: ${{ !cancelled() }}
+        run: |
+          npm ci --ignore-scripts --prefix agents/cli/ts-object-answer-chart-builder/helpers
+
+      - name: Install the chart helpers' Chromium
+        # Only on a cache miss: a hit already holds this Playwright version's browser.
+        if: ${{ !cancelled() && steps.playwright-cache.outputs.cache-hit != 'true' }}
+        run: |
+          npm exec --prefix agents/cli/ts-object-answer-chart-builder/helpers -- playwright install --with-deps chromium
+
       - name: Run credential-free smoke suites
         # These assert real behaviour of publish_plan / csr_plan / apply_plan /
         # alias / the dbt converters and need NO credentials, but ran in no CI job at all: the pytest steps
