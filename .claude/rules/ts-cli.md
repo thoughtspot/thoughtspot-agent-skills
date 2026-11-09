@@ -36,7 +36,9 @@ migration hits the same issue.
   before a CLI command is written. These are temporary scaffolding, not skill logic.
 - `agents/cli/ts-object-answer-chart-builder` and `agents/cli/ts-object-liveboard-chart-builder` — their
   calls run as `ts.post` / `ts.get` inside the ThoughtSpot MCP sandbox (`execute-thoughtspot-code`), where
-  `ts` cannot run, and a user without a `ts` profile still has the MCP. On two conditions:
+  `ts` cannot run, and a user without a `ts` profile can still create a chart or Liveboard through the MCP
+  (updating an existing one needs a profile for the `ts tml export` backup, which both skills check in Step 0).
+  On two conditions:
   1. Every call lives in a versioned block file (`helpers/mcp/*.js`, `helpers/answer-patch.js`,
      `scripts/patch.js`, `scripts/mcp/*.js`), printed by a script; never inline in a SKILL.md or reference.
   2. Every block runs against a mock `ts` in `tools/smoke-tests/_answer_patch_mock.mjs` and

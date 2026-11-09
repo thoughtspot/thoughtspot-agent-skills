@@ -112,7 +112,7 @@ are roughly ordered by value÷effort.
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
-| BL-552 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
+| BL-599 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
 | BL-553 | Looker filtered `count_distinct` maps to `count_if` (counts rows, not distinct values) | 2026-11-30 |
 | BL-554 | Snowflake SV parser drops every dimension when a view has a root-level LOD fact | 2026-11-30 |
 
@@ -495,6 +495,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
+| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, and the monthly date filter `LAST_N_PERIOD` with `oper: '='` | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -16674,25 +16675,6 @@ variable) and build it as a LOW "review" rule beside S14.
 
 **Target:** 2027-01-31.
 
-## BL-522 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
-
-**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
-open items #4 and #5, deferred here so the write path's live run could close the PR).
-
-**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
-
-1. Liveboard open item #4: of the 58 library charts, the 48 moved to MayaCharts 0.18.1 render
-   in the local preview in every data mode but carry `.preview-only` until each has been on a
-   Liveboard and screenshotted. The live run put four of them on a cluster (all rendered).
-2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
-   exclude the current month; that has not been confirmed on a screenshot.
-
-**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
-`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
-days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
-
-**Target:** 2027-01-31.
-
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5
@@ -17240,7 +17222,7 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 
 **Target:** 2026-12-31.
 
-## BL-552 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
+## BL-599 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
 
 **Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
 
@@ -17832,3 +17814,24 @@ A converted Model can be uncached without the user being told, and the invariant
 3. Update `docs/ossie/ts-ossie-construct-mapping.md` (V-items intro and V1) when it lands.
 
 **Target:** 2027-01-31.
+
+## BL-552 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
+open items #4 and #5, deferred here so the write path's live run could close the PR).
+
+**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
+
+1. Liveboard open item #4: of the 58 library charts, 48 moved to MayaCharts 0.18.1 and render
+   in the local preview in every data mode. The live run put four of them on a cluster (all
+   rendered, `.preview-only` cleared); the other 44 carry `.preview-only` until each has been on a
+   Liveboard and screenshotted.
+2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
+   exclude the current month; that has not been confirmed on a screenshot.
+
+**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
+`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
+days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
+
+**Target:** 2027-01-31.
+

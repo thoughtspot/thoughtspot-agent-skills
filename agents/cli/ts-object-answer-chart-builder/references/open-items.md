@@ -13,7 +13,7 @@ signed-in browser session (no CLI profile on the machine) and checked on disk by
 
 ---
 
-## #1 — An answer update keeps the column order and the chart's own state, live — VERIFIED 2026-11-05
+## #1 — An answer update keeps the column order, live — VERIFIED 2026-11-05
 
 **What changed:** an update keeps the table's `ordered_column_ids` (new columns last) and the custom chart's
 `client_state`, and the round trip compares both (`client_state` and `client_state_v2` parsed, since
@@ -23,7 +23,12 @@ ThoughtSpot re-serialises them).
 its table columns reversed in TML to `["Total sales", "state"]`, as a user's edit; then
 `answer-pack.mjs --answer <guid> --backup <file> --commit`: `kept` the description, table settings, tables and
 custom chart settings, `replaced: []`, `recheck: unchanged`, `roundTripOk: true`, and the order read back as
-`["Total sales", "state"]`.
+`["Total sales", "state"]`. The update (14:44 UTC) ran on a block that carried the whole-answer fingerprint
+without `fqn`, as committed.
+
+**Not shown live:** that the custom chart's `client_state` is kept. The user's edit before the update changed
+only the column order, so keeping `client_state` and rewriting it to the value the skill wrote first look the
+same. The mock covers it (`_answer_patch_mock.mjs`: a user's `client_state` on the answer survives the update, and a round trip that loses it fails).
 
 ---
 

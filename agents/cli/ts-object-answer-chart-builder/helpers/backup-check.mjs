@@ -8,8 +8,10 @@
 // outside any git working tree.
 //
 // `viz` holds one fingerprint per visualization (a Liveboard) or one for the answer: a hash of the whole
-// visualization (every key, sorted) except its id, so a backup that differs in anything (a description, formatting,
-// axis settings) is not current. The sandbox computes the same fingerprints from the live object and
+// visualization (every key, sorted) except its id, viz_guid and any fqn, so a backup whose visualization differs in
+// anything (a description, formatting, axis settings) is not current. Only visualizations are fingerprinted: a
+// Liveboard backup that differs only in the Liveboard's layout, filters, tabs or style still passes, and restoring
+// it reverts those edits. The sandbox computes the same fingerprints from the live object and
 // refuses the commit unless the backup holds every one, so a list of ids, a cut-off export, an older export or
 // another object's export does not pass: ids alone prove nothing (they are Viz_1, Viz_2 ... on every Liveboard,
 // and ThoughtSpot renumbers them on import). patch.js and answer-patch.js carry the same fingerprint code.

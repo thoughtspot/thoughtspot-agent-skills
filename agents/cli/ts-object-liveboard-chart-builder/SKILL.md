@@ -1,6 +1,9 @@
 ---
 name: ts-object-liveboard-chart-builder
-description: Build or rebuild a whole ThoughtSpot Liveboard of custom charts (BYOC tiles) that tells one story across numbered tabs, on a real model, through the ThoughtSpot MCP. An intake checks the prerequisites and asks the model, Liveboard, story, audience, size, filters, chart library and sign-in as pick-from-a-list questions. It profiles the model, plans the tabs and the question each answers, has each tile built by ts-object-answer-chart-builder on real searches, writes the About and banner tiles, adds Liveboard filters, patches the Liveboard in checksummed blocks (validate, commit, round-trip proof) and screenshots every tab in a logged-in browser. Use when the user wants a storytelling or demo Liveboard of custom charts, wants tiles added to or rearranged on such a Liveboard, or wants the Amuzing chart samples Liveboard rebuilt. Needs ts-object-answer-chart-builder installed alongside and the ThoughtSpot MCP (execute-thoughtspot-code). Not for a single chart or for Liveboards of native ThoughtSpot charts.
+description: "Build or rebuild a whole ThoughtSpot Liveboard of custom charts (BYOC tiles) that tells one story across numbered tabs, on a real model, through the ThoughtSpot MCP. An intake checks the prerequisites and asks the model, Liveboard, story, audience, size, filters, chart library and sign-in as pick-from-a-list questions. It profiles the model, plans the tabs and the question each answers, has each tile built by ts-object-answer-chart-builder on real searches, writes the About and banner tiles, adds Liveboard filters, patches the Liveboard in checksummed blocks (validate, commit, round-trip proof) and screenshots every tab in a logged-in browser. Use when the user wants a storytelling or demo Liveboard of custom charts, wants tiles added to or rearranged on such a Liveboard, or wants the Amuzing chart samples Liveboard rebuilt. Needs ts-object-answer-chart-builder installed alongside and the ThoughtSpot MCP (execute-thoughtspot-code). Not for a single chart or for Liveboards of native ThoughtSpot charts."
+metadata:
+  category: Custom Charts
+  summary: "A storytelling Liveboard of custom-chart tiles across numbered tabs on a real Model: asks what to build, plans the tabs, builds each tile with `ts-object-answer-chart-builder`, adds narrative tiles and filters, patches the Liveboard through the ThoughtSpot MCP, and screenshots every tab"
 ---
 
 # ThoughtSpot custom charts Liveboard builder
@@ -91,6 +94,13 @@ description. "Only reuse library charts" under **Charts** implies MayaCharts, so
 If 0a found no browser (usual in the Claude app), drop the sign-in option from **Check** and say the
 screenshots cannot run here. For an existing Liveboard, skip **Size** and ask what should change:
 "Add tiles", "Change tiles", "Rearrange tabs or filters".
+
+**Updating needs a `ts` profile.** When the user picks an existing Liveboard, run `ts profiles list --json`
+before any building, and look for a profile on this cluster. A commit to a Liveboard that already has
+visualizations needs a backup from `ts tml export` (Step 6), and that needs the profile; without one, every
+tile would be built and then refused at the commit. If there is none, say so now: offer to set one up with
+`/ts-profile-thoughtspot`, or to build on a new Liveboard instead, which needs no backup. Creating a new
+Liveboard needs only the MCP.
 
 If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
 lettered options, and wait for the answers.
@@ -240,9 +250,14 @@ export of this Liveboard taken before the commit, from
 `liveboard-pack.mjs` checks the file is complete JSON and a full export of this Liveboard (its top-level guid
 and the `liveboard` key with its visualizations; a YAML edoc, a stub or a cut-off file is refused), is under a
 day old (and not dated ahead), and its real path sits outside any git working tree. The block carries a
-fingerprint of every visualization in the backup (name, search, chart type, decoded chart code, note) under a
-checksum, and the sandbox refuses the commit unless every visualization on the Liveboard now is among them, so
-a list of ids, an older export or another Liveboard's export does not pass. In later blocks of one `--commit`
+fingerprint of every visualization in the backup under a checksum: a hash of the whole visualization, keys
+sorted, leaving out only its `id` and `viz_guid` (ThoughtSpot renumbers them on import) and every `fqn` (an
+export holds them only when asked). The sandbox refuses the commit unless every visualization on the Liveboard
+now is among them, so a list of ids, another Liveboard's export, or an older export that differs in anything
+inside a visualization (a description, a column format, an axis setting) does not pass: when that refusal
+comes back, tell the user the Liveboard changed since the backup and take a fresh one. The Liveboard's own
+layout, filters, tabs and style are outside the fingerprint, so an older export that differs only there
+passes, and restoring it would revert those edits; take the backup right before the commit. In later blocks of one `--commit`
 run, only the tiles an earlier block of that run wrote are exempt (owner marker, a slug an earlier block carried,
 and a body exactly that library chart's), since they were written after the backup; everything else must be in
 it, so build every block of a run with the same `--backup`. `ts tml export ... --parse` output is accepted too.

@@ -36,6 +36,12 @@ pre-commit re-check comparing the whole document.
 - Two exports of the unchanged 50-tile "Amuzing chart samples" Liveboard were byte-identical, so the
   pre-commit re-check does not refuse an untouched Liveboard.
 
+**Which code each result ran on.** Two fixes landed during this run (below, and the fingerprint in #3). The
+first commit to the empty Liveboard ran before the `export_fqn` fix (`searches: 3`). Every backup-gated result
+above, the one-tile commit (14:35 UTC) and both blocks of the two-block run (14:40 and 14:42 UTC), ran on blocks
+that carried both fixes: `export_fqn: true` and the whole-visualization fingerprint without `id`, `viz_guid` and
+`fqn`, as committed.
+
 **Found and fixed by this run:** `patch.js` exported without `export_fqn`, so an export carried no table fqn
 and a kept tile never matched "the same answer": every block rebuilt every skill tile from a new search,
 resetting what a user had set on it (the mock's export always held the fqn). The export now asks for fqns
@@ -64,28 +70,32 @@ It now walks shadow roots for marks, nodes and failure texts.
 through the MCP. Is a visualization's fingerprint the same from both?
 
 **Result (ps-internal 26.11.0.cl, 2026-11-05):** on "Amuzing chart samples" (50 visualizations) the CLI's
-request and the sandbox's returned the same bytes, and every sandbox fingerprint was in the CLI backup. The
+request body (sent from the sandbox, as no CLI profile existed) and the sandbox's request returned the same
+bytes, and every sandbox fingerprint was in the CLI backup. That comparison ran before `patch.js` asked for
+fqns: the sandbox's request was then `edoc_format: 'JSON'` without `export_fqn`. With `export_fqn: true` the
+two exports differ in the fqns only, so they are no longer the same bytes, and the fingerprint leaves the fqns
+out so they still match; the commits in #1 checked that on the final code. The
 fingerprint is now the whole visualization (keys sorted) without `id`, `viz_guid` and any `fqn`: `viz_guid` is
 a top-level key on 26.11, ThoughtSpot renumbers ids on import, and `patch.js` now exports with fqns while a CLI
 backup has none. Every commit in #1 accepted its CLI-format backup.
 
 ---
 
-## #4 — 48 MayaCharts library tiles seen on a cluster — DEFERRED 2026-11-05 (BL-522)
+## #4 — 44 MayaCharts library tiles seen on a cluster — DEFERRED 2026-11-05 (BL-552)
 
 The library tiles moved to MayaCharts 0.18.1 render in the preview in every data mode, but carry
 `.preview-only` until they have been on a Liveboard and screenshotted (`library.md`). The 2026-11-05 live run
 put four of them on a cluster (`pulse-kpi-sales`, `kpi-ring`, `where-state-bubbles`, `where-hex-cartogram`;
-all rendered).
+all rendered), and those four no longer carry `.preview-only`; 44 still do.
 
-**Action (BL-522, target 2027-01-31):** Rebuild the worked example on a cluster and screenshot every tab.
+**Action (BL-552, target 2027-01-31):** Rebuild the worked example on a cluster and screenshot every tab.
 
 ---
 
-## #5 — Default date filter `LAST_N_PERIOD` with `oper: '='` excludes the current month — DEFERRED 2026-11-05 (BL-522)
+## #5 — Default date filter `LAST_N_PERIOD` with `oper: '='` excludes the current month — DEFERRED 2026-11-05 (BL-552)
 
 Seen on a cluster that `>=` runs up to today and does not exclude the current month; that `=`
 does is the intent and has not been confirmed on a screenshot.
 
-**Action (BL-522, target 2027-01-31):** Screenshot a monthly tile with the filter applied in the last days of a
+**Action (BL-552, target 2027-01-31):** Screenshot a monthly tile with the filter applied in the last days of a
 month.

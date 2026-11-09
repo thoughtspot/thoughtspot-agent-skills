@@ -1,6 +1,9 @@
 ---
 name: ts-object-answer-chart-builder
-description: Build a ThoughtSpot custom chart (BYOC) as three paste-ready files, chart.html, chart.css and chart.js, by iterating in a real browser until the render is right: an intake with pick-from-a-list questions (model, data mode, search, library, destination), a preview the user watches (or headless screenshots), a vision critique of every attempt, and checks for missing, wrapped and empty data, tile resizes and pointer interaction. Can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a MayaCharts chart, or an existing chart tile rebuilt, debugged, or converted between sample and live data. The user picks the library or lets Claude pick (MayaCharts, D3, ECharts, Plotly, Chart.js, gridjs, HTML tables, raw SVG). Ships a library of proven live-data charts under library/, and hands finished tiles to ts-object-liveboard-chart-builder. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work.
+description: "Build a ThoughtSpot custom chart (BYOC) as three paste-ready files, chart.html, chart.css and chart.js, by iterating in a real browser until the render is right: an intake with pick-from-a-list questions (model, data mode, search, library, destination), a preview the user watches (or headless screenshots), a vision critique of every attempt, and checks for missing, wrapped and empty data, tile resizes and pointer interaction. Can save the finished chart as a ThoughtSpot answer and screenshot it in a logged-in browser. Use when the user wants a ThoughtSpot custom chart, a BYOC tile, a MayaCharts chart, or an existing chart tile rebuilt, debugged, or converted between sample and live data. The user picks the library or lets Claude pick (MayaCharts, D3, ECharts, Plotly, Chart.js, gridjs, HTML tables, raw SVG). Ships a library of proven live-data charts under library/, and hands finished tiles to ts-object-liveboard-chart-builder. Not for native ThoughtSpot chart configuration or non-ThoughtSpot charting work."
+metadata:
+  category: Custom Charts
+  summary: "A custom chart tile as paste-ready `chart.html` / `chart.css` / `chart.js` (MayaCharts by default, or D3, ECharts, Plotly, Chart.js, tables, SVG), iterated in a real browser against a faithful `viz` stub until the render is right; can save it as an answer and check it in ThoughtSpot; ships a library of 58 live-data charts"
 ---
 
 # ThoughtSpot custom chart builder
@@ -130,6 +133,13 @@ none of its options "(Recommended)". With "Let Claude pick", choose by Library c
 which library and why in one line before writing code. When the user picks one, build in it: if it
 fits the shape poorly or cannot be previewed (`cdn: blocked`), say so once with the better fit, then
 use theirs unless they switch.
+
+**Updating needs a `ts` profile.** When the chart will replace an answer that already exists (the user
+names one, or asks to rebuild or update a saved chart), run `ts profiles list --json` before building, and
+look for a profile on this cluster. The update needs a backup from `ts tml export` (Step 9), and that needs
+the profile; without one, the chart would be built and then refused at the commit. If there is none, say so
+now: offer to set one up with `/ts-profile-thoughtspot`, or to save the chart as a new answer, which needs no
+backup. A new answer needs only the MCP.
 
 If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
 lettered options, and wait for the answers. Write the answers into `<RUNS>/<SLUG>/intent.txt` in Step 3.
@@ -371,9 +381,11 @@ or C) built on the intake search. The answer is the one object this creates; mak
    answer again and refuses (`recheck: changed`) if anything in it changed since the first export: `answer-pack.mjs` refuses a file that is
    missing, not complete JSON, not a full export of this answer (top-level guid, `answer` key, its search and
    tables), over a day old or dated ahead, or whose real path sits inside a git working tree. The block carries a
-   fingerprint of the answer in the backup (name, search, chart type, decoded chart code), and the sandbox refuses
-   the update unless it is the answer's fingerprint now, so a backup of an older state or of another answer does
-   not pass. Restore by importing that TML (`ts tml import`, or
+   fingerprint of the answer in the backup: a hash of the whole answer, keys sorted, leaving out only every
+   `fqn` (an export holds them only when asked). The sandbox refuses the update unless it is the answer's
+   fingerprint now, so a backup of another answer, or of this one before any change at all (a description, a
+   column format, a chart setting), does not pass: when that refusal comes back, tell the user the answer
+   changed since the backup and take a fresh one. Restore by importing that TML (`ts tml import`, or
    **Import TML** in ThoughtSpot). Say where the backup is before committing.
 2. **Validate and commit in one paste.** `--commit` runs a `VALIDATE_ONLY` import first and commits only
    if it passes, so there is one block to send; `--validate` alone is for checking without writing. Read the
