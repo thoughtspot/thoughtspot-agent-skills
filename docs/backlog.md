@@ -460,6 +460,7 @@ are roughly ordered by value÷effort.
 | BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 | BL-549 | Converter-audit warnings on main, 2026-11-08 (dbt I11/I22, Sisense count row, snowflake-sv I7/I21, Tableau PT1, invariants I9 vs I13 and I3, Looker citation scope) | 2026-12-31 |
 | BL-551 | No check that each `ts <group> <cmd>` a SKILL.md names in frontmatter or prose is a registered command (validator half of audit 2026-09-22 finding 11.5) | 2026-12-31 |
+| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, and the monthly date filter `LAST_N_PERIOD` with `oper: '='` | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -16558,25 +16559,6 @@ variable) and build it as a LOW "review" rule beside S14.
 
 **Target:** 2027-01-31.
 
-## BL-522 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
-
-**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
-open items #4 and #5, deferred here so the write path's live run could close the PR).
-
-**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
-
-1. Liveboard open item #4: of the 58 library charts, the 48 moved to MayaCharts 0.18.1 render
-   in the local preview in every data mode but carry `.preview-only` until each has been on a
-   Liveboard and screenshotted. The live run put four of them on a cluster (all rendered).
-2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
-   exclude the current month; that has not been confirmed on a screenshot.
-
-**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
-`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
-days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
-
-**Target:** 2027-01-31.
-
 ## BL-515 — `ts-object-model-remodel`: propose a better Model `Tier 3`
 
 **Filed:** 2026-11-04. **Source:** audit v2 roadmap wave 5
@@ -17116,3 +17098,24 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **Do.** Add a validator, or a second rule in `check_skill_flag_usage.py`, that extracts every backticked `ts <group> <cmd>` from SKILL.md frontmatter (`description`, `metadata.summary`) and prose, including the slash form (`ts publish export/resolve/apply`), resolves each against the Typer app registered in `ts_cli/cli.py`, and fails on an unknown command. Let deliberate forward-references and deprecated mentions through a dated allowlist with a reason each; the audit found a green baseline apart from this case.
 
 **Target:** 2026-12-31.
+
+## BL-552 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
+open items #4 and #5, deferred here so the write path's live run could close the PR).
+
+**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
+
+1. Liveboard open item #4: of the 58 library charts, 48 moved to MayaCharts 0.18.1 and render
+   in the local preview in every data mode. The live run put four of them on a cluster (all
+   rendered, `.preview-only` cleared); the other 44 carry `.preview-only` until each has been on a
+   Liveboard and screenshotted.
+2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
+   exclude the current month; that has not been confirmed on a screenshot.
+
+**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
+`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
+days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
+
+**Target:** 2027-01-31.
+

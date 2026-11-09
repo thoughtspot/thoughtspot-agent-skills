@@ -274,9 +274,18 @@ _NODE_INSTALLS = frozenset({
     "npm ci --ignore-scripts --prefix agents/cli/ts-object-answer-chart-builder/helpers",
     "npm exec --prefix agents/cli/ts-object-answer-chart-builder/helpers -- playwright install --with-deps chromium",
 })
+_USES_PLUMBING = ("actions/checkout@", "actions/setup-python@")
 #: setup-node and cache only provide Node and restore the chart helpers' npm and browser
-#: caches for the installs above; they run no check.
-_USES_PLUMBING = ("actions/checkout@", "actions/setup-python@", "actions/setup-node@", "actions/cache@")
+#: caches for the installs above; they run no check. Plumbing only as exactly these steps,
+#: pinned action and `with:` both, so another use of either action stays unaccounted.
+_LOCK = "agents/cli/ts-object-answer-chart-builder/helpers/package-lock.json"
+_EXACT_USES = {
+    "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {
+        "node-version": "22", "cache": "npm", "cache-dependency-path": _LOCK},
+    "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9": {
+        "path": "~/.cache/ms-playwright",
+        "key": "playwright-${{ runner.os }}-${{ hashFiles('" + _LOCK + "') }}"},
+}
 #: The workflow, job and step keys the classifier understands. Anything else (`env`,
 #: `defaults`, `shell`, `working-directory`, `continue-on-error`, a job-level `uses`
 #: calling a reusable workflow, ...) can change what a line does, so it is unaccounted.
@@ -350,7 +359,8 @@ def ci_lines_not_reproduced(repo_root: Path) -> List[str]:
             label = f"{job_name} / {step.get('name') or step.get('uses') or '?'}"
             missing += [f"{label}: step key {k!r}" for k in step if k not in _STEP_KEYS]
             uses = step.get("uses")
-            if uses and not str(uses).startswith(_USES_PLUMBING):
+            if uses and not str(uses).startswith(_USES_PLUMBING) \
+                    and _EXACT_USES.get(str(uses)) != (step.get("with") or {}):
                 missing.append(f"{label}: uses {uses}")
             lines = _code_lines(step.get("run", ""))
             if step.get("name") == QUALITY_GATES_STEP:

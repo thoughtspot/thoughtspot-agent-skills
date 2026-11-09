@@ -260,7 +260,7 @@ function fixCommand(env, pw, browser) {
   const helpers = env.helpersDir;
   if (!pw) {
     return env.platform === "claude-app" || !env.helpersWritable
-      ? `npm install --prefix "${env.depsDir}" playwright-core`
+      ? `npm install --prefix "${env.depsDir}" playwright-core@1.62.1` // the lockfile's version
       : `cd "${helpers}" && npm install && npx playwright install chromium`;
   }
   if (!browser) {

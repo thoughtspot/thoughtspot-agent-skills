@@ -151,13 +151,13 @@ await scenario("B2: a stub backup (ids only), an older export and another Livebo
   // an older export: the native chart's search has changed since
   const older = clone(doc); vizNamed(older, "Native").answer.search_query = "[sales]";
   refused(await run(pack(["--commit", "--backup", backup(older, "older.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
-  // an older export that differs only outside name, search, chart type and code: a description, an axis setting
+  // an older export that differs only in a description or an axis setting
   const olderDesc = clone(doc); vizNamed(olderDesc, "Native").answer.description = "before the edit";
   refused(await run(pack(["--commit", "--backup", backup(olderDesc, "older-desc.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
   const olderAxis = clone(doc); vizNamed(olderAxis, "Native").answer.chart.axis_configs = [{ x: ["old"] }];
   refused(await run(pack(["--commit", "--backup", backup(olderAxis, "older-axis.json"), "pulse-kpi-best"]).blocks[0], st), /is not of this Liveboard/);
-  // ids are renumbered on import, so a backup that differs only in a visualization id is current
-  const renum = clone(doc); renum.liveboard.visualizations.forEach((v, i) => { v.id = "Viz_r" + i; });
+  // ids and viz_guids are renumbered on import, so a backup that differs only in them is current
+  const renum = clone(doc); renum.liveboard.visualizations.forEach((v, i) => { v.id = "Viz_r" + i; v.viz_guid = "00000000-0000-4000-8000-00000000000" + i; });
   ok(!/is not of this Liveboard/.test(String((await run(pack(["--validate", "--backup", backup(renum, "renum.json"), "pulse-kpi-best"]).blocks[0], clone(st))).commitWouldRefuse || "")), "a backup differing only in ids was refused");
   // another Liveboard's export with the guid edited to this one
   const other = { guid: LBG, liveboard: { visualizations: [{ id: "Viz_1", answer: { name: "Other", search_query: "[x]", chart: { type: "COLUMN" } } }] } };
@@ -227,10 +227,17 @@ await scenario("a later block pasted on its own still needs a backup, and keeps 
   ok(st.commits === undefined, "a later block committed without a backup");
 });
 
-await scenario("a backup saved with ts tml export --parse is accepted", async () => {
-  const doc = clone(base), f = path.join(TMP, "backups", "parsed.json");
+await scenario("a backup saved with ts tml export --parse is accepted, and fingerprinted", async () => {
+  const doc = withViz(clone(base), clone(native), 0, 20), f = path.join(TMP, "backups", "parsed.json");
   fs.writeFileSync(f, JSON.stringify([{ type: "liveboard", guid: LBG, tml: { liveboard: doc.liveboard }, info: {} }]));
-  committed(await run(pack(["--commit", "--backup", f, "pulse-kpi-best"]).blocks[0], { doc }));
+  const st = { doc: clone(doc) };
+  committed(await run(pack(["--commit", "--backup", f, "pulse-kpi-best"]).blocks[0], st));
+  ok(vizNamed(st.doc, "Native"), "native chart lost");
+  // the same shape holding an older state is refused like any other older export
+  const older = clone(doc); vizNamed(older, "Native").answer.description = "before the edit";
+  const g = path.join(TMP, "backups", "parsed-older.json");
+  fs.writeFileSync(g, JSON.stringify([{ type: "liveboard", guid: LBG, tml: { liveboard: older.liveboard }, info: {} }]));
+  refused(await run(pack(["--commit", "--backup", g, "pulse-kpi-best"]).blocks[0], { doc: clone(doc) }), /is not of this Liveboard/);
 });
 
 await scenario("--validate warns that a commit would refuse for want of a backup", async () => {
