@@ -3,7 +3,7 @@
 Attaches `databricks` to `load.app` (the publish_planning.py pattern), split from load.py
 under the file-size gate. A table with a data file gets that file's own rows; synthetic
 rows are inserted only with --generate-sample, and each such table is named on stderr
-(BL-550 — until 0.212.0 every table got synthetic rows while the command reported
+(BL-550 — until 0.210.0 every table got synthetic rows while the command reported
 `loaded … (N rows)`). Execution goes through the `databricks` CLI via the SQL Statement
 Execution API (the token lives in ~/.databrickscfg, never here). The SQL builders and the
 CSV row reader are pure and unit-tested.
@@ -475,7 +475,8 @@ def _recovery_advice(p: dict, cat: str, sch: str) -> str:
     else:
         undo = f"find the version before this load with DESCRIBE HISTORY {fq}, then RESTORE TABLE"
     return (f"{name}: existed before this run; {p['inserted']} of {p['of']} rows were appended. "
-            f"To undo, {undo}, or DELETE the appended rows. Do not re-run with "
+            f"To undo, {undo} (it also reverts any other writer's commits after that "
+            "version, so check DESCRIBE HISTORY first), or DELETE the appended rows. Do not re-run with "
             "--if-exists replace: it would drop the rows that were there before.")
 
 

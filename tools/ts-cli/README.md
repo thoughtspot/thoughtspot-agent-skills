@@ -3080,8 +3080,11 @@ are loaded with the reviewed types (see `ts load infer` for how a relative path 
   matches the schema; that every value fits its column type (above); that no two tables load
   as one table name, no two columns as one column name, and every table name has a letter
   or digit; and, with the default `--if-exists error`, that no target table exists. It does
-  **not** check permissions, warehouse errors, or that an existing table's columns match
-  the CSV (with `--if-exists append`). A failure there stops the load part-way, and the
+  **not** check permissions, warehouse errors, or that an existing table's column types
+  match the CSV (with `--if-exists append`): Databricks silently converts numeric→numeric
+  and TIMESTAMP→DATE on insert, so a decimal appended into a `BIGINT` column is stored
+  truncated. Append only into a table this loader created from the same schema. A
+  permissions or warehouse failure stops the load part-way, and the
   command prints, per table, what was written and how to recover: re-run with
   `--if-exists replace` for a table this run created; for a table that existed before an
   append, `RESTORE TABLE … TO VERSION AS OF <version>` (the version recorded before the
@@ -3099,7 +3102,7 @@ own `rows` the same meaning):
 
 | Case | `ts load databricks` | `ts load snowflake` |
 |---|---|---|
-| A manifest table with no data file, others with one | refused unless `--generate-sample` | fails with a `TypeError` (a known defect, tracked separately) |
+| A manifest table with no data file, others with one | refused unless `--generate-sample` | refused unless `--generate-sample` |
 | Integer column | `BIGINT`, or `DECIMAL(38,0)` when a value exceeds BIGINT | `INTEGER` (`NUMBER(38,0)`) |
 | `NUMBER(p,s)` with `s > 0`, `FLOAT` | `DOUBLE` | as declared |
 | TIMESTAMP with an offset | converted to a UTC instant | `TIMESTAMP` is `TIMESTAMP_NTZ` by default, which drops the offset (verified) |

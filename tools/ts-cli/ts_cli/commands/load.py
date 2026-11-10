@@ -754,7 +754,7 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
 
             csv_path = _sf_csv_path(tbl, csv_dir)
             if csv_path.exists():
-                cur.execute(f"PUT file://{csv_path} @%{table_name}")
+                cur.execute(f"PUT {_sf_put_uri(csv_path)} @%{table_name}")
                 cur.execute(
                     f"COPY INTO {table_name} FROM @%{table_name} "
                     f"FILE_FORMAT=(TYPE=CSV FIELD_OPTIONALLY_ENCLOSED_BY='\"' SKIP_HEADER=1)"
@@ -774,11 +774,28 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
         conn.close()
 
 
+def _sf_put_uri(path: Path) -> str:
+    """A quoted `file://` URI for PUT. Unquoted, a path with a space fails — and under
+    `--if-exists replace` the table has already been dropped by then (BL-550 review)."""
+    escaped = str(path).replace("\\", "\\\\").replace("'", "\\'")
+    return f"'file://{escaped}'"
+
+
+def _refuse_mixed_schema_only(tables: list) -> None:
+    """A manifest mixing tables with and without data files: without --generate-sample the
+    tables with no data file cannot be loaded. Refuse before anything is dropped or created,
+    as `ts load databricks` does (BL-550 review; it used to crash with a TypeError after
+    `--if-exists replace` had already dropped the table)."""
+    missing = [t["table_name"] for t in tables if not t.get("data_file") and not t.get("file")]
+    if missing:
+        raise SystemExit(f"Table(s) {', '.join(missing)} have no data file. "
+                         "Use --generate-sample for synthetic rows, or provide the CSVs.")
+
+
 def _sf_csv_path(tbl: dict, csv_dir: Path) -> Path:
     """The CSV a Snowflake load reads for one table: its resolved `data_file`, the same file
-    `ts load databricks` reads (BL-550 re-review), else `csv_dir / file`. That fallback is
-    unchanged, including its TypeError on a mixed manifest's table with no data file
-    (`file: None`), which is a known, separately tracked defect."""
+    `ts load databricks` reads (BL-550 re-review), else `csv_dir / file`. A table with
+    neither is refused before loading by `_refuse_mixed_schema_only`."""
     if tbl.get("data_file"):
         return Path(tbl["data_file"])
     return csv_dir / tbl.get("file", f"{tbl['table_name']}.csv")
@@ -843,6 +860,8 @@ def snowflake(
             "Source is schema-only (no data files). "
             "Use --generate-sample to generate synthetic data, or provide CSVs."
         )
+    else:
+        _refuse_mixed_schema_only(inferred["tables"])
     _refuse_unreadable_data(inferred["tables"], csv_dir)
 
     method = sf_profile.get("method", "python")

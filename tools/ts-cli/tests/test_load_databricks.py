@@ -890,3 +890,24 @@ def test_failed_append_before_any_row_says_the_table_is_unchanged(tmp_path, dbx)
     result = _run(["--source", str(tmp_path), "--if-exists", "append"])
     assert "no rows were appended, so it is unchanged" in result.stderr
     assert "RESTORE" not in result.stderr
+
+
+# -- final review: Snowflake PUT quoting, mixed manifest refused before any SQL ------
+
+def test_snowflake_put_uri_is_quoted_and_escaped():
+    from pathlib import Path as _P
+    assert load_core._sf_put_uri(_P("/a/my project/o'k.csv")) == "'file:///a/my project/o\\'k.csv'"
+
+
+def test_snowflake_mixed_manifest_refused_before_loading(tmp_path, monkeypatch):
+    (tmp_path / "orders.csv").write_text("id\n1\n", encoding="utf-8")
+    m = tmp_path / "manifest.json"
+    m.write_text(_json.dumps({"tables": [
+        {"table_name": "ORDERS", "data_file": str(tmp_path / "orders.csv"),
+         "columns": [{"name": "id", "type": "INTEGER"}]},
+        {"table_name": "DIM", "columns": [{"name": "k", "type": "INTEGER"}]}]}))
+    seen = _sf_capture(monkeypatch)
+    result = _sf_run(["--source", str(m)])
+    assert result.exit_code != 0
+    assert "DIM" in result.output and "no data file" in result.output
+    assert "tables" not in seen
