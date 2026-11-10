@@ -510,3 +510,25 @@ class TestFormulaTranslateComments:
     def test_a_sql_subscript_literal_keeps_its_dashes(self):
         from ts_cli.formula_translate.engine import strip_comments
         assert strip_comments("v['a--b'] -- c", "snowflake") == ("v['a--b']", True)
+
+
+class TestKeywordsInsideFieldNames:
+    """BL-460 re-review item 5: keyword scans read inside [field] names. Step 14's
+    END/CASE strip renamed a column, and validate's forbidden patterns skipped a calc."""
+
+    @pytest.mark.parametrize("src,out", [
+        ("SUM([Open Case Count])", "sum ( [Open Case Count])"),          # was [Open Count]
+        ("SUM([Week End Sales])", "sum ( [Week End Sales])"),            # was [Week Sales]
+        ("IF [Open Case Count] > 1 THEN 'a' ELSE 'b' END",
+         "if ( [Open Case Count] > 1 ) then 'a' else 'b'"),
+    ])
+    def test_a_name_keeps_its_words(self, src, out):
+        assert translate_single(src)[:2] == (out, [])
+
+    @pytest.mark.parametrize("src", ["SUM([Elseif Flag])", "SUM([Date_trunc Sales])",
+                                     "SUM([Not In (List)])"])
+    def test_a_name_is_not_a_forbidden_keyword(self, src):
+        assert translate_single(src)[1] == []
+
+    def test_a_bare_keyword_is_still_caught(self):
+        assert any("ELSEIF" in e for e in validate_output("if ( [x] ) then 1 ELSEIF 2"))

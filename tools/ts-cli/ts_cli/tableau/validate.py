@@ -13,7 +13,8 @@ import re
 # same source `ts formula translate`'s output guard checks, not a second list.
 from ts_cli.formula_translate.catalog import is_known
 from ts_cli.formula_translate.refs import bracketed_name
-from ts_cli.tableau.literals import blank_literals_and_refs
+from ts_cli.tableau.literals import blank_literals_and_refs, mask_refs
+from ts_cli.tableau.pre_transforms import CONTROL_WORDS
 from ts_cli.tableau.functions import MAPPED_FUNCTIONS
 
 
@@ -188,11 +189,9 @@ _FAMILY_CHECKS = (
 # untranslated Tableau even when its lower-case form is a ThoughtSpot function. That keeps
 # LOG2 out, as `log2(` or `LOG2(`, until log2 is live-checked (BL-460).
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-# Operators and control words, not functions. The converter leaves Tableau's upper-case
-# AND / OR / NOT in place (ThoughtSpot accepts them), and IF/CASE/WHEN/END/ELSEIF have
-# their own checks above and in validate_pre_import.
-_CONTROL_WORDS = frozenset(
-    {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
+# Operators and control words (pre_transforms.CONTROL_WORDS) are not functions. The
+# converter leaves Tableau's upper-case AND / OR / NOT in place (ThoughtSpot accepts them),
+# and IF/CASE/WHEN/END/ELSEIF have their own checks above and in validate_pre_import.
 _LEAD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -211,7 +210,7 @@ def _unknown_calls(code: str, reported: set[str]) -> list[str]:
     found: dict[str, None] = {}
     for m in _CALL_RE.finditer(code):
         name = m.group(1)
-        if (name.lower() in _CONTROL_WORDS or is_known(name)
+        if (name.lower() in CONTROL_WORDS or is_known(name)
                 or _DOCUMENTED_NOT_CONVERTED.fullmatch(name)
                 or name.upper() in reported):
             continue
@@ -245,8 +244,11 @@ def validate_output(expr: str) -> list[str]:
     """
     errors: list[str] = []
     reported: set[str] = set()
+    # A [field] name is not a keyword: [Elseif Flag], [Date_trunc Sales] and
+    # [Not In (List)] were skipped as ELSEIF / date_trunc / NOT IN (BL-460 re-review).
+    keyword_text = mask_refs(expr)[0]
     for pattern, desc in _FORBIDDEN_PATTERNS:
-        m = pattern.search(expr)
+        m = pattern.search(keyword_text)
         if m:
             errors.append(f"Contains {desc}")
             lead = _LEAD_NAME.match(m.group(0))

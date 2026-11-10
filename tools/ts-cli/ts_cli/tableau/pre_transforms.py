@@ -49,7 +49,9 @@ def strip_comments(formula: str) -> str:
 # wrote. Operators keep their case; [field] references are masked, and string literals are
 # already placeholders when this runs.
 _SOURCE_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)(\s*\()")
-_KEEP_CASE = frozenset(
+# Tableau's operators and control words: never a function name. The one copy;
+# validate.py's survivor catch reads it too.
+CONTROL_WORDS = frozenset(
     {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
 
 
@@ -60,7 +62,7 @@ def upper_call_names(expr: str) -> str:
 
     def _upper(m: re.Match) -> str:
         name = m.group(1)
-        return m.group(0) if name.lower() in _KEEP_CASE else name.upper() + m.group(2)
+        return m.group(0) if name.lower() in CONTROL_WORDS else name.upper() + m.group(2)
 
     return unmask_refs(_SOURCE_CALL.sub(_upper, masked), refs)
 
