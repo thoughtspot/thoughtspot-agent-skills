@@ -358,7 +358,7 @@ are roughly ordered by value÷effort.
 | BL-546 | `ts tml import` GUID back-fill matches by name across every LOGICAL_TABLE subtype and connection | 2026-12-15 |
 | BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
 | BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
-| BL-550 | `ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file | 2026-12-15 |
+| ~~BL-550~~ | ~~`ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file~~ | DONE (2026-11-08) |
 
 ### Tier 3 — Opportunistic
 
@@ -17078,7 +17078,7 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 
 **Target:** 2026-12-31.
 
-## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones `Tier 2`
+## BL-550 — `ts load databricks` silently replaces a CSV's rows with synthetic ones — DONE `Tier 2`
 
 **Filed:** 2026-11-08. **Source:** review of the README skills-metadata branch (`feat/skill-category-metadata`): ts-load-source-data's summary said it loads CSV data into Snowflake or Databricks, and for Databricks the code does not.
 
@@ -17087,6 +17087,8 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **Do.** Either load the real rows (INSERT the parsed CSV rows in batches, as the synthetic path already does, or stage and `COPY INTO`), or refuse a source that has data files unless an explicit flag asks for synthetic rows, and warn on stderr whenever synthetic rows are inserted. Match Snowflake's `--generate-sample` contract so the two loaders agree. Add a unit test that a CSV source's own values reach the INSERT, or that the command refuses.
 
 **Target:** 2026-12-15.
+
+**Done (2026-11-08, ts-cli 0.210.0, ts-load-source-data 1.2.0).** The first option: real rows by INSERT. A table with a data file gets that file's own rows. A table without one is refused unless the new `--generate-sample`, matching Snowflake; on Databricks the flag makes every table synthetic (Snowflake applies it only to a schema-only source), and each synthetic table is named by a `NOTICE` on stderr. The JSON marks each table `"data": "source"` or `"synthetic"`. The fix also found that the shared literal helper escaped a quote by doubling it, which Databricks reads as two concatenated literals (`'O''Brien'` → `OBrien`, live-verified on DBSQL 2026.35); it now backslash-escapes. The review round added strict decoding with `--encoding`, integer-only BIGINT, calendar-valid DATE and ISO TIMESTAMP checks, header-name matching that refuses a contradiction, refusal of colliding table and column names, `--if-exists error|append|replace` and doubled backticks in identifiers, and `ts load infer` output now loads as a `--source`. Planning, before anything is created, checks decoding, header matching, every value against its column type and name collisions, and (by default) that no target table exists; a failure while executing — permissions, warehouse errors, an appended-to table whose columns differ — can still leave tables partly loaded, and the command then prints per-table recovery advice (replace only for a table the run created; RESTORE to the version recorded before an append otherwise). The second review round made both loaders read the same absolute `data_file`, refuse an ambiguous relative path, give `--generate-sample` one meaning and decode strictly, widened an out-of-range integer column to DECIMAL(38,0) (CAST to BIGINT wraps silently, live-verified), and typed an all-0/1 column as INTEGER. Live-verified on `agent_skills.audit_probe`: a CSV with an apostrophe, a backslash, embedded quotes and empty cells, and a cp1252 CSV loaded with `--encoding cp1252`, both round-tripped exactly; a re-run was refused as an existing table, and a decimal after 1000 integers was refused before anything was created. The loader moved to `commands/load_databricks.py` under the file-size gate.
 
 ## BL-551 — Check that every `ts <group> <cmd>` a SKILL.md names is a registered command `Tier 3`
 

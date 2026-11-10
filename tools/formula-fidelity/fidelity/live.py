@@ -132,7 +132,7 @@ class DatabricksWarehouse:
     dialect = "databricks"
 
     def __init__(self, dbx_profile: str, cli_profile: Optional[str] = None):
-        from ts_cli.commands.load import _load_dbx_profile
+        from ts_cli.commands.load_databricks import _load_dbx_profile
 
         profile = _load_dbx_profile(dbx_profile)
         http_path = profile.get("sql_warehouse_http_path")

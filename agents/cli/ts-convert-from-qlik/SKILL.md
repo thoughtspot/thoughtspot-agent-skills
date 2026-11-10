@@ -54,7 +54,9 @@ Ask one question at a time for **dependent** decisions (where the next depends o
   `--api-key`) in their own terminal; the value is never echoed or written to a file.
 - The source tables already exist in a warehouse and a ThoughtSpot connection exposes them.
   This skill creates ThoughtSpot *logical* objects (Table, Model, Liveboard) over existing
-  physical tables; it does not load data. For a demo, `ts load` can provision synthetic tables.
+  physical tables; it does not load data. For a demo, synthetic tables can be provisioned
+  from a schema-only manifest with `ts load databricks … --generate-sample` or
+  `ts load snowflake … --generate-sample`; both refuse a schema-only source without the flag.
 
 ## Workflow
 
@@ -159,6 +161,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.3 | 2026-11-08 | The demo-provisioning note names `--generate-sample`: `ts load databricks` now refuses a schema-only source without it, as `ts load snowflake` already did (ts-cli 0.210.0, BL-550). Version may be renumbered at merge |
 | 1.2.2 | 2026-11-08 | **The lint gate runs (BL-545).** Steps 2 and 3 passed TML files to `ts tml lint` and `ts tml import` as bare arguments, which neither command accepts (exit 2, "Got unexpected extra argument(s)"), so no model invariant was ever linted on this path. The globs were also wrong: `build-model` writes `table.<name>.tml` / `model.<name>.tml`, so `out/*.table.tml` matched nothing. Lint now reads `--dir out/ --pattern '*.tml'`; the model import names each Table, then the Model, with `--file`, because `--order tableau` ranks by suffix and would put a Qlik Model first; the liveboard steps use `--pattern 'liveboard.*.tml'`. VALIDATE_ONLY still runs first |
 | 1.2.1 | 2026-10-08 | Week-note follow-ups (ts-cli v0.174.1, #589 re-review). A `Weekday()` / `WeekStart()` call inside a field name (`[Weekday(x)]`) or a string literal no longer counts as a known week start, so the note is no longer wrongly "exact week start". The reason text reads "an unsupported literal …" |
 | 1.2.0 | 2026-10-07 | **`WeekStart` is exact for a known week start** (ts-cli v0.174.0, BL-373, live-verified 2026-10-07). A 3rd argument or `SET FirstWeekDay` other than 0 now emits a week start built on the fixed `day_number_of_week` (Sunday: `add_days(date(d), 0 - mod(day_number_of_week(d), 7))`); these were NEEDS REVIEW. A literal period offset `n` adds `7*n` days. A non-literal offset or first week day, or an unsupported literal (`1.5`, `+1`), is still NEEDS REVIEW with that reason. Known-start forms carry the note "exact week start (<day>)" instead of the Monday advisory |

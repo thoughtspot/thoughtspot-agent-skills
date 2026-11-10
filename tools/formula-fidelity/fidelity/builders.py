@@ -95,14 +95,17 @@ def sql_literal(value: Any, sf_type: str, dialect: str = "snowflake") -> str:
         # Databricks reads a backslash escape inside '...'; Snowflake doubles the quote.
         body = body.replace("'", "\\'") if dialect == "databricks" else body.replace("'", "''")
         return "'" + body + "'"
+    # The shapes live in ts_cli, shared with `ts load databricks` (BL-550 review); imported
+    # here, not at module top, like formula_tml_entries below, so this module still imports
+    # without ts-cli on the path.
+    from ts_cli.sql_literal_shapes import DATE_RE, TIMESTAMP_STRICT_RE
     if t == "DATE":
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
+        if not DATE_RE.fullmatch(str(value)):
             raise ValueError(f"DATE value must be YYYY-MM-DD, got {value!r}")
         return f"'{value}'::DATE"
     if t.startswith("TIMESTAMP"):
         # 'YYYY-MM-DD HH:MM:SS[.fff]' plus, for TIMESTAMP_TZ, an offset (' +05:30').
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?(?: [+-]\d{2}:\d{2})?",
-                            str(value)):
+        if not TIMESTAMP_STRICT_RE.fullmatch(str(value)):
             raise ValueError(f"{sf_type} value must be 'YYYY-MM-DD HH:MM:SS[ +HH:MM]', "
                              f"got {value!r}")
         return f"'{value}'::{t}"

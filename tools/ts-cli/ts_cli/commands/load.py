@@ -1,7 +1,9 @@
 """ts load — source data loading commands for warehouse provisioning."""
 from __future__ import annotations
 
+import codecs
 import csv as csv_mod
+import io
 import json
 import math
 import re
@@ -25,11 +27,40 @@ def sanitise_name(name: str) -> str:
     return s.strip("_")
 
 
-def detect_source(path: Path) -> tuple[str, list[dict]]:
+def _resolve_data_path(named: str, base_dir: Path, what: str,
+                       require: bool = True) -> Optional[Path]:
+    """The absolute path of a data file a source JSON names.
+
+    An absolute path is used as is. A relative one is looked for next to the JSON and in the
+    working directory: if exactly one of those holds a file, it is used; if both do and they
+    are different files, the source is refused as ambiguous. (BL-550 re-review: the two
+    loaders used to resolve the same name to different files.) A file found in neither place
+    is refused when `require`, else None — `ts load generate` and `--generate-sample` read
+    no source rows, so they do not need it."""
+    rel = Path(named)
+    candidates = [rel] if rel.is_absolute() else [base_dir / rel, Path.cwd() / rel]
+    found: list[Path] = []
+    for c in candidates:
+        if c.is_file() and c.resolve() not in found:
+            found.append(c.resolve())
+    if len(found) > 1:
+        raise SystemExit(f"{what}: data file {named} is ambiguous — both {found[0]} and "
+                         f"{found[1]} exist. Give its absolute path.")
+    if found:
+        return found[0]
+    if not require:
+        return None
+    raise SystemExit(f"{what}: data file {named} not found "
+                     f"(looked next to the source JSON, {base_dir}, and in the working directory).")
+
+
+def detect_source(path: Path, require_data: bool = True) -> tuple[str, list[dict]]:
     """Auto-detect source type and return normalised file info list.
 
     Returns (source_type, file_infos) where source_type is one of:
       csv_dir, tableau_download, manifest, schema_only
+    Every `csv_path` is absolute (`_resolve_data_path`). With `require_data=False`, a data
+    file that is missing is treated as absent rather than refused.
     """
     if path.is_dir():
         csv_files = sorted(path.glob("*.csv"))
@@ -38,7 +69,7 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
         file_infos = []
         for f in csv_files:
             table_name = sanitise_name(f.stem)
-            file_infos.append({"csv_path": f, "table_name": table_name})
+            file_infos.append({"csv_path": f.resolve(), "table_name": table_name})
         return "csv_dir", file_infos
 
     if path.suffix.lower() == ".json":
@@ -49,7 +80,7 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
             for df in data["data_files"]:
                 if df.get("type") != "csv":
                     continue
-                csv_path = Path(df["path"])
+                csv_path = _resolve_data_path(df["path"], path.parent, f"{path.name}")
                 table_name = sanitise_name(csv_path.stem)
                 file_infos.append({"csv_path": csv_path, "table_name": table_name})
             if not file_infos:
@@ -57,24 +88,40 @@ def detect_source(path: Path) -> tuple[str, list[dict]]:
             return "tableau_download", file_infos
 
         if "tables" in data:
-            return _detect_tables_source(data["tables"])
+            return _detect_tables_source(data["tables"], path.parent, require_data)
 
     raise SystemExit(f"Cannot detect source type for {path}. "
                      "Provide a CSV directory, Tableau download JSON, or manifest JSON.")
 
 
-def _detect_tables_source(tables: list[dict]) -> tuple[str, list[dict]]:
+def _table_data_path(t: dict, base_dir: Path, require: bool = True) -> Optional[Path]:
+    """The CSV a `tables[]` entry names, or None for a schema-only table.
+
+    Two shapes name one: a manifest's `data_file`, and `ts load infer` output fed back as a
+    source — `file` with `has_data: true` (output from before `data_file` was added). Paths
+    resolve by `_resolve_data_path`; a missing one is refused when `require`, never read as
+    schema-only (BL-550)."""
+    named = t.get("data_file") or (t.get("file") if t.get("has_data") else None)
+    if not named:
+        return None
+    return _resolve_data_path(named, base_dir, f"Table {t.get('table_name')}", require)
+
+
+def _detect_tables_source(tables: list[dict], base_dir: Path = Path("."),
+                          require_data: bool = True) -> tuple[str, list[dict]]:
     """Normalise a `{"tables": [...]}` manifest into (source_type, file_infos).
 
-    `manifest` when any table has a `data_file` (load its CSV); otherwise `schema_only`
-    (synthetic generation). Per-table `columns` and optional `rows` are carried through.
+    `manifest` when any table names a data file (see `_table_data_path`); otherwise
+    `schema_only` (synthetic generation). Per-table `columns` and optional `rows` are
+    carried through.
     """
-    has_data = any(t.get("data_file") for t in tables)
+    paths = [_table_data_path(t, base_dir, require_data) for t in tables]
+    has_data = any(paths)
     file_infos = []
-    for t in tables:
+    for t, data_path in zip(tables, paths):
         info: dict[str, Any] = {"table_name": t["table_name"], "columns": t.get("columns", [])}
-        if has_data and t.get("data_file"):
-            info["csv_path"] = Path(t["data_file"])
+        if data_path is not None:
+            info["csv_path"] = data_path
         if t.get("rows") is not None:
             info["rows"] = t["rows"]
         file_infos.append(info)
@@ -95,7 +142,9 @@ def _infer_type(values: list[str]) -> str:
 
     date_re = re.compile(r"\d{4}-\d{2}-\d{2}$")
     ts_re = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?")
-    bool_vals = {"true", "false", "0", "1"}
+    # Only true/false text is BOOLEAN; an all-0/1 column stays INTEGER (BL-550 re-review:
+    # flags, counts and ids of 0/1 were typed BOOLEAN and could not be summed).
+    bool_vals = {"true", "false"}
 
     for v in values:
         stripped = v.strip()
@@ -138,12 +187,39 @@ def _infer_type(values: list[str]) -> str:
     return f"VARCHAR({varchar_len})"
 
 
-def infer_column_types(csv_path: Path, max_rows: int = 1000) -> list[dict]:
+def read_csv_text(csv_path: Path, encoding: str = "utf-8") -> str:
+    """A CSV's text, decoded strictly. UTF-8 is read as utf-8-sig, so a byte-order mark never
+    reaches the first header name. A byte that does not decode is refused, naming the file,
+    line and byte offset, instead of being replaced with U+FFFD (BL-550 review)."""
+    try:
+        name = codecs.lookup(encoding).name
+    except LookupError:
+        raise SystemExit(f"Unknown encoding {encoding!r}.") from None
+    raw = Path(csv_path).read_bytes()
+    # The BOM is cut here, not by the utf-8-sig codec, whose error offsets then count from
+    # after the BOM and name the wrong byte.
+    skip = len(codecs.BOM_UTF8) if name == "utf-8" and raw.startswith(codecs.BOM_UTF8) else 0
+    try:
+        return raw[skip:].decode(encoding)
+    except UnicodeDecodeError as e:
+        at = e.start + skip
+        line = raw.count(b"\n", 0, at) + 1
+        raise SystemExit(
+            f"{csv_path}: line {line}, byte offset {at}: 0x{raw[at]:02X} is not valid "
+            f"{encoding}. If the file uses another encoding, pass it with --encoding to "
+            f"ts load infer or ts load databricks (for example cp1252); ts load snowflake "
+            f"reads UTF-8 only, so convert the file first.") from None
+
+
+def infer_column_types(csv_path: Path, max_rows: int = 1000,
+                       encoding: Optional[str] = "utf-8") -> list[dict]:
     """Infer column types from a CSV file by scanning sample rows.
 
-    Returns a list of dicts with keys: name, db_column_name, inferred_type.
+    Returns a list of dicts with keys: name, db_column_name, inferred_type. The file is
+    decoded strictly (`read_csv_text`), so a column name in another encoding is refused, or
+    read correctly with `encoding`, never replaced with U+FFFD.
     """
-    with open(csv_path, newline="", encoding="utf-8", errors="replace") as f:
+    with io.StringIO(read_csv_text(csv_path, encoding or "utf-8"), newline="") as f:
         reader = csv_mod.reader(f)
         try:
             headers = next(reader)
@@ -177,9 +253,16 @@ def _count_csv_rows(csv_path: Path) -> int:
         return max(0, sum(1 for _ in f) - 1)
 
 
-def infer_schema(source_path: Path) -> dict:
-    """Top-level inference: detect source, infer types, return full JSON output."""
-    source_type, file_infos = detect_source(source_path)
+def infer_schema(source_path: Path, encoding: Optional[str] = "utf-8",
+                 require_data: bool = True) -> dict:
+    """Top-level inference: detect source, infer types, return full JSON output.
+
+    Each table with data carries `data_file`, the absolute path of its CSV, so the output
+    can be fed back as `--source` (after a schema review) from any working directory and
+    still load that CSV's rows. `encoding` is passed to `infer_column_types`;
+    `require_data=False` lets a manifest name data files that are missing (see
+    `detect_source`)."""
+    source_type, file_infos = detect_source(source_path, require_data)
 
     tables = []
     for info in file_infos:
@@ -198,20 +281,26 @@ def infer_schema(source_path: Path) -> dict:
         if source_type == "manifest" and info.get("columns"):
             csv_path = info.get("csv_path")
             row_count = _count_csv_rows(csv_path) if csv_path else 0
-            tables.append({
+            entry = {
                 "file": csv_path.name if csv_path else None,
                 "table_name": info["table_name"],
                 "row_count": row_count,
                 "columns": info["columns"],
                 "has_data": csv_path is not None,
-            })
+            }
+            if csv_path is not None:
+                entry["data_file"] = str(csv_path)
+            tables.append(entry)
             continue
 
-        csv_path = info["csv_path"]
-        columns = infer_column_types(csv_path)
+        csv_path = info.get("csv_path")
+        if csv_path is None:
+            raise SystemExit(f"Table {info['table_name']}: no data file and no columns.")
+        columns = infer_column_types(csv_path, encoding=encoding)
         row_count = _count_csv_rows(csv_path)
         tables.append({
             "file": csv_path.name,
+            "data_file": str(csv_path),
             "table_name": info["table_name"],
             "row_count": row_count,
             "columns": columns,
@@ -224,9 +313,11 @@ def infer_schema(source_path: Path) -> dict:
 @app.command()
 def infer(
     source: str = typer.Option(..., "--source", "-s", help="Path to CSV directory, download JSON, or manifest JSON"),
+    encoding: str = typer.Option("utf-8", "--encoding",
+                                 help="CSV text encoding, decoded strictly (e.g. cp1252)"),
 ) -> None:
     """Infer table schemas from source data."""
-    result = infer_schema(Path(source))
+    result = infer_schema(Path(source), encoding=encoding)
     print(json.dumps(result, indent=2, default=str))
 
 
@@ -294,98 +385,93 @@ def _explicit_generator(col: dict, rng):
     return None
 
 
-def _pick_generator(col_name: str, col_type: str, rng):
-    """Return a generator function for a column based on name and type patterns."""
-    lower = col_name.lower()
+def _type_class(col_type: str) -> str:
+    """bool | timestamp | date | int | float | string — the column TYPE decides first."""
+    t = (col_type or "").upper()
+    if "BOOL" in t:
+        return "bool"
+    if t.startswith("TIMESTAMP") or "DATETIME" in t:
+        return "timestamp"
+    if t.startswith("DATE"):
+        return "date"
+    if _is_int_type(t):
+        return "int"
+    if _is_float_type(t):
+        return "float"
+    return "string"
 
-    if ("id" in lower or "key" in lower) and _is_int_type(col_type):
-        counter = [0]
-        def gen_seq():
-            counter[0] += 1
-            return str(counter[0])
-        return gen_seq
 
-    if "email" in lower:
-        def gen_email():
-            return f"user_{rng.randint(1, 9999)}@example.com"
-        return gen_email
+def _gen_seq():
+    counter = [0]
+    def gen():
+        counter[0] += 1
+        return str(counter[0])
+    return gen
 
-    if any(w in lower for w in ("name", "customer")) and not _is_int_type(col_type) and not _is_float_type(col_type):
-        def gen_name():
-            return f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"
-        return gen_name
 
-    if any(w in lower for w in ("date", "_at", "_on")) or "DATE" in col_type:
-        def gen_date():
-            y = rng.randint(2023, 2025)
-            m = rng.randint(1, 12)
-            d = rng.randint(1, 28)
-            return f"{y}-{m:02d}-{d:02d}"
-        return gen_date
+def _gen_date(rng, with_time: bool):
+    def gen():
+        d = f"{rng.randint(2023, 2025)}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"
+        if not with_time:
+            return d
+        return f"{d} {rng.randint(0, 23):02d}:{rng.randint(0, 59):02d}:{rng.randint(0, 59):02d}"
+    return gen
 
+
+def _numeric_generator(lower: str, kind: str, rng):
+    if kind == "int":
+        if "id" in lower or "key" in lower:
+            return _gen_seq()
+        if any(w in lower for w in ("quantity", "count", "qty")):
+            return lambda: str(rng.randint(1, 100))
+        return lambda: str(rng.randint(1, 1000))
     if any(w in lower for w in ("price", "amount", "cost", "sales", "revenue")):
-        def gen_money():
-            return f"{rng.uniform(1, 10000):.2f}"
-        return gen_money
-
-    if any(w in lower for w in ("quantity", "count", "qty")):
-        def gen_qty():
-            return str(rng.randint(1, 100))
-        return gen_qty
-
-    if any(w in lower for w in ("status", "state", "type", "category")):
-        def gen_cat():
-            return rng.choice(_STATUSES)
-        return gen_cat
-
-    if any(w in lower for w in ("city",)):
-        def gen_city():
-            return rng.choice(_CITIES)
-        return gen_city
-
-    if any(w in lower for w in ("region",)):
-        def gen_region():
-            return rng.choice(_REGIONS)
-        return gen_region
-
-    if "phone" in lower:
-        def gen_phone():
-            return f"555-{rng.randint(0, 9999):04d}"
-        return gen_phone
-
+        return lambda: f"{rng.uniform(1, 10000):.2f}"
     if any(w in lower for w in ("percent", "ratio", "rate")):
-        def gen_pct():
-            return f"{rng.uniform(0, 1):.4f}"
-        return gen_pct
+        return lambda: f"{rng.uniform(0, 1):.4f}"
+    return lambda: f"{rng.uniform(0, 1000):.2f}"
 
-    if "BOOL" in col_type.upper():   # matches BOOL and BOOLEAN
-        def gen_bool():
-            return rng.choice(["true", "false"])
-        return gen_bool
-    if _is_int_type(col_type):
-        def gen_int():
-            return str(rng.randint(1, 1000))
-        return gen_int
-    if _is_float_type(col_type):
-        def gen_float():
-            return f"{rng.uniform(0, 1000):.2f}"
-        return gen_float
-    if "TIMESTAMP" in col_type:
-        def gen_ts():
-            y = rng.randint(2023, 2025)
-            m = rng.randint(1, 12)
-            d = rng.randint(1, 28)
-            h = rng.randint(0, 23)
-            mi = rng.randint(0, 59)
-            s = rng.randint(0, 59)
-            return f"{y}-{m:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
-        return gen_ts
 
+def _string_generator(lower: str, rng):
+    """Name-driven values for a text column (the only class where a name can choose freely).
+    The first rule whose keyword appears in the name wins, in this order."""
+    rules = (
+        (("email",), lambda: lambda: f"user_{rng.randint(1, 9999)}@example.com"),
+        (("name", "customer"), lambda: lambda: f"{rng.choice(_FIRST_NAMES)} {rng.choice(_LAST_NAMES)}"),
+        (("date", "_at", "_on"), lambda: _gen_date(rng, with_time=False)),
+        (("price", "amount", "cost", "sales", "revenue"), lambda: lambda: f"{rng.uniform(1, 10000):.2f}"),
+        (("quantity", "count", "qty"), lambda: lambda: str(rng.randint(1, 100))),
+        (("status", "state", "type", "category"), lambda: lambda: rng.choice(_STATUSES)),
+        (("city",), lambda: lambda: rng.choice(_CITIES)),
+        (("region",), lambda: lambda: rng.choice(_REGIONS)),
+        (("phone",), lambda: lambda: f"555-{rng.randint(0, 9999):04d}"),
+        (("percent", "ratio", "rate"), lambda: lambda: f"{rng.uniform(0, 1):.4f}"),
+    )
+    for words, make in rules:
+        if any(w in lower for w in words):
+            return make()
     counter = [0]
     def gen_default():
         counter[0] += 1
         return f"val_{counter[0]:05d}"
     return gen_default
+
+
+def _pick_generator(col_name: str, col_type: str, rng):
+    """Return a generator function for a column: its TYPE first, then its name.
+
+    The type decides the kind of value, so a name can never produce a value the column cannot
+    hold (`has_email BOOLEAN` used to get an email address, `update_count BIGINT` a date);
+    within a type, the name picks a realistic shape (sequential ids, money, quantities)."""
+    lower = col_name.lower()
+    kind = _type_class(col_type)
+    if kind == "bool":
+        return lambda: rng.choice(["true", "false"])
+    if kind in ("date", "timestamp"):
+        return _gen_date(rng, with_time=(kind == "timestamp"))
+    if kind in ("int", "float"):
+        return _numeric_generator(lower, kind, rng)
+    return _string_generator(lower, rng)
 
 
 def generate_csv(table_schema: dict, rows: int, output_dir: Path, seed: int = 42) -> Path:
@@ -417,7 +503,7 @@ def generate_csv(table_schema: dict, rows: int, output_dir: Path, seed: int = 42
 
 def generate_all(source_path: Path, rows: int, output_dir: Path, seed: int = 42) -> list[dict]:
     """Generate CSVs for all tables in a schema/manifest file."""
-    schema = infer_schema(source_path)
+    schema = infer_schema(source_path, require_data=False)   # no source rows are read
     results = []
     for tbl in schema["tables"]:
         # A table may pin its own row count (e.g. a fleet-grain dimension wants 1 row so a
@@ -546,7 +632,7 @@ def _load_via_cli(profile: dict, tables: list[dict], database: str,
         ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
         _run_snow_sql(conn, ddl)
 
-        csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+        csv_path = _sf_csv_path(tbl, csv_dir)
         if csv_path.exists():
             stage_name = f"@{database}.{schema}.%{table_name}"
             subprocess.run(
@@ -666,9 +752,9 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
             ddl = _build_create_table_sql(table_name, tbl["columns"], database, schema)
             cur.execute(ddl)
 
-            csv_path = csv_dir / tbl.get("file", f"{table_name}.csv")
+            csv_path = _sf_csv_path(tbl, csv_dir)
             if csv_path.exists():
-                cur.execute(f"PUT file://{csv_path} @%{table_name}")
+                cur.execute(f"PUT {_sf_put_uri(csv_path)} @%{table_name}")
                 cur.execute(
                     f"COPY INTO {table_name} FROM @%{table_name} "
                     f"FILE_FORMAT=(TYPE=CSV FIELD_OPTIONALLY_ENCLOSED_BY='\"' SKIP_HEADER=1)"
@@ -688,6 +774,56 @@ def _load_via_python(profile: dict, tables: list[dict], database: str,
         conn.close()
 
 
+def _sf_put_uri(path: Path) -> str:
+    """A quoted `file://` URI for PUT. Unquoted, a path with a space fails — and under
+    `--if-exists replace` the table has already been dropped by then (BL-550 review)."""
+    escaped = str(path).replace("\\", "\\\\").replace("'", "\\'")
+    return f"'file://{escaped}'"
+
+
+def _refuse_mixed_schema_only(tables: list) -> None:
+    """A manifest mixing tables with and without data files: without --generate-sample the
+    tables with no data file cannot be loaded. Refuse before anything is dropped or created,
+    as `ts load databricks` does (BL-550 review; it used to crash with a TypeError after
+    `--if-exists replace` had already dropped the table)."""
+    missing = [t["table_name"] for t in tables if not t.get("data_file") and not t.get("file")]
+    if missing:
+        raise SystemExit(f"Table(s) {', '.join(missing)} have no data file. "
+                         "Use --generate-sample for synthetic rows, or provide the CSVs.")
+
+
+def _sf_csv_path(tbl: dict, csv_dir: Path) -> Path:
+    """The CSV a Snowflake load reads for one table: its resolved `data_file`, the same file
+    `ts load databricks` reads (BL-550 re-review), else `csv_dir / file`. A table with
+    neither is refused before loading by `_refuse_mixed_schema_only`."""
+    if tbl.get("data_file"):
+        return Path(tbl["data_file"])
+    return csv_dir / tbl.get("file", f"{tbl['table_name']}.csv")
+
+
+def _refuse_unreadable_data(tables: list, csv_dir: Path) -> None:
+    """A table with data whose CSV cannot be read would be created empty with no error, so
+    refuse it instead (BL-550 review)."""
+    unreadable = [t["table_name"] for t in tables
+                  if t.get("has_data") and not _sf_csv_path(t, csv_dir).is_file()]
+    if unreadable:
+        raise SystemExit(f"Table(s) {', '.join(unreadable)}: data file not found.")
+
+
+def _sf_synthesise(tables: list, rows: int) -> None:
+    """--generate-sample: every table gets synthetic rows, whatever data files the source
+    names — the same meaning as `ts load databricks --generate-sample` (BL-550 re-review).
+    A table may pin its own row count with `rows`. Each table is named on stderr."""
+    import tempfile
+    gen_dir = Path(tempfile.mkdtemp(prefix="ts_load_gen_"))
+    for tbl in tables:
+        n = int(tbl.get("rows", rows))
+        csv_path = generate_csv(tbl, rows=n, output_dir=gen_dir)
+        tbl.update(file=csv_path.name, data_file=str(csv_path), has_data=True)
+        typer.echo(f"  NOTICE: {tbl['table_name']} gets {n} SYNTHETIC rows "
+                   "(--generate-sample), not source data.", err=True)
+
+
 @app.command()
 def snowflake(
     source: str = typer.Option(..., "--source", "-s", help="Path to CSV directory, download JSON, or manifest JSON"),
@@ -697,8 +833,10 @@ def snowflake(
     if_exists: str = typer.Option("error", "--if-exists", help="Action when table exists: error|skip|replace"),
     warehouse: Optional[str] = typer.Option(None, "--warehouse", "-w", help="Warehouse (default: from profile)"),
     role: Optional[str] = typer.Option(None, "--role", "-r", help="Role (default: from profile)"),
-    generate_sample: bool = typer.Option(False, "--generate-sample", help="Generate synthetic data for schema-only sources"),
-    rows: int = typer.Option(100, "--rows", help="Rows to generate (with --generate-sample)"),
+    generate_sample: bool = typer.Option(
+        False, "--generate-sample",
+        help="Insert synthetic rows for every table (required for a schema-only source)"),
+    rows: int = typer.Option(100, "--rows", help="Rows to generate per table (with --generate-sample)"),
 ) -> None:
     """Load CSV data into Snowflake tables."""
     if if_exists not in ("error", "skip", "replace"):
@@ -712,24 +850,19 @@ def snowflake(
         raise SystemExit("No warehouse specified. Use --warehouse or set default_warehouse in profile.")
 
     source_path = Path(source)
-    inferred = infer_schema(source_path)
+    inferred = infer_schema(source_path, require_data=not generate_sample)
 
     csv_dir = source_path if source_path.is_dir() else source_path.parent
-
-    if inferred["source_type"] == "schema_only":
-        if not generate_sample:
-            raise SystemExit(
-                "Source is schema-only (no data files). "
-                "Use --generate-sample to generate synthetic data, or provide CSVs."
-            )
-        import tempfile
-        gen_dir = Path(tempfile.mkdtemp(prefix="ts_load_gen_"))
-        for tbl in inferred["tables"]:
-            generate_csv(tbl, rows=rows, output_dir=gen_dir)
-        csv_dir = gen_dir
-        for tbl in inferred["tables"]:
-            tbl["file"] = f"{tbl['table_name']}.csv"
-            tbl["has_data"] = True
+    if generate_sample:
+        _sf_synthesise(inferred["tables"], rows)
+    elif inferred["source_type"] == "schema_only":
+        raise SystemExit(
+            "Source is schema-only (no data files). "
+            "Use --generate-sample to generate synthetic data, or provide CSVs."
+        )
+    else:
+        _refuse_mixed_schema_only(inferred["tables"])
+    _refuse_unreadable_data(inferred["tables"], csv_dir)
 
     method = sf_profile.get("method", "python")
     if method == "cli":
@@ -739,6 +872,10 @@ def snowflake(
         table_results = _load_via_python(sf_profile, inferred["tables"], database,
                                           schema, wh, rl, if_exists, csv_dir)
 
+    for r in table_results:          # source or synthetic rows, as ts load databricks reports
+        r["data"] = "synthetic" if generate_sample else "source"
+        if generate_sample:
+            r["source_file"] = None
     output = {
         "database": database,
         "schema": schema,
@@ -746,179 +883,3 @@ def snowflake(
         "tables": table_results,
     }
     print(json.dumps(output, indent=2))
-
-
-# ---------------------------------------------------------------------------
-# Databricks loader (ts load databricks) — provisions tables + synthetic data
-# into a Databricks catalog.schema via the SQL Statement Execution API, so a
-# ThoughtSpot Databricks connection can bind a model over them. Mirrors the
-# Snowflake loader; execution goes through the `databricks` CLI (token lives in
-# ~/.databrickscfg, never here). Pure SQL-builders below are unit-tested.
-# ---------------------------------------------------------------------------
-
-_DBX_PROFILES_PATH = Path.home() / ".claude" / "databricks-profiles.json"
-
-
-def _load_dbx_profile(profile_name: str) -> dict:
-    from ts_cli.profile_ops import get_profile, load_platform_profiles
-    profile = get_profile("databricks", profile_name, path=_DBX_PROFILES_PATH)
-    if profile is not None:
-        return profile
-    available = [p.get("name") for p in load_platform_profiles("databricks", path=_DBX_PROFILES_PATH)]
-    if not available:
-        raise SystemExit(f"No Databricks profiles file at {_DBX_PROFILES_PATH}. "
-                         "Run /ts-profile-databricks or create it.")
-    raise SystemExit(f"Databricks profile '{profile_name}' not found. "
-                     f"Available: {[p.get('name') for p in available]}")
-
-
-def dbx_type(src_type: str) -> str:
-    """Map an inferred (Snowflake-ish) column type → a Databricks SQL type."""
-    t = (src_type or "STRING").upper().strip()
-    if t.startswith(("VARCHAR", "CHAR", "STRING", "TEXT")):
-        return "STRING"
-    if t.startswith("BOOL"):
-        return "BOOLEAN"
-    if t.startswith("DATE"):
-        return "DATE"
-    if t.startswith(("TIMESTAMP", "DATETIME")):
-        return "TIMESTAMP"
-    if t.startswith(("FLOAT", "DOUBLE", "REAL")):
-        return "DOUBLE"
-    if t.startswith(("NUMBER", "NUMERIC", "DECIMAL")):
-        m = re.search(r"\(\s*\d+\s*,\s*(\d+)\s*\)", t)
-        return "DOUBLE" if (m and int(m.group(1)) > 0) else "BIGINT"
-    if t.startswith(("INT", "BIGINT", "SMALLINT", "TINYINT")):
-        return "BIGINT"
-    return "STRING"
-
-
-def _col_name(col: dict) -> str:
-    return col.get("db_column_name") or col.get("name") or ""
-
-
-def _col_type(col: dict) -> str:
-    return col.get("inferred_type") or col.get("type") or "STRING"
-
-
-def build_dbx_create_sql(fqtn: str, columns: list, replace: bool = False) -> str:
-    """CREATE TABLE DDL. Backtick-quotes identifiers and enables Delta **column mapping**
-    so source column names with spaces/special chars (e.g. `Order Date`, `Order Id`) are
-    preserved 1:1 — Delta otherwise rejects them (DELTA_INVALID_CHARACTERS_IN_COLUMN_NAMES).
-    `replace=True` uses CREATE OR REPLACE (drops+recreates to change the schema of an
-    already-provisioned table). Live-verified on ps-internal 2026-07-16."""
-    verb = "CREATE OR REPLACE TABLE" if replace else "CREATE TABLE IF NOT EXISTS"
-    cols = ",\n  ".join(f"`{_col_name(c)}` {dbx_type(_col_type(c))}" for c in columns)
-    return (f"{verb} {fqtn} (\n  {cols}\n) USING DELTA\n"
-            "TBLPROPERTIES ('delta.columnMapping.mode' = 'name', "
-            "'delta.minReaderVersion' = '2', 'delta.minWriterVersion' = '5')")
-
-
-def _sql_literal(val: str, dtype: str) -> str:
-    if val is None or val == "":
-        return "NULL"
-    if dtype in ("BIGINT", "DOUBLE"):
-        return str(val)
-    if dtype == "BOOLEAN":
-        return "true" if str(val).strip().lower() in ("true", "1", "yes", "t") else "false"
-    if dtype == "DATE":
-        return f"DATE'{val}'"
-    if dtype == "TIMESTAMP":
-        return f"TIMESTAMP'{val}'"
-    return "'" + str(val).replace("\\", "\\\\").replace("'", "''") + "'"
-
-
-def build_dbx_insert_sql(fqtn: str, columns: list, rows: list) -> str:
-    """INSERT ... VALUES for a batch of rows (row = list of stringified cell values)."""
-    dtypes = [dbx_type(_col_type(c)) for c in columns]
-    collist = ", ".join(f"`{_col_name(c)}`" for c in columns)
-    tuples = ", ".join("(" + ", ".join(_sql_literal(v, t) for v, t in zip(r, dtypes)) + ")"
-                       for r in rows)
-    return f"INSERT INTO {fqtn} ({collist}) VALUES {tuples}"
-
-
-def _chunks(seq: list, n: int):
-    for i in range(0, len(seq), n):
-        yield seq[i:i + n]
-
-
-def _dbx_exec(cli_profile: str, warehouse_id: str, statement: str) -> dict:
-    """Run one SQL statement via the Databricks Statement Execution API (databricks CLI)."""
-    import time
-    payload = json.dumps({"warehouse_id": warehouse_id, "statement": statement,
-                          "wait_timeout": "50s"})
-    r = subprocess.run(["databricks", "api", "post", "/api/2.0/sql/statements",
-                        "--profile", cli_profile, "--json", payload],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise SystemExit(f"databricks api post failed:\n{r.stderr.strip() or r.stdout.strip()}")
-    data = json.loads(r.stdout)
-    state = data.get("status", {}).get("state")
-    stmt_id = data.get("statement_id")
-    while state not in ("SUCCEEDED", "FAILED", "CANCELED", "CLOSED"):
-        time.sleep(2)
-        r2 = subprocess.run(["databricks", "api", "get",
-                             f"/api/2.0/sql/statements/{stmt_id}", "--profile", cli_profile],
-                            capture_output=True, text=True)
-        data = json.loads(r2.stdout)
-        state = data.get("status", {}).get("state")
-    if state != "SUCCEEDED":
-        msg = data.get("status", {}).get("error", {}).get("message", state)
-        raise SystemExit(f"Databricks SQL failed ({state}): {msg}")
-    return data
-
-
-@app.command()
-def databricks(
-    source: str = typer.Option(..., "--source", "-s",
-                               help="Schema/manifest JSON (or CSV dir) describing the table(s)"),
-    profile: str = typer.Option(..., "--profile", "-p", help="Databricks profile name"),
-    catalog: Optional[str] = typer.Option(None, "--catalog", help="Override profile catalog"),
-    schema: Optional[str] = typer.Option(None, "--schema", help="Override profile schema"),
-    rows: int = typer.Option(100, "--rows", "-r", help="Synthetic rows per table"),
-    seed: int = typer.Option(42, "--seed", help="Deterministic data seed"),
-    batch: int = typer.Option(200, "--batch", help="Rows per INSERT statement"),
-    replace: bool = typer.Option(False, "--replace", help="CREATE OR REPLACE (re-provision an existing table's schema)"),
-) -> None:
-    """Provision table(s) + synthetic data into a Databricks catalog.schema.
-
-    Infers the schema from --source, generates deterministic synthetic rows, then
-    CREATE TABLE + INSERT via the Databricks SQL Statement Execution API (the `databricks`
-    CLI; the token stays in ~/.databrickscfg). Makes source data exist so a ThoughtSpot
-    Databricks connection can bind a model — the Databricks half of ts-load-source-data.
-    """
-    import tempfile
-    prof = _load_dbx_profile(profile)
-    cli_profile = prof.get("dbx_profile") or profile
-    http_path = prof.get("sql_warehouse_http_path", "")
-    if not http_path:
-        raise SystemExit("Profile has no sql_warehouse_http_path.")
-    warehouse_id = http_path.rstrip("/").split("/")[-1]
-    cat = catalog or prof.get("catalog")
-    sch = schema or prof.get("schema")
-    if not cat or not sch:
-        raise SystemExit("catalog and schema required (profile or --catalog/--schema).")
-
-    tables = infer_schema(Path(source))["tables"]
-    out_dir = Path(tempfile.mkdtemp(prefix="dbxload_"))
-    _dbx_exec(cli_profile, warehouse_id, f"CREATE SCHEMA IF NOT EXISTS `{cat}`.`{sch}`")
-
-    results = []
-    for tbl in tables:
-        name = tbl["table_name"]
-        cols = tbl["columns"]
-        fqtn = f"`{cat}`.`{sch}`.`{name}`"
-        _dbx_exec(cli_profile, warehouse_id, build_dbx_create_sql(fqtn, cols, replace=replace))
-        n = int(tbl.get("rows", rows))   # a table may pin its own row count in the manifest
-        csv_path = generate_csv(tbl, rows=n, output_dir=out_dir, seed=seed)
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv_mod.reader(f)
-            next(reader, None)  # skip header
-            data_rows = list(reader)
-        for chunk in _chunks(data_rows, batch):
-            _dbx_exec(cli_profile, warehouse_id, build_dbx_insert_sql(fqtn, cols, chunk))
-        results.append({"table": f"{cat}.{sch}.{name}", "rows": len(data_rows)})
-        typer.echo(f"  loaded {cat}.{sch}.{name} ({len(data_rows)} rows)", err=True)
-
-    print(json.dumps({"loaded": results, "catalog": cat, "schema": sch,
-                      "warehouse_id": warehouse_id}, indent=2))
