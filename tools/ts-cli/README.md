@@ -3514,7 +3514,9 @@ ts snowflake build-model \
 | `--dry-run` | `false` | Write TML files only, skip import |
 
 **Output:** JSON summary to stdout — `{model_name, model_guid, formula_count,
-attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
+attribute_count, measure_count, phase1, phase2, tml_path, build_info}`, plus
+`reselected_columns: {columns, reason}` when a table's only column became a distinct-count
+formula and its key was selected again as an attribute (BL-447).
 Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
 formulas.
 

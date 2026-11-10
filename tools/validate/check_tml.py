@@ -25,7 +25,7 @@ from _git import _GitOut, git_paths
 
 # The I5 check is `ts tml lint`'s (tools/ts-cli/ts_cli/tml_lint.py), imported rather than
 # copied. tml_lint and its one import are stdlib-only, so no install is needed.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ts-cli"))
+sys.path.append(str(Path(__file__).resolve().parents[1] / "ts-cli"))
 from ts_cli.tml_lint import check_i5  # noqa: E402
 
 try:
