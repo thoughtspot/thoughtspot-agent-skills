@@ -108,6 +108,10 @@ def test_grouping_by_a_distinct_count_column_gives_the_key_and_summarising_gives
             {"type": "clusteredColumnChart", "title": "Customers by region",
              "fields": [{"role": "Category", "field": "Region", "kind": "column"},
                         {"role": "Y", "field": "CustomerKey", "kind": "aggregation",
+                         "agg": "distinctcount"}]},
+            {"type": "clusteredColumnChart", "title": "Rows by region",
+             "fields": [{"role": "Category", "field": "Region", "kind": "column"},
+                        {"role": "Y", "field": "CustomerKey", "kind": "aggregation",
                          "agg": "count"}]},
         ]}],
     }
@@ -117,7 +121,10 @@ def test_grouping_by_a_distinct_count_column_gives_the_key_and_summarising_gives
     meas = {c["name"] for c in model["columns"]
             if c.get("properties", {}).get("column_type") == "MEASURE"}
     spec = spec_from_parse(inv, "M", None, cols, meas, {})
-    grouped, summarised = spec["dashboards"][0]["visuals"]
+    grouped, summarised, plain_count = spec["dashboards"][0]["visuals"]
     assert "CustomerKey" in [f["name"] for f in grouped["fields"]]
     assert "CustomerKey" not in meas
     assert [f["name"] for f in summarised["fields"]] == ["Region", "CustomerKey (Distinct Count)"]
+    # Plain Count / CountNonNull (both parsed as "count") is a row count in Power BI: it must
+    # never bind to the distinct count (final review).
+    assert "CustomerKey (Distinct Count)" not in [f["name"] for f in plain_count["fields"]]

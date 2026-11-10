@@ -104,15 +104,18 @@ def agg_measures_map(inv):
             col = re.sub(r".*[\[.]", "", mm.group(2)).strip(" []")
             if col:
                 out[(aggw, col.lower())] = me["name"]
-    # A `summarizeBy: distinctCount` column summarised in a visual (its default count, the
-    # PBIR Count aggregation read as "count") reads the column's distinct-count formula
-    # column; grouping by the column still finds the column itself (BL-447). A DAX measure
-    # over the same column and aggregation keeps priority.
+    # A `summarizeBy: distinctCount` column summarised as a DISTINCT count reads the
+    # column's distinct-count formula column; grouping by the column still finds the column
+    # itself (BL-447). Only "distinctcount" binds: the parser reads PBIR Count (2) and
+    # CountNonNull (5) both as "count", and CountNonNull is Power BI's plain row count, so
+    # binding "count" here would show distinct customers where Power BI shows rows (final
+    # review). No PBIR code is mapped to "distinctcount" yet, so such a visual stays NEEDS
+    # REVIEW until a real export confirms which code is the distinct one. A DAX measure over
+    # the same column and aggregation keeps priority.
     for t in inv.get("tables", []):
         for c in t.get("columns", []):
             if _is_distinct_count(c):
-                for aggw in ("count", "distinctcount"):
-                    out.setdefault((aggw, c["name"].lower()), distinct_count_name(c["name"]))
+                out.setdefault(("distinctcount", c["name"].lower()), distinct_count_name(c["name"]))
     return out
 
 
