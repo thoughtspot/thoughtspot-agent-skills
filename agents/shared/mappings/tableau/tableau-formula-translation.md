@@ -1,4 +1,4 @@
-<!-- currency: tableau — 2026-11 (2026-11-08: Spatial Functions page re-verified, UNION is the 16th spatial function -- finding 13.15; functions the converter has never seen are skipped by a generic survivor catch against the ThoughtSpot formula catalog, and the census gaps from the Aggregate/Number/String/Date and connector pages (CORR, COVAR(P), VAR(P), STDEVP, PERCENTILE, QUARTER, LOG2, SPACE, COLLECT, GET_JSON_OBJECT, PARSE_URL*, XPATH_*, GROUP_CONCAT, LTRIM/RTRIM_THIS) are recorded unsupported, mappings pending a live check -- BL-460, ts-cli 0.210.0); 2026-10 (2026-10-07: week rows live-verified on se-thoughtspot — DATETRUNC('week') / DATEPART('week') / WEEK() exact for any start day, unknown start = Sunday assumed, ISOWEEK = week_number_of_year (ISO), BL-373/BL-380); 2026-07 (v0.88.0 inverse trig + COT mapped, USERNAME/ISUSERNAME/ISMEMBEROF -> RLS variables); 2026-08-26 function census re-verified page-driven rather than list-driven: spatial corrected 13->15 (PARSE_WKT, NO_CUTOUTS -- finding 13.22, two stale code sites), MODEL_*/SCRIPT_* analytics extensions and HEXBIN* added as untranslatable (13.25/13.27), RANK_PERCENTILE mapped to its NATIVE equivalent (13.26), ATAN2 and DIV now translate (13.27), ISO date-part family documented with the week_number_of_year near-miss warning (13.28) -->
+<!-- currency: tableau — 2026-11 (2026-11-08: Spatial Functions page re-verified, UNION is the 16th spatial function -- finding 13.15; functions the converter has never seen are skipped by a generic survivor catch against the ThoughtSpot formula catalog, and the census gaps from the Aggregate/Number/String/Date and connector pages (CORR, COVAR(P), VAR(P), STDEVP, PERCENTILE, QUARTER, LOG2, SPACE, COLLECT, GET_JSON_OBJECT, PARSE_URL*, XPATH_*, GROUP_CONCAT, LTRIM/RTRIM_THIS) are recorded unsupported, mappings pending a live check -- BL-460, ts-cli 0.211.0); 2026-10 (2026-10-07: week rows live-verified on se-thoughtspot — DATETRUNC('week') / DATEPART('week') / WEEK() exact for any start day, unknown start = Sunday assumed, ISOWEEK = week_number_of_year (ISO), BL-373/BL-380); 2026-07 (v0.88.0 inverse trig + COT mapped, USERNAME/ISUSERNAME/ISMEMBEROF -> RLS variables); 2026-08-26 function census re-verified page-driven rather than list-driven: spatial corrected 13->15 (PARSE_WKT, NO_CUTOUTS -- finding 13.22, two stale code sites), MODEL_*/SCRIPT_* analytics extensions and HEXBIN* added as untranslatable (13.25/13.27), RANK_PERCENTILE mapped to its NATIVE equivalent (13.26), ATAN2 and DIV now translate (13.27), ISO date-part family documented with the week_number_of_year near-miss warning (13.28) -->
 
 # Tableau → ThoughtSpot Formula Translation
 
@@ -92,7 +92,7 @@ call is left in place rather than mapped to a fabricated ThoughtSpot function na
 `minute()`, `diff_fortnights()`, `add_quarters()`, `start_of_hour()` do not exist). In every
 case, `validate_output` flags the surviving call as `unmapped Tableau function: X` and the
 formula is skipped with that reason instead of failing import with an opaque TML error.
-As of ts-cli **v0.210.0** (BL-460) the contract no longer depends on these lists: any call
+As of ts-cli **v0.211.0** (BL-460) the contract no longer depends on these lists: any call
 left in the output that is not a ThoughtSpot function is skipped as `untranslated Tableau
 function: X` (see "Functions the converter has never seen" under Untranslatable Patterns).
 
@@ -234,7 +234,7 @@ command detects pass-through conflicts automatically and skips them.
 | `ACOS(n)` / `ASIN(n)` / `ATAN(n)` | `acos ( n )` / `asin ( n )` / `atan ( n )` | Return radians on both sides (`asin ( 0.5 )` = 0.5236, live 2026-10-07). Was `* π / 180` until ts-cli 0.165.0 (BL-364). CLI-translated (v0.88.0, BL-072) |
 | `COT(n)` | `( 1 / tan ( n ) )` | No native `cot()` — composites off `tan`, matching Tableau's own `COT(n) = 1/tan(n)`. Radians (BL-364). At `n = 0` ThoughtSpot's NULL-safe `/` gives NULL; Tableau returns NULL or infinity by data source (BL-370). CLI-translated (v0.88.0, BL-072) |
 | `DATEPARSE(format, s)` | `to_date ( s , format )` | **Args flipped.** ThoughtSpot `to_date` accepts both `yyyy-MM-dd`-style and strptime `%Y-%m-%d` tokens (both validate live; `%`-codes are the documented canonical form). For common date patterns pass the Tableau format string through unchanged; for time components use strptime. Date-only (drops time). |
-| `DATETIME(expr)` | `sql_date_time_op ( "TO_TIMESTAMP({0})" , expr )` | Cast to a timestamp: scalar pass-through (PT1), verified on se-thoughtspot 2026-06-15. CLI-translated as of ts-cli **v0.210.0** (BL-460 review); before that the call passed through verbatim. **Only over a `[field]` or a date expression** (`DATE(…)`, `DATEADD(…)`, `TODAY()`, …): Tableau reads a **number** as days since 1899-12-30, but `TO_TIMESTAMP` reads it as seconds since 1970, and a **string** is parsed by the warehouse's own format rules — so a number, a string literal or arithmetic is skipped for review (BL-460 re-review). Over a numeric column the same mismatch applies: check the column's type. On a column that is already a datetime, a hand edit can reference it directly |
+| `DATETIME(expr)` | `sql_date_time_op ( "TO_TIMESTAMP({0})" , expr )` | Cast to a timestamp: scalar pass-through (PT1), verified on se-thoughtspot 2026-06-15. CLI-translated as of ts-cli **v0.211.0** (BL-460 review); before that the call passed through verbatim. **Only over a `[field]` or a date expression** (`DATE(…)`, `DATEADD(…)`, `TODAY()`, …): Tableau reads a **number** as days since 1899-12-30, but `TO_TIMESTAMP` reads it as seconds since 1970, and a **string** is parsed by the warehouse's own format rules — so a number, a string literal or arithmetic is skipped for review (BL-460 re-review). Over a numeric column the same mismatch applies: check the column's type. On a column that is already a datetime, a hand edit can reference it directly |
 | `STARTSWITH(s, sub)` | `strpos ( s , sub ) = 1` | No native `starts_with`. strpos is 1-based so a true prefix is position 1 (live-verified 2026-06-13, **re-confirmed 2026-07-29 — BL-170**, se-thoughtspot; the composition itself also imports clean). **Case semantics differ (BL-333):** ThoughtSpot's native form is case-insensitive — it lowercases both sides at compile time (live-verified 2026-10-06, se-thoughtspot; [formula reference](../../schemas/thoughtspot-formula-patterns.md#string-comparison-is-case-insensitive)) — while Tableau's own string functions are case-sensitive when the source is (e.g. a live Snowflake connection under its default collation). Exact only on data of consistent case; the translator is unchanged. |
 | `ENDSWITH(s, sub)` | `substr ( s , strlen ( s ) - strlen ( sub ) , strlen ( sub ) ) = sub` | No native `ends_with` (**re-confirmed 2026-07-29, se-thoughtspot — BL-170**; the composition itself also imports clean); mirrors the `RIGHT(s, n)` idiom above |
 | `PI()` | `sql_double_op ( "PI()" )` | No native `pi()` — the warehouse's own double (a zero-argument template is accepted, live 2026-10-07). **Changed ts-cli 0.165.0 (BL-364):** the 15-digit literal lost precision, and a literal-over-literal division of it is fixed-point at scale 6 (BL-365) |
@@ -1130,7 +1130,7 @@ model import. A missing formula produces a functional model with reduced coverag
 > (`_MODEL_EXT_RE`, `_RANK_UNKNOWN_RE`), mirroring the existing `_WINDOW_TABLECALC_RE`.
 > A named list goes stale the moment the vendor adds a member — which is precisely how
 > the spatial census drifted (13.22). Prefer a family regex whenever the family has a
-> stable prefix. Since BL-460 (ts-cli 0.210.0) a function no list or family names is
+> stable prefix. Since BL-460 (ts-cli 0.211.0) a function no list or family names is
 > caught too: see "Functions the converter has never seen" below.
 | `DIFFERENCE(geom1, geom2)` | Geospatial set difference — no ThoughtSpot equivalent. Omit + log. |
 | `INTERSECTION(geom1, geom2)` | Geospatial set intersection — no ThoughtSpot equivalent. Omit + log. |
@@ -1145,7 +1145,7 @@ model import. A missing formula produces a functional model with reduced coverag
 **Formerly untranslatable, now mapped:**
 - `ISMEMBEROF("group")` → `( ts_groups = 'group' )` — multi-value list membership handled natively with `=` (reclassified 2026-06-28; CLI-translated v0.88.0, BL-071)
 - `USERNAME()` → `ts_username` / `ISUSERNAME(s)` → `( ts_username = s )` — direct system-variable reference + composite equality check (CLI-translated v0.88.0, BL-071). `FULLNAME()`/`ISFULLNAME(s)`/`USERDOMAIN()` remain untranslatable — see rows above
-- `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28). CLI-translated as of ts-cli v0.210.0 (BL-460 review): until then the converter emitted the call verbatim
+- `DATETIME(expr)` → `sql_date_time_op ( "TO_TIMESTAMP({0})" , [col] )` — pass-through cast to timestamp; if the column is already datetime, reference directly. Verified on se-thoughtspot 2026-06-15 (reclassified 2026-06-28). CLI-translated as of ts-cli v0.211.0 (BL-460 review): until then the converter emitted the call verbatim
 - SQL-lookup Tableau Parameters → query the warehouse at migration time and populate `list_choice[]` with a point-in-time snapshot. See "SQL-lookup parameters (query at migration time)" section below (reclassified 2026-06-28)
 - `{FIXED ...}`, `{INCLUDE ...}`, `{EXCLUDE ...}` → `group_aggregate()` (see LOD section)
 - `TOTAL(SUM(...))` / percent-of-total → `group_aggregate(..., {}, query_filters())` (see LOD section)
@@ -1168,7 +1168,7 @@ model import. A missing formula produces a functional model with reduced coverag
 
 ### Functions the converter has never seen — unsupported, flagged for review (BL-460)
 
-As of ts-cli **v0.210.0**, a call to a function the converter has no mapping for is not
+As of ts-cli **v0.211.0**, a call to a function the converter has no mapping for is not
 passed through. `validate_output` checks every call still in the translated formula against
 the ThoughtSpot formula catalog (`ts_cli/formula_translate/catalog.py`, vendored from
 [`thoughtspot-formula-patterns.md`](../../schemas/thoughtspot-formula-patterns.md) and
@@ -1185,9 +1185,13 @@ ThoughtSpot's error; now they are excluded at translate time with a reason (audi
   and `log2(x)` are both flagged although `log2` exists. A `group_*` / `cumulative_*` /
   `moving_*` name counts only as a documented member (`cumulative_count`, `moving_stddev`
   were disproved live; `group_concat` is not ThoughtSpot's).
-- **Not a call:** a `[field]` reference (`[Area (sq ft)]`, `[Revenue (net) [EUR]]]`), a
-  string literal, a comment, a `sql_*_op` template's SQL text, and the operators `AND` /
-  `OR` / `NOT` / `IN` in any case.
+- **Not a call:** a `[field]` reference (`[Area (sq ft)]`), a string literal, a comment, a
+  `sql_*_op` template's SQL text, and the operators `AND` / `OR` / `NOT` / `IN` in any case.
+  No keyword or comment scan reads inside a `[field]` name either (`[Open Case Count]`,
+  `[http://site]`).
+- **A field name holding a bracket** (`[Revenue (net) [EUR]]]`, `[Profit]] Margin]`) is
+  skipped with "field name contains '[' — reference it by hand": it cannot be scoped, and
+  how ThoughtSpot escapes a bracket inside a reference is unverified (coverage matrix U16).
 - **Not caught:** `RANK_*` and `RUNNING_SUM` / `AVG` / `MAX` / `MIN`. Their ThoughtSpot
   forms are documented in the Rank and Running sections, but the CLI does not convert them:
   they reach import, and the parked-formula fix cycle applies the documented form.

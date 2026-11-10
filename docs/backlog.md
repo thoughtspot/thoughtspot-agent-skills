@@ -110,7 +110,7 @@ are roughly ordered by value÷effort.
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema and generator classification done 2026-11-08 (ts-cli v0.209.0); lint unchanged pending a render check; flipping the default library open |
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
-| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.210.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
+| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
 
 ### Tier 2 — Schedule soon
@@ -15753,7 +15753,7 @@ Follow-ups found here and **not filed** (reported for triage):
 
 **Target:** 2026-11-30.
 
-## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1` — **PARTIAL: survivor catch and UNION done 2026-11-08 (ts-cli 0.210.0); mappings after a live check**
+## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1` — **PARTIAL: survivor catch and UNION done 2026-11-08 (ts-cli 0.211.0); mappings after a live check**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.13; Codification opportunity 5.
 
@@ -15765,7 +15765,7 @@ Follow-ups found here and **not filed** (reported for triage):
 
 **Target:** 2026-11-30.
 
-**Resolution (2026-11-08, partial — ts-cli 0.210.0, ts-convert-from-tableau 1.46.3).** The
+**Resolution (2026-11-08, partial — ts-cli 0.211.0, ts-convert-from-tableau 1.46.3).** The
 generic survivor catch and the UNION half are done; the mappings are not.
 
 - **Catch.** `tableau/validate.py::validate_output` now ends by checking every call left in
@@ -15796,6 +15796,15 @@ guard; classify's tiers read comment-stripped text with literals and references 
 comments stripped; `RUNNING_COUNT` caught (answer-level only). `MID(s, start)` was checked:
 base emitted `MID(` verbatim, which no ThoughtSpot function accepts, so excluding it is not
 a regression.
+
+**Re-review follow-ups (2026-11-08).** A field name holding a bracket is refused, never
+partly resolved (`ts formula translate` NEEDS_REVIEW before the adapter runs, an output-guard
+backstop, a converter skip); `ts formula translate`'s comment stripper and the converter's
+END/CASE strip and forbidden-keyword checks no longer read inside a `[field]` name;
+`DATETIME` translates only over a field or a date expression; a mapped function in an
+unmapped form says "wrong number of arguments". Deferred: unifying the two call scans
+(`validate._unknown_calls`, `traps.output_guard`), which share the catalog and the
+reference grammar but not their keyword handling.
 
 **Remains** (target 2026-11-30 each):
 
