@@ -112,6 +112,9 @@ are roughly ordered by value÷effort.
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
+| BL-552 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
+| BL-553 | Looker filtered `count_distinct` maps to `count_if` (counts rows, not distinct values) | 2026-11-30 |
+| BL-554 | Snowflake SV parser drops every dimension when a view has a root-level LOD fact | 2026-11-30 |
 
 ### Tier 2 — Schedule soon
 
@@ -359,6 +362,11 @@ are roughly ordered by value÷effort.
 | BL-547 | from-tableau blend-merged Model template declares a list parameter `VARCHAR` (I10's own wrong example) | 2026-12-15 |
 | BL-548 | from-looker Model template hides every dimension primary key (I11) | 2026-12-15 |
 | ~~BL-550~~ | ~~`ts load databricks` reads a CSV source for its schema only, inserts synthetic rows, and reports `loaded … (N rows)` as if it had loaded the file~~ | DONE (2026-11-08) |
+| BL-555 | Power BI scatter/waterfall tiles get no axis encoding and fail the skill's own lint | 2026-12-15 |
+| BL-556 | Tableau `DATETIME([field])` translates even when the field is not a date | 2026-12-15 |
+| BL-557 | `ts load databricks --if-exists append` silently converts values into an existing table's types | 2026-12-15 |
+| BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
+| BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -460,6 +468,13 @@ are roughly ordered by value÷effort.
 | BL-544 | ts-object-model-aggregates Step 6 re-asks connection, db/schema and materialization for every candidate | 2026-12-31 |
 | BL-549 | Converter-audit warnings on main, 2026-11-08 (dbt I11/I22, Sisense count row, snowflake-sv I7/I21, Tableau PT1, invariants I9 vs I13 and I3, Looker citation scope) | 2026-12-31 |
 | BL-551 | No check that each `ts <group> <cmd>` a SKILL.md names in frontmatter or prose is a registered command (validator half of audit 2026-09-22 finding 11.5) | 2026-12-31 |
+| BL-560 | `ts tml import --dir` / `--order tableau`: Qlik names, non-TML files, Answers | 2026-12-31 |
+| BL-561 | Qlik liveboard builder emits a blank chart tile for an empty NEEDS REVIEW chart | 2026-12-31 |
+| BL-562 | Excel `unique count` → `COUNTA(UNIQUE())` counts a blank as a value | 2026-12-31 |
+| BL-563 | Distinct-count spelling: hand-built sites and requirement C gaps | 2026-12-31 |
+| BL-564 | Snowflake SV leftovers from BL-450: WITH TAG in expr, stale warnings, doc errors, check_sv_yaml gaps | 2026-12-31 |
+| BL-565 | Chart types: lint for non-enum `chart.type`; ADVANCED_SCATTER display-name refs; per-type flags | 2026-12-31 |
+| BL-566 | Formula comment and keyword edge cases left after BL-460 | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17156,5 +17171,161 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **What.** ts-publish-orgs advertised a `ts publish verify` command in its frontmatter `description`, its intro and its README summary. No such command exists: the registered set is export, resolve, apply, rollback and run, plus push, unpush and status. A user acting on the description gets a click error. Nothing could catch it: `check_skill_flag_usage.py` checks flags, never command names, and only on the command lines it extracts, not frontmatter or prose.
 
 **Do.** Add a validator, or a second rule in `check_skill_flag_usage.py`, that extracts every backticked `ts <group> <cmd>` from SKILL.md frontmatter (`description`, `metadata.summary`) and prose, including the slash form (`ts publish export/resolve/apply`), resolves each against the Typer app registered in `ts_cli/cli.py`, and fails on an unknown command. Let deliberate forward-references and deprecated mentions through a dated allowlist with a reason each; the audit found a green baseline apart from this case.
+
+**Target:** 2026-12-31.
+
+## BL-552 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** `qlik/functions.py:284-286` handles `Count(DISTINCT x)` only when it is the whole measure. `Sum(Sales)/Count(DISTINCT CustomerID)` comes out `sum(Sales)/count(DISTINCT CustomerID)`; `Count(DISTINCT A)/Count(DISTINCT B)` over-captures; `Count(DISTINCT If(…))` becomes `unique count(If(…))`; `Count(DISTINCT Upper(x))` keeps `Upper(` (PT2). All marked Migrated, all rejected at import or wrong. Mapping rows A04/CA04 and coverage row 10 overstate it.
+
+**Do.** Translate the inner expression and handle the call anywhere in the measure, through `formula_common.unique_count_formula`; route `If` to `unique_count_if`. Tests for compound, nested, `If` and scalar-wrapped cases. Correct the doc rows.
+
+**Target:** 2026-11-30.
+
+## BL-553 — Looker: a `count_distinct` measure with `filters:` maps to `count_if`, which counts rows `Tier 1`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** `coverage-matrix.md:78` (row 45), `lookml-to-ts-formula-translation.md:171-184,215-232`, `step-4-measure-translation.md:55-67` and `step-5-tml-generation.md:139` all map a filtered distinct count to `count_if`. On any key that repeats per row the result is too high, silently. Every other converter uses `unique_count_if`. Same skill: `step-5-tml-generation.md:131-141` shows formulas without `columns[]` entries (I1) and `not is_null(…)`, which the Looker mapping doc says is rejected.
+
+**Do.** Map to `unique_count_if` in all four places; fix the I1 template and the `is_null` form. Skill PATCH bump.
+
+**Target:** 2026-11-30.
+
+## BL-554 — Snowflake SV: a root-level LOD fact makes `parse_sv_ddl` drop every real dimension `Tier 1`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** Found live during BL-450. With a root-level LOD fact (`fixed dimensions (...)`), `parse_sv_ddl` takes the LOD's dimension list as the view's dimensions block; every real dimension is dropped and nothing warns. Widens BL-543 (LOD metrics), which covers the metric semantics, not this parse.
+
+**Do.** Anchor the dimensions-block match to the top-level clause; add a fixture with a root-level LOD fact and assert the real dimensions survive, or refuse LOD views loudly until BL-543 lands.
+
+**Target:** 2026-11-30.
+
+## BL-555 — `build_answer` emits no axis encoding for SCATTER, BUBBLE, WATERFALL, PARETO, CANDLESTICK, WHISKER_SCATTER `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** These types are in the lint's axis-bearing set, so the converters' own tiles fail `ts tml lint` as blank. Reachable today: Power BI `scatterChart`/`waterfallChart`, Tableau circle/point/shape marks, Sisense scatter/bubble. A Power BI report with either chart fails its own required gate (`ts-convert-from-powerbi/SKILL.md` Step 4). Found by the BL-449 review; README and the Qlik docstring now name the gap.
+
+**Do.** Verify the axis shape live (SCATTER is measure × measure, not category × measure), emit it in `build_answer`, and add a class test: every axis-set type a converter map emits comes out encoded.
+
+**Target:** 2026-12-15.
+
+## BL-556 — Tableau `DATETIME([field])` translates over a non-date column `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** BL-460 translates `DATETIME([field])` to `sql_date_time_op ( "TO_TIMESTAMP({0})" , … )`. The handler sees only masked references, so it cannot check the type. Over a number column Tableau reads days since 1899-12-30 and TO_TIMESTAMP reads seconds since 1970; over a text column the warehouse's format rules apply. The doc row says to check the type; nothing flags it.
+
+**Do.** Pass `date_columns` (already given to `translate_single`) into the handler and translate the field form only for a date column; otherwise skip with the existing reason.
+
+**Target:** 2026-12-15.
+
+## BL-557 — `ts load databricks --if-exists append` into an existing table converts values silently `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** Append runs `CREATE TABLE IF NOT EXISTS` then INSERT, never reading the target's types. Databricks allows numeric→numeric and TIMESTAMP→DATE on insert, so a decimal appended into a BIGINT column is stored truncated, reported as loaded. Documented since #723.
+
+**Do.** DESCRIBE each existing target in append mode during planning and refuse a type difference. Also from the #723 review, same loader: send DOUBLE literals with a `D` suffix; leading zeros should not count toward the 38-digit limit; `sanitise_name` is ASCII-only (`Größe` → `GR_SSE`); the profile keys read (`catalog`/`schema`) differ from those `ts-profile-databricks` writes (`default_catalog`/`default_schema`).
+
+**Target:** 2026-12-15.
+
+## BL-558 — Power BI `summarizeBy: count|min|max` on a text or date column emits a physical measure ThoughtSpot demotes `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** `powerbi/tables.py:85-86` emits these as physical MEASURE columns; ThoughtSpot stores them as ATTRIBUTE on a text or date key (BL-265, live-probed), so search lists values. BL-265's Affects list omits Power BI. Same class as BL-447's distinct-count fix.
+
+**Do.** Emit them as formula columns, as #725 does for `distinctCount`, keeping the key groupable under its own name.
+
+**Target:** 2026-12-15.
+
+## BL-559 — Tableau converter: a missing ELSE becomes `else 0` inside MEDIAN, MAX and STDEV `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** `tableau/conditionals.py:324-325`: `MEDIAN(IF [r]='a' THEN [x] END)` becomes `median ( if … then [x] else 0 )`. Tableau's missing ELSE is NULL, which those aggregates ignore, so the result changes. `ts formula translate --from tableau` already gives `else null`; Qlik was fixed the same way under BL-376 (only Sum keeps `else 0`). Related, same file family: an IF result used as an operand is not parenthesised (`IIF(c,1,0) + CASE … END` → `… else 0 + if …`).
+
+**Do.** Keep `else 0` for SUM only; parenthesise IF results used as operands. Verify how ThoughtSpot parses the unparenthesised form first.
+
+**Target:** 2026-12-15.
+
+## BL-560 — `ts tml import --dir` and `--order tableau`: Qlik type-first names, non-TML files, `.answer.tml` `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** From BL-545: Qlik writes `table.X.tml`/`model.Y.tml`, which `--order tableau` ranks by name (Model before Tables), so the Qlik skill lists files with `--file`. `--dir` reads `mapping.json` as TML unless `--pattern` is given. `.answer.tml` is unranked and goes after the Liveboard.
+
+**Do.** Teach `_tml_type_rank` the prefix form (or have the Qlik builder write `<name>.table.tml`), skip non-`.tml` files under `--dir`, rank Answers before Liveboards; then simplify the three skills' commands. ts-cli bump.
+
+**Target:** 2026-12-31.
+
+## BL-561 — Qlik `build-liveboard` emits a chart tile with no axis config for an empty NEEDS REVIEW chart `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** From BL-545: the offline RetailDemo fixture yields a COLUMN tile with an empty search and no axis config, which the now-working lint correctly fails. The Qlik smoke test never lints the liveboard.
+
+**Do.** Emit a table tile (or skip with a note) for an empty chart; lint the liveboard in the smoke test.
+
+**Target:** 2026-12-31.
+
+## BL-562 — ThoughtSpot → Excel `unique count` translates to `COUNTA(UNIQUE(range))`, which counts a blank `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** `excel/to_excel_calls.py:90-93`. The reverse of BL-540: Excel's form counts one blank cell as a value; ThoughtSpot's `unique count` ignores NULL. Reported TRANSLATED with only the generic blank-cell trap.
+
+**Do.** Emit `COUNTA(UNIQUE(FILTER(range, range<>"")))` or flag it Approximated with a note.
+
+**Target:** 2026-12-31.
+
+## BL-563 — One distinct-count spelling across converters; close requirement C's gaps `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** From the #725 audit and review. Five sites still build `unique count` by hand (`sv_sql.py:596`, `databricks/mv_translate.py:271`, `databricks/mv_sql.py:635`, `qlik/functions.py:286`, `dbt_metricflow.py:234`) with two spacings; `reselect_counted_columns` only recognises the helper's text. Power BI spells the NULL-aware form twice (DAX and `formula_common`). Requirement C's AST check misses string concatenation, `.format`, f-strings, `.upper()` and inverted to-direction maps, and flags reader idioms (`d.get("COUNT_DISTINCT")`); its dbt exemption has no staleness check.
+
+**Do.** Route every site through `formula_common.unique_count_formula`; add a parity requirement banning hand-built `unique count (` outside it; add an exemption-staleness check to `check_converter_parity`.
+
+**Target:** 2026-12-31.
+
+## BL-564 — Snowflake SV leftovers from the BL-450 live verification `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.**
+- `WITH TAG (...)` is not stripped from a dimension entry and ends up inside `expr` (tags are GA).
+- `sv_parse.py` still warns "DDL clause shape unverified" on `sample_values`/`is_enum`; both are now verified (ts-cli bump to remove).
+- `ts-convert-to-snowflake-sv/references/coverage-matrix.md` L11 says standalone filters are emitted; nothing emits them.
+- The from-rules DDL template labels the two sides of a dimension/fact entry the reverse of the CREATE grammar (`<alias>.<name> AS <expr>`).
+- `check_sv_yaml` does not look inside metrics (`default_aggregation`), and has no check for `measures` or dimension-level `unique`.
+- New Snowflake procedures `SYSTEM$CREATE_SEMANTIC_VIEW_FROM_OSI_YAML` / `SYSTEM$READ_OSI_YAML_FROM_SEMANTIC_VIEW` (OSI YAML) — check relevance to the Ossie work.
+
+**Do.** Fix each; the first is a silent wrong-output path and should go first.
+
+**Target:** 2026-12-31.
+
+## BL-565 — Chart types follow-ups from BL-449 `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** No lint check that `chart.type` is in the enum, though one bad value fails a whole import (warn, since a dev build's enum can lead a release). Exported ADVANCED_SCATTER Answers reference columns by display name in `custom_chart_config`, which contradicts the GUID-only rule; `build_answer_explicit` drops such configs while reporting Migrated. Behaviour when a per-type chart flag is off is unknown. `docs/designs/ts-object-liveboard-builder.md` still says "default to Legacy".
+
+**Do.** Add the enum warning to `ts tml lint`; emit NEEDS REVIEW when a config is dropped; probe a fresh ADVANCED_SCATTER import; update the design doc with BL-449's remaining half.
+
+**Target:** 2026-12-31.
+
+## BL-566 — Formula comment and keyword edge cases left after BL-460 `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
+
+**What.** Unterminated `/*` is left as code and a nested `/* /* */ */` leaves `c * /`; Qlik `REM` inside an expression becomes two column references; a Databricks backtick identifier containing `--` is cut (loud); `DATETIME([d]) + 1` is not rewritten as date arithmetic; the converter's call scan and `traps.output_guard` are still two copies with different keyword handling.
+
+**Do.** Decide Tableau's actual behaviour for unterminated and nested comments (help.tableau.com), then make the shared scanner match; treat Qlik `REM` as a statement comment only; unify the two call scans.
 
 **Target:** 2026-12-31.
