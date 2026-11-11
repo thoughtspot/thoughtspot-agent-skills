@@ -350,6 +350,21 @@ def test_parse_import_error_truncates_detail_to_120():
     assert len(detail) == 120
 
 
+def test_parse_import_error_formula_name_containing_a_comma():
+    """A real formula name can itself contain a comma (e.g. Tableau's own
+    LOD-scope naming convention, "Order Count {F} Region, Date {E} Channel,
+    Segment") — a greedy-up-to-first-comma pattern stops at the name's own
+    internal comma and never finds the real ", Error:" boundary."""
+    msg = (
+        "Formula: Order Count {F} Region, Date {E} Channel, Segment, "
+        "Error: Invalid token near ')'"
+    )
+    assert parse_import_error(msg) == (
+        "Order Count {F} Region, Date {E} Channel, Segment",
+        "Invalid token near ')'",
+    )
+
+
 # --- remove_formula ---
 
 def test_remove_formula_drops_formula_and_its_columns():
