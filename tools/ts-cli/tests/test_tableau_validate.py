@@ -19,12 +19,14 @@ class TestFunctionCensusCompleteness:
         from ts_cli.tableau.validate import validate_output
         return validate_output(expr)
 
-    def test_all_fifteen_spatial_functions_are_rejected(self):
+    def test_all_sixteen_spatial_functions_are_rejected(self):
+        # UNION became the 16th with its own entry on the Spatial Functions page
+        # (re-verified 2026-11-08, finding 13.15; BL-460).
         spatial = ["MAKEPOINT", "MAKELINE", "BUFFER", "OUTLINE", "PARSE_WKT",
                    "DISTANCE", "AREA", "LENGTH", "INTERSECTS", "SHAPETYPE",
                    "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
-                   "NO_CUTOUTS"]
-        assert len(spatial) == 15
+                   "NO_CUTOUTS", "UNION"]
+        assert len(spatial) == 16
         for fn in spatial:
             assert self._errs(f"{fn}([a],[b])"), f"{fn} passed through untranslated"
 
@@ -34,16 +36,18 @@ class TestFunctionCensusCompleteness:
             assert any(fn in e for e in self._errs(f"{fn}([g])"))
 
     def test_spatial_census_matches_between_the_two_code_sites(self):
-        """validate.py and classify.py each held their own copy; they drifted."""
+        """validate.py and classify.py each held their own copy; they drifted twice
+        (13.22, then UNION in 13.15). classify's _GEO_RE is now built from
+        validate.SPATIAL_FUNCTIONS; this still checks the two agree."""
         from ts_cli.tableau import classify, validate
         geo_in_classify = {
             f for f in ("MAKEPOINT", "MAKELINE", "BUFFER", "OUTLINE", "PARSE_WKT",
                         "DISTANCE", "AREA", "LENGTH", "INTERSECTS", "SHAPETYPE",
                         "DIFFERENCE", "INTERSECTION", "SYMDIFFERENCE", "VALIDATE",
-                        "NO_CUTOUTS")
+                        "NO_CUTOUTS", "UNION")
             if classify._GEO_RE.search(f"{f}([a])")
         }
-        assert len(geo_in_classify) == 15, sorted(geo_in_classify)
+        assert len(geo_in_classify) == 16, sorted(geo_in_classify)
         for f in geo_in_classify:
             assert f in validate._UNMAPPED_FUNCTIONS, f"{f} in classify but not validate"
 
@@ -82,10 +86,14 @@ class TestFunctionCensusCompleteness:
         """Documented limit, not an oversight.
 
         Every arity-sensitive handler in functions.py leaves a non-matching call
-        untouched (UPPER/LEFT/RIGHT/MID all behave this way). ATAN2/DIV cannot be added
-        to _UNMAPPED_FUNCTIONS to catch the leftover, because that scan runs on the raw
-        expression and would match the function name inside the emitted
-        `sql_double_op ( "ATAN2({0}, {1})" ...)` template.
+        untouched (UPPER/LEFT/RIGHT/MID all behave this way). The leftover is now caught
+        by the BL-460 survivor catch: it reads the expression with literals blanked, so
+        the name inside an emitted `sql_double_op ( "ATAN2({0}, {1})" ...)` template is
+        not a call, and the upper-case leftover is not a ThoughtSpot function.
         """
         from ts_cli.tableau.functions import map_functions
+        from ts_cli.tableau_translate import translate_single
         assert map_functions("ATAN2([y])") == "ATAN2([y])"
+        for src in ("ATAN2([y])", "LEFT([s])", "MID([s], 2)", "UPPER([a], [b])"):
+            assert translate_single(src)[1], f"{src} left in place but not flagged"
+        assert translate_single("ATAN2([y], [x])")[1] == []

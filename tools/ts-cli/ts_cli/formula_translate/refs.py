@@ -15,14 +15,29 @@ with only PyYAML: keep both stdlib-only (`GATE_SHARED_MODULES` in
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Optional
 
 from ts_cli.formula_translate.context import ColumnContext
 
 _QUOTED = re.compile(r"('(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\")")
+# One `[field]` reference as a SCANNER must see it, so that no scan reads a function
+# name, a keyword or a comment out of a column name. A name is free text: it may hold `(`,
+# a quote or `[` (`[Revenue (net) [EUR]]]`), and a `]` inside it is doubled (Tableau, DAX
+# and Qlik escape it that way). The scanners share it: split_literals below,
+# traps._code, tableau/literals.py and the comment strippers (BL-460 review).
+#
+# The RESOLVERS do not: _BRACKET (bracket_refs, qualify_refs) and the converter's
+# scope_columns read `[^[\]]+` / `[^\]]+`, a name with no bracket in it. A name that
+# holds one is therefore never resolved: `bracketed_name` finds it first, and
+# `ts formula translate` returns NEEDS_REVIEW / the converter skips the formula. How
+# ThoughtSpot escapes a bracket inside `[T::col]` is unverified, so there is no safe
+# output to resolve it to.
+REF_GRAMMAR = r"\[(?:[^\]]|\]\])*\]"
+_REF = re.compile(REF_GRAMMAR)
 # A bracketed reference is code even when its name holds a quote ([Bob's Sales::x],
 # BL-369): matched first at its own position so its apostrophe never opens a literal.
-_QUOTED_OR_BRACKET = re.compile(r"(\[[^\[\]]*\])|" + _QUOTED.pattern)
+_QUOTED_OR_BRACKET = re.compile(rf"({REF_GRAMMAR})|" + _QUOTED.pattern)
 _BRACKET = re.compile(r"\[([^\[\]]+)\]")
 
 # Words that are never a field when they appear bare (Qlik output).
@@ -54,6 +69,51 @@ def split_literals(expr: str, brackets_are_code: bool = True) -> list[tuple[bool
     if pos < len(expr):
         out.append((False, expr[pos:]))
     return out
+
+
+@lru_cache(maxsize=None)
+def comment_pattern(line_markers: tuple[str, ...], *, block: bool, refs: bool,
+                    literal: str = _QUOTED.pattern) -> "re.Pattern[str]":
+    """One left-to-right scan for stripping comments: a ``[field]`` reference (when
+    ``refs``), a string literal, a line comment or a ``/* */`` block — whichever starts
+    first wins. A reference may hold ``//`` or ``/*`` (``[http://site]``,
+    ``[a/*b] + [c*/d]``) and a literal may hold either, so only what lies outside both is
+    a comment. ``literal`` is the dialect's literal grammar (Tableau doubles a quote and
+    has no backslash escape). Used by ``engine.strip_comments`` and the Tableau
+    converter's ``pre_transforms.strip_comments`` (BL-460 re-review)."""
+    keep = (REF_GRAMMAR + "|" if refs else "") + literal
+    alternatives = [rf"(?P<keep>{keep})"]
+    if line_markers:
+        markers = "|".join(re.escape(m) for m in line_markers)
+        alternatives.append(rf"(?P<line>(?:{markers})[^\n]*)")
+    if block:
+        alternatives.append(r"(?P<block>/\*.*?\*/)")
+    return re.compile("|".join(alternatives), re.S)
+
+
+def strip_comment_matches(pattern: "re.Pattern[str]", text: str, line: str = " ") -> str:
+    """``text`` with every comment ``pattern`` finds replaced (a line comment by ``line``,
+    a block by a space); references and literals are kept as written."""
+    def _sub(m: re.Match) -> str:
+        if m.group("keep") is not None:
+            return m.group(0)
+        return line if m.lastgroup == "line" else " "
+    return pattern.sub(_sub, text)
+
+
+def bracketed_name(expr: str) -> Optional[str]:
+    """The first ``[field]`` reference outside string literals whose name holds ``[`` or
+    ``]`` once a doubled ``]]`` is read as one ``]`` (``[Sales [USD]]]``,
+    ``[Profit]] Margin]``), or None. No resolver here can read such a name (see
+    REF_GRAMMAR), so a caller refuses the formula rather than resolve a piece of it."""
+    for lit, seg in split_literals(expr):
+        if lit:
+            continue
+        for m in _REF.finditer(seg):
+            name = m.group(0)[1:-1].replace("]]", "]")
+            if "[" in name or "]" in name:
+                return m.group(0)
+    return None
 
 
 def _map_code(expr: str, fn) -> str:

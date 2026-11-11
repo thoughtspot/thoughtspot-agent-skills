@@ -46,7 +46,9 @@ a wholesale port. In particular:
 
     RUNNING_* (cumulative) has the identical latent defect — classified
     "cumulative" (translatable) but not actually converted by
-    ``translate_formulas()`` today — tracked separately, out of scope here.
+    ``translate_formulas()`` today, and so do the RANK_* variants. Tracked in
+    BL-460's Remains (docs/backlog.md); out of scope here. RUNNING_COUNT is
+    the exception: its form is answer-level only, so it is rejected.
 
   - TML validity is delegated entirely to :mod:`ts_cli.tml_lint`
     (``lint_tml`` for the model invariants). This module never

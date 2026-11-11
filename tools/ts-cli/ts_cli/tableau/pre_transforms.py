@@ -7,39 +7,64 @@ from __future__ import annotations
 
 import re
 
+from ts_cli.formula_translate.refs import comment_pattern, strip_comment_matches
+from ts_cli.tableau.literals import mask_refs, unmask_refs
 from ts_cli.tableau.parsing import _extract_function_args
 
 
 # ---------------------------------------------------------------------------
-# Pre-0. Strip Tableau // line comments (BL-056)
+# Pre-0. Strip Tableau comments: // line comments (BL-056) and /* */ blocks
 # ---------------------------------------------------------------------------
+#
+# help.tableau.com (Operators): "A comment starts at the two forward slashes (//) and goes
+# to the end of the line" and "Multi-line comments can be added by typing /* to start the
+# comment and */ to end it". One left-to-right scan: a [field] reference, a string literal
+# or a comment, whichever starts first. A reference may hold a quote or `//` ([Bob's Sales],
+# [http://site]), a literal may hold `//` or `/*`, and only what is outside both is a
+# comment. The character toggle this replaced read the apostrophe in [Bob's Sales] as an
+# open literal, and the `//` in [http://site] as a comment (BL-460 review).
+# The shared scanner (formula_translate.refs.comment_pattern) with Tableau's literal
+# grammar: a quote is doubled inside a literal, and there is no backslash escape.
+_COMMENT_SCAN = comment_pattern(
+    ("//",), block=True, refs=True,
+    literal=r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+
 
 def strip_comments(formula: str) -> str:
-    """Strip Tableau // line comments, preserving // inside string literals."""
-    result: list[str] = []
-    in_single = False
-    in_double = False
-    i = 0
-    while i < len(formula):
-        c = formula[i]
-        if c == "'" and not in_double:
-            in_single = not in_single
-            result.append(c)
-            i += 1
-        elif c == '"' and not in_single:
-            in_double = not in_double
-            result.append(c)
-            i += 1
-        elif (c == '/' and i + 1 < len(formula) and formula[i + 1] == '/'
-              and not in_single and not in_double):
-            newline = formula.find('\n', i)
-            if newline == -1:
-                break
-            i = newline
-        else:
-            result.append(c)
-            i += 1
-    return ''.join(result).strip()
+    """Strip Tableau comments (``//`` to the end of the line, ``/* … */`` blocks) outside
+    string literals and ``[field]`` references."""
+    return strip_comment_matches(_COMMENT_SCAN, formula, line="").strip()
+
+
+# ---------------------------------------------------------------------------
+# Pre-0c. One spelling per Tableau function (BL-460 review)
+# ---------------------------------------------------------------------------
+#
+# Tableau function names are case-insensitive, so `log2(` and `LOG2(` are one call. Every
+# mapping here matches case-insensitively and emits lower case, and the survivor catch in
+# validate.py reads a lower-case name as converter output. A source written in lower case
+# leaked through it: `log2(` (a ThoughtSpot name, though LOG2 is unmapped until a live
+# check) and `group_concat(` passed while `LOG2(` was skipped. Upper-casing every call name
+# in the source first gives one spelling: whatever comes out in lower case, the converter
+# wrote. Operators keep their case; [field] references are masked, and string literals are
+# already placeholders when this runs.
+_SOURCE_CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)(\s*\()")
+# Tableau's operators and control words: never a function name. The one copy;
+# validate.py's survivor catch reads it too.
+CONTROL_WORDS = frozenset(
+    {"if", "then", "else", "elseif", "and", "or", "not", "in", "is", "case", "when", "end"})
+
+
+def upper_call_names(expr: str) -> str:
+    """Upper-case every function name called in a Tableau source ``expr`` (not operators,
+    not inside ``[field]`` references). Run on the literal-masked source."""
+    masked, refs = mask_refs(expr)
+
+    def _upper(m: re.Match) -> str:
+        name = m.group(1)
+        return m.group(0) if name.lower() in CONTROL_WORDS else name.upper() + m.group(2)
+
+    return unmask_refs(_SOURCE_CALL.sub(_upper, masked), refs)
 
 
 # ---------------------------------------------------------------------------

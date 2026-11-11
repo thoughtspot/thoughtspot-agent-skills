@@ -63,20 +63,35 @@ EXTRAS = {
     "sql_date_time_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
     "sql_date_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
     "sql_bool_aggregate_op": "formula-patterns; live-accepted 2026-10-06 (BL-335)",
+    # The group_* shorthands, each `group_aggregate ( <agg> , {attr} , query_filters () )`.
+    # cumulative_* and moving_* are table rows (sum/average/max/min), so they are in CATALOG.
+    "group_sum": "formula-patterns: group_* shorthand table",
+    "group_average": "formula-patterns: group_* shorthand table",
+    "group_count": "formula-patterns: group_* shorthand table",
+    "group_max": "formula-patterns: group_* shorthand table",
+    "group_min": "formula-patterns: group_* shorthand table",
+    "group_unique_count": "formula-patterns: group_* shorthand table",
+    "group_stddev": "formula-patterns: group_* shorthand table",
+    "group_variance": "formula-patterns: group_* shorthand table",
 }
 # NOT accepted although the shared references list it: rejected live 2026-10-06 (OI-5).
 REJECTED_LIVE = frozenset({"sql_number_aggregate_op", "sql_number_op",  # BL-335
                            # nullif is struck through in the reference (NONEXISTENT); its
                            # underscore spelling was rejected in the same probe (§7, BL-339).
-                           "null_if"})
-
-# Prefixes of documented function families (cumulative_*, moving_*, group_*).
-FAMILY_PREFIXES = ("cumulative_", "moving_", "group_")
+                           "null_if",
+                           # "Functions that do NOT exist", rejected live 2026-07-30 with
+                           # `Search did not find "<name> ("` (formula-patterns, Window
+                           # Functions). The family-prefix rule this replaced accepted the
+                           # first three (BL-460 review).
+                           "cumulative_count", "moving_count", "moving_stddev",
+                           "lag", "dense_rank", "row_number", "nth_value"})
 
 
 def is_known(name: str) -> bool:
     """True if ``name`` (case-sensitive: ThoughtSpot output is lower case) is a known
-    ThoughtSpot formula function."""
+    ThoughtSpot formula function. A documented member, never a prefix match: a
+    `cumulative_*` / `moving_*` / `group_*` prefix rule accepted `cumulative_count`,
+    `moving_stddev` (both disproved live) and a source's `group_concat` (BL-460 review)."""
     if name in REJECTED_LIVE or name in NONEXISTENT:
         return False
-    return name in CATALOG or name in EXTRAS or name.startswith(FAMILY_PREFIXES)
+    return name in CATALOG or name in EXTRAS

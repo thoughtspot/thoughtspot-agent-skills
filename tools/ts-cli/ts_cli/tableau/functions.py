@@ -18,7 +18,9 @@ from ts_cli.formula_common import (
     ts_weekday_number,
 )
 from ts_cli.formula_week import ts_week_of_year_jan1, ts_week_start
-from ts_cli.tableau.literals import literal_value, mask_refs, unmask_refs
+from ts_cli.tableau.literals import (
+    _REF_PLACEHOLDER_RE, literal_value, mask_refs, unmask_refs,
+)
 from ts_cli.tableau.parsing import _extract_function_args
 
 
@@ -182,6 +184,36 @@ def _round_handler(a: list[str]) -> str:
     return f"ROUND({', '.join(a)})"
 
 
+# DATETIME(expr): the cast to a timestamp, as the warehouse's own TO_TIMESTAMP — the
+# mapping doc's form ("Formerly untranslatable, now mapped"), verified on se-thoughtspot
+# 2026-06-15, never wired in until the BL-460 review. Only over a [field] (masked here as a
+# reference token) or a call that yields a date: TO_TIMESTAMP reads a NUMBER as seconds
+# since 1970 where Tableau's DATETIME reads it as days since 1899-12-30, and a STRING by
+# the warehouse's own format rules, so either is left in place for review (BL-460
+# re-review). An empty or extra argument is left in place too.
+_DATE_VALUED_CALL = re.compile(
+    r"(?:DATE|DATEADD|DATETRUNC|DATETIME|MAKEDATE|MAKEDATETIME|TODAY|NOW"
+    r"|date|today|now|to_date|sql_date_op|sql_date_time_op)\s*\(")
+
+
+def _whole_call(arg: str, pattern: re.Pattern) -> bool:
+    """True if ``arg`` is one call matching ``pattern``, its parentheses closing at the end."""
+    m = pattern.match(arg)
+    if not m:
+        return False
+    extracted = _extract_function_args(arg, m.end() - 1)
+    return bool(extracted) and extracted[1] == len(arg)
+
+
+def _datetime(args: list[str]) -> str | None:
+    if len(args) != 1:
+        return None
+    arg = args[0].strip()
+    if not (_REF_PLACEHOLDER_RE.fullmatch(arg) or _whole_call(arg, _DATE_VALUED_CALL)):
+        return None
+    return f'sql_date_time_op ( "TO_TIMESTAMP({{0}})" , {arg} )'
+
+
 _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("LEFT", lambda a: f"substr ( {a[0]} , 0 , {a[1]} )" if len(a) == 2 else None),
     ("RIGHT", lambda a: f"substr ( {a[0]} , strlen ( {a[0]} ) - {a[1]} , {a[1]} )" if len(a) == 2 else None),
@@ -242,6 +274,7 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     ("COT", lambda a: f"( 1 / tan ( {a[0]} ) )" if len(a) == 1 else None),
 
     ("DATEPARSE", lambda a: f"to_date ( {a[1]} , {a[0]} )" if len(a) == 2 else None),
+    ("DATETIME", lambda a: _datetime(a)),
 
     # Pass-through rescues (tableau-formula-translation.md "Functions with no
     # native ThoughtSpot equivalent — pass-through", lines ~989-995) — no
@@ -279,6 +312,14 @@ _ARG_HANDLERS: list[tuple[str, Any]] = [
     # ISOWEEKDAY(date) is DATEPART('iso-weekday', date) — map_date_functions, so the
     # converter records the exact Monday form for the week note (#589 review).
 ]
+
+# Every Tableau function name the two tables above map, derived from them (never a list):
+# a call to one of these that survives translation was called in a form the converter
+# does not map (wrong argument count, or DATETIME over a number), not a function it has
+# never seen. validate.py words the reason accordingly (BL-460 re-review).
+MAPPED_FUNCTIONS = frozenset(
+    re.match(r"\\b([A-Z_0-9]+)", p.pattern).group(1) for p, _ in _FUNCTION_MAP
+) | frozenset(fn for fn, _ in _ARG_HANDLERS)
 
 
 def _convert_zn(expr: str) -> str:
