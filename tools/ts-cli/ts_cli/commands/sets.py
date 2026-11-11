@@ -115,6 +115,7 @@ def inventory(
     all_orgs: bool = typer.Option(False, "--all-orgs", help="Cluster scope: every ACTIVE Org in turn."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve scope only; no Set scan."),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="Write JSON here as well as stdout."),
+    export_tml: Optional[str] = typer.Option(None, "--export-tml", help="Also write each Set's TML (YAML, with FQNs) under this directory: <dir>/<org>/<Set name>__<guid>.cohort.tml."),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE"),
 ) -> None:
     """Every reusable Set on the scoped Models, classified, with grant provenance.
@@ -127,6 +128,7 @@ def inventory(
       ts sets inventory --model-contains DUNDER -p se
       ts sets inventory --org ORG1 --dry-run -p se
       ts sets inventory --all-orgs -o ./sets-inventory.json -p se
+      ts sets inventory --model "Retail Sales" --export-tml ./sets-tml -p se
     """
     if not (model or model_contains or org or all_orgs):
         _err("No scope: pass --model, --model-contains, --org or --all-orgs")
@@ -148,6 +150,8 @@ def inventory(
     if dry_run:
         n = sum(len(c) for _, _, c in plans)
         _err(f"{n} Model(s) in scope across {len(plans)} Org(s); rough estimate {max(1, n * 5)}s+")
+        if export_tml:
+            _err("--dry-run: no Set TML exported")
         print(json.dumps({"schema": SCHEMA, "dry_run": True, "scope": scope,
                           "orgs": [{"org": label, "models": c} for label, _, c in plans],
                           "notes": org_notes}, indent=2))
@@ -155,7 +159,8 @@ def inventory(
     results = []
     for label, client, chosen in plans:
         _err(f"{label}: scanning {len(chosen)} Model(s)…")
-        results.append(inventory_org(client, label, chosen))
+        results.append(inventory_org(client, label, chosen,
+                                     export_dir=Path(export_tml) if export_tml else None))
     doc = {"schema": SCHEMA,
            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "profile": resolve_profile(profile), "scope": scope,

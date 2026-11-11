@@ -10,7 +10,7 @@ from runners import runner  # shared, stream-separated (BL-139)
 MODELS = [{"guid": "g1", "name": "Dunder Mifflin"}, {"guid": "g2", "name": "Retail"}]
 
 
-def _fake_inventory(c, label, models):
+def _fake_inventory(c, label, models, export_dir=None):
     return {"org": label, "notes": [], "models": [
         {"guid": m["guid"], "name": m["name"], "discovery": "COMPLETE", "set_count": 0,
          "sets": []} for m in models]}
@@ -216,3 +216,37 @@ def test_inventory_without_a_base_url_omits_it(_c, _m, _inv, _rp):
     r = runner.invoke(app, ["sets", "inventory", "--model-contains", "dunder", "--profile", "p"])
     assert r.exit_code == 0, r.stderr
     assert json.loads(r.stdout)["base_url"] is None
+
+
+# --- --export-tml ---------------------------------------------------------------------
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_passes_dir_to_each_org(_c, _m, _rp, tmp_path):
+    with patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory) as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                str(tmp_path / "tml"), "--profile", "p"])
+    assert r.exit_code == 0, r.stderr
+    assert inv.call_args.kwargs["export_dir"] == tmp_path / "tml"
+
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_no_export_tml_means_no_export(_c, _m, _rp):
+    with patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory) as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--profile", "p"])
+    assert r.exit_code == 0, r.stderr
+    assert inv.call_args.kwargs["export_dir"] is None
+    assert "tml_exported" not in json.loads(r.stdout)["summary"]
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_dry_run_exports_nothing(_c, _m, tmp_path):
+    with patch("ts_cli.commands.sets.inventory_org") as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--dry-run",
+                                "--export-tml", str(tmp_path / "tml"), "--profile", "p"])
+    assert r.exit_code == 0 and not inv.called
+    assert not (tmp_path / "tml").exists() and "no Set TML exported" in r.stderr

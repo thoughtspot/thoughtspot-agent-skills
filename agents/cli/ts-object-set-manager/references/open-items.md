@@ -257,3 +257,19 @@ verified, so the report needs no hand-check for filter-only Liveboards.
 
 Not covered: a non-admin caller (see #6 — BL-327 gate (b)); a Liveboard filter on a Set from a
 *different* Model than the Liveboard's vizzes.
+
+## #9 — Set TML export by GUID, every Set type — VERIFIED 2026-11-11
+
+`ts sets inventory --export-tml` on se-thoughtspot, Model *Retail Sales - RP*: 11 Sets, all
+`REVIEW_DELETE` (no Answer or Liveboard uses them), covering SIMPLE/GROUP_BASED,
+SIMPLE/BIN_BASED, ADVANCED/BIN_BASED and ADVANCED/COLUMN_BASED. v2 `metadata/tml/export`
+with `{"metadata": [{"identifier": <set guid>}], "export_fqn": true}` returned each with
+`info.type: cohort`, status `OK` and a top-level `cohort:` document; 11/11 written.
+
+- **`formattype` was not honoured:** `YAML`, `JSON`, the key spelled `format_type`, and no
+  key all returned JSON, for the Model as well as a Set. The exporter re-emits JSON as YAML.
+- **`type: LOGICAL_COLUMN` is rejected** by the export endpoint (400, not a valid
+  `metadata[].type`), unlike the dependents search (F5) — send the GUID alone.
+- **Re-importable:** all 11 written files returned `OK` from a `VALIDATE_ONLY`
+  `metadata/tml/import` (nothing created).
+

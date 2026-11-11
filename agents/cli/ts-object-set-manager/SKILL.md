@@ -107,6 +107,14 @@ be scanned). On exit 1 with "No Model matched", show the selectors and return to
 Progress goes to stderr. Per Model this is one call to an internal cohort listing, then
 per Set a dependents lookup, a TML export of each Liveboard dependent, and one grants read.
 
+**When the user wants the Sets' TML** (to back them up, move them, or read their
+definitions), add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml`. It
+writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML, Model referenced by FQN),
+including Sets nothing uses — no public API lists those, so this is the way to retrieve
+them. Each Set's `tml_file` records the path; a failed export is `null` with a
+`tml_export_failed` scan note, and `summary.tml_export_failed` counts them. Read-only: it
+exports, it never imports.
+
 ## Step 5 — Report
 
     ts sets report ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/sets-inventory.json \
@@ -186,5 +194,6 @@ Say plainly that nothing was changed.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-11-11 | `--export-tml <dir>` writes each Set's TML, including Sets no Answer or Liveboard uses (ts-cli 0.212.0) |
 | 1.1.0 | 2026-10-02 | Report links Models, Answers and Liveboards into ThoughtSpot (ts-cli 0.153.1) |
 | 1.0.0 | 2026-10-02 | Initial release — report-only reusable Set inventory: scope by Model/Org/Cluster, classification, grant provenance |

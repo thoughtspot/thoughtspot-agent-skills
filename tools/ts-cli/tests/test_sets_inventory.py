@@ -195,3 +195,45 @@ def test_dependents_complete_true_when_lookup_certain():
 def test_dependents_complete_false_when_lookup_uncertain(extra):
     rec = inv.build_set_record(SET, dict(CONS, **extra), CLS, None)
     assert rec["dependents_complete"] is False
+
+
+# --- --export-tml -------------------------------------------------------------------
+
+def _run_org_export(tmp_path, export_result):
+    with patch.object(inv, "discover_sets",
+                      return_value={"sets": {"m1": [SET]}, "incomplete": [], "notes": []}), \
+         patch.object(inv, "fetch_consumers", return_value=CONS), \
+         patch.object(inv, "fetch_grants", return_value={"s1": [], "a1": []}), \
+         patch.object(inv, "export_set_tml", return_value=export_result) as ex:
+        out = inv.inventory_org(object(), "Primary", [{"guid": "m1", "name": "M"}],
+                                export_dir=tmp_path)
+    return out, ex
+
+
+def test_export_records_tml_file(tmp_path):
+    out, ex = _run_org_export(tmp_path, None)
+    rec = out["models"][0]["sets"][0]
+    assert rec["tml_file"] == str(tmp_path / "Primary" / "B__s1.cohort.tml")
+    assert ex.call_args.args[2] == tmp_path / "Primary" / "B__s1.cohort.tml"
+    assert out["notes"] == []
+    assert inv.summarise([out])["tml_exported"] == 1
+
+
+def test_failed_export_is_null_file_and_a_note(tmp_path):
+    out, _ = _run_org_export(tmp_path, "HTTP 403: forbidden")
+    rec = out["models"][0]["sets"][0]
+    assert rec["tml_file"] is None
+    assert [(n["kind"], n["detail"]) for n in out["notes"]] == \
+        [("tml_export_failed", "HTTP 403: forbidden")]
+    assert inv.summarise([out])["tml_export_failed"] == 1
+
+
+def test_without_export_dir_no_tml_field(tmp_path):
+    with patch.object(inv, "discover_sets",
+                      return_value={"sets": {"m1": [SET]}, "incomplete": [], "notes": []}), \
+         patch.object(inv, "fetch_consumers", return_value=CONS), \
+         patch.object(inv, "fetch_grants", return_value={"s1": [], "a1": []}), \
+         patch.object(inv, "export_set_tml") as ex:
+        out = inv.inventory_org(object(), "Primary", [{"guid": "m1", "name": "M"}])
+    assert not ex.called and "tml_file" not in out["models"][0]["sets"][0]
+    assert "tml_exported" not in inv.summarise([out])

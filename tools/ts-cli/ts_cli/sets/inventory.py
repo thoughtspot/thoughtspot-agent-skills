@@ -7,11 +7,13 @@ Set propagates rather than being read as a lighter verdict.
 from __future__ import annotations
 
 from collections import Counter
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
 from ts_cli.sets.classify import classify
 from ts_cli.sets.consumers import fetch_consumers
 from ts_cli.sets.discover import discover_sets
+from ts_cli.sets.export import export_set_tml, tml_path
 from ts_cli.sets.grants import UNKNOWN_GRANTS, fetch_grants, provenance
 
 # Labels that depend on knowing EVERY consumer and its owner. When that is uncertain
@@ -50,7 +52,10 @@ def build_set_record(set_ref: dict, consumers: dict, cls: dict, grants) -> dict:
                             "liveboards": consumers["liveboards"], "grants": labelled})
 
 
-def inventory_org(client, label: str, models: List[dict]) -> dict:
+def inventory_org(client, label: str, models: List[dict],
+                  export_dir: Optional[Path] = None) -> dict:
+    """With `export_dir`, also write each Set's TML there and record its path as
+    `tml_file` on the Set (None when the export failed; a `tml_export_failed` note says why)."""
     found = discover_sets(client, models)
     notes = list(found["notes"])
     out_models = []
@@ -64,7 +69,15 @@ def inventory_org(client, label: str, models: List[dict]) -> dict:
             obj = f"{m['name']} / {s['name']}"
             cons = fetch_consumers(client, s)
             grants = fetch_grants(client, s["guid"], cons)
-            records.append(build_set_record(s, cons, classify(cons), grants))
+            rec = build_set_record(s, cons, classify(cons), grants)
+            if export_dir is not None:
+                path = tml_path(export_dir, label, s)
+                failed = export_set_tml(client, s, path)
+                rec["tml_file"] = None if failed else str(path)
+                if failed:
+                    notes.append({"kind": "tml_export_failed",
+                                  "object": f"{obj} ({s['guid']})", "detail": failed})
+            records.append(rec)
             if cons.get("error"):
                 notes.append({"kind": "dependents_failed", "object": obj,
                               "detail": cons["error"]})
@@ -97,4 +110,14 @@ def summarise(orgs: List[dict]) -> dict:
             "sets": len(sets),
             "by_class": dict(Counter(s["class"] for s in sets)),
             "unexplained_grants": _grants_with(sets, "UNEXPLAINED"),
-            "unknown_grants": _grants_with(sets, "UNKNOWN")}
+            "unknown_grants": _grants_with(sets, "UNKNOWN"),
+            **_export_counts(sets)}
+
+
+def _export_counts(sets: List[dict]) -> dict:
+    """Only when TML was exported (`--export-tml`): files written and exports that failed."""
+    tried = [s for s in sets if "tml_file" in s]
+    if not tried:
+        return {}
+    ok = sum(1 for s in tried if s["tml_file"])
+    return {"tml_exported": ok, "tml_export_failed": len(tried) - ok}
