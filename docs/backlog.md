@@ -367,6 +367,7 @@ are roughly ordered by value÷effort.
 | BL-557 | `ts load databricks --if-exists append` silently converts values into an existing table's types | 2026-12-15 |
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
+| BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -17375,3 +17376,31 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **Do.** Reuse `ts_cli/sets/export.py` `safe_name` (character and byte caps, safe character set) or move it to a shared module both import, and add tests for long non-Latin and Windows-reserved names.
 
 **Target:** 2026-12-31.
+
+## BL-570 — Seven Model builders omit `join_progressive`; absent behaves as off `Tier 2`
+
+**Filed:** 2026-11-11. **Source:** querygen SQL anti-pattern benchmark (djwaldo/querygen-sql-review, `catalog/unused-dimension-joins.md`).
+
+**What.** A Model TML with no `properties.join_progressive` behaved as **non-progressive** on the SE cluster: every query joined every table on the join path. Measured on a 7-table TPC-H SF100 Model (600M-row fact) through `ts agentql generate-sql`. Without the property, "revenue by region" also joined PART (20M rows) and SUPPLIER (1M), which nothing read. After re-importing with `join_progressive: true`, the same statement joined only the path it needs. That held for INNER and LEFT OUTER join variants, and unused joins fell from 20 of 20 benchmark cases to 0. Cost of the unused joins on Snowflake X-Small (3 runs, identical results): 8.91 GB vs 5.50 GB scanned, 47.1 s vs 29.7 s median.
+
+Three builders set it: `sv_build_model.py`, `databricks/mv_build_model.py` and `link_build.py`, each with `{"is_bypass_rls": False, "join_progressive": True}`. These seven write no `join_progressive` at all (checked by grep on main @ 867868d5):
+
+- `model_builder.py`
+- `tableau/build_model.py`
+- `powerbi/build_model.py` (model `properties` carries `spotter_config` only)
+- `qlik/build_model.py`
+- `sisense/build_model.py` (`spotter_config` only)
+- `dbt/model_from_schema_yml.py`
+- `aggregate/generate.py` (`spotter_config` only). Usually a single table, so the impact is low; set it for consistency.
+
+So Models from the Tableau, Power BI, Qlik, Sisense and dbt conversion paths, and from `model_builder`, come out non-progressive unless a later step adds it. `ts audit` P4 flags the result only on Models with more than 5 tables.
+
+**Not yet established.** That absent means off has one observation: one cluster (SE, 2026-11-11) and the AgentQL path only. Confirm on the Answer/search path and on a second cluster before writing it into a skill as fact. A re-exported Model did not show the property even after the import that changed the SQL; that may be BL-567 (`--format YAML` returns JSON), so judge by the generated SQL, not the export.
+
+**Do.**
+1. One shared helper for model-level `properties` (`is_bypass_rls: False`, `join_progressive: True`, plus `spotter_config` where the builder sets it), used by all ten builders.
+2. A test per builder asserting `join_progressive: true` in its output.
+3. A `ts tml lint` check: warn when Model TML omits `join_progressive`, since omission silently means off.
+4. Any SKILL.md reference that shows a hand-written Model `properties:` block should include it.
+
+**Target:** 2026-12-15.
