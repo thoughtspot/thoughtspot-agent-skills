@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ts_cli.formula_common import UntranslatableError, bare_column_name
+from ts_cli.formula_common import (UntranslatableError, bare_column_name,
+                                   unique_count_formula)
 from ts_cli.formula_week import week_start_note
 from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     build_node_id_map,
@@ -24,6 +25,7 @@ from ts_cli.sv_naming import (  # noqa: F401  (re-exported for callers/tests)
     display_title,
     fact_aggregation,
     fact_column_type,
+    fact_counts_distinct,
     metric_ref,
 )
 from ts_cli.sv_resolve import (
@@ -124,11 +126,23 @@ def _translate_fact(
 ) -> dict[str, Any]:
     """Translate one fact entry. Facts are row-level values from the SV's
     ``facts()`` block, classified MEASURE or ATTRIBUTE by
-    :func:`fact_column_type` (BL-181)."""
+    :func:`fact_column_type` (BL-181).
+
+    A fact Cortex Analyst answers with a distinct count (:func:`fact_counts_distinct`)
+    becomes ``unique count ( <row value> )`` in every form — a pass-through
+    (``T.COL as t.col``), a rename (``T.COL as col``) and a computed fact — never a
+    column or formula carrying ``aggregation: COUNT_DISTINCT``, which ThoughtSpot
+    demotes to an ATTRIBUTE on a text or date column (I5, BL-447)."""
     col_type = fact_column_type(fact)
     agg, annotations = fact_aggregation(fact, col_type, parsed)
+    distinct = fact_counts_distinct(fact, parsed)
     if fact["expr"] is None:
         table = alias_map.get(fact["alias_table"].lower(), fact["source_table"])
+        if distinct:
+            return _entry(
+                fact["source_column"], "fact", "formula", col_type, fact,
+                ts_expr=unique_count_formula(f"[{table}::{fact['alias_name']}]"),
+                annotations=annotations)
         return _entry(
             fact["source_column"], "fact", "column", col_type, fact,
             table=table, column=fact["alias_name"], aggregation=agg,
@@ -137,6 +151,8 @@ def _translate_fact(
         parsed, fact["alias_table"], annotations=annotations,
         promote_synonym=promote_synonym)
     ts_expr = translate_sql_expr(fact["expr"], resolver)
+    if distinct:
+        ts_expr = unique_count_formula(ts_expr)
     return _entry(
         fact["source_column"], "fact", "formula", col_type, fact,
         ts_expr=ts_expr, aggregation=agg, annotations=annotations)

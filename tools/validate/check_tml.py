@@ -23,6 +23,11 @@ from pathlib import Path
 
 from _git import _GitOut, git_paths
 
+# The I5 check is `ts tml lint`'s (tools/ts-cli/ts_cli/tml_lint.py), imported rather than
+# copied. tml_lint and its one import are stdlib-only, so no install is needed.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "ts-cli"))
+from ts_cli.tml_lint import check_i5  # noqa: E402
+
 try:
     import yaml
 except ImportError:
@@ -409,21 +414,6 @@ def validate_model_tml(data: dict) -> list[str]:
                     "(ThoughtSpot uses AVERAGE, not AVG)"
                 )
 
-        # I5: COUNT_DISTINCT as an aggregation on a non-numeric physical column silently flips
-        # the column MEASURE -> ATTRIBUTE. Distinct counts must be `unique count(...)` formulas.
-        if (
-            isinstance(props, dict)
-            and props.get("aggregation") == "COUNT_DISTINCT"
-            and props.get("column_type") != "ATTRIBUTE"   # nothing to demote
-            and col.get("column_id")
-            and not col.get("formula_id")
-        ):
-            errors.append(
-                f"Column '{col_display}' uses aggregation: COUNT_DISTINCT on a physical "
-                "column — on a non-numeric column ThoughtSpot silently overrides column_type MEASURE -> ATTRIBUTE. "
-                "Express distinct counts as a 'unique count ( [TABLE::col] )' formula instead (I5)."
-            )
-
         # formula_id: must match a formulas[] id
         formula_id = col.get("formula_id")
         if formula_id:
@@ -433,6 +423,12 @@ def validate_model_tml(data: dict) -> list[str]:
                     f"Column '{col_display}' formula_id='{formula_id}' "
                     "does not match any formulas[].id in this model"
                 )
+
+    # I5 — one copy, `ts tml lint`'s: a COUNT_DISTINCT aggregation on a physical column, or
+    # on a formula column that only wraps one, is stored as an ATTRIBUTE on a text or date
+    # column. This validator kept its own narrower copy until BL-447's review.
+    errors.extend(check_i5([c for c in columns if isinstance(c, dict)],
+                           [f for f in formulas if isinstance(f, dict)]))
 
     # Every formula must be surfaced in at least one column
     unreferenced = formula_ids - formula_ids_referenced

@@ -184,7 +184,11 @@ class TestConverterParityWithoutDbtExemptions:
 
     def test_dbt_passes_on_merit_with_no_exemption(self):
         mod = self._load()
-        assert not [k for k in mod.EXPECTED_DIVERGENCES if k[0] == "dbt"]
+        # No exemption for the formula helpers (requirement B). dbt's ONLY entry is
+        # requirement C's dated one: `ts_aggregation: count_distinct` still maps to the
+        # literal COUNT_DISTINCT until BL-447's dbt part lands; delete it then.
+        assert [k for k in mod.EXPECTED_DIVERGENCES if k[0] == "dbt"] == [
+            ("dbt", mod.LITERAL_COUNT_DISTINCT)]
         files, resolved = mod.resolve_code_files(REPO_ROOT, "dbt")
         assert resolved
         failures, notes = mod.check_platform("dbt", files, frozenset())

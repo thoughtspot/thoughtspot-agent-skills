@@ -1323,3 +1323,224 @@ class TestFactDefaultAggregation:
         assert _column_props(f, is_formula=True)["aggregation"] == "AVERAGE"
         g = self._facts()["GROSS_PROFIT"]
         assert _column_props(g, is_formula=True)["aggregation"] == "SUM"
+
+    # BL-448: the CA extension names a fact by its DECLARED name. A pass-through fact
+    # that renames its column (`S.UNIQUE_CUSTOMERS as s.customer_id`) parses with
+    # alias_name = the physical column, and the lookup was keyed on that, so the
+    # renamed fact lost its own default and could take another fact's.
+    RENAMED = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID) )
+\tfacts ( S.UNIQUE_CUSTOMERS as s.customer_id, S.TOTAL_COST as s.costs,
+\t        S.COSTS as gross - margin )
+\tdimensions ( S.REGION as region )
+\twith extension (CA='{"tables":[{"name":"S","dimensions":[{"name":"REGION"}],"facts":[{"name":"UNIQUE_CUSTOMERS","default_aggregation":"count_distinct"},{"name":"COSTS","default_aggregation":"avg"}]}]}');"""
+
+    def test_renamed_passthrough_fact_takes_its_own_default(self):
+        f = self._facts(self.RENAMED)["UNIQUE_CUSTOMERS"]
+        assert f["column_type"] == "MEASURE"
+        assert any("default_aggregation 'count_distinct'" in a for a in f["annotations"]), f
+        # The declared count_distinct was lost (summed) before BL-448; since BL-447
+        # it is carried as a `unique count` formula, never a COUNT_DISTINCT column.
+        assert f["output_kind"] == "formula", f
+        assert f["ts_expr"] == "unique count ( [SALES::customer_id] )"
+
+    def test_renamed_passthrough_fact_does_not_take_another_facts_default(self):
+        facts = self._facts(self.RENAMED)
+        # TOTAL_COST aliases physical column `costs`; the `avg` belongs to the fact
+        # DECLARED as COSTS, which is a different construct.
+        assert facts["TOTAL_COST"]["aggregation"] is None, facts["TOTAL_COST"]
+        assert not any("default_aggregation" in a for a in facts["TOTAL_COST"]["annotations"])
+        assert facts["COSTS"]["aggregation"] == "AVERAGE"
+
+
+class TestDistinctCountFact:
+    """BL-447 / I5: a fact Cortex Analyst answers with ``count_distinct`` becomes a
+    ``unique count`` formula in every fact form. ``aggregation: COUNT_DISTINCT`` on a
+    column, or on a formula that only wraps one, is stored as an ATTRIBUTE by
+    ThoughtSpot on a text or date column (live 2026-10-29), so search lists the values
+    instead of counting them, silently."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID), C as DB.SCH.CUSTOMERS primary key (CUSTOMER_ID) )
+\trelationships ( S_TO_C as S(CUSTOMER_ID) references C(CUSTOMER_ID) )
+\tfacts ( S.UNIQUE_CUSTOMERS as s.customer_id, S.BUYER as customer_id,
+\t        S.BASKET_KEY as order_id * 1000 + line_no, S.GROSS as gross,
+\t        C.HEADCOUNT as c.customer_id )
+\tdimensions ( S.REGION as region )
+\tmetrics ( S.BUYERS as COUNT(DISTINCT s.buyer), S.ROW_BUYERS as COUNT(s.buyer),
+\t          S.BASKETS as COUNT(DISTINCT s.basket_key) )
+\twith extension (CA='{"tables":[{"name":"S","facts":[{"name":"UNIQUE_CUSTOMERS","default_aggregation":"count_distinct"},{"name":"BUYER","default_aggregation":"count_distinct"},{"name":"BASKET_KEY","default_aggregation":"count_distinct"},{"name":"GROSS","default_aggregation":"sum"}]},{"name":"C","facts":[{"name":"HEADCOUNT","default_aggregation":"count_distinct"}]}]}');"""
+
+    TABLES = {"S": {"name": "SALES", "fqn": "guid-s"},
+              "C": {"name": "CUSTOMERS", "fqn": "guid-c"}}
+
+    def _out(self):
+        return {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+
+    def test_passthrough_fact_is_a_unique_count_formula(self):
+        e = self._out()["UNIQUE_CUSTOMERS"]
+        assert (e["output_kind"], e["column_type"], e["aggregation"]) == ("formula", "MEASURE", None)
+        assert e["ts_expr"] == "unique count ( [SALES::customer_id] )"
+
+    def test_renamed_fact_is_a_unique_count_formula(self):
+        # `T.COL as col` used to be a formula `[SALES::customer_id]` carrying
+        # aggregation COUNT_DISTINCT — the silent path (audit 9.1, path B).
+        e = self._out()["BUYER"]
+        assert (e["output_kind"], e["aggregation"]) == ("formula", None)
+        assert e["ts_expr"] == "unique count ( [SALES::customer_id] )"
+
+    def test_computed_fact_counts_its_expression(self):
+        e = self._out()["BASKET_KEY"]
+        assert e["aggregation"] is None
+        assert e["ts_expr"].startswith("unique count ( ") and "[SALES::order_id]" in e["ts_expr"]
+
+    def test_other_defaults_unchanged(self):
+        e = self._out()["GROSS"]
+        assert e["aggregation"] == "SUM" and e["ts_expr"] == "[SALES::gross]"
+
+    def test_a_metric_over_the_fact_reads_its_row_value(self):
+        # The fact's own formula is now an aggregate; `[formula_Buyer]` inside
+        # COUNT(DISTINCT …) would nest one aggregate in another.
+        # The reference is the bare column; COUNT(s.buyer) stays a formula because the
+        # simple-aggregate classifier refuses a distinct-count fact's key (a physical
+        # COUNT column on it is demoted on text, BL-265).
+        out = self._out()
+        assert out["BUYERS"]["ts_expr"] == "unique count ( [SALES::customer_id] )"
+        assert out["ROW_BUYERS"]["output_kind"] == "formula", out["ROW_BUYERS"]
+        assert out["ROW_BUYERS"]["ts_expr"] == "count ( [SALES::customer_id] )"
+        assert "formula_" not in out["BASKETS"]["ts_expr"], out["BASKETS"]
+        assert "[SALES::order_id]" in out["BASKETS"]["ts_expr"]
+
+    def _model(self):
+        from ts_cli.sv_build_model import build_model_tml_sv
+        parsed = parse_sv_ddl(self.DDL)
+        doc, info = build_model_tml_sv(
+            model_name="Probe", parsed=parsed,
+            translated_doc=translate_sv_formulas(parsed), tables=self.TABLES)
+        return doc["model"], info
+
+    def test_model_has_no_count_distinct_aggregation_and_lints_clean(self):
+        from ts_cli.tml_lint import lint_tml
+        model, _ = self._model()
+        assert not [c for c in model["columns"]
+                    if (c.get("properties") or {}).get("aggregation") == "COUNT_DISTINCT"]
+        findings = lint_tml({"model": model})
+        assert not [f for f in findings if f.startswith(("I5", "I1", "I13"))], findings
+        by_name = {c["name"]: c for c in model["columns"]}
+        uc = by_name["Unique Customers"]
+        assert uc["formula_id"] == "formula_Unique Customers"
+        assert uc["properties"]["aggregation"] == "SUM"
+        assert uc["properties"]["index_type"] == "DONT_INDEX"
+
+    def test_a_table_left_without_a_column_is_selected_again(self):
+        # CUSTOMERS' only construct is the count; as a formula it leaves the table
+        # with no column_id entry, which ThoughtSpot refuses at import.
+        model, info = self._model()
+        cust = [c for c in model["columns"] if str(c.get("column_id", "")).startswith("CUSTOMERS::")]
+        assert cust == [{"name": "customer_id", "column_id": "CUSTOMERS::customer_id",
+                         "properties": {"column_type": "ATTRIBUTE"}}], cust
+        assert info["reselected_columns"] == ["customer_id"]
+        # SALES keeps its own columns, so nothing is added there.
+        assert all(not str(c.get("column_id", "")).startswith("SALES::customer_id")
+                   for c in model["columns"])
+
+
+class TestMetricOverPassthroughDistinctCountFact:
+    """Review blocker on BL-447: a COUNT/MIN/MAX metric over a PASS-THROUGH distinct-count
+    fact resolved the fact at step 1 to a bare `[T::c]`, so the simple-aggregate
+    classifier made the metric a physical `column_id` measure (aggregation COUNT/MIN),
+    which ThoughtSpot demotes on a text or date key (BL-265). Before BL-447 the fact
+    itself held that column_id, so the metric was promoted to a formula (I8)."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( O as DB.SCH.ORDERS primary key (ORDER_ID) )
+\tfacts ( O.CUSTOMER_ID as o.customer_id, O.AMOUNT as o.amount )
+\tdimensions ( O.REGION as region )
+\tmetrics ( O.ORDER_LINES as COUNT(o.customer_id), O.FIRST_CUSTOMER as MIN(o.customer_id),
+\t          O.TOTAL as SUM(o.amount) )
+\twith extension (CA='{"tables":[{"name":"O","facts":[{"name":"CUSTOMER_ID","default_aggregation":"count_distinct"}]}]}');"""
+
+    def _out(self):
+        return {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+
+    def test_count_and_min_over_the_fact_stay_formulas(self):
+        out = self._out()
+        for name, fn in (("ORDER_LINES", "count"), ("FIRST_CUSTOMER", "min")):
+            e = out[name]
+            assert e["output_kind"] == "formula", e
+            assert e["ts_expr"] == f"{fn} ( [ORDERS::customer_id] )", e
+
+    # Re-review blocker: an UNQUALIFIED reference resolves through the one-part branch,
+    # which never consults the fact index, so it became a physical measure on the key.
+    UNQUALIFIED = DDL.replace(
+        "metrics ( O.ORDER_LINES as COUNT(o.customer_id), O.FIRST_CUSTOMER as MIN(o.customer_id),\n\t          O.TOTAL as SUM(o.amount) )",
+        "metrics ( O.ORDER_LINES as COUNT(customer_id), O.FIRST_CUSTOMER as MIN(customer_id),\n\t          O.LAST_CUSTOMER as MAX(customer_id), O.TOTAL as SUM(amount) )")
+
+    def test_unqualified_count_min_max_stay_formulas(self):
+        assert self.UNQUALIFIED != self.DDL
+        out = {e["name"]: e for e in
+               translate_sv_formulas(parse_sv_ddl(self.UNQUALIFIED))["translated"]}
+        for name, fn in (("ORDER_LINES", "count"), ("FIRST_CUSTOMER", "min"),
+                         ("LAST_CUSTOMER", "max")):
+            assert (out[name]["output_kind"], out[name]["ts_expr"]) == \
+                ("formula", f"{fn} ( [ORDERS::customer_id] )"), out[name]
+        assert (out["TOTAL"]["output_kind"], out["TOTAL"]["aggregation"]) == ("column", "SUM")
+
+    WINDOWS = DDL.replace(
+        "O.TOTAL as SUM(o.amount) )",
+        "O.TOTAL as SUM(o.amount),\n"
+        "\t          O.PER_CUST as SUM(o.amount) OVER (PARTITION BY o.customer_id),\n"
+        "\t          O.RUNNING as SUM(o.amount) OVER (ORDER BY o.customer_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),\n"
+        "\t          O.MOVING as SUM(o.amount) OVER (ORDER BY o.customer_id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) )")
+
+    def test_window_positions_take_the_bare_column(self):
+        # PARTITION BY / ORDER BY / moving: `group_sum ( … , [T::c] )` is the
+        # documented form; a parenthesised `( [T::c] )` never was.
+        assert self.WINDOWS != self.DDL
+        out = {e["name"]: e for e in
+               translate_sv_formulas(parse_sv_ddl(self.WINDOWS))["translated"]}
+        for name in ("PER_CUST", "RUNNING", "MOVING"):
+            expr = out[name]["ts_expr"] or ""
+            assert "[ORDERS::customer_id]" in expr and "( [ORDERS::customer_id] )" not in expr, \
+                (name, expr)
+        assert out["PER_CUST"]["ts_expr"] == "group_sum ( [ORDERS::amount] , [ORDERS::customer_id] )"
+
+
+
+
+    def test_a_metric_over_an_ordinary_passthrough_fact_is_unchanged(self):
+        e = self._out()["TOTAL"]
+        assert (e["output_kind"], e["table"], e["column"], e["aggregation"]) == \
+            ("column", "ORDERS", "amount", "SUM")
+
+    def test_no_physical_measure_on_the_counted_key(self):
+        from ts_cli.sv_build_model import build_model_tml_sv
+        parsed = parse_sv_ddl(self.DDL)
+        doc, _ = build_model_tml_sv(model_name="M", parsed=parsed,
+                                    translated_doc=translate_sv_formulas(parsed),
+                                    tables={"O": {"name": "ORDERS", "fqn": "g"}})
+        measures_on_key = [c for c in doc["model"]["columns"]
+                           if c.get("column_id") == "ORDERS::customer_id"
+                           and c["properties"].get("column_type") == "MEASURE"]
+        assert measures_on_key == [], measures_on_key
+
+
+class TestDistinctCountDegeneracyGuard:
+    """Re-review (b): a COUNT metric over a distinct-count fact that is also the
+    relationship's key, re-aggregated across that relationship, groups a measure by
+    itself (always 1). Base skipped it with a ⚑ note; the parenthesised reference
+    bypassed the guard, and the fallback compared refs case-sensitively."""
+
+    DDL = """create or replace semantic view SV
+\ttables ( S as DB.SCH.SALES primary key (ID), C as DB.SCH.CUSTOMERS primary key (CUSTOMER_ID) )
+\trelationships ( S_TO_C as S(CUSTOMER_ID) references C(CUSTOMER_ID) )
+\tfacts ( S.AMOUNT as s.amount, C.HEADCOUNT as c.customer_id )
+\tdimensions ( S.REGION as region )
+\tmetrics ( C.N_CUST as COUNT(c.headcount), S.AVG_N as AVG(c.n_cust) )
+\twith extension (CA='{"tables":[{"name":"C","facts":[{"name":"HEADCOUNT","default_aggregation":"count_distinct"}]}]}');"""
+
+    def test_grouping_a_measure_by_itself_is_skipped(self):
+        out = {e["name"]: e for e in translate_sv_formulas(parse_sv_ddl(self.DDL))["translated"]}
+        e = out["AVG_N"]
+        assert any("grouping a measure by itself" in a for a in e["annotations"]), e
+        assert "group_aggregate ( count" not in (e["ts_expr"] or ""), e

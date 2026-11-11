@@ -468,6 +468,117 @@ _AGG_TO_FORMULA_FN = {
 }
 
 
+def aggregate_formula(aggregation: str | None, operand: str) -> str | None:
+    """``fn ( operand )`` for a column-aggregation enum value, or None when the
+    value has no formula function. The shared spelling of an aggregation as a formula
+    (``unique count``, with its space). Today the Snowflake SV and Power BI builders and
+    :func:`promote_duplicate_column_ids` use it; Tableau, Qlik, Sisense, the Databricks
+    MV translator and dbt MetricFlow still write ``unique count`` from their own maps."""
+    fn = _AGG_TO_FORMULA_FN.get((aggregation or "").upper())
+    return f"{fn} ( {operand} )" if fn else None
+
+
+def unique_count_formula(operand: str, *, null_is_a_value: bool = False) -> str:
+    """A distinct count as a formula: ``unique count ( operand )`` (invariant I5).
+
+    A source's distinct count must never become ``aggregation: COUNT_DISTINCT``:
+    ThoughtSpot types a physical MEASURE by its data type, so on a text or date
+    column it is stored as an ATTRIBUTE and search lists values instead of counting
+    them, with no error (live-probed 2026-10-29). A formula column carrying it over a
+    bare ``[T::c]`` is demoted the same way. The formula works for every type, and on
+    an expression too (``unique count ( [T::c] + 1 )`` compiles to
+    ``count(DISTINCT (c + 1))``, live 2026-11-08).
+
+    ``unique count`` compiles to SQL ``count(DISTINCT …)``, which **ignores NULL**
+    (live 2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That is SQL's, Tableau's
+    ``COUNTD`` and DAX ``DISTINCTCOUNTNOBLANK``'s reading. A source that counts NULL (BLANK)
+    as one more value — DAX ``DISTINCTCOUNT`` — passes ``null_is_a_value=True`` and gets
+    ``( unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 ) )``, probed the same
+    day: 4 on those keys, and 1 for a group holding only NULL. It is bracketed so it
+    composes (as a divisor it must divide by the whole count). It is an approximation, not
+    exact: a dimension row with no matching facts is BLANK in DAX and 1 here, and it is
+    unprobed inside ``group_aggregate``."""
+    base = aggregate_formula("COUNT_DISTINCT", operand)
+    if not null_is_a_value:
+        return base  # type: ignore[return-value]
+    return f"( {base} + max ( if ( isnull ( {operand} ) ) then 1 else 0 ) )"
+
+
+def distinct_count_formula_column(
+    name: str, column_id: str, formula_id: str,
+    properties: dict | None = None, description: str | None = None,
+    *, null_is_a_value: bool = False,
+) -> tuple[dict, dict]:
+    """``(formula, column)`` for a Model column that counts distinct values of the
+    physical column ``column_id`` — the I5 form of a source column whose default
+    summarisation is a distinct count. ``name`` is the caller's choice, and the key
+    usually needs keeping beside it: Power BI keeps the key as an ATTRIBUTE under its own
+    name, so a visual that groups by it still groups, and names this column
+    ``<key> (Distinct Count)`` (giving the count the key's own name turned every grouping
+    into one total row, BL-447 re-review). ``properties`` carries over except
+    the aggregation; the column is a MEASURE declaring SUM (ThoughtSpot ignores it on
+    an aggregate formula; the 2026-11-02 convention) with ``index_type: DONT_INDEX``
+    (I3). ``null_is_a_value`` as for :func:`unique_count_formula`. Pair with
+    :func:`reselect_counted_columns` once the Model's columns are assembled."""
+    props = {k: v for k, v in (properties or {}).items() if k != "aggregation"}
+    props.update({"column_type": "MEASURE", "aggregation": "SUM"})
+    props.setdefault("index_type", "DONT_INDEX")
+    column: dict = {"name": name, "formula_id": formula_id}
+    if description:
+        column["description"] = description
+    column["properties"] = props
+    return ({"id": formula_id, "name": name,
+             "expr": unique_count_formula(f"[{column_id}]",
+                                          null_is_a_value=null_is_a_value)}, column)
+
+
+_UNIQUE_COUNT_HEAD_RE = re.compile(
+    r"^\s*(?:\(\s*)?unique count \(\s*\[([^\[\]:]+)::([^\[\]]+)\]\s*\)")
+
+
+def _counted_column(expr: str) -> tuple[str, str] | None:
+    """``(table, column)`` when ``expr`` is exactly a :func:`unique_count_formula` of one
+    ``[T::c]`` (either NULL reading), else None."""
+    m = _UNIQUE_COUNT_HEAD_RE.match(expr or "")
+    if not m:
+        return None
+    ref = f"[{m.group(1)}::{m.group(2)}]"
+    forms = (unique_count_formula(ref), unique_count_formula(ref, null_is_a_value=True))
+    return (m.group(1), m.group(2)) if expr.strip() in forms else None
+
+
+def reselect_counted_columns(columns: list[dict], formulas: list[dict]) -> list[str]:
+    """In place: keep selected every Table a ``unique count ( [T::c] )`` formula counts.
+
+    ThoughtSpot refuses a Model in which a table has no ``column_id`` entry ("One or
+    more tables have been added to the model without selecting any of their columns",
+    live 2026-09-02, see :func:`bare_column_name`). Turning a distinct-count column
+    into a formula removes its ``column_id`` entry, so when that was its table's only
+    one, the physical column is added back as an ATTRIBUTE under its own name (or
+    ``name (TABLE)`` when that is taken). Returns the display names added."""
+    by_id = {f.get("id"): f.get("expr") or "" for f in formulas if isinstance(f, dict)}
+    selected = {str(c["column_id"]).split("::", 1)[0]
+                for c in columns if isinstance(c, dict) and c.get("column_id")}
+    taken = {str(c.get("name", "")).lower() for c in columns if isinstance(c, dict)}
+    added: list[str] = []
+    for c in list(columns):
+        counted = _counted_column(by_id.get(c.get("formula_id"), "")) \
+            if isinstance(c, dict) else None
+        if not counted or counted[0] in selected:
+            continue
+        table, col = counted
+        name, n = col, 2
+        while name.lower() in taken:
+            name = f"{col} ({table})" if n == 2 else f"{col} ({table} {n - 1})"
+            n += 1
+        columns.append({"name": name, "column_id": f"{table}::{col}",
+                        "properties": {"column_type": "ATTRIBUTE"}})
+        selected.add(table)
+        taken.add(name.lower())
+        added.append(name)
+    return added
+
+
 def promote_duplicate_column_ids(
     physical: list[dict],
     formula_entries: list[dict],
@@ -512,14 +623,14 @@ def promote_duplicate_column_ids(
     for cand in physical:
         entry = cand["entry"]
         col_id = f"{entry['table']}::{entry['column']}"
-        fn = None
+        expr = None
         if col_id not in seen:
             seen.add(col_id)
             kept.append(cand)
             continue
         if entry.get("column_type") == "MEASURE":
-            fn = _AGG_TO_FORMULA_FN.get((entry.get("aggregation") or "SUM").upper())
-        if fn is None:
+            expr = aggregate_formula(entry.get("aggregation") or "SUM", f"[{col_id}]")
+        if expr is None:
             # Not an aggregate we can re-express as a formula (unmapped measure
             # aggregation, or a bare duplicate dimension) — leave it in place so
             # `ts tml lint` I8 surfaces it for the author to resolve.
@@ -528,8 +639,7 @@ def promote_duplicate_column_ids(
         # `fn ( [col] )` is an aggregate formula, so ThoughtSpot ignores the column's
         # aggregation (product owner, 2026-11-02); SUM is the declared convention.
         promoted_entry = dict(entry, aggregation="SUM")
-        out_formulas.append(
-            dict(cand, entry=promoted_entry, expr=f"{fn} ( [{col_id}] )"))
+        out_formulas.append(dict(cand, entry=promoted_entry, expr=expr))
         promoted_titles.append(cand["name"])
     return kept, out_formulas, promoted_titles
 

@@ -4,16 +4,19 @@
 Every Sisense construct and its conversion status. Cite in the migration report. Within
 Mapped: **Mapped** (deterministic) · **Approximated** (mapped with a caveat). Source of
 truth for the formula rows is `tools/ts-cli/ts_cli/sisense/functions.py`
-(`AGG_MAP` / `FUNCTION_MAP` / `UNSUPPORTED`).
+(`FUNCTION_MAP` / `UNSUPPORTED`).
 
 ## Mapped Constructs
 
 ### JAQL aggregations (simple measures, no formula)
 
+The CLI has no code path that emits a plain JAQL `agg` as a column aggregation (BL-308; the
+uncalled `AGG_MAP` was deleted with BL-447). These rows are the reading to apply by hand.
+
 | Construct | Status | Notes |
 |---|---|---|
 | `sum` / `avg` / `min` / `max` | Mapped | → `SUM` / `AVERAGE` / `MIN` / `MAX` aggregation |
-| `count` (Sisense = **unique/distinct**) | Mapped | → `COUNT_DISTINCT` — Sisense `count` counts distinct values, not rows |
+| `count` (Sisense = **unique/distinct**) | Mapped | → a `unique count ( [T::col] )` formula — Sisense `count` counts distinct values, not rows. Never the `COUNT_DISTINCT` column aggregation (I5): on a text or date column ThoughtSpot stores it as an attribute |
 | `countduplicates` / `dupCount` (Sisense = **total**) | Mapped | → `COUNT` — exact total incl. duplicates (NOT approximate) |
 | `stdev` / `var` | Mapped | → `STD_DEVIATION` / `VARIANCE` |
 

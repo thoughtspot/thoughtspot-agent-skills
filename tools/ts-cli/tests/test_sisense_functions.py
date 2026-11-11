@@ -2,24 +2,29 @@
 
 Pure functions, no live cluster (per .claude/rules/ts-cli.md). Covers the deterministic
 safe subset, the placeholder+agg resolution, case->nested-if and 2-arg-round PARTIAL
-caveats, plain-agg translation, and the NEEDS-REVIEW gate for unsupported/unknown funcs.
+caveats, and the NEEDS-REVIEW gate for unsupported/unknown funcs.
 """
-from ts_cli.sisense.functions import AGG_MAP, FUNCTION_MAP, UNSUPPORTED, translate_agg, translate_jaql
+import ts_cli.sisense.functions as sisense_functions
+from ts_cli.sisense.functions import FUNCTION_MAP, UNSUPPORTED, translate_jaql
 
 
 def test_maps_present():
-    assert AGG_MAP["sum"] == "SUM"
     assert FUNCTION_MAP["ceiling"] == "ceil"
     assert "rank" in UNSUPPORTED
 
 
 def test_count_is_distinct_dupcount_is_total():
     # Sisense count == unique/distinct; dupCount/countduplicates == exact total (verified vs docs)
-    assert AGG_MAP["count"] == "COUNT_DISTINCT"
-    assert AGG_MAP["countduplicates"] == "COUNT"
-    assert AGG_MAP["dupcount"] == "COUNT"
-    assert translate_agg("count") == ("COUNT_DISTINCT", "Migrated", "")
-    assert translate_agg("countduplicates") == ("COUNT", "Migrated", "")
+    assert FUNCTION_MAP["count"] == "unique count"
+    assert FUNCTION_MAP["countduplicates"] == "count"
+    assert FUNCTION_MAP["dupcount"] == "count"
+
+
+def test_no_column_aggregation_map_survives():
+    # BL-447 / BL-308: the uncalled AGG_MAP mapped `count` to COUNT_DISTINCT, I5's
+    # forbidden form. A distinct count is only ever the `unique count` formula.
+    assert not hasattr(sisense_functions, "AGG_MAP")
+    assert not hasattr(sisense_functions, "translate_agg")
 
 
 def test_simple_agg_wrapped_placeholder():
@@ -125,9 +130,3 @@ def test_nested_formula_recurses():
     expr, status, _ = translate_jaql("[m] * 2", ctx)
     assert status == "Migrated"
     assert expr == "(sum([Revenue])) * 2"
-
-
-def test_translate_agg_simple_and_review():
-    assert translate_agg("sum") == ("SUM", "Migrated", "")
-    kw, status, note = translate_agg("median")
-    assert kw is None and status == "NEEDS REVIEW" and "median" in note

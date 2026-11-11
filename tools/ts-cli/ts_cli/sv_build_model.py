@@ -16,6 +16,7 @@ from __future__ import annotations
 from ts_cli.formula_common import (add_formula_prefix, bare_column_name,
                                    fix_double_aggregation,
                                    promote_duplicate_column_ids,
+                                   reselect_counted_columns,
                                    resolve_name_collisions)
 from ts_cli.sv_translate import build_node_id_map, display_title
 
@@ -405,6 +406,9 @@ def build_model_tml_sv(
         (translated_doc.get("options") or {}).get("promote_first_synonym"))
     columns, formulas, rename_map = build_columns_and_formulas(
         translated_doc["translated"], promote_synonym=promote_synonym)
+    # A distinct-count fact is a `unique count` formula (I5); if its column was the
+    # only one its table had, select it again or ThoughtSpot refuses the Model.
+    reselected = reselect_counted_columns(columns, formulas)
     _check_no_duplicate_display_names(columns)
 
     model: dict = {
@@ -431,6 +435,7 @@ def build_model_tml_sv(
         # step can catch a fact the SV author mis-declared (an employee number
         # in facts() becomes a summable measure, faithfully but uselessly).
         "fact_types": _fact_type_counts(translated_doc["translated"]),
+        "reselected_columns": reselected,
     }
     doc = {"model": model}
     if existing_guid:

@@ -105,8 +105,8 @@ are roughly ordered by value÷effort.
 | ~~BL-350~~ | ~~a text function over a date input returns ISO text; Excel returns the serial; no trap (silent, fidelity M1)~~ | DONE (2026-10-07 — ts-cli v0.161.0) |
 | ~~BL-357~~ | ~~`x / NULLIF(y, 0)` and `COALESCE(x / NULLIF(y, 0), 0)` both collapsed to `safe_divide` — 0 where the source is NULL and NULL where it is 0 (silent, fidelity M2; Snowflake `sv_sql` shares the code)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
 | ~~BL-359~~ | ~~Databricks `CAST(x AS BIGINT)` → `to_integer`, which compiles to a 32-bit `CAST(… as int)`: 1e12 comes back 2147483647 (silent, fidelity M2)~~ | DONE (2026-10-07 — ts-cli v0.163.0) |
-| BL-447 | I5: Snowflake SV formula-path and Power BI distinct counts demoted to ATTRIBUTE on text/date columns; `check_converter_parity` requirements C (no literal `COUNT_DISTINCT`) and D (lint before import); Tableau merge-mode lint | 2026-11-15 |
-| BL-448 | Renamed pass-through Snowflake SV fact takes the wrong aggregation (sums customer ids where Cortex Analyst counts distinct) | 2026-11-15 |
+| BL-447 | I5: ~~Snowflake SV formula-path and Power BI distinct counts demoted to ATTRIBUTE on text/date columns; `check_converter_parity` requirement C (no literal `COUNT_DISTINCT`)~~ (DONE 2026-11-08); PARTLY DONE: dbt `count_distinct` conversion, requirement D (lint before import) and Tableau merge-mode lint remain | 2026-11-15 |
+| ~~BL-448~~ | ~~Renamed pass-through Snowflake SV fact takes the wrong aggregation (sums customer ids where Cortex Analyst counts distinct)~~ | DONE (2026-11-08) |
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema and generator classification done 2026-11-08 (ts-cli v0.209.0); lint unchanged pending a render check; flipping the default library open |
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
@@ -205,7 +205,7 @@ are roughly ordered by value÷effort.
 | ~~BL-297~~ | ~~27 of 51 ts-audit checks were imported by a test but never CALLED by one~~ | DONE (#530 — every check now has a test that trips it) |
 | BL-298 | the two sharing checks `ts-audit` advertises — S8 "Overly permissive sharing (FULL access to all users)" and S9 "Sharing to external groups" — **are not implemented anywhere**; grepping the audit module for `permission|shared_with|sharing|access_level` returns only those two description strings. The descriptions are corrected so reports stop mislabelling, but a security audit still silently omits sharing entirely | next ts-audit pass |
 | BL-307 | audit 9.1 — `ts-convert-from-looker` instructs `is_hidden: true` on every joined dimension PK (`step-6-model-joins.md:68`, SKILL.md:404, step-6:64/:132, step-5:264, coverage-matrix:36). **I11 says never set it during conversion**, and `thoughtspot-model-tml.md:243` repeats the prohibition. Every joined dimension's PK ships hidden, producing the locked-visualization and join-path failure I11 names. Remove the construct AND add an `is_hidden` rule to `tml_lint.py` under the CANONICAL-RULE-SET marker, which every converter already invokes | next converter pass |
-| BL-308 | audit 9.4 — `sisense/functions.py`'s `translate_agg` has **no live caller** (only a docstring mention), so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes. The semantic mapping itself is correct and should NOT be changed (Sisense `count` is a distinct count, `dupcount` the exact total — corrected 2026-08-26, finding 14.3). Two exits needed: wire it or delete it, and if wired, note that `aggregation: COUNT_DISTINCT` on a `column_id`-backed entry silently flips MEASURE to ATTRIBUTE on a non-numeric column (I5) | 2026-12-31 |
+| ~~BL-308~~ | ~~audit 9.4 — `sisense/functions.py`'s `translate_agg` has no live caller, so `sisense-formula-translation.md` specifies a JAQL `agg` → TML `aggregation:` path the emitter never takes; wire it or delete it~~ | DONE (2026-11-08: deleted with `AGG_MAP`, BL-447) |
 | ~~BL-309~~ | ~~audit 9.5 — the CoCo `ts-convert-from-snowflake-sv` mirror carries **no I14 rule**: no role-play, alias-node or duplicate-join-pair guidance anywhere. The CLI primary added Step 7.5 plus a reference file at v1.20.0; CoCo has no `ts` CLI and executes the doc, so the rule must be prose there. An SV joining one fact to DIM_TIME on order date and ship date emits two joins on the same ordered pair and **the Model will not load** (observed at 21 joins across 7 pairs on a real customer SV). Also: `check_mirror_sync` collects only each ledger row's path and never compares the recorded CLI version against the actual one, so any SYNC-DEBT row acknowledges its mirror permanently~~ | RETIRED 2026-11-08 (runtime retired, see tag `runtimes-archive-2026-11-08`) |
 | BL-310 | audit 9.6 — `model_builder.filter_unresolvable_formulas` computes the drop set to a fixpoint via `_cascade_drop_dependents`, and three sibling skills instruct the executor to do it **by hand, one hop deep**, with the identical sentence (from-qlik:92, from-powerbi:86, from-sisense:78). With C referencing B referencing rejected A, B is dropped and C survives carrying a dangling `[formula_B]` — an I13 violation and a hard 14516 rejection, or a dangling `formula_id` and an I1 silent drop. Expose the retry loop as a shared command or helper the three skills invoke. This is BL-217's remainder and the prior sweep's 11.4 | next converter pass |
 | ~~BL-311~~ | ~~audit 13.2 — `ts-object-model-coach` open-item #4 defers Data Model Instructions to v1.1 and ships manual copy-paste, but the write API exists: `setNLInstructions` (`POST /api/rest/2.0/ai/instructions/set`, Beta 10.15.0.cl), whose **read twin this repo already calls** at `audit/context.py:145`. Needs a `ts` command, then replace the paste step. Second-order: 26.8.0.cl `ai/memory/export`/`import` (Spotter memory) appears nowhere in `agents/` or `tools/`, so `ts-migrate-orgs` and `ts-publish-orgs` move models between Orgs and silently leave it behind~~ | MERGED into BL-030 (2026-10-29, audit finding 5.2) |
@@ -351,7 +351,7 @@ are roughly ordered by value÷effort.
 | BL-530 | Liveboard-building parity: do the Power BI, Qlik and Sisense converters move to SpotterViz too, and do Tableau/Looker keep a deterministic fallback (#679 follow-up) | 2026-12-17 |
 | BL-531 | Confirm the public SpotterViz MCP endpoint and allowlist its host; replace the `<spotterviz-mcp-endpoint>` placeholder (#679 follow-up) | 2026-12-17 |
 | BL-539 | Cascade delete reads 14531 on a Model as "no feedback": probe whether a Spotter-disabled Model still owns feedback, then keep the mapping with a test or make it unchecked (#692 accepted edge case) | 2026-12-31 |
-| BL-540 | Power BI `DISTINCTCOUNT` counts a BLANK key as one value; the `unique count` it maps to likely does not, so the plain row may be off by one with no note (#517 review) | 2026-12-31 |
+| ~~BL-540~~ | ~~Power BI `DISTINCTCOUNT` counts a BLANK key as one value; the `unique count` it maps to does not, so the plain row was off by one with no note (#517 review)~~ | DONE (2026-11-08) |
 | BL-479 | Personalized Liveboard views undocumented; round-trips may drop them | 2026-11-30 |
 | BL-541 | Liveboard filters scoped to a tab or group (26.10 EA) are undocumented and stripped on import to a cluster without the feature; round-trips may lose them | 2026-12-15 |
 | BL-543 | Snowflake Semantic View LOD metrics (Preview): from-snowflake-sv fails on them; to-direction rows still say Untranslatable; from-rules line 548 contradicts the schema | 2026-12-15 |
@@ -15574,7 +15574,7 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 
 **Target:** after the 2026-10-29 audit fixes.
 
-## BL-447 — distinct counts that ThoughtSpot demotes to an attribute: Snowflake SV formula path and Power BI; no gate on the literal `COUNT_DISTINCT` `Tier 1`
+## BL-447 — distinct counts that ThoughtSpot demotes to an attribute: Snowflake SV formula path and Power BI; no gate on the literal `COUNT_DISTINCT` — PARTLY DONE `Tier 1`
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, findings 9.1 and 9.4 (and the validator half of 9.3), Codification opportunities 1 and 2. dbt's lint gate (9.3) and 17.1/17.2 are fixed by the dbt correctness PR; the dbt `count_distinct` conversion (9.2) is **here**, because review of that PR showed it needs the design below.
 
@@ -15589,15 +15589,21 @@ lines (`~ Updating: ...`, the skill list) are printed before the prompt.
 - must leave a declared `ts_column_type: attribute` alone.
 Until then the dbt lint gate reports I5 as advisory, so these columns import as they always did.
 
+**Status:** PARTLY DONE 2026-11-08 (branch `fix/bl-447-distinct-count`, ts-cli 0.212.0).
+- **Done.** Snowflake SV: a fact whose CA `default_aggregation` is `count_distinct` is `unique count ( <row value> )` in all three forms, and a reference to it reads the row value, not the now-aggregate formula. Power BI: a `summarizeBy distinctCount` column stays an attribute and gains a separate formula column, `<column> (Distinct Count)`, which a visual summarising the column binds to (a re-review fix: giving the count the column's own name made a visual grouping by it one total row). Both go through `formula_common.unique_count_formula` / `distinct_count_formula_column`; `reselect_counted_columns` keeps a table selected when its only column became a count. `ts-from-snowflake-rules.md` corrected (the CA table and the simple-aggregate table). `ts tml lint` I5 flags a formula column that only wraps `[T::c]` (following `[formula_X]` chains), and `check_tml.py` now runs that same check. `check_converter_parity` gains requirement C: no from-converter maps a source aggregation to the literal `COUNT_DISTINCT`. Its first run found `sv_naming.py`, `powerbi/tables.py` and `sisense/functions.py` (all fixed; the Sisense `AGG_MAP` / `translate_agg` had no caller and was deleted, which closes BL-308) and `dbt/tags.py` (exempted, dated). Review follow-ups on the same branch: requirement C reads the AST (it had missed tuple returns, call arguments, lists and sets, and then also caught the Databricks translator's internal label, renamed `UNIQUE_COUNT`); a `COUNT`/`MIN`/`MAX` metric over a pass-through distinct-count fact stays a formula (it had become a physical measure on the key); build-model reports `reselected_columns`.
+- **Remaining.** (1) dbt (9.2): left advisory. The four constraints above need the existing Model read on update (`--model-guid`), a reference walk over `ts_formula`, and a per-table column check across two builders, which is more than a contained change. Requirement C carries a dated `EXPECTED_DIVERGENCES` entry for `dbt/tags.py` that must be deleted when this lands. (2) Requirement D (every `ts-convert-*` builder that imports Model TML lints it first). (3) Lint in Tableau's merge mode (`commands/tableau.py`, the `ts tml import` subprocess).
+
 **Target:** 2026-11-15.
 
-## BL-448 — a renamed pass-through Snowflake SV fact takes another fact's aggregation `Tier 1`
+## BL-448 — a renamed pass-through Snowflake SV fact takes another fact's aggregation — DONE `Tier 1`
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 9.17 (reproduced offline by the report reviewer).
 
 **What.** `sv_naming.fact_aggregation` (`:162-163`, landed in #557) looks up the Cortex Analyst extension by `(alias_table, alias_name)`, which for a pass-through fact is the physical column (`sv_parse.py:552`); the CA JSON names facts by their declared name (`tests/test_sv_translate.py:1288`). `S.UNIQUE_CUSTOMERS as s.customer_id` with `count_distinct` came out `aggregation: SUM`, exit 0 — ThoughtSpot sums customer ids where Cortex Analyst counts distinct customers — and `S.AVG_COST as s.costs` took the `avg` declared for a different fact. No test covers a renamed pass-through fact.
 
 **Do.** Key the lookup by the declared fact name; add the renamed-fact test (both the count-distinct and the cross-fact cases).
+
+**Status:** DONE 2026-11-08 (branch `fix/bl-447-distinct-count`). `fact_aggregation` looks the CA extension up by `(source_table, source_column)`, the declared name. `TestFactDefaultAggregation` covers both cases: `S.UNIQUE_CUSTOMERS as s.customer_id` keeps its `count_distinct` (now a `unique count` formula, BL-447), and `S.TOTAL_COST as s.costs` no longer takes the `avg` declared for the fact named `COSTS`.
 
 **Target:** 2026-11-15.
 
@@ -17003,7 +17009,7 @@ Related: BL-513 (every delete path agreeing on Sets and feedback) may absorb the
 
 **Target:** 2026-12-31.
 
-## BL-540 — Power BI `DISTINCTCOUNT` → `unique count`: a BLANK key is one more value in DAX `Tier 2`
+## BL-540 — Power BI `DISTINCTCOUNT` → `unique count`: a BLANK key is one more value in DAX — DONE `Tier 2`
 
 **Filed:** 2026-11-08. **Source:** the PR #517 re-review (2026-11-07), should-fix 4. #517
 documents the difference on the gated `unique_count_if` path; this item is the plain row
@@ -17029,6 +17035,11 @@ Power BI's, labelled Mapped, with no note. Not verified live.
 3. Check the same question for the other converters' distinct-count rows (Tableau
    `COUNTD`, Qlik `Count(DISTINCT …)`, Sisense `count`, which is distinct in JAQL), which
    are believed to exclude NULL like SQL, and record the answer either way.
+
+**Status:** DONE 2026-11-08 (branch `fix/bl-447-distinct-count`, ts-cli 0.212.0).
+- **Probe.** The SE demo cluster's credential failed to authenticate, so the probe ran on an internal development cluster whose Snowflake connection cannot see `AGENT_SKILLS`; the data was a scratch SQL View over `VALUES` with keys a, a, b, NULL, NULL, c, and a scratch Model over it (both deleted). `unique count ( [k] )` compiled to `count(DISTINCT k)` and returned **3**; DAX `DISTINCTCOUNT` gives 4. `unique count ( [k] ) + max ( if ( isnull ( [k] ) ) then 1 else 0 )` returned **4**, and 1 for a group holding only the blank key. `unique count ( [n] + 1 )` compiled to `count(DISTINCT (n + 1))`.
+- **Change.** `DISTINCTCOUNT` emits that form, bracketed so it composes (as a divisor), and is **Approximated**, not exact: a dimension row with no matching facts is BLANK in DAX and 1 here (the review modelled it), and the form is unprobed inside `group_aggregate`; the mapping row carries that note. `DISTINCTCOUNTNOBLANK` → `unique count` (Mapped, exact). A column summarised by `distinctCount` uses the same form, also Approximated. Shared spelling: `formula_common.unique_count_formula(null_is_a_value=True)`. Mapping doc, coverage matrix, the formula reference's `unique count` row and invariant I5 updated. Not modelled: the blank row Power BI adds for unmatched relationship keys.
+- **Other converters (step 3).** Snowflake SV, Databricks MV and dbt `COUNT(DISTINCT)` exclude NULL, as `unique count` does: exact. Tableau `COUNTD` is documented to ignore Null: exact. Qlik `Count(DISTINCT …)` (Qlik keeps a separate `NullCount`) and Sisense `count` are believed to exclude NULL but were not probed on their own platforms; no change made.
 
 **Target:** 2026-12-31.
 
