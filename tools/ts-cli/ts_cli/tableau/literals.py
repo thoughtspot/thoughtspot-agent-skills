@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 
 from ts_cli.formula_text import ts_string_literal
+from ts_cli.formula_translate.refs import REF_GRAMMAR
 
 # Placeholder uses SOH (\x01) delimiters: a control character that (a) never
 # appears in real Tableau formulas, (b) is not a \w character so it can't be
@@ -44,7 +45,7 @@ _PLACEHOLDER_MATCH = re.compile(PLACEHOLDER_RE)
 # ([Bob's Sales]), which must not open a literal (#583 re-review). Tableau escapes a
 # ] inside a name by doubling it.
 _LITERAL_RE = re.compile(
-    r"(?P<ref>\[(?:[^\]]|\]\])*\])"
+    rf"(?P<ref>{REF_GRAMMAR})"
     r"|(?P<sq>'(?:[^']|'')*')"
     r"|(?P<dq>\"(?:[^\"]|\"\")*\")"
     r"|(?P<date>#[^#]*#)"
@@ -69,6 +70,15 @@ def mask_literals(expr: str) -> tuple[str, dict[str, dict[str, str]]]:
 
     masked = _LITERAL_RE.sub(_mask, expr)
     return masked, registry
+
+
+def blank_literals_and_refs(expr: str) -> str:
+    """``expr`` with every ``[field]`` reference and string / ``#date#`` literal replaced
+    by a space: the only text a function-name scan may read. One left-to-right pass of
+    the same grammar as ``mask_literals``, so a quote inside a name never opens a literal
+    and a name holding ``(`` or ``[`` (``[Revenue (net) [EUR]]]``) is never a call.
+    Shared by ``validate.validate_output`` and ``classify`` (BL-460 review)."""
+    return _LITERAL_RE.sub(" ", expr)
 
 
 def is_string_placeholder(token: str, registry: dict[str, dict[str, str]]) -> bool:
@@ -146,7 +156,7 @@ def unmask_literals(expr: str, registry: dict[str, dict[str, str]]) -> str:
 # or they rewrite the column's name. Same reference grammar as _LITERAL_RE's `ref`
 # branch (a `]` inside a name is doubled). STX delimiters, distinct from the literal
 # placeholders' SOH, so neither registry can capture the other's tokens.
-_REF_RE = re.compile(r"\[(?:[^\]]|\]\])*\]")
+_REF_RE = re.compile(REF_GRAMMAR)
 _REF_PLACEHOLDER_RE = re.compile(r"\x02R\d+\x02")
 
 

@@ -110,7 +110,7 @@ are roughly ordered by value÷effort.
 | BL-449 | `thoughtspot-chart-types.md` treats the new charts library as phase 1 and defaults to Legacy; live-verify the 26.10 enum, then schema + generator + lint | PARTIAL — enum read live on a dev build, schema and generator classification done 2026-11-08 (ts-cli v0.209.0); lint unchanged pending a render check; flipping the default library open |
 | ~~BL-450~~ | ~~Snowflake spec carry-overs from 2026-09-22: Complete Schema vs live YAML spec (BL-031's emission spec), five mapping findings, `sample_values` forbidden~~ | DONE (2026-11-08) |
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
-| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | 2026-11-30 |
+| BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
 
 ### Tier 2 — Schedule soon
@@ -15753,7 +15753,7 @@ Follow-ups found here and **not filed** (reported for triage):
 
 **Target:** 2026-11-30.
 
-## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1`
+## BL-460 — Tableau functions the converter has never seen pass through verbatim and are dropped unreported `Tier 1` — **PARTIAL: survivor catch and UNION done 2026-11-08 (ts-cli 0.211.0); mappings after a live check**
 
 **Filed:** 2026-10-29. **Source:** `docs/audit/2026-10-29-full.md`, finding 13.13; Codification opportunity 5.
 
@@ -15764,6 +15764,65 @@ Follow-ups found here and **not filed** (reported for triage):
 **Widened 2026-11-08** (`docs/audit/2026-11-08-external.md`, findings 13.15–13.17). Raised to Tier 1: this is the third census miss (2026-08-26 13.22, 13.25, now this), and the probe re-confirmed VAR, VARP, STDEVP, CORR, COVAR, COVARP and PERCENTILE, plus LOG2, SPACE and COLLECT, pass through with `validate_output` returning `[]`. Also: Tableau now documents `UNION` as a 16th spatial function, which the Geospatial Policy says it is not. Add it to the census, `_UNMAPPED_FUNCTIONS` (validate.py) and `_GEO_RE` (classify.py), change the count 15 → 16, and fix the "Classifier detection patterns" block, which still says "all 13" and omits PARSE_WKT and NO_CUTOUTS. The generic catch is the priority; the named additions are secondary.
 
 **Target:** 2026-11-30.
+
+**Resolution (2026-11-08, partial — ts-cli 0.211.0, ts-convert-from-tableau 1.46.3).** The
+generic survivor catch and the UNION half are done; the mappings are not.
+
+- **Catch.** `tableau/validate.py::validate_output` now ends by checking every call left in
+  the output against the ThoughtSpot formula catalog (`formula_translate.catalog.is_known`,
+  the same source `ts formula translate`'s output guard uses — no second list). A call that
+  is not a ThoughtSpot function skips the formula as `untranslated Tableau function: X`, the
+  same `skipped[]` channel as every other untranslatable function (classify tiers it
+  `untranslatable`; verify treats its absence as expected). Exact spelling, so `LOG2` stays
+  flagged although `log2` exists. Guards: `[field]` references, string literals and
+  `sql_*_op` template text are blanked first; `AND`/`OR`/`NOT`/`IN` in any case are not
+  calls; a name a specific check already reported is not repeated. Blanking also ended a
+  false positive of the named spatial list on a column such as `[Area (sq ft)]`.
+- **Not caught, deliberately:** `RANK_*` and `RUNNING_*`. Their forms are documented and two
+  tests pin their translatable tiers, but the CLI does not convert them; they still reach
+  import and the parked-formula fix cycle.
+- **UNION.** Re-verified on the Spatial Functions page (own entry, 2026-11-08). The census
+  is one tuple, `SPATIAL_FUNCTIONS`; `_UNMAPPED_FUNCTIONS` and classify's `_GEO_RE` are built
+  from it. The "Classifier detection patterns" block lists all 16.
+- **Docs.** Mapping doc table "Functions the converter has never seen"; coverage matrix
+  U12–U15 and L10 at 16. Tests: `tests/test_tableau_unknown_functions.py`.
+
+**Review follow-ups (2026-11-08).** One reference grammar (`formula_translate.refs.
+REF_GRAMMAR`: a name may hold `[`) for validate, classify and `ts formula translate`'s
+guard; classify's tiers read comment-stripped text with literals and references blanked
+(`WINDOW_*` by family, `COLLECT` geospatial); source call names upper-cased, so `log2(` is
+`LOG2(`; catalog families by documented member (`cumulative_count`, `moving_count`,
+`moving_stddev` rejected live); `DATETIME` wired to its documented pass-through; `/* */`
+comments stripped; `RUNNING_COUNT` caught (answer-level only). `MID(s, start)` was checked:
+base emitted `MID(` verbatim, which no ThoughtSpot function accepts, so excluding it is not
+a regression.
+
+**Re-review follow-ups (2026-11-08).** A field name holding a bracket is refused, never
+partly resolved (`ts formula translate` NEEDS_REVIEW before the adapter runs, an output-guard
+backstop, a converter skip); `ts formula translate`'s comment stripper and the converter's
+END/CASE strip and forbidden-keyword checks no longer read inside a `[field]` name;
+`DATETIME` translates only over a field or a date expression; a mapped function in an
+unmapped form says "wrong number of arguments". Deferred: unifying the two call scans
+(`validate._unknown_calls`, `traps.output_guard`), which share the catalog and the
+reference grammar but not their keyword handling.
+
+**Remains** (target 2026-11-30 each):
+
+- Map `VAR`/`VARP` → `variance` (sample or population?), `QUARTER` → `quarter_number` and
+  `LOG2` → `log2` only after a live check; never `STDEVP` → `stddev`. `CORR`, `COVAR(P)`,
+  `PERCENTILE` and `STDEVP` need a verified aggregate pass-through or stay unsupported.
+- Wrong-arity mappings the catch cannot see, because the emitted name is a catalog name:
+  `LOG(x, base)` → `log10 ( x , base )` and `FIND(s, sub, start)` → `strpos ( s , sub ,
+  start )`. Map or reject the extra argument.
+- Nested LOD: in `{FIXED [a] : SUM({FIXED [b] : SUM([x])})}` the outer braces and keyword
+  survive verbatim, and so does a dimensionless `{FIXED : SUM([x])}` beside another LOD.
+  Braces are not calls, so the catch cannot see them.
+- `MID(s, start)` (two arguments): excluded now; translating it needs `substr`'s
+  past-the-end behaviour checked.
+- `RANK_UNIQUE/DENSE/MODIFIED/PERCENTILE` and `RUNNING_SUM/AVG/MAX/MIN`: documented forms the
+  CLI has never converted; they reach import verbatim and the parked-formula fix cycle.
+  `verify.py` says this is "tracked separately", but no item tracked it. Wire them, or reject
+  them at translate time as `WINDOW_*` was.
 
 ## BL-461 — audit rule D9 misses `sql_double_aggregate_op` and the date variants `Tier 2` — **RESOLVED 2026-10-30**
 

@@ -44,6 +44,7 @@ from ts_cli.tableau.pre_transforms import (  # noqa: F401
     rewrite_csq_aliases,
     rewrite_date_arithmetic,
     strip_comments,
+    upper_call_names,
 )
 from ts_cli.tableau.conditionals import (  # noqa: F401
     _AGG_IF_MAP,
@@ -113,7 +114,9 @@ from ts_cli.tableau.literals import (  # noqa: F401
     is_string_placeholder,
     literal_value,
     mask_literals,
+    mask_refs,
     unmask_literals,
+    unmask_refs,
 )
 from ts_cli.tableau.cleanup import (  # noqa: F401
     complete_rank_args,
@@ -177,6 +180,10 @@ def translate_single(
     # must run before every other pass so THEN-folding / bare END-CASE-WHEN
     # stripping / keyword validation never see literal content.
     expr, literal_registry = mask_literals(expr)
+
+    # Pre-0c. One spelling per function: `log2(` is `LOG2(` (BL-460 review). After the
+    # literal mask, so no literal's text changes case.
+    expr = upper_call_names(expr)
 
     # Pre-1. Rewrite Custom SQL Query aliases (BL-057)
     if csq_to_table:
@@ -262,9 +269,13 @@ def translate_single(
     # 13b. Fix IN (...) → in {...} (ThoughtSpot requires curly braces)
     expr = fix_in_parentheses(expr)
 
-    # 14. Strip orphaned END/CASE/WHEN keywords that survived conversion
-    expr = re.sub(r"(?<!\[)\bEND\b(?!\])", "", expr, flags=re.IGNORECASE)
-    expr = re.sub(r"(?<!\[)\bCASE\b(?!\])", "", expr, flags=re.IGNORECASE)
+    # 14. Strip orphaned END/CASE keywords that survived conversion. On the text with
+    # [field] references masked, as map_functions reads it: the old lookarounds only
+    # protected a name that IS the keyword ([End]), so [Open Case Count] came out
+    # [Open Count] and [Week End Sales] [Week Sales] (BL-460 re-review).
+    masked, refs = mask_refs(expr)
+    masked = re.sub(r"\b(?:END|CASE)\b", "", masked, flags=re.IGNORECASE)
+    expr = unmask_refs(masked, refs)
 
     # 14b. Clean up whitespace
     expr = re.sub(r"\s+", " ", expr).strip()

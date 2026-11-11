@@ -1500,8 +1500,11 @@ class TestValidateOutput:
         # Regression guard: USERNAME/ISUSERNAME were removed from
         # _UNMAPPED_FUNCTIONS once functions.py started translating them
         # (BL-071, ts-cli v0.88.0) — validate_output must stop rejecting them.
-        errors = validate_output("if ( USERNAME ( ) = 'x' ) then 1 else 0")
-        assert not any("USERNAME" in e for e in errors)
+        # Through translate_single: since BL-460 a raw upper-case USERNAME( reaching
+        # validate_output IS a survivor, and is flagged as one.
+        for src in ("IF USERNAME() = 'x' THEN 1 ELSE 0 END", "ISUSERNAME('x')"):
+            _expr, errors, _ = translate_single(src)
+            assert errors == [], (src, errors)
 
     def test_untranslated_datepart_flagged(self):
         errors = validate_output("DATEPART ( 'minute' , [TS] )")
@@ -1519,9 +1522,11 @@ class TestValidateOutput:
         # Regression guard: ACOS/ASIN/ATAN/COT were removed from
         # _UNMAPPED_FUNCTIONS once functions.py started translating them
         # (BL-072, ts-cli v0.88.0) — validate_output must stop rejecting them.
+        # Through translate_single, as a real formula is (BL-460: a raw upper-case
+        # call reaching validate_output is a survivor and is flagged as one).
         for fn in ("ACOS", "ASIN", "ATAN", "COT"):
-            errors = validate_output(f"{fn} ( [X] )")
-            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
+            _expr, errors, _ = translate_single(f"{fn}([X])")
+            assert errors == [], f"{fn} should no longer be rejected: {errors}"
 
     def test_spatial_functions_rejected(self):
         # Full 13-function Tableau spatial set (audit 13.8) — none has a
@@ -1587,17 +1592,18 @@ class TestValidateOutput:
     def test_regexp_and_findnth_no_longer_flagged(self):
         # Fix 2: these are now wired to sql_*_op pass-throughs in
         # map_functions(), so the raw Tableau call should never survive to
-        # validate_output in a real pipeline run — but the fail-loud
-        # unmapped-function check itself must no longer flag them either,
-        # now that they're removed from _UNMAPPED_FUNCTIONS.
+        # validate_output in a real pipeline run. Checked through translate_single:
+        # since BL-460 a raw call that DID survive is flagged by the survivor catch,
+        # which is the point of it — the template it becomes must not be.
         for fn, args in (
             ("REGEXP_MATCH", "[x] , 'p'"),
             ("REGEXP_EXTRACT", "[x] , 'p'"),
             ("REGEXP_REPLACE", "[x] , 'p' , 'r'"),
             ("FINDNTH", "[x] , 'sub' , 2"),
         ):
-            errors = validate_output(f"{fn} ( {args} )")
-            assert not any(fn in e for e in errors), f"{fn} should no longer be flagged as unmapped"
+            expr, errors, _ = translate_single(f"{fn} ( {args} )")
+            assert errors == [], f"{fn} should no longer be rejected: {expr!r} {errors}"
+            assert "sql_" in expr, expr
 
     def test_regexp_extract_nth_still_flagged(self):
         # REGEXP_EXTRACT_NTH has no documented pass-through template and is

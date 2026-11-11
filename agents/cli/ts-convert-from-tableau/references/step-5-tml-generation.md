@@ -442,9 +442,9 @@ Use `tableau-formula-translation.md`.
   aggregation** (`sql_string_aggregate_op ( "LISTAGG({0}, ', ') WITHIN GROUP (ORDER BY {0})" , [col] )`,
   answer-level, ⚑ flag for review per PT1) or a plain table of the values. The feeder/`Last` scaffolding
   calcs collapse into the one LISTAGG formula. See `tableau-formula-translation.md` "String aggregation".
-- **Geospatial formulas** — full 13-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`,
-  `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`, `INTERSECTION`,
-  `SYMDIFFERENCE`, `VALIDATE`): omit the spatial formula entirely. For `MAKEPOINT(lat, lon)`,
+- **Geospatial formulas** — full 16-function set (`MAKEPOINT`, `MAKELINE`, `BUFFER`, `OUTLINE`,
+  `PARSE_WKT`, `DISTANCE`, `AREA`, `LENGTH`, `INTERSECTS`, `SHAPETYPE`, `DIFFERENCE`,
+  `INTERSECTION`, `SYMDIFFERENCE`, `UNION`, `VALIDATE`, `NO_CUTOUTS`): omit the spatial formula entirely. For `MAKEPOINT(lat, lon)`,
   ensure the underlying latitude and longitude columns are migrated as individual `ATTRIBUTE`
   columns — they are useful for filtering and display even without a map visualization. For
   `DISTANCE`/`BUFFER`/`AREA`/`LENGTH`/`INTERSECTS`/`DIFFERENCE`/`INTERSECTION`/`SYMDIFFERENCE`,
