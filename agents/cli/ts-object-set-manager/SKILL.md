@@ -1,15 +1,15 @@
 ---
 name: ts-object-set-manager
-description: Inventory reusable Sets (cohorts) on ThoughtSpot Models — how many each Model has, what depends on each, which are delete candidates or could become answer-level, and where every grant on a Set came from. Use when cleaning up Sets, auditing who can see a Set, finding unused Sets, or deciding which Sets should stay reusable. v1 is report only — it changes nothing.
+description: Inventory reusable Sets (cohorts) on ThoughtSpot Models — how many each Model has, what depends on each, which are delete candidates or could become answer-level, and where every grant on a Set came from — and optionally export every Set's TML, including Sets no Answer or Liveboard uses. Use when cleaning up Sets, auditing who can see a Set, finding unused Sets, deciding which Sets should stay reusable, or retrieving / backing up Set (cohort) TML for a Model. Read-only — it changes nothing in ThoughtSpot.
 metadata:
   category: Semantic Authoring
-  summary: "Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance (report only)"
+  summary: "Inventory reusable Sets — dependents, delete/answer-level candidates, grant provenance; optionally export each Set's TML (read-only)"
 ---
 
 # ThoughtSpot: Set Manager
 
-Report on every reusable Set across chosen Models, an Org, or the cluster. **v1 is
-read-only.** Deleting, converting to answer-level and revoking grants are v2 (BL-327).
+Report on every reusable Set across chosen Models, an Org, or the cluster, and optionally
+export each Set's TML. **v1 is read-only** — exporting writes local files, never to ThoughtSpot. Deleting, converting to answer-level and revoking grants are v2 (BL-327).
 
 ## References
 
@@ -62,7 +62,7 @@ Display, then wait for Y:
     ts-object-set-manager — inventory reusable Sets. Read-only: changes nothing.
 
       1. Authenticate ............................ auto
-      2. Choose scope (Models / Org / Cluster) ... you choose
+      2. Choose scope + whether to export TML .... you choose
       3. Dry-run: what's in scope ................ you confirm
       4. Inventory ............................... auto
       5. Report (HTML + Markdown) ................ auto
@@ -90,6 +90,15 @@ X → `--all-orgs`. `--all-orgs` scans every ACTIVE Org and **ignores `--org`** 
 picks both, say so and drop the Org. Connection scope is not available yet (BL-328) — say
 so if asked.
 
+Then ask, unless the request already settled it (asking for Set TML / definitions / a
+backup means yes; a cleanup or grants question alone does not):
+
+    Also export each Set's TML to files? [y / N]
+      Writes one .cohort.tml per Set, including Sets nothing uses
+      (the only way to retrieve those). Read-only: nothing is imported.
+
+Yes → add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml` in Step 4.
+
 ## Step 3 — Dry run
 
     ts sets inventory {flags} --dry-run --profile "{profile}"
@@ -107,9 +116,8 @@ be scanned). On exit 1 with "No Model matched", show the selectors and return to
 Progress goes to stderr. Per Model this is one call to an internal cohort listing, then
 per Set a dependents lookup, a TML export of each Liveboard dependent, and one grants read.
 
-**When the user wants the Sets' TML** (to back them up, move them, or read their
-definitions), add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml`. It
-writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML, Model referenced by FQN),
+**If the user chose to export TML in Step 2**, add
+`--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml`. It writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML, Model referenced by FQN),
 including Sets nothing uses — no public API lists those, so this is the way to retrieve
 them. Each Set's `tml_file` records the path; a failed export is `null` with a
 `tml_export_failed` scan note, and `summary.tml_export_failed` counts them. Read-only: it
@@ -127,7 +135,8 @@ browser is signed in to.
 ## Step 6 — Walk through
 
 Lead with `summary` from the inventory JSON (`models`, `models_incomplete`, `sets`,
-`by_class`, `unexplained_grants`, `unknown_grants`), then:
+`by_class`, `unexplained_grants`, `unknown_grants`; with an export, `tml_exported` and
+`tml_export_failed` plus the `tml/` directory path, and every `tml_export_failed` note), then:
 
 | Class | Meaning | What to do today |
 |---|---|---|
@@ -194,6 +203,6 @@ Say plainly that nothing was changed.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-11-11 | `--export-tml <dir>` writes each Set's TML, including Sets no Answer or Liveboard uses (ts-cli 0.212.0) |
+| 1.2.0 | 2026-11-11 | Step 2 asks whether to export each Set's TML; `--export-tml <dir>` writes it, including Sets no Answer or Liveboard uses (ts-cli 0.212.0) |
 | 1.1.0 | 2026-10-02 | Report links Models, Answers and Liveboards into ThoughtSpot (ts-cli 0.153.1) |
 | 1.0.0 | 2026-10-02 | Initial release — report-only reusable Set inventory: scope by Model/Org/Cluster, classification, grant provenance |
