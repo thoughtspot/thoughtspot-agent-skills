@@ -31,10 +31,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import SmokeTestResult, run_ts, ts_auth_check  # noqa: E402
 
+# (dialect, source, expected formula[, expected status — TRANSLATED when omitted])
 LEVEL0 = [
     ("tableau", "ROUND(SUM([Sales]) / COUNTD([Customer]), 2)",
      "round ( sum ( [TABLE::Sales]) / unique count ( [TABLE::Customer]) , 0.01 )"),
+    # DISTINCTCOUNT counts a blank key as one value, so it carries a has-NULL term and is
+    # APPROXIMATED (BL-540; a dimension row with no facts still differs).
     ("dax", "DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))",
+     "safe_divide(sum([Sales::Amount]), (unique count([Sales::Customer]) + "
+     "max((if (isnull([Sales::Customer])) then 1 else 0))))", "APPROXIMATED"),
+    ("dax", "DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNTNOBLANK(Sales[Customer]))",
      "safe_divide(sum([Sales::Amount]), unique count([Sales::Customer]))"),
     ("qlik", "Round(Sum(Sales), 0.01)", "round(sum([TABLE::Sales]), 0.01)"),
     ("sisense", "ROUND(SUM([rev]), 2)", "round(sum([TABLE::rev]), 0.01)"),
@@ -115,10 +121,12 @@ def main() -> int:
         return r.summary()
 
     def level0():
-        for dialect, src, want in LEVEL0:
+        for dialect, src, want, *status in LEVEL0:
+            want_status = status[0] if status else "TRANSLATED"
             out = run_ts(["formula", "translate", src, "--from", dialect], a.ts_profile)
-            if out["status"] != "TRANSLATED" or out["formula"] != want:
-                _fail(f"{dialect}: got {out['status']} {out['formula']!r}, want {want!r}")
+            if out["status"] != want_status or out["formula"] != want:
+                _fail(f"{dialect}: got {out['status']} {out['formula']!r}, "
+                      f"want {want_status} {want!r}")
             if not all(x["placeholder"] for x in out["references"]):
                 _fail(f"{dialect}: level-0 references must all be placeholders")
         r.info(f"{len(LEVEL0)} dialects translated at level 0")

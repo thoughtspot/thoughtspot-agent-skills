@@ -36,7 +36,7 @@ mappings/looker/
   lookml-tml-rules.md                 — verified TML generation rules for LookML → ThoughtSpot conversion (joins, key dedup, batch import)
 
 mappings/sisense/
-  sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (AGG_MAP/FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py)
+  sisense-formula-translation.md      — Sisense JAQL → ThoughtSpot formula and function mapping (FUNCTION_MAP/UNSUPPORTED, mirrors ts_cli/sisense/functions.py; plain-agg table by hand)
 mappings/qlik/
   qlik-thoughtspot-formula-translation.md — Qlik Sense expressions → ThoughtSpot formula and function mapping (199 rows, 17 categories)
 mappings/ts-dbt/

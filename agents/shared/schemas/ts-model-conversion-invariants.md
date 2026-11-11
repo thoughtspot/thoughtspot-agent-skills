@@ -175,10 +175,12 @@ bank-customers Table, re-exported, the first also queried via `searchdata`, all 
 | DATE | `COUNT_DISTINCT`, `MAX` | `ATTRIBUTE` — **silently overridden** | `COUNT_DISTINCT`: the list of values, no count (`MAX` not queried) |
 | VARCHAR, via a scalar formula `[T::col]` | `COUNT_DISTINCT` on the formula column | `ATTRIBUTE` — **silently overridden** | (not queried; the INT64 twin stayed `MEASURE`) |
 
-Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. The formula row matters because `ts tml
-lint` exempts formula columns from I5: a formula that only wraps a column, carrying
-`aggregation: COUNT_DISTINCT`, is the same failure and is not caught today (audit 2026-10-29 finding 9.1, routed to a
-validator). "Numeric" and "non-numeric" below
+Not probed: INT32, FLOAT, BOOL, DATE_TIME, TIME. The formula row matters because a
+formula that only wraps a column, carrying `aggregation: COUNT_DISTINCT`, is the same
+failure. `ts tml lint` checks it since BL-447 (2026-11-08), following a chain of formulas
+that each only wrap the next; before that it exempted every formula column (audit
+2026-10-29 finding 9.1). An aggregate formula carrying `COUNT_DISTINCT` is not flagged,
+because ThoughtSpot ignores a formula measure's aggregation. "Numeric" and "non-numeric" below
 generalise from the rows above; BL-265 (a `COUNT` metric over a VARCHAR key, demoted the
 same way) is the same platform rule. Every import succeeds; nothing is reported. Text and
 date keys (string customer ids, order dates) are common distinct-count targets, so the
@@ -199,20 +201,53 @@ numeric `COUNT_DISTINCT` column through unchanged (`thoughtspot-model-tml.md`), 
 `ts-link-*` emits one by design over numeric measures; `ts tml lint`'s I5 finding is advisory
 in both cases.
 
-**Temporary converter exception (dated 2026-10-29, ends with BL-447):** `ts-convert-from-dbt`'s
+**Temporary converter exception (dated 2026-10-29, ends with BL-447's dbt part):** `ts-convert-from-dbt`'s
 import lint gate reports I5 as advisory rather than blocking. A dbt `ts_aggregation: count_distinct`
 tag is often ThoughtSpot's own column round-tripped by ts-convert-to-dbt, and blocking would break
 builds that work today on numeric columns; converting it safely needs the existing Model read first
-(BL-447). Before that gate existed nothing was linted at all.
+(BL-447). Before that gate existed nothing was linted at all. It is also the one dated entry
+`check_converter_parity` requirement C carries (no from-converter maps a source aggregation to
+the literal `COUNT_DISTINCT`); the Snowflake SV, Power BI and Sisense hits were fixed on
+2026-11-08.
 
 **Not an I5 violation:** a column whose declared `column_type` is `ATTRIBUTE` carrying
 `aggregation: COUNT_DISTINCT` — there is no measure to demote, and ThoughtSpot's own exports carry
 exactly that pair after a demotion. `ts tml lint` and `check_tml.py` skip it.
 
-**Applies to:** All source dialects.
+**Applies to:** All source dialects. `formula_common.unique_count_formula` is the shared
+spelling; today the Snowflake SV and Power BI builders emit through it (and both SV and
+Databricks MV duplicate-column promotion through `aggregate_formula`). Tableau, Qlik, Sisense,
+the Databricks MV translator and dbt MetricFlow still write `unique count` from their own
+function maps.
 - Tableau: `COUNTD(field)` → `unique count ( [TABLE::col] )` formula
-- Snowflake SV: `COUNT(DISTINCT col)` metrics → `unique count ( [TABLE::col] )` formula
+- Snowflake SV: `COUNT(DISTINCT col)` metrics → `unique count ( [TABLE::col] )` formula; a fact
+  whose Cortex Analyst `default_aggregation` is `count_distinct` → `unique count ( <row value> )`
+  in every fact form (BL-447)
 - Databricks MV: `COUNT(DISTINCT col)` → `unique count ( [TABLE::col] )` formula
+- Power BI: a `DISTINCTCOUNT` measure → a formula under the measure's own name; a column
+  whose `summarizeBy` is `distinctCount` stays an attribute under its own name and gains a
+  separate formula column `<column> (Distinct Count)` (BL-447).
+  Both count BLANK as a value, Approximated (BL-540); `DISTINCTCOUNTNOBLANK` → plain
+  `unique count`
+- Qlik: a measure that is exactly `Count(DISTINCT x)` → `unique count ( x )`. A
+  `Count(DISTINCT …)` nested inside a larger expression is not handled the same way yet
+- Sisense `count` (a distinct count in JAQL) → `unique count` formula
+- Looker `type: count_distinct` → `unique count()` formula, by the skill's instructions
+  (`lookml-tml-rules.md`); Looker ships no CLI module, so no code gate covers it
+- dbt `ts_aggregation: count_distinct` → still a column for now; the exception above
+
+**NULL is not counted.** `unique count` compiles to SQL `count(DISTINCT …)` (live-probed
+2026-11-08, BL-540: keys a, a, b, NULL, NULL, c gave 3). That matches SQL `COUNT(DISTINCT)`
+(Snowflake SV, Databricks MV, dbt), Tableau `COUNTD` (documented to ignore Null) and DAX
+`DISTINCTCOUNTNOBLANK`. DAX `DISTINCTCOUNT`, and a Power BI column summarised by
+`distinctCount`, count BLANK as one more value; they get the probed form
+`( unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 ) )` (4 on those keys),
+bracketed so it composes. It is **Approximated**, not exact: a dimension row with no
+matching facts is BLANK in DAX and 1 here, Power BI's blank row for unmatched relationship
+keys is not modelled, and it is unprobed inside `group_aggregate`.
+`formula_common.unique_count_formula(..., null_is_a_value=True)` writes it. Qlik
+`Count(DISTINCT …)` and Sisense `count` are believed to ignore NULL like SQL (Qlik has a
+separate `NullCount`) but neither was probed on its own platform.
 
 **Correct pattern:**
 ```yaml

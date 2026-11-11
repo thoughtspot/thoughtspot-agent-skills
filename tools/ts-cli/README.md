@@ -680,7 +680,7 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I1 | a `formulas[]` entry with no paired `columns[]` entry (`formula_id` == `id`) — silently dropped |
 | I2 | an `aggregation:` under a `formulas[]` entry (only `columns[]` may carry it) |
 | I4 | `model_tables[].id` != `name` — joins silently fail at query time |
-| I5 | a physical column using `aggregation: COUNT_DISTINCT` — silently flips MEASURE → ATTRIBUTE on a non-numeric column |
+| I5 | `aggregation: COUNT_DISTINCT` on a physical column, or on a formula column whose `expr` only wraps one (`[T::c]`, directly or through `[formula_X]` references that each only wrap the next) — silently flips MEASURE → ATTRIBUTE on a non-numeric column. A declared `ATTRIBUTE`, and an aggregate formula, are not flagged. `tools/validate/check_tml.py` runs the same check |
 | I8 | a duplicate `column_id` across `columns[]` — hard import rejection ("columns should have unique column_id values") |
 | I12 | a bare (unqualified) `column_id` on a single-table model — rejected at import |
 | I13 | a `[formula_*]` reference (in `formulas[].expr`) or a `columns[].formula_id` matching no declared `formulas[].id` — hard import rejection (`error_code 14516`, `Search did not find "formula_X"`). Distinct from I9: I9 says use the id form, I13 says the id must exist |
@@ -3514,7 +3514,9 @@ ts snowflake build-model \
 | `--dry-run` | `false` | Write TML files only, skip import |
 
 **Output:** JSON summary to stdout — `{model_name, model_guid, formula_count,
-attribute_count, measure_count, phase1, phase2, tml_path, build_info}`.
+attribute_count, measure_count, phase1, phase2, tml_path, build_info}`, plus
+`reselected_columns: {columns, reason}` when a table's only column became a distinct-count
+formula and its key was selected again as an attribute (BL-447).
 Phase 1 is skipped when `--existing-guid` is supplied or when the model has no
 formulas.
 

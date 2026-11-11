@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import re
 
-from ts_cli.powerbi.functions import translate_dax
+from ts_cli.formula_common import distinct_count_formula_column
+from ts_cli.powerbi.functions import DISTINCTCOUNT_NOTE, translate_dax
 from ts_cli.spotql_ops import declare_formula_aggregations
 from ts_cli.powerbi.tables import (_AUTO_TABLE, _cardinality, _col_role, _dbname,
-                                    _slug, build_table_tml)
+                                    _is_distinct_count, _slug, build_table_tml,
+                                    distinct_count_name)
 
 
 def _drop_auto_date_tables(model_json):
@@ -96,10 +98,33 @@ def _build_joins(rels, table_names, dropped_ids, join_type):
     return joins_by_src, rel_rows
 
 
-def _build_physical_columns(tables, dropped_ids, force_physical, warnings):
+def _add_distinct_count(disp, colid, seen, columns, count_formulas):
+    """Append the distinct-count formula column for the key column ``disp`` (whose
+    summarizeBy is distinctCount) right after it. DISTINCTCOUNT counts a BLANK key as one
+    more value, which `unique count` alone does not (BL-540)."""
+    name, i = distinct_count_name(disp), 2
+    while name.lower() in seen:
+        name, i = f"{distinct_count_name(disp)} {i}", i + 1
+    seen.add(name.lower())
+    formula, column = distinct_count_formula_column(
+        name, colid, f"formula_{name}", null_is_a_value=True)
+    count_formulas.append(formula)
+    columns.append(column)
+
+
+def _build_physical_columns(tables, dropped_ids, force_physical, warnings, count_formulas):
     """Every physical column -> model columns[], keeping column_id stable and only
     disambiguating colliding display names (a join references column_id, so dropping a
-    column would break a join). Returns (columns, seen_display_names_lower)."""
+    column would break a join). Returns (columns, seen_display_names_lower).
+
+    A column whose summarizeBy is distinctCount stays an ATTRIBUTE under its own name, so
+    a visual that groups by it still groups, and gains a separate distinct-count formula
+    column, ``<name> (Distinct Count)`` (tables.distinct_count_name), its formula appended
+    to ``count_formulas``. Never a COUNT_DISTINCT column, which ThoughtSpot stores as an
+    attribute on a text or date key (invariant I5). The formula is DISTINCTCOUNT's
+    blank-aware form, ``( unique count ( x ) + max ( if ( isnull ( x ) ) then 1 else 0 ) )``
+    (BL-540), and its mapping row is Approximated with functions.DISTINCTCOUNT_NOTE. A
+    visual that summarises the column binds to the count (answers.agg_measures_map)."""
     seen, columns, renamed = set(), [], []
     for t in tables:
         for c in t.get("columns", []):
@@ -125,6 +150,8 @@ def _build_physical_columns(tables, dropped_ids, force_physical, warnings):
             if agg:
                 props["aggregation"] = agg
             columns.append({"name": disp, "column_id": colid, "properties": props})
+            if _is_distinct_count(c):
+                _add_distinct_count(disp, colid, seen, columns, count_formulas)
     if renamed:
         warnings.append("Duplicate display names disambiguated (all columns kept, "
                         "column_id unchanged): " + ", ".join(renamed))
@@ -280,8 +307,17 @@ def build_model_tml(model_json, model_name, join_type, overrides, warnings,
             entry["joins"] = joins_by_src[t["name"]]
         model_tables.append(entry)
 
-    columns, seen = _build_physical_columns(tables, dropped_ids, force_physical, warnings)
+    count_formulas = []
+    columns, seen = _build_physical_columns(tables, dropped_ids, force_physical, warnings,
+                                            count_formulas)
     formulas, measure_rows = _build_formulas(tables, overrides, dropped_ids, force_physical, seen, columns)
+    formulas[:0] = count_formulas
+    measure_rows[:0] = [{"name": f["name"], "original_dax": "summarizeBy: distinctCount",
+                         "ts_formula": f["expr"], "status": "Approximated",
+                         "note": "column's default distinct count -> unique count formula "
+                                 "(invariant I5); the column is a measure, as every "
+                                 "summarized column is. " + DISTINCTCOUNT_NOTE}
+                        for f in count_formulas]
     _cascade_flag(formulas, measure_rows, columns)
     formulas = _topo_sort_formulas(formulas)
     # Every MEASURE formula column declares an aggregation, resolved through the final

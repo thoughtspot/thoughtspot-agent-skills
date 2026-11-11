@@ -87,3 +87,44 @@ def test_end_to_end_build_from_spec():
     ccols = [c["column_id"] for c in line["answer"]["chart"]["chart_columns"]]
     assert "Month(Date)" in ccols and "Month(Month(Date))" not in ccols
     assert "Month(Month(Date))" not in json.dumps(line["answer"])
+
+
+
+def test_grouping_by_a_distinct_count_column_gives_the_key_and_summarising_gives_the_count():
+    """Re-review: a visual grouping by a `summarizeBy: distinctCount` column binds to the
+    key (an attribute); one summarising it (an inline aggregation of the column) binds to
+    the separate distinct-count formula column."""
+    from ts_cli.powerbi.build_model import assemble
+    inv = {
+        "tables": [{"name": "Fact", "columns": [
+            {"name": "Region"},
+            {"name": "CustomerKey", "dataType": "string", "summarizeBy": "distinctCount"},
+            {"name": "Amount", "dataType": "double", "summarizeBy": "sum"}], "measures": []}],
+        "relationships": [],
+        "pages": [{"name": "P1", "tooltip": False, "visuals": [
+            {"type": "tableEx", "title": "By customer",
+             "fields": [{"role": "Values", "field": "CustomerKey", "kind": "column"},
+                        {"role": "Values", "field": "Amount", "kind": "column"}]},
+            {"type": "clusteredColumnChart", "title": "Customers by region",
+             "fields": [{"role": "Category", "field": "Region", "kind": "column"},
+                        {"role": "Y", "field": "CustomerKey", "kind": "aggregation",
+                         "agg": "distinctcount"}]},
+            {"type": "clusteredColumnChart", "title": "Rows by region",
+             "fields": [{"role": "Category", "field": "Region", "kind": "column"},
+                        {"role": "Y", "field": "CustomerKey", "kind": "aggregation",
+                         "agg": "count"}]},
+        ]}],
+    }
+    files, _ = assemble(inv, {}, "conn", "db", "sch", "LEFT_OUTER", False)
+    model = next(tml for fn, tml in files if fn.endswith(".model.tml"))["model"]
+    cols = [c["name"] for c in model["columns"]]
+    meas = {c["name"] for c in model["columns"]
+            if c.get("properties", {}).get("column_type") == "MEASURE"}
+    spec = spec_from_parse(inv, "M", None, cols, meas, {})
+    grouped, summarised, plain_count = spec["dashboards"][0]["visuals"]
+    assert "CustomerKey" in [f["name"] for f in grouped["fields"]]
+    assert "CustomerKey" not in meas
+    assert [f["name"] for f in summarised["fields"]] == ["Region", "CustomerKey (Distinct Count)"]
+    # Plain Count / CountNonNull (both parsed as "count") is a row count in Power BI: it must
+    # never bind to the distinct count (final review).
+    assert "CustomerKey (Distinct Count)" not in [f["name"] for f in plain_count["fields"]]

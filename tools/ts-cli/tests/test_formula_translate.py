@@ -198,8 +198,10 @@ class TestAdapters:
 
     def test_dax(self):
         r = translate("DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))", "dax")
-        assert r["status"] == TRANSLATED
-        assert r["formula"] == "safe_divide(sum([Sales::Amount]), unique count([Sales::Customer]))"
+        assert r["status"] == APPROXIMATED   # DISTINCTCOUNT's blank term (BL-540)
+        # DISTINCTCOUNT counts a BLANK customer as one more value (BL-540)
+        assert r["formula"] == ("safe_divide(sum([Sales::Amount]), (unique count([Sales::Customer]) "
+                                "+ max((if (isnull([Sales::Customer])) then 1 else 0))))")
 
     def test_dax_approximated(self):
         r = translate("CALCULATE(SUM(Sales[Amount]), ALL(Sales[Region]))", "dax")

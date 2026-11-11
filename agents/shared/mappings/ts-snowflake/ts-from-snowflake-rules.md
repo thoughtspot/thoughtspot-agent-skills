@@ -322,12 +322,42 @@ ThoughtSpot's default answer matches (verified 2026-10-05):
 | `sum` | `SUM` |
 | `avg` / `average` | `AVERAGE` |
 | `min` / `max` | `MIN` / `MAX` |
-| `count` / `count_distinct` | `COUNT` / `COUNT_DISTINCT` |
+| `count` | `COUNT` |
+| `count_distinct` | **not a column aggregation** — the fact becomes a formula, `unique count ( <row value> )`, with the column `aggregation: SUM` (invariant I5; see below) |
 | `stddev` / `variance` | `STD_DEVIATION` / `VARIANCE` |
 | anything else (e.g. `median`) | keep `SUM` and **flag it** — ThoughtSpot has no column aggregation for it, so Cortex Analyst will answer that fact differently |
 | *(absent)* | `SUM` |
 
 Only a MEASURE fact takes it; an ATTRIBUTE fact (non-numeric expression) ignores it.
+
+**`count_distinct` is a formula in every fact form (BL-447).** `aggregation: COUNT_DISTINCT`
+is never emitted: ThoughtSpot stores a COUNT_DISTINCT measure over a text or date column as
+an `ATTRIBUTE`, and does the same to a formula column that only wraps one (`[T::col]`), so
+search lists the keys instead of counting them, with no error (live-probed 2026-10-29).
+Until 2026-11-08 this row instructed the column form, and the `T.COL as col` and computed
+forms emitted it on a formula column, the silent case. Each form now becomes:
+
+| Fact form | Emitted formula |
+|---|---|
+| pass-through `T.NAME as t.col` | `unique count ( [T::col] )` |
+| rename `T.NAME as col` | `unique count ( [T::col] )` |
+| computed `T.NAME as a - b` | `unique count ( [T::a] - [T::b] )` (an expression argument compiles to `count(DISTINCT (…))`, live 2026-11-08) |
+
+Another construct that references such a fact reads its **row value**, never
+`[formula_<id>]`, which is now an aggregate. A pass-through or a rename reads its bare column
+(`COUNT(DISTINCT t.name)` → `unique count ( [T::col] )`; so does a window's `PARTITION BY` /
+`ORDER BY`, as `group_sum ( … , [T::col] )`); a computed fact is inlined in parentheses
+(`unique count ( ( [T::a] - [T::b] ) )`). A simple `COUNT` / `MIN` / `MAX` metric over the
+fact's column is **never** emitted as a physical measure on that column, whether it names the
+fact, its declared name or the bare column unqualified: it becomes a formula,
+`count ( [T::col] )`. The fact no longer holds the column, so a physical `COUNT`/`MIN`/`MAX`
+there is a measure on the key, which ThoughtSpot demotes on a text or date column (BL-265);
+before BL-447 the fact held the column and such a metric was promoted to a formula (I8). A
+metric that re-aggregates one of these across the relationship whose key it counts (grouping
+a measure by itself) is skipped with a ⚑ note, as before. If the count was the only column its table had, build-model also
+selects that physical column as an `ATTRIBUTE` (reported as `reselected_columns`), because
+ThoughtSpot refuses a Model that selects no column of a table. The CA extension names a fact
+by its **declared** name (`T.NAME`), never the physical column a pass-through aliases (BL-448).
 
 ---
 
@@ -355,13 +385,13 @@ For simple metric EXPR patterns (`AGG(view_alias.col)`):
 |---|---|---|
 | `SUM(view.col)` | `SUM` | MEASURE |
 | `COUNT(view.col)` | `COUNT` | MEASURE |
-| `COUNT(DISTINCT view.col)` | `COUNT_DISTINCT` | MEASURE |
+| `COUNT(DISTINCT view.col)` | none — a formula, `unique count ( [T::col] )` (below) | MEASURE |
 | `AVG(view.col)` | `AVERAGE` | MEASURE |
 | `MIN(view.col)` | `MIN` | MEASURE |
 | `MAX(view.col)` | `MAX` | MEASURE |
 
-When the aggregation is COUNT_DISTINCT, **always use a formula column** rather than a
-MEASURE with `COUNT_DISTINCT`:
+A distinct count is **always a formula column**, never a MEASURE with `COUNT_DISTINCT`
+(invariant I5 — on a text or date column that is stored as an ATTRIBUTE):
 ```
 unique count ( [TABLE_ID::col_name] )
 ```

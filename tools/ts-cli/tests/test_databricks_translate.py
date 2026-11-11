@@ -1411,3 +1411,11 @@ class TestJsonPathAccess:
         assert out["ts_expr"] == (
             "sql_string_op ( \"get_json_object({0}, '$.address.city')\" , "
             "[TRANSACTIONS::json_string] )")
+
+
+def test_count_distinct_over_message_names_the_source_not_the_internal_label():
+    # BL-447 re-review nit: the NEEDS_REVIEW reason printed the internal label
+    # ("UNIQUE_COUNT(…) OVER ()"), which appears nowhere in the user's SQL.
+    with pytest.raises(UntranslatableError) as e:
+        translate_sql_expr("COUNT(DISTINCT customer_id) OVER ()", make_resolver(TABLES))
+    assert "COUNT(DISTINCT …) OVER ()" in str(e.value) and "UNIQUE_COUNT" not in str(e.value)

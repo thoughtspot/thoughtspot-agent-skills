@@ -39,7 +39,11 @@ _DAX_REVIEW = {
 # month NAME; DAX MONTH() is numeric, so the target is `month_number`.
 _DAX_FUNC = {
     "sum": "sum", "average": "average", "min": "min", "max": "max",
-    "count": "count", "counta": "count", "distinctcount": "unique count",
+    "count": "count", "counta": "count",
+    # DISTINCTCOUNTNOBLANK skips BLANK, as `unique count` (SQL count(DISTINCT)) skips
+    # NULL. DISTINCTCOUNT counts BLANK as one more value, so it is expanded first
+    # (_distinctcount_repl) into this plus a has-blank term (BL-540).
+    "distinctcountnoblank": "unique count",
     "abs": "abs", "round": "round", "int": "floor",  # DAX INT rounds toward -inf = floor.
     # NB: DAX TRUNC truncates toward zero (TRUNC(-2.5) = -2), which floor gets wrong for
     # negatives; there is no 1:1 ThoughtSpot equivalent, so TRUNC is left unmapped and flagged.
@@ -350,7 +354,8 @@ def _review_reason(src):
 def _expand_functions(expr):
     """Expand argument-aware calls (OR/AND before IF; DIVIDE/ROUND/CEILING/FLOOR anywhere).
     Returns expr, or None if any call is unbalanced/unconvertible."""
-    for fname, repl in (("DIVIDE", _divide_repl), ("OR", _or_repl),
+    for fname, repl in (("DISTINCTCOUNT", _distinctcount_repl),
+                        ("DIVIDE", _divide_repl), ("OR", _or_repl),
                         ("AND", _and_repl), ("IF", _if_repl), ("ROUND", _round_repl),
                         ("CEILING", _ceiling_repl), ("FLOOR", _floor_repl)):
         expr = _expand_calls(expr, fname, repl)
@@ -442,6 +447,8 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
         return None, "NEEDS REVIEW", "empty measure expression"
 
     src, note_bits = _apply_calculate_rewrites(src, measure_dax, physical_cols)
+    if re.search(r"\bDISTINCTCOUNT\s*\(", src, re.I):
+        note_bits.append(DISTINCTCOUNT_NOTE)
 
     reason = _review_reason(src)
     if reason:
@@ -528,6 +535,28 @@ def _divide_repl(args):
     if len(args) == 3:
         return f"({_IF} ({args[1]} = 0) then {args[2]} else ({args[0]}) / ({args[1]}))"
     return None
+
+
+# Why DISTINCTCOUNT is Approximated, not exact (BL-540 review). Shared with the
+# summarizeBy distinctCount column's mapping row in build_model.
+DISTINCTCOUNT_NOTE = (
+    "DISTINCTCOUNT counts a blank key as one value; translated as unique count plus 1 when "
+    "the group holds a NULL. Differs from Power BI where a dimension row has no matching "
+    "facts (DAX: blank, here: 1) and for the blank row Power BI adds for unmatched "
+    "relationship keys; unprobed inside group_aggregate")
+
+
+def _distinctcount_repl(args):
+    """DAX DISTINCTCOUNT(x) counts BLANK as a value; `unique count` compiles to SQL
+    count(DISTINCT x), which ignores NULL, so a column with blanks came out one lower,
+    labelled Migrated (BL-540). Exact form: the NOBLANK count plus 1 when any row in the
+    group is blank — formula_common.unique_count_formula(null_is_a_value=True), written
+    here in DAX so the IF/ISBLANK/MAX rewrites below translate it. Live-probed 2026-11-08:
+    4 on keys a, a, b, NULL, NULL, c (`unique count` alone: 3), 1 for a NULL-only group."""
+    if len(args) != 1:
+        return None
+    x = args[0]
+    return f"(DISTINCTCOUNTNOBLANK({x}) + MAX(IF(ISBLANK({x}), 1, 0)))"
 
 
 def _if_repl(args):

@@ -2,8 +2,13 @@
 
 Ported from the standalone converter (map/formula.py). Pure functions, no I/O.
 translate_jaql(expr, context=None) -> (expr_out, status, note); expr_out is None for
-NEEDS REVIEW (the caller preserves the original Sisense formula). translate_agg(agg)
-translates a plain JAQL aggregation (no formula) to a TML aggregation keyword.
+NEEDS REVIEW (the caller preserves the original Sisense formula).
+
+A plain JAQL `agg` (no formula) is never emitted as a TML column aggregation: the
+`AGG_MAP` / `translate_agg` that described one had no caller and mapped Sisense `count`
+to `COUNT_DISTINCT`, invariant I5's forbidden form (a text or date key becomes an
+attribute). Both were deleted (BL-447; BL-308's dead code). A distinct count is the
+`unique count` formula in FUNCTION_MAP.
 
 STRATEGY (unchanged from the standalone converter): deterministically translate the
 common subset; emit everything else as NEEDS REVIEW with the original formula preserved.
@@ -20,28 +25,15 @@ import re
 from ts_cli.formula_common import sql_digits_to_ts_increment
 from ts_cli.formula_text import ts_finalize_formula
 
-# Sisense JAQL `agg` -> TML aggregation property (for SIMPLE measures, no formula).
 # NOTE on count semantics (verified against Sisense docs): Sisense `count` returns the
 # number of *unique* values (distinct), while `dupCount`/`countduplicates` returns the
 # *total* item count including duplicates. So they map OPPOSITE to the intuitive reading:
-#   count           -> COUNT_DISTINCT  (unique)
-#   countduplicates -> COUNT           (exact total; NOT approximate)
-AGG_MAP: dict[str, str] = {
-    "sum": "SUM",
-    "avg": "AVERAGE",
-    "count": "COUNT_DISTINCT",    # Sisense count == distinct/unique count
-    "countduplicates": "COUNT",   # Sisense dupCount == exact total count (incl. duplicates)
-    "dupcount": "COUNT",          # JAQL sometimes spells it `dupCount`
-    "min": "MIN",
-    "max": "MAX",
-    "stdev": "STD_DEVIATION",
-    "var": "VARIANCE",
-    # median / stdevp / varp / mode have no clean TML aggregation -> MANUAL
-}
+#   count           -> `unique count`  (distinct)
+#   countduplicates -> `count`         (exact total; NOT approximate)
 
 # Sisense formula function -> TML formula function (deterministic 1:1 subset only).
 FUNCTION_MAP: dict[str, str] = {
-    # aggregation (see AGG_MAP note: Sisense count == distinct; dupCount == total)
+    # aggregation (see the count note above: Sisense count == distinct; dupCount == total)
     "sum": "sum",
     "avg": "average",
     "average": "average",
@@ -145,7 +137,7 @@ def _agg_to_func(agg: str) -> tuple:
     """A JAQL agg used as a formula wrapper -> (tml_func|None, coverage, note).
 
     count -> `unique count` (distinct) and dupCount/countduplicates -> `count` (exact total)
-    both come straight from FUNCTION_MAP; neither is approximate (see AGG_MAP note).
+    both come straight from FUNCTION_MAP; neither is approximate (see the count note).
     """
     key = (agg or "").lower()
     if key in FUNCTION_MAP:           # sum, avg->average, count->unique count, dupCount->count, min, max
@@ -418,15 +410,3 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
     out = ts_finalize_formula(out)
 
     return out, _STATUS[coverage], "; ".join(notes)
-
-
-def translate_agg(agg) -> tuple:
-    """Translate a plain JAQL `agg` (no formula) to a TML aggregation keyword.
-
-    Returns (agg_keyword|None, status, note); agg_keyword is None for NEEDS REVIEW.
-    """
-    key = (agg or "").lower()
-    if key in AGG_MAP:
-        # count->COUNT_DISTINCT and dupCount->COUNT are both exact (see AGG_MAP note) — no caveat.
-        return AGG_MAP[key], "Migrated", ""
-    return None, "NEEDS REVIEW", f"no TML aggregation for Sisense agg '{agg}'"

@@ -72,3 +72,18 @@ def test_i5_unique_count_formula_passes():
     )
     errors = check_tml.validate_model_tml(data)
     assert not any("COUNT_DISTINCT" in e for e in errors), errors
+
+
+def test_i5_formula_that_only_wraps_a_column_is_flagged():
+    # BL-447 review: check_tml kept its own I5 copy, which missed this shape that
+    # `ts tml lint` flags. Both now run tml_lint's one check.
+    data = _model(
+        model_tables=[{"name": "ORDERS"}],
+        formulas=[{"id": "f_cust", "name": "Customers", "expr": "[ORDERS::customer_id]"}],
+        columns=[{
+            "name": "Customers", "formula_id": "f_cust",
+            "properties": {"column_type": "MEASURE", "aggregation": "COUNT_DISTINCT"},
+        }],
+    )
+    errors = check_tml.validate_model_tml(data)
+    assert any("I5" in e and "Customers" in e for e in errors), errors
