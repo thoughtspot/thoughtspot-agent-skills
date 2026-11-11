@@ -95,9 +95,9 @@ backup means yes; a cleanup or grants question alone does not):
 
     Also export each Set's TML to files? [y / N]
       Writes one .cohort.tml per Set, including Sets nothing uses
-      (the only way to retrieve those). Read-only: nothing is imported.
+      (no public API lists those in practical time). Read-only: nothing is imported.
 
-Yes → add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml` in Step 4.
+Yes → add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD-HHMM}/tml` in Step 4.
 
 ## Step 3 — Dry run
 
@@ -117,9 +117,10 @@ Progress goes to stderr. Per Model this is one call to an internal cohort listin
 per Set a dependents lookup, a TML export of each Liveboard dependent, and one grants read.
 
 **If the user chose to export TML in Step 2**, add
-`--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/tml`. It writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML, Model referenced by FQN),
-including Sets nothing uses — no public API lists those, so this is the way to retrieve
-them. Each Set's `tml_file` records the path; a failed export is `null` with a
+`--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD-HHMM}/tml`. The directory must be
+new or empty (the command exits 1 otherwise, before scanning), so a rerun never mixes old
+files with new. It writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML as
+ThoughtSpot exported it, Model referenced by FQN), including Sets nothing uses. Each Set's `tml_file` records the path; a failed export is `null` with a
 `tml_export_failed` scan note, and `summary.tml_export_failed` counts them. Read-only: it
 exports, it never imports.
 

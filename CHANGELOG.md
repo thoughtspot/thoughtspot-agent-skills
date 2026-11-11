@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-11
-- feat: `ts sets inventory --export-tml <dir>` writes each reusable Set's TML (YAML, Model by FQN) to `<dir>/<org>/<Set name>__<guid>.cohort.tml`, including Sets no Answer or Liveboard uses, which no public API lists; a failed export writes nothing and is a `tml_export_failed` note (ts-object-set-manager 1.2.0)
+- feat: `ts sets inventory --export-tml <dir>` writes each reusable Set's TML (YAML, Model by FQN) to `<dir>/<org>/<Set name>__<guid>.cohort.tml` (a new or empty directory), including Sets no Answer or Liveboard uses, which no public API lists in practical time; the TML is written as exported, and a failed export writes nothing and is a `tml_export_failed` note (ts-object-set-manager 1.2.0)
 - chore: bump ts-cli to v0.213.0
 
 ## 2026-11-08

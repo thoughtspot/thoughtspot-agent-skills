@@ -8,7 +8,7 @@ from ts_cli.sets import export as ex
 
 SET = {"guid": "69f6aed0-503f-4ded-87b2-bac3ffe391af", "name": "Top Brands"}
 
-# Shape of the live export (se-thoughtspot, 2026-11-11), trimmed.
+# Shape of the live export (se-thoughtspot, 2026-11-11, edoc_format YAML), trimmed.
 EDOC = ('guid: 69f6aed0-503f-4ded-87b2-bac3ffe391af\ncohort:\n  name: Top Brands\n'
         '  worksheet:\n    name: Retail Sales - RP\n    fqn: e2806e7c-87d3-44b7-b230-69efb6183045\n'
         '  config:\n    cohort_type: ADVANCED\n    cohort_grouping_type: COLUMN_BASED\n')
@@ -27,28 +27,42 @@ def _client(body, status_code=200):
     return c
 
 
-def test_writes_tml_and_requests_yaml_with_fqn(tmp_path):
+def test_writes_tml_as_received_and_requests_yaml_with_fqn(tmp_path):
     c = _client([_item()])
     path = tmp_path / "o" / "x.cohort.tml"
     assert ex.export_set_tml(c, SET, path) is None
     assert path.read_text() == EDOC
     sent = c.post.call_args.kwargs["json"]
+    # edoc_format is the key v2 reads; formattype is ignored (live 2026-11-11, open item #9)
     assert sent == {"metadata": [{"identifier": SET["guid"]}], "export_fqn": True,
-                    "formattype": "YAML"}
+                    "edoc_format": "YAML"}
     assert c.post.call_args.kwargs["raise_for_status"] is False
+
+
+def test_json_edoc_is_written_byte_for_byte(tmp_path):
+    """Never re-serialised: a YAML round trip folds NEL, rejects C1 controls and unquotes
+    number-like strings such as "1e5" (pr-reviewer, 2026-11-11)."""
+    doc = {"guid": SET["guid"], "cohort": {"name": "Top\x85Brands\x92",
+                                           "groups": [{"name": "1e5"}]}}
+    edoc = json.dumps(doc)
+    path = tmp_path / "x.cohort.tml"
+    assert ex.export_set_tml(_client([_item(edoc=edoc)]), SET, path) is None
+    assert path.read_text(encoding="utf-8") == edoc + "\n"
+    assert json.loads(path.read_text(encoding="utf-8")) == doc
 
 
 @pytest.mark.parametrize("body,code,expect", [
     ([], 200, "unexpected export response"),
     ({"error": "x"}, 200, "unexpected export response"),
-    ([_item(status="ERROR", )], 200, "export status 'ERROR'"),
-    ([_item(edoc="")], 200, "no TML"),
+    ([_item(status="ERROR")], 200, "status ERROR"),
+    ([_item(edoc="")], 200, "Top Brands:"),   # export_item_doc wording
     ([_item(edoc="guid: abc\nliveboard:\n  name: L\n")], 200, "not Set (cohort) TML"),
     ([_item(edoc="guid: other-guid\ncohort:\n  name: X\n")], 200, "different object"),
+    ([_item(edoc="cohort:\n  name: X\n", id="other-guid")], 200, "different object (other-guid)"),
     ([_item(edoc="cohort: [unclosed\n")], 200, "does not parse"),
     ({"error": "forbidden"}, 403, "HTTP 403"),
 ], ids=["empty", "not-a-list", "status-error", "no-edoc", "wrong-type", "wrong-guid",
-        "bad-yaml", "http-error"])
+        "no-root-guid-wrong-info-id", "bad-yaml", "http-error"])
 def test_unconfirmed_body_fails_and_writes_nothing(tmp_path, body, code, expect):
     path = tmp_path / "x.cohort.tml"
     reason = ex.export_set_tml(_client(body, code), SET, path)
@@ -56,24 +70,23 @@ def test_unconfirmed_body_fails_and_writes_nothing(tmp_path, body, code, expect)
     assert not path.exists()
 
 
-def test_json_edoc_is_written_as_equivalent_yaml(tmp_path):
-    """Live: the server answered JSON with formattype YAML (se-thoughtspot, 2026-11-11)."""
-    import yaml
-    doc = yaml.safe_load(EDOC)
-    path = tmp_path / "x.cohort.tml"
-    assert ex.export_set_tml(_client([_item(edoc=json.dumps(doc))]), SET, path) is None
-    text = path.read_text()
-    assert not text.lstrip().startswith("{")
-    assert yaml.safe_load(text) == doc
-    assert list(yaml.safe_load(text)) == ["guid", "cohort"]   # key order kept
-
-
-def test_call_exception_is_reported(tmp_path):
+@pytest.mark.parametrize("exc", [RuntimeError("network down"), SystemExit(1)],
+                         ids=["exception", "client-exits-after-retries"])
+def test_call_failure_is_reported_not_raised(tmp_path, exc):
+    """The real client raises SystemExit(1) after its retries (client.py); it must become
+    a failed export, not end the whole inventory (pr-reviewer, 2026-11-11)."""
     c = MagicMock()
-    c.post.side_effect = RuntimeError("network down")
+    c.post.side_effect = exc
     path = tmp_path / "x.cohort.tml"
-    assert "network down" in ex.export_set_tml(c, SET, path)
+    assert "export call failed" in ex.export_set_tml(c, SET, path)
     assert not path.exists()
+
+
+def test_write_failure_is_reported(tmp_path):
+    blocker = tmp_path / "o"
+    blocker.write_text("a file where a directory should be")
+    reason = ex.export_set_tml(_client([_item()]), SET, blocker / "x.cohort.tml")
+    assert reason and reason.startswith("could not write")
 
 
 def test_tml_path_is_one_safe_segment_per_level(tmp_path):
@@ -82,3 +95,8 @@ def test_tml_path_is_one_safe_segment_per_level(tmp_path):
     assert p.parent.name == "default"
     assert p.name == "etc_Top_5__g1.cohort.tml"
     assert ex.tml_path(tmp_path, "", {"guid": "g1", "name": ""}).name == "unnamed__g1.cohort.tml"
+
+
+def test_non_latin_names_are_kept(tmp_path):
+    p = ex.tml_path(tmp_path, "東京", {"guid": "g1", "name": "上位ブランド/2"})
+    assert p.parent.name == "東京" and p.name == "上位ブランド_2__g1.cohort.tml"

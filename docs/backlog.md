@@ -475,6 +475,7 @@ are roughly ordered by value÷effort.
 | BL-564 | Snowflake SV leftovers from BL-450: WITH TAG in expr, stale warnings, doc errors, check_sv_yaml gaps | 2026-12-31 |
 | BL-565 | Chart types: lint for non-enum `chart.type`; ADVANCED_SCATTER display-name refs; per-type flags | 2026-12-31 |
 | BL-566 | Formula comment and keyword edge cases left after BL-460 | 2026-12-31 |
+| BL-567 | TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17338,5 +17339,15 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **What.** Unterminated `/*` is left as code and a nested `/* /* */ */` leaves `c * /`; Qlik `REM` inside an expression becomes two column references; a Databricks backtick identifier containing `--` is cut (loud); `DATETIME([d]) + 1` is not rewritten as date arithmetic; the converter's call scan and `traps.output_guard` are still two copies with different keyword handling.
 
 **Do.** Decide Tableau's actual behaviour for unterminated and nested comments (help.tableau.com), then make the shared scanner match; treat Qlik `REM` as a statement comment only; unify the two call scans.
+
+**Target:** 2026-12-31.
+
+## BL-567 — TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** pr-reviewer on the `ts sets inventory --export-tml` PR; live probe on se-thoughtspot (ts-object-set-manager open item #9).
+
+**What.** v2 `metadata/tml/export` reads `edoc_format`; `formattype` and `format_type` are ignored and the server answers JSON (live 2026-11-11, a Model and a Set). 13 call sites send `formattype`: `commands/tml.py` (the user-visible `--format YAML`), `migrate/discover.py` (×2), `audit/context.py`, `formula_translate/validate.py`, `sets/discover.py`, `commands/aggregate.py`, `commands/model.py`, `commands/dependency_cascade.py`, `commands/dependency.py`, `commands/dependency_apply.py`, `commands/publish_planning.py`, `commands/spotql.py`. Most parse the answer with a parser that takes JSON, so nothing visibly breaks, but any caller that writes the edoc to a `.tml` file, or reports the format it asked for, is wrong.
+
+**Do.** Switch each to `edoc_format`, check every caller that writes or displays the edoc, and add a validator that fails a `metadata/tml/export` body carrying `formattype`.
 
 **Target:** 2026-12-31.

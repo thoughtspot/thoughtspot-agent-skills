@@ -229,6 +229,9 @@ def test_export_tml_passes_dir_to_each_org(_c, _m, _rp, tmp_path):
                                 str(tmp_path / "tml"), "--profile", "p"])
     assert r.exit_code == 0, r.stderr
     assert inv.call_args.kwargs["export_dir"] == tmp_path / "tml"
+    out = json.loads(r.stdout)
+    assert out["scope"]["export_tml"] == str(tmp_path / "tml")
+    assert out["summary"]["tml_exported"] == 0   # present even with no Sets
 
 
 @patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
@@ -250,3 +253,25 @@ def test_dry_run_exports_nothing(_c, _m, tmp_path):
                                 "--export-tml", str(tmp_path / "tml"), "--profile", "p"])
     assert r.exit_code == 0 and not inv.called
     assert not (tmp_path / "tml").exists() and "no Set TML exported" in r.stderr
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_refuses_a_file(_c, _m, tmp_path):
+    f = tmp_path / "f"
+    f.write_text("x")
+    for extra in ([], ["--dry-run"]):
+        with patch("ts_cli.commands.sets.inventory_org") as inv:
+            r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                    str(f), "--profile", "p"] + extra)
+        assert r.exit_code == 1 and "not a directory" in r.stderr and not inv.called
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_refuses_a_non_empty_dir(_c, _m, tmp_path):
+    (tmp_path / "old.cohort.tml").write_text("x")
+    with patch("ts_cli.commands.sets.inventory_org") as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                str(tmp_path), "--profile", "p"])
+    assert r.exit_code == 1 and "not empty" in r.stderr and not inv.called

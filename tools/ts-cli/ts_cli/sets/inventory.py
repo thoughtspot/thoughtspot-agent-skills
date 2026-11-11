@@ -102,7 +102,7 @@ def _grants_with(sets: List[dict], prov: str) -> int:
     return sum(1 for s in sets for g in s["grants"] if g["provenance"] == prov)
 
 
-def summarise(orgs: List[dict]) -> dict:
+def summarise(orgs: List[dict], export_requested: bool = False) -> dict:
     models = [m for o in orgs for m in o["models"]]
     sets = [s for m in models for s in m["sets"]]
     return {"models": len(models),
@@ -111,13 +111,12 @@ def summarise(orgs: List[dict]) -> dict:
             "by_class": dict(Counter(s["class"] for s in sets)),
             "unexplained_grants": _grants_with(sets, "UNEXPLAINED"),
             "unknown_grants": _grants_with(sets, "UNKNOWN"),
-            **_export_counts(sets)}
+            **(_export_counts(sets) if export_requested else {})}
 
 
 def _export_counts(sets: List[dict]) -> dict:
-    """Only when TML was exported (`--export-tml`): files written and exports that failed."""
+    """With `--export-tml`: files written and exports that failed — present even when no
+    Set was found, so the output always shows an export was asked for."""
     tried = [s for s in sets if "tml_file" in s]
-    if not tried:
-        return {}
     ok = sum(1 for s in tried if s["tml_file"])
     return {"tml_exported": ok, "tml_export_failed": len(tried) - ok}

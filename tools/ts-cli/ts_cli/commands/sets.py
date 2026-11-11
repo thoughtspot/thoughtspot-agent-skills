@@ -99,6 +99,31 @@ def _resolve_plans(profile: Optional[str], orgs: List[Optional[str]], model: Lis
     return plans
 
 
+def _orgs_to_scan(profile: Optional[str], org: List[str],
+                  all_orgs: bool) -> Tuple[List[Optional[str]], List[dict]]:
+    """The Orgs to scan and any `org_skipped` notes. `--all-orgs` ignores `--org`; no
+    `--org` means the profile's default Org (None). Exits 1 when `--all-orgs` finds none."""
+    if not all_orgs:
+        return (list(org) or [None]), []
+    ids, notes = _all_org_ids(profile)
+    if not ids:
+        _err("--all-orgs found no ACTIVE Org")
+        raise typer.Exit(1)
+    return list(ids), notes
+
+
+def _check_export_dir(export_tml: str) -> None:
+    """Refuse, before any scan, a destination that is a file or a non-empty directory: a
+    rerun into old files would leave a deleted or renamed Set's file looking current."""
+    p = Path(export_tml)
+    if p.exists() and not p.is_dir():
+        _err(f"--export-tml {export_tml} exists and is not a directory")
+        raise typer.Exit(1)
+    if p.is_dir() and any(p.iterdir()):
+        _err(f"--export-tml {export_tml} is not empty; give a new or empty directory")
+        raise typer.Exit(1)
+
+
 def _emit(doc: dict, output: Optional[str]) -> None:
     text = json.dumps(doc, indent=2)
     if output:
@@ -115,7 +140,7 @@ def inventory(
     all_orgs: bool = typer.Option(False, "--all-orgs", help="Cluster scope: every ACTIVE Org in turn."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve scope only; no Set scan."),
     output: Optional[str] = typer.Option(None, "-o", "--output", help="Write JSON here as well as stdout."),
-    export_tml: Optional[str] = typer.Option(None, "--export-tml", help="Also write each Set's TML (YAML, with FQNs) under this directory: <dir>/<org>/<Set name>__<guid>.cohort.tml."),
+    export_tml: Optional[str] = typer.Option(None, "--export-tml", help="Also write each Set's TML (YAML, with FQNs) under this directory, which must be new or empty: <dir>/<org>/<Set name>__<guid>.cohort.tml."),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", envvar="TS_PROFILE"),
 ) -> None:
     """Every reusable Set on the scoped Models, classified, with grant provenance.
@@ -135,18 +160,12 @@ def inventory(
         raise typer.Exit(1)
     model = _clean_selectors("--model", model)
     model_contains = _clean_selectors("--model-contains", model_contains)
-    org_notes: List[dict] = []
-    orgs: List[Optional[str]]
-    if all_orgs:
-        ids, org_notes = _all_org_ids(profile)
-        orgs = list(ids)
-    else:
-        orgs = list(org) or [None]
-    if not orgs:
-        _err("--all-orgs found no ACTIVE Org")
-        raise typer.Exit(1)
+    orgs, org_notes = _orgs_to_scan(profile, org, all_orgs)
+    if export_tml:
+        _check_export_dir(export_tml)
     plans = _resolve_plans(profile, orgs, model, model_contains)
-    scope = {"model": model, "model_contains": model_contains, "org": org, "all_orgs": all_orgs}
+    scope = {"model": model, "model_contains": model_contains, "org": org, "all_orgs": all_orgs,
+             "export_tml": export_tml}
     if dry_run:
         n = sum(len(c) for _, _, c in plans)
         _err(f"{n} Model(s) in scope across {len(plans)} Org(s); rough estimate {max(1, n * 5)}s+")
@@ -167,7 +186,8 @@ def inventory(
            # For report links only (Model / Answer / Liveboard pages). Every Org client
            # shares the cluster's base URL; None when it cannot be read.
            "base_url": next((getattr(c, "base_url", None) for _, c, _ in plans), None),
-           "orgs": results, "notes": org_notes, "summary": summarise(results)}
+           "orgs": results, "notes": org_notes,
+           "summary": summarise(results, export_requested=bool(export_tml))}
     _emit(doc, output)
 
 

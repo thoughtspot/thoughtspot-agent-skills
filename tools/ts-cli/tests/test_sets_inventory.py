@@ -216,7 +216,7 @@ def test_export_records_tml_file(tmp_path):
     assert rec["tml_file"] == str(tmp_path / "Primary" / "B__s1.cohort.tml")
     assert ex.call_args.args[2] == tmp_path / "Primary" / "B__s1.cohort.tml"
     assert out["notes"] == []
-    assert inv.summarise([out])["tml_exported"] == 1
+    assert inv.summarise([out], export_requested=True)["tml_exported"] == 1
 
 
 def test_failed_export_is_null_file_and_a_note(tmp_path):
@@ -225,7 +225,7 @@ def test_failed_export_is_null_file_and_a_note(tmp_path):
     assert rec["tml_file"] is None
     assert [(n["kind"], n["detail"]) for n in out["notes"]] == \
         [("tml_export_failed", "HTTP 403: forbidden")]
-    assert inv.summarise([out])["tml_export_failed"] == 1
+    assert inv.summarise([out], export_requested=True)["tml_export_failed"] == 1
 
 
 def test_without_export_dir_no_tml_field(tmp_path):
@@ -236,4 +236,12 @@ def test_without_export_dir_no_tml_field(tmp_path):
          patch.object(inv, "export_set_tml") as ex:
         out = inv.inventory_org(object(), "Primary", [{"guid": "m1", "name": "M"}])
     assert not ex.called and "tml_file" not in out["models"][0]["sets"][0]
+    assert "tml_exported" not in inv.summarise([out])
+
+
+def test_export_counts_present_even_with_no_sets():
+    out = {"org": "o", "notes": [], "models": [{"guid": "m1", "name": "M", "discovery": "COMPLETE",
+                                                "set_count": 0, "sets": []}]}
+    assert inv.summarise([out], export_requested=True)["tml_exported"] == 0
+    assert inv.summarise([out], export_requested=True)["tml_export_failed"] == 0
     assert "tml_exported" not in inv.summarise([out])
