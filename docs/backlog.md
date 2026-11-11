@@ -476,6 +476,8 @@ are roughly ordered by value÷effort.
 | BL-565 | Chart types: lint for non-enum `chart.type`; ADVANCED_SCATTER display-name refs; per-type flags | 2026-12-31 |
 | BL-566 | Formula comment and keyword edge cases left after BL-460 | 2026-12-31 |
 | BL-567 | TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON | 2026-12-31 |
+| BL-568 | Exported TML parsed without stripping non-printables: `export_item_doc` and 9 raw `yaml.safe_load(edoc)` sites | 2026-12-31 |
+| BL-569 | `dependency/backup.py` `backup_filename`: 60-character cap overruns the 255-byte limit; keeps Windows-reserved characters | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -2077,11 +2079,11 @@ self-contained, interactive HTML ERD that opens in any browser with no TS login.
 
 ThoughtSpot sets (cohorts) count as columns on a model — a model with 100 columns and 200 sets exposes 300 accessible columns to users, causing UX overload. Sets can also drift (identical definitions across multiple sets) and cluster on a small number of base columns. The `ts-audit` health report has no visibility into set usage patterns.
 
-### Verified discovery mechanism
+### Discovery mechanism — contradicted 2026-11-11, re-verify before building on it
 
-Sets are **not** returned via `ts metadata dependents` COHORT bucket on a model. They **are** returned via `ts tml export <model-guid> --fqn --associated` as `type=cohort` items alongside tables.
+Sets are **not** returned via `ts metadata dependents` COHORT bucket on a model. As filed (2026-06-26, champ-staging), they were returned via `ts tml export <model-guid> --fqn --associated` as `type=cohort` items alongside tables.
 
-> **Contradicted 2026-11-11 — re-verify before building on this.** On the SE demo cluster, the Model's `export_associated` export returned 1 Model + 7 Tables and **no** `cohort` items, for a Model with 11 Sets (ts-object-set-manager open item #9). Until this route is re-checked, use the private cohort listing in `ts_cli/sets/discover.py` (what `ts sets inventory` and `/ts-audit` H5 already use); otherwise checks D12–D15 risk the silent miss BL-324 recorded. The audit pipeline already does `--associated` exports, so the cohort data is available — it just needs to be extracted from the export response and populated into the `Corpus.sets` field (which exists but is never populated).
+> **Contradicted 2026-11-11.** On the SE demo cluster, the Model's `export_associated` export returned 1 Model + 7 Tables and **no** `cohort` items, for a Model with 11 Sets (ts-object-set-manager open item #9). Until this route is re-checked, use the private cohort listing in `ts_cli/sets/discover.py` (what `ts sets inventory` and `/ts-audit` H5 already use); otherwise checks D12–D15 risk the silent miss BL-324 recorded. (As filed, the plan was to read Sets out of the `--associated` exports the audit pipeline already makes and populate `Corpus.sets`, which exists but is never populated; that plan rests on the contradicted route.)
 
 Consumer counting for individual sets: `ts metadata dependents <set-guid> --type LOGICAL_COLUMN` returns answers/liveboards that use the set.
 
@@ -2097,12 +2099,12 @@ Consumer counting for individual sets: `ts metadata dependents <set-guid> --type
 ### Key technical details
 
 - **Set TML structure:** `cohort.config.cohort_type` (SIMPLE = column set, ADVANCED = query set), `cohort.config.cohort_grouping_type` (BIN_BASED / GROUP_BASED / COLUMN_BASED), `cohort.config.anchor_column_id` (base column the set operates on), `cohort.worksheet` (model binding)
-- **Corpus integration:** `Corpus.sets: list[dict]` field exists at `analyzer.py:83` but is never populated. Populate from `--associated` export filtering for `type=cohort`
+- **Corpus integration:** `Corpus.sets: list[dict]` field exists at `analyzer.py:83` but is never populated. Populate from the private cohort listing (`ts_cli/sets/discover.py`); the `--associated` export filtered for `type=cohort` returned none on 2026-11-11 (see above)
 - **Test model:** Dunder Mifflin Sales on champ-staging — 44 reusable cohorts, mix of SIMPLE and ADVANCED, consumer counts ranging from 0 to multiple
 
 ### Implementation notes
 
-1. **Extract sets from `--associated` export** — filter the export response for items with `type=cohort`, parse each cohort TML, populate `Corpus.sets`
+1. **Discover sets with `ts_cli/sets/discover.py`** (the `--associated` export carried no cohorts on 2026-11-11, see above), then export each Set's TML by GUID as `ts sets inventory --export-tml` does (`ts_cli/sets/export.py`), parse it and populate `Corpus.sets`
 2. **D12 (set count)** — count columns from model TML + count sets from corpus, compare against threshold
 3. **D13 (unused sets)** — for each set GUID, run `ts metadata dependents <guid> --type LOGICAL_COLUMN`; flag those with 0 dependents
 4. **D14 (duplicate definitions)** — hash the relevant `config` fields across all sets; group by hash; flag groups with >1 member
@@ -17351,5 +17353,25 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 **What.** v2 `metadata/tml/export` reads `edoc_format`; `formattype` and `format_type` are ignored and the server answers JSON (live 2026-11-11, a Model and a Set). 13 call sites send `formattype`: `commands/tml.py` (the user-visible `--format YAML`), `migrate/discover.py` (×2), `audit/context.py`, `formula_translate/validate.py`, `sets/discover.py`, `commands/aggregate.py`, `commands/model.py`, `commands/dependency_cascade.py`, `commands/dependency.py`, `commands/dependency_apply.py`, `commands/publish_planning.py`, `commands/spotql.py`. Most parse the answer with a parser that takes JSON, so nothing visibly breaks, but any caller that writes the edoc to a `.tml` file, or reports the format it asked for, is wrong.
 
 **Do.** Switch each to `edoc_format`, check every caller that writes or displays the edoc, and add a validator that fails a `metadata/tml/export` body carrying `formattype`.
+
+**Target:** 2026-12-31.
+
+## BL-568 — Exported TML parsed without stripping non-printables `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** pr-reviewer on the `--export-tml` follow-up PR.
+
+**What.** `agents/shared/schemas/thoughtspot-tml.md` says to strip non-printables from all edoc strings before parsing: PyYAML rejects a raw C1 character (e.g. U+0095) even inside a JSON answer. `commands/tml.py` `parse_edoc` does; the shared `tml_common.export_item_doc` does not, and neither do 9 direct `yaml.safe_load(edoc)` sites in `ts_cli/`: `commands/alias.py`, `dependency/cascade.py`, `report/impact_probes.py`, `report/__init__.py` (×2), `commands/link.py`, `commands/dbt.py`, `commands/tml.py` (one site outside `parse_edoc`) and `commands/columns.py`. `ts_cli/sets/export.py` strips for its own check only. Each fails loudly, not silently, and only when an object's TML carries such a character.
+
+**Do.** Strip inside `export_item_doc` (keeping its failed-export handling), route the raw sites through it or `parse_edoc`, and add a validator that fails a new `yaml.safe_load` on an unstripped edoc.
+
+**Target:** 2026-12-31.
+
+## BL-569 — `backup_filename` overruns the file-name limit and keeps Windows-reserved characters `Tier 3`
+
+**Filed:** 2026-11-11. **Source:** pr-reviewer on the `--export-tml` follow-up PR (a sibling of the byte-cap fix in `ts_cli/sets/export.py`).
+
+**What.** `ts_cli/dependency/backup.py` `backup_filename` caps an object name at 60 characters: 60 four-byte characters make a ~292-byte name, past the 255-byte limit on ext4/XFS/Btrfs. It also keeps `: ? * " < > |`; on NTFS a `:` writes to an alternate data stream. This is the backup taken before a dependency delete, so a failed or misplaced write matters.
+
+**Do.** Reuse `ts_cli/sets/export.py` `safe_name` (character and byte caps, safe character set) or move it to a shared module both import, and add tests for long non-Latin and Windows-reserved names.
 
 **Target:** 2026-12-31.

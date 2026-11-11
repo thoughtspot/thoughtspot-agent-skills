@@ -18,7 +18,9 @@ For how sets appear inside Answer TML (as `cohorts[]`), see
 - **Column set** — scalar, single-column categorization. TML: `cohort.config.cohort_type: SIMPLE`
   with `cohort_grouping_type: BIN_BASED` or `GROUP_BASED`. No aggregation/ranking.
 - **Query set** — aggregation/ranking across columns. TML: `cohort_type: ADVANCED` with an embedded
-  `cohort.answer{}` (search_query + answer_columns + table) and `groups` over aggregated columns.
+  `cohort.answer{}` (search_query + answer_columns + table) and either `groups` over aggregated
+  columns (`COLUMN_BASED`) or `bins` over an aggregated column (`BIN_BASED`, with
+  `bins.binning_column_name` naming it — seen live 2026-11-11, ts-object-set-manager open item #9).
 
 Docs: cloud/latest/column-sets, query-sets, tml-sets.
 
@@ -99,7 +101,7 @@ cohort:
       # include_column_ids: [col_id_1]
       # exclude_column_ids: [col_id_2]
 
-  answer:                               # COLUMN_BASED (query set) only
+  answer:                               # query sets (ADVANCED) only — COLUMN_BASED or BIN_BASED
     tables:
     - id: "Model Display Name"
       name: "Model Display Name"
@@ -213,7 +215,7 @@ The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_t
 | `pass_thru_filter.include_column_ids` | Only these columns' filters are passed through |
 | `pass_thru_filter.exclude_column_ids` | These columns' filters are blocked |
 
-### `answer` section (query sets only — COLUMN_BASED)
+### `answer` section (query sets only — `cohort_type: ADVANCED`, COLUMN_BASED or BIN_BASED)
 
 Contains a full embedded Answer whose results define the set members. Two forms:
 - **Static N (fixed):** `search_query: "top N [dimension] [measure]"` (or `"bottom N …"`) — a

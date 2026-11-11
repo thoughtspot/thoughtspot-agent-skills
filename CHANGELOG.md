@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-11
-- fix: `ts sets inventory --export-tml` refuses an unwritable directory before the scan, caps file names at 200 UTF-8 bytes (long non-Latin Set names exceeded the 255-byte limit), and no longer fails on a raw C1 character in a YAML answer; `*.cohort.tml` is gitignored; the set-manager keeps one run directory per run (ts-object-set-manager 1.2.1)
+- fix: `ts sets inventory --export-tml` refuses an unwritable, dangling or unreachable directory before the scan (on Windows too), caps each file-name segment at 120 characters and 150 UTF-8 bytes (long non-Latin Set names exceeded the 255-byte limit), keeps combining marks in names, and no longer fails on a raw C1 or NEL character in a YAML answer; every `ts sets` path option expands `~`, so a quoted path lands with the rest of the run; `*.cohort.tml` is gitignored; the set-manager keeps one run directory per run (ts-object-set-manager 1.2.1)
 - chore: bump ts-cli to v0.213.1
 - feat: `ts sets inventory --export-tml <dir>` writes each reusable Set's TML (YAML, Model by FQN) to `<dir>/<org>/<Set name>__<guid>.cohort.tml` (a new or empty directory), including Sets no Answer or Liveboard uses, which no public API lists in practical time; the TML is written as exported, and a failed export writes nothing and is a `tml_export_failed` note (ts-object-set-manager 1.2.0)
 - chore: bump ts-cli to v0.213.0

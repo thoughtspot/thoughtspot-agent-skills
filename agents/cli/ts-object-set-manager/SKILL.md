@@ -112,7 +112,9 @@ be scanned). On exit 1 with "No Model matched", show the selectors and return to
 
 `{RUN}` is the run's start time, `YYYY-MM-DD-HHMM`, chosen once here: the inventory JSON,
 the report and any exported TML all go under the one `~/Dev/audit-runs/{profile}-sets-{RUN}/`
-directory, so a rerun never overwrites or mixes with an earlier run.
+directory. A rerun gets its own `{RUN}`; one started in the same minute would overwrite the
+JSON and report, so wait a minute or add seconds. Quote the paths if `{profile}` has a space —
+the CLI expands a quoted `~` itself.
 
     ts sets inventory {flags} --profile "{profile}" \
       -o ~/Dev/audit-runs/{profile}-sets-{RUN}/sets-inventory.json > /dev/null

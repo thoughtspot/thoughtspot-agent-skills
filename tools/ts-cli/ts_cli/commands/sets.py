@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -113,31 +113,65 @@ def _orgs_to_scan(profile: Optional[str], org: List[str],
     return list(ids), notes
 
 
-def _check_export_dir(export_tml: str) -> None:
-    """Refuse, before any scan, a destination that is a file, a non-empty directory, or one
-    that cannot be written: a rerun into old files would leave a deleted or renamed Set's
-    file looking current, and an unwritable path would surface only after the whole scan.
-    Creates nothing, so `--dry-run` leaves no trace."""
-    p = Path(export_tml).expanduser()
-    if p.exists() and not p.is_dir():
-        _err(f"--export-tml {export_tml} exists and is not a directory")
-        raise typer.Exit(1)
-    if p.is_dir() and any(p.iterdir()):
-        _err(f"--export-tml {export_tml} is not empty; give a new or empty directory")
-        raise typer.Exit(1)
+def _path(value: str) -> Path:
+    """Every path option goes through here, so a quoted `~` (a profile name with a space
+    forces quoting) lands every output of one run in the same place."""
+    return Path(value).expanduser()
+
+
+def _refuse(export_tml: str, why: str) -> None:
+    _err(f"--export-tml {export_tml} {why}")
+    raise typer.Exit(1)
+
+
+def _nearest_existing(p: Path) -> Optional[Path]:
+    """The nearest ancestor that exists — where the directory would be created. None at a
+    root that does not exist (an unmapped drive or unreachable share on Windows, whose
+    `.parent` is itself), so the walk always ends."""
     base = p
-    while not base.exists():  # nearest existing ancestor: where the directory gets created
+    while not base.exists():
+        if base.parent == base:
+            return None
         base = base.parent
-    if not base.is_dir() or not os.access(base, os.W_OK | os.X_OK):
-        _err(f"--export-tml {export_tml} cannot be written ({base} is not a writable directory)")
-        raise typer.Exit(1)
+    return base
+
+
+def _writable(base: Path) -> bool:
+    """Probe by creating (and at once removing) a temp file: `os.access` on Windows checks
+    only the read-only attribute, not the ACL."""
+    try:
+        with tempfile.TemporaryFile(dir=base):
+            return True
+    except OSError:
+        return False
+
+
+def _check_export_dir(export_tml: str) -> None:
+    """Refuse, before any scan, a destination that is a file, a non-empty directory, a
+    dangling link, or one that cannot be written: a rerun into old files would leave a
+    deleted or renamed Set's file looking current, and an unwritable path would surface
+    only after the whole scan. Creates nothing that outlives the check, so `--dry-run`
+    leaves no trace."""
+    p = _path(export_tml)
+    try:
+        if p.is_symlink() and not p.exists():
+            _refuse(export_tml, "is a link to nothing")
+        if p.exists() and not p.is_dir():
+            _refuse(export_tml, "exists and is not a directory")
+        if p.is_dir() and any(p.iterdir()):
+            _refuse(export_tml, "is not empty; give a new or empty directory")
+        base = _nearest_existing(p)
+    except OSError as exc:  # e.g. a parent without search permission
+        _refuse(export_tml, f"cannot be checked: {exc}")
+    if base is None or not base.is_dir() or not _writable(base):
+        _refuse(export_tml, f"cannot be written ({base or p.anchor or p} is not a writable directory)")
 
 
 def _emit(doc: dict, output: Optional[str]) -> None:
     text = json.dumps(doc, indent=2)
     if output:
-        Path(output).parent.mkdir(parents=True, exist_ok=True)
-        Path(output).write_text(text, encoding="utf-8")
+        _path(output).parent.mkdir(parents=True, exist_ok=True)
+        _path(output).write_text(text, encoding="utf-8")
     print(text)
 
 
@@ -161,8 +195,8 @@ def inventory(
     \b
       ts sets inventory --model-contains DUNDER -p se
       ts sets inventory --org ORG1 --dry-run -p se
-      ts sets inventory --all-orgs -o ./sets-inventory.json -p se
-      ts sets inventory --model "Retail Sales" --export-tml ~/sets-tml -p se
+      ts sets inventory --all-orgs -o ~/sets-run/sets-inventory.json -p se
+      ts sets inventory --model "Retail Sales" --export-tml ~/sets-run/tml -p se
     """
     if not (model or model_contains or org or all_orgs):
         _err("No scope: pass --model, --model-contains, --org or --all-orgs")
@@ -174,7 +208,7 @@ def inventory(
         _check_export_dir(export_tml)
     plans = _resolve_plans(profile, orgs, model, model_contains)
     scope = {"model": model, "model_contains": model_contains, "org": org, "all_orgs": all_orgs,
-             "export_tml": export_tml}
+             "export_tml": str(_path(export_tml)) if export_tml else None}
     if dry_run:
         n = sum(len(c) for _, _, c in plans)
         _err(f"{n} Model(s) in scope across {len(plans)} Org(s); rough estimate {max(1, n * 5)}s+")
@@ -188,7 +222,7 @@ def inventory(
     for label, client, chosen in plans:
         _err(f"{label}: scanning {len(chosen)} Model(s)…")
         results.append(inventory_org(client, label, chosen,
-                                     export_dir=Path(export_tml).expanduser() if export_tml else None))
+                                     export_dir=_path(export_tml) if export_tml else None))
     doc = {"schema": SCHEMA,
            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "profile": resolve_profile(profile), "scope": scope,
@@ -212,11 +246,11 @@ def report(
     Examples:
 
     \b
-      ts sets report ./sets-inventory.json -o ./sets-report
+      ts sets report ~/sets-run/sets-inventory.json -o ~/sets-run
     """
     from ts_cli.sets.render import render_html, render_markdown
     try:
-        inv = json.loads(Path(inventory_path).read_text(encoding="utf-8"))
+        inv = json.loads(_path(inventory_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         _err(f"Cannot read inventory {inventory_path}: {exc}")
         raise typer.Exit(1)
@@ -226,7 +260,7 @@ def report(
     if not isinstance(inv.get("summary"), dict) or not isinstance(inv.get("orgs"), list):
         _err(f"Malformed {SCHEMA} document: needs a `summary` object and an `orgs` list")
         raise typer.Exit(1)
-    target = Path(out_dir)
+    target = _path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
     (target / "report.html").write_text(render_html(inv), encoding="utf-8")
     (target / "report.md").write_text(render_markdown(inv), encoding="utf-8")
