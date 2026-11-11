@@ -110,7 +110,9 @@ Base model imported: {model_name}
   ],
   "validation_warnings": [...],
   "updated_model_guid": "guid",
-  "import_status": "OK"
+  "import_status": "OK | WARNING | SKIPPED | ERROR | absent — OK/WARNING imported; SKIPPED means every new formula was dropped and the Model is unchanged (exit 0, no import_error); absent means there were no new formulas to import in the first place, so the import step never ran (exit 0, no import_error — treat the same as SKIPPED)",
+  "import_warning": "present only on WARNING — the warning text ThoughtSpot returned",
+  "import_error": "present only on ERROR — e.g. an unparseable import response or a structural failure not attributable to one formula"
 }
 ```
 

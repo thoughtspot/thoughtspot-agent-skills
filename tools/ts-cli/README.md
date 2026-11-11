@@ -2406,6 +2406,13 @@ ts tableau build-model "workbook.twbx" \
 | `--max-retries` | Max import retry iterations for formula errors (default: 25) |
 | `--profile`, `-p` | ThoughtSpot profile for API calls |
 
+**Exit code (merge mode):** the command always prints its JSON report, then exits 1 if any
+datasource's `import_status` is `ERROR`, exit 0 otherwise — `OK`, `WARNING`, `SKIPPED`, and
+`import_status` absent (nothing new to import) are all non-failure outcomes. **This is a
+behaviour change**: previously the command exited 0 even on `ERROR`, so a caller relying on
+the exit code alone to detect an import failure must check it now, not just parse the
+report.
+
 **Sqlproxy remapping:** when the TWB uses published datasources (Tableau Server
 `sqlproxy` tables), the parser sees synthetic table names like `"Custom SQL Query"`.
 `build-model` automatically remaps these columns to the target ThoughtSpot table:

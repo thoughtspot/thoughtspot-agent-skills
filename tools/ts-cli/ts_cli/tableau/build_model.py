@@ -247,7 +247,13 @@ def prepare_formulas_for_merge(
     return formula_dicts, bare_fixed
 
 
-_IMPORT_ERR = re.compile(r"Formula:\s*([^,]+),\s*Error:")
+# Non-greedy `.+?` over ANY char, not `[^,]+` — a formula name can itself
+# contain a comma (Tableau's own LOD-scope naming convention produces names
+# like "Order Count {F} Region, Date {E} Channel, Segment"), and `[^,]+`
+# stops at that first comma, failing the match entirely since ", Error:"
+# never follows at that position. `.+?` keeps extending past internal
+# commas until it finds the actual ", Error:" boundary.
+_IMPORT_ERR = re.compile(r"Formula:\s*(.+?),\s*Error:")
 
 
 def parse_import_error(msg: str) -> tuple[str, str] | None:

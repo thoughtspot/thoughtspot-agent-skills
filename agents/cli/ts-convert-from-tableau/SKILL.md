@@ -1623,11 +1623,18 @@ filter classes are now caught pre-import.
 Parse the JSON output to report results to the user:
 
 See [references/step-7-review-templates.md](references/step-7-review-templates.md) "Phase 2 — `build-model --existing-guid` JSON output shape" for the exact
-field list (`formulas_translated`/`skipped`/`filtered`/`added`, `formulas_dropped_on_import`
-with `name`/`expr`/`error`/`original_tableau`, `validation_warnings`, `updated_model_guid`).
+field list (`import_status`, `formulas_translated`/`skipped`/`filtered`/`added`,
+`formulas_dropped_on_import` with `name`/`expr`/`error`/`original_tableau`,
+`validation_warnings`, `updated_model_guid`).
 
-**If `formulas_dropped_on_import` is empty (or absent):** Report success. Proceed to
-Step 7.5 regardless of migration pace.
+**Check `import_status` first — an empty `formulas_dropped_on_import` alone isn't success.**
+`OK`/`WARNING` imported (show `import_warning` on `WARNING`). `SKIPPED` or absent (no new
+formulas, e.g. a re-run) — unchanged, exit 0, no `import_error` — go straight to the
+`formulas_dropped_on_import` branch below. `ERROR` (or anything else) — report `import_error`
+and stop.
+
+**If `import_status` is `OK`/`WARNING` and `formulas_dropped_on_import` is empty (or absent):**
+Report success. Proceed to Step 7.5 regardless of migration pace.
 
 **If `formulas_dropped_on_import` is non-empty — behaviour depends on `{migration_pace}`:**
 
@@ -2501,10 +2508,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, …) is excluded with the function named, not parked at import; DATETIME and `/* */` comments translate; UNION is the 16th spatial function (ts-cli v0.211.0, BL-460). |
-| 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
+| 1.47.0 | 2026-10-30 | Model/formula-engine fixes (ts-cli v0.213.1). Nested-`group_aggregate` false-flagging (span containment, not match-count), LOD brace-scanning (single-pass stack scanner), `convert_string_concat` no longer treats concatenating `+` inside a `to_string`/`str` wrapper as arithmetic, import-retry no longer fails open and exits 1 on `ERROR` (behaviour change, see README), `INT64`/`DATE` params, `range_min`/`range_max`, Step 7 treats absent `import_status` as `SKIPPED`, mapping-doc fixes (ratio-explosion, `WINDOW_AVG`/`STDEV`, CHAR casts, `DATETRUNC`) — backlog BL-568/569. |
 | 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
-| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
-| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
 
-**Older entries (v1.0.0–v1.44.4):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.46.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
