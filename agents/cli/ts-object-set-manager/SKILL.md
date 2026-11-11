@@ -97,7 +97,7 @@ backup means yes; a cleanup or grants question alone does not):
       Writes one .cohort.tml per Set, including Sets nothing uses
       (no public API lists those in practical time). Read-only: nothing is imported.
 
-Yes → add `--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD-HHMM}/tml` in Step 4.
+Yes → add `--export-tml ~/Dev/audit-runs/{profile}-sets-{RUN}/tml` in Step 4.
 
 ## Step 3 — Dry run
 
@@ -110,24 +110,32 @@ be scanned). On exit 1 with "No Model matched", show the selectors and return to
 
 ## Step 4 — Inventory
 
+`{RUN}` is the run's start time, `YYYY-MM-DD-HHMM`, chosen once here: the inventory JSON,
+the report and any exported TML all go under the one `~/Dev/audit-runs/{profile}-sets-{RUN}/`
+directory. A rerun gets its own `{RUN}`; one started in the same minute would overwrite the
+JSON and report, so wait a minute or add seconds. Quote the paths if `{profile}` has a space —
+the CLI expands a quoted `~` itself.
+
     ts sets inventory {flags} --profile "{profile}" \
-      -o ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/sets-inventory.json > /dev/null
+      -o ~/Dev/audit-runs/{profile}-sets-{RUN}/sets-inventory.json > /dev/null
 
 Progress goes to stderr. Per Model this is one call to an internal cohort listing, then
 per Set a dependents lookup, a TML export of each Liveboard dependent, and one grants read.
 
 **If the user chose to export TML in Step 2**, add
-`--export-tml ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD-HHMM}/tml`. The directory must be
-new or empty (the command exits 1 otherwise, before scanning), so a rerun never mixes old
-files with new. It writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML as
-ThoughtSpot exported it, Model referenced by FQN), including Sets nothing uses. Each Set's `tml_file` records the path; a failed export is `null` with a
+`--export-tml ~/Dev/audit-runs/{profile}-sets-{RUN}/tml`. The directory must be
+new or empty and writable; otherwise the command exits 1 before scanning, with the reason on
+stderr. If that happens, pick a new `{RUN}` (a minute later) or ask the user for another
+directory, then rerun. It writes one `<org>/<Set name>__<guid>.cohort.tml` per Set (YAML as
+ThoughtSpot exported it, Model referenced by FQN), including Sets nothing uses. Each Set's
+`tml_file` records the path; a failed export is `null` with a
 `tml_export_failed` scan note, and `summary.tml_export_failed` counts them. Read-only: it
 exports, it never imports.
 
 ## Step 5 — Report
 
-    ts sets report ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/sets-inventory.json \
-      -o ~/Dev/audit-runs/{profile}-sets-{YYYY-MM-DD}/
+    ts sets report ~/Dev/audit-runs/{profile}-sets-{RUN}/sets-inventory.json \
+      -o ~/Dev/audit-runs/{profile}-sets-{RUN}/
 
 Open `report.html`. `report.md` carries the same content. Models, Answers and Liveboards
 are links into ThoughtSpot (Sets have no page of their own); a link opens in the Org the
@@ -204,6 +212,7 @@ Say plainly that nothing was changed.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-11-11 | One `{RUN}` directory per run for inventory, report and TML; says what to do when the export directory is refused (ts-cli 0.213.1) |
 | 1.2.0 | 2026-11-11 | Step 2 asks whether to export each Set's TML; `--export-tml <dir>` writes it, including Sets no Answer or Liveboard uses (ts-cli 0.213.0) |
 | 1.1.0 | 2026-10-02 | Report links Models, Answers and Liveboards into ThoughtSpot (ts-cli 0.153.1) |
 | 1.0.0 | 2026-10-02 | Initial release — report-only reusable Set inventory: scope by Model/Org/Cluster, classification, grant provenance |

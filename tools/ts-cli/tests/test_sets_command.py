@@ -275,3 +275,65 @@ def test_export_tml_refuses_a_non_empty_dir(_c, _m, tmp_path):
         r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
                                 str(tmp_path), "--profile", "p"])
     assert r.exit_code == 1 and "not empty" in r.stderr and not inv.called
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_refuses_an_unwritable_parent(_c, _m, tmp_path):
+    """Caught before the scan, not after every write fails (pr-reviewer re-review)."""
+    import os
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        if os.access(locked, os.W_OK):
+            pytest.skip("running as root: a 0o500 directory is still writable")
+        for extra in ([], ["--dry-run"]):
+            with patch("ts_cli.commands.sets.inventory_org") as inv:
+                r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                        str(locked / "new" / "tml"), "--profile", "p"] + extra)
+            assert r.exit_code == 1 and "cannot be written" in r.stderr and not inv.called
+            assert not (locked / "new").exists()
+    finally:
+        locked.chmod(0o700)
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_refuses_a_dangling_link(_c, _m, tmp_path):
+    link = tmp_path / "tml"
+    link.symlink_to(tmp_path / "gone")
+    with patch("ts_cli.commands.sets.inventory_org") as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                str(link), "--profile", "p"])
+    assert r.exit_code == 1 and "link to nothing" in r.stderr and not inv.called
+
+
+def test_missing_root_ends_the_walk():
+    """An unmapped Windows drive is a root whose .parent is itself; the walk must stop."""
+    with patch.object(sets_cmd.Path, "exists", lambda self: False):
+        assert sets_cmd._nearest_existing(sets_cmd.Path("/no/such/root/tml")) is None
+
+
+@patch("ts_cli.commands.sets.resolve_profile", side_effect=lambda p: p or "def")
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_quoted_tilde_lands_every_output_together(_c, _m, _rp, tmp_path, monkeypatch):
+    """A quoted ~ (forced by a profile name with a space) is not expanded by the shell; all
+    three outputs of a run must still land under HOME (pr-reviewer, follow-up PR)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    with patch("ts_cli.commands.sets.inventory_org", side_effect=_fake_inventory) as inv:
+        r = runner.invoke(app, ["sets", "inventory", "--model", "Retail",
+                                "-o", "~/My Run/sets-inventory.json",
+                                "--export-tml", "~/My Run/tml", "--profile", "p"])
+    assert r.exit_code == 0, r.stderr
+    assert (home / "My Run" / "sets-inventory.json").exists()
+    assert inv.call_args.kwargs["export_dir"] == home / "My Run" / "tml"
+    assert json.loads(r.stdout)["scope"]["export_tml"] == str(home / "My Run" / "tml")
+    r = runner.invoke(app, ["sets", "report", "~/My Run/sets-inventory.json", "-o", "~/My Run"])
+    assert r.exit_code == 0, r.stderr
+    assert (home / "My Run" / "report.html").exists()
+    assert not (tmp_path / "~").exists()

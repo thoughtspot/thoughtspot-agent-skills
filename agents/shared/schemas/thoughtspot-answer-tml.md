@@ -222,7 +222,7 @@ They are **not** `formulas[]` entries.
 | `name` | Display name — same name that appears in `answer_columns[]` |
 | `owner` | Email of the user who created the set |
 | `config.cohort_type` | `SIMPLE` = Column Set; `ADVANCED` = Query Set |
-| `config.cohort_grouping_type` | `BIN_BASED`, `GROUP_BASED` (for SIMPLE); `COLUMN_BASED` (for ADVANCED) |
+| `config.cohort_grouping_type` | `BIN_BASED`, `GROUP_BASED` (for SIMPLE); `COLUMN_BASED` (for ADVANCED). ADVANCED + `BIN_BASED` also exists — see `thoughtspot-sets-tml.md` |
 | `config.anchor_column_id` | The column the set is based on |
 | `config.bins` | Bin-based set config: `minimum_value`, `maximum_value`, `bin_size` |
 | `config.groups` | Group-based set config: named groups with conditions |

@@ -15,28 +15,49 @@ never re-serialised (a YAML round trip can change string values).
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Optional, Tuple
 
+from ts_cli.commands.tml import strip_nonprintable
 from ts_cli.tml_common import export_item_doc
 
 TML_EXPORT = "/api/rest/2.0/metadata/tml/export"
 
-# Anything but word characters (Unicode letters and digits included), dot, space and hyphen.
-_UNSAFE = re.compile(r"[^\w. -]+")
+_KEEP_PUNCT = frozenset("._ -")
 
 
-def safe_name(value: str, fallback: str = "unnamed") -> str:
-    """A single path segment: no separators, no leading or trailing dots, never empty."""
-    cleaned = _UNSAFE.sub("_", str(value or "")).strip(" ._")
-    return cleaned[:120] or fallback
+# A name segment is capped at 120 characters AND 150 UTF-8 bytes, whichever is shorter:
+# file systems cap a name at 255 bytes (ext4, XFS, Btrfs; a CJK character is 3 bytes),
+# and Windows caps a whole path at 260 characters by default. The GUID segment is capped
+# separately at 64, so the file name stays under 255 bytes even for a non-GUID id.
+_MAX_NAME_CHARS = 120
+_MAX_NAME_BYTES = 150
+_MAX_ID_CHARS = 64
+
+
+def _keep(ch: str) -> bool:
+    """Letters, combining marks and digits in any script, plus dot, underscore, space,
+    hyphen. Marks matter: "नमस्ते" or a decomposed "é" must not lose them."""
+    return ch in _KEEP_PUNCT or unicodedata.category(ch)[0] in "LMN"
+
+
+def safe_name(value: str, fallback: str = "unnamed", max_chars: int = _MAX_NAME_CHARS,
+              max_bytes: int = _MAX_NAME_BYTES) -> str:
+    """A single path segment: no separators, no leading or trailing dots, never empty,
+    within `max_chars` and `max_bytes` (UTF-8), cut on a character boundary."""
+    cleaned = re.sub(r"_+", "_", "".join(c if _keep(c) else "_" for c in str(value or "")))
+    cleaned = cleaned.strip(" ._")[:max_chars]
+    cut = cleaned.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+    return cut.rstrip(" ._") or fallback
 
 
 def tml_path(dest: Path, org_label: str, set_ref: dict) -> Path:
     """`<dest>/<org>/<Set name>__<guid>.cohort.tml`. The GUID keeps two Sets with the
     same name (on different Models, or the same Model) from overwriting each other."""
     return (Path(dest) / safe_name(org_label, "default")
-            / f"{safe_name(set_ref.get('name'))}__{safe_name(set_ref['guid'])}.cohort.tml")
+            / f"{safe_name(set_ref.get('name'))}__"
+               f"{safe_name(set_ref['guid'], max_chars=_MAX_ID_CHARS)}.cohort.tml")
 
 
 def _check(body, guid: str) -> Tuple[Optional[str], Optional[str]]:
@@ -44,8 +65,14 @@ def _check(body, guid: str) -> Tuple[Optional[str], Optional[str]]:
     if not isinstance(body, list) or not body:
         return None, f"unexpected export response: {str(body)[:200]}"
     item = body[0]
+    edoc = item.get("edoc") if isinstance(item, dict) else None
+    # For the CHECK only, strip non-printables (thoughtspot-tml.md: a raw C1 character such
+    # as U+0095 breaks the YAML parser) and turn NEL (U+0085, which the strip keeps and
+    # YAML reads as a line break) into a space. The file is written exactly as received.
+    probe = (dict(item, edoc=strip_nonprintable(edoc).replace("\x85", " "))
+             if isinstance(edoc, str) else item)
     try:
-        doc, reason = export_item_doc(item)
+        doc, reason = export_item_doc(probe)
     except Exception as exc:  # noqa: BLE001 — unparseable TML is a failed export
         return None, f"export TML does not parse: {exc}"
     if reason:
@@ -56,7 +83,6 @@ def _check(body, guid: str) -> Tuple[Optional[str], Optional[str]]:
     for got in (doc.get("guid"), info_id):
         if got not in (None, guid):
             return None, f"export returned a different object ({got})"
-    edoc = item["edoc"]
     if not isinstance(edoc, str):
         return None, "export TML is not text"
     return (edoc if edoc.endswith("\n") else edoc + "\n"), None

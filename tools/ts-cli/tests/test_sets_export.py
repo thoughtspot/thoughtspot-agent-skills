@@ -100,3 +100,47 @@ def test_tml_path_is_one_safe_segment_per_level(tmp_path):
 def test_non_latin_names_are_kept(tmp_path):
     p = ex.tml_path(tmp_path, "東京", {"guid": "g1", "name": "上位ブランド/2"})
     assert p.parent.name == "東京" and p.name == "上位ブランド_2__g1.cohort.tml"
+
+
+@pytest.mark.parametrize("name", ["я" * 105, "上" * 72, "上" * 400, "a" * 400, "é" * 75 + "上",
+                                  "a" * 149 + "上"],
+                         ids=["cyrillic-105", "cjk-72", "cjk-400", "ascii-400", "boundary",
+                              "mid-character"])
+def test_names_are_the_longest_prefix_within_both_caps(tmp_path, name):
+    """255-byte name limit (ext4/XFS/Btrfs) counts UTF-8 bytes; Windows caps the path at 260
+    characters. Each segment is the LONGEST prefix within 120 chars and 150 bytes."""
+    p = ex.tml_path(tmp_path, name, {"guid": SET["guid"], "name": name})
+    seg = ex.safe_name(name)
+    assert name.startswith(seg)
+    assert len(seg) <= 120 and len(seg.encode("utf-8")) <= 150
+    longer = name[:len(seg) + 1]
+    assert len(longer) > 120 or len(longer.encode("utf-8")) > 150 or longer == seg
+    for part in (p.parent.name, p.name):
+        assert len(part.encode("utf-8")) <= 255
+
+
+def test_non_guid_id_still_fits(tmp_path):
+    p = ex.tml_path(tmp_path, "o", {"guid": "x" * 400, "name": "上" * 400})
+    assert len(p.name.encode("utf-8")) <= 255
+
+
+def test_combining_marks_are_kept():
+    assert ex.safe_name("नमस्ते") == "नमस्ते"
+    assert ex.safe_name("e\u0301clair") == "e\u0301clair"
+
+
+def test_yaml_with_c1_character_is_checked_and_written_as_received(tmp_path):
+    """A raw U+0095 breaks the YAML parser (thoughtspot-tml.md); strip it for the check
+    only — the file keeps it (pr-reviewer re-review, 2026-11-11)."""
+    edoc = EDOC.replace("name: Top Brands", "name: Top\x95Brands")
+    path = tmp_path / "x.cohort.tml"
+    assert ex.export_set_tml(_client([_item(edoc=edoc)]), SET, path) is None
+    assert path.read_text(encoding="utf-8") == edoc
+
+
+def test_yaml_with_nel_is_checked_and_written_as_received(tmp_path):
+    """NEL (U+0085) survives strip_nonprintable and YAML reads it as a line break."""
+    edoc = EDOC.replace("name: Top Brands", "name: Top\x85Brands")
+    path = tmp_path / "x.cohort.tml"
+    assert ex.export_set_tml(_client([_item(edoc=edoc)]), SET, path) is None
+    assert path.read_text(encoding="utf-8") == edoc

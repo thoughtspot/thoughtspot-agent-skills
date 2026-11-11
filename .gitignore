@@ -104,3 +104,7 @@ formula-fidelity-data/
 
 # Plain-text names fed to tools/quest/denylist.py add; only their hashes are committed.
 names.txt
+
+# Set TML from `ts sets inventory --export-tml`: group conditions carry warehouse values.
+# Nothing like it is tracked; a deliberate fixture needs `git add -f`.
+*.cohort.tml
