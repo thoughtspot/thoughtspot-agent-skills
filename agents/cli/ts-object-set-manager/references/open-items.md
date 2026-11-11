@@ -257,3 +257,33 @@ verified, so the report needs no hand-check for filter-only Liveboards.
 
 Not covered: a non-admin caller (see #6 — BL-327 gate (b)); a Liveboard filter on a Set from a
 *different* Model than the Liveboard's vizzes.
+
+## #9 — Set TML export by GUID — VERIFIED 2026-11-11 (4 of 6 type combinations)
+
+`ts sets inventory --export-tml` on se-thoughtspot, Model *Retail Sales - RP*: 11 Sets, all
+`REVIEW_DELETE` (no Answer or Liveboard uses them), covering SIMPLE/GROUP_BASED,
+SIMPLE/BIN_BASED, ADVANCED/BIN_BASED and ADVANCED/COLUMN_BASED. v2 `metadata/tml/export`
+with `{"metadata": [{"identifier": <set guid>}], "export_fqn": true}` returned each with
+`info.type: cohort`, status `OK` and a top-level `cohort:` document; 11/11 written.
+
+- **The format key is `edoc_format`.** `edoc_format: YAML` returned YAML. `formattype` (YAML
+  or JSON), `format_type` and no key all returned JSON, for the Model as well as a Set: v2
+  reads `edoc_format` only (corrected after review — the first probe never tried it). The
+  13 other `formattype` callers in `ts_cli/` therefore get JSON; they parse it, so nothing
+  breaks, but `ts tml export --format YAML` does not do what it says — BL-567.
+- **A JSON answer re-imports as is** (`VALIDATE_ONLY` `OK`), so the exporter writes the TML
+  exactly as received and never re-serialises it: a YAML round trip folded U+0085, rejected
+  C1 controls and unquoted number-like strings such as `1e5` (pr-reviewer, 2026-11-11).
+- **A Model's associated export does not carry its Sets here.** `export_associated: true`
+  on *Retail Sales - RP* returned 1 Model + 7 Tables and **no** `cohort` items, although the
+  Model has 11 Sets. BL-059 (2026-06-26, another cluster) recorded Sets in that export;
+  either the build changed or that cluster differs. Until re-checked, the private listing
+  stays the only practical route to a Model's Sets.
+- **ADVANCED + BIN_BASED exists.** *daily transactions* is a query Set with bins, which
+  `thoughtspot-sets-tml.md` said ADVANCED never has; the schema now says so. Not seen:
+  ADVANCED/GROUP_BASED and SIMPLE/COLUMN_BASED.
+- **`type: LOGICAL_COLUMN` is rejected** by the export endpoint (400, not a valid
+  `metadata[].type`), unlike the dependents search (F5) — send the GUID alone.
+- **Re-importable:** all 11 written files returned `OK` from a `VALIDATE_ONLY`
+  `metadata/tml/import` (nothing created).
+

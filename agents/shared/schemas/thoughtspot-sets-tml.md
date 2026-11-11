@@ -176,7 +176,7 @@ The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_t
 |---|---|---|
 | `anchor_column_id` | Yes | The column this set groups or filters |
 | `cohort_type` | Yes | `SIMPLE` = column set (bins or groups); `ADVANCED` = query set |
-| `cohort_grouping_type` | Yes | `BIN_BASED` or `GROUP_BASED` (for SIMPLE); `COLUMN_BASED` (for ADVANCED) |
+| `cohort_grouping_type` | Yes | `BIN_BASED` or `GROUP_BASED` (for SIMPLE); `COLUMN_BASED` (for ADVANCED). ADVANCED + `BIN_BASED` also exists — a query Set with bins, seen live 2026-11-11 (ts-object-set-manager open item #9) |
 
 **BIN_BASED config:**
 

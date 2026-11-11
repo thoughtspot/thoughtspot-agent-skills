@@ -4936,6 +4936,7 @@ ts sets report ./sets-inventory.json -o ./sets-report
 | `--all-orgs` | Cluster scope: every ACTIVE Org in turn. **Ignores `--org`.** A non-ACTIVE Org is skipped and recorded as an `org_skipped` note |
 | `--dry-run` | Resolve scope only — Models matched per Org on stdout, a rough time estimate on stderr. No Set scan |
 | `-o`, `--output <path>` | Also write the JSON to this file (stdout always carries it) |
+| `--export-tml <dir>` | Also write each Set's TML to `<dir>/<org>/<Set name>__<guid>.cohort.tml` (see below). `<dir>` must be new or empty; a file or a non-empty directory exits 1 before any scan, `--dry-run` included. With `--dry-run` nothing is exported |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`) |
 
 At least one scope flag is required. A selector that matches no Model in any Org exits 1
@@ -4952,6 +4953,24 @@ reads dependents (as `LOGICAL_COLUMN`), exports each Liveboard dependent's TML t
 visualizations (`search_query`, `answer_columns[].name`, formula `expr`) and filters that
 name `[Set Name]`, and reads `DEFINED` grants on the Set and its consumers.
 
+**`--export-tml`.** Retrieves Set TML for every Set the listing finds, **including Sets no
+Answer or Liveboard uses**. The listing supplies their GUIDs: no public route gives a
+Model's Sets in practical time (the Model's `export_associated` export returned none, live
+2026-11-11, and a cluster-wide `LOGICAL_COLUMN` search did not finish in 2h45m). Per Set,
+one public `POST /api/rest/2.0/metadata/tml/export` with the Set's GUID,
+`export_fqn: true` (the file names its Model by GUID and re-imports against it) and
+`edoc_format: YAML`. The TML is written **exactly as received**, never re-serialised; were
+the server to answer JSON, the JSON is written as is (ThoughtSpot imports it). A file is
+written only when the answer is this Set's cohort TML; anything else (HTTP error, a call
+that fails after the client's retries, export status not `OK`, no TML, another object type,
+a root `guid` or `info.id` naming another object, an unwritable path) writes nothing, sets
+the Set's `tml_file` to `null` and adds a `tml_export_failed` note; the scan carries on.
+`scope.export_tml` records the directory. Live-verified 2026-11-11 on 11 Sets covering 4 of
+the 6 `cohort_type` × `cohort_grouping_type` combinations (SIMPLE group/bin, ADVANCED
+column/bin); all 11 files passed a `VALIDATE_ONLY` import. One Org per subdirectory, named
+as the Org label (`(default)` → `default`); names keep Unicode letters, other characters
+become `_`.
+
 **Output** — JSON, schema `ts-sets-inventory/1`:
 
 | Key | Content |
@@ -4959,11 +4978,11 @@ name `[Set Name]`, and reads `DEFINED` grants on the Set and its consumers.
 | `schema`, `generated_at`, `profile`, `scope` | Run metadata; `scope` echoes the selectors |
 | `orgs[]` | `{org, models[], notes[]}` per Org scanned |
 | `orgs[].models[]` | `{guid, name, discovery, set_count, sets[]}`. `discovery` is `COMPLETE` or `INCOMPLETE`; an `INCOMPLETE` Model has `set_count: null` — **unknown, not zero** |
-| `…sets[]` | `guid, name, model_guid, model_name, author, cohort_type, grouping_type, anchor_column, class, reason, target, dependents[], dependents_complete, liveboards{}, grants[]` |
+| `…sets[]` | `guid, name, model_guid, model_name, author, cohort_type, grouping_type, anchor_column, class, reason, target, dependents[], dependents_complete, liveboards{}, grants[]`, plus `tml_file` (path, or `null` when the export failed) with `--export-tml` |
 | `…dependents_complete` | `false` when the dependents list may be short (failed or partial lookup, an uninspected dependent type, an unreadable export). The report then shows the count as "unknown" or "≥N", never as a total |
 | `…grants[]` | `{principal_id, principal_name, principal_type, permission, provenance}` |
 | `notes[]` (top level) | `org_skipped`, with `reason`: `inactive` (a scope choice) or `malformed` (no `orgId`/`status` — the report marks the totals a floor) |
-| `summary` | `models, models_incomplete, sets, by_class, unexplained_grants, unknown_grants` |
+| `summary` | `models, models_incomplete, sets, by_class, unexplained_grants, unknown_grants`, plus `tml_exported, tml_export_failed` with `--export-tml` (present even when no Set was found) |
 
 `--dry-run` output is `{schema, dry_run: true, scope, orgs: [{org, models}], notes}`.
 
