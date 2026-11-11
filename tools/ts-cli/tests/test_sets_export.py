@@ -100,3 +100,22 @@ def test_tml_path_is_one_safe_segment_per_level(tmp_path):
 def test_non_latin_names_are_kept(tmp_path):
     p = ex.tml_path(tmp_path, "東京", {"guid": "g1", "name": "上位ブランド/2"})
     assert p.parent.name == "東京" and p.name == "上位ブランド_2__g1.cohort.tml"
+
+
+@pytest.mark.parametrize("name", ["я" * 105, "上" * 72, "上" * 400, "a" * 400, "é" * 101 + "x"],
+                         ids=["cyrillic-105", "cjk-72", "cjk-400", "ascii-400", "boundary"])
+def test_names_fit_the_255_byte_limit(tmp_path, name):
+    """A 255-byte name limit (ext4/XFS/Btrfs) counts UTF-8 bytes, not characters."""
+    p = ex.tml_path(tmp_path, name, {"guid": SET["guid"], "name": name})
+    for seg in (p.parent.name, p.name):
+        assert len(seg.encode("utf-8")) <= 255
+        seg.encode("utf-8").decode("utf-8")      # cut on a character boundary
+
+
+def test_yaml_with_c1_character_is_checked_and_written_as_received(tmp_path):
+    """A raw U+0095 breaks the YAML parser (thoughtspot-tml.md); strip it for the check
+    only — the file keeps it (pr-reviewer re-review, 2026-11-11)."""
+    edoc = EDOC.replace("name: Top Brands", "name: Top\x95Brands")
+    path = tmp_path / "x.cohort.tml"
+    assert ex.export_set_tml(_client([_item(edoc=edoc)]), SET, path) is None
+    assert path.read_text(encoding="utf-8") == edoc

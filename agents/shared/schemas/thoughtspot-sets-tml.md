@@ -39,8 +39,9 @@ GUID). Reusable sets have their own GUID and can be exported, imported, and shar
 ## Reusable Set TML
 
 The examples below cover all three `cohort_grouping_type` values. `BIN_BASED` and
-`GROUP_BASED` are **column sets** (`cohort_type: SIMPLE`). `COLUMN_BASED` is a
-**query set** (`cohort_type: ADVANCED`).
+`GROUP_BASED` are usually **column sets** (`cohort_type: SIMPLE`); `COLUMN_BASED` is a
+**query set** (`cohort_type: ADVANCED`). A query set can also be `BIN_BASED` (bins over an
+aggregated result — seen live 2026-11-11, ts-object-set-manager open item #9).
 
 ```yaml
 guid: "{set_guid}"              # document root — omit on first import
@@ -60,7 +61,7 @@ cohort:
     cohort_type: SIMPLE | ADVANCED
     cohort_grouping_type: BIN_BASED | GROUP_BASED | COLUMN_BASED
 
-    # --- BIN_BASED (column set — cohort_type: SIMPLE, continuous ranges) ---
+    # --- BIN_BASED (continuous ranges — cohort_type: SIMPLE, or ADVANCED for a query set) ---
     bins:
       minimum_value: 0.0
       maximum_value: 100.0

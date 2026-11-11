@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Optional, Tuple
 
+from ts_cli.commands.tml import strip_nonprintable
 from ts_cli.tml_common import export_item_doc
 
 TML_EXPORT = "/api/rest/2.0/metadata/tml/export"
@@ -26,10 +27,17 @@ TML_EXPORT = "/api/rest/2.0/metadata/tml/export"
 _UNSAFE = re.compile(r"[^\w. -]+")
 
 
+# Bytes, not characters: file systems cap a name at 255 bytes (ext4, XFS, Btrfs), and a
+# CJK character is 3 bytes in UTF-8. 200 leaves room for "__<guid>.cohort.tml" (49 bytes).
+_MAX_NAME_BYTES = 200
+
+
 def safe_name(value: str, fallback: str = "unnamed") -> str:
-    """A single path segment: no separators, no leading or trailing dots, never empty."""
+    """A single path segment: no separators, no leading or trailing dots, never empty, and
+    at most `_MAX_NAME_BYTES` in UTF-8, cut on a character boundary."""
     cleaned = _UNSAFE.sub("_", str(value or "")).strip(" ._")
-    return cleaned[:120] or fallback
+    cut = cleaned.encode("utf-8")[:_MAX_NAME_BYTES].decode("utf-8", errors="ignore")
+    return cut.rstrip(" ._") or fallback
 
 
 def tml_path(dest: Path, org_label: str, set_ref: dict) -> Path:
@@ -44,8 +52,12 @@ def _check(body, guid: str) -> Tuple[Optional[str], Optional[str]]:
     if not isinstance(body, list) or not body:
         return None, f"unexpected export response: {str(body)[:200]}"
     item = body[0]
+    edoc = item.get("edoc") if isinstance(item, dict) else None
+    # Strip non-printables for the CHECK only (thoughtspot-tml.md: a raw C1 character such
+    # as U+0095 breaks the YAML parser); the file is still written exactly as received.
+    probe = dict(item, edoc=strip_nonprintable(edoc)) if isinstance(edoc, str) else item
     try:
-        doc, reason = export_item_doc(item)
+        doc, reason = export_item_doc(probe)
     except Exception as exc:  # noqa: BLE001 — unparseable TML is a failed export
         return None, f"export TML does not parse: {exc}"
     if reason:
@@ -56,7 +68,6 @@ def _check(body, guid: str) -> Tuple[Optional[str], Optional[str]]:
     for got in (doc.get("guid"), info_id):
         if got not in (None, guid):
             return None, f"export returned a different object ({got})"
-    edoc = item["edoc"]
     if not isinstance(edoc, str):
         return None, "export TML is not text"
     return (edoc if edoc.endswith("\n") else edoc + "\n"), None

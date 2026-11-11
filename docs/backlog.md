@@ -2079,7 +2079,9 @@ ThoughtSpot sets (cohorts) count as columns on a model — a model with 100 colu
 
 ### Verified discovery mechanism
 
-Sets are **not** returned via `ts metadata dependents` COHORT bucket on a model. They **are** returned via `ts tml export <model-guid> --fqn --associated` as `type=cohort` items alongside tables. The audit pipeline already does `--associated` exports, so the cohort data is available — it just needs to be extracted from the export response and populated into the `Corpus.sets` field (which exists but is never populated).
+Sets are **not** returned via `ts metadata dependents` COHORT bucket on a model. They **are** returned via `ts tml export <model-guid> --fqn --associated` as `type=cohort` items alongside tables.
+
+> **Contradicted 2026-11-11 — re-verify before building on this.** On the SE demo cluster, the Model's `export_associated` export returned 1 Model + 7 Tables and **no** `cohort` items, for a Model with 11 Sets (ts-object-set-manager open item #9). Until this route is re-checked, use the private cohort listing in `ts_cli/sets/discover.py` (what `ts sets inventory` and `/ts-audit` H5 already use); otherwise checks D12–D15 risk the silent miss BL-324 recorded. The audit pipeline already does `--associated` exports, so the cohort data is available — it just needs to be extracted from the export response and populated into the `Corpus.sets` field (which exists but is never populated).
 
 Consumer counting for individual sets: `ts metadata dependents <set-guid> --type LOGICAL_COLUMN` returns answers/liveboards that use the set.
 

@@ -4936,7 +4936,7 @@ ts sets report ./sets-inventory.json -o ./sets-report
 | `--all-orgs` | Cluster scope: every ACTIVE Org in turn. **Ignores `--org`.** A non-ACTIVE Org is skipped and recorded as an `org_skipped` note |
 | `--dry-run` | Resolve scope only — Models matched per Org on stdout, a rough time estimate on stderr. No Set scan |
 | `-o`, `--output <path>` | Also write the JSON to this file (stdout always carries it) |
-| `--export-tml <dir>` | Also write each Set's TML to `<dir>/<org>/<Set name>__<guid>.cohort.tml` (see below). `<dir>` must be new or empty; a file or a non-empty directory exits 1 before any scan, `--dry-run` included. With `--dry-run` nothing is exported |
+| `--export-tml <dir>` | Also write each Set's TML to `<dir>/<org>/<Set name>__<guid>.cohort.tml` (see below). `<dir>` must be new or empty and writable; a file, a non-empty directory or an unwritable path exits 1 before any scan, `--dry-run` included (nothing is created). With `--dry-run` nothing is exported |
 | `--profile`, `-p` | Profile (or `TS_PROFILE`) |
 
 At least one scope flag is required. A selector that matches no Model in any Org exits 1
@@ -4969,7 +4969,8 @@ the Set's `tml_file` to `null` and adds a `tml_export_failed` note; the scan car
 the 6 `cohort_type` × `cohort_grouping_type` combinations (SIMPLE group/bin, ADVANCED
 column/bin); all 11 files passed a `VALIDATE_ONLY` import. One Org per subdirectory, named
 as the Org label (`(default)` → `default`); names keep Unicode letters, other characters
-become `_`.
+become `_`, and each name is capped at 200 UTF-8 bytes. A YAML answer is checked with
+non-printable characters stripped, but written with them.
 
 **Output** — JSON, schema `ts-sets-inventory/1`:
 

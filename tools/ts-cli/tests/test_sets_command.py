@@ -275,3 +275,24 @@ def test_export_tml_refuses_a_non_empty_dir(_c, _m, tmp_path):
         r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
                                 str(tmp_path), "--profile", "p"])
     assert r.exit_code == 1 and "not empty" in r.stderr and not inv.called
+
+
+@patch("ts_cli.commands.sets._models_in", return_value=MODELS)
+@patch("ts_cli.commands.sets._client", return_value=object())
+def test_export_tml_refuses_an_unwritable_parent(_c, _m, tmp_path):
+    """Caught before the scan, not after every write fails (pr-reviewer re-review)."""
+    import os
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        if os.access(locked, os.W_OK):   # running as root: the check cannot be exercised
+            return
+        for extra in ([], ["--dry-run"]):
+            with patch("ts_cli.commands.sets.inventory_org") as inv:
+                r = runner.invoke(app, ["sets", "inventory", "--model", "Retail", "--export-tml",
+                                        str(locked / "new" / "tml"), "--profile", "p"] + extra)
+            assert r.exit_code == 1 and "cannot be written" in r.stderr and not inv.called
+            assert not (locked / "new").exists()
+    finally:
+        locked.chmod(0o700)

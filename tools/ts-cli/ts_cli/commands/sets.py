@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,14 +114,22 @@ def _orgs_to_scan(profile: Optional[str], org: List[str],
 
 
 def _check_export_dir(export_tml: str) -> None:
-    """Refuse, before any scan, a destination that is a file or a non-empty directory: a
-    rerun into old files would leave a deleted or renamed Set's file looking current."""
-    p = Path(export_tml)
+    """Refuse, before any scan, a destination that is a file, a non-empty directory, or one
+    that cannot be written: a rerun into old files would leave a deleted or renamed Set's
+    file looking current, and an unwritable path would surface only after the whole scan.
+    Creates nothing, so `--dry-run` leaves no trace."""
+    p = Path(export_tml).expanduser()
     if p.exists() and not p.is_dir():
         _err(f"--export-tml {export_tml} exists and is not a directory")
         raise typer.Exit(1)
     if p.is_dir() and any(p.iterdir()):
         _err(f"--export-tml {export_tml} is not empty; give a new or empty directory")
+        raise typer.Exit(1)
+    base = p
+    while not base.exists():  # nearest existing ancestor: where the directory gets created
+        base = base.parent
+    if not base.is_dir() or not os.access(base, os.W_OK | os.X_OK):
+        _err(f"--export-tml {export_tml} cannot be written ({base} is not a writable directory)")
         raise typer.Exit(1)
 
 
@@ -153,7 +162,7 @@ def inventory(
       ts sets inventory --model-contains DUNDER -p se
       ts sets inventory --org ORG1 --dry-run -p se
       ts sets inventory --all-orgs -o ./sets-inventory.json -p se
-      ts sets inventory --model "Retail Sales" --export-tml ./sets-tml -p se
+      ts sets inventory --model "Retail Sales" --export-tml ~/sets-tml -p se
     """
     if not (model or model_contains or org or all_orgs):
         _err("No scope: pass --model, --model-contains, --org or --all-orgs")
@@ -179,7 +188,7 @@ def inventory(
     for label, client, chosen in plans:
         _err(f"{label}: scanning {len(chosen)} Model(s)…")
         results.append(inventory_org(client, label, chosen,
-                                     export_dir=Path(export_tml) if export_tml else None))
+                                     export_dir=Path(export_tml).expanduser() if export_tml else None))
     doc = {"schema": SCHEMA,
            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "profile": resolve_profile(profile), "scope": scope,

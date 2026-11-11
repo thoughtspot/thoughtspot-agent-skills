@@ -38,7 +38,14 @@ def main() -> int:
     ok, _ = r.step("auth", ts_auth_check, a.ts_profile)
     if not ok:
         return r.summary()
-    tml_dir = Path(tempfile.mkdtemp(prefix="smoke-sets-tml-")) / "tml"
+    tmp = Path(tempfile.mkdtemp(prefix="smoke-sets-tml-"))
+    try:
+        return _run(a, r, tmp / "tml")
+    finally:  # also on an early return when the inventory step fails
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _run(a, r: SmokeTestResult, tml_dir: Path) -> int:
     ok, inv = r.step("inventory", run_ts,
                      ["sets", "inventory", "--model", a.model_guid,
                       "--export-tml", str(tml_dir)], a.ts_profile)
@@ -92,10 +99,7 @@ def main() -> int:
                 _fail(f"{s['tml_file']} is not {s['name']}'s cohort TML")
         r.info(f"exported {len(sets)} Set TML file(s) to {tml_dir}")
 
-    try:
-        r.step("Set TML export", check_tml)
-    finally:
-        shutil.rmtree(tml_dir.parent, ignore_errors=True)
+    r.step("Set TML export", check_tml)
     return r.summary()
 
 
