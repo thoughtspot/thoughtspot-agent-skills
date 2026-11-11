@@ -203,6 +203,6 @@ Say plainly that nothing was changed.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-11-11 | Step 2 asks whether to export each Set's TML; `--export-tml <dir>` writes it, including Sets no Answer or Liveboard uses (ts-cli 0.212.0) |
+| 1.2.0 | 2026-11-11 | Step 2 asks whether to export each Set's TML; `--export-tml <dir>` writes it, including Sets no Answer or Liveboard uses (ts-cli 0.213.0) |
 | 1.1.0 | 2026-10-02 | Report links Models, Answers and Liveboards into ThoughtSpot (ts-cli 0.153.1) |
 | 1.0.0 | 2026-10-02 | Initial release — report-only reusable Set inventory: scope by Model/Org/Cluster, classification, grant provenance |

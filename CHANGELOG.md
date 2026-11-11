@@ -7,7 +7,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-11-11
 - feat: `ts sets inventory --export-tml <dir>` writes each reusable Set's TML (YAML, Model by FQN) to `<dir>/<org>/<Set name>__<guid>.cohort.tml`, including Sets no Answer or Liveboard uses, which no public API lists; a failed export writes nothing and is a `tml_export_failed` note (ts-object-set-manager 1.2.0)
-- chore: bump ts-cli to v0.212.0
+- chore: bump ts-cli to v0.213.0
 
 ## 2026-11-08
 - fix: distinct counts are `unique count` formulas, never the `COUNT_DISTINCT` column aggregation ThoughtSpot stores as an attribute on a text or date key (invariant I5): a Snowflake SV fact Cortex Analyst counts distinct, in every fact form, and a Power BI column summarised by `distinctCount`. `ts tml lint` I5 also flags a formula that only wraps a column; `check_converter_parity` requirement C fails a converter that maps an aggregation to the literal `COUNT_DISTINCT` (BL-447, partly; dbt remains). A renamed pass-through SV fact takes its own Cortex Analyst default (BL-448). DAX `DISTINCTCOUNT` counts a BLANK key as one value; it now carries a has-blank term (Approximated: a dimension row with no matching facts still differs), and `DISTINCTCOUNTNOBLANK` is mapped exactly (BL-540, live-probed). ts-convert-from-snowflake-sv 1.28.2, ts-convert-from-powerbi 1.1.13, ts-convert-from-sisense 1.0.8, ts-object-formula-translate 1.10.3
