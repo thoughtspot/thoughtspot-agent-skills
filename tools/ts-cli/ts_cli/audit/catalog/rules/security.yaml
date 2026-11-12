@@ -323,6 +323,47 @@
     fires: {fixture: sec_rls_two_key_columns, severity: LOW}
     silent: {fixture: sec_rls_one_key_column}
 
+- id: S17
+  title: RLS table planned as a second fact table
+  evidence: fact
+  description: >-
+    A Model table whose Table TML carries RLS rules and which sits at the root of the
+    Model's joins — no table joins to it, reading each join many-side to one-side by its
+    cardinality (a ONE_TO_MANY join reverses it, so it does not matter which table
+    declares the join) — while another table is a root too. Query generation plans each
+    root as its own fact. Live-verified 2026-11-12 on an internal dev cluster, as a user
+    under the rule: an access-control table joined many-to-one to a dimension the fact
+    also joins (or the dimension joined to it one-to-many) produced two CTEs, the
+    access table with the dimension filtered by the rule and the fact with the
+    dimension, each grouped and then outer-joined, roughly twice the SQL of one query;
+    the dimension joined many-to-one to the access table made it a leaf and gave one
+    flat query, with identical results. A second root carrying security filters is
+    also the shape some builds dropped the filters from (cross-tenant rows), fixed in
+    later releases by refusing the query. HIGH: an anti-pattern (product owner,
+    2026-11-12). A table in no directed join (one-to-one or many-to-many only, or none)
+    is not a root here, and an unjoined one is D5's.
+  categories: [S]
+  requires: [model_tml, table_tml]
+  scope: model.table
+  aggregate:
+    mode: each
+    where: {field: "@rls_root_beside", len_gt: 0}
+  severity: HIGH
+  message: "'{name}' carries RLS rules and no table joins to it, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
+  remediation: >-
+    If the table is an access-control table and its rules key on the user (ts_username),
+    reverse the join so the dimension joins to it many-to-one, which makes it a leaf and
+    each query one flat statement; that join is only many-to-one after the rule filters
+    it, so first check that each (user, key) pair occurs once in the table, hide its
+    columns in the Model (a user who bypasses RLS and queries them fans out), and make
+    sure no other path in the Model reaches it. If any rule scopes users by ts_groups,
+    keep the current join: a user in two groups mapped to one key gets two rows, and
+    the reversed join double-counts measures, while the stitched plan's grouping does
+    not.
+  examples:
+    fires: {fixture: sec_rls_acl_table_as_root, severity: HIGH}
+    silent: {fixture: sec_rls_acl_table_as_leaf}
+
 # Ids used before the catalog existed (see perf.yaml's P10): retired so they are never
 # reused.
 - id: S6

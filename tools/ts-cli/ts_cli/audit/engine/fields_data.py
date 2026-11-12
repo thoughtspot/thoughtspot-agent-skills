@@ -432,6 +432,69 @@ def _scopes(refs: list, by_id: dict, own: str, column: str) -> bool:
     return False
 
 
+# ── S17: an RLS Table planned as a second root ──────────────────────────────
+
+#: The roles of a root of the Model's directed joins (agents/shared/erd/roles.py):
+#: nothing joins to it, with or without measures.
+_ROOT_ROLES = ("fact", "factless")
+
+
+def _join_roots(model: dict, ctx: Any) -> frozenset:
+    """Keys (alias, else name) of the roots of the Model's directed joins: role fact or
+    factless (model_roles: direction from cardinality, ONE_TO_MANY reversed) and in at
+    least one directed join — an unjoined table is D5's, not a root."""
+    return frozenset(k for k, r in model_roles(model, ctx).items()
+                     if r.get("role") in _ROOT_ROLES and not r.get("unjoined"))
+
+
+@register("rls_root_beside", uses=(),
+          label="the other tables at the root of the Model's joins")
+def _rls_root_beside(item: dict, ctx: Any) -> list:
+    """Model table: when its Table TML (by `fqn`) carries RLS rules (_rls_rules_of, the
+    S14/S15 reading) and it is a root of the Model's directed joins (_join_roots) while
+    another table is a root too, the other roots' keys, sorted; else none. Query
+    generation plans each root as its own fact and stitches them, so such a table — an
+    access-control table joined many-to-one to a dimension is the measured case (S17,
+    live-verified 2026-11-12) — doubles every query's SQL; a name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    obj = item.get("obj")
+    fqn = obj.get("fqn") if isinstance(obj, dict) else None
+    if not isinstance(fqn, str) or not _rls_rules_of(ctx.tables.get(fqn)):
+        return NameList()
+    me = item.get("name")
+    if not isinstance(me, str) or not me:           # a non-string alias or name: no key
+        return NameList()
+    model = _model_of(item)
+    roots = cached("join_roots", model, _join_roots, model, ctx)
+    if me not in roots:
+        return NameList()
+    return NameList(sorted(roots - {me}))
+
+
+#: @rls_root_fix's values: which fix fits the table's RLS rules.
+RLS_ROOT_FIXES = (
+    "keep the join as it is: its rules scope users by ts_groups, and a many-to-one join "
+    "to it would double-count measures for a user in two groups",
+    "if it is an access-control table rather than a genuine fact, reverse the join so "
+    "the dimension joins to it many-to-one, once the conditions in the remediation hold",
+)
+
+
+@register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
+          label="the fix that fits the table's RLS rules")
+def _rls_root_fix(item: dict, ctx: Any) -> str:
+    """Model table: the first of RLS_ROOT_FIXES when any RLS rule on its Table TML (by
+    `fqn`) scopes users by ts_groups (any variant, outside quoted literals and `[...]`
+    references: _rule_variables), else the second. A user in two groups mapped to one
+    key gets two rows of the access table, so only a rule keyed on the user leaves the
+    many-to-one reversal safe."""
+    obj = item.get("obj")
+    fqn = obj.get("fqn") if isinstance(obj, dict) else None
+    rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
+    grouped = any("ts_groups" in _rule_variables(r.get("expr")) for r in rules)
+    return RLS_ROOT_FIXES[0] if grouped else RLS_ROOT_FIXES[1]
+
+
 # ── D15: duplicate Table-level joins ────────────────────────────────────────
 
 def _join_group_key(j: Any) -> Optional[tuple]:

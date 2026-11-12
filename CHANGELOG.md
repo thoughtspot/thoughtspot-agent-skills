@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-13
+- feat: `ts audit` rule S17, HIGH: a Table carrying RLS rules at the root of a Model's joins beside another root (an access-control table joined many-to-one to a dimension, or the dimension joined to it one-to-many), which query generation plans as a second fact and stitches every query from separate subqueries; the finding says whether reversing the join is safe (not when a rule scopes users by ts_groups) (ts-audit 3.20.0)
+- chore: bump ts-cli to v0.216.0
+
 ## 2026-11-12
 - feat: the audit report's Formulas view shows each formula's definition, with its references as links, what uses it and everything that depends on it, plus a search box (ts-audit 3.19.0)
 - chore: bump ts-cli to v0.215.0
