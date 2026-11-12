@@ -886,7 +886,7 @@ def _check_pre_aggregated_flag(data: dict) -> list[str]:
     Live 2026-11-12 on a newer build: a Table over a Databricks Metric View had every
     measure ``AGGREGATE`` and AgentQL planned them as ATTRIBUTEs, rejecting ``AGG()`` with
     ``COLUMNS_NOT_GROUPED_OR_AGGREGATED``. Adding the flag to the Table columns fixed it,
-    and search kept working. The October build did not need it. Checked on the Table
+    and search worked after it. The October build did not need it. Checked on the Table
     alone: AgentQL reads the Table, so a Model column inheriting the aggregation is
     expected to fail the same way (not observed separately). Only the YAML boolean ``true`` counts. Pure.
     """

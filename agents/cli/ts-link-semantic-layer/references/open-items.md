@@ -197,12 +197,14 @@ released builds.
 | Question | Finding |
 |---|---|
 | Does a released build reject the key on a Table import? | **No.** `VALIDATE_ONLY` import of a Snowflake Table on `se-thoughtspot` (released Cloud build) with one measure set to `AGGREGATE` + `is_pre_aggregated_measure: true`: `status_code OK`. A control with a made-up key under `properties:` was accepted too, so this shows the import does not fail, not that the build reads the flag. Re-export afterwards: nothing persisted (2026-11-12) |
+| Does a real (not `VALIDATE_ONLY`) import on a released build keep the flag? | Not tested. A made-up key was accepted too, so the build may accept the flag and drop it. If it does, a link made there lacks the flag and fails AgentQL once the cluster moves to a build that needs it |
 | Does the flag change any answer on a released build, or on an SV link? | Not tested. No SV link has been queried with the flag |
 
 So `ts link build` does not fail on a released build because of the flag. To close the
-rest: on an SV link, run Step 7's `AGG()` query and a search and compare with Snowflake;
-on a released build, link one Metric View and do the same. The post-import `coerced`
-check compares the Model only, so it would not catch a dropped flag; the query is the
-check.
+rest: on a released build, link one Metric View, re-export its Table and check the flag is
+still there, then run Step 7's query and a search; on an SV link, run the same and compare
+with Snowflake. The post-import `coerced` check compares the Model only, so it would not
+catch a dropped flag, and on a build that does not need the flag Step 7 passes either way:
+the re-export is the check.
 
 **Status: DEFERRED — target 2026-12-15, or the first SV link on a newer build, whichever is sooner.**
