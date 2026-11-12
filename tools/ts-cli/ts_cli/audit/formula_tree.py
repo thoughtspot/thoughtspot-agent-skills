@@ -14,12 +14,17 @@ typically the measures people search on. A cycle no root reaches is rooted where
 entered: at a formula everything upstream of which lies in its own cycle, so no formula
 is lost; the view guards against walking a cycle. A formula or column id that is not a
 string is ignored (malformed TML must not end a narrow run, BL-501).
+
+Each node also carries its expression as `expr` segments, for the view's definition
+panel: text, and each reference occurrence resolved exactly as `uses` resolves it, so a
+link in the definition can never disagree with the tree. Quoted literals stay text.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from ts_cli.audit.engine import tml
+from ts_cli.formula_translate.refs import split_literals
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
@@ -58,6 +63,39 @@ def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict
     return out
 
 
+def _segments(expr: Any, by_ref: Dict[Any, Any], params: set) -> List[Any]:
+    """The expression as text and resolved references, in order (see the module
+    docstring). A number YAML read from the TML is shown as text; any other non-string
+    is shown as nothing."""
+    if isinstance(expr, (int, float)) and not isinstance(expr, bool):
+        expr = str(expr)
+    if not isinstance(expr, str):
+        return []
+    out: List[Any] = []
+
+    def text(t: str) -> None:
+        if not t:
+            return
+        if out and isinstance(out[-1], str):
+            out[-1] += t
+        else:
+            out.append(t)
+    for literal, seg in split_literals(expr):
+        if literal:
+            text(seg)
+            continue
+        pos = 0
+        for m in tml.BRACKET_REF.finditer(seg):
+            ref = m.group(1).strip()
+            if not ref:
+                continue
+            text(seg[pos:m.start()])
+            out.append(_resolve(ref, by_ref, params))
+            pos = m.end()
+        text(seg[pos:])
+    return out
+
+
 def _node(formula: dict, column: Any, by_ref: Dict[Any, Any], params: set) -> dict:
     props = tml.mapping(column, "properties") if column else {}
     label = column.get("name") if column and column.get("name") else formula["name"]
@@ -65,6 +103,7 @@ def _node(formula: dict, column: Any, by_ref: Dict[Any, Any], params: set) -> di
             "kind": str(props.get("column_type") or "").upper() or None,
             "hidden": column is None or bool(props.get("is_hidden")),
             "uses": _uses(formula.get("expr"), by_ref, params, formula["name"]),
+            "expr": _segments(formula.get("expr"), by_ref, params),
             "used_by": 0}
 
 
@@ -115,7 +154,8 @@ def formula_tree(model: dict) -> dict:
     which people search by, else `name`), `kind` ("MEASURE", "ATTRIBUTE" or None when no
     column surfaces it), `hidden` (its column is hidden, or no column surfaces it),
     `uses` (`{"formula": name}` / `{"parameter": name}` / `{"column": ref}`) and
-    `used_by` (how many formulas use it). Formulas sharing a name are one node (the
+    `used_by` (how many formulas use it), and `expr` (its expression as segments, see the
+    module docstring). Formulas sharing a name are one node (the
     first)."""
     formulas = [f if isinstance(f.get("id"), (str, type(None))) else {**f, "id": None}
                 for f in (model.get("formulas") or [])

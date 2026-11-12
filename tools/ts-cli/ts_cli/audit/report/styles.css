@@ -740,8 +740,45 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .ftree-node > .ftree-row[role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
 .ftree-header .model-title{font-size:18px;font-weight:600;color:var(--ink);}
 .ftree-toggle{width:14px;flex-shrink:0;color:var(--muted);font-size:13px;line-height:1;}
-.ftree-node > .ftree-row[role=button] .ftree-toggle::before{content:"\25BE";}
-.ftree-node.collapsed > .ftree-row[role=button] .ftree-toggle::before{content:"\25B8";}
+.ftree-node:not(.ftree-leafy) > .ftree-row[role=button] .ftree-toggle::before{content:"\25BE";}
+.ftree-node.collapsed:not(.ftree-leafy) > .ftree-row[role=button] .ftree-toggle::before{content:"\25B8";}
+.ftree-node:not(.ftree-leafy) > .ftree-row .ftree-toggle{cursor:pointer;}
+.ftree-leaf > .ftree-row[role=button],.ftree-leafy > .ftree-row[role=button]{cursor:pointer;}
+.ftree-leaf > .ftree-row[role=button]:hover,.ftree-leafy > .ftree-row[role=button]:hover{background:var(--ground);}
+.ftree-row[role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.ftree-row.ftree-selected{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
+.ftree-exprline{padding:2px 12px 4px 34px;font-family:var(--mono);font-size:12px;color:var(--muted);
+  overflow-wrap:anywhere;}
+.ftree-eq{color:var(--muted);}
+.ftree-header .ftree-search{flex:1 1 220px;min-width:0;font:inherit;font-size:13px;padding:6px 10px;
+  border:1px solid var(--hair);border-radius:6px;background:var(--ground);color:var(--ink);}
+.ftree-results{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
+.ftree-results:empty{display:none;}
+.ftree-results .fref{padding:3px 8px;border:1px solid var(--hair);border-radius:12px;
+  background:var(--surface);font-size:12px;}
+.ftree-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,400px);gap:12px;align-items:start;}
+.fdetail{position:sticky;top:calc(var(--topbar-h) + 12px);max-height:calc(100vh - var(--topbar-h) - 24px);overflow:auto;background:var(--surface);
+  border:1px solid var(--hair);border-radius:8px;padding:14px 16px;font-size:13px;}
+.fdetail-title{font-size:16px;font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
+.fdetail-code{font-family:var(--mono);font-size:14px;}
+.fdetail-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px;}
+.fdetail-fname{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.fdetail-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted);margin:14px 0 6px;}
+.fdetail-expr{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mono);font-size:12px;
+  line-height:1.6;background:var(--ground);border:1px solid var(--hair);border-radius:6px;padding:8px 10px;color:var(--ink);}
+.fdetail ul{margin:0;padding-left:18px;}
+.fdetail li{margin:2px 0;overflow-wrap:anywhere;}
+.fdetail-none,.fdetail-note{color:var(--muted);font-size:12px;}
+.fdetail-dependents{margin-top:12px;}
+.fdetail-dependents summary{cursor:pointer;font-size:12px;color:var(--muted);}
+.fref{color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;
+  text-underline-offset:2px;}
+.fref:hover{text-decoration-style:solid;}
+.fref:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px;}
+.fref-1{color:var(--ink);}
+@media (max-width:900px){ .ftree-layout{grid-template-columns:minmax(0,1fr);}
+  .fdetail{position:static;max-height:none;order:-1;scroll-margin-top:calc(var(--topbar-h) + 8px);} }
 .ftree-name{font-weight:500;color:var(--ink);overflow-wrap:anywhere;}
 .ftree-tag{font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;
   border:1px solid var(--hair);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
@@ -753,7 +790,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .ftree-col{font-family:var(--mono);font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
 .ftree-cycle{font-size:12px;color:var(--warn);}
 @media (max-width:600px){ .ftree-used{margin-left:0;} .ftree-children{padding-left:12px;margin-left:8px;} }
-@media print{ .ftree-node.collapsed > .ftree-children{display:block;} .ftree-header .header-actions{display:none;} }
+@media print{ .ftree-node.collapsed > .ftree-children{display:block;} .ftree-header .header-actions{display:none;}
+  .ftree-layout{display:block;} .fdetail,.ftree-results{display:none;} }
 
 .empty-state{
   text-align:center;padding:24px;color:var(--muted);font-size:13px;

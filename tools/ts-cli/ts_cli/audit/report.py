@@ -232,18 +232,24 @@ def _compact_model(m: dict, model_index: dict) -> dict:
 
 def _compact_tree(tree: dict) -> dict:
     """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
-    {n label, f formula name, k kind, h hidden, b used_by, u uses}, each use
-    `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`; `r` root indices."""
+    {n label, f formula name, k kind, h hidden, b used_by, u uses, x expression}, each
+    use `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`, and `x` the
+    expression as text strings and references in that same encoding (absent from a tree
+    written before expressions were kept); `r` root indices."""
     index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
 
     def use(u):
         if "formula" in u:
             return [0, index[u["formula"]]]
         return [2, u["parameter"]] if "parameter" in u else [1, u["column"]]
-    nodes = [{"n": node.get("label") or node["name"], "f": node["name"],
-              "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
-              "u": [use(u) for u in node["uses"]]}
-             for node in tree["nodes"]]
+    nodes = []
+    for node in tree["nodes"]:
+        out = {"n": node.get("label") or node["name"], "f": node["name"],
+               "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
+               "u": [use(u) for u in node["uses"]]}
+        if isinstance(node.get("expr"), list):
+            out["x"] = [s if isinstance(s, str) else use(s) for s in node["expr"]]
+        nodes.append(out)
     return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
 
 

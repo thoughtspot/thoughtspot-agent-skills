@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-12
+- feat: the audit report's Formulas view shows each formula's definition, with its references as links, what uses it and everything that depends on it, plus a search box (ts-audit 3.19.0)
+- chore: bump ts-cli to v0.215.0
 - fix: `ts link build` writes `is_pre_aggregated_measure: true` on every `AGGREGATE` measure of the linked Table; without it a newer build's AgentQL treated the measure as an attribute and rejected `AGG()` with `COLUMNS_NOT_GROUPED_OR_AGGREGATED`. new `ts tml lint` rule I23 flags an `AGGREGATE` Table column without it (ts-link-semantic-layer 1.2.0)
 - chore: bump ts-cli to v0.214.0
 
