@@ -1,11 +1,11 @@
-<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504; I22 2026-10-23 — RLS join cycle, from a support case's exported TML; I5 failure mode narrowed by type 2026-10-29, live probes on the SE demo cluster) -->
+<!-- currency: thoughtspot — 2026-07 (2026-07-29 full sweep validated I1-I12, N1, PT1, EXC1 against 26.5-26.7 via the SpotterCode MCP; no contradictions found; I13 added and live-verified 2026-07-30 on se-thoughtspot — error_code 14516 on a dangling [formula_*] reference, BL-178/BL-183; I17-I19 added and live-verified 2026-10-21 on se-thoughtspot — join-graph error codes 13123/13124/13125/14565; I20-I21 2026-10-21 — 14528/14504; I22 2026-10-23 — RLS join cycle, from a support case's exported TML; I5 failure mode narrowed by type 2026-10-29, live probes on the SE demo cluster); I23 added 2026-11-12 — is_pre_aggregated_measure on AGGREGATE Table columns, live on the semantic SQL DEV cluster, import accepted on se-thoughtspot -->
 
 # ThoughtSpot Model Conversion Invariants
 
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I22, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I23, N1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -894,17 +894,19 @@ A second route (diamond) through an RLS join is not checked: nothing shows it fa
 View measure passed to the platform's own measure function) must carry
 `properties.is_pre_aggregated_measure: true`. Table only; the Model column needs nothing.
 
-**Failure mode (newer builds):** the Table and the Model import cleanly and UI search works.
-AgentQL plans the column as an ATTRIBUTE and refuses `AGG()` on it with
-`COLUMNS_NOT_GROUPED_OR_AGGREGATED`. A Model column that inherits the aggregation fails the
-same way as one that states it, because AgentQL reads the Table.
+**Failure mode (newer builds):** the Table and the Model import cleanly. AgentQL plans the
+column as an ATTRIBUTE and refuses `AGG()` on it with `COLUMNS_NOT_GROUPED_OR_AGGREGATED`.
+Not recorded before the fix: whether UI search worked, and a Model column that inherits the
+aggregation rather than stating it; both are expected (search reads the Model, I16; AgentQL
+reads the Table).
 
 **Evidence (2026-11-12, semantic SQL DEV cluster).** A Table built by `ts link build` over a
 Databricks Metric View failed this way; a Table over another Metric View on the same
 connection, which carried the flag, answered the same query. Adding the flag to the six
 measures (GUID kept) fixed it: AgentQL with one or two dimensions or none, and UI search, all
 matched Databricks. The October build (I16's evidence) did not need it. Snowflake Semantic
-Views and released builds are untested: `ts-link-semantic-layer` open items #9 and #10.
+Views are untested; a released build accepts the key on import: `ts-link-semantic-layer` open
+items #9 and #10.
 
 **Enforced by:** `ts tml lint` (`_check_pre_aggregated_flag`) on every Table TML, linted alone
 or in a batch. Only the YAML boolean `true` counts. `ts link build` writes it (ts-cli 0.214.0).

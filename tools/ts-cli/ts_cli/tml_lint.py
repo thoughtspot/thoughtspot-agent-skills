@@ -16,7 +16,7 @@ joins at fault — these do. I20 (a MANY_TO_MANY Model join) and I21 (a
 `referencing_join` its own Table TML does not declare; cross-file, like I16) are
 rejected with clear messages, but only at import — after a converter has finished.
 I23 is a Table rule: an `AGGREGATE` measure without `is_pre_aggregated_measure: true`
-imports and searches fine, and AgentQL then refuses `AGG()` on it (newer builds).
+imports cleanly, and AgentQL then refuses `AGG()` on it (newer builds).
 Rules mirror the invariants in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
@@ -887,17 +887,22 @@ def _check_pre_aggregated_flag(data: dict) -> list[str]:
     measure ``AGGREGATE`` and AgentQL planned them as ATTRIBUTEs, rejecting ``AGG()`` with
     ``COLUMNS_NOT_GROUPED_OR_AGGREGATED``. Adding the flag to the Table columns fixed it,
     and search kept working. The October build did not need it. Checked on the Table
-    alone: AgentQL reads the Table, so a Model column inheriting the aggregation fails
-    the same way. Only the YAML boolean ``true`` counts. Pure.
+    alone: AgentQL reads the Table, so a Model column inheriting the aggregation is
+    expected to fail the same way (not observed separately). Only the YAML boolean ``true`` counts. Pure.
     """
     table = data.get("table")
     if not isinstance(table, dict):
         return []
+    columns = table.get("columns")
+    if not isinstance(columns, list):
+        return []
     findings: list[str] = []
-    for c in table.get("columns") or []:
+    for c in columns:
         if not isinstance(c, dict):
             continue
-        p = c.get("properties") or {}
+        p = c.get("properties")
+        if not isinstance(p, dict):
+            continue
         if p.get("aggregation") == "AGGREGATE" and p.get("column_type") == "MEASURE" \
                 and p.get("is_pre_aggregated_measure") is not True:
             findings.append(

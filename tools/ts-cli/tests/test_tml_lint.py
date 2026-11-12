@@ -610,6 +610,10 @@ class TestI23PreAggregatedFlag:
     def test_flagged_column_clean(self):
         assert not any(x.startswith("I23:") for x in lint_tml(self._doc(is_pre_aggregated_measure=True)))
 
+    @pytest.mark.parametrize("columns", ["oops", [{"name": "x", "properties": "MEASURE"}], [{"name": "x", "properties": ["a"]}], 5])
+    def test_malformed_table_does_not_crash(self, columns):
+        lint_tml({"table": {"name": "t", "columns": columns}})
+
     def test_other_aggregations_not_flagged(self):
         assert not any(x.startswith("I23:") for x in lint_tml(self._doc(aggregation="SUM")))
 

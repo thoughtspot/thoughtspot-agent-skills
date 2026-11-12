@@ -187,20 +187,22 @@ it on every `AGGREGATE` Table column (ts-cli 0.214.0), and `ts tml lint` I23 fla
 
 ---
 
-## 10 — `is_pre_aggregated_measure` on Snowflake Semantic Views and on released builds — OPEN
+## 10 — `is_pre_aggregated_measure` on Snowflake Semantic Views and on released builds — DEFERRED
 
 #9 was verified on one Databricks Metric View on one newer DEV build. The build writes the
-flag on every `AGGREGATE` Table column, so it also reaches:
+flag on every `AGGREGATE` Table column, so it also reaches Snowflake Semantic View links,
+`standard`-mode measures given `aggregation: aggregate` (Honeydew, Cube, Kyvos), and
+released builds.
 
-- **Snowflake Semantic View links** (`aggregate` mode puts the flag on each metric, none on
-  facts). No SV link has been queried with the flag.
-- **Released builds.** Whether an older build accepts the key on a *Table* import, and
-  whether it changes any answer there, is not recorded. (A *Model* import silently ignores
-  unknown keys under `properties:`; nothing records the Table behaviour.) If a released build
-  rejects it, `ts link build` fails at its first import.
+| Question | Finding |
+|---|---|
+| Does a released build reject the key on a Table import? | **No.** `VALIDATE_ONLY` import of a Snowflake Table on `se-thoughtspot` (released Cloud build) with one measure set to `AGGREGATE` + `is_pre_aggregated_measure: true`: `status_code OK`. A control with a made-up key under `properties:` was accepted too, so this shows the import does not fail, not that the build reads the flag. Re-export afterwards: nothing persisted (2026-11-12) |
+| Does the flag change any answer on a released build, or on an SV link? | Not tested. No SV link has been queried with the flag |
 
-To close: on an SV link, run Step 7's query and a search; on a released build, link one
-object and do the same. The post-import `coerced` check compares the Model only, so it would
-not catch a dropped flag; the query is the check.
+So `ts link build` does not fail on a released build because of the flag. To close the
+rest: on an SV link, run Step 7's `AGG()` query and a search and compare with Snowflake;
+on a released build, link one Metric View and do the same. The post-import `coerced`
+check compares the Model only, so it would not catch a dropped flag; the query is the
+check.
 
-**Status: OPEN.**
+**Status: DEFERRED — target 2026-12-15, or the first SV link on a newer build, whichever is sooner.**
