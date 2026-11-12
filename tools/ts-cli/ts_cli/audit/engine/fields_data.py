@@ -451,11 +451,13 @@ def _join_roots(model: dict, ctx: Any) -> frozenset:
           label="the other tables at the root of the Model's joins")
 def _rls_root_beside(item: dict, ctx: Any) -> list:
     """Model table: when its Table TML (by `fqn`) carries RLS rules (_rls_rules_of, the
-    S14/S15 reading) and it is a root of the Model's directed joins (_join_roots) while
-    another table is a root too, the other roots' keys, sorted; else none. Query
-    generation plans each root as its own fact and stitches them, so such a table — an
-    access-control table joined many-to-one to a dimension is the measured case (S17,
-    live-verified 2026-11-12) — doubles every query's SQL; a name list in messages."""
+    S14/S15 reading), it holds no measures and is a root of the Model's directed joins
+    (role `factless`, joined) while another table is a root too, the other roots' keys,
+    sorted; else none. Query generation plans each root as its own fact and stitches
+    them, so such a table — an access-control table joined many-to-one to a dimension is
+    the measured case (S17, live-verified 2026-11-12) — doubles every query's SQL. A
+    root holding measures (role `fact`) is a genuine fact of a multi-fact Model, not
+    this shape, so it never fires; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
@@ -466,33 +468,47 @@ def _rls_root_beside(item: dict, ctx: Any) -> list:
         return NameList()
     model = _model_of(item)
     roots = cached("join_roots", model, _join_roots, model, ctx)
-    if me not in roots:
+    if me not in roots or model_roles(model, ctx).get(me, {}).get("role") != "factless":
         return NameList()
     return NameList(sorted(roots - {me}))
 
 
 #: @rls_root_fix's values: which fix fits the table's RLS rules.
 RLS_ROOT_FIXES = (
-    "keep the join as it is: its rules scope users by ts_groups, and a many-to-one join "
-    "to it would double-count measures for a user in two groups",
-    "if it is an access-control table rather than a genuine fact, reverse the join so "
-    "the dimension joins to it many-to-one, once the conditions in the remediation hold",
+    "keep the join as it is: its rules are not keyed on ts_username alone, so a user "
+    "can match two rows per key and a many-to-one join to it would double-count measures",
+    "reverse the join so the dimension joins to it many-to-one, once the conditions in "
+    "the remediation hold",
 )
+
+
+_OR = re.compile(r"\bor\b", re.IGNORECASE)
+
+
+def _keyed_on_user_alone(expr: Any) -> bool:
+    """An RLS rule whose only session variable is ts_username and which has no `or`
+    (outside quoted literals and `[...]` references): only then does each user see at
+    most one access row per key, the condition the many-to-one reversal needs. A
+    ts_groups or multi-value ts_var rule, or an `or` letting other users' rows through
+    (a public flag), gives a user several rows per key."""
+    code = _BRACKETED.sub(" ", _code(expr))
+    return _rule_variables(expr) == {"ts_username"} and not _OR.search(code)
 
 
 @register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
           label="the fix that fits the table's RLS rules")
 def _rls_root_fix(item: dict, ctx: Any) -> str:
-    """Model table: the first of RLS_ROOT_FIXES when any RLS rule on its Table TML (by
-    `fqn`) scopes users by ts_groups (any variant, outside quoted literals and `[...]`
-    references: _rule_variables), else the second. A user in two groups mapped to one
-    key gets two rows of the access table, so only a rule keyed on the user leaves the
-    many-to-one reversal safe."""
+    """Model table: the second of RLS_ROOT_FIXES (reverse) only when its Table TML (by
+    `fqn`) has RLS rules and every one is keyed on the user alone
+    (_keyed_on_user_alone); else the first (keep). A rule that can give a user two rows
+    per key — ts_groups, a multi-value ts_var, an `or` — would make the reversed
+    many-to-one join double-count measures, which the stitched plan's grouping does
+    not."""
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
     rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
-    grouped = any("ts_groups" in _rule_variables(r.get("expr")) for r in rules)
-    return RLS_ROOT_FIXES[0] if grouped else RLS_ROOT_FIXES[1]
+    safe = bool(rules) and all(_keyed_on_user_alone(r.get("expr")) for r in rules)
+    return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────

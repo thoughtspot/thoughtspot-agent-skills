@@ -98,25 +98,54 @@ def test_rls_root_beside_absent_data_reads_as_none():
     assert list(fields.get(only, "@rls_root_beside", bare)) == []
 
 
-def test_rls_root_fix_says_keep_the_join_for_ts_groups():
-    for expr, grouped in [
-        ("ts_username = [ACL_USER_SITE_1::USER_KEY]", False),
-        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups", True),
-        ("'site admins' in ts_groups or ts_username = [ACL_USER_SITE_1::USER_KEY]", True),
-        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups_int", True),          # any variant
-        ("[ACL_USER_SITE_1::TS_GROUPS_KEY] = ts_username", False),      # a column name
-        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and 'ts_groups' = 'x'", False),  # literal
+def test_unjoined_fact_is_not_a_second_root():
+    """Only the ACL table is a joined root; F_ORDER, holding a measure, is unjoined (D5's).
+    Without the `unjoined` exclusion F_ORDER would read as a root and S17 would fire."""
+    ctx = fx.sec_rls_acl_table_as_root()
+    del ctx.models[0]["model"]["model_tables"][0]["joins"]
+    assert _s17(ctx) == []
+    assert list(fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_beside", ctx)) == []
+
+
+def test_silent_on_a_genuine_fact_with_rls():
+    """An RLS table holding a measure is a fact of a multi-fact Model, not an access
+    table: silent, whatever its rules key on."""
+    for expr in ("ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                 "[ACL_USER_SITE_1::USER_KEY] = ts_groups"):
+        ctx = fx.build_acl_ctx("acl_to_dim", rule_expr=expr)
+        ctx.models[0]["model"]["columns"].append({
+            "name": "ACL_USER_SITE QTY", "column_id": "ACL_USER_SITE::QTY",
+            "properties": {"column_type": "MEASURE"}})
+        assert _s17(ctx) == [], expr
+
+
+def test_rls_root_fix_reverses_only_for_rules_keyed_on_the_user_alone():
+    for expr, safe in [
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY]", True),
+        ("[ACL_USER_SITE_1::TS_GROUPS_KEY] = ts_username", True),       # a column name
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and 'ts_groups' = 'x'", True),  # literal
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and [ACL_USER_SITE_1::OR_X] = 'or'",
+         True),                                                        # `or` in names
+        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups", False),
+        ("'site admins' in ts_groups or ts_username = [ACL_USER_SITE_1::USER_KEY]", False),
+        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups_int", False),         # any variant
+        ("[ACL_USER_SITE_1::USER_KEY] = ts_var ( site_regions )", False),  # multi-value
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY] or [ACL_USER_SITE_1::IS_PUBLIC] = 'Y'",
+         False),                                                       # public rows
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY] OR [ACL_USER_SITE_1::IS_PUBLIC] = 'Y'",
+         False),
     ]:
         ctx = fx.build_acl_ctx("acl_to_dim", rule_expr=expr)
         got = fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx)
-        assert got == RLS_ROOT_FIXES[0 if grouped else 1], expr
+        assert got == RLS_ROOT_FIXES[1 if safe else 0], expr
     ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="[ACL_USER_SITE_1::USER_KEY] = ts_groups")
     out = run_audit(None, [], ctx=ctx, angles=["S"])
     (detail,) = [f["detail"] for f in out["findings"] if f["check_id"] == "S17"]
-    assert "keep the join as it is" in detail and "ts_groups" in detail
+    assert "keep the join as it is" in detail and "ts_username alone" in detail
 
 
-def test_rls_root_fix_without_table_tml():
+def test_rls_root_fix_without_table_tml_keeps_the_join():
+    """No rules to read: never advise the reversal."""
     ctx = fx.sec_rls_acl_table_as_root()
     del ctx.tables["t-acl_user_site"]
-    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[1]
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
