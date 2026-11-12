@@ -14,6 +14,12 @@ typically the measures people search on. A cycle no root reaches is rooted where
 entered: at a formula everything upstream of which lies in its own cycle, so no formula
 is lost; the view guards against walking a cycle. A formula or column id that is not a
 string is ignored (malformed TML must not end a narrow run, BL-501).
+
+Each node also carries its expression as written, as `expr` segments for the view's
+definition panel: text, and each reference occurrence resolved, with `ref` the reference
+as written. Both `uses` and `expr` are read off `tml.expr_parts`, the scanner behind
+`tml.expr_refs`, so a link in the definition and the tree cannot disagree. Quoted
+literals stay text.
 """
 from __future__ import annotations
 
@@ -45,11 +51,21 @@ def _resolve(ref: str, by_ref: Dict[Any, Any], params: set) -> dict:
     return {"column": ref}
 
 
-def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict]:
-    """What one expression refers to, in order, each once (see the module docstring)."""
+def _segments(expr: Any, by_ref: Dict[Any, Any], params: set) -> List[Any]:
+    """The expression as written (`tml.expr_parts`): text, and each reference resolved
+    (see `_resolve`) with `ref`, the reference as written."""
+    return [{**_resolve(name, by_ref, params), "ref": raw} if is_ref else raw
+            for is_ref, name, raw in tml.expr_parts(expr)]
+
+
+def _uses(segments: List[Any], own: str) -> List[dict]:
+    """What an expression refers to, in order, each once, a self-reference left out:
+    read off its segments, so the tree and the definition cannot disagree."""
     seen, out = set(), []
-    for ref in tml.expr_refs(str(expr or "")):
-        item = _resolve(ref, by_ref, params)
+    for seg in segments:
+        if isinstance(seg, str):
+            continue
+        item = {k: v for k, v in seg.items() if k != "ref"}
         key = tuple(item.items())
         if item.get("formula") == own or key in seen:
             continue
@@ -61,10 +77,12 @@ def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict
 def _node(formula: dict, column: Any, by_ref: Dict[Any, Any], params: set) -> dict:
     props = tml.mapping(column, "properties") if column else {}
     label = column.get("name") if column and column.get("name") else formula["name"]
+    segments = _segments(formula.get("expr"), by_ref, params)
     return {"name": formula["name"], "label": str(label),
             "kind": str(props.get("column_type") or "").upper() or None,
             "hidden": column is None or bool(props.get("is_hidden")),
-            "uses": _uses(formula.get("expr"), by_ref, params, formula["name"]),
+            "uses": _uses(segments, formula["name"]),
+            "expr": segments,
             "used_by": 0}
 
 
@@ -115,7 +133,8 @@ def formula_tree(model: dict) -> dict:
     which people search by, else `name`), `kind` ("MEASURE", "ATTRIBUTE" or None when no
     column surfaces it), `hidden` (its column is hidden, or no column surfaces it),
     `uses` (`{"formula": name}` / `{"parameter": name}` / `{"column": ref}`) and
-    `used_by` (how many formulas use it). Formulas sharing a name are one node (the
+    `used_by` (how many formulas use it), and `expr` (its expression as segments, see the
+    module docstring). Formulas sharing a name are one node (the
     first)."""
     formulas = [f if isinstance(f.get("id"), (str, type(None))) else {**f, "id": None}
                 for f in (model.get("formulas") or [])

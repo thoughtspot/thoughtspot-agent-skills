@@ -23,6 +23,44 @@ def test_expr_refs_skips_literals_strips_and_keeps_a_quoted_name_whole():
     assert tml.expr_refs(None) == [] and tml.expr_refs(3) == []
 
 
+def test_expr_parts_is_the_text_and_references_expr_refs_reads():
+    # one scanner: the parts' references are exactly expr_refs, and the parts rejoin to
+    # the expression as written (the definition panel shows them; the tree's uses and
+    # its links are built from them, so they cannot disagree)
+    cases = {"concat ( '[A::x]' , [B::y] )": ["B::y"],
+             'if ( [A::x] = "[C::z]" ) then 1 else 0': ["A::x"],
+             "[Bob's Sales::x] + [ T::y ]": ["Bob's Sales::x", "T::y"],
+             "[ ] + 1": [], "[a]]b] + 'it''s' + [c": ["a"], "[[x]]": ["[x"],
+             "": [], "no refs at all": []}
+    for expr, refs in cases.items():
+        parts = tml.expr_parts(expr)
+        assert [ref for kind, ref, _ in parts if kind] == refs, expr
+        assert tml.expr_refs(expr) == refs, expr
+        assert "".join(raw for _, _, raw in parts) == expr, expr
+    assert tml.expr_parts("[ T::y ] + 1") == [(True, "T::y", "[ T::y ]"), (False, " + 1", " + 1")]
+    assert tml.expr_parts("[ ] + 1") == [(False, "[ ] + 1", "[ ] + 1")]
+    assert tml.expr_parts(None) == [] and tml.expr_parts(["[A]"]) == []
+    assert tml.expr_parts(3) == [(False, "3", "3")]
+
+
+def test_the_tree_reads_uses_and_definitions_with_expr_refs():
+    exprs = ["[ formula_A ] + [ ]", "concat ( '[formula_A]' , [T::x] )", "[T::Bob's] + 1"]
+    model = {"formulas": [{"id": "formula_A", "name": "A", "expr": "[T::z]"}] +
+             [{"id": f"formula_{i}", "name": f"F{i}", "expr": e} for i, e in enumerate(exprs)]}
+    for node, expr in zip(formula_tree(model)["nodes"][1:], exprs):
+        refs = [s for s in node["expr"] if isinstance(s, dict)]
+        assert len(refs) == len(tml.expr_refs(expr)), expr
+        seen = []
+        for r in refs:
+            key = {k: v for k, v in r.items() if k != "ref"}
+            if key not in seen:
+                seen.append(key)
+        assert node["uses"] == seen, expr
+    # a list where an expression belongs is malformed: no uses, no definition
+    bad = formula_tree({"formulas": [{"id": "f", "name": "A", "expr": ["[A]"]}]})["nodes"][0]
+    assert (bad["uses"], bad["expr"]) == ([], [])
+
+
 def _model(formulas, columns=()):
     return {"guid": "m-1", "model": {"name": "M", "formulas": list(formulas),
                                     "columns": list(columns), "model_tables": []}}

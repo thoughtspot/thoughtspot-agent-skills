@@ -230,20 +230,38 @@ def _compact_model(m: dict, model_index: dict) -> dict:
     return cm
 
 
+def _written_use(use: list, ref: str) -> list:
+    """A reference segment for the report: its use encoding, plus how it was written
+    unless that is just a column or parameter value in brackets (most are), which the
+    view rebuilds: the report carries every definition, so this keeps it small."""
+    if use[0] != 0 and ref == f"[{use[1]}]":
+        return use
+    return use + [ref]
+
+
 def _compact_tree(tree: dict) -> dict:
     """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
-    {n label, f formula name, k kind, h hidden, b used_by, u uses}, each use
-    `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`; `r` root indices."""
+    {n label, f formula name, k kind, h hidden, b used_by, u uses, x expression}, each
+    use `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`, and `x` the
+    expression as written: text strings, and each reference in that same encoding plus
+    the reference as written (`[0, 3, "[formula_GM]"]`), left out when it is only the
+    value in brackets (`[1, "T::C"]` is written `[T::C]`, see `_written_use`); absent
+    from a tree written before expressions were kept. `r` root indices."""
     index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
 
     def use(u):
         if "formula" in u:
             return [0, index[u["formula"]]]
         return [2, u["parameter"]] if "parameter" in u else [1, u["column"]]
-    nodes = [{"n": node.get("label") or node["name"], "f": node["name"],
-              "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
-              "u": [use(u) for u in node["uses"]]}
-             for node in tree["nodes"]]
+    nodes = []
+    for node in tree["nodes"]:
+        out = {"n": node.get("label") or node["name"], "f": node["name"],
+               "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
+               "u": [use(u) for u in node["uses"]]}
+        if isinstance(node.get("expr"), list):
+            out["x"] = [s if isinstance(s, str) else _written_use(use(s), s.get("ref", ""))
+                        for s in node["expr"]]
+        nodes.append(out)
     return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
 
 

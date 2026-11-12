@@ -146,6 +146,37 @@ def test_malformed_ids_and_names_are_ignored_not_fatal():
     assert _node(tree, "C")["uses"] == [{"formula": "A"}]
 
 
+def test_each_node_carries_its_expression_as_written_with_references_resolved():
+    tree = formula_tree(EDGES)
+    # references resolve exactly as `uses` does, each keeping how it was written; quoted
+    # literals stay text even when they hold bracket text (adjacent text is one
+    # segment); every occurrence is kept
+    assert _node(tree, "margin_f")["expr"] == [
+        {"formula": "net_sales_f", "ref": "[Net Sales]"}, " * ",
+        {"parameter": "Rate", "ref": "[Rate]"},
+        " + strlen ( 'x[ORDERS::FAKE]' ) + strlen ( \"[Old Calc]\" )"]
+    assert [s["ref"] for s in _node(tree, "Dup")["expr"] if isinstance(s, dict)] == [
+        "[formula_Net]", "[net_sales_f]", "[Net Sales]", "[ORDERS::X]", "[ORDERS::X]"]
+    # a self-reference is not a use, but the text still shows it
+    cnt = _node(formula_tree(MODEL), "Order Count")
+    assert cnt["expr"][-1] == {"formula": "Order Count", "ref": "[formula_Cnt]"}
+    # rejoined, the segments are the expression as written
+    assert "".join(s if isinstance(s, str) else s["ref"] for s in cnt["expr"]) == \
+        "count ( [ORDERS::ORDER_ID] ) + [formula_Cnt]"
+
+
+@pytest.mark.parametrize("expr, segments", [
+    ("[T::Men's] + 1", [{"column": "T::Men's", "ref": "[T::Men's]"}, " + 1"]),  # BL-369
+    (5, ["5"]),                                                 # YAML read a number
+    (None, []), ({"x": 1}, []), (["[A]"], []),
+])
+def test_an_expression_that_is_not_plain_text_is_still_shown_safely(expr, segments):
+    node = formula_tree({"formulas": [_f("formula_A", "A", expr)]})["nodes"][0]
+    assert node["expr"] == segments
+    assert node["uses"] == [{k: v for k, v in s.items() if k != "ref"}
+                            for s in segments if isinstance(s, dict)]
+
+
 def test_a_formula_and_a_column_used_twice_are_listed_once():
     dup = _node(formula_tree(EDGES), "Dup")
     assert dup["uses"] == [{"formula": "net_sales_f"}, {"column": "ORDERS::X"}]
@@ -180,6 +211,28 @@ def test_the_report_compacts_labels_names_and_use_kinds():
     assert (margin["n"], margin["f"]) == ("Margin", "margin_f")
     assert margin["u"] == [[0, names.index("net_sales_f")], [2, "Rate"]]
     assert ft["n"][names.index("Dup")]["u"][1] == [1, "ORDERS::X"]
+
+
+def test_the_report_compacts_each_expression_with_the_use_encoding():
+    data = run_audit(None, ["m-2"], ctx=make_context(
+        models=[{"guid": "m-2", "model": EDGES}], model_guids=["m-2"]))
+    from ts_cli.audit.report import compact_payload
+    ft = compact_payload(data)["C"]["m"][0]["ft"]
+    names = [n["f"] for n in ft["n"]]
+    margin = ft["n"][names.index("margin_f")]
+    # a formula reference keeps how it was written; a plain [column] or [parameter]
+    # is not stored twice (the view rebuilds it), an unusual spelling is
+    assert margin["x"][:3] == [[0, names.index("net_sales_f"), "[Net Sales]"], " * ", [2, "Rate"]]
+    assert ft["n"][names.index("Dup")]["x"][-1] == [1, "ORDERS::X"]
+    from ts_cli.audit.report import _written_use
+    assert _written_use([1, "T::y"], "[ T::y ]") == [1, "T::y", "[ T::y ]"]
+
+
+def test_a_tree_written_before_expressions_compacts_without_them():
+    from ts_cli.audit.report import _compact_tree
+    old = {"nodes": [{"name": "A", "label": "A", "kind": None, "hidden": True,
+                      "uses": [], "used_by": 0}], "roots": ["A"]}
+    assert "x" not in _compact_tree(old)["n"][0]
 
 
 def _report(tmp_path, *models, strip_trees=False):
@@ -230,15 +283,19 @@ def test_the_tree_opens_roots_one_level_and_expands_on_demand(tmp_path):
 def test_parameters_labels_and_hidden_unused_formulas_are_shown(tmp_path):
     page = _report(tmp_path, ("m-2", EDGES))
     shown = report_browser.render(page, tmp_path, "formulas/m-2", actions=_EXPAND + (
-        'window.__extra = Array.prototype.map.call(document.querySelectorAll('
-        '"#v-formulas .ftree-name[title]"), function(e){ return [e.textContent, e.title]; });'))
+        'window.__extra = {titles: Array.prototype.map.call(document.querySelectorAll('
+        '"#v-formulas .ftree-name[title]"), function(e){ return [e.textContent, e.title]; }),'
+        ' cols: Array.prototype.map.call(document.querySelectorAll('
+        '"#v-formulas .ftree-col"), function(e){ return e.textContent; })};'))
     assert shown["errors"] == []
     seen = shown["visible"]
     assert "parameter" in seen and "Rate" in seen
-    assert "FAKE" not in seen
+    # bracket text inside a quoted literal is no column: it shows only in the definition
+    assert not any("FAKE" in c for c in shown["extra"]["cols"])
+    assert "'x[ORDERS::FAKE]'" in seen
     assert "hidden, unused" in seen and "hidden helper" not in seen
-    assert ["Margin", "Formula: margin_f"] in shown["extra"]
-    assert ["Net Sales", "Formula: net_sales_f"] in shown["extra"]
+    assert ["Margin", "Formula: margin_f"] in shown["extra"]["titles"]
+    assert ["Net Sales", "Formula: net_sales_f"] in shown["extra"]["titles"]
 
 
 @needs_chrome
@@ -360,3 +417,373 @@ def test_links_carry_an_awkward_guid_verbatim(tmp_path):
     assert card["errors"] == [] and "#formulas/" + guid in card["extra"]
     tree = report_browser.render(page, tmp_path, "formulas/" + guid, actions=links)
     assert tree["errors"] == [] and "#model/" + guid in tree["extra"]
+
+
+# ── The definition panel, links, search (the Formulas view, detail panel) ──
+_ROW = ('function row(name){ return Array.prototype.find.call('
+        'document.querySelectorAll("#v-formulas .ftree-row"), function(r){'
+        ' var n = r.querySelector(".ftree-name, .ftree-col");'
+        ' return n && n.textContent === name; }); }'
+        'function panel(){ return document.querySelector("#v-formulas .fdetail"); }'
+        'function link(scope, text){ return Array.prototype.find.call('
+        'scope.querySelectorAll("a.fref"), function(a){ return a.textContent === text; }); }')
+
+
+@needs_chrome
+def test_clicking_a_formula_shows_its_definition_uses_and_used_by(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Revenue").click();'
+        'var p = panel();'
+        'window.__extra = {expr: p.querySelector(".fdetail-expr").textContent,'
+        ' uses: Array.prototype.map.call(p.querySelectorAll(".fdetail-uses a.fref"), function(a){ return a.textContent; }),'
+        ' usedBy: Array.prototype.map.call(p.querySelectorAll(".fdetail-usedby a.fref"), function(a){ return a.textContent; }),'
+        ' selected: document.querySelectorAll("#v-formulas .ftree-selected").length};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["expr"] == "sum ( [ORDERS::AMOUNT] )"   # as written: it can be copied back
+    assert x["uses"] == ["ORDERS::AMOUNT"]
+    assert x["usedBy"] == ["Gross Margin %", "Gross Margin"]
+    assert x["selected"] >= 1
+
+
+@needs_chrome
+def test_a_reference_link_opens_that_formula_and_reveals_it_in_the_tree(tmp_path):
+    page = _report(tmp_path)
+    # Cost sits under Gross Margin, collapsed: following the link must open the path to it
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Gross Margin %").click();'
+        'var gm = link(panel().querySelector(".fdetail-expr"), "[formula_GM]"); var tip = gm.title; gm.click();'
+        'var title1 = panel().querySelector(".fdetail-title").textContent;'
+        'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
+        'var r = row("Cost");'
+        'window.__extra = {tip: tip, title1: title1, title2: panel().querySelector(".fdetail-title").textContent,'
+        ' shown: !!r && r.offsetParent !== null, selected: !!r && r.classList.contains("ftree-selected")};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["tip"] == "Formula: Gross Margin"
+    assert x["title1"] == "Gross Margin" and x["title2"] == "Cost"
+    assert x["shown"] and x["selected"]
+
+
+@needs_chrome
+def test_everything_that_depends_on_a_formula_is_listed(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Order Count").click();'   # a root: nothing uses it
+        'var top = panel().querySelector(".fdetail-usedby").textContent;'
+        'row("Gross Margin %").click(); link(panel(), "Gross Margin").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
+        'window.__extra = {top: top,'
+        ' all: Array.prototype.map.call(panel().querySelectorAll(".fdetail-dependents a.fref"), function(a){ return a.textContent; })};'))
+    assert shown["errors"] == []
+    assert "Nothing uses it" in shown["extra"]["top"]
+    # Cost is used by Gross Margin, which Gross Margin % uses
+    assert shown["extra"]["all"] == ["Gross Margin", "Gross Margin %"]
+
+
+@needs_chrome
+def test_a_column_shows_the_formulas_that_use_it(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_EXPAND + _ROW + (
+        'row("ORDERS::AMOUNT").click();'
+        'window.__extra = {title: panel().querySelector(".fdetail-title").textContent,'
+        ' usedBy: Array.prototype.map.call(panel().querySelectorAll(".fdetail-usedby a.fref"), function(a){ return a.textContent; })};'))
+    assert shown["errors"] == []
+    assert shown["extra"]["title"] == "ORDERS::AMOUNT"
+    assert shown["extra"]["usedBy"] == ["Revenue"]
+
+
+@needs_chrome
+def test_search_finds_formulas_by_name_and_definition_and_columns(tmp_path):
+    page = _report(tmp_path)
+    search = ('var s = document.querySelector("#v-formulas .ftree-search");'
+              'function find(q){ s.value = q; s.dispatchEvent(new Event("input"));'
+              ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+              ' function(a){ return a.textContent; }); }')
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=search + _ROW + (
+        'var byName = find("margin"); var byExpr = find("orders::cost"); var none = find("zzz");'
+        'find("loop b"); document.querySelector("#v-formulas .ftree-results a.fref").click();'
+        'var title = panel().querySelector(".fdetail-title").textContent;'
+        'var cleared = find("");'
+        'window.__extra = {byName: byName, byExpr: byExpr, none: none, title: title, cleared: cleared,'
+        ' empty: document.querySelector("#v-formulas .ftree-results").textContent};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["byName"] == ["Gross Margin %", "Gross Margin"]
+    assert "Cost" in x["byExpr"] and "ORDERS::COST" in x["byExpr"]
+    assert x["none"] == [] and x["title"] == "Loop B" and x["cleared"] == [] and x["empty"] == ""
+
+
+@needs_chrome
+def test_an_open_formula_shows_its_expression_inline_without_counting_as_a_row(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
+        'window.__extra = Array.prototype.map.call(document.querySelectorAll('
+        '"#v-formulas .ftree > li > .ftree-children > .ftree-exprline"), function(e){ return e.textContent; });'))
+    assert shown["errors"] == []
+    assert "= Gross Margin / Revenue" in shown["extra"]
+    assert "= count ( ORDERS::ORDER_ID ) + Order Count" in shown["extra"]
+
+
+@needs_chrome
+def test_definitions_and_search_results_are_escaped(tmp_path):
+    evil = {"name": "Evil", "formulas": [
+        _f("formula_X", "x", "[formula_Y] + '<i>lit</i>'"), _f("formula_Y", "y", "[T::<b>c</b>]")],
+        "columns": [_col('<b>bold</b>', "formula_X"), _col("<b>y</b>", "formula_Y")]}
+    page = _report(tmp_path, ("m-4", evil))
+    shown = report_browser.render(page, tmp_path, "formulas/m-4", actions=_EXPAND + _ROW + (
+        'row("<b>bold</b>").click();'
+        'var s = document.querySelector("#v-formulas .ftree-search"); s.value = "<"; s.dispatchEvent(new Event("input"));'
+        'window.__extra = {tags: document.querySelectorAll("#v-formulas b, #v-formulas i").length,'
+        ' expr: panel().querySelector(".fdetail-expr").textContent};'))
+    assert shown["errors"] == []
+    assert shown["extra"]["tags"] == 0
+    assert shown["extra"]["expr"] == "[formula_Y] + '<i>lit</i>'"
+
+
+@needs_chrome
+def test_a_report_written_before_definitions_says_to_rerun(tmp_path):
+    ctx = make_context(models=[{"guid": "m-1", "model": MODEL}], model_guids=["m-1"])
+    data = run_audit(None, ["m-1"], ctx=ctx)
+    for m in data["corpus"]["models"]:
+        for node in m["formula_tree"]["nodes"]:
+            node.pop("expr")
+    page = render_report(data)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Revenue").click();'
+        'window.__extra = {inline: document.querySelectorAll("#v-formulas .ftree-exprline").length,'
+        ' uses: panel().querySelectorAll(".fdetail-uses a.fref").length};'))
+    assert shown["errors"] == []
+    assert "predates formula definitions" in shown["visible"]
+    assert shown["extra"] == {"inline": 0, "uses": 1}
+
+
+@needs_chrome
+def test_search_says_when_it_stops_and_ranks_columns_above_definitions(tmp_path):
+    # 55 formulas all use one column: the column must not be lost behind them
+    many = {"name": "Many", "formulas": [_f(f"formula_F{i}", f"F{i}", f"sum ( [ORDERS::AMOUNT] ) * {i}")
+                                         for i in range(55)]}
+    page = _report(tmp_path, ("m-7", many), ("m-1", MODEL))
+    find = ('var s = document.querySelector("#v-formulas .ftree-search");'
+            's.value = Q; s.dispatchEvent(new Event("input"));'
+            'var r = document.querySelector("#v-formulas .ftree-results");'
+            'window.__extra = {hits: Array.prototype.map.call(r.querySelectorAll("a.fref"), function(a){ return a.textContent; }),'
+            ' more: (r.querySelector(".ftree-more") || {}).textContent || ""};')
+    shown = report_browser.render(page, tmp_path, "formulas/m-7", actions='var Q = "orders::amount";' + find)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["hits"][0] == "ORDERS::AMOUNT" and len(x["hits"]) == 50
+    assert x["more"] == "and 6 more: type more to narrow the list"
+    # the definition is searched as written too
+    written = report_browser.render(page, tmp_path, "formulas/m-1", actions='var Q = "[formula_gm]";' + find)
+    assert written["errors"] == [] and written["extra"]["hits"] == ["Gross Margin %"]
+    assert written["extra"]["more"] == ""
+
+
+@needs_chrome
+def test_a_formula_in_a_cycle_never_depends_on_itself(tmp_path):
+    ring = {"name": "Ring", "formulas": [_f("formula_A", "A", "[formula_B]"),
+                                         _f("formula_B", "B", "[formula_C]"),
+                                         _f("formula_C", "C", "[formula_A] + [T::X]")]}
+    page = _report(tmp_path, ("m-8", ring))
+    shown = report_browser.render(page, tmp_path, "formulas/m-8", actions=_ROW + (
+        'row("A").click();'
+        'window.__extra = Array.prototype.map.call(panel().querySelectorAll(".fdetail-dependents a.fref"),'
+        ' function(a){ return a.textContent; });'))
+    assert shown["errors"] == []
+    assert shown["extra"] == ["C", "B"]
+
+
+@needs_chrome
+def test_the_tree_is_one_tab_stop_moved_with_the_arrow_keys(tmp_path):
+    page = _report(tmp_path)
+    key = ('function key(t, k){ t.dispatchEvent(new KeyboardEvent("keydown", {key: k, bubbles: true})); }'
+           'function stops(){ return Array.prototype.map.call(document.querySelectorAll('
+           '\'#v-formulas .ftree [tabindex="0"]\'), function(e){ return e.textContent; }); }')
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + key + (
+        'var first = stops(); document.querySelector(".ftree-expand").click(); var expanded = stops();'
+        'var r = row("Gross Margin %"); r.focus(); key(r, "ArrowDown");'
+        'var next = document.activeElement.querySelector(".ftree-name").textContent;'
+        'key(document.activeElement, "Enter");'
+        'link(panel().querySelector(".fdetail-expr"), "[Cost]").focus();'
+        'key(document.activeElement, "Enter");'
+        'var inPanel = !!document.activeElement.closest(".fdetail");'
+        'var title = panel().querySelector(".fdetail-title").textContent;'
+        'document.querySelector(".ftree-collapse").click();'
+        'var after = stops(); var visible = document.querySelector(\'#v-formulas .ftree [tabindex="0"]\').offsetParent !== null;'
+        'window.__extra = {first: first.length, expanded: expanded.length, next: next, inPanel: inPanel, title: title,'
+        ' after: after.length, visible: visible};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["first"] == 1 and x["expanded"] == 1   # rows built on opening are not tab stops
+    assert x["next"] == "Gross Margin"
+    assert x["inPanel"] and x["title"] == "Cost"
+    assert x["after"] == 1 and x["visible"]
+
+
+@needs_chrome
+def test_a_formula_with_no_expression_says_so(tmp_path):
+    blank = {"name": "Blank", "formulas": [_f("formula_E", "Empty", ""), _f("formula_T", "Top", "[formula_E]")]}
+    page = _report(tmp_path, ("m-9", blank))
+    shown = report_browser.render(page, tmp_path, "formulas/m-9", actions=_ROW + 'row("Empty").click();')
+    assert shown["errors"] == []
+    assert "The TML gives this formula no expression, or one that is not text." in shown["visible"]
+
+
+_FOCUS = ('window.__focus = function(){ var a = document.activeElement;'
+          ' return a && a.classList.contains("fdetail-title") ? a.textContent : (a && a.tagName); };')
+
+
+@needs_chrome
+@pytest.mark.parametrize("start, how, title", [
+    # from the definition, the Uses list and the search results; a column and a parameter
+    ('row("Revenue").click(); var a = link(panel().querySelector(".fdetail-expr"), "[ORDERS::AMOUNT]");',
+     "click", "ORDERS::AMOUNT"),
+    ('row("Revenue").click(); var a = link(panel().querySelector(".fdetail-uses"), "ORDERS::AMOUNT");',
+     "enter", "ORDERS::AMOUNT"),
+    ('var s = document.querySelector("#v-formulas .ftree-search"); s.value = "orders::cost";'
+     ' s.dispatchEvent(new Event("input")); var a = link(document.querySelector("#v-formulas .ftree-results"), "ORDERS::COST");',
+     "click", "ORDERS::COST"),
+])
+def test_a_column_link_selects_its_row_and_focuses_the_definition(tmp_path, start, how, title):
+    page = _report(tmp_path)
+    go = ('a.click();' if how == "click" else
+          'a.focus(); a.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", bubbles: true}));')
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + _FOCUS + start + go + (
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'window.__extra = {title: panel().querySelector(".fdetail-title").textContent,'
+        ' selected: sel && (sel.querySelector(".ftree-col, .ftree-name") || {}).textContent,'
+        ' focus: window.__focus()};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"title": title, "selected": title, "focus": title}
+
+
+@needs_chrome
+def test_a_parameter_link_selects_its_row(tmp_path):
+    page = _report(tmp_path, ("m-2", EDGES))
+    shown = report_browser.render(page, tmp_path, "formulas/m-2", actions=_ROW + _FOCUS + (
+        'row("Margin").click(); link(panel().querySelector(".fdetail-expr"), "[Rate]").click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'window.__extra = {title: panel().querySelector(".fdetail-title").textContent,'
+        ' selected: sel && sel.querySelector(".ftree-name").textContent, focus: window.__focus()};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"title": "Rate", "selected": "Rate", "focus": "Rate"}
+
+
+@needs_chrome
+def test_a_link_opens_under_the_formula_it_was_followed_from(tmp_path):
+    # D is used by B and by E; E is the shorter way down from a root (E is a root)
+    diamond = {"name": "Diamond", "formulas": [
+        _f("formula_A", "A", "[formula_B] + [formula_C]"), _f("formula_B", "B", "[formula_D]"),
+        _f("formula_C", "C", "[formula_D]"), _f("formula_D", "D", "[T::X]"),
+        _f("formula_E", "E", "[formula_D] + [formula_C]")]}
+    page = _report(tmp_path, ("m-10", diamond))
+    shown = report_browser.render(page, tmp_path, "formulas/m-10", actions=_ROW + (
+        'row("B").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[formula_D]").click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'var up = sel.parentNode.parentNode.closest("li.ftree-node");'
+        'window.__extra = up.firstChild.querySelector(".ftree-name").textContent;'))
+    assert shown["errors"] == []
+    assert shown["extra"] == "B"
+
+
+@needs_chrome
+def test_escape_and_the_close_button_close_the_definition_and_keep_focus(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Revenue").click(); link(panel().querySelector(".fdetail-expr"), "[ORDERS::AMOUNT]").click();'
+        'document.querySelector(".ftree-collapse").click();'
+        'document.querySelector("#v-formulas .fdetail-close").click();'
+        'var a1 = document.activeElement.classList.contains("ftree-row");'
+        'row("Gross Margin %").click(); var r = row("Gross Margin %"); r.focus();'
+        'r.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true}));'
+        'window.__extra = {a1: a1, empty: panel().classList.contains("fdetail-empty"),'
+        ' selected: document.querySelectorAll("#v-formulas .ftree-selected").length};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"a1": True, "empty": True, "selected": 0}
+
+
+@needs_chrome
+@pytest.mark.parametrize("size", ["850,900", "700,900"])
+def test_on_a_narrow_screen_the_definition_is_a_sheet_clear_of_the_sidebar(tmp_path, size):
+    many = {"name": "Many", "formulas": [_f(f"formula_R{i}", f"Root {i}", f"[T::C{i}]") for i in range(40)]}
+    page = _report(tmp_path, ("m-11", many))
+    shown = report_browser.render(page, tmp_path, "formulas/m-11", size=size, actions=_ROW + (
+        'var r = row("Root 30"); r.scrollIntoView({block: "end"}); var y0 = window.scrollY; r.click();'
+        'var t = panel().querySelector(".fdetail-title").getBoundingClientRect();'
+        'var hit = document.elementFromPoint(t.left + 4, t.top + t.height / 2);'
+        'var rr = r.getBoundingClientRect(), pr = panel().getBoundingClientRect();'
+        'window.__extra = {fixed: getComputedStyle(panel()).position, onPanel: !!(hit && hit.closest(".fdetail")),'
+        ' clear: rr.bottom <= pr.top + 1, y0: y0};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["fixed"] == "fixed" and x["onPanel"] and x["clear"]
+
+
+@needs_chrome
+def test_search_matches_a_definition_across_references_both_ways(tmp_path):
+    page = _report(tmp_path)
+    find = ('function find(q){ var s = document.querySelector("#v-formulas .ftree-search");'
+            ' s.value = q; s.dispatchEvent(new Event("input"));'
+            ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+            ' function(a){ return a.textContent; }); }')
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=find + (
+        'window.__extra = [find("[formula_GM] / [formula_Rev]"), find("gross margin / revenue"),'
+        ' find("sum ( [ORDERS::AMOUNT] )"), find("sum ( orders::amount )"), find("[formula_rev] - [cost]")];'))
+    assert shown["errors"] == []
+    assert shown["extra"] == [["Gross Margin %"], ["Gross Margin %"], ["Revenue"], ["Revenue"],
+                              ["Gross Margin"]]
+
+
+@needs_chrome
+def test_a_link_from_a_hidden_formula_opens_the_tree_from_the_top(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Gross Margin").click(); document.querySelector(".ftree-collapse").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'var a = sel && sel.offsetParent !== null;'
+        'link(panel().querySelector(".fdetail-usedby"), "Gross Margin").click();'
+        'window.__extra = {cost: a, title: panel().querySelector(".fdetail-title").textContent};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"cost": True, "title": "Gross Margin"}
+
+
+@needs_chrome
+def test_a_link_in_an_inline_line_opens_under_that_formula_and_leaves_others_closed(tmp_path):
+    two = {"name": "Two", "formulas": [_f("formula_R1", "R1", "[formula_Z] + 1"),
+                                       _f("formula_R2", "R2", "[formula_Z] * 2 + [formula_Q]"),
+                                       _f("formula_Z", "Z", "[T::A]"), _f("formula_Q", "Q", "[T::B]")]}
+    page = _report(tmp_path, ("m-12", two))
+    shown = report_browser.render(page, tmp_path, "formulas/m-12", actions=_ROW + (
+        'var r2 = row("R2").parentNode;'
+        'var a = Array.prototype.find.call(r2.querySelectorAll(":scope > ul > .ftree-exprline a.fref"),'
+        ' function(x){ return x.textContent === "Z"; }); a.click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'var under = sel.parentNode.parentNode.closest("li.ftree-node").firstChild.querySelector(".ftree-name").textContent;'
+        'var r1 = row("R1"); r1.click(); r1.firstChild.click();'  # select R1, close it with its arrow
+        'var s = document.querySelector("#v-formulas .ftree-search"); s.value = "q"; s.dispatchEvent(new Event("input"));'
+        'link(document.querySelector("#v-formulas .ftree-results"), "Q").click();'
+        'window.__extra = {under: under, r1Closed: r1.parentNode.classList.contains("collapsed")};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"under": "R2", "r1Closed": True}
+
+
+@needs_chrome
+def test_a_revealed_row_is_not_left_under_the_top_bar(tmp_path):
+    many = {"name": "Many", "formulas": [_f("formula_Top", "Top", "[formula_H]")] +
+            [_f(f"formula_P{i}", f"Pad {i}", f"[T::P{i}]") for i in range(60)] +
+            [_f("formula_Low", "Low", "[formula_H]"), _f("formula_H", "H", "[T::H]")]}
+    page = _report(tmp_path, ("m-13", many))
+    shown = report_browser.render(page, tmp_path, "formulas/m-13", actions=_ROW + (
+        'var low = row("Low"); low.scrollIntoView(); low.click();'
+        'var h = Array.prototype.filter.call(document.querySelectorAll("#v-formulas .ftree-row"), function(r){'
+        ' var n = r.querySelector(".ftree-name"); return n && n.textContent === "H" && r.offsetParent !== null; }).pop();'
+        'h.click(); link(panel().querySelector(".fdetail-usedby"), "Top").click();'
+        'var top = row("Top").getBoundingClientRect();'
+        'var bar = document.querySelector(".topbar").getBoundingClientRect();'
+        'window.__extra = {below: top.top >= bar.bottom - 1, y: window.scrollY};'))
+    assert shown["errors"] == []
+    assert shown["extra"]["below"]

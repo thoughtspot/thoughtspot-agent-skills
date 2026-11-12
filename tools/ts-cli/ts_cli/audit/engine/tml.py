@@ -25,7 +25,7 @@ engine modules that import it.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.formula_translate.refs import split_literals
 from ts_cli.tml_join_graph import node_id
@@ -64,17 +64,54 @@ SHAPES = {
 }
 
 
-def expr_refs(expr: Any) -> list:
-    """The `[...]` references of a formula, RLS rule or join `on`, in order: outside
-    quoted literals (`split_literals` keeps a bracketed reference whole even when its name
-    holds a quote, BL-369), stripped, empty ones dropped. The one reading every audit
-    reader shares — the formula tree, P17 and P2's reference graph, H3 and the RLS column
-    reads (BL-504); join `on` clauses go through tml_join_graph.on_clause_refs, which
-    also undoes a server escape (`dim\\.csv`). [] for a non-string."""
+def expr_parts(expr: Any) -> List[Tuple[bool, str, str]]:
+    """A formula, RLS rule or join `on` as written, in order: `(True, name, raw)` for
+    each `[...]` reference outside quoted literals (`split_literals` keeps a bracketed
+    reference whole even when its name holds a quote, BL-369), its name stripped, and
+    `(False, text, text)` for everything between, quoted literals and empty `[ ]`
+    included. The raw parts rejoin to the expression. The one scanner behind
+    `expr_refs` and the report's formula definitions, so a definition's links and the
+    references every audit reader reads cannot disagree. A number YAML read is its text;
+    any other non-string is no parts."""
+    if isinstance(expr, (int, float)) and not isinstance(expr, bool):
+        expr = str(expr)
     if not isinstance(expr, str):
         return []
-    code = " ".join(seg for lit, seg in split_literals(expr) if not lit)
-    return [r.strip() for r in BRACKET_REF.findall(code) if r.strip()]
+    out: List[Tuple[bool, str, str]] = []
+
+    def text(t: str) -> None:
+        if not t:
+            return
+        if out and not out[-1][0]:
+            out[-1] = (False, out[-1][1] + t, out[-1][2] + t)
+        else:
+            out.append((False, t, t))
+    for literal, seg in split_literals(expr):
+        if literal:
+            text(seg)
+            continue
+        pos = 0
+        for m in BRACKET_REF.finditer(seg):
+            name = m.group(1).strip()
+            if not name:
+                continue
+            text(seg[pos:m.start()])
+            out.append((True, name, m.group(0)))
+            pos = m.end()
+        text(seg[pos:])
+    return out
+
+
+def expr_refs(expr: Any) -> list:
+    """The `[...]` references of a formula, RLS rule or join `on`, in order (see
+    `expr_parts`): outside quoted literals, stripped, empty ones dropped. The one reading
+    every audit reader shares — the formula tree, P17 and P2's reference graph, H3 and
+    the RLS column reads (BL-504); join `on` clauses go through
+    tml_join_graph.on_clause_refs, which also undoes a server escape (`dim\\.csv`).
+    [] for a non-string."""
+    if not isinstance(expr, str):
+        return []
+    return [name for is_ref, name, _ in expr_parts(expr) if is_ref]
 
 
 def formula_reference_index(formulas: list, columns: Any = ()) -> Dict[Any, Any]:
