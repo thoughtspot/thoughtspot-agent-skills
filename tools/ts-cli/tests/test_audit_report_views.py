@@ -121,3 +121,71 @@ def test_a_new_view_is_a_new_file_and_a_registry_line(tmp_path, monkeypatch):
     assert shown["active"] == "v-probe"
     assert shown["active_text"] == "Probe view rendered"
     assert "Probe Link" in shown["text"], "its sidebar link comes from its own registration"
+
+
+#: Browser and language globals the report scripts may call without defining.
+_JS_GLOBALS = {
+    "Array", "Boolean", "Date", "Error", "Event", "JSON", "KeyboardEvent", "Math", "Number",
+    "Object", "RegExp", "Set", "Map", "CustomEvent", "String", "Promise", "Blob", "URL", "isNaN", "isFinite",
+    "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent", "setTimeout",
+    "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame", "alert",
+    "confirm", "getComputedStyle", "matchMedia", "fetch", "atob", "btoa", "escape",
+}
+_JS_KEYWORDS = {"if", "for", "while", "switch", "catch", "function", "return", "typeof",
+                "new", "in", "of", "do", "else", "with", "void", "delete", "throw"}
+
+
+def _strip_js_strings_and_comments(src: str) -> str:
+    """Blank out comments, string literals and regex literals (a `/` after an operator,
+    an opening bracket or a keyword starts one), so only code is left to read."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        c = src[i]
+        if src.startswith("/*", i):
+            j = src.find("*/", i + 2); i = n if j < 0 else j + 2; out.append(" "); continue
+        if src.startswith("//", i):
+            j = src.find("\n", i); i = n if j < 0 else j; continue
+        if c in "'\"`":
+            j = i + 1
+            while j < n and src[j] != c:
+                j += 2 if src[j] == "\\" else 1
+            out.append('""'); i = j + 1; continue
+        if c == "/":
+            prev = "".join(out).rstrip()
+            if not prev or prev[-1] in "(,=:[!&|?{};+-*%<>~^" or re.search(r"\b(return|typeof|in|of)$", prev):
+                j, in_class = i + 1, False
+                while j < n and (in_class or src[j] != "/"):
+                    if src[j] == "\\":
+                        j += 1
+                    elif src[j] == "[":
+                        in_class = True
+                    elif src[j] == "]":
+                        in_class = False
+                    j += 1
+                j += 1
+                while j < n and src[j].isalpha():
+                    j += 1
+                out.append('""'); i = j; continue
+        out.append(c); i += 1
+    return "".join(out)
+
+
+def test_every_function_a_report_script_calls_is_defined_somewhere():
+    """A helper deleted while a caller remains is a ReferenceError only when that path
+    runs (a column link in the Formulas view's panel, e031fba6's review): no linter reads
+    these scripts, so check the whole page's calls against its definitions."""
+    srcs = {p.relative_to(REPORT_DIR).as_posix(): _strip_js_strings_and_comments(p.read_text(encoding="utf-8"))
+            for p in sorted(REPORT_DIR.rglob("*.js"))}
+    every = "\n".join(srcs.values())
+    defined = set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", every))
+    defined |= set(re.findall(r"\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)", every))
+    for params in re.findall(r"\bfunction\s*[\w$]*\s*\(([^)]*)\)", every):
+        defined |= {p.strip() for p in params.split(",") if p.strip()}
+    defined |= set(re.findall(r"\b(?:var|let|const)\s+[\w$]+\s*=\s*[^;]*?,\s*([A-Za-z_$][\w$]*)\s*=", every))
+    missing = {}
+    for name, src in srcs.items():
+        for m in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", src):
+            fn = m.group(1)
+            if fn not in defined and fn not in _JS_GLOBALS and fn not in _JS_KEYWORDS:
+                missing.setdefault(fn, name)
+    assert missing == {}, f"called but defined nowhere in the report: {missing}"

@@ -190,17 +190,21 @@ function refLink(tree, use, written, untabbable){
     '>'+esc(written || label)+'</a>';
 }
 
+/* A reference segment as the expression writes it: its third element, or, left out
+   when it would only repeat the value, `[value]` (report.py's _compact_tree). */
+function written(s){ return s[2] !== undefined ? s[2] : "["+s[1]+"]"; }
+
 /* An expression's segments as HTML: text escaped, each reference a link, shown as
    written (`asWritten`) or by its label. */
 function exprHtml(tree, x, asWritten, untabbable){
   return x.map(function(s){
-    return typeof s === "string" ? esc(s) : refLink(tree, s, asWritten && s[2], untabbable);
+    return typeof s === "string" ? esc(s) : refLink(tree, s, asWritten && written(s), untabbable);
   }).join("");
 }
 
 /* The expression as plain text, both ways: what search reads. */
 function exprText(tree, x){
-  return (x || []).map(function(s){ return typeof s === "string" ? s : useLabel(tree, s)+" "+(s[2] || ""); }).join("");
+  return (x || []).map(function(s){ return typeof s === "string" ? s : useLabel(tree, s)+" "+written(s); }).join("");
 }
 
 function useKey(u){ return u[0]+":"+u[1]; }
@@ -247,7 +251,7 @@ function detailHtml(tree, target){
     if(node.f && node.f !== node.n) html += '<span class="fdetail-fname">Formula: '+esc(node.f)+'</span>';
     html += '</div><div class="fdetail-label">Definition</div>';
     html += !node.x ? '<div class="fdetail-note">'+esc(FORMULA_NO_DEFS)+'</div>'
-      : !node.x.length ? '<div class="fdetail-note">The TML gives this formula no expression.</div>'
+      : !node.x.length ? '<div class="fdetail-note">The TML gives this formula no expression, or one that is not text.</div>'
       : '<pre class="fdetail-expr">'+exprHtml(tree, node.x, true)+'</pre>';
     html += '<div class="fdetail-label">Uses ('+node.u.length+')</div>'+
       linkList(tree, "fdetail-uses", node.u, "No columns, parameters or formulas.");
@@ -284,9 +288,19 @@ function pathTo(tree, i){
   return null;
 }
 
-/* Open the tree down to `target` and return its row (the first, for a column or
-   parameter: under the first formula that uses it). */
-function revealRow(ul, tree, target){
+/* Open the tree down to `target` and return its row. Under `from`, the selected
+   formula's <li>, when that formula uses the target directly (the user followed a link
+   from it); otherwise the shortest way down from a root (for a column or parameter:
+   under the first formula that uses it). */
+function revealRow(ul, tree, target, from){
+  if(from && from._open){
+    from._open();
+    var kids = $(':scope > ul.ftree-children', from);
+    var hit = kids && (target[0] === 0 ? $(':scope > li.ftree-node[data-i="'+target[1]+'"]', kids) :
+      $$(':scope > li.ftree-leaf > .ftree-row', kids).filter(function(r){
+        return r._target && useKey(r._target) === useKey(target); })[0]);
+    if(hit) return target[0] === 0 ? hit.firstChild : hit;
+  }
   var at = target[0] === 0 ? target[1] : directUsers(tree, target)[0];
   if(at === undefined) return null;
   var path = pathTo(tree, at);
@@ -302,12 +316,13 @@ function revealRow(ul, tree, target){
   }
   if(target[0] === 0) return li.firstChild;
   var leaf = $$(':scope > li.ftree-leaf > .ftree-row', scope).filter(function(r){
-    return r._target && sameUse(r._target, target); })[0];
+    return r._target && useKey(r._target) === useKey(target); })[0];
   return leaf || null;
 }
 
-/* Every match, ranked: formulas by name, then columns and parameters by name, then
-   formulas by definition (as written or by label). The caller shows the first
+/* Every match, ranked: columns and parameters by name (there are few, and a column must
+   not be pushed out of the shown list), then formulas by name, then formulas by
+   definition (as written or by label). The caller shows the first
    FORMULA_SEARCH_CAP and says how many more there are. */
 function searchHits(tree, q){
   q = q.trim().toLowerCase();
@@ -324,7 +339,7 @@ function searchHits(tree, q){
       seen[useKey(u)] = true; other.push(u);
     }
   }); });
-  return byName.concat(other, byDef);
+  return other.concat(byName, byDef);
 }
 
 function searchResultsHtml(tree, value){
@@ -404,7 +419,8 @@ function buildFormulaTree(c, guid){
   var hdr = el("div","ftree-header");
   hdr.innerHTML = '<div class="model-title">'+esc(findModelName(guid))+'</div>'+
     '<div class="ftree-sub">'+tree.n.length+' formula'+(tree.n.length === 1 ? '' : 's')+', '+
-    tree.r.length+' at the top. Click a formula to see its definition and open what it uses.</div>'+
+    tree.r.length+' at the top. Click a formula to see its definition and open what it uses; '+
+    'in the tree, the arrow keys move between rows and Escape closes the definition.</div>'+
     '<div class="header-actions"><input class="ftree-search" type="search" '+
     'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
     '<button class="erd-btn ftree-expand">Expand all</button>'+
@@ -417,7 +433,6 @@ function buildFormulaTree(c, guid){
   c.appendChild(note);
   var layout = el("div","ftree-layout");
   var panel = el("aside","fdetail fdetail-empty");
-  panel.setAttribute("aria-live","polite");
   panel.setAttribute("aria-label","Definition");
   var EMPTY = '<div class="fdetail-none">Click a formula, column or parameter to see its '+
     'definition, what it uses and what uses it.</div>';
@@ -436,22 +451,32 @@ function buildFormulaTree(c, guid){
       panel.innerHTML = detailHtml(tree, target);
       panel.classList.remove("fdetail-empty");
       layout.classList.add("ftree-has-detail");
-      var revealed = !row;
-      if(!row) row = revealRow(ul, tree, target);
+      if(!row){
+        var prev = $(".ftree-selected", ul);
+        row = revealRow(ul, tree, target, prev && prev.parentNode.classList.contains("ftree-node") ? prev.parentNode : null);
+      }
       clearSelection();
-      if(row) row.classList.add("ftree-selected");
-      if(revealed && row && row.scrollIntoView) row.scrollIntoView({block: "nearest"});
+      if(row){
+        row.classList.add("ftree-selected");
+        /* "nearest" moves the page only when the row is off screen or, on a narrow
+           screen, under the sheet (its scroll-margin-bottom) */
+        if(row.scrollIntoView) row.scrollIntoView({block: "nearest"});
+      }
       if(focusPanel) $(".fdetail-title", panel).focus();
     }
   };
-  panel.addEventListener("click", function(e){
-    if(!e.target.closest(".fdetail-close")) return;
+  function closePanel(){
     var sel = $(".ftree-selected", ul);
     panel.innerHTML = EMPTY;
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
     clearSelection();
+    if(!sel || sel.offsetParent === null) sel = $('.ftree-row[tabindex="0"]', ul);
     if(sel) sel.focus();
+  }
+  panel.addEventListener("click", function(e){ if(e.target.closest(".fdetail-close")) closePanel(); });
+  layout.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && !panel.classList.contains("fdetail-empty")){ e.preventDefault(); closePanel(); }
   });
   wireRefLinks(layout, view);
   wireRefLinks(results, view);

@@ -36,10 +36,12 @@ window.addEventListener("load",function(){setTimeout(function(){
 </script>"""
 
 
-def render(html_text: str, tmp_path, route: str = "", actions: str = "") -> dict:
+def render(html_text: str, tmp_path, route: str = "", actions: str = "",
+           size: str = "1400,900") -> dict:
     """`{"errors": [...], "text": "...", "active": <id of the shown view>, "active_text":
     "...", "visible": "...", "extra": ...}` for `html_text` opened at `#route`. `actions`,
-    a script body, runs on load before the probe reads the page (a click, say)."""
+    a script body, runs on load before the probe reads the page (a click, say). `size`
+    is the window, "width,height"."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")
@@ -49,7 +51,7 @@ def render(html_text: str, tmp_path, route: str = "", actions: str = "") -> dict
            if actions else "")
     page.write_text(head + sep + _TRAP + body + act + _PROBE + sep2 + tail, encoding="utf-8")
     cmd = [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
-           f"--user-data-dir={tmp_path / 'chrome-profile'}", "--window-size=1400,900",
+           f"--user-data-dir={tmp_path / 'chrome-profile'}", f"--window-size={size}",
            "--virtual-time-budget=5000", "--dump-dom",
            page.resolve().as_uri() + (f"#{route}" if route else "")]
     dom = subprocess.run(cmd, capture_output=True, text=True, timeout=120).stdout

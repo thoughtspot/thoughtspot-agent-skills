@@ -27,12 +27,15 @@ def test_expr_parts_is_the_text_and_references_expr_refs_reads():
     # one scanner: the parts' references are exactly expr_refs, and the parts rejoin to
     # the expression as written (the definition panel shows them; the tree's uses and
     # its links are built from them, so they cannot disagree)
-    cases = ["concat ( '[A::x]' , [B::y] )", 'if ( [A::x] = "[C::z]" ) then 1 else 0',
-             "[Bob's Sales::x] + [ T::y ]", "[ ] + 1", "[a]]b] + 'it''s' + [c", "[[x]]",
-             "", "no refs at all"]
-    for expr in cases:
+    cases = {"concat ( '[A::x]' , [B::y] )": ["B::y"],
+             'if ( [A::x] = "[C::z]" ) then 1 else 0': ["A::x"],
+             "[Bob's Sales::x] + [ T::y ]": ["Bob's Sales::x", "T::y"],
+             "[ ] + 1": [], "[a]]b] + 'it''s' + [c": ["a"], "[[x]]": ["[x"],
+             "": [], "no refs at all": []}
+    for expr, refs in cases.items():
         parts = tml.expr_parts(expr)
-        assert [ref for kind, ref, _ in parts if kind] == tml.expr_refs(expr), expr
+        assert [ref for kind, ref, _ in parts if kind] == refs, expr
+        assert tml.expr_refs(expr) == refs, expr
         assert "".join(raw for _, _, raw in parts) == expr, expr
     assert tml.expr_parts("[ T::y ] + 1") == [(True, "T::y", "[ T::y ]"), (False, " + 1", " + 1")]
     assert tml.expr_parts("[ ] + 1") == [(False, "[ ] + 1", "[ ] + 1")]

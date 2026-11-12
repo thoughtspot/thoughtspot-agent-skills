@@ -792,6 +792,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   .fdetail.fdetail-empty{display:none;}
   .ftree-has-detail .ftree{margin-bottom:46vh;}
   .ftree-has-detail .ftree-row{scroll-margin-bottom:46vh;} }
+@media (min-width:769px) and (max-width:900px){ .fdetail{left:var(--sidebar-w);} }
 .ftree-name{font-weight:500;color:var(--ink);overflow-wrap:anywhere;}
 .ftree-tag{font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;
   border:1px solid var(--hair);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
