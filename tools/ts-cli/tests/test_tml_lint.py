@@ -4,6 +4,8 @@ Each invariant (I1/I2/I4/I5 + guid placement) gets a positive (violating) case a
 the clean baseline is asserted to produce zero findings. Pure-function tests — no
 ThoughtSpot connection required.
 """
+import pytest
+
 from ts_cli.tml_lint import lint_tml
 
 
@@ -500,13 +502,16 @@ class TestI15MisplacedColumnRootKeys:
 from ts_cli.tml_lint import lint_model_table_aggregation, table_aggregations  # noqa: E402
 
 
-def _mv_table(name="order_detail_mv", agg="SUM"):
+def _mv_table(name="order_detail_mv", agg="SUM", pre_aggregated=True):
+    def props(a):
+        p = {"column_type": "MEASURE", "aggregation": a}
+        if a == "AGGREGATE" and pre_aggregated:
+            p["is_pre_aggregated_measure"] = True
+        return p
     return {"name": name, "columns": [
-        {"name": "total_revenue", "db_column_name": "total_revenue",
-         "properties": {"column_type": "MEASURE", "aggregation": agg}},
+        {"name": "total_revenue", "db_column_name": "total_revenue", "properties": props(agg)},
         {"name": "Region", "db_column_name": "region", "properties": {"column_type": "ATTRIBUTE"}},
-        {"name": "line_count", "db_column_name": "line_count",
-         "properties": {"column_type": "MEASURE", "aggregation": "AGGREGATE"}},
+        {"name": "line_count", "db_column_name": "line_count", "properties": props("AGGREGATE")},
     ]}
 
 
@@ -542,6 +547,15 @@ class TestI16ModelTableAggregation:
     def test_aggregate_at_both_levels_is_clean(self):
         assert lint_model_table_aggregation(_model(AGG), self._tables(_mv_table(agg="AGGREGATE"))) == []
 
+    def test_flag_is_checked_on_the_table_not_via_the_model(self):
+        # The flag belongs to the Table column, so the cross-file check does not repeat it.
+        t = _mv_table(agg="AGGREGATE", pre_aggregated=False)
+        assert lint_model_table_aggregation(_model(AGG), self._tables(t)) == []
+
+    def test_sum_message_names_the_flag(self):
+        f = lint_model_table_aggregation(_model(AGG), self._tables(_mv_table(agg="SUM")))
+        assert "is_pre_aggregated_measure: true" in f[0]
+
     def test_reverse_direction_not_flagged(self):
         # Table AGGREGATE, Model ATTRIBUTE: searched correctly live 2026-10-07.
         m = _model({"column_type": "MEASURE", "aggregation": "SUM"},
@@ -566,6 +580,42 @@ class TestI16ModelTableAggregation:
         m["model"]["columns"][0]["formula_id"] = "formula_x"
         assert lint_model_table_aggregation(m, self._tables(_mv_table())) == []
         assert lint_model_table_aggregation({"table": {}}, {}) == []
+
+
+class TestI23PreAggregatedFlag:
+    """Live 2026-11-12 (newer build): an AGGREGATE Table column without
+    is_pre_aggregated_measure: true was planned as an ATTRIBUTE by AgentQL, which
+    rejected AGG() with COLUMNS_NOT_GROUPED_OR_AGGREGATED. Checked on the Table alone."""
+
+    @staticmethod
+    def _doc(**props):
+        base = {"column_type": "MEASURE", "aggregation": "AGGREGATE"}
+        base.update(props)
+        return {"table": {"name": "mv", "db": "c", "schema": "s", "db_table": "mv",
+                          "connection": {"name": "X"}, "columns": [
+            {"name": "rev", "db_column_name": "rev", "properties": base},
+            {"name": "region", "db_column_name": "region", "properties": {"column_type": "ATTRIBUTE"}},
+        ]}}
+
+    def test_missing_flag_flagged_on_table_alone(self):
+        f = [x for x in lint_tml(self._doc()) if x.startswith("I23:")]
+        assert len(f) == 1
+        for part in ("'rev'", "is_pre_aggregated_measure: true", "COLUMNS_NOT_GROUPED_OR_AGGREGATED"):
+            assert part in f[0]
+
+    @pytest.mark.parametrize("value", [False, "true"])
+    def test_non_true_flag_flagged(self, value):
+        assert any(x.startswith("I23:") for x in lint_tml(self._doc(is_pre_aggregated_measure=value)))
+
+    def test_flagged_column_clean(self):
+        assert not any(x.startswith("I23:") for x in lint_tml(self._doc(is_pre_aggregated_measure=True)))
+
+    @pytest.mark.parametrize("columns", ["oops", [{"name": "x", "properties": "MEASURE"}], [{"name": "x", "properties": ["a"]}], 5])
+    def test_malformed_table_does_not_crash(self, columns):
+        lint_tml({"table": {"name": "t", "columns": columns}})
+
+    def test_other_aggregations_not_flagged(self):
+        assert not any(x.startswith("I23:") for x in lint_tml(self._doc(aggregation="SUM")))
 
 
 def test_ts_tml_lint_runs_i16_when_tables_are_in_the_batch(tmp_path):

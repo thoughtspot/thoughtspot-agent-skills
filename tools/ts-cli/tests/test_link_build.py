@@ -90,11 +90,26 @@ class TestBuildAggregateMode:
         tcols = {c["name"]: c for c in t["table"]["columns"]}
         assert tcols["region"]["properties"] == {"column_type": "ATTRIBUTE"}
         assert tcols["revenue_gbp"]["properties"] == {
-            "column_type": "MEASURE", "aggregation": "AGGREGATE", "index_type": "DONT_INDEX"}
+            "column_type": "MEASURE", "aggregation": "AGGREGATE", "index_type": "DONT_INDEX",
+            "is_pre_aggregated_measure": True}
         # db_column_name always present (TML invariant)
         assert all(c["db_column_name"] == c["name"] for c in t["table"]["columns"])
         assert t["table"]["connection"] == {"name": "TS-DBX"}
         assert r["measures"] == 1 and r["attributes"] == 1
+
+    def test_pre_aggregated_flag_on_table_only(self):
+        """Without is_pre_aggregated_measure on the TABLE column, AgentQL plans an AGGREGATE
+        measure as an ATTRIBUTE and rejects AGG() with COLUMNS_NOT_GROUPED_OR_AGGREGATED
+        (live 2026-11-12, Databricks Metric View). The Model works without it."""
+        t, m, _ = build_link_tml(_spec([DIM, REV]), aggregation_mode="aggregate", model_name="Sales")
+        tcols = {c["name"]: c["properties"] for c in t["table"]["columns"]}
+        assert tcols["revenue_gbp"]["is_pre_aggregated_measure"] is True
+        assert "is_pre_aggregated_measure" not in tcols["region"]
+        assert all("is_pre_aggregated_measure" not in c["properties"] for c in m["model"]["columns"])
+
+    def test_pre_aggregated_flag_absent_in_standard_mode(self):
+        t, _, _ = build_link_tml(_spec([DIM, REV]), aggregation_mode="standard", model_name="Sales")
+        assert all("is_pre_aggregated_measure" not in c["properties"] for c in t["table"]["columns"])
 
     def test_thin_model_no_formulas_no_joins(self):
         _, m, _ = build_link_tml(_spec([DIM, REV]), aggregation_mode="aggregate", model_name="Sales")

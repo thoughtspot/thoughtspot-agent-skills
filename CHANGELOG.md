@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-12
+- fix: `ts link build` writes `is_pre_aggregated_measure: true` on every `AGGREGATE` measure of the linked Table; without it a newer build's AgentQL treated the measure as an attribute and rejected `AGG()` with `COLUMNS_NOT_GROUPED_OR_AGGREGATED`. new `ts tml lint` rule I23 flags an `AGGREGATE` Table column without it (ts-link-semantic-layer 1.2.0)
+- chore: bump ts-cli to v0.214.0
+
 ## 2026-11-11
 - fix: `ts sets inventory --export-tml` refuses an unwritable, dangling or unreachable directory before the scan (on Windows too), caps each file-name segment at 120 characters and 150 UTF-8 bytes (long non-Latin Set names exceeded the 255-byte limit), keeps combining marks in names, and no longer fails on a raw C1 or NEL character in a YAML answer; every `ts sets` path option expands `~`, so a quoted path lands with the rest of the run; `*.cohort.tml` is gitignored; the set-manager keeps one run directory per run (ts-object-set-manager 1.2.1)
 - chore: bump ts-cli to v0.213.1

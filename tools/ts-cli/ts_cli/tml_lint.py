@@ -15,10 +15,12 @@ a self-join, or an `on:` naming the wrong tables, but its message names none of 
 joins at fault — these do. I20 (a MANY_TO_MANY Model join) and I21 (a
 `referencing_join` its own Table TML does not declare; cross-file, like I16) are
 rejected with clear messages, but only at import — after a converter has finished.
+I23 is a Table rule: an `AGGREGATE` measure without `is_pre_aggregated_measure: true`
+imports cleanly, and AgentQL then refuses `AGG()` on it (newer builds).
 Rules mirror the invariants in
 `agents/shared/schemas/ts-model-conversion-invariants.md`.
 
-CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19/I20/I21/I22
+CANONICAL-RULE-SET: I1/I2/I4/I5/I8/I12/I13/I14/I15/I16/I17/I18/I19/I20/I21/I22/I23
     The one authoritative enumeration of what this module checks, gated by
     tools/validate/check_lint_invariant_list.py against the findings the code
     actually emits. Do not restate this set anywhere else — name the concept
@@ -222,6 +224,8 @@ def lint_tml(data: dict) -> list[str]:
 
     findings.extend(_check_chart_tile_encoding(data))
     findings.extend(_check_viz_table_binding(data))
+
+    findings.extend(_check_pre_aggregated_flag(data))
 
     model = data.get("model")
     if not isinstance(model, dict):
@@ -875,6 +879,42 @@ def _declared_on(ref: str, model: dict, join_names: dict[str, set]) -> str:
             f"entry") if owners else ""
 
 
+def _check_pre_aggregated_flag(data: dict) -> list[str]:
+    """I23 — a Table column at ``MEASURE``/``AGGREGATE`` must carry
+    ``is_pre_aggregated_measure: true``.
+
+    Live 2026-11-12 on a newer build: a Table over a Databricks Metric View had every
+    measure ``AGGREGATE`` and AgentQL planned them as ATTRIBUTEs, rejecting ``AGG()`` with
+    ``COLUMNS_NOT_GROUPED_OR_AGGREGATED``. Adding the flag to the Table columns fixed it,
+    and search worked after it. The October build did not need it. Checked on the Table
+    alone: AgentQL reads the Table, so a Model column inheriting the aggregation is
+    expected to fail the same way (not observed separately). Only the YAML boolean ``true`` counts. Pure.
+    """
+    table = data.get("table")
+    if not isinstance(table, dict):
+        return []
+    columns = table.get("columns")
+    if not isinstance(columns, list):
+        return []
+    findings: list[str] = []
+    for c in columns:
+        if not isinstance(c, dict):
+            continue
+        p = c.get("properties")
+        if not isinstance(p, dict):
+            continue
+        if p.get("aggregation") == "AGGREGATE" and p.get("column_type") == "MEASURE" \
+                and p.get("is_pre_aggregated_measure") is not True:
+            findings.append(
+                f"I23: Table column '{c.get('name') or c.get('db_column_name')}' is "
+                f"MEASURE/AGGREGATE without is_pre_aggregated_measure: true. On newer builds "
+                f"AgentQL then plans it as an attribute and rejects AGG() with "
+                f"COLUMNS_NOT_GROUPED_OR_AGGREGATED. Add is_pre_aggregated_measure: true "
+                f"to the column's properties."
+            )
+    return findings
+
+
 def lint_model_table_aggregation(model_tml: dict, tables: dict[str, dict]) -> list[str]:
     """I16 — a Model column marked ``MEASURE``/``AGGREGATE`` must sit on a Table column
     that is ``AGGREGATE`` too.
@@ -887,6 +927,9 @@ def lint_model_table_aggregation(model_tml: dict, tables: dict[str, dict]) -> li
     ``METRIC_VIEW_MISSING_MEASURE_FUNCTION``). Verified 2026-10-07 on two DBX Models
     whose search worked while every AgentQL aggregate failed; setting the Tables to
     ``AGGREGATE`` fixed both.
+
+    The ``is_pre_aggregated_measure`` flag an ``AGGREGATE`` Table column also needs is
+    checked on the Table itself (I23, :func:`_check_pre_aggregated_flag`), not here.
 
     The reverse — Table ``AGGREGATE``, Model not — is deliberately NOT flagged: the same
     day a Model ATTRIBUTE over an ``AGGREGATE`` Table column searched correctly, so there
@@ -938,5 +981,5 @@ def _i16_finding(col: Any, ref_to_table: dict[str, str], tables_ci: dict[str, di
         f"I16: Model column '{col.get('name', cid)}' is MEASURE/AGGREGATE but Table column "
         f"'{cid}' is {table_role} — AgentQL/SpotQL uses the Table's aggregation, so every "
         f"aggregate query on it fails while UI search works. Set the Table column to "
-        f"MEASURE/AGGREGATE as well."
+        f"MEASURE/AGGREGATE as well, with is_pre_aggregated_measure: true."
     )

@@ -151,3 +151,60 @@ inconsistency itself — AgentQL and search reading different levels — belongs
 semantic-SQL query-gen change, like #7.
 
 **Status: VERIFIED 2026-10-07.**
+
+---
+
+## 9 — An `AGGREGATE` Table column also needs `is_pre_aggregated_measure: true` — VERIFIED 2026-11-12
+
+On the semantic SQL DEV cluster (a newer build than #8's), a Table created by
+`ts link build` over the Databricks Metric View `metric_view_joins.dm_sales_analysis_mv` had
+its six measures `MEASURE`/`AGGREGATE` at both levels, as #8 requires, and AgentQL still
+failed:
+
+| Query | Result |
+|---|---|
+| `SELECT "Product Category", AGG("Total Revenue") … GROUP BY "Product Category"` | `COLUMNS_NOT_GROUPED_OR_AGGREGATED`; the query plan carried `total_revenue` as `column_type: ATTRIBUTE` |
+
+A Table over `dunder_mifflin.dunder_mifflin_sales_mv` on the same cluster and connection
+answered the same query correctly. Its TML differed in one property: every measure carried
+`is_pre_aggregated_measure: true`. Adding that property to the failing Table's six measures
+(TML update, GUID kept) fixed it: the query returned all eight categories, each matching
+`MEASURE(total_revenue)` on Databricks to the cent. The Model columns need no change; both
+working Models have no such property on their own columns.
+
+After the fix, on the same build and Table, each matched Databricks:
+
+| Path | Query |
+|---|---|
+| AgentQL | one dimension + `AGG()` (8 rows); two dimensions (112 groups); a total with no `GROUP BY` (`AGG()` of two measures) |
+| UI search (`searchdata`) | `[Product Category] [Total Revenue]`; `[Total Revenue] [Active Orders]` |
+
+`ts link build` on the October build (#8) worked without the property. The build now writes
+it on every `AGGREGATE` Table column (ts-cli 0.214.0), and `ts tml lint` I23 flags an
+`AGGREGATE` Table column without it. What this did not test is #10.
+
+**Status: VERIFIED 2026-11-12.**
+
+---
+
+## 10 — `is_pre_aggregated_measure` on Snowflake Semantic Views and on released builds — DEFERRED
+
+#9 was verified on one Databricks Metric View on one newer DEV build. The build writes the
+flag on every `AGGREGATE` Table column, so it also reaches Snowflake Semantic View links,
+`standard`-mode measures given `aggregation: aggregate` (Honeydew, Cube, Kyvos), and
+released builds.
+
+| Question | Finding |
+|---|---|
+| Does a released build reject the key on a Table import? | **No.** `VALIDATE_ONLY` import of a Snowflake Table on `se-thoughtspot` (released Cloud build) with one measure set to `AGGREGATE` + `is_pre_aggregated_measure: true`: `status_code OK`. A control with a made-up key under `properties:` was accepted too, so this shows the import does not fail, not that the build reads the flag. Re-export afterwards: nothing persisted (2026-11-12) |
+| Does a real (not `VALIDATE_ONLY`) import on a released build keep the flag? | Not tested. A made-up key was accepted too, so the build may accept the flag and drop it. If it does, a link made there lacks the flag and fails AgentQL once the cluster moves to a build that needs it |
+| Does the flag change any answer on a released build, or on an SV link? | Not tested. No SV link has been queried with the flag |
+
+So `ts link build` does not fail on a released build because of the flag. To close the
+rest: on a released build, link one Metric View, re-export its Table and check the flag is
+still there, then run Step 7's query and a search; on an SV link, run the same and compare
+with Snowflake. The post-import `coerced` check compares the Model only, so it would not
+catch a dropped flag, and on a build that does not need the flag Step 7 passes either way:
+the re-export is the check.
+
+**Status: DEFERRED — target 2026-12-15, or the first SV link on a newer build, whichever is sooner.**

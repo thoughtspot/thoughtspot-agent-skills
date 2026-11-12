@@ -419,6 +419,11 @@ def _column_entries(r: _Resolved, table_name: str, display_name: str) -> Tuple[d
         tc["description"] = desc
         mc["description"] = desc
     tc["properties"] = dict(props)
+    if r.aggregation == "AGGREGATE":
+        # Table only. Without it AgentQL plans the measure as an ATTRIBUTE and rejects
+        # AGG() with COLUMNS_NOT_GROUPED_OR_AGGREGATED (live 2026-11-12, Databricks Metric
+        # View); a hand-built Table that worked carried it. The Model works without it.
+        tc["properties"]["is_pre_aggregated_measure"] = True
     tc["db_column_properties"] = {"data_type": r.data_type}
 
     mprops = dict(props)
