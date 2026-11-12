@@ -15,16 +15,17 @@ entered: at a formula everything upstream of which lies in its own cycle, so no 
 is lost; the view guards against walking a cycle. A formula or column id that is not a
 string is ignored (malformed TML must not end a narrow run, BL-501).
 
-Each node also carries its expression as `expr` segments, for the view's definition
-panel: text, and each reference occurrence resolved exactly as `uses` resolves it, so a
-link in the definition can never disagree with the tree. Quoted literals stay text.
+Each node also carries its expression as written, as `expr` segments for the view's
+definition panel: text, and each reference occurrence resolved, with `ref` the reference
+as written. Both `uses` and `expr` are read off `tml.expr_parts`, the scanner behind
+`tml.expr_refs`, so a link in the definition and the tree cannot disagree. Quoted
+literals stay text.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from ts_cli.audit.engine import tml
-from ts_cli.formula_translate.refs import split_literals
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
@@ -50,11 +51,21 @@ def _resolve(ref: str, by_ref: Dict[Any, Any], params: set) -> dict:
     return {"column": ref}
 
 
-def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict]:
-    """What one expression refers to, in order, each once (see the module docstring)."""
+def _segments(expr: Any, by_ref: Dict[Any, Any], params: set) -> List[Any]:
+    """The expression as written (`tml.expr_parts`): text, and each reference resolved
+    (see `_resolve`) with `ref`, the reference as written."""
+    return [{**_resolve(name, by_ref, params), "ref": raw} if is_ref else raw
+            for is_ref, name, raw in tml.expr_parts(expr)]
+
+
+def _uses(segments: List[Any], own: str) -> List[dict]:
+    """What an expression refers to, in order, each once, a self-reference left out:
+    read off its segments, so the tree and the definition cannot disagree."""
     seen, out = set(), []
-    for ref in tml.expr_refs(str(expr or "")):
-        item = _resolve(ref, by_ref, params)
+    for seg in segments:
+        if isinstance(seg, str):
+            continue
+        item = {k: v for k, v in seg.items() if k != "ref"}
         key = tuple(item.items())
         if item.get("formula") == own or key in seen:
             continue
@@ -63,47 +74,15 @@ def _uses(expr: Any, by_ref: Dict[Any, Any], params: set, own: str) -> List[dict
     return out
 
 
-def _segments(expr: Any, by_ref: Dict[Any, Any], params: set) -> List[Any]:
-    """The expression as text and resolved references, in order (see the module
-    docstring). A number YAML read from the TML is shown as text; any other non-string
-    is shown as nothing."""
-    if isinstance(expr, (int, float)) and not isinstance(expr, bool):
-        expr = str(expr)
-    if not isinstance(expr, str):
-        return []
-    out: List[Any] = []
-
-    def text(t: str) -> None:
-        if not t:
-            return
-        if out and isinstance(out[-1], str):
-            out[-1] += t
-        else:
-            out.append(t)
-    for literal, seg in split_literals(expr):
-        if literal:
-            text(seg)
-            continue
-        pos = 0
-        for m in tml.BRACKET_REF.finditer(seg):
-            ref = m.group(1).strip()
-            if not ref:
-                continue
-            text(seg[pos:m.start()])
-            out.append(_resolve(ref, by_ref, params))
-            pos = m.end()
-        text(seg[pos:])
-    return out
-
-
 def _node(formula: dict, column: Any, by_ref: Dict[Any, Any], params: set) -> dict:
     props = tml.mapping(column, "properties") if column else {}
     label = column.get("name") if column and column.get("name") else formula["name"]
+    segments = _segments(formula.get("expr"), by_ref, params)
     return {"name": formula["name"], "label": str(label),
             "kind": str(props.get("column_type") or "").upper() or None,
             "hidden": column is None or bool(props.get("is_hidden")),
-            "uses": _uses(formula.get("expr"), by_ref, params, formula["name"]),
-            "expr": _segments(formula.get("expr"), by_ref, params),
+            "uses": _uses(segments, formula["name"]),
+            "expr": segments,
             "used_by": 0}
 
 

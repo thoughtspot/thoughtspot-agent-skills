@@ -234,8 +234,9 @@ def _compact_tree(tree: dict) -> dict:
     """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
     {n label, f formula name, k kind, h hidden, b used_by, u uses, x expression}, each
     use `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`, and `x` the
-    expression as text strings and references in that same encoding (absent from a tree
-    written before expressions were kept); `r` root indices."""
+    expression as written: text strings, and each reference in that same encoding plus
+    the reference as written (`[0, 3, "[formula_GM]"]`); absent from a tree written
+    before expressions were kept. `r` root indices."""
     index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
 
     def use(u):
@@ -248,7 +249,8 @@ def _compact_tree(tree: dict) -> dict:
                "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
                "u": [use(u) for u in node["uses"]]}
         if isinstance(node.get("expr"), list):
-            out["x"] = [s if isinstance(s, str) else use(s) for s in node["expr"]]
+            out["x"] = [s if isinstance(s, str) else use(s) + [s.get("ref", "")]
+                        for s in node["expr"]]
         nodes.append(out)
     return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
 
