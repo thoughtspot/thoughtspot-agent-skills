@@ -180,14 +180,14 @@ function useLabel(tree, use){ return use[0] === 0 ? tree.n[use[1]].n : String(us
 
 var FORMULA_REF_KINDS = ["Formula", "Column", "Parameter"];
 
-/* A link to `use`. `written`, the reference as the expression writes it, is shown in
+/* A link to `use`. `shown`, the reference as the expression writes it, is shown in
    place of the label (the definition shows the formula as written), with the label in
    the tooltip. `untabbable` keeps it out of the tab order (the tree's inline line). */
-function refLink(tree, use, written, untabbable){
+function refLink(tree, use, shown, untabbable){
   var label = useLabel(tree, use);
   return '<a class="fref fref-'+use[0]+'" role="button" tabindex="'+(untabbable ? -1 : 0)+'" data-k="'+use[0]+
-    '" data-v="'+esc(String(use[1]))+'"'+(written ? ' title="'+esc(FORMULA_REF_KINDS[use[0]]+': '+label)+'"' : '')+
-    '>'+esc(written || label)+'</a>';
+    '" data-v="'+esc(String(use[1]))+'"'+(shown ? ' title="'+esc(FORMULA_REF_KINDS[use[0]]+': '+label)+'"' : '')+
+    '>'+esc(shown || label)+'</a>';
 }
 
 /* A reference segment as the expression writes it: its third element, or, left out
@@ -202,9 +202,13 @@ function exprHtml(tree, x, asWritten, untabbable){
   }).join("");
 }
 
-/* The expression as plain text, both ways: what search reads. */
-function exprText(tree, x){
-  return (x || []).map(function(s){ return typeof s === "string" ? s : useLabel(tree, s)+" "+written(s); }).join("");
+/* The expression as plain text, as written (`asWritten`, the panel's form) or by label
+   (the tree's inline line): search reads both, each whole, so a query may span
+   references and the text between them. */
+function exprText(tree, x, asWritten){
+  return (x || []).map(function(s){
+    return typeof s === "string" ? s : asWritten ? written(s) : useLabel(tree, s);
+  }).join("");
 }
 
 function useKey(u){ return u[0]+":"+u[1]; }
@@ -288,12 +292,15 @@ function pathTo(tree, i){
   return null;
 }
 
-/* Open the tree down to `target` and return its row. Under `from`, the selected
-   formula's <li>, when that formula uses the target directly (the user followed a link
-   from it); otherwise the shortest way down from a root (for a column or parameter:
-   under the first formula that uses it). */
+/* Open the tree down to `target` and return its row. Under `from`, the <li> of the
+   formula the link was followed from, when that row is on screen and the formula uses
+   the target directly; otherwise the shortest way down from a root (for a column or
+   parameter: under the first formula that uses it). Nothing is opened under `from`
+   unless the target is there. */
 function revealRow(ul, tree, target, from){
-  if(from && from._open){
+  var fromI = from ? +from.getAttribute("data-i") : NaN;
+  if(from && from._open && from.firstChild.offsetParent !== null && tree.n[fromI] &&
+     tree.n[fromI].u.some(function(u){ return useKey(u) === useKey(target); })){
     from._open();
     var kids = $(':scope > ul.ftree-children', from);
     var hit = kids && (target[0] === 0 ? $(':scope > li.ftree-node[data-i="'+target[1]+'"]', kids) :
@@ -332,7 +339,8 @@ function searchHits(tree, q){
     if(node.n.toLowerCase().indexOf(q) !== -1 || String(node.f).toLowerCase().indexOf(q) !== -1){
       byName.push([0, j]); return;
     }
-    if(exprText(tree, node.x).toLowerCase().indexOf(q) !== -1) byDef.push([0, j]);
+    if(exprText(tree, node.x, true).toLowerCase().indexOf(q) !== -1 ||
+       exprText(tree, node.x, false).toLowerCase().indexOf(q) !== -1) byDef.push([0, j]);
   });
   tree.n.forEach(function(node){ node.u.forEach(function(u){
     if(u[0] !== 0 && !seen[useKey(u)] && String(u[1]).toLowerCase().indexOf(q) !== -1){
@@ -399,8 +407,11 @@ function wireRefLinks(root, view){
     if(e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
     var k = +a.getAttribute("data-k"), v = a.getAttribute("data-v");
-    /* from the panel or the search results, focus follows to the new definition */
-    view.select([k, k === 0 ? +v : v], null, !a.closest(".ftree"));
+    /* from the panel or the search results, focus follows to the new definition; from
+       a formula's inline line, the target opens under that formula */
+    var line = a.closest(".ftree-exprline");
+    view.select([k, k === 0 ? +v : v], null, !a.closest(".ftree"),
+      line ? line.parentNode.closest("li.ftree-node") : undefined);
   }
   root.addEventListener("click", go);
   root.addEventListener("keydown", go);
@@ -434,6 +445,7 @@ function buildFormulaTree(c, guid){
   var layout = el("div","ftree-layout");
   var panel = el("aside","fdetail fdetail-empty");
   panel.setAttribute("aria-label","Definition");
+  panel.setAttribute("aria-live","polite");  /* a row click keeps focus in the tree */
   var EMPTY = '<div class="fdetail-none">Click a formula, column or parameter to see its '+
     'definition, what it uses and what uses it.</div>';
   panel.innerHTML = EMPTY;
@@ -447,13 +459,16 @@ function buildFormulaTree(c, guid){
      reveals its target's row. `focusPanel` moves focus to the new definition. On a
      narrow screen the panel is a sheet over the foot of the page (styles.css). */
   var view = tree._view = {
-    select: function(target, row, focusPanel){
+    select: function(target, row, focusPanel, from){
       panel.innerHTML = detailHtml(tree, target);
       panel.classList.remove("fdetail-empty");
       layout.classList.add("ftree-has-detail");
       if(!row){
-        var prev = $(".ftree-selected", ul);
-        row = revealRow(ul, tree, target, prev && prev.parentNode.classList.contains("ftree-node") ? prev.parentNode : null);
+        if(from === undefined){
+          var prev = $(".ftree-selected", ul);
+          from = prev && prev.parentNode.classList.contains("ftree-node") ? prev.parentNode : null;
+        }
+        row = revealRow(ul, tree, target, from);
       }
       clearSelection();
       if(row){
@@ -465,16 +480,16 @@ function buildFormulaTree(c, guid){
       if(focusPanel) $(".fdetail-title", panel).focus();
     }
   };
-  function closePanel(){
+  function closePanel(byMouse){
     var sel = $(".ftree-selected", ul);
     panel.innerHTML = EMPTY;
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
     clearSelection();
     if(!sel || sel.offsetParent === null) sel = $('.ftree-row[tabindex="0"]', ul);
-    if(sel) sel.focus();
+    if(sel) sel.focus({preventScroll: !!byMouse});
   }
-  panel.addEventListener("click", function(e){ if(e.target.closest(".fdetail-close")) closePanel(); });
+  panel.addEventListener("click", function(e){ if(e.target.closest(".fdetail-close")) closePanel(e.detail > 0); });
   layout.addEventListener("keydown", function(e){
     if(e.key === "Escape" && !panel.classList.contains("fdetail-empty")){ e.preventDefault(); closePanel(); }
   });

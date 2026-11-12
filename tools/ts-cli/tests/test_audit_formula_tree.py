@@ -720,3 +720,70 @@ def test_on_a_narrow_screen_the_definition_is_a_sheet_clear_of_the_sidebar(tmp_p
     assert shown["errors"] == []
     x = shown["extra"]
     assert x["fixed"] == "fixed" and x["onPanel"] and x["clear"]
+
+
+@needs_chrome
+def test_search_matches_a_definition_across_references_both_ways(tmp_path):
+    page = _report(tmp_path)
+    find = ('function find(q){ var s = document.querySelector("#v-formulas .ftree-search");'
+            ' s.value = q; s.dispatchEvent(new Event("input"));'
+            ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+            ' function(a){ return a.textContent; }); }')
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=find + (
+        'window.__extra = [find("[formula_GM] / [formula_Rev]"), find("gross margin / revenue"),'
+        ' find("sum ( [ORDERS::AMOUNT] )"), find("sum ( orders::amount )"), find("[formula_rev] - [cost]")];'))
+    assert shown["errors"] == []
+    assert shown["extra"] == [["Gross Margin %"], ["Gross Margin %"], ["Revenue"], ["Revenue"],
+                              ["Gross Margin"]]
+
+
+@needs_chrome
+def test_a_link_from_a_hidden_formula_opens_the_tree_from_the_top(tmp_path):
+    page = _report(tmp_path)
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'row("Gross Margin").click(); document.querySelector(".ftree-collapse").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'var a = sel && sel.offsetParent !== null;'
+        'link(panel().querySelector(".fdetail-usedby"), "Gross Margin").click();'
+        'window.__extra = {cost: a, title: panel().querySelector(".fdetail-title").textContent};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"cost": True, "title": "Gross Margin"}
+
+
+@needs_chrome
+def test_a_link_in_an_inline_line_opens_under_that_formula_and_leaves_others_closed(tmp_path):
+    two = {"name": "Two", "formulas": [_f("formula_R1", "R1", "[formula_Z] + 1"),
+                                       _f("formula_R2", "R2", "[formula_Z] * 2 + [formula_Q]"),
+                                       _f("formula_Z", "Z", "[T::A]"), _f("formula_Q", "Q", "[T::B]")]}
+    page = _report(tmp_path, ("m-12", two))
+    shown = report_browser.render(page, tmp_path, "formulas/m-12", actions=_ROW + (
+        'var r2 = row("R2").parentNode;'
+        'var a = Array.prototype.find.call(r2.querySelectorAll(":scope > ul > .ftree-exprline a.fref"),'
+        ' function(x){ return x.textContent === "Z"; }); a.click();'
+        'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
+        'var under = sel.parentNode.parentNode.closest("li.ftree-node").firstChild.querySelector(".ftree-name").textContent;'
+        'var r1 = row("R1"); r1.click(); r1.firstChild.click();'  # select R1, close it with its arrow
+        'var s = document.querySelector("#v-formulas .ftree-search"); s.value = "q"; s.dispatchEvent(new Event("input"));'
+        'link(document.querySelector("#v-formulas .ftree-results"), "Q").click();'
+        'window.__extra = {under: under, r1Closed: r1.parentNode.classList.contains("collapsed")};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"under": "R2", "r1Closed": True}
+
+
+@needs_chrome
+def test_a_revealed_row_is_not_left_under_the_top_bar(tmp_path):
+    many = {"name": "Many", "formulas": [_f("formula_Top", "Top", "[formula_H]")] +
+            [_f(f"formula_P{i}", f"Pad {i}", f"[T::P{i}]") for i in range(60)] +
+            [_f("formula_Low", "Low", "[formula_H]"), _f("formula_H", "H", "[T::H]")]}
+    page = _report(tmp_path, ("m-13", many))
+    shown = report_browser.render(page, tmp_path, "formulas/m-13", actions=_ROW + (
+        'var low = row("Low"); low.scrollIntoView(); low.click();'
+        'var h = Array.prototype.filter.call(document.querySelectorAll("#v-formulas .ftree-row"), function(r){'
+        ' var n = r.querySelector(".ftree-name"); return n && n.textContent === "H" && r.offsetParent !== null; }).pop();'
+        'h.click(); link(panel().querySelector(".fdetail-usedby"), "Top").click();'
+        'var top = row("Top").getBoundingClientRect();'
+        'var bar = document.querySelector(".topbar").getBoundingClientRect();'
+        'window.__extra = {below: top.top >= bar.bottom - 1, y: window.scrollY};'))
+    assert shown["errors"] == []
+    assert shown["extra"]["below"]

@@ -401,7 +401,7 @@ ts audit run \
 ```
 
 The report is a single self-contained HTML file with six views. Its size grows with the
-estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each formula's definition to the Formulas view, which added 7.5% on a synthetic estate of 20 Models with 40 formulas each.
+estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each formula's definition to the Formulas view, which added 7.5% on a synthetic estate of 20 Models with 40 short formulas each (25 to 70 characters); long expressions, a many-armed CASE say, cost more.
 
 | View | What it shows |
 |---|---|

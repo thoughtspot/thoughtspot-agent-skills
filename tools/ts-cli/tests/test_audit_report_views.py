@@ -177,13 +177,17 @@ def test_every_function_a_report_script_calls_is_defined_somewhere():
     srcs = {p.relative_to(REPORT_DIR).as_posix(): _strip_js_strings_and_comments(p.read_text(encoding="utf-8"))
             for p in sorted(REPORT_DIR.rglob("*.js"))}
     every = "\n".join(srcs.values())
-    defined = set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", every))
-    defined |= set(re.findall(r"\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)", every))
-    for params in re.findall(r"\bfunction\s*[\w$]*\s*\(([^)]*)\)", every):
-        defined |= {p.strip() for p in params.split(",") if p.strip()}
-    defined |= set(re.findall(r"\b(?:var|let|const)\s+[\w$]+\s*=\s*[^;]*?,\s*([A-Za-z_$][\w$]*)\s*=", every))
+    functions = set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", every))
+
+    def local(src):  # vars and parameters: callable only in the script declaring them
+        names = set(re.findall(r"\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)", src))
+        for params in re.findall(r"\bfunction\s*[\w$]*\s*\(([^)]*)\)", src):
+            names |= {p.strip() for p in params.split(",") if p.strip()}
+        names |= set(re.findall(r"\b(?:var|let|const)\s+[\w$]+\s*=\s*[^;]*?,\s*([A-Za-z_$][\w$]*)\s*=", src))
+        return names
     missing = {}
     for name, src in srcs.items():
+        defined = functions | local(src)
         for m in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", src):
             fn = m.group(1)
             if fn not in defined and fn not in _JS_GLOBALS and fn not in _JS_KEYWORDS:
