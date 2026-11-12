@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**220 total items** across 24 skills — **73 open**, 132 verified, 15 deferred
+**221 total items** across 24 skills — **74 open**, 132 verified, 15 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -25,15 +25,15 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-convert-to-dbt | 18 | **2** | 16 | 0 |
 | ts-object-calendar-builder | 6 | **2** | 4 | 0 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
+| ts-link-semantic-layer | 10 | **1** | 5 | 4 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-from-dbt | 21 | **0** | 19 | 2 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
-| ts-link-semantic-layer | 9 | **0** | 5 | 4 |
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 9 | **0** | 9 | 0 |
-### Untagged (73 items)
+### Untagged (74 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -84,6 +84,7 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-dependency-manager | #22 | Surface chart-axis-role (REMOVE_CHART) in `ts metadata report` for Step 6 | OPEN |
 | ts-dependency-manager | #27 | Cascade delete fails when the cascade includes a Liveboard | OPEN |
 | ts-dependency-manager | #28 | Re-running a partial rollback duplicates what it already restored | OPEN |
+| ts-link-semantic-layer | #10 | `is_pre_aggregated_measure` on Snowflake Semantic Views and on released builds | OPEN |
 | ts-load-source-data | #1 | snow stage copy path format | OPEN |
 | ts-load-source-data | #2 | COPY INTO with quoted fields | OPEN |
 | ts-load-source-data | #3 | CREATE DATABASE IF NOT EXISTS permissions | OPEN |

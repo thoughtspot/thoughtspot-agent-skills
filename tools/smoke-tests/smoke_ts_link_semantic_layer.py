@@ -46,6 +46,8 @@ def test_aggregate_mode_thin_model():
     assert "formulas" not in m and m["model_tables"] == [{"name": "business_reporting_mv"}]
     measures = [c for c in table["table"]["columns"] if c["properties"]["column_type"] == "MEASURE"]
     assert {c["properties"]["aggregation"] for c in measures} == {"AGGREGATE"}
+    assert all(c["properties"].get("is_pre_aggregated_measure") is True for c in measures)
+    assert all("is_pre_aggregated_measure" not in c["properties"] for c in m["columns"])
     assert all("db_column_name" in c for c in table["table"]["columns"])
     types = {c["name"]: c["db_column_properties"]["data_type"] for c in table["table"]["columns"]}
     assert types["month"] == "DATE_TIME" and types["employee_count"] == "INT64"

@@ -693,6 +693,7 @@ Checks (mirrors `agents/shared/schemas/ts-model-conversion-invariants.md`):
 | I20 | a Model join with `cardinality: MANY_TO_MANY` — rejected at import (14528). Model a bridge table, joined `MANY_TO_ONE` from each side |
 | I21 | *(only when the Table TMLs are linted in the same batch)* a `referencing_join` under an entry whose Table TML does not declare that join — it belongs under the table that does (14504, "Relationships do not exist") |
 | I22 | *(only when the secured Table's TML is linted in the same batch)* an RLS rule whose join closes a directed cycle with the Model's joins — the Model imports, then queries under the rule fail with "Guid Mismatch" (one table, two roots). Drop one of the two joins, or point the Model at a copy of the table without the rule. Paths I22 cannot walk are printed to stderr as `I22 note:` lines, never findings |
+| I23 | a Table column `MEASURE`/`AGGREGATE` without `is_pre_aggregated_measure: true` — on newer builds AgentQL plans it as an attribute and rejects `AGG()` with `COLUMNS_NOT_GROUPED_OR_AGGREGATED`, while search still works. Checked on the Table alone |
 | JOIN-KEY | *(opt-in, `--require-join-key`)* a join that does not equate the given column on both tables — e.g. a tenant key in a shared-schema warehouse, where a join without it can match rows across tenants. Not an invariant: ThoughtSpot imports such a Model |
 | XREF | a model `model_tables`/`column_id`/join reference to a table or column that no batch TML generates — surfaces only when a table/sql_view TML is linted **alongside** the model (e.g. `--dir`); a lone model file skips it (no ground truth for what tables exist) |
 
@@ -5376,6 +5377,9 @@ Behaviour:
   its declared `aggregation` (the view's `default_aggregation`) or `SUM`
   (`aggregation_source`: `fact-declared` / `fact-default`); a fact declaring `AGGREGATE` fails
   the build; a non-numeric fact becomes an ATTRIBUTE. The summary carries a `facts` count.
+- **`AGGREGATE` Table columns carry `is_pre_aggregated_measure: true`.** Without it a newer
+  build's AgentQL planned the measure as an attribute and rejected `AGG()` with
+  `COLUMNS_NOT_GROUPED_OR_AGGREGATED`. Table only; the Model columns do not need it.
 - **Non-numeric measures are skipped** and listed in `skipped`: ThoughtSpot coerces a
   non-numeric MEASURE to ATTRIBUTE, which queries the platform measure without its measure
   function (Databricks: `METRIC_VIEW_MISSING_MEASURE_FUNCTION`).

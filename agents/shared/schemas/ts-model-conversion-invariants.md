@@ -719,8 +719,8 @@ covers Model TML in one direction only, per the gaps above.
 
 **Rule:** when a Model column is `MEASURE` / `aggregation: AGGREGATE` — a semantic-layer
 measure (Databricks Metric View, Snowflake Semantic View) passed through to the platform's
-own measure function — the Table column under it must be `MEASURE` / `AGGREGATE` as well,
-and carry `is_pre_aggregated_measure: true`.
+own measure function — the Table column under it must be `MEASURE` / `AGGREGATE` as well
+(and, by I23, carry `is_pre_aggregated_measure: true`).
 
 **Failure mode:** the two query paths read different levels. **UI search** reads the
 Model's aggregation and works. **AgentQL / SpotQL** reads the **Table's**: with the Table at
@@ -738,13 +738,6 @@ seven MV Tables' measures (exactly the columns Databricks flags `is_measure`) to
 `AGGREGATE` fixed both; a 60-case AgentQL corpus then matched the native star-schema Model
 on every comparable case.
 
-**The pre-aggregated flag (2026-11-12, semantic SQL DEV cluster).** On a newer build, a Table
-column at `MEASURE` / `AGGREGATE` without `is_pre_aggregated_measure: true` failed AgentQL
-too: the query plan carried it as an ATTRIBUTE and `AGG()` was rejected with
-`COLUMNS_NOT_GROUPED_OR_AGGREGATED`. Adding the property to the Table column fixed it; the
-Model column needs nothing. The October build did not require it. See
-`ts-link-semantic-layer` open item #9.
-
 **Not flagged, deliberately:** the reverse (Table `AGGREGATE`, Model `ATTRIBUTE` or another
 aggregation) — the same day a Model ATTRIBUTE over an `AGGREGATE` Table column searched
 correctly, so there is no observed failure to gate on; and a Model column with no explicit
@@ -753,7 +746,7 @@ correctly, so there is no observed failure to gate on; and a Model column with n
 **Enforced by:** `ts tml lint` (`lint_model_table_aggregation`) when the Table TMLs are linted
 in the same batch as the Model (`--dir`, or `--file table.tml --file model.tml`). A Model
 linted alone is not checked — there is no Table to compare against. `ts link build` writes
-`AGGREGATE` at both levels and the flag on the Table, so its output satisfies this by construction; the rule exists
+`AGGREGATE` at both levels, so its output satisfies this by construction; the rule exists
 for hand-built and hand-edited Models.
 
 **Applies to:** every Model over a semantic-layer object (`ts-link-semantic-layer`, and any
@@ -894,6 +887,30 @@ the RLS rule (or move the rule).
 **Enforced by:** `ts tml lint`, cross-file like I21 — only when the secured Table's TML
 is linted in the same batch; and `ts audit` S11. Graph mechanics: `ts_cli/tml_rls_graph.py`.
 A second route (diamond) through an RLS join is not checked: nothing shows it failing.
+
+### I23 — An `AGGREGATE` Table column carries `is_pre_aggregated_measure: true`
+
+**Rule:** a Table column at `MEASURE` / `aggregation: AGGREGATE` (a Semantic View or Metric
+View measure passed to the platform's own measure function) must carry
+`properties.is_pre_aggregated_measure: true`. Table only; the Model column needs nothing.
+
+**Failure mode (newer builds):** the Table and the Model import cleanly and UI search works.
+AgentQL plans the column as an ATTRIBUTE and refuses `AGG()` on it with
+`COLUMNS_NOT_GROUPED_OR_AGGREGATED`. A Model column that inherits the aggregation fails the
+same way as one that states it, because AgentQL reads the Table.
+
+**Evidence (2026-11-12, semantic SQL DEV cluster).** A Table built by `ts link build` over a
+Databricks Metric View failed this way; a Table over another Metric View on the same
+connection, which carried the flag, answered the same query. Adding the flag to the six
+measures (GUID kept) fixed it: AgentQL with one or two dimensions or none, and UI search, all
+matched Databricks. The October build (I16's evidence) did not need it. Snowflake Semantic
+Views and released builds are untested: `ts-link-semantic-layer` open items #9 and #10.
+
+**Enforced by:** `ts tml lint` (`_check_pre_aggregated_flag`) on every Table TML, linted alone
+or in a batch. Only the YAML boolean `true` counts. `ts link build` writes it (ts-cli 0.214.0).
+
+**Applies to:** every Table over a semantic-layer object (`ts-link-semantic-layer`, and any
+hand-built equivalent).
 
 ---
 

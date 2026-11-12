@@ -172,9 +172,35 @@ answered the same query correctly. Its TML differed in one property: every measu
 `MEASURE(total_revenue)` on Databricks to the cent. The Model columns need no change; both
 working Models have no such property on their own columns.
 
-`ts link build` on the October build (#8) worked without the property, so this is a newer
-build's requirement. Whether the property changes anything on the older build was not
-tested; the build now writes it on every `AGGREGATE` Table column (ts-cli 0.214.0), and
-`ts tml lint` I16 flags an `AGGREGATE` Table column without it.
+After the fix, on the same build and Table, each matched Databricks:
+
+| Path | Query |
+|---|---|
+| AgentQL | one dimension + `AGG()` (8 rows); two dimensions (112 groups); a total with no `GROUP BY` (`AGG()` of two measures) |
+| UI search (`searchdata`) | `[Product Category] [Total Revenue]`; `[Total Revenue] [Active Orders]` |
+
+`ts link build` on the October build (#8) worked without the property. The build now writes
+it on every `AGGREGATE` Table column (ts-cli 0.214.0), and `ts tml lint` I23 flags an
+`AGGREGATE` Table column without it. What this did not test is #10.
 
 **Status: VERIFIED 2026-11-12.**
+
+---
+
+## 10 — `is_pre_aggregated_measure` on Snowflake Semantic Views and on released builds — OPEN
+
+#9 was verified on one Databricks Metric View on one newer DEV build. The build writes the
+flag on every `AGGREGATE` Table column, so it also reaches:
+
+- **Snowflake Semantic View links** (`aggregate` mode puts the flag on each metric, none on
+  facts). No SV link has been queried with the flag.
+- **Released builds.** Whether an older build accepts the key on a *Table* import, and
+  whether it changes any answer there, is not recorded. (A *Model* import silently ignores
+  unknown keys under `properties:`; nothing records the Table behaviour.) If a released build
+  rejects it, `ts link build` fails at its first import.
+
+To close: on an SV link, run Step 7's query and a search; on a released build, link one
+object and do the same. The post-import `coerced` check compares the Model only, so it would
+not catch a dropped flag; the query is the check.
+
+**Status: OPEN.**
