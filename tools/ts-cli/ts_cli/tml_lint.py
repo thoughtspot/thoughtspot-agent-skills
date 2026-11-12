@@ -746,14 +746,16 @@ def lint_cross_references(model_tml: dict, tables: dict[str, set[str]]) -> list[
 # --- I16: semantic-layer measure aggregation, Model vs Table ------------------
 
 def table_aggregations(table: dict) -> dict[str, tuple]:
-    """``{column name or db_column_name, lower-case: (column_type, aggregation)}`` for one
-    parsed ``table:`` body. Both names are indexed, as a Model ``column_id`` may use either."""
+    """``{column name or db_column_name, lower-case: (column_type, aggregation,
+    is_pre_aggregated_measure)}`` for one parsed ``table:`` body. Both names are indexed,
+    as a Model ``column_id`` may use either."""
     out: dict[str, tuple] = {}
     for c in table.get("columns") or []:
         if not isinstance(c, dict):
             continue
         p = c.get("properties") or {}
-        role = (p.get("column_type"), p.get("aggregation"))
+        role = (p.get("column_type"), p.get("aggregation"),
+                p.get("is_pre_aggregated_measure") is True)
         for key in (c.get("name"), c.get("db_column_name")):
             if key:
                 out.setdefault(str(key).lower(), role)
@@ -888,6 +890,11 @@ def lint_model_table_aggregation(model_tml: dict, tables: dict[str, dict]) -> li
     whose search worked while every AgentQL aggregate failed; setting the Tables to
     ``AGGREGATE`` fixed both.
 
+    An ``AGGREGATE`` Table column must also carry ``is_pre_aggregated_measure: true``.
+    Without it AgentQL plans the column as an ATTRIBUTE and rejects ``AGG()`` with
+    ``COLUMNS_NOT_GROUPED_OR_AGGREGATED`` (live 2026-11-12 on a DEV build, Databricks
+    Metric View; adding the flag fixed it). The October build did not need it.
+
     The reverse — Table ``AGGREGATE``, Model not — is deliberately NOT flagged: the same
     day a Model ATTRIBUTE over an ``AGGREGATE`` Table column searched correctly, so there
     is no observed failure to gate on. A Model column with no explicit ``aggregation`` is
@@ -931,9 +938,19 @@ def _i16_finding(col: Any, ref_to_table: dict[str, str], tables_ci: dict[str, di
     tpart, cpart = cid.split("::", 1)
     tcols = tables_ci.get(ref_to_table.get(tpart.lower(), tpart.lower()))
     role = tcols.get(cpart.lower()) if tcols is not None else None
-    if role is None or role[1] == "AGGREGATE":
+    if role is None:
         return None
-    table_role = "/".join(x for x in role if x) or "no role"
+    if role[1] == "AGGREGATE":
+        if role[2]:
+            return None
+        return (
+            f"I16: Model column '{col.get('name', cid)}' is MEASURE/AGGREGATE and Table column "
+            f"'{cid}' is AGGREGATE without is_pre_aggregated_measure: true — AgentQL then "
+            f"treats it as an attribute and rejects AGG() with "
+            f"COLUMNS_NOT_GROUPED_OR_AGGREGATED. Add is_pre_aggregated_measure: true to the "
+            f"Table column's properties."
+        )
+    table_role = "/".join(x for x in role[:2] if x) or "no role"
     return (
         f"I16: Model column '{col.get('name', cid)}' is MEASURE/AGGREGATE but Table column "
         f"'{cid}' is {table_role} — AgentQL/SpotQL uses the Table's aggregation, so every "

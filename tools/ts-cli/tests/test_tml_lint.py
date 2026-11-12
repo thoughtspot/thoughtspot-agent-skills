@@ -500,13 +500,16 @@ class TestI15MisplacedColumnRootKeys:
 from ts_cli.tml_lint import lint_model_table_aggregation, table_aggregations  # noqa: E402
 
 
-def _mv_table(name="order_detail_mv", agg="SUM"):
+def _mv_table(name="order_detail_mv", agg="SUM", pre_aggregated=True):
+    def props(a):
+        p = {"column_type": "MEASURE", "aggregation": a}
+        if a == "AGGREGATE" and pre_aggregated:
+            p["is_pre_aggregated_measure"] = True
+        return p
     return {"name": name, "columns": [
-        {"name": "total_revenue", "db_column_name": "total_revenue",
-         "properties": {"column_type": "MEASURE", "aggregation": agg}},
+        {"name": "total_revenue", "db_column_name": "total_revenue", "properties": props(agg)},
         {"name": "Region", "db_column_name": "region", "properties": {"column_type": "ATTRIBUTE"}},
-        {"name": "line_count", "db_column_name": "line_count",
-         "properties": {"column_type": "MEASURE", "aggregation": "AGGREGATE"}},
+        {"name": "line_count", "db_column_name": "line_count", "properties": props("AGGREGATE")},
     ]}
 
 
@@ -541,6 +544,21 @@ class TestI16ModelTableAggregation:
 
     def test_aggregate_at_both_levels_is_clean(self):
         assert lint_model_table_aggregation(_model(AGG), self._tables(_mv_table(agg="AGGREGATE"))) == []
+
+    def test_table_aggregate_without_pre_aggregated_flag_is_flagged(self):
+        # Live 2026-11-12: AgentQL planned such a measure as an ATTRIBUTE and rejected
+        # AGG() with COLUMNS_NOT_GROUPED_OR_AGGREGATED; adding the flag fixed it.
+        t = _mv_table(agg="AGGREGATE", pre_aggregated=False)
+        f = lint_model_table_aggregation(_model(AGG), self._tables(t))
+        assert len(f) == 1 and f[0].startswith("I16:")
+        for part in ("'order_detail_mv::total_revenue'", "is_pre_aggregated_measure: true",
+                     "COLUMNS_NOT_GROUPED_OR_AGGREGATED"):
+            assert part in f[0]
+
+    def test_pre_aggregated_flag_false_is_flagged(self):
+        t = _mv_table(agg="AGGREGATE")
+        t["columns"][0]["properties"]["is_pre_aggregated_measure"] = False
+        assert len(lint_model_table_aggregation(_model(AGG), self._tables(t))) == 1
 
     def test_reverse_direction_not_flagged(self):
         # Table AGGREGATE, Model ATTRIBUTE: searched correctly live 2026-10-07.

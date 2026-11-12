@@ -103,6 +103,7 @@ table:
 | `properties.column_type` | Yes | `ATTRIBUTE` or `MEASURE` |
 | `db_column_properties.data_type` | Yes | ThoughtSpot type value — see type mapping below |
 | `properties.aggregation` | No | For MEASURE columns: `SUM`, `COUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT_DISTINCT` |
+| `properties.is_pre_aggregated_measure` | No | `true` on a MEASURE column with `aggregation: AGGREGATE` (a Semantic View / Metric View measure). Without it a newer build's AgentQL treats the column as an attribute and rejects `AGG()` (`COLUMNS_NOT_GROUPED_OR_AGGREGATED`, live 2026-11-12). Table only; the Model column does not need it |
 | `properties.index_type` | No | `DONT_INDEX` suppresses text search indexing — recommended for measures and date/FK columns. Omit for default (indexed). |
 | `properties.value_casing` | No | For VARCHAR columns: `UPPER`, `LOWER`, `MIXED`, or `UNKNOWN`. Only present when ThoughtSpot has detected or assigned a casing convention. |
 | `properties.synonyms` | No | Array of alternative names for natural-language search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |

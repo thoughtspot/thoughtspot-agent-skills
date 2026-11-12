@@ -719,7 +719,8 @@ covers Model TML in one direction only, per the gaps above.
 
 **Rule:** when a Model column is `MEASURE` / `aggregation: AGGREGATE` — a semantic-layer
 measure (Databricks Metric View, Snowflake Semantic View) passed through to the platform's
-own measure function — the Table column under it must be `MEASURE` / `AGGREGATE` as well.
+own measure function — the Table column under it must be `MEASURE` / `AGGREGATE` as well,
+and carry `is_pre_aggregated_measure: true`.
 
 **Failure mode:** the two query paths read different levels. **UI search** reads the
 Model's aggregation and works. **AgentQL / SpotQL** reads the **Table's**: with the Table at
@@ -737,6 +738,13 @@ seven MV Tables' measures (exactly the columns Databricks flags `is_measure`) to
 `AGGREGATE` fixed both; a 60-case AgentQL corpus then matched the native star-schema Model
 on every comparable case.
 
+**The pre-aggregated flag (2026-11-12, semantic SQL DEV cluster).** On a newer build, a Table
+column at `MEASURE` / `AGGREGATE` without `is_pre_aggregated_measure: true` failed AgentQL
+too: the query plan carried it as an ATTRIBUTE and `AGG()` was rejected with
+`COLUMNS_NOT_GROUPED_OR_AGGREGATED`. Adding the property to the Table column fixed it; the
+Model column needs nothing. The October build did not require it. See
+`ts-link-semantic-layer` open item #9.
+
 **Not flagged, deliberately:** the reverse (Table `AGGREGATE`, Model `ATTRIBUTE` or another
 aggregation) — the same day a Model ATTRIBUTE over an `AGGREGATE` Table column searched
 correctly, so there is no observed failure to gate on; and a Model column with no explicit
@@ -745,7 +753,7 @@ correctly, so there is no observed failure to gate on; and a Model column with n
 **Enforced by:** `ts tml lint` (`lint_model_table_aggregation`) when the Table TMLs are linted
 in the same batch as the Model (`--dir`, or `--file table.tml --file model.tml`). A Model
 linted alone is not checked — there is no Table to compare against. `ts link build` writes
-`AGGREGATE` at both levels, so its output satisfies this by construction; the rule exists
+`AGGREGATE` at both levels and the flag on the Table, so its output satisfies this by construction; the rule exists
 for hand-built and hand-edited Models.
 
 **Applies to:** every Model over a semantic-layer object (`ts-link-semantic-layer`, and any

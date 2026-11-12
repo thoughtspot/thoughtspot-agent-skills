@@ -151,3 +151,30 @@ inconsistency itself — AgentQL and search reading different levels — belongs
 semantic-SQL query-gen change, like #7.
 
 **Status: VERIFIED 2026-10-07.**
+
+---
+
+## 9 — An `AGGREGATE` Table column also needs `is_pre_aggregated_measure: true` — VERIFIED 2026-11-12
+
+On the semantic SQL DEV cluster (a newer build than #8's), a Table created by
+`ts link build` over the Databricks Metric View `metric_view_joins.dm_sales_analysis_mv` had
+its six measures `MEASURE`/`AGGREGATE` at both levels, as #8 requires, and AgentQL still
+failed:
+
+| Query | Result |
+|---|---|
+| `SELECT "Product Category", AGG("Total Revenue") … GROUP BY "Product Category"` | `COLUMNS_NOT_GROUPED_OR_AGGREGATED`; the query plan carried `total_revenue` as `column_type: ATTRIBUTE` |
+
+A Table over `dunder_mifflin.dunder_mifflin_sales_mv` on the same cluster and connection
+answered the same query correctly. Its TML differed in one property: every measure carried
+`is_pre_aggregated_measure: true`. Adding that property to the failing Table's six measures
+(TML update, GUID kept) fixed it: the query returned all eight categories, each matching
+`MEASURE(total_revenue)` on Databricks to the cent. The Model columns need no change; both
+working Models have no such property on their own columns.
+
+`ts link build` on the October build (#8) worked without the property, so this is a newer
+build's requirement. Whether the property changes anything on the older build was not
+tested; the build now writes it on every `AGGREGATE` Table column (ts-cli 0.214.0), and
+`ts tml lint` I16 flags an `AGGREGATE` Table column without it.
+
+**Status: VERIFIED 2026-11-12.**
