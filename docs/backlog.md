@@ -17404,3 +17404,34 @@ So Models from the Tableau, Power BI, Qlik, Sisense and dbt conversion paths, an
 4. Any SKILL.md reference that shows a hand-written Model `properties:` block should include it.
 
 **Target:** 2026-12-15.
+
+## BL-571 — SV converter: a metric named like its own column resolves to itself `Tier 2`
+
+**Filed:** 2026-11-12. **Source:** converting a Dunder Mifflin sales Semantic View on the semantic SQL dev cluster (profile `semantic-sql`).
+
+**What.** The metric `QUANTITY AS SUM(dm_order_detail.QUANTITY)` has the same name as the physical column it sums. `ts snowflake translate-formulas` resolved `dm_order_detail.QUANTITY` to the metric, not the column. The output was `sum ( [formula_Quantity] )`, and `build-model` emitted `formula_Quantity` with expr `[formula_Quantity]`, a formula that references itself. `Category Quantity` (`SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY …)`) was built on the same reference.
+
+`build-model` reported `lint_findings: []`: I13 checks that a referenced id exists, and this one does. The Model was fixed by hand before import (`Quantity` as a SUM column on `DM_ORDER_DETAIL::QUANTITY`), and then matched the view exactly.
+
+**Likely cause.** The generic resolver in `sv_translate.py` checks the metric index before the physical column. Inside a metric's own aggregate, a qualified `table.col` should resolve to the column first.
+
+**Do.**
+1. Resolve a qualified reference inside an aggregate to the physical column when the table has one by that name. Keep the metric reference for a bare or derived-metric use.
+2. A `ts tml lint` check that rejects a formula whose expression references its own id, directly or through a cycle.
+3. A test with a metric and column that share a name.
+
+**Target:** 2026-12-15.
+
+## BL-572 — SV converter skips a window sum nested inside `DIV0` `Tier 3`
+
+**Filed:** 2026-11-12. **Source:** same conversion as BL-571.
+
+**What.** `DIV0(dm_order_detail.QUANTITY, SUM(dm_order_detail.QUANTITY) OVER (PARTITION BY dm_category.product_category))` was skipped: "OVER clause in expression — pre-split window expressions before calling translate_sql_expr" (`sv_sql.py`). Both parts already have mapping rows in `ts-snowflake-formula-translation.md`. `DIV0(x, y)` is `( if ( isnull ( x ) ) then null else safe_divide ( x , y ) )`, and the partitioned sum is `group_sum`. The translator only handles a window at the top level of a metric.
+
+Written by hand as `( if ( isnull ( sum ( [Q] ) ) ) then null else safe_divide ( sum ( [Q] ) , group_sum ( [Q] , [DM_CATEGORY::CATEGORY_NAME] ) ) )`. It imported, and per product it sums to 1.0 within each category.
+
+**Do.**
+1. Split a `SUM(…) OVER (PARTITION BY …)` sub-expression out of an enclosing expression and translate it to `group_sum` in place.
+2. A test for the contribution-ratio shape (`DIV0(x, SUM(x) OVER (PARTITION BY d))`).
+
+**Target:** 2027-01-31.
