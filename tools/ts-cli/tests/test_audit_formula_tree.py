@@ -260,7 +260,8 @@ def test_the_tree_opens_roots_one_level_and_expands_on_demand(tmp_path):
     # roots, and the formulas each root directly uses
     for name in ("Gross Margin %", "Order Count", "Gross Margin", "Revenue"):
         assert name in seen
-    assert "hidden helper" in seen and "used by 2 formulas" in seen
+    # Gross Margin is hidden and only Gross Margin % uses it
+    assert "used once, hidden" in seen and "used by 2 formulas" in seen
     assert re.search(r"used by 1 formula(?!s)", seen)
     # Gross Margin is built but collapsed: Cost, beneath it, is not shown
     assert "Cost" not in seen
@@ -787,3 +788,43 @@ def test_a_revealed_row_is_not_left_under_the_top_bar(tmp_path):
         'window.__extra = {below: top.top >= bar.bottom - 1, y: window.scrollY};'))
     assert shown["errors"] == []
     assert shown["extra"]["below"]
+
+
+@needs_chrome
+def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path):
+    page = _report(tmp_path)
+    # Gross Margin is hidden and only Gross Margin % uses it; Cost (no column) is used
+    # only by Gross Margin; Revenue is used twice and stays a reference
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'var tags = function(name){ return Array.prototype.map.call('
+        '  row(name).querySelectorAll(".ftree-tag"), function(t){ return t.textContent; }); };'
+        'row("Gross Margin %").click();'
+        'var inl = panel().querySelector(".fdetail-inlined");'
+        'var gmTags = tags("Gross Margin"), gmpTags = tags("Gross Margin %");'
+        'row("Revenue").click();'
+        'var revInl = panel().querySelector(".fdetail-inlined");'
+        'window.__extra = {gm: gmTags, gmp: gmpTags, inl: inl && inl.textContent,'
+        ' links: inl ? Array.prototype.map.call(inl.querySelectorAll("a.fref"), function(a){ return a.textContent; }) : null,'
+        ' revInl: revInl === null};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
+    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::AMOUNT] ) ) ) / [formula_Rev]".replace(
+        "AMOUNT", "COST")
+    assert x["links"] == ["[formula_Rev]", "[ORDERS::COST]", "[formula_Rev]"]
+    assert x["revInl"]   # uses no single-use helper: no second definition
+
+
+@needs_chrome
+def test_pasting_helpers_in_stops_at_a_cycle(tmp_path):
+    model = {"name": "Loop", "formulas": [
+        {"id": "formula_A", "name": "A", "expr": "[formula_B] + 1"},
+        {"id": "formula_B", "name": "B", "expr": "[formula_A] + 2"}], "columns": []}
+    page = _report(tmp_path, ("m-9", model))
+    # A and B are hidden (no column) and each only uses the other: B is pasted into A,
+    # and A, the formula shown, is not pasted back into B
+    shown = report_browser.render(page, tmp_path, "formulas/m-9", actions=_ROW + (
+        'row("A").click();'
+        'window.__extra = panel().querySelector(".fdetail-inlined").textContent;'))
+    assert shown["errors"] == []
+    assert shown["extra"] == "( [formula_A] + 2 ) + 1"

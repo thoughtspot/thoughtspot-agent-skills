@@ -852,3 +852,46 @@ def human_flag_spelled_out() -> AuditContext:
     return build_typed_model_ctx(build_typed_col("Active", "ACTIVE", ctype="ATTRIBUTE", hidden=True),
                                  build_typed_col("Status", "STATUS", ctype="ATTRIBUTE"),
                                  types={"ACTIVE": "BOOL", "STATUS": "VARCHAR"})
+
+
+# ── H15: hidden formulas used by exactly one other formula ──────────────────
+
+def _helper_col(name, fid, hidden=False):
+    c = {"name": name, "formula_id": fid, "properties": {"column_type": "MEASURE"}}
+    if hidden:
+        c["properties"]["is_hidden"] = True
+    return c
+
+
+def human_single_use_hidden_helper() -> AuditContext:
+    """'Discounts' is hidden and only 'Net Sales' uses it (H15 LOW)."""
+    return make_context(models=[build_human_model(
+        columns=[_helper_col("Net Sales", "formula_Net"),
+                 _helper_col("Discounts", "formula_Disc", hidden=True)],
+        formulas=[{"id": "formula_Net", "name": "Net Sales",
+                   "expr": "sum ( [T1::GROSS] ) - [formula_Disc]"},
+                  {"id": "formula_Disc", "name": "Discounts",
+                   "expr": "sum ( [T1::DISCOUNT] )"}])])
+
+
+def human_helper_visible_or_reused() -> AuditContext:
+    """Helpers H15 leaves alone: a visible one, a hidden one two formulas use, a hidden
+    one a Model filter uses, and a hidden one too long to paste in."""
+    long_expr = "sum ( if ( [T1::STATUS] = 'OPEN' ) then [T1::AMOUNT] else 0 ) " * 5
+    model = build_human_model(
+        columns=[_helper_col("Net Sales", "formula_Net"),
+                 _helper_col("Margin", "formula_Margin"),
+                 _helper_col("Gross", "formula_Gross"),
+                 _helper_col("Cost", "formula_Cost", hidden=True),
+                 _helper_col("Open Amount", "formula_Open", hidden=True),
+                 _helper_col("Filtered", "formula_Filt", hidden=True)],
+        formulas=[{"id": "formula_Gross", "name": "Gross", "expr": "sum ( [T1::GROSS] )"},
+                  {"id": "formula_Cost", "name": "Cost", "expr": "sum ( [T1::COST] )"},
+                  {"id": "formula_Open", "name": "Open Amount", "expr": long_expr},
+                  {"id": "formula_Filt", "name": "Filtered", "expr": "sum ( [T1::X] )"},
+                  {"id": "formula_Net", "name": "Net Sales",
+                   "expr": "[formula_Gross] - [formula_Cost] + [formula_Open] + [formula_Filt]"},
+                  {"id": "formula_Margin", "name": "Margin",
+                   "expr": "[formula_Gross] - [formula_Cost]"}])
+    model["model"]["filters"] = [{"column": ["Filtered"], "oper": ">", "values": ["0"]}]
+    return make_context(models=[model])
