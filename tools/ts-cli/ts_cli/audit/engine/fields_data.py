@@ -447,21 +447,29 @@ def _join_roots(model: dict, ctx: Any) -> frozenset:
                      if r.get("role") in _ROOT_ROLES and not r.get("unjoined"))
 
 
+def _dicts(value: Any) -> list:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _measure_formulas(body: dict) -> list:
+    """The formulas the Model surfaces as MEASURE columns."""
+    by_id = {f.get("id"): f for f in _dicts(body.get("formulas"))
+             if isinstance(f.get("id"), str)}
+    return [by_id[c["formula_id"]] for c in _dicts(body.get("columns"))
+            if c.get("formula_id") in by_id
+            and (c.get("properties") or {}).get("column_type") == "MEASURE"]
+
+
 def _formula_measure_tables(model: dict) -> frozenset:
     """Table keys (the part before `::`) that a formula surfaced as a MEASURE column
     reads, following formula cross-references (formula_ref_index): such a table is
     counted as a fact even when none of its own columns is a MEASURE, which the shared
     role classifier does not see (it reads `column_id` columns only)."""
-    m = model.get("model") if isinstance(model.get("model"), dict) else model
-    formulas = [f for f in (m.get("formulas") or []) if isinstance(f, dict)]
-    cols = [c for c in (m.get("columns") or []) if isinstance(c, dict)]
-    by_id = {f.get("id"): f for f in formulas if isinstance(f.get("id"), str)}
+    body = model["model"] if isinstance(model.get("model"), dict) else model
+    formulas = _dicts(body.get("formulas"))
     by_ref = tml.formula_ref_index(formulas)
     by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
-    todo = [by_id[c["formula_id"]] for c in cols
-            if c.get("formula_id") in by_id
-            and (c.get("properties") or {}).get("column_type") == "MEASURE"]
-    seen, tables = set(), set()
+    todo, seen, tables = _measure_formulas(body), set(), set()
     while todo:
         f = todo.pop()
         if id(f) in seen:
