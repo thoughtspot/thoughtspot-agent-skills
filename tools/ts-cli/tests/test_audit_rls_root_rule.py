@@ -119,29 +119,69 @@ def test_silent_on_a_genuine_fact_with_rls():
         assert _s17(ctx) == [], expr
 
 
-def test_rls_root_fix_reverses_only_for_rules_keyed_on_the_user_alone():
+def test_silent_on_a_fact_whose_measures_are_formulas():
+    """No MEASURE column of its own, but a formula measure reads it: a fact, not an
+    access table (the role classifier reads `column_id` columns only), directly or
+    through another formula."""
+    for exprs in (["unique count ( [ACL_USER_SITE::USER_KEY] )"],
+                  ["[formula_inner] * 2", "count ( [ACL_USER_SITE::SITE_ID] )"]):
+        ctx = fx.build_acl_ctx("acl_to_dim")
+        m = ctx.models[0]["model"]
+        m["formulas"] = [{"id": "formula_outer" if k == 0 else "formula_inner",
+                          "name": "Outer" if k == 0 else "Inner", "expr": e}
+                         for k, e in enumerate(exprs)]
+        m["columns"].append({"name": "Outer", "formula_id": "formula_outer",
+                             "properties": {"column_type": "MEASURE"}})
+        assert _s17(ctx) == [], exprs
+    # an ATTRIBUTE formula reading it is not a measure: still fires
+    ctx = fx.build_acl_ctx("acl_to_dim")
+    m = ctx.models[0]["model"]
+    m["formulas"] = [{"id": "formula_a", "name": "A", "expr": "[ACL_USER_SITE::USER_KEY]"}]
+    m["columns"].append({"name": "A", "formula_id": "formula_a",
+                         "properties": {"column_type": "ATTRIBUTE"}})
+    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+
+
+def test_rls_root_fix_reverses_only_for_one_user_equals_key_rule():
     for expr, safe in [
         ("ts_username = [ACL_USER_SITE_1::USER_KEY]", True),
+        ("[ACL_USER_SITE_1::USER_KEY]  =  TS_USERNAME", True),
         ("[ACL_USER_SITE_1::TS_GROUPS_KEY] = ts_username", True),       # a column name
-        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and 'ts_groups' = 'x'", True),  # literal
-        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and [ACL_USER_SITE_1::OR_X] = 'or'",
-         True),                                                        # `or` in names
+        ("ts_username = [ACL_USER_SITE_1::USER_KEY] and 'ts_groups' = 'x'", False),
         ("[ACL_USER_SITE_1::USER_KEY] = ts_groups", False),
         ("'site admins' in ts_groups or ts_username = [ACL_USER_SITE_1::USER_KEY]", False),
-        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups_int", False),         # any variant
-        ("[ACL_USER_SITE_1::USER_KEY] = ts_var ( site_regions )", False),  # multi-value
+        ("[ACL_USER_SITE_1::USER_KEY] = ts_groups_int", False),
+        ("[ACL_USER_SITE_1::USER_KEY] = ts_var ( site_regions )", False),
         ("ts_username = [ACL_USER_SITE_1::USER_KEY] or [ACL_USER_SITE_1::IS_PUBLIC] = 'Y'",
-         False),                                                       # public rows
-        ("ts_username = [ACL_USER_SITE_1::USER_KEY] OR [ACL_USER_SITE_1::IS_PUBLIC] = 'Y'",
          False),
+        ("ts_username != 'guest'", False),
+        ("ts_username = 'alice'", False),
+        ("ts_username != [ACL_USER_SITE_1::USER_KEY]", False),
+        ("contains ( [ACL_USER_SITE_1::USERS], ts_username )", False),
+        ("[ACL_USER_SITE_1::USER_KEY] in ( ts_username , 'public' )", False),
+        ("if ( ts_username = 'admin' ) then true else ts_username = [ACL_USER_SITE_1::USER_KEY]",
+         False),
+        ("not ( ts_username = [ACL_USER_SITE_1::USER_KEY] )", False),
     ]:
         ctx = fx.build_acl_ctx("acl_to_dim", rule_expr=expr)
         got = fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx)
         assert got == RLS_ROOT_FIXES[1 if safe else 0], expr
+
+
+def test_rls_root_fix_keeps_the_join_for_two_rules():
+    """A Table's rules combine with OR: owner on one row and delegate on another gives a
+    user two rows per key, though each rule alone is `ts_username = [column]`."""
+    ctx = fx.build_acl_ctx("acl_to_dim")
+    ctx.tables["t-acl_user_site"]["table"]["rls_rules"]["rules"].append(
+        {"name": "Delegate", "expr": "ts_username = [ACL_USER_SITE_1::DELEGATE]"})
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
+
+
+def test_rls_root_fix_detail_for_ts_groups():
     ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="[ACL_USER_SITE_1::USER_KEY] = ts_groups")
     out = run_audit(None, [], ctx=ctx, angles=["S"])
     (detail,) = [f["detail"] for f in out["findings"] if f["check_id"] == "S17"]
-    assert "keep the join as it is" in detail and "ts_username alone" in detail
+    assert "review its rules" in detail and "ts_username = [column]" in detail
 
 
 def test_rls_root_fix_without_table_tml_keeps_the_join():

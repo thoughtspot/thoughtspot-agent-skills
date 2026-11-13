@@ -338,8 +338,9 @@
     dimension, each grouped and then outer-joined, roughly twice the SQL of one query;
     the dimension joined many-to-one to the access table made it a leaf and gave one
     flat query, with identical results. HIGH: an anti-pattern (product owner,
-    2026-11-12). A root holding measures is a genuine fact of a multi-fact Model and
-    never fires. A table in no directed join (one-to-one or many-to-many only, or none)
+    2026-11-12): an access-control list's RLS filter should leave one row per key per
+    user, whatever the rule. A root holding measures, or read by a formula measure, is a genuine
+    fact of a multi-fact Model and never fires. A table in no directed join (one-to-one or many-to-many only, or none)
     is not a root here, and an unjoined one is D5's.
   categories: [S]
   requires: [model_tml, table_tml]
@@ -350,15 +351,17 @@
   severity: HIGH
   message: "'{name}' carries RLS rules and no table joins to it many-to-one, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
   remediation: >-
-    If every rule keys on the user alone (ts_username, with no ts_groups, ts_var or `or`),
+    If it is an access-control table with one rule, `ts_username = [column]`,
     reverse the join so the dimension joins to it many-to-one, which makes it a leaf and
     each query one flat statement; that join is only many-to-one after the rule filters
     it, so first check that each (user, key) pair occurs once in the table, hide its
     columns in the Model (a user who bypasses RLS and queries them fans out), and make
-    sure no other path in the Model reaches it. Otherwise keep the current join: a
-    ts_groups or multi-value ts_var rule, or an `or`, can give a user two rows per key
-    (two groups mapped to one key), and the reversed join double-counts measures,
-    while the stitched plan's grouping does not.
+    sure no other path in the Model reaches it. With any other rules (a second rule, a
+    ts_groups or multi-value ts_var rule, an `or`, `!=` or literal comparison), review
+    them: an access-control list should leave each user at most one row per key after
+    the RLS filter, and if it does, reverse the join the same way; if it can leave two
+    (a user in two groups mapped to one key), keep the current join, as the reversed
+    join double-counts measures while the stitched plan's grouping does not.
   examples:
     fires: {fixture: sec_rls_acl_table_as_root, severity: HIGH}
     silent: {fixture: sec_rls_acl_table_as_leaf}

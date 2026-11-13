@@ -447,6 +447,34 @@ def _join_roots(model: dict, ctx: Any) -> frozenset:
                      if r.get("role") in _ROOT_ROLES and not r.get("unjoined"))
 
 
+def _formula_measure_tables(model: dict) -> frozenset:
+    """Table keys (the part before `::`) that a formula surfaced as a MEASURE column
+    reads, following formula cross-references (formula_ref_index): such a table is
+    counted as a fact even when none of its own columns is a MEASURE, which the shared
+    role classifier does not see (it reads `column_id` columns only)."""
+    m = model.get("model") if isinstance(model.get("model"), dict) else model
+    formulas = [f for f in (m.get("formulas") or []) if isinstance(f, dict)]
+    cols = [c for c in (m.get("columns") or []) if isinstance(c, dict)]
+    by_id = {f.get("id"): f for f in formulas if isinstance(f.get("id"), str)}
+    by_ref = tml.formula_ref_index(formulas)
+    by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
+    todo = [by_id[c["formula_id"]] for c in cols
+            if c.get("formula_id") in by_id
+            and (c.get("properties") or {}).get("column_type") == "MEASURE"]
+    seen, tables = set(), set()
+    while todo:
+        f = todo.pop()
+        if id(f) in seen:
+            continue
+        seen.add(id(f))
+        for ref in tml.expr_refs(f.get("expr")):
+            if "::" in ref:
+                tables.add(ref.partition("::")[0].strip())
+            elif by_ref.get(ref) in by_name:
+                todo.append(by_name[by_ref[ref]])
+    return frozenset(tables)
+
+
 @register("rls_root_beside", uses=(),
           label="the other tables at the root of the Model's joins")
 def _rls_root_beside(item: dict, ctx: Any) -> list:
@@ -456,8 +484,9 @@ def _rls_root_beside(item: dict, ctx: Any) -> list:
     sorted; else none. Query generation plans each root as its own fact and stitches
     them, so such a table — an access-control table joined many-to-one to a dimension is
     the measured case (S17, live-verified 2026-11-12) — doubles every query's SQL. A
-    root holding measures (role `fact`) is a genuine fact of a multi-fact Model, not
-    this shape, so it never fires; a name list in messages."""
+    root holding measures (role `fact`), or one a formula measure reads
+    (_formula_measure_tables), is a genuine fact of a multi-fact Model, not this shape,
+    so it never fires; a name list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
@@ -470,44 +499,52 @@ def _rls_root_beside(item: dict, ctx: Any) -> list:
     roots = cached("join_roots", model, _join_roots, model, ctx)
     if me not in roots or model_roles(model, ctx).get(me, {}).get("role") != "factless":
         return NameList()
+    if me in cached("formula_measure_tables", model, _formula_measure_tables, model):
+        return NameList()
     return NameList(sorted(roots - {me}))
 
 
 #: @rls_root_fix's values: which fix fits the table's RLS rules.
 RLS_ROOT_FIXES = (
-    "keep the join as it is: its rules are not keyed on ts_username alone, so a user "
-    "can match two rows per key and a many-to-one join to it would double-count measures",
-    "reverse the join so the dimension joins to it many-to-one, once the conditions in "
-    "the remediation hold",
+    "review its rules: they are not one `ts_username = [column]` rule, so check that "
+    "after the RLS filter every user has at most one row per key (a user in two groups "
+    "mapped to one key has two); if so, reverse the join so the dimension joins to it "
+    "many-to-one, and if not, keep it, as the reversed join would double-count measures",
+    "if it is an access-control table rather than a fact, reverse the join so the "
+    "dimension joins to it many-to-one, once the conditions in the remediation hold",
 )
 
 
-_OR = re.compile(r"\bor\b", re.IGNORECASE)
+#: The one rule shape the reversal is safe for: the user equals a column of the table.
+_USER_EQUALS_KEY = re.compile(
+    r"(?i)^\s*(?:ts_username\s*=\s*\[[^\]]+\]|\[[^\]]+\]\s*=\s*ts_username)\s*$")
 
 
 def _keyed_on_user_alone(expr: Any) -> bool:
-    """An RLS rule whose only session variable is ts_username and which has no `or`
-    (outside quoted literals and `[...]` references): only then does each user see at
-    most one access row per key, the condition the many-to-one reversal needs. A
-    ts_groups or multi-value ts_var rule, or an `or` letting other users' rows through
-    (a public flag), gives a user several rows per key."""
-    code = _BRACKETED.sub(" ", _code(expr))
-    return _rule_variables(expr) == {"ts_username"} and not _OR.search(code)
+    """The rule is exactly `ts_username = [path::COLUMN]` (either side; quoted literals
+    removed, so a literal comparison never matches): each user then sees only the rows
+    whose key column holds their name, the condition the many-to-one reversal needs
+    together with the (user, key) uniqueness the remediation asks to check. Anything
+    else — ts_groups, a multi-value ts_var, `or`, `!=`, `in`, contains, a literal — can
+    give a user several rows per key."""
+    return isinstance(expr, str) and bool(_USER_EQUALS_KEY.match(_code(expr)))
 
 
 @register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
           label="the fix that fits the table's RLS rules")
 def _rls_root_fix(item: dict, ctx: Any) -> str:
     """Model table: the second of RLS_ROOT_FIXES (reverse) only when its Table TML (by
-    `fqn`) has RLS rules and every one is keyed on the user alone
-    (_keyed_on_user_alone); else the first (keep). A rule that can give a user two rows
-    per key — ts_groups, a multi-value ts_var, an `or` — would make the reversed
-    many-to-one join double-count measures, which the stitched plan's grouping does
-    not."""
+    `fqn`) has exactly one RLS rule and it is keyed on the user alone
+    (_keyed_on_user_alone); else the first (review: an access-control list should
+    return one row per key per user after the filter, so the shape stays an
+    anti-pattern, but the code cannot prove it here). A Table's rules combine with OR, so
+    a second rule (owner or delegate) can give a user two rows per key, as can ts_groups,
+    a multi-value ts_var or an `or`: the reversed many-to-one join would double-count
+    measures, which the stitched plan's grouping does not."""
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
     rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
-    safe = bool(rules) and all(_keyed_on_user_alone(r.get("expr")) for r in rules)
+    safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"))
     return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]
 
 
