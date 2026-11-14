@@ -133,13 +133,16 @@ def test_silent_on_a_fact_whose_measures_are_formulas():
         m["columns"].append({"name": "Outer", "formula_id": "formula_outer",
                              "properties": {"column_type": "MEASURE"}})
         assert _s17(ctx) == [], exprs
-    # an ATTRIBUTE formula reading it is not a measure: still fires
-    ctx = fx.build_acl_ctx("acl_to_dim")
-    m = ctx.models[0]["model"]
-    m["formulas"] = [{"id": "formula_a", "name": "A", "expr": "[ACL_USER_SITE::USER_KEY]"}]
-    m["columns"].append({"name": "A", "formula_id": "formula_a",
-                         "properties": {"column_type": "ATTRIBUTE"}})
-    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+    # a hidden ATTRIBUTE formula reading it is not a measure and not for analysis:
+    # still fires; visible, it surfaces the table's data, so not an access table
+    for hidden, want in ((True, [("ACL_USER_SITE", "HIGH")]), (False, [])):
+        ctx = fx.build_acl_ctx("acl_to_dim")
+        m = ctx.models[0]["model"]
+        m["formulas"] = [{"id": "formula_a", "name": "A",
+                          "expr": "upper ( [ACL_USER_SITE::USER_KEY] )"}]
+        m["columns"].append({"name": "A", "formula_id": "formula_a", "properties": {
+            "column_type": "ATTRIBUTE", "is_hidden": hidden}})
+        assert _s17(ctx) == want, hidden
 
 
 def test_rls_root_fix_reverses_only_for_one_user_equals_key_rule():
@@ -241,25 +244,69 @@ def test_an_rls_table_with_a_visible_column_is_not_an_acl():
     assert _s17(ctx) == []
 
 
-def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
-    """Signal 2: no rule of its own, another Table's RLS rule reaches it through a rule
-    path, and none of its columns is in the Model: fires, with the review advice."""
-    ctx = fx.build_acl_ctx("acl_to_dim",
-                           rule_expr="ts_username = [ACL_USER_SITE_1::USER_KEY]",
-                           rls_on="D_SITE")
-    d_site = ctx.tables["t-d_site"]["table"]["rls_rules"]
-    d_site["table_paths"] = [{"id": "ACL_USER_SITE_1", "table": "ACL_USER_SITE",
-                              "join_path": [{"join": ["site_acl"]}]}]
+def _reach_acl(ctx, frm, joins, path):
+    """Put a rule on `frm` that reaches ACL_USER_SITE through `path` (rls_rules.joins)."""
+    rls = ctx.tables[f"t-{frm.lower()}"]["table"]["rls_rules"]
+    rls["joins"] = joins
+    rls["table_paths"] = [{"id": "ACL_USER_SITE_1", "table": "ACL_USER_SITE",
+                           "column": ["USER_KEY"], "join_path": [{"join": path}]}]
     m = ctx.models[0]["model"]
     m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
-    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+
+
+def _all(ctx):
+    out = run_audit(None, [], ctx=ctx, angles=["S"])
+    return sorted((f["check_id"], f["severity"]) for f in out["findings"])
+
+
+def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
+    """Signal 2: no rule of its own, another Table's RLS rule reaches it, and no column of
+    it is in the Model. Here the rule on F_ORDER joins straight to it (its own RLS join),
+    which closes no loop with the Model's joins: S17, with the review advice."""
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                           rls_on="F_ORDER")
+    _reach_acl(ctx, "F_ORDER", [{"name": "order_acl", "source": "F_ORDER",
+                                 "destination": "ACL_USER_SITE", "type": "INNER"}],
+               ["order_acl"])
+    assert _all(ctx) == [("S17", "HIGH")]
     assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
-    # with one of its columns in the Model, signal 2 does not hold
-    m["columns"].append({"name": "K", "column_id": "ACL_USER_SITE::USER_KEY",
-                         "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}})
+    # a column of it in the Model, even hidden: signal 2 does not hold
+    ctx.models[0]["model"]["columns"].append(
+        {"name": "K", "column_id": "ACL_USER_SITE::USER_KEY",
+         "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}})
     assert _s17(ctx) == []
-    # and with no rule reaching it at all, a column-less measure-less root is not an ACL
-    ctx = fx.build_acl_ctx("acl_to_dim", rls_on="NONE")
+
+
+def test_an_rls_path_entering_from_the_joined_dimension_is_s11s():
+    """The rule on D_SITE walks D_SITE -> ACL_USER_SITE while the Model joins
+    ACL_USER_SITE -> D_SITE: a directed loop, S11 CRITICAL (every query under the rule
+    fails). S17 stays silent rather than advise on a Model that does not run."""
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                           rls_on="D_SITE")
+    _reach_acl(ctx, "D_SITE", [{"name": "site_acl", "source": "D_SITE",
+                                "destination": "ACL_USER_SITE", "type": "INNER"}],
+               ["site_acl"])
+    assert ("S11", "CRITICAL") in _all(ctx) and _s17(ctx) == []
+
+
+def test_an_unreferenced_or_unwalkable_rls_path_does_not_reach_the_table():
+    """Only a path a rule references and that can be walked reaches a table (the shared
+    RLS graph): a rule on F_ORDER that never names ACL_USER_SITE_1 is silent."""
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="[F_ORDER_1::ORDER_ID] = ts_groups",
+                           rls_on="F_ORDER")
+    _reach_acl(ctx, "F_ORDER", [{"name": "order_acl", "source": "F_ORDER",
+                                 "destination": "ACL_USER_SITE", "type": "INNER"}],
+               ["order_acl"])
+    assert _s17(ctx) == []
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                           rls_on="F_ORDER")
+    _reach_acl(ctx, "F_ORDER", [], ["order_acl"])                    # no such RLS join
+    assert _s17(ctx) == []
+
+
+def test_an_rls_table_with_no_column_in_the_model_is_not_signal_one():
+    """Signal 1 needs at least one (hidden) column in the Model to enforce the rule."""
+    ctx = fx.sec_rls_acl_table_as_root()
     m = ctx.models[0]["model"]
     m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
     assert _s17(ctx) == []

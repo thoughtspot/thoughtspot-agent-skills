@@ -17435,3 +17435,15 @@ Written by hand as `( if ( isnull ( sum ( [Q] ) ) ) then null else safe_divide (
 2. A test for the contribution-ratio shape (`DIV0(x, SUM(x) OVER (PARTITION BY d))`).
 
 **Target:** 2027-01-31.
+
+## BL-573 — the shared role classifier misses formula measures, so D6 and D11 grade a formula-measured fact as factless `Tier 3`
+
+**Filed:** 2026-11-14. **Source:** pr-ready review of the S17 audit rule (ts-audit 3.20.0).
+
+**What.** `agents/shared/erd/roles.py` counts a table as holding measures only through its `column_id` columns. A table whose only measures are Model formulas (`sum ( [F_LINE::AMOUNT] )`) reads as `factless`, not `fact`. S17 corrects for this locally (`_formula_measure_tables` in `ts_cli/audit/engine/fields_data.py`). The other readers do not: D6 (`@table_role eq fact`) and D11 (`@is_fact_to_fact_join`). I.e. F_LINE → D_HDR with D_HDR holding a measure: F_LINE's measure as a column gives D11 MEDIUM; the same measure as a formula gives D11 INFO. BL-505 covers the converters' side only.
+
+**Do.**
+1. Attribute formula measures to the tables they read in the classifier itself (or in `tml.model_table_roles`), following formula cross-references the way `_formula_measure_tables` does, and drop S17's local copy.
+2. Re-pin D6 and D11 where findings change, and replay the fire rates on the SE demo sample.
+
+**Target:** 2027-01-31.
