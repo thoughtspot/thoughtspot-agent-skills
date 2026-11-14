@@ -456,7 +456,7 @@ def _measure_formulas(body: dict) -> list:
     by_id = {f.get("id"): f for f in _dicts(body.get("formulas"))
              if isinstance(f.get("id"), str)}
     return [by_id[c["formula_id"]] for c in _dicts(body.get("columns"))
-            if c.get("formula_id") in by_id
+            if isinstance(c.get("formula_id"), str) and c["formula_id"] in by_id
             and (c.get("properties") or {}).get("column_type") == "MEASURE"]
 
 
@@ -467,7 +467,7 @@ def _formula_measure_tables(model: dict) -> frozenset:
     role classifier does not see (it reads `column_id` columns only)."""
     body = model["model"] if isinstance(model.get("model"), dict) else model
     formulas = _dicts(body.get("formulas"))
-    by_ref = tml.formula_ref_index(formulas)
+    by_ref = tml.formula_reference_index(formulas, _dicts(body.get("columns")))
     by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
     todo, seen, tables = _measure_formulas(body), set(), set()
     while todo:
@@ -483,38 +483,74 @@ def _formula_measure_tables(model: dict) -> frozenset:
     return frozenset(tables)
 
 
+def _model_columns_of(model: dict, key: str) -> list:
+    """The Model's columns (dicts) whose `column_id` names the table `key`."""
+    return [c for c in _dicts(model.get("columns"))
+            if isinstance(c.get("column_id"), str)
+            and c["column_id"].partition("::")[0].strip() == key]
+
+
+def _rls_path_tables(model: dict, ctx: Any) -> frozenset:
+    """Table names that another Model table's RLS rules reach through their
+    `table_paths` (_own_table_and_paths), the rule's own Table excluded."""
+    out = set()
+    for mt in _dicts(model.get("model_tables")):
+        fqn = mt.get("fqn")
+        own, by_id = _own_table_and_paths(ctx.tables.get(fqn) if isinstance(fqn, str) else None)
+        out |= {t for t in by_id.values() if isinstance(t, str) and t != own}
+    return frozenset(out)
+
+
+def _acl_signal(item: dict, ctx: Any, model: dict, me: str) -> bool:
+    """Whether a measure-less root reads as an access-control table, by the product
+    owner's two signals (2026-11-14): (1) its own Table TML carries RLS rules and every
+    column it surfaces in the Model is hidden (the Model needs one to enforce the rule;
+    none is for analysis), or (2) another table's RLS rule reaches it through a rule
+    path and none of its columns is in the Model. A factless fact (an event table)
+    exposes its columns and is neither."""
+    fqn = (item.get("obj") or {}).get("fqn")
+    doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
+    cols = _model_columns_of(model, me)
+    if _rls_rules_of(doc):
+        return all((c.get("properties") or {}).get("is_hidden") is True for c in cols)
+    name = (doc or {}).get("table", {}).get("name") if isinstance(doc, dict) else None
+    reached = cached("rls_path_tables", model, _rls_path_tables, model, ctx)
+    return not cols and any(n in reached for n in (name, (item.get("obj") or {}).get("name")))
+
+
 @register("rls_root_beside", uses=(),
           label="the other tables at the root of the Model's joins")
 def _rls_root_beside(item: dict, ctx: Any) -> list:
-    """Model table: when its Table TML (by `fqn`) carries RLS rules (_rls_rules_of, the
-    S14/S15 reading), it holds no measures and is a root of the Model's directed joins
-    (role `factless`, joined) while another table is a root too, the other roots' keys,
-    sorted; else none. Query generation plans each root as its own fact and stitches
-    them, so such a table — an access-control table joined many-to-one to a dimension is
-    the measured case (S17, live-verified 2026-11-12) — doubles every query's SQL. A
-    root holding measures (role `fact`), or one a formula measure reads
-    (_formula_measure_tables), is a genuine fact of a multi-fact Model, not this shape,
-    so it never fires; a name list in messages."""
+    """Model table: when it reads as an access-control table (_acl_signal), holds no
+    measures and is a root of the Model's directed joins (role `factless`, joined)
+    while another table is a root too, the other roots' keys, sorted; else none. Query
+    generation plans each root as its own fact and stitches them, so such a table — an
+    access-control table joined many-to-one to a dimension is the measured case (S17,
+    live-verified 2026-11-12) — doubles every query's SQL. A root holding measures
+    (role `fact`), or one a formula measure reads (_formula_measure_tables), is a
+    genuine fact; a Model bypassing RLS applies no rule (S10); neither fires. A name
+    list in messages."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    obj = item.get("obj")
-    fqn = obj.get("fqn") if isinstance(obj, dict) else None
-    if not isinstance(fqn, str) or not _rls_rules_of(ctx.tables.get(fqn)):
-        return NameList()
     me = item.get("name")
     if not isinstance(me, str) or not me:           # a non-string alias or name: no key
         return NameList()
     model = _model_of(item)
+    if (model.get("properties") or {}).get("is_bypass_rls"):
+        return NameList()
     roots = cached("join_roots", model, _join_roots, model, ctx)
     if me not in roots or model_roles(model, ctx).get(me, {}).get("role") != "factless":
         return NameList()
     if me in cached("formula_measure_tables", model, _formula_measure_tables, model):
+        return NameList()
+    if not _acl_signal(item, ctx, model, me):
         return NameList()
     return NameList(sorted(roots - {me}))
 
 
 #: @rls_root_fix's values: which fix fits the table's RLS rules.
 RLS_ROOT_FIXES = (
-    "review its rules: they are not one `ts_username = [column]` rule, so check that "
+    "review the RLS rules that reach it: they are not recognised as one "
+    "`ts_username = [column]` rule on this table, so check that "
     "after the RLS filter every user has at most one row per key (a user in two groups "
     "mapped to one key has two); if so, reverse the join so the dimension joins to it "
     "many-to-one, and if not, keep it, as the reversed join would double-count measures",
@@ -525,17 +561,30 @@ RLS_ROOT_FIXES = (
 
 #: The one rule shape the reversal is safe for: the user equals a column of the table.
 _USER_EQUALS_KEY = re.compile(
-    r"(?i)^\s*(?:ts_username\s*=\s*\[[^\]]+\]|\[[^\]]+\]\s*=\s*ts_username)\s*$")
+    r"(?i)^\s*(?:ts_username\s*=\s*\[([^\]]+)\]|\[([^\]]+)\]\s*=\s*ts_username)\s*$")
+_OUTER_PARENS = re.compile(r"^\s*\((.*)\)\s*$", re.S)
 
 
-def _keyed_on_user_alone(expr: Any) -> bool:
-    """The rule is exactly `ts_username = [path::COLUMN]` (either side; quoted literals
-    removed, so a literal comparison never matches): each user then sees only the rows
-    whose key column holds their name, the condition the many-to-one reversal needs
-    together with the (user, key) uniqueness the remediation asks to check. Anything
-    else — ts_groups, a multi-value ts_var, `or`, `!=`, `in`, contains, a literal — can
-    give a user several rows per key."""
-    return isinstance(expr, str) and bool(_USER_EQUALS_KEY.match(_code(expr)))
+def _keyed_on_user_alone(expr: Any, doc: Any) -> bool:
+    """The rule is exactly `ts_username = [path::COLUMN]` (either side, optionally in
+    parentheses; quoted literals removed, so a literal comparison never matches) and the
+    path resolves to the rule's own Table (_own_table_and_paths): each user then sees
+    only the rows whose key column holds their name, the condition the many-to-one
+    reversal needs together with the (user, key) uniqueness the remediation asks to
+    check. Anything else — ts_groups, a multi-value ts_var, `or`, `!=`, `in`, contains,
+    a literal, or a user column on another Table reached through a join path (a
+    group-keyed access table) — can give a user several rows per key."""
+    if not isinstance(expr, str):
+        return False
+    code = _code(expr)
+    while (m := _OUTER_PARENS.match(code)) and m.group(1).count("(") == m.group(1).count(")"):
+        code = m.group(1)
+    hit = _USER_EQUALS_KEY.match(code)
+    if not hit:
+        return False
+    own, by_id = _own_table_and_paths(doc)
+    prefix = (hit.group(1) or hit.group(2)).partition("::")[0].strip()
+    return isinstance(own, str) and by_id.get(prefix, prefix) == own
 
 
 @register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
@@ -552,7 +601,8 @@ def _rls_root_fix(item: dict, ctx: Any) -> str:
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
     rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
-    safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"))
+    doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
+    safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"), doc)
     return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]
 
 

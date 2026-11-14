@@ -181,7 +181,7 @@ def test_rls_root_fix_detail_for_ts_groups():
     ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="[ACL_USER_SITE_1::USER_KEY] = ts_groups")
     out = run_audit(None, [], ctx=ctx, angles=["S"])
     (detail,) = [f["detail"] for f in out["findings"] if f["check_id"] == "S17"]
-    assert "review its rules" in detail and "ts_username = [column]" in detail
+    assert "review the RLS rules that reach it" in detail and "ts_username = [column]" in detail
 
 
 def test_rls_root_fix_without_table_tml_keeps_the_join():
@@ -189,3 +189,77 @@ def test_rls_root_fix_without_table_tml_keeps_the_join():
     ctx = fx.sec_rls_acl_table_as_root()
     del ctx.tables["t-acl_user_site"]
     assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
+
+
+def test_rls_root_fix_requires_the_user_column_on_the_table_itself():
+    """A user column on another Table reached through a join path (a group-keyed access
+    table) can leave a user two rows per key: review, never reverse."""
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="ts_username = [USER_GROUP_1::USER_NAME]")
+    rls = ctx.tables["t-acl_user_site"]["table"]["rls_rules"]
+    rls["table_paths"].append({"id": "USER_GROUP_1", "table": "USER_GROUP",
+                               "join_path": [{"join": ["acl_group"]}]})
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
+    # parentheses around the one own-table rule still qualify
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="( ts_username = [ACL_USER_SITE_1::USER_KEY] )")
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[1]
+    ctx = fx.build_acl_ctx("acl_to_dim",
+                           rule_expr="( ts_username = 'a' ) or ( [ACL_USER_SITE_1::K] = 'b' )")
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
+
+
+def test_formula_measure_through_a_surfacing_column_name_is_a_fact():
+    """The shared reading (formula_reference_index) resolves a formula by the display name
+    of the column surfacing it, as P17, P2, H3 and the formula tree do."""
+    ctx = fx.build_acl_ctx("acl_to_dim")
+    m = ctx.models[0]["model"]
+    m["formulas"] = [{"id": "formula_inner", "name": "Inner",
+                      "expr": "[ACL_USER_SITE::SITE_ID] * 1"},
+                     {"id": "formula_outer", "name": "Outer", "expr": "count ( [Qty Adj] )"}]
+    m["columns"] += [{"name": "Qty Adj", "formula_id": "formula_inner",
+                      "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}},
+                     {"name": "Outer", "formula_id": "formula_outer",
+                      "properties": {"column_type": "MEASURE"}},
+                     {"name": "Odd", "formula_id": ["not", "a", "string"],
+                      "properties": {"column_type": "MEASURE"}}]
+    assert _s17(ctx) == []
+
+
+def test_silent_when_the_model_bypasses_rls():
+    """No rule applies under is_bypass_rls (S10's finding), so the measured plan does not."""
+    ctx = fx.sec_rls_acl_table_as_root()
+    ctx.models[0]["model"]["properties"] = {"is_bypass_rls": True}
+    assert _s17(ctx) == []
+
+
+def test_an_rls_table_with_a_visible_column_is_not_an_acl():
+    """Signal 1: an access-control table's Model columns are all hidden, there to enforce
+    the rule. A factless fact (an event table) exposes its columns: silent."""
+    ctx = fx.sec_rls_acl_table_as_root()
+    ctx.models[0]["model"]["columns"].append(
+        {"name": "Event Note", "column_id": "ACL_USER_SITE::NOTE",
+         "properties": {"column_type": "ATTRIBUTE"}})
+    assert _s17(ctx) == []
+
+
+def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
+    """Signal 2: no rule of its own, another Table's RLS rule reaches it through a rule
+    path, and none of its columns is in the Model: fires, with the review advice."""
+    ctx = fx.build_acl_ctx("acl_to_dim",
+                           rule_expr="ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                           rls_on="D_SITE")
+    d_site = ctx.tables["t-d_site"]["table"]["rls_rules"]
+    d_site["table_paths"] = [{"id": "ACL_USER_SITE_1", "table": "ACL_USER_SITE",
+                              "join_path": [{"join": ["site_acl"]}]}]
+    m = ctx.models[0]["model"]
+    m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
+    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
+    # with one of its columns in the Model, signal 2 does not hold
+    m["columns"].append({"name": "K", "column_id": "ACL_USER_SITE::USER_KEY",
+                         "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}})
+    assert _s17(ctx) == []
+    # and with no rule reaching it at all, a column-less measure-less root is not an ACL
+    ctx = fx.build_acl_ctx("acl_to_dim", rls_on="NONE")
+    m = ctx.models[0]["model"]
+    m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
+    assert _s17(ctx) == []

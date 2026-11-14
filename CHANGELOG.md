@@ -5,8 +5,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
-## 2026-11-13
-- feat: `ts audit` rule S17, HIGH: a Table with RLS rules and no measures at the root of a Model's joins beside another root (an access-control table joined many-to-one to a dimension, or the dimension joined to it one-to-many), which query generation plans as a second fact and stitches every query from separate subqueries; the finding advises reversing the join when the table has one `ts_username = [column]` rule, and otherwise to review that the RLS filter leaves each user one row per key before reversing it (a ts_groups, multi-value ts_var, `or` or second rule can leave two and double-count); a table holding measures, or read by a formula measure, is a fact and never fires (ts-audit 3.20.0)
+## 2026-11-14
+- feat: `ts audit` rule S17, HIGH: an access-control table at the root of a Model's joins beside another root (joined many-to-one to a dimension, or the dimension joined to it one-to-many), which query generation plans as a second fact and stitches every query from separate subqueries. A measure-less table reads as access-control when it carries RLS rules with all its Model columns hidden, or another table's RLS rule reaches it and none of its columns is in the Model; an event table exposing its columns, a table a formula measure reads, and a Model bypassing RLS never fire. The finding advises reversing the join for one `ts_username = [column]` rule on the table, and otherwise to review that the RLS filter leaves each user one row per key before reversing it (ts-audit 3.20.0)
 - chore: bump ts-cli to v0.216.0
 
 ## 2026-11-12

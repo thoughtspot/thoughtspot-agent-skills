@@ -327,21 +327,27 @@
   title: RLS table planned as a second fact table
   evidence: fact
   description: >-
-    A Model table with no measures whose Table TML carries RLS rules and which sits at
-    the root of the Model's joins — no table joins to it, reading each join many-side to one-side by its
-    cardinality (a ONE_TO_MANY join reverses it, so it does not matter which table
-    declares the join) — while another table is a root too. Query generation plans each
-    root as its own fact. Live-verified 2026-11-12 on an internal dev cluster, as a user
-    under the rule: an access-control table joined many-to-one to a dimension the fact
-    also joins (or the dimension joined to it one-to-many) produced two CTEs, the
-    access table with the dimension filtered by the rule and the fact with the
-    dimension, each grouped and then outer-joined, roughly twice the SQL of one query;
-    the dimension joined many-to-one to the access table made it a leaf and gave one
-    flat query, with identical results. HIGH: an anti-pattern (product owner,
-    2026-11-12): an access-control list's RLS filter should leave one row per key per
-    user, whatever the rule. A root holding measures, or read by a formula measure, is a genuine
-    fact of a multi-fact Model and never fires. A table in no directed join (one-to-one or many-to-many only, or none)
-    is not a root here, and an unjoined one is D5's.
+    An access-control table at the root of the Model's joins — no table joins to it,
+    reading each join many-side to one-side by its cardinality (a ONE_TO_MANY join
+    reverses it, so it does not matter which table declares the join) — while another
+    table is a root too. Query generation plans each root as its own fact.
+    Live-verified 2026-11-12 on an internal dev cluster, as a user under the rule: an
+    access-control table joined many-to-one to a dimension the fact also joins (or the
+    dimension joined to it one-to-many) produced two CTEs, the access table with the
+    dimension filtered by the rule and the fact with the dimension, each grouped and
+    then outer-joined, roughly twice the SQL of one query; the dimension joined
+    many-to-one to the access table made it a leaf and gave one flat query, with
+    identical results. A table reads as access-control when it holds no measures (none
+    of its own, and no formula measure reads it) and either carries RLS rules with
+    every column it surfaces in the Model hidden (one is needed to enforce the rule,
+    none is for analysis), or is reached by another table's RLS rule path with none of
+    its columns in the Model (product owner, 2026-11-14; the second shape is not
+    live-measured). An event table that exposes its columns is a fact and never fires.
+    HIGH: an anti-pattern (product owner, 2026-11-12): an access-control list's RLS
+    filter should leave one row per key per user, whatever the rule. A Model with
+    is_bypass_rls applies no rule (S10) and never fires. A table in no directed join
+    (one-to-one or many-to-many only, or none) is not a root here, and an unjoined one
+    is D5's.
   categories: [S]
   requires: [model_tml, table_tml]
   scope: model.table
@@ -349,7 +355,7 @@
     mode: each
     where: {field: "@rls_root_beside", len_gt: 0}
   severity: HIGH
-  message: "'{name}' carries RLS rules and no table joins to it many-to-one, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
+  message: "Access-control table '{name}' has no table joining to it many-to-one, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
   remediation: >-
     If it is an access-control table with one rule, `ts_username = [column]`,
     reverse the join so the dimension joins to it many-to-one, which makes it a leaf and
