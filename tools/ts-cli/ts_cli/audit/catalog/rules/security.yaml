@@ -342,8 +342,9 @@
     every column it surfaces in the Model hidden (one is needed to enforce the rule,
     none is for analysis), or is reached by another table's RLS rule path with none of
     its columns in the Model (product owner, 2026-11-14; the second shape is not
-    live-measured). A Model column counts whether it is the table's own or a formula
-    over it, and only a rule path that a rule references and that can be walked reaches
+    live-measured, and its finding says to check the query plan first). Either signal
+    is enough. A Model column counts whether it is the table's own or a formula over it
+    (directly or through other formulas), and only a rule path that a rule references and that can be walked reaches
     a table. An event table that exposes its columns is a fact and never fires. A rule
     path entering the table from the dimension the Model joins it to closes a loop:
     that is S11's (CRITICAL, every query under the rule fails), and S17 stays silent.
@@ -361,7 +362,7 @@
   severity: HIGH
   message: "Access-control table '{name}' has no table joining to it many-to-one, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
   remediation: >-
-    If it is an access-control table with one rule, `ts_username = [column]`,
+    If it is an access-control table with one rule on this table, `ts_username = [column]`,
     reverse the join so the dimension joins to it many-to-one, which makes it a leaf and
     each query one flat statement; that join is only many-to-one after the rule filters
     it, so first check that each (user, key) pair occurs once in the table, hide its

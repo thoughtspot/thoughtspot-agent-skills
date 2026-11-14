@@ -269,12 +269,22 @@ def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
                                  "destination": "ACL_USER_SITE", "type": "INNER"}],
                ["order_acl"])
     assert _all(ctx) == [("S17", "HIGH")]
-    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[0]
-    # a column of it in the Model, even hidden: signal 2 does not hold
-    ctx.models[0]["model"]["columns"].append(
-        {"name": "K", "column_id": "ACL_USER_SITE::USER_KEY",
-         "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}})
+    # not live-measured: the finding says to check the query plan first
+    assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == RLS_ROOT_FIXES[2]
+    # a column of it in the Model, even hidden: signal 2 does not hold (and with no rule
+    # of its own, signal 1 does not either)
+    cols = ctx.models[0]["model"]["columns"]
+    cols.append({"name": "K", "column_id": "ACL_USER_SITE::USER_KEY",
+                 "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}})
     assert _s17(ctx) == []
+    cols.pop()
+    # either signal is enough: a rule of its own, with no Model column, keeps signal 2
+    ctx.tables["t-acl_user_site"]["table"]["rls_rules"] = {
+        "tables": [{"name": "ACL_USER_SITE"}],
+        "table_paths": [{"id": "ACL_USER_SITE_1", "table": "ACL_USER_SITE",
+                         "column": ["USER_KEY"]}],
+        "rules": [{"name": "Own", "expr": "ts_username = [ACL_USER_SITE_1::USER_KEY]"}]}
+    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
 
 
 def test_an_rls_path_entering_from_the_joined_dimension_is_s11s():
@@ -309,4 +319,31 @@ def test_an_rls_table_with_no_column_in_the_model_is_not_signal_one():
     ctx = fx.sec_rls_acl_table_as_root()
     m = ctx.models[0]["model"]
     m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
+    assert _s17(ctx) == []
+
+
+def test_a_visible_formula_reading_the_table_through_another_formula_counts():
+    """A Model column surfaces the table's data whether its formula reads it directly or
+    through another formula: visible, it is not an access table."""
+    for ref in ("[formula_inner]", "[Inner]"):
+        ctx = fx.build_acl_ctx("acl_to_dim")
+        m = ctx.models[0]["model"]
+        m["formulas"] = [{"id": "formula_inner", "name": "Inner",
+                          "expr": "[ACL_USER_SITE::SITE_ID]"},
+                         {"id": "formula_outer", "name": "Outer",
+                          "expr": f"concat ( 'site ' , to_string ( {ref} ) )"}]
+        m["columns"] += [{"name": "Inner Col", "formula_id": "formula_inner",
+                          "properties": {"column_type": "ATTRIBUTE", "is_hidden": True}},
+                         {"name": "Outer", "formula_id": "formula_outer",
+                          "properties": {"column_type": "ATTRIBUTE"}}]
+        assert _s17(ctx) == [], ref
+
+
+def test_a_hidden_measure_column_makes_it_a_fact():
+    """The measure-less guard on its own: a hidden MEASURE passes signal 1's visibility
+    test, so only the role (fact) keeps it silent."""
+    ctx = fx.sec_rls_acl_table_as_root()
+    ctx.models[0]["model"]["columns"].append(
+        {"name": "Qty", "column_id": "ACL_USER_SITE::QTY",
+         "properties": {"column_type": "MEASURE", "is_hidden": True}})
     assert _s17(ctx) == []

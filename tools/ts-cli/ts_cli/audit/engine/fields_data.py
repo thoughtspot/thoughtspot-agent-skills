@@ -17,7 +17,7 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
@@ -452,50 +452,62 @@ def _dicts(value: Any) -> list:
     return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
 
-def _measure_formulas(body: dict) -> list:
-    """The formulas the Model surfaces as MEASURE columns."""
-    by_id = {f.get("id"): f for f in _dicts(body.get("formulas"))
-             if isinstance(f.get("id"), str)}
-    return [by_id[c["formula_id"]] for c in _dicts(body.get("columns"))
-            if isinstance(c.get("formula_id"), str) and c["formula_id"] in by_id
-            and (c.get("properties") or {}).get("column_type") == "MEASURE"]
+def _body(model: dict) -> dict:
+    return model["model"] if isinstance(model.get("model"), dict) else model
 
 
-def _formula_measure_tables(model: dict) -> frozenset:
-    """Table keys (the part before `::`) that a formula surfaced as a MEASURE column
-    reads, following formula cross-references (formula_ref_index): such a table is
-    counted as a fact even when none of its own columns is a MEASURE, which the shared
-    role classifier does not see (it reads `column_id` columns only)."""
-    body = model["model"] if isinstance(model.get("model"), dict) else model
+def _formula_tables(model: dict) -> Dict[str, frozenset]:
+    """Per formula id, the table keys (the part before `::`) it reads, directly or
+    through other formulas (formula_reference_index: id, name, or a surfacing
+    column's display name)."""
+    body = _body(model)
     formulas = _dicts(body.get("formulas"))
     by_ref = tml.formula_reference_index(formulas, _dicts(body.get("columns")))
     by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
-    todo, seen, tables = _measure_formulas(body), set(), set()
-    while todo:
-        f = todo.pop()
-        if id(f) in seen:
+    out = {}
+    for start in formulas:
+        if not isinstance(start.get("id"), str):
             continue
-        seen.add(id(f))
-        for ref in tml.expr_refs(f.get("expr")):
-            if "::" in ref:
-                tables.add(ref.partition("::")[0].strip())
-            elif by_ref.get(ref) in by_name:
-                todo.append(by_name[by_ref[ref]])
-    return frozenset(tables)
+        todo, seen, tables = [start], set(), set()
+        while todo:
+            f = todo.pop()
+            if id(f) in seen:
+                continue
+            seen.add(id(f))
+            for ref in tml.expr_refs(f.get("expr")):
+                if "::" in ref:
+                    tables.add(ref.partition("::")[0].strip())
+                elif by_ref.get(ref) in by_name:
+                    todo.append(by_name[by_ref[ref]])
+        out[start["id"]] = frozenset(tables)
+    return out
+
+
+def _formula_measure_tables(model: dict) -> frozenset:
+    """Table keys that a formula surfaced as a MEASURE column reads (_formula_tables):
+    such a table is counted as a fact even when none of its own columns is a MEASURE,
+    which the shared role classifier does not see (it reads `column_id` columns only;
+    BL-573)."""
+    reads = cached("formula_tables", model, _formula_tables, model)
+    out = set()
+    for c in _dicts(_body(model).get("columns")):
+        fid = c.get("formula_id")
+        if isinstance(fid, str) and tml.mapping(c, "properties").get("column_type") == "MEASURE":
+            out |= reads.get(fid, frozenset())
+    return frozenset(out)
 
 
 def _surfacing_columns(model: dict, key: str) -> list:
     """The Model's columns (dicts) that surface data of the table `key`: its own
-    `column_id` columns, and formula columns whose formula references `[key::...]`."""
-    exprs = {f.get("id"): f.get("expr") for f in _dicts(model.get("formulas"))
-             if isinstance(f.get("id"), str)}
+    `column_id` columns, and formula columns whose formula reads it, directly or
+    through other formulas (_formula_tables)."""
+    reads = cached("formula_tables", model, _formula_tables, model)
     out = []
-    for c in _dicts(model.get("columns")):
+    for c in _dicts(_body(model).get("columns")):
         cid, fid = c.get("column_id"), c.get("formula_id")
         if isinstance(cid, str) and cid.partition("::")[0].strip() == key:
             out.append(c)
-        elif isinstance(fid, str) and any(r.partition("::")[0].strip() == key
-                                          for r in tml.expr_refs(exprs.get(fid)) if "::" in r):
+        elif isinstance(fid, str) and key in reads.get(fid, frozenset()):
             out.append(c)
     return out
 
@@ -525,11 +537,10 @@ def _acl_signal(item: dict, ctx: Any, model: dict, me: str) -> bool:
     fqn = (item.get("obj") or {}).get("fqn")
     doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
     cols = _surfacing_columns(model, me)
-    if _rls_rules_of(doc):
-        return bool(cols) and all(
-            tml.mapping(c, "properties").get("is_hidden") is True for c in cols)
+    own = bool(_rls_rules_of(doc)) and bool(cols) and all(
+        tml.mapping(c, "properties").get("is_hidden") is True for c in cols)
     reached, _ = cached("rls_reach", model, _rls_reach, model, ctx)
-    return not cols and me in reached
+    return own or (not cols and me in reached)
 
 
 @register("rls_root_beside", uses=(),
@@ -549,7 +560,7 @@ def _rls_root_beside(item: dict, ctx: Any) -> list:
     if not isinstance(me, str) or not me:           # a non-string alias or name: no key
         return NameList()
     model = _model_of(item)
-    if (model.get("properties") or {}).get("is_bypass_rls"):
+    if tml.mapping(model, "properties").get("is_bypass_rls"):
         return NameList()
     roots = cached("join_roots", model, _join_roots, model, ctx)
     if me not in roots or model_roles(model, ctx).get(me, {}).get("role") != "factless":
@@ -572,6 +583,10 @@ RLS_ROOT_FIXES = (
     "many-to-one, and if not, keep it, as the reversed join would double-count measures",
     "reverse the join so the dimension joins to it many-to-one, once the conditions in "
     "the remediation hold",
+    "this shape is not live-measured (only another table's RLS rule reaches it, and it "
+    "has no column in the Model): first check the query plan as a user under the rule; "
+    "if it does stitch, review that the rule leaves each user at most one row per key, "
+    "then reverse the join so the dimension joins to it many-to-one, keeping it if not",
 )
 
 
@@ -613,10 +628,14 @@ def _rls_root_fix(item: dict, ctx: Any) -> str:
     anti-pattern, but the code cannot prove it here). A Table's rules combine with OR, so
     a second rule (owner or delegate) can give a user two rows per key, as can ts_groups,
     a multi-value ts_var or an `or`: the reversed many-to-one join would double-count
-    measures, which the stitched plan's grouping does not."""
+    measures, which the stitched plan's grouping does not. The third (check the plan
+    first) when the table has no rule of its own and no Model column: only another
+    table's rule reaches it, a shape not live-measured."""
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
     rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
+    if not rules and not _surfacing_columns(_model_of(item), item.get("name")):
+        return RLS_ROOT_FIXES[2]
     doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
     safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"), doc)
     return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]
