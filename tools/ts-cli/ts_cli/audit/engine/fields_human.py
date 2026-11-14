@@ -360,100 +360,111 @@ def _shared_term_kind(item: dict, ctx: Any) -> Optional[str]:
 _INLINE_WRAP = len("(  )")
 
 
-def _filter_columns(model: dict) -> set:
-    """The column names a Model's `filters[]` name (each `column` list, or a scalar)."""
+def _named_columns(model: dict) -> set:
+    """The column names something else in the Model names: each `filters[].column`
+    (a list, or a scalar) and each column's `properties.currency_type.column`."""
     out = set()
     for f in model.get("filters") or []:
         col = f.get("column") if isinstance(f, dict) else None
         out.update(str(c) for c in (col if isinstance(col, (list, tuple)) else [col])
                    if c is not None)
+    for c in model.get("columns") or []:
+        currency = tml.mapping(c, "properties").get("currency_type") if isinstance(c, dict) else None
+        if isinstance(currency, dict) and currency.get("column") is not None:
+            out.add(str(currency["column"]))
     return out
 
 
-def _inlined_length(user: dict, helper: dict) -> Optional[int]:
-    """The length of `user`'s expression with each reference to `helper` replaced by
-    `( <helper's expression> )`; None when either expression is not text."""
-    parts, text = user.get("expr"), helper.get("_text")
-    if not isinstance(parts, list) or not isinstance(text, str):
+def _text(segments: Any) -> Optional[str]:
+    """An expression rebuilt from its formula-tree segments, as written; None when the
+    TML gave none, or none that is text."""
+    if not isinstance(segments, list) or not segments:
         return None
+    return "".join(s if isinstance(s, str) else str(s.get("ref") or "") for s in segments)
+
+
+def _refs_to(segments: Any, name: str) -> int:
+    return sum(1 for s in segments or [] if isinstance(s, dict) and s.get("formula") == name)
+
+
+def _inlined_length(user: dict, name: str, text: str) -> int:
+    """The length of `user`'s expression with its reference to formula `name` replaced
+    by `( <text> )`; every other reference counts as written."""
     total = 0
-    for seg in parts:
+    for seg in user["expr"]:
         if isinstance(seg, str):
             total += len(seg)
-        elif seg.get("formula") == helper["name"]:
+        elif seg.get("formula") == name:
             total += len(text) + _INLINE_WRAP
         else:
             total += len(str(seg.get("ref") or ""))
     return total
 
 
-def _formula_texts(model: dict, names: Any) -> Dict[str, Any]:
-    """Each named formula's `expr` as the TML gives it (the first formula of a name)."""
-    texts: Dict[str, Any] = {}
-    for f in model.get("formulas") or []:
-        if isinstance(f, dict) and f.get("name") in names and f["name"] not in texts:
-            texts[f["name"]] = f.get("expr")
-    return texts
-
-
-def _formula_users(nodes: Dict[str, dict]) -> Dict[str, List[str]]:
-    """Per formula name, the formulas that use it (each once, as the tree reads uses)."""
-    users: Dict[str, List[str]] = {n: [] for n in nodes}
-    for name, node in nodes.items():
-        for use in node["uses"]:
-            if "formula" in use:
-                users[use["formula"]].append(name)
-    return users
+def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict],
+                  named: set) -> dict:
+    from ts_cli.audit.formula_tree import _reachable
+    sole = users[0] if len(users) == 1 else None
+    entry = {"label": node["label"], "hidden": node["hidden"], "user_count": len(users),
+             "sole_user": nodes[sole]["label"] if sole else None,
+             "named": node["label"] in named or name in named,
+             "cyclic": False, "user_refs": 0, "inlined_length": None}
+    if sole is None:
+        return entry
+    entry["user_refs"] = _refs_to(nodes[sole]["expr"], name)
+    entry["cyclic"] = _refs_to(node["expr"], name) > 0 or sole in _reachable([name], nodes)
+    text = _text(node["expr"])
+    if text is not None and isinstance(nodes[sole]["expr"], list):
+        entry["inlined_length"] = _inlined_length(nodes[sole], name, text)
+    return entry
 
 
 def _build_single_use(model: dict) -> Dict[str, dict]:
-    """Per formula name, from the report's formula tree (so the audit and the Formulas
-    view read uses the same way): whether it is hidden, the formulas that use it, the
-    label of the one that does when only one does, whether a Model filter names its
-    column, and the user's length once it is inlined. A helper its one user is reached
-    from (a cycle) cannot be inlined: no length."""
+    """Per formula name, read off the report's formula tree (so the audit and the
+    Formulas view read uses the same way): its label, whether it is hidden, how many
+    formulas use it and the label of the one that does when only one does, whether a
+    Model filter or currency setting names its column, whether it and that one user
+    form a cycle (a reference to itself counts), how many times that user references
+    it, and that user's length with it pasted in."""
     from ts_cli.audit.formula_tree import formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
-    texts = _formula_texts(model, nodes)
-    users = _formula_users(nodes)
-    filtered = _filter_columns(model)
-    out: Dict[str, dict] = {}
-    for name, node in nodes.items():
-        sole = users[name][0] if len(users[name]) == 1 else None
-        length = None
-        if sole is not None and not _reaches(name, sole, nodes):
-            length = _inlined_length(nodes[sole], {"name": name, "_text": texts.get(name)})
-        out[name] = {"hidden": node["hidden"], "user_count": len(users[name]),
-                     "sole_user": nodes[sole]["label"] if sole else None,
-                     "in_filter": node["label"] in filtered or name in filtered,
-                     "inlined_length": length}
+    users: Dict[str, List[str]] = {n: [] for n in nodes}
+    for user, node in nodes.items():
+        for use in node["uses"]:
+            if "formula" in use:
+                users[use["formula"]].append(user)
+    named = _named_columns(model)
+    return {name: _helper_entry(name, node, users[name], nodes, named)
+            for name, node in nodes.items()}
+
+
+def _first_index(model: dict) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for i, f in enumerate(model.get("formulas") or []):
+        name = f.get("name") if isinstance(f, dict) else None
+        if isinstance(name, str) and name not in out:
+            out[name] = i
     return out
-
-
-def _reaches(start: str, target: str, nodes: Dict[str, dict]) -> bool:
-    seen, stack = set(), [start]
-    while stack:
-        n = stack.pop()
-        if n == target:
-            return True
-        if n in seen:
-            continue
-        seen.add(n)
-        stack += [u["formula"] for u in nodes[n]["uses"] if "formula" in u]
-    return False
 
 
 def _single_use(item: dict) -> dict:
     """This formula's entry in _build_single_use; {} for a formula sharing an earlier
-    formula's name (the tree keeps the first), so a name reports once."""
+    formula's name (the tree keeps the first, so a name reports once) or whose name is
+    not text (malformed TML, BL-501)."""
     model = _model_of(item)
     name = (item.get("obj") or {}).get("name")
-    formulas = model.get("formulas") or []
-    first = next((i for i, f in enumerate(formulas)
-                  if isinstance(f, dict) and f.get("name") == name), None)
-    if first != item.get("index"):
+    if not isinstance(name, str):
+        return {}
+    if cached("formula_first_index", model, _first_index, model).get(name) != item.get("index"):
         return {}
     return cached("single_use_helpers", model, _build_single_use, model).get(name, {})
+
+
+@register("formula_label", uses=(),
+          label="the name people search the formula by")
+def _formula_label(item: dict, ctx: Any) -> Optional[str]:
+    """Formula: its surfacing column's name, else its own name."""
+    return _single_use(item).get("label") or (item.get("obj") or {}).get("name")
 
 
 @register("formula_hidden", uses=(),
@@ -478,16 +489,34 @@ def _sole_formula_user(item: dict, ctx: Any) -> Optional[str]:
     return _single_use(item).get("sole_user")
 
 
-@register("formula_in_model_filter", uses=(),
-          label="a Model filter uses the formula's column")
-def _formula_in_model_filter(item: dict, ctx: Any) -> bool:
-    """Formula: a Model `filters[]` entry names its column (or the formula)."""
-    return bool(_single_use(item).get("in_filter"))
+@register("sole_user_reference_count", uses=(),
+          label="how many times the one formula that uses it references it")
+def _sole_user_reference_count(item: dict, ctx: Any) -> int:
+    """Formula used by exactly one formula: how many times that formula references it
+    (0 otherwise)."""
+    return int(_single_use(item).get("user_refs") or 0)
+
+
+@register("formula_column_named", uses=(),
+          label="a Model filter or currency setting names the formula's column")
+def _formula_column_named(item: dict, ctx: Any) -> bool:
+    """Formula: a Model `filters[]` entry, or a column's `currency_type.column`, names
+    its column (or the formula)."""
+    return bool(_single_use(item).get("named"))
+
+
+@register("formula_cycles_with_user", uses=(),
+          label="the formula and the one formula that uses it form a cycle")
+def _formula_cycles_with_user(item: dict, ctx: Any) -> bool:
+    """Formula used by exactly one formula: it reaches that formula through what it
+    uses, or references itself."""
+    return bool(_single_use(item).get("cyclic"))
 
 
 @register("inlined_length", uses=(),
-          label="the length of the formula that uses it, once the formula is pasted in")
+          label="the length of the formula that uses it, with this formula pasted in")
 def _inlined_length_field(item: dict, ctx: Any) -> Optional[int]:
     """Formula used by exactly one formula: that formula's expression length with this
-    one pasted in, in brackets; None otherwise, or when they form a cycle."""
+    one pasted in, in parentheses (this helper only: pasting several helpers into one
+    formula adds up); None otherwise, or when either expression is not text."""
     return _single_use(item).get("inlined_length")

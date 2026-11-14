@@ -42,15 +42,23 @@ def test_a_formula_no_column_shows_counts_as_hidden_and_a_display_name_ref_count
                   _f("formula_Helper", "helper_f", "1"),
                   _f("formula_Disc", "disc_f", "2")],
                  [PARENT, _col("Disc Shown", "formula_Disc", hidden=True)])
-    assert sorted(d.split("'")[1] for _, d in found) == ["disc_f", "helper_f"]
+    assert sorted(d.split("'")[1] for _, d in found) == ["Disc Shown", "helper_f"]
 
 
-def test_two_references_from_the_one_user_are_one_user_and_both_are_inlined():
-    found = _h15([_f("formula_Net", "Net Sales", "[formula_D] + [formula_D]"),
-                  _f("formula_D", "D", "x")],
-                 [PARENT, _col("D", "formula_D", hidden=True)])
-    # "( x ) + ( x )"
-    assert len(found) == 1 and "would be 13 characters" in found[0][1]
+def test_a_helper_its_one_user_references_twice_is_not_reported():
+    # pasting it in would write it twice: the helper is doing a job
+    assert _h15([_f("formula_Net", "Net Sales", "if ( [formula_D] > 0 ) then [formula_D] else 0"),
+                 _f("formula_D", "D", "x")],
+                [PARENT, _col("D", "formula_D", hidden=True)]) == []
+
+
+def test_the_message_names_the_helper_as_people_search_it_and_other_refs_count_as_written():
+    found = _h15([_f("formula_Net", "Net Sales", "[formula_d_internal] + [T::COL]"),
+                  _f("formula_d_internal", "d_internal", "1")],
+                 [PARENT, _col("Discount Shown", "formula_d_internal", hidden=True)])
+    # "( 1 ) + [T::COL]" is 16 characters
+    assert found == [("LOW", "Hidden formula 'Discount Shown' is used only by 'Net Sales'; pasting "
+                      "it in removes a level of nesting ('Net Sales' would be 16 characters)")]
 
 
 def test_a_visible_helper_a_reused_helper_and_a_root_are_not_reported():
@@ -61,12 +69,17 @@ def test_a_visible_helper_a_reused_helper_and_a_root_are_not_reported():
                  _col("R", "formula_R", hidden=True)]) == []
 
 
-def test_a_helper_a_model_filter_uses_is_not_reported():
-    formulas = [_f("formula_Net", "Net Sales", "[formula_D]"), _f("formula_D", "D", "1")]
-    columns = [PARENT, _col("D", "formula_D", hidden=True)]
-    assert _h15(formulas, columns, filters=[{"column": ["D"], "oper": "in"}]) == []
-    assert _h15(formulas, columns, filters=[{"column": "D"}]) == []
+def test_a_helper_a_model_filter_or_a_currency_setting_names_is_not_reported():
+    formulas = [_f("formula_Net", "Net Sales", "[formula_d_internal]"),
+                _f("formula_d_internal", "d_internal", "1")]
+    columns = [PARENT, _col("Shown D", "formula_d_internal", hidden=True)]
+    # a filter names the column by its display name, not the formula's
+    assert _h15(formulas, columns, filters=[{"column": ["Shown D"], "oper": "in"}]) == []
+    assert _h15(formulas, columns, filters=[{"column": "Shown D"}]) == []
     assert len(_h15(formulas, columns, filters=[{"column": ["Other"]}, {"oper": "in"}])) == 1
+    amount = {"name": "Amount", "column_id": "T::AMOUNT",
+              "properties": {"column_type": "MEASURE", "currency_type": {"column": "Shown D"}}}
+    assert _h15(formulas, columns + [amount]) == []
 
 
 def test_the_length_limit_is_inclusive_at_250():
@@ -78,16 +91,28 @@ def test_the_length_limit_is_inclusive_at_250():
     assert at(251) == []
 
 
-def test_a_cycle_is_not_reported_and_a_non_text_expression_is_not_fatal():
+def test_a_cycle_and_a_self_reference_are_not_reported():
     assert _h15([_f("formula_A", "A", "[formula_B]"), _f("formula_B", "B", "[formula_A]")],
                 [_col("A", "formula_A", hidden=True), _col("B", "formula_B", hidden=True)]) == []
-    # a non-text expression (malformed TML) has no length, so no finding, and no error
-    from ts_cli.audit.engine.fields_human import _inlined_length_field
+    assert _h15([_f("formula_Net", "Net Sales", "[formula_H] * 2"),
+                 _f("formula_H", "H", "[formula_H] + 1")],
+                [PARENT, _col("H", "formula_H", hidden=True)]) == []
+
+
+def _item(model, i):
+    return {"obj": model["formulas"][i], "index": i, "parent": {"obj": model}}
+
+
+def test_malformed_formulas_give_no_value_and_no_error():
+    from ts_cli.audit.engine.fields_human import _formula_hidden, _inlined_length_field
     model = {"formulas": [_f("formula_Net", "Net Sales", "[formula_D]"),
-                          _f("formula_D", "D", ["not", "text"])],
+                          _f("formula_D", "D", ["not", "text"]),
+                          {"id": "formula_X", "name": ["a", "list"], "expr": "1"}],
              "columns": [PARENT, _col("D", "formula_D", hidden=True)]}
-    item = {"obj": model["formulas"][1], "index": 1, "parent": {"obj": model}}
-    assert _inlined_length_field(item, None) is None
+    # a non-text expression has no length, so no finding
+    assert _inlined_length_field(_item(model, 1), None) is None
+    # a name that is not text (BL-501) is skipped, not an unhashable-key error
+    assert _formula_hidden(_item(model, 2), None) is False
 
 
 def test_formulas_sharing_a_name_report_once():

@@ -875,8 +875,9 @@ def human_single_use_hidden_helper() -> AuditContext:
 
 
 def human_helper_visible_or_reused() -> AuditContext:
-    """Helpers H15 leaves alone: a visible one, a hidden one two formulas use, a hidden
-    one a Model filter uses, and a hidden one too long to paste in."""
+    """Helpers H15 leaves alone: Gross (visible, and used twice), Cost (hidden, used by
+    two formulas), Filtered (hidden, a Model filter names it) and Open Amount (hidden,
+    too long to paste in)."""
     long_expr = "sum ( if ( [T1::STATUS] = 'OPEN' ) then [T1::AMOUNT] else 0 ) " * 5
     model = build_human_model(
         columns=[_helper_col("Net Sales", "formula_Net"),

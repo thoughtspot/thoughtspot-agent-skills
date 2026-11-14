@@ -228,6 +228,17 @@ def test_the_report_compacts_each_expression_with_the_use_encoding():
     assert _written_use([1, "T::y"], "[ T::y ]") == [1, "T::y", "[ T::y ]"]
 
 
+def test_the_report_marks_exactly_the_helpers_h15_reported():
+    data = run_audit(None, ["m-1"], ctx=make_context(
+        models=[{"guid": "m-1", "model": MODEL}], model_guids=["m-1"]))
+    from ts_cli.audit.report import compact_payload
+    ft = compact_payload(data)["C"]["m"][0]["ft"]
+    reported = sorted(f["object_name"] for f in data["findings"] if f["check_id"] == "H15")
+    assert reported == ["Cost", "Gross Margin"]
+    # Loop B is hidden and used once, but in a cycle: H15 is silent, so it is not marked
+    assert sorted(n["f"] for n in ft["n"] if n.get("s") == 1) == reported
+
+
 def test_a_tree_written_before_expressions_compacts_without_them():
     from ts_cli.audit.report import _compact_tree
     old = {"nodes": [{"name": "A", "label": "A", "kind": None, "hidden": True,
@@ -809,22 +820,39 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
     assert shown["errors"] == []
     x = shown["extra"]
     assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
-    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::AMOUNT] ) ) ) / [formula_Rev]".replace(
-        "AMOUNT", "COST")
+    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
     assert x["links"] == ["[formula_Rev]", "[ORDERS::COST]", "[formula_Rev]"]
     assert x["revInl"]   # uses no single-use helper: no second definition
 
 
 @needs_chrome
-def test_pasting_helpers_in_stops_at_a_cycle(tmp_path):
-    model = {"name": "Loop", "formulas": [
+def test_only_what_h15_reports_is_tagged_and_pasted(tmp_path):
+    model = {"name": "Tags", "filters": [{"column": ["Filtered"], "oper": "in"}], "formulas": [
         {"id": "formula_A", "name": "A", "expr": "[formula_B] + 1"},
-        {"id": "formula_B", "name": "B", "expr": "[formula_A] + 2"}], "columns": []}
+        {"id": "formula_B", "name": "B", "expr": "[formula_A] + 2"},
+        {"id": "formula_T", "name": "Top", "expr": "[formula_S] + [formula_S2] + [formula_F]"},
+        {"id": "formula_U", "name": "Top Two", "expr": "[formula_S2] * 2"},
+        {"id": "formula_S", "name": "S", "expr": "1"},
+        {"id": "formula_S2", "name": "Shared", "expr": "2"},
+        {"id": "formula_F", "name": "Filtered", "expr": "3"}],
+        "columns": [{"name": n, "formula_id": f, "properties": {"column_type": "MEASURE", **h}}
+                    for n, f, h in (("Top", "formula_T", {}), ("Top Two", "formula_U", {}),
+                                    ("Shared", "formula_S2", {"is_hidden": True}),
+                                    ("Filtered", "formula_F", {"is_hidden": True}))]}
     page = _report(tmp_path, ("m-9", model))
-    # A and B are hidden (no column) and each only uses the other: B is pasted into A,
-    # and A, the formula shown, is not pasted back into B
-    shown = report_browser.render(page, tmp_path, "formulas/m-9", actions=_ROW + (
-        'row("A").click();'
-        'window.__extra = panel().querySelector(".fdetail-inlined").textContent;'))
+    shown = report_browser.render(page, tmp_path, "formulas/m-9", actions=_ROW + _EXPAND + (
+        'var tags = {}; ["A", "B", "S", "Shared", "Filtered"].forEach(function(n){'
+        '  tags[n] = Array.prototype.map.call(row(n).querySelectorAll(".ftree-tag"),'
+        '    function(t){ return t.textContent; }).join(","); });'
+        'row("Top").click(); var top = panel().querySelector(".fdetail-inlined");'
+        'row("A").click(); var a = panel().querySelector(".fdetail-inlined");'
+        'window.__extra = {tags: tags, top: top && top.textContent, a: a === null};'))
     assert shown["errors"] == []
-    assert shown["extra"] == "( [formula_A] + 2 ) + 1"
+    x = shown["extra"]
+    # S is reported; a cycle (A, B), a helper two formulas use and a filtered one are not
+    assert x["tags"]["S"] == "used once, hidden"
+    assert x["tags"]["B"] == "hidden helper" and x["tags"]["A"] == "hidden helper"
+    assert x["tags"]["Shared"] == "MEASURE,hidden helper"
+    assert x["tags"]["Filtered"] == "MEASURE,hidden helper"
+    assert x["top"] == "( 1 ) + [formula_S2] + [formula_F]"
+    assert x["a"]   # nothing in a cycle is pasted
