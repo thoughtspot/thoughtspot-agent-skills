@@ -480,12 +480,59 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
         for use in node["uses"]:
             if "formula" in use:
                 users[use["formula"]].append(user)
-    names = [f.get("name") for f in model.get("formulas") or [] if isinstance(f, dict)]
+    from collections import Counter
+    counts = Counter(f.get("name") for f in model.get("formulas") or []
+                     if isinstance(f, dict) and isinstance(f.get("name"), str))
     facts = {"named": _named_columns(model),
-             "shared": {n for n in names if isinstance(n, str) and names.count(n) > 1},
+             "shared": {n for n, c in counts.items() if c > 1},
              "aggregates": _aggregate_formula_names(model)}
-    return {name: _helper_entry(name, node, users[name], nodes, facts)
-            for name, node in nodes.items()}
+    entries = {name: _helper_entry(name, node, users[name], nodes, facts)
+               for name, node in nodes.items()}
+    _measure_together(entries, nodes, users)
+    return entries
+
+
+def _pasteable_entry(entry: dict) -> bool:
+    """Everything H15 asks of a helper but the length: hidden, one user referencing it
+    once, nothing naming its column, no cycle, nothing blocking the paste, and text."""
+    return bool(entry["hidden"] and entry["user_count"] == 1 and entry["user_refs"] == 1
+                and not entry["named"] and not entry["cyclic"] and not entry["blocked"]
+                and entry["inlined_length"] is not None)
+
+
+def _measure_together(entries: Dict[str, dict], nodes: Dict[str, dict],
+                      users: Dict[str, List[str]]) -> None:
+    """Replace each pasteable helper's length with that of the formula it ends up in
+    (`target`: up through users that are pasteable themselves) once EVERY pasteable
+    helper under that formula is pasted in, all the way down: the result the Formulas
+    view shows, and what the 250 limit is on (the product owner, 2026-11-14), so
+    findings that each pass cannot add up past it."""
+    paste = {n for n, e in entries.items() if _pasteable_entry(e)}
+    for name in paste:
+        target, seen = users[name][0], {name}
+        while target in paste and target not in seen:
+            seen.add(target)
+            target = users[target][0]
+        entries[name]["target"] = nodes[target]["label"]
+        entries[name]["inlined_length"] = (
+            _expanded_length(target, nodes, paste, set())
+            if isinstance(nodes[target]["expr"], list) else None)
+
+
+def _expanded_length(name: str, nodes: Dict[str, dict], paste: set, open_: set) -> int:
+    """The length of formula `name` with every pasteable helper it references pasted
+    in, in parentheses, recursively; a helper already open (never, after the cycle
+    exclusion, but cheap to guard) counts as written."""
+    total = 0
+    open_ = open_ | {name}
+    for seg in nodes[name]["expr"]:
+        if isinstance(seg, str):
+            total += len(seg)
+        elif seg.get("formula") in paste and seg["formula"] not in open_:
+            total += _expanded_length(seg["formula"], nodes, paste, open_) + _INLINE_WRAP
+        else:
+            total += len(str(seg.get("ref") or ""))
+    return total
 
 
 def _first_index(model: dict) -> Dict[str, int]:
@@ -573,10 +620,19 @@ def _paste_blocked(item: dict, ctx: Any) -> bool:
     return bool(_single_use(item).get("blocked"))
 
 
+@register("paste_target", uses=(),
+          label="the formula the helper ends up in once every such helper is pasted in")
+def _paste_target(item: dict, ctx: Any) -> Optional[str]:
+    """Formula H15 could report: the formula it ends up in, by label — its one user, or,
+    when that user is a helper pasted in too, the formula above it; None otherwise."""
+    return _single_use(item).get("target")
+
+
 @register("inlined_length", uses=(),
-          label="the length of the formula that uses it, with this formula pasted in")
+          label="the length of the formula it ends up in, with every such helper pasted in")
 def _inlined_length_field(item: dict, ctx: Any) -> Optional[int]:
-    """Formula used by exactly one formula: that formula's expression length with this
-    one pasted in, in parentheses (this helper only: pasting several helpers into one
-    formula adds up); None otherwise, or when either expression is not text."""
+    """Formula used by exactly one formula: the length of the formula it ends up in
+    (@paste_target) with every helper H15 could report under it pasted in, in
+    parentheses, all the way down; for any other helper, its one user's length with it
+    alone pasted in. None when no one formula uses it, or an expression is not text."""
     return _single_use(item).get("inlined_length")

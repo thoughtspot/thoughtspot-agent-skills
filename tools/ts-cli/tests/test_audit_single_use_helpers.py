@@ -36,7 +36,7 @@ def test_a_hidden_helper_one_formula_uses_is_reported_with_its_inlined_length():
                  [PARENT, _col("Discounts", "formula_Disc", hidden=True)])
     # "( sum ( [T::D] ) ) * 2" is 22 characters
     assert found == [("LOW", "Hidden formula 'Discounts' is used only by 'Net Sales'; pasting "
-                      "it in removes a level of nesting ('Net Sales' would be 22 characters)")]
+                      "it in removes a level of nesting ('Net Sales' would be 22 characters with every such helper pasted in)")]
 
 
 def test_a_formula_no_column_shows_counts_as_hidden_and_a_display_name_ref_counts():
@@ -60,7 +60,7 @@ def test_the_message_names_the_helper_as_people_search_it_and_other_refs_count_a
                  [PARENT, _col("Discount Shown", "formula_d_internal", hidden=True)])
     # "( 1 ) + [T::COL]" is 16 characters
     assert found == [("LOW", "Hidden formula 'Discount Shown' is used only by 'Net Sales'; pasting "
-                      "it in removes a level of nesting ('Net Sales' would be 16 characters)")]
+                      "it in removes a level of nesting ('Net Sales' would be 16 characters with every such helper pasted in)")]
 
 
 def test_a_visible_helper_a_reused_helper_and_a_root_are_not_reported():
@@ -158,3 +158,30 @@ def test_a_paste_thoughtspot_would_reject_is_not_reported(user_expr, helper_expr
 def test_a_paste_outside_those_calls_is_reported(user_expr, helper_expr):
     assert len(_h15([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr)],
                     [PARENT, _col("H", "formula_H", hidden=True)])) == 1
+
+
+def test_the_limit_counts_every_helper_of_one_formula_together():
+    helpers = [_f(f"formula_H{i}", f"H{i}", "x" * 60) for i in range(5)]
+    user = _f("formula_Net", "Net Sales", " + ".join(f"[formula_H{i}]" for i in range(5)))
+    cols = [PARENT] + [_col(f"H{i}", f"formula_H{i}", hidden=True) for i in range(5)]
+    # each alone would pass (4 * 13 + 4 * 3 + 64 = 128); all five pasted is
+    # 5 * 64 + 4 * 3 = 332, so none of them is reported
+    assert _h15([user] + helpers, cols) == []
+    # three, beside two columns: 3 * 64 + 4 * 3 + 2 * 6 = 216
+    user3 = _f("formula_Net", "Net Sales", " + ".join(f"[formula_H{i}]" for i in range(3)) +
+               " + [T::A] + [T::B]")
+    found = _h15([user3] + helpers[:3], cols[:4])
+    assert len(found) == 3
+    assert {d.split("would be ")[1].split(" ")[0] for _, d in found} == {"216"}
+
+
+def test_a_chain_is_measured_in_the_formula_it_ends_up_in():
+    # B is pasted into C, C into Top: both findings name Top and its full length
+    found = _h15([_f("formula_Top", "Top", "[formula_C] * 2"),
+                  _f("formula_C", "C", "[formula_B] + 1"), _f("formula_B", "B", "y")],
+                 [_col("Top", "formula_Top"), _col("C", "formula_C", hidden=True),
+                  _col("B", "formula_B", hidden=True)])
+    # "( ( y ) + 1 ) * 2" is 17 characters
+    assert [d.split("; ")[1] for _, d in found] == [
+        "pasting it in removes a level of nesting ('Top' would be 17 characters with every "
+        "such helper pasted in)"] * 2
