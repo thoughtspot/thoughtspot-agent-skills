@@ -397,7 +397,11 @@
     reader must open to follow the formula that uses it, and nothing else reuses it.
     Not reported when a Model filter or a column's currency setting names its column,
     when it and the formula using it form a cycle, when that formula references it
-    more than once (pasting it in would repeat it), or when pasting it in would make
+    more than once (pasting it in would repeat it), when another formula shares its
+    name, when the formula using it is itself hidden and unused (remove both instead),
+    when pasting it would put an aggregate inside an aggregate, group or window
+    function, or anything inside a group function (forms ThoughtSpot rejects: there a
+    separate formula is the only way to write it), or when pasting it in would make
     that formula longer than 250 characters, where one long formula is harder to read
     than two short ones. The length counts this helper only: pasting several into one
     formula adds up. Formulas sharing a name report once.
@@ -413,14 +417,15 @@
         - {field: "@sole_user_reference_count", eq: 1}
         - {field: "@formula_column_named", truthy: false}
         - {field: "@formula_cycles_with_user", truthy: false}
+        - {field: "@paste_blocked", truthy: false}
         - {field: "@inlined_length", lte: 250}
   severity: LOW
   message: "Hidden formula '{@formula_label}' is used only by '{@sole_formula_user}'; pasting it in removes a level of nesting ('{@sole_formula_user}' would be {@inlined_length} characters)"
   remediation: >-
     Paste the formula's definition, in parentheses, into the one formula that uses it
-    and check that formula gives the same answers; then remove the helper. Run
-    /ts-dependency-manager on its column first: an Answer saved before the column was
-    hidden can still use it
+    and check that formula gives the same answers; then remove the helper. When a
+    column shows the helper, run /ts-dependency-manager on that column first: an
+    Answer saved before the column was hidden can still use it
   examples:
     fires: {fixture: human_single_use_hidden_helper, severity: LOW}
     silent: {fixture: human_helper_visible_or_reused}

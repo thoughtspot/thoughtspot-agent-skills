@@ -273,9 +273,10 @@ def _compact_tree(tree: dict, pasteable: Any = frozenset()) -> dict:
 
 def _pasteable(findings: list) -> set:
     """The (Model guid, formula name) pairs H15 reported: the helpers the Formulas view
-    tags and pastes in."""
+    tags and pastes in. A Model with no guid is left out: its marks could not be told
+    from another such Model's."""
     return {(f.get("object_guid"), f.get("object_name")) for f in findings
-            if f.get("check_id") == "H15"}
+            if f.get("check_id") == "H15" and f.get("object_guid")}
 
 
 def compact_payload(data: dict) -> dict:

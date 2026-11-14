@@ -27,7 +27,8 @@ shared with the ts-cli tests). This script only loads it from `--root` and repor
 It imports the catalog modules (catalog_model, catalog_validate, catalog_expr,
 catalog_code, catalog_forms, catalog_uses, catalog_reads, catalog_consistency) and, to learn the names rules may use, two engine registries:
 derived fields (engine/fields.py and the engine/fields_data.py and
-engine/fields_human.py it imports, which need only engine/tml.py, engine/memo.py and,
+engine/fields_human.py it imports, which need only engine/tml.py, engine/memo.py,
+ts_cli/tml_join_graph.py and,
 inside a function, formula_tree.py) and code rules
 (engine/code_rules.py and the engine/code_rules_human.py it imports, which need
 findings.py; see its docstring for what else they may import) — WITHOUT executing the `ts_cli` package __init__, which pulls in typer,

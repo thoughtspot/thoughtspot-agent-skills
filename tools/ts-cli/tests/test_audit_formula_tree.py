@@ -239,6 +239,14 @@ def test_the_report_marks_exactly_the_helpers_h15_reported():
     assert sorted(n["f"] for n in ft["n"] if n.get("s") == 1) == reported
 
 
+def test_a_model_without_a_guid_marks_nothing():
+    from ts_cli.audit.report import _pasteable
+    findings = [{"check_id": "H15", "object_guid": "", "object_name": "D"},
+                {"check_id": "H15", "object_guid": "m-1", "object_name": "E"},
+                {"check_id": "H3", "object_guid": "m-1", "object_name": "F"}]
+    assert _pasteable(findings) == {("m-1", "E")}
+
+
 def test_a_tree_written_before_expressions_compacts_without_them():
     from ts_cli.audit.report import _compact_tree
     old = {"nodes": [{"name": "A", "label": "A", "kind": None, "hidden": True,

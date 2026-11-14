@@ -25,7 +25,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.fields import _model_of, register
+from ts_cli.audit.engine.fields import (AGGREGATE_FUNCS, _aggregate_formula_names,
+                                        _model_of, register)
 from ts_cli.audit.engine.memo import cached
 from ts_cli.tml_join_graph import on_clause_refs
 
@@ -387,6 +388,43 @@ def _refs_to(segments: Any, name: str) -> int:
     return sum(1 for s in segments or [] if isinstance(s, dict) and s.get("formula") == name)
 
 
+_CALL_OR_PAREN = re.compile(r"([A-Za-z_]\w*(?:\s+count)?)\s*\(|\(|\)")
+_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+_GROUP_CALL = re.compile(r"(?i)group_\w+\Z")
+
+
+def _calls_around(user: dict, name: str) -> List[str]:
+    """The calls (function names, lower-case) that enclose `user`'s first reference to
+    formula `name`, outermost first: read off its segments, quoted literals left out,
+    a bare bracket recorded as ""."""
+    stack: List[str] = []
+    for seg in user["expr"]:
+        if isinstance(seg, dict):
+            if seg.get("formula") == name:
+                return stack
+            continue
+        for m in _CALL_OR_PAREN.finditer(_QUOTED.sub(" ", seg)):
+            if m.group(0) == ")":
+                if stack:
+                    stack.pop()
+            else:
+                stack.append((m.group(1) or "").lower())
+    return stack
+
+
+def _paste_nests(user: dict, name: str, aggregates: bool) -> bool:
+    """Pasting formula `name` into `user` would write a form ThoughtSpot rejects
+    (thoughtspot-formula-patterns.md, "Group functions" rules 2 and 4): an aggregating
+    helper inside an aggregate, group or window call, or any helper inside a group
+    call, where only a column or a formula reference is shown working."""
+    for call in _calls_around(user, name):
+        if _GROUP_CALL.match(call):
+            return True
+        if aggregates and call and AGGREGATE_FUNCS.match(call + " ("):
+            return True
+    return False
+
+
 def _inlined_length(user: dict, name: str, text: str) -> int:
     """The length of `user`'s expression with its reference to formula `name` replaced
     by `( <text> )`; every other reference counts as written."""
@@ -402,17 +440,23 @@ def _inlined_length(user: dict, name: str, text: str) -> int:
 
 
 def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict],
-                  named: set) -> dict:
+                  model: dict) -> dict:
     from ts_cli.audit.formula_tree import _reachable
     sole = users[0] if len(users) == 1 else None
+    named, shared, aggregates = model["named"], model["shared"], model["aggregates"]
     entry = {"label": node["label"], "hidden": node["hidden"], "user_count": len(users),
              "sole_user": nodes[sole]["label"] if sole else None,
              "named": node["label"] in named or name in named,
-             "cyclic": False, "user_refs": 0, "inlined_length": None}
+             "cyclic": False, "user_refs": 0, "inlined_length": None,
+             "blocked": name in shared}
     if sole is None:
         return entry
-    entry["user_refs"] = _refs_to(nodes[sole]["expr"], name)
+    user = nodes[sole]
+    entry["user_refs"] = _refs_to(user["expr"], name)
     entry["cyclic"] = _refs_to(node["expr"], name) > 0 or sole in _reachable([name], nodes)
+    entry["blocked"] = (entry["blocked"] or (user["hidden"] and user["used_by"] == 0)
+                        or (isinstance(user["expr"], list)
+                            and _paste_nests(user, name, name in aggregates)))
     text = _text(node["expr"])
     if text is not None and isinstance(nodes[sole]["expr"], list):
         entry["inlined_length"] = _inlined_length(nodes[sole], name, text)
@@ -425,7 +469,10 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     formulas use it and the label of the one that does when only one does, whether a
     Model filter or currency setting names its column, whether it and that one user
     form a cycle (a reference to itself counts), how many times that user references
-    it, and that user's length with it pasted in."""
+    it, that user's length with it pasted in, and whether pasting is blocked: its name
+    is shared (the tree keeps one formula of a name, so "used only by" may be false),
+    its user is itself hidden and unused (remove both instead), or the paste would nest
+    an aggregate where ThoughtSpot rejects one (_paste_nests)."""
     from ts_cli.audit.formula_tree import formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
     users: Dict[str, List[str]] = {n: [] for n in nodes}
@@ -433,8 +480,11 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
         for use in node["uses"]:
             if "formula" in use:
                 users[use["formula"]].append(user)
-    named = _named_columns(model)
-    return {name: _helper_entry(name, node, users[name], nodes, named)
+    names = [f.get("name") for f in model.get("formulas") or [] if isinstance(f, dict)]
+    facts = {"named": _named_columns(model),
+             "shared": {n for n in names if isinstance(n, str) and names.count(n) > 1},
+             "aggregates": _aggregate_formula_names(model)}
+    return {name: _helper_entry(name, node, users[name], nodes, facts)
             for name, node in nodes.items()}
 
 
@@ -511,6 +561,16 @@ def _formula_cycles_with_user(item: dict, ctx: Any) -> bool:
     """Formula used by exactly one formula: it reaches that formula through what it
     uses, or references itself."""
     return bool(_single_use(item).get("cyclic"))
+
+
+@register("paste_blocked", uses=(),
+          label="pasting the formula in would be invalid or pointless")
+def _paste_blocked(item: dict, ctx: Any) -> bool:
+    """Formula: another formula shares its name; or the one formula that uses it is
+    hidden and unused itself; or pasting it there would put an aggregate inside an
+    aggregate, group or window call, or anything inside a group call, which
+    ThoughtSpot rejects."""
+    return bool(_single_use(item).get("blocked"))
 
 
 @register("inlined_length", uses=(),

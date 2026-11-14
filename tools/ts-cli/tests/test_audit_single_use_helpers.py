@@ -1,6 +1,8 @@
 """H15: hidden formulas used by exactly one other formula (fields_human, single-use helpers)."""
 from __future__ import annotations
 
+import pytest
+
 from ts_cli.audit import run_audit
 from ts_cli.audit.context import make_context
 
@@ -115,8 +117,44 @@ def test_malformed_formulas_give_no_value_and_no_error():
     assert _formula_hidden(_item(model, 2), None) is False
 
 
-def test_formulas_sharing_a_name_report_once():
-    found = _h15([_f("formula_Net", "Net Sales", "[formula_D]"),
-                  _f("formula_D", "D", "1"), _f("formula_D2", "D", "2")],
-                 [PARENT])
-    assert len(found) == 1
+def test_a_name_two_formulas_share_is_not_reported():
+    # the tree keeps one formula of a name, so "used only by" could be false and the
+    # paste could be the wrong formula
+    assert _h15([_f("formula_Net", "Net Sales", "[formula_D2] * 10"),
+                 _f("formula_D", "D", "sum ( [T::ONE] )"), _f("formula_D2", "D", "sum ( [T::TWO] )")],
+                [PARENT]) == []
+
+
+def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
+    # remove both instead: pasting into a formula nothing uses is not the fix
+    assert _h15([_f("formula_X", "X", "[formula_Y] + 1"), _f("formula_Y", "Y", "2")],
+                [_col("X", "formula_X", hidden=True), _col("Y", "formula_Y", hidden=True)]) == []
+
+
+@pytest.mark.parametrize("user_expr, helper_expr", [
+    # thoughtspot-formula-patterns.md, group functions rule 2: no group inside a group
+    ("group_sum ( [formula_H] , [T::REGION] )", "group_count ( [T::ID] , [T::CATEGORY] )"),
+    # rule 4: no raw aggregate inside a window function
+    ("moving_sum ( [formula_H] , -1 , 0 , [T::ORDER_DATE] )", "sum ( [T::AMOUNT] )"),
+    # an aggregate reached through another formula still aggregates
+    ("cumulative_sum ( [formula_H] , [T::D] )", "[formula_Base] * 2"),
+    # anything as a group function's grouping column
+    ("group_sum ( [T::AMT] , [formula_H] )", "if ( [T::X] > 0 ) then 'a' else 'b'"),
+    # an aggregate inside an aggregate
+    ("sum ( [formula_H] )", "average ( [T::A] )"),
+])
+def test_a_paste_thoughtspot_would_reject_is_not_reported(user_expr, helper_expr):
+    assert _h15([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr),
+                 _f("formula_Base", "Base", "sum ( [T::B] )")],
+                [PARENT, _col("H", "formula_H", hidden=True), _col("Base", "formula_Base")]) == []
+
+
+@pytest.mark.parametrize("user_expr, helper_expr", [
+    # a row-level helper inside an aggregate is fine: sum ( ( [T::A] * 2 ) )
+    ("sum ( [formula_H] )", "[T::A] * 2"),
+    # an aggregate after a closed call, and a bracket in a quoted literal
+    ("sum ( [T::A] ) + [formula_H] + strlen ( ')(' )", "average ( [T::B] )"),
+])
+def test_a_paste_outside_those_calls_is_reported(user_expr, helper_expr):
+    assert len(_h15([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr)],
+                    [PARENT, _col("H", "formula_H", hidden=True)])) == 1
