@@ -573,3 +573,76 @@ def sec_rls_null_test_on_joined_column() -> AuditContext:
     rls["table_paths"].append({"id": "CUST_1", "table": "CUST", "column": ["REGION"]})
     rls["rules"][0]["expr"] = "isnull ( [CUST_1::REGION] ) or [ORDERS_1::OWNER] = ts_groups"
     return ctx
+
+
+# ── S17: an RLS Table planned as a second root ──────────────────────────────
+
+#: The three shapes of the access-control join measured live 2026-11-12, keyed by the
+#: shape name: (the table declaring the join, its `with`, its cardinality).
+_ACL_JOINS = {
+    "acl_to_dim": ("ACL_USER_SITE", "D_SITE", "MANY_TO_ONE"),              # a second root
+    "dim_to_acl_one_to_many": ("D_SITE", "ACL_USER_SITE", "ONE_TO_MANY"),  # the same
+    "dim_to_acl": ("D_SITE", "ACL_USER_SITE", "MANY_TO_ONE"),              # a leaf
+}
+
+
+def build_acl_ctx(shape: str = "acl_to_dim",
+                  rule_expr: str = "ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                  rls_on: str = "ACL_USER_SITE") -> AuditContext:
+    """F_ORDER -> D_SITE (MANY_TO_ONE), plus ACL_USER_SITE joined to D_SITE in one of
+    _ACL_JOINS's shapes; the Table named by `rls_on` carries one RLS rule."""
+    src, dest, card = _ACL_JOINS[shape]
+
+    def mcol(table, col, kind="ATTRIBUTE", hidden=False):
+        props = {"column_type": kind}
+        if hidden:
+            props["is_hidden"] = True
+        return {"name": f"{table} {col}", "column_id": f"{table}::{col}", "properties": props}
+
+    joins = {"F_ORDER": [{"name": "order_site", "with": "D_SITE", "type": "INNER",
+                          "on": "[F_ORDER::SITE_ID] = [D_SITE::SITE_ID]",
+                          "cardinality": "MANY_TO_ONE"}]}
+    joins.setdefault(src, []).append({
+        "name": "site_acl", "with": dest, "type": "INNER", "cardinality": card,
+        "on": f"[{src}::SITE_ID] = [{dest}::SITE_ID]"})
+    model_tables = []
+    for name in ("F_ORDER", "D_SITE", "ACL_USER_SITE"):
+        mt = {"name": name, "fqn": f"t-{name.lower()}"}
+        if name in joins:
+            mt["joins"] = joins[name]
+        model_tables.append(mt)
+    model = {"guid": "m-acl", "model": {
+        "name": "Orders", "model_tables": model_tables,
+        "columns": [mcol("F_ORDER", "AMOUNT", "MEASURE"), mcol("F_ORDER", "ORDER_ID"),
+                    mcol("D_SITE", "SITE_NAME"),
+                    mcol("ACL_USER_SITE", "USER_KEY", hidden=True)]}}
+
+    def table(name, cols):
+        doc = {"table": {"name": name, "columns": [{"name": c} for c in cols]}}
+        if name == rls_on:
+            doc["table"]["rls_rules"] = {
+                "tables": [{"name": name}],
+                "table_paths": [{"id": f"{name}_1", "table": name, "column": ["USER_KEY"]}],
+                "rules": [{"name": "User sites", "expr": rule_expr}]}
+        return doc
+    return make_context(models=[model], tables={
+        "t-f_order": table("F_ORDER", ["ORDER_ID", "SITE_ID", "AMOUNT"]),
+        "t-d_site": table("D_SITE", ["SITE_ID", "SITE_NAME"]),
+        "t-acl_user_site": table("ACL_USER_SITE", ["USER_KEY", "SITE_ID"])})
+
+
+def sec_rls_acl_table_as_root() -> AuditContext:
+    """ACL_USER_SITE joins D_SITE many-to-one, so nothing joins to it: a second root
+    beside F_ORDER, carrying RLS — S17."""
+    return build_acl_ctx("acl_to_dim")
+
+
+def sec_rls_acl_table_one_to_many() -> AuditContext:
+    """D_SITE declares the join, ONE_TO_MANY: direction is by cardinality, so
+    ACL_USER_SITE is still a root — S17, as for sec_rls_acl_table_as_root."""
+    return build_acl_ctx("dim_to_acl_one_to_many")
+
+
+def sec_rls_acl_table_as_leaf() -> AuditContext:
+    """D_SITE joins ACL_USER_SITE many-to-one: a leaf dimension, one flat query — no S17."""
+    return build_acl_ctx("dim_to_acl")
