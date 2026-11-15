@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import (_IF_CALL, AGGREGATE_FUNCS, _aggregate_formula_names,
-                                        _model_of, register)
+                                        _formula_names_by_id, _model_of, register)
 from ts_cli.audit.engine.memo import cached
 from ts_cli.formula_translate.refs import _QUOTED as _LITERAL
 from ts_cli.spotql_ops import is_bare_window
@@ -36,12 +36,12 @@ def _named_columns(model: dict) -> set:
     out = set()
     for f in model.get("filters") or []:
         col = f.get("column") if isinstance(f, dict) else None
-        out.update(str(c).casefold() for c in (col if isinstance(col, (list, tuple)) else [col])
+        out.update(_spelling(c) for c in (col if isinstance(col, (list, tuple)) else [col])
                    if c is not None)
     for c in model.get("columns") or []:
         currency = tml.mapping(c, "properties").get("currency_type") if isinstance(c, dict) else None
         if isinstance(currency, dict) and currency.get("column") is not None:
-            out.add(str(currency["column"]).casefold())
+            out.add(_spelling(currency["column"]))
     return out
 
 
@@ -167,7 +167,7 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
     columns = model["columns"].get(name, set()) | {node["label"], name}
     entry = {"label": node["label"], "hidden": node["hidden"], "user_count": len(users),
              "sole_user": nodes[sole]["label"] if sole else None,
-             "named": bool({c.casefold() for c in columns} & model["named"]),
+             "named": bool({_spelling(c) for c in columns} & model["named"]),
              "cyclic": False, "user_refs": 0, "inlined_length": None,
              "blocked": bool(model["shared"] or model["ambiguous"])}
     if sole is None:
@@ -231,38 +231,60 @@ def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
             "live": _reachable(visible, nodes)}
 
 
+def _spelling(value: Any) -> str:
+    """A name as compared here: text, edges trimmed (as tml.expr_parts trims a
+    reference), case aside."""
+    return str(value).strip().casefold()
+
+
 def _ambiguous_spellings(model: dict, nodes: Dict[str, dict]) -> bool:
     """The Model spells a formula in a way the shared reference index (exact match,
-    first surfacing column only, last formula of a spelling wins) may read differently
-    from ThoughtSpot (BL-578): one spelling, case aside, names two formulas (an id, a
-    name or any surfacing column's name); or a reference the tree read as a column
-    matches a formula's spelling, case aside. Then "used only by" and the aggregate
-    reading H16 shares with P2 can be wrong anywhere in the Model. Fail safe: H16
-    reports nothing there."""
+    first surfacing column only, last formula of a spelling wins, formulas before
+    columns and parameters) may read differently from ThoughtSpot (BL-578): a formula
+    has no name; one spelling, trimmed and case aside, names two formulas (an id, a
+    name or any surfacing column's name), or a formula and a physical column or
+    parameter; or a reference the tree read as a column matches a formula's spelling.
+    Then "used only by" and the aggregate reading H16 shares with P2 can be wrong
+    anywhere in the Model. Fail safe: H16 reports nothing there."""
+    owner = _formula_spellings(model)
+    if owner is None:
+        return True
+    if any(_spelling(o) in owner for o in _non_formula_names(model)):
+        return True
+    refs = {_spelling(seg["column"]) for node in nodes.values() for seg in node["expr"] or []
+            if isinstance(seg, dict) and "column" in seg}
+    return bool(refs & set(owner))
+
+
+def _formula_spellings(model: dict) -> Optional[Dict[str, str]]:
+    """Each formula's spellings (name, id, every surfacing column's name) to its name;
+    None when a formula has no name or two formulas share a spelling."""
     owner: Dict[str, str] = {}
     surfacing = _surfacing_names(model)
     for f in model.get("formulas") or []:
         name = f.get("name") if isinstance(f, dict) else None
-        if not isinstance(name, str):
-            continue
-        spellings = {name, f.get("id")} | surfacing.get(name, set())
-        for spelling in spellings:
-            if not isinstance(spelling, str) or not spelling:
-                continue
-            key = spelling.casefold()
-            if owner.setdefault(key, name) != name:
-                return True
-    refs = {str(seg["column"]).casefold() for node in nodes.values() for seg in node["expr"] or []
-            if isinstance(seg, dict) and "column" in seg}
-    return bool(refs & set(owner))
+        if not isinstance(name, str) or not name.strip():
+            return None
+        ident = f.get("id")
+        spellings = {name} | surfacing.get(name, set()) | ({ident} if isinstance(ident, str) else set())
+        if any(sp and owner.setdefault(_spelling(sp), name) != name for sp in spellings):
+            return None
+    return owner
+
+
+def _non_formula_names(model: dict) -> List[Any]:
+    """The names of the Model's physical columns and parameters."""
+    names = [c.get("name") for c in model.get("columns") or []
+             if isinstance(c, dict) and not c.get("formula_id")]
+    names += [p.get("name") for p in model.get("parameters") or [] if isinstance(p, dict)]
+    return [n for n in names if n is not None]
 
 
 def _kept_aggregation(model: dict) -> set:
     """Formulas a column surfaces with an aggregation other than SUM (the default):
     pasting the expression drops that column, and with it the aggregation, which
     thoughtspot-model-tml.md calls load-bearing on some formulas."""
-    ids = {f.get("id"): f.get("name") for f in model.get("formulas") or []
-           if isinstance(f, dict) and isinstance(f.get("id"), str)}
+    ids = _formula_names_by_id(model)
     out = set()
     for c in model.get("columns") or []:
         fid = c.get("formula_id") if isinstance(c, dict) else None
@@ -276,8 +298,7 @@ def _kept_aggregation(model: dict) -> set:
 def _surfacing_names(model: dict) -> Dict[str, set]:
     """Per formula name, the names of every column that surfaces it (a formula can have
     more than one), so a filter on any of them counts."""
-    ids = {f.get("id"): f.get("name") for f in model.get("formulas") or []
-           if isinstance(f, dict) and isinstance(f.get("id"), str)}
+    ids = _formula_names_by_id(model)
     out: Dict[str, set] = {}
     for c in model.get("columns") or []:
         fid = c.get("formula_id") if isinstance(c, dict) else None

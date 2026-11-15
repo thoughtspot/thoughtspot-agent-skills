@@ -387,3 +387,35 @@ def test_a_filter_names_a_column_case_aside():
     formulas = [_f("formula_Net", "Net Sales", "[formula_d_internal]"), _f("formula_d_internal", "d_internal", "1")]
     columns = [PARENT, _col("Shown D", "formula_d_internal", hidden=True)]
     assert _h16(formulas, columns, filters=[{"column": ["shown d"], "oper": "in"}]) == []
+
+
+@pytest.mark.parametrize("formula_id", [["formula_D"], {"a": 1}])
+def test_a_formula_id_that_is_not_text_does_not_end_an_h_run(formula_id):
+    found = _h16([_f("formula_Net", "Net Sales", "[formula_D] * 2"), _f("formula_D", "D", "1"),
+                  {"id": formula_id, "name": "Odd", "expr": "2"}],
+                 [PARENT, _col("D", "formula_D", hidden=True)])
+    assert len(found) == 1
+
+
+@pytest.mark.parametrize("extra", [
+    {"columns": [{"name": "Revenue", "column_id": "T::REVENUE", "properties": {"column_type": "MEASURE"}}]},
+    {"parameters": [{"name": "Revenue", "data_type": "DOUBLE"}]},
+    {"columns": [{"name": "formula_Revenue", "column_id": "T::X", "properties": {"column_type": "MEASURE"}}]},
+])
+def test_a_formula_spelled_like_a_physical_column_or_parameter_blocks_the_model(extra):
+    columns = [PARENT, _col("Revenue calc", "formula_Revenue", hidden=True)] + extra.get("columns", [])
+    kw = {"parameters": extra["parameters"]} if "parameters" in extra else {}
+    assert _h16([_f("formula_Net", "Net Sales", "[Revenue] * 2"),
+                 _f("formula_Revenue", "Revenue", "sum ( [T::A] )")], columns, **kw) == []
+
+
+def test_names_compare_with_edge_spaces_trimmed():
+    assert _h16([_f("formula_U1", "U1", "[formula_H] * 2"), _f("formula_U2", "U2", "[Disc ] + 1"),
+                 _f("formula_H", "H", "1")],
+                [_col("U1", "formula_U1"), _col("U2", "formula_U2"), _col("Disc ", "formula_H", hidden=True)]) == []
+
+
+def test_a_formula_with_no_name_blocks_the_model():
+    assert _h16([_f("formula_Net", "Net Sales", "[formula_H] * 2"), _f("formula_H", "H", "1"),
+                 _f("formula_E", "", "[formula_H] * 3")],
+                [PARENT, _col("H", "formula_H", hidden=True)]) == []
