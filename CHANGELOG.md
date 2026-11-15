@@ -5,7 +5,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
-## 2026-11-15
+## 2026-11-16
 - feat: new audit rule H16 flags a hidden formula that only one other formula uses, and the Formulas view shows a formula's definition with those helpers pasted in (ts-audit 3.21.0)
 - chore: bump ts-cli to v0.217.0
 

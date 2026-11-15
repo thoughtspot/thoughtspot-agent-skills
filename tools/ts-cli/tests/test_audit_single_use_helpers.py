@@ -134,8 +134,11 @@ def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
 @pytest.mark.parametrize("user_expr, helper_expr", [
     # thoughtspot-formula-patterns.md, group functions rule 2: no group inside a group
     ("group_sum ( [formula_H] , [T::REGION] )", "group_count ( [T::ID] , [T::CATEGORY] )"),
-    # rule 4: no raw aggregate directly inside a window function
+    # rule 4: no raw aggregate inside a window function, directly or through a scalar call
     ("moving_sum ( [formula_H] , -1 , 0 , [T::ORDER_DATE] )", "sum ( [T::AMOUNT] )"),
+    ("moving_sum ( abs ( [formula_H] ) , -1 , 0 , [T::D] )", "sum ( [T::A] )"),
+    ("cumulative_sum ( if ( [formula_H] > 0 ) then 1 else 0 , [T::D] )", "sum ( [T::A] )"),
+    ("moving_average ( round ( [formula_H] , 1 ) , 2 , 0 , [T::D] )", "average ( [T::A] )"),
     # an aggregate reached through another formula still aggregates
     ("cumulative_sum ( [formula_H] , [T::D] )", "[formula_Base] * 2"),
     # a plain aggregate inside a plain aggregate, also after a keyword
@@ -143,8 +146,24 @@ def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
     ("if ( [T::FLAG] = 1 ) then count ( [formula_H] ) else 0", "sum ( [T::A] )"),
     ("if ( [T::X] = 0 or unique count ( [formula_H] ) > 1 ) then 1 else 0", "max ( [T::A] )"),
     ('sql_int_aggregate_op ( "sum({0})" , [formula_H] )', "sum ( [T::A] )"),
+    # a plain aggregate in a group shorthand: "inside group_aggregate only" (rule 1)
+    ("group_sum ( [formula_H] , [T::REGION] )", "sum ( [T::AMOUNT] )"),
+    ("group_count ( [formula_H] , [T::REGION] )", "count ( [T::ID] )"),
+    ("group_max ( [formula_H] , [T::REGION] )", "max ( [T::AMOUNT] )"),
+    # rank around a group function: rejected live (2026-07-30)
+    ("rank ( [formula_H] , 'desc' )", "group_aggregate ( sum ( [T::M] ) , { [T::A] } , query_filters ( ) )"),
+    ("rank_percentile ( [formula_H] , 'asc' )", "group_sum ( [T::M] , [T::A] )"),
+    # a helper that is both group and plain fits no host
+    ("sum ( [formula_H] )", "sum ( [T::A] ) / group_sum ( [T::A] , [T::R] )"),
+    ("moving_sum ( [formula_H] , -1 , 0 , [T::D] )", "sum ( [T::A] ) / group_sum ( [T::A] , [T::R] )"),
+    # a reference's name is never read as code: an apostrophe, a name that reads `group_x (`
+    ("group_count ( [formula_H] , [T::C] )",
+     "[T::OWNER'S TOTAL] + group_sum ( [T::A] , [T::OWNER'S REGION] )"),
+    ("moving_sum ( [formula_H] , -1 , 0 , [T::D] )", "sum ( [T::SALES group_a (EMEA)] )"),
+    # a row-level helper as a group shorthand's argument: only columns are shown there
+    ("group_sum ( [T::AMT] , [formula_H] )", "if ( [T::X] > 0 ) then 'a' else 'b'"),
 ])
-def test_a_paste_the_formula_reference_writes_separately_is_not_reported(user_expr, helper_expr):
+def test_a_paste_the_formula_reference_does_not_show_working_is_not_reported(user_expr, helper_expr):
     assert _h16([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr),
                  _f("formula_Base", "Base", "sum ( [T::B] )")],
                 [PARENT, _col("H", "formula_H", hidden=True), _col("Base", "formula_Base")]) == []
@@ -153,8 +172,9 @@ def test_a_paste_the_formula_reference_writes_separately_is_not_reported(user_ex
 @pytest.mark.parametrize("user_expr, helper_expr", [
     # a row-level helper inside an aggregate: sum ( ( [T::A] * 2 ) )
     ("sum ( [formula_H] )", "[T::A] * 2"),
-    # an aggregate after a closed call, and a bracket in a quoted literal
+    # an aggregate with no aggregate around it, after a closed call and a quoted bracket
     ("sum ( [T::A] ) + [formula_H] + strlen ( ')(' )", "average ( [T::B] )"),
+    ("safe_divide ( [formula_H] , sum ( [T::B] ) )", "sum ( [T::A] )"),
     # forms thoughtspot-formula-patterns.md and thoughtspot-model-tml.md show working
     ("moving_sum ( [formula_H] , -1 , 0 , [T::ORDER_DATE] )",
      "group_aggregate ( sum ( [T::AMOUNT] ) , { [T::PK] } , query_filters ( ) )"),
@@ -163,12 +183,27 @@ def test_a_paste_the_formula_reference_writes_separately_is_not_reported(user_ex
     ("last_value ( [formula_H] , query_groups ( ) , { [T::DATE] } )", "sum ( [T::BALANCE] )"),
     ("sum ( [formula_H] )", "group_sum ( [T::AMOUNT] , [T::REGION] )"),
     ("group_aggregate ( sum ( [formula_H] ) , { [T::R] } , query_filters ( ) )", "[T::A] * 2"),
-    # a row-level helper as a group function's grouping column: not shown rejected
-    ("group_sum ( [T::AMT] , [formula_H] )", "if ( [T::X] > 0 ) then 'a' else 'b'"),
 ])
-def test_a_paste_outside_those_forms_is_reported(user_expr, helper_expr):
+def test_a_paste_the_formula_reference_shows_working_is_reported(user_expr, helper_expr):
     assert len(_h16([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr)],
                     [PARENT, _col("H", "formula_H", hidden=True)])) == 1
+
+
+def test_a_filter_on_any_column_that_shows_the_helper_counts():
+    formulas = [_f("formula_Net", "Net Sales", "[formula_H] * 2"), _f("formula_H", "H", "1")]
+    columns = [PARENT, _col("H one", "formula_H", hidden=True), _col("H two", "formula_H", hidden=True)]
+    assert _h16(formulas, columns, filters=[{"column": ["H two"], "oper": "in"}]) == []
+    assert _h16(formulas, columns, filters=[{"column": ["H one"], "oper": "in"}]) == []
+
+
+def test_a_chain_too_deep_to_measure_is_not_reported_and_does_not_end_the_run():
+    n = 1200
+    formulas = [_f("formula_Top", "Top", "[formula_C0] + 1")] + [
+        _f(f"formula_C{i}", f"C{i}", f"[formula_C{i + 1}] + 1") for i in range(n)] + [
+        _f(f"formula_C{n}", f"C{n}", "1")]
+    columns = [_col("Top", "formula_Top")] + [
+        _col(f"C{i}", f"formula_C{i}", hidden=True) for i in range(n + 1)]
+    assert _h16(formulas, columns) == []
 
 
 def test_a_paste_that_would_raise_p16_is_not_reported():

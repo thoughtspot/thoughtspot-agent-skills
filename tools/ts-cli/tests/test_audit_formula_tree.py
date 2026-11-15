@@ -228,7 +228,7 @@ def test_the_report_compacts_each_expression_with_the_use_encoding():
     assert _written_use([1, "T::y"], "[ T::y ]") == [1, "T::y", "[ T::y ]"]
 
 
-def test_the_report_marks_exactly_the_helpers_h15_reported():
+def test_the_report_marks_exactly_the_helpers_h16_reported():
     data = run_audit(None, ["m-1"], ctx=make_context(
         models=[{"guid": "m-1", "model": MODEL}], model_guids=["m-1"]))
     from ts_cli.audit.report import compact_payload
@@ -834,7 +834,7 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
 
 
 @needs_chrome
-def test_only_what_h15_reports_is_tagged_and_pasted(tmp_path):
+def test_only_what_h16_reports_is_tagged_and_pasted(tmp_path):
     model = {"name": "Tags", "filters": [{"column": ["Filtered"], "oper": "in"}], "formulas": [
         {"id": "formula_A", "name": "A", "expr": "[formula_B] + 1"},
         {"id": "formula_B", "name": "B", "expr": "[formula_A] + 2"},
