@@ -17474,6 +17474,7 @@ BL-505 covers the converters' side only.
 **Do.**
 1. One shared "named by the Model" field (filters, currency settings), read by H3, H11 and H16, and passed to the view so its "hidden, unused" tag agrees.
 2. Tests: a hidden column a filter names, and one a currency setting names, are silent under H3 and H11 and not tagged unused.
+3. Read the other places a Model names a column by display name too: `joins_with[].on` and `constraints[…].date_range_condition.column` (thoughtspot-model-tml.md). H16's `_named_columns` reads neither today.
 
 **Target:** 2027-01-31.
 
@@ -17481,7 +17482,7 @@ BL-505 covers the converters' side only.
 
 **Filed:** 2026-11-15. **Source:** building and reviewing H16 (ts-audit 3.21.0).
 
-**What.** A formula whose `expr` is a list or a number (malformed or hand-edited TML) raises `TypeError` in the ERD parser (`agents/shared/erd/parser.py`, `_primary_table_of_formula` reading `_COLREF.findall(expr)`), which ends the whole run. The rule engine and the formula tree read such an expression as absent (BL-501's class); the ERD parser does not.
+**What.** A formula whose `expr` is a list or a number (malformed or hand-edited TML) raises `TypeError` in the ERD parser (`agents/shared/erd/parser.py`, `_primary_table_of_formula` reading `_COLREF.findall(expr)`), which ends the whole run. The rule engine reads a list-valued expression as absent and the formula tree reads a number as its text (`5` gives `['5']`); the ERD parser does neither (BL-501's class).
 
 **Do.**
 1. Read a non-text `expr` as empty in the ERD parser, or add formula `expr` to `tml.SHAPES` so such a Model is listed under "Could not be read".

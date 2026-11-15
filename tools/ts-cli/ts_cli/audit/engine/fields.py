@@ -737,8 +737,9 @@ def _lowered_formula_text(model: dict) -> str:
     return " ".join(str(f.get("expr") or "") for f in (model.get("formulas") or [])).lower()
 
 
-# The D (Data Modeling) and H (Human Readiness) fields live in their own modules;
+# The D (Data Modeling) and H (Human Readiness) fields, and H16's, live in their own modules;
 # importing them here registers them wherever FIELDS is read (the engine, and the
 # catalog gate's known names).
 from ts_cli.audit.engine import fields_data  # noqa: E402,F401
 from ts_cli.audit.engine import fields_human  # noqa: E402,F401
+from ts_cli.audit.engine import fields_single_use  # noqa: E402,F401

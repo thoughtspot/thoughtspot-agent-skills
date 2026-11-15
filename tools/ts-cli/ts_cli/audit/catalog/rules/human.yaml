@@ -5,7 +5,7 @@
 # None of these is profile-aware: the catalog default holds under both profiles.
 # Titles are the legacy CHECK_META descriptions; H3, H4 and H8 carry the report's
 # existing remediation text, the others have never had one. H4, H5 and H10 feed the
-# report's cleanup view. The derived fields are in engine/fields_human.py, the code
+# report's cleanup view. The derived fields are in engine/fields_human.py (H16's in engine/fields_single_use.py), the code
 # rules (H2, H10) in engine/code_rules_human.py.
 #
 # Known legacy defects reproduced here, not fixed (the pinned legacy answers hold the
@@ -400,7 +400,8 @@
     more than once (pasting it in would repeat it), when the Model has two formulas of
     one name (uses could be read wrong), when no visible formula sits above the
     formula using it (remove the chain instead), when a column shows it with an
-    aggregation other than SUM (pasting drops that column and its aggregation), when
+    aggregation other than SUM, or it is a bare window or group call (pasting drops
+    that column and its aggregation), when
     another formula reads it through a second column's display name, when the paste
     is not one of the plain cases (an aggregating helper only where no aggregate,
     group, window or rank call encloses it; a row-level helper only where nothing but

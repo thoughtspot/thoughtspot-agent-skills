@@ -1,4 +1,4 @@
-"""H16: hidden formulas used by exactly one other formula (fields_human, single-use helpers)."""
+"""H16: hidden formulas used by exactly one other formula (engine/fields_single_use.py)."""
 from __future__ import annotations
 
 import pytest
@@ -106,7 +106,7 @@ def _item(model, i):
 
 
 def test_malformed_formulas_give_no_value_and_no_error():
-    from ts_cli.audit.engine.fields_human import _formula_hidden, _inlined_length_field
+    from ts_cli.audit.engine.fields_single_use import _formula_hidden, _inlined_length_field
     model = {"formulas": [_f("formula_Net", "Net Sales", "[formula_D]"),
                           _f("formula_D", "D", ["not", "text"]),
                           {"id": "formula_X", "name": ["a", "list"], "expr": "1"}],
@@ -177,6 +177,12 @@ def test_a_paste_outside_the_plain_cases_is_not_reported(user_expr, helper_expr)
     ("safe_divide ( [formula_H] , sum ( [T::B] ) )", "sum ( [T::A] )"),
     ("[formula_H] + 1", "sum ( [T::A] ) / group_sum ( [T::A] , [T::R] )"),
     ("concat ( 'O''Neil' , [formula_H] )", "max ( [T::NAME] )"),
+    # a backslash-escaped quote does not end the literal (the shared grammar): read
+    # with a quotes-only grammar, `sum (` would look like a call around the reference
+    ("concat ( 'a\\'sum (' , [formula_H] )", "max ( [T::NAME] )"),
+    # a reference whose name reads like a call is not a call: H stays row-level
+    ("sum ( [formula_H] )", "[T::SALES group_a (EMEA)] * 2"),
+    ("sum ( [formula_H] )", "[T::Max (Q1)] * 2"),
 ])
 def test_a_paste_in_the_plain_cases_is_reported(user_expr, helper_expr):
     assert len(_h16([_f("formula_Net", "Net Sales", user_expr), _f("formula_H", "H", helper_expr)],
@@ -272,3 +278,22 @@ def test_a_chain_is_measured_in_the_formula_it_ends_up_in():
     assert [d.split("; ")[1] for _, d in found] == [
         "pasting it in removes a level of nesting ('Top' would be 17 characters with every "
         "such helper pasted in)"] * 2
+
+
+@pytest.mark.parametrize("helper_expr", [
+    "group_sum ( [T::AMT] , [T::REGION] )",
+    "last_value ( sum ( [T::BAL] ) , query_groups ( ) , { [T::DATE] } )",
+    "group_aggregate ( sum ( [T::A] ) , { [T::R] } , query_filters ( ) )",
+])
+def test_a_bare_window_or_group_helper_is_not_reported(helper_expr):
+    # its column aggregation is applied to its result: pasting drops it
+    assert _h16([_f("formula_Net", "Net Sales", "[formula_H] / 1000"), _f("formula_H", "H", helper_expr)],
+                [PARENT, _col("H", "formula_H", hidden=True)]) == []
+
+
+def test_a_malformed_formula_id_is_skipped_not_fatal():
+    bad = _col("Odd", "formula_X")
+    bad["formula_id"] = ["not", "text"]
+    found = _h16([_f("formula_Net", "Net Sales", "[formula_D] * 2"), _f("formula_D", "D", "1")],
+                 [PARENT, _col("D", "formula_D", hidden=True), bad])
+    assert len(found) == 1

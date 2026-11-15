@@ -39,8 +39,8 @@ live in `catalog_expr.py` and are re-exported here; the code-rule checks live in
 `catalog_code.py`, and those of the per-severity forms of `message` and
 `legacy_threshold` in `catalog_forms.py`. Two names come from engine
 registries, each imported lazily so the gate stays free of typer/requests: derived
-fields (`engine/fields.py` and the `engine/fields_data.py` / `engine/fields_human.py`
-it imports, via `known_derived_fields`) and code rules (`implementation: code:<name>`,
+fields (`engine/fields.py` and the `engine/fields_data.py` / `engine/fields_human.py` /
+`engine/fields_single_use.py` it imports, via `known_derived_fields`) and code rules (`implementation: code:<name>`,
 `engine/code_rules.py` and the `engine/code_rules_human.py` it imports, via
 `known_code_rules`).
 
