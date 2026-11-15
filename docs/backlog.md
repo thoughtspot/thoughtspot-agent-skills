@@ -17469,7 +17469,7 @@ BL-505 covers the converters' side only.
 
 **Filed:** 2026-11-15. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
 
-**What.** H16 treats a column a Model filter (`filters[].column`) or another column's `properties.currency_type.column` names as doing a job (`_named_columns` in `ts_cli/audit/engine/fields_human.py`). H3 (MEDIUM, "Remove unnecessary hidden columns") and H11 do not, and the Formulas view tags such a formula "hidden, unused … a cleanup candidate". Removing a filtered column means dropping the Model filter too (import error 14518; ts-dependency-manager drops it, `ts_cli/dependency/mutate.py`), which widens every query on the Model.
+**What.** H16 treats a column a Model filter (`filters[].column`) or another column's `properties.currency_type.column` names as doing a job (`_named_columns` in `ts_cli/audit/engine/fields_single_use.py`). H3 (MEDIUM, "Remove unnecessary hidden columns") and H11 do not, and the Formulas view tags such a formula "hidden, unused … a cleanup candidate". Removing a filtered column means dropping the Model filter too (import error 14518; ts-dependency-manager drops it, `ts_cli/dependency/mutate.py`), which widens every query on the Model.
 
 **Do.**
 1. One shared "named by the Model" field (filters, currency settings), read by H3, H11 and H16, and passed to the view so its "hidden, unused" tag agrees.
@@ -17499,5 +17499,17 @@ BL-505 covers the converters' side only.
 **Do.**
 1. Count, on the same snapshot, the formulas no column shows and no formula uses.
 2. If they are common, a Human Readiness rule (scope `model.formula`) for them, or widen H3 to cover them, with the product owner's severity.
+
+**Target:** 2027-01-31.
+
+## BL-578 — a formula referenced through a second column's display name reads as unused `Tier 3`
+
+**Filed:** 2026-11-16. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
+
+**What.** `tml.formula_reference_index` resolves a formula's display name through the first column that surfaces it only. When two columns show one formula ("H one", "H two") and another formula writes `[H two]`, the formula tree reads that as a column reference: the formula's `used_by` is 0, and the Formulas view tags it "hidden, unused … a cleanup candidate" though removing it breaks the formula that uses it. P17 and P2 read the same index. H16 guards its own case (it skips a helper read through a second column's name); nothing else does.
+
+**Do.**
+1. Resolve every surfacing column's display name in `formula_reference_index`.
+2. A test: a formula shown by two columns, used through the second's name, has `used_by` 1 in the tree and is not tagged unused; P17 counts the edge.
 
 **Target:** 2027-01-31.

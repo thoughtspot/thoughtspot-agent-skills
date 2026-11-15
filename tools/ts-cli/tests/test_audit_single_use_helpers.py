@@ -157,6 +157,9 @@ def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
     ("last_value ( sum ( [T::A] ) , query_groups ( ) , { [formula_H] } )", "to_date ( [T::S] )"),
     ("rank ( [formula_H] , 'desc' )", "[T::A] * 2"),
     ("moving_sum ( [formula_H] , -1 , 0 , [T::D] )", "[T::A] * 2"),
+    # a bare row-level helper beside an aggregate: it may roll up differently
+    ("sum ( [T::X] ) / [formula_H]", "[T::A] * [T::B]"),
+    ("[formula_H] + count ( [T::ID] )", "[T::A] * [T::B]"),
     # a reference's name is never read as code: read whole, the apostrophes would pair
     # across `max (` and the helper would look row-level
     ("sum ( [formula_H] )", "[T::OWNER'S TOTAL] * max ( [T::OWNER'S X] )"),
@@ -172,6 +175,8 @@ def test_a_paste_outside_the_plain_cases_is_not_reported(user_expr, helper_expr)
     # a row-level helper inside plain aggregates: sum ( ( [T::A] * 2 ) )
     ("sum ( [formula_H] )", "[T::A] * 2"),
     ("safe_divide ( sum ( [formula_H] ) , count ( [T::ID] ) )", "[T::A] * [T::B]"),
+    # a row-level helper in a formula that does not aggregate
+    ("[formula_H] + 1", "[T::A] * [T::B]"),
     # an aggregating helper with no aggregate around it
     ("sum ( [T::A] ) + [formula_H] + strlen ( ')(' )", "average ( [T::B] )"),
     ("safe_divide ( [formula_H] , sum ( [T::B] ) )", "sum ( [T::A] )"),
@@ -282,10 +287,15 @@ def test_a_chain_is_measured_in_the_formula_it_ends_up_in():
 
 @pytest.mark.parametrize("helper_expr", [
     "group_sum ( [T::AMT] , [T::REGION] )",
+    "( group_sum ( [T::AMT] , [T::REGION] ) )",
+    "( last_value ( sum ( [T::BAL] ) , query_groups ( ) , { [T::DATE] } ) )",
+    "group_aggregate ( sum ( [T::A] ) , { [T::R] } , query_filters ( ) + { [T::S] = 'x)' } )",
+    "group_max ( [T::AMOUNT (USD] , [T::REGION] )",
     "last_value ( sum ( [T::BAL] ) , query_groups ( ) , { [T::DATE] } )",
     "group_aggregate ( sum ( [T::A] ) , { [T::R] } , query_filters ( ) )",
 ])
 def test_a_bare_window_or_group_helper_is_not_reported(helper_expr):
+    """Also in redundant brackets, and with a bracket inside a name or a literal."""
     # its column aggregation is applied to its result: pasting drops it
     assert _h16([_f("formula_Net", "Net Sales", "[formula_H] / 1000"), _f("formula_H", "H", helper_expr)],
                 [PARENT, _col("H", "formula_H", hidden=True)]) == []

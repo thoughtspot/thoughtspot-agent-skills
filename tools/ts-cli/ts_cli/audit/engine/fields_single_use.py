@@ -102,20 +102,46 @@ def _aggregate_family(call: str) -> bool:
     return bool(call) and bool(AGGREGATE_FUNCS.match(call + " (") or _SQL_AGGREGATE_CALL.match(call))
 
 
-def _paste_allowed(user: dict, name: str, aggregating: bool) -> bool:
+def _paste_allowed(user: dict, name: str, aggregating: bool, user_aggregates: bool) -> bool:
     """Pasting formula `name` into `user` reads the way referencing it does, in the
     plainest cases only (fail safe: anything else is not suggested, whatever
     ThoughtSpot might accept). An aggregating helper: when no aggregate-family call
     encloses its reference, so the pasted aggregate stands where the reference stood.
     A row-level helper: when every aggregate-family call around it is a plain
     aggregate (sum, average, count and the like), which takes any row-level
-    expression. A group, window, rank or first/last value call around a helper is
-    never suggested: which argument the reference fills, and what that argument takes,
-    is more than the formula reference settles."""
+    expression, and, when `user_aggregates` (the formula using it aggregates), at least
+    one does: a bare row-level expression beside an aggregate may roll up differently
+    from the reference. A group, window, rank or first/last value call around a
+    helper is never suggested: which argument the reference fills, and what that
+    argument takes, is more than the formula reference settles."""
     family = [c for c in _calls_around(user, name) if _aggregate_family(c)]
     if aggregating:
         return not family
+    if user_aggregates and not family:
+        return False
     return all(not _NOT_PLAIN.match(c) and not _SQL_AGGREGATE_CALL.match(c) for c in family)
+
+
+def _bare_window(segments: Any) -> bool:
+    """spotql_ops.is_bare_window on the expression with its literals emptied, each
+    reference a placeholder and redundant enclosing brackets dropped, so neither a
+    bracket inside a name or a literal nor `( group_sum ( ... ) )` hides the call."""
+    if not isinstance(segments, list):
+        return False
+    text = "".join(_LITERAL.sub("''", s) if isinstance(s, str) else "[r]" for s in segments).strip()
+    while text.startswith("(") and _closes_at_end(text):
+        text = text[1:-1].strip()
+    return is_bare_window(text)
+
+
+def _closes_at_end(text: str) -> bool:
+    """The bracket opening `text` is the one closing it."""
+    depth = 0
+    for i, ch in enumerate(text):
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth == 0:
+            return i == len(text) - 1
+    return False
 
 
 def _inlined_length(user: dict, name: str, text: str) -> int:
@@ -149,10 +175,11 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
     entry["cyclic"] = _refs_to(node["expr"], name) > 0 or sole in _reachable([name], nodes)
     entry["blocked"] = (entry["blocked"] or sole not in model["live"]
                         or name in model["kept_aggregation"]
-                        or is_bare_window(_text(node["expr"]))
+                        or _bare_window(node["expr"])
                         or bool((columns - {node["label"]}) & model["column_refs"])
                         or not isinstance(user["expr"], list)
-                        or not _paste_allowed(user, name, name in model["aggregating"]))
+                        or not _paste_allowed(user, name, name in model["aggregating"],
+                                              sole in model["aggregating"]))
     text = _text(node["expr"])
     if text is not None and isinstance(nodes[sole]["expr"], list):
         entry["inlined_length"] = _inlined_length(nodes[sole], name, text)
@@ -196,7 +223,8 @@ def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
     return {"named": _named_columns(model),
             "columns": _surfacing_names(model),
             "shared": {n for n, c in counts.items() if c > 1},
-            "aggregating": _aggregate_formula_names(model),
+            "aggregating": cached("aggregate_formula_names", model,
+                                  _aggregate_formula_names, model),
             "kept_aggregation": _kept_aggregation(model),
             "column_refs": _column_refs(nodes),
             "live": _reachable(visible, nodes)}

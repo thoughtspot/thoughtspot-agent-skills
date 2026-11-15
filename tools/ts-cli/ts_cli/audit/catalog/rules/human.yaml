@@ -405,7 +405,8 @@
     another formula reads it through a second column's display name, when the paste
     is not one of the plain cases (an aggregating helper only where no aggregate,
     group, window or rank call encloses it; a row-level helper only where nothing but
-    plain aggregates such as sum or average does: anything else is left alone, since
+    plain aggregates such as sum or average does, and inside one when the formula
+    using it aggregates: anything else is left alone, since
     which forms ThoughtSpot accepts there is more than the formula reference settles),
     when
     the formula it ends up in would make more than 3 if() calls (so following it does
