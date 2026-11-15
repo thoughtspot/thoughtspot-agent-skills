@@ -464,6 +464,15 @@ def _formula_tables(model: dict) -> Dict[str, frozenset]:
     formulas = _dicts(body.get("formulas"))
     by_ref = tml.formula_reference_index(formulas, _dicts(body.get("columns")))
     by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
+    direct: Dict[int, Tuple[set, list]] = {}       # each expression parsed once
+    for f in formulas:
+        tables, nexts = set(), []
+        for ref in tml.expr_refs(f.get("expr")):
+            if "::" in ref:
+                tables.add(ref.partition("::")[0].strip())
+            elif by_ref.get(ref) in by_name:
+                nexts.append(by_name[by_ref[ref]])
+        direct[id(f)] = (tables, nexts)
     out = {}
     for start in formulas:
         if not isinstance(start.get("id"), str):
@@ -474,11 +483,9 @@ def _formula_tables(model: dict) -> Dict[str, frozenset]:
             if id(f) in seen:
                 continue
             seen.add(id(f))
-            for ref in tml.expr_refs(f.get("expr")):
-                if "::" in ref:
-                    tables.add(ref.partition("::")[0].strip())
-                elif by_ref.get(ref) in by_name:
-                    todo.append(by_name[by_ref[ref]])
+            own, nexts = direct.get(id(f), (set(), []))
+            tables |= own
+            todo.extend(nexts)
         out[start["id"]] = frozenset(tables)
     return out
 
@@ -583,10 +590,12 @@ RLS_ROOT_FIXES = (
     "many-to-one, and if not, keep it, as the reversed join would double-count measures",
     "reverse the join so the dimension joins to it many-to-one, once the conditions in "
     "the remediation hold",
-    "this shape is not live-measured (only another table's RLS rule reaches it, and it "
-    "has no column in the Model): first check the query plan as a user under the rule; "
-    "if it does stitch, review that the rule leaves each user at most one row per key, "
-    "then reverse the join so the dimension joins to it many-to-one, keeping it if not",
+    "this shape is not live-measured (it has no column in the Model, so only another "
+    "table's RLS rule filters it, and a rule of its own cannot be enforced): first check "
+    "the query plan as a user under the rule; if it does stitch, check that the rule "
+    "filtering it applies on the Model's join to the dimension and leaves each user at "
+    "most one row per key, then reverse the join so the dimension joins to it "
+    "many-to-one, keeping it if not",
 )
 
 
@@ -629,13 +638,14 @@ def _rls_root_fix(item: dict, ctx: Any) -> str:
     a second rule (owner or delegate) can give a user two rows per key, as can ts_groups,
     a multi-value ts_var or an `or`: the reversed many-to-one join would double-count
     measures, which the stitched plan's grouping does not. The third (check the plan
-    first) when the table has no rule of its own and no Model column: only another
-    table's rule reaches it, a shape not live-measured."""
+    first) when the table has no Model column, whatever its own rules: only another
+    table's rule filters it (a rule of its own has no Model column to be enforced
+    through), a shape not live-measured."""
+    if not _surfacing_columns(_model_of(item), item.get("name")):
+        return RLS_ROOT_FIXES[2]
     obj = item.get("obj")
     fqn = obj.get("fqn") if isinstance(obj, dict) else None
     rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
-    if not rules and not _surfacing_columns(_model_of(item), item.get("name")):
-        return RLS_ROOT_FIXES[2]
     doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
     safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"), doc)
     return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]

@@ -259,6 +259,26 @@ def _all(ctx):
     return sorted((f["check_id"], f["severity"]) for f in out["findings"])
 
 
+def test_silent_on_a_hidden_formula_measure_over_the_acl_table():
+    """A hidden formula MEASURE reading the table, directly or through another formula:
+    every column it surfaces is hidden and it carries its own rule, so signal 1 holds
+    and only the formula-measure guard keeps it silent (pins that guard, chains
+    included)."""
+    for exprs in (["count ( [ACL_USER_SITE::USER_KEY] )"],
+                  ["[formula_inner] * 2", "count ( [ACL_USER_SITE::SITE_ID] )"]):
+        ctx = fx.build_acl_ctx("acl_to_dim")
+        m = ctx.models[0]["model"]
+        m["formulas"] = [{"id": "formula_outer" if k == 0 else "formula_inner",
+                          "name": "Outer" if k == 0 else "Inner", "expr": e}
+                         for k, e in enumerate(exprs)]
+        m["columns"].append({"name": "Outer", "formula_id": "formula_outer",
+                             "properties": {"column_type": "MEASURE", "is_hidden": True}})
+        assert _s17(ctx) == [], exprs
+        # the same column as a hidden ATTRIBUTE is no measure: the table still fires
+        m["columns"][-1]["properties"]["column_type"] = "ATTRIBUTE"
+        assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")], exprs
+
+
 def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
     """Signal 2: no rule of its own, another Table's RLS rule reaches it, and no column of
     it is in the Model. Here the rule on F_ORDER joins straight to it (its own RLS join),
@@ -285,6 +305,13 @@ def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
                          "column": ["USER_KEY"]}],
         "rules": [{"name": "Own", "expr": "ts_username = [ACL_USER_SITE_1::USER_KEY]"}]}
     assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+    # its own rule has no Model column to be enforced through, so the reversal advice
+    # does not apply: still the unmeasured shape, whatever that rule keys on
+    for expr in ("ts_username = [ACL_USER_SITE_1::USER_KEY]",
+                 "[ACL_USER_SITE_1::USER_KEY] = ts_groups"):
+        ctx.tables["t-acl_user_site"]["table"]["rls_rules"]["rules"][0]["expr"] = expr
+        assert fields.get(_tables(ctx)["ACL_USER_SITE"], "@rls_root_fix", ctx) == \
+            RLS_ROOT_FIXES[2], expr
 
 
 def test_an_rls_path_entering_from_the_joined_dimension_is_s11s():

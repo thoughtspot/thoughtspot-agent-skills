@@ -80,7 +80,7 @@ def test_missing_or_unknown_evidence_fails():
 
 
 HEURISTIC = {"S1", "S2", "S4", "S5", "H1", "H2", "H10", "D12", "D14", "H12", "D17", "H13", "H14", "D13",
-             "S14", "S15", "S16"}
+             "S14", "S15", "S16", "S17"}
 MEASURE = {"A1", "A2", "A6", "D1", "D9", "P2", "P4", "P7", "P8", "P11", "P13", "P16",
            "P17", "D7", "A7", "H11", "H16"}
 
@@ -91,7 +91,7 @@ def test_shipped_catalog_classes():
     assert {i for i, r in active.items() if r.evidence == "measure"} == MEASURE
     assert {i for i, r in active.items() if r.evidence == "fact"} == \
         set(active) - HEURISTIC - MEASURE
-    assert [r.id for r in active.values() if r.severity_exception] == ["S5"]
+    assert [r.id for r in active.values() if r.severity_exception] == ["S5", "S17"]
     assert all(evidence_problems(r, PROFILES) == [] for r in active.values())
 
 
