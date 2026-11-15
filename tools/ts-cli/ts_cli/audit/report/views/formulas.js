@@ -53,13 +53,13 @@ function buildFormulasPicker(c){
   c.innerHTML = html + '</ul>';
 }
 
-/* A hidden formula the audit's H15 reported (report.py marks it `s`): one formula
+/* A hidden formula the audit's H16 reported (report.py marks it `s`): one formula
    uses it, once, and pasting it in keeps that formula short. Only these are tagged and
-   pasted, so the view says what the audit says; a report built without H15 marks none. */
+   pasted, so the view says what the audit says; a report built without H16 marks none. */
 function singleUse(node){ return node.s === 1; }
 
 var FORMULA_HIDDEN_TAGS = {
-  single: ["ftree-single", "used once, hidden", "Hidden, and used once by only one formula: the audit's H15 "+
+  single: ["ftree-single", "used once, hidden", "Hidden, and used once by only one formula: the audit's H16 "+
     "suggests pasting it into that formula"],
   helper: ["ftree-hidden", "hidden helper", "Hidden from search, or surfaced by no column: it feeds the formulas that use it"],
   unused: ["ftree-unused", "hidden, unused", "Hidden from search, or surfaced by no column, and used by no formula: "+
@@ -261,8 +261,8 @@ function usesSingleUse(tree, node){
 
 function opened(i){ var o = {}; o[i] = true; return o; }
 
-/* An expression as written, with each helper H15 reported pasted in, in parentheses,
-   all the way down. H15 leaves out cycles and a helper referenced twice, so each helper
+/* An expression as written, with each helper H16 reported pasted in, in parentheses,
+   all the way down. H16 leaves out cycles and a helper referenced twice, so each helper
    is pasted at most once; the guard keeps a hand-built tree from looping anyway. */
 function inlinedHtml(tree, x, open){
   return x.map(function(s){

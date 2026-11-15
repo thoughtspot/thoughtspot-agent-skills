@@ -387,7 +387,7 @@
     silent: {fixture: human_technical_column_hidden}
 
 
-- id: H15
+- id: H16
   title: Hidden formula used by only one formula
   evidence: fact
   description: >-
@@ -397,16 +397,19 @@
     reader must open to follow the formula that uses it, and nothing else reuses it.
     Not reported when a Model filter or a column's currency setting names its column,
     when it and the formula using it form a cycle, when that formula references it
-    more than once (pasting it in would repeat it), when another formula shares its
-    name, when the formula using it is itself hidden and unused (remove both instead),
-    when pasting it would put an aggregate inside an aggregate, group or window
-    function, or anything inside a group function (forms ThoughtSpot rejects: there a
-    separate formula is the only way to write it), or when the formula it ends up in
-    would be longer than 250 characters, where one long formula is harder to read than
-    two short ones. That length is measured with every such helper pasted in, all the
-    way down, so following all of a formula's findings keeps it within the limit; the
-    formula it ends up in is its one user, or the formula above when that user is
-    pasted in too. When the result is too long, none of its helpers is reported.
+    more than once (pasting it in would repeat it), when the Model has two formulas of
+    one name (uses could be read wrong), when no visible formula sits above the
+    formula using it (remove the chain instead), when pasting would put a group
+    function inside a group function, a plain aggregate directly inside a moving or
+    cumulative function, or a plain aggregate inside a plain aggregate (forms the
+    formula reference writes as a separate formula or a group_aggregate wrapper), when
+    the formula it ends up in would make more than 3 if() calls (so following it does
+    not raise P16), or when that formula would be longer than 250 characters, where one
+    long formula is harder to read than two short ones. Length and if() calls are
+    measured with every such helper pasted in, all the way down, so following all of
+    a formula's findings keeps it within both; the formula it ends up in is its one
+    user, or the formula above when that user is pasted in too. When the result
+    passes either, none of its helpers is reported.
   categories: [H]
   requires: [model_tml]
   scope: model.formula
@@ -420,6 +423,7 @@
         - {field: "@formula_column_named", truthy: false}
         - {field: "@formula_cycles_with_user", truthy: false}
         - {field: "@paste_blocked", truthy: false}
+        - {field: "@inlined_if_count", lte: 3}
         - {field: "@inlined_length", lte: 250}
   severity: LOW
   message: "Hidden formula '{@formula_label}' is used only by '{@sole_formula_user}'; pasting it in removes a level of nesting ('{@paste_target}' would be {@inlined_length} characters with every such helper pasted in)"

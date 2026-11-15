@@ -17464,3 +17464,39 @@ BL-505 covers the converters' side only.
 2. If so, add the bypass guard to S11 and S12 (or word them for the bypass case), with tests.
 
 **Target:** 2027-01-31.
+
+## BL-575 — H3, H11 and the Formulas view call a column a filter or currency setting names "unused" `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
+
+**What.** H16 treats a column a Model filter (`filters[].column`) or another column's `properties.currency_type.column` names as doing a job (`_named_columns` in `ts_cli/audit/engine/fields_human.py`). H3 (MEDIUM, "Remove unnecessary hidden columns") and H11 do not, and the Formulas view tags such a formula "hidden, unused … a cleanup candidate". Removing a filtered column means dropping the Model filter too (import error 14518; ts-dependency-manager drops it, `ts_cli/dependency/mutate.py`), which widens every query on the Model.
+
+**Do.**
+1. One shared "named by the Model" field (filters, currency settings), read by H3, H11 and H16, and passed to the view so its "hidden, unused" tag agrees.
+2. Tests: a hidden column a filter names, and one a currency setting names, are silent under H3 and H11 and not tagged unused.
+
+**Target:** 2027-01-31.
+
+## BL-576 — `ts audit run` ends on a Model formula whose `expr` is not text `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** building and reviewing H16 (ts-audit 3.21.0).
+
+**What.** A formula whose `expr` is a list or a number (malformed or hand-edited TML) raises `TypeError` in the ERD parser (`agents/shared/erd/parser.py`, `_primary_table_of_formula` reading `_COLREF.findall(expr)`), which ends the whole run. The rule engine and the formula tree read such an expression as absent (BL-501's class); the ERD parser does not.
+
+**Do.**
+1. Read a non-text `expr` as empty in the ERD parser, or add formula `expr` to `tml.SHAPES` so such a Model is listed under "Could not be read".
+2. A test running the audit over a Model with a list-valued and a number-valued `expr`.
+
+**Target:** 2027-01-31.
+
+## BL-577 — no rule reports a formula that no column shows and nothing uses `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** H16's run on the 20 most formula-heavy Models of the SE demo cluster.
+
+**What.** Of 71 hidden formulas in that sample, 53 were used by no formula. H3 reports a hidden column no formula references, but a formula with no `columns[]` entry at all is not a column, so nothing reports it; the Formulas view tags it "hidden, unused". How many of the 53 had no column was not counted.
+
+**Do.**
+1. Count, on the same snapshot, the formulas no column shows and no formula uses.
+2. If they are common, a Human Readiness rule (scope `model.formula`) for them, or widen H3 to cover them, with the product owner's severity.
+
+**Target:** 2027-01-31.

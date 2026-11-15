@@ -207,7 +207,7 @@ def _compact_ai(ai: dict) -> dict:
 def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:
     """One corpus Model, compacted: its stats, tables, and — when present — its AI
     analysis, Spotter readiness score (`rs`: score and level), ERD and formula tree
-    (`pasteable`: the (Model guid, formula name) pairs H15 reported)."""
+    (`pasteable`: the (Model guid, formula name) pairs H16 reported)."""
     key = (m.get("name", ""), m.get("guid", ""))
     cm = {
         "mi": model_index.get(key, -1),
@@ -249,7 +249,7 @@ def _compact_tree(tree: dict, pasteable: Any = frozenset()) -> dict:
     the reference as written (`[0, 3, "[formula_GM]"]`), left out when it is only the
     value in brackets (`[1, "T::C"]` is written `[T::C]`, see `_written_use`); absent
     from a tree written before expressions were kept. `s` (1, else absent) marks a
-    formula H15 reported, a hidden helper to paste into its one user: the view tags and
+    formula H16 reported, a hidden helper to paste into its one user: the view tags and
     pastes only these, so it agrees with the audit. `r` root indices."""
     index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
 
@@ -272,11 +272,11 @@ def _compact_tree(tree: dict, pasteable: Any = frozenset()) -> dict:
 
 
 def _pasteable(findings: list) -> set:
-    """The (Model guid, formula name) pairs H15 reported: the helpers the Formulas view
+    """The (Model guid, formula name) pairs H16 reported: the helpers the Formulas view
     tags and pastes in. A Model with no guid is left out: its marks could not be told
     from another such Model's."""
     return {(f.get("object_guid"), f.get("object_name")) for f in findings
-            if f.get("check_id") == "H15" and f.get("object_guid")}
+            if f.get("check_id") == "H16" and f.get("object_guid")}
 
 
 def compact_payload(data: dict) -> dict:

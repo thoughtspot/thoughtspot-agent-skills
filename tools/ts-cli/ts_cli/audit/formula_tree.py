@@ -29,12 +29,19 @@ from ts_cli.audit.engine import tml
 
 
 def _surfacing_columns(model: dict) -> Dict[Any, dict]:
+    """The column that surfaces each formula: the first, unless a later one is visible
+    and the first is not, so a formula a visible column shows never reads as hidden."""
     out: Dict[Any, dict] = {}
     for c in model.get("columns") or []:
         fid = c.get("formula_id") if isinstance(c, dict) else None
-        if isinstance(fid, str) and fid and fid not in out:
+        if isinstance(fid, str) and fid and (fid not in out or (
+                _hidden(out[fid]) and not _hidden(c))):
             out[fid] = c
     return out
+
+
+def _hidden(column: dict) -> bool:
+    return bool(tml.mapping(column, "properties").get("is_hidden"))
 
 
 def _parameter_names(model: dict) -> set:

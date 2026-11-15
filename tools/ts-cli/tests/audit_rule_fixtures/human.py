@@ -854,7 +854,7 @@ def human_flag_spelled_out() -> AuditContext:
                                  types={"ACTIVE": "BOOL", "STATUS": "VARCHAR"})
 
 
-# ── H15: hidden formulas used by exactly one other formula ──────────────────
+# ── H16: hidden formulas used by exactly one other formula ──────────────────
 
 def _helper_col(name, fid, hidden=False):
     c = {"name": name, "formula_id": fid, "properties": {"column_type": "MEASURE"}}
@@ -864,7 +864,7 @@ def _helper_col(name, fid, hidden=False):
 
 
 def human_single_use_hidden_helper() -> AuditContext:
-    """'Discounts' is hidden and only 'Net Sales' uses it (H15 LOW)."""
+    """'Discounts' is hidden and only 'Net Sales' uses it (H16 LOW)."""
     return make_context(models=[build_human_model(
         columns=[_helper_col("Net Sales", "formula_Net"),
                  _helper_col("Discounts", "formula_Disc", hidden=True)],
@@ -875,7 +875,7 @@ def human_single_use_hidden_helper() -> AuditContext:
 
 
 def human_helper_visible_or_reused() -> AuditContext:
-    """Helpers H15 leaves alone: Gross (visible, and used twice), Cost (hidden, used by
+    """Helpers H16 leaves alone: Gross (visible, and used twice), Cost (hidden, used by
     two formulas), Filtered (hidden, a Model filter names it) and Open Amount (hidden,
     too long to paste in)."""
     long_expr = "sum ( if ( [T1::STATUS] = 'OPEN' ) then [T1::AMOUNT] else 0 ) " * 5

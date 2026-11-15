@@ -233,16 +233,16 @@ def test_the_report_marks_exactly_the_helpers_h15_reported():
         models=[{"guid": "m-1", "model": MODEL}], model_guids=["m-1"]))
     from ts_cli.audit.report import compact_payload
     ft = compact_payload(data)["C"]["m"][0]["ft"]
-    reported = sorted(f["object_name"] for f in data["findings"] if f["check_id"] == "H15")
+    reported = sorted(f["object_name"] for f in data["findings"] if f["check_id"] == "H16")
     assert reported == ["Cost", "Gross Margin"]
-    # Loop B is hidden and used once, but in a cycle: H15 is silent, so it is not marked
+    # Loop B is hidden and used once, but in a cycle: H16 is silent, so it is not marked
     assert sorted(n["f"] for n in ft["n"] if n.get("s") == 1) == reported
 
 
 def test_a_model_without_a_guid_marks_nothing():
     from ts_cli.audit.report import _pasteable
-    findings = [{"check_id": "H15", "object_guid": "", "object_name": "D"},
-                {"check_id": "H15", "object_guid": "m-1", "object_name": "E"},
+    findings = [{"check_id": "H16", "object_guid": "", "object_name": "D"},
+                {"check_id": "H16", "object_guid": "m-1", "object_name": "E"},
                 {"check_id": "H3", "object_guid": "m-1", "object_name": "F"}]
     assert _pasteable(findings) == {("m-1", "E")}
 

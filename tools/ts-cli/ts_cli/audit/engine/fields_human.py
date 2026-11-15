@@ -25,8 +25,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
-from ts_cli.audit.engine.fields import (AGGREGATE_FUNCS, _aggregate_formula_names,
-                                        _model_of, register)
+from ts_cli.audit.engine.fields import (_IF_CALL, AGGREGATE_FUNCS,
+                                        _aggregate_formula_names, _model_of, register)
 from ts_cli.audit.engine.memo import cached
 from ts_cli.tml_join_graph import on_clause_refs
 
@@ -355,7 +355,7 @@ def _shared_term_kind(item: dict, ctx: Any) -> Optional[str]:
 
 
 
-# ── H15: hidden formulas used by exactly one other formula ──────────────────
+# ── H16: hidden formulas used by exactly one other formula ──────────────────
 
 #: What wraps a helper's expression when it is pasted into the formula that uses it.
 _INLINE_WRAP = len("(  )")
@@ -388,9 +388,17 @@ def _refs_to(segments: Any, name: str) -> int:
     return sum(1 for s in segments or [] if isinstance(s, dict) and s.get("formula") == name)
 
 
-_CALL_OR_PAREN = re.compile(r"([A-Za-z_]\w*(?:\s+count)?)\s*\(|\(|\)")
+#: A call (`unique count` is the one two-word name, as in formula_translate.refs) or a
+#: bare bracket.
+_CALL_OR_PAREN = re.compile(r"(unique\s+count|[A-Za-z_]\w*)\s*\(|\(|\)", re.IGNORECASE)
 _QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 _GROUP_CALL = re.compile(r"(?i)group_\w+\Z")
+_WINDOW_CALL = re.compile(r"(?i)(moving|cumulative)_\w+\Z")
+#: Aggregates that take row-level input and return one value per group: not group,
+#: window, rank or first/last value functions, which have rules of their own.
+_NOT_PLAIN = re.compile(r"(?i)(group_\w+|moving_\w+|cumulative_\w+|rank\w*|(first|last)_value\w*)\Z")
+_SQL_AGGREGATE_CALL = re.compile(r"(?i)sql_\w+_aggregate_op\Z")
+_GROUP_IN_TEXT = re.compile(r"(?i)\bgroup_\w+\s*\(")
 
 
 def _calls_around(user: dict, name: str) -> List[str]:
@@ -408,20 +416,31 @@ def _calls_around(user: dict, name: str) -> List[str]:
                 if stack:
                     stack.pop()
             else:
-                stack.append((m.group(1) or "").lower())
+                stack.append(" ".join((m.group(1) or "").lower().split()))
     return stack
 
 
-def _paste_nests(user: dict, name: str, aggregates: bool) -> bool:
-    """Pasting formula `name` into `user` would write a form ThoughtSpot rejects
-    (thoughtspot-formula-patterns.md, "Group functions" rules 2 and 4): an aggregating
-    helper inside an aggregate, group or window call, or any helper inside a group
-    call, where only a column or a formula reference is shown working."""
-    for call in _calls_around(user, name):
-        if _GROUP_CALL.match(call):
-            return True
-        if aggregates and call and AGGREGATE_FUNCS.match(call + " ("):
-            return True
+def _plain_aggregate(call: str) -> bool:
+    return bool(call) and not _NOT_PLAIN.match(call) and bool(
+        AGGREGATE_FUNCS.match(call + " (") or _SQL_AGGREGATE_CALL.match(call))
+
+
+def _paste_nests(user: dict, name: str, kind: Optional[str]) -> bool:
+    """Pasting formula `name` (`kind`: "group" when it calls a group function, directly
+    or through formulas it uses; "plain" when it aggregates otherwise; None when it is
+    row-level) into `user` would write a form thoughtspot-formula-patterns.md says needs
+    a separate formula or a group_aggregate wrapper: a group function inside a group
+    function (its "Group functions" rule 2), a plain aggregate directly inside a moving
+    or cumulative function (rule 4), or a plain aggregate inside a plain aggregate. A
+    group function inside a window, rank or plain aggregate, and a plain aggregate
+    inside group_aggregate, rank or last_value, are shown working, so they paste."""
+    calls = _calls_around(user, name)
+    named = [c for c in calls if c]
+    if kind == "group":
+        return any(_GROUP_CALL.match(c) for c in calls)
+    if kind == "plain":
+        return bool((named and _WINDOW_CALL.match(named[-1]))
+                    or any(_plain_aggregate(c) for c in calls))
     return False
 
 
@@ -443,20 +462,20 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
                   model: dict) -> dict:
     from ts_cli.audit.formula_tree import _reachable
     sole = users[0] if len(users) == 1 else None
-    named, shared, aggregates = model["named"], model["shared"], model["aggregates"]
+    named, aggregates = model["named"], model["aggregates"]
     entry = {"label": node["label"], "hidden": node["hidden"], "user_count": len(users),
              "sole_user": nodes[sole]["label"] if sole else None,
              "named": node["label"] in named or name in named,
              "cyclic": False, "user_refs": 0, "inlined_length": None,
-             "blocked": name in shared}
+             "blocked": bool(model["shared"])}
     if sole is None:
         return entry
     user = nodes[sole]
     entry["user_refs"] = _refs_to(user["expr"], name)
     entry["cyclic"] = _refs_to(node["expr"], name) > 0 or sole in _reachable([name], nodes)
-    entry["blocked"] = (entry["blocked"] or (user["hidden"] and user["used_by"] == 0)
-                        or (isinstance(user["expr"], list)
-                            and _paste_nests(user, name, name in aggregates)))
+    kind = ("group" if name in model["groups"] else "plain" if name in aggregates else None)
+    entry["blocked"] = (entry["blocked"] or sole not in model["live"]
+                        or (isinstance(user["expr"], list) and _paste_nests(user, name, kind)))
     text = _text(node["expr"])
     if text is not None and isinstance(nodes[sole]["expr"], list):
         entry["inlined_length"] = _inlined_length(nodes[sole], name, text)
@@ -473,7 +492,7 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     is shared (the tree keeps one formula of a name, so "used only by" may be false),
     its user is itself hidden and unused (remove both instead), or the paste would nest
     an aggregate where ThoughtSpot rejects one (_paste_nests)."""
-    from ts_cli.audit.formula_tree import formula_tree
+    from ts_cli.audit.formula_tree import _reachable, formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
     users: Dict[str, List[str]] = {n: [] for n in nodes}
     for user, node in nodes.items():
@@ -483,17 +502,28 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     from collections import Counter
     counts = Counter(f.get("name") for f in model.get("formulas") or []
                      if isinstance(f, dict) and isinstance(f.get("name"), str))
+    visible = [n for n, node in nodes.items() if not node["hidden"]]
     facts = {"named": _named_columns(model),
              "shared": {n for n, c in counts.items() if c > 1},
-             "aggregates": _aggregate_formula_names(model)}
+             "aggregates": _aggregate_formula_names(model),
+             "groups": _group_formula_names(nodes),
+             "live": _reachable(visible, nodes)}
     entries = {name: _helper_entry(name, node, users[name], nodes, facts)
                for name, node in nodes.items()}
     _measure_together(entries, nodes, users)
     return entries
 
 
+def _group_formula_names(nodes: Dict[str, dict]) -> set:
+    """Formulas that call a group function, directly or through a formula they use."""
+    from ts_cli.audit.formula_tree import _reachable
+    direct = {n for n, node in nodes.items()
+              if _GROUP_IN_TEXT.search(_QUOTED.sub(" ", _text(node["expr"]) or ""))}
+    return {n for n in nodes if _reachable([n], nodes) & direct}
+
+
 def _pasteable_entry(entry: dict) -> bool:
-    """Everything H15 asks of a helper but the length: hidden, one user referencing it
+    """Everything H16 asks of a helper but the length: hidden, one user referencing it
     once, nothing naming its column, no cycle, nothing blocking the paste, and text."""
     return bool(entry["hidden"] and entry["user_count"] == 1 and entry["user_refs"] == 1
                 and not entry["named"] and not entry["cyclic"] and not entry["blocked"]
@@ -514,25 +544,29 @@ def _measure_together(entries: Dict[str, dict], nodes: Dict[str, dict],
             seen.add(target)
             target = users[target][0]
         entries[name]["target"] = nodes[target]["label"]
-        entries[name]["inlined_length"] = (
-            _expanded_length(target, nodes, paste, set())
-            if isinstance(nodes[target]["expr"], list) else None)
+        length, ifs = (_expanded(target, nodes, paste, set())
+                       if isinstance(nodes[target]["expr"], list) else (None, None))
+        entries[name]["inlined_length"], entries[name]["inlined_ifs"] = length, ifs
 
 
-def _expanded_length(name: str, nodes: Dict[str, dict], paste: set, open_: set) -> int:
+def _expanded(name: str, nodes: Dict[str, dict], paste: set, open_: set) -> Tuple[int, int]:
     """The length of formula `name` with every pasteable helper it references pasted
-    in, in parentheses, recursively; a helper already open (never, after the cycle
-    exclusion, but cheap to guard) counts as written."""
-    total = 0
+    in, in parentheses, recursively, and how many `if (` calls the result makes (as P16
+    counts them); a helper already open (never, after the cycle exclusion, but cheap to
+    guard) counts as written."""
+    length = ifs = 0
     open_ = open_ | {name}
     for seg in nodes[name]["expr"]:
         if isinstance(seg, str):
-            total += len(seg)
+            length += len(seg)
+            ifs += len(_IF_CALL.findall(seg))
         elif seg.get("formula") in paste and seg["formula"] not in open_:
-            total += _expanded_length(seg["formula"], nodes, paste, open_) + _INLINE_WRAP
+            inner = _expanded(seg["formula"], nodes, paste, open_)
+            length += inner[0] + _INLINE_WRAP
+            ifs += inner[1]
         else:
-            total += len(str(seg.get("ref") or ""))
-    return total
+            length += len(str(seg.get("ref") or ""))
+    return length, ifs
 
 
 def _first_index(model: dict) -> Dict[str, int]:
@@ -623,16 +657,24 @@ def _paste_blocked(item: dict, ctx: Any) -> bool:
 @register("paste_target", uses=(),
           label="the formula the helper ends up in once every such helper is pasted in")
 def _paste_target(item: dict, ctx: Any) -> Optional[str]:
-    """Formula H15 could report: the formula it ends up in, by label — its one user, or,
+    """Formula H16 could report: the formula it ends up in, by label — its one user, or,
     when that user is a helper pasted in too, the formula above it; None otherwise."""
     return _single_use(item).get("target")
+
+
+@register("inlined_if_count", uses=(),
+          label="the number of IF calls in the formula it ends up in, with every such helper pasted in")
+def _inlined_if_count(item: dict, ctx: Any) -> Optional[int]:
+    """Formula H16 could report: how many `if (` calls the formula it ends up in makes
+    with every such helper pasted in (as P16 counts them); None otherwise."""
+    return _single_use(item).get("inlined_ifs")
 
 
 @register("inlined_length", uses=(),
           label="the length of the formula it ends up in, with every such helper pasted in")
 def _inlined_length_field(item: dict, ctx: Any) -> Optional[int]:
     """Formula used by exactly one formula: the length of the formula it ends up in
-    (@paste_target) with every helper H15 could report under it pasted in, in
+    (@paste_target) with every helper H16 could report under it pasted in, in
     parentheses, all the way down; for any other helper, its one user's length with it
     alone pasted in. None when no one formula uses it, or an expression is not text."""
     return _single_use(item).get("inlined_length")
