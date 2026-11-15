@@ -399,12 +399,14 @@
     when it and the formula using it form a cycle, when that formula references it
     more than once (pasting it in would repeat it), when the Model has two formulas of
     one name (uses could be read wrong), when no visible formula sits above the
-    formula using it (remove the chain instead), when the paste is not a form the
-    repo's formula reference shows working (a group function may sit in a moving,
-    cumulative or plain aggregate function; a plain aggregate in group_aggregate, rank
-    or a first or last value function; a row-level helper anywhere but a group
-    shorthand or a moving or cumulative function; any helper with no aggregate around
-    it; anything else, rank around a group function included, is not suggested), when
+    formula using it (remove the chain instead), when a column shows it with an
+    aggregation other than SUM (pasting drops that column and its aggregation), when
+    another formula reads it through a second column's display name, when the paste
+    is not one of the plain cases (an aggregating helper only where no aggregate,
+    group, window or rank call encloses it; a row-level helper only where nothing but
+    plain aggregates such as sum or average does: anything else is left alone, since
+    which forms ThoughtSpot accepts there is more than the formula reference settles),
+    when
     the formula it ends up in would make more than 3 if() calls (so following it does
     not raise P16), or when that formula would be longer than 250 characters, where one
     long formula is harder to read than two short ones. Length and if() calls are

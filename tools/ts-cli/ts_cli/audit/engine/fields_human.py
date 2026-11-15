@@ -28,6 +28,7 @@ from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import (_IF_CALL, AGGREGATE_FUNCS,
                                         _model_of, register)
 from ts_cli.audit.engine.memo import cached
+from ts_cli.formula_translate.refs import _QUOTED as _LITERAL
 from ts_cli.tml_join_graph import on_clause_refs
 
 _WHITESPACE = re.compile(r"\s+")
@@ -362,8 +363,10 @@ _INLINE_WRAP = len("(  )")
 
 
 def _named_columns(model: dict) -> set:
-    """The column names something else in the Model names: each `filters[].column`
-    (a list, or a scalar) and each column's `properties.currency_type.column`."""
+    """The column names a Model filter (`filters[].column`, a list or a scalar) or a
+    column's currency setting (`properties.currency_type.column`) names. Not read:
+    `joins_with[].on` and `date_range_condition` columns (BL-575 covers the shared
+    reading)."""
     out = set()
     for f in model.get("filters") or []:
         col = f.get("column") if isinstance(f, dict) else None
@@ -391,29 +394,22 @@ def _refs_to(segments: Any, name: str) -> int:
 #: A call (`unique count` is the one two-word name, as in formula_translate.refs) or a
 #: bare bracket.
 _CALL_OR_PAREN = re.compile(r"(unique\s+count|[A-Za-z_]\w*)\s*\(|\(|\)", re.IGNORECASE)
-_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
-_GROUP_CALL = re.compile(r"(?i)group_\w+\Z")
-_GROUP_SHORTHAND = re.compile(r"(?i)group_(?!aggregate\Z)\w+\Z")
-_WINDOW_CALL = re.compile(r"(?i)(moving|cumulative)_\w+\Z")
 _SQL_AGGREGATE_CALL = re.compile(r"(?i)sql_\w+_aggregate_op\Z")
 #: Aggregates that take row-level input and return one value per group: not group,
-#: window, rank or first/last value functions, which have rules of their own.
+#: window, rank or first/last value functions, nor SQL pass-through.
 _NOT_PLAIN = re.compile(r"(?i)(group_\w+|moving_\w+|cumulative_\w+|rank\w*|(first|last)_value\w*)\Z")
-#: Where thoughtspot-formula-patterns.md (and thoughtspot-model-tml.md for last_value)
-#: shows a plain aggregate working as an argument: group_aggregate (its "Group
-#: functions" rule 1), rank and last/first value.
-_PLAIN_HOSTS = re.compile(r"(?i)(group_aggregate|rank|rank_percentile|(first|last)_value(_in_period)?)\Z")
 
 
 def _tokens(segments: Any):
     """`("call", name)`, `("close", "")` and `("ref", segment)` in order, read off an
-    expression's tree segments: calls and brackets from the text segments only, with
-    quoted literals left out, so a reference's name is never read as code (BL-369)."""
+    expression's tree segments: calls and brackets from the text segments only, quoted
+    literals left out with the shared grammar (formula_translate.refs), so a
+    reference's name is never read as code (BL-369)."""
     for seg in segments if isinstance(segments, list) else []:
         if isinstance(seg, dict):
             yield "ref", seg
             continue
-        for m in _CALL_OR_PAREN.finditer(_QUOTED.sub(" ", seg)):
+        for m in _CALL_OR_PAREN.finditer(_LITERAL.sub(" ", seg)):
             if m.group(0) == ")":
                 yield "close", ""
             else:
@@ -437,90 +433,34 @@ def _calls_around(user: dict, name: str) -> List[str]:
 
 
 def _aggregate_family(call: str) -> bool:
+    """Any aggregate, group, window, rank or first/last value call, or SQL pass-through
+    aggregation."""
     return bool(call) and bool(AGGREGATE_FUNCS.match(call + " (") or _SQL_AGGREGATE_CALL.match(call))
 
 
-def _plain_aggregate(call: str) -> bool:
-    return _aggregate_family(call) and not _NOT_PLAIN.match(call)
+def _aggregating(nodes: Dict[str, dict]) -> set:
+    """Formulas whose own code calls an aggregate-family function, or that reference
+    one that does: read off text segments only (_tokens)."""
+    from ts_cli.audit.formula_tree import _reachable
+    direct = {n for n, node in nodes.items()
+              if any(k == "call" and _aggregate_family(v) for k, v in _tokens(node["expr"]))}
+    return {n for n in nodes if _reachable([n], nodes) & direct}
 
 
-def _direct_kind(node: dict) -> Tuple[bool, bool, List[Tuple[str, bool]]]:
-    """Whether a formula's own text calls a group function, whether it calls any other
-    aggregate outside a group function (a plain aggregate, a window, rank or first/last
-    value: "plain" below), and each formula it references with whether a group function
-    encloses that reference."""
-    group = plain = False
-    refs: List[Tuple[str, bool]] = []
-    stack: List[str] = []
-    for kind, value in _tokens(node["expr"]):
-        in_group = any(_GROUP_CALL.match(c) for c in stack)
-        if kind == "ref":
-            if "formula" in value:
-                refs.append((value["formula"], in_group))
-        elif kind == "close":
-            if stack:
-                stack.pop()
-        else:
-            if _GROUP_CALL.match(value):
-                group = True
-            elif _aggregate_family(value) and not in_group:
-                plain = True
-            stack.append(value)
-    return group, plain, refs
-
-
-def _helper_kinds(nodes: Dict[str, dict]) -> Dict[str, Tuple[bool, bool]]:
-    """Per formula, (calls a group function, aggregates outside one), through the
-    formulas it references too: a group helper anywhere makes it group; a plain one
-    referenced outside a group function makes it plain."""
-    direct = {n: _direct_kind(node) for n, node in nodes.items()}
-    group = {n: d[0] for n, d in direct.items()}
-    plain = {n: d[1] for n, d in direct.items()}
-    changed = True
-    while changed:
-        changed = False
-        for n, (_, _, refs) in direct.items():
-            for ref, in_group in refs:
-                if ref not in nodes:
-                    continue
-                g, p = group[n] or group[ref], plain[n] or (plain[ref] and not in_group)
-                if (g, p) != (group[n], plain[n]):
-                    group[n], plain[n], changed = g, p, True
-    return {n: (group[n], plain[n]) for n in nodes}
-
-
-def _paste_allowed(user: dict, name: str, group: bool, plain: bool) -> bool:
-    """Pasting formula `name` into `user` writes a form the formula reference shows
-    working (an allow-list: anything it does not show is not suggested).
-
-    - A row-level helper: anywhere but inside a group shorthand (group_sum and the
-      like, where only columns are shown) or a moving or cumulative function (only a
-      column or a group function result is shown there).
-    - An aggregating helper with no aggregate, group or window call around it: as
-      the reference itself behaves.
-    - Otherwise exactly one such call may enclose it, and it must be the innermost
-      call: group_aggregate, rank or last/first value for a plain aggregate
-      ("Group functions" rule 1, the rank form, the semi-additive form); a moving or
-      cumulative function or a plain aggregate for a group function (rule 3, and
-      `sum ( group_aggregate ( ... ) )` in thoughtspot-model-tml.md). Never rank around a
-      group function (rejected live, 2026-07-30), never a helper that is both."""
-    named = [c for c in _calls_around(user, name) if c]
-    if not group and not plain:
-        return not any(_GROUP_SHORTHAND.match(c) or _WINDOW_CALL.match(c) for c in named)
-    family = [c for c in named if _aggregate_family(c)]
-    if not family:
-        return True
-    if len(family) != 1 or family[0] != named[-1] or (group and plain):
-        return False
-    return _hosts(family[0], plain)
-
-
-def _hosts(host: str, plain: bool) -> bool:
-    """`host`, the one aggregate call around the reference and the innermost call,
-    takes a plain helper (`plain`) or a group helper, per _paste_allowed."""
-    if plain:
-        return bool(_PLAIN_HOSTS.match(host))
-    return bool(_WINDOW_CALL.match(host) or _plain_aggregate(host))
+def _paste_allowed(user: dict, name: str, aggregating: bool) -> bool:
+    """Pasting formula `name` into `user` reads the way referencing it does, in the
+    plainest cases only (fail safe: anything else is not suggested, whatever
+    ThoughtSpot might accept). An aggregating helper: when no aggregate-family call
+    encloses its reference, so the pasted aggregate stands where the reference stood.
+    A row-level helper: when every aggregate-family call around it is a plain
+    aggregate (sum, average, count and the like), which takes any row-level
+    expression. A group, window, rank or first/last value call around a helper is
+    never suggested: which argument the reference fills, and what that argument takes,
+    is more than the formula reference settles."""
+    family = [c for c in _calls_around(user, name) if _aggregate_family(c)]
+    if aggregating:
+        return not family
+    return all(not _NOT_PLAIN.match(c) and not _SQL_AGGREGATE_CALL.match(c) for c in family)
 
 
 def _inlined_length(user: dict, name: str, text: str) -> int:
@@ -552,10 +492,11 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
     user = nodes[sole]
     entry["user_refs"] = _refs_to(user["expr"], name)
     entry["cyclic"] = _refs_to(node["expr"], name) > 0 or sole in _reachable([name], nodes)
-    group, plain = model["kinds"][name]
     entry["blocked"] = (entry["blocked"] or sole not in model["live"]
+                        or name in model["kept_aggregation"]
+                        or bool((columns - {node["label"]}) & model["column_refs"])
                         or not isinstance(user["expr"], list)
-                        or not _paste_allowed(user, name, group, plain))
+                        or not _paste_allowed(user, name, name in model["aggregating"]))
     text = _text(node["expr"])
     if text is not None and isinstance(nodes[sole]["expr"], list):
         entry["inlined_length"] = _inlined_length(nodes[sole], name, text)
@@ -571,28 +512,59 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     it, that user's length with it pasted in, and whether pasting is blocked: the
     Model has two formulas of one name (the tree keeps one of them, so its uses, and
     "used only by", may be wrong), no visible formula sits above its user (remove the
-    chain instead), or the paste is not one the formula reference shows working
-    (_paste_allowed)."""
-    from ts_cli.audit.formula_tree import _reachable, formula_tree
+    chain instead), a column shows it with an aggregation other than SUM, another
+    formula reads it through a second column's display name (the tree reads that as a
+    column, so "used only by" would be false), or the paste is not one of the plain
+    cases _paste_allowed suggests."""
+    from ts_cli.audit.formula_tree import formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
     users: Dict[str, List[str]] = {n: [] for n in nodes}
     for user, node in nodes.items():
         for use in node["uses"]:
             if "formula" in use:
                 users[use["formula"]].append(user)
-    from collections import Counter
-    counts = Counter(f.get("name") for f in model.get("formulas") or []
-                     if isinstance(f, dict) and isinstance(f.get("name"), str))
-    visible = [n for n, node in nodes.items() if not node["hidden"]]
-    facts = {"named": _named_columns(model),
-             "columns": _surfacing_names(model),
-             "shared": {n for n, c in counts.items() if c > 1},
-             "kinds": _helper_kinds(nodes),
-             "live": _reachable(visible, nodes)}
+    facts = _model_facts(model, nodes)
     entries = {name: _helper_entry(name, node, users[name], nodes, facts)
                for name, node in nodes.items()}
     _measure_together(entries, nodes, users)
     return entries
+
+
+def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
+    """What _helper_entry reads about the whole Model (see _build_single_use)."""
+    from collections import Counter
+    from ts_cli.audit.formula_tree import _reachable
+    counts = Counter(f.get("name") for f in model.get("formulas") or []
+                     if isinstance(f, dict) and isinstance(f.get("name"), str))
+    visible = [n for n, node in nodes.items() if not node["hidden"]]
+    return {"named": _named_columns(model),
+            "columns": _surfacing_names(model),
+            "shared": {n for n, c in counts.items() if c > 1},
+            "aggregating": _aggregating(nodes),
+            "kept_aggregation": _kept_aggregation(model),
+            "column_refs": _column_refs(nodes),
+            "live": _reachable(visible, nodes)}
+
+
+def _column_refs(nodes: Dict[str, dict]) -> set:
+    """Every column reference any formula makes, as the tree resolved it."""
+    return {seg["column"] for node in nodes.values() for seg in node["expr"] or []
+            if isinstance(seg, dict) and "column" in seg}
+
+
+def _kept_aggregation(model: dict) -> set:
+    """Formulas a column surfaces with an aggregation other than SUM (the default):
+    pasting the expression drops that column, and with it the aggregation, which
+    thoughtspot-model-tml.md calls load-bearing on some formulas."""
+    ids = {f.get("id"): f.get("name") for f in model.get("formulas") or []
+           if isinstance(f, dict) and isinstance(f.get("id"), str)}
+    out = set()
+    for c in model.get("columns") or []:
+        name = ids.get(c.get("formula_id")) if isinstance(c, dict) else None
+        agg = str(tml.mapping(c, "properties").get("aggregation") or "SUM").upper()
+        if isinstance(name, str) and agg != "SUM":
+            out.add(name)
+    return out
 
 
 def _surfacing_names(model: dict) -> Dict[str, set]:
@@ -624,17 +596,20 @@ def _measure_together(entries: Dict[str, dict], nodes: Dict[str, dict],
     view shows, and what the 250 limit is on (the product owner, 2026-11-14), so
     findings that each pass cannot add up past it."""
     paste = {n for n, e in entries.items() if _pasteable_entry(e)}
+    measured: Dict[str, Tuple[Any, Any]] = {}
     for name in paste:
         target, seen = users[name][0], {name}
         while target in paste and target not in seen:
             seen.add(target)
             target = users[target][0]
         entries[name]["target"] = nodes[target]["label"]
-        try:
-            length, ifs = (_expanded(target, nodes, paste, set())
-                           if isinstance(nodes[target]["expr"], list) else (None, None))
-        except RecursionError:  # a chain of ~1,000 helpers: no finding, never a crash
-            length, ifs = None, None
+        if target not in measured:
+            try:
+                measured[target] = (_expanded(target, nodes, paste, set())
+                                    if isinstance(nodes[target]["expr"], list) else (None, None))
+            except RecursionError:  # a chain of ~1,000 helpers: no finding, never a crash
+                measured[target] = (None, None)
+        length, ifs = measured[target]
         entries[name]["inlined_length"], entries[name]["inlined_ifs"] = length, ifs
 
 
@@ -734,11 +709,12 @@ def _formula_cycles_with_user(item: dict, ctx: Any) -> bool:
 
 
 @register("paste_blocked", uses=(),
-          label="pasting the formula in is not a form the formula reference shows working, or is pointless")
+          label="pasting the formula in is not one of the plain, safe cases, or is pointless")
 def _paste_blocked(item: dict, ctx: Any) -> bool:
-    """Formula: the Model has two formulas of one name; or no visible formula sits
-    above the one formula that uses it; or pasting it there is not a form the formula
-    reference shows working (see _paste_allowed)."""
+    """Formula: the Model has two formulas of one name; no visible formula sits above
+    the one formula that uses it; a column shows it with an aggregation other than
+    SUM; another formula reads it through a second column's display name; or pasting
+    it there is not one of the plain cases _paste_allowed suggests."""
     return bool(_single_use(item).get("blocked"))
 
 
