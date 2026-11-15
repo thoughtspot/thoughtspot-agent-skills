@@ -17,13 +17,14 @@ Same import constraint as fields.py: Python 3.9, no third-party imports at modul
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import _model_of, model_roles, register
 from ts_cli.audit.engine.memo import cached
 from ts_cli.formula_translate.refs import split_literals
 from ts_cli.tml_join_graph import on_clause_key_pairs
+from ts_cli.tml_rls_graph import rls_edges, rls_join_cycles
 
 
 def _upper(value: Any) -> Optional[str]:
@@ -430,6 +431,214 @@ def _scopes(refs: list, by_id: dict, own: str, column: str) -> bool:
         if sep and col.strip() == column and by_id.get(prefix.strip(), prefix.strip()) == own:
             return True
     return False
+
+
+# ── S17: an RLS Table planned as a second root ──────────────────────────────
+
+#: The roles of a root of the Model's directed joins (agents/shared/erd/roles.py):
+#: nothing joins to it, with or without measures.
+_ROOT_ROLES = ("fact", "factless")
+
+
+def _join_roots(model: dict, ctx: Any) -> frozenset:
+    """Keys (alias, else name) of the roots of the Model's directed joins: role fact or
+    factless (model_roles: direction from cardinality, ONE_TO_MANY reversed) and in at
+    least one directed join — an unjoined table is D5's, not a root."""
+    return frozenset(k for k, r in model_roles(model, ctx).items()
+                     if r.get("role") in _ROOT_ROLES and not r.get("unjoined"))
+
+
+def _dicts(value: Any) -> list:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _body(model: dict) -> dict:
+    return model["model"] if isinstance(model.get("model"), dict) else model
+
+
+def _formula_tables(model: dict) -> Dict[str, frozenset]:
+    """Per formula id, the table keys (the part before `::`) it reads, directly or
+    through other formulas (formula_reference_index: id, name, or a surfacing
+    column's display name)."""
+    body = _body(model)
+    formulas = _dicts(body.get("formulas"))
+    by_ref = tml.formula_reference_index(formulas, _dicts(body.get("columns")))
+    by_name = {f.get("name"): f for f in formulas if isinstance(f.get("name"), str)}
+    out = {}
+    for start in formulas:
+        if not isinstance(start.get("id"), str):
+            continue
+        todo, seen, tables = [start], set(), set()
+        while todo:
+            f = todo.pop()
+            if id(f) in seen:
+                continue
+            seen.add(id(f))
+            for ref in tml.expr_refs(f.get("expr")):
+                if "::" in ref:
+                    tables.add(ref.partition("::")[0].strip())
+                elif by_ref.get(ref) in by_name:
+                    todo.append(by_name[by_ref[ref]])
+        out[start["id"]] = frozenset(tables)
+    return out
+
+
+def _formula_measure_tables(model: dict) -> frozenset:
+    """Table keys that a formula surfaced as a MEASURE column reads (_formula_tables):
+    such a table is counted as a fact even when none of its own columns is a MEASURE,
+    which the shared role classifier does not see (it reads `column_id` columns only;
+    BL-573)."""
+    reads = cached("formula_tables", model, _formula_tables, model)
+    out = set()
+    for c in _dicts(_body(model).get("columns")):
+        fid = c.get("formula_id")
+        if isinstance(fid, str) and tml.mapping(c, "properties").get("column_type") == "MEASURE":
+            out |= reads.get(fid, frozenset())
+    return frozenset(out)
+
+
+def _surfacing_columns(model: dict, key: str) -> list:
+    """The Model's columns (dicts) that surface data of the table `key`: its own
+    `column_id` columns, and formula columns whose formula reads it, directly or
+    through other formulas (_formula_tables)."""
+    reads = cached("formula_tables", model, _formula_tables, model)
+    out = []
+    for c in _dicts(_body(model).get("columns")):
+        cid, fid = c.get("column_id"), c.get("formula_id")
+        if isinstance(cid, str) and cid.partition("::")[0].strip() == key:
+            out.append(c)
+        elif isinstance(fid, str) and key in reads.get(fid, frozenset()):
+            out.append(c)
+    return out
+
+
+def _rls_reach(model: dict, ctx: Any) -> Tuple[frozenset, frozenset]:
+    """(Model nodes another table's RLS rule reaches, Model nodes on an RLS join cycle),
+    from the shared RLS graph (tml_rls_graph: only walkable paths a rule references).
+    A table on a cycle is S11's (CRITICAL: every query under the rule fails)."""
+    def table_of(entry: dict):
+        doc = (ctx.tables or {}).get(entry.get("fqn") or "")
+        body = doc.get("table") if isinstance(doc, dict) else None
+        return body if isinstance(body, dict) else None
+    mts = _dicts(model.get("model_tables"))
+    edges, _ = rls_edges(mts, {}, table_of)
+    on_cycle = {n for hit in rls_join_cycles(mts, {}, table_of) for n in hit["cycle"]}
+    return frozenset(e.to for e in edges if e.to != e.frm), frozenset(on_cycle)
+
+
+def _acl_signal(item: dict, ctx: Any, model: dict, me: str) -> bool:
+    """Whether a measure-less root reads as an access-control table, by the product
+    owner's two signals (2026-11-14): (1) its own Table TML carries RLS rules and it
+    surfaces at least one column in the Model, every one hidden (the Model needs one to
+    enforce the rule; none is for analysis), or (2) another table's RLS rule reaches it
+    (_rls_reach) and no column surfaces its data in the Model. A Model column counts
+    whether it is the table's own or a formula over it (_surfacing_columns). A factless
+    fact (an event table) exposes its columns and is neither."""
+    fqn = (item.get("obj") or {}).get("fqn")
+    doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
+    cols = _surfacing_columns(model, me)
+    own = bool(_rls_rules_of(doc)) and bool(cols) and all(
+        tml.mapping(c, "properties").get("is_hidden") is True for c in cols)
+    reached, _ = cached("rls_reach", model, _rls_reach, model, ctx)
+    return own or (not cols and me in reached)
+
+
+@register("rls_root_beside", uses=(),
+          label="the other tables at the root of the Model's joins")
+def _rls_root_beside(item: dict, ctx: Any) -> list:
+    """Model table: when it reads as an access-control table (_acl_signal), holds no
+    measures and is a root of the Model's directed joins (role `factless`, joined)
+    while another table is a root too, the other roots' keys, sorted; else none. Query
+    generation plans each root as its own fact and stitches them, so such a table — an
+    access-control table joined many-to-one to a dimension is the measured case (S17,
+    live-verified 2026-11-12) — doubles every query's SQL. A root holding measures
+    (role `fact`), or one a formula measure reads (_formula_measure_tables), is a
+    genuine fact; a Model bypassing RLS applies no rule (S10); a table on an RLS join
+    cycle is S11's (CRITICAL); none fires. A name list in messages."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    me = item.get("name")
+    if not isinstance(me, str) or not me:           # a non-string alias or name: no key
+        return NameList()
+    model = _model_of(item)
+    if tml.mapping(model, "properties").get("is_bypass_rls"):
+        return NameList()
+    roots = cached("join_roots", model, _join_roots, model, ctx)
+    if me not in roots or model_roles(model, ctx).get(me, {}).get("role") != "factless":
+        return NameList()
+    if me in cached("formula_measure_tables", model, _formula_measure_tables, model):
+        return NameList()
+    if me in cached("rls_reach", model, _rls_reach, model, ctx)[1]:   # S11's
+        return NameList()
+    if not _acl_signal(item, ctx, model, me):
+        return NameList()
+    return NameList(sorted(roots - {me}))
+
+
+#: @rls_root_fix's values: which fix fits the table's RLS rules.
+RLS_ROOT_FIXES = (
+    "review the RLS rules that reach it: they are not recognised as one "
+    "`ts_username = [column]` rule on this table, so check that "
+    "after the RLS filter every user has at most one row per key (a user in two groups "
+    "mapped to one key has two); if so, reverse the join so the dimension joins to it "
+    "many-to-one, and if not, keep it, as the reversed join would double-count measures",
+    "reverse the join so the dimension joins to it many-to-one, once the conditions in "
+    "the remediation hold",
+    "this shape is not live-measured (only another table's RLS rule reaches it, and it "
+    "has no column in the Model): first check the query plan as a user under the rule; "
+    "if it does stitch, review that the rule leaves each user at most one row per key, "
+    "then reverse the join so the dimension joins to it many-to-one, keeping it if not",
+)
+
+
+#: The one rule shape the reversal is safe for: the user equals a column of the table.
+_USER_EQUALS_KEY = re.compile(
+    r"(?i)^\s*(?:ts_username\s*=\s*\[([^\]]+)\]|\[([^\]]+)\]\s*=\s*ts_username)\s*$")
+_OUTER_PARENS = re.compile(r"^\s*\((.*)\)\s*$", re.S)
+
+
+def _keyed_on_user_alone(expr: Any, doc: Any) -> bool:
+    """The rule is exactly `ts_username = [path::COLUMN]` (either side, optionally in
+    parentheses; quoted literals removed, so a literal comparison never matches) and the
+    path resolves to the rule's own Table (_own_table_and_paths): each user then sees
+    only the rows whose key column holds their name, the condition the many-to-one
+    reversal needs together with the (user, key) uniqueness the remediation asks to
+    check. Anything else — ts_groups, a multi-value ts_var, `or`, `!=`, `in`, contains,
+    a literal, or a user column on another Table reached through a join path (a
+    group-keyed access table) — can give a user several rows per key."""
+    if not isinstance(expr, str):
+        return False
+    code = _code(expr)
+    while (m := _OUTER_PARENS.match(code)) and m.group(1).count("(") == m.group(1).count(")"):
+        code = m.group(1)
+    hit = _USER_EQUALS_KEY.match(code)
+    if not hit:
+        return False
+    own, by_id = _own_table_and_paths(doc)
+    prefix = (hit.group(1) or hit.group(2)).partition("::")[0].strip()
+    return isinstance(own, str) and by_id.get(prefix, prefix) == own
+
+
+@register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
+          label="the fix that fits the table's RLS rules")
+def _rls_root_fix(item: dict, ctx: Any) -> str:
+    """Model table: the second of RLS_ROOT_FIXES (reverse) only when its Table TML (by
+    `fqn`) has exactly one RLS rule and it is keyed on the user alone
+    (_keyed_on_user_alone); else the first (review: an access-control list should
+    return one row per key per user after the filter, so the shape stays an
+    anti-pattern, but the code cannot prove it here). A Table's rules combine with OR, so
+    a second rule (owner or delegate) can give a user two rows per key, as can ts_groups,
+    a multi-value ts_var or an `or`: the reversed many-to-one join would double-count
+    measures, which the stitched plan's grouping does not. The third (check the plan
+    first) when the table has no rule of its own and no Model column: only another
+    table's rule reaches it, a shape not live-measured."""
+    obj = item.get("obj")
+    fqn = obj.get("fqn") if isinstance(obj, dict) else None
+    rules = _rls_rules_of(ctx.tables.get(fqn)) if isinstance(fqn, str) else []
+    if not rules and not _surfacing_columns(_model_of(item), item.get("name")):
+        return RLS_ROOT_FIXES[2]
+    doc = ctx.tables.get(fqn) if isinstance(fqn, str) else None
+    safe = len(rules) == 1 and _keyed_on_user_alone(rules[0].get("expr"), doc)
+    return RLS_ROOT_FIXES[1] if safe else RLS_ROOT_FIXES[0]
 
 
 # ── D15: duplicate Table-level joins ────────────────────────────────────────

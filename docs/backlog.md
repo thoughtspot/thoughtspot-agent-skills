@@ -17435,3 +17435,32 @@ Written by hand as `( if ( isnull ( sum ( [Q] ) ) ) then null else safe_divide (
 2. A test for the contribution-ratio shape (`DIV0(x, SUM(x) OVER (PARTITION BY d))`).
 
 **Target:** 2027-01-31.
+
+## BL-573 — the shared role classifier misses formula measures, so D7, D11 and the ERD read a formula-measured fact as factless `Tier 3`
+
+**Filed:** 2026-11-14. **Source:** pr-ready reviews of the S17 audit rule (ts-audit 3.20.0).
+
+**What.** `agents/shared/erd/roles.py` counts a table as holding measures only through its `column_id` columns. A table whose only measures are Model formulas (`sum ( [F_LINE::AMOUNT] )`) reads as `factless`, not `fact`. S17 corrects for this locally (`_formula_measure_tables` in `ts_cli/audit/engine/fields_data.py`). The other readers do not:
+- D11 (`@is_fact_to_fact_join`): F_LINE → D_HDR with D_HDR holding a measure gives MEDIUM with F_LINE's measure as a column, INFO with the same measure as a formula.
+- D7 (`model_overlap`, `code_rules.py`): treats a shared table as a fact only when its role is `fact`; two overlapping Models give MEDIUM with the column, no finding with the formula.
+- The ERD labels such a table "Factless / bridge".
+
+BL-505 covers the converters' side only.
+
+**Do.**
+1. Attribute formula measures to the tables they read in the classifier itself (or in `tml.model_table_roles`), following formula cross-references the way `_formula_tables` does, and drop S17's local copy.
+2. Re-pin D7 and D11 where findings change, and replay the fire rates on the SE demo sample.
+
+**Target:** 2027-01-31.
+
+## BL-574 — S11 and S12 still fire on a Model that bypasses RLS `Tier 3`
+
+**Filed:** 2026-11-14. **Source:** pr-ready review of the S17 audit rule (ts-audit 3.20.0).
+
+**What.** With `properties.is_bypass_rls` set no rule applies (S10's own message), and S17 stays silent there. S11 (CRITICAL, "queries fail") and S12 (MEDIUM, "for users under the rule") still fire. I.e. `sec_rls_join_cycle` with bypass gives S10, S11, S12 and S13.
+
+**Do.**
+1. Confirm on a live cluster that a bypassing Model does not apply the RLS joins (so the S11 loop cannot fail a query).
+2. If so, add the bypass guard to S11 and S12 (or word them for the bypass case), with tests.
+
+**Target:** 2027-01-31.

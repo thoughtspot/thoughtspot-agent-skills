@@ -6,7 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-14
-- feat: new audit rule H15 flags a hidden formula that only one other formula uses, and the Formulas view shows a formula's definition with those helpers pasted in (ts-audit 3.20.0)
+- feat: new audit rule H15 flags a hidden formula that only one other formula uses, and the Formulas view shows a formula's definition with those helpers pasted in (ts-audit 3.21.0)
+- chore: bump ts-cli to v0.217.0
+- feat: `ts audit` rule S17, HIGH: an access-control table at the root of a Model's joins beside another root (joined many-to-one to a dimension, or the dimension joined to it one-to-many), which query generation plans as a second fact and stitches every query from separate subqueries. A measure-less table reads as access-control when it carries RLS rules and surfaces at least one Model column, all hidden, or another table's RLS rule reaches it and none of its columns is in the Model; an event table exposing its columns, a table a formula measure reads, a Model bypassing RLS and a table on an RLS join loop (S11's) never fire. The finding advises reversing the join for one `ts_username = [column]` rule on the table, and otherwise to review that the RLS filter leaves each user one row per key before reversing it (ts-audit 3.20.0)
 - chore: bump ts-cli to v0.216.0
 
 ## 2026-11-12
