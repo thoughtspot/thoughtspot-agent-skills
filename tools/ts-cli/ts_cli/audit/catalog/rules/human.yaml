@@ -395,7 +395,8 @@
     one other formula references, once, by id, name or display name, outside quoted
     literals, read as the report's Formulas view reads it. Each one adds a level a
     reader must open to follow the formula that uses it, and nothing else reuses it.
-    Not reported when a Model filter or a column's currency setting names its column,
+    Not reported when a Model filter, a column's currency setting, a Model-level join
+    or a date-range constraint names its column,
     when it and the formula using it form a cycle, when that formula references it
     more than once (pasting it in would repeat it), when the Model has two formulas of
     one name (uses could be read wrong), when no visible formula sits above the

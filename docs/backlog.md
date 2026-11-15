@@ -17481,7 +17481,7 @@ BL-505 covers the converters' side only.
 **Do.**
 1. One shared "named by the Model" field (filters, currency settings), read by H3, H11 and H16, and passed to the view so its "hidden, unused" tag agrees.
 2. Tests: a hidden column a filter names, and one a currency setting names, are silent under H3 and H11 and not tagged unused.
-3. Read the other places a Model names a column by display name too: `joins_with[].on` and `constraints[…].date_range_condition.column` (thoughtspot-model-tml.md). H16's `_named_columns` reads neither today.
+3. Read the other places a Model names a column by display name too: `joins_with[].on` and `constraints[…].date_range_condition.column` (thoughtspot-model-tml.md). H16's `_named_columns` (`engine/fields_single_use.py`) reads all four; share it.
 
 **Target:** 2027-01-31.
 
@@ -17494,6 +17494,7 @@ BL-505 covers the converters' side only.
 **Do.**
 1. Read a non-text `expr` as empty in the ERD parser, or add formula `expr` to `tml.SHAPES` so such a Model is listed under "Could not be read".
 2. A test running the audit over a Model with a list-valued and a number-valued `expr`.
+3. The same for a non-text formula `name` and a non-list `parameters`: `fields._reference_graph` (P2, and H16 through it) and `formula_tree._parameter_names` end the run on them too (H16 review, 2026-11-16).
 
 **Target:** 2027-01-31.
 

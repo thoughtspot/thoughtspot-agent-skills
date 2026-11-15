@@ -27,22 +27,63 @@ from ts_cli.spotql_ops import is_bare_window
 _INLINE_WRAP = len("(  )")
 
 
+#: A `[...]` reference in a join's `on` text; its column is after the last `::`.
+_ON_REF = re.compile(r"\[([^\]]*)\]")
+
+
 def _named_columns(model: dict) -> set:
-    """The column names a Model filter (`filters[].column`, a list or a scalar) or a
-    column's currency setting (`properties.currency_type.column`) names. Not read:
-    `joins_with[].on` and `date_range_condition` columns (BL-575, item 3). Case-folded:
-    whether ThoughtSpot matches these names case-insensitively is not recorded, so
-    either way counts."""
-    out = set()
+    """The column names something else in the Model names, as H16 compares them
+    (_spelling): a filter (`filters[].column`, a list or a scalar), a column's currency
+    setting (`properties.currency_type.column`), a Model-level join's `on` text
+    (`joins_with[].on`, each `[...::<column>]`) and a constraint's
+    `date_range_condition.column`. Case-folded: whether ThoughtSpot matches these names
+    case-insensitively is not recorded, so either way counts."""
+    names = (_filter_columns(model) + _currency_columns(model) + _join_columns(model)
+             + _date_range_columns(model.get("constraints")))
+    return {_spelling(n) for n in names if n is not None}
+
+
+def _filter_columns(model: dict) -> List[Any]:
+    out: List[Any] = []
     for f in model.get("filters") or []:
         col = f.get("column") if isinstance(f, dict) else None
-        out.update(_spelling(c) for c in (col if isinstance(col, (list, tuple)) else [col])
-                   if c is not None)
+        out += list(col) if isinstance(col, (list, tuple)) else [col]
+    return out
+
+
+def _currency_columns(model: dict) -> List[Any]:
+    out: List[Any] = []
     for c in model.get("columns") or []:
         currency = tml.mapping(c, "properties").get("currency_type") if isinstance(c, dict) else None
-        if isinstance(currency, dict) and currency.get("column") is not None:
-            out.add(_spelling(currency["column"]))
+        if isinstance(currency, dict):
+            out.append(currency.get("column"))
     return out
+
+
+def _join_columns(model: dict) -> List[Any]:
+    out: List[Any] = []
+    for j in model.get("joins_with") or []:
+        on = j.get("on") if isinstance(j, dict) else None
+        if isinstance(on, str):
+            out += [ref.split("::")[-1] for ref in _ON_REF.findall(on)]
+    return out
+
+
+def _date_range_columns(value: Any) -> List[Any]:
+    """Every `date_range_condition.column` under a Model's `constraints`, whatever
+    list or mapping nests it."""
+    found: List[Any] = []
+    stack = [value]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, dict):
+            cond = v.get("date_range_condition")
+            if isinstance(cond, dict) and cond.get("column") is not None:
+                found.append(cond["column"])
+            stack.extend(v.values())
+        elif isinstance(v, list):
+            stack.extend(v)
+    return found
 
 
 def _text(segments: Any) -> Optional[str]:

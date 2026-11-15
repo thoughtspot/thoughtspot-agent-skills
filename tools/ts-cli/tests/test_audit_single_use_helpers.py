@@ -133,7 +133,9 @@ def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
 
 @pytest.mark.parametrize("user_expr, helper_expr", [
     # an aggregating helper inside any aggregate-family call
-    ("group_sum ( [formula_H] , [T::REGION] )", "group_count ( [T::ID] , [T::CATEGORY] )"),
+    # (a group or window helper is written `… * 1`: a bare one is refused before the
+    # paste guard, which these cases test)
+    ("group_sum ( [formula_H] , [T::REGION] )", "group_count ( [T::ID] , [T::CATEGORY] ) * 1"),
     ("moving_sum ( [formula_H] , -1 , 0 , [T::ORDER_DATE] )", "sum ( [T::AMOUNT] )"),
     ("moving_sum ( abs ( [formula_H] ) , -1 , 0 , [T::D] )", "sum ( [T::A] )"),
     ("cumulative_sum ( [formula_H] , [T::D] )", "[formula_Base] * 2"),
@@ -142,14 +144,14 @@ def test_a_helper_whose_one_user_is_hidden_and_unused_is_not_reported():
     ("if ( [T::X] = 0 or unique count ( [formula_H] ) > 1 ) then 1 else 0", "max ( [T::A] )"),
     ('sql_int_aggregate_op ( "sum({0})" , [formula_H] )', "sum ( [T::A] )"),
     ("group_sum ( [formula_H] , [T::REGION] )", "sum ( [T::AMOUNT] )"),
-    ("rank ( [formula_H] , 'desc' )", "group_aggregate ( sum ( [T::M] ) , { [T::A] } , query_filters ( ) )"),
+    ("rank ( [formula_H] , 'desc' )", "group_aggregate ( sum ( [T::M] ) , { [T::A] } , query_filters ( ) ) * 1"),
     ("rank ( [formula_H] , 'desc' )", "sum ( [T::QUANTITY] )"),
     ("rank ( [formula_H] , 'desc' )", "cumulative_sum ( [T::A] , [T::D] )"),
     ("group_aggregate ( [formula_H] , { [T::REGION] } , query_filters ( ) )", "sum ( [T::AMOUNT] )"),
     ("last_value ( [formula_H] , query_groups ( ) , { [T::DATE] } )", "sum ( [T::BALANCE] )"),
     ("moving_sum ( [formula_H] , -1 , 0 , [T::ORDER_DATE] )",
-     "group_aggregate ( sum ( [T::AMOUNT] ) , { [T::PK] } , query_filters ( ) )"),
-    ("sum ( [formula_H] )", "group_sum ( [T::AMOUNT] , [T::REGION] )"),
+     "group_aggregate ( sum ( [T::AMOUNT] ) , { [T::PK] } , query_filters ( ) ) * 1"),
+    ("sum ( [formula_H] )", "group_sum ( [T::AMOUNT] , [T::REGION] ) * 1"),
     ("sum ( [formula_H] )", "sum ( [T::A] ) / group_sum ( [T::A] , [T::R] )"),
     # a row-level helper in any slot of a group, window, rank or last_value call
     ("group_sum ( [T::AMT] , [formula_H] )", "if ( [T::X] > 0 ) then 'a' else 'b'"),
@@ -419,3 +421,27 @@ def test_a_formula_with_no_name_blocks_the_model():
     assert _h16([_f("formula_Net", "Net Sales", "[formula_H] * 2"), _f("formula_H", "H", "1"),
                  _f("formula_E", "", "[formula_H] * 3")],
                 [PARENT, _col("H", "formula_H", hidden=True)]) == []
+
+
+@pytest.mark.parametrize("extra", [
+    {"constraints": {"constraint": [{"date_range_condition": {"column": "Order Day", "type": "LAST_N"}}]}},
+    {"joins_with": [{"name": "j", "with": "Budget", "on": "[M::Order Day] = [Budget::Day]", "type": "INNER"}]},
+])
+def test_a_helper_a_constraint_or_model_join_names_is_not_reported(extra):
+    formulas = [_f("formula_Net", "Net Sales", "[formula_D] + 1"), _f("formula_D", "D", "to_date ( [T::TS] )")]
+    columns = [PARENT, _col("Order Day", "formula_D", hidden=True)]
+    assert len(_h16(formulas, columns)) == 1
+    assert _h16(formulas, columns, **extra) == []
+
+
+def test_in_a_chain_the_limit_is_measured_on_the_top_formula():
+    """The product owner's ruling (2026-11-14): with every such helper pasted in, all the
+    way down, a result over 250 reports none of its helpers, even one that would fit one
+    level down."""
+    top = _f("formula_Top", "Top", "[formula_C] * 2 + " + " + ".join(f"[T::TOP{i}]" for i in range(12)))
+    c = _f("formula_C", "C", "[formula_B] + " + " + ".join(f"[T::C{i}]" for i in range(14)))
+    b = _f("formula_B", "B", "1")
+    cols = [_col("Top", "formula_Top"), _col("C", "formula_C", hidden=True), _col("B", "formula_B", hidden=True)]
+    assert _h16([top, c, b], cols) == []
+    cols[1] = _col("C", "formula_C")  # C visible: B's target is C, within the limit
+    assert len(_h16([top, c, b], cols)) == 1
