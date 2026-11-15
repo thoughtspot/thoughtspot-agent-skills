@@ -329,3 +329,29 @@ def test_the_if_count_reads_reference_names_as_p16_does():
                   _f("formula_H", "H", "if ( [T::A] = 1 ) then 1 else 0")],
                  [PARENT, _col("H", "formula_H", hidden=True)])
     assert found == []
+
+
+@pytest.mark.parametrize("agg_columns", [
+    # the visible column second: the tree labels Agg "Agg two", the index knows "Agg one"
+    [("Agg one", True), ("Agg two", False)],
+    [("Agg one", False), ("Agg two", True)],
+])
+def test_a_formula_read_through_any_surfacing_column_name_blocks_the_model(agg_columns):
+    cols = [PARENT, _col("H", "formula_H", hidden=True)] + [
+        _col(n, "formula_Agg", hidden=h) for n, h in agg_columns]
+    base = [_f("formula_Agg", "Agg", "sum ( [T::C] )")]
+    for name in ("Agg one", "Agg two"):
+        # H row-level beside an aggregate read by column name (through the first column the
+        # index resolves Agg, so Net Sales aggregates and the bare paste is refused anyway)
+        assert _h16(base + [_f("formula_H", "H", "[T::A] * [T::B]"),
+                            _f("formula_Net", "Net Sales", f"[formula_H] + [{name}]")], cols) == []
+        # an aggregate read by column name inside H, pasted into sum
+        assert _h16(base + [_f("formula_H", "H", f"[{name}] * 2"),
+                            _f("formula_Net", "Net Sales", "sum ( [formula_H] )")], cols) == []
+
+
+def test_a_helper_with_a_number_for_a_column_name_is_not_reported_as_used_once():
+    h = _col(2024, "formula_H", hidden=True)
+    assert _h16([_f("formula_U1", "U1", "[formula_H] * 2"), _f("formula_U2", "U2", "[2024] + 1"),
+                 _f("formula_H", "H", "1")],
+                [_col("U1", "formula_U1"), _col("U2", "formula_U2"), h]) == []

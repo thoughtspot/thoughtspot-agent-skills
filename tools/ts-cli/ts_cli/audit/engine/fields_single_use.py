@@ -230,18 +230,16 @@ def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
 
 
 def _second_column_refs(model: dict, nodes: Dict[str, dict]) -> bool:
-    """Some formula names a formula through a column other than the first that
-    surfaces it. The shared reference index resolves only the first (BL-578), so the
-    tree reads that reference as a column, and both "used only by" and the aggregate
-    reading H16 shares with P2 can be wrong anywhere in the Model: fail safe, H16
+    """Some formula reference the tree read as a column names a column that surfaces
+    a formula. The shared reference index resolves only a formula's first surfacing
+    column (BL-578), and the tree may label it with a later, visible one, so such a
+    reference is a formula use read as a column: "used only by" and the aggregate
+    reading H16 shares with P2 can be wrong anywhere in the Model. Fail safe: H16
     reports nothing there."""
-    refs = {seg["column"] for node in nodes.values() for seg in node["expr"] or []
+    refs = {str(seg["column"]) for node in nodes.values() for seg in node["expr"] or []
             if isinstance(seg, dict) and "column" in seg}
-    seconds = set()
-    for name, columns in _surfacing_names(model).items():
-        label = nodes[name]["label"] if name in nodes else None
-        seconds |= columns - {label, name}
-    return bool(refs & seconds)
+    surfacing = set().union(*_surfacing_names(model).values())
+    return bool(refs & surfacing)
 
 
 def _kept_aggregation(model: dict) -> set:
@@ -270,7 +268,7 @@ def _surfacing_names(model: dict) -> Dict[str, set]:
         fid = c.get("formula_id") if isinstance(c, dict) else None
         name = ids.get(fid) if isinstance(fid, str) else None
         if isinstance(name, str) and c.get("name") is not None:
-            out.setdefault(name, set()).add(str(c["name"]))
+            out.setdefault(name, set()).add(str(c["name"]))  # a YAML number too
     return out
 
 
