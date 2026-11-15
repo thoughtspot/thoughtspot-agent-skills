@@ -355,3 +355,35 @@ def test_a_helper_with_a_number_for_a_column_name_is_not_reported_as_used_once()
     assert _h16([_f("formula_U1", "U1", "[formula_H] * 2"), _f("formula_U2", "U2", "[2024] + 1"),
                  _f("formula_H", "H", "1")],
                 [_col("U1", "formula_U1"), _col("U2", "formula_U2"), h]) == []
+
+
+def _hc(name, fid):
+    return _col(name, fid, hidden=True)
+
+
+@pytest.mark.parametrize("formulas, columns", [
+    # a formula named like another formula's id: the index's answer depends on list order
+    ([_f("formula_X", "X", "sum ( [T::A] )"), _f("formula_formula_X", "formula_X", "1"),
+      _f("formula_U", "U", "[formula_X] * 2")],
+     [_col("U", "formula_U"), _hc("X", "formula_X"), _hc("formula_X", "formula_formula_X")]),
+    # a case variant of the helper's id, name or column name
+    *[([_f("formula_U1", "U1", "[formula_H] * 2"), _f("formula_U2", "U2", f"{ref} + 1"),
+        _f("formula_H", "H", "1")],
+       [_col("U1", "formula_U1"), _col("U2", "formula_U2"), _hc("H shown", "formula_H")])
+      for ref in ("[FORMULA_H]", "[formula_h]", "[h]", "[h shown]")],
+    # a column named like another formula
+    ([_f("formula_Rev", "Revenue", "sum ( [T::A] )"), _f("formula_Rev2", "Revenue v2", "sum ( [T::B] )"),
+      _f("formula_M", "Margin", "[Revenue] - sum ( [T::COST] )")],
+     [_col("Margin", "formula_M"), _hc("Revenue (old)", "formula_Rev"), _hc("Revenue", "formula_Rev2")]),
+    # two formulas with one id
+    ([_f("formula_U", "U", "[formula_D] * 2"), _f("formula_D", "D", "1"), _f("formula_D", "D2", "2")],
+     [_col("U", "formula_U"), _hc("D", "formula_D")]),
+])
+def test_a_model_that_spells_a_formula_ambiguously_reports_nothing(formulas, columns):
+    assert _h16(formulas, columns) == []
+
+
+def test_a_filter_names_a_column_case_aside():
+    formulas = [_f("formula_Net", "Net Sales", "[formula_d_internal]"), _f("formula_d_internal", "d_internal", "1")]
+    columns = [PARENT, _col("Shown D", "formula_d_internal", hidden=True)]
+    assert _h16(formulas, columns, filters=[{"column": ["shown d"], "oper": "in"}]) == []

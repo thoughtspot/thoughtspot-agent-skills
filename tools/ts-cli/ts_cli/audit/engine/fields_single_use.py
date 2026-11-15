@@ -30,16 +30,18 @@ _INLINE_WRAP = len("(  )")
 def _named_columns(model: dict) -> set:
     """The column names a Model filter (`filters[].column`, a list or a scalar) or a
     column's currency setting (`properties.currency_type.column`) names. Not read:
-    `joins_with[].on` and `date_range_condition` columns (BL-575, item 3)."""
+    `joins_with[].on` and `date_range_condition` columns (BL-575, item 3). Case-folded:
+    whether ThoughtSpot matches these names case-insensitively is not recorded, so
+    either way counts."""
     out = set()
     for f in model.get("filters") or []:
         col = f.get("column") if isinstance(f, dict) else None
-        out.update(str(c) for c in (col if isinstance(col, (list, tuple)) else [col])
+        out.update(str(c).casefold() for c in (col if isinstance(col, (list, tuple)) else [col])
                    if c is not None)
     for c in model.get("columns") or []:
         currency = tml.mapping(c, "properties").get("currency_type") if isinstance(c, dict) else None
         if isinstance(currency, dict) and currency.get("column") is not None:
-            out.add(str(currency["column"]))
+            out.add(str(currency["column"]).casefold())
     return out
 
 
@@ -165,9 +167,9 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
     columns = model["columns"].get(name, set()) | {node["label"], name}
     entry = {"label": node["label"], "hidden": node["hidden"], "user_count": len(users),
              "sole_user": nodes[sole]["label"] if sole else None,
-             "named": bool(columns & model["named"]),
+             "named": bool({c.casefold() for c in columns} & model["named"]),
              "cyclic": False, "user_refs": 0, "inlined_length": None,
-             "blocked": bool(model["shared"] or model["second_column_refs"])}
+             "blocked": bool(model["shared"] or model["ambiguous"])}
     if sole is None:
         return entry
     user = nodes[sole]
@@ -195,8 +197,8 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     Model has two formulas of one name (the tree keeps one of them, so its uses, and
     "used only by", may be wrong), no visible formula sits above its user (remove the
     chain instead), a column shows it with an aggregation other than SUM, it is a bare
-    window or group call (_bare_window), some formula in the Model reads a formula
-    through a second column's display name (_second_column_refs), or the paste is not
+    window or group call (_bare_window), the Model spells a formula ambiguously
+    (_ambiguous_spellings), or the paste is not
     one of the plain cases _paste_allowed suggests."""
     from ts_cli.audit.formula_tree import formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
@@ -225,21 +227,34 @@ def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
             "aggregating": cached("aggregate_formula_names", model,
                                   _aggregate_formula_names, model),
             "kept_aggregation": _kept_aggregation(model),
-            "second_column_refs": _second_column_refs(model, nodes),
+            "ambiguous": _ambiguous_spellings(model, nodes),
             "live": _reachable(visible, nodes)}
 
 
-def _second_column_refs(model: dict, nodes: Dict[str, dict]) -> bool:
-    """Some formula reference the tree read as a column names a column that surfaces
-    a formula. The shared reference index resolves only a formula's first surfacing
-    column (BL-578), and the tree may label it with a later, visible one, so such a
-    reference is a formula use read as a column: "used only by" and the aggregate
+def _ambiguous_spellings(model: dict, nodes: Dict[str, dict]) -> bool:
+    """The Model spells a formula in a way the shared reference index (exact match,
+    first surfacing column only, last formula of a spelling wins) may read differently
+    from ThoughtSpot (BL-578): one spelling, case aside, names two formulas (an id, a
+    name or any surfacing column's name); or a reference the tree read as a column
+    matches a formula's spelling, case aside. Then "used only by" and the aggregate
     reading H16 shares with P2 can be wrong anywhere in the Model. Fail safe: H16
     reports nothing there."""
-    refs = {str(seg["column"]) for node in nodes.values() for seg in node["expr"] or []
+    owner: Dict[str, str] = {}
+    surfacing = _surfacing_names(model)
+    for f in model.get("formulas") or []:
+        name = f.get("name") if isinstance(f, dict) else None
+        if not isinstance(name, str):
+            continue
+        spellings = {name, f.get("id")} | surfacing.get(name, set())
+        for spelling in spellings:
+            if not isinstance(spelling, str) or not spelling:
+                continue
+            key = spelling.casefold()
+            if owner.setdefault(key, name) != name:
+                return True
+    refs = {str(seg["column"]).casefold() for node in nodes.values() for seg in node["expr"] or []
             if isinstance(seg, dict) and "column" in seg}
-    surfacing = set().union(*_surfacing_names(model).values())
-    return bool(refs & surfacing)
+    return bool(refs & set(owner))
 
 
 def _kept_aggregation(model: dict) -> set:
@@ -407,8 +422,9 @@ def _formula_cycles_with_user(item: dict, ctx: Any) -> bool:
 def _paste_blocked(item: dict, ctx: Any) -> bool:
     """Formula: the Model has two formulas of one name; no visible formula sits above
     the one formula that uses it; a column shows it with an aggregation other than
-    SUM; it is a bare window or group call; some formula in the Model reads a formula
-    through a second column's display name; or pasting it there is not one of the plain cases
+    SUM; it is a bare window or group call; the Model spells a formula ambiguously
+    (two formulas share a spelling case aside, or a reference read as a column matches
+    one); or pasting it there is not one of the plain cases
     _paste_allowed suggests."""
     return bool(_single_use(item).get("blocked"))
 

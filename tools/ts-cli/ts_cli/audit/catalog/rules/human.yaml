@@ -402,8 +402,9 @@
     formula using it (remove the chain instead), when a column shows it with an
     aggregation other than SUM, or it is a bare window or group call (pasting drops
     that column and its aggregation), when
-    any formula in the Model reads a formula through a column's display name the
-    shared index does not resolve (BL-578: uses could be read wrong), when the paste
+    the Model spells a formula ambiguously (two formulas share an id, a name or a
+    column name, case aside, or a reference read as a column matches one; BL-578: uses
+    could be read wrong), when the paste
     is not one of the plain cases (an aggregating helper only where no aggregate,
     group, window or rank call encloses it; a row-level helper only where nothing but
     plain aggregates such as sum or average does, and inside one when the formula
