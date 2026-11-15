@@ -5,7 +5,7 @@
 # None of these is profile-aware: the catalog default holds under both profiles.
 # Titles are the legacy CHECK_META descriptions; H3, H4 and H8 carry the report's
 # existing remediation text, the others have never had one. H4, H5 and H10 feed the
-# report's cleanup view. The derived fields are in engine/fields_human.py, the code
+# report's cleanup view. The derived fields are in engine/fields_human.py (H16's in engine/fields_single_use.py), the code
 # rules (H2, H10) in engine/code_rules_human.py.
 #
 # Known legacy defects reproduced here, not fixed (the pinned legacy answers hold the
@@ -386,3 +386,62 @@
     fires: {fixture: human_technical_column_visible, severity: LOW}
     silent: {fixture: human_technical_column_hidden}
 
+
+- id: H16
+  title: Hidden formula used by only one formula
+  evidence: measure
+  description: >-
+    A hidden Model formula (no visible column shows it) that exactly
+    one other formula references, once, by id, name or display name, outside quoted
+    literals, read as the report's Formulas view reads it. Each one adds a level a
+    reader must open to follow the formula that uses it, and nothing else reuses it.
+    Not reported when a Model filter, a column's currency setting, a Model-level join
+    or a date-range constraint names its column,
+    when it and the formula using it form a cycle, when that formula references it
+    more than once (pasting it in would repeat it), when the Model has two formulas of
+    one name (uses could be read wrong), when no visible formula sits above the
+    formula using it (remove the chain instead), when a column shows it with an
+    aggregation other than SUM, or it is a bare window or group call (pasting drops
+    that column and its aggregation), when
+    the Model spells a formula ambiguously (a formula with no name; two formulas, or a
+    formula and a physical column or parameter, share an id, a name or a column name,
+    case and edge spaces aside; or a reference read as a column matches one; BL-578:
+    uses could be read wrong), when the paste
+    is not one of the plain cases (an aggregating helper only where no aggregate,
+    group, window or rank call encloses it; a row-level helper only where nothing but
+    plain aggregates such as sum or average does, and inside one when the formula
+    using it aggregates: anything else is left alone, since
+    which forms ThoughtSpot accepts there is more than the formula reference settles),
+    when
+    the formula it ends up in would make more than 3 if() calls (so following it does
+    not raise P16), or when that formula would be longer than 250 characters, where one
+    long formula is harder to read than two short ones. Length and if() calls are
+    measured with every such helper pasted in, all the way down, so following all of
+    a formula's findings keeps it within both; the formula it ends up in is its one
+    user, or the formula above when that user is pasted in too. When the result
+    passes either, none of its helpers is reported.
+  categories: [H]
+  requires: [model_tml]
+  scope: model.formula
+  aggregate:
+    mode: each
+    where:
+      all:
+        - {field: "@formula_hidden", truthy: true}
+        - {field: "@formula_user_count", eq: 1}
+        - {field: "@sole_user_reference_count", eq: 1}
+        - {field: "@formula_column_named", truthy: false}
+        - {field: "@formula_cycles_with_user", truthy: false}
+        - {field: "@paste_blocked", truthy: false}
+        - {field: "@inlined_if_count", lte: 3}
+        - {field: "@inlined_length", lte: 250}
+  severity: LOW
+  message: "Hidden formula '{@formula_label}' is used only by '{@sole_formula_user}'; pasting it in removes a level of nesting ('{@paste_target}' would be {@inlined_length} characters with every such helper pasted in)"
+  remediation: >-
+    Paste the formula's definition, in parentheses, into the one formula that uses it
+    and check that formula gives the same answers; then remove the helper. When a
+    column shows the helper, run /ts-dependency-manager on that column first: an
+    Answer saved before the column was hidden can still use it
+  examples:
+    fires: {fixture: human_single_use_hidden_helper, severity: LOW}
+    silent: {fixture: human_helper_visible_or_reused}

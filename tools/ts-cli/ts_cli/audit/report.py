@@ -204,9 +204,10 @@ def _compact_ai(ai: dict) -> dict:
     return out
 
 
-def _compact_model(m: dict, model_index: dict) -> dict:
+def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:
     """One corpus Model, compacted: its stats, tables, and — when present — its AI
-    analysis, Spotter readiness score (`rs`: score and level) and ERD."""
+    analysis, Spotter readiness score (`rs`: score and level), ERD and formula tree
+    (`pasteable`: the (Model guid, formula name) pairs H16 reported)."""
     key = (m.get("name", ""), m.get("guid", ""))
     cm = {
         "mi": model_index.get(key, -1),
@@ -226,7 +227,8 @@ def _compact_model(m: dict, model_index: dict) -> dict:
     if m.get("erd"):
         cm["ed"] = m["erd"]
     if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
-        cm["ft"] = _compact_tree(m["formula_tree"])
+        cm["ft"] = _compact_tree(m["formula_tree"],
+                                 {n for g, n in pasteable if g == m.get("guid")})
     return cm
 
 
@@ -239,14 +241,16 @@ def _written_use(use: list, ref: str) -> list:
     return use + [ref]
 
 
-def _compact_tree(tree: dict) -> dict:
+def _compact_tree(tree: dict, pasteable: Any = frozenset()) -> dict:
     """The formula tree (formula_tree.py), compacted for the Formulas view: `n` nodes as
     {n label, f formula name, k kind, h hidden, b used_by, u uses, x expression}, each
     use `[0, formula index]`, `[1, column ref]` or `[2, parameter name]`, and `x` the
     expression as written: text strings, and each reference in that same encoding plus
     the reference as written (`[0, 3, "[formula_GM]"]`), left out when it is only the
     value in brackets (`[1, "T::C"]` is written `[T::C]`, see `_written_use`); absent
-    from a tree written before expressions were kept. `r` root indices."""
+    from a tree written before expressions were kept. `s` (1, else absent) marks a
+    formula H16 reported, a hidden helper to paste into its one user: the view tags and
+    pastes only these, so it agrees with the audit. `r` root indices."""
     index = {node["name"]: i for i, node in enumerate(tree["nodes"])}
 
     def use(u):
@@ -258,11 +262,21 @@ def _compact_tree(tree: dict) -> dict:
         out = {"n": node.get("label") or node["name"], "f": node["name"],
                "k": node["kind"], "h": bool(node["hidden"]), "b": node["used_by"],
                "u": [use(u) for u in node["uses"]]}
+        if node["name"] in pasteable:
+            out["s"] = 1
         if isinstance(node.get("expr"), list):
             out["x"] = [s if isinstance(s, str) else _written_use(use(s), s.get("ref", ""))
                         for s in node["expr"]]
         nodes.append(out)
     return {"n": nodes, "r": [index[r] for r in tree["roots"]]}
+
+
+def _pasteable(findings: list) -> set:
+    """The (Model guid, formula name) pairs H16 reported: the helpers the Formulas view
+    tags and pastes in. A Model with no guid is left out: its marks could not be told
+    from another such Model's."""
+    return {(f.get("object_guid"), f.get("object_name")) for f in findings
+            if f.get("check_id") == "H16" and f.get("object_guid")}
 
 
 def compact_payload(data: dict) -> dict:
@@ -294,7 +308,9 @@ def compact_payload(data: dict) -> dict:
     }
 
     if corpus:
-        compact_models = [_compact_model(m, model_index) for m in corpus.get("models", [])]
+        pasteable = _pasteable(findings)
+        compact_models = [_compact_model(m, model_index, pasteable)
+                          for m in corpus.get("models", [])]
 
         compact_reuse = [
             {

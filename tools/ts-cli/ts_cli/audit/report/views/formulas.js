@@ -53,16 +53,31 @@ function buildFormulasPicker(c){
   c.innerHTML = html + '</ul>';
 }
 
+/* A hidden formula the audit's H16 reported (report.py marks it `s`): one formula
+   uses it, once, and pasting it in keeps that formula short. Only these are tagged and
+   pasted, so the view says what the audit says; a report built without H16 marks none. */
+function singleUse(node){ return node.s === 1; }
+
+var FORMULA_HIDDEN_TAGS = {
+  single: ["ftree-single", "used once, hidden", "Hidden, and used once by only one formula: the audit's H16 "+
+    "suggests pasting it into that formula"],
+  helper: ["ftree-hidden", "hidden helper", "Hidden from search, or surfaced by no column: it feeds the formulas that use it"],
+  unused: ["ftree-unused", "hidden, unused", "Hidden from search, or surfaced by no column, and used by no formula: "+
+    "a cleanup candidate"]};
+
+function hiddenTag(node){
+  if(!node.h) return "";
+  var t = FORMULA_HIDDEN_TAGS[singleUse(node) ? "single" : node.b > 0 ? "helper" : "unused"];
+  return '<span class="ftree-tag '+t[0]+'" title="'+esc(t[2])+'">'+t[1]+'</span>';
+}
+
 function formulaRow(node){
   var row = el("div","ftree-row");
   var renamed = node.f && node.f !== node.n;
   var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+
     '<span class="ftree-name"'+(renamed ? ' title="Formula: '+esc(node.f)+'"' : '')+'>'+esc(node.n)+'</span>';
   if(FORMULA_KINDS[node.k]) html += '<span class="ftree-tag ftree-kind" data-kind="'+node.k+'">'+node.k+'</span>';
-  if(node.h && node.b > 0) html += '<span class="ftree-tag ftree-hidden" title="Hidden from search, or surfaced '+
-    'by no column: it feeds the formulas that use it">hidden helper</span>';
-  else if(node.h) html += '<span class="ftree-tag ftree-unused" title="Hidden from search, or surfaced by no '+
-    'column, and used by no formula: a cleanup candidate">hidden, unused</span>';
+  html += hiddenTag(node);
   html += '<span class="ftree-used">used by '+node.b+' formula'+(node.b === 1 ? '' : 's')+'</span>';
   row.innerHTML = html;
   return row;
@@ -240,6 +255,28 @@ function allDependents(tree, target){
   return order;
 }
 
+function usesSingleUse(tree, node){
+  return node.u.some(function(u){ return u[0] === 0 && singleUse(tree.n[u[1]]); });
+}
+
+function opened(i){ var o = {}; o[i] = true; return o; }
+
+/* An expression as written, with each helper H16 reported pasted in, in parentheses,
+   all the way down. H16 leaves out cycles and a helper referenced twice, so each helper
+   is pasted at most once; the guard keeps a hand-built tree from looping anyway. */
+function inlinedHtml(tree, x, open){
+  return x.map(function(s){
+    if(typeof s === "string") return esc(s);
+    var helper = s[0] === 0 && tree.n[s[1]];
+    if(!helper || !singleUse(helper) || !helper.x || !helper.x.length || open[s[1]])
+      return refLink(tree, s, written(s));
+    open[s[1]] = true;
+    var inner = inlinedHtml(tree, helper.x, open);
+    delete open[s[1]];
+    return '<span class="finl" title="'+esc("Pasted in: "+helper.n)+'">( '+inner+' )</span>';
+  }).join("");
+}
+
 function linkList(tree, cls, uses, none){
   if(!uses.length) return '<div class="'+cls+' fdetail-none">'+esc(none)+'</div>';
   return '<ul class="'+cls+'">'+uses.map(function(u){ return '<li>'+refLink(tree, u)+'</li>'; }).join("")+'</ul>';
@@ -251,12 +288,16 @@ function detailHtml(tree, target){
     var node = tree.n[target[1]];
     html += '<div class="fdetail-title" tabindex="-1">'+esc(node.n)+'</div><div class="fdetail-meta">';
     if(FORMULA_KINDS[node.k]) html += '<span class="ftree-tag ftree-kind" data-kind="'+node.k+'">'+node.k+'</span>';
-    if(node.h) html += '<span class="ftree-tag '+(node.b > 0 ? 'ftree-hidden">hidden helper' : 'ftree-unused">hidden, unused')+'</span>';
+    html += hiddenTag(node);
     if(node.f && node.f !== node.n) html += '<span class="fdetail-fname">Formula: '+esc(node.f)+'</span>';
     html += '</div><div class="fdetail-label">Definition</div>';
     html += !node.x ? '<div class="fdetail-note">'+esc(FORMULA_NO_DEFS)+'</div>'
       : !node.x.length ? '<div class="fdetail-note">The TML gives this formula no expression, or one that is not text.</div>'
       : '<pre class="fdetail-expr">'+exprHtml(tree, node.x, true)+'</pre>';
+    if(node.x && usesSingleUse(tree, node)){
+      html += '<div class="fdetail-label">Definition with single-use helpers pasted in</div>'+
+        '<pre class="fdetail-expr fdetail-inlined">'+inlinedHtml(tree, node.x, opened(target[1]))+'</pre>';
+    }
     html += '<div class="fdetail-label">Uses ('+node.u.length+')</div>'+
       linkList(tree, "fdetail-uses", node.u, "No columns, parameters or formulas.");
   } else {

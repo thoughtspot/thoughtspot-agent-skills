@@ -14,7 +14,7 @@ declarative form expresses are **code rules**, but even those keep a full catalo
 | Assessment profiles (`--assessment`) | `tools/ts-cli/ts_cli/audit/catalog/profiles.yaml` |
 | Rules, one file per primary category | `tools/ts-cli/ts_cli/audit/catalog/rules/{ai,data,human,perf,security}.yaml` |
 | Rule engine: scopes, modes, bands, messages | `tools/ts-cli/ts_cli/audit/engine/` |
-| Derived fields (`@name`) | `engine/fields.py`, `engine/fields_data.py`, `engine/fields_human.py` |
+| Derived fields (`@name`) | `engine/fields.py`, `engine/fields_data.py`, `engine/fields_human.py`, `engine/fields_single_use.py` |
 | Code rules (`code:<name>`) | `engine/code_rules.py`, `engine/code_rules_human.py` |
 | Example fixtures (synthetic) | `tools/ts-cli/tests/audit_rule_fixtures/<category>.py` |
 | The human catalog (generated) | [check-catalog.md](check-catalog.md) |

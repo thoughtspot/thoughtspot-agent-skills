@@ -16586,12 +16586,19 @@ Two questions are unverified: which aggregation ThoughtSpot applies to a bare wi
 column declares none (D13 does not read that case), and whether AgentQL needs `SUM(...)`
 around an `*_in_period` snapshot as it does around `last_value` (classified by the shared
 argument shape only). Separately, `spotql_ops.outermost_func` ignores quotes, so a bare
-window whose arguments hold a quoted `)` is not read as bare.
+window whose arguments hold a quoted `)` is not read as bare. Two more spellings are read
+the same way (H16 review, 2026-11-16): redundant enclosing brackets
+(`( group_average ( … ) )`) and a bracket inside a reference name
+(`group_average ( [T::PRICE (USD] , … )`). D13's `@surfaces_bare_window_formula` and
+`formula_aggregation` then give SUM and no finding; H16's `_bare_window`
+(`engine/fields_single_use.py`) already normalises all three.
 
 **Do.** Route the four builders through `declare_formula_aggregations` where the source
 names no aggregation, keeping a source-declared one; probe the two questions on the SE demo
 cluster (an Answer over a bare window with and without a declared aggregation; one AgentQL
-query over an `*_in_period` measure); make `outermost_func` skip quoted text.
+query over an `*_in_period` measure); make `outermost_func` skip quoted text, reference
+names and redundant enclosing brackets (move H16's normalisation into `spotql_ops` and have
+`_bare_window` call it), checking which converters emit a bracketed bare window.
 
 **Target:** 2027-01-31.
 
@@ -17462,5 +17469,55 @@ BL-505 covers the converters' side only.
 **Do.**
 1. Confirm on a live cluster that a bypassing Model does not apply the RLS joins (so the S11 loop cannot fail a query).
 2. If so, add the bypass guard to S11 and S12 (or word them for the bypass case), with tests.
+
+**Target:** 2027-01-31.
+
+## BL-575 — H3, H11 and the Formulas view call a column a filter or currency setting names "unused" `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
+
+**What.** H16 treats a column a Model filter (`filters[].column`) or another column's `properties.currency_type.column` names as doing a job (`_named_columns` in `ts_cli/audit/engine/fields_single_use.py`). H3 (MEDIUM, "Remove unnecessary hidden columns") and H11 do not, and the Formulas view tags such a formula "hidden, unused … a cleanup candidate". Removing a filtered column means dropping the Model filter too (import error 14518; ts-dependency-manager drops it, `ts_cli/dependency/mutate.py`), which widens every query on the Model.
+
+**Do.**
+1. One shared "named by the Model" field (filters, currency settings), read by H3, H11 and H16, and passed to the view so its "hidden, unused" tag agrees.
+2. Tests: a hidden column a filter names, and one a currency setting names, are silent under H3 and H11 and not tagged unused.
+3. Read the other places a Model names a column by display name too: `joins_with[].on` and `constraints[…].date_range_condition.column` (thoughtspot-model-tml.md). H16's `_named_columns` (`engine/fields_single_use.py`) reads all four; share it.
+
+**Target:** 2027-01-31.
+
+## BL-576 — `ts audit run` ends on a Model formula whose `expr` is not text `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** building and reviewing H16 (ts-audit 3.21.0).
+
+**What.** A formula whose `expr` is a list or a number (malformed or hand-edited TML) raises `TypeError` in the ERD parser (`agents/shared/erd/parser.py`, `_primary_table_of_formula` reading `_COLREF.findall(expr)`), which ends the whole run. The rule engine reads a list-valued expression as absent and the formula tree reads a number as its text (`5` gives `['5']`); the ERD parser does neither (BL-501's class).
+
+**Do.**
+1. Read a non-text `expr` as empty in the ERD parser, or add formula `expr` to `tml.SHAPES` so such a Model is listed under "Could not be read".
+2. A test running the audit over a Model with a list-valued and a number-valued `expr`.
+3. The same for a non-text formula `name` and a non-list `parameters`: `fields._reference_graph` (P2, and H16 through it) and `formula_tree._parameter_names` end the run on them too (H16 review, 2026-11-16).
+
+**Target:** 2027-01-31.
+
+## BL-577 — no rule reports a formula that no column shows and nothing uses `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** H16's run on the 20 most formula-heavy Models of the SE demo cluster.
+
+**What.** Of 71 hidden formulas in that sample, 53 were used by no formula. H3 reports a hidden column no formula references, but a formula with no `columns[]` entry at all is not a column, so nothing reports it; the Formulas view tags it "hidden, unused". How many of the 53 had no column was not counted.
+
+**Do.**
+1. Count, on the same snapshot, the formulas no column shows and no formula uses.
+2. If they are common, a Human Readiness rule (scope `model.formula`) for them, or widen H3 to cover them, with the product owner's severity.
+
+**Target:** 2027-01-31.
+
+## BL-578 — a formula referenced through a second column's display name reads as unused `Tier 3`
+
+**Filed:** 2026-11-16. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
+
+**What.** `tml.formula_reference_index` resolves a formula's display name through the first column that surfaces it only. When two columns show one formula ("H one", "H two") and another formula writes `[H two]`, the formula tree reads that as a column reference: the formula's `used_by` is 0, and the Formulas view tags it "hidden, unused … a cleanup candidate" though removing it breaks the formula that uses it. P17 and P2 read the same index, and so does the aggregate reading H16 shares with P2 (`_aggregate_formula_names`). H16 does not try to tell the cases apart: it reports nothing on a Model where any reference the tree reads as a column names a column that surfaces a formula. The formula tree also labels a formula with its visible column, which can be that second column, so the label is one the index does not resolve.
+
+**Do.**
+1. Resolve every surfacing column's display name in `formula_reference_index`, and decide the other spellings it reads by exact match and list order: a formula named like another's id (`formula_X`; the later one wins today), a case variant (`[formula_h]`, `[h shown]`), a name with edge spaces, a column named like another formula, and a formula named like a physical column or parameter (the index tries formulas first). H16 reports nothing on a Model with any of these (`_ambiguous_spellings`).
+2. A test: a formula shown by two columns, used through the second's name, has `used_by` 1 in the tree and is not tagged unused; P17 counts the edge.
 
 **Target:** 2027-01-31.

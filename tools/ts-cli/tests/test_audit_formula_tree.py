@@ -228,6 +228,25 @@ def test_the_report_compacts_each_expression_with_the_use_encoding():
     assert _written_use([1, "T::y"], "[ T::y ]") == [1, "T::y", "[ T::y ]"]
 
 
+def test_the_report_marks_exactly_the_helpers_h16_reported():
+    data = run_audit(None, ["m-1"], ctx=make_context(
+        models=[{"guid": "m-1", "model": MODEL}], model_guids=["m-1"]))
+    from ts_cli.audit.report import compact_payload
+    ft = compact_payload(data)["C"]["m"][0]["ft"]
+    reported = sorted(f["object_name"] for f in data["findings"] if f["check_id"] == "H16")
+    assert reported == ["Cost", "Gross Margin"]
+    # Loop B is hidden and used once, but in a cycle: H16 is silent, so it is not marked
+    assert sorted(n["f"] for n in ft["n"] if n.get("s") == 1) == reported
+
+
+def test_a_model_without_a_guid_marks_nothing():
+    from ts_cli.audit.report import _pasteable
+    findings = [{"check_id": "H16", "object_guid": "", "object_name": "D"},
+                {"check_id": "H16", "object_guid": "m-1", "object_name": "E"},
+                {"check_id": "H3", "object_guid": "m-1", "object_name": "F"}]
+    assert _pasteable(findings) == {("m-1", "E")}
+
+
 def test_a_tree_written_before_expressions_compacts_without_them():
     from ts_cli.audit.report import _compact_tree
     old = {"nodes": [{"name": "A", "label": "A", "kind": None, "hidden": True,
@@ -260,7 +279,8 @@ def test_the_tree_opens_roots_one_level_and_expands_on_demand(tmp_path):
     # roots, and the formulas each root directly uses
     for name in ("Gross Margin %", "Order Count", "Gross Margin", "Revenue"):
         assert name in seen
-    assert "hidden helper" in seen and "used by 2 formulas" in seen
+    # Gross Margin is hidden and only Gross Margin % uses it
+    assert "used once, hidden" in seen and "used by 2 formulas" in seen
     assert re.search(r"used by 1 formula(?!s)", seen)
     # Gross Margin is built but collapsed: Cost, beneath it, is not shown
     assert "Cost" not in seen
@@ -787,3 +807,60 @@ def test_a_revealed_row_is_not_left_under_the_top_bar(tmp_path):
         'window.__extra = {below: top.top >= bar.bottom - 1, y: window.scrollY};'))
     assert shown["errors"] == []
     assert shown["extra"]["below"]
+
+
+@needs_chrome
+def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path):
+    page = _report(tmp_path)
+    # Gross Margin is hidden and only Gross Margin % uses it; Cost (no column) is used
+    # only by Gross Margin; Revenue is used twice and stays a reference
+    shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
+        'var tags = function(name){ return Array.prototype.map.call('
+        '  row(name).querySelectorAll(".ftree-tag"), function(t){ return t.textContent; }); };'
+        'row("Gross Margin %").click();'
+        'var inl = panel().querySelector(".fdetail-inlined");'
+        'var gmTags = tags("Gross Margin"), gmpTags = tags("Gross Margin %");'
+        'row("Revenue").click();'
+        'var revInl = panel().querySelector(".fdetail-inlined");'
+        'window.__extra = {gm: gmTags, gmp: gmpTags, inl: inl && inl.textContent,'
+        ' links: inl ? Array.prototype.map.call(inl.querySelectorAll("a.fref"), function(a){ return a.textContent; }) : null,'
+        ' revInl: revInl === null};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
+    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
+    assert x["links"] == ["[formula_Rev]", "[ORDERS::COST]", "[formula_Rev]"]
+    assert x["revInl"]   # uses no single-use helper: no second definition
+
+
+@needs_chrome
+def test_only_what_h16_reports_is_tagged_and_pasted(tmp_path):
+    model = {"name": "Tags", "filters": [{"column": ["Filtered"], "oper": "in"}], "formulas": [
+        {"id": "formula_A", "name": "A", "expr": "[formula_B] + 1"},
+        {"id": "formula_B", "name": "B", "expr": "[formula_A] + 2"},
+        {"id": "formula_T", "name": "Top", "expr": "[formula_S] + [formula_S2] + [formula_F]"},
+        {"id": "formula_U", "name": "Top Two", "expr": "[formula_S2] * 2"},
+        {"id": "formula_S", "name": "S", "expr": "1"},
+        {"id": "formula_S2", "name": "Shared", "expr": "2"},
+        {"id": "formula_F", "name": "Filtered", "expr": "3"}],
+        "columns": [{"name": n, "formula_id": f, "properties": {"column_type": "MEASURE", **h}}
+                    for n, f, h in (("Top", "formula_T", {}), ("Top Two", "formula_U", {}),
+                                    ("Shared", "formula_S2", {"is_hidden": True}),
+                                    ("Filtered", "formula_F", {"is_hidden": True}))]}
+    page = _report(tmp_path, ("m-9", model))
+    shown = report_browser.render(page, tmp_path, "formulas/m-9", actions=_ROW + _EXPAND + (
+        'var tags = {}; ["A", "B", "S", "Shared", "Filtered"].forEach(function(n){'
+        '  tags[n] = Array.prototype.map.call(row(n).querySelectorAll(".ftree-tag"),'
+        '    function(t){ return t.textContent; }).join(","); });'
+        'row("Top").click(); var top = panel().querySelector(".fdetail-inlined");'
+        'row("A").click(); var a = panel().querySelector(".fdetail-inlined");'
+        'window.__extra = {tags: tags, top: top && top.textContent, a: a === null};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    # S is reported; a cycle (A, B), a helper two formulas use and a filtered one are not
+    assert x["tags"]["S"] == "used once, hidden"
+    assert x["tags"]["B"] == "hidden helper" and x["tags"]["A"] == "hidden helper"
+    assert x["tags"]["Shared"] == "MEASURE,hidden helper"
+    assert x["tags"]["Filtered"] == "MEASURE,hidden helper"
+    assert x["top"] == "( 1 ) + [formula_S2] + [formula_F]"
+    assert x["a"]   # nothing in a cycle is pasted
