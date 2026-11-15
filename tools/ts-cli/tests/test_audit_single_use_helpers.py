@@ -307,3 +307,25 @@ def test_a_malformed_formula_id_is_skipped_not_fatal():
     found = _h16([_f("formula_Net", "Net Sales", "[formula_D] * 2"), _f("formula_D", "D", "1")],
                  [PARENT, _col("D", "formula_D", hidden=True), bad])
     assert len(found) == 1
+
+
+def test_a_model_where_a_formula_is_read_through_a_second_column_reports_nothing():
+    # the aggregate Agg is read through "Agg two", which the shared index does not
+    # resolve: Net Sales would look row-level and H's bare paste beside it would pass
+    cols = [PARENT, _col("H", "formula_H", hidden=True),
+            _col("Agg one", "formula_Agg"), _col("Agg two", "formula_Agg", hidden=True)]
+    formulas = [_f("formula_H", "H", "[T::A] * [T::B]"), _f("formula_Agg", "Agg", "sum ( [T::C] )")]
+    assert _h16(formulas + [_f("formula_Net", "Net Sales", "[formula_H] + [Agg two]")], cols) == []
+    # through the first column it resolves: Net Sales aggregates, so the bare paste is refused
+    assert _h16(formulas + [_f("formula_Net", "Net Sales", "[formula_H] + [Agg one]")], cols) == []
+    assert len(_h16(formulas + [_f("formula_Net", "Net Sales", "sum ( [formula_H] ) + [Agg one]")],
+                    cols)) == 1
+
+
+def test_the_if_count_reads_reference_names_as_p16_does():
+    # P16 counts `if (` in the raw text, a reference's name included: 3 here + 1 = 4
+    found = _h16([_f("formula_Net", "Net Sales",
+                     "if ( [T::B] = 1 ) then [formula_H] else if ( [T::B] = 2 ) then [T::Margin if (net)] else 0"),
+                  _f("formula_H", "H", "if ( [T::A] = 1 ) then 1 else 0")],
+                 [PARENT, _col("H", "formula_H", hidden=True)])
+    assert found == []

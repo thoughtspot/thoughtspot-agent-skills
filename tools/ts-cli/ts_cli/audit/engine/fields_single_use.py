@@ -167,7 +167,7 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
              "sole_user": nodes[sole]["label"] if sole else None,
              "named": bool(columns & model["named"]),
              "cyclic": False, "user_refs": 0, "inlined_length": None,
-             "blocked": bool(model["shared"])}
+             "blocked": bool(model["shared"] or model["second_column_refs"])}
     if sole is None:
         return entry
     user = nodes[sole]
@@ -176,7 +176,6 @@ def _helper_entry(name: str, node: dict, users: List[str], nodes: Dict[str, dict
     entry["blocked"] = (entry["blocked"] or sole not in model["live"]
                         or name in model["kept_aggregation"]
                         or _bare_window(node["expr"])
-                        or bool((columns - {node["label"]}) & model["column_refs"])
                         or not isinstance(user["expr"], list)
                         or not _paste_allowed(user, name, name in model["aggregating"],
                                               sole in model["aggregating"]))
@@ -195,10 +194,10 @@ def _build_single_use(model: dict) -> Dict[str, dict]:
     it, that user's length with it pasted in, and whether pasting is blocked: the
     Model has two formulas of one name (the tree keeps one of them, so its uses, and
     "used only by", may be wrong), no visible formula sits above its user (remove the
-    chain instead), a column shows it with an aggregation other than SUM, another
-    formula reads it through a second column's display name (the tree reads that as a
-    column, so "used only by" would be false), or the paste is not one of the plain
-    cases _paste_allowed suggests."""
+    chain instead), a column shows it with an aggregation other than SUM, it is a bare
+    window or group call (_bare_window), some formula in the Model reads a formula
+    through a second column's display name (_second_column_refs), or the paste is not
+    one of the plain cases _paste_allowed suggests."""
     from ts_cli.audit.formula_tree import formula_tree
     nodes = {n["name"]: n for n in formula_tree(model)["nodes"]}
     users: Dict[str, List[str]] = {n: [] for n in nodes}
@@ -226,14 +225,23 @@ def _model_facts(model: dict, nodes: Dict[str, dict]) -> dict:
             "aggregating": cached("aggregate_formula_names", model,
                                   _aggregate_formula_names, model),
             "kept_aggregation": _kept_aggregation(model),
-            "column_refs": _column_refs(nodes),
+            "second_column_refs": _second_column_refs(model, nodes),
             "live": _reachable(visible, nodes)}
 
 
-def _column_refs(nodes: Dict[str, dict]) -> set:
-    """Every column reference any formula makes, as the tree resolved it."""
-    return {seg["column"] for node in nodes.values() for seg in node["expr"] or []
+def _second_column_refs(model: dict, nodes: Dict[str, dict]) -> bool:
+    """Some formula names a formula through a column other than the first that
+    surfaces it. The shared reference index resolves only the first (BL-578), so the
+    tree reads that reference as a column, and both "used only by" and the aggregate
+    reading H16 shares with P2 can be wrong anywhere in the Model: fail safe, H16
+    reports nothing there."""
+    refs = {seg["column"] for node in nodes.values() for seg in node["expr"] or []
             if isinstance(seg, dict) and "column" in seg}
+    seconds = set()
+    for name, columns in _surfacing_names(model).items():
+        label = nodes[name]["label"] if name in nodes else None
+        seconds |= columns - {label, name}
+    return bool(refs & seconds)
 
 
 def _kept_aggregation(model: dict) -> set:
@@ -315,7 +323,9 @@ def _expanded(name: str, nodes: Dict[str, dict], paste: set, open_: set) -> Tupl
             length += inner[0] + _INLINE_WRAP
             ifs += inner[1]
         else:
-            length += len(str(seg.get("ref") or ""))
+            written = str(seg.get("ref") or "")
+            length += len(written)
+            ifs += len(_IF_CALL.findall(written))  # P16 counts the raw text, names included
     return length, ifs
 
 
@@ -399,8 +409,8 @@ def _formula_cycles_with_user(item: dict, ctx: Any) -> bool:
 def _paste_blocked(item: dict, ctx: Any) -> bool:
     """Formula: the Model has two formulas of one name; no visible formula sits above
     the one formula that uses it; a column shows it with an aggregation other than
-    SUM; it is a bare window or group call; another formula reads it through a second
-    column's display name; or pasting it there is not one of the plain cases
+    SUM; it is a bare window or group call; some formula in the Model reads a formula
+    through a second column's display name; or pasting it there is not one of the plain cases
     _paste_allowed suggests."""
     return bool(_single_use(item).get("blocked"))
 

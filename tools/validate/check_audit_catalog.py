@@ -24,8 +24,7 @@ skill directory, so a missing doc fails too.
 The checks themselves live in `ts_cli/audit/catalog_validate.py` (one implementation,
 shared with the ts-cli tests). This script only loads it from `--root` and reports.
 
-It imports the catalog modules (catalog_model, catalog_validate, catalog_expr,
-catalog_code, catalog_forms, catalog_uses, catalog_reads, catalog_consistency) and, to learn the names rules may use, two engine registries:
+It imports the catalog modules and, to learn the names rules may use, two engine registries:
 derived fields (engine/fields.py and the engine/fields_data.py,
 engine/fields_human.py and engine/fields_single_use.py it imports, which need only the
 modules tools/validate/tests/test_check_audit_catalog.py lists in GATE_MODULES and

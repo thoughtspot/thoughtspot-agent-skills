@@ -16586,12 +16586,19 @@ Two questions are unverified: which aggregation ThoughtSpot applies to a bare wi
 column declares none (D13 does not read that case), and whether AgentQL needs `SUM(...)`
 around an `*_in_period` snapshot as it does around `last_value` (classified by the shared
 argument shape only). Separately, `spotql_ops.outermost_func` ignores quotes, so a bare
-window whose arguments hold a quoted `)` is not read as bare.
+window whose arguments hold a quoted `)` is not read as bare. Two more spellings are read
+the same way (H16 review, 2026-11-16): redundant enclosing brackets
+(`( group_average ( … ) )`) and a bracket inside a reference name
+(`group_average ( [T::PRICE (USD] , … )`). D13's `@surfaces_bare_window_formula` and
+`formula_aggregation` then give SUM and no finding; H16's `_bare_window`
+(`engine/fields_single_use.py`) already normalises all three.
 
 **Do.** Route the four builders through `declare_formula_aggregations` where the source
 names no aggregation, keeping a source-declared one; probe the two questions on the SE demo
 cluster (an Answer over a bare window with and without a declared aggregation; one AgentQL
-query over an `*_in_period` measure); make `outermost_func` skip quoted text.
+query over an `*_in_period` measure); make `outermost_func` skip quoted text, reference
+names and redundant enclosing brackets (move H16's normalisation into `spotql_ops` and have
+`_bare_window` call it), checking which converters emit a bracketed bare window.
 
 **Target:** 2027-01-31.
 
@@ -17506,7 +17513,7 @@ BL-505 covers the converters' side only.
 
 **Filed:** 2026-11-16. **Source:** pr-ready review of the H16 audit rule (ts-audit 3.21.0).
 
-**What.** `tml.formula_reference_index` resolves a formula's display name through the first column that surfaces it only. When two columns show one formula ("H one", "H two") and another formula writes `[H two]`, the formula tree reads that as a column reference: the formula's `used_by` is 0, and the Formulas view tags it "hidden, unused … a cleanup candidate" though removing it breaks the formula that uses it. P17 and P2 read the same index. H16 guards its own case (it skips a helper read through a second column's name); nothing else does.
+**What.** `tml.formula_reference_index` resolves a formula's display name through the first column that surfaces it only. When two columns show one formula ("H one", "H two") and another formula writes `[H two]`, the formula tree reads that as a column reference: the formula's `used_by` is 0, and the Formulas view tags it "hidden, unused … a cleanup candidate" though removing it breaks the formula that uses it. P17 and P2 read the same index, and so does the aggregate reading H16 shares with P2 (`_aggregate_formula_names`). H16 does not try to tell the cases apart: it reports nothing on a Model where any formula names a second surfacing column. The formula tree also labels a formula with its visible column, which can be that second column, so the label is one the index does not resolve.
 
 **Do.**
 1. Resolve every surfacing column's display name in `formula_reference_index`.
