@@ -314,6 +314,25 @@ def test_an_acl_reached_by_another_tables_rule_with_no_model_columns():
             RLS_ROOT_FIXES[2], expr
 
 
+def test_a_rule_path_reaches_every_table_it_passes_through():
+    """Product owner, 2026-11-15: a rule path reaches every table on it, not only its
+    end. F_ORDER's rule filters on D_SITE through F_ORDER -> ACL_USER_SITE -> D_SITE;
+    ACL_USER_SITE, which the path only passes through, still fires (no ACL column in
+    the Model, signal 2)."""
+    ctx = fx.build_acl_ctx("acl_to_dim", rule_expr="ts_username = [D_SITE_1::SITE_ID]",
+                           rls_on="F_ORDER")
+    rls = ctx.tables["t-f_order"]["table"]["rls_rules"]
+    rls["joins"] = [{"name": "order_acl", "source": "F_ORDER",
+                     "destination": "ACL_USER_SITE", "type": "INNER"},
+                    {"name": "acl_site", "source": "ACL_USER_SITE",
+                     "destination": "D_SITE", "type": "INNER"}]
+    rls["table_paths"] = [{"id": "D_SITE_1", "table": "D_SITE", "column": ["SITE_ID"],
+                           "join_path": [{"join": ["order_acl", "acl_site"]}]}]
+    m = ctx.models[0]["model"]
+    m["columns"] = [c for c in m["columns"] if not c["column_id"].startswith("ACL_USER_SITE")]
+    assert _s17(ctx) == [("ACL_USER_SITE", "HIGH")]
+
+
 def test_an_rls_path_entering_from_the_joined_dimension_is_s11s():
     """The rule on D_SITE walks D_SITE -> ACL_USER_SITE while the Model joins
     ACL_USER_SITE -> D_SITE: a directed loop, S11 CRITICAL (every query under the rule

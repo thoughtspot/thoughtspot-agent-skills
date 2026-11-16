@@ -135,7 +135,7 @@ def _audit():
 
 
 @needs_chrome
-def test_heuristic_findings_show_name_match(tmp_path):
+def test_heuristic_findings_show_inferred(tmp_path):
     from ts_cli.audit.report import render_report
     data = _audit()
     heuristic = sum(1 for f in data["findings"] if f["evidence"] == "heuristic")
@@ -149,7 +149,7 @@ def test_heuristic_findings_show_name_match(tmp_path):
         # the scorecard opens with its angle sections collapsed, so its text, not its
         # visible text; the cross-model table shows every finding
         text = shown["visible"] if route == "crossmodel" else shown["active_text"]
-        assert "name match" in text
+        assert "inferred" in text
 
 
 @needs_chrome
@@ -159,7 +159,7 @@ def test_old_json_without_evidence_renders(tmp_path):
     for f in data["findings"]:
         f.pop("evidence")
     shown = report_browser.render(render_report(data), tmp_path, "crossmodel")
-    assert shown["errors"] == [] and "name match" not in shown["visible"]
+    assert shown["errors"] == [] and "inferred" not in shown["visible"]
 
 
 @needs_chrome

@@ -17534,11 +17534,11 @@ BL-505 covers the converters' side only.
    - `_formula_tables` walks formula-to-formula references itself. `fields._reference_graph` already builds that graph from the same `tml.formula_reference_index` and `tml.expr_refs`.
 
    Each copy can drift from the original. If the reference rules change (BL-504 was one such change), S17 could read formulas differently from P17, P2 and H3.
-2. **File size.** `audit/engine/fields_data.py` is 735 lines. `check_file_size` warns above 500 and fails at 1,000.
+2. **File size.** `audit/engine/fields_data.py` is about 745 lines. `check_file_size` warns above 500 and fails at 1,000.
 
 **Do.**
 1. Move the Table TML resolver into one shared place, and have `_rls_reach` and `code_rules_security` both call it.
 2. Rebuild `_formula_tables` on `_reference_graph`, or factor out a shared transitive walk. Keep S17's formula-chain tests passing.
-3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Keep the imports at module level, because `check_audit_catalog.py` cannot follow an import made inside a function.
+3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Import the new module where `fields.py` imports `fields_data`, so its `@register` fields are registered.
 
 **Target:** 2027-02-28.

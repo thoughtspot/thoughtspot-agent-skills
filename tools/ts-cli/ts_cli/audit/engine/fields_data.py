@@ -581,7 +581,7 @@ def _rls_root_beside(item: dict, ctx: Any) -> list:
     return NameList(sorted(roots - {me}))
 
 
-#: @rls_root_fix's values: which fix fits the table's RLS rules.
+#: @rls_root_fix's values: which fix fits the table's RLS rules and Model columns.
 RLS_ROOT_FIXES = (
     "review the RLS rules that reach it: they are not recognised as one "
     "`ts_username = [column]` rule on this table, so check that "
@@ -591,7 +591,7 @@ RLS_ROOT_FIXES = (
     "reverse the join so the dimension joins to it many-to-one, once the conditions in "
     "the remediation hold",
     "this shape is not live-measured (it has no column in the Model, so only another "
-    "table's RLS rule filters it, and a rule of its own cannot be enforced): first check "
+    "table's RLS rule filters it, and a rule of its own may not apply): first check "
     "the query plan as a user under the rule; if it does stitch, check that the rule "
     "filtering it applies on the Model's join to the dimension and leaves each user at "
     "most one row per key, then reverse the join so the dimension joins to it "
@@ -628,7 +628,7 @@ def _keyed_on_user_alone(expr: Any, doc: Any) -> bool:
 
 
 @register("rls_root_fix", uses=(), values=RLS_ROOT_FIXES,
-          label="the fix that fits the table's RLS rules")
+          label="the fix that fits the table's RLS rules and Model columns")
 def _rls_root_fix(item: dict, ctx: Any) -> str:
     """Model table: the second of RLS_ROOT_FIXES (reverse) only when its Table TML (by
     `fqn`) has exactly one RLS rule and it is keyed on the user alone
@@ -639,8 +639,8 @@ def _rls_root_fix(item: dict, ctx: Any) -> str:
     a multi-value ts_var or an `or`: the reversed many-to-one join would double-count
     measures, which the stitched plan's grouping does not. The third (check the plan
     first) when the table has no Model column, whatever its own rules: only another
-    table's rule filters it (a rule of its own has no Model column to be enforced
-    through), a shape not live-measured."""
+    table's rule filters it (a rule of its own may not apply without a Model column;
+    not measured), a shape not live-measured."""
     if not _surfacing_columns(_model_of(item), item.get("name")):
         return RLS_ROOT_FIXES[2]
     obj = item.get("obj")

@@ -345,9 +345,11 @@
     every column it surfaces in the Model hidden (one is needed to enforce the rule,
     none is for analysis), or is reached by another table's RLS rule path with none of
     its columns in the Model (product owner, 2026-11-14). Either signal is enough. A
-    table with no column in the Model is not live-measured, whether or not it carries a
-    rule of its own (which then cannot be enforced, as the Model has no column for it),
-    and its finding says to check the query plan first. A Model column counts whether it is the table's own or a formula over it
+    rule path reaches every table it passes through, not only the one at its end
+    (product owner, 2026-11-15). A table with no column in the Model is not
+    live-measured, whether or not it carries a rule of its own (which may not apply
+    without a Model column; not measured), and its finding says to check the query plan
+    first. A Model column counts whether it is the table's own or a formula over it
     (directly or through other formulas), and only a rule path that a rule references and that can be walked reaches
     a table. An event table that exposes its columns is a fact and never fires. A rule
     path entering the table from the dimension the Model joins it to closes a loop:
@@ -376,7 +378,10 @@
     them: an access-control list should leave each user at most one row per key after
     the RLS filter, and if it does, reverse the join the same way; if it can leave two
     (a user in two groups mapped to one key), keep the current join, as the reversed
-    join double-counts measures while the stitched plan's grouping does not.
+    join double-counts measures while the stitched plan's grouping does not. If the
+    table has no column in the Model, first check the query plan as a user under the
+    rule, as the finding says: that shape is not measured, and a rule of its own may not
+    apply.
   examples:
     fires: {fixture: sec_rls_acl_table_as_root, severity: HIGH}
     silent: {fixture: sec_rls_acl_table_as_leaf}
