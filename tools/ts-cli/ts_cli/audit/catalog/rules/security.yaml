@@ -325,7 +325,10 @@
 
 - id: S17
   title: RLS table planned as a second fact table
-  evidence: fact
+  evidence: heuristic
+  severity_exception:
+    reason: An access-control table at the root of the joins is an anti-pattern whatever its rule (product owner, 2026-11-12), and the access-control reading rests on the product owner's two signals rather than on the TML alone.
+    approved: 2026-11-15
   description: >-
     An access-control table at the root of the Model's joins — no table joins to it,
     reading each join many-side to one-side by its cardinality (a ONE_TO_MANY join
@@ -341,9 +344,12 @@
     of its own, and no formula measure reads it) and either carries RLS rules with
     every column it surfaces in the Model hidden (one is needed to enforce the rule,
     none is for analysis), or is reached by another table's RLS rule path with none of
-    its columns in the Model (product owner, 2026-11-14; the second shape is not
-    live-measured, and its finding says to check the query plan first). Either signal
-    is enough. A Model column counts whether it is the table's own or a formula over it
+    its columns in the Model (product owner, 2026-11-14). Either signal is enough. A
+    rule path reaches every table it passes through, not only the one at its end
+    (product owner, 2026-11-15). A table with no column in the Model is not
+    live-measured, whether or not it carries a rule of its own (which may not apply
+    without a Model column; not measured), and its finding says to check the query plan
+    first. A Model column counts whether it is the table's own or a formula over it
     (directly or through other formulas), and only a rule path that a rule references and that can be walked reaches
     a table. An event table that exposes its columns is a fact and never fires. A rule
     path entering the table from the dimension the Model joins it to closes a loop:
@@ -360,7 +366,7 @@
     mode: each
     where: {field: "@rls_root_beside", len_gt: 0}
   severity: HIGH
-  message: "Access-control table '{name}' has no table joining to it many-to-one, so query generation plans it as a second fact beside {@rls_root_beside} and stitches every query from separate subqueries — {@rls_root_fix}"
+  message: "Access-control table '{name}' has no table joining to it many-to-one, so query generation can plan it as a second fact beside {@rls_root_beside} and stitch every query from separate subqueries — {@rls_root_fix}"
   remediation: >-
     If it is an access-control table with one rule on this table, `ts_username = [column]`,
     reverse the join so the dimension joins to it many-to-one, which makes it a leaf and
@@ -372,7 +378,10 @@
     them: an access-control list should leave each user at most one row per key after
     the RLS filter, and if it does, reverse the join the same way; if it can leave two
     (a user in two groups mapped to one key), keep the current join, as the reversed
-    join double-counts measures while the stitched plan's grouping does not.
+    join double-counts measures while the stitched plan's grouping does not. If the
+    table has no column in the Model, first check the query plan as a user under the
+    rule, as the finding says: that shape is not measured, and a rule of its own may not
+    apply.
   examples:
     fires: {fixture: sec_rls_acl_table_as_root, severity: HIGH}
     silent: {fixture: sec_rls_acl_table_as_leaf}

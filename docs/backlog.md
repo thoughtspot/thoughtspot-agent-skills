@@ -17451,6 +17451,7 @@ Written by hand as `( if ( isnull ( sum ( [Q] ) ) ) then null else safe_divide (
 - D11 (`@is_fact_to_fact_join`): F_LINE → D_HDR with D_HDR holding a measure gives MEDIUM with F_LINE's measure as a column, INFO with the same measure as a formula.
 - D7 (`model_overlap`, `code_rules.py`): treats a shared table as a fact only when its role is `fact`; two overlapping Models give MEDIUM with the column, no finding with the formula.
 - The ERD labels such a table "Factless / bridge".
+- The audit JSON's `corpus.models[].model_tables[].role` reads `factless` for it too.
 
 BL-505 covers the converters' side only.
 
@@ -17460,15 +17461,15 @@ BL-505 covers the converters' side only.
 
 **Target:** 2027-01-31.
 
-## BL-574 — S11 and S12 still fire on a Model that bypasses RLS `Tier 3`
+## BL-574 — S11, S12, S14 and S16 still fire on a Model that bypasses RLS `Tier 3`
 
 **Filed:** 2026-11-14. **Source:** pr-ready review of the S17 audit rule (ts-audit 3.20.0).
 
-**What.** With `properties.is_bypass_rls` set no rule applies (S10's own message), and S17 stays silent there. S11 (CRITICAL, "queries fail") and S12 (MEDIUM, "for users under the rule") still fire. I.e. `sec_rls_join_cycle` with bypass gives S10, S11, S12 and S13.
+**What.** With `properties.is_bypass_rls` set no rule applies (S10's own message), and S17 stays silent there. S11 (CRITICAL, "queries fail") and S12 (MEDIUM, "for users under the rule") still fire. I.e. `sec_rls_join_cycle` with bypass gives S10, S11, S12 and S13. S14 and S16, which describe how one search on the Model scopes users, fire there too: `sec_rls_two_tenant_variables` with bypass gives S10, S14 and S16, and `sec_rls_two_key_columns` gives S10 and S16 (added 2026-11-15, from the review of #734's last commit). S13 and S15 check each rule rather than the Model, so they rightly still fire.
 
 **Do.**
 1. Confirm on a live cluster that a bypassing Model does not apply the RLS joins (so the S11 loop cannot fail a query).
-2. If so, add the bypass guard to S11 and S12 (or word them for the bypass case), with tests.
+2. If so, add the bypass guard to S11, S12, S14 and S16 (or word them for the bypass case), with tests.
 
 **Target:** 2027-01-31.
 
@@ -17521,3 +17522,23 @@ BL-505 covers the converters' side only.
 2. A test: a formula shown by two columns, used through the second's name, has `used_by` 1 in the tree and is not tagged unused; P17 counts the edge.
 
 **Target:** 2027-01-31.
+
+## BL-579 — Tidy the S17 helpers in `fields_data.py`: reuse instead of copies, and split the file `Tier 3`
+
+**Filed:** 2026-11-15. **Source:** pr-ready reviews of the S17 audit rule (#734, ts-audit 3.20.0), and the review of its last commit. Neither point changes what S17 reports. That review's speed finding (`_formula_tables` re-parsed each expression on every visit) is fixed in ts-cli 0.217.1.
+
+**What.**
+1. **Copies of existing helpers.** S17's derived field brought three helpers that repeat code already in the audit engine:
+   - `_rls_reach` defines its own `table_of`, the same function as `_table_of` in `audit/engine/code_rules_security.py`.
+   - `_dicts` in `fields_data.py` filters a list to its dicts. `tml_rls_graph._as_list` does nearly the same job.
+   - `_formula_tables` walks formula-to-formula references itself. `fields._reference_graph` already builds that graph from the same `tml.formula_reference_index` and `tml.expr_refs`.
+
+   Each copy can drift from the original. If the reference rules change (BL-504 was one such change), S17 could read formulas differently from P17, P2 and H3.
+2. **File size.** `audit/engine/fields_data.py` is about 745 lines. `check_file_size` warns above 500 and fails at 1,000.
+
+**Do.**
+1. Move the Table TML resolver into one shared place, and have `_rls_reach` and `code_rules_security` both call it.
+2. Rebuild `_formula_tables` on `_reference_graph`, or factor out a shared transitive walk. Keep S17's formula-chain tests passing.
+3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Import the new module where `fields.py` imports `fields_data`, so its `@register` fields are registered.
+
+**Target:** 2027-02-28.

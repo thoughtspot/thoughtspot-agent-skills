@@ -56,11 +56,12 @@ function el(tag,cls,html){
 }
 
 /* A finding whose rule rests on an inference (evidence: heuristic — a name or wording
-   pattern) carries `h`; the report says so, so a reader can tell a guess from a fact. */
-var NAME_MATCH_NOTE = "Graded on a name or wording pattern, not on something the TML states: "+
-  "check it before acting.";
+   pattern, or a role read from the Model's shape) carries `h`; the report says so, so a
+   reader can tell a guess from a fact. */
+var NAME_MATCH_NOTE = "Graded on an inference (a name or wording pattern, or a role read "+
+  "from the Model's shape), not on something the TML states: check it before acting.";
 function nameMatchTag(f){
-  return f && f.h ? '<span class="evidence-tag" title="'+esc(NAME_MATCH_NOTE)+'">name match</span>' : "";
+  return f && f.h ? '<span class="evidence-tag" title="'+esc(NAME_MATCH_NOTE)+'">inferred</span>' : "";
 }
 
 function esc(s){
