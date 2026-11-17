@@ -4,6 +4,8 @@ Pure functions, no live cluster (per .claude/rules/ts-cli.md). Covers the safe s
 plus the cluster-verified extensions (sum_if, group_aggregate, [formula_<name>] id-refs,
 ROUND-increment, 2-arg CEILING, diff_days) and the NEEDS-REVIEW gate.
 """
+import pytest
+
 from ts_cli.powerbi.functions import translate_dax
 
 
@@ -276,3 +278,141 @@ def test_distinctcount_inside_divide():
     expr, status, _ = translate_dax("DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))")
     assert status == "Approximated"
     assert "unique count([Sales::Customer])" in expr and "isnull([Sales::Customer])" in expr
+
+
+def test_split_args_tracks_braces():
+    """DAX writes a value set as `T[Status] IN {"a","b"}`. Without brace tracking the
+    commas inside the set split it into arguments that are not arguments, so every
+    CALCULATE carrying an IN-set was read wrongly."""
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('DISTINCTCOUNT(T[k]), T[Status] IN {"x","y"}') == [
+        "DISTINCTCOUNT(T[k])", 'T[Status] IN {"x","y"}']
+
+
+# --- Round-4 review of the gated-measures PR: _split_args reaches every DAX path -------
+
+@pytest.mark.parametrize("dax,expected", [
+    # main gave this; brace tracking without string skipping mis-split it into
+    # "then '{', 'b' else 0", labelled Migrated
+    ('IF(T[c] = 1, "{", "b")', "(if ([T::c] = 1) then '{' else 'b')"),
+    ('IF(T[c] = 1, "}", "b")', "(if ([T::c] = 1) then '}' else 'b')"),
+    ('IF(T[s] = "a,b", 1, 0)', "(if ([T::s] = 'a,b') then 1 else 0)"),
+    ('IF(T[s] = "a)b", 1, 0)', "(if ([T::s] = 'a)b') then 1 else 0)"),
+])
+def test_quoted_text_is_not_argument_structure(dax, expected):
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (expected, "Migrated")
+
+
+def test_split_args_skips_strings_quoted_names_and_brackets():
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('T[c] = 1, "{", "b"') == ["T[c] = 1", '"{"', '"b"']
+    assert _split_args('"a,b", \'Bob\'\'s, (x)\'[c], T[a,b]') == [
+        '"a,b"', "'Bob''s, (x)'[c]", "T[a,b]"]
+    assert _split_args('"say ""a,b"""') == ['"say ""a,b"""']
+
+
+def test_in_set_inside_if_translates():
+    """An IN-set inside a call was NEEDS REVIEW before _split_args tracked braces (its
+    commas split the call). It now translates; `in { }` is ThoughtSpot syntax."""
+    expr, status, _ = translate_dax('IF(T[s] IN {"a","b"}, 1, 0)')
+    assert (expr, status) == ("(if ([T::s] IN {'a','b'}) then 1 else 0)", "Migrated")
+
+
+# --- Round-5 review: the splitter must not open new inputs to _calc_approx ---------
+
+_CALC_SHAPES = {
+    "ratio": "CALCULATE(SUM(Sales[Profit]) / SUM(Sales[Revenue]), {f})",
+    "times 100": "CALCULATE(SUM(Sales[Profit]) * 100, {f})",
+    "countrows distinct": "CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), {f})",
+    "count": "CALCULATE(COUNT(Sales[Cust]), {f})",
+    "filter all": "CALCULATE(SUM(Sales[Profit]), FILTER(ALL(Sales), {f}))",
+}
+_NEW_FILTERS = {
+    "in set": 'Sales[Region] IN {"East","West"}',
+    "comma in string": 'Sales[Region] = "East,West"',
+    "paren in string": 'Sales[Region] = "East)"',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_CALC_SHAPES))
+@pytest.mark.parametrize("filt", sorted(_NEW_FILTERS))
+def test_calculate_the_quote_aware_split_newly_reads_stays_needs_review(shape, filt):
+    """_calc_approx keeps only the first aggregate's argument (a ratio became its
+    numerator, `* 100` vanished, ALL was dropped). Before the quote-aware splitter these
+    inputs failed to split and were NEEDS REVIEW; they still are (BL-590)."""
+    expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f=_NEW_FILTERS[filt]))
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.xfail(strict=True, reason="BL-590: _calc_approx drops parts of the expression "
+                   "on an `=` filter, as on main; flips to a pass when BL-590 lands")
+@pytest.mark.parametrize("shape", sorted(_CALC_SHAPES))
+def test_calculate_with_an_equals_filter_should_need_review(shape):
+    expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f='Sales[Region] = "East"'))
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+def test_in_set_inside_calculate_sum_needs_review():
+    expr, status, _ = translate_dax('CALCULATE(SUM(T[x]), T[s] IN {"a","b"})')
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+def test_plain_equals_calculate_still_approximates_as_on_main():
+    expr, status, _ = translate_dax('CALCULATE(SUM(T[x]), T[s] = "a")')
+    assert (expr, status) == ("sum_if([T::s] = 'a', [T::x])", "Approximated")
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(NOT Fact[s] IN {"a","b"}, 1, 0)',
+    'IF(NOT(Fact[s] IN {"a"}), 1, 0)',
+    'NOT(T[s] IN {"a"})',
+    'IF(NOT [s] IN {"a"}, 1, 0)',
+    "IF(NOT 'My T'[s] IN {\"a\"}, 1, 0)",
+    'IF(not Fact[s] in {"a"}, 1, 0)',
+])
+def test_not_before_an_in_set_needs_review(dax):
+    """A blank s is not in the set: TRUE in DAX, but ThoughtSpot's not ( NULL in {…} )
+    is NULL and falls to else. Inferred, not probed (BL-591). The gated parser refuses
+    the same shape."""
+    expr, status, note = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-591" in note
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(Fact[s] IN {"a", 1.50}, 1, 0)', 'IF(Fact[s] IN {"a", 1.0}, 1, 0)',
+    'IF(Fact[s] IN {"a", 01}, 1, 0)', 'IF(Fact[s] IN {"a", 1}, 1, 0)',
+    'T[s] IN {2.5, "a"}', 'IF(Fact[s] IN {"a", 99999999999999999999}, 1, 0)',
+    'IF(Fact[s] IN {"a", TRUE}, 1, 0)', 'IF(Fact[s] IN {"a", BLANK()}, 1, 0)',
+    'IF(Fact[s] IN {"a", Fact[t]}, 1, 0)',
+])
+def test_mixed_in_set_on_the_main_path_needs_review(dax):
+    """DAX compares a mixed set as text, each number in its own form (1.50 as "1.5").
+    This path rewrites no literal, so even a plain integer would be emitted bare against
+    a text column; every mixed set is refused (the gated parser writes plain ones as text)."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax,expected", [
+    ('IF(Fact[s] IN {1, 2.5}, 1, 0)', "(if ([Fact::s] IN {1, 2.5}) then 1 else 0)"),
+    ('IF(NOT ISBLANK(T[a]) && T[s] IN {"a"}, 1, 0)',
+     "(if (not isnull([T::a]) and [T::s] IN {'a'}) then 1 else 0)"),
+    ('IF(T[s] IN {"NOT x"}, 1, 0)', None),     # NOT inside a string is not a NOT
+    ('IF(NOTE[s] IN {"a"}, 1, 0)', "(if ([NOTE::s] IN {'a'}) then 1 else 0)"),
+    ('IF(T[s] IN {"1", "2"}, 1, 0)', "(if ([T::s] IN {'1', '2'}) then 1 else 0)"),
+])
+def test_in_sets_that_still_translate(dax, expected):
+    expr, status, _ = translate_dax(dax)
+    assert status == "Migrated"
+    if expected:
+        assert expr == expected
+
+
+def test_plain_int64():
+    from ts_cli.powerbi.functions import plain_int64
+    assert all(plain_int64(v) for v in ("0", "-1", "10", "9223372036854775807",
+                                        "-9223372036854775808"))
+    assert not any(plain_int64(v) for v in ("01", "-0", "1.0", "+1", "9223372036854775808",
+                                            "-9223372036854775809", "9" * 5000))

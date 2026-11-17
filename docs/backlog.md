@@ -17656,3 +17656,35 @@ disagree.
 2. Or a small validator that warns when a vendored version is older than a set age.
 
 **Target:** 2027-01-31.
+
+## BL-590 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** `ts_cli/powerbi/functions.py` `_calc_approx` rewrites a two-argument `CALCULATE(<agg>, <filter>)` to `sum_if(<cond>, <arg>)` when the first argument *starts* with `SUM(` or `COUNT`/`COUNTA`/`COUNTROWS(`, and keeps only that call's argument. Everything around it is dropped, and the result is labelled Approximated, so `build-model` writes it into the Model as a MEASURE:
+
+- `CALCULATE(SUM(Sales[Profit]) / SUM(Sales[Revenue]), Sales[Region] = "East")` becomes `sum_if(..., [Sales::Profit])`: total profit, not the ratio.
+- `CALCULATE(SUM(Fact[x]) * 100, Fact[s] = "a")` loses the `* 100`.
+- `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
+- `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
+
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set, or a `,` `(` `)` inside a string) away from this rewrite (`_split_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above already behave this way on main.
+
+**Do.**
+1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it.
+3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
+
+**Target:** 2027-01-31.
+
+## BL-591 — a DAX `<>` or `NOT ... IN {...}` comparison drops blank rows that DAX keeps `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related `NOT ... IN {...}` form on the main path (it is now NEEDS REVIEW); `<>` still translates as Migrated, as it has on main.
+
+**Do.**
+1. Probe one `!=` and one `not ( ... in { ... } )` formula over a column with NULLs on a live cluster, and record what ThoughtSpot compiles and returns.
+2. If NULL rows drop, emit `( [x] != 'a' or isnull ( [x] ) )` (and the same for `not in`), or flag the comparison Approximated with the reason. Either way, a test per form.
+
+**Target:** 2027-01-31.
