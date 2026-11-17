@@ -61,6 +61,14 @@ directory. Plain markdown — no external library needed.
 
 ### Classification rules
 
+**Dashboard-tile zones describe what's recognizable from the LookML alone, not a
+guarantee of the built result.** Audit mode never calls SpotterViz (no ThoughtSpot auth,
+no TMLs generated) — it classifies what the *source* construct is, so the migrate-mode
+report can set expectations before the build runs. A "CLEAN" dashboard tile means the
+construct has a clear SpotterViz instruction to compose from; it still goes through
+`ts tml verify-render` and a filter-scoping check in migrate mode (`spotterviz-liveboard-
+build.md`), same as any other tile — "CLEAN" here is not "self-verifying."
+
 Assign every field and every dashboard tile to exactly one zone:
 
 **CLEAN** — no post-import action needed:
@@ -94,7 +102,10 @@ Assign every field and every dashboard tile to exactly one zone:
 - `derived_table: { explore_source: }` (native derived table)
 - Liquid/Jinja templating (`{{ }}`) in SQL
 - `looker_map` / `looker_geo_choropleth` tile
-- `looker_funnel` tile
+- `looker_funnel` tile — no ThoughtSpot chart type has a direct equivalent; migrate mode
+  asks SpotterViz for the closest reasonable substitute (e.g. a table/bar ranked by stage)
+  rather than omitting the tile, and logs it as a gap in the Migration Summary — same
+  placeholder-tile treatment as any other unsupported chart shape, not a hard block
 - Dashboard `link:` (cross-dashboard navigation)
 - `sql_always_having:`
 

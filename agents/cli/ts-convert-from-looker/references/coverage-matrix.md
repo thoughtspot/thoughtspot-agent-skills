@@ -87,16 +87,16 @@ Use this as the canonical limitations reference for audit reports and migration 
 | 49 | `dashboard: name` | Liveboard `name:` | |
 | 50 | `tile: { type: single_value }` | `KPI` viz | |
 | 51 | `tile: { type: looker_column }` | `COLUMN` chart | |
-| 52 | `tile: { type: looker_bar }` | `BAR` chart | |
-| 53 | `tile: { type: looker_line }` | `LINE` chart | |
-| 54 | `tile: { type: looker_pie }` | `PIE` chart | |
-| 55 | `tile: { type: looker_scatter }` | `SCATTER` chart | |
-| 56 | `tile: { type: looker_grid \| table }` | `TABLE` chart | |
-| 57 | `tile: { type: looker_area }` | `AREA` chart | |
-| 58 | `listen:` dashboard filters | Liveboard `filters[]` | |
-| 59 | `measures:` + `dimensions:` on tile | `search_query` + `answer_columns` | |
-| 60 | `sorts:` on tile | `search_query` ORDER BY equivalent | |
-| 61 | `title:` on tile | `answer.name:` | |
+| 52 | `tile: { type: looker_bar }` | A bar-chart intent in the Step 10b build instructions | SpotterViz resolves the actual chart type/TML; this skill describes intent, not literal `chart.type` |
+| 53 | `tile: { type: looker_line }` | A line-chart intent in the Step 10b build instructions | |
+| 54 | `tile: { type: looker_pie }` | A pie-chart intent in the Step 10b build instructions | |
+| 55 | `tile: { type: looker_scatter }` | A scatter/bubble intent in the Step 10b build instructions | |
+| 56 | `tile: { type: looker_grid \| table }` | A table intent in the Step 10b build instructions | |
+| 57 | `tile: { type: looker_area }` | An area-chart intent in the Step 10b build instructions | |
+| 58 | `listen:` dashboard filters | A per-tile scoped-filter description in the Step 10b build instructions, naming which tiles the filter applies to and which it excludes | SpotterViz, not this skill, emits the actual `filters[]`/`excluded_visualizations` TML — verify the scoping took by exporting the built liveboard (see Step 10b point 6) |
+| 59 | `measures:` + `dimensions:` on tile | Named in the tile's own description in the Step 10b build instructions | SpotterViz resolves the actual `search_query`/`answer_columns` TML |
+| 60 | `sorts:` on tile | Named in the tile's description, if present | SpotterViz resolves sort; no equivalent for a manual/custom sort — log as a gap |
+| 61 | `title:` on tile | Used as the tile's name in the Step 10b build instructions | |
 
 ---
 
