@@ -482,6 +482,7 @@ are roughly ordered by value÷effort.
 | BL-583 | `check_references.py` does not scan `agents/cli/SETUP.md`, so a broken link there passes every gate | 2026-12-31 |
 | BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
+| BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17596,5 +17597,28 @@ matrix update in prose only.
 1. In the PR-scoped gates, warn when a `ts-convert-*` `SKILL.md` loses lines in a step and
    its `references/coverage-matrix.md` is unchanged in the same diff.
 2. Keep it a warning: a reword also removes lines.
+
+**Target:** 2026-12-31.
+
+## BL-586 — `check_lint_invariant_list.py` scans untracked files, so agent worktrees fail every commit `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** a commit on the #738 branch, made while two reviewer
+agents had worktrees open under `.claude/worktrees/`.
+
+**What.** `_iter_files` walks `root.glob("**/*.md")` and `root.glob("**/*.py")`, skipping only
+`SKIP_DIRS` (`.git`, `node_modules`, caches, venvs). `.claude/worktrees/` is ignored by git
+(`.git/info/exclude`) but not by the glob, so each worktree's full checkout is scanned. Its
+copies of `CHANGELOG.md`, `tml_lint.py` and the validator itself legitimately enumerate the
+rule set. Every commit then fails with dozens of findings in files the commit doesn't touch,
+and the only way past it is `--no-verify`. `check_patterns.py` (lines 241-245, full mode)
+globs the same way; it passed here only because nothing in the worktrees tripped it.
+
+**Do.**
+1. Scan tracked files only (`git ls-files`, as `check_patterns.py` already does for SKILL.md),
+   or add `.claude` worktrees to `SKIP_DIRS`. The first also covers any other untracked
+   checkout.
+2. Apply the same fix to `check_patterns.py`'s full mode.
+3. Prove it with a test: an untracked file under `.claude/worktrees/` that enumerates the rule
+   set must not fail the check.
 
 **Target:** 2026-12-31.
