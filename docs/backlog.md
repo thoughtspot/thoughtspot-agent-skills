@@ -16851,6 +16851,12 @@ SpotterViz:
 Deliberately not decided at #679's merge: the converters that build Liveboards
 deterministically work today, and SpotterViz had no field history yet.
 
+**Update (2026-11-17, #679 design review):** a reviewer raised the fallback question
+again (point 2 above) directly on the PR. Per the maintainer's own original direction
+decision this item already records, #679 stays SpotterViz-only with no fallback added —
+this item remains the place that question is tracked and decided, not something #679
+itself resolves.
+
 **Target:** 2026-12-17.
 
 ## BL-531 — Confirm and allowlist the public SpotterViz MCP endpoint `Tier 3`
@@ -16870,6 +16876,21 @@ the placeholder safe, but setup is not self-service.
    `spotterviz-liveboard-build.md` reference.
 3. Add the host to whatever allowlist applies (the customer-reference gate's allowed
    hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
+
+**Update (2026-11-17, #679 design review):** (2) and the `check_customer_references.py`
+allowlist half of (3) are done — the placeholder is now
+`https://agent.thoughtspot.app/mcp?api-version=latest` everywhere, and
+`agent.thoughtspot.app` is on `ALLOWED_HOSTS`. No skill fetches this URL via `WebFetch`
+(it's an MCP server connection, not an HTTP fetch), so that half of (3) doesn't apply.
+(1) is **not** independently confirmed by this update — the URL came from the user
+directly as their own working config, not from a located ThoughtSpot public-docs page; a
+documentation search for it (docs.thoughtspot.com, web search) found no page describing
+this MCP server at all. Also unconfirmed: a dated `api-version` value more specific than
+`latest` (a separate reviewer concern — the server's own source reportedly defaults an
+unversioned request to an older tool surface) and the server's minimum ThoughtSpot
+cluster version / privilege / Node.js prerequisites a reviewer cited — none of these were
+locatable in ThoughtSpot's public docs either. Confirming (1) and these specifics with the
+SpotterViz team directly is still open.
 
 **Target:** 2026-12-17.
 

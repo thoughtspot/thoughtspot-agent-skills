@@ -1,7 +1,8 @@
 # Open Items — ts-convert-from-looker
 
 Tracks unverified behaviour, deferred work, and known gaps.
-Status: OPEN | VERIFIED | DEFERRED | WONT-FIX
+Status: OPEN | VERIFIED | DEFERRED | RESOLVED (the token `generate_open_items_index.py`
+actually recognizes — `WONT-FIX` isn't in its vocabulary and silently reads as OPEN)
 
 ---
 
@@ -60,14 +61,15 @@ add an optional Step 9.5 that creates RLS rules from `sql_always_where:` conditi
 
 ---
 
-## #5 — Liveboard layout grid coordinates — VERIFIED via docs 2026-07-22
+## #5 — Liveboard layout grid coordinates — RESOLVED (superseded)
 
-**Answer:** `layout` is optional in the liveboard TML schema. ThoughtSpot renders
-liveboards with auto-layout when `layout_config` is absent — tiles are arranged in
-order. The current handling (emit tiles in order, omit `layout_config`) is correct.
+Previously: hand-authored liveboard TML could omit `layout`/`layout_config` and let
+ThoughtSpot auto-arrange tiles in order. Moot — Step 10 no longer hand-authors liveboard
+TML; it builds via SpotterViz from natural-language instructions (see
+`../../shared/schemas/spotterviz-liveboard-build.md`), which composes layout from the
+dashboard's relative grouping rather than emitting `layout_config` directly.
 
-Explicit grid mapping from LookML `tile_size:` hints is a potential enhancement but
-not required for a correct migration.
+Status: RESOLVED (superseded) — hand-authored liveboard TML no longer exists in this skill
 
 ---
 

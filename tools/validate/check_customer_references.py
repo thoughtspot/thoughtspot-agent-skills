@@ -136,6 +136,7 @@ ALLOWED_HOSTS = {
     "community.thoughtspot.com",       # public community knowledge base
     "www.thoughtspot.com",             # public marketing site (not cited today; public)
     "spottercode.thoughtspot.app",     # public SpotterCode MCP endpoint wired in .mcp.json
+    "agent.thoughtspot.app",           # public SpotterViz MCP endpoint (BL-531)
     # Internal ThoughtSpot clusters are deliberately NOT listed: name them in prose
     # ("the SE demo cluster") or by profile, never by hostname, in a public repo.
     "try-everywhere.thoughtspot.cloud",  # public ThoughtSpot free-trial cluster
