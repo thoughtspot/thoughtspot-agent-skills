@@ -272,13 +272,14 @@ The family prefix stays the naming rule. A **category** is a separate, coarser
 grouping for discovery: it decides which README table a skill is listed in, never
 what the skill is called. Each SKILL.md declares one in its frontmatter
 `metadata.category`, one of `Setup`, `Conversion`, `Semantic Authoring`,
-`Platform & Governance`, `Query` or `Recipes`, beside the `metadata.summary` that
+`Platform & Governance`, `Query`, `Recipes` or `Custom Charts`, beside the `metadata.summary` that
 becomes its README row; `tools/validate/generate_readme_skills.py` builds the README
 tables from them.
 
 Families and categories do not map one to one: `ts-object-*` skills sit in both
 Semantic Authoring and Query, `ts-link-semantic-layer` sits in Conversion beside the
-`ts-convert-*` family, and `ts-migrate-orgs` sits in Setup. So pick the family first,
+`ts-convert-*` family, `ts-migrate-orgs` sits in Setup, and the two
+`ts-object-*-chart-builder` skills sit in Custom Charts. So pick the family first,
 with the questions above, then the category by where a user would look for the skill.
 
 ---

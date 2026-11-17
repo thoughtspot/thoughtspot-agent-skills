@@ -99,3 +99,19 @@ does is the intent and has not been confirmed on a screenshot.
 
 **Action (BL-552, target 2027-01-31):** Screenshot a monthly tile with the filter applied in the last days of a
 month.
+
+---
+
+## #6 — A rebuilt tile keeps its `viz_guid`, and a multi-block run with a changed spec, on 26.11 — DEFERRED 2026-11-17 (BL-552)
+
+From the third PR 711 review. Two changes are covered by the mock only:
+
+- `patch.js` now sends a rebuilt owned tile with the `viz_guid` it had (embeds address a tile by it). Nothing
+  records yet whether a 26.11 import keeps a `viz_guid` that is sent, renumbers it, or rejects it.
+- Each block carries the tiles a later block of the run carries (`pending`) over unchanged, so a run whose spec
+  retitles a later tile, or changes its search, commits every block (mock scenario "a multi-block run that
+  retitles a later tile ...").
+
+**Action (BL-552, target 2027-01-31):** In the same live run as #4, retitle one tile and change another's search
+in the spec, run `--commit --all` with a small `--max`, and read back each rebuilt tile's `viz_guid`.
+

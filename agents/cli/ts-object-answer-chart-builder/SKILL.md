@@ -134,12 +134,21 @@ which library and why in one line before writing code. When the user picks one, 
 fits the shape poorly or cannot be previewed (`cdn: blocked`), say so once with the better fit, then
 use theirs unless they switch.
 
-**Updating needs a `ts` profile.** When the chart will replace an answer that already exists (the user
-names one, or asks to rebuild or update a saved chart), run `ts profiles list --json` before building, and
-look for a profile on this cluster. The update needs a backup from `ts tml export` (Step 9), and that needs
-the profile; without one, the chart would be built and then refused at the commit. If there is none, say so
-now: offer to set one up with `/ts-profile-thoughtspot`, or to save the chart as a new answer, which needs no
-backup. A new answer needs only the MCP.
+**Updating needs a working `ts` profile.** When the chart will replace an answer that already exists (the
+user names one, or asks to rebuild or update a saved chart), prove the backup (Step 9) will work before
+building: run `ts profiles list --json`, pick the profile for this cluster, and take a read-only probe
+export with it, checked the way the commit will check the backup:
+```bash
+mkdir -p ~/.cache/ts-charts/backups
+ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-probe.json
+node <SKILL>/helpers/backup-check.mjs ~/.cache/ts-charts/backups/<guid>-probe.json <guid> answer
+```
+It prints `ok: true` only when the profile reaches this cluster and the Org that holds the answer, its
+token works, and the user can export it. A profile that only exists (bound to another Org, or with an
+expired token) would otherwise fail at the backup, after the chart is built. If there is no profile, or the
+probe fails, say so now with its message: offer to set one up or sign in again with
+`/ts-profile-thoughtspot`, or to save the chart as a new answer, which needs no backup. A new answer needs
+only the MCP. The probe is not the backup: take that right before the commit.
 
 If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
 lettered options, and wait for the answers. Write the answers into `<RUNS>/<SLUG>/intent.txt` in Step 3.
@@ -155,9 +164,9 @@ Read before writing any chart code, in this order:
 5. `references/library-starters.md` — per-library starters and traps (CDN loading, drill-down, motion) learned in real tiles. **Always for MayaCharts** (its section is the starter); otherwise the first time a run uses a library.
 6. `references/examples.md` — the older charts under `examples/`, indexed by shape. Only when no library chart is close; most of its entries are superseded by the library.
 
-Read 1 to 4 on every run, 5 to 7 only when their condition holds. Nothing else needs reading
+Read 1 to 4 on every run, 5 and 6 only when their condition holds. Nothing else needs reading
 before the first attempt: `emit-checklist.md` belongs to Step 7 and `library-contract.md` to
-Step 10. All seven ship with the skill; paths are relative to the skill folder, wherever it is
+Step 10. All six ship with the skill; paths are relative to the skill folder, wherever it is
 installed.
 
 ## Step 2 — settle the data mode
@@ -376,8 +385,9 @@ or C) built on the intake search. The answer is the one object this creates; mak
    The summary lists both: `kept`, and `replaced` (for example a native chart and its axes, a table display
    mode, columns the new search drops). Tell the user what is under `replaced`.
    **The backup is required** for an update commit, and checked: export the answer first with
-   `ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json`.
-   It must be JSON (the REST export, or the same with `--parse`); right before the commit the block exports the
+   `mkdir -p ~/.cache/ts-charts/backups && ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json`.
+   It must be the JSON REST export, not saved with `--parse` (ts-cli deletes every emoji from a parsed edoc,
+   so it never matches, and `answer-pack.mjs` refuses that file); right before the commit the block exports the
    answer again and refuses (`recheck: changed`) if anything in it changed since the first export: `answer-pack.mjs` refuses a file that is
    missing, not complete JSON, not a full export of this answer (top-level guid, `answer` key, its search and
    tables), over a day old or dated ahead, or whose real path sits inside a git working tree. The block carries a
@@ -413,7 +423,8 @@ or C) built on the intake search. The answer is the one object this creates; mak
    than the tab holds, or a tile shows failure text, so a non-zero exit is a defect, not a hiccup. A tile still loading
    counts as not rendered: raise `--wait` (or `--scroll-wait` for tiles below the fold) and run it again before
    debugging the chart. `--debug-frames` prints every frame and how it was classified. A fix goes
-   back through the loop (Step 5) and Step 6, then is sent again with `--answer <guid> --commit`.
+   back through the loop (Step 5) and Step 6, then is sent again with `--answer <guid> --commit --backup <file>`, from a fresh backup (the commit
+before changed the answer, so the old one no longer matches).
 5. **Sign out**, unless the intake chose to stay signed in: the saved session is a credential and does not
    outlive the run.
    ```bash

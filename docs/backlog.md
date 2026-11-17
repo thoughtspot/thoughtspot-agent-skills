@@ -17828,10 +17828,15 @@ open items #4 and #5, deferred here so the write path's live run could close the
    Liveboard and screenshotted.
 2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
    exclude the current month; that has not been confirmed on a screenshot.
+3. Liveboard open item #6 (third PR 711 review): a rebuilt tile is sent with its `viz_guid`, and
+   a multi-block run carries later blocks' tiles over unchanged. Both are mock-only; whether 26.11
+   keeps a sent `viz_guid` is not recorded.
 
 **Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
 `cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
-days of a month, screenshot a monthly tile with the filter applied. Mark both items VERIFIED.
+days of a month, screenshot a monthly tile with the filter applied. For #6, retitle one tile and
+change another's search, run `--commit --all` with a small `--max`, and read back each rebuilt
+tile's `viz_guid`. Mark the items VERIFIED.
 
 **Target:** 2027-01-31.
 

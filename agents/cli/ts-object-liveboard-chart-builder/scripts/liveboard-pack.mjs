@@ -14,6 +14,7 @@
 //   --commit    ALL_OR_NONE import, then a round-trip proof
 //   --check     one read-only block that compares every tile on the Liveboard with the library (no charts sent)
 //   --all       every slug in <liveboard dir>/liveboard.spec.json
+//   --max       characters of chart code per block (default 60000); the fixed part, about 60,000 more, is on top
 //   --list      print what would be sent, with sizes, and stop
 //   --core-ref  send the shared core as a checksum only: the sandbox takes it from a tile already on the Liveboard.
 //               Blocks after the first in one --commit run do this by themselves, since the first block puts the
@@ -68,6 +69,7 @@ const unset = [["liveboard", spec.liveboard.guid], ["model", spec.liveboard.mode
 // LIVEBOARD_PACK_OFFLINE lets the smoke tests build blocks for placeholder guids; a commit never gets that pass.
 // Guids are compared in lower case in the sandbox; the spec's is normalised here too.
 spec.liveboard.guid = String(spec.liveboard.guid || "").toLowerCase();
+if (spec.liveboard.model && spec.liveboard.model.guid) spec.liveboard.model.guid = String(spec.liveboard.model.guid).toLowerCase();
 if (unset.length && !flags.has("--list") && (MODE === "commit" || !process.env.LIVEBOARD_PACK_OFFLINE)) { console.error("the spec has no real " + unset.map(([k]) => k).join(" or ") + " guid; set it in make-spec.py (the worked example reads LIVEBOARD_GUID and MODEL_GUID) and re-run it"); process.exit(2); }
 // The backup: checked here, on disk, because the sandbox cannot see files. The sandbox gets its name and checksum.
 const backup = val("--backup", null) ? checkBackup(val("--backup"), spec.liveboard.guid, "liveboard") : null;
@@ -159,12 +161,13 @@ if (MODE === "check") {
   console.error(`\n[liveboard-pack] read-only check of ${slugs.length} tile(s) on ${spec.liveboard.name}`);
   process.exit(0);
 }
+// --max counts the charts a block carries. The block's fixed part (patch.js, the spec, the shared core) comes on
+// top: it is about 60,000 characters by itself, so counting it too put one chart in every block.
 const blocks = [];
 let cur = {}, size = 0;
-const baseSize = JSON.stringify({ spec, core: Object.values(tiles).every((t) => t.f && t.f.lean) ? null : core }).length + tpl.length;
 for (const s of slugs) {
   const n = JSON.stringify(tiles[s]).length;
-  if (size && baseSize + size + n > MAX) { blocks.push(cur); cur = {}; size = 0; }
+  if (size && size + n > MAX) { blocks.push(cur); cur = {}; size = 0; }
   cur[s] = tiles[s]; size += n;
 }
 if (size) blocks.push(cur);

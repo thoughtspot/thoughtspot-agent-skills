@@ -3,7 +3,8 @@
 // MCP sandbox cannot see files. Returns { file, bytes, sha, viz } for the block (checksummed there), or exits 2.
 //
 // The file must be a JSON TML export of THAT object: the REST export response (`ts tml export <guid> --format
-// JSON`), the same parsed (`--parse`), or one edoc document. Its top-level guid is the guid and it has the
+// JSON`) or one edoc document. Not `--parse`: ts-cli strips every character outside its printable range from each
+// edoc (every emoji included), so a tile titled "Revenue <rocket emoji>" is saved as "Revenue " and never matches the live one. Its top-level guid is the guid and it has the
 // object's type key. It must be under a day old (and not dated in the future), and its real path must sit
 // outside any git working tree.
 //
@@ -18,6 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -36,10 +38,12 @@ export function fingerprint(v) {
 function docs(j) {
   const out = [];
   for (const x of Array.isArray(j) ? j : [j]) {
-    if (x && typeof x.edoc === "string") { try { out.push(JSON.parse(x.edoc)); } catch { out.push({ yaml: true }); } }
+    // No edoc: ThoughtSpot refused the export (another Org, no access, an unknown guid), with the reason in info.
+    if (x && "info" in x && !x.edoc && !x.tml) out.push({ denied: (x.info && x.info.status && (x.info.status.error_message || x.info.status.status_code)) || "no edoc" });
+    else if (x && typeof x.edoc === "string") { try { out.push(JSON.parse(x.edoc)); } catch { out.push({ yaml: true }); } }
     else if (x && x.edoc && typeof x.edoc === "object") out.push(x.edoc);
-    // `ts tml export --parse`: [{ type, guid, tml, info }], the document under tml
-    else if (x && x.tml && typeof x.tml === "object") out.push({ guid: x.guid, ...x.tml });
+    // `ts tml export --parse`: [{ type, guid, tml, info }]. Refused by the caller.
+    else if (x && x.tml && typeof x.tml === "object") out.push({ parsed: true });
     else if (x && typeof x === "object") out.push(x);
   }
   return out;
@@ -47,7 +51,7 @@ function docs(j) {
 
 export function checkBackup(file, guid, type) {
   const stop = (m) => { console.error("--backup" + (file ? " " + file : "") + ": " + m); process.exit(2); };
-  const how = "ts tml export " + guid + " --format JSON --profile <name> > ~/.cache/ts-charts/backups/" + guid + "-$(date +%Y%m%d-%H%M).json";
+  const how = "mkdir -p ~/.cache/ts-charts/backups && ts tml export " + guid + " --format JSON --profile <name> > ~/.cache/ts-charts/backups/" + guid + "-$(date +%Y%m%d-%H%M).json";
   if (!file) stop("missing; export the " + type + "'s TML first: " + how);
   let f;
   try { f = fs.realpathSync(path.resolve(file)); } catch { stop("does not exist"); }
@@ -65,7 +69,10 @@ export function checkBackup(file, guid, type) {
   // A cut-off export is not valid JSON, so it stops here.
   try { j = JSON.parse(txt); } catch { stop("is not complete JSON; a backup is the JSON export, in full: " + how); }
   const all = docs(j);
+  const denied = all.find((d) => d.denied);
+  if (denied && !all.some((h) => h && String(h.guid || "").toLowerCase() === guid.toLowerCase())) stop("holds no TML: ThoughtSpot refused the export (" + String(denied.denied).slice(0, 200) + "). Check that the profile is signed in to the cluster and Org that hold " + type + " " + guid + ", and that the user can open it");
   if (all.some((d) => d.yaml)) stop("holds a YAML edoc; export it as JSON: " + how);
+  if (all.some((d) => d.parsed)) stop("was saved with --parse, which deletes every emoji (and other characters it counts as non-printable) from the TML, so it never matches the live object; export it again without --parse: " + how);
   const d = all.find((h) => h && String(h.guid || "").toLowerCase() === guid.toLowerCase() && h[type] && typeof h[type] === "object");
   if (!d) stop("is not a TML export of " + type + " " + guid + " (its top-level guid and '" + type + "' must match)");
   let viz;
@@ -77,4 +84,15 @@ export function checkBackup(file, guid, type) {
     viz = [fingerprint({ answer: d.answer })];
   }
   return { file: path.basename(f), bytes: txt.length, sha: sha256(txt).slice(0, 16), viz };
+}
+
+// node backup-check.mjs <file> <guid> liveboard|answer
+// The intake's read-only probe (Step 0 of both skills): an export saved with the user's profile and checked the
+// way a commit will check it. It passes only when the profile reaches this cluster and Org, its token works, the
+// user can export the object, and the file is one a commit would accept. Prints { ok, file, visualizations }.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
+  const [file, guid, type] = process.argv.slice(2);
+  if (!file || !GUID.test(guid || "") || !["liveboard", "answer"].includes(type)) { console.error("usage: node backup-check.mjs <file> <guid> liveboard|answer"); process.exit(2); }
+  const b = checkBackup(file, guid, type);
+  console.log(JSON.stringify({ ok: true, file: b.file, visualizations: b.viz.length }));
 }

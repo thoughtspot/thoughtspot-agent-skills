@@ -95,12 +95,20 @@ If 0a found no browser (usual in the Claude app), drop the sign-in option from *
 screenshots cannot run here. For an existing Liveboard, skip **Size** and ask what should change:
 "Add tiles", "Change tiles", "Rearrange tabs or filters".
 
-**Updating needs a `ts` profile.** When the user picks an existing Liveboard, run `ts profiles list --json`
-before any building, and look for a profile on this cluster. A commit to a Liveboard that already has
-visualizations needs a backup from `ts tml export` (Step 6), and that needs the profile; without one, every
-tile would be built and then refused at the commit. If there is none, say so now: offer to set one up with
+**Updating needs a working `ts` profile.** When the user picks an existing Liveboard, prove the backup
+(Step 6) will work before any building: run `ts profiles list --json`, pick the profile for this cluster,
+and take a read-only probe export with it, checked the way the commit will check the backup:
+```bash
+mkdir -p ~/.cache/ts-charts/backups
+ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-probe.json
+node <C>/helpers/backup-check.mjs ~/.cache/ts-charts/backups/<guid>-probe.json <guid> liveboard
+```
+It prints `ok: true` only when the profile reaches this cluster and the Org that holds the Liveboard, its
+token works, and the user can export it. A profile that only exists (bound to another Org, or with an
+expired token) would otherwise fail at the backup, after every tile is built. If there is no profile, or
+the probe fails, say so now with its message: offer to set one up or sign in again with
 `/ts-profile-thoughtspot`, or to build on a new Liveboard instead, which needs no backup. Creating a new
-Liveboard needs only the MCP.
+Liveboard needs only the MCP. The probe is not the backup: take that right before the commit.
 
 If `AskUserQuestion` is not available, ask the same questions in one message as a numbered list with
 lettered options, and wait for the answers.
@@ -198,7 +206,8 @@ already on the Liveboard (blocks after the first in a run do this by themselves)
 checksum of the spec, because the spec sets every title, search and position: a slip in it is refused like a
 slip in chart code.
 
-Each block carries some charts (up to `--max`, default 60,000 characters), the spec and the shared core.
+Each block carries some charts (up to `--max` characters of chart code, default 60,000), plus the spec,
+the shared core and `patch.js`, about 60,000 characters more; the worked example packs into 6 blocks.
 In the sandbox (`<L>/scripts/patch.js`) it checks every sha256, exports the Liveboard and **merges** into
 that export.
 
@@ -246,9 +255,10 @@ send are `pending`, not problems.
 **Backup.** When the Liveboard has any visualization (the skill's own count too: a marked tile may be a
 user's copy), the sandbox refuses the commit unless the block was built with `--backup <file>`: a JSON TML
 export of this Liveboard taken before the commit, from
-`ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json`.
+`mkdir -p ~/.cache/ts-charts/backups && ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups/<guid>-<date>.json`.
 `liveboard-pack.mjs` checks the file is complete JSON and a full export of this Liveboard (its top-level guid
-and the `liveboard` key with its visualizations; a YAML edoc, a stub or a cut-off file is refused), is under a
+and the `liveboard` key with its visualizations; a YAML edoc, a stub, a cut-off file or a refused export
+is refused), is under a
 day old (and not dated ahead), and its real path sits outside any git working tree. The block carries a
 fingerprint of every visualization in the backup under a checksum: a hash of the whole visualization, keys
 sorted, leaving out only its `id` and `viz_guid` (ThoughtSpot renumbers them on import) and every `fqn` (an
@@ -256,11 +266,16 @@ export holds them only when asked). The sandbox refuses the commit unless every 
 now is among them, so a list of ids, another Liveboard's export, or an older export that differs in anything
 inside a visualization (a description, a column format, an axis setting) does not pass: when that refusal
 comes back, tell the user the Liveboard changed since the backup and take a fresh one. The Liveboard's own
-layout, filters, tabs and style are outside the fingerprint, so an older export that differs only there
-passes, and restoring it would revert those edits; take the backup right before the commit. In later blocks of one `--commit`
-run, only the tiles an earlier block of that run wrote are exempt (owner marker, a slug an earlier block carried,
-and a body exactly that library chart's), since they were written after the backup; everything else must be in
-it, so build every block of a run with the same `--backup`. `ts tml export ... --parse` output is accepted too.
+name, description, parameters, layout, filters, tabs and style are outside the fingerprint, so an older
+export that differs only there passes, and restoring it would revert those edits; take the backup right
+before the commit. In later blocks of one `--commit` run, only the tiles an earlier block of that run wrote
+are exempt (owner marker, a slug an earlier block carried, a body exactly that library chart's, and that
+slug's spec position, where the block put it), since they were written after the backup. A user's copy of
+such a tile has the same code but sits elsewhere, so it is not exempt; everything else must be in the
+backup, so build every block of a run with the same `--backup`. A block leaves every tile a later block of
+the run carries (`pending`) exactly as it is, its title, search and code included, so a later block's
+refusal for the backup is never caused by an earlier block. Do not save the backup with `--parse`: ts-cli
+deletes every emoji from a parsed edoc, so it never matches, and `liveboard-pack.mjs` refuses that file.
 `--validate` reports `commitWouldRefuse` when a commit would be refused for the backup. Tell the
 user where it is; restore by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). A new, empty
 Liveboard needs none.
@@ -275,7 +290,8 @@ to the worked example.
 
 Read the file and paste **each block between the `=====` lines
 unchanged** as the `code` of `execute-thoughtspot-code` with `confirm_write_operations: true`, in order.
-Every block leaves a complete, working Liveboard, so a build can stop between blocks.
+Every block leaves a complete, working Liveboard, so a build can stop between blocks: a tile a later
+block carries keeps the title, search and code it had until that block writes it.
 
 1. `--commit` runs a `VALIDATE_ONLY` import first and commits only if it passes, so each block is pasted
    once. `--validate` alone checks without writing.

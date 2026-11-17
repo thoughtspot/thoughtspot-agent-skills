@@ -61,7 +61,7 @@ if (P.core && !P.core.ref) for (const k of ['js', 'css']) if ((await sha256(P.co
 if (badSha.length) return { refused: 'CHECKSUM MISMATCH - nothing written, resend this block unchanged', badSha };
 
 // 2. current Liveboard
-const spec = P.spec, LB = spec.liveboard, model = LB.model, LBG = String(LB.guid).toLowerCase();
+const spec = P.spec, LB = spec.liveboard, model = LB.model, LBG = String(LB.guid).toLowerCase(), MODELG = String(model.guid).toLowerCase();
 const nameOf = (v) => (v && v.answer && v.answer.name) || (v && v.id) || '?';
 // export_fqn: a tile is kept as it is only when its answer names the model by fqn, and an export holds fqns only
 // when asked (without it every kept tile was rebuilt from a new search). The backup fingerprint ignores fqns.
@@ -224,6 +224,21 @@ for (const tab of spec.tabs) {
       from = 'kept, marked';
     }
     const prevId = [idBySlug[t.slug], idByPos[pos]].find((x) => x && !taken.has(x));
+    // A tile a later block of this run carries is left exactly as it is (its title, description, search and code),
+    // only placed at its spec position: the later block writes it, and checks it against the backup taken before
+    // the run, so this block must not change it. Rewriting it here gave it the spec's new title, or ran its new
+    // search with its old code, and the later block then refused, saying the Liveboard had changed since the
+    // backup. So every block leaves a working Liveboard, each tile with the code, search and title it was built with.
+    if (from !== 'payload' && (P.pending || []).includes(t.slug) && prevId) {
+      taken.add(prevId);
+      vizzes.push(vizById[prevId]);
+      if (t.filters === false) excluded.push(prevId); // filters live outside the tile, and keep skipping it meanwhile
+      tiles.push({ visualization_id: prevId, x: t.x, 'y': t.y, height: t.h, width: t.w });
+      // The proof checks it comes back with the code it has (unmarked, if it had no marker yet).
+      const pc = codeOf(vizById[prevId]) || code;
+      report.push({ slug: t.slug, from: 'pending', id: prevId, js: (await sha256(pc.js)).slice(0, 12), css: (await sha256(pc.css)).slice(0, 12) });
+      continue;
+    }
     // The search is run only for tiles this block composes afresh: charts in the payload, kept tiles whose search
     // or model changed, and kept tiles that need a marker. A kept tile whose code is untouched and whose answer
     // already runs the spec's search on the spec's model is carried over as it is (title and description from
@@ -231,7 +246,7 @@ for (const tab of spec.tabs) {
     // costs one searchdata call per distinct search it rebuilds, not one per spec tile, and every search that
     // does run still refuses the commit when it fails.
     const prev = prevId && vizById[prevId], pa = prev && prev.answer;
-    const sameAnswer = (from === 'kept' || from === 'kept (position)') && prevId === (from === 'kept' ? idBySlug[t.slug] : idByPos[pos]) && pa && pa.search_query === t.search && (pa.tables || []).some((x) => x && x.fqn === model.guid) && Array.isArray(pa.answer_columns) && pa.answer_columns.length > 0;
+    const sameAnswer = (from === 'kept' || from === 'kept (position)') && prevId === (from === 'kept' ? idBySlug[t.slug] : idByPos[pos]) && pa && pa.search_query === t.search && (pa.tables || []).some((x) => x && String(x.fqn || '').toLowerCase() === MODELG) && Array.isArray(pa.answer_columns) && pa.answer_columns.length > 0;
     if (sameAnswer) {
       const answer = { ...pa, name: t.title };
       if (t.description) answer.description = t.description; else delete answer.description;
@@ -270,7 +285,8 @@ for (const tab of spec.tabs) {
     // An owned tile keeps its visualization id, so filters and anything else that points at it still resolve.
     const id = prevId || freshId();
     taken.add(id);
-    vizzes.push({ id, answer });
+    // and its viz_guid, which embeds address the tile by.
+    vizzes.push(prev && prev.viz_guid ? { id, viz_guid: prev.viz_guid, answer } : { id, answer });
     if (t.filters === false) excluded.push(id);
     tiles.push({ visualization_id: id, x: t.x, 'y': t.y, height: t.h, width: t.w });
     report.push({ slug: t.slug, from, id, js: (await sha256(code.js)).slice(0, 12), css: (await sha256(code.css)).slice(0, 12) });
@@ -362,9 +378,12 @@ if (summary.tmlKB > 2000) summary.warning = 'TML over 2 MB; imports near 2.8 MB 
 // a tile marked as the skill's may still be a user's copy, so owned tiles count too. Only a new, empty Liveboard
 // needs none. Later blocks of one commit run see the tiles the earlier blocks wrote, which a backup taken before
 // the run cannot hold: only those are exempt, each recognised by its owner marker, a slug an earlier block of
-// this run carried (P.runBody) and a body that is exactly that library chart's. Anything else, a user's copy of
-// a skill tile included, must be in the backup, so a later block pasted on its own still needs one.
-const runTile = async (v) => { const c = codeOf(v), m = c && MARK.exec(c.js); return !!(m && ownerOf(c) === LBG && P.runBody && P.runBody[m[1]] && (await sha256(strip(bodyOf(c).js).trim())) === P.runBody[m[1]]); };
+// this run carried (P.runBody), a body that is exactly that library chart's, and the spec position of that slug,
+// where the earlier block put it. A user's copy has the same code by construction, so only its position tells it
+// apart: anything off its slug's spec position, a copy included, must be in the backup, and a later block pasted
+// on its own still needs one.
+const posOfViz = {}; for (const tab of ((doc0.layout && doc0.layout.tabs) || [])) for (const tl of tab.tiles || []) posOfViz[tl.visualization_id] = tab.name + '|' + tl.x + '|' + tl.y;
+const runTile = async (v) => { const c = codeOf(v), m = c && MARK.exec(c.js); return !!(m && ownerOf(c) === LBG && P.runBody && P.runBody[m[1]] && specPos[posOfViz[v.id]] === m[1] && (await sha256(strip(bodyOf(c).js).trim())) === P.runBody[m[1]]); };
 const vis0 = [];
 for (const v of doc0.visualizations || []) if (!(await runTile(v))) vis0.push(v);
 let backupRefusal = vis0.length && !P.backup ? 'NOT COMMITTED - this Liveboard holds ' + vis0.length + ' visualization(s); export a backup (ts tml export <guid> --format JSON) and build the block with --backup <file>' : null;

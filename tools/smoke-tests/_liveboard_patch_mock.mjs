@@ -36,8 +36,16 @@ fs.writeFileSync(path.join(DIR, "liveboard.spec.json"), JSON.stringify({
   ] }]
 }));
 
-function pack(args) {
-  const p = spawnSync("node", [PACK, "--liveboard", DIR, ...args], { encoding: "utf8", env: ENV, maxBuffer: 64 << 20 });
+// A copy of the spec with some tiles changed (title, search), in a folder of its own.
+function specDir(name, edit, top = {}) {
+  const d = path.join(TMP, name); fs.mkdirSync(d, { recursive: true });
+  const sp = { ...JSON.parse(fs.readFileSync(path.join(DIR, "liveboard.spec.json"), "utf8")), ...top };
+  for (const t of sp.tabs.flatMap((x) => x.tiles)) if (edit[t.slug]) Object.assign(t, edit[t.slug]);
+  fs.writeFileSync(path.join(d, "liveboard.spec.json"), JSON.stringify(sp));
+  return d;
+}
+function pack(args, dir = DIR) {
+  const p = spawnSync("node", [PACK, "--liveboard", dir, ...args], { encoding: "utf8", env: ENV, maxBuffer: 64 << 20 });
   return { code: p.status, blocks: p.stdout.split(/^=====$/m).map((b) => b.trim()).filter(Boolean), err: p.stderr };
 }
 function backup(doc, name = "b.json") {
@@ -227,17 +235,82 @@ await scenario("a later block pasted on its own still needs a backup, and keeps 
   ok(st.commits === undefined, "a later block committed without a backup");
 });
 
-await scenario("a backup saved with ts tml export --parse is accepted, and fingerprinted", async () => {
+await scenario("a user's copy of a tile an earlier block wrote is not exempt from the backup in a later block", async () => {
+  // The Liveboard holds only the skill's Best (as block 1 of this run left it) and the user's "Copy of Best", whose
+  // code is identical by construction. Only the copy needs the backup, so block 2 without one must refuse.
+  const doc = clone(base);
+  for (const n of ["Bubbles", "About"]) { const id = vizNamed(doc, n).id; doc.liveboard.visualizations = doc.liveboard.visualizations.filter((v) => v.id !== id); tabOf(doc).tiles = tabOf(doc).tiles.filter((x) => x.visualization_id !== id); }
+  const best = vizNamed(doc, "Best");
+  withViz(doc, { ...clone(best), id: "Viz_copy", answer: { ...clone(best.answer), name: "Copy of Best" } }, 0, 30);
+  const p = pack(["--commit", "--max", "3000", "--all"]);
+  ok(p.blocks.length === 3, "expected 3 blocks, got " + p.blocks.length);
+  const st = { doc: clone(doc) };
+  refused(await run(p.blocks[1], st), /export a backup.*|lacks Copy of Best/);
+  ok(st.commits === undefined, "block 2 committed over the user's copy without a backup");
+  // The original deleted: with --relayout the copy would be taken, renamed and moved. Without a backup it must not be.
+  const gone = clone(doc), id = vizNamed(gone, "Best").id;
+  gone.liveboard.visualizations = gone.liveboard.visualizations.filter((v) => v.id !== id); tabOf(gone).tiles = tabOf(gone).tiles.filter((x) => x.visualization_id !== id);
+  const st2 = { doc: clone(gone) };
+  refused(await run(pack(["--commit", "--relayout", "--max", "3000", "--all"]).blocks[1], st2), /export a backup/);
+  ok(st2.commits === undefined && placeOf(st2.doc, "Copy of Best") === "0,30", "the user's copy was moved or renamed without a backup");
+});
+
+await scenario("a multi-block run that retitles a later tile and changes another's search commits every block", async () => {
+  // Found in the third PR 711 review: block 1 rewrote the later blocks' tiles (title, or a new search with the old
+  // code), so block 2 checked them against the backup taken before the run and refused, blaming the user.
+  const d = specDir("lb-edit", { "banner-pulse": { title: "About this Liveboard", filters: false }, "where-state-bubbles": { search: "[sales] [state] [region]" } },
+    { filters: [{ column: "region", label: "Region", applyToNarrative: false }] });
+  const doc = withViz(clone(base), clone(native), 0, 20);
+  const p = pack(["--commit", "--max", "3000", "--backup", backup(doc, "edit.json"), "--all"], d);
+  ok(p.code === 0 && p.blocks.length === 3, "expected 3 blocks: " + p.err);
+  const st = { doc };
+  committed(await run(p.blocks[0], st));
+  // After block 1 the later tiles are as they were: their own title, search and code, so the Liveboard works.
+  ok(vizNamed(st.doc, "About") && !vizNamed(st.doc, "About this Liveboard"), "block 1 retitled a tile a later block carries");
+  ok(vizNamed(st.doc, "Bubbles").answer.search_query === "[sales] [state]", "block 1 ran a later tile's new search with its old code");
+  const skips = (doc) => (doc.liveboard.filters || []).flatMap((f) => f.excluded_visualizations || []);
+  ok(skips(st.doc).includes(vizNamed(st.doc, "About").id), "block 1 dropped the narrative tile from the filter's exclusions");
+  for (const b of p.blocks.slice(1)) committed(await run(b, st));
+  ok(vizNamed(st.doc, "About this Liveboard") && vizNamed(st.doc, "Bubbles").answer.search_query === "[sales] [state] [region]", "the spec's changes did not land");
+  ok(vizNamed(st.doc, "Native"), "native chart lost");
+});
+
+await scenario("a backup saved with ts tml export --parse is refused, since --parse deletes every emoji", async () => {
   const doc = withViz(clone(base), clone(native), 0, 20), f = path.join(TMP, "backups", "parsed.json");
   fs.writeFileSync(f, JSON.stringify([{ type: "liveboard", guid: LBG, tml: { liveboard: doc.liveboard }, info: {} }]));
+  const p = pack(["--commit", "--backup", f, "pulse-kpi-best"]);
+  ok(p.code === 2 && /--parse/.test(p.err), "a --parse backup passed the disk check: " + p.err);
+});
+
+await scenario("the intake's probe export is refused when ThoughtSpot refused the export (another Org, no access)", async () => {
+  const f = path.join(TMP, "backups", "forbidden.json");
+  fs.writeFileSync(f, JSON.stringify([{ edoc: "", info: { status: { status_code: "ERROR", error_message: "FORBIDDEN" } } }]));
+  const p = spawnSync("node", [path.join(ROOT, "agents", "cli", "ts-object-answer-chart-builder", "helpers", "backup-check.mjs"), f, LBG, "liveboard"], { encoding: "utf8", env: ENV });
+  ok(p.status === 2 && /refused the export \(FORBIDDEN\)/.test(p.stderr), "a refused export passed the probe: " + p.stderr);
+  const g = backup(base, "probe.json");
+  const q = spawnSync("node", [path.join(ROOT, "agents", "cli", "ts-object-answer-chart-builder", "helpers", "backup-check.mjs"), g, LBG, "liveboard"], { encoding: "utf8", env: ENV });
+  ok(q.status === 0 && JSON.parse(q.stdout).ok === true, "a good export failed the probe: " + q.stderr);
+});
+
+await scenario("a tile whose title holds an emoji matches its JSON backup", async () => {
+  const doc = withViz(clone(base), { ...clone(native), answer: { ...clone(native.answer), name: "Revenue \u{1F680} by region" } }, 0, 20);
   const st = { doc: clone(doc) };
-  committed(await run(pack(["--commit", "--backup", f, "pulse-kpi-best"]).blocks[0], st));
-  ok(vizNamed(st.doc, "Native"), "native chart lost");
-  // the same shape holding an older state is refused like any other older export
-  const older = clone(doc); vizNamed(older, "Native").answer.description = "before the edit";
-  const g = path.join(TMP, "backups", "parsed-older.json");
-  fs.writeFileSync(g, JSON.stringify([{ type: "liveboard", guid: LBG, tml: { liveboard: older.liveboard }, info: {} }]));
-  refused(await run(pack(["--commit", "--backup", g, "pulse-kpi-best"]).blocks[0], { doc: clone(doc) }), /is not of this Liveboard/);
+  committed(await run(pack(["--commit", "--backup", backup(doc, "emoji.json"), "pulse-kpi-best"]).blocks[0], st));
+  ok(vizNamed(st.doc, "Revenue \u{1F680} by region"), "the emoji tile was lost");
+});
+
+await scenario("a rebuilt tile keeps its viz_guid, and an upper-case model guid does not rebuild kept tiles", async () => {
+  const doc = clone(base);
+  doc.liveboard.visualizations.forEach((v, i) => { v.viz_guid = "00000000-0000-4000-8000-00000000000" + i; });
+  const g = vizNamed(doc, "Bubbles").viz_guid, keep = vizNamed(doc, "About").viz_guid;
+  const d = specDir("lb-upper", { "where-state-bubbles": { search: "[sales] [state] [region]" } });
+  const sp = JSON.parse(fs.readFileSync(path.join(d, "liveboard.spec.json"), "utf8")); sp.liveboard.model.guid = MODEL.toUpperCase();
+  fs.writeFileSync(path.join(d, "liveboard.spec.json"), JSON.stringify(sp));
+  const st = { doc: clone(doc) };
+  const r = await run(pack(["--commit", "--backup", backup(doc, "vg.json"), "pulse-kpi-best"], d).blocks[0], { doc: clone(doc) });
+  ok(r.searches === 2, "an upper-case model guid searched " + r.searches + " times (expected Best and the changed Bubbles)");
+  committed(await run(pack(["--commit", "--backup", backup(doc, "vg2.json"), "pulse-kpi-best", "where-state-bubbles"], d).blocks[0], st));
+  ok(vizNamed(st.doc, "Bubbles").viz_guid === g && vizNamed(st.doc, "About").viz_guid === keep, "viz_guid dropped: " + vizNamed(st.doc, "Bubbles").viz_guid);
 });
 
 await scenario("--validate warns that a commit would refuse for want of a backup", async () => {
