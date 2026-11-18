@@ -144,6 +144,40 @@ def test_oauth_from_a_client_id_and_secret_alone_is_marked_m2m():
     assert (named["oauth"], named["oauth_m2m"]) == (True, False)
 
 
+def _dbx(configuration, kind="DATABRICKS", via="data_warehouse_type"):
+    entry = {"id": "c", "name": "N", "details": {"configuration": configuration}}
+    if via == "data_warehouse_type":
+        entry["data_warehouse_type"] = kind
+    else:
+        entry["details"]["type"] = kind
+    return connection_facts(entry)
+
+
+@pytest.mark.parametrize("configuration, kind, via, expected", [
+    # Every Databricks OAuth connection on the SE demo cluster holds just this pair,
+    # which per-user OAuth and a service principal both use: OAuth, to confirm.
+    ('{"OAuth2ClientId": "x", "OAuth2Secret": "******", "host": "h", "http_path": "p"}',
+     "DATABRICKS", "data_warehouse_type", (True, True)),
+    ('{"oauth2clientid": "x", "OAUTH2SECRET": "y", "host": "h"}',
+     " databricks ", "details.type", (True, True)),
+    # One of the pair alone is still a setting named for OAuth: firm.
+    ('{"OAuth2ClientId": "x", "host": "h"}', "DATABRICKS", "data_warehouse_type",
+     (True, False)),
+    # Another setting naming OAuth beside the pair: firm.
+    ('{"OAuth2ClientId": "x", "OAuth2Secret": "y", "oauth_pvt_key": "k"}',
+     "DATABRICKS", "data_warehouse_type", (True, False)),
+    # The same pair on another warehouse stays firm OAuth.
+    ('{"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}',
+     "SNOWFLAKE", "data_warehouse_type", (True, False)),
+    # A personal access token is not OAuth.
+    ('{"host": "h", "http_path": "p", "personal_access_token": "t"}',
+     "DATABRICKS", "data_warehouse_type", (False, False)),
+])
+def test_databricks_oauth_client_pair_is_to_confirm(configuration, kind, via, expected):
+    facts = _dbx(configuration, kind, via)
+    assert (facts["oauth"], facts["oauth_m2m"]) == expected
+
+
 @pytest.mark.parametrize("details", [{}, {"configuration": None},
                                      {"configuration": "not json"},
                                      {"configuration": "[1, 2]"}, "a string"])

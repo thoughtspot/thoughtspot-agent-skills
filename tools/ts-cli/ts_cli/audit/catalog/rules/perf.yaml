@@ -521,7 +521,9 @@
     (matched by name, any case), else its metadata header `dataSourceType`; `SNOWFLAKE`
     and `DATABRICKS` pass, with or without an `RDBMS_` prefix, any case. A source with
     neither type is not judged, and the Model's Data Cache readiness reads Not assessed.
-    The finding lists each source with its type.
+    The finding lists each source with its type; `RDBMS_MODE`, an Analyst Studio
+    dataset, which Data Cache does not serve (product owner, 2026-11-19), is named
+    "Analyst Studio".
   categories: [P]
   requires: [model_tml]
   uses: [connections]
@@ -553,10 +555,13 @@
     when the connection search failed. A Table whose connection block names no
     connection is matched by its metadata header's connection name. A connection missing
     from the search, whose settings or header could not be read, or that nothing names,
-    is not judged, and the Model's Data Cache readiness reads Not assessed. OAuth read only from `client_id` and `client_secret`, and
-    PrivateLink read from the host, are for the product team to confirm: a finding
-    resting only on them says the Model may not be able to use Data Cache. The finding
-    lists each connection and what it uses.
+    is not judged, and the Model's Data Cache readiness reads Not assessed. OAuth read only
+    from a client ID and secret (`client_id` and `client_secret`, or on a Databricks
+    connection `OAuth2ClientId` and `OAuth2Secret` with no other setting naming OAuth,
+    which per-user OAuth and a service principal both hold), and PrivateLink read from
+    the host, are for the product team to confirm: a finding resting only on them says
+    the Model may not be able to use Data Cache. The finding lists each connection and
+    what it uses.
   categories: [P]
   requires: [model_tml, connections]
   scope: model

@@ -307,9 +307,15 @@ data_warehouse_type, details: {type, configuration, ...}}`:
   (`audit/connection_facts.py`; a test checks the context, the snapshot, the audit
   JSON, the report and the logs).
 - **There is no auth-type field.** OAuth shows only in setting names: `OAuth2ClientId`
-  and `OAuth2Secret` (Snowflake OAuth), `oauth_pvt_key`, and `client_id` with
-  `client_secret` on a Databricks connection (an OAuth M2M service principal). So P24
-  is evidence `heuristic`.
+  and `OAuth2Secret`, `oauth_pvt_key`, and `client_id` with `client_secret`. So P24 is
+  evidence `heuristic`. **Corrected 2026-11-19:** this note first called the
+  `OAuth2ClientId` pair Snowflake OAuth and `client_id` with `client_secret` the
+  Databricks form. Listing the setting names (names only, no value printed or kept) of
+  the cluster's 14 Databricks connections showed otherwise: 12 hold `host`, `http_path`,
+  `OAuth2ClientId` and `OAuth2Secret` and nothing else naming OAuth; one holds a
+  `personal_access_token`; one a `user` and `password`. None holds `client_id` or
+  `client_secret`. Per-user OAuth and a service principal (M2M) both need a client ID
+  and secret, so those names cannot tell them apart; #18's point 1 covers it.
 - **No setting names PrivateLink.** P24 reads it from the `host` or `accountName`
   value: a Snowflake PrivateLink URL carries `.privatelink.`. The value is read to
   derive the flag and not kept.
@@ -358,9 +364,9 @@ Until the team answers, no open point reads Can use, with one exception taken by
 decision: point 2's negative side. A host without `privatelink` reads as no PrivateLink,
 since nothing else in a connection's settings could say otherwise. Point 3 is no longer
 open: the product owner answered it, and that reading is firm. A finding marks "to
-confirm" every other reading that rests on an open point. Those are P24's OAuth M2M
-(point 1), PrivateLink read from the host (point 2) and P28's operator null test (point
-4). So are P19's calendar named in a formula (point 5) and code-based name that a custom
+confirm" every other reading that rests on an open point. Those are P24's OAuth client
+ID and secret (point 1), PrivateLink read from the host (point 2) and P28's operator null
+test (point 4). So are P19's calendar named in a formula (point 5) and code-based name that a custom
 calendar also has (point 9), and P21's measure only flagged pre-aggregated (point 6). A finding
 resting only on such readings says the Model may not be able to use Data Cache, and the
 Model reads To confirm. Points 7 and 8 leave the rule unable to judge the Model, which
@@ -371,10 +377,16 @@ for the team. Points 4 to 6, 8 and 9 came from the reviews of the rules that day
 the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P24 or P28
 reads today.
 
-1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
-   `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
-   Databricks OAuth M2M service principal). Does Data Cache treat that M2M connection as
-   an OAuth connection? The finding names it "OAuth M2M (to confirm)".
+1. **OAuth from a client ID and secret.** P24 reads a connection as OAuth when a
+   configuration key contains `oauth`, or, without one, when it has both `client_id` and
+   `client_secret` (an OAuth M2M service principal). A Databricks connection holding
+   `OAuth2ClientId` and `OAuth2Secret` and no other setting naming OAuth may be per-user
+   OAuth or a service principal: the names cannot tell (#17). Does Data Cache treat a
+   service-principal connection as an OAuth connection, and how is the kind told apart?
+   Until the team answers, both read "OAuth client ID and secret (to confirm)" and the
+   Model reads To confirm (product owner, 2026-11-19: on the 150-Model sample of that
+   day all seven Models P24 blocked rested on this pair). The same pair on any other
+   warehouse stays firm OAuth.
 2. **PrivateLink.** No configuration key names PrivateLink, so P24 reads it from a
    `host` or `accountName` containing `privatelink`. Is that a sound signal on every
    source Data Cache supports? The finding names it "PrivateLink read from the host (to
