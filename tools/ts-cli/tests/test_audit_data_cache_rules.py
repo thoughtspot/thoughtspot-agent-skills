@@ -137,7 +137,38 @@ def test_is_semantic_measure(own, table, semantic):
 
 def test_p21_lists_the_semantic_measures():
     [f] = _findings(fx.perf_semantic_query_measures(), "P21")
-    assert f.severity == "MEDIUM" and f.detail.endswith("aggregates: Revenue, Margin")
+    assert f.severity == "MEDIUM"
+    assert f.detail.startswith("Can't use Data Cache:")
+    assert f.detail.endswith("aggregates: Revenue, Margin (pre-aggregated, to confirm)")
+
+
+def _p21_readiness(ctx):
+    ctx.calendars, ctx.connections = [], [fx.build_cache_connection()]
+    ctx.metadata = [{"metadata_header": fx.build_cache_header()}]
+    from ts_cli.audit import run_audit
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    return model["data_cache"]["readiness"]
+
+
+@pytest.mark.parametrize("model_aggregation, table_properties, readiness, lead, listed", [
+    # only the Table column's pre-aggregated flag: open-items #18 point 6, to confirm
+    ("SUM", {"aggregation": "SUM", "is_pre_aggregated_measure": True}, "confirm",
+     "May not be able to use Data Cache", "Margin (pre-aggregated, to confirm)"),
+    # AGGREGATE stays firm, on the Model column or on its Table column
+    ("AGGREGATE", {}, "blocked", "Can't use Data Cache", "Margin"),
+    ("SUM", {"aggregation": "AGGREGATE", "is_pre_aggregated_measure": True}, "blocked",
+     "Can't use Data Cache", "Margin"),
+])
+def test_a_pre_aggregated_measure_alone_is_a_reading_to_confirm(
+        model_aggregation, table_properties, readiness, lead, listed):
+    ctx = fx.build_cache_ctx(
+        model_columns=[col("Margin", "ORDERS::MARGIN", column_type="MEASURE",
+                           aggregation=model_aggregation)],
+        table_columns=[{"name": "MARGIN", "properties": dict(table_properties)}])
+    [f] = _findings(ctx, "P21")
+    assert f.severity == "MEDIUM"
+    assert f.detail.startswith(lead + ": ") and f.detail.endswith(": " + listed)
+    assert _p21_readiness(ctx) == readiness
 
 
 def test_malformed_properties_read_as_absent():

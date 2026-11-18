@@ -143,18 +143,32 @@ def test_p23_lists_each_source_with_its_type():
 def test_p24_names_what_each_connection_uses():
     assert _detail(fx.perf_connection_oauth_privatelink(), "P24") == (
         "MEDIUM", "Can't use Data Cache: connections that use OAuth, PrivateLink or a "
-                  "template variable: Warehouse A (OAuth, PrivateLink read from the host, to confirm)")
+                  "template variable: Warehouse A: OAuth; PrivateLink read from the host "
+                  "(to confirm)")
     ctx = fx.build_cache_ctx(connections=[conn(parameterized=True)])
-    assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A (template variable)"]
+    assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A: template variable"]
     m2m = fx.build_cache_ctx(connections=[dict(conn(oauth=True), oauth_m2m=True)])
-    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A (OAuth M2M, to confirm)"]
+    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A: OAuth M2M (to confirm)"]
+
+
+def test_p24_attaches_to_confirm_to_its_own_reading():
+    """Each reading of a connection is one item; "to confirm" qualifies only the reading
+    it follows, never reads as an item of its own."""
+    ctx = fx.build_cache_ctx(connections=[
+        conn(privatelink=True, parameterized=True),
+        conn("Warehouse B", oauth=True, oauth_m2m=True)],
+        sources=[{"name": "V", "fqn": "v1"}],
+        headers=[header("v1", "ONE_TO_ONE_LOGICAL", connection="Warehouse B")])
+    assert _field(ctx, "@connection_cache_blockers") == [
+        "Warehouse A: PrivateLink read from the host (to confirm); template variable",
+        "Warehouse B: OAuth M2M (to confirm)"]
 
 
 def test_p24_matches_by_id_when_the_header_carries_one():
     ctx = fx.build_cache_ctx(connection="Renamed", connections=[
         dict(conn("Old name", oauth=True), id="conn-a")])
     ctx.metadata = [{"metadata_header": dict(header(), dataSourceId="conn-a")}]
-    assert _field(ctx, "@connection_cache_blockers") == ["Renamed (OAuth)"]
+    assert _field(ctx, "@connection_cache_blockers") == ["Renamed: OAuth"]
 
 
 @pytest.mark.parametrize("facts", [
@@ -174,8 +188,9 @@ def test_a_connection_p24_cannot_read_leaves_the_model_not_assessed(facts):
 def test_an_unknown_connection_does_not_hide_a_firm_blocker():
     ctx = fx.build_cache_ctx(connections=[conn(oauth=None, parameterized=True)],
                              headers=SNOWFLAKE_HEADER)
-    assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A (template variable)"]
-    assert _readiness(ctx) == ("blocked", [])
+    assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A: template variable"]
+    # its OAuth setting is unread, so P24 is not assessed in full: listed, not hidden
+    assert _readiness(ctx) == ("blocked", ["P24"])
 
 
 # ── P24: readings the product team is to confirm ────────────────────────────
@@ -197,6 +212,24 @@ def test_a_reading_to_confirm_is_not_a_firm_cant_use(facts, readiness, lead):
     assert finding.severity == "MEDIUM"
     assert finding.detail.startswith(lead + ": connections that use OAuth")
     assert _readiness(ctx)[0] == readiness
+
+
+def test_an_unread_connection_is_not_hidden_by_a_reading_to_confirm():
+    """WH A reads PrivateLink from its host (to confirm); WH B is missing from the
+    connection search. Both show: P24's reason, and P24 not checked. An unread
+    connection outranks a reading to confirm, so the Model is unknown, not To confirm."""
+    ctx = fx.build_cache_ctx(connections=[conn(privatelink=True)],
+                             sources=[{"name": "ITEMS", "fqn": "t-b"}],
+                             headers=[header(), header("t-b", connection="Warehouse B")])
+    ctx.tables["t-b"] = {"guid": "t-b", "table": {
+        "name": "ITEMS", "connection": {"name": "Warehouse B"}, "columns": []}}
+    if ctx.calendars is None:
+        ctx.calendars = []
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    dc = model["data_cache"]
+    assert dc["readiness"] == "unknown" and dc["not_assessed"] == ["P24"]
+    assert [(r["rule"], r["effect"], r["items"]) for r in dc["reasons"]] == [
+        ("P24", "may block", ["Warehouse A: PrivateLink read from the host (to confirm)"])]
 
 
 def test_a_firm_blocker_from_another_rule_keeps_a_to_confirm_model_blocked():

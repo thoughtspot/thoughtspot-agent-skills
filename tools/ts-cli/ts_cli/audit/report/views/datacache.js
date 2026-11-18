@@ -147,7 +147,8 @@ function buildDataCache(D){
     "View, or an RLS rule beyond its Table\u2019s own columns. A connection that defines "+
     "custom calendars is a warning, since a query that picks one at run time is not cached. "+
     "To confirm: the only reasons are readings the product team is to review (OAuth read "+
-    "from a client ID and secret, PrivateLink read from the host)."));
+    "from a client ID and secret, PrivateLink read from the host, a measure only flagged "+
+    "pre-aggregated)."));
   var table = el("table", "cleanup-table dc-table");
   table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';

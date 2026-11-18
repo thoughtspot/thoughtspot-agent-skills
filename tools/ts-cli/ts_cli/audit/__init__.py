@@ -25,9 +25,12 @@ from ts_cli.audit.formula_tree import formula_tree
 #: panel (`corpus.dependents`). Same vocabulary as a rule's `uses`. NOT fetched for
 #: the report's sake: `ts audit run` fetches only what the selected rules need, and
 #: the report says "not collected for this selection" for a section whose data is
-#: missing from `corpus.fetched_needs`. The connections' custom calendars are read by
-#: each Model's Data Cache readiness (`data_cache.model_data_cache`, the Data Cache view).
-REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets", "calendars"})
+#: missing from `corpus.fetched_needs`. The connections' custom calendars and settings
+#: are read by each Model's Data Cache readiness (`data_cache.model_data_cache`, the
+#: Data Cache view): P22's and P24's fields, P23's connection types, and the helpers
+#: that say what P23 and P24 could not read.
+REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets", "calendars",
+                          "connections"})
 
 #: The category whose run computes each Model's Spotter readiness score (`build_corpus`).
 READINESS_CATEGORY = "A"

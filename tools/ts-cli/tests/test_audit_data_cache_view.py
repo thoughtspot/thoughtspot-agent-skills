@@ -124,7 +124,7 @@ def test_the_new_limitations_block_with_their_reasons():
     assert dc["readiness"] == "blocked"
     assert [(r["rule"], r["label"], r["items"]) for r in dc["reasons"]] == [
         ("P23", "Source not Snowflake or Databricks", ["ORDERS (REDSHIFT)"]),
-        ("P24", "Connection uses OAuth, PrivateLink or a variable", ["Warehouse C (OAuth)"])]
+        ("P24", "Connection uses OAuth, PrivateLink or a variable", ["Warehouse C: OAuth"])]
 
 
 def _to_confirm(**kw):
@@ -141,7 +141,7 @@ def test_a_model_blocked_only_by_readings_to_confirm_reads_confirm():
     assert dc["m-ready"]["reasons"] == [{
         "rule": "P24", "effect": "may block",
         "label": "Connection uses OAuth, PrivateLink or a variable",
-        "items": ["Warehouse C (PrivateLink read from the host, to confirm)"]}]
+        "items": ["Warehouse C: PrivateLink read from the host (to confirm)"]}]
     assert dc["m-sql"]["readiness"] == "blocked"     # its pass-through is firm
     assert [r["effect"] for r in dc["m-sql"]["reasons"]] == ["blocks", "may block"]
 

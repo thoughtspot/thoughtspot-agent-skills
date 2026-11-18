@@ -40,7 +40,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.fields_data import _code, _own_table_and_paths, _rls_rules_of
-from ts_cli.audit.engine.fields_data_cache import (calls_sql_passthrough, connection_facts_for,
+from ts_cli.audit.engine.fields_data_cache import (CANT_USE, MAY_NOT_USE, calls_sql_passthrough,
+                                                   connection_facts_for, missing_tables,
                                                    model_connections, model_sources,
                                                    source_connection)
 from ts_cli.formula_translate.refs import REF_GRAMMAR
@@ -116,9 +117,6 @@ def unjudged_sources(item: dict, ctx: Any) -> List[str]:
 
 #: The connection_facts flags P24 reads.
 _CONNECTION_FLAGS = ("oauth", "privatelink", "parameterized")
-#: How P24's message begins: a firm reading, or only readings to confirm.
-CANT_USE = "Can't use Data Cache"
-MAY_NOT_USE = "May not be able to use Data Cache"
 
 
 def connection_readings(item: dict, ctx: Any) -> List[Dict[str, Any]]:
@@ -145,21 +143,24 @@ def _flag_reading(key: str, facts: list) -> Tuple[str, bool]:
     from a setting named for it, are firm."""
     if key == "oauth":
         m2m = all(f.get("oauth_m2m") is True for f in facts if f.get("oauth") is True)
-        return ("OAuth M2M, to confirm", True) if m2m else ("OAuth", False)
+        return ("OAuth M2M", True) if m2m else ("OAuth", False)
     if key == "privatelink":
-        return "PrivateLink read from the host, to confirm", True
+        return "PrivateLink read from the host", True
     return "template variable", False
 
 
 @register("connection_cache_blockers", uses={"connections"},
           label="the connections using OAuth, PrivateLink or a template variable")
 def _connection_cache_blockers(item: dict, ctx: Any) -> Any:
-    """Model: "<connection> (<what>)" for each connection_readings entry with a flag
-    found. Empty when none, and when the connections were not fetched (a rule that must
-    skip requires them)."""
+    """Model: "<connection>: <reading>; <reading>" for each connection_readings entry
+    with a flag found, a reading to confirm followed by "(to confirm)" so the qualifier
+    attaches to it alone. Empty when none, and when the connections were not fetched (a
+    rule that must skip requires them)."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    return NameList(f"{r['connection']} ({', '.join(label for label, _ in r['found'])})"
-                    for r in connection_readings(item, ctx) if r["found"])
+    return NameList(
+        f"{r['connection']}: " + "; ".join(label + (" (to confirm)" if to_confirm else "")
+                                          for label, to_confirm in r["found"])
+        for r in connection_readings(item, ctx) if r["found"])
 
 
 def connection_blockers_to_confirm(item: dict, ctx: Any) -> bool:
@@ -286,6 +287,14 @@ def _call_problems(code: str) -> set:
     return found
 
 
+def unjudged_rls(item: dict, ctx: Any) -> List[str]:
+    """Model: the sources whose RLS rules P28 cannot read (missing_tables); none for a
+    Model bypassing RLS, which applies no rule wherever it is defined."""
+    if tml.mapping(item.get("obj") or {}, "properties").get("is_bypass_rls"):
+        return []
+    return missing_tables(item, ctx)
+
+
 def _paths_by_id(table_doc: Any) -> Dict[str, dict]:
     t = table_doc.get("table") if isinstance(table_doc, dict) else None
     rls = t.get("rls_rules") if isinstance(t, dict) else None
@@ -299,7 +308,7 @@ def _paths_by_id(table_doc: Any) -> Dict[str, dict]:
 def _rls_rules_beyond_own_table(item: dict, ctx: Any) -> Any:
     """Model: "<source>: <rule> (<what>)" for each RLS rule on a source's Table TML that
     rls_rule_problems names something for; a rule comparing only its own Table's
-    columns with ts_ variables is not listed. None for a Model bypassing RLS
+    columns with ts_ variables is not listed. Empty for a Model bypassing RLS
     (`properties.is_bypass_rls`, read as S17 reads it): it applies no rule."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
     out = NameList()

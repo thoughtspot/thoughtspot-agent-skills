@@ -511,40 +511,66 @@ _METADATA_SEARCH_PATH = "/api/rest/2.0/metadata/search"
 
 def _search_headers(client: Any, guids: list, warnings: list, batch_size: int = 50) -> list:
     """The `metadata/search` rows (headers included) for `guids`, `batch_size` a
-    request.
+    request, with the TML export's retry (`_export_items`).
 
-    One refused id refuses its whole request, and the ids asked for include every Model
-    source, a Table whose export failed among them, so a refused batch is retried one id
-    at a time; an id that still fails is skipped with a warning naming its status and
-    the path, never the response body. A batch whose answer is not JSON is retried the
-    same way. A final 401 or a 429 (_FATAL_STATUSES) ends the run once, and so does a
-    `requests` exception (_abort_on_request_failure): every later request would fail
-    alike."""
+    The ids asked for include every Model source, a Table whose export failed among
+    them, and one bad id refuses its whole request. So a batch refused as a bad request
+    (400 or 404) is retried one id at a time (_search_headers_one_by_one). Any other
+    refusal, or an answer that is not a JSON list, would recur for every id, so the
+    batch is skipped whole with one warning. Each warning names the status and the
+    path, never the response body. A final 401 or a 429 (_FATAL_STATUSES) ends the run
+    once, and so does a `requests` exception (_abort_on_request_failure): every later
+    request would fail alike."""
     rows: list = []
-    for i in range(0, len(guids), batch_size):
+    for n, i in enumerate(range(0, len(guids), batch_size), 1):
         batch = guids[i:i + batch_size]
-        page, failure = _search_header_page(client, batch)
+        answer = _search_header_page(client, batch)
+        page, failure, status = answer
         if page is not None:
             rows.extend(page)
             continue
-        if len(batch) > 1:
-            _log(f"Warning: metadata search batch {i // batch_size + 1} {failure}; "
-                 f"retrying its {len(batch)} object(s) one at a time")
-        for guid in batch:
-            if len(batch) > 1:
-                page, failure = _search_header_page(client, [guid])
-            if page is not None:
-                rows.extend(page)
-                continue
-            msg = f"Metadata search {failure} for {guid}, so its header was not read"
+        if status not in _RETRY_ONE_BY_ONE:
+            msg = (f"Metadata search batch {n} {failure}, so the headers of its "
+                   f"{len(batch)} object(s) were not read")
             _log(f"Warning: {msg}")
             warnings.append(msg)
+            continue
+        if len(batch) > 1:
+            _log(f"Warning: metadata search batch {n} {failure}; retrying its "
+                 f"{len(batch)} object(s) one at a time")
+        rows.extend(_search_headers_one_by_one(client, batch, answer, warnings))
     return rows
 
 
-def _search_header_page(client: Any, guids: list) -> Tuple[Optional[list], str]:
-    """`(rows, "")` for one `metadata/search` request's answer, or `(None, why)` with
-    `why` its status and path only (a response body may quote anything)."""
+def _search_headers_one_by_one(client: Any, batch: list, batch_answer: Tuple,
+                               warnings: list) -> list:
+    """The rows of `batch`'s ids, one request each (a lone id reuses the batch's own
+    answer). An id refused as a bad request is skipped with a warning; any other
+    refusal would recur for every id left, so the retry stops there and the rest are
+    reported with it."""
+    rows: list = []
+    for k, guid in enumerate(batch):
+        page, failure, status = \
+            _search_header_page(client, [guid]) if len(batch) > 1 else batch_answer
+        if page is not None:
+            rows.extend(page)
+            continue
+        msg = f"Metadata search {failure} for {guid}, so its header was not read"
+        rest = len(batch) - k - 1
+        stop = status not in _RETRY_ONE_BY_ONE
+        if stop and rest:
+            msg += f"; the retry stopped there, skipping {rest} more object(s)"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        if stop:
+            break
+    return rows
+
+
+def _search_header_page(client: Any, guids: list) -> Tuple[Optional[list], str, int]:
+    """`(rows, "", status)` for one `metadata/search` request's answer, or `(None, why,
+    status)` with `why` its status and path only (a response body may quote
+    anything)."""
     import requests
     try:
         resp = client.post(_METADATA_SEARCH_PATH, json={
@@ -556,20 +582,22 @@ def _search_header_page(client: Any, guids: list) -> Tuple[Optional[list], str]:
         }, timeout=300, raise_for_status=False)
     except requests.RequestException as exc:
         _abort_on_request_failure(exc, "Metadata search")
-    where = f"returned {resp.status_code} on POST {_METADATA_SEARCH_PATH}"
-    if resp.status_code in _FATAL_STATUSES:
-        print(f"ThoughtSpot API {resp.status_code} on POST {_METADATA_SEARCH_PATH} — "
-              f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
+    status = resp.status_code
+    where = f"returned {status} on POST {_METADATA_SEARCH_PATH}"
+    if status in _FATAL_STATUSES:
+        print(f"ThoughtSpot API {status} on POST {_METADATA_SEARCH_PATH} — "
+              f"{_FATAL_STATUSES[status]}; aborting the audit", file=sys.stderr)
         raise SystemExit(1)
-    if not 200 <= resp.status_code < 300:
-        return None, where
+    if not 200 <= status < 300:
+        return None, where, status
     try:
         data = resp.json()
     except ValueError:
-        return None, f"{where}, not JSON"
+        return None, f"{where}, not JSON", status
     page = data if isinstance(data, list) else \
         (data.get("metadata", []) if isinstance(data, dict) else None)
-    return (page, "") if isinstance(page, list) else (None, f"{where}, not a list")
+    return (page, "", status) if isinstance(page, list) else \
+        (None, f"{where}, not a list", status)
 
 
 def _source_guids(models: list) -> list:

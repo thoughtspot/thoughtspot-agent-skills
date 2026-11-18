@@ -4895,11 +4895,13 @@ with a warning, and the Model reads `instructions_read: false` ("Could not be re
 report). The custom calendar search (`calendars/search`, for P22) and the connection
 search (`connection/search` with details, for P23 and P24) are each one paged search per
 audit, handled the same way: a final 401, a 429 or a `requests` exception aborts once;
-any other failure is a warning, the data reads as unknown, and the rule judges no Model.
-A page holding an entry that is not a connection fails the whole search the same way.
-The metadata header search, which covers every Model source, retries a refused request
-one object at a time. An object still refused is skipped with a warning naming its
-status and the path, so one unreadable source no longer ends the audit.
+any other failure is a warning and the data reads as unknown. P22 and P24 then judge no
+Model, and P23 falls back to each source's metadata header for its type. A page holding
+an entry that is not a connection fails the whole search the same way. The metadata
+header search, which covers every Model source, retries a request refused as a bad
+request (400 or 404) one object at a time, and skips an object still refused. Any other
+refusal skips its batch. Each such warning names the status and the path, so one
+unreadable source no longer ends the audit.
 The connection search answers each connection's configuration, credentials included:
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
 PrivateLink or a template variable (and whether the OAuth reading rests only on a

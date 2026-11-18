@@ -218,16 +218,48 @@ def test_generated_catalog_current():
 
 # ── the report's own needs (REPORT_NEEDS) ───────────────────────────────────
 
+def _data_cache_reach() -> list:
+    """What the corpus builder reaches through the Data Cache readiness that the static
+    scan cannot follow (catalog_reads' "Evasions"): the helpers in data_cache's
+    UNJUDGED and TO_CONFIRM tables (functions in a dict), the derived field each CHECKS
+    rule's `where` names (`fields.get` with a field name read from the rule), and the
+    availability check behind each of those rules' `requires` (`scopes.has_data`
+    through AVAILABILITY)."""
+    from ts_cli.audit import data_cache
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.fields import FIELDS
+    from ts_cli.audit.engine.scopes import AVAILABILITY
+    catalog = load_catalog()
+    out = list(data_cache.UNJUDGED.values()) + list(data_cache.TO_CONFIRM.values())
+    for rule_id, _, _ in data_cache.CHECKS:
+        rule = catalog.rules[rule_id]
+        out.append(FIELDS[rule.aggregate["where"]["field"].lstrip("@")])
+        out += [AVAILABILITY[req] for req in rule.requires]
+    return out
+
+
 def test_report_needs_cover_what_the_report_reads():
     """Statically, as the catalog gate checks rules: the corpus and ERD builders read
-    only conditional data REPORT_NEEDS declares."""
-    from ts_cli.audit import REPORT_NEEDS, build_corpus
+    only conditional data REPORT_NEEDS declares. What the scan cannot follow is added
+    by name (_data_cache_reach), and a place it cannot read fails the test unless it is
+    shown unreachable from the report."""
+    from ts_cli.audit import REPORT_NEEDS, build_corpus, data_cache
     from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
-    from ts_cli.audit.catalog_reads import static_reads
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.catalog_reads import _scan
     from ts_cli.audit.erd import build_erd_for_audit
     assert REPORT_NEEDS <= set(CONDITIONAL_DATA)
-    reads = static_reads([build_corpus, build_erd_for_audit])
-    assert {"ai_instructions", "dependents", "sets"} <= set(reads)
+    walker = _scan([build_corpus, build_erd_for_audit] + _data_cache_reach())
+    # predicates._count iterates a scope the rule names, which the scan cannot read. The
+    # report reaches predicates only through data_cache's CHECKS rules, whose `where`
+    # never counts, so that iteration is unreachable from the report.
+    catalog = load_catalog()
+    assert all(set(catalog.rules[r].aggregate["where"]) == {"field", "len_gt"}
+               for r, _, _ in data_cache.CHECKS)
+    unreadable = [p for p in walker.problems if not p.startswith("_count calls iterate")]
+    assert unreadable == []
+    reads = walker.reads
+    assert {"ai_instructions", "dependents", "sets", "calendars", "connections"} <= set(reads)
     assert set(reads) <= REPORT_NEEDS, reads
 
 

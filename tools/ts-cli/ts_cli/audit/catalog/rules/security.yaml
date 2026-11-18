@@ -293,7 +293,7 @@
     where: {field: "@own_column_null_tests", nonblank: true}
   severity: LOW
   message: "RLS rule '{obj.name}' keeps rows whose {@own_column_null_tests} is null for every user — review whether ownerless rows should be visible"
-  remediation: If the null test is there for an outer join (S12), test the join key instead (a column that is never null, such as `isnull ( [T_1::KEY] )`), so unmatched rows are kept and ownerless ones are not; otherwise give ownerless rows an owner, or drop the null branch
+  remediation: If the null test is there for an outer join (S12), test the join key instead (a column that is never null, such as `isnull ( [T_1::KEY] )`), so unmatched rows are kept and ownerless ones are not; otherwise give ownerless rows an owner, or drop the null branch. An `isnull` or `is_null` test in the rule stops Data Cache for the Model (P28), so with that form keeping the rows and caching the Model cannot both be had. Whether the `= null` form stops Data Cache too is to be confirmed with the product team
   examples:
     fires: {fixture: sec_rls_null_test_on_own_column, severity: LOW}
     silent: {fixture: sec_rls_null_test_on_joined_column}

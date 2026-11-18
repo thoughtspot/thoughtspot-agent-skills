@@ -7,13 +7,18 @@ ThoughtSpot's Data Cache cannot serve some Models. The product owner's rules
     P19  @custom_calendar_columns       a column on a table-based custom calendar (blocks)
     P20  @sql_passthrough_formulas      a formula calling a SQL pass-through function (blocks)
     P21  @semantic_query_measures       a measure aggregated AGGREGATE: a semantic query
-                                        Model, uncached by design (blocks)
+                                        Model, uncached by design (blocks); a measure only
+                                        flagged pre-aggregated is a reading to confirm
+                                        (open-items #18), and @semantic_query_lead begins
+                                        the message
     P22  @connection_custom_calendars   a connection of the Model's Tables with custom
                                         calendars registered: a user can pick one at run
                                         time, and that query is not cached (warns)
 
 The report's per-Model readiness (audit/data_cache.py) reads these same fields, so the
-Data Cache view and the findings cannot disagree.
+Data Cache view and the findings cannot disagree. It also reads missing_tables: a source
+Table whose TML is not in the context (its export failed) leaves P19, P21, P25 and P28
+not assessed for the Model, since each reads that Table.
 
 Registered into the same registry as engine/fields.py, which imports this module at its
 end. Same import constraint as fields.py: Python 3.9, no third-party imports at module
@@ -22,7 +27,7 @@ level.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
@@ -36,6 +41,10 @@ from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
 #: blank value sets no calendar.
 CODE_BASED_CALENDARS = ("calendar", "fiscal", "default")
 CODE, CUSTOM = "code-based", "custom"
+#: How a Data Cache message begins: a firm reading, or only readings the product team
+#: is to confirm (open-items #18). P21 and P24 choose between them.
+CANT_USE = "Can't use Data Cache"
+MAY_NOT_USE = "May not be able to use Data Cache"
 
 
 def calendar_kind(value: Any) -> Optional[str]:
@@ -145,27 +154,65 @@ def _is_aggregate(properties: dict) -> bool:
     return isinstance(value, str) and value.strip().upper() == "AGGREGATE"
 
 
-def is_semantic_measure(column: dict, table_column: dict) -> bool:
-    """A Model column the source platform aggregates: its own `properties.aggregation`
-    is AGGREGATE (any case), or the Table column it surfaces has `aggregation:
-    AGGREGATE` or `is_pre_aggregated_measure: true` (the YAML boolean only, as
-    tml_lint's I23 reads it)."""
+#: semantic_measure_kind's values.
+AGGREGATED, PRE_AGGREGATED = "aggregate", "pre-aggregated"
+
+
+def semantic_measure_kind(column: dict, table_column: dict) -> Optional[str]:
+    """Whether the source platform aggregates a Model column. AGGREGATED (firm) when its
+    own `properties.aggregation` is AGGREGATE (any case) or the Table column it surfaces
+    has `aggregation: AGGREGATE`; else PRE_AGGREGATED when that Table column has
+    `is_pre_aggregated_measure: true` (the YAML boolean only, as tml_lint's I23 reads
+    it), a reading the product team is to confirm stops Data Cache (open-items #18,
+    point 6); else None."""
     own = tml.mapping(column, "properties")
     table = tml.mapping(table_column, "properties")
-    return _is_aggregate(own) or _is_aggregate(table) \
-        or table.get("is_pre_aggregated_measure") is True
+    if _is_aggregate(own) or _is_aggregate(table):
+        return AGGREGATED
+    return PRE_AGGREGATED if table.get("is_pre_aggregated_measure") is True else None
+
+
+def is_semantic_measure(column: dict, table_column: dict) -> bool:
+    """semantic_measure_kind names a kind for the column."""
+    return semantic_measure_kind(column, table_column) is not None
+
+
+def semantic_measures(item: dict, ctx: Any) -> List[Tuple[str, str]]:
+    """Model: (column name, semantic_measure_kind) for each column it names, in column
+    order."""
+    doc = item.get("doc") or {}
+    table_columns = cached("table_columns", doc, ctx.table_columns, doc)
+    out = []
+    for c in _model_columns(doc):
+        kind = semantic_measure_kind(c, _table_column(c, table_columns))
+        if kind is not None:
+            out.append((_column_label(c), kind))
+    return out
 
 
 @register("semantic_query_measures", uses=(),
           label="the measures the source platform aggregates")
 def _semantic_query_measures(item: dict, ctx: Any) -> Any:
-    """Model: the name of each column is_semantic_measure holds for, in column order;
-    empty when none."""
+    """Model: each column semantic_measures lists, a PRE_AGGREGATED one as "<name>
+    (pre-aggregated, to confirm)"; empty when none."""
     from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    doc = item.get("doc") or {}
-    table_columns = cached("table_columns", doc, ctx.table_columns, doc)
-    return NameList(_column_label(c) for c in _model_columns(doc)
-                    if is_semantic_measure(c, _table_column(c, table_columns)))
+    return NameList(name if kind == AGGREGATED else f"{name} (pre-aggregated, to confirm)"
+                    for name, kind in semantic_measures(item, ctx))
+
+
+def semantic_measures_to_confirm(item: dict, ctx: Any) -> bool:
+    """Model: P21 lists a measure, and every one it lists is PRE_AGGREGATED, a reading
+    to confirm. The readiness then reads "confirm", not "blocked"."""
+    kinds = [kind for _, kind in semantic_measures(item, ctx)]
+    return bool(kinds) and all(k == PRE_AGGREGATED for k in kinds)
+
+
+@register("semantic_query_lead", uses=(), values=(CANT_USE, MAY_NOT_USE),
+          label="whether the Model can't use Data Cache or may not, pending review")
+def _semantic_query_lead(item: dict, ctx: Any) -> str:
+    """Model: how P21's message begins. MAY_NOT_USE when every measure it lists is a
+    reading to confirm (semantic_measures_to_confirm), else CANT_USE."""
+    return MAY_NOT_USE if semantic_measures_to_confirm(item, ctx) else CANT_USE
 
 
 # ── P22: connections defining custom calendars ──────────────────────────────
@@ -211,6 +258,17 @@ def source_connection(source: Dict[str, Any]) -> Optional[Dict[str, Optional[str
     name = name if isinstance(name, str) and name else None
     cid = header.get("dataSourceId") if isinstance(header.get("dataSourceId"), str) else None
     return {"name": name, "id": cid} if (name or cid) else None
+
+
+def missing_tables(item: dict, ctx: Any) -> List[str]:
+    """Model: the sources whose Table TML is not in the context (its export failed, or
+    it is not a Table the audit keeps), a SQL View aside: the audit keeps no SQL View
+    TML by design, and P27 reports it. P19 (a Table column's calendar), P21 (a Table
+    column's flags), P25 (a Table's names) and P28 (a Table's RLS rules) read the
+    Table, so the readiness counts each as not assessed while any is listed."""
+    return [s["name"] for s in model_sources(item.get("doc") or {}, ctx)
+            if s["table"] is None
+            and str(s["header"].get("type") or "").strip().upper() != "SQL_VIEW"]
 
 
 def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
