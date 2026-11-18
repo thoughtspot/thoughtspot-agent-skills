@@ -42,8 +42,8 @@ Verified on two other fixtures instead, one per match path:
 
 | Path | Set (Model) | Liveboard | Result |
 |---|---|---|---|
-| `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model `<redacted-model>` `8b07b2bc-…`) | `<redacted-model>` `73df2a30-e378-44c3-a113-00f269717d19`, plus `<redacted-model>` (a copy) `ee7f0be1-…` and *Food Supy Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
-| `formulas[].expr` | *mytop5* `3fbe9ac6-…`, *mytop10* `8c1cbe6e-…` (Model *Paul - Snowflake Retapp* `5bb6feec-…`) | *Dynamic Set Selection* `eb3871ab-c026-4459-ad2e-aad002cc7f3b` | Both Sets list it with `Viz_1` *Total Sales by fx*, `filter: false` |
+| `search_query` + `answer_columns` | *Promotion Id set* `223a23fc-f5af-4460-908f-e72a9257000e` (Model `<redacted-model>` `8b07b2bc-…`) | `<redacted-model>` `73df2a30-e378-44c3-a113-00f269717d19`, plus `<redacted-model>` (a copy) `ee7f0be1-…` and *Demo Liveboard* `de54cbe2-…` | All three listed, each with `Viz_7` *Promotion Impact on AOV* (`average [Order Revenue] [Promotion Id set]`), `filter: false` |
+| `formulas[].expr` | *mytop5* `3fbe9ac6-…`, *mytop10* `8c1cbe6e-…` (Model *Demo - Snowflake Retapp* `5bb6feec-…`) | *Dynamic Set Selection* `eb3871ab-c026-4459-ad2e-aad002cc7f3b` | Both Sets list it with `Viz_1` *Total Sales by fx*, `filter: false` |
 
 **Divergence (class, not detection) — resolved by #6.** All four Sets above classified
 `REVIEW_MANUAL`, because their dependents response carries `hasInaccessibleDependents: true`.
@@ -57,7 +57,7 @@ grant on the Set reads `REQUIRED`.
 
 Checked on *Advanced Basket Analysis* `b8b5788b-986f-4999-9408-224d88082e3f` and *Basket
 Analysis* `4ab96c01-87e9-46ba-994a-3689eb85ffef` (dependents of *Product Basket 2* / *PC*).
-The dependents item's `author` (`1401d07c-…`, pinelopi.chamalelli) **equals** the Answer's own
+The dependents item's `author` (`1401d07c-…`, `<redacted-user>`) **equals** the Answer's own
 `metadata/search` header `author` / `authorName`. The header `owner` field is **not a user**:
 on an Answer it is the Answer's own GUID (`owner == metadata_id` on both). So `author` is
 the only user-valued owner field ThoughtSpot exposes, and reading it as owner is correct.
@@ -158,7 +158,7 @@ Live re-verification, same admin profile, read-only:
 - Smoke on Dunder Mifflin: **PASS** — PB1 `REVIEW_DELETE`, PB2 `CANDIDATE_ANSWER`, PC `KEEP_SHARED`.
 - TEST_SV_DMSI_AI_CONTEXT: *Static Top 10* and *Customer State set* `CANDIDATE_ANSWER`,
   *Product Category set* `KEEP_SHARED`, all `dependents_complete` true.
-- *Paul - Snowflake Retapp*: *mytop5* / *mytop10* `CANDIDATE_VIZ`.
+- *Demo - Snowflake Retapp* `5bb6feec-…`: *mytop5* / *mytop10* `CANDIDATE_VIZ`.
 - `ts audit run --angles H` on Dunder Mifflin: no `hasInaccessibleDependents` warnings; Sets
   with dependents are recorded and not flagged.
 

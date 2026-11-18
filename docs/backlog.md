@@ -1889,7 +1889,7 @@ the specific API behaviours rather than carrying the broad gaps here.
 **Target:** No date — schedule when embedded-Answer or set-promotion demand is confirmed.
 ## BL-038 — `ts-recipe-formula-weighted-average` skill `Tier 4`
 
-**Source:** Tableau migration sessions (`tableau-migration-testing/twb/test/Weighted Usage.twb`) + production weighted-cost formulas (Albertsons / JD Power). Spun out of the weighted-average mapping work (`feat/weighted-average-mapping`, 2026-06-19).
+**Source:** Tableau migration sessions (`tableau-migration-testing/twb/test/Weighted Usage.twb`) + production weighted-cost formulas (two customers'). Spun out of the weighted-average mapping work (`feat/weighted-average-mapping`, 2026-06-19).
 **Affects:** New `ts-recipe-formula-weighted-average` skill under `agents/cli/` (pure-ThoughtSpot — no platform suffix); family 7 (`ts-recipe-*`)
 **Status:** Open — deferred deliberately. The mapping/coverage knowledge that makes the **converters** weighted-average-aware shipped first (see Related); this standalone interactive recipe is the second, larger deliverable.
 **Related:** BL-037 (recipe skills for investigation patterns); `thoughtspot-formula-patterns.md` → "Weighted average"; `tableau-formula-translation.md` LOD section ("boolean predicate inside a FIXED partition"); coverage-matrix rows 110–112.
@@ -6974,7 +6974,7 @@ closed, and one is untouched:**
 
 | # | Status after the census | Detail |
 |---|---|---|
-| **V1** | **SUBSTANTIALLY SETTLED** — and it settles the converter behaviour that was blocking | The value is a calendar **name**: two real *named* calendars observed on Model columns (`SeanTSCROOTS` on `454 Cal Test (Sean)`, `Dupont_Fiscal_Cal` on `Test Custom Calendars`), which the 40-model run reports as *not* seen. The literal `calendar` is the **default spelling** (70 sightings / 34 unrelated Models). `CALENDAR_TYPE_GREGORIAN`: **0** in 500 documents, on any type, including 0 on the SQL Views where our own reference claimed it — now marked withdrawn/unverified there. And **`calendar:` IS honoured on a Table column** (`FACT_RETAPP_SALES.RECORDDATE: SeanTSCROOTS`), which the 40-model run explicitly reports as not observed — so the Table-TML row withheld in PR #415 has now been added. It also appears on **formula-backed** Model columns (5 sightings), which no reference contemplated. **Residual: one narrow question** — is the literal `calendar` a genuine default *sentinel*, or a customer calendar coincidentally named "calendar"? The 34-Model spread across unrelated tenants strongly favours sentinel. Closing it needs a `GET /api/rest/2.0/calendars/…` read, **not another export** — so the `calendars/create` leg this entry originally specified is no longer the cheapest path |
+| **V1** | **SUBSTANTIALLY SETTLED** — and it settles the converter behaviour that was blocking | The value is a calendar **name**: two real *named* calendars observed on Model columns (`Retail454Cal` on `454 Calendar Test`, `AcmeFiscalCal` on `Test Custom Calendars`), which the 40-model run reports as *not* seen. The literal `calendar` is the **default spelling** (70 sightings / 34 unrelated Models). `CALENDAR_TYPE_GREGORIAN`: **0** in 500 documents, on any type, including 0 on the SQL Views where our own reference claimed it — now marked withdrawn/unverified there. And **`calendar:` IS honoured on a Table column** (`FACT_RETAPP_SALES.RECORDDATE: Retail454Cal`; names synthetic, see the census), which the 40-model run explicitly reports as not observed — so the Table-TML row withheld in PR #415 has now been added. It also appears on **formula-backed** Model columns (5 sightings), which no reference contemplated. **Residual: one narrow question** — is the literal `calendar` a genuine default *sentinel*, or a customer calendar coincidentally named "calendar"? The 34-Model spread across unrelated tenants strongly favours sentinel. Closing it needs a `GET /api/rest/2.0/calendars/…` read, **not another export** — so the `calendars/create` leg this entry originally specified is no longer the cheapest path |
 | **V2** | **HALF SETTLED** | The `column` form is **confirmed live** — one sighting, on a **Table** column, carrying a **bare column name** (`{"column": "TARGET_CURRENCY"}`), *not* a `TABLE::Column` reference. That answers one of this row's two original questions outright. `is_browser`: **0** sightings in 500 documents. **Residual:** whether either non-`iso_code` form survives an import/export **round trip** — an export-only census cannot show that — and whether `is_browser` is emitted at all |
 | **V3** | **CONFIRMED PRESENT** — closeable | Custom-map `geo_config` (`custom_file_guid` + `geometryType`) confirmed in **3 production Models / 7 columns**, `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. The declared-loss-under-X8 verdict is unchanged; what changes is that the path is **exercised in the wild**, so real models will hit it. This row was always read-only-by-design, and it now has its shape on record — it can be marked closed |
 | **V4** | **UNTOUCHED, and now negatively evidenced twice** | `is_mandatory_token_filter`: **0** of 500 documents. A second and far larger survey has failed to find it, which means a survey is the wrong instrument — a property that never appears cannot be shown to round-trip. Closing V4 requires **constructing** an object that sets the flag and round-tripping it, exactly as this entry's original step describes. Unchanged and still the highest-stakes of the four, because it fails open |
@@ -7390,7 +7390,7 @@ exports before changing anything):
 6. **`search_query` still named the cascaded-away formula.** `_strip_view_search_query`
    runs before the formula cascade is known, so it cannot see a formula that column
    removal *cascades* into -- and a View references its formulas from the search string by
-   id. `OptumRx View`'s real query begins `[formula_PMPM month] [formula_PMPM month].monthly`;
+   id. `Acme View`'s real query begins `[formula_PMPM month] [formula_PMPM month].monthly`;
    removing `Fill Date` dropped that formula and left the query naming it, the same
    dangling reference by another route. `_strip_view_formulas` now re-sanitizes against the
    removed formulas' ids and names. Corpus-measured: **94 cases** with the old code, **0**
@@ -7742,7 +7742,7 @@ regardless, and a hand-authored Model can still carry the shape.
 ## BL-205 -- an ERD from a source semantic definition is possible but entirely manual: `build-model` demands warehouse-registration inputs a diagram never uses `Tier 2` -- DONE (2026-08-05)
 
 **Filed:** 2026-08-05.
-**Source:** rendering an ERD for a customer Snowflake SV (`DEV_GOLD.SALESFORCE.SUPPORT_CASE_SV`,
+**Source:** rendering an ERD for a customer Snowflake SV (`<redacted-schema>.SUPPORT_CASE_SV`,
 13 tables / 12 joins / 5 role-play aliases). The skill has no source-definition path, so the
 whole pipeline was assembled by hand in-session.
 **Affects:** `agents/cli/ts-object-model-erd/SKILL.md` (Step 1),
@@ -11510,7 +11510,7 @@ symptom this item exists for, the one `_extract_joins`' own call site warns abou
 multi-table model imports with no join and ThoughtSpot rejects it"), is unchanged.
 
 **Filed:** 2026-08-06. **Jira:** SCAL-330635.
-**Source:** `ts-convert-from-tableau` accuracy-testing pass (Keshav Sharma KT handoff) --
+**Source:** `ts-convert-from-tableau` accuracy-testing pass (a colleague's KT handoff) --
 found on `Multi level WB v0.twb`, a workbook built specifically to exercise multi-level
 formulas and multi-table joins. First concrete test case for
 `references/open-items.md` #3 (COLLECTION datasources -- now OPEN; its "no example
