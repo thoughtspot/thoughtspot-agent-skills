@@ -42,7 +42,8 @@ def render(html_text: str, tmp_path, route: str = "", actions: str = "",
     "...", "visible": "...", "extra": ...}` for `html_text` opened at `#route`. `actions`,
     a script body, runs on load before the probe reads the page (a click, say). `size`
     is the window, "width,height". `settle_ms` is how long after load the probe reads the
-    page: raise it when `actions` finish on a timer or an animation frame."""
+    page: raise it when `actions` finish on a timer. Animation frames stop firing soon after
+    load under `--virtual-time-budget`, so an animation cannot be waited on here."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")

@@ -16,5 +16,9 @@ is in CODEOWNERS: a re-pin widens that exemption, so it is the reviewed step.
 the bundle. `@dagrejs/dagre` is the maintained fork of `dagre`; it does not bundle lodash, so it is
 96 KB against `dagre` 0.8.5's 284 KB.
 
+`MANIFEST`'s hashes are of the files as served at the URLs above on 2026-11-18: a reviewer of a
+re-pin can download the named version and compare its SHA-256 without trusting the committer.
+`.gitattributes` keeps these files byte-exact (no line-ending conversion).
+
 To update one: download the new version from the same source, replace the file, update
 its line in `MANIFEST` (`shasum -a 256 <file>`) and this table, and check the licence.

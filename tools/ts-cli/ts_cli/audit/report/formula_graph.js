@@ -184,8 +184,19 @@ function buildFormulaGraph(c, guid, tree){
                 y: box.clientHeight / 2 - (bb.y1 + bb.y2) / 2 * FORMULA_GRAPH_MIN_ZOOM});
       }
       var sel = cy.$(".focus");
-      if(sel.length) cy.center(sel);
+      if(sel.length) cy.pan(panTo(sel));
     }, 0);
+  }
+  /* The pan that puts `n` in the middle of the canvas's visible part: on a narrow screen
+     the definition is a sheet fixed over the foot of the page (styles.css), and a node
+     centred in the whole canvas would sit under it. */
+  function panTo(n){
+    var w = cy.width(), h = cy.height(), pos = n.position(), z = cy.zoom();
+    if(getComputedStyle(panel).position === "fixed" && !panel.classList.contains("fdetail-empty")){
+      var under = box.getBoundingClientRect().bottom - panel.getBoundingClientRect().top;
+      if(under > 0) h = Math.max(40, h - under);
+    }
+    return {x: w / 2 - pos.x * z, y: h / 2 - pos.y * z};
   }
   function clearHighlight(){
     if(cy) cy.elements().removeClass("faded focus lit");
@@ -201,7 +212,7 @@ function buildFormulaGraph(c, guid, tree){
     reach.removeClass("faded");
     reach.edges().addClass("lit");
     n.addClass("focus");
-    if(animate) cy.animate({center: {eles: n}, duration: 200});
+    if(animate) cy.animate({pan: panTo(n), duration: 200});
     else fit();
   }
   var view = tree._view = {
@@ -211,8 +222,11 @@ function buildFormulaGraph(c, guid, tree){
       panel.classList.remove("fdetail-empty");
       layout.classList.add("ftree-has-detail");
       var id = graphNodeId(target), redrawn = false;
-      if(partial && !(shown && shown[id])){
-        shown = graphLineage(tree, target);
+      var lineage = partial && graphLineage(tree, target);
+      /* redraw unless the whole lineage is drawn: then what is drawn upstream and
+         downstream of the node is exactly its lineage, and nothing else */
+      if(partial && !(shown && Object.keys(lineage).every(function(k){ return shown[k]; }))){
+        shown = lineage;
         draw(shown);
         redrawn = true;
       }

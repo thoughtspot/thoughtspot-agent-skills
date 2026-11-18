@@ -196,7 +196,6 @@ def test_a_model_past_the_cap_is_drawn_one_lineage_at_a_time(tmp_path):
     page = _report(("m-3", _big(200)))   # 200 formulas + 200 columns = 400 nodes
     shown = report_browser.render(page, tmp_path, "formulas/m-3/graph", actions=_CY + _LABELS + (
         'var first = labels("node.formula");'
-        'Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-search"), function(){ return true; });'
         'var s = document.querySelector("#v-formulas .ftree-search");'
         's.value = "F102"; s.dispatchEvent(new Event("input"));'
         'Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
@@ -217,17 +216,31 @@ _IN_VIEW = ('function inView(cy){ var n = cy.$(".focus"); if(!n.length) return n
             ' return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= cy.width() && b.y2 <= cy.height(); }')
 
 
+def _chains(k):
+    """k separate chains of five formulas, one column each: tall, under the cap at k = 29."""
+    return _big(5 * k)
+
+
 @needs_chrome
-def test_a_selection_carried_from_the_tree_lands_in_view(tmp_path):
-    shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1", actions=_IN_VIEW + (
+@pytest.mark.parametrize("size", ["1400,900", "800,700"])
+def test_a_selection_carried_from_the_tree_lands_in_view(tmp_path, size):
+    # F144 sits far down a tall graph; on a narrow screen the definition is a sheet over
+    # the foot of the page, so the node must sit in the canvas above it
+    shown = report_browser.render(_report(("m-5", _chains(29))), tmp_path, "formulas/m-5", actions=(
         'var row = Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-row"),'
-        '  function(r){ var n = r.querySelector(".ftree-name"); return n && n.textContent === "Gross Margin %"; });'
-        'row.click(); location.hash = "#formulas/m-1/graph";'
+        '  function(r){ var n = r.querySelector(".ftree-name"); return n && n.textContent === "F144"; });'
+        'row.click(); location.hash = "#formulas/m-5/graph";'
         'setTimeout(function(){'
-        '  var cy = document.getElementById("v-formulas")._cy; window.__extra = inView(cy); }, 100);'),
-        settle_ms=400)
+        '  var cy = document.getElementById("v-formulas")._cy, n = cy.$(".focus");'
+        '  var b = n.renderedBoundingBox(), box = cy.container().getBoundingClientRect();'
+        '  var panel = document.querySelector("#v-formulas .fdetail");'
+        '  var bottom = getComputedStyle(panel).position === "fixed" ?'
+        '    Math.min(cy.height(), panel.getBoundingClientRect().top - box.top) : cy.height();'
+        '  window.__extra = {label: n.data("label"), ok: b.x1 >= 0 && b.y1 >= 0 && b.x2 <= cy.width() && b.y2 <= bottom};'
+        '}, 100);'),
+        size=size, settle_ms=400)
     assert shown["errors"] == []
-    assert shown["extra"] is True
+    assert shown["extra"] == {"label": "F144", "ok": True}
 
 
 @needs_chrome
@@ -269,3 +282,31 @@ def test_a_selection_carried_to_the_tree_is_scrolled_into_view(tmp_path):
         settle_ms=400)
     assert shown["errors"] == []
     assert shown["extra"] is True
+
+
+@needs_chrome
+def test_past_the_cap_a_node_already_drawn_still_shows_its_whole_lineage(tmp_path):
+    """Picking Alpha draws Alpha's lineage, which holds Mix but not Beta or Rate; picking
+    Mix then must draw Mix's own lineage, not light what happens to be on screen."""
+    fillers = [_f(f"formula_X{i}", f"X{i}", f"sum ( [ORDERS::X{i}] )") for i in range(160)]
+    model = {"name": "Mixed", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+             "parameters": [{"name": "Rate", "data_type": "DOUBLE"}],
+             "formulas": fillers + [
+                 _f("formula_Alpha", "Alpha", "sum ( [ORDERS::A] )"),
+                 _f("formula_Beta", "Beta", "sum ( [ORDERS::B] )"),
+                 _f("formula_Mix", "Mix", "[formula_Alpha] + [formula_Beta] * [Rate]"),
+                 _f("formula_Top", "Top", "[formula_Mix] * 2")],
+             "columns": [_col(f["name"], f["id"]) for f in fillers] + [_col("Top", "formula_Top")]}
+    shown = report_browser.render(_report(("m-6", model)), tmp_path, "formulas/m-6/graph", actions=(
+        'function pick(name){ var s = document.querySelector("#v-formulas .ftree-search");'
+        '  s.value = name; s.dispatchEvent(new Event("input"));'
+        '  Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+        '    function(a){ return a.textContent === name; }).click(); }'
+        'pick("Alpha");'
+        'var cy = document.getElementById("v-formulas")._cy;'
+        'cy.nodes().filter(function(n){ return n.data("label") === "Mix"; }).emit("tap");'
+        'cy = document.getElementById("v-formulas")._cy;'
+        'window.__extra = cy.nodes().filter(function(n){ return !n.hasClass("faded"); })'
+        '  .map(function(n){ return n.data("label"); }).sort();'))
+    assert shown["errors"] == []
+    assert shown["extra"] == sorted(["Mix", "Alpha", "Beta", "Rate", "ORDERS::A", "ORDERS::B", "Top"])

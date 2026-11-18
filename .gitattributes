@@ -1,0 +1,2 @@
+# Vendored JavaScript is pinned by SHA-256 (tools/ts-cli/ts_cli/audit/vendor/MANIFEST): keep it byte-exact.
+tools/ts-cli/ts_cli/audit/vendor/* -text
