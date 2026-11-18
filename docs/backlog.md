@@ -493,6 +493,7 @@ are roughly ordered by value÷effort.
 | BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
 | BL-595 | Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it | 2027-01-31 |
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
+| BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -7023,8 +7024,9 @@ this census could not see by construction.
 are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
 not repo work. This entry covers only the four verifications, which *are* ours to close.
 
-**Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
-any unrelated live check.
+**Target:** next `se-thoughtspot` session. V1 is answered (2026-11-18 ruling), so what is left is
+V2, which needs an object built to set the `column` and `is_browser` forms; it cannot ride along
+with an unrelated live check.
 
 ---
 
@@ -17688,13 +17690,13 @@ disagree.
 
 **Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
 
-**What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each reads To confirm or Not assessed, never Can use:
+**What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each open reading reads To confirm or Not assessed, never Can use, with two qualifications. Point 2's negative side is excepted by decision (a host without `privatelink` reads as no PrivateLink), and point 3 is firm, since the product owner answered it:
 
 - P24 reads OAuth from a Databricks `client_id` and `client_secret` pair (point 1), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
-- P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the `= null` form to confirm (point 4).
-- P19 lists a formula that names a custom calendar (point 5), and a code-based value that a custom calendar is also named (point 9), to confirm.
+- P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the operator forms S12 accepts (`= null`, `!= null`, `<= null`, `>= null`) to confirm (point 4).
+- P19 lists a formula that names a custom calendar (point 5), and a code-based value on a column or in a formula that a custom calendar is also named (point 9), to confirm.
 - P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
-- P23 cannot type a source that is a View (point 7), and P28 cannot judge a rule whose path ids differ only in case (point 8): both leave the Model Not assessed.
+- P23 cannot type a source that is a View (point 7). P28 cannot judge a rule naming a path id its Table does not define exactly, a case-only difference included (point 8). Both leave the Model Not assessed.
 
 **Do.**
 1. Get the team's answer on each of the nine points in open-items #18.
@@ -17784,4 +17786,17 @@ A converted Model can be uncached without the user being told, and the invariant
 2. Rewrite the sample report against v1.1, or drop the rows v1.1 now maps.
 
 **Target:** 2027-02-28.
+
+## BL-597 — the Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** review of the Data Cache readiness rules (the audit now uses `formula_common`'s helpers). **Relates to:** BL-217 part 2.
+
+**What.** `tools/ts-cli/ts_cli/sisense/functions.py` defines its own `_split_top_level_args` and `_match_paren`. Neither treats a `[...]` reference as one unit. The paren matcher is not quote-aware either. Both serve `_rewrite_conditionals` and `_rewrite_round`, so a reference holding a quote, or a string holding a paren, can split or close in the wrong place. The shared module `ts_cli/formula_common.py` already has helpers that handle both (`split_top_level_args`, `close_paren`), and its docstring says not to fork them into a platform module.
+
+**Do.**
+1. Replace the Sisense copies with `formula_common`'s helpers.
+2. Tests with a quote inside a reference and a paren inside a string, through `_rewrite_conditionals` and `_rewrite_round`.
+3. Consider a `check_converter_parity` rule that flags any `ts_cli` module defining a function with the name of a `formula_common` helper.
+
+**Target:** 2027-01-31.
 
