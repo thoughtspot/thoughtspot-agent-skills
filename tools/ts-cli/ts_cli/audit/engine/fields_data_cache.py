@@ -172,8 +172,8 @@ def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
     """The connections the Model's Tables are on, each once in Table order: `{"name",
     "id"}` — the name from the Table TML's `table.connection.name` (absent on Falcon
     and system Tables, which have no connection), the id from the Table's metadata
-    header `dataSourceId` when it carries one (not seen in this repo's fixtures; used
-    only when present)."""
+    header `dataSourceId` when it carries one (none of 93 headers on the SE demo cluster
+    did, 2026-11-18: the name carries the match; used only when present)."""
     headers = cached("headers_by_id", ctx, _headers_by_id, ctx)
     out: List[Dict[str, Optional[str]]] = []
     seen = set()

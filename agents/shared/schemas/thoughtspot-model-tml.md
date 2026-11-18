@@ -276,9 +276,10 @@ Three consequences:
 2. **`calendar:` is honoured on a Table column**, not only a Model column — see
    [thoughtspot-table-tml.md](thoughtspot-table-tml.md). It also appears on **formula-backed**
    Model columns (5 sightings), which neither reference previously contemplated.
-3. **Still open:** whether the literal `calendar` is a genuine default sentinel or a customer
-   calendar that happens to be named "calendar". The 34-Model spread across unrelated tenants
-   strongly favours *sentinel*, but confirming it needs a `GET /api/rest/2.0/calendars/…` read.
+3. **`calendar` and `fiscal` are code-based calendars, not custom ones** (product owner,
+   2026-11-18), as is a column with no `calendar:`. Any other value names a table-based custom
+   calendar registered on the connection (`POST /api/rest/2.0/calendars/search`). The audit's
+   Data Cache rules read it that way (P19: a custom calendar stops Data Cache).
 
 ### `formulas[]` fields
 

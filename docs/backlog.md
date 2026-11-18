@@ -17644,3 +17644,15 @@ disagree.
 3. Prove it with a test: an item headed `— TO VERIFY` is reported as unresolved.
 
 **Target:** 2026-12-31.
+
+## BL-588 — the report's sidebar writes a Model guid into a link without escaping it `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** building the Data Cache view (ts-audit 3.23.0).
+
+**What.** `core.js` builds each sidebar Model link's `href` from the Model guid without `esc`. A test with a guid holding markup ran its script. Real guids are hex, so this needs malformed or hand-built audit JSON.
+
+**Do.**
+1. Escape the guid in every `href` core.js builds (and check the views for the same pattern).
+2. A headless-Chrome test with a guid holding a quote and markup: the link renders as text, nothing runs.
+
+**Target:** 2027-01-31.

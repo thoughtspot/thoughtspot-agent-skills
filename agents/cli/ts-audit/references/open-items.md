@@ -273,9 +273,10 @@ the four ids and names it reads. It matches a calendar to a Model's Tables by
 connection name, any case, and by connection id where a Table's metadata header
 carries `dataSourceId`.
 
-**Not verified.** That the metadata header's `dataSourceId` is the connection id: no
-fixture in this repo carries it, so the id match is used only when it is present and
-the name match carries the rule. And the paging guard against a server that ignores
+**Checked 2026-11-18, the SE demo cluster:** none of 93 Table metadata headers in a 20-Model
+snapshot carries `dataSourceId` (73 carry `dataSourceName`), so the name match is what
+carries the rule; the id match stays for a build that adds the key. **Not verified:** what
+that key would hold. And the paging guard against a server that ignores
 `record_offset` (a repeated full page is an error) has met no such server.
 
 ---
