@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Iterable, NoReturn, Optional, Tuple
+from typing import Any, Dict, Iterable, NoReturn, Optional, Tuple
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine import tml
@@ -372,10 +372,16 @@ _CONNECTION_SEARCH_PATH = "/api/rest/2.0/connection/search"
 def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
     """Every connection's derived facts (`connection/search` with `include_details`,
     100 a page; connection_facts.connection_facts: `{id, name, type, oauth, oauth_m2m,
-    privatelink, parameterized}`); None, with a warning, when the search failed
-    (`_paged_fetch`). Each configuration is parsed and dropped here, page by page: no
-    value of it is kept, logged or warned about, and a refused search is reported by
-    its status and path alone, never its response body."""
+    privatelink, parameterized, parameterized_connection}`); None, with a warning, when
+    the search failed (`_paged_fetch`). Each configuration is parsed and dropped here,
+    page by page: no value of it is kept, logged or warned about, and a refused search
+    is reported by its status and path alone, never its response body.
+
+    `parameterized_connection` comes from each connection's metadata header
+    (_fetch_connection_flags), since the search shows a parameterized connection's
+    settings without their tokens (ts-audit open-items #17). It stays None, unknown,
+    for a connection with no header, and for every connection when that search
+    failed."""
     from ts_cli.paged_search import search_pages
     _log("Fetching connection settings...")
 
@@ -383,8 +389,51 @@ def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
         return search_pages(lambda body: _facts_page(fetch_page(body)),
                             {"include_details": True}, 100, id_key="id",
                             what="connection/search", items="connections")
-    return _paged_fetch(client, _CONNECTION_SEARCH_PATH, "Connection",
-                        "connection settings", warnings, search, with_body=False)
+    facts = _paged_fetch(client, _CONNECTION_SEARCH_PATH, "Connection",
+                         "connection settings", warnings, search, with_body=False)
+    if facts is None:
+        return None
+    flags = _fetch_connection_flags(client, warnings)
+    for fact in facts:
+        fact["parameterized_connection"] = (flags or {}).get(fact.get("id"))
+    return facts
+
+
+def _fetch_connection_flags(client: Any, warnings: list) -> Optional[Dict[str, Any]]:
+    """Connection id -> connection_facts.header_parameterized, from a paged
+    `metadata/search` of CONNECTION headers (100 a page); None, with a warning, when
+    that search failed (`_paged_fetch`, the response body kept out). Each header is
+    reduced to its id and that one flag as its page arrives."""
+    from ts_cli.paged_search import search_pages
+    body = {"metadata": [{"type": "CONNECTION"}], "include_headers": True,
+            "include_hidden_objects": True}
+
+    def search(fetch_page: Any) -> list:
+        return search_pages(lambda b: _flags_page(fetch_page(b)), body, 100, id_key="id",
+                            what="metadata/search", items="connection headers")
+    found = _paged_fetch(client, _METADATA_SEARCH_PATH, "Connection header",
+                         "the connections' parameterized flags", warnings, search,
+                         with_body=False)
+    if found is None:
+        return None
+    return {f["id"]: f["parameterized_connection"] for f in found if f.get("id")}
+
+
+def _flags_page(page: Any) -> Any:
+    """One CONNECTION header page, each row reduced at once to `{id,
+    parameterized_connection}`; a page that is not a list of mappings is left for the
+    pager to refuse, as _facts_page does."""
+    from ts_cli.audit.connection_facts import header_parameterized
+    if not isinstance(page, list) or not all(isinstance(r, dict) for r in page):
+        return page
+    out = []
+    for row in page:
+        header = row.get("metadata_header") if isinstance(row.get("metadata_header"), dict) \
+            else {}
+        cid = header.get("id") or row.get("metadata_id")
+        out.append({"id": cid if isinstance(cid, str) else None,
+                    "parameterized_connection": header_parameterized(header)})
+    return out
 
 
 def _facts_page(page: Any) -> Any:

@@ -185,6 +185,19 @@ def test_a_connection_p24_cannot_read_leaves_the_model_not_assessed(facts):
     assert _readiness(ctx) == ("unknown", ["P24"])
 
 
+@pytest.mark.parametrize("flag, listed, readiness", [
+    (True, ["Warehouse A: template variable"], ("blocked", [])),
+    (None, [], ("unknown", ["P24"])),
+    (False, [], ("ready", [])),
+])
+def test_p24_reads_the_parameterized_connection_flag(flag, listed, readiness):
+    """The header's flag is a firm reading; a header that could not be read is unknown."""
+    ctx = fx.build_cache_ctx(connections=[conn(parameterized_connection=flag)],
+                             headers=SNOWFLAKE_HEADER)
+    assert _field(ctx, "@connection_cache_blockers") == listed
+    assert _readiness(ctx) == readiness
+
+
 def test_an_unknown_connection_does_not_hide_a_firm_blocker():
     ctx = fx.build_cache_ctx(connections=[conn(oauth=None, parameterized=True)],
                              headers=SNOWFLAKE_HEADER)

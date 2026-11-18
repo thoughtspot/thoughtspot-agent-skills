@@ -301,8 +301,9 @@ data_warehouse_type, details: {type, configuration, ...}}`:
 - `details.configuration` is a **JSON string** of the connection's settings,
   credentials included. They were masked (`******`) in what the probe saw; the audit
   does not rely on that. It parses the string in the fetch, keeps
-  `{id, name, type, oauth, oauth_m2m, privatelink, parameterized}` and drops the rest, so no
-  configuration value is stored, logged, snapshotted or reported
+  `{id, name, type, oauth, oauth_m2m, privatelink, parameterized,
+  parameterized_connection}` and drops the rest, so no configuration value is stored,
+  logged, snapshotted or reported
   (`audit/connection_facts.py`; a test checks the context, the snapshot, the audit
   JSON, the report and the logs).
 - **There is no auth-type field.** OAuth shows only in setting names: `OAuth2ClientId`
@@ -316,9 +317,13 @@ data_warehouse_type, details: {type, configuration, ...}}`:
   2026-11-18, read-only: the search does not show one.** None of the 1,815 connections
   it returned held a token. One connection's metadata header carries
   `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each
-  of its six properties, but the search returned none of them as a token. So P24
-  cannot see a parameterized connection this way; the header flag is the signal
-  (BL-595). Only key names and counts were read; no value was printed or kept.
+  of its six properties, but the search returned none of them as a token. Only key
+  names and counts were read; no value was printed or kept. **So P24 reads the header
+  instead.** The connections fetch also pages a `metadata/search` of CONNECTION headers.
+  It keeps, per connection, whether `parameterizedConnection` or `isParameterized` is
+  true (`parameterized_connection`). Run live on the same cluster, the audit's fetch
+  read 1,815 connections and flagged exactly that one. A connection with no header, or
+  every connection when that search fails, reads as unknown.
 
 The Table metadata headers carry `dataSourceType`: `RDBMS_SNOWFLAKE` on 73 of 92 headers
 in the sample (Model headers carry none). P23 reads the connection's

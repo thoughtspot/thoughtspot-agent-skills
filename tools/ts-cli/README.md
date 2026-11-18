@@ -4906,7 +4906,11 @@ The connection search answers each connection's configuration, credentials inclu
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
 PrivateLink or a template variable (and whether the OAuth reading rests only on a
 `client_id` and `client_secret` pair, `oauth_m2m`), and keeps, logs and reports no
-configuration value. A refused connection search is reported by its status and path
+configuration value. The search shows a parameterized connection's settings without
+their `${var}` tokens, so a paged `metadata/search` of CONNECTION headers adds whether
+each connection is parameterized (`parameterizedConnection` or `isParameterized`). A
+connection with no header, or every connection when that search fails, reads as
+unknown, and P24 leaves its Models not assessed. A refused connection search is reported by its status and path
 alone, never its response body.
 Any other exception is a bug and propagates unchanged. A snapshot captured before
 ts-cli 0.219.0 holds neither calendars nor connection settings, so replaying the P

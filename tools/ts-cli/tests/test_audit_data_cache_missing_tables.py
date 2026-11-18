@@ -51,12 +51,18 @@ def _response(body):
 
 class Client:
     """Exports Model m1 with Table t1, and t2 too unless `t2_fails`; every source's
-    header says Snowflake on Warehouse A, whose settings and calendars are searched."""
+    header says Snowflake on Warehouse A, whose settings and calendars are searched.
+    Warehouse A's connection header says `parameterizedConnection: parameterized`."""
 
-    def __init__(self, t2_fails: bool):
-        self.t2_fails = t2_fails
+    def __init__(self, t2_fails: bool, parameterized: bool = False):
+        self.t2_fails, self.parameterized = t2_fails, parameterized
 
     def post(self, url, json=None, **_kw):
+        if url.endswith("/metadata/search") \
+                and [m.get("type") for m in json["metadata"]] == ["CONNECTION"]:
+            return _response([] if json.get("record_offset") else [{"metadata_header": {
+                "id": "conn-a", "parameterizedConnection": self.parameterized,
+                "isParameterized": False}}])
         if url.endswith("/metadata/tml/export"):
             t2 = FAILED if self.t2_fails else {"edoc": yaml.safe_dump(_table("t2", "ITEMS"))}
             return _response([{"edoc": yaml.safe_dump(MODEL)},
@@ -77,8 +83,8 @@ def _config():
     return json.dumps({"accountName": "acme", "user": "svc", "password": "******"})
 
 
-def _readiness(t2_fails):
-    ctx = build_context(Client(t2_fails), ["m1"], {"calendars", "connections"})
+def _readiness(t2_fails, parameterized=False):
+    ctx = build_context(Client(t2_fails, parameterized), ["m1"], {"calendars", "connections"})
     [model] = run_audit(None, ["m1"], ["P"], ctx=ctx)["corpus"]["models"]
     return ctx, model["data_cache"]
 
@@ -95,3 +101,12 @@ def test_control_the_same_model_with_every_table_exported_can_use_data_cache():
     ctx, dc = _readiness(t2_fails=False)
     assert "t2" in ctx.tables
     assert (dc["readiness"], dc["reasons"], dc["not_assessed"]) == ("ready", [], [])
+
+
+def test_a_model_on_a_parameterized_connection_cannot_use_data_cache():
+    """The connection search shows no `${var}` token for a parameterized connection
+    (open-items #17); its metadata header says so, and P24 reads that."""
+    ctx, dc = _readiness(t2_fails=False, parameterized=True)
+    assert dc["readiness"] == "blocked"
+    assert [(r["rule"], r["items"]) for r in dc["reasons"]] == [
+        ("P24", ["Warehouse A: template variable"])]

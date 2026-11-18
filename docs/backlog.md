@@ -491,7 +491,6 @@ are roughly ordered by value÷effort.
 | BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
 | BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
 | BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
-| BL-595 | P24 cannot see a parameterized connection: the connection search returns its settings without the tokens | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17754,15 +17753,3 @@ A converted Model can be uncached without the user being told, and the invariant
 
 **Target:** 2027-01-31.
 
-## BL-595 — P24 cannot see a parameterized connection: the connection search returns its settings without the tokens `Tier 3`
-
-**Filed:** 2026-11-18. **Source:** live probe for the Data Cache review; ts-audit open-items #17.
-
-**What.** P24 reads a template variable as a connection setting whose whole value is a `${var}` token. On the SE demo cluster none of the 1,815 connections `connection/search` returned held a token. One connection's metadata header carries `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each of its six properties, but the search returned none of them as a token. So P24 never sees a parameterized connection, and a Model on one can read "Can use".
-
-**Do.**
-1. Derive the connection facts' `parameterized` flag from the connection's metadata header (`parameterizedConnection`, and `isParameterized`), from a paged `metadata/search` of type CONNECTION, keeping the token reading as a second signal.
-2. A test with a parameterized connection whose settings hold no token.
-3. Re-run the 20-Model sample and record the change in ts-audit open-items #17.
-
-**Target:** 2027-01-31.

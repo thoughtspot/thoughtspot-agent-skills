@@ -115,8 +115,13 @@ def unjudged_sources(item: dict, ctx: Any) -> List[str]:
 
 # ── P24: connections using OAuth, PrivateLink or a template variable ────────
 
-#: The connection_facts flags P24 reads.
+#: The readings P24 makes of a connection.
 _CONNECTION_FLAGS = ("oauth", "privatelink", "parameterized")
+#: The connection_facts keys each reading rests on: a template variable is a `${var}`
+#: token in the settings or the metadata header's flag (the search shows a
+#: parameterized connection without its tokens, ts-audit open-items #17).
+_FLAG_FACTS = {"oauth": ("oauth",), "privatelink": ("privatelink",),
+               "parameterized": ("parameterized", "parameterized_connection")}
 
 
 def connection_readings(item: dict, ctx: Any) -> List[Dict[str, Any]]:
@@ -129,8 +134,9 @@ def connection_readings(item: dict, ctx: Any) -> List[Dict[str, Any]]:
     for conn in model_connections(item.get("doc") or {}, ctx):
         mine = connection_facts_for(conn, ctx.connections)
         found = [_flag_reading(key, mine) for key in _CONNECTION_FLAGS
-                 if any(f.get(key) is True for f in mine)]
-        unknown = not mine or any(f.get(key) is None for f in mine for key in _CONNECTION_FLAGS)
+                 if any(f.get(k) is True for f in mine for k in _FLAG_FACTS[key])]
+        unknown = not mine or any(f.get(k) is None for f in mine
+                                  for key in _CONNECTION_FLAGS for k in _FLAG_FACTS[key])
         out.append({"connection": conn["name"] or conn["id"], "found": found,
                     "unknown": unknown})
     return out

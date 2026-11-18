@@ -3,7 +3,8 @@
 `connection/search` with `include_details` answers each connection with
 `details.configuration`, a JSON string of its settings, credentials included (live probe,
 the SE demo cluster, 2026-11-18; ts-audit open-items #17). The audit parses it in the
-fetch and keeps only `{id, name, type, oauth, oauth_m2m, privatelink, parameterized}`: no
+fetch and keeps only `{id, name, type, oauth, oauth_m2m, privatelink, parameterized,
+parameterized_connection}` (the last from each connection's metadata header): no
 configuration value may reach the context, a snapshot, the audit JSON, a warning or a
 log line. Fetched once per audit, paged, only when a selected rule declares it; None when
 not fetched or the search failed, as for `calendars`.
@@ -116,7 +117,7 @@ def test_facts_keep_ids_names_and_type_only():
     facts = connection_facts(SECRET_CONNECTIONS[0])
     assert facts == {"id": "conn-0", "name": "Warehouse A", "type": "SNOWFLAKE",
                      "oauth": True, "oauth_m2m": False, "privatelink": True,
-                     "parameterized": False}
+                     "parameterized": False, "parameterized_connection": None}
     assert tuple(facts) == CONNECTION_KEYS
 
 
@@ -158,16 +159,24 @@ def _response(status, body):
     return r
 
 
+def _is_connection_header_search(json):
+    return [m.get("type") for m in (json or {}).get("metadata") or []] == ["CONNECTION"]
+
+
 class Client:
     """Model `m1` (on Table t1 and a SQL View v1) exports; `connection/search` answers
-    `search(body)`; the metadata search answers headers for what it is asked."""
+    `search(body)`; the CONNECTION header search answers `headers(body)` (none by
+    default); the metadata search answers headers for what it is asked."""
 
-    def __init__(self, search):
+    def __init__(self, search, headers=None):
         self.search = search
+        self.headers = headers or (lambda body: _response(200, []))
         self.calls = []
 
     def post(self, url, json=None, **kw):
         self.calls.append((url, json, kw))
+        if url.endswith("/metadata/search") and _is_connection_header_search(json):
+            return self.headers(json)
         if url.endswith("/metadata/tml/export"):
             return _response(200, [{"edoc": yaml.safe_dump(MODEL)}, {"edoc": yaml.safe_dump(TABLE)},
                                    {"edoc": yaml.safe_dump({"guid": "v1", "sql_view": {
@@ -188,6 +197,59 @@ def _paged(connections):
         off, size = body["record_offset"], body["record_size"]
         return _response(200, connections[off:off + size])
     return search
+
+
+def _connection_header(i, configs=None, **flags):
+    """A CONNECTION metadata/search row; `configs` stands for whatever else a header
+    carries, which the audit must not keep."""
+    header = {"id": f"conn-{i}", "name": f"C{i}", "configs": configs or {"pw": SECRETS[0]}}
+    header.update(flags)
+    return {"metadata_id": f"conn-{i}", "metadata_header": header}
+
+
+def test_the_parameterized_flag_is_read_from_each_connections_header():
+    """connection/search returns a parameterized connection's settings without its
+    `${var}` tokens (open-items #17), so the flag comes from the connection's metadata
+    header: `parameterizedConnection`, or `isParameterized`, true. A header without
+    either key, or no header at all, leaves it unknown, never "no"."""
+    conns = [_connection(i, f"C{i}") for i in range(5)]
+    headers = [_connection_header(0, parameterizedConnection=True, isParameterized=False),
+               _connection_header(1, parameterizedConnection=False, isParameterized=True),
+               _connection_header(2, parameterizedConnection=False, isParameterized=False),
+               _connection_header(3)]
+    client = Client(_paged(conns), _paged(headers))
+    ctx = build_context(client, ["m1"], {"connections"})
+    assert [c["parameterized_connection"] for c in ctx.connections] == [
+        True, True, False, None, None]
+    [ask] = [j for u, j, _ in client.calls
+             if u.endswith("/metadata/search") and _is_connection_header_search(j)]
+    assert ask["include_headers"] is True and ask["record_offset"] == 0
+    assert SECRETS[0] not in json.dumps(ctx.connections)
+
+
+def test_the_header_search_pages_like_the_connection_search():
+    conns = [_connection(i, f"C{i}") for i in range(130)]
+    headers = [_connection_header(i, parameterizedConnection=(i == 120)) for i in range(130)]
+    client = Client(_paged(conns), _paged(headers))
+    ctx = build_context(client, ["m1"], {"connections"})
+    flagged = [c["name"] for c in ctx.connections if c["parameterized_connection"]]
+    assert flagged == ["C120"]
+    assert all(c["parameterized_connection"] is False for c in ctx.connections
+               if c["name"] != "C120")
+
+
+def test_a_failed_header_search_leaves_the_flag_unknown_and_warns_without_a_body(capsys):
+    refused = _response(403, {"error": SECRETS[0]})
+    refused.text = f'{{"error": "{SECRETS[0]}"}}'
+    ctx = build_context(Client(_paged(SECRET_CONNECTIONS), lambda body: refused), ["m1"],
+                        {"connections"})
+    assert len(ctx.connections) == 3
+    assert all(c["parameterized_connection"] is None for c in ctx.connections)
+    [warning] = [w for w in ctx.warnings if "header search" in w]
+    assert warning == ("Connection header search failed, so the connections' parameterized "
+                       "flags were not checked: ThoughtSpot API 403 on POST "
+                       "/api/rest/2.0/metadata/search")
+    assert SECRETS[0] not in "".join(capsys.readouterr())
 
 
 def test_connections_are_fetched_only_when_needed():

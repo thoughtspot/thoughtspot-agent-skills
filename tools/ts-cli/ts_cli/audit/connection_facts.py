@@ -25,10 +25,17 @@ or a log line.
                    to confirm the host is a sound signal (open-items #18).
     parameterized  a configuration value that is wholly a `${var}` template token
                    (publish_plan.parse_variable_token, as connection parameterization
-                   writes it).
+                   writes it). The search was seen returning a parameterized
+                   connection's settings without its tokens (open-items #17), so this
+                   rarely holds; `parameterized_connection` is the signal.
+    parameterized_connection
+                   the connection's metadata header says it is parameterized
+                   (header_parameterized). The search does not carry the header, so
+                   `connection_facts` leaves it None and the audit's fetch fills it from
+                   a CONNECTION metadata search (audit/context.py).
 
-A configuration that is absent or does not parse as a JSON object leaves all four
-None: unknown, never "no". Pure; stdlib and publish_plan only.
+A configuration that is absent or does not parse as a JSON object leaves the four
+configuration flags None: unknown, never "no". Pure; stdlib and publish_plan only.
 """
 from __future__ import annotations
 
@@ -38,7 +45,11 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 from ts_cli.publish_plan import parse_variable_token
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
-CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized")
+CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized",
+                   "parameterized_connection")
+#: The metadata header keys that say a connection is parameterized (seen on every
+#: CONNECTION header of the SE demo cluster, 2026-11-18).
+HEADER_PARAMETERIZED_KEYS = ("parameterizedConnection", "isParameterized")
 #: How deep a configuration is walked: far beyond any seen (they are flat).
 _MAX_DEPTH = 8
 _HOST_KEYS = ("host", "accountname")
@@ -116,9 +127,10 @@ def _flags(config: dict) -> Dict[str, bool]:
 
 
 def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
-    """`{id, name, type, oauth, oauth_m2m, privatelink, parameterized}` for one
-    `connection/search` entry (see the module docstring), or None for an entry that is
-    not a mapping. `type`
+    """`{id, name, type, oauth, oauth_m2m, privatelink, parameterized,
+    parameterized_connection}` for one `connection/search` entry (see the module
+    docstring; `parameterized_connection` None, for the fetch to fill), or None for an
+    entry that is not a mapping. `type`
     is `data_warehouse_type`, else `details.type`; each text field None when absent."""
     if not isinstance(entry, dict):
         return None
@@ -128,4 +140,16 @@ def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
         {"oauth": None, "oauth_m2m": None, "privatelink": None, "parameterized": None}
     return {"id": _text(entry.get("id")), "name": _text(entry.get("name")),
             "type": _text(entry.get("data_warehouse_type")) or _text(details.get("type")),
-            **flags}
+            **flags, "parameterized_connection": None}
+
+
+def header_parameterized(header: Any) -> Optional[bool]:
+    """Whether a CONNECTION metadata header says the connection is parameterized: True
+    when either HEADER_PARAMETERIZED_KEYS value is the boolean true, False when one is
+    the boolean false and neither is true, None when neither is a boolean (unknown,
+    never "no"). Reads nothing else of the header."""
+    values = [header.get(k) for k in HEADER_PARAMETERIZED_KEYS] if isinstance(header, dict) else []
+    flags = [v for v in values if isinstance(v, bool)]
+    if any(flags):
+        return True
+    return False if flags else None

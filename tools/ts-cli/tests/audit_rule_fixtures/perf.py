@@ -839,11 +839,13 @@ def build_cache_header(guid=CACHE_TABLE, type="ONE_TO_ONE_LOGICAL", source="RDBM
 
 
 def build_cache_connection(name="Warehouse A", oauth=False, privatelink=False,
-                           parameterized=False, type="SNOWFLAKE", oauth_m2m=False) -> dict:
+                           parameterized=False, type="SNOWFLAKE", oauth_m2m=False,
+                           parameterized_connection=False) -> dict:
     """A connection's facts, as the audit keeps them (no configuration value)."""
     return {"id": f"conn-{name}", "name": name, "type": type, "oauth": oauth,
             "oauth_m2m": oauth_m2m, "privatelink": privatelink,
-            "parameterized": parameterized}
+            "parameterized": parameterized,
+            "parameterized_connection": parameterized_connection}
 
 
 def build_cache_column(name, column_id=None, **properties) -> dict:

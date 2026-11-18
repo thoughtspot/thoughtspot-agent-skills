@@ -314,7 +314,9 @@ whichever category selected each rule:
   calendars" (P22).
 - `connections` is each connection's derived settings, one paged `connection/search`
   (with details) per audit: `{id, name, type, oauth, oauth_m2m, privatelink,
-  parameterized}`, built in the fetch by `audit/connection_facts.py`. The search
+  parameterized, parameterized_connection}`, built in the fetch by
+  `audit/connection_facts.py`; the last comes from a paged `metadata/search` of
+  CONNECTION headers. The search
   answers each connection's configuration, credentials included; the fetch keeps no
   value of it, so neither may a rule, a field or a test. Null when not fetched or the
   search failed, as for `calendars` (P24; P23 falls back to the metadata header).
