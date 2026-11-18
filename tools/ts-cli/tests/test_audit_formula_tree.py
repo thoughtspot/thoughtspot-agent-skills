@@ -389,7 +389,7 @@ def test_the_picker_the_sidebar_and_the_scorecard_link_reach_the_tree(tmp_path):
     assert picker["errors"] == [] and "Sales" in picker["visible"]
     assert picker["extra"] == ["#formulas/m-1"]
     head = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
-        'window.__extra = document.querySelector("#v-formulas .ftree-header a").getAttribute("href");'))
+        'window.__extra = document.querySelector("#v-formulas .ftree-header a.ts-link-btn").getAttribute("href");'))
     assert head["errors"] == [] and head["extra"] == "#model/m-1"
     assert "7 formulas" in picker["visible"] and "Plain" not in picker["visible"]
     nav = ('var nav = document.querySelector(\'#sidebar-nav a[href="#formulas"]\');'

@@ -119,16 +119,45 @@ def _js_function_findings(root: str, rel: str) -> tuple[list, list]:
     return fails, warns
 
 
+# Third-party code the audit report embeds (minified, not ours to split). A file there
+# is skipped only while its SHA-256 matches its line in the directory's MANIFEST, so
+# code written here, or a vendored file edited by hand, is scanned like any other.
+VENDOR_DIR = "tools/ts-cli/ts_cli/audit/vendor"
+
+
+def _vendored(root: str) -> set[str]:
+    """The files under VENDOR_DIR whose content matches MANIFEST (`<sha256>  <name>`)."""
+    import hashlib
+    base = os.path.join(root, VENDOR_DIR)
+    try:
+        with open(os.path.join(base, "MANIFEST"), encoding="utf-8") as fh:
+            pinned = dict(reversed(line.split(None, 1)) for line in fh if line.strip())
+    except OSError:
+        return set()
+    out = set()
+    for name, digest in pinned.items():
+        name = name.strip()
+        try:
+            with open(os.path.join(base, name), "rb") as fh:
+                if hashlib.sha256(fh.read()).hexdigest() == digest.strip():
+                    out.add(f"{VENDOR_DIR}/{name}")
+        except OSError:
+            continue
+    return out
+
+
 def _scan_files(root: str) -> list[str]:
     base = os.path.join(root, SCAN_ROOT)
     files: list[str] = []
+    skip = _vendored(root)
     for dirpath, _dirs, fnames in os.walk(base):
         if "/tests" in dirpath.replace(os.sep, "/"):
             continue
         for fn in fnames:
             if fn.endswith(SCANNED_SUFFIXES):
-                rel = os.path.relpath(os.path.join(dirpath, fn), root)
-                files.append(rel.replace(os.sep, "/"))
+                rel = os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/")
+                if rel not in skip:
+                    files.append(rel)
     return files
 
 

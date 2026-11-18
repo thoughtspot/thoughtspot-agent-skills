@@ -477,6 +477,7 @@ function buildFormulaTree(c, guid){
     'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
     '<button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
+    (graphAvailable(tree) ? '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'/graph">Graph</a>' : '')+
     '<a class="ts-link-btn" href="#model/'+esc(guid)+'">Model scorecard</a></div>';
   c.appendChild(hdr);
   var results = el("div","ftree-results");
@@ -501,6 +502,7 @@ function buildFormulaTree(c, guid){
      narrow screen the panel is a sheet over the foot of the page (styles.css). */
   var view = tree._view = {
     select: function(target, row, focusPanel, from){
+      tree._selected = target;  /* kept across the tree and the graph */
       panel.innerHTML = detailHtml(tree, target);
       panel.classList.remove("fdetail-empty");
       layout.classList.add("ftree-has-detail");
@@ -523,6 +525,7 @@ function buildFormulaTree(c, guid){
   };
   function closePanel(byMouse){
     var sel = $(".ftree-selected", ul);
+    tree._selected = null;
     panel.innerHTML = EMPTY;
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
@@ -544,6 +547,7 @@ function buildFormulaTree(c, guid){
   });
   c.appendChild(layout);
   wireTreeKeys(ul);
+  if(tree._selected) view.select(tree._selected);
   $(".ftree-search", hdr).addEventListener("input", function(e){
     results.innerHTML = searchResultsHtml(tree, e.target.value);
   });
@@ -564,10 +568,12 @@ function buildFormulaTree(c, guid){
   });
 }
 
-function buildFormulas(D, guid){
+function buildFormulas(D, guid, mode){
   var c = document.getElementById("v-formulas");
   c.innerHTML = "";
-  if(guid) buildFormulaTree(c, guid);
+  var cm = guid && findCorpusModel(guid);
+  if(mode === "graph" && cm && graphAvailable(cm.ft)) buildFormulaGraph(c, guid, cm.ft);
+  else if(guid) buildFormulaTree(c, guid);
   else buildFormulasPicker(c);
 }
 
@@ -575,7 +581,7 @@ function buildFormulas(D, guid){
 registerView({id: "formulas", routes: ["formulas"],
   nav: {hash: "#formulas", icon: "ƒ", label: "Formulas"},
   show: function(route){
-  buildFormulas(D, route.id);
+  buildFormulas(D, route.id, route.sub);
   if(route.id) return {crumbs: ["Formulas", findModelName(route.id)], links: ["#formulas"]};
   return {crumbs: ["Formulas"], links: []};
 }});

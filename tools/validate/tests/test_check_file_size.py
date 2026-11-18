@@ -201,3 +201,28 @@ def test_pre_commit_runs_the_gate_on_staged_report_js():
     text = (repo_root / "scripts" / "pre-commit.sh").read_text(encoding="utf-8")
     block = text[:text.index('run_check "file size"')].rsplit("\nif ", 1)[1]
     assert r"\.(py|js)$" in block and "grep -qE" in block
+
+
+def _vendor(tmp_path, name, body, pin=True, digest=None):
+    import hashlib
+    d = tmp_path / fs.VENDOR_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(body, encoding="utf-8")
+    if pin:
+        h = digest or hashlib.sha256(body.encode("utf-8")).hexdigest()
+        with open(d / "MANIFEST", "a", encoding="utf-8") as fh:
+            fh.write(f"{h}  {name}\n")
+
+
+_LONG_FN = "function big(){\n" + "x();\n" * (fs.JS_FUNCTION_FAIL + 10) + "}\n"
+
+
+def test_a_pinned_vendored_file_is_skipped(tmp_path, capsys, monkeypatch):
+    _vendor(tmp_path, "lib.min.js", _LONG_FN)
+    assert _run(tmp_path, monkeypatch) == 0
+
+
+@pytest.mark.parametrize("pin, digest", [(False, None), (True, "0" * 64)])
+def test_a_vendored_file_not_pinned_or_edited_is_scanned(tmp_path, capsys, monkeypatch, pin, digest):
+    _vendor(tmp_path, "lib.min.js", _LONG_FN, pin=pin, digest=digest)
+    assert _run(tmp_path, monkeypatch) == 1
