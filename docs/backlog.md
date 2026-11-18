@@ -494,6 +494,7 @@ are roughly ordered by value÷effort.
 | BL-595 | Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it | 2027-01-31 |
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
+| BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17800,3 +17801,15 @@ A converted Model can be uncached without the user being told, and the invariant
 
 **Target:** 2027-01-31.
 
+## BL-598 — the Ossie converter drops a Table column's `properties` when the Model surfaces that column as a field `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** conversion-consistency audit of the Data Cache branch (ts-audit 3.23.0), which ran a TML → Ossie → TML round trip against apache/ossie-converters `thoughtspot/` at 7dd04af and 93fb75c.
+
+**What.** A `calendar` (or any other property) set on a Table column that the Model surfaces as a field is missing from the Ossie document, and the return leg writes nothing back. The forward leg (`_physical_column_stash` in `tml_to_ossie.py`) keeps only `db_column_name` and `data_type` for such a column, and the reverse leg (`_physical_table_column` in `ossie_to_thoughtspot.py`) writes only `name`, `db_column_name` and `db_column_properties`. No issue is raised, against the `OssieConversion` docstring's promise that nothing TML held goes missing without one. A Model column with no `calendar` of its own inherits its Table column's, so after the round trip that column silently falls back to the default calendar and fiscal periods come out wrong. Model columns, Table columns the Model does not use, and Table columns used only by a metric keep their properties.
+
+**Do.**
+1. Raise it upstream on apache/ossie-converters with a minimal TML fixture: a Table column carrying `calendar`, surfaced by a Model field.
+2. Ask for the property to be stashed and restored, or for an issue to be raised when it is dropped.
+3. Update `docs/ossie/ts-ossie-construct-mapping.md` (V-items intro and V1) when it lands.
+
+**Target:** 2027-01-31.
