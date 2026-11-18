@@ -368,6 +368,7 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
+| BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -479,6 +480,8 @@ are roughly ordered by value÷effort.
 | BL-567 | TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON | 2026-12-31 |
 | BL-568 | Exported TML parsed without stripping non-printables: `export_item_doc` and 9 raw `yaml.safe_load(edoc)` sites | 2026-12-31 |
 | BL-569 | `dependency/backup.py` `backup_filename`: 60-character cap overruns the 255-byte limit; keeps Windows-reserved characters | 2026-12-31 |
+| BL-581 | Unconfirmed whether `fix_double_aggregation`'s blanket `sum([formula_X])` → `[formula_X]` simplification silently undoes a `group_aggregate(...)`-wrapped reference another formula shape needs to avoid a misleading import failure | 2026-12-31, or the next converter work touching `fix_double_aggregation` |
+| BL-582 | A CHAR list parameter's runtime value: tableau-formula-translation.md:193 says it's the migrated `display_name`; the translator still compares formula literals against Tableau's internal `list_config.value` | 2026-12-31, or the next converter work touching parameter comparisons |
 | BL-583 | `check_references.py` does not scan `agents/cli/SETUP.md`, so a broken link there passes every gate | 2026-12-31 |
 | BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
@@ -17565,6 +17568,118 @@ BL-505 covers the converters' side only.
 3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Import the new module where `fields.py` imports `fields_data`, so its `@register` fields are registered.
 
 **Target:** 2027-02-28.
+## BL-580 — Correct Step 7's "rerun when formulas are filtered" explanation `Tier 2`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.
+`references/step-7-review-templates.md` tells the reader that a non-zero
+`formulas_filtered` from `build-model --existing-guid` can be a same-batch ordering
+artifact — a formula depending on another formula added in the *same* batch, filtered
+because its dependency "wasn't live yet" — and that an identical retry often clears it once
+the dependency is live. That explanation is wrong: a same-batch `[Base]` dependency is
+rewritten to the resolved `[formula_Base]` reference and kept, not filtered, so retrying
+fixes nothing in that case. Left as-is, this sends the next reader down the wrong
+diagnostic path on a genuine `formulas_filtered` result.
+
+**Do.** Identify the actual mechanism `filter_unresolvable_formulas` uses that makes a
+second identical run sometimes clear previously-filtered formulas (if one still exists —
+confirm live, don't assume the prose was describing a real behavior that just had the wrong
+cause), and correct the step-7 reference accordingly. If no such mechanism survives
+scrutiny, remove the "retry once" advice entirely rather than leave a plausible-sounding but
+false explanation in place.
+
+**Target:** next Tableau skill touch that reaches Step 7, or 2026-12-31, whichever comes
+first.
+
+## BL-581 — Check whether `fix_double_aggregation` (formula_common.py) undoes a wrapper a different formula shape actually needs `Tier 3`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission, flagging a
+tension between two findings from the same session:
+
+1. A Tableau-specific finding: when a formula references another `group_aggregate`-valued
+   formula and the combination hits ThoughtSpot's nested-`group_aggregate` restriction, one
+   fix shape is to wrap the reference in `group_aggregate(sum([formula_X]), query_groups(),
+   {})` rather than a bare `sum([formula_X])` — specifically because a bare `sum(...)`
+   around a reference to a formula with `average()`/`stddev()` dependents fails import with
+   a misleading `Formula addition failed... Search did not find` error, while the
+   `group_aggregate(...)`-wrapped form does not.
+2. The shared `fix_double_aggregation` (`tools/ts-cli/ts_cli/formula_common.py`, used by
+   Table/SV/Sisense/Tableau/Qlik/dbt/Databricks-MV model building — Power BI and Looker
+   never call it) replaces `sum([formula_X])` with bare `[formula_X]` whenever `X` is
+   already aggregated — intended to avoid a genuine double-aggregation, but applied as a
+   blanket simplification regardless of what depends on `X` downstream.
+
+If (1) is a real, general pattern (not Tableau-specific), (2) could be silently undoing the
+exact wrapper (1) says is required — reintroducing the same avg/stdev-dependent import
+failure for *any* converter's formula that happens to match this shape, not just Tableau's.
+
+**Update (2026-11-17, round-4 PR #662 review):** a related but distinct case is now fixed
+in code, not just documented: `fix_double_aggregation` also stripped `sum([formula_X])`
+whenever `X`'s own expr was a `group_aggregate(...)` call (a FIXED/INCLUDE/EXCLUDE LOD) —
+`expr_is_aggregated` matches `group_aggregate` too, so this hit the SAME blanket check as
+(2). Unlike simplifying `sum(sum(...))`, stripping `sum()` around a `group_aggregate` ref is
+not redundant — it re-aggregates the LOD's per-group values to the query's own grain, a
+different, legitimate number. That was a silent WRONG NUMBER (not an import failure, unlike
+(1)'s dependents case), live in a ratio like `unique_count([Order ID]) / sum([formula_A])`
+where `A` is a FIXED LOD. Fixed by excluding `group_aggregate`-valued refs from the strip.
+See `tools/ts-cli/ts_cli/formula_common.py`'s `fix_double_aggregation` and
+`tools/ts-cli/tests/test_model_builder.py::TestDoubleAggregation::test_sum_of_group_aggregate_ref_not_unwrapped`.
+
+**Update (2026-11-17, round-7 PR #662 review):** the round-4 fix only checked `X`'s own
+inline text, so a `group_aggregate`-valued sibling reached one level removed through
+another `[formula_*]` reference (e.g. `X = [formula_Rev] / group_aggregate(...)` with
+`Rev = sum(S)`) was still wrongly stripped — the same wrong-number class as round-4's case,
+just indirect. `_every_aggregate_is_inside_a_group_aggregate` now follows `[formula_*]`
+references recursively (with a cycle guard), recognizes the full ThoughtSpot aggregate list
+(`median`, `min_if`, `max_if`, `stddev_if`, `variance_if` were missing from
+`_AGG_FUNCTIONS`), and finds each `group_aggregate(...)` call's span with the module's own
+quote-aware `_close_paren` instead of a Tableau-only, non-quote-aware helper (an unbalanced
+`(` inside a string literal in the LOD's own filter argument used to throw the span off).
+See the new cases added to `TestDoubleAggregation` this round. Neither round's fix confirms
+or resolves the still-open question below (the average()/stddev()-dependent import-failure
+case) — that still needs a live probe.
+
+**Do.** Confirm live, on a real cluster: does `fix_double_aggregation` ever fire on a
+formula `X` that itself has `average()`/`stddev()` dependents? If yes, does the simplified
+(bare-reference) output actually fail import the way a bare `sum(...)` wrap does in finding
+(1)? If the interaction is real, either make `fix_double_aggregation` skip simplifying when
+`X` has such a dependent, or confirm the two shapes are safe together and document why.
+
+**Target:** 2026-12-31, or the next converter work that touches `fix_double_aggregation` or
+the nested-`group_aggregate` reconstruction guidance, whichever comes first.
+
+## BL-582 — CHAR list parameter: translator compares Tableau's internal value, runtime value unconfirmed `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** PR #662 round-4 review.
+`tableau-formula-translation.md:193` originally said a CHAR list parameter's runtime value
+is its migrated `display_name`, not Tableau's internal `list_config.value` — e.g. a choice
+with internal value `"1"` and display name `"Last Month"` has a runtime value of
+`"Last Month"`. `tools/ts-cli/ts_cli/tableau/twb.py` agrees for the parameter OBJECT itself:
+`default_value` is set from `alias` (the display name), not `value`, for any list-based
+(CHAR) parameter.
+
+But a FORMULA that compares against the same parameter (e.g. `IF [Period] = '1' THEN ...`)
+is not rewritten at all — the comparison literal passes through untouched, still the
+internal `list_config.value`, not the display name. If the display-name claim is right,
+every such formula compares against the wrong thing and silently takes the wrong branch
+once a user actually changes the parameter.
+
+**Update (round-5, PR #662 review):** since this contradiction was unresolved and risked
+shipping a flatly wrong instruction, `tableau-formula-translation.md:193` was hedged rather
+than asserted either way: it now flags the question as **unverified, see BL-582**, and
+tells the skill to let an already-working sibling formula's own comparison be the guide
+instead of assuming a convention. This backlog item is still the one that needs the live
+probe below — the hedge only stops the doc from asserting something unconfirmed, it doesn't
+settle which value is actually correct.
+
+**Do.** Confirm live, on a real cluster: when a CHAR list parameter changes value, does a
+formula's `=` comparison see the choice's display name or something else? If display name,
+rewrite formula-side literal comparisons against a list parameter's known choices from
+`value` to `display_name` (the choices are already carried on the parameter's
+`list_config.list_choice`) — mirroring what `twb.py` already does for the parameter's own
+`default_value`. If the doc is wrong instead, correct
+`tableau-formula-translation.md:193`.
+
+**Target:** 2026-12-31, or the next converter work that touches parameter comparisons.
 
 ## BL-583 — `check_references.py` does not scan `agents/cli/SETUP.md` `Tier 3`
 

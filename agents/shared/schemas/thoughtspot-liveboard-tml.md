@@ -247,6 +247,19 @@ fix `chart_columns`/`axis_configs`/`table_columns` — those must already use th
 names or the chart fails. The reliable workflow: import once, export, copy the resolved
 names into `chart_columns`/`axis_configs`, re-import.
 
+**`axis_configs[]` keys depend on chart type — don't default to KPI's `y`-only shape for
+everything.** `KPI` is the only type with no category to plot, so it correctly uses `y`
+only. Every other type — **including `PIE`** — needs **both** `x` (the category/slice
+column) and `y` (the measure). A pie chart looks like "just one measure" the way a KPI is,
+so it's tempting to give it a `y`-only `axis_configs`, but that's a different, harder-to-spot
+failure than the "renders broken" case above: it imports with **no error** and the tile is
+not visibly broken — it just hangs/loads indefinitely while structurally similar tiles with
+a complete `x`+`y` load normally. **Verified 2026-07-02:** a PIE tile built with
+`axis_configs: [{y: [Measure]}]` (no `x`) hung indefinitely; adding `x: [Category]` fixed it
+immediately. If a specific tile is unusually slow while others in the same liveboard are
+fast, diff its `axis_configs` against a working tile of a similar chart type before assuming
+a data-volume problem.
+
 ---
 
 ## Note tiles (text tiles)
@@ -595,6 +608,30 @@ for viz in lb.get("visualizations", []):
             flag = " [auto]" if f.get("was_auto_generated") else ""
             print(f"  {f['name']}{flag}: {f['expr']}")
 ```
+
+---
+
+## Answer-local formula references — bare name, not `[formula_...]`, across the Model boundary
+
+Found on a Tableau migration, 2026-10-16. Liveboard-viz-local `answer.formulas[]` entries (ad-hoc formulas defined on one tile, not in
+the shared Model) use a **different** cross-reference convention than Model formulas:
+
+- **Local formula → sibling local formula** (same viz's `formulas[]` list): the normal
+  `[formula_<name>]` ID-ref works, e.g. `[formula_event count by category] / [formula_total
+  event count] * 100`.
+- **Local formula → a shared Model-level formula**: must use the **bare display name**,
+  `[<name>]` — e.g. `[Grand Total Count]`. The `[formula_<name>]` form that is correct for
+  Model-to-Model references gets parsed here as a literal, nonexistent search token and
+  fails at import with a misleading `Formula addition failed... Search did not find
+  "formula_<name>" in your data or metadata` error that reads like a syntax problem but
+  isn't.
+- **Inlining a nontrivial expression** directly as a new local formula (an `if/else`, or
+  even a bare `group_aggregate(...)` call with no branching at all) is fragile and can fail
+  the same way — `Search did not find "<fragment of the expression>"` — even when the
+  identical expression imports and computes correctly as a Model-level formula. If a local
+  formula needs anything beyond a one-line reference to an existing Model formula, add (or
+  reuse) a permanent Model formula to hold the logic and have the local formula just
+  reference it by bare name.
 
 ---
 

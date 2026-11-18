@@ -221,6 +221,21 @@ class TestBuildColumnsAndFormulas:
                          "properties": {"column_type": "MEASURE", "aggregation": "SUM",
                                         "index_type": "DONT_INDEX"}}]
 
+    def test_double_aggregation_collapses_through_this_converter(self):
+        """Round-5 review (blocking #2): the shared `fix_double_aggregation`
+        bug ("does `group_aggregate` appear anywhere") reached every
+        converter that calls it, not just Tableau's — this exercises it
+        through Databricks MV's own `build_columns_and_formulas` call path."""
+        _, formulas, _ = build_columns_and_formulas(
+            [_t("net_ratio", "formula", "MEASURE",
+                ts_expr="average ( group_aggregate ( sum ( [T::a] ) , {} , {} ) )",
+                display_name="Net Ratio"),
+             _t("net_ratio_total", "formula", "MEASURE",
+                ts_expr="sum ( [Net Ratio] )",
+                display_name="Net Ratio Total")], None)
+        total = next(f for f in formulas if f["name"] == "Net Ratio Total")
+        assert total["expr"] == "[formula_Net Ratio]"
+
     def test_attribute_formula_gets_column_type_in_formulas(self):
         _, formulas, _ = build_columns_and_formulas(
             [_t("transaction_month", "formula", "ATTRIBUTE",

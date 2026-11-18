@@ -4,6 +4,8 @@ Test cases derived from actual CPG Merch Promotion Performance migration failure
 """
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from ts_cli.tableau_translate import (
@@ -1092,6 +1094,270 @@ class TestConvertStringConcat:
         result = convert_string_concat(expr, role="measure")
         assert result == expr
 
+    def test_function_call_operand_wrapped_when_datatype_is_string(self):
+        """The case this was built for: a function call returning text
+        (e.g. LEFT, not just to_string) joined to a string literal by `+`,
+        in a dimension/string-typed formula."""
+        expr = "[a] + ' ' + LEFT ( [b] , 2 )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == "concat ( [a] , ' ' , LEFT ( [b] , 2 ) )"
+
+    def test_function_call_operand_not_wrapped_without_datatype_string(self):
+        """Without datatype=='string', a function call is not an eligible
+        concat operand — only the base [ref]/'literal'/to_string()/masked-
+        placeholder shapes are, same as before this change. `[a] + ' '` still
+        concats (both operands are already in the unconditional base set);
+        the chain simply doesn't extend to swallow `LEFT(...)` too."""
+        expr = "[a] + ' ' + LEFT ( [b] , 2 )"
+        result = convert_string_concat(expr, role="dimension", datatype=None)
+        assert result == "concat ( [a] , ' ' ) + LEFT ( [b] , 2 )"
+
+    def test_date_arithmetic_in_dimension_role_not_wrapped_in_concat(self):
+        """Regression: the new 'any function call' operand, combined with the
+        pre-existing `role == "dimension"` shortcut (which alone makes any `+`
+        pair look like string concat), wrapped ordinary numeric arithmetic in
+        `concat()` — which rejects non-text arguments, so a formula that
+        imports fine today would fail. Must not fire when datatype isn't
+        declared 'string', even though role is 'dimension'."""
+        expr = "diff_days ( [End Date] , [Start Date] ) + [Offset Days]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_year_plus_n_in_dimension_role_not_wrapped_in_concat(self):
+        expr = "year ( [d] ) + [n]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_ref_plus_ref_in_numeric_dimension_role_not_wrapped_in_concat(self):
+        """Gap: role=='dimension' alone (regardless of datatype) used to be
+        read as sufficient evidence of string concatenation — a numeric
+        dimension formula doing plain `[ref] + [ref]` addition (e.g. a
+        derived numeric key) got wrongly concat()-ed. Must stay plain
+        arithmetic once datatype is declared non-string."""
+        expr = "[Year] + [Month Offset]"
+        result = convert_string_concat(expr, role="dimension", datatype="integer")
+        assert result == expr
+
+    def test_arithmetic_in_a_condition_not_wrapped_in_concat(self):
+        """Round-4 review (blocking #2): a row-level `IF ... THEN 'x' ELSE 'y'
+        END` calc is typed as a string dimension by Tableau, but a `+` inside
+        its numeric CONDITION is still arithmetic — `concat()` rejects a
+        comparison operand, so wrapping `LEN([First]) + LEN([Last])` here
+        failed at import where main's plain-arithmetic output compiled."""
+        expr = "IF LEN ( [First] ) + LEN ( [Last] ) > 20 THEN 'Long' ELSE 'Short' END"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_arithmetic_in_a_function_argument_not_wrapped_in_concat(self):
+        """Same bug, with the arithmetic inside another function's argument
+        (LEFT's length argument) rather than a condition — LEN([a]) + LEN([b])
+        must stay numeric, not become `concat(strlen(...), strlen(...))`."""
+        expr = "LEFT ( [Name] , LEN ( [a] ) + LEN ( [b] ) )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_sum_plus_sum_in_a_condition_not_wrapped_in_concat(self):
+        expr = "IF SUM ( [a] ) + SUM ( [b] ) > 100 THEN 'High' ELSE 'Low' END"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_function_call_plus_field_in_a_condition_not_wrapped_in_concat(self):
+        """DATEDIFF's own date-part argument is itself a string literal
+        ('day') — that literal must not be read as evidence that the
+        unrelated `+ [Delay Days]` outside it is string concatenation."""
+        expr = (
+            "IF DATEDIFF ( 'day' , [Start] , [End] ) + [Delay Days] > 5 "
+            "THEN 'Late' ELSE 'OnTime' END"
+        )
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_numeric_pair_before_string_concat_does_not_abort_the_scan(self):
+        """Round-5 review (blocking #1): a no-evidence pair earlier in the
+        expression used to `break` the whole scan, leaving every string `+`
+        after it unconverted. Only the no-evidence pair itself is arithmetic;
+        the later genuine concatenation must still convert."""
+        expr = (
+            "IF LEN([a]) + [n] > 5 THEN [First] + ' ' + [Last] ELSE 'x' END"
+        )
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == (
+            "IF LEN([a]) + [n] > 5 THEN concat ( [First] , ' ' , [Last] ) ELSE 'x' END"
+        )
+
+    def test_numeric_pair_before_two_string_branches_both_convert(self):
+        expr = (
+            "IF ROUND([Score],0) + [Bonus] >= 90 THEN [First] + ' (A)' "
+            "ELSE [First] + [Last] END"
+        )
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == (
+            "IF ROUND([Score],0) + [Bonus] >= 90 THEN concat ( [First] , ' (A)' ) "
+            "ELSE concat ( [First] , [Last] ) END"
+        )
+
+    def test_numeric_pair_before_string_concat_in_measure_role(self):
+        """Same bug, measure role: the leading `SUM(...) + SUM(...)` pair has
+        no string evidence and no dimension-fallback (role isn't dimension),
+        so it must stay arithmetic while the later `'High: ' + STR(...)`
+        still converts."""
+        expr = (
+            "IF SUM([Sales]) + SUM([Returns]) > 1000 "
+            "THEN 'High: ' + STR(SUM([Sales])) ELSE 'Low' END"
+        )
+        result = convert_string_concat(expr, role="measure", datatype="string")
+        assert result == (
+            "IF SUM([Sales]) + SUM([Returns]) > 1000 "
+            "THEN concat ( 'High: ' , STR(SUM([Sales])) ) ELSE 'Low' END"
+        )
+
+    def test_long_case_ladder_with_a_rejected_pair_per_branch_converts_every_branch(self):
+        """Round-6 review (blocking #1): counting every loop pass — rejections
+        included — against the same 50-pass budget `main` used only for
+        successful conversions made a long ladder exhaust the budget roughly
+        quadratically (every conversion rescans from 0, re-rejecting every
+        earlier numeric pair again). An 18-branch ladder already exhausted a
+        200-pass budget; this pins a 30-branch one, past that failure point,
+        all the way through."""
+        branches = " ".join(
+            f"WHEN {i} THEN [F] + ' #{i}'" for i in range(1, 31)
+        )
+        expr = f"CASE ROUND([n],0) + [n] {branches} ELSE [F] + ' other' END"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        # The leading numeric pair (rejected) stays raw arithmetic ...
+        assert "ROUND([n],0) + [n]" in result
+        # ... and every one of the 30 branches, plus the ELSE, converted —
+        # no raw `+ '...'` string concat left unconverted anywhere.
+        assert result.count("concat (") == 31
+        assert "+ '" not in result
+
+    def test_str_wrapping_a_boolean_comparison_keeps_its_wrapper(self):
+        """Round-5 review nit: `STR([a] + 'x' = [b])`'s argument converts to
+        `concat ( [a] , 'x' ) = [b]` — a boolean comparison whose LEFT side
+        happens to be a concat() call, not a bare concat() call itself. The
+        old `.startswith("concat (")` check misread that as "argument is
+        entirely a concat()" and dropped the STR() wrapper, losing the
+        stringification the `=` result still needs."""
+        expr = "'Match: ' + STR([a] + 'x' = [b])"
+        result = convert_string_concat(expr, role="measure", datatype="string")
+        assert result == "concat ( 'Match: ' , STR( concat ( [a] , 'x' ) = [b] ) )"
+
+    def test_field_literally_named_like_the_internal_wrap_token_does_not_hang(self):
+        """Round-5 review nit: a real (if unusual) Tableau field named
+        `[__WRAP0__]` used to collide with the old plain-string
+        `__WRAPN__` masking token — the restore map's value for the token
+        contained the token's own text again, so the fixed-point
+        substitution loop never terminated. The token is now control-
+        character-delimited, so no real field name can ever collide.
+
+        Round-7 review nit: this used to run with no timeout, so a future
+        regression would hang the whole CI run instead of just failing this
+        one test. Run it on a daemon thread with a bounded `join` instead —
+        a hang now fails fast."""
+        expr = "STR([__WRAP0__] + 'x')"
+        outcome: dict[str, str] = {}
+        thread = threading.Thread(
+            target=lambda: outcome.setdefault(
+                "result", convert_string_concat(expr, role="measure", datatype="string")
+            ),
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "convert_string_concat hung — masking-token regression"
+        assert outcome["result"] == "concat ( [__WRAP0__] , 'x' )"
+
+    def test_arithmetic_inside_to_string_wrapper_not_split_into_concat(self):
+        """Gap: with datatype=='string' enabling the 'any function call'
+        concat operand, `sum([a]) + sum([b])` INSIDE a to_string(...) call's
+        own argument (ordinary arithmetic being stringified, not
+        concatenation) was matched as its own concat-pair and wrapped,
+        breaking the formula's arithmetic. Must come back out unchanged."""
+        expr = "to_string ( sum ( [a] ) + sum ( [b] ) )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_two_to_string_wrappers_both_keep_their_arithmetic(self):
+        """Regression (PR #662 review): masking the first wrapper shortened the
+        string, so positions found up front for the second wrapper were stale,
+        its `+` stayed visible, and the output had unbalanced parentheses."""
+        expr = "to_string(sum([a]) + sum([b])) + ' / ' + to_string(sum([c]) + sum([d]))"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == (
+            "concat ( to_string(sum([a]) + sum([b])) , ' / ' , "
+            "to_string(sum([c]) + sum([d])) )"
+        )
+        assert result.count("(") == result.count(")")
+
+    def test_string_plus_inside_to_string_wrapper_still_concatenates(self):
+        """Regression (PR #662 review): `_mask_wrapper_call_interiors` hid a
+        wrapper's argument whenever "+" appeared in it at all, treating every
+        `+` as arithmetic — including a `+` that joins strings. `to_string`'s
+        own concatenation must still convert to `concat()`. The wrapper
+        itself is then dropped rather than nested around the concat() (round-3
+        review point 1: ThoughtSpot's `to_string` rejects a Text argument, so
+        `to_string ( concat ( ... ) )` is rejected the same way the raw `+`
+        was)."""
+        expr = "to_string ( [First] + ' ' + [Last] )"
+        result = convert_string_concat(expr, role="dimension")
+        assert result == "concat ( [First] , ' ' , [Last] )"
+        assert result.count("(") == result.count(")")
+
+    def test_string_plus_split_across_two_to_string_wrappers_and_literals(self):
+        """Same bug as above, with the concatenation spanning two wrappers and
+        bare literals outside either of them. The first wrapper's argument
+        becomes a concat() and drops its to_string(); the second wrapper's
+        argument (`[n]`, no `+` at all) is untouched and keeps its
+        to_string()."""
+        expr = "to_string ( [Region] + ' - ' + [Segment] ) + ' (' + to_string ( [n] ) + ')'"
+        result = convert_string_concat(expr, role="dimension")
+        assert result == (
+            "concat ( concat ( [Region] , ' - ' , [Segment] ) , "
+            "' (' , to_string ( [n] ) , ')' )"
+        )
+        assert result.count("(") == result.count(")")
+
+    def test_string_plus_inside_if_branch_inside_to_string_wrapper(self):
+        """Same bug, with the concatenation inside an IF branch that is itself
+        inside a to_string(...) wrapper — the `+`-is-arithmetic mistake must
+        not swallow the branch's own string literal, and each wrapper is
+        dropped once its argument becomes a concat()."""
+        expr = "if ( [x] ) then to_string ( [a] + ' Yes' ) else to_string ( [b] + ' No' )"
+        result = convert_string_concat(expr, role="dimension")
+        assert result == (
+            "if ( [x] ) then concat ( [a] , ' Yes' ) "
+            "else concat ( [b] , ' No' )"
+        )
+        assert result.count("(") == result.count(")")
+
+    def test_string_plus_inside_nested_to_string_wrapper(self):
+        """Same bug, nested two wrappers deep: the inner `to_string([a]+[b])`
+        is itself arithmetic (no string evidence) and must stay untouched —
+        including its own to_string(), since that wrapper's own argument
+        never became a concat() — while the outer wrapper's own `+ 'x'` is
+        concatenation, converts, and drops the outer to_string()."""
+        expr = "to_string ( to_string ( [a] + [b] ) + 'x' )"
+        result = convert_string_concat(expr, role="dimension")
+        assert result == "concat ( to_string ( [a] + [b] ) , 'x' )"
+        assert result.count("(") == result.count(")")
+
+    def test_quote_buried_in_nested_call_inside_wrapper_is_not_string_evidence(self):
+        """Round-4 review should-fix #1: `STR(IIF([Flag] = 'Y', [a] + [b], 0))`
+        — the unrelated `'Y'` in the IIF condition is not evidence that the
+        numeric `[a] + [b]` branch is a string; it must stay arithmetic and
+        the whole STR() call must round-trip untouched."""
+        expr = "STR ( IIF ( [Flag] = 'Y' , [a] + [b] , 0 ) )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == expr
+
+    def test_quote_buried_in_nested_sum_filter_inside_wrapper_is_not_string_evidence(self):
+        """Same class of bug, with the quote inside a SUM(IF ... END) filter
+        argument rather than an IIF — `SUM(IF [Type] = 'A' THEN [Sales] END)
+        + SUM([Other])` is ordinary arithmetic, not two string operands."""
+        expr = "'Total: ' + STR ( SUM ( IF [Type] = 'A' THEN [Sales] END ) + SUM ( [Other] ) )"
+        result = convert_string_concat(expr, role="dimension", datatype="string")
+        assert result == "concat ( 'Total: ' , STR ( SUM ( IF [Type] = 'A' THEN [Sales] END ) + SUM ( [Other] ) ) )"
+
 
 class TestLooksLikeStringConcat:
     """`_looks_like_string_concat` — heuristic classifier (currently unused by
@@ -1448,6 +1714,60 @@ class TestConvertLod:
         # any other keyword is exercised here directly.
         result = _lod_to_group_aggregate("BOGUS", "[A] , [B]", "SUM([X])")
         assert result == "group_aggregate ( SUM([X]) , {} , {} )"
+
+    def test_field_name_with_unescaped_bracket_does_not_hide_a_following_lod(self):
+        """A [ref] can contain a literal, unescaped `[` (only a literal `]`
+        needs Tableau's `]]` escape) — e.g. a field named "Ratio [x" is
+        written `[Ratio [x]`. A naive bracket-depth counter miscounts this
+        and can leave a real {FIXED/INCLUDE/EXCLUDE...} that follows raw."""
+        expr = "[Ratio [x] + {FIXED [B]: SUM([t])}"
+        result = convert_lod(expr)
+        assert "group_aggregate" in result
+        assert "{FIXED" not in result
+
+    def test_sibling_lods_one_per_if_elseif_branch_all_convert(self):
+        """An if/else-if chain with one {FIXED/INCLUDE/EXCLUDE...} per branch
+        (e.g. one per tier) only had its first branch converted: the first
+        branch's own emitted `{ [dims] }` set-literal becomes the next brace
+        pair the scan sees, `_parse_lod_content` correctly rejects it (not
+        real LOD syntax) — but the scan must continue past it to find the
+        next sibling's real LOD, not stop there."""
+        expr = (
+            'IF [Tier] = "All" THEN {FIXED [Date]: MAX([CountAll])} '
+            'ELSEIF [Tier] = "A" THEN {FIXED [Date]: MAX([CountA])} '
+            'ELSE {FIXED [Date]: MAX([CountOther])} END'
+        )
+        result = convert_lod(expr)
+        assert result.count("group_aggregate") == 3
+        assert "{FIXED" not in result
+
+    def test_genuinely_nested_lod_still_converts_both_levels(self):
+        """The innermost-first behavior must survive alongside the
+        skip-past-a-failed-candidate fix above — a failed candidate's outer
+        LOD (if it has one) must not be lost either."""
+        result = convert_lod("{FIXED [A] : SUM({FIXED [B] : MAX([col])})}")
+        assert result.count("group_aggregate") == 2
+        assert "{FIXED" not in result
+
+    def test_fixed_lod_nested_in_another_fixed_lod_is_skipped_not_migrated(self):
+        """Round-4 review: convert_lod correctly produces a flat-looking
+        group_aggregate-inside-group_aggregate here, but ThoughtSpot rejects
+        that shape at QUERY time (NESTED_GROUP_AGGREGATE_NOT_SUPPORTED), not
+        at import. validate_output must catch it so the formula is skipped
+        (parked) through the normal pipeline, the same outcome as an
+        untranslatable formula — not silently imported as a ticking
+        time bomb."""
+        formulas = [{
+            "name": "A", "caption": "A",
+            "formula": "{FIXED [Customer] : MIN({FIXED [Customer], [Order] : SUM([Sales])})}",
+            "datatype": "real", "role": "measure",
+        }]
+        result = translate_formulas(
+            formulas=formulas, scoped_columns={}, param_map={}, parameters=[], calc_id_map={},
+        )
+        assert result["translated"] == []
+        assert len(result["skipped"]) == 1
+        assert "nested group_aggregate" in result["skipped"][0]["reason"]
 
 
 # ---------------------------------------------------------------------------

@@ -162,6 +162,152 @@ class TestDoubleAggregation:
         result = fix_double_aggregation(expr, formula_exprs)
         assert "sum ( [formula_Customers LY] )" in result
 
+    def test_sum_of_group_aggregate_ref_not_unwrapped(self):
+        """Round-4 review (PR #662): a FIXED LOD's own expr is a
+        group_aggregate() call, which `expr_is_aggregated` also matches — but
+        stripping `sum(...)` around a reference to it is NOT the same
+        redundant double-aggregation as `sum(sum(...))`. `sum([formula_A])`
+        re-aggregates A's per-group values to the query's own grain, a
+        different, legitimate number from `[formula_A]` alone. Unwrapping it
+        turned a correct ratio into a live wrong number
+        (tableau-formula-translation.md)."""
+        formula_exprs = {
+            "A": "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , {} )",
+        }
+        expr = "( unique_count ( [T::Order ID] ) / sum ( [formula_A] ) ) * 100"
+        result = fix_double_aggregation(expr, formula_exprs)
+        assert "sum ( [formula_A] )" in result
+
+    def test_ratio_of_plain_sum_and_lod_is_unwrapped(self):
+        """Round-5 review (blocking #2): `X = sum(S) / group_aggregate(sum(S),
+        {}, {})` has `group_aggregate` SOMEWHERE in its text, but the `sum(S)`
+        on the left is a "naked" aggregate not nested inside it — X as a
+        whole is already a single fully-aggregated scalar (a ratio of two
+        complete aggregates), not a per-group LOD value. `sum([formula_X])`
+        must still unwrap to `[formula_X]`, the same as any other
+        already-aggregated ref — keeping the wrapper (the "contains
+        group_aggregate anywhere" check's bug) fails live."""
+        formula_exprs = {
+            "X": "sum ( [T::Sales] ) / group_aggregate ( sum ( [T::Sales] ) , {} , {} )",
+        }
+        expr = "sum ( [formula_X] )"
+        result = fix_double_aggregation(expr, formula_exprs)
+        assert result == "[formula_X]"
+
+    def test_difference_of_plain_sum_and_lod_is_unwrapped(self):
+        formula_exprs = {
+            "X": "sum ( [T::Sales] ) - group_aggregate ( sum ( [T::Sales] ) , {} , {} )",
+        }
+        expr = "sum ( [formula_X] )"
+        result = fix_double_aggregation(expr, formula_exprs)
+        assert result == "[formula_X]"
+
+    def test_plain_aggregate_wrapping_a_lod_is_unwrapped(self):
+        """The Snowflake SV shape: `average(group_aggregate(...))` already
+        collapses the per-group LOD values to one scalar at the current
+        query grain — it is not itself a dangling per-group value, so
+        wrapping a reference to it in another `sum()` is genuine double
+        aggregation and must unwrap, the same as `average(group_aggregate(
+        ...))` wrapping any other already-aggregated expression would."""
+        formula_exprs = {
+            "X": "average ( group_aggregate ( sum ( [T::Sales] ) , {} , {} ) )",
+        }
+        expr = "sum ( [formula_X] )"
+        result = fix_double_aggregation(expr, formula_exprs)
+        assert result == "[formula_X]"
+
+    def test_ratio_of_two_sibling_lods_is_not_unwrapped(self):
+        """Two INDEPENDENT group_aggregate calls combined by arithmetic —
+        each side's own aggregate (sum) is correctly nested inside its own
+        group_aggregate — must still be treated as LOD-shaped as a whole,
+        the same as the single-LOD case. This is the shape the original
+        round-4 fix was protecting; the round-5 fix must not regress it."""
+        formula_exprs = {
+            "X": (
+                "group_aggregate ( sum ( [T::Profit] ) , { [T::Region] } , {} ) / "
+                "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , {} )"
+            ),
+        }
+        expr = "sum ( [formula_X] )"
+        result = fix_double_aggregation(expr, formula_exprs)
+        assert result == "sum ( [formula_X] )"
+
+    def test_naked_aggregate_behind_a_formula_reference_is_unwrapped(self):
+        """Round-6 review (blocking #2): the round-5 fix only looked at INLINE
+        aggregate calls in the ref's own text — `X = [Rev] /
+        group_aggregate(sum(S), {}, {})` with `Rev = sum(S)` has no inline
+        aggregate outside the group_aggregate span, so it was wrongly read as
+        fully LOD-shaped. `Rev` is a naked aggregate one level removed
+        (referencing it is equivalent to inlining `sum(S)`), so `X` as a
+        whole is a ratio of two complete aggregates, same as the inline
+        case — `sum([formula_X])` must still unwrap. `formula_exprs` is
+        always keyed and valued by bare pre-prefix names (every call site
+        snapshots it before its own `add_formula_prefix` pass), so `X`'s
+        OWN stored text references `Rev` as plain `[Rev]`, not
+        `[formula_Rev]` — this is the realistic shape, not the `[formula_*]`
+        form `fix_double_aggregation`'s own first argument arrives in."""
+        formula_exprs = {
+            "Rev": "sum ( [T::Sales] )",
+            "X": "[Rev] / group_aggregate ( sum ( [T::Sales] ) , {} , {} )",
+        }
+        result = fix_double_aggregation("sum ( [formula_X] )", formula_exprs)
+        assert result == "[formula_X]"
+
+    def test_two_lod_valued_sibling_references_not_unwrapped(self):
+        """The reference-equivalent of the inline sibling-LOD case: X
+        references two OTHER formulas that are each themselves fully
+        LOD-shaped. Must stay LOD-shaped as a whole, same as writing both
+        group_aggregate calls inline."""
+        formula_exprs = {
+            "A": "group_aggregate ( sum ( [T::Profit] ) , { [T::Region] } , {} )",
+            "B": "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , {} )",
+            "X": "[A] / [B]",
+        }
+        result = fix_double_aggregation("sum ( [formula_X] )", formula_exprs)
+        assert result == "sum ( [formula_X] )"
+
+    def test_lod_minus_a_naked_average_reference_is_unwrapped(self):
+        formula_exprs = {
+            "Avg": "average ( [T::Sales] )",
+            "Y": "group_aggregate ( sum ( [T::Sales] ) , {} , {} ) - [Avg]",
+        }
+        result = fix_double_aggregation("sum ( [formula_Y] )", formula_exprs)
+        assert result == "[formula_Y]"
+
+    def test_lod_divided_by_median_is_unwrapped(self):
+        """`median` was missing from `_AGG_FUNCTIONS` (round-6 review) — a
+        naked `median(...)` sibling went undetected, so `expr_is_aggregated`
+        on the inner ref never even recognized this as aggregated at all,
+        independent of the group_aggregate-containment question."""
+        formula_exprs = {
+            "Z": "group_aggregate ( sum ( [T::Sales] ) , {} , {} ) / median ( [T::Sales] )",
+        }
+        result = fix_double_aggregation("sum ( [formula_Z] )", formula_exprs)
+        assert result == "[formula_Z]"
+
+    def test_lod_divided_by_max_if_is_unwrapped(self):
+        """`max_if` was also missing from `_AGG_FUNCTIONS`."""
+        formula_exprs = {
+            "W": "group_aggregate ( sum ( [T::Sales] ) , {} , {} ) / max_if ( [T::Flag] = 'y' , [T::Sales] )",
+        }
+        result = fix_double_aggregation("sum ( [formula_W] )", formula_exprs)
+        assert result == "[formula_W]"
+
+    def test_unbalanced_paren_in_a_literal_inside_the_lod_does_not_break_span_matching(self):
+        """Round-6 review: `_extract_function_args` isn't quote-aware, so an
+        unbalanced `(` inside a string literal in the LOD's filter argument
+        used to throw off the group_aggregate span computation. The module's
+        own `_close_paren` is quote-aware (same helper `bare_column_name`
+        already relies on) and must be used instead — a pure LOD with this
+        literal stays correctly recognized as LOD-shaped (kept, not
+        unwrapped)."""
+        formula_exprs = {
+            "A": "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , "
+                 "{ [T::Name] = 'Acme (East)' } )",
+        }
+        result = fix_double_aggregation("sum ( [formula_A] )", formula_exprs)
+        assert result == "sum ( [formula_A] )"
+
 
 # ===================================================================
 # Test 3: sum_if simplification — handled by translate_single,
@@ -770,11 +916,11 @@ class TestNormalizeDateParams:
         from ts_cli.model_builder import _normalize_date_params
         params = [{
             "name": "DateRange", "data_type": "DATE", "default_value": "#2024-01-01#",
-            "range_config": {"min": "#2020-01-01#", "max": "#2026-12-31#"},
+            "range_config": {"range_min": "#2020-01-01#", "range_max": "#2026-12-31#"},
         }]
         result = _normalize_date_params(params)
-        assert result[0]["range_config"]["min"] == "01/01/2020"
-        assert result[0]["range_config"]["max"] == "12/31/2026"
+        assert result[0]["range_config"]["range_min"] == "01/01/2020"
+        assert result[0]["range_config"]["range_max"] == "12/31/2026"
 
     def test_list_config_dates_converted(self):
         from ts_cli.model_builder import _normalize_date_params

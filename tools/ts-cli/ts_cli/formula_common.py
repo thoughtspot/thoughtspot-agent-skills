@@ -757,9 +757,7 @@ def _in_quotes(idx: int, spans: list[tuple[int, int]]) -> bool:
     return any(a <= idx < b for a, b in spans)
 
 
-#: Public names for the paren, argument and quote-span helpers above, for callers
-#: outside the converters (the audit's formula-calendar reading, P19). The private names
-#: stay for the existing callers.
+#: Public names for the helpers above, for callers outside the converters (P19).
 split_top_level_args = _split_top_level_args
 close_paren = _close_paren
 quoted_spans = _quoted_spans
@@ -884,17 +882,68 @@ def wrap_passthrough_calls(
 # ---------------------------------------------------------------------------
 
 _AGG_FUNCTIONS = re.compile(
-    r"\b(sum|average|count|unique\s+count|max|min|sum_if|count_if|average_if|"
-    r"unique_count_if|cumulative_sum|cumulative_average|cumulative_max|"
-    r"cumulative_min|stddev|variance|moving_sum|moving_average|moving_max|"
-    r"moving_min|group_aggregate)\s*\(",
+    r"\b(sum|average|count|unique\s+count|max|min|median|sum_if|count_if|"
+    r"average_if|unique_count_if|min_if|max_if|stddev_if|variance_if|"
+    r"cumulative_sum|cumulative_average|cumulative_max|cumulative_min|stddev|"
+    r"variance|moving_sum|moving_average|moving_max|moving_min|group_aggregate)\s*\(",
     re.IGNORECASE,
 )
+
+# `formula_exprs` is keyed by the BARE pre-prefix name (snapshotted before
+# `add_formula_prefix` runs) — a ref's own text reads `[Rev]`, not
+# `[formula_Rev]`. Resolve a bracketed name against it, as-is or stripped.
+_BRACKET_REF_RE = re.compile(r"\[([^\]]+)\]")
 
 
 def expr_is_aggregated(expr: str) -> bool:
     """Check if an expression contains aggregation functions."""
     return bool(_AGG_FUNCTIONS.search(expr))
+
+
+def _group_aggregate_spans(expr: str) -> list[tuple[int, int]]:
+    """Start/end offsets of each `group_aggregate(...)` call's own span."""
+    return [(m.start(), (_close_paren(expr, m.end() - 1) + 1) or len(expr))
+            for m in re.finditer(r"\bgroup_aggregate\s*\(", expr, re.IGNORECASE)]
+
+
+def _resolve_formula_ref(name: str, formula_exprs: dict[str, str]) -> str | None:
+    """Resolve a bracketed name to a `formula_exprs` key, as-is or `formula_`-stripped."""
+    stripped = name[8:] if name.lower().startswith("formula_") else None
+    return name if name in formula_exprs else stripped if stripped in formula_exprs else None
+
+
+def _every_aggregate_is_inside_a_group_aggregate(
+    expr: str, formula_exprs: dict[str, str] | None = None, _seen: frozenset[str] = frozenset(),
+) -> bool:
+    """True if `expr` has a `group_aggregate(...)` call, and every OTHER
+    aggregate — inline, or via a `[Rev]` ref resolved against `formula_exprs`
+    — nests inside some `group_aggregate(...)` span. A naked aggregate
+    elsewhere (`sum(S) / group_aggregate(...)`, inline or via a ref) means
+    `expr` is already fully-aggregated, not per-group LOD — False even with
+    `group_aggregate` present. Two siblings stay True. `_seen` guards a cycle.
+    """
+    formula_exprs = formula_exprs or {}
+    ga_spans = _group_aggregate_spans(expr)
+    if not ga_spans:
+        return False
+
+    def _outside_every_span(pos: int) -> bool:
+        return not any(start <= pos < end for start, end in ga_spans)
+
+    for m in _AGG_FUNCTIONS.finditer(expr):
+        if m.group(1).lower() != "group_aggregate" and _outside_every_span(m.start()):
+            return False
+    for m in _BRACKET_REF_RE.finditer(expr):
+        if not _outside_every_span(m.start()):
+            continue  # already inside a group_aggregate
+        ref_name = _resolve_formula_ref(m.group(1), formula_exprs)
+        if ref_name is None or ref_name in _seen:
+            continue  # not a formula ref (e.g. a column), or a cycle
+        ref_expr = formula_exprs[ref_name]
+        if expr_is_aggregated(ref_expr) and not _every_aggregate_is_inside_a_group_aggregate(
+                ref_expr, formula_exprs, _seen | {ref_name}):
+            return False
+    return True
 
 
 def fix_double_aggregation(
@@ -903,7 +952,8 @@ def fix_double_aggregation(
 ) -> str:
     """Replace sum([formula_X]) with [formula_X] when X is already aggregated.
 
-    Handles sum, count, average, max, min and their _if variants.
+    Handles sum, count, average, max, min and their _if variants. Does NOT
+    strip when X is LOD-shaped (see `_every_aggregate_is_inside_a_group_aggregate`).
     """
     _WRAPPED_REF = re.compile(
         r"\b(sum|average|count|max|min)\s*\(\s*\[formula_([^\]]+)\]\s*\)",
@@ -913,7 +963,7 @@ def fix_double_aggregation(
     def _replace(m: re.Match) -> str:
         ref_name = m.group(2)
         ref_expr = formula_exprs.get(ref_name, "")
-        if expr_is_aggregated(ref_expr):
+        if expr_is_aggregated(ref_expr) and not _every_aggregate_is_inside_a_group_aggregate(ref_expr, formula_exprs):
             return f"[formula_{ref_name}]"
         return m.group(0)
 
@@ -930,25 +980,11 @@ _QUALIFIED_BARE_COLUMN_RE = re.compile(
 def bare_column_name(expr: str | None, alias_table: str | None = None) -> str | None:
     """Return the column an expression names, if it names exactly one column.
 
-    A rename is a COLUMN in ThoughtSpot, not a formula — and, as
-    `_translate_dimension` documents, "a table needs at least one real column
-    selected or it imports with a cross-join warning". The previous pattern
-    only recognised the UNQUALIFIED, UNQUOTED form, so a rename written
-    `DM_DATE_DIM.DATE_VALUE as dm_date_dim."DATE"` was classified as computed and
-    emitted as a formula. On a date dimension whose only other references are join
-    keys that left the table with **zero** `column_id` entries, and ThoughtSpot
-    refuses the import outright:
-
-        "One or more tables have been added to the model without selecting any of
-         their columns ... DM_DATE_DIM"
-
-    (live, converting TEST_SV_DUNDER_MIFFLIN_SALES_INVENTORY, 2026-09-02.) BL-212
-    taught the expression *translator* to read quoted identifiers; this is the
-    *classifier* catching up.
-
-    When the expression is qualified, the qualifier must match `alias_table`
-    (case-insensitively) — a reference to a different table is not a simple rename
-    of this one's column, so it correctly falls through to the formula path.
+    A rename is a COLUMN in ThoughtSpot, not a formula — `_translate_dimension`
+    requires at least one real column or the import cross-joins. The old pattern
+    only recognised the unqualified, unquoted form, mis-classifying a qualified,
+    quoted rename as computed (live, 2026-09-02, BL-212). A qualifier must match
+    `alias_table` case-insensitively, or this falls through to the formula path.
     Returns the column name with quotes stripped, or None.
     """
     if not expr:

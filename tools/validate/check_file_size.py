@@ -59,7 +59,11 @@ RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
-    "tools/ts-cli/ts_cli/commands/tableau.py": (1675, "BL-089"),
+    # 1596 as of ts-cli v0.217.2: _export_model_tml raises _ExportFailed
+    # instead of exiting the process directly, so a failed export on one
+    # datasource no longer kills the per-datasource loop before every other
+    # datasource's result is printed (round-4 PR #662 review).
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1596, "BL-089"),
     # The report's largest view: past SOFT_WARN when the gate reached JS (BL-503).
     # Split it into per-tab files when it is next changed; lower this as it shrinks.
     "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-520"),

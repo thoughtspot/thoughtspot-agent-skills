@@ -110,7 +110,9 @@ Base model imported: {model_name}
   ],
   "validation_warnings": [...],
   "updated_model_guid": "guid",
-  "import_status": "OK"
+  "import_status": "OK | WARNING | SKIPPED | ERROR | absent — OK/WARNING imported; SKIPPED means every new formula was attempted and dropped during retry, Model unchanged (exit 0, no import_error) — `formulas_dropped_on_import` is always NON-empty here, so SKILL.md's Step 7 routes it through the dropped-formula branch, not straight to Step 7.5; absent means there were no new formulas to import in the first place, so the import step never ran (exit 0, no import_error, and `formulas_dropped_on_import` genuinely empty/absent) — only THIS case routes straight to Step 7.5 the same as a clean OK import.",
+  "import_warning": "present only on WARNING — the warning text ThoughtSpot returned",
+  "import_error": "present only on ERROR — e.g. an unparseable import response or a structural failure not attributable to one formula"
 }
 ```
 

@@ -1616,17 +1616,23 @@ double-aggregation fix → deterministic unresolvable-reference filtering → ta
 merge → import with up to 10 retry cycles) — see
 [references/step-5-tml-generation.md](references/step-5-tml-generation.md)
 "`build-model --existing-guid` internal pipeline (Step 7 Phase 2)" for the full 10-step
-breakdown. A large multi-table model no longer needs a high `--max-retries` (previously
-exceeding the cap rolled the whole `ALL_OR_NONE` batch back to zero) since the deterministic
-filter classes are now caught pre-import.
+breakdown. A large multi-table model no longer needs a high `--max-retries`, since the
+deterministic filter classes are now caught pre-import.
 
 Parse the JSON output to report results to the user:
 
 See [references/step-7-review-templates.md](references/step-7-review-templates.md) "Phase 2 — `build-model --existing-guid` JSON output shape" for the exact
-field list (`formulas_translated`/`skipped`/`filtered`/`added`, `formulas_dropped_on_import`
-with `name`/`expr`/`error`/`original_tableau`, `validation_warnings`, `updated_model_guid`).
+field list (`import_status`, `formulas_translated`/`skipped`/`filtered`/`added`,
+`formulas_dropped_on_import` with `name`/`expr`/`error`/`original_tableau`,
+`validation_warnings`, `updated_model_guid`).
 
-**If `formulas_dropped_on_import` is empty (or absent):** Report success. Proceed to
+**Check `import_status` first.** `OK`/`WARNING` imported (either can still carry a partial
+drop list); on `WARNING` also show `import_warning`. `SKIPPED` means every new formula was dropped during retry (Model unchanged,
+exit 0, no `import_error`) — **its drop list is always non-empty**. Absent means no new
+formulas existed (exit 0, no `import_error`, drop list genuinely empty). `ERROR` — report
+`import_error` and stop.
+
+**If `formulas_dropped_on_import` is empty (or absent):** Report success and proceed to
 Step 7.5 regardless of migration pace.
 
 **If `formulas_dropped_on_import` is non-empty — behaviour depends on `{migration_pace}`:**
@@ -2501,10 +2507,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, …) is excluded with the function named, not parked at import; DATETIME and `/* */` comments translate; UNION is the 16th spatial function (ts-cli v0.211.0, BL-460). |
-| 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
-| 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
-| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
-| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
+| 1.47.0 | 2026-11-17 | Model/formula-engine fixes (ts-cli v0.219.2). Nested-`group_aggregate` false-flag fixed; a nested FIXED LOD parks, not migrates. `convert_string_concat` no longer concats a numeric `+` just because the formula is string-typed; a rejected pair no longer shares a conversion's budget, so long ladders convert fully. `to_string`/`str` drops only for a whole `concat()` argument; its masking token is control-character-delimited. `fix_double_aggregation` follows a cross-reference, adds `median`/`min_if`/`max_if`/`stddev_if`/`variance_if`, uses a quote-aware paren matcher; strips `sum()` only when some aggregate sits outside every `group_aggregate`. Import-retry no longer fails open; merge prints every datasource's result — BL-580/581/582. |
 
-**Older entries (v1.0.0–v1.44.4):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.46.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
