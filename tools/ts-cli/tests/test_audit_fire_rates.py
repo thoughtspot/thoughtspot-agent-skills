@@ -13,6 +13,10 @@ from ts_cli.audit.catalog_evidence import fire_rate_problems
 from ts_cli.audit.fire_rates import fire_rates, object_kind
 
 CAT = load_catalog(PKG_CATALOG)
+#: What a capture of every angle fetches: a snapshot written without `needs` reads as a
+#: legacy one, which lacks the calendars and connections P22 and P24 read, so its P
+#: selection would be refused.
+ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections"}
 TODAY = datetime.date(2026, 11, 2)
 COUNTS = {"model": 4, "table": 10, "answer": 0, "set": 3}
 
@@ -113,7 +117,8 @@ def test_the_command_reads_a_snapshot(tmp_path):
     import audit_rule_fixtures as fx
     from ts_cli.audit.snapshot import write_snapshot
     from ts_cli.commands.audit import app
-    write_snapshot(fx.ai_model_without_description(), tmp_path / "snap", ["A", "D", "H", "P", "S"])
+    write_snapshot(fx.ai_model_without_description(), tmp_path / "snap", ["A", "D", "H", "P", "S"],
+                   needs=ALL_NEEDS)
     res = CliRunner().invoke(app, ["fire-rates", "--snapshot-in", str(tmp_path / "snap"),
                                    "--assessment", "general"])
     assert res.exit_code == 0, res.output
@@ -144,7 +149,7 @@ def test_only_judged_objects_are_counted(tmp_path):
     bad["model"]["columns"] = [{"name": "x", "column_id": "T::X", "properties": ["oops"]}]
     ctx.models.append(bad)
     ctx.model_guids = [m["guid"] for m in ctx.models]
-    write_snapshot(ctx, tmp_path / "snap", ["A", "D", "H", "P", "S"])
+    write_snapshot(ctx, tmp_path / "snap", ["A", "D", "H", "P", "S"], needs=ALL_NEEDS)
     res = CliRunner().invoke(app, ["fire-rates", "--snapshot-in", str(tmp_path / "snap"),
                                    "--assessment", "general"])
     a4 = _row(json.loads(res.stdout[res.stdout.index("{"):])["rules"], "A4")

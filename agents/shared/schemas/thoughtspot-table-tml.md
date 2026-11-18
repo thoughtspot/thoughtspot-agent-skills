@@ -33,7 +33,7 @@ table:
       value_casing: UNKNOWN   # optional — VARCHAR columns: UPPER | LOWER | MIXED | UNKNOWN
       format_pattern: "MM/dd/yyyy"  # optional — display format (date or number)
       is_hidden: false        # optional — hides the column from the search bar
-      calendar: calendar      # optional — DATE columns only; a custom-calendar NAME
+      calendar: calendar      # optional — DATE columns only; calendar, fiscal or default (code-based), else a custom calendar's name
       currency_type:          # optional — MEASURE columns
         column: TARGET_CURRENCY     # per-row ISO code read from another column
     db_column_properties:
@@ -111,7 +111,7 @@ table:
 | `properties.format_pattern` | No | Display format string — date or number. **Added 2026-07-30:** documented on Model and SQL-View columns but missing from this reference; the census found it on 13 of 275 Tables (37 columns) with values `MM/dd/yyyy`, `yyyy-MM-dd HH:mm:ss`, `#,###`, `dd MMM YYYY`. |
 | `properties.is_hidden` | No | `true` hides the column from the search bar. **Added 2026-07-30** (11 sightings, 4 Tables). Same caution as the Model reference: do not set during conversion — hidden columns cause locked visualizations. |
 | `properties.currency_type` | No | Currency symbol and formatting for a MEASURE. Same three mutually-exclusive forms as the Model reference (`iso_code`, `column`, `is_browser`). **Added 2026-07-30** — and the single live sighting anywhere of the `column` form is on a Table column: `{"column": "TARGET_CURRENCY"}` on `TARGET_CURRENCY_RATES`. Note it is a **bare column name**, not a `TABLE::Column` reference. |
-| `properties.calendar` | No | **DATE columns only** — the name of a Connection-scoped custom calendar. **Added 2026-07-30, and this settles an open question:** `calendar:` **is** honoured on a Table column, not only on a Model column — `FACT_RETAPP_SALES.RECORDDATE: Retail454Cal` (calendar name synthetic; see the census), 1 of 275 Tables. Same portability caveat as the Model reference (see [thoughtspot-model-tml.md](thoughtspot-model-tml.md) `properties.calendar`): the calendar object lives outside TML, so **do not emit when generating a table** — pass through on round-trips only. |
+| `properties.calendar` | No | **DATE columns only** — `calendar`, `fiscal` or `default` for a code-based calendar, else the name of a Connection-scoped custom calendar. **Added 2026-07-30, and this settles an open question:** `calendar:` **is** honoured on a Table column, not only on a Model column — `FACT_RETAPP_SALES.RECORDDATE: Retail454Cal` (calendar name synthetic; see the census), 1 of 275 Tables. Same portability caveat as the Model reference (see [thoughtspot-model-tml.md](thoughtspot-model-tml.md) `properties.calendar`): a custom calendar object lives outside TML, so **do not emit when generating a table** — pass through on round-trips only. |
 | `table.description` | No | Table-level description (top-level under `table:`). Maps from Snowflake Semantic View `tables (...)` table-comment clauses. |
 
 ### `joins_with[]` fields

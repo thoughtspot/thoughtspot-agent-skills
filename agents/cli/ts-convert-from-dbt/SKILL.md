@@ -484,7 +484,7 @@ Core ≤1.7-era projects may still use a bare `meta:` sibling instead, see below
 | `ts_format_pattern` | Numeric/date display format | Format pattern strings |
 | `ts_hidden` | Column visibility | `yes`/`no` (default `no`) |
 | `ts_currency_type` | Currency formatting | **A nested block, not a flat value** — `type:` is `from_isocode` (with `isocode:`), `from_column` (with `column:`), `from_browser`, or `none`. See the example below |
-| `ts_calendar_type` | Custom calendar | `none`, `default`, or a calendar name. DATE/DATETIME columns only |
+| `ts_calendar_type` | Calendar | `none`, or a calendar value: `calendar`, `fiscal` and `default` name code-based calendars; any other value names a Connection-scoped custom calendar. DATE/DATETIME columns only |
 | `ts_geo_config` | Geo map role | **A nested block, not a flat value** — `type:` is `latitude`, `longitude`, `country`, `sub_nation_region` (with `country:` and `region_type:`), or `none`. See the example below |
 | `ts_index_priority` | Search index priority | Integer 1–10 |
 | `ts_index_type` | Indexing behavior | `default` or `dont_index` |
@@ -1162,6 +1162,7 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.3 | 2026-11-18 | **`ts_calendar_type` values corrected.** The tag table called the value "a calendar name"; it now gives the product owner's ruling: `calendar`, `fiscal` and `default` name code-based calendars, and any other value names a connection-scoped custom calendar. |
 | 1.1.2 | 2026-11-04 | **`ts_formula` measures declare an aggregation.** A MEASURE `ts_formula` column with no `ts_aggregation` now gets one from `spotql_ops.formula_aggregation` (SUM, or for a bare `group_aggregate` / `last_value` the re-aggregation its inner aggregate implies); a declared `ts_aggregation` is kept (BL-509). |
 | 1.1.1 | 2026-10-29 | Requires ts-cli 0.192.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (without it ThoughtSpot answers a misleading 400 that reads as a bad archive; the CLI now explains it names a missing `--file`); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (refused locally; the server rejected a create without it on one cluster), taken from `dbt_project.yml` `name:` in Step 2. |
 | 1.1.0 | 2026-10-29 | Requires ts-cli 0.187.0. `ts dbt build-model` and `ts dbt-export build-model --import` lint the Model TML before importing it (I5 advisory); `ts dbt build-model` applies `ts_rls_rules` before the Model import — for every Table the Model joins, including join targets outside `--model-path` — and stops (non-zero) if any Table's rules did not apply (audit 2026-10-29: 9.3, 17.2). |

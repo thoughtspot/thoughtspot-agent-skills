@@ -36,6 +36,10 @@ def _full_context():
         model_guids=["m1"],
         warnings=["Set discovery partial for Sales: timeout"],
         assessment="spotter",
+        calendars=[{"calendar_id": "c1", "calendar_name": "Retail 445",
+                    "connection_id": "k1", "connection_name": "Warehouse A"}],
+        connections=[{"id": "k1", "name": "Warehouse A", "type": "SNOWFLAKE", "oauth": False,
+                      "privatelink": None, "parameterized": False}],
     )
 
 
@@ -205,9 +209,15 @@ def _app():
     return app
 
 
+#: Every conditional data kind: a capture of every angle fetches them all (a snapshot
+#: written without `needs` reads as a legacy, angle-keyed one, which lacks calendars
+#: and connections).
+ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections"}
+
+
 def test_cli_snapshot_in_needs_no_profile(tmp_path, no_profiles):
     snap = tmp_path / "snap"
-    write_snapshot(_full_context(), snap, ALL)
+    write_snapshot(_full_context(), snap, ALL, needs=ALL_NEEDS)
     out = tmp_path / "out.json"
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap), "-o", str(out)])
     assert result.exit_code == 0, result.output
@@ -218,7 +228,7 @@ def test_cli_snapshot_in_needs_no_profile(tmp_path, no_profiles):
 
 def test_cli_snapshot_in_defaults_to_captured_angles(tmp_path, no_profiles):
     snap = tmp_path / "snap"
-    write_snapshot(_full_context(), snap, ["D", "P"])
+    write_snapshot(_full_context(), snap, ["D", "P"], needs={"calendars", "connections"})
     out = tmp_path / "out.json"
     result = runner.invoke(_app(), ["audit", "run", "--snapshot-in", str(snap), "-o", str(out)])
     assert result.exit_code == 0, result.output

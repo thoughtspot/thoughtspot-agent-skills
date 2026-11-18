@@ -30,7 +30,10 @@ Tested on champ-staging (2026-06-18). Sequential export of 8 models:
 The caching layer (Step 4) is essential — subsequent runs only re-export changed
 objects. 4-way concurrent throttling NOT yet tested (needs a parallel harness).
 
-**Remaining:** Test 4-way parallel to confirm no 429 or connection pooling issues.
+**Closed 2026-11-18:** the 4-way parallel test is obsolete. The audit sends its exports
+one request at a time, up to 50 objects each (`context._export_items`). It starts no
+thread or process: a grep for thread pools, `threading`, `asyncio` and
+`multiprocessing` under `ts_cli/audit` finds none. So concurrent exports never happen.
 
 ---
 
@@ -65,7 +68,7 @@ properties:
 ```
 
 S4, S10, D4, and P11 can all read from `model.properties` directly.
-### #1 — Bulk metadata search performance — UNVERIFIED
+### #1 — Bulk metadata search performance — RESOLVED (a duplicate: the VERIFIED #1 above answers it; kept as the original question)
 
 Large instances may have 1000+ models and 2000+ answers. The `ts metadata search --all`
 command auto-paginates, but we need to verify:
@@ -78,7 +81,12 @@ and measure elapsed time and response completeness.
 
 ---
 
-### #2 — Bulk TML export throttling — UNVERIFIED
+### #2 — Bulk TML export throttling — RESOLVED (obsolete: the audit does not export concurrently; kept as the original question)
+
+**Obsolete (2026-11-18).** The question assumed exports at 4-way concurrency. The audit
+sends them one request at a time (`context._export_items`) and starts no thread or
+process, so concurrent-export throttling cannot arise. The VERIFIED #2 above measured
+sequential export only, so it did not answer this question either.
 
 Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 - Does the ThoughtSpot API throttle or 429 on concurrent TML exports?
@@ -89,7 +97,7 @@ Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 
 ---
 
-### #3 — Dependent counts for orphan detection — UNVERIFIED
+### #3 — Dependent counts for orphan detection — RESOLVED (a duplicate: the VERIFIED #3 above answers it; kept as the original question)
 
 Step 5 uses `ts metadata dependents` to detect orphan models (H4) and sets (H5).
 Need to verify:
@@ -101,7 +109,7 @@ Need to verify:
 
 ---
 
-### #4 — is_bypass_rls in exported TML — UNVERIFIED
+### #4 — is_bypass_rls in exported TML — RESOLVED (a duplicate: the VERIFIED #4 above answers it; kept as the original question)
 
 S4 and S10 need `is_bypass_rls` from the model TML. Need to verify:
 - Does `is_bypass_rls` appear in `ts tml export` output?
@@ -173,7 +181,7 @@ Response shape:
 A3 can now check both TML path (`data_model_instructions`) and API path
 (`ai/instructions/get`) for full NL instruction coverage. Instructions set via the
 UI appear in the API response. `scope: GLOBAL` applies to all searches on this model.
-### #8 — NL Instructions API — UNVERIFIED
+### #8 — NL Instructions API — RESOLVED (a duplicate: the VERIFIED #8 above answers it; kept as the original question)
 
 A3 partially depends on detecting NL Instructions set via the REST API
 (`POST /api/rest/2.0/ai/instructions/get`). Confirmed via MCP as Beta since
@@ -189,22 +197,22 @@ covers the TML path. This API would add coverage for instructions set only via t
 
 ## Phase 2 — Usage Analysis (future)
 
-### #9 — searchdata against BI Server — UNVERIFIED
+### #9 — searchdata against BI Server — DEFERRED to BL-081 (usage stats)
 
 Need to verify `POST /api/rest/2.0/searchdata` works with the BI Server system model:
 - Does it accept the BI Server model GUID as `logical_table_identifier`?
 - What is the maximum `record_size`? Does pagination work?
 
-### #10 — BI Server Spotter coverage — UNVERIFIED
+### #10 — BI Server Spotter coverage — DEFERRED to BL-081 (usage stats)
 
 Does the TS: BI Server system model capture Spotter/AI search interactions,
 or only classic Search interactions?
 
-### #11 — User Action enum — UNVERIFIED
+### #11 — User Action enum — DEFERRED to BL-081 (usage stats)
 
 Full `User Action` values in BI Server? Need the enum to filter appropriately.
 
-### #12 — Query Text column parsability — UNVERIFIED
+### #12 — Query Text column parsability — DEFERRED to BL-081 (usage stats)
 
 Does `[Query Text]` contain `[column_name]` tokens parseable for column-level
 usage analysis?
@@ -248,9 +256,176 @@ omitted dependent objects. Needs re-verification on next audit run.
 
 ---
 
+### #16 — Custom calendar search pages, and `record_size: -1` returns none — VERIFIED 2026-11-18
+
+Live-probed, read-only, on the SE demo cluster on 2026-11-18, for P22, which reads the
+custom calendars registered on each connection. `POST /api/rest/2.0/calendars/search`:
+
+| Request body | Answer |
+|---|---|
+| `{}` | The first 10 calendars only (the default page size is 10) |
+| `{"record_size": 100}` | 57 calendars on 22 connections: all of them |
+| `{"record_size": -1}` | **None at all.** -1 is not "all" here, as it is on `metadata/search` |
+| `{"record_offset": 10, "record_size": 10}` | The next 10 |
+| Pages of 25 from offset 0 until a short page | All 57 |
+| `{"connection_identifier": <connection id>}` | That connection's calendars only |
+
+Each item is `{calendar_id, calendar_name, connection_id, connection_name,
+data_warehouse_type, author_name, modification_time_in_millis}`, all strings.
+
+**What changed (ts-cli 0.219.0, ts-audit 3.23.0).** `ts calendar search` sent no
+`record_size`, so it listed at most 10 calendars. It now pages 100 at a time until a
+page comes back short. The audit's `calendars` fetch (for P22 and the Data Cache view)
+shares that paging (`ts_cli/custom_calendar/search.py`), once per audit, and keeps only
+the four ids and names it reads. It matches a calendar to a Model's Tables by
+connection name, any case, and by connection id where a Table's metadata header
+carries `dataSourceId`.
+
+**Checked 2026-11-18, the SE demo cluster:** none of 93 Table metadata headers in a 20-Model
+snapshot carries `dataSourceId` (73 carry `dataSourceName`), so the name match is what
+carries the rule; the id match stays for a build that adds the key. **Not verified:** what
+that key would hold. And the paging guard against a server that ignores
+`record_offset` (a repeated full page is an error) has met no such server.
+
+---
+
+### #17 — Connection search details, and how P23 and P24 read a connection — VERIFIED 2026-11-18
+
+Live-probed, read-only, on the SE demo cluster on 2026-11-18, for P23 and P24.
+
+`POST /api/rest/2.0/connection/search` with `{"record_size": 200, "record_offset": 0,
+"include_details": true}` answered 200 connections, so the audit pages it as it pages
+the calendar search (until a short page, 100 at a time). Each item is `{id, name,
+data_warehouse_type, details: {type, configuration, ...}}`:
+
+- `details.configuration` is a **JSON string** of the connection's settings,
+  credentials included. They were masked (`******`) in what the probe saw; the audit
+  does not rely on that. It parses the string in the fetch, keeps
+  `{id, name, type, oauth, oauth_m2m, privatelink, parameterized,
+  parameterized_connection}` and drops the rest, so no configuration value is stored,
+  logged, snapshotted or reported
+  (`audit/connection_facts.py`; a test checks the context, the snapshot, the audit
+  JSON, the report and the logs).
+- **There is no auth-type field.** OAuth shows only in setting names: `OAuth2ClientId`
+  and `OAuth2Secret` (Snowflake OAuth), `oauth_pvt_key`, and `client_id` with
+  `client_secret` on a Databricks connection (an OAuth M2M service principal). So P24
+  is evidence `heuristic`.
+- **No setting names PrivateLink.** P24 reads it from the `host` or `accountName`
+  value: a Snowflake PrivateLink URL carries `.privatelink.`. The value is read to
+  derive the flag and not kept.
+- A template variable is a setting whose whole value is a `${var}` token. **Checked
+  2026-11-18, read-only: the search does not show one.** None of the 1,815 connections
+  it returned held a token. One connection's metadata header carries
+  `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each
+  of its six properties, but the search returned none of them as a token. Each of
+  those six came back as the id of a CONNECTION_PROPERTY template variable instead
+  (checked against `template/variables/search`). Only key names, value shapes and
+  counts were read; no value was printed or kept. **So P24 reads the header
+  instead.** The connections fetch also pages a `metadata/search` of CONNECTION headers.
+  It keeps, per connection, whether `parameterizedConnection` or `isParameterized` is
+  true (`parameterized_connection`). Run live on the same cluster, the audit's fetch
+  read 1,815 connections and flagged exactly that one. A connection with no header, or
+  every connection when that search fails, reads as unknown.
+
+The Table metadata headers carry `dataSourceType`: `RDBMS_SNOWFLAKE` on 73 of 92 headers
+in the sample (Model headers carry none). P23 reads the connection's
+`data_warehouse_type` first, and the header's type when the connection gives none.
+
+**Checked 2026-11-18, read-only, with `ts metadata search` on the SE demo cluster.**
+Both points this item first left open now hold:
+
+- **`RDBMS_DATABRICKS` is Databricks' `dataSourceType`.** Of 13,162 Table headers, 149
+  carry it: every Table on the cluster's 14 Databricks connections. One of them, fetched
+  by id in the request shape the audit's header fetch uses, carries it too. The other
+  values seen were `RDBMS_SNOWFLAKE` (12,549), `RDBMS_MODE` (394), `RDBMS_GCP_BIGQUERY`
+  (24), `RDBMS_POSTGRES` (18), `DEFAULT` (13), `RDBMS_REDSHIFT` (11),
+  `RDBMS_GCP_POSTGRESQL` (3) and `RDBMS_SQLSERVER` (1). P23 reads each of those as a
+  source Data Cache does not serve.
+- **A SQL View's header `type` is `SQL_VIEW`.** Five SQL Views sampled, and one fetched
+  by id in the audit's request shape, all carry it. The audit keeps no SQL View TML
+  (only `table` documents), and until 3.23.0 it fetched no header for a SQL View either,
+  so P1 and D8 could not see one a Model used. P27 reads the header, and falls back to
+  the row's `metadata_subtype`, as `migrate/discover.py` does.
+
+What P28 counts as a function in an RLS rule, a null test included, is #18's point 3:
+the product owner confirmed it.
+
+---
+
+### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
+
+Until the team answers, no open point reads Can use, with one exception taken by
+decision: point 2's negative side. A host without `privatelink` reads as no PrivateLink,
+since nothing else in a connection's settings could say otherwise. Point 3 is no longer
+open: the product owner answered it, and that reading is firm. A finding marks "to
+confirm" every other reading that rests on an open point. Those are P24's OAuth M2M
+(point 1), PrivateLink read from the host (point 2) and P28's operator null test (point
+4). So are P19's calendar named in a formula (point 5) and code-based name that a custom
+calendar also has (point 9), and P21's measure only flagged pre-aggregated (point 6). A finding
+resting only on such readings says the Model may not be able to use Data Cache, and the
+Model reads To confirm. Points 7 and 8 leave the rule unable to judge the Model, which
+reads Not assessed. P24 is graded as a heuristic.
+
+The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
+for the team. Points 4 to 6, 8 and 9 came from the reviews of the rules that day and
+the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P24 or P28
+reads today.
+
+1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
+   `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
+   Databricks OAuth M2M service principal). Does Data Cache treat that M2M connection as
+   an OAuth connection? The finding names it "OAuth M2M (to confirm)".
+2. **PrivateLink.** No configuration key names PrivateLink, so P24 reads it from a
+   `host` or `accountName` containing `privatelink`. Is that a sound signal on every
+   source Data Cache supports? The finding names it "PrivateLink read from the host (to
+   confirm)". The question has a negative side too: a Databricks PrivateLink workspace
+   may keep its usual host, so a host without `privatelink` is not proof that a
+   connection does not use PrivateLink. P24 reads such a connection as no PrivateLink
+   today.
+3. **A null test in an RLS rule.** The product owner confirmed (2026-11-18) that any
+   function in an RLS rule's formula stops Data Cache, `isnull` included. S12 advises a
+   null test so an outer join keeps its unmatched rows, so the two rules meet: the team
+   is to decide how customers should weigh keeping the rows against caching. Both S12's
+   and P28's remediation now say so, and P28 names such a rule "a null test that keeps
+   outer-join rows, see S12".
+4. **Operator null tests.** S12 and S15 accept `[X] = null` as a null branch, as well
+   as `isnull` and `is_null`. Their pattern matches `= null` after any character, so it
+   reads `[X] != null`, `<= null` and `>= null` as a null branch too. P28 reads the same
+   forms and lists a rule with one as "a null test that keeps outer-join rows, see S12
+   (to confirm)". Does an operator comparison with null stop Data Cache too? If so, it
+   becomes a firm reading like `isnull`; if not, P28 drops it. S12's remediation says it
+   is to confirm.
+5. **A custom calendar named in a formula.** A formula can pass a calendar to a date
+   function, as in `start_of_week ( [d] , RetailCal )`. P19 lists such a formula as
+   "Week Start: calendar RetailCal in a formula (to confirm)". It reads the last
+   argument of a date function that takes a calendar, when that argument is a bare
+   keyword other than `calendar`, `fiscal` or `default` (and other than `true`, `false`
+   or `null`, which are literals). Every calendar a formula names, code-based or not, is
+   listed under Calendars in use as "in a formula". Does a formula that names a custom
+   calendar stop Data Cache? If so, the reading becomes firm; if not, P19 drops it.
+6. **Pre-aggregated measures beyond `AGGREGATE`.** P21 also fires on a Model column over
+   a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`. The
+   product owner's rule named Models with `AGGREGATE` measures (semantic query Models).
+   Is a Model with such a pre-aggregated SUM measure uncached too?
+7. **A Model built on a View.** A Model source whose metadata header type is
+   `AGGR_WORKSHEET` (a View) names no connection, so P23 cannot read a warehouse type
+   for it, and the Model reads Not assessed. Two of the 19 Models in the 2026-11-18
+   sample on the SE demo cluster do. Can Data Cache serve a Model built on a View?
+8. **RLS path ids that differ only in case.** P28 matches the ids an RLS rule names to
+   its Table's `table_paths` ids exactly. A rule naming `teams_1` where the path is
+   `TEAMS_1` is not judged, and the Model reads Not assessed; so is a rule naming an id
+   its Table does not define at all. Does ThoughtSpot match the ids without case? If so,
+   P28 should read such a rule as it reads the path; if not, the rule is malformed.
+9. **A custom calendar named like a code-based one.** A custom calendar could be named
+   `Fiscal`, `default` or `calendar`. When a custom calendar registered on the Model's
+   connection has the name a column's calendar, or a formula's calendar argument, uses,
+   P19 lists the column or formula "to confirm" and the calendars column shows it as
+   "code-based or custom, to confirm". Can a custom
+   calendar take such a name, and if so, how does TML tell it from the code-based one?
+
 ## Phase 3 — Visualization Layer (future)
 
-### #13 — Liveboard viz fingerprinting — UNVERIFIED
+### #13 — Liveboard viz fingerprinting — DEFERRED to BL-591
 
 Can two liveboards with the same visualizations be reliably detected by comparing
 `search_query` strings in their viz definitions?

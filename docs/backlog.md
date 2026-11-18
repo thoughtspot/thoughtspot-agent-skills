@@ -134,7 +134,7 @@ are roughly ordered by value÷effort.
 | BL-222 | Seven `ts snowflake` subcommands never invoked by a test; `exec` is uncovered in CI entirely | next `commands/snowflake.py` change |
 | BL-223 | `rely`/`cardinality` modelled as equivalent-then-exclusive; every one-to-many join drops a recommended optimization, and the one-to-many restrictions are undocumented | next Databricks pass |
 | BL-158 | Extract the cascade-drop retry loop into shared import machinery — qlik/powerbi/sisense hand-walk a transitive closure | with BL-217 part 2 |
-| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
+| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 and V4 closed; V1's sentinel question answered by the 2026-11-18 ruling. One residual: V2's round-trip + `is_browser`** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | ~~BL-276~~ | ~~`_extract_joins` has no filter for object-graph-cached join duplicates~~ | DONE (2026-09-28, ts-cli v0.152.0) — fixed as a value dedup; the subtree exclusion this item proposed was disproven |
@@ -391,7 +391,7 @@ are roughly ordered by value÷effort.
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
 | BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
 | BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
-| BL-081 | `ts data search` for ts-audit Phase 2 | 2026-10-31 |
+| BL-081 | `ts data search` for ts-audit Phase 2 | 2027-01-31 |
 | BL-086 | Model-coach: codify deterministic substrate | 2026-11-30 |
 | BL-007 | Array/VARIANT column handling pattern | — |
 | BL-008 | Soft/overridable exclusion rules in model-instructions-schema | — |
@@ -484,6 +484,17 @@ are roughly ordered by value÷effort.
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
 | BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
 | BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
+| BL-588 | The report's sidebar writes a Model guid into a link without escaping it | 2027-01-31 |
+| BL-589 | Nothing checks the audit report's vendored JavaScript for updates or advisories | 2027-01-31 |
+| BL-590 | Data Cache: the product team's answers on the readings in open-items #18 | 2027-01-31 |
+| BL-591 | ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? | 2027-03-31 |
+| BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
+| BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
+| BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
+| BL-595 | Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it | 2027-01-31 |
+| BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
+| BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
+| BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -2857,7 +2868,8 @@ ts-audit Phase 2 (dead-column detection, unused-object identification, low-usage
 requires querying the TS: BI Server system model — a `ts data search` command (open items
 #9–#12 in ts-audit's references). Spec via MCP first, then live-verify.
 
-**Target:** 2026-10-31.
+**Target:** 2027-01-31. Re-dated 2026-11-18: the first target, 2026-10-31, passed with
+the item open. Usage stats is the next ts-audit work after the Data Cache rules.
 
 ---
 
@@ -6968,7 +6980,12 @@ closed, and one is untouched:**
 | **V4** | **UNTOUCHED, and now negatively evidenced twice** | `is_mandatory_token_filter`: **0** of 500 documents. A second and far larger survey has failed to find it, which means a survey is the wrong instrument — a property that never appears cannot be shown to round-trip. Closing V4 requires **constructing** an object that sets the flag and round-tripping it, exactly as this entry's original step describes. Unchanged and still the highest-stakes of the four, because it fails open |
 
 **What remains of this entry, restated (revised 2026-09-01).** V1's sentinel-versus-name question
-(one API read) and V2's round-trip leg plus `is_browser` (needs a constructed object). **V3 is
+(one API read) and V2's round-trip leg plus `is_browser` (needs a constructed object).
+
+**V1 answered 2026-11-18.** The product owner ruled that `calendar`, `fiscal` and `default` name
+code-based calendars, and any other value a connection-scoped custom calendar. So the literal
+`calendar` is the code-based default, not a calendar named "calendar", and no API read is needed.
+V2 is what remains. **V3 is
 done, and V4 is now closed — see below.**
 
 **V4 CLOSED 2026-09-01 — will not be verified.** Per ThoughtSpot domain review,
@@ -7008,8 +7025,9 @@ this census could not see by construction.
 are deliberately **not** routed to a backlog entry -- they are input to a product conversation,
 not repo work. This entry covers only the four verifications, which *are* ours to close.
 
-**Target:** next `se-thoughtspot` session -- V1 alone is a 15-minute task and can ride along with
-any unrelated live check.
+**Target:** next `se-thoughtspot` session. V1 is answered (2026-11-18 ruling), so what is left is
+V2, which needs an object built to set the `column` and `is_browser` forms; it cannot ride along
+with an unrelated live check.
 
 ---
 
@@ -17645,6 +17663,18 @@ disagree.
 
 **Target:** 2026-12-31.
 
+## BL-588 — the report's sidebar writes a Model guid into a link without escaping it `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** building the Data Cache view (ts-audit 3.23.0).
+
+**What.** `core.js` builds each sidebar Model link's `href` from the Model guid without `esc`. A test with a guid holding markup ran its script. Real guids are hex, so this needs malformed or hand-built audit JSON.
+
+**Do.**
+1. Escape the guid in every `href` core.js builds (and check the views for the same pattern).
+2. A headless-Chrome test with a guid holding a quote and markup: the link renders as text, nothing runs.
+
+**Target:** 2027-01-31.
+
 ## BL-589 — nothing checks the audit report's vendored JavaScript for updates or advisories `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** pr-ready review of the formula graph (ts-audit 3.22.0).
@@ -17654,5 +17684,132 @@ disagree.
 **Do.**
 1. Add `tools/ts-cli/ts_cli/audit/vendor/` (its README table) to angle 16's scope and the workflow's finder prompt: check each package's latest version and advisories.
 2. Or a small validator that warns when a vendored version is older than a set age.
+
+**Target:** 2027-01-31.
+
+## BL-590 — Data Cache: the product team's answers on the readings in open-items #18 `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
+
+**What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each open reading reads To confirm or Not assessed, never Can use, with two qualifications. Point 2's negative side is excepted by decision (a host without `privatelink` reads as no PrivateLink), and point 3 is firm, since the product owner answered it:
+
+- P24 reads OAuth from a Databricks `client_id` and `client_secret` pair (point 1), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
+- P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the operator forms S12 accepts (`= null`, `!= null`, `<= null`, `>= null`) to confirm (point 4).
+- P19 lists a formula that names a custom calendar (point 5), and a code-based value on a column or in a formula that a custom calendar is also named (point 9), to confirm.
+- P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
+- P23 cannot type a source that is a View (point 7). P28 cannot judge a rule naming a path id its Table does not define exactly, a case-only difference included (point 8). Both leave the Model Not assessed.
+
+**Do.**
+1. Get the team's answer on each of the nine points in open-items #18.
+2. Update P19, P21, P23, P24 (and its heuristic grading) and P28, and the P28, S12 and S15 remediations, to match; mark #18 VERIFIED.
+
+**Target:** 2027-01-31.
+
+## BL-591 — ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** ts-audit open-items #13 (Phase 3, visualization layer), which had no dated item.
+
+**What.** Phase 3 of ts-audit would detect duplicate Liveboards by comparing visualization `search_query` strings. Whether that is a reliable signal has never been tested.
+
+**Do.**
+1. Export two Liveboards built with the same visualizations and compare their `search_query` strings.
+2. Record the answer in open-items #13; if it holds, design the check through the rule catalog.
+
+**Target:** 2027-03-31.
+
+## BL-592 — converters emit what the Data Cache rules block, and nothing tells the user `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0).
+
+**What.** ts-audit's Data Cache rules flag constructs that the converters emit on purpose:
+
+- PT2 requires a `sql_string_op` pass-through for `UPPER`, `LOWER`, `TRIM`, `LTRIM`, `RTRIM` and `REPLACE`, and PT1 calls scalar pass-throughs reliable (`agents/shared/schemas/ts-model-conversion-invariants.md`). P20 says any pass-through stops Data Cache.
+- `ts-convert-from-tableau` promotes Tableau parameters (I10), and `ts-convert-from-powerbi` rebuilds time intelligence with parameters. P26 says a parameter in a formula stops Data Cache. (`ts-convert-from-databricks-mv` emits no parameters: its coverage matrix leaves them to the user, L3.)
+- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. `ts-convert-from-looker` does too, for a view with `derived_table: { sql: ... }` (Step 5b). So does `ts-convert-from-databricks-mv`, when the user picks option T for a subquery source (Step 5T). `ts-convert-from-snowflake-sv` documents a SQL View path for an inline `ALIAS as (SELECT ...)` table (coverage matrix row 37) but does not emit one yet (BL-595). P27 says a SQL View stops Data Cache.
+- `ts-convert-from-dbt` carries the user's `ts_rls_rules` and `ts_calendar_type` values through to ThoughtSpot. An RLS rule beyond its Table's own columns stops Data Cache (P28), and so does a custom calendar name (P19).
+
+A converted Model can be uncached without the user being told, and the invariants still call these the right choice.
+
+**Do.**
+1. Add a Data Cache note to PT1 and PT2: a pass-through stops Data Cache (P20), so a converter that emits one says so.
+2. In each affected converter's migration report, list the constructs that stop Data Cache (pass-throughs, parameters, SQL Views, RLS rules, custom calendars), so the user can weigh them.
+3. Run the conversion-consistency auditor over the change.
+
+**Target:** 2027-02-28.
+
+## BL-593 — `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #16.
+
+**What.** `tools/validate/check_pagination_convention.py` treats `record_size: -1` as ThoughtSpot's "return everything" sentinel and never flags it. ts-audit open-items #16 shows `-1` returns no rows at all on `calendars/search`. The gate also cannot see a search that sends no `record_size`, which returns only the first page (10 on `calendars/search`). Callers still send `-1` to `connection/search`: `migrate/discover.py` `connection_names` and `commands/connections.py` `_fetch_connection_v2`. And `ts connections list` (`commands/connections.py`) pages with its own loop, with no de-duplication and no page ceiling.
+
+**Do.**
+1. Check live, read-only, what `record_size: -1` returns on `connection/search`, and record it in ts-audit open-items #16.
+2. Fix the gate's assumption: `-1` is "all" only where verified, per endpoint. Make it flag a `*/search` request that sends no `record_size`.
+3. Move `ts connections list` onto `paged_search.search_pages`, which de-duplicates and caps the pages, and fix any `-1` caller the probe shows is wrong.
+4. `paged_search.search_pages` stops at the first page shorter than the page size, so a server that answers a short page before the end truncates the list with no warning. Decide whether to page on until an empty page.
+5. The audit matches connection facts to a Model's Tables by name, case aside, so two connections whose names differ only in case merge into one reading. Match by id where the header carries one, and warn on a case-only clash.
+
+**Target:** 2027-01-31.
+
+## BL-594 — `ts connections add-tables` without `--auth-type` may always omit the connection's auth type `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #17. **Relates to:** BL-095.
+
+**What.** `_extract_auth_type` (`tools/ts-cli/ts_cli/commands/connections.py`) assumes `connection/search` answers with an auth type, at the top level or in `details`. The open-items #17 probe saw none: the answer has no auth-type field, and OAuth shows only in setting names. That probe used a list query, not the request `add-tables` sends, so this is not settled. If no request shape returns it, `ts connections add-tables` without `--auth-type` always omits `authenticationType` from the update, and the update endpoint then defaults to `SERVICE_ACCOUNT` (BL-095). `agents/shared/schemas/thoughtspot-connection.md` shows `add-tables` without `--auth-type`.
+
+**Do.**
+1. Probe, read-only, the `connection/search` request `_fetch_connection_v2` sends, on a key-pair and an OAuth connection: does any field carry the auth type?
+2. If none does, make `add-tables` require `--auth-type` (or read it another way), and update the README and `thoughtspot-connection.md`. If one does, record which and keep the code.
+
+**Target:** 2027-01-31.
+
+## BL-595 — Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (BL-592).
+
+**What.** `ts-convert-from-snowflake-sv`'s coverage matrix row 37 maps an inline `ALIAS as (SELECT ...)` table in `tables()` to ThoughtSpot SQL View TML referenced from `model_tables[]`. The parser recognises the form (`sv_parse.py`, `is_subquery`), but nothing builds the SQL View: `sv_introspect.py` skips subquery tables, `sv_build_model.py` has no SQL View path, and it raises when a relationship touches the alias ("not in tables map"). So a Semantic View with such a table cannot convert, though the matrix says it can.
+
+**Do.**
+1. Mark row 37 a gap (with this item as its exemption), or build the path: emit the SQL View TML, add it to the tables map and reference it from the Model.
+2. Either way, a test that converts a Semantic View with an inline query table and checks the result against the row.
+
+**Target:** 2027-01-31.
+
+## BL-596 — the Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (calendar wording sweep).
+
+**What.** `ts-databricks-properties.md` and `ts-to-databricks-rules.md` list `ai_context` as a bare name, not `properties.ai_context` on a column. The Unmapped Report sample in `ts-databricks-properties.md` calls it model-level, and its `synonyms` and `description` rows say Metric Views support neither ("MV v0.1 has no description field"), which contradicts the file's own v1.1 description and synonym rows.
+
+**Do.**
+1. Name the property by its path in every row, and say what level it lives at.
+2. Rewrite the sample report against v1.1, or drop the rows v1.1 now maps.
+
+**Target:** 2027-02-28.
+
+## BL-597 — the Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** review of the Data Cache readiness rules (the audit now uses `formula_common`'s helpers). **Relates to:** BL-217 part 2.
+
+**What.** `tools/ts-cli/ts_cli/sisense/functions.py` defines its own `_split_top_level_args` and `_match_paren`. Neither treats a `[...]` reference as one unit. The paren matcher is not quote-aware either. Both serve `_rewrite_conditionals` and `_rewrite_round`, so a reference holding a quote, or a string holding a paren, can split or close in the wrong place. The shared module `ts_cli/formula_common.py` already has helpers that handle both (`split_top_level_args`, `close_paren`), and its docstring says not to fork them into a platform module.
+
+**Do.**
+1. Replace the Sisense copies with `formula_common`'s helpers.
+2. Tests with a quote inside a reference and a paren inside a string, through `_rewrite_conditionals` and `_rewrite_round`.
+3. Consider a `check_converter_parity` rule that flags any `ts_cli` module defining a function with the name of a `formula_common` helper.
+
+**Target:** 2027-01-31.
+
+## BL-598 — the Ossie converter drops a Table column's `properties` when the Model surfaces that column as a field `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** conversion-consistency audit of the Data Cache branch (ts-audit 3.23.0), which ran a TML → Ossie → TML round trip against apache/ossie-converters `thoughtspot/` at 7dd04af and 93fb75c.
+
+**What.** A `calendar` (or any other property) set on a Table column that the Model surfaces as a field is missing from the Ossie document, and the return leg writes nothing back. The forward leg (`_physical_column_stash` in `tml_to_ossie.py`) keeps only `db_column_name` and `data_type` for such a column, and the reverse leg (`_physical_table_column` in `ossie_to_thoughtspot.py`) writes only `name`, `db_column_name` and `db_column_properties`. No issue is raised, against the `OssieConversion` docstring's promise that nothing TML held goes missing without one. A Model column with no `calendar` of its own inherits its Table column's, so after the round trip that column silently falls back to the default calendar and fiscal periods come out wrong. Model columns, Table columns the Model does not use, and Table columns used only by a metric keep their properties.
+
+**Do.**
+1. Raise it upstream on apache/ossie-converters with a minimal TML fixture: a Table column carrying `calendar`, surfaced by a Model field.
+2. Ask for the property to be stashed and restored, or for an issue to be raised when it is dropped.
+3. Update `docs/ossie/ts-ossie-construct-mapping.md` (V-items intro and V1) when it lands.
 
 **Target:** 2027-01-31.

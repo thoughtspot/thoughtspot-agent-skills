@@ -9,6 +9,10 @@ app = typer.Typer(
     name="ts",
     help="ThoughtSpot REST API CLI.\n\nWraps common ThoughtSpot API operations used by Claude skills.",
     no_args_is_help=True,
+    # A traceback never prints frame locals: one can hold a token, a password or a
+    # connection's configuration. typer < 0.13 defaulted this to True, and pyproject
+    # allows typer>=0.12, so it is set rather than left to the installed default.
+    pretty_exceptions_show_locals=False,
 )
 
 app.add_typer(audit.app, name="audit")

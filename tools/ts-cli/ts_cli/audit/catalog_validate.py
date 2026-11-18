@@ -111,7 +111,7 @@ from ts_cli.audit.catalog_model import (
 # ── vocabulary ──────────────────────────────────────────────────────────────
 
 REQUIRES = ["model_tml", "table_tml", "metadata", "dependents", "ai_instructions",
-            "answers", "sets"]
+            "answers", "sets", "calendars", "connections"]
 OVERRIDABLE = {"status", "bands", "severity", "message", "remediation", "parameters"}
 # Accepted in a profile block but not a general override: it reproduces the legacy
 # per-profile `threshold` dict (A1/A2/A6) and goes when the legacy dict does.

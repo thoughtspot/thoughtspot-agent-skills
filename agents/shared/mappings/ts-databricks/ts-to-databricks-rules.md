@@ -112,7 +112,7 @@ v1.1 columns support rich metadata. Map ThoughtSpot properties as follows:
 | `properties.synonyms[]` | `synonyms:` | Read from `properties.synonyms`, NOT column root. YAML list: `['alias1', 'alias2']`. **Subject to the Synonyms Clamp below (finding 13.9).** |
 | Model-level `description` | Top-level `comment:` | |
 | `ai_context` | **Unmapped** | No equivalent — log in Unmapped Report |
-| `properties.calendar_type` | **Unmapped** | No equivalent |
+| `properties.calendar` | **Unmapped** | No equivalent |
 
 The `name:` field in MV YAML is a machine-readable identifier (snake_case recommended).
 The `display_name:` is the human-readable label.
@@ -735,7 +735,7 @@ These ThoughtSpot properties have no Databricks MV equivalent:
 | ThoughtSpot property | Status | Notes |
 |---|---|---|
 | `ai_context` | **Unmapped** | No equivalent — include in view-level `comment` if relevant |
-| `properties.calendar_type` | **Unmapped** | No equivalent |
+| `properties.calendar` | **Unmapped** | No equivalent |
 | `properties.index_type` | **Unmapped** | Databricks handles indexing internally |
 | `properties.index_priority` | **Unmapped** | No equivalent |
 | `properties.currency_type` | `format: { type: currency, currency_code: ... }` | v1.1 supports `format:` on measures, and (corrected 2026-07-29, finding 13.10) also on `fields:`/`dimensions:` entries |

@@ -40,7 +40,7 @@ All of these land under the column's `config: {meta: {...}}`.
 | Column `properties.is_additive` | `ts_additive` (`yes`) | Emitted only when true |
 | Column `properties.spotiq_preference` | `ts_spotiq_pref` (`exclude`) | Emitted only for `EXCLUDE` |
 | Column `properties.is_hidden` | `ts_hidden` (`yes`) | Emitted only when true |
-| Column `properties.calendar` | `ts_calendar_type` | Calendar **name**, verbatim. Connection-scoped, so it means nothing on an instance whose connection has no calendar of that name |
+| Column `properties.calendar` | `ts_calendar_type` | The value, verbatim: `calendar`, `fiscal` or `default` for a code-based calendar, else a custom calendar's **name**. A custom calendar is Connection-scoped, so its name means nothing on an instance whose connection has no calendar of that name |
 | Column `properties.currency_type` | `ts_currency_type` — a **nested block** with a `type` discriminator | `{iso_code: USD}` → `{type: from_isocode, isocode: USD}`; `{column: CCY}` → `{type: from_column, column: CCY}`; `{is_browser: true}` → `{type: from_browser}` |
 | Column `properties.geo_config` | `ts_geo_config` — a **nested block** with a `type` discriminator | `{latitude: true}` → `{type: latitude}`; `{longitude: true}` → `{type: longitude}`; `{country: true}` → `{type: country}`; `{region_name: {country: C, region_name: R}}` → `{type: sub_nation_region, country: C, region_type: R}` |
 | Column `properties.geo_config` — custom-map role (`custom_file_guid` + `geometryType`) | **Not emitted** — reported in `unmapped_properties` | The one geo role with no `ts_geo_config` type. `thoughtspot-model-tml.md` also calls it instance-local: "a portable document must not carry it — the geo role has to be dropped rather than translated" |

@@ -9,7 +9,7 @@ A snapshot is a directory holding one JSON file per ``AuditContext`` field plus
 
 ``angles`` records what the capture was asked for, ``needs`` what it fetched: the
 data always fetched (``context.ALWAYS_FETCHED``) and the conditional data (AI
-instructions, Answer TML, Sets) a selected rule declares in ``requires`` or ``uses``
+instructions, Answer TML, Sets, custom calendars, connection settings) a selected rule declares in ``requires`` or ``uses``
 (``engine.run.needs_for``, under every profile). A replay refuses a selection whose rules read data the
 snapshot did not capture, rather than report it clean. A manifest written before
 ``needs`` was recorded is read by what its angles fetched then
@@ -53,6 +53,13 @@ _TAG = "__ts_snapshot_type__"
 #: shipped catalog, exactly the same — test_audit_context_needs.py).
 LEGACY_ANGLE_NEEDS = {"A": frozenset({"ai_instructions"}),
                       "H": frozenset({"answers", "sets"})}
+
+
+#: AuditContext fields added after snapshots were first written, with the value one
+#: written before them reads as: `calendars` and `connections` (2026-11-18) as None,
+#: not fetched. Such a snapshot's `needs` lacks the data too, so a replay of a rule that
+#: reads it is refused (``captured_needs``), never run on the default.
+ADDED_FIELDS = {"calendars": None, "connections": None}
 
 
 class SnapshotError(Exception):
@@ -253,6 +260,9 @@ def read_snapshot_needs(in_dir: Path) -> tuple[AuditContext, list[str], set]:
     values = {}
     for field in _FIELDS:
         name = _file_for(field)
+        if name not in listed and field in ADDED_FIELDS:
+            values[field] = ADDED_FIELDS[field]
+            continue
         if name not in listed:
             raise SnapshotError(f"snapshot has no {field} data: {MANIFEST} does not list {name}")
         values[field] = _load(in_dir / name)
