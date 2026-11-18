@@ -221,7 +221,9 @@ def model_sources(doc: dict, ctx: Any) -> List[Dict[str, Any]]:
     """The Model's sources, each `model_tables` fqn once, in order: `{"name", "fqn",
     "table", "header"}` — its Table TML body (`ctx.tables` by fqn; None for a SQL View,
     whose TML the audit does not keep, or a Table whose export failed) and its metadata
-    header ({} when none). Cached per Model."""
+    header ({} when none). An entry with no fqn is a source the audit cannot read: it is
+    listed with fqn, Table TML and header all empty, so the rules count it as unread
+    rather than skip it. Cached per Model."""
     return cached("model_sources", doc, _model_sources, doc, ctx)
 
 
@@ -231,44 +233,78 @@ def _model_sources(doc: dict, ctx: Any) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     seen = set()
     for mt in (mts if isinstance(mts, list) else []):
-        fqn = mt.get("fqn") if isinstance(mt, dict) else None
-        if not isinstance(fqn, str) or not fqn or fqn in seen:
+        if not isinstance(mt, dict):
+            continue
+        fqn = mt.get("fqn") if isinstance(mt.get("fqn"), str) and mt.get("fqn") else None
+        if fqn is not None and fqn in seen:
             continue
         seen.add(fqn)
-        found = (ctx.tables or {}).get(fqn)
-        body = found.get("table") if isinstance(found, dict) else None
-        out.append({"name": _text(mt.get("name")) or _text(mt.get("alias")) or fqn,
-                    "fqn": fqn, "table": body if isinstance(body, dict) else None,
-                    "header": headers.get(fqn) or {}})
+        out.append(_source(mt, fqn, ctx, headers))
     return out
+
+
+def _source(mt: dict, fqn: Optional[str], ctx: Any, headers: dict) -> Dict[str, Any]:
+    """One model_sources entry; an entry with no fqn has no Table TML and no header."""
+    found = (ctx.tables or {}).get(fqn) if fqn else None
+    body = found.get("table") if isinstance(found, dict) else None
+    return {"name": _text(mt.get("name")) or _text(mt.get("alias")) or fqn or "?",
+            "fqn": fqn, "table": body if isinstance(body, dict) else None,
+            "header": (headers.get(fqn) or {}) if fqn else {}}
 
 
 def source_connection(source: Dict[str, Any]) -> Optional[Dict[str, Optional[str]]]:
     """The connection a source (model_sources) is on: `{"name", "id"}`, or None when
     neither is known. The name is the Table TML's `table.connection.name` (a Falcon or
-    system Table has no connection block, and so no connection); for a source with no
-    Table TML (a SQL View), its metadata header's `dataSourceName`. The id is the
-    header's `dataSourceId` when it carries one (none of 93 headers on the SE demo
-    cluster did, 2026-11-18: the name carries the match; used only when present)."""
+    system Table has no connection block, and so no connection), else its metadata
+    header's `dataSourceName` (a SQL View, a Table whose export failed, or a connection
+    block naming no connection). The id is the header's `dataSourceId` when it carries
+    one (none of 93 headers on the SE demo cluster did, 2026-11-18: the name carries
+    the match; used only when present)."""
     header = source["header"]
-    if source["table"] is not None:
-        name = tml.mapping(source["table"], "connection").get("name")
-    else:
+    name = tml.mapping(source["table"], "connection").get("name") \
+        if source["table"] is not None else None
+    if not (isinstance(name, str) and name):
         name = header.get("dataSourceName")
     name = name if isinstance(name, str) and name else None
     cid = header.get("dataSourceId") if isinstance(header.get("dataSourceId"), str) else None
     return {"name": name, "id": cid} if (name or cid) else None
 
 
-def missing_tables(item: dict, ctx: Any) -> List[str]:
-    """Model: the sources whose Table TML is not in the context (its export failed, or
-    it is not a Table the audit keeps), a SQL View aside: the audit keeps no SQL View
-    TML by design, and P27 reports it. P19 (a Table column's calendar), P21 (a Table
-    column's flags), P25 (a Table's names) and P28 (a Table's RLS rules) read the
-    Table, so the readiness counts each as not assessed while any is listed."""
+def connection_unread(source: Dict[str, Any]) -> bool:
+    """A source whose connection the audit cannot name (source_connection is None)
+    though it has one: anything but a Table whose TML has no connection block (a
+    Falcon or system Table, which P23 reports as having none)."""
+    if source["table"] is not None and not tml.mapping(source["table"], "connection"):
+        return False
+    return source_connection(source) is None
+
+
+def is_sql_view(source: Dict[str, Any]) -> bool:
+    return str(source["header"].get("type") or "").strip().upper() == "SQL_VIEW"
+
+
+def unread_sources(item: dict, ctx: Any) -> List[str]:
+    """Model: the sources whose TML the audit does not hold: a Table whose export
+    failed, a SQL View (the audit keeps no SQL View TML), a View, or a `model_tables`
+    entry with no fqn. Their columns may set a calendar (P19) or be pre-aggregated
+    (P21), and they may carry RLS rules (P28), so the readiness counts each of those as
+    not assessed while any is listed, and the calendars column names them."""
     return [s["name"] for s in model_sources(item.get("doc") or {}, ctx)
-            if s["table"] is None
-            and str(s["header"].get("type") or "").strip().upper() != "SQL_VIEW"]
+            if s["table"] is None]
+
+
+def missing_tables(item: dict, ctx: Any) -> List[str]:
+    """Model: unread_sources but a SQL View, which has no database, schema or table name
+    of its own: what P25 could not read."""
+    return [s["name"] for s in model_sources(item.get("doc") or {}, ctx)
+            if s["table"] is None and not is_sql_view(s)]
+
+
+def unjudged_sql_views(item: dict, ctx: Any) -> List[str]:
+    """Model: the sources P27 cannot tell from a SQL View: no Table TML, and no header
+    type (the header search skipped it, or the entry has no fqn)."""
+    return [s["name"] for s in model_sources(item.get("doc") or {}, ctx)
+            if s["table"] is None and not str(s["header"].get("type") or "").strip()]
 
 
 def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:

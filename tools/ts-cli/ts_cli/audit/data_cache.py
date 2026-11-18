@@ -12,26 +12,33 @@ report it: for each one that ran, the item passes the rule's own `requires` and
 fires), and the reasons list the rule's derived field. So the view and the findings
 cannot disagree. A rule can also run and still fail to read part of one Model
 (UNJUDGED): it is then not assessed for that Model, whether or not it fires, never "no
-problem". And P21 or P24 may rest only on readings the product team is to confirm
+problem". And P21, P24 or P28 may rest only on readings the product team is to confirm
 (TO_CONFIRM): its reason then "may block".
 
     readiness   blocked   a blocking rule fires on a firm reading (whatever else ran)
-                unknown   no firm block, but a blocking rule did not run (an --angles
-                          without P) or could not read part of the Model: P24 when the
-                          connection search failed or a connection's settings could
-                          not be read; P23 when a source's type is unknown; P19, P21,
-                          P25 and P28 when a source Table's TML is missing. An unread
-                          part outranks a reading to confirm, so it is never hidden
-                confirm   no firm block and nothing unread, but a blocking rule fires on
+                unknown   no firm block, but a rule did not run (an --angles without P)
+                          or could not read part of the Model: P22 when the calendar
+                          search failed; P24 when the connection search failed or a
+                          connection's settings, header or name could not be read; P23
+                          when a source's type is unknown; P19, P21 and P28 when a
+                          source's TML is not held (a failed export, a SQL View, a View,
+                          an entry with no fqn), P25 for such a Table; P27 when such a
+                          source has no header type either. What the audit could not
+                          read never reads "Can use", and it outranks a reading to
+                          confirm, so it is never hidden
+                confirm   nothing firm and nothing unread, but a blocking rule fires on
                           readings to confirm only (P24's OAuth M2M or PrivateLink read
-                          from the host; P21's measure only flagged pre-aggregated)
-                warning   no blocking rule fires and all ran; P22 fires
-                ready     no rule fires and every blocking rule ran
+                          from the host; P21's measure only flagged pre-aggregated;
+                          P28's `= null` test)
+                warning   no blocking rule fires and every rule ran; P22 fires
+                ready     no rule fires and every rule ran
     reasons     [{rule, effect: "blocks" | "may block" | "warns", label, items}]
-    not_assessed  the rules that did not run, or could not read all of this Model (P22
-                when the calendar search failed, and the cases under unknown)
+    not_assessed  the rules that did not run, or could not read all of this Model (the
+                cases under unknown)
     calendars_in_use      each column that sets a calendar: {column, calendar, kind
                           ("code-based" | "custom"), set_on ("model" | "table")}
+    calendars_not_read    the sources whose TML was not read (unread_sources): their
+                          Table-column calendars are not in calendars_in_use
     connection_calendars  the custom calendars on the Model's connections:
                           [{connection, calendars}], or None when not fetched
 """
@@ -42,8 +49,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import fields, predicates, scopes
 from ts_cli.audit.engine.fields_data_cache import (column_calendars, connection_calendars,
                                                    missing_tables,
-                                                   semantic_measures_to_confirm)
+                                                   semantic_measures_to_confirm,
+                                                   unjudged_sql_views, unread_sources)
 from ts_cli.audit.engine.fields_data_cache_sources import (connection_blockers_to_confirm,
+                                                           rls_rules_to_confirm,
                                                            unjudged_connections,
                                                            unjudged_rls, unjudged_sources)
 
@@ -60,13 +69,14 @@ CHECKS = (
     ("P27", "blocks", "SQL View"),
     ("P28", "blocks", "RLS rule beyond its Table's columns"),
 )
-BLOCKING = tuple(rule for rule, effect, _ in CHECKS if effect == "blocks")
 #: Rules that can run and still not read all of one Model: rule -> (item, ctx) -> what
 #: it could not read (empty when it read everything).
-UNJUDGED = {"P19": missing_tables, "P21": missing_tables, "P23": unjudged_sources,
-            "P24": unjudged_connections, "P25": missing_tables, "P28": unjudged_rls}
+UNJUDGED = {"P19": unread_sources, "P21": unread_sources, "P23": unjudged_sources,
+            "P24": unjudged_connections, "P25": missing_tables, "P27": unjudged_sql_views,
+            "P28": unjudged_rls}
 #: Rules whose reason may rest only on readings to confirm: rule -> (item, ctx) -> bool.
-TO_CONFIRM = {"P21": semantic_measures_to_confirm, "P24": connection_blockers_to_confirm}
+TO_CONFIRM = {"P21": semantic_measures_to_confirm, "P24": connection_blockers_to_confirm,
+              "P28": rls_rules_to_confirm}
 
 
 def _judged(rule: Any, item: dict, ctx: Any) -> bool:
@@ -108,7 +118,7 @@ def _readiness(reasons: List[dict], not_assessed: List[str]) -> str:
     effects = {r["effect"] for r in reasons}
     if "blocks" in effects:
         return "blocked"
-    if any(rule in not_assessed for rule in BLOCKING):
+    if not_assessed:
         return "unknown"
     if "may block" in effects:
         return "confirm"
@@ -130,4 +140,5 @@ def model_data_cache(item: dict, ctx: Any, ran: Dict[str, Any]) -> dict:
     return {"readiness": _readiness(reasons, not_assessed), "reasons": reasons,
             "not_assessed": not_assessed,
             "calendars_in_use": [dict(c) for c in column_calendars(doc, ctx)],
+            "calendars_not_read": unread_sources(item, ctx),
             "connection_calendars": connection_calendars(doc, ctx)}

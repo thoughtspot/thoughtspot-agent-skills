@@ -55,12 +55,19 @@ function dcSearchText(row){
   return parts.join(" ").toLowerCase();
 }
 
+/* A reason that may block says "to confirm" once: its items name the reading to confirm
+   (P21, P24, P28 all do), so the qualifier is added only when none does. */
+function dcSaysToConfirm(r){
+  return (r.i || []).some(function(i){ return String(i).indexOf("to confirm") !== -1; });
+}
+
 function dcReasonsHtml(row){
   var dc = row.dc, html = "";
   (dc.r || []).forEach(function(r){
     html += '<div class="dc-reason'+(r.b ? ' dc-blocks' : '')+(r.q ? ' dc-may-block' : '')+
       '"><span class="dc-rule">'+esc(r.c)+'</span> '+esc(r.l)+': '+
-      esc((r.i || []).join(", "))+(r.q ? ' <span class="dc-muted">(to confirm)</span>' : '')+
+      esc((r.i || []).join(", "))+(r.q && !dcSaysToConfirm(r) ?
+        ' <span class="dc-muted">(to confirm)</span>' : '')+
       '</div>';
   });
   /* What was not checked: every check (none ran, or the report predates them), or some
@@ -78,11 +85,19 @@ function dcReasonsHtml(row){
   return html || '<span class="dc-muted">None</span>';
 }
 
+/* "None set" only when every source's TML was read: a source not read (`ku`) may set a
+   calendar on its Table columns that the audit did not see. */
 function dcCalendarsHtml(row){
-  var lines = dcCalendarLines(row.dc);
-  var html = lines.length ? lines.map(function(line){
-    return '<div class="dc-calendar">'+esc(line)+'</div>'; }).join("") :
-    '<span class="dc-muted">None set: the default calendar</span>';
+  var lines = dcCalendarLines(row.dc), unread = row.dc.ku || [];
+  var html = lines.map(function(line){
+    return '<div class="dc-calendar">'+esc(line)+'</div>'; }).join("");
+  if(unread.length){
+    html += '<div class="dc-muted">Not read: '+unread.length+' source'+
+      (unread.length === 1 ? '' : 's')+' ('+esc(unread.join(", "))+
+      '), whose Table columns may set a calendar</div>';
+  } else if(!lines.length){
+    html = '<span class="dc-muted">None set: the default calendar</span>';
+  }
   if(row.dc.cc && row.dc.cc.length){
     html += '<div class="dc-muted">On its connections: '+esc(row.dc.cc.map(function(cc){
       return cc.n+" ("+cc.k.join(", ")+")"; }).join("; "))+'</div>';
@@ -148,7 +163,8 @@ function buildDataCache(D){
     "custom calendars is a warning, since a query that picks one at run time is not cached. "+
     "To confirm: the only reasons are readings the product team is to review (OAuth read "+
     "from a client ID and secret, PrivateLink read from the host, a measure only flagged "+
-    "pre-aggregated)."));
+    "pre-aggregated, an RLS rule\u2019s \u201c= null\u201d test). Anything the audit could "+
+    "not read makes a Model Not assessed, never Can use."));
   var table = el("table", "cleanup-table dc-table");
   table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';

@@ -675,7 +675,8 @@ def build_context(
     rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers` (Answer
     TML of the dependents' Answers), `sets` (Set discovery and each Set's consumers) and
     `calendars` (every connection's registered custom calendars, one paged search) and
-    `connections` (each connection's derived facts, one paged search).
+    `connections` (each connection's derived facts: two paged searches, the
+    connections with details and their CONNECTION metadata headers).
     `dependents` may be in `needs` but is fetched regardless. Anything that is not a
     `requires` value — a category letter from a caller still passing angles — is
     rejected, not silently ignored.

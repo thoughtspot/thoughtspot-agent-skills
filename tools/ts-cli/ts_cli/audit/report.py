@@ -221,22 +221,33 @@ def _compact_data_cache(dc: dict) -> dict:
     calendars its columns use, {n column, c calendar, u 1 when custom, t 1 when set on
     the Table column}; `cc` the custom calendars on its connections, {n connection, k
     calendar names}, or null when they were not fetched; `na` the checks not made for
-    it."""
+    it; `ku`, when any, the sources whose TML was not read, so their Table-column
+    calendars are not among `k`."""
     conn = dc.get("connection_calendars")
+    unread = dc.get("calendars_not_read")
     return {
         "s": dc.get("readiness") or "unknown",
-        "r": [dict({"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
-                    "l": r.get("label", ""), "i": list(r.get("items") or [])},
-                   **({"q": 1} if r.get("effect") == "may block" else {}))
-              for r in dc.get("reasons") or []],
-        "k": [{"n": k.get("column", ""), "c": k.get("calendar", ""),
-               "u": 1 if k.get("kind") == "custom" else 0,
-               "t": 1 if k.get("set_on") == "table" else 0}
-              for k in dc.get("calendars_in_use") or []],
+        "r": [_compact_dc_reason(r) for r in dc.get("reasons") or []],
+        "k": [_compact_dc_calendar(k) for k in dc.get("calendars_in_use") or []],
         "cc": None if conn is None else [{"n": c.get("connection", ""),
                                           "k": list(c.get("calendars") or [])} for c in conn],
         "na": list(dc.get("not_assessed") or []),
+        **({"ku": list(unread)} if unread else {}),
     }
+
+
+def _compact_dc_reason(r: dict) -> dict:
+    out = {"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
+           "l": r.get("label", ""), "i": list(r.get("items") or [])}
+    if r.get("effect") == "may block":
+        out["q"] = 1
+    return out
+
+
+def _compact_dc_calendar(k: dict) -> dict:
+    return {"n": k.get("column", ""), "c": k.get("calendar", ""),
+            "u": 1 if k.get("kind") == "custom" else 0,
+            "t": 1 if k.get("set_on") == "table" else 0}
 
 
 def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:

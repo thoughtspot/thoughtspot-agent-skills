@@ -100,12 +100,16 @@ def test_without_the_performance_rules_readiness_is_unknown():
     assert dc["m-blocked"]["calendars_in_use"][0]["calendar"] == "Retail 445"
 
 
-def test_a_failed_calendar_search_leaves_the_warning_unchecked_not_the_model_unknown():
+def test_a_failed_calendar_search_leaves_an_unblocked_model_unknown():
+    """What the audit could not read never reads "Can use": P22 not checked rules out
+    ready (and To confirm), as an unchecked blocking rule does."""
     dc = _dc(run_audit(None, [], ["P"], ctx=_estate(calendars=None)))
-    assert dc["m-ready"]["readiness"] == "ready" and dc["m-ready"]["not_assessed"] == ["P22"]
-    assert dc["m-warn"]["readiness"] == "ready"         # its warning could not be checked
+    assert dc["m-ready"]["readiness"] == "unknown" and dc["m-ready"]["not_assessed"] == ["P22"]
+    assert dc["m-warn"]["readiness"] == "unknown"       # its warning could not be checked
     assert dc["m-warn"]["connection_calendars"] is None
     assert dc["m-blocked"]["readiness"] == "blocked"
+    confirm = _dc(run_audit(None, [], ["P"], ctx=_to_confirm(calendars=None)))
+    assert confirm["m-ready"]["readiness"] == "unknown"
 
 
 def test_a_failed_connection_search_leaves_an_unblocked_model_unknown():
@@ -201,6 +205,19 @@ def test_the_payload_compacts_readiness_reasons_and_calendars():
     assert (reason["c"], reason["b"], reason["q"]) == ("P24", 0, 1)
 
 
+def test_a_source_whose_tml_was_not_read_is_named_in_the_calendars_column():
+    """Its Table columns may set a calendar the audit did not see: the column says so,
+    not "None set: the default calendar"."""
+    ctx = _estate()
+    del ctx.tables["t-c"]
+    dc = _dc(run_audit(None, [], ["P"], ctx=ctx))
+    assert dc["m-ready"]["calendars_not_read"] == ["ORDERS"]
+    assert dc["m-blocked"]["calendars_not_read"] == []
+    payload = compact_payload(run_audit(None, [], ["P"], ctx=ctx))
+    by_guid = {payload["L"][cm["mi"]]["g"]: cm["dc"] for cm in payload["C"]["m"]}
+    assert by_guid["m-ready"]["ku"] == ["ORDERS"] and "ku" not in by_guid["m-blocked"]
+
+
 def test_json_from_before_the_view_compacts_without_it():
     data = run_audit(None, [], ["P"], ctx=_estate())
     for m in data["corpus"]["models"]:
@@ -282,6 +299,34 @@ def test_a_null_test_rls_rule_shows_its_s12_trade_off(tmp_path):
     assert shown["errors"] == []
     assert ("RLS rule beyond its Table’s columns: ORDERS: Keep unmatched (a null test that "
             "keeps outer-join rows, see S12)") in shown["visible"].replace("'", "’")
+
+
+_CELLS = ('window.__extra = Array.prototype.map.call(document.querySelectorAll('
+          '"#v-datacache tbody tr[data-state]"), function(tr){ return '
+          '[tr.querySelector("a").textContent, tr.cells[2].textContent, '
+          'tr.cells[3].textContent]; });')
+
+
+@needs_chrome
+def test_the_calendars_column_says_which_sources_were_not_read(tmp_path):
+    ctx = _estate()
+    del ctx.tables["t-c"]
+    page = render_report(run_audit(None, [], ["P"], ctx=ctx))
+    shown = report_browser.render(page, tmp_path, "datacache", actions=_CELLS)
+    assert shown["errors"] == []
+    cells = {name: calendars for name, _, calendars in shown["extra"]}
+    assert "Not read: 1 source" in cells["Ready Sales"]
+    assert "None set" not in cells["Ready Sales"]
+    assert cells["Warned Sales"].startswith("None set: the default calendar")
+
+
+@needs_chrome
+def test_to_confirm_is_said_once_per_reason(tmp_path):
+    page = render_report(run_audit(None, [], ["P"], ctx=_to_confirm()))
+    shown = report_browser.render(page, tmp_path, "datacache", actions=_CELLS)
+    assert shown["errors"] == []
+    reasons = {name: text for name, text, _ in shown["extra"]}["Ready Sales"]
+    assert reasons.count("to confirm") == 1, reasons
 
 
 @needs_chrome

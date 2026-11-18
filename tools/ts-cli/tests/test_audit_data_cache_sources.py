@@ -50,12 +50,36 @@ SNOWFLAKE_HEADER = [header()]
 # ── the Model's sources ─────────────────────────────────────────────────────
 
 def test_sources_are_each_model_table_once_with_its_tml_and_header():
+    """An entry with no fqn is a source the audit cannot read, so it is listed (with no
+    TML and no header) rather than dropped; a non-mapping entry is malformed TML."""
     ctx = fx.build_cache_ctx(sources=[{"name": "V", "fqn": "v1"}, {"name": "V again", "fqn": "v1"},
                                       {"name": "No fqn"}, "not a table"],
                              headers=[header("v1", "SQL_VIEW")])
     got = [(s["name"], s["fqn"], s["table"] is not None, s["header"].get("type"))
            for s in model_sources(ctx.models[0], ctx)]
-    assert got == [("ORDERS", fx.CACHE_TABLE, True, None), ("V", "v1", False, "SQL_VIEW")]
+    assert got == [("ORDERS", fx.CACHE_TABLE, True, None), ("V", "v1", False, "SQL_VIEW"),
+                   ("No fqn", None, False, None)]
+
+
+#: Every rule that reads a Model's sources.
+SOURCE_RULES = ["P19", "P21", "P23", "P24", "P25", "P27", "P28"]
+
+
+def test_a_model_table_with_no_fqn_leaves_every_source_rule_not_assessed():
+    ctx = fx.build_cache_ctx(connections=CLEAN, headers=SNOWFLAKE_HEADER,
+                             sources=[{"name": "LOOSE"}])
+    assert _readiness(ctx) == ("unknown", SOURCE_RULES)
+
+
+@pytest.mark.parametrize("header_name, readiness", [
+    ("Warehouse A", ("ready", [])),       # the header names the connection
+    (None, ("unknown", ["P24"])),          # nothing does: its settings are unread
+])
+def test_a_connection_block_with_no_name_falls_back_to_the_header(header_name, readiness):
+    ctx = fx.build_cache_ctx(connection=None, connections=CLEAN,
+                             table={"connection": {"type": "RDBMS_SNOWFLAKE"}},
+                             headers=[header(connection=header_name)])
+    assert _readiness(ctx) == readiness
 
 
 def test_a_header_without_a_type_takes_its_rows_subtype():
@@ -306,6 +330,7 @@ OWN = {"ORDERS_1": {"id": "ORDERS_1", "table": "ORDERS"},
        "E_1": {"id": "E_1", "table": "ORDERS", "join_path": [{}]},
        "E_2": {"id": "E_2", "table": "ORDERS", "join_path": [{"join": []}, {"join": [""]}]}}
 NULL_TEST = "a null test that keeps outer-join rows, see S12"
+NULL_TEST_TO_CONFIRM = NULL_TEST + " (to confirm)"
 
 
 @pytest.mark.parametrize("expr, problems", [
@@ -331,8 +356,12 @@ NULL_TEST = "a null test that keeps outer-join rows, see S12"
     ("[ORDERS_1::R] = ts_username or IS_NULL ( [ORDERS_1::K] )", [NULL_TEST]),
     ("upper ( [ORDERS_1::R] ) = ts_username or isnull ( [ORDERS_1::K] )",
      ["a formula", NULL_TEST]),
-    # `= null` is not a call: P28 does not read it (whether it stops Data Cache is open)
-    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] = null", []),
+    # `= null` is a null test too, but whether it stops Data Cache is open: to confirm
+    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] = null", [NULL_TEST_TO_CONFIRM]),
+    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K]=NULL", [NULL_TEST_TO_CONFIRM]),
+    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] != null", []),
+    ("[ORDERS_1::R] = 'x = null'", []),
+    ("isnull ( [ORDERS_1::K] ) or [ORDERS_1::J] = null", [NULL_TEST, NULL_TEST_TO_CONFIRM]),
     ("[ORDERS_1::R] = 'isnull ( x )'", []),
 ])
 def test_rls_rule_problems(expr, problems):
@@ -355,6 +384,25 @@ def test_p28_skips_a_model_that_bypasses_rls():
     assert run_rule(ctx, CAT, "P28", "general") == []
     ctx.models[0]["model"]["properties"] = {"is_bypass_rls": False}
     assert len(_field(ctx, "@rls_rules_beyond_own_table")) == 3
+
+
+@pytest.mark.parametrize("expr, readiness, lead", [
+    ("[ORDERS_1::REGION] = ts_username or [ORDERS_1::ID] = null", "confirm",
+     "May not be able to use Data Cache"),
+    ("[ORDERS_1::REGION] = ts_username or isnull ( [ORDERS_1::ID] )", "blocked",
+     "Can't use Data Cache"),
+    ("upper ( [ORDERS_1::REGION] ) = ts_username or [ORDERS_1::ID] = null", "blocked",
+     "Can't use Data Cache"),
+])
+def test_an_equals_null_test_is_a_reading_to_confirm(expr, readiness, lead):
+    """open-items #18 point 4: whether `[X] = null` stops Data Cache is open, so it
+    alone reads To confirm; `isnull` (confirmed) and any other function stay firm."""
+    ctx = fx.build_cache_ctx(connections=CLEAN, headers=SNOWFLAKE_HEADER, table={
+        "rls_rules": {"table_paths": [fx.CACHE_OWN_PATH],
+                      "rules": [{"name": "Keep", "expr": expr}]}})
+    [finding] = run_rule(ctx, CAT, "P28", "general")
+    assert finding.severity == "MEDIUM" and finding.detail.startswith(lead + ": ")
+    assert _readiness(ctx)[0] == readiness
 
 
 def test_a_null_test_rule_is_listed_with_its_trade_off():

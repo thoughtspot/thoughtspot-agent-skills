@@ -54,8 +54,10 @@ class Client:
     header says Snowflake on Warehouse A, whose settings and calendars are searched.
     Warehouse A's connection header says `parameterizedConnection: parameterized`."""
 
-    def __init__(self, t2_fails: bool, parameterized: bool = False):
+    def __init__(self, t2_fails: bool, parameterized: bool = False,
+                 headers_fail: bool = False):
         self.t2_fails, self.parameterized = t2_fails, parameterized
+        self.headers_fail = headers_fail
 
     def post(self, url, json=None, **_kw):
         if url.endswith("/metadata/search") \
@@ -68,6 +70,10 @@ class Client:
             return _response([{"edoc": yaml.safe_dump(MODEL)},
                               {"edoc": yaml.safe_dump(_table("t1", "ORDERS"))}, t2])
         if url.endswith("/metadata/search") and (json or {}).get("include_headers"):
+            if self.headers_fail:
+                refused = _response({"error": "unavailable"})
+                refused.status_code, refused.ok = 500, False
+                return refused
             return _response([{"metadata_header": {
                 "id": m["identifier"], "type": "ONE_TO_ONE_LOGICAL",
                 "dataSourceType": "RDBMS_SNOWFLAKE", "dataSourceName": "Warehouse A"}}
@@ -83,8 +89,9 @@ def _config():
     return json.dumps({"accountName": "acme", "user": "svc", "password": "******"})
 
 
-def _readiness(t2_fails, parameterized=False):
-    ctx = build_context(Client(t2_fails, parameterized), ["m1"], {"calendars", "connections"})
+def _readiness(t2_fails, parameterized=False, headers_fail=False):
+    ctx = build_context(Client(t2_fails, parameterized, headers_fail), ["m1"],
+                        {"calendars", "connections"})
     [model] = run_audit(None, ["m1"], ["P"], ctx=ctx)["corpus"]["models"]
     return ctx, model["data_cache"]
 
@@ -110,3 +117,20 @@ def test_a_model_on_a_parameterized_connection_cannot_use_data_cache():
     assert dc["readiness"] == "blocked"
     assert [(r["rule"], r["items"]) for r in dc["reasons"]] == [
         ("P24", ["Warehouse A: template variable"])]
+
+
+def test_a_skipped_header_batch_lists_every_rule_that_did_not_read_the_source():
+    """No TML for ITEMS and no header either: nothing says its type, its connection or
+    whether it is a SQL View, so P23, P24 and P27 are not checked beside the Table
+    rules."""
+    ctx, dc = _readiness(t2_fails=True, headers_fail=True)
+    assert any("Metadata search batch" in w for w in ctx.warnings)
+    assert dc["readiness"] == "unknown"
+    assert dc["not_assessed"] == ["P19", "P21", "P23", "P24", "P25", "P27", "P28"]
+
+
+def test_control_a_skipped_header_batch_with_every_table_exported_is_still_read():
+    """The Table TML names each connection, the connection search types it, and a Table
+    is not a SQL View: the headers are not needed."""
+    ctx, dc = _readiness(t2_fails=False, headers_fail=True)
+    assert (dc["readiness"], dc["not_assessed"]) == ("ready", [])

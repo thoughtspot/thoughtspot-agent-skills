@@ -354,13 +354,16 @@ the product owner confirmed it.
 
 ### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
 
-Until the team answers, P24 is graded as a heuristic and its findings say "to confirm" where they rest on point 1 or 2.
-A Model whose only Data Cache reasons rest on those two reads To confirm, not Can't use.
+Until the team answers, a finding marks "to confirm" every reading that rests on an
+open point. Those are P24's OAuth M2M (point 1) and PrivateLink read from the host
+(point 2), P28's `= null` test (point 4) and P21's measure only flagged pre-aggregated
+(point 6). A finding resting only on such readings says the Model may not be able to
+use Data Cache, and the Model reads To confirm, not Can't use. P24 is graded as a
+heuristic.
 
 The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
 for the team. Points 4 to 6 came from the review of the rules the same day, and point 7
 from re-running the sample after it. Each is what P19, P21, P23, P24 or P28 reads today.
-A P24 finding says "to confirm" where it rests on point 1 or 2.
 
 1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
    `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
@@ -377,9 +380,10 @@ A P24 finding says "to confirm" where it rests on point 1 or 2.
    and P28's remediation now say so, and P28 names such a rule "a null test that keeps
    outer-join rows, see S12".
 4. **The `= null` form of a null test.** S12 and S15 accept `[X] = null` as a null
-   branch, as well as `isnull` and `is_null`. P28 reads only function calls, so a rule
-   whose null test is `= null` does not fire it. Does that form stop Data Cache too? If
-   so, P28 should read it the way S12 does. S12's remediation says it is to confirm.
+   branch, as well as `isnull` and `is_null`. P28 lists a rule with that form as "a
+   null test that keeps outer-join rows, see S12 (to confirm)". Does that form stop Data
+   Cache too? If so, it becomes a firm reading like `isnull`; if not, P28 drops it.
+   S12's remediation says it is to confirm.
 5. **A custom calendar named in a formula.** A formula can pass a calendar to a date
    function, as in `start_of_week ( [d] , RetailCal )`. P19 reads only a column's
    `properties.calendar`, so it misses such a formula. Does a formula that names a custom

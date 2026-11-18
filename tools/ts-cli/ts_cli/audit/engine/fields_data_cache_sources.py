@@ -41,9 +41,9 @@ from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.fields_data import _code, _own_table_and_paths, _rls_rules_of
 from ts_cli.audit.engine.fields_data_cache import (CANT_USE, MAY_NOT_USE, calls_sql_passthrough,
-                                                   connection_facts_for, missing_tables,
+                                                   connection_facts_for, connection_unread,
                                                    model_connections, model_sources,
-                                                   source_connection)
+                                                   source_connection, unread_sources)
 from ts_cli.formula_translate.refs import REF_GRAMMAR
 from ts_cli.publish_plan import parse_variable_token
 from ts_cli.tml_rls_graph import _referenced_path_ids, _segment_joins
@@ -185,12 +185,15 @@ def _connection_cache_lead(item: dict, ctx: Any) -> str:
 
 
 def unjudged_connections(item: dict, ctx: Any) -> List[str]:
-    """Model: the connections whose settings P24 cannot read (connection_readings'
-    `unknown`), when the connections were fetched. The readiness counts P24 as not
-    assessed for a Model it does not fire on while any is listed."""
+    """Model: what P24 cannot read, when the connections were fetched: the connections
+    whose settings or header are unknown (connection_readings' `unknown`), and the
+    sources whose connection cannot be named at all (connection_unread: no Table TML
+    and no header, or a connection block and a header naming none). The readiness counts
+    P24 as not assessed for the Model while any is listed."""
     if ctx.connections is None:
         return []
-    return [r["connection"] for r in connection_readings(item, ctx) if r["unknown"]]
+    return [r["connection"] for r in connection_readings(item, ctx) if r["unknown"]] + \
+        [s["name"] for s in model_sources(item.get("doc") or {}, ctx) if connection_unread(s)]
 
 
 # ── P25: Tables named by a template variable ────────────────────────────────
@@ -238,12 +241,18 @@ _CALL = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
 _NOT_FORMULA = frozenset({"ts_var", "in", "not", "and", "or"})
 _PASSTHROUGH_NAME = re.compile(r"(?i)^sql_\w+_op$")
 #: A null-test call, in the spellings S12 and S15 read as a call (`isnull`, `is_null`;
-#: fields_data._ISNULL_CALL). Their `[X] = null` form is no call, so P28 does not read
-#: it: whether it stops Data Cache is for the product team (open-items #18).
+#: fields_data._ISNULL_CALL).
 _NULL_TEST_NAME = re.compile(r"(?i)^is_?null$")
+#: The other null test S12 and S15 accept, `[X] = null` (not `!=`, `<=` or `>=`).
+_EQUALS_NULL = re.compile(r"(?i)(?<![!<>=])=\s*null\b")
 #: How P28 names a null test: the call S12 advises so an outer join keeps its unmatched
 #: rows, which stops Data Cache all the same (product owner, 2026-11-18).
 NULL_TEST = "a null test that keeps outer-join rows, see S12"
+#: How P28 names an `= null` test: whether that form stops Data Cache is for the product
+#: team to confirm (open-items #18, point 4).
+NULL_TEST_TO_CONFIRM = NULL_TEST + " (to confirm)"
+#: P28's readings that rest on an open product question.
+_RLS_TO_CONFIRM = frozenset({NULL_TEST_TO_CONFIRM})
 
 
 def rls_rule_problems(rule: dict, own: Any, paths: Dict[str, dict]) -> List[str]:
@@ -251,15 +260,18 @@ def rls_rule_problems(rule: dict, own: Any, paths: Dict[str, dict]) -> List[str]
     join" (a referenced `table_paths` entry whose `join_path` names a join, as
     tml_rls_graph walks it), "another table's column" (one whose `table` is not the
     owning Table, any case), "a formula" (a function call other than `ts_var` or a null
-    test), NULL_TEST (an `isnull` / `is_null` call), "a SQL pass-through"
-    (fields_data_cache's matcher). Read outside quoted literals; a path id the rule's
-    `table_paths` does not define is not judged."""
+    test), NULL_TEST (an `isnull` / `is_null` call), NULL_TEST_TO_CONFIRM (an `= null`
+    test), "a SQL pass-through" (fields_data_cache's matcher). Read outside quoted
+    literals; a path id the rule's `table_paths` does not define is not judged."""
     expr = rule.get("expr")
     code = _code(expr)
     found = _path_problems(code, own, paths) | _call_problems(code)
+    if _EQUALS_NULL.search(_REF.sub(" ", code)):
+        found.add(NULL_TEST_TO_CONFIRM)
     if calls_sql_passthrough(expr):
         found.add("a SQL pass-through")
-    order = ("a join", "another table's column", "a formula", NULL_TEST, "a SQL pass-through")
+    order = ("a join", "another table's column", "a formula", NULL_TEST,
+             NULL_TEST_TO_CONFIRM, "a SQL pass-through")
     return [p for p in order if p in found]
 
 
@@ -294,11 +306,11 @@ def _call_problems(code: str) -> set:
 
 
 def unjudged_rls(item: dict, ctx: Any) -> List[str]:
-    """Model: the sources whose RLS rules P28 cannot read (missing_tables); none for a
+    """Model: the sources whose RLS rules P28 cannot read (unread_sources); none for a
     Model bypassing RLS, which applies no rule wherever it is defined."""
     if tml.mapping(item.get("obj") or {}, "properties").get("is_bypass_rls"):
         return []
-    return missing_tables(item, ctx)
+    return unread_sources(item, ctx)
 
 
 def _paths_by_id(table_doc: Any) -> Dict[str, dict]:
@@ -309,24 +321,47 @@ def _paths_by_id(table_doc: Any) -> Dict[str, dict]:
             if isinstance(p, dict) and isinstance(p.get("id"), str)}
 
 
-@register("rls_rules_beyond_own_table", uses=(),
-          label="the RLS rules reaching beyond their Table's own columns")
-def _rls_rules_beyond_own_table(item: dict, ctx: Any) -> Any:
-    """Model: "<source>: <rule> (<what>)" for each RLS rule on a source's Table TML that
-    rls_rule_problems names something for; a rule comparing only its own Table's
-    columns with ts_ variables is not listed. Empty for a Model bypassing RLS
-    (`properties.is_bypass_rls`, read as S17 reads it): it applies no rule."""
-    from ts_cli.audit.engine.messages import NameList  # messages imports fields
-    out = NameList()
+def rls_readings(item: dict, ctx: Any) -> List[Tuple[str, str, List[str]]]:
+    """Model: (source, rule name, rls_rule_problems) for each RLS rule on a source's
+    Table TML that the problems name something for, in order; none for a Model
+    bypassing RLS (`properties.is_bypass_rls`, read as S17 reads it): it applies no
+    rule."""
     if tml.mapping(item.get("obj") or {}, "properties").get("is_bypass_rls"):
-        return out
+        return []
+    out = []
     for source in model_sources(item.get("doc") or {}, ctx):
-        doc = (ctx.tables or {}).get(source["fqn"])
+        doc = (ctx.tables or {}).get(source["fqn"]) if source["fqn"] else None
         own, _ = _own_table_and_paths(doc)
         paths = _paths_by_id(doc)
         for rule in _rls_rules_of(doc):
             problems = rls_rule_problems(rule, own, paths)
             if problems:
                 name = rule.get("name") if isinstance(rule.get("name"), str) else "?"
-                out.append(f"{source['name']}: {name} ({', '.join(problems)})")
+                out.append((source["name"], name, problems))
     return out
+
+
+@register("rls_rules_beyond_own_table", uses=(),
+          label="the RLS rules reaching beyond their Table's own columns")
+def _rls_rules_beyond_own_table(item: dict, ctx: Any) -> Any:
+    """Model: "<source>: <rule> (<what>)" for each rls_readings entry; a rule comparing
+    only its own Table's columns with ts_ variables is not listed. Empty for a Model
+    bypassing RLS."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(f"{source}: {name} ({', '.join(problems)})"
+                    for source, name, problems in rls_readings(item, ctx))
+
+
+def rls_rules_to_confirm(item: dict, ctx: Any) -> bool:
+    """Model: P28 lists a rule, and every reading it lists rests on an open product
+    question (an `= null` test). The readiness then reads "confirm", not "blocked"."""
+    found = [p for _, _, problems in rls_readings(item, ctx) for p in problems]
+    return bool(found) and all(p in _RLS_TO_CONFIRM for p in found)
+
+
+@register("rls_rules_lead", uses=(), values=(CANT_USE, MAY_NOT_USE),
+          label="whether the Model can't use Data Cache or may not, pending review")
+def _rls_rules_lead(item: dict, ctx: Any) -> str:
+    """Model: how P28's message begins. MAY_NOT_USE when every reading it lists is one
+    to confirm (rls_rules_to_confirm), else CANT_USE."""
+    return MAY_NOT_USE if rls_rules_to_confirm(item, ctx) else CANT_USE
