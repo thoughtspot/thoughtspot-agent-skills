@@ -5332,13 +5332,18 @@ ts calendar register --name RetailCal --connection "Snowflake Prod" \
 
 ### `ts calendar search`
 
-List registered custom calendars, to verify what landed.
+List every registered custom calendar, to verify what landed. It pages through the whole
+list, 100 at a time: the API returns only the first 10 when no page size is sent, and
+`record_size: -1` returns none (live-probed 2026-11-18). Before ts-cli 0.219.0 this
+command sent no page size, so it listed at most 10 calendars.
 
 ```bash
 ts calendar search --connection "Snowflake Prod"
 ```
 
-**Output:** JSON array from `POST /api/rest/2.0/calendars/search`, to stdout.
+**Output:** JSON array of every calendar from `POST /api/rest/2.0/calendars/search`, to
+stdout. An answer that cannot be paged (not a list, or a full page repeated) is an error,
+exit 1.
 
 ## `ts link` — Link a semantic-layer object for direct query
 
