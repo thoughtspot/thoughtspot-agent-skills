@@ -24,6 +24,15 @@ from typing import Any, Dict, List, Optional
 
 
 REPORT_DIR = Path(__file__).parent / "report"
+VENDOR_DIR = Path(__file__).parent / "vendor"
+
+#: Scripts every view may call, between core.js and the views: shared code that is not
+#: a view of its own (the Formulas view's graph mode).
+REPORT_LIBS: List[str] = ["formula_graph.js"]
+
+#: The graph's libraries, in load order (vendor/README.md): dagre, then Cytoscape, then
+#: the Cytoscape layout that drives dagre, which registers itself with Cytoscape.
+GRAPH_VENDOR = ["dagre.min.js", "cytoscape.min.js", "cytoscape-dagre.js"]
 
 #: The views, in the order their containers appear: (view id, script under report/).
 #: The view's container is `<div class="view" id="v-<view id>">`.
@@ -43,8 +52,8 @@ def assemble_page() -> str:
         return (REPORT_DIR / name).read_text(encoding="utf-8")
     containers = "\n".join(f'    <div class="view" id="v-{view}"></div>'
                            for view, _ in REPORT_VIEWS)
-    script = "".join([part("core.js")] + [part(js) for _, js in REPORT_VIEWS]
-                     + [part("boot.js")])
+    script = "".join([part("core.js")] + [part(js) for js in REPORT_LIBS]
+                     + [part(js) for _, js in REPORT_VIEWS] + [part("boot.js")])
     page = part("shell.html")
     for slot, value in (("{{STYLES}}", part("styles.css").rstrip("\n")),
                         ("{{VIEW_CONTAINERS}}", containers),
@@ -377,11 +386,34 @@ def compact_payload(data: dict) -> dict:
     return result
 
 
+GRAPH_LICENCES = ["LICENSE-dagre", "LICENSE-cytoscape", "LICENSE-cytoscape-dagre"]
+
+
+def graph_script() -> str:
+    """The formula graph's libraries as one script (vendor/README.md), each library's
+    licence text first, in a comment, so the notices travel with the code."""
+    notices = "\n".join((VENDOR_DIR / name).read_text(encoding="utf-8").replace("*/", "* /")
+                        for name in GRAPH_LICENCES)
+    return "\n".join([f"/*\n{notices}\n*/"]
+                     + [(VENDOR_DIR / name).read_text(encoding="utf-8") for name in GRAPH_VENDOR])
+
+
+def has_formula_chains(payload: dict) -> bool:
+    """Some audited Model has a formula built on another formula: only then is there a
+    graph worth drawing, and only then does the report carry its libraries."""
+    models = ((payload.get("C") or {}).get("m")) or []
+    return any(use[0] == 0 for cm in models for node in ((cm.get("ft") or {}).get("n") or [])
+               for use in node.get("u") or [])
+
+
 def render_report(data: dict) -> str:
     payload = compact_payload(data)
     erd_assets = _read_erd_assets()
     if erd_assets:
         payload["E"] = erd_assets
+    if has_formula_chains(payload):
+        # In the data, not the page's script: it runs only when a graph is first opened
+        payload["V"] = graph_script()
     json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")
 
     return assemble_page().replace("{{AUDIT_DATA}}", json_str)

@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-18
+- feat: the audit report's Formulas view draws each Model's formula lineage as a graph (Cytoscape.js and dagre, embedded only when some Model has a formula chain) (ts-audit 3.22.0)
+- chore: bump ts-cli to v0.218.0
+
 ## 2026-11-16
 - fix: `ts audit` S17 now grades as heuristic, with an approved exception keeping it HIGH, since the access-control reading rests on the product owner's signals and one shape is not live-measured. Its message says query generation *can* plan the table as a second fact; a table with no Model column gets the check-the-query-plan advice even when it carries a rule of its own; its remediation says the same; a long formula chain no longer slows the S angle; and the report's tag for a heuristic finding reads "inferred" rather than "name match" (ts-audit 3.21.1)
 - chore: bump ts-cli to v0.217.1
