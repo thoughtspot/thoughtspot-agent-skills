@@ -483,6 +483,7 @@ are roughly ordered by value÷effort.
 | BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
 | BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
+| BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17620,5 +17621,26 @@ globs the same way; it passed here only because nothing in the worktrees tripped
 2. Apply the same fix to `check_patterns.py`'s full mode.
 3. Prove it with a test: an untracked file under `.claude/worktrees/` that enumerates the rule
    set must not fail the check.
+
+**Target:** 2026-12-31.
+
+## BL-587 — `check_open_items.py` does not count `TO VERIFY` as unresolved `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the PR #672 review. Sisense item #8, which the PR's join
+and value-matching assumptions rest on, is `TO VERIFY`, and the check reports the Sisense
+file as "all items resolved".
+
+**What.** The check finds unresolved items by four markers (`_UNRESOLVED_MARKERS`, line 54):
+`UNTESTED`, `NEEDS VERIFICATION`, `UNVERIFIED`, `NOT IMPLEMENTED`. `TO VERIFY` is not one of
+them, though the Sisense file declares it as its own status word (line 3). On main this
+hides four items: Sisense #4 and #5, and Tableau #18 and #19. It is the reverse of BL-584,
+where the index reads an unknown status as OPEN: the two tools read the same files and
+disagree.
+
+**Do.**
+1. Add `TO VERIFY` to the markers.
+2. Better, fail on any item status outside the documented vocabulary, so the next new
+   spelling can't hide an item either. Fix this with BL-584, so both tools share one list.
+3. Prove it with a test: an item headed `— TO VERIFY` is reported as unresolved.
 
 **Target:** 2026-12-31.
