@@ -43,6 +43,7 @@ REPORT_VIEWS: List[tuple] = [
     ("objectmap", "views/objectmap.js"),
     ("cleanup", "views/cleanup.js"),
     ("formulas", "views/formulas.js"),
+    ("datacache", "views/datacache.js"),
 ]
 
 
@@ -213,10 +214,53 @@ def _compact_ai(ai: dict) -> dict:
     return out
 
 
+def _compact_data_cache(dc: dict) -> dict:
+    """A Model's `data_cache` (audit/data_cache.py), compacted for the Data Cache view:
+    `s` its readiness; `r` the reasons, {c rule, b 1 when it blocks else 0, l label, i
+    items, and q 1 when it may block, resting only on readings to confirm}; `k` the
+    calendars its columns and formulas use (_compact_dc_calendar: u 1 custom, 0
+    code-based, 2 unclear; t 1 when set on the Table column; f 1 when named in a
+    formula); `cc` the custom calendars on its connections, {n connection, k calendar
+    names}, or null when they were not fetched; `na` the checks not made for it; `ku`,
+    when any, the sources whose TML was not read, so their Table-column calendars are
+    not among `k`."""
+    conn = dc.get("connection_calendars")
+    unread = dc.get("calendars_not_read")
+    return {
+        "s": dc.get("readiness") or "unknown",
+        "r": [_compact_dc_reason(r) for r in dc.get("reasons") or []],
+        "k": [_compact_dc_calendar(k) for k in dc.get("calendars_in_use") or []],
+        "cc": None if conn is None else [{"n": c.get("connection", ""),
+                                          "k": list(c.get("calendars") or [])} for c in conn],
+        "na": list(dc.get("not_assessed") or []),
+        **({"ku": list(unread)} if unread else {}),
+    }
+
+
+def _compact_dc_reason(r: dict) -> dict:
+    out = {"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
+           "l": r.get("label", ""), "i": list(r.get("items") or [])}
+    if r.get("effect") == "may block":
+        out["q"] = 1
+    return out
+
+
+def _compact_dc_calendar(k: dict) -> dict:
+    """`u` 1 custom, 0 code-based, 2 unclear; `t` 1 set on the Table column; `f` 1 named
+    in a formula (only when it is)."""
+    kind = {"custom": 1, "unclear": 2}.get(k.get("kind"), 0)
+    out = {"n": k.get("column", ""), "c": k.get("calendar", ""), "u": kind,
+           "t": 1 if k.get("set_on") == "table" else 0}
+    if k.get("set_on") == "formula":
+        out["f"] = 1
+    return out
+
+
 def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:
     """One corpus Model, compacted: its stats, tables, and — when present — its AI
-    analysis, Spotter readiness score (`rs`: score and level), ERD and formula tree
-    (`pasteable`: the (Model guid, formula name) pairs H16 reported)."""
+    analysis, Spotter readiness score (`rs`: score and level), ERD, formula tree
+    (`pasteable`: the (Model guid, formula name) pairs H16 reported) and Data Cache
+    readiness (`dc`)."""
     key = (m.get("name", ""), m.get("guid", ""))
     cm = {
         "mi": model_index.get(key, -1),
@@ -238,6 +282,8 @@ def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> 
     if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
         cm["ft"] = _compact_tree(m["formula_tree"],
                                  {n for g, n in pasteable if g == m.get("guid")})
+    if isinstance(m.get("data_cache"), dict):  # absent from JSON written before 3.23
+        cm["dc"] = _compact_data_cache(m["data_cache"])
     return cm
 
 

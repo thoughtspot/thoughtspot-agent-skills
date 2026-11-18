@@ -6,6 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-18
+- feat: `ts audit` assesses Data Cache readiness. New Performance rules, each MEDIUM unless noted: P19 (a column on a custom calendar), P20 (a SQL pass-through formula), P21 (a semantic query Model), P22 (a connection that defines custom calendars, LOW), P23 (a source other than Snowflake or Databricks), P24 (a connection using OAuth, PrivateLink or a template variable), P25 (a parameterized Table), P26 (a parameter in a formula), P27 (a SQL View) and P28 (an RLS rule beyond its Table's own columns). Two new conditional data kinds, `calendars` and `connections`, are fetched only when a selected rule declares them; the connection search keeps no configuration value. The audit now fetches the metadata header of every Model source, so P1 and D8 see SQL Views. Each Model's `data_cache` readiness (can use, can't use, to confirm, warning or not assessed) is in the audit JSON, and a Data Cache report view has filters and search. A snapshot captured earlier cannot replay the P angle: capture it again (ts-audit 3.23.0)
+- fix: `ts calendar search` lists every calendar, paging 100 at a time; it listed only the first 10
+- chore: bump ts-cli to v0.219.0
 - feat: the audit report's Formulas view draws each Model's formula lineage as a graph (Cytoscape.js and dagre, embedded only when some Model has a formula chain) (ts-audit 3.22.0)
 - chore: bump ts-cli to v0.218.0
 

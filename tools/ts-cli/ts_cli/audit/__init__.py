@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext, build_context
-from ts_cli.audit.engine import scopes, tml
+from ts_cli.audit.data_cache import model_data_cache
+from ts_cli.audit.engine import memo, scopes, tml
 from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
@@ -24,8 +25,12 @@ from ts_cli.audit.formula_tree import formula_tree
 #: panel (`corpus.dependents`). Same vocabulary as a rule's `uses`. NOT fetched for
 #: the report's sake: `ts audit run` fetches only what the selected rules need, and
 #: the report says "not collected for this selection" for a section whose data is
-#: missing from `corpus.fetched_needs`.
-REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets"})
+#: missing from `corpus.fetched_needs`. The connections' custom calendars and settings
+#: are read by each Model's Data Cache readiness (`data_cache.model_data_cache`, the
+#: Data Cache view): P22's and P24's fields, P23's connection types, and the helpers
+#: that say what P23 and P24 could not read.
+REPORT_NEEDS = frozenset({"ai_instructions", "dependents", "sets", "calendars",
+                          "connections"})
 
 #: The category whose run computes each Model's Spotter readiness score (`build_corpus`).
 READINESS_CATEGORY = "A"
@@ -211,12 +216,26 @@ def _model_ai_analysis(ctx, guid: str, model: dict, ai_fetched: Optional[bool]) 
     return analysis
 
 
+def _ran_rules(angles: list) -> dict:
+    """Rule id -> rule, for the rules a run of `angles` under the catalog's default
+    profile runs: what `build_corpus` judges Data Cache readiness by when its caller does
+    not say which rules ran."""
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.run import selected_rules
+    catalog = load_catalog()
+    known = [a for a in angles if a in catalog.categories]
+    return {r.id: r for r in selected_rules(catalog, known, catalog.default_profile())}
+
+
 def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
-                 angles: Optional[list] = None, ai_fetched: Optional[bool] = None) -> dict:
+                 angles: Optional[list] = None, ai_fetched: Optional[bool] = None,
+                 ran_rules: Optional[dict] = None) -> dict:
     """The report's corpus. ``ai_fetched`` says whether ai_instructions was fetched for
     this context: True records each Model's ``ai_analysis.instructions_read`` (whether
     its lookup succeeded), False records it as None (not looked up), and None — the
-    caller does not know — leaves it out."""
+    caller does not know — leaves it out. ``ran_rules`` (rule id -> rule) are the rules
+    the run ran, which decide each Model's ``data_cache`` readiness; None reads them
+    from the catalog for ``angles`` under the default profile."""
     if not angles:
         from ts_cli.audit import catalog_model
         angles = list(catalog_model.load_catalog().categories)
@@ -225,36 +244,12 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
     # instructions it reads (coaching, 25% of the score) are fetched — and not when the
     # caller knows they were not, since every Model would then score as uncoached.
     scored = READINESS_CATEGORY in angles and ai_fetched is not False
-    items = list(scopes.iterate(ctx, "model")) if scored else None
-    models_out = []
-    for i, model in enumerate(ctx.models):
-        m = model.get("model", {})
-        guid = model.get("guid", m.get("guid", ""))
-        model_tables = m.get("model_tables") or []
-        roles = tml.model_table_roles(m, ctx.tables)
-        entry: dict = {
-            "guid": guid,
-            "name": m.get("name", ""),
-            "description": m.get("description", ""),
-            "table_count": len(model_tables),
-            "column_count": len(m.get("columns") or []),
-            "formula_count": len(m.get("formulas") or []),
-            "join_count": tml.join_count(model_tables),
-            "join_depth": tml.join_depth(model_tables),
-            "model_tables": [
-                {"name": mt.get("name", ""), "fqn": mt.get("fqn", ""),
-                 "role": (roles.get(tml.table_key(mt)) or {}).get("role", "")}
-                for mt in model_tables
-            ],
-        }
-        entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
-        entry["formula_tree"] = formula_tree(m)
-        if items is not None:
-            score = readiness_score(items[i], ctx)
-            # graded on the raw score, as A5 was; rounded only for the report
-            entry["spotter_readiness"] = {"score": round(score, 1),
-                                          "level": readiness_level(score)}
-        models_out.append(entry)
+    model_items = list(scopes.iterate(ctx, "model"))
+    items = model_items if scored else None
+    ran = _ran_rules(angles) if ran_rules is None else ran_rules
+    with memo.run_scope():  # the Data Cache fields share per-Model lookups
+        models_out = [_corpus_model(ctx, model, model_items[i], items, i, ai_fetched, ran)
+                      for i, model in enumerate(ctx.models)]
 
     table_reuse = _build_table_reuse_from_ctx(models_out)
     model_overlaps = _build_overlaps_from_ctx(models_out)
@@ -277,6 +272,41 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         "model_overlaps": model_overlaps,
         "dependents": dict(ctx.dependents),
     }
+
+
+def _corpus_model(ctx, model: dict, item: dict, items: Optional[list], i: int,
+                  ai_fetched: Optional[bool], ran: dict) -> dict:
+    """One Model's corpus entry: its stats, tables, AI analysis, formula tree, Data Cache
+    readiness (`item` is its model scope item) and, when scored (`items`), its Spotter
+    readiness."""
+    m = model.get("model", {})
+    guid = model.get("guid", m.get("guid", ""))
+    model_tables = m.get("model_tables") or []
+    roles = tml.model_table_roles(m, ctx.tables)
+    entry: dict = {
+        "guid": guid,
+        "name": m.get("name", ""),
+        "description": m.get("description", ""),
+        "table_count": len(model_tables),
+        "column_count": len(m.get("columns") or []),
+        "formula_count": len(m.get("formulas") or []),
+        "join_count": tml.join_count(model_tables),
+        "join_depth": tml.join_depth(model_tables),
+        "model_tables": [
+            {"name": mt.get("name", ""), "fqn": mt.get("fqn", ""),
+             "role": (roles.get(tml.table_key(mt)) or {}).get("role", "")}
+            for mt in model_tables
+        ],
+    }
+    entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
+    entry["formula_tree"] = formula_tree(m)
+    entry["data_cache"] = model_data_cache(item, ctx, ran)
+    if items is not None:
+        score = readiness_score(items[i], ctx)
+        # graded on the raw score, as A5 was; rounded only for the report
+        entry["spotter_readiness"] = {"score": round(score, 1),
+                                      "level": readiness_level(score)}
+    return entry
 
 
 def _build_table_reuse_from_ctx(models: list) -> list:
@@ -423,7 +453,8 @@ def run_audit(
     ctx = readable(ctx)  # what no rule judges is left out of the findings and corpus
     known = [a for a in angles if a in catalog.categories]
     findings: list[Finding] = run_rules(ctx, catalog, known, profile)
-    run_ids = [rule.id for rule in selected_rules(catalog, known, profile)]
+    ran = {rule.id: rule for rule in selected_rules(catalog, known, profile)}
+    run_ids = list(ran)
     check_meta = report_meta(catalog)["checks"]
 
     corpus = build_corpus(
@@ -432,6 +463,7 @@ def run_audit(
         profile_name=getattr(client, "_profile_name", ""),
         angles=angles,
         ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
+        ran_rules=ran,
     )
     corpus["assessment"] = catalog.profiles[profile].label
     if unreadable:
