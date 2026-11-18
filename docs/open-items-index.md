@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**221 total items** across 24 skills — **73 open**, 132 verified, 16 deferred
+**222 total items** across 24 skills — **73 open**, 133 verified, 16 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
-| ts-audit | 15 | **5** | 10 | 0 |
+| ts-audit | 16 | **5** | 11 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |

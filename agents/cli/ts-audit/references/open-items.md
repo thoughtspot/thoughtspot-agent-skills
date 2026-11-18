@@ -248,6 +248,38 @@ omitted dependent objects. Needs re-verification on next audit run.
 
 ---
 
+### #16 — Custom calendar search pages, and `record_size: -1` returns none — VERIFIED 2026-11-18
+
+Live-probed, read-only, on the SE demo cluster on 2026-11-18, for P22, which reads the
+custom calendars registered on each connection. `POST /api/rest/2.0/calendars/search`:
+
+| Request body | Answer |
+|---|---|
+| `{}` | The first 10 calendars only (the default page size is 10) |
+| `{"record_size": 100}` | 57 calendars on 22 connections: all of them |
+| `{"record_size": -1}` | **None at all.** -1 is not "all" here, as it is on `metadata/search` |
+| `{"record_offset": 10, "record_size": 10}` | The next 10 |
+| Pages of 25 from offset 0 until a short page | All 57 |
+| `{"connection_identifier": <connection id>}` | That connection's calendars only |
+
+Each item is `{calendar_id, calendar_name, connection_id, connection_name,
+data_warehouse_type, author_name, modification_time_in_millis}`, all strings.
+
+**What changed (ts-cli 0.219.0, ts-audit 3.23.0).** `ts calendar search` sent no
+`record_size`, so it listed at most 10 calendars. It now pages 100 at a time until a
+page comes back short. The audit's `calendars` fetch (for P22 and the Data Cache view)
+shares that paging (`ts_cli/custom_calendar/search.py`), once per audit, and keeps only
+the four ids and names it reads. It matches a calendar to a Model's Tables by
+connection name, any case, and by connection id where a Table's metadata header
+carries `dataSourceId`.
+
+**Not verified.** That the metadata header's `dataSourceId` is the connection id: no
+fixture in this repo carries it, so the id match is used only when it is present and
+the name match carries the rule. And the paging guard against a server that ignores
+`record_offset` (a repeated full page is an error) has met no such server.
+
+---
+
 ## Phase 3 — Visualization Layer (future)
 
 ### #13 — Liveboard viz fingerprinting — UNVERIFIED

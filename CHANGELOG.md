@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-18
+- feat: `ts audit` assesses Data Cache readiness. New Performance rules P19 (a column on a custom calendar, MEDIUM), P20 (a SQL pass-through formula, MEDIUM), P21 (a semantic query Model, MEDIUM) and P22 (a connection that defines custom calendars, LOW); a new conditional data kind, `calendars`, fetched only when a selected rule declares it; each Model's `data_cache` readiness in the audit JSON; and a Data Cache report view with filters and search. A snapshot captured earlier cannot replay the P angle: capture it again (ts-audit 3.23.0)
+- fix: `ts calendar search` lists every calendar, paging 100 at a time; it listed only the first 10
+- chore: bump ts-cli to v0.219.0
+
 ## 2026-11-16
 - fix: `ts audit` S17 now grades as heuristic, with an approved exception keeping it HIGH, since the access-control reading rests on the product owner's signals and one shape is not live-measured. Its message says query generation *can* plan the table as a second fact; a table with no Model column gets the check-the-query-plan advice even when it carries a rule of its own; its remediation says the same; a long formula chain no longer slows the S angle; and the report's tag for a heuristic finding reads "inferred" rather than "name match" (ts-audit 3.21.1)
 - chore: bump ts-cli to v0.217.1
