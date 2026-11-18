@@ -386,9 +386,16 @@ def compact_payload(data: dict) -> dict:
     return result
 
 
+GRAPH_LICENCES = ["LICENSE-dagre", "LICENSE-cytoscape", "LICENSE-cytoscape-dagre"]
+
+
 def graph_script() -> str:
-    """The formula graph's libraries as one script (vendor/README.md)."""
-    return "\n".join((VENDOR_DIR / name).read_text(encoding="utf-8") for name in GRAPH_VENDOR)
+    """The formula graph's libraries as one script (vendor/README.md), each library's
+    licence text first, in a comment, so the notices travel with the code."""
+    notices = "\n".join((VENDOR_DIR / name).read_text(encoding="utf-8").replace("*/", "* /")
+                        for name in GRAPH_LICENCES)
+    return "\n".join([f"/*\n{notices}\n*/"]
+                     + [(VENDOR_DIR / name).read_text(encoding="utf-8") for name in GRAPH_VENDOR])
 
 
 def has_formula_chains(payload: dict) -> bool:

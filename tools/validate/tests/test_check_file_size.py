@@ -226,3 +226,11 @@ def test_a_pinned_vendored_file_is_skipped(tmp_path, capsys, monkeypatch):
 def test_a_vendored_file_not_pinned_or_edited_is_scanned(tmp_path, capsys, monkeypatch, pin, digest):
     _vendor(tmp_path, "lib.min.js", _LONG_FN, pin=pin, digest=digest)
     assert _run(tmp_path, monkeypatch) == 1
+
+
+def test_a_malformed_manifest_line_pins_nothing_and_does_not_crash(tmp_path, capsys, monkeypatch):
+    d = tmp_path / fs.VENDOR_DIR
+    d.mkdir(parents=True)
+    (d / "lib.min.js").write_text(_LONG_FN, encoding="utf-8")
+    (d / "MANIFEST").write_text("onlyoneword\n", encoding="utf-8")
+    assert _run(tmp_path, monkeypatch) == 1

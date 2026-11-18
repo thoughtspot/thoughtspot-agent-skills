@@ -10,6 +10,8 @@ Rules (product code under tools/ts-cli/ts_cli, excluding tests — `.py` modules
 since BL-503, the audit report's `.js` parts, which the report now grows by adding):
 - lines > HARD_FAIL and not allowlisted  -> FAIL (exit 1)
 - lines > SOFT_WARN                       -> WARN (printed nudge, exit 0)
+- a file under VENDOR_DIR whose SHA-256 matches its MANIFEST line -> not scanned
+  (third-party minified code; see VENDOR_DIR below)
 - a top-level JS `function` longer than JS_FUNCTION_FAIL lines -> FAIL, unless
   ratcheted in JS_FUNCTION_RATCHET; longer than JS_FUNCTION_WARN -> WARN. (The Python
   side's function-level gate is check_module_health's complexity ratchet; the report's
@@ -120,8 +122,10 @@ def _js_function_findings(root: str, rel: str) -> tuple[list, list]:
 
 
 # Third-party code the audit report embeds (minified, not ours to split). A file there
-# is skipped only while its SHA-256 matches its line in the directory's MANIFEST, so
-# code written here, or a vendored file edited by hand, is scanned like any other.
+# is skipped only while its SHA-256 matches its line in the directory's MANIFEST: a new
+# file, or a vendored file edited by hand, is scanned like any other until someone also
+# re-pins it in MANIFEST. A re-pin is the reviewed step: the directory is in CODEOWNERS,
+# and tests/test_audit_formula_graph.py holds MANIFEST to the files the report embeds.
 VENDOR_DIR = "tools/ts-cli/ts_cli/audit/vendor"
 
 
@@ -129,9 +133,13 @@ def _vendored(root: str) -> set[str]:
     """The files under VENDOR_DIR whose content matches MANIFEST (`<sha256>  <name>`)."""
     import hashlib
     base = os.path.join(root, VENDOR_DIR)
+    pinned = {}
     try:
         with open(os.path.join(base, "MANIFEST"), encoding="utf-8") as fh:
-            pinned = dict(reversed(line.split(None, 1)) for line in fh if line.strip())
+            for line in fh:
+                parts = line.split(None, 1)
+                if len(parts) == 2:  # a malformed line pins nothing: its file is scanned
+                    pinned[parts[1]] = parts[0]
     except OSError:
         return set()
     out = set()

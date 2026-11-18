@@ -547,7 +547,9 @@ function buildFormulaTree(c, guid){
   });
   c.appendChild(layout);
   wireTreeKeys(ul);
-  if(tree._selected) view.select(tree._selected);
+  /* after this turn: the router shows this view once it is built, and a hidden row
+     cannot be scrolled into view */
+  if(tree._selected) setTimeout(function(){ view.select(tree._selected); }, 0);
   $(".ftree-search", hdr).addEventListener("input", function(e){
     results.innerHTML = searchResultsHtml(tree, e.target.value);
   });
@@ -570,6 +572,7 @@ function buildFormulaTree(c, guid){
 
 function buildFormulas(D, guid, mode){
   var c = document.getElementById("v-formulas");
+  if(c._cy){ c._cy.destroy(); c._cy = null; }  /* a graph left running would keep rendering */
   c.innerHTML = "";
   var cm = guid && findCorpusModel(guid);
   if(mode === "graph" && cm && graphAvailable(cm.ft)) buildFormulaGraph(c, guid, cm.ft);

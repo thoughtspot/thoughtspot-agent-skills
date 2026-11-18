@@ -86,7 +86,9 @@ def test_the_libraries_travel_only_with_a_formula_chain():
         data[name] = json.loads(re.search(r'<script id="audit-data" type="application/json">(.*?)</script>', page, re.S).group(1))
     # the libraries, in load order, beside the catalog meta (key G), not in place of it
     v = data["chained"]["V"]
-    marks = [v.index(m) for m in ("g.dagre=f()", "The Cytoscape Consortium", "cytoscapeDagre")]
+    assert v.startswith("/*") and v.count("Permission is hereby granted") >= 3   # the licences, first
+    code = v[v.index("*/") + 2:]
+    marks = [code.index(m) for m in ("g.dagre=f()", "The Cytoscape Consortium", "cytoscapeDagre")]
     assert marks == sorted(marks)
     assert "V" not in data["flat"]
     assert data["chained"]["G"] == data["flat"]["G"] and "categories" in data["chained"]["G"]
@@ -208,3 +210,62 @@ def test_a_model_past_the_cap_is_drawn_one_lineage_at_a_time(tmp_path):
     assert "F102" in x["after"] and x["first"] != x["after"]
     assert "400 formulas, columns and parameters, too many to draw at once" in x["sub"]
     assert "lineage of F102" in x["sub"]
+
+
+_IN_VIEW = ('function inView(cy){ var n = cy.$(".focus"); if(!n.length) return null;'
+            ' var b = n.renderedBoundingBox();'
+            ' return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= cy.width() && b.y2 <= cy.height(); }')
+
+
+@needs_chrome
+def test_a_selection_carried_from_the_tree_lands_in_view(tmp_path):
+    shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1", actions=_IN_VIEW + (
+        'var row = Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-row"),'
+        '  function(r){ var n = r.querySelector(".ftree-name"); return n && n.textContent === "Gross Margin %"; });'
+        'row.click(); location.hash = "#formulas/m-1/graph";'
+        'setTimeout(function(){'
+        '  var cy = document.getElementById("v-formulas")._cy; window.__extra = inView(cy); }, 100);'),
+        settle_ms=400)
+    assert shown["errors"] == []
+    assert shown["extra"] is True
+
+
+@needs_chrome
+def test_rebuilding_the_view_destroys_the_last_graph(tmp_path):
+    shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1/graph", actions=(
+        'var first = document.getElementById("v-formulas")._cy;'
+        'location.hash = "#formulas/m-1";'
+        'setTimeout(function(){ window.__extra = {destroyed: first.destroyed(),'
+        ' left: document.getElementById("v-formulas")._cy || null}; }, 20);'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"destroyed": True, "left": None}
+
+
+@needs_chrome
+def test_a_model_past_the_cap_opens_on_a_lineage_under_it(tmp_path):
+    hub = {"name": "Hub", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+           "formulas": [_f(f"formula_H{i}", f"H{i}", f"sum ( [ORDERS::C{i}] )") for i in range(200)]
+           + [_f("formula_Total", "Total", " + ".join(f"[formula_H{i}]" for i in range(200))),
+              _f("formula_S0", "S0", "sum ( [ORDERS::S] )"), _f("formula_S1", "S1", "[formula_S0] * 2")],
+           "columns": [_col("Total", "formula_Total"), _col("S1", "formula_S1")]}
+    shown = report_browser.render(_report(("m-4", hub)), tmp_path, "formulas/m-4/graph", actions=(
+        'window.__extra = document.getElementById("v-formulas")._cy.nodes().length;'))
+    assert shown["errors"] == []
+    assert 0 < shown["extra"] <= 300    # S1's lineage, not Total's 401 nodes
+
+
+@needs_chrome
+def test_a_selection_carried_to_the_tree_is_scrolled_into_view(tmp_path):
+    shown = report_browser.render(_report(("m-3", _big(200))), tmp_path, "formulas/m-3/graph", actions=(
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        's.value = "F197"; s.dispatchEvent(new Event("input"));'
+        'Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+        '  function(a){ return a.textContent === "F197"; }).click();'
+        'location.hash = "#formulas/m-3";'
+        'setTimeout(function(){'
+        '  var r = document.querySelector("#v-formulas .ftree-selected");'
+        '  var b = r && r.getBoundingClientRect();'
+        '  window.__extra = !!b && b.top >= 0 && b.bottom <= window.innerHeight; }, 100);'),
+        settle_ms=400)
+    assert shown["errors"] == []
+    assert shown["extra"] is True

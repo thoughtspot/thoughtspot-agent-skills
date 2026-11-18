@@ -80,7 +80,7 @@ function graphElements(tree, keep){
       var id = graphNodeId(u);
       if(u[0] !== 0) node(id, String(u[1]), u[0] === 1 ? "column" : "parameter", u);
       if(keep && !keep[id]) return;
-      edges.push({data: {id: id+">f"+i, source: id, target: "f"+i}});
+      edges.push({data: {source: id, target: "f"+i}});  /* Cytoscape names it: no id clash */
     });
   });
   return nodes.concat(edges);
@@ -116,14 +116,16 @@ function graphNote(total, tree, target){
     total+" formulas, columns and parameters. Click a node to see its definition and its lineage.";
 }
 
-/* The root with the longest reach downwards: where a Model too big to draw whole opens. */
+/* Where a Model too big to draw whole opens: the root whose lineage is the largest that
+   still fits under the cap, or, when none does, the smallest (a click draws any other). */
 function graphStart(tree){
-  var best = tree.r[0], most = -1;
+  var best = null, size = -1, smallest = null, least = Infinity;
   tree.r.forEach(function(i){
     var n = Object.keys(graphLineage(tree, [0, i])).length;
-    if(n > most){ most = n; best = i; }
+    if(n <= FORMULA_GRAPH_CAP && n > size){ size = n; best = i; }
+    if(n < least){ least = n; smallest = i; }
   });
-  return [0, best];
+  return [0, best !== null ? best : smallest];
 }
 
 function buildFormulaGraph(c, guid, tree){
@@ -160,17 +162,19 @@ function buildFormulaGraph(c, guid, tree){
   function draw(keep){
     if(cy) cy.destroy();
     cy = c._cy = window.cytoscape({container: box, elements: graphElements(tree, keep),
-      style: graphStyle(), wheelSensitivity: 0.3, minZoom: 0.05, maxZoom: 3,
+      style: graphStyle(), minZoom: 0.05, maxZoom: 3,
       layout: {name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}});
     cy.on("tap", "node", function(e){ view.select(e.target.data("use")); });
     cy.on("tap", function(e){ if(e.target === cy) clearHighlight(); });
     fit();
   }
-  /* The view may be built before its container is shown (the router shows it after),
-     when Cytoscape reads a size of nothing: measure and fit again on the next frame. */
+  /* The view may be built before its container is shown (the router shows it after,
+     in the same turn), when Cytoscape reads a size of nothing: measure and fit again
+     once this turn is over. */
   function fit(){
-    requestAnimationFrame(function(){
-      if(!cy) return;
+    setTimeout(function(){
+      if(!cy || cy.destroyed()) return;  /* the view was rebuilt before this frame */
+      cy.stop(true);  /* an animation begun while hidden ends on a pan worked out for no size */
       cy.resize();
       cy.fit(undefined, 24);
       if(cy.zoom() < FORMULA_GRAPH_MIN_ZOOM){  /* readable labels over seeing it all */
@@ -181,12 +185,14 @@ function buildFormulaGraph(c, guid, tree){
       }
       var sel = cy.$(".focus");
       if(sel.length) cy.center(sel);
-    });
+    }, 0);
   }
   function clearHighlight(){
     if(cy) cy.elements().removeClass("faded focus lit");
   }
-  function highlight(id){
+  /* `animate`: glide to the node; otherwise (a redraw, or a view not yet shown) fit()
+     centres it once the canvas has a size. */
+  function highlight(id, animate){
     var n = cy.getElementById(id);
     if(!n.length) return;
     var reach = n.predecessors().union(n.successors()).union(n);
@@ -195,7 +201,8 @@ function buildFormulaGraph(c, guid, tree){
     reach.removeClass("faded");
     reach.edges().addClass("lit");
     n.addClass("focus");
-    cy.animate({center: {eles: n}, duration: 200});
+    if(animate) cy.animate({center: {eles: n}, duration: 200});
+    else fit();
   }
   var view = tree._view = {
     select: function(target, row, focusPanel){
@@ -203,24 +210,27 @@ function buildFormulaGraph(c, guid, tree){
       panel.innerHTML = detailHtml(tree, target);
       panel.classList.remove("fdetail-empty");
       layout.classList.add("ftree-has-detail");
-      var id = graphNodeId(target);
+      var id = graphNodeId(target), redrawn = false;
       if(partial && !(shown && shown[id])){
         shown = graphLineage(tree, target);
         draw(shown);
+        redrawn = true;
       }
       $(".fgraph-sub", hdr).textContent = graphNote(total, tree, target);
       cy.resize();
-      highlight(id);
+      highlight(id, !redrawn && box.offsetParent !== null);
       if(focusPanel) $(".fdetail-title", panel).focus();
     }
   };
   function closePanel(){
+    var focusLost = panel.contains(document.activeElement);
     panel.innerHTML = EMPTY;
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
     clearHighlight();
     tree._selected = null;
     if(cy) cy.resize();
+    if(focusLost) $(".ftree-search", hdr).focus();  /* not lost to <body> */
   }
   panel.addEventListener("click", function(e){ if(e.target.closest(".fdetail-close")) closePanel(); });
   layout.addEventListener("keydown", function(e){

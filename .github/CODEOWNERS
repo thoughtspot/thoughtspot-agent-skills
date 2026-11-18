@@ -20,6 +20,11 @@
 # editing any owned file.
 /tools/validate/                                             @djwaldo
 
+# Third-party code the audit report embeds. Its MANIFEST pins each file's SHA-256, and
+# check_file_size.py skips a file only while that hash matches: a re-pin widens a gate
+# exemption, and a re-pinned file runs in every report that carries it.
+/tools/ts-cli/ts_cli/audit/vendor/                           @djwaldo
+
 # Hooks and their installer: a change here can disable every local gate.
 /scripts/install-hooks.sh                                    @djwaldo
 /scripts/pre-commit.sh                                       @djwaldo
