@@ -11,6 +11,8 @@
    accessible form of the same data, one click away. */
 var FORMULA_GRAPH_CAP = 300;  /* nodes drawn whole; beyond it, one lineage at a time */
 var FORMULA_GRAPH_MIN_ZOOM = 0.7;  /* a wider graph opens at its left edge, panned from there */
+var FORMULA_GRAPH_MAX_FIT = 1.2;   /* a small graph is not blown up to fill the canvas */
+var FORMULA_GRAPH_MIN_VISIBLE = 120;  /* px of canvas above a narrow screen's sheet */
 
 /* The graph libraries are in this report, and the Model has a formula built on another. */
 function graphAvailable(tree){
@@ -139,6 +141,8 @@ function buildFormulaGraph(c, guid, tree){
   var hdr = el("div","ftree-header");
   hdr.innerHTML = '<div class="model-title">'+esc(findModelName(guid))+'</div>'+
     '<div class="ftree-sub fgraph-sub"></div>'+
+    '<div class="ftree-sub fgraph-legend">Border: blue a measure, grey an attribute; dashed hidden; '+
+    'amber hidden and used once (H16). Grey boxes are table columns and parameters.</div>'+
     '<div class="header-actions"><input class="ftree-search" type="search" '+
     'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
     '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'">Tree</a>'+
@@ -148,6 +152,7 @@ function buildFormulaGraph(c, guid, tree){
   c.appendChild(results);
   var layout = el("div","ftree-layout");
   var box = el("div","fgraph");
+  box.tabIndex = -1;
   box.setAttribute("role","img");
   box.setAttribute("aria-label","Formula lineage graph; the tree shows the same data and is keyboard-reachable");
   var panel = el("aside","fdetail fdetail-empty");
@@ -164,7 +169,10 @@ function buildFormulaGraph(c, guid, tree){
     cy = c._cy = window.cytoscape({container: box, elements: graphElements(tree, keep),
       style: graphStyle(), minZoom: 0.05, maxZoom: 3,
       layout: {name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}});
-    cy.on("tap", "node", function(e){ view.select(e.target.data("use")); });
+    cy.on("tap", "node", function(e){
+      box.focus({preventScroll: true});  /* so Escape reaches the view, not <body> */
+      view.select(e.target.data("use"));
+    });
     cy.on("tap", function(e){ if(e.target === cy) clearHighlight(); });
     fit();
   }
@@ -177,6 +185,7 @@ function buildFormulaGraph(c, guid, tree){
       cy.stop(true);  /* an animation begun while hidden ends on a pan worked out for no size */
       cy.resize();
       cy.fit(undefined, 24);
+      if(cy.zoom() > FORMULA_GRAPH_MAX_FIT){ cy.zoom(FORMULA_GRAPH_MAX_FIT); cy.center(); }
       if(cy.zoom() < FORMULA_GRAPH_MIN_ZOOM){  /* readable labels over seeing it all */
         var bb = cy.elements().boundingBox();
         cy.zoom(FORMULA_GRAPH_MIN_ZOOM);
@@ -193,7 +202,14 @@ function buildFormulaGraph(c, guid, tree){
   function panTo(n){
     var w = cy.width(), h = cy.height(), pos = n.position(), z = cy.zoom();
     if(getComputedStyle(panel).position === "fixed" && !panel.classList.contains("fdetail-empty")){
-      var under = box.getBoundingClientRect().bottom - panel.getBoundingClientRect().top;
+      var sheet = panel.getBoundingClientRect().top, rect = box.getBoundingClientRect();
+      if(sheet - rect.top < FORMULA_GRAPH_MIN_VISIBLE){
+        /* too little of the canvas above the sheet: scroll it up under the top bar */
+        var bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h")) || 0;
+        window.scrollBy(0, rect.top - bar - 8);
+        rect = box.getBoundingClientRect();
+      }
+      var under = rect.bottom - sheet;
       if(under > 0) h = Math.max(40, h - under);
     }
     return {x: w / 2 - pos.x * z, y: h / 2 - pos.y * z};
@@ -254,6 +270,9 @@ function buildFormulaGraph(c, guid, tree){
   wireRefLinks(results, view);
   $(".ftree-search", hdr).addEventListener("input", function(e){
     results.innerHTML = searchResultsHtml(tree, e.target.value);
+    /* the results move the canvas, and Cytoscape keeps its last idea of where the
+       canvas is: without this a click lands on the node a row away */
+    if(cy) cy.resize();
   });
   var start = tree._selected || (partial ? graphStart(tree) : null);
   if(partial) shown = graphLineage(tree, start);

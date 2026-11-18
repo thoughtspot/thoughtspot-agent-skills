@@ -124,8 +124,9 @@ def _js_function_findings(root: str, rel: str) -> tuple[list, list]:
 # Third-party code the audit report embeds (minified, not ours to split). A file there
 # is skipped only while its SHA-256 matches its line in the directory's MANIFEST: a new
 # file, or a vendored file edited by hand, is scanned like any other until someone also
-# re-pins it in MANIFEST. A re-pin is the reviewed step: the directory is in CODEOWNERS,
-# and tests/test_audit_formula_graph.py holds MANIFEST to the files the report embeds.
+# re-pins it in MANIFEST. A re-pin requests the code owner's review (the directory is in
+# CODEOWNERS), and tests/test_audit_formula_graph.py holds MANIFEST to the files the
+# report embeds.
 VENDOR_DIR = "tools/ts-cli/ts_cli/audit/vendor"
 
 

@@ -25,6 +25,10 @@
 # exemption, and a re-pinned file runs in every report that carries it.
 /tools/ts-cli/ts_cli/audit/vendor/                           @djwaldo
 
+# Attributes decide what a diff shows (a `-diff` or `linguist-generated` line hides a
+# file's changes from review) and keep the vendored files byte-exact.
+/.gitattributes                                              @djwaldo
+
 # Hooks and their installer: a change here can disable every local gate.
 /scripts/install-hooks.sh                                    @djwaldo
 /scripts/pre-commit.sh                                       @djwaldo

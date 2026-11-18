@@ -211,18 +211,13 @@ def test_a_model_past_the_cap_is_drawn_one_lineage_at_a_time(tmp_path):
     assert "lineage of F102" in x["sub"]
 
 
-_IN_VIEW = ('function inView(cy){ var n = cy.$(".focus"); if(!n.length) return null;'
-            ' var b = n.renderedBoundingBox();'
-            ' return b.x1 >= 0 && b.y1 >= 0 && b.x2 <= cy.width() && b.y2 <= cy.height(); }')
-
-
 def _chains(k):
     """k separate chains of five formulas, one column each: tall, under the cap at k = 29."""
     return _big(5 * k)
 
 
 @needs_chrome
-@pytest.mark.parametrize("size", ["1400,900", "800,700"])
+@pytest.mark.parametrize("size", ["1400,900", "800,700", "667,375"])
 def test_a_selection_carried_from_the_tree_lands_in_view(tmp_path, size):
     # F144 sits far down a tall graph; on a narrow screen the definition is a sheet over
     # the foot of the page, so the node must sit in the canvas above it
@@ -286,27 +281,64 @@ def test_a_selection_carried_to_the_tree_is_scrolled_into_view(tmp_path):
 
 @needs_chrome
 def test_past_the_cap_a_node_already_drawn_still_shows_its_whole_lineage(tmp_path):
-    """Picking Alpha draws Alpha's lineage, which holds Mix but not Beta or Rate; picking
-    Mix then must draw Mix's own lineage, not light what happens to be on screen."""
-    fillers = [_f(f"formula_X{i}", f"X{i}", f"sum ( [ORDERS::X{i}] )") for i in range(160)]
+    """Picking Alpha draws Alpha's lineage, which holds Mix and Top but not Beta or Rate;
+    picking Mix then must draw Mix's own lineage, not light what happens to be on screen.
+    A 12-link chain is the larger lineage under the cap, so the graph opens on it."""
+    fillers = [_f(f"formula_X{i}", f"X{i}", f"sum ( [ORDERS::X{i}] )") for i in range(150)]
+    chain = [_f("formula_L0", "L0", "sum ( [ORDERS::L] )")] + [
+        _f(f"formula_L{i}", f"L{i}", f"[formula_L{i - 1}] + 1") for i in range(1, 12)]
     model = {"name": "Mixed", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
              "parameters": [{"name": "Rate", "data_type": "DOUBLE"}],
-             "formulas": fillers + [
+             "formulas": fillers + chain + [
                  _f("formula_Alpha", "Alpha", "sum ( [ORDERS::A] )"),
                  _f("formula_Beta", "Beta", "sum ( [ORDERS::B] )"),
                  _f("formula_Mix", "Mix", "[formula_Alpha] + [formula_Beta] * [Rate]"),
                  _f("formula_Top", "Top", "[formula_Mix] * 2")],
-             "columns": [_col(f["name"], f["id"]) for f in fillers] + [_col("Top", "formula_Top")]}
+             "columns": [_col(f["name"], f["id"]) for f in fillers] + [
+                 _col("L11", "formula_L11"), _col("Top", "formula_Top")]}
     shown = report_browser.render(_report(("m-6", model)), tmp_path, "formulas/m-6/graph", actions=(
         'function pick(name){ var s = document.querySelector("#v-formulas .ftree-search");'
         '  s.value = name; s.dispatchEvent(new Event("input"));'
         '  Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
         '    function(a){ return a.textContent === name; }).click(); }'
+        'function labels(cy, f){ return cy.nodes().filter(f).map(function(n){ return n.data("label"); }).sort(); }'
+        'var first = labels(document.getElementById("v-formulas")._cy, function(){ return true; });'
         'pick("Alpha");'
         'var cy = document.getElementById("v-formulas")._cy;'
+        'var afterAlpha = labels(cy, function(){ return true; });'
         'cy.nodes().filter(function(n){ return n.data("label") === "Mix"; }).emit("tap");'
         'cy = document.getElementById("v-formulas")._cy;'
-        'window.__extra = cy.nodes().filter(function(n){ return !n.hasClass("faded"); })'
-        '  .map(function(n){ return n.data("label"); }).sort();'))
+        'window.__extra = {first: first.indexOf("L11") >= 0, alpha: afterAlpha,'
+        ' lit: labels(cy, function(n){ return !n.hasClass("faded"); })};'))
     assert shown["errors"] == []
-    assert shown["extra"] == sorted(["Mix", "Alpha", "Beta", "Rate", "ORDERS::A", "ORDERS::B", "Top"])
+    x = shown["extra"]
+    assert x["first"]                                  # opened on the chain
+    assert x["alpha"] == ["Alpha", "Mix", "ORDERS::A", "Top"]   # Beta and Rate not drawn yet
+    assert x["lit"] == sorted(["Mix", "Alpha", "Beta", "Rate", "ORDERS::A", "ORDERS::B", "Top"])
+
+
+@needs_chrome
+def test_a_search_tells_the_graph_its_canvas_moved(tmp_path):
+    """Results above the canvas move it; Cytoscape must re-measure, or a click lands a
+    row away (it caches where its canvas is)."""
+    shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1/graph", actions=(
+        'var cy = document.getElementById("v-formulas")._cy, calls = 0, resize = cy.resize;'
+        'cy.resize = function(){ calls++; return resize.apply(cy, arguments); };'
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        's.value = "Order"; s.dispatchEvent(new Event("input"));'
+        's.value = ""; s.dispatchEvent(new Event("input"));'
+        'window.__extra = calls;'))
+    assert shown["errors"] == []
+    assert shown["extra"] >= 2
+
+
+@needs_chrome
+def test_escape_closes_the_definition_after_a_click_on_the_canvas(tmp_path):
+    shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1/graph", actions=(
+        'var cy = document.getElementById("v-formulas")._cy;'
+        'cy.getElementById("f2").emit("tap");'
+        'var open = !document.querySelector("#v-formulas .fdetail").classList.contains("fdetail-empty");'
+        'document.activeElement.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true}));'
+        'window.__extra = {open: open, closed: document.querySelector("#v-formulas .fdetail").classList.contains("fdetail-empty")};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"open": True, "closed": True}
