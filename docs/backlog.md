@@ -391,7 +391,7 @@ are roughly ordered by value÷effort.
 | BL-036 | Databricks-native connection creation | 2026-10-31 |
 | BL-066 | Codify formula promotion as `ts model promote-formula` | 2026-10-31 |
 | BL-080 | `ts metadata permissions` + answer-promote pre-flight | 2026-09-30 |
-| BL-081 | `ts data search` for ts-audit Phase 2 | 2026-10-31 |
+| BL-081 | `ts data search` for ts-audit Phase 2 | 2027-01-31 |
 | BL-086 | Model-coach: codify deterministic substrate | 2026-11-30 |
 | BL-007 | Array/VARIANT column handling pattern | — |
 | BL-008 | Soft/overridable exclusion rules in model-instructions-schema | — |
@@ -484,10 +484,13 @@ are roughly ordered by value÷effort.
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
 | BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
 | BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
-| BL-588 | The report's sidebar writes a Model guid into a link without escaping it | — |
+| BL-588 | The report's sidebar writes a Model guid into a link without escaping it | 2027-01-31 |
 | BL-589 | Nothing checks the audit report's vendored JavaScript for updates or advisories | 2027-01-31 |
 | BL-590 | Data Cache: the product team's answers on OAuth M2M, PrivateLink and null tests in RLS rules | 2027-01-31 |
 | BL-591 | ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? | 2027-03-31 |
+| BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
+| BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
+| BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -2861,7 +2864,8 @@ ts-audit Phase 2 (dead-column detection, unused-object identification, low-usage
 requires querying the TS: BI Server system model — a `ts data search` command (open items
 #9–#12 in ts-audit's references). Spec via MCP first, then live-verify.
 
-**Target:** 2026-10-31.
+**Target:** 2027-01-31. Re-dated 2026-11-18: the first target, 2026-10-31, passed with
+the item open. Usage stats is the next ts-audit work after the Data Cache rules.
 
 ---
 
@@ -17659,6 +17663,8 @@ disagree.
 1. Escape the guid in every `href` core.js builds (and check the views for the same pattern).
 2. A headless-Chrome test with a guid holding a quote and markup: the link renders as text, nothing runs.
 
+**Target:** 2027-01-31.
+
 ## BL-589 — nothing checks the audit report's vendored JavaScript for updates or advisories `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** pr-ready review of the formula graph (ts-audit 3.22.0).
@@ -17675,15 +17681,16 @@ disagree.
 
 **Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
 
-**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team. Three more readings need the same answer:
+**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team. Four more readings need the same answer:
 
 - S12 and S15 accept `[X] = null` as a null branch, but P28 reads only the `isnull` and `is_null` calls. Does the `= null` form stop Data Cache too?
 - A formula such as `start_of_week ( [d] , RetailCal )` names a custom calendar, but P19 reads only `properties.calendar`. Does that formula stop Data Cache?
 - P21 also fires on a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`, which goes beyond the `AGGREGATE` measures the product owner named. Is that Model uncached too?
+- A Model source that is a View (header type `AGGR_WORKSHEET`) names no connection, so P23 cannot type it and the Model reads Not assessed: 2 of 19 Models in the 2026-11-18 sample. Can Data Cache serve a Model built on a View?
 
 **Do.**
-1. Get the team's answer on each of the six points in open-items #18.
-2. Update P24 (and its heuristic grading), P19, P21, P28 and the P28 and S12 remediations to match, and mark #18 VERIFIED.
+1. Get the team's answer on each of the seven points in open-items #18.
+2. Update P24 (and its heuristic grading), P19, P21, P23, P28 and the P28 and S12 remediations to match, and mark #18 VERIFIED.
 
 **Target:** 2027-01-31.
 
@@ -17698,3 +17705,47 @@ disagree.
 2. Record the answer in open-items #13; if it holds, design the check through the rule catalog.
 
 **Target:** 2027-03-31.
+
+## BL-592 — converters emit what the Data Cache rules block, and nothing tells the user `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0).
+
+**What.** ts-audit's Data Cache rules flag constructs that the converters emit on purpose:
+
+- PT2 requires a `sql_string_op` pass-through for `UPPER`, `LOWER`, `TRIM`, `LTRIM`, `RTRIM` and `REPLACE`, and PT1 calls scalar pass-throughs reliable (`agents/shared/schemas/ts-model-conversion-invariants.md`). P20 says any pass-through stops Data Cache.
+- `ts-convert-from-tableau` promotes Tableau parameters (I10), and `ts-convert-from-powerbi` rebuilds time intelligence with parameters. P26 says a parameter in a formula stops Data Cache. (`ts-convert-from-databricks-mv` emits no parameters: its coverage matrix leaves them to the user, L3.)
+- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. P27 says a SQL View stops Data Cache.
+
+A converted Model can be uncached without the user being told, and the invariants still call these the right choice.
+
+**Do.**
+1. Add a Data Cache note to PT1 and PT2: a pass-through stops Data Cache (P20), so a converter that emits one says so.
+2. In each affected converter's migration report, list the constructs that stop Data Cache (pass-throughs, parameters, SQL Views), so the user can weigh them.
+3. Run the conversion-consistency auditor over the change.
+
+**Target:** 2027-02-28.
+
+## BL-593 — `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #16.
+
+**What.** `tools/validate/check_pagination_convention.py` treats `record_size: -1` as ThoughtSpot's "return everything" sentinel and never flags it. ts-audit open-items #16 shows `-1` returns no rows at all on `calendars/search`. The gate also cannot see a search that sends no `record_size`, which returns only the first page (10 on `calendars/search`). Callers still send `-1` to `connection/search`: `migrate/discover.py` `connection_names` and `commands/connections.py` `_fetch_connection_v2`. And `ts connections list` (`commands/connections.py`) pages with its own loop, with no de-duplication and no page ceiling.
+
+**Do.**
+1. Check live, read-only, what `record_size: -1` returns on `connection/search`, and record it in ts-audit open-items #16.
+2. Fix the gate's assumption: `-1` is "all" only where verified, per endpoint. Make it flag a `*/search` request that sends no `record_size`.
+3. Move `ts connections list` onto `paged_search.search_pages`, which de-duplicates and caps the pages, and fix any `-1` caller the probe shows is wrong.
+
+**Target:** 2027-01-31.
+
+## BL-594 — `ts connections add-tables` without `--auth-type` may always omit the connection's auth type `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #17. **Relates to:** BL-095.
+
+**What.** `_extract_auth_type` (`tools/ts-cli/ts_cli/commands/connections.py`) assumes `connection/search` answers with an auth type, at the top level or in `details`. The open-items #17 probe saw none: the answer has no auth-type field, and OAuth shows only in setting names. That probe used a list query, not the request `add-tables` sends, so this is not settled. If no request shape returns it, `ts connections add-tables` without `--auth-type` always omits `authenticationType` from the update, and the update endpoint then defaults to `SERVICE_ACCOUNT` (BL-095). `agents/shared/schemas/thoughtspot-connection.md` shows `add-tables` without `--auth-type`.
+
+**Do.**
+1. Probe, read-only, the `connection/search` request `_fetch_connection_v2` sends, on a key-pair and an OAuth connection: does any field carry the auth type?
+2. If none does, make `add-tables` require `--auth-type` (or read it another way), and update the README and `thoughtspot-connection.md`. If one does, record which and keep the code.
+
+**Target:** 2027-01-31.

@@ -30,7 +30,10 @@ Tested on champ-staging (2026-06-18). Sequential export of 8 models:
 The caching layer (Step 4) is essential — subsequent runs only re-export changed
 objects. 4-way concurrent throttling NOT yet tested (needs a parallel harness).
 
-**Remaining:** Test 4-way parallel to confirm no 429 or connection pooling issues.
+**Closed 2026-11-18:** the 4-way parallel test is obsolete. The audit sends its exports
+one request at a time, up to 50 objects each (`context._export_items`). It starts no
+thread or process: a grep for thread pools, `threading`, `asyncio` and
+`multiprocessing` under `ts_cli/audit` finds none. So concurrent exports never happen.
 
 ---
 
@@ -78,7 +81,12 @@ and measure elapsed time and response completeness.
 
 ---
 
-### #2 — Bulk TML export throttling — RESOLVED (a duplicate: the VERIFIED #2 above answers it; kept as the original question)
+### #2 — Bulk TML export throttling — RESOLVED (obsolete: the audit does not export concurrently; kept as the original question)
+
+**Obsolete (2026-11-18).** The question assumed exports at 4-way concurrency. The audit
+sends them one request at a time (`context._export_items`) and starts no thread or
+process, so concurrent-export throttling cannot arise. The VERIFIED #2 above measured
+sequential export only, so it did not answer this question either.
 
 Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 - Does the ThoughtSpot API throttle or 429 on concurrent TML exports?
@@ -307,20 +315,27 @@ data_warehouse_type, details: {type, configuration, ...}}`:
 - A template variable is a setting whose whole value is a `${var}` token.
 
 The Table metadata headers carry `dataSourceType`: `RDBMS_SNOWFLAKE` on 73 of 92 headers
-in the sample (Model headers carry none). P23 reads it.
+in the sample (Model headers carry none). P23 reads the connection's
+`data_warehouse_type` first, and the header's type when the connection gives none.
 
-**Not verified.**
-- `RDBMS_DATABRICKS` as Databricks' `dataSourceType`: the Databricks connection's
-  `data_warehouse_type` is `DATABRICKS`, and `details.type` follows `RDBMS_<TYPE>`, but
-  no Databricks Table header was in the sample. P23 accepts it.
-- That a Model's SQL View headers carry a `type` of `SQL_VIEW`: the audit keeps no SQL
-  View TML (only `table` documents), and until 3.23.0 it fetched no header for a SQL
-  View either, so P1 and D8 could not see one a Model used. P27 reads the header, and
-  falls back to the row's `metadata_subtype`, as `migrate/discover.py` does.
-- What P28 counts as "a formula" in an RLS rule. Table TML has no formulas, so P28
-  reads it as any function call other than `ts_var` (`upper`, `contains`, `if`, and a
-  null test such as `isnull`, which S12 advises for an outer join). Confirm with the
-  product owner that a null test stops Data Cache.
+**Checked 2026-11-18, read-only, with `ts metadata search` on the SE demo cluster.**
+Both points this item first left open now hold:
+
+- **`RDBMS_DATABRICKS` is Databricks' `dataSourceType`.** Of 13,162 Table headers, 149
+  carry it: every Table on the cluster's 14 Databricks connections. One of them, fetched
+  by id in the request shape the audit's header fetch uses, carries it too. The other
+  values seen were `RDBMS_SNOWFLAKE` (12,549), `RDBMS_MODE` (394), `RDBMS_GCP_BIGQUERY`
+  (24), `RDBMS_POSTGRES` (18), `DEFAULT` (13), `RDBMS_REDSHIFT` (11),
+  `RDBMS_GCP_POSTGRESQL` (3) and `RDBMS_SQLSERVER` (1). P23 reads each of those as a
+  source Data Cache does not serve.
+- **A SQL View's header `type` is `SQL_VIEW`.** Five SQL Views sampled, and one fetched
+  by id in the audit's request shape, all carry it. The audit keeps no SQL View TML
+  (only `table` documents), and until 3.23.0 it fetched no header for a SQL View either,
+  so P1 and D8 could not see one a Model used. P27 reads the header, and falls back to
+  the row's `metadata_subtype`, as `migrate/discover.py` does.
+
+What P28 counts as a function in an RLS rule, a null test included, is #18's point 3:
+the product owner confirmed it.
 
 ---
 
@@ -330,8 +345,9 @@ Until the team answers, P24 is graded as a heuristic and its findings say "to co
 A Model whose only Data Cache reasons rest on those two reads To confirm, not Can't use.
 
 The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
-for the team. Points 4 to 6 came from the review of the rules the same day. Each is what P19, P21, P24 or P28 reads today. A P24 finding says "to confirm"
-where it rests on point 1 or 2.
+for the team. Points 4 to 6 came from the review of the rules the same day, and point 7
+from re-running the sample after it. Each is what P19, P21, P23, P24 or P28 reads today.
+A P24 finding says "to confirm" where it rests on point 1 or 2.
 
 1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
    `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
@@ -359,6 +375,10 @@ where it rests on point 1 or 2.
    a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`. The
    product owner's rule named Models with `AGGREGATE` measures (semantic query Models).
    Is a Model with such a pre-aggregated SUM measure uncached too?
+7. **A Model built on a View.** A Model source whose metadata header type is
+   `AGGR_WORKSHEET` (a View) names no connection, so P23 cannot read a warehouse type
+   for it, and the Model reads Not assessed. Two of the 19 Models in the 2026-11-18
+   sample on the SE demo cluster do. Can Data Cache serve a Model built on a View?
 
 ## Phase 3 — Visualization Layer (future)
 
