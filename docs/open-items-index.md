@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**224 total items** across 24 skills — **68 open**, 134 verified, 22 deferred
+**233 total items** across 25 skills — **68 open**, 139 verified, 26 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -33,6 +33,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 9 | **0** | 9 | 0 |
+| ts-recipe-answer-period-comparison | 9 | **0** | 5 | 4 |
 ### Untagged (68 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.

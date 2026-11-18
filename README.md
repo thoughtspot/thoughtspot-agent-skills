@@ -8,7 +8,7 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-The catalog has <!-- BEGIN GENERATED: skills-total -->35 skills across six categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
+The catalog has <!-- BEGIN GENERATED: skills-total -->36 skills across six categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
 CLI except `ts-profile-snowflake`, which is Claude Code only (Cortex Code manages Snowflake
 connections natively). For why an individual skill exists, who tends to need it, and
 when to reach for it, see [skill personas](docs/skill-personas.md).
@@ -23,7 +23,7 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 8 |
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
-| [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
+| [Recipes](#recipes) | The same analytical need recurs account after account | 3 |
 
 <!-- END GENERATED: skills-overview -->
 
@@ -151,6 +151,7 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 
 | Skill | What it builds |
 |---|---|
+| [`ts-recipe-answer-period-comparison`](agents/cli/ts-recipe-answer-period-comparison/SKILL.md) | Event-period comparison Answer: average daily sales in a retail event vs prior weeks, per year, as a reusable Set or Answer formula |
 | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings |
 

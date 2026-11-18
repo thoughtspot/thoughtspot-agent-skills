@@ -328,6 +328,20 @@ and each SE solves it from scratch. A recipe is the solved version, deployable i
 - **Use when** call duration, handle time or ticket age should read as `HH:MM:SS`,
   `DD:HH:MM:SS`, `HH:MM` or `DD:HH:MM`. Deploys four Snowflake UDFs plus the formula syntax.
 
+### `ts-recipe-answer-period-comparison`
+
+- **Business problem.** "How much did Black Friday lift daily sales over a normal week?",
+  asked for every year at once. Built by hand, the Answer needs dozens of typed date
+  ranges that drift, and a fixed-level measure can quietly inflate the numbers.
+- **Who asks.** SE and CSA on retail and e-commerce use cases; analysts measuring
+  promotion uplift.
+- **Use when** someone wants an event (Black Friday, Cyber Monday, Christmas, Boxing Day,
+  Easter, or their own) compared with the weeks before it, one row per year with the
+  variance. Creates one Answer, and optionally a reusable Set on the Model.
+- **Watch for.** A DATE_TIME date column is not verified live; the skill offers only the
+  formula form there. Give the last loaded date, or a year whose data is not loaded yet
+  shows an average of 0.
+
 ---
 
 ## Keeping this page honest

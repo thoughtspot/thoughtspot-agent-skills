@@ -70,6 +70,7 @@ REQUIRED_EXTRA_ARGS: dict[str, list[str]] = {
     "ts-convert-from-snowflake-sv":             ["--sf-profile", "--sv-fqn"],
     "ts-convert-to-databricks-mv":              ["--dbx-profile", "--model-guid"],
     "ts-convert-from-databricks-mv":            ["--dbx-profile", "--mv-fqn"],
+    "ts-recipe-answer-period-comparison":       ["--model-guid", "--model-name", "--date-column", "--measure-column"],
     "ts-recipe-formula-business-days-snowflake": ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
     "ts-recipe-formula-hms-display-snowflake":   ["--sf-profile", "--sf-target-db", "--sf-target-schema"],
 }
