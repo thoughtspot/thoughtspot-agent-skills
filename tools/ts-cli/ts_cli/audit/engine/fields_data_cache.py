@@ -30,10 +30,11 @@ from ts_cli.audit.engine.memo import cached
 from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
 
 #: `properties.calendar` values that name a code-based calendar, case and edge spaces
-#: aside: the default (`calendar`, the spelling a 2026-07-30 census found on 34 Models)
-#: and the fiscal one. Any other value names a table-based custom calendar (product
-#: owner, 2026-11-18). An absent, null or blank value sets no calendar.
-CODE_BASED_CALENDARS = ("calendar", "fiscal")
+#: aside: the default (`calendar`, the spelling a 2026-07-30 census found on 34 Models,
+#: and `default`, ThoughtSpot's published spelling) and the fiscal one. Any other value
+#: names a table-based custom calendar (product owner, 2026-11-18). An absent, null or
+#: blank value sets no calendar.
+CODE_BASED_CALENDARS = ("calendar", "fiscal", "default")
 CODE, CUSTOM = "code-based", "custom"
 
 

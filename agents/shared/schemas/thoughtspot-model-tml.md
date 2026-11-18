@@ -251,7 +251,7 @@ joins:
 | `properties.ai_context` | No | Free-text description used by Spotter (AI search) to understand the column's business meaning. Appears on most columns in AI-enriched models. Pass through on round-trips; safe to omit when constructing new models. |
 | `properties.custom_order` | No | Array of attribute values in custom display order. Used to control sort order in visualizations (e.g. `[USA, UK, France]`). ATTRIBUTE columns only. |
 | `properties.default_date_bucket` | No | Default time granularity for date columns. Values: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `YEARLY`, `AUTO`. Omit for ThoughtSpot default. |
-| `properties.calendar` | No | **Date columns only** — the custom / fiscal calendar the column is bucketed by, so quarters and years follow a fiscal or 4-4-5 retail calendar instead of the Gregorian one. **Reference only:** the calendar itself is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table), so this value is meaningless on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. **Value vocabulary — settled 2026-07-30** by a 500-document census, superseding the "not settled" note this row previously carried: the value is a **calendar name**, and the literal `calendar` is the default spelling. See the sub-table below. |
+| `properties.calendar` | No | **Date columns only** — the calendar the column is bucketed by. `calendar`, `fiscal` and `default` name code-based calendars: the Gregorian default and the fiscal calendar. Any other value names a custom calendar, so quarters and years follow a fiscal or 4-4-5 retail calendar defined in a warehouse table. **Reference only:** a custom calendar is a *Connection-scoped* object created outside TML (`POST /api/rest/2.0/calendars/create`, 10.12.0.cl or later, backed by a warehouse calendar table). Its name means nothing on a target instance whose connection has no calendar of that name. **Do not emit when generating a model** — pass through on round-trips only. **Value vocabulary — settled 2026-07-30** by a 500-document census, superseding the "not settled" note this row previously carried: the value is a **calendar name**, and the literal `calendar` is the default spelling. See the sub-table below. |
 | `properties.value_casing` | No | Documented as a Table-column refinement, but **present on Model columns too — 545 sightings across 18 of 143 Models** (2026-07-30 census), including 156 on *formula-backed* columns. Same vocabulary as the Table reference (`UPPER` / `LOWER` / `MIXED` / `UNKNOWN`); every observed Model value is `UNKNOWN`. Pass through on round-trips; do not emit when generating a model. |
 | `properties.synonyms` | No | Array of alternative names for search. **Must live under `properties:`** — top-level `synonyms:` at the column root is silently dropped on import. |
 | `properties.synonym_type` | No | `USER_DEFINED` for user-supplied synonyms; `AUTO_GENERATED` for ThoughtSpot-inferred. Set to `USER_DEFINED` whenever you populate `properties.synonyms`. |
@@ -276,10 +276,11 @@ Three consequences:
 2. **`calendar:` is honoured on a Table column**, not only a Model column — see
    [thoughtspot-table-tml.md](thoughtspot-table-tml.md). It also appears on **formula-backed**
    Model columns (5 sightings), which neither reference previously contemplated.
-3. **`calendar` and `fiscal` are code-based calendars, not custom ones** (product owner,
-   2026-11-18), as is a column with no `calendar:`. Any other value names a table-based custom
-   calendar registered on the connection (`POST /api/rest/2.0/calendars/search`). The audit's
-   Data Cache rules read it that way (P19: a custom calendar stops Data Cache).
+3. **`calendar`, `fiscal` and `default` are code-based calendars, not custom ones** (product
+   owner, 2026-11-18). So is a column with no `calendar:`. Any other value names a custom
+   calendar: a warehouse table registered on the connection (`calendars/search`). The audit's
+   Data Cache rule P19 reads it this way, since a custom calendar stops Data Cache.
+   The spelling `CALENDAR_TYPE_GREGORIAN` is not on the list: no document carries it.
 
 ### `formulas[]` fields
 

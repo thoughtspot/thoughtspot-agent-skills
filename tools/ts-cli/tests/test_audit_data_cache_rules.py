@@ -41,8 +41,9 @@ col, cal = fx.build_cache_column, fx.build_cache_calendar
 @pytest.mark.parametrize("value, kind", [
     (None, None), ("", None), ("   ", None), ({}, None), ([], None),
     ("calendar", CODE), (" Calendar ", CODE), ("FISCAL", CODE), ("fiscal", CODE),
+    ("default", CODE), (" DEFAULT ", CODE),
     ("Retail 445", CUSTOM), ("calendars", CUSTOM), ("fiscal year", CUSTOM),
-    ("default", CUSTOM), (2024, CUSTOM),
+    ("default calendar", CUSTOM), ("CALENDAR_TYPE_GREGORIAN", CUSTOM), (2024, CUSTOM),
 ])
 def test_calendar_kind(value, kind):
     assert calendar_kind(value) == kind

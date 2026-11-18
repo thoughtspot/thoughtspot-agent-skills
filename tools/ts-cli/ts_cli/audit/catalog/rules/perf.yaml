@@ -398,10 +398,10 @@
   description: >-
     A Model with a column on a table-based custom calendar, which Data Cache cannot
     serve. A column's calendar is its own `properties.calendar`, else the one on the
-    Table column its `column_id` resolves to. `calendar` and `fiscal` (any case, edge
-    spaces aside) are code-based calendars, and an absent or blank value sets none; any
-    other value names a custom calendar. The finding lists each such column with the
-    calendar it names.
+    Table column its `column_id` resolves to. `calendar`, `fiscal` and `default` (any
+    case, edge spaces aside) are code-based calendars, and an absent or blank value sets
+    none; any other value names a custom calendar. The finding lists each such column
+    with the calendar it names.
   categories: [P]
   requires: [model_tml]
   scope: model
@@ -411,8 +411,8 @@
   severity: MEDIUM
   message: "Can't use Data Cache: columns on a custom calendar: {@custom_calendar_columns}"
   remediation: >-
-    Move each listed column to a code-based calendar (calendar or fiscal) so Data Cache
-    can serve the Model, or accept that the Model stays uncached.
+    Move each listed column to a code-based calendar (calendar, fiscal or default) so
+    Data Cache can serve the Model, or accept that the Model stays uncached.
   examples:
     fires: {fixture: perf_custom_calendar_columns, severity: MEDIUM}
     silent: {fixture: perf_code_based_calendars}
