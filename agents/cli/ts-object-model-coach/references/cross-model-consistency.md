@@ -132,8 +132,8 @@ for the review; the user changes it if the heuristic is wrong.
 ```markdown
 | # | RouteAction | Column | # of collisions | Other Models | Divergent on | Suggested rationale |
 |---|---|---|---|---|---|---|
-| 1 | RENAME | Amount | 2 | "Q3 Sales", "Anant Copy" | db_column_name (DM_ORDER.AMOUNT vs DM_ORDER_DETAIL.LINE_TOTAL) | This Model is at order-line grain; "Q3 Sales" is at order-header grain. Different things. |
-| 2 | KEEP_AS_IS | Customer Name | 4 | "Anant Copy", "Test Copy", "Sidharth Copy", "Anurag Copy" | (no divergence — all 4 use DM_CUSTOMER_BIRD.NAME) | Identical definition across all collisions. |
+| 1 | RENAME | Amount | 2 | "Q3 Sales", "Analyst A Copy" | db_column_name (DM_ORDER.AMOUNT vs DM_ORDER_DETAIL.LINE_TOTAL) | This Model is at order-line grain; "Q3 Sales" is at order-header grain. Different things. |
+| 2 | KEEP_AS_IS | Customer Name | 4 | "Analyst A Copy", "Test Copy", "Analyst B Copy", "Analyst C Copy" | (no divergence — all 4 use DM_CUSTOMER_BIRD.NAME) | Identical definition across all collisions. |
 | 3 | ALIGN | Inventory Balance | 1 | "TestCopy" | formula expression (last_value vs first_value) | This Model uses last_value (snapshot), which is the documented Inventory Balance semantic. TestCopy is wrong. |
 ```
 

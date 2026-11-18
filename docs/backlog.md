@@ -7372,7 +7372,7 @@ exports before changing anything):
 6. **`search_query` still named the cascaded-away formula.** `_strip_view_search_query`
    runs before the formula cascade is known, so it cannot see a formula that column
    removal *cascades* into -- and a View references its formulas from the search string by
-   id. `OptumRx View`'s real query begins `[formula_PMPM month] [formula_PMPM month].monthly`;
+   id. `Acme View`'s real query begins `[formula_PMPM month] [formula_PMPM month].monthly`;
    removing `Fill Date` dropped that formula and left the query naming it, the same
    dangling reference by another route. `_strip_view_formulas` now re-sanitizes against the
    removed formulas' ids and names. Corpus-measured: **94 cases** with the old code, **0**
@@ -11492,7 +11492,7 @@ symptom this item exists for, the one `_extract_joins`' own call site warns abou
 multi-table model imports with no join and ThoughtSpot rejects it"), is unchanged.
 
 **Filed:** 2026-08-06. **Jira:** SCAL-330635.
-**Source:** `ts-convert-from-tableau` accuracy-testing pass (Keshav Sharma KT handoff) --
+**Source:** `ts-convert-from-tableau` accuracy-testing pass (a colleague's KT handoff) --
 found on `Multi level WB v0.twb`, a workbook built specifically to exercise multi-level
 formulas and multi-table joins. First concrete test case for
 `references/open-items.md` #3 (COLLECTION datasources -- now OPEN; its "no example

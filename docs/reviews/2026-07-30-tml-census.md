@@ -5,6 +5,10 @@ A read-only property census of real ThoughtSpot logical-table TML on the
 validate our schema references and OSI construct-mapping coverage against what the
 product actually emits in the wild.
 
+**Names replaced, 2026-11-18.** Object, calendar and user names that carried a person's
+or a company's name were replaced with synthetic ones on 2026-11-18. Counts, findings and
+GUIDs are unchanged.
+
 **Nothing was created, modified or deleted on the instance.** Every call was
 `ts metadata search` (read) or `ts tml export` (read). No repo file was edited.
 
@@ -100,7 +104,7 @@ but it is defending against an input that this cluster can no longer produce.
 | `TS: External Table Current Row Count [Deprecated]` | `FORBIDDEN` — same |
 | `Retail Sales (AD)` | `OBJECT_INVALID_STATE` — "Worksheet has …" (broken object) |
 | `Care Provider - BW` | `OBJECT_INVALID_STATE` — same |
-| `Abhas's Testing Parameters` | `WORKSHEET_FORMULA_GENERATION_ERROR` |
+| `Analyst's Testing Parameters` | `WORKSHEET_FORMULA_GENERATION_ERROR` |
 
 ### 1.6 Incidental ts-cli bug found (report only — no repo edit made)
 
@@ -154,7 +158,7 @@ type contain the path.
 | `model.columns[].name` | 4985 | 143 | str | `Date Date Key` · `Full Date` |
 | `model.columns[].properties` | 4985 | 143 | dict | — |
 | `model.columns[].properties.aggregation` | 1806 | 137 | str | `SUM` · `AVERAGE` |
-| `model.columns[].properties.ai_context` | 656 | 16 | str | `Unique integer identifier for calendar dates enabling precise joins and filtering for daily store operations analysis across the Starbucks data model.` · `Calendar date field for trending transactions, net sales, labor hours, wait times, and satisfaction metrics over time in store operations analysis.` |
+| `model.columns[].properties.ai_context` | 656 | 16 | str | `Unique integer identifier for calendar dates enabling precise joins and filtering for daily store operations analysis across the Acme Coffee data model.` · `Calendar date field for trending transactions, net sales, labor hours, wait times, and satisfaction metrics over time in store operations analysis.` |
 | `model.columns[].properties.calendar` | 72 | 35 | str | `calendar` · `Retail454Cal` |
 | `model.columns[].properties.column_type` | 4985 | 143 | str | `ATTRIBUTE` · `MEASURE` |
 | `model.columns[].properties.currency_type` | 81 | 21 | dict | — |
@@ -182,7 +186,7 @@ type contain the path.
 | `model.columns[].properties.synonyms` | 2812 | 96 | list | — |
 | `model.columns[].properties.synonyms[]` | 9329 | 96 | str | `item` · `category` |
 | `model.columns[].properties.value_casing` | 545 | 18 | str | `UNKNOWN` |
-| `model.description` | 76 | 76 | str | `cognizant.com IT Services Marketing analytics model.` · `The "P2 Retail Sales" worksheet provides a comprehensive overview of retail sales data, capturing various aspects of customer behavior and store performance. It…` |
+| `model.description` | 76 | 76 | str | `example.com IT Services Marketing analytics model.` · `The "P2 Retail Sales" worksheet provides a comprehensive overview of retail sales data, capturing various aspects of customer behavior and store performance. It…` |
 | `model.filters` | 5 | 5 | list | — |
 | `model.filters[].column` | 5 | 5 | list | — |
 | `model.filters[].column[]` | 5 | 5 | str | `Event Category` · `Date Filter` |
@@ -199,7 +203,7 @@ type contain the path.
 | `model.lesson_plans[].lesson_id` | 22 | 8 | int | `0` · `1` |
 | `model.lesson_plans[].lesson_plan_string` | 22 | 8 | str | `What were [Sales] by [Store Region] in [Date].'last year' ?` · `What were your [top] [Sales] per [Brand] in [Date].'last 2 years' ?` |
 | `model.model_tables` | 143 | 143 | list | — |
-| `model.model_tables[].alias` | 31 | 6 | str | `fact_connectivity_usage_blitz_transatel_674965` · `dim_date_blitz_transatel_674965` |
+| `model.model_tables[].alias` | 31 | 6 | str | `fact_connectivity_usage_blitz_acme_674965` · `dim_date_blitz_acme_674965` |
 | `model.model_tables[].joins` | 193 | 110 | list | — |
 | `model.model_tables[].joins[].cardinality` | 237 | 57 | str | `MANY_TO_ONE` · `ONE_TO_MANY` |
 | `model.model_tables[].joins[].on` | 233 | 56 | str | `[MARKETING_PERFORMANCE::ACCOUNT_KEY] = [ACCOUNTS::ACCOUNT_KEY]` · `[MARKETING_PERFORMANCE::CAMPAIGN_KEY] = [CAMPAIGNS::CAMPAIGN_KEY]` |
@@ -207,7 +211,7 @@ type contain the path.
 | `model.model_tables[].joins[].type` | 241 | 63 | str | `LEFT_OUTER` · `INNER` |
 | `model.model_tables[].joins[].with` | 493 | 110 | str | `ACCOUNTS` · `CAMPAIGNS` |
 | `model.model_tables[].name` | 599 | 143 | str | `DATES` · `ACCOUNTS` |
-| `model.name` | 143 | 143 | str | `TST_COG_05260859_RLO_mdl` · `Liz (SE) Retail Apparel` |
+| `model.name` | 143 | 143 | str | `TST_COG_05260859_RLO_mdl` · `Demo (SE) Retail Apparel` |
 | `model.parameters` | 21 | 21 | list | — |
 | `model.parameters[].data_type` | 63 | 21 | str | `CHAR` · `DOUBLE` |
 | `model.parameters[].default_value` | 63 | 21 | str | `monthly` · `sales` |
@@ -271,7 +275,7 @@ type contain the path.
 | `table.properties.spotter_config.is_spotter_enabled` | 275 | 275 | bool | `false` · `true` |
 | `table.rls_rules` | 2 | 2 | dict | — |
 | `table.rls_rules.rules` | 2 | 2 | list | — |
-| `table.rls_rules.rules[].expr` | 2 | 2 | str | `ts_groups != "katrina's group"` · `ts_groups = [BANK_EMPLOYEES_1::COUNTRY] ` |
+| `table.rls_rules.rules[].expr` | 2 | 2 | str | `ts_groups != "Analyst's group"` · `ts_groups = [BANK_EMPLOYEES_1::COUNTRY] ` |
 | `table.rls_rules.rules[].name` | 2 | 2 | str | `test` · `RLS By Country` |
 | `table.rls_rules.table_paths` | 1 | 1 | list | — |
 | `table.rls_rules.table_paths[].column` | 1 | 1 | list | — |
@@ -303,11 +307,11 @@ type contain the path.
 | `view.joins[].source` | 1 | 1 | str | `TS: Daily Row Count External Table [Deprecated]` |
 | `view.joins_with` | 6 | 6 | list | — |
 | `view.joins_with[].destination` | 15 | 6 | dict | — |
-| `view.joins_with[].destination.name` | 15 | 6 | str | `OptumRx_Member Months` · `TS: External Table Info [Deprecated]` |
+| `view.joins_with[].destination.name` | 15 | 6 | str | `Acme_Member Months` · `TS: External Table Info [Deprecated]` |
 | `view.joins_with[].name` | 15 | 6 | str | `PMPM Join by Date` · `Daily Row Count - Table Info` |
-| `view.joins_with[].on` | 15 | 6 | str | `[OptumRx View::PMPM month] = [OptumRx_Member Months::Year Month in MM-DD-YYYY]` · `[TS\: Daily Row Count External Table \[Deprecated\]::table_id] = [TS\: External Table Info \[Deprecated\]::table_id]` |
+| `view.joins_with[].on` | 15 | 6 | str | `[Acme View::PMPM month] = [Acme_Member Months::Year Month in MM-DD-YYYY]` · `[TS\: Daily Row Count External Table \[Deprecated\]::table_id] = [TS\: External Table Info \[Deprecated\]::table_id]` |
 | `view.joins_with[].type` | 15 | 6 | str | `INNER` |
-| `view.name` | 42 | 42 | str | `Demo view - hiro` · `Total Sales by Age Group` |
+| `view.name` | 42 | 42 | str | `Demo view - analyst` · `Total Sales by Age Group` |
 | `view.search_query` | 42 | 42 | str | `[region] [sales]` · `[Sales] [Age Group]` |
 | `view.table_paths` | 1 | 1 | list | — |
 | `view.table_paths[].id` | 2 | 1 | str | `TS: Daily Row Count External Table [Deprecated]_1` · `TS: External Table Info [Deprecated]_1` |
@@ -381,8 +385,8 @@ Ordered by severity of the gap, not alphabetically. Every row carries live evide
 
 | # | Path | Occ | Docs | Evidence | Why it matters |
 |---|---|--:|--:|---|---|
-| U1 | `view.view_columns[].search_output_column` | 265 | **42/42** | `{"name": "region", "search_output_column": "region", …}` (`Demo view - hiro`); `{"name":"Total sales","search_output_column":"Total sales"}` | **`thoughtspot-view-tml.md` documents `column_id` as the View column-reference field and never mentions `search_output_column`.** In 42 of 42 real Views, `column_id` appears **zero** times and `search_output_column` appears in **every** column (265/265). Our View reference's central field is the wrong one. Worse, `thoughtspot-sql-view-tml.md` lists "Using `search_output_column` — Wrong field name — that does not exist" as a *common import error*, which is true for `sql_view:` and actively misleading for `view:`. |
-| U2 | `model.columns[].description` | **2,023** | **72/143** | `"description": "This is the same as Net Sales, in USD"` on `Sales`; `"comes from product listing"` on `Product` (`Liz (SE) Retail Apparel`) | At snapshot time the Model TML reference's `columns[]` table had **no `description` row**, and it is the second-most-common optional column key in the wild. **Already fixed on the concurrent branch** (§5.4) — retained here because this census's numbers are 3.6× the sample that fix was based on, and because §4.1 quantifies the formula-backed split precisely. |
+| U1 | `view.view_columns[].search_output_column` | 265 | **42/42** | `{"name": "region", "search_output_column": "region", …}` (`Demo view - analyst`); `{"name":"Total sales","search_output_column":"Total sales"}` | **`thoughtspot-view-tml.md` documents `column_id` as the View column-reference field and never mentions `search_output_column`.** In 42 of 42 real Views, `column_id` appears **zero** times and `search_output_column` appears in **every** column (265/265). Our View reference's central field is the wrong one. Worse, `thoughtspot-sql-view-tml.md` lists "Using `search_output_column` — Wrong field name — that does not exist" as a *common import error*, which is true for `sql_view:` and actively misleading for `view:`. |
+| U2 | `model.columns[].description` | **2,023** | **72/143** | `"description": "This is the same as Net Sales, in USD"` on `Sales`; `"comes from product listing"` on `Product` (`Demo (SE) Retail Apparel`) | At snapshot time the Model TML reference's `columns[]` table had **no `description` row**, and it is the second-most-common optional column key in the wild. **Already fixed on the concurrent branch** (§5.4) — retained here because this census's numbers are 3.6× the sample that fix was based on, and because §4.1 quantifies the formula-backed split precisely. |
 | U3 | `table.rls_rules.table_paths[].column[]` | 1 | 1/275 | `"column": ["COUNTRY"]` (`BANK_EMPLOYEES`) | `thoughtspot-table-tml.md` documents this as a **string** with brackets in the value: `column: "[COL_NAME]"`. Reality is a **list of bare column names**. A generator following the ref emits the wrong YAML type. |
 | U4 | `view.view_columns[].properties.geo_config.region_name` as a **dict** | 1 | 1/42 | `{"region_name": {"country": "UNITED STATES", "region_name": "state"}}` (`LMS Banking View`, col `State`) | Both `thoughtspot-view-tml.md` and `thoughtspot-sql-view-tml.md` document `region_name` as a **list** of `{country, region_name}`. The Model ref documents it as a dict. Observed on Views: **dict**, matching the Model ref, not the View ref. The two references disagree and the View/SQL-View one is the one that is wrong. |
 
@@ -521,11 +525,11 @@ model formulas[].properties: column_type (10)   ← nothing else, ever
 
 Live examples of a **formula** column carrying a description:
 
-- `Liz (SE) Retail Apparel` → column `Date` (`formula_id: formula_Date`) →
+- `Demo (SE) Retail Apparel` → column `Date` (`formula_id: formula_Date`) →
   `"This is on daily grain, back 2 years rolling"`
 - `P2 Retail Sales_13 month calendar` → `Average Ticket Size` →
   `"The average sales price by pos transaction number"`
-- `Assurant People Analytics Demo` → `Number of Employees` →
+- `Acme People Analytics Demo` → `Number of Employees` →
   `"This is the number of active employees who are currently employed"`
 
 **Consequence — two construct-mapping fidelity verdicts are wrong.** The mapping states,
@@ -560,8 +564,8 @@ documents.**
 | Value | Occurrences | Distinct docs | Interpretation |
 |---|--:|--:|---|
 | `calendar` (the literal string) | 70 | 34 models | The **default** spelling. Appears across 34 mutually-unrelated models (`TST_*`, `PUB_*`, `VER_*`, `DAI_*`, `WEL_*`, plus `Retail Sales - RLS`, `Transaction History`, `Inventory Planning`, `Care Provider`, `Mobile Network Analysis`, `Employee Recognition`), almost always on a column named `Full Date` or `Month Start Date`. |
-| `Retail454Cal` | 1 (model) + 1 (table) | `454 Calendar Test` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | A real custom-calendar **object name**. |
-| `AcmeFiscalCal` | 1 | `Test Custom Calendars` col `Eff Start Date` | A real custom-calendar **object name**. |
+| `Retail454Cal` | 1 (model) + 1 (table) | `454 Calendar Test` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | Stands for a real custom-calendar **object name**. |
+| `AcmeFiscalCal` | 1 | `Test Custom Calendars` col `Eff Start Date` | Stands for a real custom-calendar **object name**. |
 | `CALENDAR_TYPE_GREGORIAN` | **0** | — | Not emitted by this build, on any document type. |
 | `default` | **0** | — | Not emitted either. |
 
@@ -597,7 +601,7 @@ are [reconciled]"* — is now resolvable in favour of the name form, with the li
 ```
 
 Models: `Copy of Retail Sales - KM`, `(Sample) Retail - Apparel - LH`,
-`(Sample) Retail - Apparel - JDUB`, `(Sample) Retail - Apparel - jhegele`, +4.
+`(Sample) Retail - Apparel - ANALYST_A`, `(Sample) Retail - Apparel - analyst_b`, +4.
 
 `lesson_id` is a 0-based integer; `lesson_plan_string` is a ThoughtSpot search string with
 `[column]` tokens and `.'last year'` date modifiers. It is a **sibling of `properties:`**,
@@ -685,7 +689,7 @@ way.
 - `list_choice[]` items: **79/79 are objects** — zero bare strings. Invariant I10 confirmed.
 - Within those objects: `value` 79/79 (always), `display_name` 51/79 — so `display_name`
   is genuinely optional, as documented. Live example of the `value`-only form:
-  `Hiro - Salesforce` → `{"name":"bucket","data_type":"CHAR","default_value":"weekly",
+  `Analyst - Salesforce` → `{"name":"bucket","data_type":"CHAR","default_value":"weekly",
   "list_config":{"list_choice":[{"value":"weekly"},{"value":"monthly"}]}}`.
 - `range_config` always carries all four keys together: `range_min`, `range_max`,
   `include_min`, `include_max` (7/7).
@@ -709,7 +713,7 @@ Yes — five things, all covered above, plus two value-level surprises:
 7. **`index_priority` is emitted as a non-integral number**: every one of the 20 sightings
    is `10.0`, `9.0`, `8.0`, `7.0`, `2.0` — confirmed in the raw `edoc` payload, not an
    artefact of our JSON parsing (`"index_priority":10.0` appears verbatim in the edoc
-   string returned for `Liz (SE) Retail Apparel`). Our refs and the OSI payload schema
+   string returned for `Demo (SE) Retail Apparel`). Our refs and the OSI payload schema
    both declare it `integer`. A strict integer validator rejects real ThoughtSpot output.
 
 Also worth recording: **`is_mandatory_token_filter` was never observed** (0/500). The

@@ -136,7 +136,7 @@ table:
 | `rls_rules.joins[]` | When a path crosses tables | The joins the rule's paths may use: `{name, source, destination, type, is_one_to_one}`, with no cardinality. In the one live sighting (2026-10-23, a support case's export) `name` was a `joins_with[]` join declared on the owning table, `source` the owning table; whether a join declared on the far table appears here with `source`/`destination` reversed is unverified, so read direction from the path walk below, not from these labels. |
 | `rls_rules.table_paths[].join_path` | When `table` is not the owning table | Ordered segments `[{join: [<rls_rules.joins name>, ...]}]` from the owning table to `table`. Walk it outward from the owning table: that is the direction the rule adds to the query (see I22 in `ts-model-conversion-invariants.md` — such a join can close a cycle with the Model's joins). |
 | `rls_rules.rules[].name` | Yes | Rule display name |
-| `rls_rules.rules[].expr` | Yes | Bracket refs use the `table_paths` aliases. Live examples: `ts_groups = [BANK_EMPLOYEES_1::COUNTRY]`, `ts_groups != "katrina's group"` |
+| `rls_rules.rules[].expr` | Yes | Bracket refs use the `table_paths` aliases. Live examples: `ts_groups = [BANK_EMPLOYEES_1::COUNTRY]`, `ts_groups != "Analyst's group"` |
 
 ---
 

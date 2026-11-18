@@ -264,10 +264,14 @@ joins:
 | Value | Occurrences | Where | Reading |
 |---|--:|---|---|
 | `calendar` (the literal string) | 70 | 34 unrelated Models — `TST_*`, `PUB_*`, `VER_*`, `Retail Sales - RLS`, `Transaction History`, `Inventory Planning`, `Care Provider`, `Mobile Network Analysis`, … — almost always on a column named `Full Date` or `Month Start Date` | **The default spelling.** Neither our references nor ThoughtSpot's docs previously recorded it |
-| `Retail454Cal` | 1 Model + 1 **Table** | `454 Calendar Test` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | A real custom-calendar **object name** |
-| `AcmeFiscalCal` | 1 | `Test Custom Calendars` col `Eff Start Date` | A real custom-calendar object name |
+| `Retail454Cal` | 1 Model + 1 **Table** | `454 Calendar Test` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | Stands for a real custom-calendar **object name** |
+| `AcmeFiscalCal` | 1 | `Test Custom Calendars` col `Eff Start Date` | Stands for a real custom-calendar object name |
 | `CALENDAR_TYPE_GREGORIAN` | **0** | — | **Not emitted by this build, on any document type.** [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md) records this literal; it is now marked unverified there — including on the SQL Views where that file claims it (0 of 40) |
 | `default` | **0** | — | Not emitted either, despite appearing in ThoughtSpot's published `[ default \| calendar_name ]` |
+
+Object, calendar and user names in this table and the census that carried a person's or a
+company's name were replaced with synthetic ones on 2026-11-18; counts and findings are
+unchanged.
 
 Three consequences:
 

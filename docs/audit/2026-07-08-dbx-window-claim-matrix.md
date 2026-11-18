@@ -332,18 +332,18 @@ to had to be cross-checked via `ts tml export {id}` (the `connection.properties[
 field) against the `Production` Databricks profile's host
 (`your-workspace.cloud.databricks.com`, from `~/.claude/databricks-profiles.json`, the
 same profile Tasks 3–4 used). Exactly one connection matches:
-**`dl-databricks`** (`5e7a6105-aaa6-42d7-88cd-21b62e496bd7`, `PERSONAL_ACCESS_TOKEN` auth,
+**`<redacted-connection-2>`** (`5e7a6105-aaa6-42d7-88cd-21b62e496bd7`, `PERSONAL_ACCESS_TOKEN` auth,
 `http_path: /sql/1.0/warehouses/6a882f6a859e0002` — a different SQL warehouse than Task 3/4's
 `{warehouse_id}`, same workspace/metastore). This is **not an idle connection**: `ts
 connections get` / `connection/search` with `include_details: true` shows it is owned by
-`denise.lee`, last modified 2026-06-12, with several existing production tables registered
-(`dim_retapp_products`, `dim_retapp_stores`, `dl_fact_retapp_sales_current`, …) — i.e. a
+`<redacted-user>`, last modified 2026-06-12, with several existing production tables registered
+(`dim_retapp_products`, `dim_retapp_stores`, `user_fact_retapp_sales_current`, …) — i.e. a
 colleague's live connection with unrelated real content on it, not a throwaway test
 connection.
 
-**Registration failure:** `agent_skills` is not in `dl-databricks`'s `selected_databases`
+**Registration failure:** `agent_skills` is not in `<redacted-connection-2>`'s `selected_databases`
 (only `["samples", "hive_metastore"]`), so `ts tables create` failed immediately with
-`Database with name: agent_skills does not exist in connection: dl-databricks` (expected —
+`Database with name: agent_skills does not exist in connection: <redacted-connection-2>` (expected —
 the table's warehouse database must be registered on the connection first). The documented
 fix, `ts connections add-tables {id}`, failed on every attempt with a generic 500:
 
@@ -359,7 +359,7 @@ detail `ts-cli`'s `add_tables()` doesn't send: *"If the `authentication_type` is
 other than SERVICE_ACCOUNT, you must explicitly provide the `authenticationType` property in
 the payload — otherwise the API defaults to SERVICE_ACCOUNT."* `ts_cli/commands/
 connections.py::add_tables()` omits `authenticationType` entirely, so for a
-`PERSONAL_ACCESS_TOKEN` connection like `dl-databricks` the backend silently treats the
+`PERSONAL_ACCESS_TOKEN` connection like `<redacted-connection-2>` the backend silently treats the
 request as SERVICE_ACCOUNT — a plausible cause of a server-side error. To test this without
 editing `tools/ts-cli/` (out of scope for this task — live-work rules restrict edits to this
 file), a scratch script in the task's scratchpad dir reused `ts_cli.client.ThoughtSpotClient`
@@ -372,15 +372,15 @@ different, `SERVICE_ACCOUNT`-authenticated Databricks connection, whose stored h
 **also 500'd**, with default (correct) `authenticationType`. Four payload variants × two
 differently-configured, independently-healthy connections, uniform generic 500 — this points
 to a backend/instance-level defect in `updateConnectionV2` on this ThoughtSpot Cloud build,
-not a fixable client-payload bug and not something specific to `dl-databricks`.
+not a fixable client-payload bug and not something specific to `<redacted-connection-2>`.
 
 **Why this is BLOCKED rather than worked around:** (1) `ts connections create` is explicitly
 disallowed by the brief (wrong auth model — key-pair vs. this profile's PAT/OAuth — and "do
 not create unilaterally"); (2) reconstructing a full `configuration` block to retry the update
-with `validate: true` would require resending `dl-databricks`'s real Databricks credentials,
+with `validate: true` would require resending `<redacted-connection-2>`'s real Databricks credentials,
 which the API never exposes (TML export and `connection/search` both redact the token to
 `""`/`"******"`) — guessing or blanking that field risks corrupting a colleague's live,
-in-use connection, so this was not attempted; (3) `dl-databricks` already carries unrelated
+in-use connection, so this was not attempted; (3) `<redacted-connection-2>` already carries unrelated
 production tables owned by another engineer — continuing to probe its `update` endpoint
 beyond the diagnostics above was judged an unacceptable risk to someone else's live setup;
 (4) editing `tools/ts-cli/` to fix the missing `authenticationType` is the correct long-term
@@ -477,7 +477,7 @@ the row-relative correction candidate `moving_sum([PR1_PERIOD_FIXTURE::amount], 
 [PR1_PERIOD_FIXTURE::txn_date])`. **None of this ran** — the blocker is identical to, and
 upstream of, the one documented in `### C1, C3, C4, C5, C7 — TS-side attempt (Task 5) —
 BLOCKED` above: `PR1_PERIOD_FIXTURE` could not be registered on the one ThoughtSpot connection
-(`dl-databricks`) that points at the Task 3/4 Databricks workspace, because `ts connections
+(`<redacted-connection-2>`) that points at the Task 3/4 Databricks workspace, because `ts connections
 add-tables` (`POST /api/rest/2.0/connections/{id}/update`) 500s uniformly regardless of
 payload shape or which connection is targeted. See that section for the full diagnostic
 (connection discovery, the `authenticationType` spec gap found via

@@ -59,7 +59,7 @@ class TestSanitizeSearchQuery:
     def test_consumes_the_tokens_bucket_modifier(self):
         """A real View query says `[date].daily` / `[formula_PMPM month].monthly`.
         Stripping only the bracketed half strands a bare `.monthly` (observed on
-        `OptumRx View`'s live export) — the modifier is meaningless without its column.
+        `Acme View`'s live export) — the modifier is meaningless without its column.
         """
         assert sanitize_search_query("[date].monthly [Brand]", ["date"]) == "[Brand]"
         assert sanitize_search_query("[date].daily by [Region]", ["date"]) == "by [Region]"
@@ -488,7 +488,7 @@ class TestRemoveColumnsFromView:
 
     def test_sanitizes_search_query_of_a_cascaded_formula_reference(self):
         """A View references its formulas from `search_query` BY ID
-        (`[formula_PMPM month].monthly` — real, from `OptumRx View`). `search_query` is
+        (`[formula_PMPM month].monthly` — real, from `Acme View`). `search_query` is
         sanitized before the formula cascade is known, so `_strip_view_formulas` has to
         re-sanitize, or removing a column drops the formula and leaves the query naming
         it: the same dangling reference by another route. The `.monthly` bucket modifier

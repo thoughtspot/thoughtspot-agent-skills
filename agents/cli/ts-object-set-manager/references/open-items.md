@@ -57,7 +57,7 @@ grant on the Set reads `REQUIRED`.
 
 Checked on *Advanced Basket Analysis* `b8b5788b-986f-4999-9408-224d88082e3f` and *Basket
 Analysis* `4ab96c01-87e9-46ba-994a-3689eb85ffef` (dependents of *Product Basket 2* / *PC*).
-The dependents item's `author` (`1401d07c-…`, pinelopi.chamalelli) **equals** the Answer's own
+The dependents item's `author` (`1401d07c-…`, `<redacted-user>`) **equals** the Answer's own
 `metadata/search` header `author` / `authorName`. The header `owner` field is **not a user**:
 on an Answer it is the Answer's own GUID (`owner == metadata_id` on both). So `author` is
 the only user-valued owner field ThoughtSpot exposes, and reading it as owner is correct.
@@ -158,7 +158,7 @@ Live re-verification, same admin profile, read-only:
 - Smoke on Dunder Mifflin: **PASS** — PB1 `REVIEW_DELETE`, PB2 `CANDIDATE_ANSWER`, PC `KEEP_SHARED`.
 - TEST_SV_DMSI_AI_CONTEXT: *Static Top 10* and *Customer State set* `CANDIDATE_ANSWER`,
   *Product Category set* `KEEP_SHARED`, all `dependents_complete` true.
-- *Demo - Snowflake Retapp*: *mytop5* / *mytop10* `CANDIDATE_VIZ`.
+- *Demo - Snowflake Retapp* `5bb6feec-…`: *mytop5* / *mytop10* `CANDIDATE_VIZ`.
 - `ts audit run --angles H` on Dunder Mifflin: no `hasInaccessibleDependents` warnings; Sets
   with dependents are recorded and not flagged.
 
