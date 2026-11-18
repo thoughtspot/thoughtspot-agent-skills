@@ -28,6 +28,11 @@ class AuditContext:
     # None when they were not fetched or the fetch failed, never [] for either: a rule
     # requiring them then skips a Model rather than read "no calendars" (P22).
     calendars: Optional[list] = None
+    # What the audit keeps of each connection (`connection/search` with details): only
+    # the derived facts of connection_facts.CONNECTION_KEYS, never a configuration
+    # value. Fetched when a selected rule declares `connections`; None when not fetched
+    # or the search failed, as for `calendars` (P24 then skips every Model).
+    connections: Optional[list] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -133,6 +138,7 @@ def make_context(
     warnings=None,
     assessment="general",
     calendars=None,
+    connections=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -142,6 +148,7 @@ def make_context(
         ai_instructions=ai_instructions or {},
         answers=answers or [],
         calendars=calendars,  # None and [] differ: not fetched, and fetched with none
+        connections=connections,  # likewise
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -242,7 +249,7 @@ def _abort_on_request_failure(exc: Exception, what: str) -> NoReturn:
     raise SystemExit(1) from exc
 
 
-#: Answers to a conditional fetch (`ai/instructions/get`, `calendars/search`) that are
+#: Answers to a conditional fetch (`ai/instructions/get`, a paged search) that are
 #: about the run, not one Model or page: every later request would get the same, so the
 #: run stops once (the client retries neither).
 _FATAL_STATUSES = {401: "the credential was refused after re-authentication",
@@ -311,38 +318,76 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
 CALENDAR_KEYS = ("calendar_id", "calendar_name", "connection_id", "connection_name")
 
 
-def _fetch_calendars(client: Any, warnings: list) -> Optional[list]:
-    """Every registered custom calendar (`calendars/search`, paged by
-    custom_calendar.search, which `ts calendar search` shares), each trimmed to
-    CALENDAR_KEYS; None, with a warning, when the search failed.
+def _paged_fetch(client: Any, path: str, what: str, unchecked: str, warnings: list,
+                 search: Any) -> Optional[list]:
+    """`search(fetch_page)` — a ts_cli.paged_search pager — with each page POSTed to
+    `path`; None, with a warning that `unchecked` was not checked, when it failed.
 
     The error handling is `_fetch_ai_instructions`', per page: `raise_for_status=False`;
     a `requests` exception raised by the request or its re-authentication, a final 401
     or a 429 aborts the run once; any other non-2xx, a non-JSON 2xx or an answer that
     cannot be paged makes the whole search "failed" (None), so no rule reads a partial
-    list as complete — P22, which requires `calendars`, then skips every Model."""
+    list as complete: a rule that requires the data then skips every Model."""
     import requests
-    from ts_cli.custom_calendar.search import (SEARCH_PATH, CalendarSearchError,
-                                               search_calendars)
-    _log("Fetching custom calendars...")
+    from ts_cli.paged_search import PagedSearchError
 
     def page(body: dict) -> Any:
         try:
-            resp = client.post(SEARCH_PATH, json=body, raise_for_status=False)
+            resp = client.post(path, json=body, raise_for_status=False)
         except requests.RequestException as exc:
-            _abort_on_request_failure(exc, "Custom calendar search")
-        answer, reason = _read_answer(resp, SEARCH_PATH)
+            _abort_on_request_failure(exc, f"{what} search")
+        answer, reason = _read_answer(resp, path)
         if reason is not None:
-            raise CalendarSearchError(reason)
+            raise PagedSearchError(reason)
         return answer
     try:
-        found = search_calendars(page)
-    except CalendarSearchError as exc:
-        msg = f"Custom calendar search failed, so connection calendars were not checked: {exc}"
+        return search(page)
+    except PagedSearchError as exc:
+        msg = f"{what} search failed, so {unchecked} were not checked: {exc}"
         _log(f"Warning: {msg}")
         warnings.append(msg)
         return None
-    return [{k: c.get(k) for k in CALENDAR_KEYS} for c in found]
+
+
+def _fetch_calendars(client: Any, warnings: list) -> Optional[list]:
+    """Every registered custom calendar (`calendars/search`, paged by
+    custom_calendar.search, which `ts calendar search` shares), each trimmed to
+    CALENDAR_KEYS; None, with a warning, when the search failed (`_paged_fetch`)."""
+    from ts_cli.custom_calendar.search import SEARCH_PATH, search_calendars
+    _log("Fetching custom calendars...")
+    found = _paged_fetch(client, SEARCH_PATH, "Custom calendar", "connection calendars",
+                         warnings, search_calendars)
+    return None if found is None else [{k: c.get(k) for k in CALENDAR_KEYS} for c in found]
+
+
+_CONNECTION_SEARCH_PATH = "/api/rest/2.0/connection/search"
+
+
+def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
+    """Every connection's derived facts (`connection/search` with `include_details`,
+    100 a page; connection_facts.connection_facts: `{id, name, type, oauth, privatelink,
+    parameterized}`); None, with a warning, when the search failed (`_paged_fetch`).
+    Each configuration is parsed and dropped here, page by page: no value of it is
+    kept, logged or warned about."""
+    from ts_cli.paged_search import search_pages
+    _log("Fetching connection settings...")
+
+    def search(fetch_page: Any) -> list:
+        return search_pages(lambda body: _facts_page(fetch_page(body)),
+                            {"include_details": True}, 100, id_key="id",
+                            what="connection/search", items="connections")
+    return _paged_fetch(client, _CONNECTION_SEARCH_PATH, "Connection",
+                        "connection settings", warnings, search)
+
+
+def _facts_page(page: Any) -> Any:
+    """One `connection/search` page with each entry reduced to its facts at once, so no
+    configuration outlives the page; anything not a list is left for the pager to
+    refuse."""
+    from ts_cli.audit.connection_facts import connection_facts
+    if not isinstance(page, list):
+        return page
+    return [f for f in (connection_facts(c) for c in page) if f is not None]
 
 
 def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
@@ -452,6 +497,20 @@ def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list
     return items
 
 
+def _source_guids(models: list) -> list:
+    """Every string `model_tables[].fqn` of the exported Models, read defensively (a
+    malformed Model is excluded later, not here)."""
+    out = []
+    for doc in models:
+        body = doc.get("model") if isinstance(doc, dict) else None
+        mts = body.get("model_tables") if isinstance(body, dict) else None
+        for mt in (mts if isinstance(mts, list) else []):
+            fqn = mt.get("fqn") if isinstance(mt, dict) else None
+            if isinstance(fqn, str) and fqn:
+                out.append(fqn)
+    return out
+
+
 def build_context(
     client: Any,
     model_guids: list,
@@ -463,7 +522,8 @@ def build_context(
     The optional data is fetched only when it is in `needs` — `requires ∪ uses` of the
     rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers` (Answer
     TML of the dependents' Answers), `sets` (Set discovery and each Set's consumers) and
-    `calendars` (every connection's registered custom calendars, one paged search).
+    `calendars` (every connection's registered custom calendars, one paged search) and
+    `connections` (each connection's derived facts, one paged search).
     `dependents` may be in `needs` but is fetched regardless. Anything that is not a
     `requires` value — a category letter from a caller still passing angles — is
     rejected, not silently ignored.
@@ -478,6 +538,7 @@ def build_context(
     ai_instructions = {}
     answers = []
     calendars = None
+    connections = None
 
     # Model TML (with associated Table TML), metadata and dependents below are fetched
     # for every audit and must stay so: rules read Model and Table TML without declaring
@@ -510,7 +571,11 @@ def build_context(
 
     model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
-    scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
+    # And every Model's sources by `model_tables[].fqn`: a SQL View's TML is not kept
+    # (only `table` documents are), so its header (type SQL_VIEW, its connection type)
+    # is how P1, D8 and P27 see it; a Table whose export failed keeps its header too.
+    scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml
+                            + _source_guids(models)))
     _log(f"Searching metadata for {len(scoped_guids)} scoped object(s)...")
     metadata_results = []
     batch_size = 50
@@ -560,6 +625,8 @@ def build_context(
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
     if "calendars" in needs:
         calendars = _fetch_calendars(client, warnings)
+    if "connections" in needs:
+        connections = _fetch_connections(client, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")
@@ -572,6 +639,7 @@ def build_context(
         ai_instructions=ai_instructions,
         answers=answers,
         calendars=calendars,
+        connections=connections,
         model_guids=model_guids,
         warnings=warnings,
     )

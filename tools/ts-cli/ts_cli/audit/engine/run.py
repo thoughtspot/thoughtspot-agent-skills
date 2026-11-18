@@ -111,7 +111,7 @@ def needs_for(catalog: Catalog, categories: List[str], profile: str,
     layer switches off, contributes nothing.
 
     `build_context` fetches the conditional data (`ai_instructions`, `answers`, `sets`,
-    `calendars`) only when it is in here. Rules also read data they do not declare — Model and Table
+    `calendars`, `connections`) only when it is in here. Rules also read data they do not declare — Model and Table
     TML, which are fetched unconditionally for that reason; the catalog gate holds every
     rule's conditional reads to its declarations (catalog_uses.py)."""
     needs: Set[str] = set()

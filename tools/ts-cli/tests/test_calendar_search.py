@@ -14,9 +14,8 @@ import pytest
 from typer.testing import CliRunner
 
 from ts_cli.commands.calendars import app
-from ts_cli.custom_calendar.search import (
-    MAX_PAGES, SEARCH_PATH, CalendarSearchError, search_calendars,
-)
+from ts_cli.custom_calendar.search import SEARCH_PATH, CalendarSearchError, search_calendars
+from ts_cli.paged_search import MAX_PAGES, PagedSearchError, search_pages
 
 runner = CliRunner()
 
@@ -102,7 +101,7 @@ def test_a_server_that_ignores_the_offset_stops_rather_than_looping():
 
 
 def test_the_page_ceiling_stops_an_endless_list(monkeypatch):
-    monkeypatch.setattr("ts_cli.custom_calendar.search.MAX_PAGES", 3)
+    monkeypatch.setattr("ts_cli.paged_search.MAX_PAGES", 3)
     counter = iter(range(10 ** 6))
 
     def endless(body):
@@ -110,6 +109,25 @@ def test_the_page_ceiling_stops_an_endless_list(monkeypatch):
     with pytest.raises(CalendarSearchError, match="after 3 requests"):
         search_calendars(endless, page_size=2)
     assert MAX_PAGES == 1000
+
+
+def test_the_shared_pager_names_its_endpoint_and_keys_by_the_given_id():
+    """The connection fetch pages through the same loop, by `id`, with its own body."""
+    bodies = []
+
+    def page(body):
+        bodies.append(body)
+        rows = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+        return rows[body["record_offset"]:body["record_offset"] + body["record_size"]]
+    found = search_pages(page, {"include_details": True}, page_size=2, what="connection/search",
+                         items="connections")
+    assert [c["id"] for c in found] == ["a", "b", "c"]
+    assert bodies == [{"include_details": True, "record_offset": 0, "record_size": 2},
+                      {"include_details": True, "record_offset": 2, "record_size": 2}]
+    with pytest.raises(PagedSearchError, match="connection/search answered dict at offset 0, "
+                                               "not a list of connections"):
+        search_pages(lambda body: {}, what="connection/search", items="connections")
+    assert issubclass(CalendarSearchError, PagedSearchError)
 
 
 # ── `ts calendar search` ────────────────────────────────────────────────────

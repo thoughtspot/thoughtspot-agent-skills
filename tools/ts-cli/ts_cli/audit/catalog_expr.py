@@ -51,12 +51,13 @@ SCOPES = [
     "answer", "answer.table_ref", "answer.formula", "set", "metadata",
 ]
 # The data a derived field, code rule or scope registers it reads, and the only values
-# `uses:` takes. AI instructions, Answer TML, Sets and the connections' custom
-# calendars are fetched only when a selected rule declares them (needs = requires ∪
+# `uses:` takes. AI instructions, Answer TML, Sets, the connections' custom calendars
+# and the connections' derived settings are fetched only when a selected rule declares them (needs = requires ∪
 # uses, engine.run.needs_for); dependents are fetched for every audit today but are
 # declared all the same, because Set discovery writes into them. Model and Table TML
 # and metadata are fetched for every audit and are never declared for fetching.
-CONDITIONAL_DATA = ["dependents", "ai_instructions", "answers", "sets", "calendars"]
+CONDITIONAL_DATA = ["dependents", "ai_instructions", "answers", "sets", "calendars",
+                    "connections"]
 # Child scope -> the scope its items belong to. Scopes not listed are top level.
 PARENT_SCOPE = {
     "model.column": "model", "model.formula": "model", "model.filter": "model",
