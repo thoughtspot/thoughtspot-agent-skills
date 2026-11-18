@@ -48,6 +48,9 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "findings.py", "engine/__init__.py", "engine/fields.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/fields_single_use.py",
+                # stdlib and the shared formula reference grammar only: the Data Cache
+                # rules' fields (P19-P22, 2026-11).
+                "engine/fields_data_cache.py",
                 "engine/code_rules.py", "engine/code_rules_human.py",
                 "engine/code_rules_security.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
@@ -551,13 +554,19 @@ def test_merge_base_lets_a_branch_drop_an_id_it_added(tmp_path):
     merge base with origin/main (where HEAD would wrongly call it removed)."""
     root = _git_repo(tmp_path)
     _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
-    def add_p19(rules):
-        p19 = copy.deepcopy(next(r for r in rules if r["id"] == "P18"))
-        p19["id"] = "P19"
-        return rules + [p19]
-    _edit_rules(root, "perf.yaml", add_p19)
-    _commit(root, "branch adds P19")
-    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != "P19"])
+    # The next P id the shipped catalog has not used (P19 was taken 2026-11-18).
+    rules_dir = root / AUDIT_REL / "catalog" / "rules"
+    used = [int(r["id"][1:]) for p in rules_dir.glob("*.yaml")
+            for r in yaml.safe_load(p.read_text()) or [] if r["id"].startswith("P")]
+    new_id = f"P{max(used) + 1}"
+
+    def add_new(rules):
+        rule = copy.deepcopy(next(r for r in rules if r["id"] == "P18"))
+        rule["id"] = new_id
+        return rules + [rule]
+    _edit_rules(root, "perf.yaml", add_new)
+    _commit(root, f"branch adds {new_id}")
+    _edit_rules(root, "perf.yaml", lambda rules: [r for r in rules if r["id"] != new_id])
     assert _run_base(root, "HEAD").returncode == 1  # what the old pre-commit did
     res = subprocess.run([sys.executable, str(SCRIPT), "--root", str(root),
                           "--merge-base-with", "origin/main"], capture_output=True, text=True)

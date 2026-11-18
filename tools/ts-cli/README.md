@@ -4883,14 +4883,20 @@ whatever it finds (1 on a usage error or an unreadable snapshot). `scripts/pr-re
 `TS_AUDIT_SNAPSHOT` names a snapshot directory (kept outside the repo).
 
 **What is fetched.** Model TML with its associated Table TML, metadata headers and
-dependents, always; AI instructions, Answer TML and Sets only when a selected rule
-declares them (`requires`/`uses`), so a narrow `--angles` fetches less. The JSON records
+dependents, always; AI instructions, Answer TML, Sets and the connections' custom
+calendars only when a selected rule declares them (`requires`/`uses`), so a narrow
+`--angles` fetches less. The JSON records
 what was fetched as `corpus.fetched_needs`. On the AI-instructions lookup, a final 401 (after
 the client's one re-authentication), a 429, or any `requests` exception raised by the
 request or its re-authentication aborts the run once. Any other non-2xx (403, 404, a 5xx
 after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips that Model's AI-instruction rules
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
-report). Any other exception is a bug and propagates unchanged.
+report). The custom calendar search (`calendars/search`, one paged search per audit, for
+P22) is handled the same way: a final 401, a 429 or a `requests` exception aborts once;
+any other failure is a warning, the calendars read as unknown, and P22 judges no Model.
+Any other exception is a bug and propagates unchanged. A snapshot captured before
+ts-cli 0.219.0 holds no calendars, so replaying the P angle from it is refused (P22
+reads them): capture it again.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

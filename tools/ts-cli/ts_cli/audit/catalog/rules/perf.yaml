@@ -389,6 +389,108 @@
     fires: {fixture: perf_column_count_distinct, severity: INFO}
     silent: {fixture: perf_model_80_columns}
 
+# Data Cache readiness (product owner's rules, 2026-11-18). ThoughtSpot's Data Cache
+# cannot serve a Model with any of P19-P21; P22 warns. The report's Data Cache view reads
+# the same fields (audit/data_cache.py), so it says what these findings say.
+- id: P19
+  title: Custom calendar stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a column on a table-based custom calendar, which Data Cache cannot
+    serve. A column's calendar is its own `properties.calendar`, else the one on the
+    Table column its `column_id` resolves to. `calendar` and `fiscal` (any case, edge
+    spaces aside) are code-based calendars, and an absent or blank value sets none; any
+    other value names a custom calendar. The finding lists each such column with the
+    calendar it names.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@custom_calendar_columns", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: columns on a custom calendar: {@custom_calendar_columns}"
+  remediation: >-
+    Move each listed column to a code-based calendar (calendar or fiscal) so Data Cache
+    can serve the Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_custom_calendar_columns, severity: MEDIUM}
+    silent: {fixture: perf_code_based_calendars}
+
+- id: P20
+  title: SQL pass-through stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a formula that calls a SQL pass-through function, which Data Cache
+    cannot serve: a scalar one (`sql_string_op`, `sql_int_op`, `sql_double_op`,
+    `sql_bool_op`, `sql_date_op` and the rest) or an aggregate one
+    (`sql_<type>_aggregate_op`). Any case; not a name inside a `[...]` reference or a
+    quoted literal. D9 grades the share of aggregate pass-through formulas; this rule
+    fires on one formula of either kind. The finding lists the formulas.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@sql_passthrough_formulas", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: formulas call a SQL pass-through function: {@sql_passthrough_formulas}"
+  remediation: >-
+    Rewrite each listed formula with ThoughtSpot functions so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_sql_passthrough_formulas, severity: MEDIUM}
+    silent: {fixture: perf_sql_passthrough_named_only}
+
+- id: P21
+  title: Semantic query Model is not cached
+  evidence: fact
+  description: >-
+    A semantic query Model, which Data Cache does not serve by design: a Model with a
+    measure the source platform aggregates. That is a Model column with
+    `aggregation: AGGREGATE` (any case), or one over a Table column with
+    `aggregation: AGGREGATE` or `is_pre_aggregated_measure: true`. The finding lists the
+    columns.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@semantic_query_measures", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: a semantic query Model, with measures the source platform aggregates: {@semantic_query_measures}"
+  remediation: >-
+    No change to make: a semantic query Model passes its measures to the source
+    platform's semantic layer, and is uncached by design.
+  examples:
+    fires: {fixture: perf_semantic_query_measures, severity: MEDIUM}
+    silent: {fixture: perf_summed_measures}
+
+- id: P22
+  title: Connection defines custom calendars
+  evidence: fact
+  description: >-
+    A Model on a connection with at least one registered custom calendar: the
+    connection a Table names (`connection.name`, any case; Falcon and system Tables
+    name none), or the id its metadata header carries. A user can pick such a calendar
+    at run time, and that query does not use Data Cache. Skipped when the calendar
+    search failed. The finding names each connection and how many custom calendars it
+    defines.
+  categories: [P]
+  requires: [model_tml, calendars]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@connection_custom_calendars", len_gt: 0}
+  severity: LOW
+  message: "A query that picks a custom calendar at run time won't use Data Cache: {@connection_custom_calendars}"
+  remediation: >-
+    Nothing to change in the Model. Tell its users that a query on a custom calendar
+    runs uncached, and remove calendars nobody uses from the connection.
+  examples:
+    fires: {fixture: perf_connection_custom_calendars, severity: LOW}
+    silent: {fixture: perf_connection_without_custom_calendars}
+
 # Ids used before the catalog existed. Recorded as retired so the history gate holds
 # them: the gate reads only catalog history, and "the next free number" would hand
 # them out again.

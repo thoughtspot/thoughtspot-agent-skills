@@ -794,3 +794,137 @@ P_INPUTS.update({f"join_chain_{n}_tables": (lambda n=n: build_join_chain(
 P_INPUTS.update({f"rls_rules_{n}": (lambda n=n: make_context(tables={"db.s.T1": build_perf_table(
                  rls_rules={"rules": [{"expr": f"[col{i}]"} for i in range(n)]})}))
                  for n in range(0, 9)})
+
+
+# ── P19-P22: Data Cache readiness ───────────────────────────────────────────
+# Rules added after the pin, so not in P_INPUTS: their examples are their regression net.
+
+CACHE_TABLE = "t-cache-orders"
+
+
+def build_cache_ctx(model_columns=(), formulas=(), table_columns=(),
+                    connection="Warehouse A", calendars=None, alias=None) -> AuditContext:
+    """One Model ("Cache Sales") over one Table ORDERS (`connection`, None for a Falcon
+    Table), with the given columns, formulas and registered calendars."""
+    table = {"guid": CACHE_TABLE, "table": {"name": "ORDERS",
+                                            "columns": copy.deepcopy(list(table_columns))}}
+    if connection:
+        table["table"]["connection"] = {"name": connection}
+    model_table = {"name": "ORDERS", "fqn": CACHE_TABLE}
+    if alias:
+        model_table["alias"] = alias
+    model = {"guid": "m-cache", "model": {
+        "name": "Cache Sales", "model_tables": [model_table],
+        "columns": copy.deepcopy(list(model_columns)),
+        "formulas": copy.deepcopy(list(formulas))}}
+    return make_context(models=[model], tables={CACHE_TABLE: table},
+                        calendars=copy.deepcopy(calendars))
+
+
+def build_cache_column(name, column_id=None, **properties) -> dict:
+    col = {"name": name, "properties": dict(properties)}
+    if column_id:
+        col["column_id"] = column_id
+    return col
+
+
+def build_cache_calendar(name, connection="Warehouse A", connection_id="conn-a") -> dict:
+    return {"calendar_id": f"cal-{name}", "calendar_name": name,
+            "connection_id": connection_id, "connection_name": connection}
+
+
+def perf_custom_calendar_columns() -> AuditContext:
+    """Order Date names a custom calendar itself; Ship Date inherits one from its Table
+    column (P19 fires, listing both)."""
+    return build_cache_ctx(
+        model_columns=[
+            build_cache_column("Order Date", "ORDERS::ORDER_DATE", calendar="Retail 445"),
+            build_cache_column("Ship Date", "ORDERS::SHIP_DATE"),
+            build_cache_column("Amount", "ORDERS::AMOUNT", column_type="MEASURE")],
+        table_columns=[
+            {"name": "ORDER_DATE", "properties": {}},
+            {"name": "SHIP_DATE", "properties": {"calendar": "Fiscal 4-4-5"}}])
+
+
+def perf_code_based_calendars() -> AuditContext:
+    """Every calendar code-based, in any case or spacing; a blank Model value falls back
+    to the Table's; a Model column's own code-based calendar wins over a custom one on
+    its Table column (P19 silent)."""
+    return build_cache_ctx(
+        model_columns=[
+            build_cache_column("Order Date", "ORDERS::ORDER_DATE", calendar=" Calendar "),
+            build_cache_column("Ship Date", "ORDERS::SHIP_DATE", calendar="FISCAL"),
+            build_cache_column("Due Date", "ORDERS::DUE_DATE", calendar="  "),
+            build_cache_column("Close Date", "ORDERS::CLOSE_DATE", calendar="calendar")],
+        table_columns=[
+            {"name": "DUE_DATE", "properties": {"calendar": "fiscal"}},
+            {"name": "CLOSE_DATE", "properties": {"calendar": "Retail 445"}}])
+
+
+def perf_sql_passthrough_formulas() -> AuditContext:
+    """A scalar and an aggregate pass-through call, any case (P20 fires, listing both)."""
+    return build_cache_ctx(formulas=[
+        {"id": "formula_Upper Name", "name": "Upper Name",
+         "expr": "sql_string_op ( \"upper({0})\" , [ORDERS::NAME] )"},
+        {"id": "formula_Median", "name": "Median",
+         "expr": "SQL_DOUBLE_AGGREGATE_OP(\"median({0})\", [ORDERS::AMOUNT])"},
+        {"id": "formula_Plain", "name": "Plain", "expr": "sum ( [ORDERS::AMOUNT] )"}])
+
+
+def perf_sql_passthrough_named_only() -> AuditContext:
+    """`sql_int_op` only inside a quoted literal, a `[...]` reference (a name holding a
+    quote too) or a longer name; no call (P20 silent)."""
+    return build_cache_ctx(formulas=[
+        {"id": "formula_A", "name": "A",
+         "expr": "concat ( 'sql_int_op ( 1 )' , [ORDERS::NAME] )"},
+        {"id": "formula_B", "name": "B", "expr": "[ORDERS::sql_int_op ( it's )] + 1"},
+        {"id": "formula_C", "name": "C", "expr": "my_sql_int_op ( 1 ) + sql_int_opx ( 2 )"}])
+
+
+def perf_semantic_query_measures() -> AuditContext:
+    """A Model measure aggregated `aggregate` (any case), and one over a Table column
+    flagged is_pre_aggregated_measure (P21 fires, listing both)."""
+    return build_cache_ctx(
+        model_columns=[
+            build_cache_column("Revenue", "ORDERS::REVENUE", column_type="MEASURE",
+                               aggregation=" aggregate "),
+            build_cache_column("Margin", "ORDERS::MARGIN", column_type="MEASURE",
+                               aggregation="SUM"),
+            build_cache_column("Region", "ORDERS::REGION", column_type="ATTRIBUTE")],
+        table_columns=[
+            {"name": "MARGIN", "properties": {"column_type": "MEASURE",
+                                             "aggregation": "SUM",
+                                             "is_pre_aggregated_measure": True}}])
+
+
+def perf_summed_measures() -> AuditContext:
+    """Ordinary measures; a string "true" pre-aggregated flag is not the YAML boolean
+    tml_lint's I23 reads (P21 silent)."""
+    return build_cache_ctx(
+        model_columns=[
+            build_cache_column("Revenue", "ORDERS::REVENUE", column_type="MEASURE",
+                               aggregation="SUM"),
+            build_cache_column("Orders", "ORDERS::ID", column_type="MEASURE",
+                               aggregation="COUNT")],
+        table_columns=[
+            {"name": "REVENUE", "properties": {"aggregation": "SUM",
+                                              "is_pre_aggregated_measure": "true"}}])
+
+
+def perf_connection_custom_calendars() -> AuditContext:
+    """The Table's connection has two registered custom calendars (one named with other
+    case); a third is on another connection (P22 fires, LOW)."""
+    return build_cache_ctx(
+        model_columns=[build_cache_column("Order Date", "ORDERS::ORDER_DATE")],
+        calendars=[build_cache_calendar("Retail 445"),
+                   build_cache_calendar("Fiscal 52", connection="WAREHOUSE A "),
+                   build_cache_calendar("Other", connection="Warehouse B",
+                                        connection_id="conn-b")])
+
+
+def perf_connection_without_custom_calendars() -> AuditContext:
+    """Calendars registered only on another connection (P22 silent)."""
+    return build_cache_ctx(
+        model_columns=[build_cache_column("Order Date", "ORDERS::ORDER_DATE")],
+        calendars=[build_cache_calendar("Other", connection="Warehouse B",
+                                        connection_id="conn-b")])

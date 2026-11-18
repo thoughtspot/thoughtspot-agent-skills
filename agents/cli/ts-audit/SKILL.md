@@ -310,13 +310,15 @@ them:
 | AI instructions (`ai/instructions/get`, one call per Model) | When a selected rule declares `ai_instructions` (A3); the report's Spotter readiness score reads them too |
 | Answer TML (the Answers among the Models' dependents) | When a selected rule declares `answers` (H7, H8, H9) |
 | Sets and each Set's consumers | When a selected rule declares `sets` (H4, H5) |
+| The custom calendars registered on the cluster's connections (`calendars/search`, paged) | When a selected rule declares `calendars` (P22); the report's Data Cache view reads them too |
 
 So narrowing `--angles` also narrows the fetch. On the AI-instructions lookup, a final 401
 (after re-authentication), a 429, or any `requests` exception raised by the request or
 its re-authentication aborts the run once, because every later call would fail the same
 way. Any other non-2xx (403, 404, a 5xx after the client's retries, …) or a non-JSON
 2xx skips that Model's AI-instruction rules with a warning, and the report shows "Could
-not be read". Separately, the dashboard's "Could not be read" box lists every Model whose
+not be read". The calendar search is handled the same way, per page; any other failure
+leaves the calendars unknown, with a warning, and P22 then judges no Model. Separately, the dashboard's "Could not be read" box lists every Model whose
 TML, or a Table it uses, holds the wrong shape where the audit reads one — a list or a
 single value where a mapping belongs (`properties`, `spotter_config`,
 `db_column_properties`, `model_instructions`, `rls_rules`, the document body itself), a
@@ -362,7 +364,7 @@ are in its catalog entry.
 | `rules/ai.yaml` | A — AI Readiness | A1–A4, A6–A9 (A5 retired) |
 | `rules/data.yaml` | D — Data Modeling | D1, D3, D5, D7–D18 (D2, D4, D6 retired) |
 | `rules/human.yaml` | H — Human Readiness | H1–H5, H7–H14, H16 (H6 retired) |
-| `rules/perf.yaml` | P — Performance | P1–P4, P6–P8, P11, P13–P18 (P5, P9–P10, P12 retired) |
+| `rules/perf.yaml` | P — Performance | P1–P4, P6–P8, P11, P13–P22 (P5, P9–P10, P12 retired) |
 | `rules/security.yaml` | S — Security | S1–S2, S4–S5, S10–S17 (S3, S6–S9 retired) |
 <!-- END GENERATED: rules-files -->
 
