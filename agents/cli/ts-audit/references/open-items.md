@@ -65,7 +65,7 @@ properties:
 ```
 
 S4, S10, D4, and P11 can all read from `model.properties` directly.
-### #1 — Bulk metadata search performance — UNVERIFIED
+### #1 — Bulk metadata search performance — RESOLVED (a duplicate: the VERIFIED #1 above answers it; kept as the original question)
 
 Large instances may have 1000+ models and 2000+ answers. The `ts metadata search --all`
 command auto-paginates, but we need to verify:
@@ -78,7 +78,7 @@ and measure elapsed time and response completeness.
 
 ---
 
-### #2 — Bulk TML export throttling — UNVERIFIED
+### #2 — Bulk TML export throttling — RESOLVED (a duplicate: the VERIFIED #2 above answers it; kept as the original question)
 
 Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 - Does the ThoughtSpot API throttle or 429 on concurrent TML exports?
@@ -89,7 +89,7 @@ Step 4 exports TML at 4-way parallel concurrency. Need to verify:
 
 ---
 
-### #3 — Dependent counts for orphan detection — UNVERIFIED
+### #3 — Dependent counts for orphan detection — RESOLVED (a duplicate: the VERIFIED #3 above answers it; kept as the original question)
 
 Step 5 uses `ts metadata dependents` to detect orphan models (H4) and sets (H5).
 Need to verify:
@@ -101,7 +101,7 @@ Need to verify:
 
 ---
 
-### #4 — is_bypass_rls in exported TML — UNVERIFIED
+### #4 — is_bypass_rls in exported TML — RESOLVED (a duplicate: the VERIFIED #4 above answers it; kept as the original question)
 
 S4 and S10 need `is_bypass_rls` from the model TML. Need to verify:
 - Does `is_bypass_rls` appear in `ts tml export` output?
@@ -173,7 +173,7 @@ Response shape:
 A3 can now check both TML path (`data_model_instructions`) and API path
 (`ai/instructions/get`) for full NL instruction coverage. Instructions set via the
 UI appear in the API response. `scope: GLOBAL` applies to all searches on this model.
-### #8 — NL Instructions API — UNVERIFIED
+### #8 — NL Instructions API — RESOLVED (a duplicate: the VERIFIED #8 above answers it; kept as the original question)
 
 A3 partially depends on detecting NL Instructions set via the REST API
 (`POST /api/rest/2.0/ai/instructions/get`). Confirmed via MCP as Beta since
@@ -189,22 +189,22 @@ covers the TML path. This API would add coverage for instructions set only via t
 
 ## Phase 2 — Usage Analysis (future)
 
-### #9 — searchdata against BI Server — UNVERIFIED
+### #9 — searchdata against BI Server — DEFERRED to BL-081 (usage stats)
 
 Need to verify `POST /api/rest/2.0/searchdata` works with the BI Server system model:
 - Does it accept the BI Server model GUID as `logical_table_identifier`?
 - What is the maximum `record_size`? Does pagination work?
 
-### #10 — BI Server Spotter coverage — UNVERIFIED
+### #10 — BI Server Spotter coverage — DEFERRED to BL-081 (usage stats)
 
 Does the TS: BI Server system model capture Spotter/AI search interactions,
 or only classic Search interactions?
 
-### #11 — User Action enum — UNVERIFIED
+### #11 — User Action enum — DEFERRED to BL-081 (usage stats)
 
 Full `User Action` values in BI Server? Need the enum to filter appropriately.
 
-### #12 — Query Text column parsability — UNVERIFIED
+### #12 — Query Text column parsability — DEFERRED to BL-081 (usage stats)
 
 Does `[Query Text]` contain `[column_name]` tokens parseable for column-level
 usage analysis?
@@ -324,7 +324,9 @@ in the sample (Model headers carry none). P23 reads it.
 
 ---
 
-### #18 — Data Cache: what the product team is to confirm — UNVERIFIED
+### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
+
+Until the team answers, P24 is graded as a heuristic and its findings say "to confirm" where they rest on point 1 or 2.
 
 Raised 2026-11-18 by the product owner, who asked for these to be flagged so the team
 can review them. Each is what P24 or P28 reads today; the finding says "to confirm" where
@@ -346,7 +348,7 @@ it rests on one of them.
 
 ## Phase 3 — Visualization Layer (future)
 
-### #13 — Liveboard viz fingerprinting — UNVERIFIED
+### #13 — Liveboard viz fingerprinting — DEFERRED to BL-591
 
 Can two liveboards with the same visualizations be reliably detected by comparing
 `search_query` strings in their viz definitions?

@@ -484,6 +484,10 @@ are roughly ordered by value÷effort.
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
 | BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
 | BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
+| BL-588 | The report's sidebar writes a Model guid into a link without escaping it | — |
+| BL-589 | Nothing checks the audit report's vendored JavaScript for updates or advisories | 2027-01-31 |
+| BL-590 | Data Cache: the product team's answers on OAuth M2M, PrivateLink and null tests in RLS rules | 2027-01-31 |
+| BL-591 | ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? | 2027-03-31 |
 
 ### Tier 4 — Deferred
 
@@ -17666,3 +17670,27 @@ disagree.
 2. Or a small validator that warns when a vendored version is older than a set age.
 
 **Target:** 2027-01-31.
+
+## BL-590 — Data Cache: the product team's answers on OAuth M2M, PrivateLink and null tests in RLS rules `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
+
+**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team.
+
+**Do.**
+1. Get the team's answer on each of the three points in open-items #18.
+2. Update P24 (and its heuristic grading) and the P28 and S12 remediations to match, and mark #18 VERIFIED.
+
+**Target:** 2027-01-31.
+
+## BL-591 — ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** ts-audit open-items #13 (Phase 3, visualization layer), which had no dated item.
+
+**What.** Phase 3 of ts-audit would detect duplicate Liveboards by comparing visualization `search_query` strings. Whether that is a reliable signal has never been tested.
+
+**Do.**
+1. Export two Liveboards built with the same visualizations and compare their `search_query` strings.
+2. Record the answer in open-items #13; if it holds, design the check through the rule catalog.
+
+**Target:** 2027-03-31.
