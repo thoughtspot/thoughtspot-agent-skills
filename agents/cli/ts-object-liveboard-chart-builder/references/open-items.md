@@ -102,16 +102,16 @@ month.
 
 ---
 
-## #6 — A rebuilt tile keeps its `viz_guid`, and a multi-block run with a changed spec, on 26.11 — DEFERRED 2026-11-17 (BL-552)
+## #6 — A multi-block run with a changed spec, on 26.11 — DEFERRED 2026-11-17 (BL-552)
 
-From the third PR 711 review. Two changes are covered by the mock only:
+From the third and fourth PR 711 reviews. Covered by the mock only: every block but the last of a run carries
+each spec tile it does not write over unchanged, both the tiles a later block carries (`pending`) and spec tiles
+outside the run (`heldForLastBlock`), so a run whose spec retitles a tile, or changes its search, commits every
+block (mock scenarios "a multi-block run that retitles a later tile ..." and "... a tile outside the run ...").
 
-- `patch.js` now sends a rebuilt owned tile with the `viz_guid` it had (embeds address a tile by it). Nothing
-  records yet whether a 26.11 import keeps a `viz_guid` that is sent, renumbers it, or rejects it.
-- Each block carries the tiles a later block of the run carries (`pending`) over unchanged, so a run whose spec
-  retitles a later tile, or changes its search, commits every block (mock scenario "a multi-block run that
-  retitles a later tile ...").
+A rebuilt tile is sent with the `viz_guid` it had, only when the tile is its own slug's. That 26.11 keeps a sent
+`viz_guid` is shown by #1: its round trip compares every field but `id` of each visualization the skill does not
+own (the user's native chart, note and copy), each sent with its `viz_guid`, and returned `roundTripAllOk: true`.
 
-**Action (BL-552, target 2027-01-31):** In the same live run as #4, retitle one tile and change another's search
-in the spec, run `--commit --all` with a small `--max`, and read back each rebuilt tile's `viz_guid`.
-
+**Action (BL-552, target 2027-01-31):** In the same live run as #4, retitle one tile outside the run and change
+another's search, run `--commit` on two other slugs with a small `--max`, and confirm every block commits.

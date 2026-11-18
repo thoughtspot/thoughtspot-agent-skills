@@ -45,7 +45,8 @@ const ownerOf = (c) => { const m = c && OWNER.exec(c.js); return m ? m[1].toLowe
 const strip = (js) => js.replace(MARK, '').replace(OWNER, '');
 const stable = (x) => Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x);
 // A visualization's fingerprint, the same as the chart skill's helpers/backup-check.mjs computes from the backup
-// file: the whole visualization, keys sorted, except its id and viz_guid (ThoughtSpot renumbers them on import)
+// file: the whole visualization, keys sorted, except its id (ThoughtSpot renumbers ids on import), its viz_guid
+// (kept when sent, new for a tile rebuilt without one)
 // and every `fqn` (an export holds them only when asked, and a backup may be exported either way).
 const noFqn = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'fqn' ? undefined : v)));
 const fpOf = async (v) => { const { id, viz_guid, ...rest } = v || {}; return (await sha256(stable(noFqn(rest)))).slice(0, 16); };
@@ -205,6 +206,7 @@ const used = new Set(Object.keys(vizById));
 let nId = 0;
 const freshId = () => { let id; do id = 'Viz_' + (++nId); while (used.has(id)); used.add(id); return id; };
 const taken = new Set();
+const otherOwn = (id, slug) => Object.keys(idBySlug).some((s) => s !== slug && idBySlug[s] === id && specSlugs.has(s));
 const COLS = {}, vizzes = [], specTabs = [], report = [], excluded = [];
 for (const tab of spec.tabs) {
   const tiles = [];
@@ -217,26 +219,31 @@ for (const tab of spec.tabs) {
     if (P.tiles[t.slug] && P.tiles[t.slug].body) { const bd = P.tiles[t.slug].body; code = { js: core.js + bd.js, css: bd.cssWhole || core.css + bd.css, html: bd.html }; from = 'payload'; }
     else if (P.tiles[t.slug]) { const f = P.tiles[t.slug].f; code = f.lean ? { js: mark(f.js), css: f.css, html: f.html } : { js: core.js + '\n' + mark(f.js), css: core.css + '\n' + f.css, html: f.html }; from = 'payload'; }
     else if (bySlug[t.slug]) { code = bySlug[t.slug]; from = 'kept'; }
-    else if (byPos[pos]) { code = byPos[pos]; from = 'kept (position)'; }
+    else if (byPos[pos] && !otherOwn(idByPos[pos], t.slug)) { code = byPos[pos]; from = 'kept (position)'; }
     else { report.push({ slug: t.slug, from: (P.pending || []).includes(t.slug) ? 'pending' : 'MISSING - not on the Liveboard and not in this payload' }); continue; }
     if (from !== 'payload' && !ownerOf(code)) {
       code = { ...code, js: MARK.test(code.js) ? mark(code.js) : code.js.replace(END_JS, END_JS + '\n/* amuzing-slug: ' + t.slug + ' */\n' + OWNER_LINE) };
       from = 'kept, marked';
     }
-    const prevId = [idBySlug[t.slug], idByPos[pos]].find((x) => x && !taken.has(x));
-    // A tile a later block of this run carries is left exactly as it is (its title, description, search and code),
-    // only placed at its spec position: the later block writes it, and checks it against the backup taken before
-    // the run, so this block must not change it. Rewriting it here gave it the spec's new title, or ran its new
-    // search with its old code, and the later block then refused, saying the Liveboard had changed since the
-    // backup. So every block leaves a working Liveboard, each tile with the code, search and title it was built with.
-    if (from !== 'payload' && (P.pending || []).includes(t.slug) && prevId) {
+    // The tile already here: its own slug's first, else whatever owned tile sits at its spec position, unless that is
+    // another spec slug's own tile (one the spec moved, with --relayout): that one keeps its id and viz_guid.
+    const prevId = [idBySlug[t.slug], idByPos[pos]].find((x) => x && !taken.has(x) && !otherOwn(x, t.slug));
+    // Every block but the last of a run leaves each tile it does not write exactly as it is (its title, description,
+    // search and code), only placed at its spec position: a later block, or the last one, writes it, and checks it
+    // against the backup taken before the run, so no earlier block may change it. Rewriting it early gave it the
+    // spec's new title, or ran its new search with its old code, and the next block then refused, saying the
+    // Liveboard had changed since the backup. That covers tiles a later block carries (pending) and spec tiles
+    // outside the run (held: retitled, re-searched, marked or adopted in the last block). So every block leaves a
+    // working Liveboard, each tile with the code, search and title it was built with.
+    const hold = (P.pending || []).includes(t.slug) ? 'pending' : P.last === false ? 'held for the last block' : null;
+    if (from !== 'payload' && hold && prevId) {
       taken.add(prevId);
       vizzes.push(vizById[prevId]);
       if (t.filters === false) excluded.push(prevId); // filters live outside the tile, and keep skipping it meanwhile
       tiles.push({ visualization_id: prevId, x: t.x, 'y': t.y, height: t.h, width: t.w });
       // The proof checks it comes back with the code it has (unmarked, if it had no marker yet).
       const pc = codeOf(vizById[prevId]) || code;
-      report.push({ slug: t.slug, from: 'pending', id: prevId, js: (await sha256(pc.js)).slice(0, 12), css: (await sha256(pc.css)).slice(0, 12) });
+      report.push({ slug: t.slug, from: hold, id: prevId, js: (await sha256(pc.js)).slice(0, 12), css: (await sha256(pc.css)).slice(0, 12) });
       continue;
     }
     // The search is run only for tiles this block composes afresh: charts in the payload, kept tiles whose search
@@ -282,11 +289,12 @@ for (const tab of spec.tabs) {
       display_mode: 'CHART_MODE'
     };
     if (t.description) answer.description = t.description;
-    // An owned tile keeps its visualization id, so filters and anything else that points at it still resolve.
+    // An owned tile keeps its visualization id, so filters and anything else that points at it still resolve, and its
+    // viz_guid, which embeds address the tile by; the viz_guid only when the tile is its own slug's, never one it
+    // took over by position.
     const id = prevId || freshId();
     taken.add(id);
-    // and its viz_guid, which embeds address the tile by.
-    vizzes.push(prev && prev.viz_guid ? { id, viz_guid: prev.viz_guid, answer } : { id, answer });
+    vizzes.push(prev && prev.viz_guid && prevId === idBySlug[t.slug] ? { id, viz_guid: prev.viz_guid, answer } : { id, answer });
     if (t.filters === false) excluded.push(id);
     tiles.push({ visualization_id: id, x: t.x, 'y': t.y, height: t.h, width: t.w });
     report.push({ slug: t.slug, from, id, js: (await sha256(code.js)).slice(0, 12), css: (await sha256(code.css)).slice(0, 12) });
@@ -365,7 +373,8 @@ const summary = {
   keptByPosition: report.filter((r) => r.from === 'kept (position)').length,
   marked: report.filter((r) => r.from === 'kept, marked').map((r) => r.slug),
   problems: [...report.filter((r) => /MISSING|FAILED/.test(r.from)), ...conflicts.map((c) => ({ from: c }))],
-  pending: report.filter((r) => r.from === 'pending').map((r) => r.slug)
+  pending: report.filter((r) => r.from === 'pending').map((r) => r.slug),
+  heldForLastBlock: report.filter((r) => r.from === 'held for the last block').map((r) => r.slug)
 };
 if (removed.length) summary.removed = removed;
 if (droppedTabs.length) summary.droppedTabs = droppedTabs;

@@ -292,7 +292,50 @@ await scenario("the intake's probe export is refused when ThoughtSpot refused th
   ok(q.status === 0 && JSON.parse(q.stdout).ok === true, "a good export failed the probe: " + q.stderr);
 });
 
-await scenario("a tile whose title holds an emoji matches its JSON backup", async () => {
+await scenario("a run that leaves out a tile the spec retitled, or whose search changed, commits every block", async () => {
+  // Found in the fourth PR 711 review: block 1 still retitled (or rebuilt) a spec tile outside the run, and block 2
+  // then refused, saying the backup lacked it. Every block but the last now holds such tiles as they are.
+  const d = specDir("lb-outside", { "pulse-kpi-best": { title: "Best region" }, "banner-pulse": { search: "[sales] [date].weekly" } });
+  const doc = withViz(clone(base), clone(native), 0, 20);
+  const p = pack(["--commit", "--max", "3000", "--backup", backup(doc, "outside.json"), "where-state-bubbles", "banner-pulse"], d);
+  ok(p.code === 0 && p.blocks.length === 2, "expected 2 blocks: " + p.err);
+  const st = { doc };
+  const r1 = await run(p.blocks[0], st);
+  committed(r1);
+  ok(vizNamed(st.doc, "Best") && !vizNamed(st.doc, "Best region"), "block 1 retitled a tile outside the run");
+  ok((r1.heldForLastBlock || []).includes("pulse-kpi-best"), "Best not reported as held: " + JSON.stringify(r1).slice(0, 300));
+  committed(await run(p.blocks[1], st));
+  ok(vizNamed(st.doc, "Best region"), "the last block did not retitle the tile outside the run");
+  ok(vizNamed(st.doc, "About").answer.search_query === "[sales] [date].weekly" && vizNamed(st.doc, "Native"), "the last block lost a change");
+});
+
+await scenario("with --relayout, a new chart at a moved tile's old place takes neither its id nor its viz_guid", async () => {
+  // Found in the fourth PR 711 review: the new chart, listed first, took the moved tile's id and viz_guid, so an
+  // embed of Best showed Sales.
+  const doc = clone(base);
+  doc.liveboard.visualizations.forEach((v, i) => { v.viz_guid = "00000000-0000-4000-8000-00000000001" + i; });
+  const bestGuid = vizNamed(doc, "Best").viz_guid;
+  const d = path.join(TMP, "lb-relayout"); fs.mkdirSync(d, { recursive: true });
+  const sp = JSON.parse(fs.readFileSync(path.join(DIR, "liveboard.spec.json"), "utf8"));
+  const best = sp.tabs[0].tiles.find((t) => t.slug === "pulse-kpi-best"); best.y = 8;
+  sp.tabs[0].tiles.unshift({ slug: "pulse-kpi-sales", title: "Sales", search: "[sales]", x: 0, y: 0, w: 6, h: 4 });
+  fs.writeFileSync(path.join(d, "liveboard.spec.json"), JSON.stringify(sp));
+  const st = { doc: clone(doc) };
+  committed(await run(pack(["--commit", "--relayout", "--backup", backup(doc, "relayout.json"), "pulse-kpi-sales", "pulse-kpi-best"], d).blocks[0], st));
+  ok(vizNamed(st.doc, "Best").viz_guid === bestGuid, "Best lost its viz_guid: " + vizNamed(st.doc, "Best").viz_guid);
+  ok(vizNamed(st.doc, "Sales").viz_guid !== bestGuid, "the new chart took Best's viz_guid");
+  ok(placeOf(st.doc, "Best") === "0,8" && placeOf(st.doc, "Sales") === "0,0", "placed " + placeOf(st.doc, "Best") + " / " + placeOf(st.doc, "Sales"));
+});
+
+await scenario("the intake's probe accepts an existing Liveboard with no visualizations, which needs no backup", async () => {
+  const g = backup(empty(), "probe-empty.json");
+  const q = spawnSync("node", [path.join(ROOT, "agents", "cli", "ts-object-answer-chart-builder", "helpers", "backup-check.mjs"), g, LBG, "liveboard"], { encoding: "utf8", env: ENV });
+  ok(q.status === 0 && JSON.parse(q.stdout).visualizations === 0 && /needs no backup/.test(JSON.parse(q.stdout).note), "probe of an empty Liveboard: " + q.stdout + q.stderr);
+  // As a commit's backup, an empty export still proves nothing.
+  ok(pack(["--commit", "--backup", g, "pulse-kpi-best"]).code === 2, "an empty export passed as a commit's backup");
+});
+
+await scenario("positive control: a tile whose title holds an emoji matches its JSON backup (passes on the old code too)", async () => {
   const doc = withViz(clone(base), { ...clone(native), answer: { ...clone(native.answer), name: "Revenue \u{1F680} by region" } }, 0, 20);
   const st = { doc: clone(doc) };
   committed(await run(pack(["--commit", "--backup", backup(doc, "emoji.json"), "pulse-kpi-best"]).blocks[0], st));

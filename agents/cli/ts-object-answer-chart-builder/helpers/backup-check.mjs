@@ -11,8 +11,8 @@
 // `viz` holds one fingerprint per visualization (a Liveboard) or one for the answer: a hash of the whole
 // visualization (every key, sorted) except its id, viz_guid and any fqn, so a backup whose visualization differs in
 // anything (a description, formatting, axis settings) is not current. Only visualizations are fingerprinted: a
-// Liveboard backup that differs only in the Liveboard's layout, filters, tabs or style still passes, and restoring
-// it reverts those edits. The sandbox computes the same fingerprints from the live object and
+// Liveboard backup that differs only in the Liveboard's name, description, parameters, layout, filters, tabs or
+// style still passes, and restoring it reverts those edits. The sandbox computes the same fingerprints from the live object and
 // refuses the commit unless the backup holds every one, so a list of ids, a cut-off export, an older export or
 // another object's export does not pass: ids alone prove nothing (they are Viz_1, Viz_2 ... on every Liveboard,
 // and ThoughtSpot renumbers them on import). patch.js and answer-patch.js carry the same fingerprint code.
@@ -26,7 +26,8 @@ export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 export const stable = (x) => Array.isArray(x) ? "[" + x.map(stable).join(",") + "]" : x && typeof x === "object" ? "{" + Object.keys(x).filter((k) => x[k] !== undefined).sort().map((k) => JSON.stringify(k) + ":" + stable(x[k])).join(",") + "}" : JSON.stringify(x);
 // A visualization ({ id, answer } or { id, note_tile }), or an answer wrapped as { answer }: all of it but the id
-// and viz_guid, which ThoughtSpot renumbers on import, and every `fqn`, which an export holds only when asked
+// (ThoughtSpot renumbers ids on import) and viz_guid (kept when it is sent, but new for a tile rebuilt without
+// one, so it proves nothing about content), and every `fqn`, which an export holds only when asked
 // (export_fqn) and the sandbox and `ts tml export` ask differently.
 export const noFqn = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === "fqn" ? undefined : v)));
 export function fingerprint(v) {
@@ -49,7 +50,7 @@ function docs(j) {
   return out;
 }
 
-export function checkBackup(file, guid, type) {
+export function checkBackup(file, guid, type, { probe = false } = {}) {
   const stop = (m) => { console.error("--backup" + (file ? " " + file : "") + ": " + m); process.exit(2); };
   const how = "mkdir -p ~/.cache/ts-charts/backups && ts tml export " + guid + " --format JSON --profile <name> > ~/.cache/ts-charts/backups/" + guid + "-$(date +%Y%m%d-%H%M).json";
   if (!file) stop("missing; export the " + type + "'s TML first: " + how);
@@ -77,8 +78,11 @@ export function checkBackup(file, guid, type) {
   if (!d) stop("is not a TML export of " + type + " " + guid + " (its top-level guid and '" + type + "' must match)");
   let viz;
   if (type === "liveboard") {
-    if (!Array.isArray(d.liveboard.visualizations) || !d.liveboard.visualizations.length) stop("holds no visualizations; a Liveboard backup must be the full export");
-    viz = d.liveboard.visualizations.map(fingerprint);
+    // The intake's probe accepts a Liveboard with no visualizations yet (one Step 3 created, say): a commit to it
+    // needs no backup. As a commit's backup, an empty export proves nothing, so it is refused.
+    const empty = !Array.isArray(d.liveboard.visualizations) || !d.liveboard.visualizations.length;
+    if (empty && !probe) stop("holds no visualizations; a Liveboard backup must be the full export");
+    viz = empty ? [] : d.liveboard.visualizations.map(fingerprint);
   } else {
     if (!(typeof d.answer.search_query === "string" && Array.isArray(d.answer.tables) && d.answer.tables.length)) stop("holds no search or tables; an answer backup must be the full export");
     viz = [fingerprint({ answer: d.answer })];
@@ -93,6 +97,6 @@ export function checkBackup(file, guid, type) {
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const [file, guid, type] = process.argv.slice(2);
   if (!file || !GUID.test(guid || "") || !["liveboard", "answer"].includes(type)) { console.error("usage: node backup-check.mjs <file> <guid> liveboard|answer"); process.exit(2); }
-  const b = checkBackup(file, guid, type);
-  console.log(JSON.stringify({ ok: true, file: b.file, visualizations: b.viz.length }));
+  const b = checkBackup(file, guid, type, { probe: true });
+  console.log(JSON.stringify({ ok: true, file: b.file, visualizations: b.viz.length, ...(b.viz.length ? {} : { note: "the Liveboard has no visualizations yet; a commit to it needs no backup" }) }));
 }

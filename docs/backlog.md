@@ -495,7 +495,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
-| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, and the monthly date filter `LAST_N_PERIOD` with `oper: '='` | 2027-01-31 |
+| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17820,7 +17820,7 @@ A converted Model can be uncached without the user being told, and the invariant
 **Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
 open items #4 and #5, deferred here so the write path's live run could close the PR).
 
-**What.** Two things the skills' 2026-11-05 live run on ps-internal did not cover:
+**What.** Three things the skills' 2026-11-05 live run on ps-internal did not cover:
 
 1. Liveboard open item #4: of the 58 library charts, 48 moved to MayaCharts 0.18.1 and render
    in the local preview in every data mode. The live run put four of them on a cluster (all
@@ -17828,15 +17828,15 @@ open items #4 and #5, deferred here so the write path's live run could close the
    Liveboard and screenshotted.
 2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
    exclude the current month; that has not been confirmed on a screenshot.
-3. Liveboard open item #6 (third PR 711 review): a rebuilt tile is sent with its `viz_guid`, and
-   a multi-block run carries later blocks' tiles over unchanged. Both are mock-only; whether 26.11
-   keeps a sent `viz_guid` is not recorded.
+3. Liveboard open item #6 (third and fourth PR 711 reviews): every block but the last of a run
+   carries the spec tiles it does not write over unchanged, so a spec change commits every block.
+   Mock-only so far.
 
 **Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
 `cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
-days of a month, screenshot a monthly tile with the filter applied. For #6, retitle one tile and
-change another's search, run `--commit --all` with a small `--max`, and read back each rebuilt
-tile's `viz_guid`. Mark the items VERIFIED.
+days of a month, screenshot a monthly tile with the filter applied. For #6, retitle one tile outside
+the run and change another's search, run `--commit` on two other slugs with a small `--max`, and
+confirm every block commits. Mark the items VERIFIED.
 
 **Target:** 2027-01-31.
 

@@ -104,7 +104,8 @@ ts tml export <guid> --format JSON --profile <name> > ~/.cache/ts-charts/backups
 node <C>/helpers/backup-check.mjs ~/.cache/ts-charts/backups/<guid>-probe.json <guid> liveboard
 ```
 It prints `ok: true` only when the profile reaches this cluster and the Org that holds the Liveboard, its
-token works, and the user can export it. A profile that only exists (bound to another Org, or with an
+token works, and the user can export it. For a Liveboard with no visualizations yet (one Step 3 created, say)
+it adds a `note`: a commit to it needs no backup. A profile that only exists (bound to another Org, or with an
 expired token) would otherwise fail at the backup, after every tile is built. If there is no profile, or
 the probe fails, say so now with its message: offer to set one up or sign in again with
 `/ts-profile-thoughtspot`, or to build on a new Liveboard instead, which needs no backup. Creating a new
@@ -206,8 +207,10 @@ already on the Liveboard (blocks after the first in a run do this by themselves)
 checksum of the spec, because the spec sets every title, search and position: a slip in it is refused like a
 slip in chart code.
 
-Each block carries some charts (up to `--max` characters of chart code, default 60,000), plus the spec,
-the shared core and `patch.js`, about 60,000 characters more; the worked example packs into 6 blocks.
+Each block carries some charts (up to `--max` characters of chart code, default 20,000), plus the spec,
+the shared core and `patch.js`, about 60,000 characters more; the worked example packs into 17 blocks,
+the largest about 76 KB. Each block is pasted whole as one argument, and the largest pasted live was
+77 KB, so `liveboard-pack.mjs` warns about any block over that: lower `--max`, or send the chart alone.
 In the sandbox (`<L>/scripts/patch.js`) it checks every sha256, exports the Liveboard and **merges** into
 that export.
 
@@ -250,7 +253,8 @@ search (the tile it would have rebuilt stays as it is), a spec tile with no code
 conflict, tiles to adopt, a search that returns no columns, a Liveboard with any tile laid out without
 tabs (`layout.tiles`, alone or next to tabs; refused before anything is composed: move every tile into a
 tab in ThoughtSpot first, or build on a new Liveboard). Tiles that later blocks of the same run will
-send are `pending`, not problems.
+send are `pending`, and spec tiles outside the run that the last block will update are
+`heldForLastBlock`; neither is a problem.
 
 **Backup.** When the Liveboard has any visualization (the skill's own count too: a marked tile may be a
 user's copy), the sandbox refuses the commit unless the block was built with `--backup <file>`: a JSON TML
@@ -261,7 +265,8 @@ and the `liveboard` key with its visualizations; a YAML edoc, a stub, a cut-off 
 is refused), is under a
 day old (and not dated ahead), and its real path sits outside any git working tree. The block carries a
 fingerprint of every visualization in the backup under a checksum: a hash of the whole visualization, keys
-sorted, leaving out only its `id` and `viz_guid` (ThoughtSpot renumbers them on import) and every `fqn` (an
+sorted, leaving out only its `id` (ThoughtSpot renumbers ids on import), its `viz_guid` (kept when it is sent, as
+the 2026-11-05 round trip showed, but new for a tile rebuilt without one) and every `fqn` (an
 export holds them only when asked). The sandbox refuses the commit unless every visualization on the Liveboard
 now is among them, so a list of ids, another Liveboard's export, or an older export that differs in anything
 inside a visualization (a description, a column format, an axis setting) does not pass: when that refusal
@@ -272,9 +277,11 @@ before the commit. In later blocks of one `--commit` run, only the tiles an earl
 are exempt (owner marker, a slug an earlier block carried, a body exactly that library chart's, and that
 slug's spec position, where the block put it), since they were written after the backup. A user's copy of
 such a tile has the same code but sits elsewhere, so it is not exempt; everything else must be in the
-backup, so build every block of a run with the same `--backup`. A block leaves every tile a later block of
-the run carries (`pending`) exactly as it is, its title, search and code included, so a later block's
-refusal for the backup is never caused by an earlier block. Do not save the backup with `--parse`: ts-cli
+backup, so build every block of a run with the same `--backup`. Every block but the last leaves each spec
+tile it does not write exactly as it is, its title, search and code included: the tiles a later block
+carries (`pending`) and spec tiles outside the run (`heldForLastBlock`, whose title, search or marker the
+last block then updates). So a later block's refusal for the backup is never caused by an earlier block
+of the same run; a block pasted from another run, or after an edit in ThoughtSpot, can still be refused. Do not save the backup with `--parse`: ts-cli
 deletes every emoji from a parsed edoc, so it never matches, and `liveboard-pack.mjs` refuses that file.
 `--validate` reports `commitWouldRefuse` when a commit would be refused for the backup. Tell the
 user where it is; restore by importing it (`ts tml import`, or **Import TML** in ThoughtSpot). A new, empty
@@ -305,7 +312,8 @@ block carries keeps the title, search and code it had until that block writes it
    `roundTripLost`, `roundTripChanged`, `roundTripLayout` or `roundTripFailed` after a commit mean the import changed more than
    was composed: restore from the backup and tell the user. On a first build, tiles still to come in later blocks are listed
    under `pending`, not `problems`. `CHECKSUM MISMATCH` means the paste was altered: resend the block.
-3. Send only what changed. A new Liveboard needs every tile once (`--all`, several blocks).
+3. Send only what changed. A new Liveboard needs every tile once (`--all`, several blocks). A change to
+   another tile's title or search in the spec lands in the run's last block, so paste every block.
 
 **Before and after, check for drift:** `node <L>/scripts/liveboard-pack.mjs --liveboard <dir> --check`
 prints one read-only block that compares every tile on the Liveboard with the library. Expect

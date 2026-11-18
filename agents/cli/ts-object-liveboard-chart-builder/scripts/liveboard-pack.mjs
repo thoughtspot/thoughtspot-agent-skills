@@ -14,7 +14,8 @@
 //   --commit    ALL_OR_NONE import, then a round-trip proof
 //   --check     one read-only block that compares every tile on the Liveboard with the library (no charts sent)
 //   --all       every slug in <liveboard dir>/liveboard.spec.json
-//   --max       characters of chart code per block (default 60000); the fixed part, about 60,000 more, is on top
+//   --max       characters of chart code per block (default 20000); the fixed part, about 60,000 more, is on top.
+//               The default keeps the worked example's blocks under 77 KB, the largest pasted live.
 //   --list      print what would be sent, with sizes, and stop
 //   --core-ref  send the shared core as a checksum only: the sandbox takes it from a tile already on the Liveboard.
 //               Blocks after the first in one --commit run do this by themselves, since the first block puts the
@@ -54,7 +55,7 @@ const argv = process.argv.slice(2);
 const VALUED = new Set(["--max", "--liveboard", "--reuse", "--backup"]);
 const flags = new Set(argv.filter((a, i) => a.startsWith("--") && !VALUED.has(argv[i - 1])));
 const val = (k, d) => { const i = argv.indexOf(k); if (i < 0) return d; const v = argv[i + 1]; if (v === undefined || v.startsWith("--")) { console.error(k + " needs a value"); process.exit(2); } return v; };
-const MAX = Number(val("--max", 60000));
+const MAX = Number(val("--max", 20000));
 // A commit writes to a real Liveboard, so it never falls back to the worked example: name the folder.
 if (flags.has("--commit") && !argv.includes("--liveboard")) { console.error("--commit needs --liveboard <dir>: the folder whose liveboard.spec.json names the Liveboard to write"); process.exit(2); }
 const LB = path.resolve(val("--liveboard", path.join(skillDir, "liveboards", "amuzing-chart-samples")));
@@ -150,7 +151,7 @@ const src = (payload) => {
   out.push("core: " + (payload.core && payload.core.ref ? "{ ref: true, sha: " + JSON.stringify(payload.core.sha) + " }" : payload.core ? "{ js: " + raw(payload.core.js) + ",\ncss: " + raw(payload.core.css) + ",\nsha: " + JSON.stringify(payload.core.sha) + " }" : "null") + ",");
   out.push("tiles: {");
   for (const [slug, t] of Object.entries(payload.tiles)) if (t.ref) out.push(JSON.stringify(slug) + ": { ref: " + JSON.stringify(t.ref) + " },"); else out.push(JSON.stringify(slug) + ": { f: { html: " + raw(t.f.html) + ",\ncss: " + raw(t.f.css) + ",\njs: " + raw(t.f.js) + (t.f.lean ? ",\nlean: true" : "") + " },\nsha: " + JSON.stringify(t.sha) + " },");
-  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt") || flags.has("--adopt-by-position")) + ",", "adoptByPosition: " + JSON.stringify(flags.has("--adopt-by-position")) + ",", "relayout: " + JSON.stringify(flags.has("--relayout")) + ",", "runBody: " + JSON.stringify(payload.runBody || {}) + ",", "backup: " + JSON.stringify(backup) + ",", "backupSha: " + JSON.stringify(backupSha) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
+  out.push("},", "reuse: " + JSON.stringify(REUSE) + ",", "adopt: " + JSON.stringify(flags.has("--adopt") || flags.has("--adopt-by-position")) + ",", "adoptByPosition: " + JSON.stringify(flags.has("--adopt-by-position")) + ",", "relayout: " + JSON.stringify(flags.has("--relayout")) + ",", "runBody: " + JSON.stringify(payload.runBody || {}) + ",", "backup: " + JSON.stringify(backup) + ",", "backupSha: " + JSON.stringify(backupSha) + ",", "pending: " + JSON.stringify(payload.pending || []) + ",", "last: " + JSON.stringify(payload.last !== false) + ",", "bodySha: " + JSON.stringify(payload.bodySha), "}");
   return out.join("\n");
 };
 const block = (payload) => tpl.replace("'__MODE__'", () => JSON.stringify(MODE)).replace("__PAYLOAD__", () => src(payload));
@@ -175,5 +176,9 @@ if (size) blocks.push(cur);
 const coreRef = { ref: true, sha: core.sha };
 const needsCore = (b) => Object.values(b).some((t) => !(t.f && t.f.lean));
 const firstCore = blocks.findIndex(needsCore);
-console.log(blocks.map((t, i) => block({ spec, core: !needsCore(t) ? null : flags.has("--core-ref") || (i > firstCore && MODE === "commit") ? coreRef : core, tiles: t, bodySha: {}, runBody: MODE === "commit" ? Object.fromEntries(blocks.slice(0, i).flatMap((b) => Object.keys(b)).map((s) => [s, bodySha[s].js])) : {}, pending: blocks.slice(i + 1).flatMap((b) => Object.keys(b)) })).join("\n=====\n"));
+const out = blocks.map((t, i) => block({ spec, core: !needsCore(t) ? null : flags.has("--core-ref") || (i > firstCore && MODE === "commit") ? coreRef : core, tiles: t, bodySha: {}, runBody: MODE === "commit" ? Object.fromEntries(blocks.slice(0, i).flatMap((b) => Object.keys(b)).map((s) => [s, bodySha[s].js])) : {}, pending: blocks.slice(i + 1).flatMap((b) => Object.keys(b)), last: i === blocks.length - 1 }));
+console.log(out.join("\n=====\n"));
+// A block is pasted whole as one argument. The largest pasted live was about 77 KB; a bigger one may not get through.
+const LIVE_MAX = 77000, big = out.map((b, i) => [i + 1, b.length]).filter(([, n]) => n > LIVE_MAX);
+if (big.length) console.error("warning: block(s) " + big.map(([i, n]) => i + " (" + n + " characters)").join(", ") + " are larger than any block pasted live (about " + LIVE_MAX + "); lower --max, or send that chart in a block of its own");
 console.error(`\n[liveboard-pack] ${slugs.length} tile(s) in ${blocks.length} block(s), mode ${MODE}: ` + blocks.map((b) => Object.keys(b).join(" ")).join(" | "));
