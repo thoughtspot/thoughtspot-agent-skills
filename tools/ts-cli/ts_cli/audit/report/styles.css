@@ -758,6 +758,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .ftree-results .fref{padding:3px 8px;border:1px solid var(--hair);border-radius:12px;
   background:var(--surface);font-size:12px;}
 .ftree-layout{display:grid;grid-template-columns:minmax(0,1fr) clamp(260px,32%,400px);gap:12px;align-items:start;}
+.fgraph{height:calc(100vh - var(--topbar-h) - 180px);min-height:420px;border:1px solid var(--hair);border-radius:8px;background:var(--surface);}
 .fdetail{position:sticky;top:calc(var(--topbar-h) + 12px);max-height:calc(100vh - var(--topbar-h) - 24px);overflow:auto;background:var(--surface);
   border:1px solid var(--hair);border-radius:8px;padding:14px 16px;font-size:13px;}
 .fdetail-close{float:right;margin:-6px -8px 0 8px;border:0;background:none;color:var(--muted);font-size:20px;

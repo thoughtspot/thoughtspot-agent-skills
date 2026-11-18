@@ -17,7 +17,7 @@ import pytest
 
 import report_browser
 from ts_cli.audit import report
-from ts_cli.audit.report import REPORT_DIR, REPORT_VIEWS, assemble_page, render_report
+from ts_cli.audit.report import REPORT_DIR, REPORT_LIBS, REPORT_VIEWS, assemble_page, render_report
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "audit"
 needs_chrome = pytest.mark.skipif(report_browser.CHROME is None,
@@ -33,7 +33,7 @@ ROUTES = {
     "formulas": ("formulas", "No formulas in the audited Models"),  # JSON from before 3.2
     "datacache": ("datacache", "Not assessed"),  # JSON from before 3.23: no readiness
 }
-_PARTS = ["core.js"] + [script for _, script in REPORT_VIEWS] + ["boot.js"]
+_PARTS = ["core.js"] + REPORT_LIBS + [script for _, script in REPORT_VIEWS] + ["boot.js"]
 
 
 def _registrations(script: str) -> list:

@@ -17655,4 +17655,14 @@ disagree.
 1. Escape the guid in every `href` core.js builds (and check the views for the same pattern).
 2. A headless-Chrome test with a guid holding a quote and markup: the link renders as text, nothing runs.
 
+## BL-589 — nothing checks the audit report's vendored JavaScript for updates or advisories `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** pr-ready review of the formula graph (ts-audit 3.22.0).
+
+**What.** `tools/ts-cli/ts_cli/audit/vendor/` holds Cytoscape.js 3.30.2, @dagrejs/dagre 1.1.4 (with graphlib 2.2.4) and cytoscape-dagre 2.5.0, which run in every audit report that has a formula chain. `pip-audit` covers Python only, and the repo audit's angle 16 reads only `pyproject.toml` and requirements files (`.claude/workflows/repo-audit.js`, `.claude/rules/repo-audit.md`). Nothing looks for a newer release or an advisory.
+
+**Do.**
+1. Add `tools/ts-cli/ts_cli/audit/vendor/` (its README table) to angle 16's scope and the workflow's finder prompt: check each package's latest version and advisories.
+2. Or a small validator that warns when a vendored version is older than a set age.
+
 **Target:** 2027-01-31.

@@ -32,16 +32,18 @@ window.addEventListener("load",function(){setTimeout(function(){
   p.textContent=JSON.stringify({errors:window.__errs,text:clone.textContent,
     active:view?view.id:null,active_text:view?view.textContent:"",
     visible:view?view.innerText:"",extra:window.__extra===undefined?null:window.__extra});
-  document.body.appendChild(p);},50);});
+  document.body.appendChild(p);},__SETTLE__);});
 </script>"""
 
 
 def render(html_text: str, tmp_path, route: str = "", actions: str = "",
-           size: str = "1400,900") -> dict:
+           size: str = "1400,900", settle_ms: int = 50) -> dict:
     """`{"errors": [...], "text": "...", "active": <id of the shown view>, "active_text":
     "...", "visible": "...", "extra": ...}` for `html_text` opened at `#route`. `actions`,
     a script body, runs on load before the probe reads the page (a click, say). `size`
-    is the window, "width,height"."""
+    is the window, "width,height". `settle_ms` is how long after load the probe reads the
+    page: raise it when `actions` finish on a timer. Animation frames stop firing soon after
+    load under `--virtual-time-budget`, so an animation cannot be waited on here."""
     head, sep, rest = html_text.partition("<head>")
     assert sep, "no <head> in the report"
     body, sep2, tail = rest.rpartition("</body>")
@@ -49,7 +51,8 @@ def render(html_text: str, tmp_path, route: str = "", actions: str = "",
     page = tmp_path / "report_probe.html"
     act = (f'<script>window.addEventListener("load",function(){{{actions}}});</script>'
            if actions else "")
-    page.write_text(head + sep + _TRAP + body + act + _PROBE + sep2 + tail, encoding="utf-8")
+    probe = _PROBE.replace("__SETTLE__", str(int(settle_ms)))
+    page.write_text(head + sep + _TRAP + body + act + probe + sep2 + tail, encoding="utf-8")
     cmd = [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
            f"--user-data-dir={tmp_path / 'chrome-profile'}", f"--window-size={size}",
            "--virtual-time-budget=5000", "--dump-dom",
