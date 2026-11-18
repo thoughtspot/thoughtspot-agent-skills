@@ -293,7 +293,7 @@ data_warehouse_type, details: {type, configuration, ...}}`:
 - `details.configuration` is a **JSON string** of the connection's settings,
   credentials included. They were masked (`******`) in what the probe saw; the audit
   does not rely on that. It parses the string in the fetch, keeps
-  `{id, name, type, oauth, privatelink, parameterized}` and drops the rest, so no
+  `{id, name, type, oauth, oauth_m2m, privatelink, parameterized}` and drops the rest, so no
   configuration value is stored, logged, snapshotted or reported
   (`audit/connection_facts.py`; a test checks the context, the snapshot, the audit
   JSON, the report and the logs).

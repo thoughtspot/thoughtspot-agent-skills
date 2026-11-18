@@ -4893,12 +4893,19 @@ request or its re-authentication aborts the run once. Any other non-2xx (403, 40
 after the client's retries, a final 1xx or 3xx, …) or a non-JSON 2xx skips that Model's AI-instruction rules
 with a warning, and the Model reads `instructions_read: false` ("Could not be read" in the
 report). The custom calendar search (`calendars/search`, for P22) and the connection
-search (`connection/search` with details, for P24) are each one paged search per audit,
-handled the same way: a final 401, a 429 or a `requests` exception aborts once; any
-other failure is a warning, the data reads as unknown, and the rule judges no Model.
+search (`connection/search` with details, for P23 and P24) are each one paged search per
+audit, handled the same way: a final 401, a 429 or a `requests` exception aborts once;
+any other failure is a warning, the data reads as unknown, and the rule judges no Model.
+A page holding an entry that is not a connection fails the whole search the same way.
+The metadata header search, which covers every Model source, retries a refused request
+one object at a time. An object still refused is skipped with a warning naming its
+status and the path, so one unreadable source no longer ends the audit.
 The connection search answers each connection's configuration, credentials included:
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
-PrivateLink or a template variable, and keeps, logs and reports no configuration value.
+PrivateLink or a template variable (and whether the OAuth reading rests only on a
+`client_id` and `client_secret` pair, `oauth_m2m`), and keeps, logs and reports no
+configuration value. A refused connection search is reported by its status and path
+alone, never its response body.
 Any other exception is a bug and propagates unchanged. A snapshot captured before
 ts-cli 0.219.0 holds neither calendars nor connection settings, so replaying the P
 angle from it is refused (P22 and P24 read them): capture it again.

@@ -256,18 +256,22 @@ _FATAL_STATUSES = {401: "the credential was refused after re-authentication",
                    429: "rate limited — retry later"}
 
 
-def _read_answer(resp: Any, path: str) -> Tuple[Any, Optional[str]]:
+def _read_answer(resp: Any, path: str, body: bool = True) -> Tuple[Any, Optional[str]]:
     """`(decoded JSON, None)` for a 2xx JSON answer to a conditional fetch; `(None,
     reason)` for any other answer, the reason being `format_http_error`'s secret-free
     line (a final 1xx or 3xx too: `resp.ok` passes both) or the JSON error. A final 401
-    or a 429 (_FATAL_STATUSES) ends the run once, `SystemExit(1)`."""
+    or a 429 (_FATAL_STATUSES) ends the run once, `SystemExit(1)`. With `body=False`
+    the line names the status and path only, never the response body (format_http_error
+    quotes up to 500 characters of it): for a search whose answers hold credentials."""
     from ts_cli.client import format_http_error
+    line = format_http_error("POST", path, resp) if body \
+        else f"ThoughtSpot API {resp.status_code} on POST {path}"
     if resp.status_code in _FATAL_STATUSES:
-        print(f"{format_http_error('POST', path, resp)} — "
-              f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
+        print(f"{line} — {_FATAL_STATUSES[resp.status_code]}; aborting the audit",
+              file=sys.stderr)
         raise SystemExit(1)
     if not 200 <= resp.status_code < 300:
-        return None, format_http_error("POST", path, resp)
+        return None, line
     try:
         return resp.json(), None
     except ValueError as exc:  # this answer is not JSON
@@ -319,7 +323,7 @@ CALENDAR_KEYS = ("calendar_id", "calendar_name", "connection_id", "connection_na
 
 
 def _paged_fetch(client: Any, path: str, what: str, unchecked: str, warnings: list,
-                 search: Any) -> Optional[list]:
+                 search: Any, with_body: bool = True) -> Optional[list]:
     """`search(fetch_page)` — a ts_cli.paged_search pager — with each page POSTed to
     `path`; None, with a warning that `unchecked` was not checked, when it failed.
 
@@ -327,7 +331,9 @@ def _paged_fetch(client: Any, path: str, what: str, unchecked: str, warnings: li
     a `requests` exception raised by the request or its re-authentication, a final 401
     or a 429 aborts the run once; any other non-2xx, a non-JSON 2xx or an answer that
     cannot be paged makes the whole search "failed" (None), so no rule reads a partial
-    list as complete: a rule that requires the data then skips every Model."""
+    list as complete: a rule that requires the data then skips every Model.
+    `with_body` is `_read_answer`'s `body`: False keeps a response body out of every
+    line."""
     import requests
     from ts_cli.paged_search import PagedSearchError
 
@@ -336,7 +342,7 @@ def _paged_fetch(client: Any, path: str, what: str, unchecked: str, warnings: li
             resp = client.post(path, json=body, raise_for_status=False)
         except requests.RequestException as exc:
             _abort_on_request_failure(exc, f"{what} search")
-        answer, reason = _read_answer(resp, path)
+        answer, reason = _read_answer(resp, path, with_body)
         if reason is not None:
             raise PagedSearchError(reason)
         return answer
@@ -365,10 +371,11 @@ _CONNECTION_SEARCH_PATH = "/api/rest/2.0/connection/search"
 
 def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
     """Every connection's derived facts (`connection/search` with `include_details`,
-    100 a page; connection_facts.connection_facts: `{id, name, type, oauth, privatelink,
-    parameterized}`); None, with a warning, when the search failed (`_paged_fetch`).
-    Each configuration is parsed and dropped here, page by page: no value of it is
-    kept, logged or warned about."""
+    100 a page; connection_facts.connection_facts: `{id, name, type, oauth, oauth_m2m,
+    privatelink, parameterized}`); None, with a warning, when the search failed
+    (`_paged_fetch`). Each configuration is parsed and dropped here, page by page: no
+    value of it is kept, logged or warned about, and a refused search is reported by
+    its status and path alone, never its response body."""
     from ts_cli.paged_search import search_pages
     _log("Fetching connection settings...")
 
@@ -377,17 +384,19 @@ def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
                             {"include_details": True}, 100, id_key="id",
                             what="connection/search", items="connections")
     return _paged_fetch(client, _CONNECTION_SEARCH_PATH, "Connection",
-                        "connection settings", warnings, search)
+                        "connection settings", warnings, search, with_body=False)
 
 
 def _facts_page(page: Any) -> Any:
     """One `connection/search` page with each entry reduced to its facts at once, so no
-    configuration outlives the page; anything not a list is left for the pager to
-    refuse."""
+    configuration outlives the page. A page that is not a list of mappings is left for
+    the pager to refuse, whole: dropping one odd entry would leave a full page one
+    short, which the pager reads as the last page, so the rest of the list would be
+    lost unseen."""
     from ts_cli.audit.connection_facts import connection_facts
-    if not isinstance(page, list):
+    if not isinstance(page, list) or not all(isinstance(c, dict) for c in page):
         return page
-    return [f for f in (connection_facts(c) for c in page) if f is not None]
+    return [connection_facts(c) for c in page]
 
 
 def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
@@ -497,6 +506,72 @@ def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list
     return items
 
 
+_METADATA_SEARCH_PATH = "/api/rest/2.0/metadata/search"
+
+
+def _search_headers(client: Any, guids: list, warnings: list, batch_size: int = 50) -> list:
+    """The `metadata/search` rows (headers included) for `guids`, `batch_size` a
+    request.
+
+    One refused id refuses its whole request, and the ids asked for include every Model
+    source, a Table whose export failed among them, so a refused batch is retried one id
+    at a time; an id that still fails is skipped with a warning naming its status and
+    the path, never the response body. A batch whose answer is not JSON is retried the
+    same way. A final 401 or a 429 (_FATAL_STATUSES) ends the run once, and so does a
+    `requests` exception (_abort_on_request_failure): every later request would fail
+    alike."""
+    rows: list = []
+    for i in range(0, len(guids), batch_size):
+        batch = guids[i:i + batch_size]
+        page, failure = _search_header_page(client, batch)
+        if page is not None:
+            rows.extend(page)
+            continue
+        if len(batch) > 1:
+            _log(f"Warning: metadata search batch {i // batch_size + 1} {failure}; "
+                 f"retrying its {len(batch)} object(s) one at a time")
+        for guid in batch:
+            if len(batch) > 1:
+                page, failure = _search_header_page(client, [guid])
+            if page is not None:
+                rows.extend(page)
+                continue
+            msg = f"Metadata search {failure} for {guid}, so its header was not read"
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
+    return rows
+
+
+def _search_header_page(client: Any, guids: list) -> Tuple[Optional[list], str]:
+    """`(rows, "")` for one `metadata/search` request's answer, or `(None, why)` with
+    `why` its status and path only (a response body may quote anything)."""
+    import requests
+    try:
+        resp = client.post(_METADATA_SEARCH_PATH, json={
+            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in guids],
+            "include_headers": True,
+            "include_hidden_objects": True,
+            "record_size": -1,
+            "record_offset": 0,
+        }, timeout=300, raise_for_status=False)
+    except requests.RequestException as exc:
+        _abort_on_request_failure(exc, "Metadata search")
+    where = f"returned {resp.status_code} on POST {_METADATA_SEARCH_PATH}"
+    if resp.status_code in _FATAL_STATUSES:
+        print(f"ThoughtSpot API {resp.status_code} on POST {_METADATA_SEARCH_PATH} — "
+              f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
+        raise SystemExit(1)
+    if not 200 <= resp.status_code < 300:
+        return None, where
+    try:
+        data = resp.json()
+    except ValueError:
+        return None, f"{where}, not JSON"
+    page = data if isinstance(data, list) else \
+        (data.get("metadata", []) if isinstance(data, dict) else None)
+    return (page, "") if isinstance(page, list) else (None, f"{where}, not a list")
+
+
 def _source_guids(models: list) -> list:
     """Every string `model_tables[].fqn` of the exported Models, read defensively (a
     malformed Model is excluded later, not here)."""
@@ -577,20 +652,7 @@ def build_context(
     scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml
                             + _source_guids(models)))
     _log(f"Searching metadata for {len(scoped_guids)} scoped object(s)...")
-    metadata_results = []
-    batch_size = 50
-    for i in range(0, len(scoped_guids), batch_size):
-        batch = scoped_guids[i:i + batch_size]
-        resp = client.post("/api/rest/2.0/metadata/search", json={
-            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
-            "include_headers": True,
-            "include_hidden_objects": True,
-            "record_size": -1,
-            "record_offset": 0,
-        }, timeout=300)
-        data = resp.json()
-        page = data if isinstance(data, list) else data.get("metadata", [])
-        metadata_results.extend(page)
+    metadata_results = _search_headers(client, scoped_guids, warnings)
 
     _log("Fetching dependents...")
     from ts_cli.commands.metadata import (

@@ -6,16 +6,19 @@ connection as `{id, name, data_warehouse_type, details: {type, configuration, ..
 where `details.configuration` is a JSON string of the connection's settings (live probe,
 the SE demo cluster, 2026-11-18; ts-audit open-items #17). The configuration holds
 credentials. They were masked (`******`) in what the probe saw, but nothing here relies
-on that: `connection_facts` parses it, derives three booleans and drops it, so no
+on that: `connection_facts` parses it, derives four booleans and drops it, so no
 configuration value reaches the audit context, a snapshot, the audit JSON, a warning
 or a log line.
 
     oauth          a configuration key, at any depth, containing `oauth` (any case:
                    `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or both
                    `client_id` and `client_secret` (a Databricks OAuth M2M service
-                   principal; `oauth_m2m` says only that pair matched, which the product
-                   owner's team is to confirm counts as OAuth, open-items #18). Read from
-                   key names: the response has no auth-type field.
+                   principal). Read from key names: the response has no auth-type
+                   field. A key counts only when its value is set (_is_set): not null,
+                   false, empty, or text reading "false" or "null".
+    oauth_m2m      `oauth` rests only on the `client_id` and `client_secret` pair, which
+                   the product owner's team is to confirm counts as OAuth
+                   (open-items #18).
     privatelink    a `host` or `accountName` value (any case of key) containing
                    `privatelink` (any case): a Snowflake PrivateLink URL carries
                    `.privatelink.`. No configuration key names PrivateLink; the team is
@@ -24,7 +27,7 @@ or a log line.
                    (publish_plan.parse_variable_token, as connection parameterization
                    writes it).
 
-A configuration that is absent or does not parse as a JSON object leaves all three
+A configuration that is absent or does not parse as a JSON object leaves all four
 None: unknown, never "no". Pure; stdlib and publish_plan only.
 """
 from __future__ import annotations
@@ -60,25 +63,37 @@ def _configuration(raw: Any) -> Optional[dict]:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _entries(value: Any, depth: int = 0) -> Iterator[Tuple[Optional[str], Any]]:
-    """Every (key, value) pair in a configuration, nested mappings and lists walked;
-    a list's items come with the key of the list."""
+def _entries(value: Any, depth: int = 0,
+             key: Optional[str] = None) -> Iterator[Tuple[Optional[str], Any]]:
+    """Every (key, value) pair in a configuration, nested mappings and lists walked: a
+    mapping's entry comes with its value (a nested mapping or list included), then what
+    that value holds; a list's items come with the key of the list (`key`)."""
     if depth > _MAX_DEPTH:
         return
     if isinstance(value, dict):
-        for key, inner in value.items():
-            name = key if isinstance(key, str) else None
+        for name, inner in value.items():
+            name = name if isinstance(name, str) else None
+            yield name, inner
             if isinstance(inner, (dict, list)):
-                yield name, None
-                yield from _entries(inner, depth + 1)
-            else:
-                yield name, inner
+                yield from _entries(inner, depth + 1, name)
     elif isinstance(value, list):
         for inner in value:
             if isinstance(inner, (dict, list)):
-                yield from _entries(inner, depth + 1)
+                yield from _entries(inner, depth + 1, key)
             else:
-                yield None, inner
+                yield key, inner
+
+
+#: Text that sets nothing, case and edge spaces aside.
+_UNSET_TEXT = ("", "false", "null")
+
+
+def _is_set(value: Any) -> bool:
+    """A setting holds something: not null, false, zero or empty, and not text reading
+    "", "false" or "null"."""
+    if isinstance(value, str):
+        return value.strip().casefold() not in _UNSET_TEXT
+    return bool(value)
 
 
 def _flags(config: dict) -> Dict[str, bool]:
@@ -86,9 +101,11 @@ def _flags(config: dict) -> Dict[str, bool]:
     privatelink = parameterized = False
     for key, value in _entries(config):
         folded = (key or "").casefold()
-        keys.add(folded)
-        if folded in _HOST_KEYS and isinstance(value, str) \
-                and "privatelink" in value.casefold():
+        if _is_set(value):
+            keys.add(folded)
+        if not isinstance(value, str):
+            continue
+        if folded in _HOST_KEYS and "privatelink" in value.casefold():
             privatelink = True
         if parse_variable_token(value) is not None:
             parameterized = True
@@ -99,8 +116,9 @@ def _flags(config: dict) -> Dict[str, bool]:
 
 
 def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
-    """`{id, name, type, oauth, privatelink, parameterized}` for one `connection/search`
-    entry (see the module docstring), or None for an entry that is not a mapping. `type`
+    """`{id, name, type, oauth, oauth_m2m, privatelink, parameterized}` for one
+    `connection/search` entry (see the module docstring), or None for an entry that is
+    not a mapping. `type`
     is `data_warehouse_type`, else `details.type`; each text field None when absent."""
     if not isinstance(entry, dict):
         return None

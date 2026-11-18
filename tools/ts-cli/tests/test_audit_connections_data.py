@@ -3,7 +3,7 @@
 `connection/search` with `include_details` answers each connection with
 `details.configuration`, a JSON string of its settings, credentials included (live probe,
 the SE demo cluster, 2026-11-18; ts-audit open-items #17). The audit parses it in the
-fetch and keeps only `{id, name, type, oauth, privatelink, parameterized}`: no
+fetch and keeps only `{id, name, type, oauth, oauth_m2m, privatelink, parameterized}`: no
 configuration value may reach the context, a snapshot, the audit JSON, a warning or a
 log line. Fetched once per audit, paged, only when a selected rule declares it; None when
 not fetched or the search failed, as for `calendars`.
@@ -87,6 +87,29 @@ def test_privatelink_is_read_from_the_host_or_account_value(settings, privatelin
 ])
 def test_a_whole_template_token_is_a_parameterized_connection(settings, parameterized):
     assert connection_facts(_connection(0, **settings))["parameterized"] is parameterized
+
+
+@pytest.mark.parametrize("settings, oauth", [
+    ({"OAuth2ClientId": ""}, False), ({"oauth_enabled": False}, False),
+    ({"oauth_enabled": "false"}, False), ({"oauth_enabled": " FALSE "}, False),
+    ({"OAUTH": None}, False), ({"oauth": "null"}, False), ({"oauth": {}}, False),
+    ({"oauth": []}, False), ({"client_id": "x", "client_secret": ""}, False),
+    ({"client_id": None, "client_secret": "y"}, False),
+    ({"oauth_enabled": True}, True), ({"oauth": {"client": "x"}}, True),
+    ({"OAuth2Secret": "******"}, True),
+])
+def test_an_oauth_setting_counts_only_when_it_is_set(settings, oauth):
+    assert connection_facts(_connection(0, **settings))["oauth"] is oauth
+
+
+@pytest.mark.parametrize("settings, privatelink", [
+    ({"host": ["x.privatelink.example"]}, True),
+    ({"accountName": [["acme.privatelink.example"]]}, True),
+    ({"hosts": ["x.privatelink.example"]}, False),
+    ({"host": [{"name": "x.privatelink.example"}]}, False),
+])
+def test_a_lists_items_come_with_the_lists_key(settings, privatelink):
+    assert connection_facts(_connection(0, **settings))["privatelink"] is privatelink
 
 
 def test_facts_keep_ids_names_and_type_only():
@@ -205,11 +228,37 @@ def test_a_failed_search_is_a_warning_and_reads_as_not_fetched(answer, reason):
                               "checked") and reason in warning
 
 
+def test_a_refused_search_warns_with_its_status_and_path_never_its_body(capsys):
+    """An error body can quote anything, a configuration value included."""
+    refused = _response(403, {"error": f"denied: {SECRETS[0]}"})
+    refused.text = f'{{"error": "denied: {SECRETS[0]}"}}'
+    ctx = build_context(Client(lambda body: refused), ["m1"], {"connections"})
+    [warning] = [w for w in ctx.warnings if "Connection search" in w]
+    assert warning == ("Connection search failed, so connection settings were not checked: "
+                       f"ThoughtSpot API 403 on POST {SEARCH}")
+    assert SECRETS[0] not in "".join(capsys.readouterr())
+
+
+def test_a_page_with_an_entry_that_is_not_a_connection_fails_the_search():
+    """Dropping the odd entry left a full page one short, which read as the last page:
+    150 connections paged as 99, silently. The search fails instead, so no rule reads a
+    partial list as complete."""
+    many = [_connection(i, f"C{i}") for i in range(150)]
+    many[5] = "not a connection"
+    ctx = build_context(Client(_paged(many)), ["m1"], {"connections"})
+    assert ctx.connections is None
+    [warning] = [w for w in ctx.warnings if "Connection search" in w]
+    assert warning.startswith("Connection search failed") and "not a list of connections" in warning
+
+
 @pytest.mark.parametrize("status", [401, 429])
 def test_a_final_401_or_429_aborts_the_run(status, capsys):
+    refused = _response(status, {"error": SECRETS[0]})
+    refused.text = f'{{"error": "{SECRETS[0]}"}}'
     with pytest.raises(SystemExit):
-        build_context(Client(lambda body: _response(status, {})), ["m1"], {"connections"})
-    assert f"ThoughtSpot API {status} on POST {SEARCH}" in capsys.readouterr().err
+        build_context(Client(lambda body: refused), ["m1"], {"connections"})
+    err = capsys.readouterr().err
+    assert f"ThoughtSpot API {status} on POST {SEARCH}" in err and SECRETS[0] not in err
 
 
 def test_a_requests_exception_aborts_once_naming_the_type_only(capsys):

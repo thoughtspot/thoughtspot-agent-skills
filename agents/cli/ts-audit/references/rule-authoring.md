@@ -313,11 +313,11 @@ whichever category selected each rule:
   `requires: [calendars]` skips every Model after a failed search rather than read "no
   calendars" (P22).
 - `connections` is each connection's derived settings, one paged `connection/search`
-  (with details) per audit: `{id, name, type, oauth, privatelink, parameterized}`, built
-  in the fetch by `audit/connection_facts.py`. The search answers each connection's
-  configuration, credentials included; the fetch keeps no value of it, so neither may a
-  rule, a field or a test. Null when not fetched or the search failed, as for
-  `calendars` (P24).
+  (with details) per audit: `{id, name, type, oauth, oauth_m2m, privatelink,
+  parameterized}`, built in the fetch by `audit/connection_facts.py`. The search
+  answers each connection's configuration, credentials included; the fetch keeps no
+  value of it, so neither may a rule, a field or a test. Null when not fetched or the
+  search failed, as for `calendars` (P24; P23 falls back to the metadata header).
 - Neither key is overridable per profile.
 
 **The read-declaration gate.** Each derived field (`@register(name, uses=...)`), code rule
