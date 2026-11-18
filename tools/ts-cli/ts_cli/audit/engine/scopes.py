@@ -229,6 +229,12 @@ def _has_ai_instructions(item: Item, ctx) -> bool:
         else bool(ctx.ai_instructions)
 
 
+def _calendars_fetched(item: Item, ctx) -> bool:
+    """The connections' calendars were fetched (one search per audit, so for every item
+    or none): None is "not fetched, or the search failed", never "no calendars"."""
+    return ctx.calendars is not None
+
+
 def _set_looked_up(item: Item, ctx) -> bool:
     """A Set's consumers were looked up cleanly iff its guid keys `dependents`
     (context._add_set_dependents): absence is "unknown", never "no consumers"."""
@@ -241,6 +247,7 @@ def _set_looked_up(item: Item, ctx) -> bool:
 #   table_tml            a Model holds TML for at least one of its tables
 #   ai_instructions      the Model's guid was looked up (a failed fetch leaves no entry)
 #   sets                 the Set's consumers were looked up
+#   calendars            the calendar search ran and answered (context._fetch_calendars)
 #   metadata, dependents always: fetched for every scoped object, so a missing entry
 #                        means "none", which a rule may legitimately report on
 AVAILABILITY: Dict[str, Callable[[Item, Any], bool]] = {
@@ -251,6 +258,7 @@ AVAILABILITY: Dict[str, Callable[[Item, Any], bool]] = {
     "ai_instructions": _has_ai_instructions,
     "answers": lambda item, ctx: root(item)["scope"] == "answer" or bool(ctx.answers),
     "sets": _set_looked_up,
+    "calendars": _calendars_fetched,
 }
 
 
