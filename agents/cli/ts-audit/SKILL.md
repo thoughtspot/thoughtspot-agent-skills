@@ -402,7 +402,7 @@ ts audit run \
   | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/report.html
 ```
 
-The report is a single self-contained HTML file with six views. Its size grows with the
+The report is a single self-contained HTML file with seven views. Its size grows with the
 estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each formula's definition to the Formulas view, which added 7.5% on a synthetic estate of 20 Models with 40 short formulas each (25 to 70 characters); long expressions, a many-armed CASE say, cost more.
 
 | View | What it shows |
@@ -413,6 +413,7 @@ estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each form
 | **Object Map** | Table reuse (Sankey), model overlaps, dependencies (bar charts) |
 | **Cleanup** | Orphan models, stale objects with checkbox selection + clipboard copy |
 | **Formulas** | Each Model's formula dependency tree: every tree starts at a formula nothing else uses (or where a circular chain is entered) and opens down to the table columns and parameters, marking each formula MEASURE or ATTRIBUTE, a hidden helper (hidden, and used by other formulas), used once and hidden (a formula H16 reported: a candidate to paste into the one formula that uses it; a report built without H16 tags none) or hidden and unused (a cleanup candidate), and how many formulas use it. An open formula shows its definition beneath it. Clicking a formula, column or parameter opens a panel beside the tree (on a narrow screen, a sheet at the foot of the page) with its definition as written (every reference a link) and, when it uses a formula H16 reported, the definition again with each such helper pasted in, in parentheses, all the way down; what it uses, what uses it and everything that depends on it; following a link opens the tree down to that formula. A search box finds columns and parameters by name, then formulas by name, then formulas by definition, showing the first 50 and counting the rest. The tree is one tab stop: the arrow keys move through it, and Escape closes the definition. Roots open one level; Expand all opens about 2,000 more rows per press. Reached from the sidebar (a Model picker) or a Model's scorecard |
+| **Data Cache** | Which audited Models ThoughtSpot's Data Cache can serve: one row per Model with its readiness (Can use, Can't use, Warning, or Not assessed when the Performance rules did not run), the reasons (a custom calendar, P19; a SQL pass-through formula, P20; a semantic query Model, P21; a connection that defines custom calendars, P22, a warning), and the calendars its columns use, code-based or custom, with the custom calendars registered on its connections. Filter pills (All, Can use, Can't use, Warning) and a search box over names, reasons and calendars narrow the list; each Model links to its scorecard. The readiness is read off the same fields those rules judge by, so the view and the findings agree. A report from JSON written before 3.23.0 shows every Model as Not assessed |
 
 Open the HTML file in the user's default browser. It has no external dependencies
 and can be shared directly via email or Slack.

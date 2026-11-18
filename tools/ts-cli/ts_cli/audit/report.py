@@ -34,6 +34,7 @@ REPORT_VIEWS: List[tuple] = [
     ("objectmap", "views/objectmap.js"),
     ("cleanup", "views/cleanup.js"),
     ("formulas", "views/formulas.js"),
+    ("datacache", "views/datacache.js"),
 ]
 
 
@@ -204,10 +205,34 @@ def _compact_ai(ai: dict) -> dict:
     return out
 
 
+def _compact_data_cache(dc: dict) -> dict:
+    """A Model's `data_cache` (audit/data_cache.py), compacted for the Data Cache view:
+    `s` its readiness; `r` the reasons, {c rule, b 1 when it blocks else 0, l label, i
+    items}; `k` the calendars its columns use, {n column, c calendar, u 1 when custom, t
+    1 when set on the Table column}; `cc` the custom calendars on its connections, {n
+    connection, k calendar names}, or null when they were not fetched; `na` the checks
+    not made for it."""
+    conn = dc.get("connection_calendars")
+    return {
+        "s": dc.get("readiness") or "unknown",
+        "r": [{"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
+               "l": r.get("label", ""), "i": list(r.get("items") or [])}
+              for r in dc.get("reasons") or []],
+        "k": [{"n": k.get("column", ""), "c": k.get("calendar", ""),
+               "u": 1 if k.get("kind") == "custom" else 0,
+               "t": 1 if k.get("set_on") == "table" else 0}
+              for k in dc.get("calendars_in_use") or []],
+        "cc": None if conn is None else [{"n": c.get("connection", ""),
+                                          "k": list(c.get("calendars") or [])} for c in conn],
+        "na": list(dc.get("not_assessed") or []),
+    }
+
+
 def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:
     """One corpus Model, compacted: its stats, tables, and — when present — its AI
-    analysis, Spotter readiness score (`rs`: score and level), ERD and formula tree
-    (`pasteable`: the (Model guid, formula name) pairs H16 reported)."""
+    analysis, Spotter readiness score (`rs`: score and level), ERD, formula tree
+    (`pasteable`: the (Model guid, formula name) pairs H16 reported) and Data Cache
+    readiness (`dc`)."""
     key = (m.get("name", ""), m.get("guid", ""))
     cm = {
         "mi": model_index.get(key, -1),
@@ -229,6 +254,8 @@ def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> 
     if isinstance(m.get("formula_tree"), dict):  # absent from JSON written before 3.2
         cm["ft"] = _compact_tree(m["formula_tree"],
                                  {n for g, n in pasteable if g == m.get("guid")})
+    if isinstance(m.get("data_cache"), dict):  # absent from JSON written before 3.23
+        cm["dc"] = _compact_data_cache(m["data_cache"])
     return cm
 
 
