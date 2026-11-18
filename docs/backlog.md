@@ -134,7 +134,7 @@ are roughly ordered by value÷effort.
 | BL-222 | Seven `ts snowflake` subcommands never invoked by a test; `exec` is uncovered in CI entirely | next `commands/snowflake.py` change |
 | BL-223 | `rely`/`cardinality` modelled as equivalent-then-exclusive; every one-to-many join drops a recommended optimization, and the one-to-many restrictions are undocumented | next Databricks pass |
 | BL-158 | Extract the cascade-drop retry loop into shared import machinery — qlik/powerbi/sisense hand-walk a transitive closure | with BL-217 part 2 |
-| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 closed; V1/V2 advanced. Three residuals: V1's sentinel question, V2's round-trip + `is_browser`, V4 in full** | next se-thoughtspot session |
+| BL-186 | Live-verify the OSSIE-mapping TML property questions — **V3 and V4 closed; V1's sentinel question answered by the 2026-11-18 ruling. One residual: V2's round-trip + `is_browser`** | next se-thoughtspot session |
 | ~~BL-189~~ | ~~`ts tml export --parse` crashes on a null `edoc` — ready-to-fix null guard~~ | DONE (2026-07-31) |
 | ~~BL-187~~ | ~~Live-verify the two contested OSSIE product-gap claims (G7, G13)~~ | DONE (2026-07-30) |
 | ~~BL-276~~ | ~~`_extract_joins` has no filter for object-graph-cached join duplicates~~ | DONE (2026-09-28, ts-cli v0.152.0) — fixed as a value dedup; the subtree exclusion this item proposed was disproven |
@@ -491,6 +491,8 @@ are roughly ordered by value÷effort.
 | BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
 | BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
 | BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
+| BL-595 | Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it | 2027-01-31 |
+| BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 
 ### Tier 4 — Deferred
 
@@ -6976,7 +6978,12 @@ closed, and one is untouched:**
 | **V4** | **UNTOUCHED, and now negatively evidenced twice** | `is_mandatory_token_filter`: **0** of 500 documents. A second and far larger survey has failed to find it, which means a survey is the wrong instrument — a property that never appears cannot be shown to round-trip. Closing V4 requires **constructing** an object that sets the flag and round-tripping it, exactly as this entry's original step describes. Unchanged and still the highest-stakes of the four, because it fails open |
 
 **What remains of this entry, restated (revised 2026-09-01).** V1's sentinel-versus-name question
-(one API read) and V2's round-trip leg plus `is_browser` (needs a constructed object). **V3 is
+(one API read) and V2's round-trip leg plus `is_browser` (needs a constructed object).
+
+**V1 answered 2026-11-18.** The product owner ruled that `calendar`, `fiscal` and `default` name
+code-based calendars, and any other value a connection-scoped custom calendar. So the literal
+`calendar` is the code-based default, not a calendar named "calendar", and no API read is needed.
+V2 is what remains. **V3 is
 done, and V4 is now closed — see below.**
 
 **V4 CLOSED 2026-09-01 — will not be verified.** Per ThoughtSpot domain review,
@@ -17687,6 +17694,8 @@ disagree.
 - A formula such as `start_of_week ( [d] , RetailCal )` names a custom calendar, but P19 reads only `properties.calendar`. Does that formula stop Data Cache?
 - P21 also fires on a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`, which goes beyond the `AGGREGATE` measures the product owner named. Is that Model uncached too?
 - A Model source that is a View (header type `AGGR_WORKSHEET`) names no connection, so P23 cannot type it and the Model reads Not assessed: 2 of 19 Models in the 2026-11-18 sample. Can Data Cache serve a Model built on a View?
+- P28 matches an RLS rule's `table_paths` ids to the ids its expression names exactly, case included. Does ThoughtSpot match them without case? If so, P28 should too.
+- A custom calendar could be named `Fiscal`, `default` or `calendar`, and P19 would read it as code-based. Can a custom calendar take such a name, and if so, how does TML tell it from the code-based one?
 
 **Do.**
 1. Get the team's answer on each of the seven points in open-items #18.
@@ -17714,7 +17723,7 @@ disagree.
 
 - PT2 requires a `sql_string_op` pass-through for `UPPER`, `LOWER`, `TRIM`, `LTRIM`, `RTRIM` and `REPLACE`, and PT1 calls scalar pass-throughs reliable (`agents/shared/schemas/ts-model-conversion-invariants.md`). P20 says any pass-through stops Data Cache.
 - `ts-convert-from-tableau` promotes Tableau parameters (I10), and `ts-convert-from-powerbi` rebuilds time intelligence with parameters. P26 says a parameter in a formula stops Data Cache. (`ts-convert-from-databricks-mv` emits no parameters: its coverage matrix leaves them to the user, L3.)
-- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. So do `ts-convert-from-looker`, for a view with `derived_table: { sql: ... }` (Step 5b); `ts-convert-from-databricks-mv`, when the user picks option T for a subquery source (Step 5T); and `ts-convert-from-snowflake-sv`, for an inline `ALIAS as (SELECT ...)` table (coverage matrix row 37). P27 says a SQL View stops Data Cache.
+- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. `ts-convert-from-looker` does too, for a view with `derived_table: { sql: ... }` (Step 5b). So does `ts-convert-from-databricks-mv`, when the user picks option T for a subquery source (Step 5T). `ts-convert-from-snowflake-sv` documents a SQL View path for an inline `ALIAS as (SELECT ...)` table (coverage matrix row 37) but does not emit one yet (BL-595). P27 says a SQL View stops Data Cache.
 - `ts-convert-from-dbt` carries the user's `ts_rls_rules` and `ts_calendar_type` values through to ThoughtSpot. An RLS rule beyond its Table's own columns stops Data Cache (P28), and so does a custom calendar name (P19).
 
 A converted Model can be uncached without the user being told, and the invariants still call these the right choice.
@@ -17752,4 +17761,28 @@ A converted Model can be uncached without the user being told, and the invariant
 2. If none does, make `add-tables` require `--auth-type` (or read it another way), and update the README and `thoughtspot-connection.md`. If one does, record which and keep the code.
 
 **Target:** 2027-01-31.
+
+## BL-595 — Snowflake SV coverage row 37 claims an inline `ALIAS as (SELECT ...)` table becomes a SQL View, but no code or step does it `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (BL-592).
+
+**What.** `ts-convert-from-snowflake-sv`'s coverage matrix row 37 maps an inline `ALIAS as (SELECT ...)` table in `tables()` to ThoughtSpot SQL View TML referenced from `model_tables[]`. The parser recognises the form (`sv_parse.py`, `is_subquery`), but nothing builds the SQL View: `sv_introspect.py` skips subquery tables, `sv_build_model.py` has no SQL View path, and it raises when a relationship touches the alias ("not in tables map"). So a Semantic View with such a table cannot convert, though the matrix says it can.
+
+**Do.**
+1. Mark row 37 a gap (with this item as its exemption), or build the path: emit the SQL View TML, add it to the tables map and reference it from the Model.
+2. Either way, a test that converts a Semantic View with an inline query table and checks the result against the row.
+
+**Target:** 2027-01-31.
+
+## BL-596 — the Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** review of the Data Cache readiness rules (calendar wording sweep).
+
+**What.** `ts-databricks-properties.md` and `ts-to-databricks-rules.md` list `ai_context` as a bare name, not `properties.ai_context` on a column. The Unmapped Report sample in `ts-databricks-properties.md` calls it model-level, and its `synonyms` and `description` rows say Metric Views support neither ("MV v0.1 has no description field"), which contradicts the file's own v1.1 description and synonym rows.
+
+**Do.**
+1. Name the property by its path in every row, and say what level it lives at.
+2. Rewrite the sample report against v1.1, or drop the rows v1.1 now maps.
+
+**Target:** 2027-02-28.
 
