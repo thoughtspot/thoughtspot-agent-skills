@@ -2,8 +2,11 @@
 and the report's Data Cache view.
 
 ThoughtSpot's Data Cache cannot serve a Model with a custom calendar (P19), a SQL
-pass-through formula (P20) or a semantic query measure (P21); a connection that defines
-custom calendars is a warning (P22). The readiness is decided by the very rules that
+pass-through formula (P20), a semantic query measure (P21), a source on neither
+Snowflake nor Databricks (P23), a connection using OAuth, PrivateLink or a template
+variable (P24), a parameterized Table (P25), a parameter in a formula (P26), a SQL View
+(P27) or an RLS rule reaching beyond its Table's own columns (P28); a connection that
+defines custom calendars is a warning (P22). The readiness is decided by the very rules that
 report it: for each one that ran, the item passes the rule's own `requires` and
 `where` (scopes.has_data, predicates.passes — what its `each` mode checks before it
 fires), and the reasons list the rule's derived field. So the view and the findings
@@ -11,12 +14,13 @@ cannot disagree.
 
     readiness   blocked   a blocking rule fires (whatever else ran)
                 unknown   no blocking rule fires, but one of them did not run (an
-                          --angles without P)
+                          --angles without P) or could not judge the Model (P24 when
+                          the connection search failed)
                 warning   no blocking rule fires and all ran; P22 fires
                 ready     no rule fires and every blocking rule ran
     reasons     [{rule, effect: "blocks" | "warns", label, items}]
     not_assessed  the rules that did not run, or could not judge this Model (P22 when
-                the calendar search failed)
+                the calendar search failed, P24 when the connection search did)
     calendars_in_use      each column that sets a calendar: {column, calendar, kind
                           ("code-based" | "custom"), set_on ("model" | "table")}
     connection_calendars  the custom calendars on the Model's connections:
@@ -35,6 +39,12 @@ CHECKS = (
     ("P20", "blocks", "SQL pass-through"),
     ("P21", "blocks", "Semantic query Model"),
     ("P22", "warns", "Connection defines custom calendars"),
+    ("P23", "blocks", "Source not Snowflake or Databricks"),
+    ("P24", "blocks", "Connection uses OAuth, PrivateLink or a variable"),
+    ("P25", "blocks", "Parameterized Table"),
+    ("P26", "blocks", "Parameter in a formula"),
+    ("P27", "blocks", "SQL View"),
+    ("P28", "blocks", "RLS rule beyond its Table's columns"),
 )
 BLOCKING = tuple(rule for rule, effect, _ in CHECKS if effect == "blocks")
 

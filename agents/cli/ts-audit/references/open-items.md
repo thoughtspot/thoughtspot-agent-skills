@@ -281,6 +281,49 @@ that key would hold. And the paging guard against a server that ignores
 
 ---
 
+### #17 — Connection search details, and how P23 and P24 read a connection — VERIFIED 2026-11-18
+
+Live-probed, read-only, on the SE demo cluster on 2026-11-18, for P23 and P24.
+
+`POST /api/rest/2.0/connection/search` with `{"record_size": 200, "record_offset": 0,
+"include_details": true}` answered 200 connections, so the audit pages it as it pages
+the calendar search (until a short page, 100 at a time). Each item is `{id, name,
+data_warehouse_type, details: {type, configuration, ...}}`:
+
+- `details.configuration` is a **JSON string** of the connection's settings,
+  credentials included. They were masked (`******`) in what the probe saw; the audit
+  does not rely on that. It parses the string in the fetch, keeps
+  `{id, name, type, oauth, privatelink, parameterized}` and drops the rest, so no
+  configuration value is stored, logged, snapshotted or reported
+  (`audit/connection_facts.py`; a test checks the context, the snapshot, the audit
+  JSON, the report and the logs).
+- **There is no auth-type field.** OAuth shows only in setting names: `OAuth2ClientId`
+  and `OAuth2Secret` (Snowflake OAuth), `oauth_pvt_key`, and `client_id` with
+  `client_secret` on a Databricks connection (an OAuth M2M service principal). So P24
+  is evidence `heuristic`.
+- **No setting names PrivateLink.** P24 reads it from the `host` or `accountName`
+  value: a Snowflake PrivateLink URL carries `.privatelink.`. The value is read to
+  derive the flag and not kept.
+- A template variable is a setting whose whole value is a `${var}` token.
+
+The Table metadata headers carry `dataSourceType`: `RDBMS_SNOWFLAKE` on 73 of 92 headers
+in the sample (Model headers carry none). P23 reads it.
+
+**Not verified.**
+- `RDBMS_DATABRICKS` as Databricks' `dataSourceType`: the Databricks connection's
+  `data_warehouse_type` is `DATABRICKS`, and `details.type` follows `RDBMS_<TYPE>`, but
+  no Databricks Table header was in the sample. P23 accepts it.
+- That a Model's SQL View headers carry a `type` of `SQL_VIEW`: the audit keeps no SQL
+  View TML (only `table` documents), and until 3.23.0 it fetched no header for a SQL
+  View either, so P1 and D8 could not see one a Model used. P27 reads the header, and
+  falls back to the row's `metadata_subtype`, as `migrate/discover.py` does.
+- What P28 counts as "a formula" in an RLS rule. Table TML has no formulas, so P28
+  reads it as any function call other than `ts_var` (`upper`, `contains`, `if`, and a
+  null test such as `isnull`, which S12 advises for an outer join). Confirm with the
+  product owner that a null test stops Data Cache.
+
+---
+
 ## Phase 3 — Visualization Layer (future)
 
 ### #13 — Liveboard viz fingerprinting — UNVERIFIED

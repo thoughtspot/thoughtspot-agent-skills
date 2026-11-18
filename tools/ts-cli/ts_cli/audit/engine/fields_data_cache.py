@@ -1,4 +1,5 @@
-"""Derived fields for Data Cache readiness: P19-P22 and the report's Data Cache view.
+"""Derived fields for Data Cache readiness: P19-P22 and the report's Data Cache view
+(P23-P28's are in fields_data_cache_sources.py, on the helpers here).
 
 ThoughtSpot's Data Cache cannot serve some Models. The product owner's rules
 (2026-11-18), one field each:
@@ -168,19 +169,48 @@ def _semantic_query_measures(item: dict, ctx: Any) -> Any:
 
 # ── P22: connections defining custom calendars ──────────────────────────────
 
-def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
-    """The connections the Model's Tables are on, each once in Table order: `{"name",
-    "id"}` — the name from the Table TML's `table.connection.name` (absent on Falcon
-    and system Tables, which have no connection), the id from the Table's metadata
-    header `dataSourceId` when it carries one (none of 93 headers on the SE demo cluster
-    did, 2026-11-18: the name carries the match; used only when present)."""
+def model_sources(doc: dict, ctx: Any) -> List[Dict[str, Any]]:
+    """The Model's sources, each `model_tables` fqn once, in order: `{"name", "fqn",
+    "table", "header"}` — its Table TML body (`ctx.tables` by fqn; None for a SQL View,
+    whose TML the audit does not keep, or a Table whose export failed) and its metadata
+    header ({} when none). Cached per Model."""
+    return cached("model_sources", doc, _model_sources, doc, ctx)
+
+
+def _model_sources(doc: dict, ctx: Any) -> List[Dict[str, Any]]:
     headers = cached("headers_by_id", ctx, _headers_by_id, ctx)
+    mts = (doc.get("model") or {}).get("model_tables") if isinstance(doc, dict) else None
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for mt in (mts if isinstance(mts, list) else []):
+        fqn = mt.get("fqn") if isinstance(mt, dict) else None
+        if not isinstance(fqn, str) or not fqn or fqn in seen:
+            continue
+        seen.add(fqn)
+        found = (ctx.tables or {}).get(fqn)
+        body = found.get("table") if isinstance(found, dict) else None
+        out.append({"name": _text(mt.get("name")) or _text(mt.get("alias")) or fqn,
+                    "fqn": fqn, "table": body if isinstance(body, dict) else None,
+                    "header": headers.get(fqn) or {}})
+    return out
+
+
+def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
+    """The connections the Model's sources are on, each once in source order: `{"name",
+    "id"}`. The name is the Table TML's `table.connection.name` (a Falcon or system Table
+    has no connection block, and so no connection); for a source with no Table TML (a
+    SQL View), its metadata header's `dataSourceName`. The id is the header's
+    `dataSourceId` when it carries one (none of 93 headers on the SE demo cluster did,
+    2026-11-18: the name carries the match; used only when present)."""
     out: List[Dict[str, Optional[str]]] = []
     seen = set()
-    for table in ctx.tables_for_model(doc):
-        conn = tml.mapping(table.get("table") or {}, "connection")
-        name = conn.get("name") if isinstance(conn.get("name"), str) else None
-        header = headers.get(table.get("guid")) or {}
+    for source in model_sources(doc, ctx):
+        header = source["header"]
+        if source["table"] is not None:
+            name = tml.mapping(source["table"], "connection").get("name")
+        else:
+            name = header.get("dataSourceName")
+        name = name if isinstance(name, str) and name else None
         cid = header.get("dataSourceId") if isinstance(header.get("dataSourceId"), str) else None
         key = ((name or "").strip().casefold(), cid)
         if (name or cid) and key not in seen:
@@ -190,12 +220,24 @@ def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
 
 
 def _headers_by_id(ctx: Any) -> dict:
+    """Metadata header by object id; a header without a `type` takes its row's
+    `metadata_subtype` (how `metadata/search` may report a LOGICAL_TABLE's subtype)."""
     out = {}
     for entry in ctx.metadata or []:
         header = (entry.get("metadata_header") or entry) if isinstance(entry, dict) else {}
         if isinstance(header, dict) and isinstance(header.get("id"), str):
+            if not header.get("type") and isinstance(entry.get("metadata_subtype"), str):
+                header = dict(header, type=entry["metadata_subtype"])
             out.setdefault(header["id"], header)
     return out
+
+
+def connection_matches(conn: Dict[str, Optional[str]], name: Any, cid: Any) -> bool:
+    """Whether a calendar's or connection entry's (`name`, `cid`) is `conn`
+    (model_connections): the same id, or the same name, case and edge spaces aside."""
+    wanted = (conn["name"] or "").strip().casefold()
+    return bool((conn["id"] and cid == conn["id"])
+                or (wanted and _text(name).strip().casefold() == wanted))
 
 
 def connection_calendars(doc: dict, ctx: Any) -> Optional[List[Dict[str, Any]]]:
@@ -209,12 +251,9 @@ def connection_calendars(doc: dict, ctx: Any) -> Optional[List[Dict[str, Any]]]:
         return None
     out = []
     for conn in model_connections(doc, ctx):
-        wanted = (conn["name"] or "").strip().casefold()
         names = sorted({_text(c.get("calendar_name")) or _text(c.get("calendar_id"))
-                        for c in calendars if isinstance(c, dict) and (
-                            (conn["id"] and c.get("connection_id") == conn["id"])
-                            or (wanted and _text(c.get("connection_name")).strip().casefold()
-                                == wanted))})
+                        for c in calendars if isinstance(c, dict) and connection_matches(
+                            conn, c.get("connection_name"), c.get("connection_id"))})
         if names:
             out.append({"connection": conn["name"] or conn["id"], "calendars": names})
     return out

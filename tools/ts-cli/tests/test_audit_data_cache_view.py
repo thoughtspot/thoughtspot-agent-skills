@@ -20,7 +20,7 @@ from ts_cli.audit.report import compact_payload, render_report
 needs_chrome = pytest.mark.skipif(report_browser.CHROME is None,
                                   reason="headless Chrome not installed")
 col, cal = fx.build_cache_column, fx.build_cache_calendar
-CACHE_RULES = ("P19", "P20", "P21", "P22")
+CACHE_RULES = ("P19", "P20", "P21", "P22", "P23", "P24", "P25", "P26", "P27", "P28")
 
 
 def _model(guid, name, columns=(), formulas=(), fqn=fx.CACHE_TABLE):
@@ -29,9 +29,12 @@ def _model(guid, name, columns=(), formulas=(), fqn=fx.CACHE_TABLE):
                                     "columns": list(columns), "formulas": list(formulas)}}
 
 
-def _estate(calendars=(cal("Retail 445", connection="Warehouse B", connection_id="k-b"),)):
+def _estate(calendars=(cal("Retail 445", connection="Warehouse B", connection_id="k-b"),),
+            connections=()):
     """Four Models: one on a custom calendar (blocked), one on a connection that
-    defines custom calendars (warning), one ready, one with a pass-through formula."""
+    defines custom calendars (warning), one ready, one with a pass-through formula. Its
+    connections were searched (none with a blocking setting) unless `connections` is
+    None."""
     a = {"guid": "t-a", "table": {"name": "ORDERS", "connection": {"name": "Warehouse A"},
                                   "columns": [{"name": "SHIP", "properties": {
                                       "calendar": "Retail 445"}}]}}
@@ -52,7 +55,8 @@ def _estate(calendars=(cal("Retail 445", connection="Warehouse B", connection_id
     ]
     return make_context(models=models, tables={"t-a": a, "t-b": b, "t-c": c},
                         model_guids=[m["guid"] for m in models],
-                        calendars=None if calendars is None else list(calendars))
+                        calendars=None if calendars is None else list(calendars),
+                        connections=None if connections is None else list(connections))
 
 
 def _dc(data):
@@ -97,6 +101,26 @@ def test_a_failed_calendar_search_leaves_the_warning_unchecked_not_the_model_unk
     assert dc["m-blocked"]["readiness"] == "blocked"
 
 
+def test_a_failed_connection_search_leaves_an_unblocked_model_unknown():
+    """P24 blocks, so a Model it could not judge is not "ready": the connection search
+    failed, and nothing else stops it."""
+    dc = _dc(run_audit(None, [], ["P"], ctx=_estate(connections=None)))
+    assert dc["m-ready"]["readiness"] == "unknown" and dc["m-ready"]["not_assessed"] == ["P24"]
+    assert dc["m-warn"]["readiness"] == "unknown"
+    assert dc["m-blocked"]["readiness"] == "blocked"
+
+
+def test_the_new_limitations_block_with_their_reasons():
+    ctx = _estate(connections=[fx.build_cache_connection("Warehouse C", oauth=True)])
+    ctx.metadata = [{"metadata_header": fx.build_cache_header("t-c", source="RDBMS_REDSHIFT",
+                                                              connection="Warehouse C")}]
+    dc = _dc(run_audit(None, [], ["P"], ctx=ctx))["m-ready"]
+    assert dc["readiness"] == "blocked"
+    assert [(r["rule"], r["label"], r["items"]) for r in dc["reasons"]] == [
+        ("P23", "Source not Snowflake or Databricks", ["ORDERS (RDBMS_REDSHIFT)"]),
+        ("P24", "Connection uses OAuth, PrivateLink or a variable", ["Warehouse C (OAuth)"])]
+
+
 def test_a_blocked_model_also_lists_its_warning():
     ctx = _estate(calendars=[cal("Retail 445")])
     dc = _dc(run_audit(None, [], ["P"], ctx=ctx))["m-blocked"]
@@ -111,6 +135,11 @@ def test_a_blocked_model_also_lists_its_warning():
     fx.perf_sql_passthrough_formulas, fx.perf_sql_passthrough_named_only,
     fx.perf_semantic_query_measures, fx.perf_summed_measures,
     fx.perf_connection_custom_calendars, fx.perf_connection_without_custom_calendars,
+    fx.perf_non_cloud_sources, fx.perf_cloud_sources, fx.perf_connection_oauth_privatelink,
+    fx.perf_connection_service_account, fx.perf_parameterized_table,
+    fx.perf_fixed_table_names, fx.perf_parameter_formula,
+    fx.perf_parameter_named_in_a_literal, fx.perf_sql_view_source, fx.perf_tables_only,
+    fx.perf_rls_beyond_own_columns, fx.perf_rls_own_columns_only,
 ])
 @pytest.mark.parametrize("profile", ["general", "spotter"])
 def test_the_view_and_the_findings_agree(build, profile):
@@ -221,6 +250,10 @@ def test_a_run_without_p_and_a_failed_search_say_so(tmp_path):
     assert "did not run" in without["visible"]
     failed = report_browser.render(_page(calendars=None), tmp_path, "datacache")
     assert failed["errors"] == [] and "Not checked: connection calendars" in failed["visible"]
+    no_settings = report_browser.render(_page(connections=None), tmp_path, "datacache")
+    assert no_settings["errors"] == []
+    assert "Not checked: connection settings" in no_settings["visible"]
+    assert "Not assessed" in no_settings["visible"]
 
 
 @needs_chrome

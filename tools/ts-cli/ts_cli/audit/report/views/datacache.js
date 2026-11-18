@@ -5,7 +5,7 @@
    [{n column, c calendar, u 1 when custom, t 1 when set on the Table column}], `cc` the
    custom calendars registered on its connections [{n connection, k calendar names}],
    or null when they were not fetched, and `na` the checks not made for it. The
-   readiness is read off the fields the rules P19-P22 judge by, so it says what their
+   readiness is read off the fields the rules P19-P28 judge by, so it says what their
    findings say. JSON written before this view has no `dc`: its Models read "Not
    assessed". */
 var DC_STATES = {
@@ -17,7 +17,8 @@ var DC_STATES = {
 var DC_FILTERS = [["all", "All"], ["ready", "Can use"], ["blocked", "Can’t use"],
   ["warning", "Warning"]];
 var DC_CHECKS = {P19: "custom calendars", P20: "SQL pass-through", P21: "semantic query",
-  P22: "connection calendars"};
+  P22: "connection calendars", P23: "source types", P24: "connection settings",
+  P25: "Table variables", P26: "formula parameters", P27: "SQL Views", P28: "RLS rules"};
 var DC_NO_DATA = {s: "unknown", r: [], k: [], cc: null, na: []};
 var _dcFilter = "all";
 var _dcSearch = "";
@@ -58,14 +59,17 @@ function dcReasonsHtml(row){
     html += '<div class="dc-reason'+(r.b ? ' dc-blocks' : '')+'"><span class="dc-rule">'+esc(r.c)+
       '</span> '+esc(r.l)+': '+esc((r.i || []).join(", "))+'</div>';
   });
+  /* What was not checked: every check (none ran, or the report predates them), or some
+     (a check that could not judge the Model, as when a search failed). */
   var missed = (dc.na || []).map(function(c){ return DC_CHECKS[c] || c; });
-  if(missed.length && row.state !== "unknown"){
+  if(row.dc === DC_NO_DATA){
+    html += '<div class="dc-muted">This report predates the Data Cache checks: re-run '+
+      '`ts audit run` with the Performance angle.</div>';
+  } else if(missed.length >= Object.keys(DC_CHECKS).length){
+    html += '<div class="dc-muted">The Performance checks that decide it did not run '+
+      '(run with --angles P).</div>';
+  } else if(missed.length){
     html += '<div class="dc-muted">Not checked: '+esc(missed.join(", "))+'</div>';
-  }
-  if(row.state === "unknown"){
-    html += '<div class="dc-muted">'+(row.dc === DC_NO_DATA ?
-      'This report predates the Data Cache checks: re-run `ts audit run` with the Performance angle.' :
-      'The Performance checks that decide it did not run (run with --angles P).')+'</div>';
   }
   return html || '<span class="dc-muted">None</span>';
 }
@@ -133,9 +137,11 @@ function buildDataCache(D){
     return;
   }
   c.appendChild(el("div", "ftree-intro", "Which audited Models ThoughtSpot’s Data Cache "+
-    "can serve. A custom calendar, a SQL pass-through formula or a semantic query Model "+
-    "stops it; a connection that defines custom calendars is a warning, since a query "+
-    "that picks one at run time is not cached."));
+    "can serve. Any of these stops it: a custom calendar, a SQL pass-through formula, a "+
+    "semantic query Model, a source other than Snowflake or Databricks, an OAuth, "+
+    "PrivateLink or parameterized connection or Table, a parameter in a formula, a SQL "+
+    "View, or an RLS rule beyond its Table\u2019s own columns. A connection that defines "+
+    "custom calendars is a warning, since a query that picks one at run time is not cached."));
   var table = el("table", "cleanup-table dc-table");
   table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';

@@ -738,9 +738,10 @@ def _lowered_formula_text(model: dict) -> str:
 
 
 # The D (Data Modeling) and H (Human Readiness) fields, H16's and the Data Cache rules'
-# (P19-P22) live in their own modules; importing them here registers them wherever
+# (P19-P28) live in their own modules; importing them here registers them wherever
 # FIELDS is read (the engine, and the catalog gate's known names).
 from ts_cli.audit.engine import fields_data  # noqa: E402,F401
 from ts_cli.audit.engine import fields_human  # noqa: E402,F401
 from ts_cli.audit.engine import fields_single_use  # noqa: E402,F401
 from ts_cli.audit.engine import fields_data_cache  # noqa: E402,F401
+from ts_cli.audit.engine import fields_data_cache_sources  # noqa: E402,F401

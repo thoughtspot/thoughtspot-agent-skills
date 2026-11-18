@@ -491,6 +491,157 @@
     fires: {fixture: perf_connection_custom_calendars, severity: LOW}
     silent: {fixture: perf_connection_without_custom_calendars}
 
+# More Data Cache limitations (product owner, 2026-11-18): each stops Data Cache, as
+# P19-P21 do, and folds into the same readiness.
+- id: P23
+  title: Source other than Snowflake or Databricks stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a source on neither Snowflake nor Databricks, which Data Cache cannot
+    serve: a Table whose TML has no connection (a Falcon or system Table), or a source
+    whose metadata header `dataSourceType` is not `RDBMS_SNOWFLAKE` or
+    `RDBMS_DATABRICKS` (any case). A source whose header gives no type is not judged.
+    The finding lists each source with its type.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@non_cloud_sources", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: tables on a source other than Snowflake or Databricks: {@non_cloud_sources}"
+  remediation: >-
+    Move the listed tables to a Snowflake or Databricks connection so Data Cache can
+    serve the Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_non_cloud_sources, severity: MEDIUM}
+    silent: {fixture: perf_cloud_sources}
+
+- id: P24
+  title: Connection with OAuth, PrivateLink or a template variable stops Data Cache
+  evidence: heuristic
+  description: >-
+    A Model on a connection that uses OAuth, PrivateLink or a template variable, which
+    Data Cache cannot serve. Read from the connection's settings: OAuth when a setting
+    name contains `oauth`, or names both `client_id` and `client_secret`; PrivateLink
+    when its host or account name contains `privatelink`; a template variable when a
+    setting is wholly a `${var}` token. Setting names, not a declared type, so a
+    heuristic. A connection is matched to the Model's Tables by name, any case. Skipped
+    when the connection search failed. The finding lists each connection and what it
+    uses.
+  categories: [P]
+  requires: [model_tml, connections]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@connection_cache_blockers", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: connections that use OAuth, PrivateLink or a template variable: {@connection_cache_blockers}"
+  remediation: >-
+    Check each listed connection's settings first, since they are read from setting
+    names and the host. Then switch it to a service account without PrivateLink or
+    template variables so Data Cache can serve the Model, or accept that the Model stays
+    uncached.
+  examples:
+    fires: {fixture: perf_connection_oauth_privatelink, severity: MEDIUM}
+    silent: {fixture: perf_connection_service_account}
+
+- id: P25
+  title: Parameterized Table stops Data Cache
+  evidence: fact
+  description: >-
+    A Model on a Table whose database, schema or table name (`db`, `schema`,
+    `db_table`) is wholly a `${var}` template variable, which Data Cache cannot serve.
+    A value that only contains a token is a fixed name. P24 reports a template variable
+    in a connection's settings. The finding lists each Table and its parameterized
+    fields.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@parameterized_tables", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: tables whose database, schema or table name is a template variable: {@parameterized_tables}"
+  remediation: >-
+    Give each listed Table a fixed database, schema and table name so Data Cache can
+    serve the Model, or accept that the Model stays uncached (a published Model needs
+    its variables).
+  examples:
+    fires: {fixture: perf_parameterized_table, severity: MEDIUM}
+    silent: {fixture: perf_fixed_table_names}
+
+- id: P26
+  title: Parameter in a formula stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a formula that reads a Model parameter (`[<parameter name>]` outside a
+    quoted literal, as A9 reads it), which Data Cache cannot serve. The finding lists
+    the formulas.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@parameter_formula_names", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: formulas read a parameter: {@parameter_formula_names}"
+  remediation: >-
+    Replace each parameter with a fixed value or a filter so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_parameter_formula, severity: MEDIUM}
+    silent: {fixture: perf_parameter_named_in_a_literal}
+
+- id: P27
+  title: SQL View stops Data Cache
+  evidence: fact
+  description: >-
+    A Model built on a SQL View, which Data Cache cannot serve: a source whose metadata
+    header type is `SQL_VIEW`. The audit keeps no SQL View TML, so the header is what
+    says so; it fetches the header of every Model source. P1 reports the same SQL Views
+    for blocking filter pushdown. The finding lists the SQL Views.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@sql_view_sources", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: SQL Views: {@sql_view_sources}"
+  remediation: >-
+    Replace each SQL View with a Table over a warehouse view so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_sql_view_source, severity: MEDIUM}
+    silent: {fixture: perf_tables_only}
+
+- id: P28
+  title: RLS rule beyond its Table's own columns stops Data Cache
+  evidence: fact
+  description: >-
+    A Model on a Table with an RLS rule that Data Cache cannot apply: one reaching
+    another table's column or a join (a referenced `table_paths` entry on another table
+    or with a `join_path`), calling a formula function (any call but `ts_var`), or
+    calling a SQL pass-through function. Read outside quoted literals. A rule comparing
+    only its own Table's columns with ts_ variables is fine. The finding lists each rule
+    and what it uses.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@rls_rules_beyond_own_table", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: RLS rules reaching beyond their Table's own columns: {@rls_rules_beyond_own_table}"
+  remediation: >-
+    Rewrite each listed rule to compare only its Table's own columns with ts_
+    variables so Data Cache can serve the Model, or accept that the Model stays
+    uncached.
+  examples:
+    fires: {fixture: perf_rls_beyond_own_columns, severity: MEDIUM}
+    silent: {fixture: perf_rls_own_columns_only}
+
 # Ids used before the catalog existed. Recorded as retired so the history gate holds
 # them: the gate reads only catalog history, and "the next free number" would hand
 # them out again.

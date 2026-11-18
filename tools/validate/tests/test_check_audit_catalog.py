@@ -49,8 +49,8 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 "engine/fields_data.py", "engine/fields_human.py",
                 "engine/fields_single_use.py",
                 # stdlib and the shared formula reference grammar only: the Data Cache
-                # rules' fields (P19-P22, 2026-11).
-                "engine/fields_data_cache.py",
+                # rules' fields (P19-P28, 2026-11).
+                "engine/fields_data_cache.py", "engine/fields_data_cache_sources.py",
                 "engine/code_rules.py", "engine/code_rules_human.py",
                 "engine/code_rules_security.py", "engine/bands.py", "engine/scopes.py",
                 "engine/predicates.py", "engine/messages.py", "engine/memo.py",
@@ -70,7 +70,10 @@ GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py", "spotql_ops.py",
                        # A9's @parameter_formula_names reads formulas outside quoted
                        # literals with the shared splitter (2026-11).
                        "formula_translate/__init__.py", "formula_translate/refs.py",
-                       "formula_translate/context.py")
+                       "formula_translate/context.py",
+                       # P25's template-variable reading (parse_variable_token): stdlib
+                       # only, and publish_apply, which publish_plan re-exports (2026-11).
+                       "publish_plan.py", "publish_apply.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:
