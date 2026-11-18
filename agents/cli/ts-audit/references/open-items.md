@@ -317,8 +317,10 @@ data_warehouse_type, details: {type, configuration, ...}}`:
   2026-11-18, read-only: the search does not show one.** None of the 1,815 connections
   it returned held a token. One connection's metadata header carries
   `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each
-  of its six properties, but the search returned none of them as a token. Only key
-  names and counts were read; no value was printed or kept. **So P24 reads the header
+  of its six properties, but the search returned none of them as a token. Each of
+  those six came back as the id of a CONNECTION_PROPERTY template variable instead
+  (checked against `template/variables/search`). Only key names, value shapes and
+  counts were read; no value was printed or kept. **So P24 reads the header
   instead.** The connections fetch also pages a `metadata/search` of CONNECTION headers.
   It keeps, per connection, whether `parameterizedConnection` or `isParameterized` is
   true (`parameterized_connection`). Run live on the same cluster, the audit's fetch
