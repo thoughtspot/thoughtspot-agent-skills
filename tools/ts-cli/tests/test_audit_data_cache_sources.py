@@ -405,6 +405,18 @@ def test_an_equals_null_test_is_a_reading_to_confirm(expr, readiness, lead):
     assert _readiness(ctx)[0] == readiness
 
 
+def test_a_path_id_matched_only_without_case_leaves_p28_not_assessed():
+    """BL-590: whether ThoughtSpot matches `table_paths` ids without case is open. A rule
+    naming `teams_1` where the path is `TEAMS_1` (another table) is not judged, rather
+    than read as an own-column rule."""
+    ctx = fx.build_cache_ctx(connections=CLEAN, headers=SNOWFLAKE_HEADER, table={
+        "rls_rules": {"table_paths": [fx.CACHE_OWN_PATH,
+                                      {"id": "TEAMS_1", "table": "TEAMS", "column": ["M"]}],
+                      "rules": [{"name": "By team", "expr": "[teams_1::M] = ts_username"}]}})
+    assert _field(ctx, "@rls_rules_beyond_own_table") == []
+    assert _readiness(ctx) == ("unknown", ["P28"])
+
+
 def test_a_null_test_rule_is_listed_with_its_trade_off():
     ctx = fx.build_cache_ctx(table={"rls_rules": {
         "table_paths": [fx.CACHE_OWN_PATH],

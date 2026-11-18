@@ -44,7 +44,7 @@ def _connection(i, name="Warehouse A", **settings):
     return {"id": f"conn-{i}", "name": name, "data_warehouse_type": "SNOWFLAKE",
             "details": {"type": "RDBMS_SNOWFLAKE",
                         "configuration": _config(**settings) if settings else _config(
-                            user="svc", password=SECRETS[0])}}
+                            accountName="acme", user="svc", password=SECRETS[0])}}
 
 
 SECRET_CONNECTIONS = [
@@ -63,8 +63,8 @@ SECRET_CONNECTIONS = [
     ({"OAuth2ClientId": "x"}, True), ({"oauth_pvt_key": "x"}, True),
     ({"OAUTH": "x"}, True), ({"client_id": "x", "client_secret": "y"}, True),
     ({"Client_ID": "x", "CLIENT_SECRET": "y"}, True),
-    ({"client_id": "x"}, False), ({"user": "u", "password": "p"}, False),
-    ({"auth": {"oauth_scope": "x"}}, True), ({"note": "uses oauth"}, False),
+    ({"client_id": "x"}, False), ({"user": "u", "password": "p", "host": "h"}, False),
+    ({"auth": {"oauth_scope": "x"}}, True), ({"note": "uses oauth", "host": "h"}, False),
 ])
 def test_oauth_is_read_from_key_names_at_any_depth(settings, oauth):
     assert connection_facts(_connection(0, **settings))["oauth"] is oauth
@@ -75,7 +75,8 @@ def test_oauth_is_read_from_key_names_at_any_depth(settings, oauth):
     ({"host": "acme.PRIVATELINK.snowflakecomputing.com"}, True),
     ({"ACCOUNTNAME": "x.privatelink.y"}, True),
     ({"host": "acme.snowflakecomputing.com"}, False),
-    ({"note": "privatelink"}, False), ({"host": 12}, False),
+    # no host or account name to read it from: unknown, not "no"
+    ({"note": "privatelink", "client_id": "x"}, None), ({"host": 12, "user": "u"}, None),
 ])
 def test_privatelink_is_read_from_the_host_or_account_value(settings, privatelink):
     assert connection_facts(_connection(0, **settings))["privatelink"] is privatelink
@@ -106,11 +107,23 @@ def test_an_oauth_setting_counts_only_when_it_is_set(settings, oauth):
 @pytest.mark.parametrize("settings, privatelink", [
     ({"host": ["x.privatelink.example"]}, True),
     ({"accountName": [["acme.privatelink.example"]]}, True),
-    ({"hosts": ["x.privatelink.example"]}, False),
-    ({"host": [{"name": "x.privatelink.example"}]}, False),
+    ({"host": ["acme.example"]}, False),
+    # no host key, or a host that holds no text: unknown
+    ({"hosts": ["x.privatelink.example"]}, None),
+    ({"host": [{"name": "x.privatelink.example"}]}, None),
 ])
 def test_a_lists_items_come_with_the_lists_key(settings, privatelink):
     assert connection_facts(_connection(0, **settings))["privatelink"] is privatelink
+
+
+@pytest.mark.parametrize("configuration", [
+    "{}", '{"user": "u", "password": "p"}', '{"note": "x", "warehouse": "w"}'])
+def test_a_configuration_without_the_keys_the_readings_use_is_unknown(configuration):
+    """A parsed `{}`, or settings naming no host, account name, OAuth or client key, say
+    nothing about OAuth or PrivateLink: unknown, never "no"."""
+    facts = connection_facts({"id": "c", "name": "N", "details": {"configuration": configuration}})
+    assert (facts["oauth"], facts["oauth_m2m"], facts["privatelink"],
+            facts["parameterized"]) == (None, None, None, None)
 
 
 def test_facts_keep_ids_names_and_type_only():

@@ -321,6 +321,27 @@ def test_the_calendars_column_says_which_sources_were_not_read(tmp_path):
 
 
 @needs_chrome
+def test_a_formula_calendar_reads_to_confirm_and_is_listed_from_its_formula(tmp_path):
+    """open-items #18 point 5: Ready Sales gains a formula naming a custom calendar. It
+    reads To confirm, not Can use, and its calendars column shows the formula's
+    calendar, not "None set"."""
+    ctx = _estate()
+    ctx.models[2]["model"]["formulas"] = [{"id": "formula_Wk", "name": "Week Start",
+                                           "expr": "start_of_week ( [ORDERS::D] , RetailCal )"}]
+    page = render_report(run_audit(None, [], ["P"], ctx=ctx))
+    shown = report_browser.render(page, tmp_path, "datacache", actions=_CELLS)
+    assert shown["errors"] == []
+    row = {name: (reasons, calendars) for name, reasons, calendars in shown["extra"]}
+    reasons, calendars = row["Ready Sales"]
+    assert "Week Start: calendar RetailCal in a formula (to confirm)" in reasons
+    assert reasons.count("to confirm") == 1
+    assert "RetailCal (custom): Week Start (in a formula)" in calendars
+    assert "None set" not in calendars
+    states = report_browser.render(page, tmp_path, "datacache", actions=_ROWS)["extra"]
+    assert ["Ready Sales", "confirm"] in states
+
+
+@needs_chrome
 def test_to_confirm_is_said_once_per_reason(tmp_path):
     page = render_report(run_audit(None, [], ["P"], ctx=_to_confirm()))
     shown = report_browser.render(page, tmp_path, "datacache", actions=_CELLS)

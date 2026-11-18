@@ -23,10 +23,11 @@ ThoughtSpot's Data Cache cannot serve a Model with any of these (product owner,
 The sources come from fields_data_cache.model_sources: each `model_tables` fqn's Table
 TML and metadata header. The audit keeps no SQL View TML, so a SQL View is seen by its
 header, which `build_context` fetches for every Model source. The report's readiness
-(audit/data_cache.py) reads these same fields, and two helpers that are not rule
-fields: what P23 and P24 could not read for a Model (unjudged_sources,
-unjudged_connections), which leaves it not assessed rather than ready, and whether all
-P24 reads is to confirm (connection_blockers_to_confirm).
+(audit/data_cache.py) reads these same fields, and helpers that are not rule fields:
+what P23, P24 and P28 could not read for a Model (unjudged_sources,
+unjudged_connections, unjudged_rls), which leaves it not assessed rather than ready,
+and whether all P24 or P28 reads is to confirm (connection_blockers_to_confirm,
+rls_rules_to_confirm).
 
 Registered into the same registry as engine/fields.py, which imports this module at its
 end. Same import constraint as fields.py: Python 3.9, no third-party imports at module
@@ -243,7 +244,9 @@ _PASSTHROUGH_NAME = re.compile(r"(?i)^sql_\w+_op$")
 #: A null-test call, in the spellings S12 and S15 read as a call (`isnull`, `is_null`;
 #: fields_data._ISNULL_CALL).
 _NULL_TEST_NAME = re.compile(r"(?i)^is_?null$")
-#: The other null test S12 and S15 accept, `[X] = null` (not `!=`, `<=` or `>=`).
+#: The other null-test form S12 and S15 accept, `[X] = null`. Their pattern
+#: (fields_data._ISNULL_CALL) matches `= null` after any character, so it also reads
+#: `!= null`, `<= null` and `>= null` as a null branch; P28 reads only `= null` itself.
 _EQUALS_NULL = re.compile(r"(?i)(?<![!<>=])=\s*null\b")
 #: How P28 names a null test: the call S12 advises so an outer join keeps its unmatched
 #: rows, which stops Data Cache all the same (product owner, 2026-11-18).
@@ -306,11 +309,22 @@ def _call_problems(code: str) -> set:
 
 
 def unjudged_rls(item: dict, ctx: Any) -> List[str]:
-    """Model: the sources whose RLS rules P28 cannot read (unread_sources); none for a
-    Model bypassing RLS, which applies no rule wherever it is defined."""
+    """Model: the sources whose RLS rules P28 cannot read: unread_sources, and a Table
+    with a rule naming a `table_paths` id that matches one only without case (whether
+    ThoughtSpot matches ids without case is open, BL-590). None for a Model bypassing
+    RLS, which applies no rule wherever it is defined."""
     if tml.mapping(item.get("obj") or {}, "properties").get("is_bypass_rls"):
         return []
-    return unread_sources(item, ctx)
+    out = unread_sources(item, ctx)
+    for source in model_sources(item.get("doc") or {}, ctx):
+        doc = (ctx.tables or {}).get(source["fqn"]) if source["fqn"] else None
+        paths = _paths_by_id(doc)
+        folded = {pid.casefold() for pid in paths}
+        if any(pid not in paths and pid.casefold() in folded
+               for rule in _rls_rules_of(doc)
+               for pid in _referenced_path_ids([{"expr": _code(rule.get("expr"))}])):
+            out.append(source["name"])
+    return out
 
 
 def _paths_by_id(table_doc: Any) -> Dict[str, dict]:

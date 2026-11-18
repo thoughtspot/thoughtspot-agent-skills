@@ -40,9 +40,10 @@ function dcRows(){
 function dcCalendarLines(dc){
   var order = [], columns = Object.create(null);
   (dc.k || []).forEach(function(k){
-    var key = k.c + (k.u ? " (custom)" : " (code-based)");
+    var key = k.c + (k.u === 2 ? " (code-based or custom, to confirm)" :
+      k.u ? " (custom)" : " (code-based)");
     if(!columns[key]){ columns[key] = []; order.push(key); }
-    columns[key].push(k.n + (k.t ? " (from its Table)" : ""));
+    columns[key].push(k.n + (k.t ? " (from its Table)" : k.f ? " (in a formula)" : ""));
   });
   return order.map(function(key){ return key + ": " + columns[key].join(", "); });
 }

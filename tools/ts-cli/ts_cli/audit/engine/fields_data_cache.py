@@ -4,7 +4,11 @@
 ThoughtSpot's Data Cache cannot serve some Models. The product owner's rules
 (2026-11-18), one field each:
 
-    P19  @custom_calendar_columns       a column on a table-based custom calendar (blocks)
+    P19  @custom_calendar_columns       a column on a table-based custom calendar (blocks);
+                                        to confirm: a formula naming a custom calendar,
+                                        and a code-based value that a custom calendar on
+                                        the connection is also named (open-items #18,
+                                        BL-590); @custom_calendar_lead begins the message
     P20  @sql_passthrough_formulas      a formula calling a SQL pass-through function (blocks)
     P21  @semantic_query_measures       a measure aggregated AGGREGATE: a semantic query
                                         Model, uncached by design (blocks); a measure only
@@ -16,9 +20,10 @@ ThoughtSpot's Data Cache cannot serve some Models. The product owner's rules
                                         time, and that query is not cached (warns)
 
 The report's per-Model readiness (audit/data_cache.py) reads these same fields, so the
-Data Cache view and the findings cannot disagree. It also reads missing_tables: a source
-Table whose TML is not in the context (its export failed) leaves P19, P21, P25 and P28
-not assessed for the Model, since each reads that Table.
+Data Cache view and the findings cannot disagree. It also reads unread_sources (a source
+whose TML the audit does not hold leaves P19, P21 and P28 not assessed for the Model,
+since each reads it), missing_tables (the same for P25, SQL Views aside) and
+unjudged_sql_views (P27).
 
 Registered into the same registry as engine/fields.py, which imports this module at its
 end. Same import constraint as fields.py: Python 3.9, no third-party imports at module
@@ -32,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.memo import cached
+from ts_cli.formula_common import _close_paren, _in_quotes, _quoted_spans, _split_top_level_args
 from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
 
 #: `properties.calendar` values that name a code-based calendar, case and edge spaces
@@ -106,15 +112,112 @@ def _column_calendars(doc: dict, ctx: Any) -> List[Dict[str, str]]:
     return out
 
 
-@register("custom_calendar_columns", uses=(),
-          label="the columns on a custom calendar")
-def _custom_calendar_columns(item: dict, ctx: Any) -> Any:
-    """Model: "<column> (<calendar>)" for each column on a custom calendar
-    (column_calendars), in column order; empty when none."""
-    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+#: Date functions that take a calendar as an optional last argument, a bare keyword:
+#: `fiscal`, or a custom calendar's name (thoughtspot-formula-patterns.md, Date
+#: Functions; `start_of_week ( [d] , RetailCal )` live-probed 2026-10-07). The `diff_*`
+#: functions take it third, after the two dates.
+_CALENDAR_FUNCTIONS = frozenset({
+    "year", "year_name", "quarter_number", "month", "month_number",
+    "month_number_of_quarter", "day", "day_of_week", "day_number_of_week",
+    "day_number_of_quarter", "day_number_of_year", "week_number_of_month",
+    "week_number_of_quarter", "week_number_of_year", "is_weekend", "start_of_week",
+    "start_of_month", "start_of_quarter", "start_of_year"})
+_DIFF_CALENDAR_FUNCTIONS = frozenset({"diff_weeks", "diff_months", "diff_quarters",
+                                      "diff_years"})
+_CALL_NAME = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
+_BARE_KEYWORD = re.compile(r"^[A-Za-z_]\w*$")
+#: Bare words that are not a calendar: the formula language's literals.
+_NOT_A_CALENDAR = frozenset({"true", "false", "null"})
+
+
+def formula_calendar_names(expr: Any) -> List[str]:
+    """The custom calendars a formula passes to a date function, in order: the last
+    argument of a _CALENDAR_FUNCTIONS call (of two or more) or a _DIFF_CALENDAR_FUNCTIONS
+    call (of three or more) when it is a bare keyword that is not code-based
+    (CODE_BASED_CALENDARS), a literal or a session variable (`ts_*`). Calls inside a
+    quoted literal or a `[...]` reference are not read. Uses formula_common's paren and
+    argument splitters, which keep quotes and references opaque."""
+    if not isinstance(expr, str):
+        return []
+    spans = _quoted_spans(expr)
+    out: List[str] = []
+    for m in _CALL_NAME.finditer(expr):
+        name = m.group(1).lower()
+        least = 3 if name in _DIFF_CALENDAR_FUNCTIONS else 2
+        if (name not in _CALENDAR_FUNCTIONS and name not in _DIFF_CALENDAR_FUNCTIONS) \
+                or _in_quotes(m.start(), spans):
+            continue
+        close = _close_paren(expr, m.end() - 1)
+        args = _split_top_level_args(expr[m.end():close]) if close > 0 else []
+        last = args[-1] if len(args) >= least else ""
+        word = last.casefold()
+        if _BARE_KEYWORD.match(last) and word not in CODE_BASED_CALENDARS \
+                and word not in _NOT_A_CALENDAR and not word.startswith("ts_"):
+            out.append(last)
+    return out
+
+
+def formula_calendars(doc: dict) -> List[Dict[str, str]]:
+    """Each custom calendar a Model formula names (formula_calendar_names), in formula
+    order: `{"column" (the formula's name, else id), "calendar", "kind": CUSTOM,
+    "set_on": "formula"}`, the shape column_calendars gives."""
+    formulas = (doc.get("model") or {}).get("formulas") if isinstance(doc, dict) else None
+    out: List[Dict[str, str]] = []
+    for f in (formulas if isinstance(formulas, list) else []):
+        if not isinstance(f, dict):
+            continue
+        label = _text(f.get("name")) or _text(f.get("id")) or "?"
+        out += [{"column": label, "calendar": name, "kind": CUSTOM, "set_on": "formula"}
+                for name in formula_calendar_names(f.get("expr"))]
+    return out
+
+
+def custom_names_that_look_code_based(doc: dict, ctx: Any) -> List[Dict[str, str]]:
+    """Each column_calendars entry whose code-based value (`fiscal`, `default`,
+    `calendar`) is also the name of a custom calendar registered on one of the Model's
+    connections (connection_calendars, any case): which one the column means is open
+    (BL-590). None when the calendars were not fetched."""
+    registered = {n.strip().casefold() for c in (connection_calendars(doc, ctx) or [])
+                  for n in c["calendars"]}
+    return [c for c in column_calendars(doc, ctx)
+            if c["kind"] == CODE and c["calendar"].strip().casefold() in registered]
+
+
+def custom_calendar_readings(item: dict, ctx: Any) -> List[Tuple[str, bool]]:
+    """Model: (item, to_confirm) for each P19 reading: a column on a custom calendar
+    (firm), a code-based value a custom calendar is also named (to confirm), a formula
+    naming a custom calendar (to confirm)."""
     doc = item.get("doc") or {}
-    return NameList(f"{c['column']} ({c['calendar']})" for c in column_calendars(doc, ctx)
-                    if c["kind"] == CUSTOM)
+    out = [(f"{c['column']} ({c['calendar']})", False)
+           for c in column_calendars(doc, ctx) if c["kind"] == CUSTOM]
+    out += [(f"{c['column']}: {c['calendar']}, also a custom calendar's name on its "
+             "connection (to confirm)", True)
+            for c in custom_names_that_look_code_based(doc, ctx)]
+    out += [(f"{c['column']}: calendar {c['calendar']} in a formula (to confirm)", True)
+            for c in formula_calendars(doc)]
+    return out
+
+
+@register("custom_calendar_columns", uses={"calendars"},
+          label="the columns or formulas on a custom calendar")
+def _custom_calendar_columns(item: dict, ctx: Any) -> Any:
+    """Model: each custom_calendar_readings item, in order; empty when none."""
+    from ts_cli.audit.engine.messages import NameList  # messages imports fields
+    return NameList(text for text, _ in custom_calendar_readings(item, ctx))
+
+
+def custom_calendars_to_confirm(item: dict, ctx: Any) -> bool:
+    """Model: P19 lists something, and every reading it lists is one to confirm."""
+    found = [to_confirm for _, to_confirm in custom_calendar_readings(item, ctx)]
+    return bool(found) and all(found)
+
+
+@register("custom_calendar_lead", uses={"calendars"}, values=(CANT_USE, MAY_NOT_USE),
+          label="whether the Model can't use Data Cache or may not, pending review")
+def _custom_calendar_lead(item: dict, ctx: Any) -> str:
+    """Model: how P19's message begins: MAY_NOT_USE when every reading is one to
+    confirm (custom_calendars_to_confirm), else CANT_USE."""
+    return MAY_NOT_USE if custom_calendars_to_confirm(item, ctx) else CANT_USE
 
 
 # ── P20: SQL pass-through ───────────────────────────────────────────────────

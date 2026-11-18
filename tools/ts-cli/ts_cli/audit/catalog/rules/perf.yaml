@@ -400,21 +400,28 @@
     serve. A column's calendar is its own `properties.calendar`, else the one on the
     Table column its `column_id` resolves to. `calendar`, `fiscal` and `default` (any
     case, edge spaces aside) are code-based calendars, and an absent or blank value sets
-    none; any other value names a custom calendar. A source whose TML the audit did not
-    read (a failed export, a SQL View) is not judged, and the Model's Data Cache
-    readiness reads Not assessed. The finding lists each such column with the calendar
-    it names.
+    none; any other value names a custom calendar. Two readings are for the product team
+    to confirm: a formula that passes a custom calendar's name to a date function (as in
+    `start_of_week ( [d] , RetailCal )`), and a code-based value that a custom calendar
+    registered on the Model's connection is also named. A finding resting only on them
+    says the Model may not be able to use Data Cache. A source whose TML the audit did
+    not read (a failed export, a SQL View) is not judged, and the Model's Data Cache
+    readiness reads Not assessed. The finding lists each such column or formula with the
+    calendar it names.
   categories: [P]
   requires: [model_tml]
+  uses: [calendars]
   scope: model
   aggregate:
     mode: each
     where: {field: "@custom_calendar_columns", len_gt: 0}
   severity: MEDIUM
-  message: "Can't use Data Cache: columns on a custom calendar: {@custom_calendar_columns}"
+  message: "{@custom_calendar_lead}: columns or formulas on a custom calendar: {@custom_calendar_columns}"
   remediation: >-
-    Move each listed column to a code-based calendar (calendar, fiscal or default) so
-    Data Cache can serve the Model, or accept that the Model stays uncached.
+    Move each listed column to a code-based calendar (calendar, fiscal or default), and
+    drop the calendar argument from each listed formula, so Data Cache can serve the
+    Model, or accept that the Model stays uncached. A reading marked to confirm waits on
+    the product team.
   examples:
     fires: {fixture: perf_custom_calendar_columns, severity: MEDIUM}
     silent: {fixture: perf_code_based_calendars}
@@ -481,7 +488,8 @@
   description: >-
     A Model on a connection with at least one registered custom calendar: the
     connection a Table names (`connection.name`, any case; Falcon and system Tables
-    name none), or the id its metadata header carries. A user can pick such a calendar
+    name none), else its metadata header's connection name (a SQL View, a Table whose
+    export failed, or a connection block naming none), or the id that header carries. A user can pick such a calendar
     at run time, and that query does not use Data Cache. Skipped when the calendar
     search failed, and the Model's Data Cache readiness then reads Not assessed. The
     finding names each connection and how many custom calendars it defines.

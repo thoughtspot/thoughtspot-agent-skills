@@ -14,7 +14,7 @@ from ts_cli.audit.catalog_model import load_catalog
 from ts_cli.audit.engine import fields, scopes
 from ts_cli.audit.engine.fields_data_cache import (
     CODE, CUSTOM, calendar_kind, calls_sql_passthrough, column_calendars,
-    connection_calendars, is_semantic_measure, model_connections,
+    connection_calendars, formula_calendar_names, is_semantic_measure, model_connections,
 )
 from ts_cli.audit.engine.run import run_rule
 
@@ -66,6 +66,60 @@ def test_the_model_columns_value_wins_and_a_blank_one_falls_back_to_the_table():
     assert _field(ctx, "@custom_calendar_columns") == ["B (Retail)"]
 
 
+@pytest.mark.parametrize("expr, found", [
+    ("start_of_week ( [ORDERS::D] , RetailCal )", ["RetailCal"]),
+    ("year ( [ORDERS::D] , Retail_445 ) + month_number ( [ORDERS::D] , fiscal )",
+     ["Retail_445"]),
+    ("diff_months ( [ORDERS::E] , [ORDERS::S] , RetailCal )", ["RetailCal"]),
+    ("diff_months ( [ORDERS::E] , [ORDERS::S] )", []),
+    ("start_of_week ( [ORDERS::D] )", []),
+    ("year ( [ORDERS::D] , FISCAL ) + quarter_number ( [ORDERS::D] , default )", []),
+    ("contains ( [ORDERS::N] , ts_username )", []),
+    ("concat ( 'start_of_week ( [d] , RetailCal )' , [ORDERS::N] )", []),
+    ("start_of_week ( [ORDERS::RetailCal] )", []),
+    ("start_of_week ( [ORDERS::D] , 'RetailCal' )", []),
+    (None, []),
+])
+def test_formula_calendar_names(expr, found):
+    assert formula_calendar_names(expr) == found
+
+
+def test_a_formula_naming_a_custom_calendar_is_a_p19_reading_to_confirm():
+    """open-items #18 point 5: whether a formula that names a custom calendar stops Data
+    Cache is open, so it reads To confirm, never Can use, and its calendar is listed."""
+    ctx = fx.build_cache_ctx(formulas=[{"id": "formula_Wk", "name": "Week Start",
+                                        "expr": "start_of_week ( [ORDERS::D] , RetailCal )"}],
+                             calendars=[], connections=[fx.build_cache_connection()],
+                             headers=[fx.build_cache_header()])
+    [f] = _findings(ctx, "P19")
+    assert f.severity == "MEDIUM"
+    assert f.detail == ("May not be able to use Data Cache: columns or formulas on a custom "
+                        "calendar: Week Start: calendar RetailCal in a formula (to confirm)")
+    from ts_cli.audit import run_audit
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    dc = model["data_cache"]
+    assert dc["readiness"] == "confirm"
+    assert dc["calendars_in_use"] == [{"column": "Week Start", "calendar": "RetailCal",
+                                       "kind": "custom", "set_on": "formula"}]
+
+
+def test_a_code_based_name_that_is_also_a_custom_calendars_is_to_confirm():
+    """BL-590: a custom calendar named "fiscal" on the Model's connection makes a column's
+    `fiscal` ambiguous, so it reads To confirm rather than code-based and Can use."""
+    ctx = fx.build_cache_ctx(
+        model_columns=[col("Day", "ORDERS::DAY", calendar="Fiscal")],
+        calendars=[cal("fiscal")], connections=[fx.build_cache_connection()],
+        headers=[fx.build_cache_header()])
+    assert _field(ctx, "@custom_calendar_columns") == [
+        "Day: Fiscal, also a custom calendar's name on its connection (to confirm)"]
+    from ts_cli.audit import run_audit
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    assert model["data_cache"]["readiness"] == "confirm"
+    plain = fx.build_cache_ctx(model_columns=[col("Day", "ORDERS::DAY", calendar="Fiscal")],
+                               calendars=[cal("Retail 445")])
+    assert _field(plain, "@custom_calendar_columns") == []
+
+
 def test_a_table_column_is_found_through_the_model_tables_alias():
     ctx = fx.build_cache_ctx(alias="O",
                              model_columns=[col("Day", "O::DAY"), col("Raw", "ORDERS::DAY")],
@@ -83,7 +137,7 @@ def test_a_formula_column_and_a_table_out_of_scope_read_only_their_own_calendar(
 def test_p19_lists_every_custom_calendar_column():
     [f] = _findings(fx.perf_custom_calendar_columns(), "P19")
     assert f.severity == "MEDIUM" and f.object_name == "Cache Sales"
-    assert f.detail == ("Can't use Data Cache: columns on a custom calendar: "
+    assert f.detail == ("Can't use Data Cache: columns or formulas on a custom calendar: "
                         "Order Date (Retail 445), Ship Date (Fiscal 4-4-5)")
 
 

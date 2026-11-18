@@ -354,25 +354,32 @@ the product owner confirmed it.
 
 ### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
 
-Until the team answers, a finding marks "to confirm" every reading that rests on an
-open point. Those are P24's OAuth M2M (point 1) and PrivateLink read from the host
-(point 2), P28's `= null` test (point 4) and P21's measure only flagged pre-aggregated
-(point 6). A finding resting only on such readings says the Model may not be able to
-use Data Cache, and the Model reads To confirm, not Can't use. P24 is graded as a
-heuristic.
+Until the team answers, no open point reads Can use. A finding marks "to confirm"
+every reading that rests on one: P24's OAuth M2M (point 1) and PrivateLink read from the
+host (point 2), P28's `= null` test (point 4), P19's calendar named in a formula (point
+5) and code-based name that a custom calendar also has (point 9), and P21's measure only
+flagged pre-aggregated (point 6). A finding resting only on such readings says the
+Model may not be able to use Data Cache, and the Model reads To confirm. Points 7 and 8
+leave the rule unable to judge the Model, which reads Not assessed. Point 2's negative
+side has no reading yet: a host without `privatelink` reads as no PrivateLink. P24 is
+graded as a heuristic.
 
 The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
-for the team. Points 4 to 6 came from the review of the rules the same day, and point 7
-from re-running the sample after it. Each is what P19, P21, P23, P24 or P28 reads today.
+for the team. Points 4 to 6, 8 and 9 came from the reviews of the rules that day and
+the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P24 or P28
+reads today.
 
 1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
    `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
    Databricks OAuth M2M service principal). Does Data Cache treat that M2M connection as
-   an OAuth connection? The finding names it "OAuth M2M, to confirm".
+   an OAuth connection? The finding names it "OAuth M2M (to confirm)".
 2. **PrivateLink.** No configuration key names PrivateLink, so P24 reads it from a
    `host` or `accountName` containing `privatelink`. Is that a sound signal on every
-   source Data Cache supports? The finding names it "PrivateLink read from the host, to
-   confirm".
+   source Data Cache supports? The finding names it "PrivateLink read from the host (to
+   confirm)". The question has a negative side too: a Databricks PrivateLink workspace
+   may keep its usual host, so a host without `privatelink` is not proof that a
+   connection does not use PrivateLink. P24 reads such a connection as no PrivateLink
+   today.
 3. **A null test in an RLS rule.** The product owner confirmed (2026-11-18) that any
    function in an RLS rule's formula stops Data Cache, `isnull` included. S12 advises a
    null test so an outer join keeps its unmatched rows, so the two rules meet: the team
@@ -380,14 +387,18 @@ from re-running the sample after it. Each is what P19, P21, P23, P24 or P28 read
    and P28's remediation now say so, and P28 names such a rule "a null test that keeps
    outer-join rows, see S12".
 4. **The `= null` form of a null test.** S12 and S15 accept `[X] = null` as a null
-   branch, as well as `isnull` and `is_null`. P28 lists a rule with that form as "a
+   branch, as well as `isnull` and `is_null`. Their pattern matches `= null` after any
+   character, so it reads `[X] != null`, `<= null` and `>= null` as a null branch too;
+   P28 reads only `= null` itself. P28 lists a rule with that form as "a
    null test that keeps outer-join rows, see S12 (to confirm)". Does that form stop Data
    Cache too? If so, it becomes a firm reading like `isnull`; if not, P28 drops it.
    S12's remediation says it is to confirm.
 5. **A custom calendar named in a formula.** A formula can pass a calendar to a date
-   function, as in `start_of_week ( [d] , RetailCal )`. P19 reads only a column's
-   `properties.calendar`, so it misses such a formula. Does a formula that names a custom
-   calendar stop Data Cache? If so, P19 (or a new rule) should read formula arguments.
+   function, as in `start_of_week ( [d] , RetailCal )`. P19 lists such a formula as
+   "Week Start: calendar RetailCal in a formula (to confirm)". It reads the last
+   argument of a date function that takes a calendar, when that argument is a bare
+   keyword other than `calendar`, `fiscal` or `default`. Does a formula that names a custom calendar
+   stop Data Cache? If so, the reading becomes firm; if not, P19 drops it.
 6. **Pre-aggregated measures beyond `AGGREGATE`.** P21 also fires on a Model column over
    a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`. The
    product owner's rule named Models with `AGGREGATE` measures (semantic query Models).
@@ -396,6 +407,16 @@ from re-running the sample after it. Each is what P19, P21, P23, P24 or P28 read
    `AGGR_WORKSHEET` (a View) names no connection, so P23 cannot read a warehouse type
    for it, and the Model reads Not assessed. Two of the 19 Models in the 2026-11-18
    sample on the SE demo cluster do. Can Data Cache serve a Model built on a View?
+8. **RLS path ids that differ only in case.** P28 matches the ids an RLS rule names to
+   its Table's `table_paths` ids exactly. A rule naming `teams_1` where the path is
+   `TEAMS_1` is not judged, and the Model reads Not assessed. Does ThoughtSpot match the
+   ids without case? If so, P28 should read such a rule as it reads the path; if not,
+   the rule is malformed.
+9. **A custom calendar named like a code-based one.** A custom calendar could be named
+   `Fiscal`, `default` or `calendar`. When a custom calendar registered on the Model's
+   connection has the name a column's calendar uses, P19 lists the column "to confirm"
+   and the calendars column shows it as "code-based or custom, to confirm". Can a custom
+   calendar take such a name, and if so, how does TML tell it from the code-based one?
 
 ## Phase 3 — Visualization Layer (future)
 

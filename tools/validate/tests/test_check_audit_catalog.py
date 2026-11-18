@@ -73,7 +73,10 @@ GATE_SHARED_MODULES = ("tml_join_graph.py", "tml_rls_graph.py", "spotql_ops.py",
                        "formula_translate/context.py",
                        # P25's template-variable reading (parse_variable_token): stdlib
                        # only, and publish_apply, which publish_plan re-exports (2026-11).
-                       "publish_plan.py", "publish_apply.py")
+                       "publish_plan.py", "publish_apply.py",
+                       # P19's formula-calendar reading: the shared paren and argument
+                       # splitters, stdlib only (2026-11).
+                       "formula_common.py")
 
 
 def _copy_repo(tmp_path: Path, clear_rules: bool = False) -> Path:

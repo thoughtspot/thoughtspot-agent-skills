@@ -245,9 +245,14 @@ def _compact_dc_reason(r: dict) -> dict:
 
 
 def _compact_dc_calendar(k: dict) -> dict:
-    return {"n": k.get("column", ""), "c": k.get("calendar", ""),
-            "u": 1 if k.get("kind") == "custom" else 0,
-            "t": 1 if k.get("set_on") == "table" else 0}
+    """`u` 1 custom, 0 code-based, 2 unclear; `t` 1 set on the Table column; `f` 1 named
+    in a formula (only when it is)."""
+    kind = {"custom": 1, "unclear": 2}.get(k.get("kind"), 0)
+    out = {"n": k.get("column", ""), "c": k.get("calendar", ""), "u": kind,
+           "t": 1 if k.get("set_on") == "table" else 0}
+    if k.get("set_on") == "formula":
+        out["f"] = 1
+    return out
 
 
 def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> dict:

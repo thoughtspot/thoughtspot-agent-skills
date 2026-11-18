@@ -34,8 +34,9 @@ or a log line.
                    `connection_facts` leaves it None and the audit's fetch fills it from
                    a CONNECTION metadata search (audit/context.py).
 
-A configuration that is absent or does not parse as a JSON object leaves the four
-configuration flags None: unknown, never "no". Pure; stdlib and publish_plan only.
+A configuration that is absent, does not parse as a JSON object, parses to `{}` or holds
+none of the keys the OAuth and PrivateLink readings read leaves those flags None:
+unknown, never "no" (_flags). Pure; stdlib and publish_plan only.
 """
 from __future__ import annotations
 
@@ -107,21 +108,47 @@ def _is_set(value: Any) -> bool:
     return bool(value)
 
 
-def _flags(config: dict) -> Dict[str, bool]:
-    keys = set()
-    privatelink = parameterized = False
+#: Keys whose presence lets the OAuth and PrivateLink readings judge a configuration:
+#: one naming OAuth, an M2M client pair, or a host. A configuration with none of them
+#: (`{}`, or only a user and password) says nothing either way.
+_M2M_KEYS = ("client_id", "client_secret")
+
+
+def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
+    """What _flags reads of a configuration: every key (case folded), the keys whose
+    value is set (_is_set), the text of each host or account name, and whether any value
+    is wholly a template token."""
+    present, keys, hosts = set(), set(), []
+    parameterized = False
     for key, value in _entries(config):
         folded = (key or "").casefold()
+        present.add(folded)
         if _is_set(value):
             keys.add(folded)
         if not isinstance(value, str):
             continue
-        if folded in _HOST_KEYS and "privatelink" in value.casefold():
-            privatelink = True
+        if folded in _HOST_KEYS:
+            hosts.append(value)
         if parse_variable_token(value) is not None:
             parameterized = True
+    return present, keys, hosts, parameterized
+
+
+def _flags(config: dict) -> Dict[str, Optional[bool]]:
+    """The four flags of a parsed configuration (module docstring). OAuth and PrivateLink
+    are None, unknown, when no key they read is present (_M2M_KEYS, a key naming OAuth,
+    _HOST_KEYS); PrivateLink is None too when no host or account name holds text. A
+    template variable is True when a value is one, else False for a configuration the
+    readings can judge and None for one they cannot."""
+    present, keys, hosts, parameterized = _read_entries(config)
+    readable = any("oauth" in k for k in present) or bool(
+        present & (set(_M2M_KEYS) | set(_HOST_KEYS)))
+    if not readable:
+        return {"oauth": None, "oauth_m2m": None, "privatelink": None,
+                "parameterized": True if parameterized else None}
     named = any("oauth" in k for k in keys)
-    m2m = not named and {"client_id", "client_secret"} <= keys
+    m2m = not named and set(_M2M_KEYS) <= keys
+    privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
     return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,
             "parameterized": parameterized}
 
