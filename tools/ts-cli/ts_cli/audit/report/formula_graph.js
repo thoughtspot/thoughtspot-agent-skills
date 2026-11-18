@@ -111,10 +111,11 @@ function graphStyle(){
   ];
 }
 
-function graphNote(total, tree, target){
+function graphNote(total, tree, target, drawn){
   return total > FORMULA_GRAPH_CAP ?
     "This Model has "+total+" formulas, columns and parameters, too many to draw at once: showing the lineage of "+
-    useLabel(tree, target)+". Pick another from the search box or by clicking a node." :
+    useLabel(tree, target)+(drawn ? " ("+drawn+" of them)" : "")+
+    ". Pick another from the search box or by clicking a node." :
     total+" formulas, columns and parameters. Click a node to see its definition and its lineage.";
 }
 
@@ -174,6 +175,8 @@ function buildFormulaGraph(c, guid, tree){
       view.select(e.target.data("use"));
     });
     cy.on("tap", function(e){ if(e.target === cy) clearHighlight(); });
+    /* a click or a drag on the empty canvas leaves focus on <body>: keep Escape working */
+    cy.on("tapend", function(){ box.focus({preventScroll: true}); });
     fit();
   }
   /* The view may be built before its container is shown (the router shows it after,
@@ -246,7 +249,7 @@ function buildFormulaGraph(c, guid, tree){
         draw(shown);
         redrawn = true;
       }
-      $(".fgraph-sub", hdr).textContent = graphNote(total, tree, target);
+      $(".fgraph-sub", hdr).textContent = graphNote(total, tree, target, cy.nodes().length);
       cy.resize();
       highlight(id, !redrawn && box.offsetParent !== null);
       if(focusPanel) $(".fdetail-title", panel).focus();
@@ -277,6 +280,6 @@ function buildFormulaGraph(c, guid, tree){
   var start = tree._selected || (partial ? graphStart(tree) : null);
   if(partial) shown = graphLineage(tree, start);
   draw(shown);
-  $(".fgraph-sub", hdr).textContent = graphNote(total, tree, start || [0, tree.r[0]]);
+  $(".fgraph-sub", hdr).textContent = graphNote(total, tree, start || [0, tree.r[0]], cy.nodes().length);
   if(tree._selected) view.select(tree._selected);
 }

@@ -23,5 +23,8 @@ the bundle. `@dagrejs/dagre` is the maintained fork of `dagre`; it does not bund
 re-pin can download the named version and compare its SHA-256 without trusting the committer.
 `.gitattributes` keeps these files byte-exact (no line-ending conversion).
 
+Nothing checks these for new releases or advisories yet: BL-589. The table above is the
+source-and-licence inventory BL-384 asks for.
+
 To update one: download the new version from the same source, replace the file, update
 its line in `MANIFEST` (`shasum -a 256 <file>`) and this table, and check the licence.

@@ -318,22 +318,26 @@ def test_past_the_cap_a_node_already_drawn_still_shows_its_whole_lineage(tmp_pat
 
 
 @needs_chrome
-def test_a_search_tells_the_graph_its_canvas_moved(tmp_path):
-    """Results above the canvas move it; Cytoscape must re-measure, or a click lands a
-    row away (it caches where its canvas is)."""
+def test_a_click_after_a_search_opens_the_node_under_the_pointer(tmp_path):
+    """Results above the canvas move it; Cytoscape caches where its canvas is, so it must
+    re-measure after the results render, or a click lands a row away."""
     shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1/graph", actions=(
-        'var cy = document.getElementById("v-formulas")._cy, calls = 0, resize = cy.resize;'
-        'cy.resize = function(){ calls++; return resize.apply(cy, arguments); };'
-        'var s = document.querySelector("#v-formulas .ftree-search");'
-        's.value = "Order"; s.dispatchEvent(new Event("input"));'
-        's.value = ""; s.dispatchEvent(new Event("input"));'
-        'window.__extra = calls;'))
-    assert shown["errors"] == []
-    assert shown["extra"] >= 2
+        'setTimeout(function(){ var cy = document.getElementById("v-formulas")._cy, box = cy.container();'
+        ' function tap(x, y){ var t = document.elementFromPoint(x, y),'
+        '   o = {bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0};'
+        '   t.dispatchEvent(new MouseEvent("mousedown", o)); t.dispatchEvent(new MouseEvent("mouseup", o)); }'
+        ' var r = box.getBoundingClientRect(); tap(r.left + 4, r.top + 4);'
+        ' var s = document.querySelector("#v-formulas .ftree-search");'
+        ' s.value = "Order"; s.dispatchEvent(new Event("input"));'
+        ' var p = cy.getElementById("f2").renderedPosition(); r = box.getBoundingClientRect();'
+        ' tap(r.left + 1 + p.x, r.top + 1 + p.y);'
+        ' var t = document.querySelector("#v-formulas .fdetail-title");'
+        ' window.__extra = t ? t.textContent : null; }, 60);'), settle_ms=400)
+    assert shown["errors"] == [] and shown["extra"] == "Gross Margin"
 
 
 @needs_chrome
-def test_escape_closes_the_definition_after_a_click_on_the_canvas(tmp_path):
+def test_escape_closes_the_definition_after_a_click_on_a_node(tmp_path):
     shown = report_browser.render(_report(("m-1", CHAIN)), tmp_path, "formulas/m-1/graph", actions=(
         'var cy = document.getElementById("v-formulas")._cy;'
         'cy.getElementById("f2").emit("tap");'
