@@ -155,7 +155,7 @@ type contain the path.
 | `model.columns[].properties` | 4985 | 143 | dict | — |
 | `model.columns[].properties.aggregation` | 1806 | 137 | str | `SUM` · `AVERAGE` |
 | `model.columns[].properties.ai_context` | 656 | 16 | str | `Unique integer identifier for calendar dates enabling precise joins and filtering for daily store operations analysis across the Starbucks data model.` · `Calendar date field for trending transactions, net sales, labor hours, wait times, and satisfaction metrics over time in store operations analysis.` |
-| `model.columns[].properties.calendar` | 72 | 35 | str | `calendar` · `SeanTSCROOTS` |
+| `model.columns[].properties.calendar` | 72 | 35 | str | `calendar` · `Retail454Cal` |
 | `model.columns[].properties.column_type` | 4985 | 143 | str | `ATTRIBUTE` · `MEASURE` |
 | `model.columns[].properties.currency_type` | 81 | 21 | dict | — |
 | `model.columns[].properties.currency_type.iso_code` | 81 | 21 | str | `USD` · `INR` |
@@ -243,7 +243,7 @@ type contain the path.
 | `table.columns[].name` | 2719 | 275 | str | `CLIENT_ENGAGEMENTS_KEY` · `MONTH_KEY` |
 | `table.columns[].properties` | 2719 | 275 | dict | — |
 | `table.columns[].properties.aggregation` | 1307 | 252 | str | `SUM` · `AVERAGE` |
-| `table.columns[].properties.calendar` | 1 | 1 | str | `SeanTSCROOTS` |
+| `table.columns[].properties.calendar` | 1 | 1 | str | `Retail454Cal` |
 | `table.columns[].properties.column_type` | 2719 | 275 | str | `MEASURE` · `ATTRIBUTE` |
 | `table.columns[].properties.currency_type` | 1 | 1 | dict | — |
 | `table.columns[].properties.currency_type.column` | 1 | 1 | str | `TARGET_CURRENCY` |
@@ -400,7 +400,7 @@ Ordered by severity of the gap, not alphabetically. Every row carries live evide
 | U12 | `table.columns[].properties.is_hidden` | 11 | 4/275 | `true` | Documented on Model / SQL-View / View columns; absent from the Table ref. |
 | U13 | `view.view_columns[].properties.currency_type` + `.iso_code` | 5 each | 5/42 | `{"iso_code": "USD"}`, `{"iso_code": "JPY"}` | Absent from the View ref's column-property table. |
 | U14 | `table.columns[].properties.currency_type` + `.column` | 1 each | 1/275 | `{"column": "TARGET_CURRENCY"}` | `currency_type` is absent from the Table ref entirely — **and** this is the only live sighting anywhere of the `column` form (see V2, §4.2). |
-| U15 | `table.columns[].properties.calendar` | 1 | 1/275 | `SeanTSCROOTS` (`FACT_RETAPP_SALES`, col `RECORDDATE`) | `calendar` is documented on Model and SQL-View columns; the Table ref has no row, and V1 explicitly lists "whether `calendar:` is honoured on a **Table** column" as open. **It is** — see §4.2. |
+| U15 | `table.columns[].properties.calendar` | 1 | 1/275 | `Retail454Cal` (`FACT_RETAPP_SALES`, col `RECORDDATE`) | `calendar` is documented on Model and SQL-View columns; the Table ref has no row, and V1 explicitly lists "whether `calendar:` is honoured on a **Table** column" as open. **It is** — see §4.2. |
 | U16 | `view.formulas[].was_auto_generated` | 46 | **19/42** | `false` | Documented on Model `formulas[]`; absent from the View ref. Present on **46 of 46** View formulas — i.e. always emitted when a View has formulas at all. |
 | U17 | `table.dataset_id` | 4 | 4/275 | `28ede9b627ab`, `f147b3fb21c9`, `8e65de074be7`, `35ba9408140f` (four uploaded Tables) | A root-level Table key we have never documented. 12-hex-char id, appears on uploaded/derived tables. Looks instance-local (identity-like) — likely an `NM1`-class value a portable document must **not** carry, which is exactly why it needs documenting. |
 | U18 | `view.joins[].id` | 1 | 1/42 | `Daily Row Count - Table Info` (equal to the sibling `name`) | The View ref documents `joins[].name` but not `joins[].id`. Observed together, same value. |
@@ -560,8 +560,8 @@ documents.**
 | Value | Occurrences | Distinct docs | Interpretation |
 |---|--:|--:|---|
 | `calendar` (the literal string) | 70 | 34 models | The **default** spelling. Appears across 34 mutually-unrelated models (`TST_*`, `PUB_*`, `VER_*`, `DAI_*`, `WEL_*`, plus `Retail Sales - RLS`, `Transaction History`, `Inventory Planning`, `Care Provider`, `Mobile Network Analysis`, `Employee Recognition`), almost always on a column named `Full Date` or `Month Start Date`. |
-| `SeanTSCROOTS` | 1 (model) + 1 (table) | `454 Cal Test (Sean)` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | A real custom-calendar **object name**. |
-| `Dupont_Fiscal_Cal` | 1 | `Test Custom Calendars` col `Eff Start Date` | A real custom-calendar **object name**. |
+| `Retail454Cal` | 1 (model) + 1 (table) | `454 Calendar Test` col `Transaction Date`; `FACT_RETAPP_SALES` col `RECORDDATE` | A real custom-calendar **object name**. |
+| `AcmeFiscalCal` | 1 | `Test Custom Calendars` col `Eff Start Date` | A real custom-calendar **object name**. |
 | `CALENDAR_TYPE_GREGORIAN` | **0** | — | Not emitted by this build, on any document type. |
 | `default` | **0** | — | Not emitted either. |
 
@@ -575,7 +575,7 @@ documents.**
 2. **The default spelling is the literal `calendar`, not `default`.** Neither our refs nor
    the TML docs say this.
 3. **`calendar:` *is* honoured on a Table column** — `FACT_RETAPP_SALES.RECORDDATE:
-   SeanTSCROOTS`. That half of V1 is answered YES.
+   Retail454Cal`. That half of V1 is answered YES.
 4. Still open: whether `calendar` (the literal) is a genuine default sentinel or a
    customer calendar coincidentally named "calendar". The 34-model spread across unrelated
    tenants strongly favours *default sentinel*, but confirming it needs a
@@ -762,7 +762,7 @@ Ordered by blast radius. All are `agents/shared/schemas/` edits.
 | M1 | **Field level, `description` row:** change `lossless (physical) / lossy→issue (formula)` → **`lossless`**. The X9 argument is factually wrong: `model.columns[].description` exists and is honoured on formula-backed entries. — **ALREADY DONE on the concurrent branch.** Outstanding: upgrade the cited evidence to 63/549 across 143 models. | ~~HIGH~~ done |
 | M2 | **Metric level, `description` row:** change `lossy→issue` → **`lossless`**; remove the `MetricLevel` note saying "No key exists here for `description`". — **ALREADY DONE on the concurrent branch.** | ~~HIGH~~ done |
 | M3 | **Metric level `aggregation` enum** (and `MetricLevel.column_properties.aggregation` in the payload schema): the closed nine-value enum rejects real ThoughtSpot output. Add `MOVING_SUM`, `RANK`, `SQL_INT_AGGREGATE_OP`, or scope the enum to Model columns and handle View columns separately. | **HIGH** |
-| M4 | **`V1` — advance it past the concurrent branch's own note.** That branch records "*in every case the value was the bare lowercase token `calendar`*" and "*no `calendar:` value was observed on a **Table** column*". **This census observes both of the things it says it did not:** two real *named* calendars on Model columns (`SeanTSCROOTS` on `454 Cal Test (Sean)`, `Dupont_Fiscal_Cal` on `Test Custom Calendars`) **and** a `calendar:` on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE: SeanTSCROOTS`). That confirms the `calendar_name` reading directly and answers the Table-column half of V1 YES. | **MED — new evidence** |
+| M4 | **`V1` — advance it past the concurrent branch's own note.** That branch records "*in every case the value was the bare lowercase token `calendar`*" and "*no `calendar:` value was observed on a **Table** column*". **This census observes both of the things it says it did not:** two real *named* calendars on Model columns (`Retail454Cal` on `454 Calendar Test`, `AcmeFiscalCal` on `Test Custom Calendars`) **and** a `calendar:` on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE: Retail454Cal`). That confirms the `calendar_name` reading directly and answers the Table-column half of V1 YES. | **MED — new evidence** |
 | M5 | **`V2` — partially resolve.** `currency_type.column` observed live **once**, on a Table column, with a **bare column name** (`TARGET_CURRENCY`) — *not* a `TABLE::Column` reference. `is_browser` still unobserved. | MED |
 | M6 | **`V3` — add live evidence.** Custom-map `geo_config` (`custom_file_guid` + `geometryType`) confirmed in 3 production models / 7 columns; `geometryType` vocabulary `POLYGON`, `MULTI_POLYGON`. The declared-loss-under-X8 verdict stands, now grounded. | LOW |
 | M7 | **`V4` — record as still open.** `is_mandatory_token_filter` was observed **zero** times in 500 documents; the round-trip question is untested. | LOW |
@@ -777,7 +777,7 @@ Ordered by blast radius. All are `agents/shared/schemas/` edits.
 
 | Item | Before | After this census |
 |---|---|---|
-| **V1** — `calendar` value vocabulary | Two candidate spellings (`default \| calendar_name` vs `CALENDAR_TYPE_GREGORIAN`), unreconciled; Table-column support unknown. The concurrent branch narrowed it to "only ever the bare token `calendar`, never on a Table column" | **SETTLED (mostly), beyond the branch's own position.** The value is a calendar **name** — two real named calendars observed (`SeanTSCROOTS`, `Dupont_Fiscal_Cal`), which the branch reports as not seen; the literal `calendar` is the default spelling (34 models / 70 columns); `CALENDAR_TYPE_GREGORIAN` and `default` are unobserved in 500 docs across all 4 types; **Table columns do carry it** (`FACT_RETAPP_SALES.RECORDDATE`), which the branch explicitly reports as not observed. Residual: whether the literal `calendar` is a sentinel or a coincidental name. |
+| **V1** — `calendar` value vocabulary | Two candidate spellings (`default \| calendar_name` vs `CALENDAR_TYPE_GREGORIAN`), unreconciled; Table-column support unknown. The concurrent branch narrowed it to "only ever the bare token `calendar`, never on a Table column" | **SETTLED (mostly), beyond the branch's own position.** The value is a calendar **name** — two real named calendars observed (`Retail454Cal`, `AcmeFiscalCal`), which the branch reports as not seen; the literal `calendar` is the default spelling (34 models / 70 columns); `CALENDAR_TYPE_GREGORIAN` and `default` are unobserved in 500 docs across all 4 types; **Table columns do carry it** (`FACT_RETAPP_SALES.RECORDDATE`), which the branch explicitly reports as not observed. Residual: whether the literal `calendar` is a sentinel or a coincidental name. |
 | **V2** — `currency_type` `column` / `is_browser` forms | Only `iso_code` ever seen | **PARTIALLY SETTLED.** `column` form confirmed live (Table column, bare column name `TARGET_CURRENCY`, no `TABLE::` prefix). `is_browser` still zero sightings. Round-trip survival still untested. |
 | **V3** — custom-map `geo_config` | Documented, listed as "nothing to verify" | **CONFIRMED PRESENT** in production (3 models, 7 columns); `geometryType` ∈ {`POLYGON`, `MULTI_POLYGON`}. Verdict unchanged (declared loss under X8), now evidence-backed. |
 | **V4** — `is_mandatory_token_filter` round trip | Untested | **STILL OPEN** — zero sightings in 500 documents; census cannot speak to it. |
@@ -798,7 +798,7 @@ working-tree edits to `thoughtspot-model-tml.md`, `thoughtspot-table-tml.md`,
 | U2 / S2 / M1 / M2 — `model.columns[].description` exists and works on formula-backed entries | **Already fixed.** Model ref has a `description` row; both mapping fidelity verdicts flipped to `lossless`; `MetricLevel` note rewritten | **Corroborates at 3.6× the sample.** Branch cites *14 of 78 formula-backed columns across 40 models*; census measures **63 of 549 across 143 models** (and 1,960 of 4,436 physical columns, 72/143 models). Also confirms the negative half exactly: **0 of 4,985 Model columns carry `data_type` in any form**, and `formulas[].properties` only ever holds `column_type` (10 of 555). |
 | S16 — `lesson_plans` provisional hedge | **Already removed**, citing 4 Models | Raises the count to **8 of 143** and confirms `lesson_id` is 0-based |
 | §4.4 — `FULL_OUTER` / `OUTER` vocabulary | **Already corrected** in all three refs + the `RelationshipLevel.type` payload enum, from a live *import* probe | Independent *export*-side confirmation: **0 `FULL_OUTER` in 500 documents**. Across **all 421 typed joins of every document type**: `INNER` 213 · `LEFT_OUTER` 199 · `RIGHT_OUTER` 5 · `OUTER` 4 — exactly the corrected four-value vocabulary and nothing else |
-| M4 — V1 `calendar` vocabulary | Branch records **only** the bare token `calendar` (12 models) and states *"no `calendar:` value was observed on a **Table** column"* | **Contradicts that gap with live evidence.** Two *named* calendars on Model columns (`SeanTSCROOTS`, `Dupont_Fiscal_Cal`) **and** one on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE`). Also widens the bare-token count to 34 models / 70 columns. V1's Table-column question is answered. |
+| M4 — V1 `calendar` vocabulary | Branch records **only** the bare token `calendar` (12 models) and states *"no `calendar:` value was observed on a **Table** column"* | **Contradicts that gap with live evidence.** Two *named* calendars on Model columns (`Retail454Cal`, `AcmeFiscalCal`) **and** one on a **Table** column (`FACT_RETAPP_SALES.RECORDDATE`). Also widens the bare-token count to 34 models / 70 columns. V1's Table-column question is answered. |
 
 **All other findings in §5.1 / §5.2 are untouched by that branch** — in particular the
 HIGH-severity View `search_output_column` error (S1), the `rls_rules.table_paths[].column`
