@@ -479,6 +479,11 @@ are roughly ordered by value÷effort.
 | BL-567 | TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON | 2026-12-31 |
 | BL-568 | Exported TML parsed without stripping non-printables: `export_item_doc` and 9 raw `yaml.safe_load(edoc)` sites | 2026-12-31 |
 | BL-569 | `dependency/backup.py` `backup_filename`: 60-character cap overruns the 255-byte limit; keeps Windows-reserved characters | 2026-12-31 |
+| BL-583 | `check_references.py` does not scan `agents/cli/SETUP.md`, so a broken link there passes every gate | 2026-12-31 |
+| BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
+| BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
+| BL-586 | `check_lint_invariant_list.py` scans untracked files, so an agent worktree under `.claude/worktrees/` fails every commit | 2026-12-31 |
+| BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
 
 ### Tier 4 — Deferred
 
@@ -17542,3 +17547,100 @@ BL-505 covers the converters' side only.
 3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Import the new module where `fields.py` imports `fields_data`, so its `@register` fields are registered.
 
 **Target:** 2027-02-28.
+
+## BL-583 — `check_references.py` does not scan `agents/cli/SETUP.md` `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** the PR #679 review. Its `SETUP.md:44` links
+`shared/schemas/spotterviz-liveboard-build.md`, which resolves to a missing
+`agents/cli/shared/`, and every gate passed.
+
+**What.** `check_references.py` reads each skill's `SKILL.md`, its `references/*.md` and
+`docs/**/*.md` (`main()`, the `skill_files` / `reference_files` / `doc_files` lists).
+`agents/cli/SETUP.md` is in none of them. It is the install guide every user follows, so a
+broken link there is the one most likely to be hit.
+
+**Do.**
+1. Add `agents/cli/SETUP.md` to the scanned files, or every `*.md` directly under each
+   runtime directory from `_dirs.py`.
+2. Prove it with a deliberate broken link in a test.
+
+**Target:** 2026-12-31.
+
+## BL-584 — The open-items index reads an unrecognised status as OPEN `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** the PR #679 review. The PR marks items
+`WONT-FIX (superseded)`, which is not in `_STATUS_TOKENS`, so the index counts them as
+open. The PR's own index went from 71 to 72 open items, the opposite of what it meant.
+
+**What.** `generate_open_items_index.py` falls back to `"OPEN"` when no status token
+matches (line 106). A typo or a new word is silently filed as open, and nothing tells the
+author.
+
+**Do.**
+1. Fail `--check` on a header with an unrecognised status, naming the file and item.
+2. Decide whether `WONT-FIX` joins the vocabulary or stays refused. The precedent so far is
+   `RESOLVED <date> (superseded)`.
+
+**Target:** 2026-12-31.
+
+## BL-585 — No warning when a converter step is removed but its coverage matrix is not touched `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** the PR #679 review. The PR removed the Tableau and
+Looker liveboard steps (parameter chips, filter scoping, number formats, gap logging).
+Both `coverage-matrix.md` files and Looker's Audit mode still describe the old behaviour,
+and no gate noticed.
+
+**What.** `check_coverage_matrix.py` checks that a matrix exists and that exemptions carry a
+date. It does not look at what changed. The change-impact map in CLAUDE.md asks for the
+matrix update in prose only.
+
+**Do.**
+1. In the PR-scoped gates, warn when a `ts-convert-*` `SKILL.md` loses lines in a step and
+   its `references/coverage-matrix.md` is unchanged in the same diff.
+2. Keep it a warning: a reword also removes lines.
+
+**Target:** 2026-12-31.
+
+## BL-586 — `check_lint_invariant_list.py` scans untracked files, so agent worktrees fail every commit `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** a commit on the #738 branch, made while two reviewer
+agents had worktrees open under `.claude/worktrees/`.
+
+**What.** `_iter_files` walks `root.glob("**/*.md")` and `root.glob("**/*.py")`, skipping only
+`SKIP_DIRS` (`.git`, `node_modules`, caches, venvs). `.claude/worktrees/` is ignored by git
+(`.git/info/exclude`) but not by the glob, so each worktree's full checkout is scanned. Its
+copies of `CHANGELOG.md`, `tml_lint.py` and the validator itself legitimately enumerate the
+rule set. Every commit then fails with dozens of findings in files the commit doesn't touch,
+and the only way past it is `--no-verify`. `check_patterns.py` (lines 241-245, full mode)
+globs the same way; it passed here only because nothing in the worktrees tripped it.
+
+**Do.**
+1. Scan tracked files only (`git ls-files`, as `check_patterns.py` already does for SKILL.md),
+   or add `.claude` worktrees to `SKIP_DIRS`. The first also covers any other untracked
+   checkout.
+2. Apply the same fix to `check_patterns.py`'s full mode.
+3. Prove it with a test: an untracked file under `.claude/worktrees/` that enumerates the rule
+   set must not fail the check.
+
+**Target:** 2026-12-31.
+
+## BL-587 — `check_open_items.py` does not count `TO VERIFY` as unresolved `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the PR #672 review. Sisense item #8, which the PR's join
+and value-matching assumptions rest on, is `TO VERIFY`, and the check reports the Sisense
+file as "all items resolved".
+
+**What.** The check finds unresolved items by four markers (`_UNRESOLVED_MARKERS`, line 54):
+`UNTESTED`, `NEEDS VERIFICATION`, `UNVERIFIED`, `NOT IMPLEMENTED`. `TO VERIFY` is not one of
+them, though the Sisense file declares it as its own status word (line 3). On main this
+hides four items: Sisense #4 and #5, and Tableau #18 and #19. It is the reverse of BL-584,
+where the index reads an unknown status as OPEN: the two tools read the same files and
+disagree.
+
+**Do.**
+1. Add `TO VERIFY` to the markers.
+2. Better, fail on any item status outside the documented vocabulary, so the next new
+   spelling can't hide an item either. Fix this with BL-584, so both tools share one list.
+3. Prove it with a test: an item headed `— TO VERIFY` is reported as unresolved.
+
+**Target:** 2026-12-31.
