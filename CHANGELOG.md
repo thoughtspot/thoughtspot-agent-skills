@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-18
+- docs: object, calendar and user names that carried a person's or a company's name in recorded evidence are replaced with synthetic ones; findings unchanged
+- chore: bump ts-cli to v0.219.1 (docstrings only)
 - feat: the audit report's Formulas view draws each Model's formula lineage as a graph (Cytoscape.js and dagre, embedded only when some Model has a formula chain) (ts-audit 3.22.0)
 - chore: bump ts-cli to v0.218.0
 
