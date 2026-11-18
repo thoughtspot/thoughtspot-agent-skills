@@ -86,9 +86,11 @@ def test_p23_lists_each_source_with_its_type():
 def test_p24_names_what_each_connection_uses():
     assert _detail(fx.perf_connection_oauth_privatelink(), "P24") == (
         "MEDIUM", "Can't use Data Cache: connections that use OAuth, PrivateLink or a "
-                  "template variable: Warehouse A (OAuth, PrivateLink)")
+                  "template variable: Warehouse A (OAuth, PrivateLink read from the host, to confirm)")
     ctx = fx.build_cache_ctx(connections=[conn(parameterized=True)])
     assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A (template variable)"]
+    m2m = fx.build_cache_ctx(connections=[dict(conn(oauth=True), oauth_m2m=True)])
+    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A (OAuth M2M, to confirm)"]
 
 
 def test_p24_matches_by_id_when_the_header_carries_one():

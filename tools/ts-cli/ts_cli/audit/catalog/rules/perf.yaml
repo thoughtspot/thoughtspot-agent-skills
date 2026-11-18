@@ -622,8 +622,11 @@
   description: >-
     A Model on a Table with an RLS rule that Data Cache cannot apply: one reaching
     another table's column or a join (a referenced `table_paths` entry on another table
-    or with a `join_path`), calling a formula function (any call but `ts_var`), or
-    calling a SQL pass-through function. Read outside quoted literals. A rule comparing
+    or with a `join_path`), calling a function in its formula (an RLS rule is a
+    formula; any call but `ts_var`, a null test such as `isnull` included), or calling
+    a SQL pass-through function. A null test is how a rule keeps an outer join's
+    unmatched rows (S12 advises one), so that rule is a trade-off: it keeps the rows and
+    stops Data Cache; the product owner asked for both to be flagged for review. Read outside quoted literals. A rule comparing
     only its own Table's columns with ts_ variables is fine. The finding lists each rule
     and what it uses.
   categories: [P]
@@ -637,7 +640,8 @@
   remediation: >-
     Rewrite each listed rule to compare only its Table's own columns with ts_
     variables so Data Cache can serve the Model, or accept that the Model stays
-    uncached.
+    uncached. A null test kept so an outer join keeps its unmatched rows (S12) is a
+    trade-off to decide, not a mistake: removing it brings the rows' loss back.
   examples:
     fires: {fixture: perf_rls_beyond_own_columns, severity: MEDIUM}
     silent: {fixture: perf_rls_own_columns_only}

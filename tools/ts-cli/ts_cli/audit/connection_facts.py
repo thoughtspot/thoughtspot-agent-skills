@@ -13,10 +13,13 @@ or a log line.
     oauth          a configuration key, at any depth, containing `oauth` (any case:
                    `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or both
                    `client_id` and `client_secret` (a Databricks OAuth M2M service
-                   principal). Read from key names: the response has no auth-type field.
+                   principal; `oauth_m2m` says only that pair matched, which the product
+                   owner's team is to confirm counts as OAuth, open-items #18). Read from
+                   key names: the response has no auth-type field.
     privatelink    a `host` or `accountName` value (any case of key) containing
                    `privatelink` (any case): a Snowflake PrivateLink URL carries
-                   `.privatelink.`. No configuration key names PrivateLink.
+                   `.privatelink.`. No configuration key names PrivateLink; the team is
+                   to confirm the host is a sound signal (open-items #18).
     parameterized  a configuration value that is wholly a `${var}` template token
                    (publish_plan.parse_variable_token, as connection parameterization
                    writes it).
@@ -32,7 +35,7 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 from ts_cli.publish_plan import parse_variable_token
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
-CONNECTION_KEYS = ("id", "name", "type", "oauth", "privatelink", "parameterized")
+CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized")
 #: How deep a configuration is walked: far beyond any seen (they are flat).
 _MAX_DEPTH = 8
 _HOST_KEYS = ("host", "accountname")
@@ -89,8 +92,10 @@ def _flags(config: dict) -> Dict[str, bool]:
             privatelink = True
         if parse_variable_token(value) is not None:
             parameterized = True
-    oauth = any("oauth" in k for k in keys) or {"client_id", "client_secret"} <= keys
-    return {"oauth": oauth, "privatelink": privatelink, "parameterized": parameterized}
+    named = any("oauth" in k for k in keys)
+    m2m = not named and {"client_id", "client_secret"} <= keys
+    return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,
+            "parameterized": parameterized}
 
 
 def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
@@ -102,7 +107,7 @@ def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
     details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
     config = _configuration(details.get("configuration"))
     flags = _flags(config) if config is not None else \
-        {"oauth": None, "privatelink": None, "parameterized": None}
+        {"oauth": None, "oauth_m2m": None, "privatelink": None, "parameterized": None}
     return {"id": _text(entry.get("id")), "name": _text(entry.get("name")),
             "type": _text(entry.get("data_warehouse_type")) or _text(details.get("type")),
             **flags}

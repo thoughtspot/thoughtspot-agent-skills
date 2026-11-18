@@ -324,6 +324,26 @@ in the sample (Model headers carry none). P23 reads it.
 
 ---
 
+### #18 — Data Cache: what the product team is to confirm — UNVERIFIED
+
+Raised 2026-11-18 by the product owner, who asked for these to be flagged so the team
+can review them. Each is what P24 or P28 reads today; the finding says "to confirm" where
+it rests on one of them.
+
+1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
+   `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
+   Databricks OAuth M2M service principal). Does Data Cache treat that M2M connection as
+   an OAuth connection? The finding names it "OAuth M2M, to confirm".
+2. **PrivateLink.** No configuration key names PrivateLink, so P24 reads it from a
+   `host` or `accountName` containing `privatelink`. Is that a sound signal on every
+   source Data Cache supports? The finding names it "PrivateLink read from the host, to
+   confirm".
+3. **A null test in an RLS rule.** The product owner confirmed (2026-11-18) that any
+   function in an RLS rule's formula stops Data Cache, `isnull` included. S12 advises a
+   null test so an outer join keeps its unmatched rows, so the two rules meet: the team
+   is to decide how customers should weigh keeping the rows against caching. Both S12's
+   and P28's remediation now say so.
+
 ## Phase 3 — Visualization Layer (future)
 
 ### #13 — Liveboard viz fingerprinting — UNVERIFIED

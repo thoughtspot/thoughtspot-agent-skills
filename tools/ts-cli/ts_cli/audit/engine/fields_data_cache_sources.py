@@ -94,12 +94,23 @@ def _connection_cache_blockers(item: dict, ctx: Any) -> Any:
     facts = [f for f in (ctx.connections or []) if isinstance(f, dict)]
     out = NameList()
     for conn in model_connections(item.get("doc") or {}, ctx):
-        found = [label for key, label in _CONNECTION_FLAGS
-                 if any(f.get(key) is True for f in facts
-                        if connection_matches(conn, f.get("name"), f.get("id")))]
+        mine = [f for f in facts if connection_matches(conn, f.get("name"), f.get("id"))]
+        found = [_flag_label(key, label, mine) for key, label in _CONNECTION_FLAGS
+                 if any(f.get(key) is True for f in mine)]
         if found:
             out.append(f"{conn['name'] or conn['id']} ({', '.join(found)})")
     return out
+
+
+def _flag_label(key: str, label: str, facts: list) -> str:
+    """How a finding names one flag; the two inferred readings say they are for the
+    team to confirm (open-items #18): OAuth read only from a client_id/client_secret
+    pair (Databricks OAuth M2M), and PrivateLink read from the host."""
+    if key == "oauth" and all(f.get("oauth_m2m") is True for f in facts if f.get("oauth") is True):
+        return "OAuth M2M, to confirm"
+    if key == "privatelink":
+        return "PrivateLink read from the host, to confirm"
+    return label
 
 
 # ── P25: Tables named by a template variable ────────────────────────────────

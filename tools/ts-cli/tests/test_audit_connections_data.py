@@ -92,8 +92,18 @@ def test_a_whole_template_token_is_a_parameterized_connection(settings, paramete
 def test_facts_keep_ids_names_and_type_only():
     facts = connection_facts(SECRET_CONNECTIONS[0])
     assert facts == {"id": "conn-0", "name": "Warehouse A", "type": "SNOWFLAKE",
-                     "oauth": True, "privatelink": True, "parameterized": False}
+                     "oauth": True, "oauth_m2m": False, "privatelink": True,
+                     "parameterized": False}
     assert tuple(facts) == CONNECTION_KEYS
+
+
+def test_oauth_from_a_client_id_and_secret_alone_is_marked_m2m():
+    m2m = connection_facts({"id": "c", "name": "N", "details": {
+        "configuration": '{"client_id": "x", "client_secret": "******", "host": "h"}'}})
+    named = connection_facts({"id": "c", "name": "N", "details": {
+        "configuration": '{"OAuth2ClientId": "x", "client_id": "x", "client_secret": "y"}'}})
+    assert (m2m["oauth"], m2m["oauth_m2m"]) == (True, True)
+    assert (named["oauth"], named["oauth_m2m"]) == (True, False)
 
 
 @pytest.mark.parametrize("details", [{}, {"configuration": None},
