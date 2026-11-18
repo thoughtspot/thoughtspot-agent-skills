@@ -75,6 +75,8 @@ def test_the_model_columns_value_wins_and_a_blank_one_falls_back_to_the_table():
     ("start_of_week ( [ORDERS::D] )", []),
     ("year ( [ORDERS::D] , FISCAL ) + quarter_number ( [ORDERS::D] , default )", []),
     ("contains ( [ORDERS::N] , ts_username )", []),
+    # no calendar-taking date function takes a session variable: a ts_ word is a name
+    ("start_of_week ( [ORDERS::D] , ts_retail )", ["ts_retail"]),
     ("concat ( 'start_of_week ( [d] , RetailCal )' , [ORDERS::N] )", []),
     ("start_of_week ( [ORDERS::RetailCal] )", []),
     ("start_of_week ( [ORDERS::D] , 'RetailCal' )", []),
@@ -101,6 +103,53 @@ def test_a_formula_naming_a_custom_calendar_is_a_p19_reading_to_confirm():
     assert dc["readiness"] == "confirm"
     assert dc["calendars_in_use"] == [{"column": "Week Start", "calendar": "RetailCal",
                                        "kind": "custom", "set_on": "formula"}]
+
+
+def test_every_calendar_a_formula_names_is_in_use_marked_in_a_formula():
+    """Code-based or custom, a calendar a formula passes is listed under Calendars in
+    use; only the custom one is a P19 reading."""
+    ctx = fx.build_cache_ctx(formulas=[
+        {"id": "f1", "name": "Fiscal Year", "expr": "year ( [ORDERS::D] , fiscal )"},
+        {"id": "f2", "name": "Week Start", "expr": "start_of_week ( [ORDERS::D] , RetailCal )"}],
+        calendars=[], connections=[fx.build_cache_connection()],
+        headers=[fx.build_cache_header()])
+    from ts_cli.audit import run_audit
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    assert model["data_cache"]["calendars_in_use"] == [
+        {"column": "Fiscal Year", "calendar": "fiscal", "kind": "code-based",
+         "set_on": "formula"},
+        {"column": "Week Start", "calendar": "RetailCal", "kind": "custom",
+         "set_on": "formula"}]
+    assert _field(ctx, "@custom_calendar_columns") == [
+        "Week Start: calendar RetailCal in a formula (to confirm)"]
+
+
+def test_a_formulas_code_based_calendar_that_a_custom_calendar_also_names_is_to_confirm():
+    """Point 9 for formulas: `fiscal` in a formula, with a custom calendar named "Fiscal"
+    on the connection, could mean either."""
+    ctx = fx.build_cache_ctx(formulas=[
+        {"id": "f1", "name": "Fiscal Year", "expr": "year ( [ORDERS::D] , fiscal )"}],
+        calendars=[cal("Fiscal")], connections=[fx.build_cache_connection()],
+        headers=[fx.build_cache_header()])
+    assert _field(ctx, "@custom_calendar_columns") == [
+        "Fiscal Year: calendar fiscal in a formula, also a custom calendar's name on its "
+        "connection (to confirm)"]
+    from ts_cli.audit import run_audit
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    assert model["data_cache"]["readiness"] == "confirm"
+    assert model["data_cache"]["calendars_in_use"][0]["kind"] == "unclear"
+
+
+def test_the_unclear_mark_holds_with_the_memo_disabled():
+    """The clash is read in one pass, not matched by object identity across two calls,
+    so it holds whether or not the per-run memo shares the column list."""
+    from ts_cli.audit.data_cache import model_data_cache
+    from ts_cli.audit.engine import memo
+    ctx = fx.build_cache_ctx(model_columns=[col("Day", "ORDERS::DAY", calendar="fiscal")],
+                             calendars=[cal("Fiscal")])
+    with memo.disabled():
+        dc = model_data_cache(_item(ctx), ctx, {})
+    assert dc["calendars_in_use"][0]["kind"] == "unclear"
 
 
 def test_a_code_based_name_that_is_also_a_custom_calendars_is_to_confirm():

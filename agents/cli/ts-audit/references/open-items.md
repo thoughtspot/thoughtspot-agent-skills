@@ -354,15 +354,17 @@ the product owner confirmed it.
 
 ### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
 
-Until the team answers, no open point reads Can use. A finding marks "to confirm"
-every reading that rests on one: P24's OAuth M2M (point 1) and PrivateLink read from the
-host (point 2), P28's `= null` test (point 4), P19's calendar named in a formula (point
-5) and code-based name that a custom calendar also has (point 9), and P21's measure only
-flagged pre-aggregated (point 6). A finding resting only on such readings says the
-Model may not be able to use Data Cache, and the Model reads To confirm. Points 7 and 8
-leave the rule unable to judge the Model, which reads Not assessed. Point 2's negative
-side has no reading yet: a host without `privatelink` reads as no PrivateLink. P24 is
-graded as a heuristic.
+Until the team answers, no open point reads Can use, with one exception taken by
+decision: point 2's negative side. A host without `privatelink` reads as no PrivateLink,
+since nothing else in a connection's settings could say otherwise. Point 3 is no longer
+open: the product owner answered it, and that reading is firm. A finding marks "to
+confirm" every other reading that rests on an open point. Those are P24's OAuth M2M
+(point 1), PrivateLink read from the host (point 2) and P28's operator null test (point
+4). So are P19's calendar named in a formula (point 5) and code-based name that a custom
+calendar also has (point 9), and P21's measure only flagged pre-aggregated (point 6). A finding
+resting only on such readings says the Model may not be able to use Data Cache, and the
+Model reads To confirm. Points 7 and 8 leave the rule unable to judge the Model, which
+reads Not assessed. P24 is graded as a heuristic.
 
 The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
 for the team. Points 4 to 6, 8 and 9 came from the reviews of the rules that day and
@@ -386,19 +388,21 @@ reads today.
    is to decide how customers should weigh keeping the rows against caching. Both S12's
    and P28's remediation now say so, and P28 names such a rule "a null test that keeps
    outer-join rows, see S12".
-4. **The `= null` form of a null test.** S12 and S15 accept `[X] = null` as a null
-   branch, as well as `isnull` and `is_null`. Their pattern matches `= null` after any
-   character, so it reads `[X] != null`, `<= null` and `>= null` as a null branch too;
-   P28 reads only `= null` itself. P28 lists a rule with that form as "a
-   null test that keeps outer-join rows, see S12 (to confirm)". Does that form stop Data
-   Cache too? If so, it becomes a firm reading like `isnull`; if not, P28 drops it.
-   S12's remediation says it is to confirm.
+4. **Operator null tests.** S12 and S15 accept `[X] = null` as a null branch, as well
+   as `isnull` and `is_null`. Their pattern matches `= null` after any character, so it
+   reads `[X] != null`, `<= null` and `>= null` as a null branch too. P28 reads the same
+   forms and lists a rule with one as "a null test that keeps outer-join rows, see S12
+   (to confirm)". Does an operator comparison with null stop Data Cache too? If so, it
+   becomes a firm reading like `isnull`; if not, P28 drops it. S12's remediation says it
+   is to confirm.
 5. **A custom calendar named in a formula.** A formula can pass a calendar to a date
    function, as in `start_of_week ( [d] , RetailCal )`. P19 lists such a formula as
    "Week Start: calendar RetailCal in a formula (to confirm)". It reads the last
    argument of a date function that takes a calendar, when that argument is a bare
-   keyword other than `calendar`, `fiscal` or `default`. Does a formula that names a custom calendar
-   stop Data Cache? If so, the reading becomes firm; if not, P19 drops it.
+   keyword other than `calendar`, `fiscal` or `default` (and other than `true`, `false`
+   or `null`, which are literals). Every calendar a formula names, code-based or not, is
+   listed under Calendars in use as "in a formula". Does a formula that names a custom
+   calendar stop Data Cache? If so, the reading becomes firm; if not, P19 drops it.
 6. **Pre-aggregated measures beyond `AGGREGATE`.** P21 also fires on a Model column over
    a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`. The
    product owner's rule named Models with `AGGREGATE` measures (semantic query Models).
@@ -409,13 +413,14 @@ reads today.
    sample on the SE demo cluster do. Can Data Cache serve a Model built on a View?
 8. **RLS path ids that differ only in case.** P28 matches the ids an RLS rule names to
    its Table's `table_paths` ids exactly. A rule naming `teams_1` where the path is
-   `TEAMS_1` is not judged, and the Model reads Not assessed. Does ThoughtSpot match the
-   ids without case? If so, P28 should read such a rule as it reads the path; if not,
-   the rule is malformed.
+   `TEAMS_1` is not judged, and the Model reads Not assessed; so is a rule naming an id
+   its Table does not define at all. Does ThoughtSpot match the ids without case? If so,
+   P28 should read such a rule as it reads the path; if not, the rule is malformed.
 9. **A custom calendar named like a code-based one.** A custom calendar could be named
    `Fiscal`, `default` or `calendar`. When a custom calendar registered on the Model's
-   connection has the name a column's calendar uses, P19 lists the column "to confirm"
-   and the calendars column shows it as "code-based or custom, to confirm". Can a custom
+   connection has the name a column's calendar, or a formula's calendar argument, uses,
+   P19 lists the column or formula "to confirm" and the calendars column shows it as
+   "code-based or custom, to confirm". Can a custom
    calendar take such a name, and if so, how does TML tell it from the code-based one?
 
 ## Phase 3 — Visualization Layer (future)

@@ -77,6 +77,7 @@ def test_oauth_is_read_from_key_names_at_any_depth(settings, oauth):
     ({"host": "acme.snowflakecomputing.com"}, False),
     # no host or account name to read it from: unknown, not "no"
     ({"note": "privatelink", "client_id": "x"}, None), ({"host": 12, "user": "u"}, None),
+    ({"host": "   ", "client_id": "x"}, None), ({"accountName": "", "host": "acme"}, False),
 ])
 def test_privatelink_is_read_from_the_host_or_account_value(settings, privatelink):
     assert connection_facts(_connection(0, **settings))["privatelink"] is privatelink

@@ -359,7 +359,9 @@ NULL_TEST_TO_CONFIRM = NULL_TEST + " (to confirm)"
     # `= null` is a null test too, but whether it stops Data Cache is open: to confirm
     ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] = null", [NULL_TEST_TO_CONFIRM]),
     ("[ORDERS_1::R] = ts_username or [ORDERS_1::K]=NULL", [NULL_TEST_TO_CONFIRM]),
-    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] != null", []),
+    # every operator form S12 reads as a null branch is a reading to confirm too
+    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] != null", [NULL_TEST_TO_CONFIRM]),
+    ("[ORDERS_1::K] <= null or [ORDERS_1::J] >= NULL", [NULL_TEST_TO_CONFIRM]),
     ("[ORDERS_1::R] = 'x = null'", []),
     ("isnull ( [ORDERS_1::K] ) or [ORDERS_1::J] = null", [NULL_TEST, NULL_TEST_TO_CONFIRM]),
     ("[ORDERS_1::R] = 'isnull ( x )'", []),
@@ -403,6 +405,16 @@ def test_an_equals_null_test_is_a_reading_to_confirm(expr, readiness, lead):
     [finding] = run_rule(ctx, CAT, "P28", "general")
     assert finding.severity == "MEDIUM" and finding.detail.startswith(lead + ": ")
     assert _readiness(ctx)[0] == readiness
+
+
+def test_any_path_id_a_rule_names_but_its_table_does_not_define_leaves_p28_not_assessed():
+    """A rule naming a `table_paths` id that is not there (case or spelling) cannot be
+    judged: P28 is not assessed, never read as an own-column rule."""
+    ctx = fx.build_cache_ctx(connections=CLEAN, headers=SNOWFLAKE_HEADER, table={
+        "rls_rules": {"table_paths": [fx.CACHE_OWN_PATH],
+                      "rules": [{"name": "Ghost", "expr": "[GHOST_1::M] = ts_username"}]}})
+    assert _field(ctx, "@rls_rules_beyond_own_table") == []
+    assert _readiness(ctx) == ("unknown", ["P28"])
 
 
 def test_a_path_id_matched_only_without_case_leaves_p28_not_assessed():

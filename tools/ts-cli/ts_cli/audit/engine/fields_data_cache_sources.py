@@ -41,7 +41,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.fields_data import _code, _own_table_and_paths, _rls_rules_of
-from ts_cli.audit.engine.fields_data_cache import (CANT_USE, MAY_NOT_USE, calls_sql_passthrough,
+from ts_cli.audit.engine.fields_data_cache import (_CALL, CANT_USE, MAY_NOT_USE,
+                                                   calls_sql_passthrough,
                                                    connection_facts_for, connection_unread,
                                                    model_connections, model_sources,
                                                    source_connection, unread_sources)
@@ -235,8 +236,6 @@ def _sql_view_sources(item: dict, ctx: Any) -> Any:
 # ── P28: RLS rules reaching beyond their Table's own columns ────────────────
 
 _REF = re.compile(REF_GRAMMAR)
-#: A function call outside quoted literals and references.
-_CALL = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
 #: Words before `(` that are not a formula function: the session-variable accessor, which
 #: a plain rule uses, and the operators.
 _NOT_FORMULA = frozenset({"ts_var", "in", "not", "and", "or"})
@@ -244,15 +243,15 @@ _PASSTHROUGH_NAME = re.compile(r"(?i)^sql_\w+_op$")
 #: A null-test call, in the spellings S12 and S15 read as a call (`isnull`, `is_null`;
 #: fields_data._ISNULL_CALL).
 _NULL_TEST_NAME = re.compile(r"(?i)^is_?null$")
-#: The other null-test form S12 and S15 accept, `[X] = null`. Their pattern
-#: (fields_data._ISNULL_CALL) matches `= null` after any character, so it also reads
-#: `!= null`, `<= null` and `>= null` as a null branch; P28 reads only `= null` itself.
-_EQUALS_NULL = re.compile(r"(?i)(?<![!<>=])=\s*null\b")
+#: The operator null tests S12 and S15 accept as a null branch: their pattern
+#: (fields_data._ISNULL_CALL) matches `= null` after any character, so `[X] = null`,
+#: `!= null`, `<= null` and `>= null` alike. P28 reads the same forms.
+_EQUALS_NULL = re.compile(r"(?i)=\s*null\b")
 #: How P28 names a null test: the call S12 advises so an outer join keeps its unmatched
 #: rows, which stops Data Cache all the same (product owner, 2026-11-18).
 NULL_TEST = "a null test that keeps outer-join rows, see S12"
-#: How P28 names an `= null` test: whether that form stops Data Cache is for the product
-#: team to confirm (open-items #18, point 4).
+#: How P28 names an operator null test (`= null`, `!= null`, ...): whether that form stops
+#: Data Cache is for the product team to confirm (open-items #18, point 4).
 NULL_TEST_TO_CONFIRM = NULL_TEST + " (to confirm)"
 #: P28's readings that rest on an open product question.
 _RLS_TO_CONFIRM = frozenset({NULL_TEST_TO_CONFIRM})
@@ -263,9 +262,10 @@ def rls_rule_problems(rule: dict, own: Any, paths: Dict[str, dict]) -> List[str]
     join" (a referenced `table_paths` entry whose `join_path` names a join, as
     tml_rls_graph walks it), "another table's column" (one whose `table` is not the
     owning Table, any case), "a formula" (a function call other than `ts_var` or a null
-    test), NULL_TEST (an `isnull` / `is_null` call), NULL_TEST_TO_CONFIRM (an `= null`
-    test), "a SQL pass-through" (fields_data_cache's matcher). Read outside quoted
-    literals; a path id the rule's `table_paths` does not define is not judged."""
+    test), NULL_TEST (an `isnull` / `is_null` call), NULL_TEST_TO_CONFIRM (an operator
+    null test, `= null` or `!= null` and the like), "a SQL pass-through"
+    (fields_data_cache's matcher). Read outside quoted literals; a path id the rule's
+    `table_paths` does not define is not judged here (unjudged_rls)."""
     expr = rule.get("expr")
     code = _code(expr)
     found = _path_problems(code, own, paths) | _call_problems(code)
@@ -310,18 +310,17 @@ def _call_problems(code: str) -> set:
 
 def unjudged_rls(item: dict, ctx: Any) -> List[str]:
     """Model: the sources whose RLS rules P28 cannot read: unread_sources, and a Table
-    with a rule naming a `table_paths` id that matches one only without case (whether
-    ThoughtSpot matches ids without case is open, BL-590). None for a Model bypassing
-    RLS, which applies no rule wherever it is defined."""
+    with a rule naming a path id its `table_paths` does not define by exact match (a
+    misspelt id, or one differing only in case, which ThoughtSpot may or may not match,
+    open-items #18 point 8). Empty for a Model bypassing RLS, which applies no rule
+    wherever it is defined."""
     if tml.mapping(item.get("obj") or {}, "properties").get("is_bypass_rls"):
         return []
     out = unread_sources(item, ctx)
     for source in model_sources(item.get("doc") or {}, ctx):
         doc = (ctx.tables or {}).get(source["fqn"]) if source["fqn"] else None
         paths = _paths_by_id(doc)
-        folded = {pid.casefold() for pid in paths}
-        if any(pid not in paths and pid.casefold() in folded
-               for rule in _rls_rules_of(doc)
+        if any(pid not in paths for rule in _rls_rules_of(doc)
                for pid in _referenced_path_ids([{"expr": _code(rule.get("expr"))}])):
             out.append(source["name"])
     return out

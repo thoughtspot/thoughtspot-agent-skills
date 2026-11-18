@@ -402,9 +402,9 @@
     case, edge spaces aside) are code-based calendars, and an absent or blank value sets
     none; any other value names a custom calendar. Two readings are for the product team
     to confirm: a formula that passes a custom calendar's name to a date function (as in
-    `start_of_week ( [d] , RetailCal )`), and a code-based value that a custom calendar
-    registered on the Model's connection is also named. A finding resting only on them
-    says the Model may not be able to use Data Cache. A source whose TML the audit did
+    `start_of_week ( [d] , RetailCal )`), and a code-based value, on a column or in a
+    formula, that a custom calendar registered on the Model's connection is also named.
+    A finding resting only on them says the Model may not be able to use Data Cache. A source whose TML the audit did
     not read (a failed export, a SQL View) is not judged, and the Model's Data Cache
     readiness reads Not assessed. The finding lists each such column or formula with the
     calendar it names.
@@ -420,8 +420,9 @@
   remediation: >-
     Move each listed column to a code-based calendar (calendar, fiscal or default), and
     drop the calendar argument from each listed formula, so Data Cache can serve the
-    Model, or accept that the Model stays uncached. A reading marked to confirm waits on
-    the product team.
+    Model, or accept that the Model stays uncached. Where a code-based value is also a
+    custom calendar's name, rename that custom calendar so the value means one calendar
+    only. A reading marked to confirm waits on the product team.
   examples:
     fires: {fixture: perf_custom_calendar_columns, severity: MEDIUM}
     silent: {fixture: perf_code_based_calendars}
@@ -658,13 +659,15 @@
     unmatched rows (S12 advises one), so that rule is a trade-off: it keeps the rows and
     stops Data Cache. The finding names it apart from other functions, and the product
     owner asked for both rules to be flagged for review. The `isnull` and `is_null`
-    calls are firm. Whether the `= null` form S12 also accepts stops Data Cache is for
-    the product team to confirm, so P28 lists it marked "to confirm", and a finding
-    resting only on such rules says the Model may not be able to use Data Cache. Read
-    outside quoted literals. A rule comparing only its own Table's columns with ts_
-    variables is fine, and a Model that bypasses RLS (`is_bypass_rls`) applies no rule.
-    A source whose TML the audit did not read (a failed export, a SQL View) is not
-    judged, and the Model's Data Cache readiness reads Not assessed. The finding lists
+    calls are firm. Whether the operator forms S12 also accepts (`= null`, `!= null`,
+    `<= null`, `>= null`) stop Data Cache is for the product team to confirm, so P28
+    lists them marked "to confirm", and a finding resting only on such rules says the
+    Model may not be able to use Data Cache. Read outside quoted literals. A rule
+    comparing only its own Table's columns with ts_ variables is fine, and a Model that
+    bypasses RLS (`is_bypass_rls`) applies no rule. A source whose TML the audit did not
+    read (a failed export, a SQL View), or a rule naming a path id its Table's
+    `table_paths` does not define exactly, is not judged, and the Model's Data Cache
+    readiness reads Not assessed. The finding lists
     each rule and what it uses.
   categories: [P]
   requires: [model_tml]

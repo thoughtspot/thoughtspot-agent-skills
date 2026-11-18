@@ -117,7 +117,8 @@ _M2M_KEYS = ("client_id", "client_secret")
 def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
     """What _flags reads of a configuration: every key (case folded), the keys whose
     value is set (_is_set), the text of each host or account name, and whether any value
-    is wholly a template token."""
+    is wholly a template token. A blank host or account name holds no text, so it is
+    not a host."""
     present, keys, hosts = set(), set(), []
     parameterized = False
     for key, value in _entries(config):
@@ -127,7 +128,7 @@ def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
             keys.add(folded)
         if not isinstance(value, str):
             continue
-        if folded in _HOST_KEYS:
+        if folded in _HOST_KEYS and value.strip():
             hosts.append(value)
         if parse_variable_token(value) is not None:
             parameterized = True

@@ -757,6 +757,15 @@ def _in_quotes(idx: int, spans: list[tuple[int, int]]) -> bool:
     return any(a <= idx < b for a, b in spans)
 
 
+#: Public names for the paren, argument and quote-span helpers above, for callers
+#: outside the converters (the audit's formula-calendar reading, P19). The private names
+#: stay for the existing callers.
+split_top_level_args = _split_top_level_args
+close_paren = _close_paren
+quoted_spans = _quoted_spans
+in_quotes = _in_quotes
+
+
 def rewrite_marker_calls(
     text: str,
     handlers: dict[str, Any],

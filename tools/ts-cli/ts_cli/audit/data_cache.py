@@ -36,11 +36,11 @@ confirm (TO_CONFIRM): its reason then "may block".
     reasons     [{rule, effect: "blocks" | "may block" | "warns", label, items}]
     not_assessed  the rules that did not run, or could not read all of this Model (the
                 cases under unknown)
-    calendars_in_use      each column that sets a calendar, then each custom calendar a
-                          formula names: {column, calendar, kind ("code-based" |
-                          "custom" | "unclear": a code-based value a custom calendar on
-                          the connection is also named), set_on ("model" | "table" |
-                          "formula")}
+    calendars_in_use      each column that sets a calendar, then each calendar a
+                          formula names (fields_data_cache.calendars_in_use): {column,
+                          calendar, kind ("code-based" | "custom" | "unclear": a
+                          code-based value a custom calendar on the connection is also
+                          named), set_on ("model" | "table" | "formula")}
     calendars_not_read    the sources whose TML was not read (unread_sources): their
                           Table-column calendars are not in calendars_in_use
     connection_calendars  the custom calendars on the Model's connections:
@@ -51,10 +51,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from ts_cli.audit.engine import fields, predicates, scopes
-from ts_cli.audit.engine.fields_data_cache import (column_calendars, connection_calendars,
+from ts_cli.audit.engine.fields_data_cache import (calendars_in_use, connection_calendars,
                                                    custom_calendars_to_confirm,
-                                                   custom_names_that_look_code_based,
-                                                   formula_calendars, missing_tables,
+                                                   missing_tables,
                                                    semantic_measures_to_confirm,
                                                    unjudged_sql_views, unread_sources)
 from ts_cli.audit.engine.fields_data_cache_sources import (connection_blockers_to_confirm,
@@ -131,19 +130,6 @@ def _readiness(reasons: List[dict], not_assessed: List[str]) -> str:
     return "warning" if reasons else "ready"
 
 
-#: calendars_in_use's kind for a code-based value a custom calendar is also named.
-UNCLEAR = "unclear"
-
-
-def _calendars_in_use(doc: dict, ctx: Any) -> List[dict]:
-    """column_calendars, then formula_calendars; a code-based value that a custom
-    calendar on the Model's connections is also named reads UNCLEAR, not code-based."""
-    clashes = {id(c) for c in custom_names_that_look_code_based(doc, ctx)}
-    out = [dict(c, kind=UNCLEAR) if id(c) in clashes else dict(c)
-           for c in column_calendars(doc, ctx)]
-    return out + formula_calendars(doc)
-
-
 def model_data_cache(item: dict, ctx: Any, ran: Dict[str, Any]) -> dict:
     """`item` (a model scope item) judged by the rules in `ran` (id -> the catalog rule,
     the rules this run ran)."""
@@ -158,6 +144,6 @@ def model_data_cache(item: dict, ctx: Any, ran: Dict[str, Any]) -> dict:
     doc = item.get("doc") or {}
     return {"readiness": _readiness(reasons, not_assessed), "reasons": reasons,
             "not_assessed": not_assessed,
-            "calendars_in_use": _calendars_in_use(doc, ctx),
+            "calendars_in_use": calendars_in_use(doc, ctx),
             "calendars_not_read": unread_sources(item, ctx),
             "connection_calendars": connection_calendars(doc, ctx)}

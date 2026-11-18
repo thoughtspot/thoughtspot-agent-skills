@@ -2,10 +2,13 @@
    The data is each corpus Model's `dc` (ts_cli/audit/data_cache.py, compacted in
    report.py): `s` its readiness (ready, blocked, confirm, warning or unknown), `r` the
    reasons [{c rule, b 1 when it blocks, q 1 when it may block (only readings the product
-   team is to confirm), l label, i items}], `k` the calendars its columns use
-   [{n column, c calendar, u 1 when custom, t 1 when set on the Table column}], `cc` the
-   custom calendars registered on its connections [{n connection, k calendar names}],
-   or null when they were not fetched, and `na` the checks not made for it. The
+   team is to confirm), l label, i items}], `k` the calendars its columns and formulas
+   use [{n column or formula, c calendar, u 1 custom, 0 code-based, 2 unclear (a
+   code-based value a custom calendar on the connection is also named), t 1 when set on
+   the Table column, f 1 when named in a formula}], `ku` the sources whose TML was not
+   read, `cc` the custom calendars registered on its connections [{n connection, k
+   calendar names}], or null when they were not fetched, and `na` the checks not made
+   for it. The
    readiness is read off the fields the rules P19-P28 judge by, so it says what their
    findings say. JSON written before this view has no `dc`: its Models read "Not
    assessed". */
@@ -35,8 +38,8 @@ function dcRows(){
   });
 }
 
-/* The calendars a Model's columns use, one line per calendar: "Retail 445 (custom):
-   Order Date, Ship Date (from its Table)". */
+/* The calendars a Model's columns and formulas use, one line per calendar: "Retail 445
+   (custom): Order Date, Ship Date (from its Table), Week Start (in a formula)". */
 function dcCalendarLines(dc){
   var order = [], columns = Object.create(null);
   (dc.k || []).forEach(function(k){
@@ -164,8 +167,9 @@ function buildDataCache(D){
     "custom calendars is a warning, since a query that picks one at run time is not cached. "+
     "To confirm: the only reasons are readings the product team is to review (OAuth read "+
     "from a client ID and secret, PrivateLink read from the host, a measure only flagged "+
-    "pre-aggregated, an RLS rule\u2019s \u201c= null\u201d test). Anything the audit could "+
-    "not read makes a Model Not assessed, never Can use."));
+    "pre-aggregated, an RLS rule\u2019s \u201c= null\u201d test, a custom calendar named in "+
+    "a formula, a code-based calendar name that a custom calendar also has). Anything "+
+    "the audit could not read makes a Model Not assessed, never Can use."));
   var table = el("table", "cleanup-table dc-table");
   table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';

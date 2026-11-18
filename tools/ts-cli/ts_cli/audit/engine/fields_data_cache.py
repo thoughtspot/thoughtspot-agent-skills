@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.memo import cached
-from ts_cli.formula_common import _close_paren, _in_quotes, _quoted_spans, _split_top_level_args
+from ts_cli.formula_common import close_paren, in_quotes, quoted_spans, split_top_level_args
 from ts_cli.formula_translate.refs import REF_GRAMMAR, split_literals
 
 #: `properties.calendar` values that name a code-based calendar, case and edge spaces
@@ -124,77 +124,97 @@ _CALENDAR_FUNCTIONS = frozenset({
     "start_of_month", "start_of_quarter", "start_of_year"})
 _DIFF_CALENDAR_FUNCTIONS = frozenset({"diff_weeks", "diff_months", "diff_quarters",
                                       "diff_years"})
-_CALL_NAME = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
+#: A function call outside quoted literals and references (fields_data_cache_sources
+#: reads RLS rules with it too).
+_CALL = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
 _BARE_KEYWORD = re.compile(r"^[A-Za-z_]\w*$")
 #: Bare words that are not a calendar: the formula language's literals.
 _NOT_A_CALENDAR = frozenset({"true", "false", "null"})
 
 
-def formula_calendar_names(expr: Any) -> List[str]:
-    """The custom calendars a formula passes to a date function, in order: the last
-    argument of a _CALENDAR_FUNCTIONS call (of two or more) or a _DIFF_CALENDAR_FUNCTIONS
-    call (of three or more) when it is a bare keyword that is not code-based
-    (CODE_BASED_CALENDARS), a literal or a session variable (`ts_*`). Calls inside a
-    quoted literal or a `[...]` reference are not read. Uses formula_common's paren and
-    argument splitters, which keep quotes and references opaque."""
+def formula_calendar_arguments(expr: Any) -> List[str]:
+    """Every calendar a formula passes to a date function, in order: the last argument
+    of a _CALENDAR_FUNCTIONS call (of two or more) or a _DIFF_CALENDAR_FUNCTIONS call
+    (of three or more) when it is a bare keyword other than `true`, `false` or `null`,
+    code-based (`fiscal`) or not. Calls inside a quoted literal or a `[...]` reference
+    are not read. Uses formula_common's paren and argument splitters, which keep quotes
+    and references opaque."""
     if not isinstance(expr, str):
         return []
-    spans = _quoted_spans(expr)
+    spans = quoted_spans(expr)
     out: List[str] = []
-    for m in _CALL_NAME.finditer(expr):
+    for m in _CALL.finditer(expr):
         name = m.group(1).lower()
         least = 3 if name in _DIFF_CALENDAR_FUNCTIONS else 2
         if (name not in _CALENDAR_FUNCTIONS and name not in _DIFF_CALENDAR_FUNCTIONS) \
-                or _in_quotes(m.start(), spans):
+                or in_quotes(m.start(), spans):
             continue
-        close = _close_paren(expr, m.end() - 1)
-        args = _split_top_level_args(expr[m.end():close]) if close > 0 else []
+        close = close_paren(expr, m.end() - 1)
+        args = split_top_level_args(expr[m.end():close]) if close > 0 else []
         last = args[-1] if len(args) >= least else ""
-        word = last.casefold()
-        if _BARE_KEYWORD.match(last) and word not in CODE_BASED_CALENDARS \
-                and word not in _NOT_A_CALENDAR and not word.startswith("ts_"):
+        if _BARE_KEYWORD.match(last) and last.casefold() not in _NOT_A_CALENDAR:
             out.append(last)
     return out
 
 
+def formula_calendar_names(expr: Any) -> List[str]:
+    """The custom calendars among formula_calendar_arguments: those not code-based."""
+    return [a for a in formula_calendar_arguments(expr) if calendar_kind(a) == CUSTOM]
+
+
 def formula_calendars(doc: dict) -> List[Dict[str, str]]:
-    """Each custom calendar a Model formula names (formula_calendar_names), in formula
-    order: `{"column" (the formula's name, else id), "calendar", "kind": CUSTOM,
-    "set_on": "formula"}`, the shape column_calendars gives."""
+    """Each calendar a Model formula names (formula_calendar_arguments), in formula
+    order: `{"column" (the formula's name, else id), "calendar", "kind" (CODE or
+    CUSTOM), "set_on": "formula"}`, the shape column_calendars gives."""
     formulas = (doc.get("model") or {}).get("formulas") if isinstance(doc, dict) else None
     out: List[Dict[str, str]] = []
     for f in (formulas if isinstance(formulas, list) else []):
         if not isinstance(f, dict):
             continue
         label = _text(f.get("name")) or _text(f.get("id")) or "?"
-        out += [{"column": label, "calendar": name, "kind": CUSTOM, "set_on": "formula"}
-                for name in formula_calendar_names(f.get("expr"))]
+        out += [{"column": label, "calendar": name, "kind": calendar_kind(name) or CUSTOM,
+                 "set_on": "formula"}
+                for name in formula_calendar_arguments(f.get("expr"))]
     return out
 
 
-def custom_names_that_look_code_based(doc: dict, ctx: Any) -> List[Dict[str, str]]:
-    """Each column_calendars entry whose code-based value (`fiscal`, `default`,
-    `calendar`) is also the name of a custom calendar registered on one of the Model's
-    connections (connection_calendars, any case): which one the column means is open
-    (BL-590). None when the calendars were not fetched."""
+#: calendars_in_use's kind for a code-based value a custom calendar is also named.
+UNCLEAR = "unclear"
+
+
+def calendars_in_use(doc: dict, ctx: Any) -> List[Dict[str, str]]:
+    """Every calendar the Model uses, each a fresh mapping, in one pass: column_calendars
+    then formula_calendars. A code-based value that a custom calendar registered on one
+    of the Model's connections is also named (connection_calendars, any case) reads
+    UNCLEAR: which one it means is open (open-items #18 point 9). With the calendars not
+    fetched, no value is UNCLEAR."""
     registered = {n.strip().casefold() for c in (connection_calendars(doc, ctx) or [])
                   for n in c["calendars"]}
-    return [c for c in column_calendars(doc, ctx)
-            if c["kind"] == CODE and c["calendar"].strip().casefold() in registered]
+    out = []
+    for c in column_calendars(doc, ctx) + formula_calendars(doc):
+        c = dict(c)
+        if c["kind"] == CODE and c["calendar"].strip().casefold() in registered:
+            c["kind"] = UNCLEAR
+        out.append(c)
+    return out
 
 
 def custom_calendar_readings(item: dict, ctx: Any) -> List[Tuple[str, bool]]:
-    """Model: (item, to_confirm) for each P19 reading: a column on a custom calendar
-    (firm), a code-based value a custom calendar is also named (to confirm), a formula
-    naming a custom calendar (to confirm)."""
-    doc = item.get("doc") or {}
-    out = [(f"{c['column']} ({c['calendar']})", False)
-           for c in column_calendars(doc, ctx) if c["kind"] == CUSTOM]
-    out += [(f"{c['column']}: {c['calendar']}, also a custom calendar's name on its "
-             "connection (to confirm)", True)
-            for c in custom_names_that_look_code_based(doc, ctx)]
-    out += [(f"{c['column']}: calendar {c['calendar']} in a formula (to confirm)", True)
-            for c in formula_calendars(doc)]
+    """Model: (item, to_confirm) for each P19 reading, in calendars_in_use order: a
+    column on a custom calendar (firm); a code-based value a custom calendar is also
+    named (UNCLEAR), and a formula naming a custom calendar (both to confirm)."""
+    out = []
+    for c in calendars_in_use(item.get("doc") or {}, ctx):
+        in_formula = c["set_on"] == "formula"
+        where = f"{c['column']}: calendar {c['calendar']} in a formula" if in_formula \
+            else f"{c['column']}: {c['calendar']}"
+        if c["kind"] == UNCLEAR:
+            out.append((f"{where}, also a custom calendar's name on its connection "
+                        "(to confirm)", True))
+        elif c["kind"] == CUSTOM and in_formula:
+            out.append((f"{where} (to confirm)", True))
+        elif c["kind"] == CUSTOM:
+            out.append((f"{c['column']} ({c['calendar']})", False))
     return out
 
 

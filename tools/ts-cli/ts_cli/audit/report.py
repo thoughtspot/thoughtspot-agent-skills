@@ -218,11 +218,12 @@ def _compact_data_cache(dc: dict) -> dict:
     """A Model's `data_cache` (audit/data_cache.py), compacted for the Data Cache view:
     `s` its readiness; `r` the reasons, {c rule, b 1 when it blocks else 0, l label, i
     items, and q 1 when it may block, resting only on readings to confirm}; `k` the
-    calendars its columns use, {n column, c calendar, u 1 when custom, t 1 when set on
-    the Table column}; `cc` the custom calendars on its connections, {n connection, k
-    calendar names}, or null when they were not fetched; `na` the checks not made for
-    it; `ku`, when any, the sources whose TML was not read, so their Table-column
-    calendars are not among `k`."""
+    calendars its columns and formulas use (_compact_dc_calendar: u 1 custom, 0
+    code-based, 2 unclear; t 1 when set on the Table column; f 1 when named in a
+    formula); `cc` the custom calendars on its connections, {n connection, k calendar
+    names}, or null when they were not fetched; `na` the checks not made for it; `ku`,
+    when any, the sources whose TML was not read, so their Table-column calendars are
+    not among `k`."""
     conn = dc.get("connection_calendars")
     unread = dc.get("calendars_not_read")
     return {
