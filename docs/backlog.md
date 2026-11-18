@@ -491,6 +491,7 @@ are roughly ordered by value÷effort.
 | BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
 | BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
 | BL-594 | `ts connections add-tables` without `--auth-type` may always omit the connection's auth type | 2027-01-31 |
+| BL-595 | P24 cannot see a parameterized connection: the connection search returns its settings without the tokens | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17714,13 +17715,14 @@ disagree.
 
 - PT2 requires a `sql_string_op` pass-through for `UPPER`, `LOWER`, `TRIM`, `LTRIM`, `RTRIM` and `REPLACE`, and PT1 calls scalar pass-throughs reliable (`agents/shared/schemas/ts-model-conversion-invariants.md`). P20 says any pass-through stops Data Cache.
 - `ts-convert-from-tableau` promotes Tableau parameters (I10), and `ts-convert-from-powerbi` rebuilds time intelligence with parameters. P26 says a parameter in a formula stops Data Cache. (`ts-convert-from-databricks-mv` emits no parameters: its coverage matrix leaves them to the user, L3.)
-- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. P27 says a SQL View stops Data Cache.
+- `ts-convert-from-tableau` emits a SQL View for each custom SQL relation. So do `ts-convert-from-looker`, for a view with `derived_table: { sql: ... }` (Step 5b); `ts-convert-from-databricks-mv`, when the user picks option T for a subquery source (Step 5T); and `ts-convert-from-snowflake-sv`, for an inline `ALIAS as (SELECT ...)` table (coverage matrix row 37). P27 says a SQL View stops Data Cache.
+- `ts-convert-from-dbt` carries the user's `ts_rls_rules` and `ts_calendar_type` values through to ThoughtSpot. An RLS rule beyond its Table's own columns stops Data Cache (P28), and so does a custom calendar name (P19).
 
 A converted Model can be uncached without the user being told, and the invariants still call these the right choice.
 
 **Do.**
 1. Add a Data Cache note to PT1 and PT2: a pass-through stops Data Cache (P20), so a converter that emits one says so.
-2. In each affected converter's migration report, list the constructs that stop Data Cache (pass-throughs, parameters, SQL Views), so the user can weigh them.
+2. In each affected converter's migration report, list the constructs that stop Data Cache (pass-throughs, parameters, SQL Views, RLS rules, custom calendars), so the user can weigh them.
 3. Run the conversion-consistency auditor over the change.
 
 **Target:** 2027-02-28.
@@ -17735,6 +17737,8 @@ A converted Model can be uncached without the user being told, and the invariant
 1. Check live, read-only, what `record_size: -1` returns on `connection/search`, and record it in ts-audit open-items #16.
 2. Fix the gate's assumption: `-1` is "all" only where verified, per endpoint. Make it flag a `*/search` request that sends no `record_size`.
 3. Move `ts connections list` onto `paged_search.search_pages`, which de-duplicates and caps the pages, and fix any `-1` caller the probe shows is wrong.
+4. `paged_search.search_pages` stops at the first page shorter than the page size, so a server that answers a short page before the end truncates the list with no warning. Decide whether to page on until an empty page.
+5. The audit matches connection facts to a Model's Tables by name, case aside, so two connections whose names differ only in case merge into one reading. Match by id where the header carries one, and warn on a case-only clash.
 
 **Target:** 2027-01-31.
 
@@ -17747,5 +17751,18 @@ A converted Model can be uncached without the user being told, and the invariant
 **Do.**
 1. Probe, read-only, the `connection/search` request `_fetch_connection_v2` sends, on a key-pair and an OAuth connection: does any field carry the auth type?
 2. If none does, make `add-tables` require `--auth-type` (or read it another way), and update the README and `thoughtspot-connection.md`. If one does, record which and keep the code.
+
+**Target:** 2027-01-31.
+
+## BL-595 — P24 cannot see a parameterized connection: the connection search returns its settings without the tokens `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** live probe for the Data Cache review; ts-audit open-items #17.
+
+**What.** P24 reads a template variable as a connection setting whose whole value is a `${var}` token. On the SE demo cluster none of the 1,815 connections `connection/search` returned held a token. One connection's metadata header carries `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each of its six properties, but the search returned none of them as a token. So P24 never sees a parameterized connection, and a Model on one can read "Can use".
+
+**Do.**
+1. Derive the connection facts' `parameterized` flag from the connection's metadata header (`parameterizedConnection`, and `isParameterized`), from a paged `metadata/search` of type CONNECTION, keeping the token reading as a second signal.
+2. A test with a parameterized connection whose settings hold no token.
+3. Re-run the 20-Model sample and record the change in ts-audit open-items #17.
 
 **Target:** 2027-01-31.

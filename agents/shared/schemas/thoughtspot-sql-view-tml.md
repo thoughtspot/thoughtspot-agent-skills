@@ -82,7 +82,7 @@ sql_view:
     properties:
       column_type: ATTRIBUTE
       index_type: DONT_INDEX
-      calendar: calendar               # optional — a calendar NAME; `calendar` is the default spelling
+      calendar: calendar               # optional — calendar, fiscal or default (code-based), else a custom calendar's name
       is_attribution_dimension: false    # optional
   formulas:                            # optional — calculated columns on top of the SQL output
   - id: "formula_Metric Name"
@@ -133,7 +133,7 @@ sql_view:
 | `properties.synonyms` | No | Array of alternative names for search. Must be under `properties:`. |
 | `properties.is_attribution_dimension` | No | Boolean — marks column as an attribution dimension |
 | `properties.is_additive` | No | Boolean — marks column as additive |
-| `properties.calendar` | No | Date columns only — the **name** of a Connection-scoped custom calendar, with the literal `calendar` as the default spelling. **`CALENDAR_TYPE_GREGORIAN` is withdrawn as unverified (2026-07-30):** a 500-document census on se-thoughtspot found that literal **zero** times on any document type, and found `calendar:` on **zero** of 40 SQL View columns — so this row is doubly unverified for `sql_view:`. See [thoughtspot-model-tml.md](thoughtspot-model-tml.md) for the observed vocabulary |
+| `properties.calendar` | No | Date columns only. `calendar`, `fiscal` and `default` name code-based calendars; any other value names a Connection-scoped custom calendar (product owner, 2026-11-18). **`CALENDAR_TYPE_GREGORIAN` is withdrawn as unverified (2026-07-30):** a 500-document census on se-thoughtspot found that literal **zero** times on any document type, and found `calendar:` on **zero** of 40 SQL View columns — so this row is doubly unverified for `sql_view:`. See [thoughtspot-model-tml.md](thoughtspot-model-tml.md) for the observed vocabulary |
 | `properties.format_pattern` | No | Number/date display format string |
 | `properties.currency_type.iso_code` | No | ISO currency code (e.g. `USD`, `EUR`) |
 | `properties.is_hidden` | No | `true` hides the column from the search bar |

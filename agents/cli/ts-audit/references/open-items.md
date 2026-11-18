@@ -312,7 +312,13 @@ data_warehouse_type, details: {type, configuration, ...}}`:
 - **No setting names PrivateLink.** P24 reads it from the `host` or `accountName`
   value: a Snowflake PrivateLink URL carries `.privatelink.`. The value is read to
   derive the flag and not kept.
-- A template variable is a setting whose whole value is a `${var}` token.
+- A template variable is a setting whose whole value is a `${var}` token. **Checked
+  2026-11-18, read-only: the search does not show one.** None of the 1,815 connections
+  it returned held a token. One connection's metadata header carries
+  `parameterizedConnection: true`, and its connection TML holds a `${var}` token in each
+  of its six properties, but the search returned none of them as a token. So P24
+  cannot see a parameterized connection this way; the header flag is the signal
+  (BL-595). Only key names and counts were read; no value was printed or kept.
 
 The Table metadata headers carry `dataSourceType`: `RDBMS_SNOWFLAKE` on 73 of 92 headers
 in the sample (Model headers carry none). P23 reads the connection's

@@ -484,7 +484,7 @@ Core ≤1.7-era projects may still use a bare `meta:` sibling instead, see below
 | `ts_format_pattern` | Numeric/date display format | Format pattern strings |
 | `ts_hidden` | Column visibility | `yes`/`no` (default `no`) |
 | `ts_currency_type` | Currency formatting | **A nested block, not a flat value** — `type:` is `from_isocode` (with `isocode:`), `from_column` (with `column:`), `from_browser`, or `none`. See the example below |
-| `ts_calendar_type` | Custom calendar | `none`, `default`, or a calendar name. DATE/DATETIME columns only |
+| `ts_calendar_type` | Calendar | `none`, or a calendar value: `calendar`, `fiscal` and `default` name code-based calendars; any other value names a Connection-scoped custom calendar. DATE/DATETIME columns only |
 | `ts_geo_config` | Geo map role | **A nested block, not a flat value** — `type:` is `latitude`, `longitude`, `country`, `sub_nation_region` (with `country:` and `region_type:`), or `none`. See the example below |
 | `ts_index_priority` | Search index priority | Integer 1–10 |
 | `ts_index_type` | Indexing behavior | `default` or `dont_index` |

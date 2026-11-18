@@ -535,8 +535,9 @@
     Data Cache cannot serve. Read from the connection's settings: OAuth when a setting
     name contains `oauth`, or names both `client_id` and `client_secret`; PrivateLink
     when its host or account name contains `privatelink`; a template variable when a
-    setting is wholly a `${var}` token. Setting names, not a declared type, so a
-    heuristic. A connection is matched to the Model's Tables by name, any case. Skipped
+    setting is wholly a `${var}` token. The one parameterized connection probed came
+    back from the search with no token, so the template-variable reading can miss one
+    (BL-595). Setting names, not a declared type, so a heuristic. A connection is matched to the Model's Tables by name, any case. Skipped
     when the connection search failed. A connection missing from the search, or whose
     settings could not be read, is not judged, and the Model's Data Cache readiness
     reads Not assessed. OAuth read only from `client_id` and `client_secret`, and
