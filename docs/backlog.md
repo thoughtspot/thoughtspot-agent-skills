@@ -17675,11 +17675,15 @@ disagree.
 
 **Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
 
-**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team.
+**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team. Three more readings need the same answer:
+
+- S12 and S15 accept `[X] = null` as a null branch, but P28 reads only the `isnull` and `is_null` calls. Does the `= null` form stop Data Cache too?
+- A formula such as `start_of_week ( [d] , RetailCal )` names a custom calendar, but P19 reads only `properties.calendar`. Does that formula stop Data Cache?
+- P21 also fires on a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`, which goes beyond the `AGGREGATE` measures the product owner named. Is that Model uncached too?
 
 **Do.**
-1. Get the team's answer on each of the three points in open-items #18.
-2. Update P24 (and its heuristic grading) and the P28 and S12 remediations to match, and mark #18 VERIFIED.
+1. Get the team's answer on each of the six points in open-items #18.
+2. Update P24 (and its heuristic grading), P19, P21, P28 and the P28 and S12 remediations to match, and mark #18 VERIFIED.
 
 **Target:** 2027-01-31.
 

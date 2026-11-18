@@ -220,7 +220,7 @@
     where: {field: "@outer_join_unguarded_rls", nonblank: true}
   severity: MEDIUM
   message: "{obj.type} join '{name}' keeps unmatched rows that {@outer_join_unguarded_rls} has no row for, and its RLS rules have no null branch — users under them may get an inner join instead"
-  remediation: Review the rule against the docs' "Respect join definitions" — add an `or` null test on the column the join type needs (both sides for a full outer join), in the spelling your cluster accepts, or make the join INNER if unmatched rows are not wanted. Testing the join key (never null) keeps unmatched rows without showing the table's ownerless rows; a null test on the owner column also shows those to every user (S15). A null test in the rule stops Data Cache for the Model (P28), so keeping the rows and caching the Model cannot both be had
+  remediation: Review the rule against the docs' "Respect join definitions" — add an `or` null test on the column the join type needs (both sides for a full outer join), in the spelling your cluster accepts, or make the join INNER if unmatched rows are not wanted. Testing the join key (never null) keeps unmatched rows without showing the table's ownerless rows; a null test on the owner column also shows those to every user (S15). An `isnull` or `is_null` test in the rule stops Data Cache for the Model (P28), so with that form keeping the rows and caching the Model cannot both be had. Whether the `= null` form stops Data Cache too is to be confirmed with the product team
   examples:
     fires: {fixture: sec_rls_outer_joined_unguarded, severity: MEDIUM}
     silent: {fixture: sec_rls_outer_joined_isnull}

@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 import audit_rule_fixtures as fx
+from ts_cli.audit import run_audit
 from ts_cli.audit.catalog_model import load_catalog
 from ts_cli.audit.engine import fields, scopes
 from ts_cli.audit.engine.fields_data_cache import model_connections, model_sources
@@ -30,6 +31,20 @@ def _field(ctx, name):
 def _detail(ctx, rule_id):
     [f] = run_rule(ctx, CAT, rule_id, "general")
     return f.severity, f.detail
+
+
+def _readiness(ctx):
+    """The Model's Data Cache readiness and the checks not made for it, after a P run
+    (its calendars searched, so P22 is judged)."""
+    if ctx.calendars is None:
+        ctx.calendars = []
+    [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+    return model["data_cache"]["readiness"], model["data_cache"]["not_assessed"]
+
+
+#: Facts for ORDERS' connection with every flag clear, and a Snowflake header for it.
+CLEAN = [conn()]
+SNOWFLAKE_HEADER = [header()]
 
 
 # ── the Model's sources ─────────────────────────────────────────────────────
@@ -61,18 +76,60 @@ def test_a_sql_views_connection_comes_from_its_header():
 @pytest.mark.parametrize("table, kind, problem", [
     ({"name": "T", "connection": {"name": "C"}}, "RDBMS_SNOWFLAKE", ""),
     ({"name": "T", "connection": {"name": "C"}}, " rdbms_databricks ", ""),
+    ({"name": "T", "connection": {"name": "C"}}, "DATABRICKS", ""),
+    ({"name": "T", "connection": {"name": "C"}}, "snowflake", ""),
     ({"name": "T", "connection": {"name": "C"}}, "RDBMS_REDSHIFT", "RDBMS_REDSHIFT"),
-    ({"name": "T", "connection": {"name": "C"}}, None, ""),
-    ({"name": "T", "connection": {"name": "C"}}, "", ""),
+    ({"name": "T", "connection": {"name": "C"}}, "DEFAULT", "DEFAULT"),
+    ({"name": "T", "connection": {"name": "C"}}, None, None),
+    ({"name": "T", "connection": {"name": "C"}}, "", None),
     ({"name": "T"}, "RDBMS_SNOWFLAKE", "no connection"),
     ({"name": "T", "connection": {}}, None, "no connection"),
     ({"name": "T", "connection": "C"}, None, "no connection"),
     (None, "RDBMS_POSTGRES", "RDBMS_POSTGRES"),
-    (None, None, ""),
+    (None, None, None),
 ])
 def test_source_type_problem(table, kind, problem):
+    """"" is cacheable, None is unknown (not judged). Bare and RDBMS_ forms both read."""
     head = {"dataSourceType": kind} if kind is not None else {}
     assert source_type_problem({"name": "T", "table": table, "header": head}) == problem
+
+
+@pytest.mark.parametrize("facts_type, header_type, problem", [
+    ("DATABRICKS", None, ""),               # the connection's type decides
+    ("SNOWFLAKE", None, ""),
+    ("REDSHIFT", "RDBMS_SNOWFLAKE", "REDSHIFT"),     # over the header's
+    ("RDBMS_DATABRICKS", "RDBMS_REDSHIFT", ""),
+    (None, "RDBMS_DATABRICKS", ""),         # no type in the facts: the header's
+    (None, None, None),
+])
+def test_p23_reads_the_connections_type_before_the_header(facts_type, header_type, problem):
+    source = {"name": "T", "table": {"name": "T", "connection": {"name": "Warehouse A"}},
+              "header": {"dataSourceType": header_type} if header_type else {}}
+    facts = [conn(type=facts_type), conn("Warehouse B", type="REDSHIFT")]
+    assert source_type_problem(source, facts) == problem
+
+
+def test_p23_reads_a_sql_views_connection_from_its_header():
+    source = {"name": "V", "table": None,
+              "header": {"dataSourceName": "warehouse b", "dataSourceType": "RDBMS_SNOWFLAKE"}}
+    assert source_type_problem(source, [conn("Warehouse B", type="REDSHIFT")]) == "REDSHIFT"
+    assert source_type_problem(source, [conn("Warehouse C", type="REDSHIFT")]) == ""
+
+
+def test_p23_fires_on_a_non_cloud_connection_without_any_header():
+    ctx = fx.build_cache_ctx(connections=[conn(type="REDSHIFT")])
+    assert _field(ctx, "@non_cloud_sources") == ["ORDERS (REDSHIFT)"]
+
+
+def test_a_source_with_no_type_leaves_p23_not_assessed():
+    """No header type and no connection facts to read one from: P23 cannot judge the
+    Model, so it is unknown, not ready."""
+    ctx = fx.build_cache_ctx(connections=[conn(type=None)], headers=[header(source=None)])
+    assert _field(ctx, "@non_cloud_sources") == []
+    assert _readiness(ctx) == ("unknown", ["P23"])
+    # the connection's type is enough
+    typed = fx.build_cache_ctx(connections=CLEAN)
+    assert _readiness(typed) == ("ready", [])
 
 
 def test_p23_lists_each_source_with_its_type():
@@ -98,6 +155,54 @@ def test_p24_matches_by_id_when_the_header_carries_one():
         dict(conn("Old name", oauth=True), id="conn-a")])
     ctx.metadata = [{"metadata_header": dict(header(), dataSourceId="conn-a")}]
     assert _field(ctx, "@connection_cache_blockers") == ["Renamed (OAuth)"]
+
+
+@pytest.mark.parametrize("facts", [
+    pytest.param([dict(conn(), oauth=None, oauth_m2m=None, privatelink=None,
+                       parameterized=None)], id="facts all unknown"),
+    pytest.param([dict(conn(), privatelink=None)], id="one flag unknown"),
+    pytest.param([conn("Warehouse B")], id="connection missing from the list"),
+    pytest.param([], id="no connections listed"),
+    pytest.param([conn(), dict(conn(), id="conn-2", oauth=None)], id="a duplicate unknown"),
+])
+def test_a_connection_p24_cannot_read_leaves_the_model_not_assessed(facts):
+    ctx = fx.build_cache_ctx(connections=facts, headers=SNOWFLAKE_HEADER)
+    assert run_rule(ctx, CAT, "P24", "general") == []
+    assert _readiness(ctx) == ("unknown", ["P24"])
+
+
+def test_an_unknown_connection_does_not_hide_a_firm_blocker():
+    ctx = fx.build_cache_ctx(connections=[conn(oauth=None, parameterized=True)],
+                             headers=SNOWFLAKE_HEADER)
+    assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A (template variable)"]
+    assert _readiness(ctx) == ("blocked", [])
+
+
+# ── P24: readings the product team is to confirm ────────────────────────────
+
+@pytest.mark.parametrize("facts, readiness, lead", [
+    ([conn(oauth=True, oauth_m2m=True)], "confirm", "May not be able to use Data Cache"),
+    ([conn(privatelink=True)], "confirm", "May not be able to use Data Cache"),
+    ([conn(oauth=True, oauth_m2m=True, privatelink=True)], "confirm",
+     "May not be able to use Data Cache"),
+    ([conn(oauth=True)], "blocked", "Can't use Data Cache"),
+    ([conn(oauth=True, privatelink=True)], "blocked", "Can't use Data Cache"),
+    ([conn(privatelink=True, parameterized=True)], "blocked", "Can't use Data Cache"),
+    ([conn(privatelink=True), conn("Warehouse B", parameterized=True)], "confirm",
+     "May not be able to use Data Cache"),
+])
+def test_a_reading_to_confirm_is_not_a_firm_cant_use(facts, readiness, lead):
+    ctx = fx.build_cache_ctx(connections=facts, headers=SNOWFLAKE_HEADER)
+    [finding] = run_rule(ctx, CAT, "P24", "general")
+    assert finding.severity == "MEDIUM"
+    assert finding.detail.startswith(lead + ": connections that use OAuth")
+    assert _readiness(ctx)[0] == readiness
+
+
+def test_a_firm_blocker_from_another_rule_keeps_a_to_confirm_model_blocked():
+    ctx = fx.build_cache_ctx(connections=[conn(privatelink=True)], headers=SNOWFLAKE_HEADER,
+                             table={"db": "${TENANT_DB}"})
+    assert _readiness(ctx) == ("blocked", [])
 
 
 def test_p24_is_heuristic_and_skips_every_model_when_connections_are_unknown():
@@ -151,7 +256,10 @@ def test_p27_lists_the_sql_views():
 
 OWN = {"ORDERS_1": {"id": "ORDERS_1", "table": "ORDERS"},
        "T_1": {"id": "T_1", "table": "TEAMS"},
-       "J_1": {"id": "J_1", "table": "orders", "join_path": [{"join": ["J"]}]}}
+       "J_1": {"id": "J_1", "table": "orders", "join_path": [{"join": ["J"]}]},
+       "E_1": {"id": "E_1", "table": "ORDERS", "join_path": [{}]},
+       "E_2": {"id": "E_2", "table": "ORDERS", "join_path": [{"join": []}, {"join": [""]}]}}
+NULL_TEST = "a null test that keeps outer-join rows, see S12"
 
 
 @pytest.mark.parametrize("expr, problems", [
@@ -169,6 +277,17 @@ OWN = {"ORDERS_1": {"id": "ORDERS_1", "table": "ORDERS"},
     ("contains ( [T_1::X] , ts_username ) or SQL_INT_OP ( \"1\" ) = 1",
      ["another table's column", "a formula", "a SQL pass-through"]),
     (None, []),
+    # an own-column path whose join_path names no join is not a join
+    ("[E_1::R] = ts_username", []),
+    ("[E_2::R] = ts_username", []),
+    # a null test is named for the S12 trade-off, not as "a formula"
+    ("[ORDERS_1::R] = ts_username or isnull ( [ORDERS_1::K] )", [NULL_TEST]),
+    ("[ORDERS_1::R] = ts_username or IS_NULL ( [ORDERS_1::K] )", [NULL_TEST]),
+    ("upper ( [ORDERS_1::R] ) = ts_username or isnull ( [ORDERS_1::K] )",
+     ["a formula", NULL_TEST]),
+    # `= null` is not a call: P28 does not read it (whether it stops Data Cache is open)
+    ("[ORDERS_1::R] = ts_username or [ORDERS_1::K] = null", []),
+    ("[ORDERS_1::R] = 'isnull ( x )'", []),
 ])
 def test_rls_rule_problems(expr, problems):
     assert rls_rule_problems({"expr": expr}, "ORDERS", OWN) == problems
@@ -180,6 +299,25 @@ def test_p28_lists_each_rule_and_what_it_uses():
     assert detail == ("Can't use Data Cache: RLS rules reaching beyond their Table's own "
                       "columns: ORDERS: By team (a join, another table's column), ORDERS: "
                       "Upper region (a formula), ORDERS: Raw (a SQL pass-through)")
+
+
+def test_p28_skips_a_model_that_bypasses_rls():
+    """A Model with `is_bypass_rls` applies no RLS rule, as S17 reads it."""
+    ctx = fx.perf_rls_beyond_own_columns()
+    ctx.models[0]["model"]["properties"] = {"is_bypass_rls": True}
+    assert _field(ctx, "@rls_rules_beyond_own_table") == []
+    assert run_rule(ctx, CAT, "P28", "general") == []
+    ctx.models[0]["model"]["properties"] = {"is_bypass_rls": False}
+    assert len(_field(ctx, "@rls_rules_beyond_own_table")) == 3
+
+
+def test_a_null_test_rule_is_listed_with_its_trade_off():
+    ctx = fx.build_cache_ctx(table={"rls_rules": {
+        "table_paths": [fx.CACHE_OWN_PATH],
+        "rules": [{"name": "Keep unmatched",
+                   "expr": "[ORDERS_1::REGION] = ts_username or isnull ( [ORDERS_1::ID] )"}]}})
+    assert _field(ctx, "@rls_rules_beyond_own_table") == [
+        f"ORDERS: Keep unmatched ({NULL_TEST})"]
 
 
 def test_p28_reads_only_the_models_own_tables_and_survives_malformed_rls():

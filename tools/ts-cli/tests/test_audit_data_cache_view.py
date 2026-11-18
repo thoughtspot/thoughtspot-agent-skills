@@ -29,12 +29,16 @@ def _model(guid, name, columns=(), formulas=(), fqn=fx.CACHE_TABLE):
                                     "columns": list(columns), "formulas": list(formulas)}}
 
 
+#: The estate's three connections, searched, none with a blocking setting.
+CLEAN_CONNECTIONS = tuple(fx.build_cache_connection(f"Warehouse {x}") for x in "ABC")
+
+
 def _estate(calendars=(cal("Retail 445", connection="Warehouse B", connection_id="k-b"),),
-            connections=()):
+            connections=CLEAN_CONNECTIONS):
     """Four Models: one on a custom calendar (blocked), one on a connection that
     defines custom calendars (warning), one ready, one with a pass-through formula. Its
     connections were searched (none with a blocking setting) unless `connections` is
-    None."""
+    None; every Table's header says Snowflake."""
     a = {"guid": "t-a", "table": {"name": "ORDERS", "connection": {"name": "Warehouse A"},
                                   "columns": [{"name": "SHIP", "properties": {
                                       "calendar": "Retail 445"}}]}}
@@ -53,8 +57,11 @@ def _estate(calendars=(cal("Retail 445", connection="Warehouse B", connection_id
             {"id": "formula_U", "name": "Upper", "expr": "sql_string_op ( \"upper({0})\" , [ORDERS::N] )"}],
                fqn="t-c"),
     ]
+    headers = [fx.build_cache_header(t, connection=f"Warehouse {t[-1].upper()}")
+               for t in ("t-a", "t-b", "t-c")]
     return make_context(models=models, tables={"t-a": a, "t-b": b, "t-c": c},
                         model_guids=[m["guid"] for m in models],
+                        metadata=[{"metadata_header": h} for h in headers],
                         calendars=None if calendars is None else list(calendars),
                         connections=None if connections is None else list(connections))
 
@@ -111,14 +118,39 @@ def test_a_failed_connection_search_leaves_an_unblocked_model_unknown():
 
 
 def test_the_new_limitations_block_with_their_reasons():
-    ctx = _estate(connections=[fx.build_cache_connection("Warehouse C", oauth=True)])
-    ctx.metadata = [{"metadata_header": fx.build_cache_header("t-c", source="RDBMS_REDSHIFT",
-                                                              connection="Warehouse C")}]
+    ctx = _estate(connections=[fx.build_cache_connection("Warehouse C", oauth=True,
+                                                         type="REDSHIFT")])
     dc = _dc(run_audit(None, [], ["P"], ctx=ctx))["m-ready"]
     assert dc["readiness"] == "blocked"
     assert [(r["rule"], r["label"], r["items"]) for r in dc["reasons"]] == [
-        ("P23", "Source not Snowflake or Databricks", ["ORDERS (RDBMS_REDSHIFT)"]),
+        ("P23", "Source not Snowflake or Databricks", ["ORDERS (REDSHIFT)"]),
         ("P24", "Connection uses OAuth, PrivateLink or a variable", ["Warehouse C (OAuth)"])]
+
+
+def _to_confirm(**kw):
+    """The estate with Warehouse C read as PrivateLink from its host: Ready Sales rests
+    only on a reading to confirm; Passthrough Sales, on the same connection, also has a
+    firm blocker."""
+    return _estate(connections=CLEAN_CONNECTIONS[:2] + (
+        fx.build_cache_connection("Warehouse C", privatelink=True),), **kw)
+
+
+def test_a_model_blocked_only_by_readings_to_confirm_reads_confirm():
+    dc = _dc(run_audit(None, [], ["P"], ctx=_to_confirm()))
+    assert dc["m-ready"]["readiness"] == "confirm"
+    assert dc["m-ready"]["reasons"] == [{
+        "rule": "P24", "effect": "may block",
+        "label": "Connection uses OAuth, PrivateLink or a variable",
+        "items": ["Warehouse C (PrivateLink read from the host, to confirm)"]}]
+    assert dc["m-sql"]["readiness"] == "blocked"     # its pass-through is firm
+    assert [r["effect"] for r in dc["m-sql"]["reasons"]] == ["blocks", "may block"]
+
+
+def test_an_unread_connection_leaves_an_unblocked_model_unknown():
+    dc = _dc(run_audit(None, [], ["P"], ctx=_estate(connections=CLEAN_CONNECTIONS[:2])))
+    assert dc["m-ready"]["readiness"] == "unknown"
+    assert dc["m-ready"]["not_assessed"] == ["P24"]
+    assert dc["m-blocked"]["readiness"] == "blocked"
 
 
 def test_a_blocked_model_also_lists_its_warning():
@@ -164,6 +196,9 @@ def test_the_payload_compacts_readiness_reasons_and_calendars():
     assert by_guid["m-warn"]["r"][0]["b"] == 0
     unknown = compact_payload(run_audit(None, [], ["P"], ctx=_estate(calendars=None)))
     assert all(cm["dc"]["cc"] is None for cm in unknown["C"]["m"])
+    confirm = compact_payload(run_audit(None, [], ["P"], ctx=_to_confirm()))
+    reason = next(cm["dc"] for cm in confirm["C"]["m"] if cm["dc"]["s"] == "confirm")["r"][0]
+    assert (reason["c"], reason["b"], reason["q"]) == ("P24", 0, 1)
 
 
 def test_json_from_before_the_view_compacts_without_it():
@@ -215,6 +250,38 @@ def test_the_pills_filter_by_readiness(tmp_path, pill, expected):
     assert shown["errors"] == []
     assert sorted(name for name, _ in shown["extra"]) == expected
     assert f"{len(expected)} of 4 Models" in shown["visible"]
+
+
+@needs_chrome
+def test_to_confirm_and_not_assessed_have_their_own_state_and_pill(tmp_path):
+    page = render_report(run_audit(None, [], ["P"], ctx=_to_confirm()))
+    shown = report_browser.render(page, tmp_path, "datacache", actions=_ROWS)
+    assert shown["errors"] == []
+    assert ["Ready Sales", "confirm"] in shown["extra"]
+    assert "To confirm" in shown["visible"]
+    click = ('document.querySelector(\'#v-datacache .dc-pill[data-filter="confirm"]\').click();')
+    picked = report_browser.render(page, tmp_path, "datacache", actions=click + _ROWS)
+    assert picked["errors"] == [] and picked["extra"] == [["Ready Sales", "confirm"]]
+    unknown = report_browser.render(_page(connections=None), tmp_path, "datacache", actions=(
+        'document.querySelector(\'#v-datacache .dc-pill[data-filter="unknown"]\').click();'
+        + _ROWS))
+    assert unknown["errors"] == []
+    assert sorted(unknown["extra"]) == [["Ready Sales", "unknown"], ["Warned Sales", "unknown"]]
+
+
+@needs_chrome
+def test_a_null_test_rls_rule_shows_its_s12_trade_off(tmp_path):
+    """P28 names a null test apart from other functions, and the view shows that name."""
+    ctx = _estate()
+    ctx.tables["t-c"]["table"]["rls_rules"] = {
+        "table_paths": [{"id": "ORDERS_1", "table": "ORDERS", "column": ["REGION"]}],
+        "rules": [{"name": "Keep unmatched",
+                   "expr": "[ORDERS_1::REGION] = ts_username or isnull ( [ORDERS_1::ID] )"}]}
+    page = render_report(run_audit(None, [], ["P"], ctx=ctx))
+    shown = report_browser.render(page, tmp_path, "datacache")
+    assert shown["errors"] == []
+    assert ("RLS rule beyond its Table’s columns: ORDERS: Keep unmatched (a null test that "
+            "keeps outer-join rows, see S12)") in shown["visible"].replace("'", "’")
 
 
 @needs_chrome

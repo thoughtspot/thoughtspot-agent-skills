@@ -1,7 +1,8 @@
 /* ── Data Cache: which audited Models ThoughtSpot's Data Cache can serve ──
    The data is each corpus Model's `dc` (ts_cli/audit/data_cache.py, compacted in
-   report.py): `s` its readiness (ready, blocked, warning or unknown), `r` the reasons
-   [{c rule, b 1 when it blocks, l label, i items}], `k` the calendars its columns use
+   report.py): `s` its readiness (ready, blocked, confirm, warning or unknown), `r` the
+   reasons [{c rule, b 1 when it blocks, q 1 when it may block (only readings the product
+   team is to confirm), l label, i items}], `k` the calendars its columns use
    [{n column, c calendar, u 1 when custom, t 1 when set on the Table column}], `cc` the
    custom calendars registered on its connections [{n connection, k calendar names}],
    or null when they were not fetched, and `na` the checks not made for it. The
@@ -11,11 +12,12 @@
 var DC_STATES = {
   ready: {label: "Can use", cls: "dc-ready"},
   blocked: {label: "Can’t use", cls: "dc-blocked"},
+  confirm: {label: "To confirm", cls: "dc-confirm"},
   warning: {label: "Warning", cls: "dc-warning"},
   unknown: {label: "Not assessed", cls: "dc-unknown"}
 };
 var DC_FILTERS = [["all", "All"], ["ready", "Can use"], ["blocked", "Can’t use"],
-  ["warning", "Warning"]];
+  ["confirm", "To confirm"], ["warning", "Warning"], ["unknown", "Not assessed"]];
 var DC_CHECKS = {P19: "custom calendars", P20: "SQL pass-through", P21: "semantic query",
   P22: "connection calendars", P23: "source types", P24: "connection settings",
   P25: "Table variables", P26: "formula parameters", P27: "SQL Views", P28: "RLS rules"};
@@ -56,8 +58,10 @@ function dcSearchText(row){
 function dcReasonsHtml(row){
   var dc = row.dc, html = "";
   (dc.r || []).forEach(function(r){
-    html += '<div class="dc-reason'+(r.b ? ' dc-blocks' : '')+'"><span class="dc-rule">'+esc(r.c)+
-      '</span> '+esc(r.l)+': '+esc((r.i || []).join(", "))+'</div>';
+    html += '<div class="dc-reason'+(r.b ? ' dc-blocks' : '')+(r.q ? ' dc-may-block' : '')+
+      '"><span class="dc-rule">'+esc(r.c)+'</span> '+esc(r.l)+': '+
+      esc((r.i || []).join(", "))+(r.q ? ' <span class="dc-muted">(to confirm)</span>' : '')+
+      '</div>';
   });
   /* What was not checked: every check (none ran, or the report predates them), or some
      (a check that could not judge the Model, as when a search failed). */
@@ -141,7 +145,9 @@ function buildDataCache(D){
     "semantic query Model, a source other than Snowflake or Databricks, an OAuth, "+
     "PrivateLink or parameterized connection or Table, a parameter in a formula, a SQL "+
     "View, or an RLS rule beyond its Table\u2019s own columns. A connection that defines "+
-    "custom calendars is a warning, since a query that picks one at run time is not cached."));
+    "custom calendars is a warning, since a query that picks one at run time is not cached. "+
+    "To confirm: the only reasons are readings the product team is to review (OAuth read "+
+    "from a client ID and secret, PrivateLink read from the host)."));
   var table = el("table", "cleanup-table dc-table");
   table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';

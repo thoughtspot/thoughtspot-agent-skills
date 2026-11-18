@@ -499,11 +499,14 @@
   description: >-
     A Model with a source on neither Snowflake nor Databricks, which Data Cache cannot
     serve: a Table whose TML has no connection (a Falcon or system Table), or a source
-    whose metadata header `dataSourceType` is not `RDBMS_SNOWFLAKE` or
-    `RDBMS_DATABRICKS` (any case). A source whose header gives no type is not judged.
+    of another type. The type is the source's connection's, from the connection search
+    (matched by name, any case), else its metadata header `dataSourceType`; `SNOWFLAKE`
+    and `DATABRICKS` pass, with or without an `RDBMS_` prefix, any case. A source with
+    neither type is not judged, and the Model's Data Cache readiness reads Not assessed.
     The finding lists each source with its type.
   categories: [P]
   requires: [model_tml]
+  uses: [connections]
   scope: model
   aggregate:
     mode: each
@@ -527,8 +530,12 @@
     when its host or account name contains `privatelink`; a template variable when a
     setting is wholly a `${var}` token. Setting names, not a declared type, so a
     heuristic. A connection is matched to the Model's Tables by name, any case. Skipped
-    when the connection search failed. The finding lists each connection and what it
-    uses.
+    when the connection search failed. A connection missing from the search, or whose
+    settings could not be read, is not judged, and the Model's Data Cache readiness
+    reads Not assessed. OAuth read only from `client_id` and `client_secret`, and
+    PrivateLink read from the host, are for the product team to confirm: a finding
+    resting only on them says the Model may not be able to use Data Cache. The finding
+    lists each connection and what it uses.
   categories: [P]
   requires: [model_tml, connections]
   scope: model
@@ -536,7 +543,7 @@
     mode: each
     where: {field: "@connection_cache_blockers", len_gt: 0}
   severity: MEDIUM
-  message: "Can't use Data Cache: connections that use OAuth, PrivateLink or a template variable: {@connection_cache_blockers}"
+  message: "{@connection_cache_lead}: connections that use OAuth, PrivateLink or a template variable: {@connection_cache_blockers}"
   remediation: >-
     Check each listed connection's settings first, since they are read from setting
     names and the host. Then switch it to a service account without PrivateLink or
@@ -621,14 +628,17 @@
   evidence: fact
   description: >-
     A Model on a Table with an RLS rule that Data Cache cannot apply: one reaching
-    another table's column or a join (a referenced `table_paths` entry on another table
-    or with a `join_path`), calling a function in its formula (an RLS rule is a
-    formula; any call but `ts_var`, a null test such as `isnull` included), or calling
-    a SQL pass-through function. A null test is how a rule keeps an outer join's
+    another table's column or a join (a referenced `table_paths` entry on another table,
+    or whose `join_path` names a join), calling a function in its formula (an RLS rule
+    is a formula; any call but `ts_var`, a null test such as `isnull` included), or
+    calling a SQL pass-through function. A null test is how a rule keeps an outer join's
     unmatched rows (S12 advises one), so that rule is a trade-off: it keeps the rows and
-    stops Data Cache; the product owner asked for both to be flagged for review. Read outside quoted literals. A rule comparing
-    only its own Table's columns with ts_ variables is fine. The finding lists each rule
-    and what it uses.
+    stops Data Cache. The finding names it apart from other functions, and the product
+    owner asked for both rules to be flagged for review. P28 reads the `isnull` and
+    `is_null` calls; whether the `= null` form S12 also accepts stops Data Cache is still
+    to confirm, so P28 does not read it. Read outside quoted literals. A rule comparing
+    only its own Table's columns with ts_ variables is fine, and a Model that bypasses
+    RLS (`is_bypass_rls`) applies no rule. The finding lists each rule and what it uses.
   categories: [P]
   requires: [model_tml]
   scope: model

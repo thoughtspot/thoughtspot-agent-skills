@@ -196,27 +196,34 @@ def _model_sources(doc: dict, ctx: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def source_connection(source: Dict[str, Any]) -> Optional[Dict[str, Optional[str]]]:
+    """The connection a source (model_sources) is on: `{"name", "id"}`, or None when
+    neither is known. The name is the Table TML's `table.connection.name` (a Falcon or
+    system Table has no connection block, and so no connection); for a source with no
+    Table TML (a SQL View), its metadata header's `dataSourceName`. The id is the
+    header's `dataSourceId` when it carries one (none of 93 headers on the SE demo
+    cluster did, 2026-11-18: the name carries the match; used only when present)."""
+    header = source["header"]
+    if source["table"] is not None:
+        name = tml.mapping(source["table"], "connection").get("name")
+    else:
+        name = header.get("dataSourceName")
+    name = name if isinstance(name, str) and name else None
+    cid = header.get("dataSourceId") if isinstance(header.get("dataSourceId"), str) else None
+    return {"name": name, "id": cid} if (name or cid) else None
+
+
 def model_connections(doc: dict, ctx: Any) -> List[Dict[str, Optional[str]]]:
-    """The connections the Model's sources are on, each once in source order: `{"name",
-    "id"}`. The name is the Table TML's `table.connection.name` (a Falcon or system Table
-    has no connection block, and so no connection); for a source with no Table TML (a
-    SQL View), its metadata header's `dataSourceName`. The id is the header's
-    `dataSourceId` when it carries one (none of 93 headers on the SE demo cluster did,
-    2026-11-18: the name carries the match; used only when present)."""
+    """The connections the Model's sources are on (source_connection), each once in
+    source order."""
     out: List[Dict[str, Optional[str]]] = []
     seen = set()
     for source in model_sources(doc, ctx):
-        header = source["header"]
-        if source["table"] is not None:
-            name = tml.mapping(source["table"], "connection").get("name")
-        else:
-            name = header.get("dataSourceName")
-        name = name if isinstance(name, str) and name else None
-        cid = header.get("dataSourceId") if isinstance(header.get("dataSourceId"), str) else None
-        key = ((name or "").strip().casefold(), cid)
-        if (name or cid) and key not in seen:
+        conn = source_connection(source)
+        key = conn and ((conn["name"] or "").strip().casefold(), conn["id"])
+        if conn and key not in seen:
             seen.add(key)
-            out.append({"name": name, "id": cid})
+            out.append(conn)
     return out
 
 
@@ -239,6 +246,13 @@ def connection_matches(conn: Dict[str, Optional[str]], name: Any, cid: Any) -> b
     wanted = (conn["name"] or "").strip().casefold()
     return bool((conn["id"] and cid == conn["id"])
                 or (wanted and _text(name).strip().casefold() == wanted))
+
+
+def connection_facts_for(conn: Dict[str, Optional[str]], connections: Any) -> List[dict]:
+    """The entries of `connections` (`ctx.connections`: connection_facts) that are
+    `conn`'s (connection_matches); none when the connections were not fetched."""
+    return [f for f in (connections if isinstance(connections, list) else [])
+            if isinstance(f, dict) and connection_matches(conn, f.get("name"), f.get("id"))]
 
 
 def connection_calendars(doc: dict, ctx: Any) -> Optional[List[Dict[str, Any]]]:

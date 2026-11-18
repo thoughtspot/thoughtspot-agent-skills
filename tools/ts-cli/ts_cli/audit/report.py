@@ -217,15 +217,17 @@ def _compact_ai(ai: dict) -> dict:
 def _compact_data_cache(dc: dict) -> dict:
     """A Model's `data_cache` (audit/data_cache.py), compacted for the Data Cache view:
     `s` its readiness; `r` the reasons, {c rule, b 1 when it blocks else 0, l label, i
-    items}; `k` the calendars its columns use, {n column, c calendar, u 1 when custom, t
-    1 when set on the Table column}; `cc` the custom calendars on its connections, {n
-    connection, k calendar names}, or null when they were not fetched; `na` the checks
-    not made for it."""
+    items, and q 1 when it may block, resting only on readings to confirm}; `k` the
+    calendars its columns use, {n column, c calendar, u 1 when custom, t 1 when set on
+    the Table column}; `cc` the custom calendars on its connections, {n connection, k
+    calendar names}, or null when they were not fetched; `na` the checks not made for
+    it."""
     conn = dc.get("connection_calendars")
     return {
         "s": dc.get("readiness") or "unknown",
-        "r": [{"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
-               "l": r.get("label", ""), "i": list(r.get("items") or [])}
+        "r": [dict({"c": r.get("rule", ""), "b": 1 if r.get("effect") == "blocks" else 0,
+                    "l": r.get("label", ""), "i": list(r.get("items") or [])},
+                   **({"q": 1} if r.get("effect") == "may block" else {}))
               for r in dc.get("reasons") or []],
         "k": [{"n": k.get("column", ""), "c": k.get("calendar", ""),
                "u": 1 if k.get("kind") == "custom" else 0,

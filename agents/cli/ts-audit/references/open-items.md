@@ -327,10 +327,11 @@ in the sample (Model headers carry none). P23 reads it.
 ### #18 — Data Cache: what the product team is to confirm — DEFERRED to BL-590
 
 Until the team answers, P24 is graded as a heuristic and its findings say "to confirm" where they rest on point 1 or 2.
+A Model whose only Data Cache reasons rest on those two reads To confirm, not Can't use.
 
-Raised 2026-11-18 by the product owner, who asked for these to be flagged so the team
-can review them. Each is what P24 or P28 reads today; the finding says "to confirm" where
-it rests on one of them.
+The product owner raised points 1 to 3 on 2026-11-18 and asked for them to be flagged
+for the team. Points 4 to 6 came from the review of the rules the same day. Each is what P19, P21, P24 or P28 reads today. A P24 finding says "to confirm"
+where it rests on point 1 or 2.
 
 1. **OAuth M2M.** P24 reads a connection as OAuth when a configuration key contains
    `oauth`, or, without one, when it has both `client_id` and `client_secret` (a
@@ -344,7 +345,20 @@ it rests on one of them.
    function in an RLS rule's formula stops Data Cache, `isnull` included. S12 advises a
    null test so an outer join keeps its unmatched rows, so the two rules meet: the team
    is to decide how customers should weigh keeping the rows against caching. Both S12's
-   and P28's remediation now say so.
+   and P28's remediation now say so, and P28 names such a rule "a null test that keeps
+   outer-join rows, see S12".
+4. **The `= null` form of a null test.** S12 and S15 accept `[X] = null` as a null
+   branch, as well as `isnull` and `is_null`. P28 reads only function calls, so a rule
+   whose null test is `= null` does not fire it. Does that form stop Data Cache too? If
+   so, P28 should read it the way S12 does. S12's remediation says it is to confirm.
+5. **A custom calendar named in a formula.** A formula can pass a calendar to a date
+   function, as in `start_of_week ( [d] , RetailCal )`. P19 reads only a column's
+   `properties.calendar`, so it misses such a formula. Does a formula that names a custom
+   calendar stop Data Cache? If so, P19 (or a new rule) should read formula arguments.
+6. **Pre-aggregated measures beyond `AGGREGATE`.** P21 also fires on a Model column over
+   a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`. The
+   product owner's rule named Models with `AGGREGATE` measures (semantic query Models).
+   Is a Model with such a pre-aggregated SUM measure uncached too?
 
 ## Phase 3 — Visualization Layer (future)
 

@@ -839,10 +839,11 @@ def build_cache_header(guid=CACHE_TABLE, type="ONE_TO_ONE_LOGICAL", source="RDBM
 
 
 def build_cache_connection(name="Warehouse A", oauth=False, privatelink=False,
-                           parameterized=False) -> dict:
+                           parameterized=False, type="SNOWFLAKE", oauth_m2m=False) -> dict:
     """A connection's facts, as the audit keeps them (no configuration value)."""
-    return {"id": f"conn-{name}", "name": name, "type": "SNOWFLAKE", "oauth": oauth,
-            "privatelink": privatelink, "parameterized": parameterized}
+    return {"id": f"conn-{name}", "name": name, "type": type, "oauth": oauth,
+            "oauth_m2m": oauth_m2m, "privatelink": privatelink,
+            "parameterized": parameterized}
 
 
 def build_cache_column(name, column_id=None, **properties) -> dict:
@@ -982,11 +983,11 @@ def perf_connection_oauth_privatelink() -> AuditContext:
 
 
 def perf_connection_service_account() -> AuditContext:
-    """ORDERS' connection uses none of them, or its settings are unknown; another
-    connection's flags are not its (P24 silent)."""
+    """ORDERS' connection uses none of them; another connection's flags are not its
+    (P24 silent, and it judged the Model). A connection whose settings are unknown is
+    not judged: test_audit_data_cache_sources covers it."""
     return build_cache_ctx(connections=[
         build_cache_connection("Warehouse A"),
-        dict(build_cache_connection("Warehouse A"), id="conn-2", oauth=None),
         build_cache_connection("Warehouse B", oauth=True)])
 
 
