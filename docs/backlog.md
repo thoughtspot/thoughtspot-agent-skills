@@ -486,7 +486,7 @@ are roughly ordered by value÷effort.
 | BL-587 | `check_open_items.py` does not count `TO VERIFY` as unresolved, so four items on main read as resolved | 2026-12-31 |
 | BL-588 | The report's sidebar writes a Model guid into a link without escaping it | 2027-01-31 |
 | BL-589 | Nothing checks the audit report's vendored JavaScript for updates or advisories | 2027-01-31 |
-| BL-590 | Data Cache: the product team's answers on OAuth M2M, PrivateLink and null tests in RLS rules | 2027-01-31 |
+| BL-590 | Data Cache: the product team's answers on the readings in open-items #18 | 2027-01-31 |
 | BL-591 | ts-audit: can Liveboard visualizations be fingerprinted to find duplicates? | 2027-03-31 |
 | BL-592 | Converters emit what the Data Cache rules block, and nothing tells the user | 2027-02-28 |
 | BL-593 | `record_size: -1` is read as "return everything" by the pagination gate, but returns nothing on `calendars/search` | 2027-01-31 |
@@ -17684,22 +17684,21 @@ disagree.
 
 **Target:** 2027-01-31.
 
-## BL-590 — Data Cache: the product team's answers on OAuth M2M, PrivateLink and null tests in RLS rules `Tier 3`
+## BL-590 — Data Cache: the product team's answers on the readings in open-items #18 `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** building the Data Cache readiness rules (ts-audit 3.23.0); ts-audit open-items #18.
 
-**What.** P24 reads a Databricks connection with `client_id` and `client_secret` as OAuth (M2M), and reads PrivateLink from a `host` or `accountName` containing `privatelink`. P28 counts a null test such as `isnull` in an RLS rule as blocking, which conflicts with S12's advice for outer joins. The product owner asked for all three to go to the product team. Four more readings need the same answer:
+**What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each reads To confirm or Not assessed, never Can use:
 
-- S12 and S15 accept `[X] = null` as a null branch, but P28 reads only the `isnull` and `is_null` calls. Does the `= null` form stop Data Cache too?
-- A formula such as `start_of_week ( [d] , RetailCal )` names a custom calendar, but P19 reads only `properties.calendar`. Does that formula stop Data Cache?
-- P21 also fires on a Table column with `aggregation: SUM` and `is_pre_aggregated_measure: true`, which goes beyond the `AGGREGATE` measures the product owner named. Is that Model uncached too?
-- A Model source that is a View (header type `AGGR_WORKSHEET`) names no connection, so P23 cannot type it and the Model reads Not assessed: 2 of 19 Models in the 2026-11-18 sample. Can Data Cache serve a Model built on a View?
-- P28 matches an RLS rule's `table_paths` ids to the ids its expression names exactly, case included. Does ThoughtSpot match them without case? If so, P28 should too.
-- A custom calendar could be named `Fiscal`, `default` or `calendar`, and P19 would read it as code-based. Can a custom calendar take such a name, and if so, how does TML tell it from the code-based one?
+- P24 reads OAuth from a Databricks `client_id` and `client_secret` pair (point 1), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
+- P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the `= null` form to confirm (point 4).
+- P19 lists a formula that names a custom calendar (point 5), and a code-based value that a custom calendar is also named (point 9), to confirm.
+- P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
+- P23 cannot type a source that is a View (point 7), and P28 cannot judge a rule whose path ids differ only in case (point 8): both leave the Model Not assessed.
 
 **Do.**
-1. Get the team's answer on each of the seven points in open-items #18.
-2. Update P24 (and its heuristic grading), P19, P21, P23, P28 and the P28 and S12 remediations to match, and mark #18 VERIFIED.
+1. Get the team's answer on each of the nine points in open-items #18.
+2. Update P19, P21, P23, P24 (and its heuristic grading) and P28, and the P28, S12 and S15 remediations, to match; mark #18 VERIFIED.
 
 **Target:** 2027-01-31.
 
