@@ -405,15 +405,15 @@ def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("derived, kept", [
-    (None, False), ({}, False), ({"connections": 1}, False), ({"connections": "2"}, False),
-    ({"connections": 2}, True), ({"connections": 3}, True)])
+    (None, False), ({}, False), ({"connections": 1}, False), ({"connections": "3"}, False),
+    ({"connections": 2}, False), ({"connections": 3}, True), ({"connections": 4}, True)])
 def test_connection_facts_from_an_older_derivation_count_as_not_captured(derived, kept):
     """A snapshot keeps only derived connection facts, so facts recorded under an older
     derivation (connection_facts.FACTS_VERSION), or with none recorded, are not
     replayed: P24 would give the old verdict. Keyed on the derivation, not the release."""
     from ts_cli.audit.connection_facts import FACTS_VERSION
     from ts_cli.audit.snapshot import captured_needs
-    assert FACTS_VERSION == 2
+    assert FACTS_VERSION == 3
     manifest = {"ts_cli_version": "9.9.9", "angles": ["P"],
                 "needs": ["model_tml", "connections", "calendars"]}
     if derived is not None:

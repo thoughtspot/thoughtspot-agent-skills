@@ -11,14 +11,16 @@ configuration value reaches the audit context, a snapshot, the audit JSON, a war
 or a log line.
 
     oauth          a configuration key, at any depth, containing `oauth` (any case:
-                   `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or both
-                   `client_id` and `client_secret` (an OAuth M2M service principal).
+                   `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or a
+                   `client_id` or `client_secret` (an OAuth M2M service principal; one
+                   set without the other is an open question, so it reads as OAuth to
+                   confirm, never as no OAuth: the product owner's rule, 2026-11-19).
                    Read from key names: the response has no auth-type field. A key
                    counts only when its value is set (_is_set): not null, false,
                    empty, or text reading "false" or "null".
     oauth_m2m      `oauth` rests only on a client ID and secret, whose kind of OAuth the
-                   product owner's team is to confirm (open-items #18): the
-                   `client_id` and `client_secret` pair on any connection, or, on a
+                   product owner's team is to confirm (open-items #18): a set
+                   `client_id`, `client_secret` or both on any connection, or, on a
                    Databricks connection or one whose type is not given, OAuth read
                    only from `OAuth2ClientId`, `OAuth2Secret` or both (no other setting
                    naming OAuth). On the SE demo cluster, 12 of its 14
@@ -56,10 +58,14 @@ from ts_cli.publish_plan import parse_variable_token
 #: whenever any entry's facts change, and a snapshot recording an older version (or
 #: none) is refused for the rules that read them (audit/snapshot.py). The golden table
 #: in tests/test_audit_connections_data.py fails until it is bumped.
-#: 1: ts-cli 0.219.0 to 0.220.0 (no `derived` recorded). 2: from 0.221.0, a Databricks OAuth2ClientId/OAuth2Secret pair alone
-#: (either key or both, on Databricks or a connection with no type) reads as
+#: 1: ts-cli 0.219.0 to 0.220.0 (no `derived` recorded). 2: from 0.221.0, a Databricks
+#: OAuth2ClientId/OAuth2Secret pair alone (either key or both, on Databricks or a
+#: connection with no type) reads as
 #: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
-FACTS_VERSION = 2
+#: 3: from ts-cli 0.222.0, a `client_id` or `client_secret` set alone (the other blank or
+#: absent), on any warehouse, reads as `oauth` and `oauth_m2m` (to confirm), as the pair
+#: does; it read as no OAuth, so its Model could read Can use.
+FACTS_VERSION = 3
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
 CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized",
@@ -181,7 +187,7 @@ def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[
                 "parameterized": True if parameterized else None}
     oauth_keys = {k for k in keys if "oauth" in k}
     named = bool(oauth_keys)
-    m2m = (not named and set(_M2M_KEYS) <= keys) or (
+    m2m = (not named and bool(set(_M2M_KEYS) & keys)) or (
         warehouse_type(warehouse) in ("DATABRICKS", None)
         and named and oauth_keys <= _DATABRICKS_OAUTH_PAIR)
     privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None

@@ -17818,7 +17818,7 @@ disagree.
 
 **Filed:** 2026-11-18. **Source:** pr-ready review of the formula graph (ts-audit 3.22.0).
 
-**What.** `tools/ts-cli/ts_cli/audit/vendor/` holds Cytoscape.js 3.30.2, @dagrejs/dagre 1.1.4 (with graphlib 2.2.4) and cytoscape-dagre 2.5.0, which run in every audit report that has a formula chain. `pip-audit` covers Python only, and the repo audit's angle 16 reads only `pyproject.toml` and requirements files (`.claude/workflows/repo-audit.js`, `.claude/rules/repo-audit.md`). Nothing looks for a newer release or an advisory.
+**What.** `tools/ts-cli/ts_cli/audit/vendor/` holds Cytoscape.js 3.30.2, @dagrejs/dagre 1.1.4 (with graphlib 2.2.4) and cytoscape-dagre 2.5.0, which run in every audit report where some Model has a formula (`report.has_formulas`). `pip-audit` covers Python only, and the repo audit's angle 16 reads only `pyproject.toml` and requirements files (`.claude/workflows/repo-audit.js`, `.claude/rules/repo-audit.md`). Nothing looks for a newer release or an advisory.
 
 **Do.**
 1. Add `tools/ts-cli/ts_cli/audit/vendor/` (its README table) to angle 16's scope and the workflow's finder prompt: check each package's latest version and advisories.
@@ -18555,37 +18555,33 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
 **Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
 blocker or should-fix left; these were deferred, not declined).
 
-**What.**
+**What.** (The original item 1, a set `client_id` or `client_secret` alone reading as no
+OAuth, and item 6's long FACTS_VERSION comment line are fixed in ts-audit 3.25.0: one of
+the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered.)
 
-1. **One OAuth key on the `client_id` spelling.** `connection_facts._flags` reads a set
-   `client_id` alone (or with a blank `client_secret`) as no OAuth, so the Model reads Can use,
-   while `OAuth2ClientId` alone reads to confirm. Read either spelling alone the same way, or
-   record in ts-audit open-items #18 why `client_id` alone is firm "no OAuth". No connection on
-   the SE demo cluster holds `client_id`.
-2. **A connection with no type ignores its Table header.** P24 reads a connection whose search
+1. **A connection with no type ignores its Table header.** P24 reads a connection whose search
    entry has no warehouse type as maybe Databricks, though P23 may read the source as Snowflake
    from its Table header; a Snowflake OAuth2 pair then reads To confirm, not Can't use. A
    `data_warehouse_type` of only spaces does the same, since `_text(" ")` stops the fallback to
    `details.type`: run `warehouse_type` on each candidate before choosing. Both lean to To
    confirm, never Can use, and neither has been seen live.
-3. **P24's rule text.** `perf.yaml`'s P24 description (and README, CHANGELOG, BL-590) names
+2. **P24's rule text.** `perf.yaml`'s P24 description (and README, CHANGELOG, BL-590) names
    the OAuth2 pair only "on a Databricks connection"; the code also reads either key alone, and
    a connection with no type, as to confirm. Its remediation ("switch it to a service account")
    is circular for a connection that may already be a service principal: give readings to
    confirm a line of their own, and add P24 to BL-590's step 2.
-4. **The golden table pins rows, not the derivation.** `test_audit_connections_data.py`'s table
+3. **The golden table pins rows, not the derivation.** `test_audit_connections_data.py`'s table
    fails only when a pinned row changes; a change no row covers (or `header_parameterized`,
    which has no row) passes without a `FACTS_VERSION` bump. Pin one row per derivation path,
    or a digest of the outputs per version.
-5. **Snapshot docs and tests.** README's `--snapshot-out` / `--snapshot-in` table rows predate
+4. **Snapshot docs and tests.** README's `--snapshot-out` / `--snapshot-in` table rows predate
    the manifest's `derived` key, and so does `snapshot.py`'s docstring example (the README's
    snapshot paragraph is right). No test runs `ts audit fire-rates` on a P snapshot with
    no `derived` (verified by hand: refused, with the right message). A newer `derived` version
    replays silently; a note on stderr would keep engine comparisons honest.
-6. **Report code and tests.** `formulas.js`'s `inlinedText` repeats `inlinedHtml`'s paste
+5. **Report code and tests.** `formulas.js`'s `inlinedText` repeats `inlinedHtml`'s paste
    condition (one walker taking a renderer would stop them drifting); no test checks the
    Dashboard Data Cache cell's "(to confirm)" or "Not checked:" hover text (both verified by
-   hand in headless Chrome); `connection_facts.py`'s FACTS_VERSION comment has a 125-character
-   line.
+   hand in headless Chrome).
 
 **Target:** 2027-01-31.

@@ -378,8 +378,9 @@ the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P2
 reads today.
 
 1. **OAuth from a client ID and secret.** P24 reads a connection as OAuth when a
-   configuration key contains `oauth`, or, without one, when it has both `client_id` and
-   `client_secret` (an OAuth M2M service principal). A Databricks connection holding
+   configuration key contains `oauth`, or, without one, when it has a `client_id` or a
+   `client_secret` set (an OAuth M2M service principal; one set without the other reads to
+   confirm as the pair does, from ts-cli 0.222.0, since an open question never reads Can use). A Databricks connection holding
    `OAuth2ClientId` and `OAuth2Secret` and no other setting naming OAuth may be per-user
    OAuth or a service principal: the names cannot tell (#17). Does Data Cache treat a
    service-principal connection as an OAuth connection, and how is the kind told apart?
