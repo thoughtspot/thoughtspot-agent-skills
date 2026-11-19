@@ -31,6 +31,10 @@ from ts_cli.formula_text import ts_finalize_formula
 #   count           -> `unique count`  (distinct)
 #   countduplicates -> `count`         (exact total; NOT approximate)
 
+# The Sisense aggregations (a JAQL `agg`, or the same word as a formula function): their
+# ThoughtSpot names are FUNCTION_MAP's, the one table both readers use.
+AGG_FUNCTIONS = ("sum", "avg", "average", "count", "dupcount", "countduplicates", "min", "max")
+
 # Sisense formula function -> TML formula function (deterministic 1:1 subset only).
 FUNCTION_MAP: dict[str, str] = {
     # aggregation (see the count note above: Sisense count == distinct; dupCount == total)
