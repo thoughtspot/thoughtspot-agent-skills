@@ -138,8 +138,9 @@ def test_facts_keep_ids_names_and_type_only():
 def test_oauth_from_a_client_id_and_secret_alone_is_marked_m2m():
     m2m = connection_facts({"id": "c", "name": "N", "details": {
         "configuration": '{"client_id": "x", "client_secret": "******", "host": "h"}'}})
-    named = connection_facts({"id": "c", "name": "N", "details": {
-        "configuration": '{"OAuth2ClientId": "x", "client_id": "x", "client_secret": "y"}'}})
+    # on Snowflake: on Databricks, or with no type, OAuth2ClientId alone is to confirm too
+    named = connection_facts({"id": "c", "name": "N", "data_warehouse_type": "SNOWFLAKE",
+        "details": {"configuration": '{"OAuth2ClientId": "x", "client_id": "x", "client_secret": "y"}'}})
     assert (m2m["oauth"], m2m["oauth_m2m"]) == (True, True)
     assert (named["oauth"], named["oauth_m2m"]) == (True, False)
 
@@ -162,9 +163,11 @@ def _dbx(configuration, kind="DATABRICKS", via="data_warehouse_type"):
      " databricks ", "details.type", (True, True)),
     ('{"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}',
      "RDBMS_DATABRICKS", "details.type", (True, True)),
-    # One of the pair alone is still a setting named for OAuth: firm.
+    # One of the pair alone (the secret blank) rests on the same open question.
     ('{"OAuth2ClientId": "x", "host": "h"}', "DATABRICKS", "data_warehouse_type",
-     (True, False)),
+     (True, True)),
+    ('{"OAuth2ClientId": "x", "OAuth2Secret": "", "host": "h"}', "DATABRICKS",
+     "data_warehouse_type", (True, True)),
     # Another setting naming OAuth beside the pair: firm.
     ('{"OAuth2ClientId": "x", "OAuth2Secret": "y", "oauth_pvt_key": "k"}',
      "DATABRICKS", "data_warehouse_type", (True, False)),
@@ -430,7 +433,8 @@ GOLDEN_VERSION = 2
 GOLDEN = [
     ("DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
     ("RDBMS_DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
-    ("DATABRICKS", {"OAuth2ClientId": "x", "host": "h"}, (True, False, False, False)),
+    ("DATABRICKS", {"OAuth2ClientId": "x", "host": "h"}, (True, True, False, False)),
+    (None, {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
     ("DATABRICKS", {"host": "h", "personal_access_token": "t"}, (False, False, False, False)),
     ("SNOWFLAKE", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, False, False, False)),
     ("SNOWFLAKE", {"client_id": "x", "client_secret": "y", "host": "h"}, (True, True, False, False)),

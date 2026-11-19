@@ -70,9 +70,9 @@ def _uncaptured(selection: list, profile: str, captured: set) -> Optional[str]:
 def _stale_note(snapshot_in: Path, why: str) -> str:
     """When data `why` names was captured but derived by an older ts-cli (snapshot
     stale_needs), say so: the files are there, so "not captured" alone would mislead."""
-    from ts_cli.audit.snapshot import SnapshotError, _read_manifest, stale_needs
+    from ts_cli.audit.snapshot import SnapshotError, snapshot_stale_needs
     try:
-        stale = sorted(n for n in stale_needs(_read_manifest(Path(snapshot_in))) if n in why)
+        stale = sorted(n for n in snapshot_stale_needs(snapshot_in) if n in why)
     except SnapshotError:
         return ""
     if not stale:

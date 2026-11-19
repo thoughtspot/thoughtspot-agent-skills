@@ -452,3 +452,22 @@ def test_a_p_replay_of_a_snapshot_from_an_older_derivation_is_refused(tmp_path):
     rest = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap),
                                     "--angles", "D", "-o", str(tmp_path / "d.json")])
     assert rest.exit_code == 0, rest.output
+
+
+def test_a_snapshot_that_never_fetched_connections_is_not_called_stale(tmp_path):
+    """A snapshot without P (no `derived`, as before it was recorded) never fetched
+    connections: a P replay says they were not captured, not that they are old."""
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import data_needs
+    from ts_cli.cli import app
+    snap = tmp_path / "snap"
+    write_snapshot(fx.registry_populated_context(), snap, ["D"],
+                   needs=sorted(data_needs(["D"], ["general"])))
+    manifest_path = snap / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["derived"]
+    manifest_path.write_text(json.dumps(manifest))
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
+    out = " ".join(plain(res).split())
+    assert res.exit_code != 0 and "not captured" in out and "connections" in out, out
+    assert "derived by an older ts-cli" not in out

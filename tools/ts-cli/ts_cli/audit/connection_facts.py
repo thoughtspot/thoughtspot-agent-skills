@@ -19,8 +19,9 @@ or a log line.
     oauth_m2m      `oauth` rests only on a client ID and secret, whose kind of OAuth the
                    product owner's team is to confirm (open-items #18): the
                    `client_id` and `client_secret` pair on any connection, or, on a
-                   Databricks connection, `OAuth2ClientId` and `OAuth2Secret` with no
-                   other setting naming OAuth. On the SE demo cluster, 12 of its 14
+                   Databricks connection or one whose type is not given, OAuth read
+                   only from `OAuth2ClientId`, `OAuth2Secret` or both (no other setting
+                   naming OAuth). On the SE demo cluster, 12 of its 14
                    Databricks connections use OAuth, and each holds just that pair
                    (2026-11-19), which per-user OAuth and a service principal (M2M)
                    both use, so the names cannot tell them apart.
@@ -56,7 +57,8 @@ from ts_cli.publish_plan import parse_variable_token
 #: none) is refused for the rules that read them (audit/snapshot.py). The golden table
 #: in tests/test_audit_connections_data.py fails until it is bumped.
 #: 1: until ts-cli 0.220.0. 2: a Databricks OAuth2ClientId/OAuth2Secret pair alone
-#: reads as `oauth_m2m` (to confirm), and warehouse types drop an `RDBMS_` prefix.
+#: (either key or both, on Databricks or a connection with no type) reads as
+#: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
 FACTS_VERSION = 2
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
@@ -169,7 +171,8 @@ def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[
     _HOST_KEYS); PrivateLink is None too when no host or account name holds text. A
     template variable is True when a value is one, else False for a configuration the
     readings can judge and None for one they cannot. `warehouse` is the connection's
-    type: on DATABRICKS, OAuth resting only on _DATABRICKS_OAUTH_PAIR is oauth_m2m."""
+    type: on DATABRICKS, or with no type given, OAuth resting only on keys of
+    _DATABRICKS_OAUTH_PAIR is oauth_m2m."""
     present, keys, hosts, parameterized = _read_entries(config)
     readable = any("oauth" in k for k in present) or bool(
         present & (set(_M2M_KEYS) | set(_HOST_KEYS)))
@@ -179,8 +182,8 @@ def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[
     oauth_keys = {k for k in keys if "oauth" in k}
     named = bool(oauth_keys)
     m2m = (not named and set(_M2M_KEYS) <= keys) or (
-        warehouse_type(warehouse) == "DATABRICKS"
-        and oauth_keys == _DATABRICKS_OAUTH_PAIR)
+        warehouse_type(warehouse) in ("DATABRICKS", None)
+        and named and oauth_keys <= _DATABRICKS_OAUTH_PAIR)
     privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
     return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,
             "parameterized": parameterized}

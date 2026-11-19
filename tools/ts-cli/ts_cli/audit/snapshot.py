@@ -241,24 +241,35 @@ def derived_versions() -> dict:
     return {"connections": FACTS_VERSION}
 
 
+def _fetched(manifest: dict) -> set:
+    """What the snapshot fetched: its manifest's ``needs``, or for a legacy manifest
+    without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``)."""
+    if manifest.get("needs") is not None:
+        return set(manifest["needs"])
+    out = set(ALWAYS_FETCHED)
+    for angle in manifest["angles"]:
+        out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
+    return out
+
+
 def stale_needs(manifest: dict) -> set:
-    """The derived kinds the snapshot recorded under an older derivation, or none."""
+    """The derived kinds the snapshot fetched under an older derivation, or with none
+    recorded; what it never fetched is not stale, only missing."""
     recorded = manifest.get("derived") if isinstance(manifest.get("derived"), dict) else {}
     return {need for need, version in derived_versions().items()
-            if not isinstance(recorded.get(need), int) or recorded[need] < version}
+            if need in _fetched(manifest)
+            and (not isinstance(recorded.get(need), int) or recorded[need] < version)}
+
+
+def snapshot_stale_needs(in_dir: Path) -> set:
+    """stale_needs for the snapshot in ``in_dir`` (SnapshotError if it is not one)."""
+    return stale_needs(_read_manifest(Path(in_dir)))
 
 
 def captured_needs(manifest: dict) -> set:
-    """What the snapshot fetched: its manifest's ``needs``, or for a legacy manifest
-    without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``), less what it
-    derived under an older derivation (stale_needs): a replay reading that is refused."""
-    if manifest.get("needs") is not None:
-        out = set(manifest["needs"])
-    else:
-        out = set(ALWAYS_FETCHED)
-        for angle in manifest["angles"]:
-            out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
-    return out - stale_needs(manifest)
+    """What the snapshot fetched (_fetched), less what it derived under an older
+    derivation (stale_needs): a replay reading that is refused."""
+    return _fetched(manifest) - stale_needs(manifest)
 
 
 def read_snapshot(in_dir: Path) -> tuple[AuditContext, list[str]]:

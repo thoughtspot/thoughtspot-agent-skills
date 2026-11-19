@@ -386,10 +386,9 @@ reads today.
    Until the team answers, both read "OAuth client ID and secret (to confirm)" and the
    Model reads To confirm (product owner, 2026-11-19: on the 150-Model sample of that
    day all seven Models P24 blocked rested on this pair). The same pair on any other
-   warehouse stays firm OAuth. Two edges, neither seen on the cluster (2026-11-19), read firm OAuth for now: a
-   connection whose search entry carries no warehouse type at all (P24 reads the type
-   from the connection only, though P23 may still read Databricks from a Table
-   header), and one holding `OAuth2ClientId` without a set `OAuth2Secret`.
+   warehouse stays firm OAuth. Two edges, neither seen on the cluster (2026-11-19),
+   read to confirm too: a connection whose search entry carries no warehouse type,
+   and one holding only `OAuth2ClientId` or only `OAuth2Secret`.
 2. **PrivateLink.** No configuration key names PrivateLink, so P24 reads it from a
    `host` or `accountName` containing `privatelink`. Is that a sound signal on every
    source Data Cache supports? The finding names it "PrivateLink read from the host (to
