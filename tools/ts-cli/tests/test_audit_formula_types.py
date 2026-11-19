@@ -238,3 +238,32 @@ def test_the_tree_shows_the_legend_and_says_when_every_type_is_off(tmp_path):
                  "Faded: switched off, kept for what is shown under it"):
         assert text in x["legend"]
     assert x["rows"] == 0 and "Every type is switched off" in x["note"]
+
+
+def _mostly_columns(n=30):
+    """n formulas each built on one column only, and one short chain: with Columns
+    off, all but the chain are left with no edges."""
+    formulas = [_f(f"formula_S{i}", f"Single {i}", f"sum ( [ORDERS::C{i}] )") for i in range(n)]
+    formulas += [_f("formula_A", "Chain A", "sum ( [ORDERS::A] )"),
+                 _f("formula_B", "Chain B", "[formula_A] * 2"),
+                 _f("formula_C", "Chain C", "[formula_B] + [formula_A]")]
+    return {"name": "Columns", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": formulas, "columns": [_col(f["name"], f["id"]) for f in formulas]}
+
+
+@needs_chrome
+def test_nodes_left_without_edges_are_gridded_beside_the_rest_and_all_start_in_view(tmp_path):
+    """Switching Columns off leaves most formulas with no edge; dagre alone stacks
+    them in one tall column, most of it off screen."""
+    shown = report_browser.render(_page(("m-7", _mostly_columns())), tmp_path, "formulas/m-7/graph",
+                                  actions=_CY + _chip("column") + '.click();'
+        'setTimeout(function(){ var c = cy(), w = c.width(), h = c.height(), bb = c.nodes().boundingBox(),'
+        '  out = c.nodes().filter(function(n){ var b = n.renderedBoundingBox();'
+        '    return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length;'
+        '  window.__extra = {nodes: c.nodes().length, out: out, ratio: bb.h / bb.w}; }, 100);',
+                                  settle_ms=400)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["nodes"] == 33
+    assert x["out"] == 0, "every node starts in view"
+    assert x["ratio"] < 1.5, "not one tall column"

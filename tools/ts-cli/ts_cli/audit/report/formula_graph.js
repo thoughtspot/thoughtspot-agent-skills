@@ -157,6 +157,32 @@ function graphStart(tree){
   return [0, best !== null ? best : smallest];
 }
 
+/* Lay out the graph: dagre for the nodes joined by an edge, and the nodes left with
+   none (a type switched off can strand most of them) in a grid beside that part, its
+   columns chosen so the whole is about the canvas's shape. Without the grid dagre
+   stacks them in one tall column, most of it off screen. */
+function graphArrange(cy){
+  var lone = cy.nodes().filter(function(n){ return n.degree(false) === 0; });
+  var linked = cy.elements().not(lone);
+  if(linked.length) linked.layout({name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}).run();
+  if(!lone.length) return;
+  var gap = 40, cellH = 36, cellW = 0;
+  lone.forEach(function(n){ cellW = Math.max(cellW, n.data("w") + 16); });
+  var bb = linked.length ? linked.boundingBox() : {x1: 0, y1: 0, x2: -gap, w: 0, h: 0};
+  var aspect = (cy.width() && cy.height()) ? cy.width() / cy.height() : 1.6;
+  var best = 1, bestScore = Infinity;
+  for(var cols = 1; cols <= lone.length; cols++){
+    var rows = Math.ceil(lone.length / cols);
+    var w = bb.w + (bb.w ? gap : 0) + cols * cellW, h = Math.max(bb.h, rows * cellH);
+    var score = Math.abs(Math.log(w / h / aspect));
+    if(score < bestScore){ bestScore = score; best = cols; }
+  }
+  var x0 = bb.x2 + gap + cellW / 2, y0 = bb.y1 + cellH / 2;
+  lone.forEach(function(n, i){
+    n.position({x: x0 + (i % best) * cellW, y: y0 + Math.floor(i / best) * cellH});
+  });
+}
+
 /* The graph's header: the Model, the note on what is drawn, search and the way back to
    the tree. The type chips go in below (buildFormulaGraph). */
 function graphHeader(guid){
@@ -250,8 +276,8 @@ function buildFormulaGraph(c, guid, tree){
   function draw(keep){
     if(cy) cy.destroy();
     cy = c._cy = window.cytoscape({container: box, elements: graphElements(tree, graphShownIds(tree, keep)),
-      style: graphStyle(), minZoom: 0.05, maxZoom: 3,
-      layout: {name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}});
+      style: graphStyle(), minZoom: 0.05, maxZoom: 3, layout: {name: "preset"}});
+    graphArrange(cy);
     cy.on("tap", "node", function(e){
       box.focus({preventScroll: true});  /* so Escape reaches the view, not <body> */
       view.select(e.target.data("use"));
