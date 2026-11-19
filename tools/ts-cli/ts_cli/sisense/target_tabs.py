@@ -15,9 +15,12 @@ _GRAIN_SUFFIX = re.compile(r"\s*\((daily|weekly|monthly|quarterly|yearly)\)\s*$"
 
 
 def _field_key(f: dict) -> str:
-    """Everything about a plotted field except its title and date level (and the week start,
-    which only means something at the weekly level -- a weekly grain is flagged on its row)."""
-    return repr(sorted((k, repr(v)) for k, v in f.items() if k not in ("level", "title", "firstday")))
+    """Everything about a plotted field except its title and, for a dimension, its date level
+    (and the week start, which only means something at the weekly level -- a weekly grain is
+    flagged on its row). A measure's level is part of what it computes (a count of months), so
+    two tabs differing there are different charts, never grains of one."""
+    skip = ("title", "firstday") if f.get("kind") == "measure" else ("level", "title", "firstday")
+    return repr(sorted((k, repr(v)) for k, v in f.items() if k not in skip))
 
 
 def _shape(w: dict) -> tuple:

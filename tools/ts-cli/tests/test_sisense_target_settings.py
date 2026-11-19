@@ -699,3 +699,53 @@ def test_declared_connections_must_be_the_ones_sisense_reads():
     inv["connections"] = ["A"]
     res = build_target_liveboard(inv, _target(), tables=tables, overrides={"connections": {"A": "X", "Zbogus": "Y"}})
     assert "same warehouse is not checked" in _row(res, "Cost by status")["note"]
+
+
+# --------------------------------------------------------------------------- review round 6
+def test_filter_map_never_replaces_an_aggregate_filter_or_one_with_unread_keys():
+    agg = dict(_range("[fact_visit.cost]", {"from": 100}), agg="sum")
+    w = _cost_by_status([agg])
+    res = build_target_liveboard(_inv([w]), _target(),
+                                 overrides={"filter_map": {"[fact_visit.cost]": "[Case ID] >= 'a'"}})
+    assert "filters an aggregate" in _row(res, "Cost by status")["note"]
+    odd = dict(_member("[dim_case.status]", ["Open"]), unsupported=["explicit=False"])
+    res = build_target_liveboard(_inv([_kpi([odd])]), _target(),
+                                 overrides={"filter_map": {"[dim_case.status]": "[Case Status] = 'Open'"}})
+    assert "does not read" in _row(res, "Cost")["note"]
+    from ts_cli.sisense.target_filters import condition_key
+    assert condition_key({"from": 100}, None, "sum") != condition_key({"from": 100})
+
+
+def test_an_all_filter_is_never_replaced_by_filter_map():
+    dim = "[Visit_Start_Date.id_]"
+    widgets = [_started([_member(dim, ["1"])], "Started"),
+               _started([dict(_member(dim, []), raw={"all": True})], "All visits")]
+    res = build_target_liveboard(_inv(widgets), _target(), overrides={"filter_map": {dim: "[Visit Started?] = true"}})
+    answers = _answers(res)
+    assert answers["Started"]["search_query"].endswith("[Visit Started?] = true")
+    assert "[Visit Started?]" not in answers["All visits"]["search_query"]
+
+
+def test_a_filter_no_check_reported_is_still_named(monkeypatch):
+    from ts_cli.sisense import target_answers as ta
+    monkeypatch.setattr(ta._Binder, "filter_fragment", lambda self, sf, anchors: (None, None, ""))
+    row = _row(build_target_liveboard(_inv([_kpi([_member("[dim_case.status]", ["Open"])])]), _target()), "Cost")
+    assert "no check reported why" in row["note"]
+
+
+def test_a_date_measure_with_no_level_is_flagged():
+    w = _w("w1", "Dates", "indicator", [dict(_f("[Visit_Start_Date.date_day (Calendar)]", "value", "measure", "count"),
+                                             datatype="datetime")])
+    assert "carries no level" in _row(build_target_liveboard(_inv([w]), _target()), "Dates")["note"]
+
+
+def test_a_hidden_tab_differing_in_a_measures_level_is_not_merged():
+    from tests.test_sisense_target_answers import _w as w_
+    date = "[Visit_Start_Date.date_day (Calendar)]"
+    shown = w_("t1", "Visits (Daily)", "indicator", [_f(date, "value", "measure", "count")])
+    hidden = w_("t2", "Visits (Monthly)", "indicator", [dict(_f(date, "value", "measure", "count"), level="months")])
+    tabber = w_("tb", "Visits", "WidgetsTabber", [], tabber={"tabs": [{"title": "Daily", "show": ["t1"]},
+                                                                      {"title": "Monthly", "show": ["t2"]}], "active": 0})
+    res = build_target_liveboard(_inv([tabber, shown, hidden]), _target())
+    row = next(r for r in res["visual_rows"] if r["visual"] == "Visits (Monthly)")
+    assert row["status"] != "Merged"

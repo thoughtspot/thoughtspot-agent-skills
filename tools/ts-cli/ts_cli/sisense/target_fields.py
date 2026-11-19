@@ -143,7 +143,10 @@ def _field_warning(f: dict):
     if (f.get("level") or "").lower() in ("quarters", "years"):
         return (f"field {what} buckets {f['level']}, which in ThoughtSpot follow the cluster's fiscal-year start; "
                 "confirm it matches Sisense's")
-    if f.get("datatype") == "datetime" and not f.get("level") and f.get("kind") != "measure":
+    if f.get("datatype") == "datetime" and not f.get("level"):
+        if f.get("kind") == "measure":
+            return (f"measure over date field {what} carries no level, so whether Sisense counts days or "
+                    "timestamps is not decided")
         return f"date field {what} carries no level, so the grain ThoughtSpot shows it at is not decided"
     if (f.get("level") or "").lower() == "weeks":
         start = f"starting on {f['firstday']}" if f.get("firstday") else "with the Sisense server's week start"
