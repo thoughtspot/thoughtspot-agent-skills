@@ -456,12 +456,14 @@ def test_clicking_a_formula_shows_its_definition_uses_and_used_by(tmp_path):
         'row("Revenue").click();'
         'var p = panel();'
         'window.__extra = {expr: p.querySelector(".fdetail-expr").textContent,'
+        ' written: p.querySelector(".fdetail-written") && p.querySelector(".fdetail-written").textContent,'
         ' uses: Array.prototype.map.call(p.querySelectorAll(".fdetail-uses a.fref"), function(a){ return a.textContent; }),'
         ' usedBy: Array.prototype.map.call(p.querySelectorAll(".fdetail-usedby a.fref"), function(a){ return a.textContent; }),'
         ' selected: document.querySelectorAll("#v-formulas .ftree-selected").length};'))
     assert shown["errors"] == []
     x = shown["extra"]
-    assert x["expr"] == "sum ( [ORDERS::AMOUNT] )"   # as written: it can be copied back
+    assert x["expr"] == "sum ( [ORDERS::AMOUNT] )"   # a column reads as written
+    assert x["written"] is None   # nothing to show twice
     assert x["uses"] == ["ORDERS::AMOUNT"]
     assert x["usedBy"] == ["Gross Margin %", "Gross Margin"]
     assert x["selected"] >= 1
@@ -473,15 +475,18 @@ def test_a_reference_link_opens_that_formula_and_reveals_it_in_the_tree(tmp_path
     # Cost sits under Gross Margin, collapsed: following the link must open the path to it
     shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
         'row("Gross Margin %").click();'
-        'var gm = link(panel().querySelector(".fdetail-expr"), "[formula_GM]"); var tip = gm.title; gm.click();'
+        'var gm = link(panel().querySelector(".fdetail-expr"), "[Gross Margin]"); var tip = gm.title;'
+        'var tml = panel().querySelector(".fdetail-written").textContent; gm.click();'
         'var title1 = panel().querySelector(".fdetail-title").textContent;'
         'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
         'var r = row("Cost");'
-        'window.__extra = {tip: tip, title1: title1, title2: panel().querySelector(".fdetail-title").textContent,'
+        'window.__extra = {tip: tip, tml: tml, title1: title1, title2: panel().querySelector(".fdetail-title").textContent,'
         ' shown: !!r && r.offsetParent !== null, selected: !!r && r.classList.contains("ftree-selected")};'))
     assert shown["errors"] == []
     x = shown["extra"]
-    assert x["tip"] == "Formula: Gross Margin"
+    # a formula reference reads by the name the tree uses; the TML form is beneath
+    assert x["tip"] == "Formula: Gross Margin, written [formula_GM]"
+    assert x["tml"] == "[formula_GM] / [formula_Rev]"
     assert x["title1"] == "Gross Margin" and x["title2"] == "Cost"
     assert x["shown"] and x["selected"]
 
@@ -559,7 +564,7 @@ def test_definitions_and_search_results_are_escaped(tmp_path):
         ' expr: panel().querySelector(".fdetail-expr").textContent};'))
     assert shown["errors"] == []
     assert shown["extra"]["tags"] == 0
-    assert shown["extra"]["expr"] == "[formula_Y] + '<i>lit</i>'"
+    assert shown["extra"]["expr"] == "[<b>y</b>] + '<i>lit</i>'"
 
 
 @needs_chrome
@@ -701,7 +706,7 @@ def test_a_link_opens_under_the_formula_it_was_followed_from(tmp_path):
     page = _report(tmp_path, ("m-10", diamond))
     shown = report_browser.render(page, tmp_path, "formulas/m-10", actions=_ROW + (
         'row("B").click();'
-        'link(panel().querySelector(".fdetail-expr"), "[formula_D]").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[D]").click();'
         'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
         'var up = sel.parentNode.parentNode.closest("li.ftree-node");'
         'window.__extra = up.firstChild.querySelector(".ftree-name").textContent;'))
@@ -828,8 +833,8 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
     assert shown["errors"] == []
     x = shown["extra"]
     assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
-    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
-    assert x["links"] == ["[formula_Rev]", "[ORDERS::COST]", "[formula_Rev]"]
+    assert x["inl"] == "( [Revenue] - ( sum ( [ORDERS::COST] ) ) ) / [Revenue]"
+    assert x["links"] == ["[Revenue]", "[ORDERS::COST]", "[Revenue]"]
     assert x["revInl"]   # uses no single-use helper: no second definition
 
 
@@ -862,5 +867,5 @@ def test_only_what_h16_reports_is_tagged_and_pasted(tmp_path):
     assert x["tags"]["B"] == "hidden helper" and x["tags"]["A"] == "hidden helper"
     assert x["tags"]["Shared"] == "MEASURE,hidden helper"
     assert x["tags"]["Filtered"] == "MEASURE,hidden helper"
-    assert x["top"] == "( 1 ) + [formula_S2] + [formula_F]"
+    assert x["top"] == "( 1 ) + [Shared] + [Filtered]"
     assert x["a"]   # nothing in a cycle is pasted

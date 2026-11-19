@@ -6,8 +6,10 @@
    written before definitions were kept), and `r` the roots, the formulas nothing uses.
    Clicking a formula, column or parameter opens the definition panel beside the tree:
    its expression with every reference a link, what it uses, what uses it and everything
-   that depends on it. The panel shows the expression as written; the tree's inline line
-   shows it by label. Following a link opens the tree down to that formula. The tree is
+   that depends on it. The panel shows the expression with each formula reference by the
+   name the tree uses (its column's name), as ThoughtSpot's formula editor does, and,
+   when that differs, the expression as the TML writes it, to copy; the tree's inline
+   line shows it by label. Following a link opens the tree down to that formula. The tree is
    one tab stop, moved through with the arrow keys.
    Children are built only when a node is opened, since a formula many others use would
    otherwise be drawn once per path; a node already on the path is a circular reference. */
@@ -209,12 +211,30 @@ function refLink(tree, use, shown, untabbable){
    when it would only repeat the value, `[value]` (report.py's _compact_tree). */
 function written(s){ return s[2] !== undefined ? s[2] : "["+s[1]+"]"; }
 
-/* An expression's segments as HTML: text escaped, each reference a link, shown as
-   written (`asWritten`) or by its label. */
+/* A reference segment as the panel shows it: a formula in brackets by the name the tree
+   uses (`[formula_Date]` reads `[Transaction Date]`), a column or parameter as written. */
+function named(tree, s){ return s[0] === 0 ? "["+useLabel(tree, s)+"]" : written(s); }
+
+/* A link showing `named` form, its tooltip naming the kind, the label and, when it
+   differs, the reference as written. */
+function namedLink(tree, s, untabbable){
+  var link = refLink(tree, s, named(tree, s), untabbable);
+  return named(tree, s) === written(s) ? link
+    : link.replace(/ title="([^"]*)"/, function(m, t){ return ' title="'+t+esc(", written "+written(s))+'"'; });
+}
+
+/* An expression's segments as HTML: text escaped, each reference a link, shown by name
+   (`asWritten`, the panel's form: namedLink) or by its label (the tree's inline line). */
 function exprHtml(tree, x, asWritten, untabbable){
   return x.map(function(s){
-    return typeof s === "string" ? esc(s) : refLink(tree, s, asWritten && written(s), untabbable);
+    return typeof s === "string" ? esc(s) : asWritten ? namedLink(tree, s, untabbable)
+      : refLink(tree, s, false, untabbable);
   }).join("");
+}
+
+/* The expression as the panel shows it, in plain text (named). */
+function namedText(tree, x){
+  return (x || []).map(function(s){ return typeof s === "string" ? s : named(tree, s); }).join("");
 }
 
 /* The expression as plain text, as written (`asWritten`, the panel's form) or by label
@@ -269,7 +289,7 @@ function inlinedHtml(tree, x, open){
     if(typeof s === "string") return esc(s);
     var helper = s[0] === 0 && tree.n[s[1]];
     if(!helper || !singleUse(helper) || !helper.x || !helper.x.length || open[s[1]])
-      return refLink(tree, s, written(s));
+      return namedLink(tree, s);
     open[s[1]] = true;
     var inner = inlinedHtml(tree, helper.x, open);
     delete open[s[1]];
@@ -294,6 +314,10 @@ function detailHtml(tree, target){
     html += !node.x ? '<div class="fdetail-note">'+esc(FORMULA_NO_DEFS)+'</div>'
       : !node.x.length ? '<div class="fdetail-note">The TML gives this formula no expression, or one that is not text.</div>'
       : '<pre class="fdetail-expr">'+exprHtml(tree, node.x, true)+'</pre>';
+    if(node.x && node.x.length && namedText(tree, node.x) !== exprText(tree, node.x, true)){
+      html += '<div class="fdetail-label">As written in TML</div>'+
+        '<pre class="fdetail-expr fdetail-written">'+esc(exprText(tree, node.x, true))+'</pre>';
+    }
     if(node.x && usesSingleUse(tree, node)){
       html += '<div class="fdetail-label">Definition with single-use helpers pasted in</div>'+
         '<pre class="fdetail-expr fdetail-inlined">'+inlinedHtml(tree, node.x, opened(target[1]))+'</pre>';
