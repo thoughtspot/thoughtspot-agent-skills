@@ -8,10 +8,12 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-The catalog has <!-- BEGIN GENERATED: skills-total -->35 skills across six categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
+The catalog has <!-- BEGIN GENERATED: skills-total -->37 skills across seven categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
 CLI except `ts-profile-snowflake`, which is Claude Code only (Cortex Code manages Snowflake
-connections natively). For why an individual skill exists, who tends to need it, and
-when to reach for it, see [skill personas](docs/skill-personas.md).
+connections natively), and the two Custom Charts skills, which link into Claude Code only
+(they drive a local browser and the ThoughtSpot MCP, and have not been run on Cortex Code
+CLI). For why an individual skill exists, who tends to need it, and when to reach for it,
+see [skill personas](docs/skill-personas.md).
 
 <!-- BEGIN GENERATED: skills-overview -->
 <!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
@@ -24,6 +26,7 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
 | [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
+| [Custom Charts](#custom-charts) | A native chart can't show the story, and a hand-built custom chart ships as a blank tile | 2 |
 
 <!-- END GENERATED: skills-overview -->
 
@@ -155,6 +158,24 @@ when to reach for it, see [skill personas](docs/skill-personas.md).
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings |
 
 <!-- END GENERATED: skills-recipes -->
+
+</details>
+
+<a id="custom-charts"></a>
+<details>
+<summary><strong>Custom Charts</strong> — Build custom chart (BYOC) tiles and Liveboards made of them</summary>
+
+&nbsp;
+
+<!-- BEGIN GENERATED: skills-custom-charts -->
+<!-- Generated from each skill's SKILL.md `metadata:` by `python3 tools/validate/generate_readme_skills.py`; do not edit by hand. -->
+
+| Skill | What it builds |
+|---|---|
+| [`ts-object-answer-chart-builder`](agents/cli/ts-object-answer-chart-builder/SKILL.md) | A custom chart tile as paste-ready `chart.html` / `chart.css` / `chart.js` (MayaCharts by default, or D3, ECharts, Plotly, Chart.js, tables, SVG), iterated in a real browser against a faithful `viz` stub until the render is right; can save it as an answer and check it in ThoughtSpot; ships a library of 58 live-data charts |
+| [`ts-object-liveboard-chart-builder`](agents/cli/ts-object-liveboard-chart-builder/SKILL.md) | A storytelling Liveboard of custom-chart tiles across numbered tabs on a real Model: asks what to build, plans the tabs, builds each tile with `ts-object-answer-chart-builder`, adds narrative tiles and filters, patches the Liveboard through the ThoughtSpot MCP, and screenshots every tab |
+
+<!-- END GENERATED: skills-custom-charts -->
 
 </details>
 

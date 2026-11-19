@@ -138,6 +138,9 @@ CATEGORIES: Tuple[Category, ...] = (
     Category("Recipes", "recipes",
              "The same analytical need recurs account after account",
              (("What it builds", "summary"),)),
+    Category("Custom Charts", "custom-charts",
+             "A native chart can't show the story, and a hand-built custom chart ships as a blank tile",
+             (("What it builds", "summary"),)),
 )
 _BY_NAME = {c.name: c for c in CATEGORIES}
 
