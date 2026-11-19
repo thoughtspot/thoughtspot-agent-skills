@@ -416,3 +416,47 @@ def test_plain_int64():
                                         "-9223372036854775808"))
     assert not any(plain_int64(v) for v in ("01", "-0", "1.0", "+1", "9223372036854775808",
                                             "-9223372036854775809", "9" * 5000))
+
+
+# --- Round-6 review: a [ or ] the two splitters read differently --------------------
+
+_BRACKET_CALCS = [
+    # a "[" or "]" inside a string: the earlier splitter counted it as depth, failed to
+    # split and left the measure NEEDS REVIEW; read correctly, _calc_approx drops parts
+    # (the first counts every open row, not just those with "[" in the title)
+    'CALCULATE(COUNTROWS(FILTER(Fact, CONTAINSSTRING(Fact[Title], "["))), Fact[Status] = "Open")',
+    'CALCULATE(SUM(Fact[Amount]) * IF(Fact[Tag] = "[", 2, 1), Fact[Status] = "East")',
+    'CALCULATE(SUM(Fact[Amount]) * IF(Fact[Tag] = "]", 2, 1), Fact[Status] = "East")',
+    # a [column] whose parens close before they open: equal counts, not nested
+    'CALCULATE(SUM(Fact[x]) + Fact[a),(b], Fact[s] = "x")',
+    # a ] outside any [column]
+    'CALCULATE(SUM(Fact[x]) * 2 ], Fact[s] = "x")',
+    'CALCULATE(SUM(Fact[x]) * 2 ], ALL(Fact[r]))',
+]
+
+
+@pytest.mark.parametrize("dax", _BRACKET_CALCS)
+def test_calculate_with_a_bracket_the_splitters_read_differently_needs_review(dax):
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax", _BRACKET_CALCS[:2])
+def test_formula_translate_refuses_a_bracket_in_a_string_inside_calculate(dax):
+    """`ts formula translate --from dax` shares translate_dax, and returned both of these
+    APPROXIMATED with part of the expression dropped."""
+    from ts_cli.formula_translate.engine import translate as ft_translate
+    r = ft_translate(dax, "dax")
+    assert (r["status"], r["formula"]) == ("NEEDS_REVIEW", None)
+
+
+@pytest.mark.parametrize("dax", [
+    'CALCULATE(SUM(T[x]) * IF(MAX(T[s]) IN {"a","b"}, 2, 1), ALL(T[r]))',
+    'CALCULATE(SUM(T[x]) * IF(MAX(T[s]) = "a,b", 2, 1), ALL(T[r]))',
+])
+def test_calculate_all_the_quote_aware_split_newly_reads_stays_needs_review(dax):
+    """The group_aggregate rewrite has the same gate as _approx_calculate: a body the
+    earlier splitter could not read stays NEEDS REVIEW, as on main, rather than being
+    rewritten by code written against that splitter."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")

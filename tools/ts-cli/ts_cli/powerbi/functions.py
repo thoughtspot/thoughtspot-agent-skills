@@ -237,12 +237,26 @@ def _match_paren(s, open_idx):
     return -1
 
 
+def _parens_nest(body: str) -> bool:
+    """True when every ``)`` in ``body`` closes an earlier ``(`` and none is left open.
+    Equal counts are not enough: the earlier splitter read the ``)`` in ``T[a),(b]`` as
+    closing, so the ``,`` after it split the call."""
+    depth = 0
+    for c in body:
+        depth += (c == "(") - (c == ")")
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def _split_reads_differently(s: str) -> bool:
     """True when ``s`` holds something the quote-aware ``_split_args`` / ``_match_paren``
     read differently from the earlier splitter, which tracked neither braces nor quoted
-    text: a ``{`` or ``}`` outside quotes, a ``,`` ``(`` or ``)`` inside a "string" or a
-    'table name', or a [column] with an unbalanced paren or a ``]]`` escape. A conservative
-    superset: it may refuse a few inputs the old splitter also read correctly.
+    text and counted ``[`` and ``]`` as depth everywhere: a ``{`` ``}`` or a stray ``]``
+    outside quotes, a ``,`` ``(`` ``)`` ``[`` or ``]`` inside a "string" or a 'table name',
+    or a [column] whose parens do not nest, that holds a ``[`` or that uses a ``]]`` escape.
+    A conservative superset: it may refuse a few inputs the old splitter also read
+    correctly.
 
     The CALCULATE rewrites below were written against the old splitter, and a CALCULATE
     holding such text used to fail to split and fall to NEEDS REVIEW. Reading it correctly
@@ -257,13 +271,13 @@ def _split_reads_differently(s: str) -> bool:
             j = _opaque_end(s, i)
             body = s[i + 1:j - 1]
             if ch == "[":
-                if body.count("(") != body.count(")") or "]]" in s[i:j + 1] or "[" in body:
+                if "]]" in s[i:j + 1] or "[" in body or not _parens_nest(body):
                     return True
-            elif any(c in body for c in ",()"):
+            elif any(c in body for c in ",()[]"):
                 return True
             i = j
             continue
-        if ch in "{}":
+        if ch in "{}]":
             return True
         i += 1
     return False
