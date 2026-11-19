@@ -420,3 +420,34 @@ def test_no_configuration_value_reaches_the_context_snapshot_json_report_or_logs
             assert secret not in text, f"a configuration value reached the {where}"
     assert {c["name"] for c in ctx.connections} == {"Warehouse A", "Warehouse B", "Broken"}
     assert next(c for c in ctx.connections if c["name"] == "Broken")["oauth"] is None
+
+
+#: connection_facts' flags for a fixed set of entries, pinned with the derivation
+#: version they were derived by. A snapshot keeps only these facts, so when any row
+#: changes, bump connection_facts.FACTS_VERSION (an older snapshot is then refused for
+#: P24) and update GOLDEN_VERSION and the row together.
+GOLDEN_VERSION = 2
+GOLDEN = [
+    ("DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
+    ("RDBMS_DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
+    ("DATABRICKS", {"OAuth2ClientId": "x", "host": "h"}, (True, False, False, False)),
+    ("DATABRICKS", {"host": "h", "personal_access_token": "t"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"client_id": "x", "client_secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"oauth_pvt_key": "k", "accountName": "a.privatelink.b"}, (True, False, True, False)),
+    ("SNOWFLAKE", {"user": "u", "password": "p", "host": "h", "db": "${tenant_db}"}, (False, False, False, True)),
+    ("SNOWFLAKE", {"user": "u", "password": "p"}, (None, None, None, None)),
+]
+
+
+@pytest.mark.parametrize("kind, config, flags", GOLDEN)
+def test_connection_facts_golden_table_moves_with_facts_version(kind, config, flags):
+    from ts_cli.audit.connection_facts import FACTS_VERSION
+    assert FACTS_VERSION == GOLDEN_VERSION, (
+        "FACTS_VERSION changed: re-check every GOLDEN row and update GOLDEN_VERSION")
+    facts = connection_facts({"id": "c", "name": "N", "data_warehouse_type": kind,
+                              "details": {"configuration": json.dumps(config)}})
+    assert (facts["oauth"], facts["oauth_m2m"], facts["privatelink"],
+            facts["parameterized"]) == flags, (
+        "connection_facts' output changed: bump connection_facts.FACTS_VERSION and "
+        "GOLDEN_VERSION, then update this row")

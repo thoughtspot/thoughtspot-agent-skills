@@ -829,12 +829,17 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
         'row("Gross Margin %").click();'
         'var inl = panel().querySelector(".fdetail-inlined");'
         'var inlTml = panel().querySelector(".fdetail-inlined-written");'
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        'function find(q){ s.value = q; s.dispatchEvent(new Event("input"));'
+        ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+        ' function(a){ return a.textContent; }); }'
+        'var pasted = find("( [revenue] - ( sum"), pastedTml = find("( [formula_rev] - ( sum"); find("");'
         'var gmTags = tags("Gross Margin"), gmpTags = tags("Gross Margin %");'
         'row("Revenue").click();'
         'var revInl = panel().querySelector(".fdetail-inlined");'
         'window.__extra = {gm: gmTags, gmp: gmpTags, inl: inl && inl.textContent,'
         ' links: inl ? Array.prototype.map.call(inl.querySelectorAll("a.fref"), function(a){ return a.textContent; }) : null,'
-        ' inlTml: inlTml && inlTml.textContent, revInl: revInl === null};'))
+        ' inlTml: inlTml && inlTml.textContent, revInl: revInl === null, pasted: pasted, pastedTml: pastedTml};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
@@ -842,6 +847,8 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
     assert x["links"] == ["[Revenue]", "[ORDERS::COST]", "[Revenue]"]
     # the TML's own form, to copy into the formula that uses the helper
     assert x["inlTml"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
+    # search finds a formula by its pasted-in definition, in either form
+    assert x["pasted"] == ["Gross Margin %"] and x["pastedTml"] == ["Gross Margin %"]
     assert x["revInl"]   # uses no single-use helper: no second definition
 
 

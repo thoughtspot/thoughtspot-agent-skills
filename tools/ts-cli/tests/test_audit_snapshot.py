@@ -404,34 +404,51 @@ def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
     assert "fetch" not in calls and not (repo / "snap").exists()
 
 
-@pytest.mark.parametrize("version, kept", [
-    ("0.219.1", False), ("0.219.0", False), ("0.220.0", True), ("0.221.3", True),
-    ("1.0.0", True), ("not a version", False), (None, False)])
-def test_connection_facts_derived_before_0_220_count_as_not_captured(version, kept):
-    """0.220.0 reads a Databricks OAuth2ClientId/OAuth2Secret pair differently, and a
-    snapshot keeps only the derived facts, so an older snapshot's connection facts are
-    not replayed: P24 would give the old verdict. A replay reading them is refused."""
+@pytest.mark.parametrize("derived, kept", [
+    (None, False), ({}, False), ({"connections": 1}, False), ({"connections": "2"}, False),
+    ({"connections": 2}, True), ({"connections": 3}, True)])
+def test_connection_facts_from_an_older_derivation_count_as_not_captured(derived, kept):
+    """A snapshot keeps only derived connection facts, so facts recorded under an older
+    derivation (connection_facts.FACTS_VERSION), or with none recorded, are not
+    replayed: P24 would give the old verdict. Keyed on the derivation, not the release."""
+    from ts_cli.audit.connection_facts import FACTS_VERSION
     from ts_cli.audit.snapshot import captured_needs
-    manifest = {"ts_cli_version": version, "angles": ["P"],
+    assert FACTS_VERSION == 2
+    manifest = {"ts_cli_version": "9.9.9", "angles": ["P"],
                 "needs": ["model_tml", "connections", "calendars"]}
+    if derived is not None:
+        manifest["derived"] = derived
     needs = captured_needs(manifest)
     assert ("connections" in needs) is kept
     assert {"model_tml", "calendars"} <= needs
 
 
-def test_a_p_replay_of_a_snapshot_from_before_0_220_is_refused(tmp_path):
-    from typer.testing import CliRunner
+def test_a_snapshot_records_each_derivation_version(tmp_path):
+    from ts_cli.audit.connection_facts import FACTS_VERSION
+    write_snapshot(make_context(), tmp_path / "s", ["A"])
+    manifest = json.loads((tmp_path / "s" / "manifest.json").read_text())
+    assert manifest["derived"] == {"connections": FACTS_VERSION}
 
+
+def test_a_p_replay_of_a_snapshot_from_an_older_derivation_is_refused(tmp_path):
     import audit_rule_fixtures as fx
     from ts_cli.audit import data_needs
     from ts_cli.cli import app
     ctx = fx.build_cache_ctx(connections=[fx.build_cache_connection()], calendars=[])
     snap = tmp_path / "snap"
     write_snapshot(ctx, snap, ["P"], needs=sorted(data_needs(["P"], ["general"])))
+    ok = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P",
+                                  "-o", str(tmp_path / "ok.json")])
+    assert ok.exit_code == 0, ok.output
     manifest_path = snap / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["ts_cli_version"] = "0.219.1"
+    del manifest["derived"]   # as a snapshot written by ts-cli 0.219.x is
     manifest_path.write_text(json.dumps(manifest))
     res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
     assert res.exit_code != 0
-    assert "connections" in res.output and "P24" in res.output, res.output
+    out = " ".join(plain(res).split())
+    assert "P24" in out and "derived by an older ts-cli" in out, out
+    # the other angles still replay
+    rest = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap),
+                                    "--angles", "D", "-o", str(tmp_path / "d.json")])
+    assert rest.exit_code == 0, rest.output

@@ -50,6 +50,15 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 
 from ts_cli.publish_plan import parse_variable_token
 
+#: The version of how `connection_facts` derives its flags. A snapshot keeps only the
+#: derived facts, never the settings, so a replay cannot derive them again: bump this
+#: whenever any entry's facts change, and a snapshot recording an older version (or
+#: none) is refused for the rules that read them (audit/snapshot.py). The golden table
+#: in tests/test_audit_connections_data.py fails until it is bumped.
+#: 1: until ts-cli 0.220.0. 2: a Databricks OAuth2ClientId/OAuth2Secret pair alone
+#: reads as `oauth_m2m` (to confirm), and warehouse types drop an `RDBMS_` prefix.
+FACTS_VERSION = 2
+
 #: The keys `connection_facts` returns, and the only ones the audit stores.
 CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized",
                    "parameterized_connection")

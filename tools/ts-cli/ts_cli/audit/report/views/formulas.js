@@ -415,7 +415,8 @@ function revealRow(ul, tree, target, from){
 
 /* Every match, ranked: columns and parameters by name (there are few, and a column must
    not be pushed out of the shown list), then formulas by name, then formulas by
-   definition (as the panel shows it, as the TML writes it, or by label). The caller shows the first
+   definition (as the panel shows it, pasted-in forms included, as the TML writes it, or
+   by label). The caller shows the first
    FORMULA_SEARCH_CAP and says how many more there are. */
 function searchHits(tree, q){
   q = q.trim().toLowerCase();
@@ -425,9 +426,10 @@ function searchHits(tree, q){
     if(node.n.toLowerCase().indexOf(q) !== -1 || String(node.f).toLowerCase().indexOf(q) !== -1){
       byName.push([0, j]); return;
     }
-    if(namedText(tree, node.x).toLowerCase().indexOf(q) !== -1 ||
-       exprText(tree, node.x, true).toLowerCase().indexOf(q) !== -1 ||
-       exprText(tree, node.x, false).toLowerCase().indexOf(q) !== -1) byDef.push([0, j]);
+    var forms = [namedText(tree, node.x), exprText(tree, node.x, true), exprText(tree, node.x, false)];
+    if(node.x && usesSingleUse(tree, node))   /* the pasted-in forms the panel also shows */
+      forms.push(inlinedText(tree, node.x, opened(j), named), inlinedText(tree, node.x, opened(j), written));
+    if(forms.some(function(f){ return f.toLowerCase().indexOf(q) !== -1; })) byDef.push([0, j]);
   });
   tree.n.forEach(function(node){ node.u.forEach(function(u){
     if(u[0] !== 0 && !seen[useKey(u)] && String(u[1]).toLowerCase().indexOf(q) !== -1){
