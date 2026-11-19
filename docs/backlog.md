@@ -504,6 +504,7 @@ are roughly ordered by value÷effort.
 | BL-605 | The Tableau docs say a cohort needs the Model's `obj_id` to bind; the Sets schema says `{id, name, fqn}` and `{id, name}` import | 2027-01-31 |
 | BL-606 | A Tableau static Set on a DATE anchor writes raw member strings as `date_filter_values`; the mapping says one `EXACT_DATE` object per date | 2027-01-31 |
 | BL-607 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
+| BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17963,13 +17964,25 @@ that commit):
 - **Excel function map:** `docs/function-maps/ts-excel-function-mapping.md:358` (`SUMIFS`),
   `:610` (`NETWORKDAYS`, the inline-holiday term) and `:706` (`N`).
 - **Sheets function map:** `ts-sheets-function-mapping.md:274` (`EPOCHTODATE`).
-- **Sigma function map,** not yet in this item: `ts-sigma-function-mapping.md:266`
-  (`DateFromUnix`).
+- **Sigma function map:** `ts-sigma-function-mapping.md:266` (`DateFromUnix`).
 - **Snowflake SV translator:** `tools/ts-cli/ts_cli/sv_sql.py:414-415` passes a `TO_DATE`
   format through raw, the twin of `databricks/mv_sql.py:421-424`.
 - **The period-comparison recipe** already emits `'%Y-%m-%d'`
   (`tools/ts-cli/ts_cli/period_comparison/emit.py:258-259`, its `to_date` literal). When
   the shared helper lands (Do, step 2), import it there too.
+
+**Widened after merge, 2026-11-19** (the final pr-ready review of PR #742; lines at its
+merge commit):
+
+- **Qlik mapping:** `agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md:183`
+  (`Timestamp`) and `:277` (`Date#`). Both map to `to_date(col, format)` and pass the
+  Qlik format through, with no note that the formats differ.
+- **Coverage matrices:** `agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md:139`
+  (`TO_DATE`, raw string arguments) and
+  `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md:58` (`DATEPARSE`).
+- **Not a site:** `agents/cli/ts-recipe-answer-period-comparison/references/open-items.md:136`
+  quotes `to_date('2019-11-29', 'yyyy-MM-dd')`. That is ThoughtSpot's generated SQL, not
+  emitted TML, so leave it.
 
 `agents/shared/schemas/thoughtspot-formula-patterns.md` (its date literal warning, about
 line 414) points here and stays accurate.
@@ -18052,8 +18065,10 @@ hits (another build, `id`/`name` not matching the Model, or no `id`/`name` at al
    dropped" in the same PR as the rule. Their `obj_id` output stays correct; only the
    reason they give changes. Lines at 2026-11-19:
    - `agents/cli/ts-convert-from-looker/SKILL.md:640`;
+   - `agents/cli/ts-convert-from-looker/references/step-10-liveboard-generation.md:138`;
    - `agents/cli/ts-convert-from-tableau/SKILL.md:2071`;
-   - `agents/cli/ts-convert-from-tableau/references/step-10-liveboard-generation.md:233`;
+   - `agents/cli/ts-convert-from-tableau/references/step-10-liveboard-generation.md:220`
+     and `:233`;
    - `tools/ts-cli/ts_cli/tml_common.py:224` (the `derive_viz_obj_id` docstring);
    - `tools/ts-cli/ts_cli/tableau/liveboard.py:249` and `:306`;
    - `tools/ts-cli/ts_cli/qlik/answers.py:169`.
@@ -18101,7 +18116,10 @@ no `obj_id`. The 2026-11-18 probes ran against a long-lived Model, which may hav
      (the Top-N query set binds by `id`/`name`/`obj_id`);
    - `agents/shared/worked-examples/tableau/static-set-to-column-set.md:41` and `:68`;
    - `agents/shared/worked-examples/tableau/topn-set-to-query-set.md:117`, `:154`, `:181`,
-     `:218`, `:249` and `:287`.
+     `:218`, `:249` and `:287`;
+   - `agents/shared/mappings/tableau/tableau-formula-translation.md:591-592` (a fixed-size
+     bin's cohort is "bound to the model (worksheet) by `obj_id`") and `:662` (its example's
+     `worksheet` comment, "model obj_id, set it first").
 3. Record the result in `thoughtspot-sets-tml.md`.
 
 **Target:** 2027-01-31.
@@ -18273,3 +18291,77 @@ commit that filed this item.
 
 **Target:** 2027-02-28.
 
+
+## BL-608 — ts-recipe-answer-period-comparison follow-ups after merge `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the final pr-ready review and the
+converter-consistency audit of PR #742. Line numbers are at its merge commit.
+
+Two of these can give a wrong Answer with no warning (items 1 and 3). Three make a re-run
+or its rollback unsafe (items 2, 5 and 6). Fix items 1 to 7 before the smaller ones. Item 4
+points to BL-607 item 21 rather than repeating it.
+
+**What and do.**
+
+1. **A year repeated in a custom dates file is silently merged.** `load_custom_windows`
+   (`tools/ts-cli/ts_cli/period_comparison/windows.py:418`) stores each year in a dict.
+   `_read_mapping` (`:429`) parses with `json.loads` or `yaml.safe_load`, and both keep
+   the last of two equal keys. So a second `2024:` key, or `2024` beside `'2024'`, keeps
+   only the last entry. Nothing warns.
+   Fix: refuse a year already loaded. Also reject a duplicate key at parse: an
+   `object_pairs_hook` for `json.loads`, and a `SafeLoader` subclass that raises on one.
+2. **Step 8 cannot tell whether an in-place update landed.** Its checks
+   (`agents/cli/ts-recipe-answer-period-comparison/SKILL.md:360-363`) are the formula ids,
+   the absent `cohorts` and `tables[].fqn`. All three are the same before and after a
+   re-run.
+   Fix: compare the exported `search_query` year span and the bucket formula's `expr` (or
+   the Set's conditions) with the generated files. After an in-place import times out
+   (Step 7, `SKILL.md:342-348`), export and compare. Do not search by name: an in-place
+   target is never missing.
+3. **Clashes are checked on anchor days only.** `_clashing_events` (`windows.py:301-313`)
+   flags a comparison window only when it holds a built-in event's anchor day. A window of
+   1 or 2 days can hold Black Friday's Saturday or Sunday unflagged. I.e.
+   `--event christmas --length 1 --years 2021` gives `clashes: []`, and its 4th comparison
+   window is 2021-11-27, the Saturday after Black Friday. Across 2000–2025, 19 of 104
+   Christmas or Boxing Day runs at length 1 or 2 hit this.
+   Fix: test overlap with each built-in event's default window (`--offset 0 --length 4`).
+   Or document the gap in SKILL Step 4 and Step 6's clash note (`SKILL.md:261-263`).
+4. **The Answer's numbers have never been compared with an expected value.** This is the
+   gap most likely to hide a wrong number. The steps are BL-607 item 21: run
+   `tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py` with `--no-cleanup`.
+   Then check the 2019 row against the warehouse: the measure's sum ÷ its distinct dates
+   over 29 Nov–2 Dec 2019, and over the six prior windows. The probe record gives event
+   ≈72,526.22 and comparison ≈65,967.57. Record the query and result in open item #7.
+   Do it once, under BL-607, and close both entries together.
+5. **Rollback backups go to a directory the OS may clear.** Step 6 (`SKILL.md:246`)
+   suggests `mktemp -d` for the run directory, and Step 7 (`:297-328`) writes the backups
+   there. The ts-cli README's recipe example does the same
+   (`tools/ts-cli/README.md:5399`).
+   Fix: use a persistent run directory, as ts-object-model-coach does
+   (`~/Dev/coaching-runs/<slug>-<ts>/`), and give the user the path.
+6. **The re-run search treats `_` and `%` as wildcards.** Step 5 (`SKILL.md:208`) runs
+   `ts metadata search --name "{answer_name}"`, which matches with SQL LIKE. I.e. a search
+   for `Q4_Sales` also finds `Q4-Sales`, and Step 5 may offer it for an in-place overwrite.
+   Fix: keep only exact name matches before offering. The smoke test already does
+   (`smoke_ts_recipe_answer_period_comparison.py:111-115`).
+7. **`--create-new` is stated per run, not per file.** Step 5 (`SKILL.md:228-229`), Step 7
+   (`:338-339`) and the re-run row (`:407`) say to drop it when updating in place. In a
+   mixed run the Set is updated in place and the Answer is new. Then only the Set's
+   import (`:333`) drops it; the Answer's (`:334`) keeps it. Say so per file.
+8. **Smaller items.**
+   - The reusable-Set form does not check the bucket name against the measure names.
+     The formula form does (`period_comparison/emit.py:365`); the Set form passes the
+     measure names only (`:371`).
+   - The Answer name is only checked for being blank (`emit.py:357`). Control characters
+     and leading or trailing spaces pass. `_check_text` (`:94`) already rejects both.
+   - `ts powerbi build-timeintel --help` shows `{base_name, base_expr, }`. Rich reads
+     `[sply_name, yoy_name, yoy_pct_name]` as markup
+     (`tools/ts-cli/ts_cli/commands/powerbi.py:162`). Escape the brackets.
+   - The Set backup (Step 7, `SKILL.md:300-308`) extracts `edoc` by hand.
+     `ts sets inventory --model <guid> --export-tml <dir>` writes each Set's TML and
+     could replace it.
+   - SKILL says a year missing from a custom file is an error (`SKILL.md:140`, `:259`).
+     Under `--last N` the current year is an exception (`windows.py:27-28`): it is dropped
+     while its event window is unknown. Say so.
+
+**Target:** 2027-01-31.
