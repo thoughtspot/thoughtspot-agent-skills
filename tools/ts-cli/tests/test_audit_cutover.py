@@ -218,16 +218,48 @@ def test_generated_catalog_current():
 
 # ── the report's own needs (REPORT_NEEDS) ───────────────────────────────────
 
+def _data_cache_reach() -> list:
+    """What the corpus builder reaches through the Data Cache readiness that the static
+    scan cannot follow (catalog_reads' "Evasions"): the helpers in data_cache's
+    UNJUDGED and TO_CONFIRM tables (functions in a dict), the derived field each CHECKS
+    rule's `where` names (`fields.get` with a field name read from the rule), and the
+    availability check behind each of those rules' `requires` (`scopes.has_data`
+    through AVAILABILITY)."""
+    from ts_cli.audit import data_cache
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.engine.fields import FIELDS
+    from ts_cli.audit.engine.scopes import AVAILABILITY
+    catalog = load_catalog()
+    out = list(data_cache.UNJUDGED.values()) + list(data_cache.TO_CONFIRM.values())
+    for rule_id, _, _ in data_cache.CHECKS:
+        rule = catalog.rules[rule_id]
+        out.append(FIELDS[rule.aggregate["where"]["field"].lstrip("@")])
+        out += [AVAILABILITY[req] for req in rule.requires]
+    return out
+
+
 def test_report_needs_cover_what_the_report_reads():
     """Statically, as the catalog gate checks rules: the corpus and ERD builders read
-    only conditional data REPORT_NEEDS declares."""
-    from ts_cli.audit import REPORT_NEEDS, build_corpus
+    only conditional data REPORT_NEEDS declares. What the scan cannot follow is added
+    by name (_data_cache_reach), and a place it cannot read fails the test unless it is
+    shown unreachable from the report."""
+    from ts_cli.audit import REPORT_NEEDS, build_corpus, data_cache
     from ts_cli.audit.catalog_expr import CONDITIONAL_DATA
-    from ts_cli.audit.catalog_reads import static_reads
+    from ts_cli.audit.catalog_model import load_catalog
+    from ts_cli.audit.catalog_reads import _scan
     from ts_cli.audit.erd import build_erd_for_audit
     assert REPORT_NEEDS <= set(CONDITIONAL_DATA)
-    reads = static_reads([build_corpus, build_erd_for_audit])
-    assert {"ai_instructions", "dependents", "sets"} <= set(reads)
+    walker = _scan([build_corpus, build_erd_for_audit] + _data_cache_reach())
+    # predicates._count iterates a scope the rule names, which the scan cannot read. The
+    # report reaches predicates only through data_cache's CHECKS rules, whose `where`
+    # never counts, so that iteration is unreachable from the report.
+    catalog = load_catalog()
+    assert all(set(catalog.rules[r].aggregate["where"]) == {"field", "len_gt"}
+               for r, _, _ in data_cache.CHECKS)
+    unreadable = [p for p in walker.problems if not p.startswith("_count calls iterate")]
+    assert unreadable == []
+    reads = walker.reads
+    assert {"ai_instructions", "dependents", "sets", "calendars", "connections"} <= set(reads)
     assert set(reads) <= REPORT_NEEDS, reads
 
 
@@ -254,7 +286,8 @@ def _p_only_client(model):
 
 def test_a_run_fetches_only_what_its_rules_need_and_records_it():
     """A P-only run: no P rule reads AI instructions or Sets, so neither is fetched
-    for the report's sake (by decision) — and the corpus says so."""
+    for the report's sake (by decision) — and the corpus says so. P22 reads the
+    connections' custom calendars and P24 their settings, so those are fetched."""
     from unittest.mock import patch
 
     from ts_cli.audit import data_needs, run_audit
@@ -267,8 +300,8 @@ def test_a_run_fetches_only_what_its_rules_need_and_records_it():
     disc.assert_not_called()
     assert not any(c.args[0].endswith("/ai/instructions/get")
                    for c in client.post.call_args_list)
-    assert out["corpus"]["fetched_needs"] == ["dependents", "metadata", "model_tml",
-                                              "table_tml"]
+    assert out["corpus"]["fetched_needs"] == ["calendars", "connections", "dependents",
+                                              "metadata", "model_tml", "table_tml"]
     assert out["corpus"]["models"][0]["ai_analysis"]["questions"] == []
     # not looked up is not "failed": instructions_read is null, not false
     assert out["corpus"]["models"][0]["ai_analysis"]["instructions_read"] is None
@@ -422,6 +455,25 @@ def test_replay_records_what_the_snapshot_captured(tmp_path):
         sorted(_ALWAYS | {"ai_instructions"})
 
 
+def test_a_snapshot_without_calendars_cannot_replay_p(tmp_path):
+    """P22 reads the connections' custom calendars and P24 their settings, which a
+    snapshot captured before them (or without P) lacks: replaying P is refused, naming
+    both, rather than run with them silently skipping every Model. A capture with them
+    replays."""
+    from ts_cli.commands.audit import _replay
+    old = _snap(tmp_path, ["D", "P"], needs=set())
+    with pytest.raises(SystemExit) as exc:
+        _replay(old, ["P"], None)
+    for name in ("calendars", "connections", "P22", "P24"):
+        assert name in str(exc.value)
+    assert _replay(old, ["D"], None)["summary"]["checks_run"] > 0
+    from ts_cli.audit.snapshot import write_snapshot
+    fresh = tmp_path / "fresh"
+    write_snapshot(fx.registry_populated_context(), fresh, ["P"],
+                   needs={"calendars", "connections"})
+    assert {"P22", "P24"} <= set(_replay(fresh, ["P"], None)["summary"]["all_check_ids"])
+
+
 # ── the CLI validates against the catalog ───────────────────────────────────
 
 def test_cli_rejects_an_unknown_category_and_assessment(tmp_path):
@@ -429,7 +481,7 @@ def test_cli_rejects_an_unknown_category_and_assessment(tmp_path):
 
     from ts_cli.cli import app
     snap = _snap(tmp_path, ["A", "D", "H", "P", "S"],
-                 needs={"ai_instructions", "answers", "sets"})
+                 needs={"ai_instructions", "answers", "sets", "calendars", "connections"})
     runner = CliRunner()
     res = runner.invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "A,X"])
     assert res.exit_code != 0 and "unknown category X" in res.output

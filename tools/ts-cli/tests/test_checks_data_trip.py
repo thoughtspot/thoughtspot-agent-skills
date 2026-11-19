@@ -98,6 +98,16 @@ def test_d8_same_name_in_a_different_schema_is_not_a_duplicate():
     assert run_rule(fx.data_metadata_same_name_other_schema(), "D8") == []
 
 
+def test_d8_ignores_sql_views_that_share_a_name():
+    """A SQL View has no physical table: two SQL Views named alike on one connection are
+    two queries, not duplicates of one table. The audit fetches every Model source's
+    header since 3.23.0, which brings SQL View headers to D8."""
+    from ts_cli.audit.context import make_context
+    ctx = make_context(metadata=[fx.build_search_row("v-1", "V_SALES", subtype="SQL_VIEW"),
+                                 fx.build_search_row("v-2", "V_SALES", subtype="SQL_VIEW")])
+    assert run_rule(ctx, "D8") == []
+
+
 def test_d8_ignores_models():
     """Two Models over the same tables are D7's business, not D8's."""
     assert run_rule(fx.data_metadata_duplicate_models(), "D8") == []

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Iterable, NoReturn, Optional
+from typing import Any, Dict, Iterable, NoReturn, Optional, Tuple
 
 from ts_cli.audit.catalog_validate import REQUIRES
 from ts_cli.audit.engine import tml
@@ -23,6 +23,16 @@ class AuditContext:
     metadata: list = field(default_factory=list)
     ai_instructions: dict = field(default_factory=dict)
     answers: list = field(default_factory=list)
+    # The custom calendars registered on the cluster's connections (`calendars/search`,
+    # each trimmed to CALENDAR_KEYS), fetched when a selected rule declares `calendars`.
+    # None when they were not fetched or the fetch failed, never [] for either: a rule
+    # requiring them then skips a Model rather than read "no calendars" (P22).
+    calendars: Optional[list] = None
+    # What the audit keeps of each connection (`connection/search` with details): only
+    # the derived facts of connection_facts.CONNECTION_KEYS, never a configuration
+    # value. Fetched when a selected rule declares `connections`; None when not fetched
+    # or the search failed, as for `calendars` (P24 then skips every Model).
+    connections: Optional[list] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -32,6 +42,24 @@ class AuditContext:
 
     def guid_for(self, tml: dict) -> str:
         return tml.get("guid", "")
+
+    def table_columns(self, model: dict) -> dict:
+        """``TABLE::COL`` -> the Table TML column, for every column of every table this
+        model is built on: what a Model column's ``column_id`` resolves to, keyed by the
+        model_tables entry's ``alias`` (or ``name``) and the Table column's ``name``. A
+        later table's column of the same key wins. A table with no TML in
+        ``self.tables`` contributes nothing."""
+        out: dict = {}
+        for mt in (model.get("model", {}).get("model_tables") or []):
+            table = self.tables.get(mt.get("fqn", ""))
+            if not table:
+                continue
+            prefix = mt.get("alias") or mt.get("name") or ""
+            for col in (table.get("table", {}).get("columns") or []):
+                name = col.get("name", "")
+                if name:
+                    out[f"{prefix}::{name}"] = col
+        return out
 
     def column_types(self, model: dict) -> dict:
         """``TABLE::COL`` -> warehouse data type, for every column of every table
@@ -47,19 +75,8 @@ class AuditContext:
         A table with no TML in ``self.tables`` contributes nothing: its columns'
         types are unknown, which a caller must not read as "not a string".
         """
-        out: dict = {}
-        for mt in (model.get("model", {}).get("model_tables") or []):
-            table = self.tables.get(mt.get("fqn", ""))
-            if not table:
-                continue
-            prefix = mt.get("alias") or mt.get("name") or ""
-            for col in (table.get("table", {}).get("columns") or []):
-                name = col.get("name", "")
-                if not name:
-                    continue
-                dt = tml.mapping(col, "db_column_properties").get("data_type", "")
-                out[f"{prefix}::{name}"] = dt
-        return out
+        return {key: tml.mapping(col, "db_column_properties").get("data_type", "")
+                for key, col in self.table_columns(model).items()}
 
     def tables_for_model(self, model: dict) -> list:
         result = []
@@ -120,6 +137,8 @@ def make_context(
     model_guids=None,
     warnings=None,
     assessment="general",
+    calendars=None,
+    connections=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -128,6 +147,8 @@ def make_context(
         metadata=metadata or [],
         ai_instructions=ai_instructions or {},
         answers=answers or [],
+        calendars=calendars,  # None and [] differ: not fetched, and fetched with none
+        connections=connections,  # likewise
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -202,8 +223,9 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
 
 
-def _abort_on_request_failure(exc: Exception, guid: str) -> NoReturn:
-    """Exit the run: the `ai/instructions/get` request raised a `requests` exception.
+def _abort_on_request_failure(exc: Exception, what: str) -> NoReturn:
+    """Exit the run: a conditional fetch's request (`what`: "AI instructions lookup for
+    model <guid>", "Custom calendar search") raised a `requests` exception.
 
     The client turns its own per-request HTTP and network failures into a response or a
     `SystemExit`, so a `requests.RequestException` that escapes `client.post` came from
@@ -212,7 +234,7 @@ def _abort_on_request_failure(exc: Exception, guid: str) -> NoReturn:
     SSO or proxy HTML login: requests' `JSONDecodeError`), or the network dropping
     during it — or a transport error the client does not retry. Every later call would
     fail the same way, so it is fatal once, never one swallowed failure and one
-    re-authentication per Model. The line names the exception type and, for an HTTP
+    re-authentication per Model (or per page). The line names the exception type and, for an HTTP
     error, its status and path — never the URL's host, a header or the exception text
     (a requests message can carry a URL)."""
     resp = getattr(exc, "response", None)
@@ -221,16 +243,39 @@ def _abort_on_request_failure(exc: Exception, guid: str) -> NoReturn:
         from urllib.parse import urlparse
         path = urlparse(getattr(resp, "url", "") or "").path or "?"
         where = f" ({resp.status_code} on {path})"
-    print(f"Error: AI instructions lookup for model {guid} failed in the request itself "
+    print(f"Error: {what} failed in the request itself "
           f"(re-authentication or transport): {type(exc).__name__}{where} — aborting the audit",
           file=sys.stderr)
     raise SystemExit(1) from exc
 
 
-#: Answers to `ai/instructions/get` that are about the run, not one Model: every later
-#: lookup would get the same, so the run stops once (the client retries neither).
+#: Answers to a conditional fetch (`ai/instructions/get`, a paged search) that are
+#: about the run, not one Model or page: every later request would get the same, so the
+#: run stops once (the client retries neither).
 _FATAL_STATUSES = {401: "the credential was refused after re-authentication",
                    429: "rate limited — retry later"}
+
+
+def _read_answer(resp: Any, path: str, body: bool = True) -> Tuple[Any, Optional[str]]:
+    """`(decoded JSON, None)` for a 2xx JSON answer to a conditional fetch; `(None,
+    reason)` for any other answer, the reason being `format_http_error`'s secret-free
+    line (a final 1xx or 3xx too: `resp.ok` passes both) or the JSON error. A final 401
+    or a 429 (_FATAL_STATUSES) ends the run once, `SystemExit(1)`. With `body=False`
+    the line names the status and path only, never the response body (format_http_error
+    quotes up to 500 characters of it): for a search whose answers hold credentials."""
+    from ts_cli.client import format_http_error
+    line = format_http_error("POST", path, resp) if body \
+        else f"ThoughtSpot API {resp.status_code} on POST {path}"
+    if resp.status_code in _FATAL_STATUSES:
+        print(f"{line} — {_FATAL_STATUSES[resp.status_code]}; aborting the audit",
+              file=sys.stderr)
+        raise SystemExit(1)
+    if not 200 <= resp.status_code < 300:
+        return None, line
+    try:
+        return resp.json(), None
+    except ValueError as exc:  # this answer is not JSON
+        return None, str(exc)
 
 
 def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
@@ -255,29 +300,152 @@ def _fetch_ai_instructions(client: Any, model_guids: list, out: dict,
       on the path.
     * A 2xx whose body is not JSON (`ValueError` from `resp.json()`) skips this Model."""
     import requests
-    from ts_cli.client import format_http_error
     _log("Fetching AI instructions...")
     for guid in model_guids:
         try:
             resp = client.post(_AI_INSTRUCTIONS_PATH, json={"data_source_identifier": guid},
                                raise_for_status=False)
         except requests.RequestException as exc:
-            _abort_on_request_failure(exc, guid)
-        if resp.status_code in _FATAL_STATUSES:
-            print(f"{format_http_error('POST', _AI_INSTRUCTIONS_PATH, resp)} — "
-                  f"{_FATAL_STATUSES[resp.status_code]}; aborting the audit", file=sys.stderr)
-            raise SystemExit(1)
-        if not 200 <= resp.status_code < 300:  # `resp.ok` passes a final 1xx/3xx
-            reason = format_http_error("POST", _AI_INSTRUCTIONS_PATH, resp)
-        else:
-            try:
-                out[guid] = resp.json()
-                continue
-            except ValueError as exc:  # this Model's answer is not JSON
-                reason = str(exc)
+            _abort_on_request_failure(exc, f"AI instructions lookup for model {guid}")
+        answer, reason = _read_answer(resp, _AI_INSTRUCTIONS_PATH)
+        if reason is None:
+            out[guid] = answer
+            continue
         msg = f"AI instructions fetch failed for model {guid}: {reason}"
         _log(f"Warning: {msg}")
         warnings.append(msg)
+
+
+#: What the audit keeps of each `calendars/search` entry: what P22 and the report's
+#: Data Cache view read. The author and modification time are dropped, so a snapshot
+#: holds no more than the audit reads.
+CALENDAR_KEYS = ("calendar_id", "calendar_name", "connection_id", "connection_name")
+
+
+def _paged_fetch(client: Any, path: str, what: str, unchecked: str, warnings: list,
+                 search: Any, with_body: bool = True) -> Optional[list]:
+    """`search(fetch_page)` — a ts_cli.paged_search pager — with each page POSTed to
+    `path`; None, with a warning that `unchecked` was not checked, when it failed.
+
+    The error handling is `_fetch_ai_instructions`', per page: `raise_for_status=False`;
+    a `requests` exception raised by the request or its re-authentication, a final 401
+    or a 429 aborts the run once; any other non-2xx, a non-JSON 2xx or an answer that
+    cannot be paged makes the whole search "failed" (None), so no rule reads a partial
+    list as complete: a rule that requires the data then skips every Model.
+    `with_body` is `_read_answer`'s `body`: False keeps a response body out of every
+    line."""
+    import requests
+    from ts_cli.paged_search import PagedSearchError
+
+    def page(body: dict) -> Any:
+        try:
+            resp = client.post(path, json=body, raise_for_status=False)
+        except requests.RequestException as exc:
+            _abort_on_request_failure(exc, f"{what} search")
+        answer, reason = _read_answer(resp, path, with_body)
+        if reason is not None:
+            raise PagedSearchError(reason)
+        return answer
+    try:
+        return search(page)
+    except PagedSearchError as exc:
+        msg = f"{what} search failed, so {unchecked} were not checked: {exc}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        return None
+
+
+def _fetch_calendars(client: Any, warnings: list) -> Optional[list]:
+    """Every registered custom calendar (`calendars/search`, paged by
+    custom_calendar.search, which `ts calendar search` shares), each trimmed to
+    CALENDAR_KEYS; None, with a warning, when the search failed (`_paged_fetch`)."""
+    from ts_cli.custom_calendar.search import SEARCH_PATH, search_calendars
+    _log("Fetching custom calendars...")
+    found = _paged_fetch(client, SEARCH_PATH, "Custom calendar", "connection calendars",
+                         warnings, search_calendars)
+    return None if found is None else [{k: c.get(k) for k in CALENDAR_KEYS} for c in found]
+
+
+_CONNECTION_SEARCH_PATH = "/api/rest/2.0/connection/search"
+
+
+def _fetch_connections(client: Any, warnings: list) -> Optional[list]:
+    """Every connection's derived facts (`connection/search` with `include_details`,
+    100 a page; connection_facts.connection_facts: `{id, name, type, oauth, oauth_m2m,
+    privatelink, parameterized, parameterized_connection}`); None, with a warning, when
+    the search failed (`_paged_fetch`). Each configuration is parsed and dropped here,
+    page by page: no value of it is kept, logged or warned about, and a refused search
+    is reported by its status and path alone, never its response body.
+
+    `parameterized_connection` comes from each connection's metadata header
+    (_fetch_connection_flags), since the search shows a parameterized connection's
+    settings without their tokens (ts-audit open-items #17). It stays None, unknown,
+    for a connection with no header, and for every connection when that search
+    failed."""
+    from ts_cli.paged_search import search_pages
+    _log("Fetching connection settings...")
+
+    def search(fetch_page: Any) -> list:
+        return search_pages(lambda body: _facts_page(fetch_page(body)),
+                            {"include_details": True}, 100, id_key="id",
+                            what="connection/search", items="connections")
+    facts = _paged_fetch(client, _CONNECTION_SEARCH_PATH, "Connection",
+                         "connection settings", warnings, search, with_body=False)
+    if facts is None:
+        return None
+    flags = _fetch_connection_flags(client, warnings)
+    for fact in facts:
+        fact["parameterized_connection"] = (flags or {}).get(fact.get("id"))
+    return facts
+
+
+def _fetch_connection_flags(client: Any, warnings: list) -> Optional[Dict[str, Any]]:
+    """Connection id -> connection_facts.header_parameterized, from a paged
+    `metadata/search` of CONNECTION headers (100 a page); None, with a warning, when
+    that search failed (`_paged_fetch`, the response body kept out). Each header is
+    reduced to its id and that one flag as its page arrives."""
+    from ts_cli.paged_search import search_pages
+    body = {"metadata": [{"type": "CONNECTION"}], "include_headers": True,
+            "include_hidden_objects": True}
+
+    def search(fetch_page: Any) -> list:
+        return search_pages(lambda b: _flags_page(fetch_page(b)), body, 100, id_key="id",
+                            what="metadata/search", items="connection headers")
+    found = _paged_fetch(client, _METADATA_SEARCH_PATH, "Connection header",
+                         "the connections' parameterized flags", warnings, search,
+                         with_body=False)
+    if found is None:
+        return None
+    return {f["id"]: f["parameterized_connection"] for f in found if f.get("id")}
+
+
+def _flags_page(page: Any) -> Any:
+    """One CONNECTION header page, each row reduced at once to `{id,
+    parameterized_connection}`; a page that is not a list of mappings is left for the
+    pager to refuse, as _facts_page does."""
+    from ts_cli.audit.connection_facts import header_parameterized
+    if not isinstance(page, list) or not all(isinstance(r, dict) for r in page):
+        return page
+    out = []
+    for row in page:
+        header = row.get("metadata_header") if isinstance(row.get("metadata_header"), dict) \
+            else {}
+        cid = header.get("id") or row.get("metadata_id")
+        out.append({"id": cid if isinstance(cid, str) else None,
+                    "parameterized_connection": header_parameterized(header)})
+    return out
+
+
+def _facts_page(page: Any) -> Any:
+    """One `connection/search` page with each entry reduced to its facts at once, so no
+    configuration outlives the page. A page that is not a list of mappings is left for
+    the pager to refuse, whole: dropping one odd entry would leave a full page one
+    short, which the pager reads as the last page, so the rest of the list would be
+    lost unseen."""
+    from ts_cli.audit.connection_facts import connection_facts
+    if not isinstance(page, list) or not all(isinstance(c, dict) for c in page):
+        return page
+    return [connection_facts(c) for c in page]
 
 
 def _export_answers(client: Any, dependents: dict, warnings: list) -> list:
@@ -387,6 +555,114 @@ def _export_one_by_one(client: Any, batch: list, batch_resp: Any, warnings: list
     return items
 
 
+_METADATA_SEARCH_PATH = "/api/rest/2.0/metadata/search"
+
+
+def _search_headers(client: Any, guids: list, warnings: list, batch_size: int = 50) -> list:
+    """The `metadata/search` rows (headers included) for `guids`, `batch_size` a
+    request, with the TML export's retry (`_export_items`).
+
+    The ids asked for include every Model source, a Table whose export failed among
+    them, and one bad id refuses its whole request. So a batch refused as a bad request
+    (400 or 404) is retried one id at a time (_search_headers_one_by_one). Any other
+    refusal, or an answer that is not a JSON list, would recur for every id, so the
+    batch is skipped whole with one warning. Each warning names the status and the
+    path, never the response body. A final 401 or a 429 (_FATAL_STATUSES) ends the run
+    once, and so does a `requests` exception (_abort_on_request_failure): every later
+    request would fail alike."""
+    rows: list = []
+    for n, i in enumerate(range(0, len(guids), batch_size), 1):
+        batch = guids[i:i + batch_size]
+        answer = _search_header_page(client, batch)
+        page, failure, status = answer
+        if page is not None:
+            rows.extend(page)
+            continue
+        if status not in _RETRY_ONE_BY_ONE:
+            msg = (f"Metadata search batch {n} {failure}, so the headers of its "
+                   f"{len(batch)} object(s) were not read")
+            _log(f"Warning: {msg}")
+            warnings.append(msg)
+            continue
+        if len(batch) > 1:
+            _log(f"Warning: metadata search batch {n} {failure}; retrying its "
+                 f"{len(batch)} object(s) one at a time")
+        rows.extend(_search_headers_one_by_one(client, batch, answer, warnings))
+    return rows
+
+
+def _search_headers_one_by_one(client: Any, batch: list, batch_answer: Tuple,
+                               warnings: list) -> list:
+    """The rows of `batch`'s ids, one request each (a lone id reuses the batch's own
+    answer). An id refused as a bad request is skipped with a warning; any other
+    refusal would recur for every id left, so the retry stops there and the rest are
+    reported with it."""
+    rows: list = []
+    for k, guid in enumerate(batch):
+        page, failure, status = \
+            _search_header_page(client, [guid]) if len(batch) > 1 else batch_answer
+        if page is not None:
+            rows.extend(page)
+            continue
+        msg = f"Metadata search {failure} for {guid}, so its header was not read"
+        rest = len(batch) - k - 1
+        stop = status not in _RETRY_ONE_BY_ONE
+        if stop and rest:
+            msg += f"; the retry stopped there, skipping {rest} more object(s)"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        if stop:
+            break
+    return rows
+
+
+def _search_header_page(client: Any, guids: list) -> Tuple[Optional[list], str, int]:
+    """`(rows, "", status)` for one `metadata/search` request's answer, or `(None, why,
+    status)` with `why` its status and path only (a response body may quote
+    anything)."""
+    import requests
+    try:
+        resp = client.post(_METADATA_SEARCH_PATH, json={
+            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in guids],
+            "include_headers": True,
+            "include_hidden_objects": True,
+            "record_size": -1,
+            "record_offset": 0,
+        }, timeout=300, raise_for_status=False)
+    except requests.RequestException as exc:
+        _abort_on_request_failure(exc, "Metadata search")
+    status = resp.status_code
+    where = f"returned {status} on POST {_METADATA_SEARCH_PATH}"
+    if status in _FATAL_STATUSES:
+        print(f"ThoughtSpot API {status} on POST {_METADATA_SEARCH_PATH} — "
+              f"{_FATAL_STATUSES[status]}; aborting the audit", file=sys.stderr)
+        raise SystemExit(1)
+    if not 200 <= status < 300:
+        return None, where, status
+    try:
+        data = resp.json()
+    except ValueError:
+        return None, f"{where}, not JSON", status
+    page = data if isinstance(data, list) else \
+        (data.get("metadata", []) if isinstance(data, dict) else None)
+    return (page, "", status) if isinstance(page, list) else \
+        (None, f"{where}, not a list", status)
+
+
+def _source_guids(models: list) -> list:
+    """Every string `model_tables[].fqn` of the exported Models, read defensively (a
+    malformed Model is excluded later, not here)."""
+    out = []
+    for doc in models:
+        body = doc.get("model") if isinstance(doc, dict) else None
+        mts = body.get("model_tables") if isinstance(body, dict) else None
+        for mt in (mts if isinstance(mts, list) else []):
+            fqn = mt.get("fqn") if isinstance(mt, dict) else None
+            if isinstance(fqn, str) and fqn:
+                out.append(fqn)
+    return out
+
+
 def build_context(
     client: Any,
     model_guids: list,
@@ -397,7 +673,10 @@ def build_context(
     Model TML (with associated Table TML), metadata and dependents are always fetched.
     The optional data is fetched only when it is in `needs` — `requires ∪ uses` of the
     rules that will run (`engine.run.needs_for`): `ai_instructions`, `answers` (Answer
-    TML of the dependents' Answers) and `sets` (Set discovery and each Set's consumers).
+    TML of the dependents' Answers), `sets` (Set discovery and each Set's consumers) and
+    `calendars` (every connection's registered custom calendars, one paged search) and
+    `connections` (each connection's derived facts: two paged searches, the
+    connections with details and their CONNECTION metadata headers).
     `dependents` may be in `needs` but is fetched regardless. Anything that is not a
     `requires` value — a category letter from a caller still passing angles — is
     rejected, not silently ignored.
@@ -411,6 +690,8 @@ def build_context(
     dependents = {}
     ai_instructions = {}
     answers = []
+    calendars = None
+    connections = None
 
     # Model TML (with associated Table TML), metadata and dependents below are fetched
     # for every audit and must stay so: rules read Model and Table TML without declaring
@@ -443,22 +724,13 @@ def build_context(
 
     model_guids_from_tml = [m.get("guid") for m in models if m.get("guid")]
     table_guids_from_tml = [t.get("guid") for t in tables.values() if t.get("guid")]
-    scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
+    # And every Model's sources by `model_tables[].fqn`: a SQL View's TML is not kept
+    # (only `table` documents are), so its header (type SQL_VIEW, its connection type)
+    # is how P1, D8 and P27 see it; a Table whose export failed keeps its header too.
+    scoped_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml
+                            + _source_guids(models)))
     _log(f"Searching metadata for {len(scoped_guids)} scoped object(s)...")
-    metadata_results = []
-    batch_size = 50
-    for i in range(0, len(scoped_guids), batch_size):
-        batch = scoped_guids[i:i + batch_size]
-        resp = client.post("/api/rest/2.0/metadata/search", json={
-            "metadata": [{"identifier": g, "type": "LOGICAL_TABLE"} for g in batch],
-            "include_headers": True,
-            "include_hidden_objects": True,
-            "record_size": -1,
-            "record_offset": 0,
-        }, timeout=300)
-        data = resp.json()
-        page = data if isinstance(data, list) else data.get("metadata", [])
-        metadata_results.extend(page)
+    metadata_results = _search_headers(client, scoped_guids, warnings)
 
     _log("Fetching dependents...")
     from ts_cli.commands.metadata import (
@@ -491,6 +763,10 @@ def build_context(
     if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
         _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
+    if "calendars" in needs:
+        calendars = _fetch_calendars(client, warnings)
+    if "connections" in needs:
+        connections = _fetch_connections(client, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")
@@ -502,6 +778,8 @@ def build_context(
         metadata=metadata_results,
         ai_instructions=ai_instructions,
         answers=answers,
+        calendars=calendars,
+        connections=connections,
         model_guids=model_guids,
         warnings=warnings,
     )

@@ -1,0 +1,5 @@
+# Working folders of the Liveboards you build live under ~/.cache/ts-charts/liveboards/<name>/ (their README
+# holds profile findings and their spec holds real guids). Only the worked example is tracked.
+/*
+!/.gitignore
+!/amuzing-chart-samples/

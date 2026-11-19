@@ -166,8 +166,8 @@ must word that finding from a placeholder instead.
 | | Values |
 |---|---|
 | `scope` | `model`, `model.column`, `model.formula`, `model.filter`, `model.table`, `join`, `table`, `table.rls_rule`, `rls_column_ref`, `answer`, `answer.table_ref`, `answer.formula`, `set`, `metadata` |
-| `requires` | `model_tml`, `table_tml`, `metadata`, `dependents`, `ai_instructions`, `answers`, `sets` |
-| `uses` | `dependents`, `ai_instructions`, `answers`, `sets` (conditional data only) |
+| `requires` | `model_tml`, `table_tml`, `metadata`, `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections` |
+| `uses` | `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections` (conditional data only) |
 | Band `op` | `lt`, `lte`, `gt`, `gte`, `eq` |
 | Severities | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
 
@@ -293,19 +293,33 @@ whichever category selected each rule:
 | Data | Fetched |
 |---|---|
 | `model_tml`, `table_tml`, `metadata`, `dependents` | every audit, whatever the rules declare |
-| `ai_instructions`, `answers`, `sets` | only when a selected rule declares them |
+| `ai_instructions`, `answers`, `sets`, `calendars`, `connections` | only when a selected rule declares them |
 
 - **`requires`** both fetches the data and gates: an object lacking it is **skipped**.
   A3 requires `ai_instructions`, so a Model whose lookup failed is not judged.
 - **`uses`** fetches but never gates. The rule reads the data and still judges an object
   without it: a rule that `uses: [ai_instructions]` would judge a Model whose lookup
   failed as uncoached, where A3, which requires them, skips it.
-- `uses` takes only conditional data (`dependents`, `ai_instructions`, `answers`, `sets`).
+- `uses` takes only conditional data (`dependents`, `ai_instructions`, `answers`, `sets`,
+  `calendars`, `connections`).
   Model and Table TML and metadata are always fetched, so there is nothing to declare.
   `dependents` is fetched every audit today but is still declared, because Set discovery
   writes into it.
 - A reader of `dependents` must also declare `sets`: Set rows are only present when Sets
   were fetched.
+- `calendars` is every connection's registered custom calendars, one paged
+  `calendars/search` per audit. It is null when not fetched and when the search failed
+  (a warning says so), and a list (perhaps empty) when it answered, so a rule that
+  `requires: [calendars]` skips every Model after a failed search rather than read "no
+  calendars" (P22).
+- `connections` is each connection's derived settings, one paged `connection/search`
+  (with details) per audit: `{id, name, type, oauth, oauth_m2m, privatelink,
+  parameterized, parameterized_connection}`, built in the fetch by
+  `audit/connection_facts.py`; the last comes from a paged `metadata/search` of
+  CONNECTION headers. The search
+  answers each connection's configuration, credentials included; the fetch keeps no
+  value of it, so neither may a rule, a field or a test. Null when not fetched or the
+  search failed, as for `calendars` (P24; P23 falls back to the metadata header).
 - Neither key is overridable per profile.
 
 **The read-declaration gate.** Each derived field (`@register(name, uses=...)`), code rule

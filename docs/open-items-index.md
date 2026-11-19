@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**221 total items** across 24 skills — **73 open**, 132 verified, 16 deferred
+**233 total items** across 26 skills — **68 open**, 140 verified, 25 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -14,7 +14,6 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-aggregates | 20 | **8** | 11 | 1 |
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
-| ts-audit | 15 | **5** | 10 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
@@ -26,24 +25,22 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-calendar-builder | 6 | **2** | 4 | 0 |
 | ts-convert-from-powerbi | 5 | **1** | 3 | 1 |
 | ts-security-columns | 6 | **1** | 5 | 0 |
+| ts-audit | 18 | **0** | 12 | 6 |
 | ts-convert-from-databricks-mv | 1 | **0** | 0 | 1 |
 | ts-convert-from-dbt | 21 | **0** | 19 | 2 |
 | ts-convert-to-snowflake-sv | 0 | **0** | 0 | 0 |
 | ts-link-semantic-layer | 10 | **0** | 5 | 5 |
+| ts-object-answer-chart-builder | 3 | **0** | 3 | 0 |
 | ts-object-formula-translate | 5 | **0** | 5 | 0 |
+| ts-object-liveboard-chart-builder | 6 | **0** | 3 | 3 |
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 9 | **0** | 9 | 0 |
-### Untagged (73 items)
+### Untagged (68 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
 | Skill | # | Title | Status |
 |---|---|---|---|
-| ts-audit | #9 | searchdata against BI Server | UNVERIFIED |
-| ts-audit | #10 | BI Server Spotter coverage | UNVERIFIED |
-| ts-audit | #11 | User Action enum | UNVERIFIED |
-| ts-audit | #12 | Query Text column parsability | UNVERIFIED |
-| ts-audit | #13 | Liveboard viz fingerprinting | UNVERIFIED |
 | ts-convert-from-looker | #1 | `type: number` cross-measure SQL inlining edge cases | OPEN |
 | ts-convert-from-looker | #3 | Multiple explores that share views: one model or separate models | OPEN |
 | ts-convert-from-looker | #4 | `sql_always_where:` → ThoughtSpot RLS | OPEN |

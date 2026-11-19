@@ -103,7 +103,7 @@ docs/audit/2026-07-09-dbx-semantic-claim-matrix.md (E1).
 | ThoughtSpot property | Status | Future path |
 |---|---|---|
 | `ai_context` | **Unmapped** | No equivalent; include in view-level `comment` if relevant |
-| `properties.calendar_type` | **Unmapped** | No calendar concept in MV |
+| `properties.calendar` | **Unmapped** | No calendar concept in MV |
 | `properties.index_type` | **Unmapped** | Databricks handles indexing internally |
 | `properties.index_priority` | **Unmapped** | No equivalent |
 | `properties.currency_type` | `format: { type: currency, currency_code: <iso> }` | v1.1 supports `format:` on measures, and (corrected 2026-07-29, finding 13.10) also on `fields:`/`dimensions:` entries — not measures-only. The ThoughtSpot side of the pair is `currency_type.iso_code` (**not** `currency_code`); implemented in both directions as of 2026-07-31 (BL-174) |

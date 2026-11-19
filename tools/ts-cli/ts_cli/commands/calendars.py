@@ -20,6 +20,7 @@ from ts_cli.custom_calendar.emit import snowflake_ddl, write_csv
 from ts_cli.custom_calendar.grid import build_years
 from ts_cli.custom_calendar.labels import default_month_names
 from ts_cli.custom_calendar.rows import COLUMNS_10, COLUMNS_30, build_rows, columns_for
+from ts_cli.custom_calendar.search import SEARCH_PATH, CalendarSearchError, search_calendars
 from ts_cli.custom_calendar.spec import (
     DAYS_EN, MONTHS_EN, CalendarSpec, LabelSpec, leap_index, parse_day_of_week,
     periods_per_year, validate_labels, validate_spec,
@@ -535,18 +536,24 @@ def search_cmd(
                                              help="Connection name or GUID to scope the search"),
     profile: Optional[str] = _profile_option,
 ) -> None:
-    """List registered custom calendars, to verify what landed.
+    """List every registered custom calendar, to verify what landed.
 
-    Output: JSON array from POST /api/rest/2.0/calendars/search, to stdout.
+    Pages through the whole list, 100 at a time: the API returns only the first 10
+    when no page size is sent.
+
+    Output: JSON array of every calendar from POST /api/rest/2.0/calendars/search, to
+    stdout.
 
     Examples:
 
     \b
       ts calendar search --connection "Snowflake Prod"
     """
-    payload: Dict[str, object] = {}
-    if connection:
-        payload["connection_identifier"] = connection
     client = ThoughtSpotClient(resolve_profile(profile))
-    resp = client.post("/api/rest/2.0/calendars/search", json=payload)
-    print(json.dumps(resp.json()))
+    try:
+        calendars = search_calendars(
+            lambda body: client.post(SEARCH_PATH, json=body).json(), connection)
+    except CalendarSearchError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(1) from None
+    print(json.dumps(calendars))

@@ -587,7 +587,9 @@ def data_names_none() -> AuditContext:
                             columns=[{"name": None, "properties": {"column_type": "ATTRIBUTE"}}])
     return make_context(models=[model, twin], metadata=[
         {"metadata_header": {"type": "ONE_TO_ONE_LOGICAL", "name": None, "id": None}},
-        {"metadata_header": {"type": "SQL_VIEW", "name": None, "id": "x"}}])
+        {"metadata_header": {"type": "SQL_VIEW", "name": None, "id": "x"}},
+        # D8 reads Tables only (a SQL View has no physical table): a second one for it
+        {"metadata_header": {"type": "ONE_TO_ONE_LOGICAL", "name": None, "id": "y"}}])
 
 
 def data_names_absent() -> AuditContext:
@@ -604,8 +606,11 @@ def data_names_absent() -> AuditContext:
     del model["guid"], model["model"]["name"]
     twin = build_data_model(name="Twin", guid="g-twin", model_tables=model["model"]["model_tables"],
                             columns=[{"properties": {"column_type": "ATTRIBUTE"}}])
+    # two SQL Views (P1) and two Tables (D8, which reads Tables only)
     return make_context(models=[model, twin], metadata=[{"type": "SQL_VIEW"},
-                                                         {"type": "SQL_VIEW"}])
+                                                         {"type": "SQL_VIEW"},
+                                                         {"type": "ONE_TO_ONE_LOGICAL"},
+                                                         {"type": "ONE_TO_ONE_LOGICAL"}])
 
 
 def data_lists_none() -> AuditContext:

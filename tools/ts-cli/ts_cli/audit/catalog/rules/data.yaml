@@ -163,16 +163,17 @@
   title: Duplicate table objects found
   evidence: fact
   description: >-
-    Two or more Table objects (ONE_TO_ONE_LOGICAL or SQL_VIEW in the metadata) on one
-    physical table — the same connection, database, schema and table name. Reported
-    once per physical table, on the first object's guid.
+    Two or more Table objects (ONE_TO_ONE_LOGICAL in the metadata) on one physical
+    table — the same connection, database, schema and table name. Reported once per
+    physical table, on the first object's guid. A SQL View has no physical table, so two
+    SQL Views that share a name are not duplicates and are not read.
   categories: [D]
   requires: [metadata]
   scope: metadata
   aggregate:
     mode: group
     kind: duplicates
-    where: {field: type, in: [ONE_TO_ONE_LOGICAL, SQL_VIEW]}
+    where: {field: type, in: [ONE_TO_ONE_LOGICAL]}
     key: "@physical_table_key"
   bands:
     direction: lower_is_better

@@ -1,0 +1,15 @@
+// Search: [product] [item type] [sales] [quantity purchased]. Bars rank products by sales, the line is the running share; the frame steps through the top 6 item types, then All.
+document.getElementById('chart')?.style.setProperty('color-scheme', (([r, g, b]) => r * .299 + g * .587 + b * .114 > 140)(getComputedStyle(document.body).color.match(/\d+/g)) ? 'dark' : 'light');
+const MAYA = 'https://cdn.jsdelivr.net/npm/mayacharts@0.18.1/dist/maya.global.js'; const SRI = 'sha384-Z7INdXfgP1H/WUINrm44nlLrtN58MLpFXLi52fr7HiGOGg/J4FAvjgXQM2Wnd9AK';
+const derive = (d, ix = (re) => d?.schema?.findIndex((c) => re.test(c.name))) => {
+  const [p, i, v, q] = [ix(/product/i), ix(/item/i), ix(/sales/i), ix(/quantity|units/i)], live = (d?.data ?? []).map((r) => r.map((c) => c?.value?.() ?? c?.value ?? c)).filter((r) => r[v] > 0);
+  if (!live.length) return { table: d }; const byI = live.reduce((m, r) => m.set(r[i], (m.get(r[i]) || 0) + r[v]), new Map()), scopes = [...byI].sort((a, b) => b[1] - a[1]).slice(0, 6).map((e) => e[0]).concat('All'), data = [], annotate = [];
+  let n80, nAll; scopes.forEach((s) => {
+    const ps = live.filter((r) => s === 'All' || r[i] === s).sort((a, b) => b[v] - a[v]), tot = ps.reduce((a, r) => a + r[v], 0); let run = 0, hit = 0;
+    ps.forEach((r, k) => { run += r[v]; if (!hit && run >= 0.8 * tot) hit = k + 1; data.push([s, '#' + (k + 1) + ' ' + r[p], r[v], r[q], run / tot]); });
+    if (hit) annotate.push({ x: '#' + hit + ' ' + ps[hit - 1][p], text: '80% at #' + hit + ' of ' + ps.length });
+    if (s === 'All') [n80, nAll] = [hit, ps.length]; });
+  return { table: { schema: ['Scope', 'Rank', 'Sales', 'Units', 'Cumulative'].map((name, k) => ({ name, type: k && k < 4 ? 'measure' : 'dimension' })), data }, spec: { annotate, subtitle: n80 + ' of ' + nAll + ' overall. Bars rank products by sales; the line is the running share.' } }; };
+const SPEC = { type: 'bar', x: 'Rank', y: 'Sales', y2: 'Cumulative', frame: 'Scope', select: true, xAxis: false, tooltip: { fields: ['Units'] }, format: { Sales: { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }, Units: { notation: 'compact', maximumFractionDigits: 1 }, Cumulative: { style: 'percent', maximumFractionDigits: 0 } }, titles: { Rank: 'Product', Cumulative: 'Cumulative share', Scope: 'Scope' }, text: { noData: 'No rows yet: bind [product] [item type] [sales] [quantity purchased]' } };
+const go = () => { const d = derive(viz?.getDataFromSearchQuery?.()?.getData()); maya.host.thoughtspot({ events: viz?.events, getDataFromSearchQuery: () => ({ getData: () => d.table }) }, { ...SPEC, ...d.spec }); };
+if (window.maya?.host) go(); else { const s = document.querySelector('script[src="' + MAYA + '"]') ?? document.head.appendChild(Object.assign(document.createElement('script'), { src: MAYA, integrity: SRI, crossOrigin: 'anonymous' })); s.addEventListener('load', go); s.addEventListener('error', () => { (document.getElementById('chart') ?? document.body).textContent = 'MayaCharts could not load from ' + MAYA; viz?.events?.emitRenderCompletedEvent?.(); }); }

@@ -64,7 +64,7 @@ Flagged (needs a human; never faked) or Dropped (no ThoughtSpot equivalent).
 |---|---|---|
 | Point-in-time (`CALCULATE`+`ALL`+`MAX`, headcount-as-of-date) | Flagged | genuine manual rebuild |
 | Iterators (`SUMX`/`RANKX`/`EARLIER`), row-context, `SWITCH`, and `VAR/RETURN` other than the gated ratio above | Flagged | no safe deterministic port |
-| `NOT t[c] IN {…}`; an IN set mixing strings and numbers; an IN set (or a string holding `,` `(` `)`) inside `CALCULATE(<agg>, …)` | Flagged | NEEDS REVIEW. NOT: a blank is TRUE in DAX and NULL in ThoughtSpot (BL-591). Mixed: DAX compares as text (`1.50` as `"1.5"`). CALCULATE: the `sum_if` rewrite keeps only the first aggregate's argument (BL-590); the gated distinct count above is the exception |
+| `NOT t[c] IN {…}`; an IN set mixing strings and numbers; an IN set (or a string holding `,` `(` `)`) inside `CALCULATE(<agg>, …)` | Flagged | NEEDS REVIEW. NOT: a blank is TRUE in DAX and NULL in ThoughtSpot (BL-608). Mixed: DAX compares as text (`1.50` as `"1.5"`). CALCULATE: the `sum_if` rewrite keeps only the first aggregate's argument (BL-607); the gated distinct count above is the exception |
 | Map / gauge / custom AppSource visual | Flagged/Approximated | needs a geo column / no map equivalent |
 | Tooltip page | Dropped | hover overlay, not a navigable tab |
 | Slicer / `basicShape` / buttons / text boxes | Dropped | filters / decorations, not data visuals |

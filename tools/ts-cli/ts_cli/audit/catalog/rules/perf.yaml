@@ -389,6 +389,303 @@
     fires: {fixture: perf_column_count_distinct, severity: INFO}
     silent: {fixture: perf_model_80_columns}
 
+# Data Cache readiness (product owner's rules, 2026-11-18). ThoughtSpot's Data Cache
+# cannot serve a Model with any of P19-P21; P22 warns. The report's Data Cache view reads
+# the same fields (audit/data_cache.py), so it says what these findings say.
+- id: P19
+  title: Custom calendar stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a column on a table-based custom calendar, which Data Cache cannot
+    serve. A column's calendar is its own `properties.calendar`, else the one on the
+    Table column its `column_id` resolves to. `calendar`, `fiscal` and `default` (any
+    case, edge spaces aside) are code-based calendars, and an absent or blank value sets
+    none; any other value names a custom calendar. Two readings are for the product team
+    to confirm: a formula that passes a custom calendar's name to a date function (as in
+    `start_of_week ( [d] , RetailCal )`), and a code-based value, on a column or in a
+    formula, that a custom calendar registered on the Model's connection is also named.
+    A finding resting only on them says the Model may not be able to use Data Cache. A source whose TML the audit did
+    not read (a failed export, a SQL View) is not judged, and the Model's Data Cache
+    readiness reads Not assessed. The finding lists each such column or formula with the
+    calendar it names.
+  categories: [P]
+  requires: [model_tml]
+  uses: [calendars]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@custom_calendar_columns", len_gt: 0}
+  severity: MEDIUM
+  message: "{@custom_calendar_lead}: columns or formulas on a custom calendar: {@custom_calendar_columns}"
+  remediation: >-
+    Move each listed column to a code-based calendar (calendar, fiscal or default), and
+    drop the calendar argument from each listed formula, so Data Cache can serve the
+    Model, or accept that the Model stays uncached. Where a code-based value is also a
+    custom calendar's name, rename that custom calendar so the value means one calendar
+    only. A reading marked to confirm waits on the product team.
+  examples:
+    fires: {fixture: perf_custom_calendar_columns, severity: MEDIUM}
+    silent: {fixture: perf_code_based_calendars}
+
+- id: P20
+  title: SQL pass-through stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a formula that calls a SQL pass-through function, which Data Cache
+    cannot serve: a scalar one (`sql_string_op`, `sql_int_op`, `sql_double_op`,
+    `sql_bool_op`, `sql_date_op` and the rest) or an aggregate one
+    (`sql_<type>_aggregate_op`). Any case; not a name inside a `[...]` reference or a
+    quoted literal. D9 grades the share of aggregate pass-through formulas; this rule
+    fires on one formula of either kind. The finding lists the formulas.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@sql_passthrough_formulas", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: formulas call a SQL pass-through function: {@sql_passthrough_formulas}"
+  remediation: >-
+    Rewrite each listed formula with ThoughtSpot functions so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_sql_passthrough_formulas, severity: MEDIUM}
+    silent: {fixture: perf_sql_passthrough_named_only}
+
+- id: P21
+  title: Semantic query Model is not cached
+  evidence: fact
+  description: >-
+    A semantic query Model, which Data Cache does not serve by design: a Model with a
+    measure the source platform aggregates. That is a Model column with
+    `aggregation: AGGREGATE` (any case), or one over a Table column with
+    `aggregation: AGGREGATE`. A column over a Table column with only
+    `is_pre_aggregated_measure: true` is listed too, as a reading the product team is to
+    confirm: a finding resting only on such columns says the Model may not be able to
+    use Data Cache. A source whose TML the audit did not read (a failed export, a SQL
+    View) is not judged, and the Model's Data Cache readiness reads Not assessed. The
+    finding lists the columns.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@semantic_query_measures", len_gt: 0}
+  severity: MEDIUM
+  message: "{@semantic_query_lead}: a semantic query Model, with measures the source platform aggregates: {@semantic_query_measures}"
+  remediation: >-
+    No change to make: a semantic query Model passes its measures to the source
+    platform's semantic layer, and is uncached by design. A measure listed as
+    pre-aggregated, to confirm, is there only because its Table column is flagged
+    `is_pre_aggregated_measure`; whether that alone stops Data Cache is for the product
+    team to confirm.
+  examples:
+    fires: {fixture: perf_semantic_query_measures, severity: MEDIUM}
+    silent: {fixture: perf_summed_measures}
+
+- id: P22
+  title: Connection defines custom calendars
+  evidence: fact
+  description: >-
+    A Model on a connection with at least one registered custom calendar: the
+    connection a Table names (`connection.name`, any case; Falcon and system Tables
+    name none), else its metadata header's connection name (a SQL View, a Table whose
+    export failed, or a connection block naming none), or the id that header carries. A user can pick such a calendar
+    at run time, and that query does not use Data Cache. Skipped when the calendar
+    search failed, and the Model's Data Cache readiness then reads Not assessed. The
+    finding names each connection and how many custom calendars it defines.
+  categories: [P]
+  requires: [model_tml, calendars]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@connection_custom_calendars", len_gt: 0}
+  severity: LOW
+  message: "A query that picks a custom calendar at run time won't use Data Cache: {@connection_custom_calendars}"
+  remediation: >-
+    Nothing to change in the Model. Tell its users that a query on a custom calendar
+    runs uncached, and remove calendars nobody uses from the connection.
+  examples:
+    fires: {fixture: perf_connection_custom_calendars, severity: LOW}
+    silent: {fixture: perf_connection_without_custom_calendars}
+
+# More Data Cache limitations (product owner, 2026-11-18): each stops Data Cache, as
+# P19-P21 do, and folds into the same readiness.
+- id: P23
+  title: Source other than Snowflake or Databricks stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a source on neither Snowflake nor Databricks, which Data Cache cannot
+    serve: a Table whose TML has no connection (a Falcon or system Table), or a source
+    of another type. The type is the source's connection's, from the connection search
+    (matched by name, any case), else its metadata header `dataSourceType`; `SNOWFLAKE`
+    and `DATABRICKS` pass, with or without an `RDBMS_` prefix, any case. A source with
+    neither type is not judged, and the Model's Data Cache readiness reads Not assessed.
+    The finding lists each source with its type.
+  categories: [P]
+  requires: [model_tml]
+  uses: [connections]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@non_cloud_sources", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: tables on a source other than Snowflake or Databricks: {@non_cloud_sources}"
+  remediation: >-
+    Move the listed tables to a Snowflake or Databricks connection so Data Cache can
+    serve the Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_non_cloud_sources, severity: MEDIUM}
+    silent: {fixture: perf_cloud_sources}
+
+- id: P24
+  title: Connection with OAuth, PrivateLink or a template variable stops Data Cache
+  evidence: heuristic
+  description: >-
+    A Model on a connection that uses OAuth, PrivateLink or a template variable, which
+    Data Cache cannot serve. Read from the connection's settings: OAuth when a setting
+    name contains `oauth`, or names both `client_id` and `client_secret`; PrivateLink
+    when its host or account name contains `privatelink`; a template variable when a
+    setting is wholly a `${var}` token, or when the connection's metadata header says it
+    is parameterized (`parameterizedConnection` or `isParameterized`), since the search
+    shows a parameterized connection's settings without their tokens. Setting names, not
+    a declared type, so a heuristic. A connection is matched to the Model's Tables by name, any case. Skipped
+    when the connection search failed. A Table whose connection block names no
+    connection is matched by its metadata header's connection name. A connection missing
+    from the search, whose settings or header could not be read, or that nothing names,
+    is not judged, and the Model's Data Cache readiness reads Not assessed. OAuth read only from `client_id` and `client_secret`, and
+    PrivateLink read from the host, are for the product team to confirm: a finding
+    resting only on them says the Model may not be able to use Data Cache. The finding
+    lists each connection and what it uses.
+  categories: [P]
+  requires: [model_tml, connections]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@connection_cache_blockers", len_gt: 0}
+  severity: MEDIUM
+  message: "{@connection_cache_lead}: connections that use OAuth, PrivateLink or a template variable: {@connection_cache_blockers}"
+  remediation: >-
+    Check each listed connection's settings first, since they are read from setting
+    names and the host. Then switch it to a service account without PrivateLink or
+    template variables so Data Cache can serve the Model, or accept that the Model stays
+    uncached.
+  examples:
+    fires: {fixture: perf_connection_oauth_privatelink, severity: MEDIUM}
+    silent: {fixture: perf_connection_service_account}
+
+- id: P25
+  title: Parameterized Table stops Data Cache
+  evidence: fact
+  description: >-
+    A Model on a Table whose database, schema or table name (`db`, `schema`,
+    `db_table`) is wholly a `${var}` template variable, which Data Cache cannot serve.
+    A value that only contains a token is a fixed name. P24 reports a template variable
+    in a connection's settings. A Table whose TML could not be exported is not read,
+    and the Model's Data Cache readiness reads Not assessed. The finding lists each
+    Table and its parameterized fields.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@parameterized_tables", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: tables whose database, schema or table name is a template variable: {@parameterized_tables}"
+  remediation: >-
+    Give each listed Table a fixed database, schema and table name so Data Cache can
+    serve the Model, or accept that the Model stays uncached (a published Model needs
+    its variables).
+  examples:
+    fires: {fixture: perf_parameterized_table, severity: MEDIUM}
+    silent: {fixture: perf_fixed_table_names}
+
+- id: P26
+  title: Parameter in a formula stops Data Cache
+  evidence: fact
+  description: >-
+    A Model with a formula that reads a Model parameter (`[<parameter name>]` outside a
+    quoted literal, as A9 reads it), which Data Cache cannot serve. The finding lists
+    the formulas.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@parameter_formula_names", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: formulas read a parameter: {@parameter_formula_names}"
+  remediation: >-
+    Replace each parameter with a fixed value or a filter so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_parameter_formula, severity: MEDIUM}
+    silent: {fixture: perf_parameter_named_in_a_literal}
+
+- id: P27
+  title: SQL View stops Data Cache
+  evidence: fact
+  description: >-
+    A Model built on a SQL View, which Data Cache cannot serve: a source whose metadata
+    header type is `SQL_VIEW`. The audit keeps no SQL View TML, so the header is what
+    says so; it fetches the header of every Model source. A source with neither TML nor
+    a header type (its header search failed, or it has no fqn) is not judged, and the
+    Model's Data Cache readiness reads Not assessed. P1 reports the same SQL Views for
+    blocking filter pushdown. The finding lists the SQL Views.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@sql_view_sources", len_gt: 0}
+  severity: MEDIUM
+  message: "Can't use Data Cache: SQL Views: {@sql_view_sources}"
+  remediation: >-
+    Replace each SQL View with a Table over a warehouse view so Data Cache can serve the
+    Model, or accept that the Model stays uncached.
+  examples:
+    fires: {fixture: perf_sql_view_source, severity: MEDIUM}
+    silent: {fixture: perf_tables_only}
+
+- id: P28
+  title: RLS rule beyond its Table's own columns stops Data Cache
+  evidence: fact
+  description: >-
+    A Model on a Table with an RLS rule that Data Cache cannot apply: one reaching
+    another table's column or a join (a referenced `table_paths` entry on another table,
+    or whose `join_path` names a join), calling a function in its formula (an RLS rule
+    is a formula; any call but `ts_var`, a null test such as `isnull` included), or
+    calling a SQL pass-through function. A null test is how a rule keeps an outer join's
+    unmatched rows (S12 advises one), so that rule is a trade-off: it keeps the rows and
+    stops Data Cache. The finding names it apart from other functions, and the product
+    owner asked for both rules to be flagged for review. The `isnull` and `is_null`
+    calls are firm. Whether the operator forms S12 also accepts (`= null`, `!= null`,
+    `<= null`, `>= null`) stop Data Cache is for the product team to confirm, so P28
+    lists them marked "to confirm", and a finding resting only on such rules says the
+    Model may not be able to use Data Cache. Read outside quoted literals. A rule
+    comparing only its own Table's columns with ts_ variables is fine, and a Model that
+    bypasses RLS (`is_bypass_rls`) applies no rule. A source whose TML the audit did not
+    read (a failed export, a SQL View), or a rule naming a path id its Table's
+    `table_paths` does not define exactly, is not judged, and the Model's Data Cache
+    readiness reads Not assessed. The finding lists
+    each rule and what it uses.
+  categories: [P]
+  requires: [model_tml]
+  scope: model
+  aggregate:
+    mode: each
+    where: {field: "@rls_rules_beyond_own_table", len_gt: 0}
+  severity: MEDIUM
+  message: "{@rls_rules_lead}: RLS rules reaching beyond their Table's own columns: {@rls_rules_beyond_own_table}"
+  remediation: >-
+    Rewrite each listed rule to compare only its Table's own columns with ts_
+    variables so Data Cache can serve the Model, or accept that the Model stays
+    uncached. A null test kept so an outer join keeps its unmatched rows (S12) is a
+    trade-off to decide, not a mistake: removing it brings the rows' loss back.
+  examples:
+    fires: {fixture: perf_rls_beyond_own_columns, severity: MEDIUM}
+    silent: {fixture: perf_rls_own_columns_only}
+
 # Ids used before the catalog existed. Recorded as retired so the history gate holds
 # them: the gate reads only catalog history, and "the next free number" would hand
 # them out again.

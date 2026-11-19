@@ -97,7 +97,7 @@ def sanitize_search_query(query_str: Optional[str], cols_to_remove: Iterable[str
 
     A token's trailing **bucket modifiers** go with it: a real query says
     `[formula_PMPM month].monthly` / `[date].daily`, and stripping only the bracketed half
-    stranded a bare `.monthly` at the front of the query (seen on `OptumRx View`'s live
+    stranded a bare `.monthly` at the front of the query (seen on `Acme View`'s live
     export while fixing BL-191). A modifier is meaningless without its column, and dropping
     it can only remove leftovers, never introduce a reference. `(?:\\.\\w+)*` repeats so a
     chained `.monthly.growth` goes whole; the modifier must follow the `]` immediately, so
@@ -330,7 +330,7 @@ def _strip_view_formulas(v: TmlSection, cols_to_remove: List[str]) -> None:
     `search_query` is re-sanitized here against the removed formulas' **ids and names**:
     `_strip_view_search_query` ran earlier knowing only `cols_to_remove`, so it cannot see
     a formula the removal *cascades* into — and a View names its formulas in the search
-    string by id (`OptumRx View`'s real query begins `[formula_PMPM month].monthly`), so
+    string by id (`Acme View`'s real query begins `[formula_PMPM month].monthly`), so
     leaving the query intact ships the same dangling reference by another route
     (open-items #3). Found by review of the BL-191 fix, on that live export.
     """

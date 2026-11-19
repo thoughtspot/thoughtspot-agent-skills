@@ -329,9 +329,10 @@ date outside the calendar's range drops the row. **Formula translations must not
 `day_number_of_week` and `week_number_of_year` compiled to exactly the same SQL as on a
 plain column: Gregorian, Monday weeks. So for those three functions, without the argument, the
 week is **Gregorian with a Monday start** whatever the column says. `start_of_month`,
-`start_of_quarter` and `start_of_year` on a calendar-bound column were **not** probed. (For the Model/column side, `properties.calendar` takes the name of
-a Connection-scoped custom calendar — see [thoughtspot-sql-view-tml.md](thoughtspot-sql-view-tml.md);
-`ts-object-calendar-builder` builds those calendars.)
+`start_of_quarter` and `start_of_year` on a calendar-bound column were **not** probed. (For the Model/column side,
+`properties.calendar`: `calendar`, `fiscal` and `default` name code-based calendars; any other value names a Connection-scoped custom calendar — see the `properties.calendar` row of
+[thoughtspot-model-tml.md](thoughtspot-model-tml.md); `ts-object-calendar-builder` builds the
+custom ones.)
 
 **What to flag instead: any translated formula that assumes Monday is the first day of the
 week** — weekday numbering (`day_number_of_week`), week-start alignment (`start_of_week`),

@@ -132,7 +132,8 @@ def test_needs_for_is_the_union_of_the_selected_rules_requires():
     cat = load_catalog()
     assert needs_for(cat, ["A"], "general") == {"model_tml", "ai_instructions"}
     assert needs_for(cat, ["H"], "general") == {"model_tml", "dependents", "sets", "answers"}
-    assert needs_for(cat, ["P"], "general") == {"model_tml", "metadata", "table_tml"}
+    assert needs_for(cat, ["P"], "general") == {"model_tml", "metadata", "table_tml",
+                                                "calendars", "connections"}
     assert needs_for(cat, [], "general") == set()
 
 
@@ -147,7 +148,10 @@ SHIPPED_NEEDS = {
     # D15 (duplicate Table-level joins, 2026-11) declares Table TML, always fetched anyway.
     "D": {"model_tml", "metadata", "table_tml"},
     "H": {"model_tml", "dependents", "sets", "answers"},
-    "P": {"model_tml", "metadata", "table_tml"},
+    # P22 (a connection defining custom calendars, 2026-11-18) requires the calendars,
+    # and P24 (a connection using OAuth, PrivateLink or a template variable) the
+    # connections' settings.
+    "P": {"model_tml", "metadata", "table_tml", "calendars", "connections"},
     # S8 and S9 retired 2026-10; S12 and S13 (RLS robustness, 2026-11) declare Table TML
     # again, which every audit fetches anyway.
     "S": {"model_tml", "table_tml"},

@@ -1,7 +1,7 @@
 """Catalog checks for what a rule reads: `uses:`, and `requires ∪ uses` coverage.
 
-`build_context` fetches AI instructions, Answer TML and Sets only when a selected rule
-declares them: needs = `requires ∪ uses` over the rules that will run
+`build_context` fetches AI instructions, Answer TML, Sets and the connections' custom
+calendars and settings only when a selected rule declares them: needs = `requires ∪ uses` over the rules that will run
 (`engine.run.needs_for`). Dependents are fetched for every audit, but are conditional
 data all the same (`CONDITIONAL_DATA`): Set discovery writes into them, and a rule that
 reads them declares them. A rule declares data one of two ways:
