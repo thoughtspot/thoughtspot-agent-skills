@@ -378,10 +378,10 @@ the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P2
 reads today.
 
 1. **OAuth from a client ID and secret.** P24 reads a connection as OAuth when a
-   configuration key contains `oauth`, or, without one, when it has a client ID or secret
-   key set, in any spelling (`client_id`, `clientId`, `ClientID`, `client-secret`,
-   `azure_client_id`: keys are compared in any case with `_` and `-` dropped), alone or
-   both (an OAuth M2M service principal). One set without the other reads to confirm as
+   configuration key has a word starting `oauth` (`oauth_pvt_key`, `OAuth2Secret`; not
+   `no_auth` or `noAuth`), or, without one, when it has a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret` (`client_id`, `clientId`,
+   `Client Secret`, `client.id`, `clientSecretKey`, `clientIdentifier`), alone or both (an
+   OAuth M2M service principal); the match errs toward To confirm. One set without the other reads to confirm as
    the pair does, from ts-cli 0.222.0, since an open question never reads Can use. A Databricks connection holding
    `OAuth2ClientId` and `OAuth2Secret` and no other setting naming OAuth may be per-user
    OAuth or a service principal: the names cannot tell (#17). Does Data Cache treat a

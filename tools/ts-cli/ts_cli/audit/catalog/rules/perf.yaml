@@ -546,9 +546,11 @@
   description: >-
     A Model on a connection that uses OAuth, PrivateLink or a template variable, which
     Data Cache cannot serve. Read from the connection's settings: OAuth when a setting
-    name contains `oauth`, or names an OAuth client ID or secret (`client_id`, `clientId`,
-    `client-secret` and the like, either alone or both); PrivateLink
-    when its host or account name contains `privatelink`; a template variable when a
+    name has a word starting `oauth` (`oauth_pvt_key`, `OAuth2Secret`; not `no_auth`), or
+    when a set setting's name, ignoring case and punctuation, contains `clientid` or
+    `clientsecret` (an OAuth client ID or secret, alone or both); PrivateLink when its
+    host or account name (its key read ignoring case and punctuation) contains
+    `privatelink`; a template variable when a
     setting is wholly a `${var}` token, or when the connection's metadata header says it
     is parameterized (`parameterizedConnection` or `isParameterized`), since the search
     shows a parameterized connection's settings without their tokens. Setting names, not
@@ -557,8 +559,8 @@
     connection is matched by its metadata header's connection name. A connection missing
     from the search, whose settings or header could not be read, or that nothing names,
     is not judged, and the Model's Data Cache readiness reads Not assessed. OAuth read only
-    from client credentials (a client ID or secret, or both, in any spelling, with no
-    other setting naming OAuth, on any connection; or on a Databricks connection, or one
+    from client credentials (such a client ID or secret key, or both, with no other
+    setting naming OAuth, on any connection; or on a Databricks connection, or one
     whose type the search does not give, `OAuth2ClientId`, `OAuth2Secret` or both with no
     other setting naming OAuth, which
     per-user OAuth and a service principal both hold), and PrivateLink read from

@@ -71,6 +71,8 @@ SECRET_CONNECTIONS = [
     ({"azure_client_id": "x", "azure_client_secret": "y"}, True), ({"nested": {"ClientSecret": "y"}}, True),
     ({"user": "u", "password": "p", "host": "h"}, False),
     ({"auth": {"oauth_scope": "x"}}, True), ({"note": "uses oauth", "host": "h"}, False),
+    ({"no_auth": "true", "host": "h"}, False), ({"noAuth": True, "host": "h"}, False),
+    ({"Client Secret": "y"}, True), ({"clientIdentifier": "x"}, True),
 ])
 def test_oauth_is_read_from_key_names_at_any_depth(settings, oauth):
     assert connection_facts(_connection(0, **settings))["oauth"] is oauth
@@ -456,6 +458,23 @@ GOLDEN = [
     ("SNOWFLAKE", {"azure_client_id": "x", "azure_client_secret": "y", "host": "h"}, (True, True, False, False)),
     ("SNOWFLAKE", {"oauth_client_id": "x", "host": "h"}, (True, False, False, False)),
     ("SNOWFLAKE", {"clientId": "", "host": "h"}, (False, False, False, False)),
+    # a key names OAuth only with a word starting `oauth` (not no_auth joined by _norm)
+    ("SNOWFLAKE", {"no_auth": "true", "user": "u", "password": "p", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"noAuth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"sso_auth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"two-auth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"oauth_pvt_key": "k", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"OAuth2Secret": "s", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"azureOAuthKey": "k", "host": "h"}, (True, False, False, False)),
+    # a client key: its name, ignoring case and punctuation, contains clientid or clientsecret
+    ("SNOWFLAKE", {"Client Secret": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client.id": "x", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"clientSecretKey": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client_secret_value": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"clientIdentifier": "x", "host": "h"}, (True, True, False, False)),
+    # a host or account name key is matched ignoring case and punctuation
+    ("SNOWFLAKE", {"account_name": "acme.privatelink.snowflakecomputing.com", "host": "h"}, (False, False, True, False)),
+    ("SNOWFLAKE", {"Account-Name": "acme", "user": "u"}, (False, False, False, False)),
     ("SNOWFLAKE", {"oauth_pvt_key": "k", "accountName": "a.privatelink.b"}, (True, False, True, False)),
     ("SNOWFLAKE", {"user": "u", "password": "p", "host": "h", "db": "${tenant_db}"}, (False, False, False, True)),
     ("SNOWFLAKE", {"user": "u", "password": "p"}, (None, None, None, None)),

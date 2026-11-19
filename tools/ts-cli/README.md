@@ -4912,9 +4912,9 @@ unreadable source no longer ends the audit.
 The connection search answers each connection's configuration, credentials included:
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
 PrivateLink or a template variable (and whether the OAuth reading rests only on a
-client ID or secret, `oauth_m2m`: a set key ending in `clientid` or `clientsecret`
-(compared in any case with `_` and `-` dropped, so `client_id`, `clientId` and
-`azure_client_secret` count), alone or both, with no other key naming OAuth, on any
+client ID or secret, `oauth_m2m`: a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret`
+(`client_id`, `clientId`, `Client Secret`, `clientSecretKey`), alone or both, with no
+key naming OAuth (a word starting `oauth`, so `no_auth` does not) on any
 connection, or on a Databricks connection (or one whose type the search does not give)
 `OAuth2ClientId`, `OAuth2Secret` or both with no other setting naming OAuth, which per-user OAuth and a service principal both
 hold, so P24 reads it as to confirm), and keeps, logs and reports no configuration

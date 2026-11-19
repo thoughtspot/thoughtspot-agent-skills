@@ -334,7 +334,7 @@ are roughly ordered by value÷effort.
 | ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
-| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332, `buildScorecard` 302 lines), gate the embedded ERD `renderer.js` (1,338 lines, outside the scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
+| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332 lines; `buildScorecard` is now under the limit), gate the embedded ERD `renderer.js` (about 1,400 lines, still outside `check_file_size`'s scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
 | ~~BL-521~~ | ~~G5e's other half: RLS Tables scoping the tenant through different key columns~~ | DONE (2026-11-05) |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
@@ -16651,7 +16651,7 @@ names and redundant enclosing brackets (move H16's normalisation into `spotql_op
 `views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
 limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
 `views/scorecard.js`; split under the 250-line limit and its ratchet entry dropped on 2026-11-19, ts-audit 3.25.0). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
-(1,338 lines; `audit/report.py` reads it into the page), which sits outside
+(1,338 lines when filed, about 1,400 since the 2026-11-19 filter bar; `audit/report.py` reads it into the page), which sits outside
 `check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
 measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
 function expression, an arrow, a `registerView({...})` method, an indented declaration or
@@ -17834,7 +17834,7 @@ disagree.
 
 **What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each open reading reads To confirm or Not assessed, never Can use, with two qualifications. Point 2's negative side is excepted by decision (a host without `privatelink` reads as no PrivateLink), and point 3 is firm, since the product owner answered it:
 
-- P24 reads OAuth from client credentials alone (point 1): a client ID or secret key in any spelling (`client_id`, `clientId`, `client-secret`), alone or both, or on a Databricks connection (or one whose type the search does not give) `OAuth2ClientId`, `OAuth2Secret` or both, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
+- P24 reads OAuth from client credentials alone (point 1): a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret` (`client_id`, `clientId`, `Client Secret`), alone or both, or on a Databricks connection (or one whose type the search does not give) `OAuth2ClientId`, `OAuth2Secret` or both, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
 - P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the operator forms S12 accepts (`= null`, `!= null`, `<= null`, `>= null`) to confirm (point 4).
 - P19 lists a formula that names a custom calendar (point 5), and a code-based value on a column or in a formula that a custom calendar is also named (point 9), to confirm.
 - P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
@@ -18568,7 +18568,7 @@ the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered
    `details.type`: run `warehouse_type` on each candidate before choosing. Both lean to To
    confirm, never Can use, and neither has been seen live.
 2. **P24's remediation.** Its description, README and BL-590 name every reading to confirm
-   since ts-audit 3.25.0 (either key alone, any spelling, a connection with no type). Its
+   since ts-audit 3.25.0 (either key alone, every spelling the client-key match takes, a connection with no type). Its
    remediation ("switch it to a service account") is circular for a connection that may
    already be a service principal: give readings to confirm a line of their own, and add P24
    to BL-590's step 2.

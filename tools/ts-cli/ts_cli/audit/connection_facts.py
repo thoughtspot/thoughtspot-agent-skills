@@ -10,21 +10,24 @@ on that: `connection_facts` parses it, derives four booleans and drops it, so no
 configuration value reaches the audit context, a snapshot, the audit JSON, a warning
 or a log line.
 
-    oauth          a configuration key, at any depth, containing `oauth` (`OAuth2ClientId`,
-                   `OAuth2Secret`, `oauth_pvt_key` were seen), or a key ending in
-                   `clientid` or `clientsecret` (an OAuth M2M service principal:
-                   `client_id`, `clientId`, `ClientID`, `client-secret`,
-                   `azure_client_id`), alone or together. Keys are compared normalised
-                   (_norm: any case, `_` and `-` dropped). One set without the other is
-                   an open question, so it reads as OAuth to confirm, never as no OAuth:
-                   the product owner's rule, 2026-11-19.
+    oauth          a configuration key, at any depth, with a word starting `oauth`
+                   (_names_oauth: at the key's start, after punctuation, or at a
+                   camelCase capital, so `OAuth2ClientId`, `OAuth2Secret`,
+                   `oauth_pvt_key` and `azureOAuthKey` count and `no_auth`, `noAuth`
+                   and `sso_auth` do not), or a key whose name, ignoring case and
+                   punctuation (_norm), contains `clientid` or `clientsecret` (an OAuth
+                   M2M service principal: `client_id`, `clientId`, `Client Secret`,
+                   `client.id`, `clientSecretKey`, `clientIdentifier`), alone or
+                   together. One set without the other is an open question, so it
+                   reads as OAuth to confirm, never as no OAuth: the product owner's
+                   rule, 2026-11-19; the match errs toward To confirm.
                    Read from key names: the response has no auth-type field. A key
                    counts only when its value is set (_is_set): not null, false,
                    empty, or text reading "false" or "null".
     oauth_m2m      `oauth` rests only on a client ID and secret, whose kind of OAuth the
                    product owner's team is to confirm (open-items #18): a set client ID
-                   or secret key (any spelling above), or both, with no other key naming
-                   OAuth, on any connection, or, on a
+                   or secret key (as above), or both, with no other key naming OAuth, on
+                   any connection, or, on a
                    Databricks connection or one whose type is not given, OAuth read
                    only from `OAuth2ClientId`, `OAuth2Secret` or both (no other setting
                    naming OAuth). On the SE demo cluster, 12 of its 14
@@ -53,6 +56,7 @@ unknown, never "no" (_flags). Pure; stdlib and publish_plan only.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Iterator, Optional, Tuple
 
 from ts_cli.publish_plan import parse_variable_token
@@ -68,8 +72,12 @@ from ts_cli.publish_plan import parse_variable_token
 #: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
 #: 3: from ts-cli 0.222.0, a `client_id` or `client_secret` set alone (the other blank or
 #: absent), on any warehouse, reads as `oauth` and `oauth_m2m` (to confirm), as the pair
-#: does; it read as no OAuth, so its Model could read Can use. Keys are compared
-#: normalised, so `clientId`, `client-secret` or `azure_client_id` read the same way.
+#: does; it read as no OAuth, so its Model could read Can use. A client key is any key
+#: whose name, ignoring case and punctuation, contains `clientid` or `clientsecret`
+#: (`clientId`, `Client Secret`, `client.id`, `clientSecretKey`). A key names OAuth only
+#: with a word starting `oauth`, so `no_auth` is not OAuth. A host or account name key is
+#: matched ignoring case and punctuation too, so `account_name` holding `privatelink`
+#: now reads PrivateLink to confirm.
 FACTS_VERSION = 3
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
@@ -136,41 +144,58 @@ def _is_set(value: Any) -> bool:
 
 
 #: Keys whose presence lets the OAuth and PrivateLink readings judge a configuration:
-#: one naming OAuth, one ending in one of these (an OAuth client ID or secret, normalised
-#: by _norm), or a host. A configuration with none of them (`{}`, or only a user and
-#: password) says nothing either way.
-_CLIENT_SUFFIXES = ("clientid", "clientsecret")
+#: one naming OAuth (_names_oauth), one whose normalised name contains one of these (an
+#: OAuth client ID or secret, _client_key), or a host. A configuration with none of them
+#: (`{}`, or only a user and password) says nothing either way.
+_CLIENT_PARTS = ("clientid", "clientsecret")
 #: The client ID and secret a Databricks OAuth connection holds (normalised), used by
 #: per-user OAuth and by a service principal alike (oauth_m2m in the module docstring).
 _DATABRICKS_OAUTH_PAIR = frozenset(("oauth2clientid", "oauth2secret"))
 
 
 def _norm(key: Any) -> str:
-    """A key as compared: any case, `_` and `-` dropped, so `client_id`, `clientId`,
-    `ClientID` and `client-id` are one key. Keys only: no value is read beyond _is_set."""
-    return (key or "").casefold().replace("_", "").replace("-", "")
+    """A key as the client-key, Databricks-pair and host readings compare it: case folded,
+    every character but a letter or digit dropped, so `client_id`, `clientId`,
+    `Client Secret` and `client.id` read alike. Keys only: no value is read beyond
+    _is_set."""
+    return re.sub(r"[^0-9a-z]", "", str(key or "").casefold())
 
 
-def _client_key(key: str) -> bool:
-    """A normalised key naming an OAuth client ID or secret."""
-    return key.endswith(_CLIENT_SUFFIXES)
+def _client_key(key: Any) -> bool:
+    """A key naming an OAuth client ID or secret: its normalised name contains one."""
+    n = _norm(key)
+    return any(part in n for part in _CLIENT_PARTS)
+
+
+def _names_oauth(key: Any) -> bool:
+    """A key with a word starting `oauth`: at the key's start, after a character that is
+    not a letter or digit, or at a capital after a small letter or digit (camelCase).
+    `oauth_pvt_key`, `OAuth2Secret`, `azureOAuthKey` and `auth.oauth_scope` do; `no_auth`,
+    `noAuth` and `sso_auth`, which _norm would join into "oauth", do not."""
+    text = str(key or "")
+    low = text.lower()
+    for m in re.finditer("oauth", low):
+        i = m.start()
+        if i == 0 or not low[i - 1].isalnum() or (text[i].isupper() and not text[i - 1].isupper()):
+            return True
+    return False
 
 
 def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
-    """What _flags reads of a configuration: every key (normalised, _norm), the keys whose
-    value is set (_is_set), the text of each host or account name, and whether any value
-    is wholly a template token. A blank host or account name holds no text, so it is
-    not a host."""
+    """What _flags reads of a configuration: every key (as written), the keys whose value
+    is set (_is_set), the text of each host or account name (its key matched normalised,
+    _norm, so `account_name` counts), and whether any value is wholly a template token. A
+    blank host or account name holds no text, so it is not a host."""
     present, keys, hosts = set(), set(), []
     parameterized = False
     for key, value in _entries(config):
-        folded = _norm(key)
-        present.add(folded)
+        name = str(key or "")
+        present.add(name)
         if _is_set(value):
-            keys.add(folded)
+            keys.add(name)
         if not isinstance(value, str):
             continue
-        if folded in _HOST_KEYS and value.strip():
+        if _norm(name) in _HOST_KEYS and value.strip():
             hosts.append(value)
         if parse_variable_token(value) is not None:
             parameterized = True
@@ -208,14 +233,14 @@ def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[
 
 def _readable(present: set) -> bool:
     """Some key the OAuth or PrivateLink reading reads is present, set or not."""
-    return any("oauth" in k or _client_key(k) for k in present) or bool(present & set(_HOST_KEYS))
+    return any(_names_oauth(k) or _client_key(k) or _norm(k) in _HOST_KEYS for k in present)
 
 
 def _oauth(keys: set, warehouse: Optional[str]) -> Tuple[bool, bool]:
     """(oauth, oauth_m2m) from the set keys (module docstring): a key naming OAuth is
     firm OAuth, unless it is only the Databricks pair on a Databricks connection or one
     with no type; with none, a client ID or secret key is OAuth to confirm."""
-    oauth_keys = {k for k in keys if "oauth" in k}
+    oauth_keys = {_norm(k) for k in keys if _names_oauth(k)}
     named = bool(oauth_keys)
     m2m = (not named and any(_client_key(k) for k in keys)) or (
         warehouse_type(warehouse) in ("DATABRICKS", None)
