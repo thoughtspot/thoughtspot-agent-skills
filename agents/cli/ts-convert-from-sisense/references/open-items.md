@@ -51,7 +51,7 @@ functions currently emitted as Migrated may still be rejected by the ThoughtSpot
 have a safe deterministic port. Confirm against real JAQL on the first few live migrations; the
 runtime prune step (Step 2) is the safety net until then.
 
-## #5 — Numeric-range / date-bucket filter-chip fidelity — TO VERIFY live
+## #5 — Numeric-range / date-bucket filter-chip fidelity — member/exclude VERIFIED 2026-10-27; ranges TO VERIFY live
 
 The dashboard-filter → Liveboard-chip mapping (member→`IN`, exclude→`NOT_IN`, numeric range→
 `GE`/`GT`/`LE`/`LT`/`BW_INC`/`BW`/`EQ`; date `level`→`HOURLY…YEARLY`) is derived from the
@@ -62,3 +62,95 @@ Liveboard. **Specifically verify the two-sided range boundary:** ThoughtSpot exp
 (e.g. `from:10, toNotEqual:100`) keeps both bounds but is emitted as `BW_INC`, so the exact
 open/closed boundary is approximate — confirm whether a mixed-bound operator exists on the
 target build and tighten if so.
+
+**Member / exclude chips — VERIFIED 2026-10-27.** The exported-Liveboard shape — top-level
+`oper: in` / `oper: not in` with a top-level `values` list — filters every tile on import: a
+`not in` chip excluding one test location moved every tile of a 19-tile board by the expected
+amount (26.9 cluster). The `generic_filter {oper: IN|NOT_IN}` form previously emitted had never
+been round-tripped, so both builders now emit the verified shape. **Range chips are still
+emitted as `generic_filter` and remain TO VERIFY** — the dashboards used for this round carried
+no numeric-range dashboard filter.
+
+## #6 — Binding to an existing Model (`--target-model`) — VERIFIED 2026-10-27
+
+Live end-to-end on a 26.9 cluster against a hand-designed production Model (128 table instances:
+a hub dimension, 63 role-playing date copies, several role copies of one dimension). A 31-widget
+dashboard (27 charts, 3 tab sets, 3 jump-to-dashboard pivots, 11 dashboard filters) was rebuilt
+by `build-liveboard --target-model ... --drill ...`:
+
+- `ts tml lint` clean; import OK; the board renders all 19 tiles (`liveboard/data`); 9 tab
+  variants reported `Merged`.
+- Each tile's search matched a hand-built rebuild of the same dashboard (row count and total).
+  That rebuild made the same binding choices, so this checks the emitter, **not** parity with
+  Sisense: what VERIFIED covers here is that the target path builds, imports and renders.
+
+Facts established on the way, each now encoded:
+
+| Behaviour | Where |
+|---|---|
+| ThoughtSpot search **ORs** repeated `[X] = v` and **ANDs** repeated `[X] != v`; `[X] in (...)` and `[X] not in (...)` are **silently ignored** (unfiltered result, no error) | `target_answers.filter_fragment` |
+| `count [X]` → `Number of X`, `unique count` → `Unique Number of X`, `sum` → `Total X`, `average`/`min`/`max` → `Average`/`Minimum`/`Maximum X`; a formula measure keeps its name | `tableau/liveboard._output_name` |
+| A measure filter on one fact with an attribute from another fact (both on a shared dimension) returns **0 or one all-NULL group, no error** | `render_check.suspect_tiles`, surfaced by `verify-render` |
+| Server-generated obj_ids drop spaces, parentheses and commas; a Model may carry a custom obj_id no derivation reproduces | `tml_common.derive_viz_obj_id`; the target path uses the exported root `obj_id` |
+| PyYAML reads an unquoted `on:` join key as boolean `True` | `target_model.TargetModel` |
+| Sisense relation endpoints use the table **id** (sometimes opaque `tq_…`); JAQL dims use the table **name** | `parsing._parse_table` keeps `jaql_name` |
+| A cascading dashboard filter group has no `jaql` of its own, only `levels[]` — read as one filter it was dropped silently (the same dashboard carried one: 11 chips became 14) | `parsing.parse_dashboard` |
+| A measure NUMBER format (`unit: NONE`, `decimals: 2`, `removeTrailingZeroes: true`, thousands separators) on `answer_columns[].format` imports and exports unchanged (18 columns, one block) and renders a count as `22,652`: thousands separators, no `K`, no trailing `.00` | `target_answers.FULL_NUMBER_FORMAT` |
+
+| A search literal containing `'` escaped as `\'` (`[X] = 'O\'Brien'`) matches: a member with an apostrophe returned the same count filtered as in the unfiltered list (2026-11-05, same build; the double-quoted form matches too) | `target_answers._literal` |
+
+| A date value has no verified search form: `[D] = '2026-02-01'` and `'2026-02-01T00:00:00'` are rejected ("Date value token doesn't have a valid date filter"), bare `2026-02-01` / `02/01/2026` are invalid tokens, and `'02/01/2026'` parses but matched nothing for a day with 8,662 rows (same build) | `target_filters.date_problem` |
+| `top N` and `bottom N` rank by the answer's single measure: each returned exactly the N largest / smallest values of the unfiltered list (same build) | `target_filters.top_n` |
+| `top N` ranks the FILTERED rows wherever it sits in the query: `... top 2 [Region] = 'West'` and `... [Region] = 'West' top 2` return the same two rows, the top two of the filtered list (26.11, 2026-11-17) | `target_answers._answer_for` puts the ranking last anyway |
+| Search `=` and `!=` on text ignore case (`[Status] = 'ACTIVE'` matches `Active`), and `[X] != 'v'` KEEPS rows where X is NULL (on a column holding NULLs, `!= 'v'` returned every row but the `v` rows, NULLs included) (26.11, 2026-11-17) | `target_settings.value_matching_row`, and the join-type check counts an exclude as showing unmatched rows |
+| On a boolean formula column (`if ( ... ) then true else false`), `[X] = true` returned exactly the true group and `= false` / `!= true` exactly the false group (the groups summed to the total); `= 'true'` behaves like `= true` (26.11, 2026-11-17) | `target_filters.value_problem`, `target_answers._term_problem` (booleans only on a boolean column) |
+| A Sisense relation with no join type is an INNER join (Sisense documentation, Linux edition, "Creating and Removing a Relationship Between Tables"); every relation in the data model above has `type: null` | `target_settings.join_type_problem` (see #8) |
+| Sisense "Highlight" mode (`dashboardFiltersMode: select`) highlights members of a column the widget plots instead of filtering, and acts as a normal filter on a column it does not plot; a widget filter takes priority over a dashboard filter on the same dimension; a switched-off filter performs no filtering (Sisense documentation, Linux edition) | `target_chips` |
+
+**The rule is an allowlist, at every level on both sides.** On the Sisense side `allowlist.py`
+lists every dashboard, widget, `options`, `style`, `metadata`, panel, data-model table and
+relation key the converter reads or treats as presentation (built from the keys 21 real
+dashboards carry), the parser lists every JAQL, panel-item and filter key it does not read, and
+contradictory filter keys are refused. On the Model side `target_settings.py` reads the Model's
+filters, `join_progressive`, join types, column properties and Tables' warehouse tables. A new
+setting on either side is flagged, never ignored. What is flagged NEEDS REVIEW,
+on the chip and on every tile it affects, is enumerated in the coverage matrix ("Binding to an
+existing Model"). Rebuilt with every check in place, the live board above reports these NEEDS
+REVIEW rows, each a real risk or an unverified step: tiles whose tables reach the filtered
+facility through two copies Sisense relates (which one Sisense filters by cannot be decided), and
+the hidden grains merged into them; weekly buckets (that cluster starts weeks on Monday, as the
+Sisense widgets do, so they are accepted there); a calculated column bound to its Model formula by
+name only (confirmed with one `field_map` line); two count tiles whose dimension both the
+enrollment fact and the Model-added union view reach (ThoughtSpot's choice of fact, not Sisense's);
+a tile on a Sisense loop (enrollment, case and facility relate to each other); a filter override
+that reads a view built to stand in for a Sisense table; quarterly grains (that cluster uses
+calendar quarters, as Sisense does, so they are accepted there); and the drill's details table, whose facility
+columns were bound through the enrollment copy while Sisense joins that widget's facility through
+the case, and whose patient table Sisense reaches on a column the Model does not join. The earlier
+tile-for-tile comparison above was between two rebuilds sharing those bindings, not against Sisense.
+
+Still unit-tested only: range chips (#5, flagged until verified), and a search value containing
+a backslash (flagged, since only `'` quoting is verified).
+
+## #8 — Sisense value matching and join type, against a live Sisense query — TO VERIFY
+
+ThoughtSpot's side is live-verified (#6: search ignores case and keeps NULL rows under `!=`). Two
+Sisense behaviours the target path relies on are read from documentation, not observed:
+
+- **Join type.** A relation with no type is an INNER join (Sisense docs). Community threads
+  disagree on older builds, so this should be confirmed on the customer's own Sisense: count a
+  fact's rows grouped by a dimension that has an unmatched key, in a widget, and compare with
+  the fact's total. Until then a Model join that is not INNER on a tile's path is NEEDS REVIEW.
+- **Member and exclude matching.** Whether Sisense compares text members case-sensitively, and
+  whether an exclude keeps NULL rows. Until verified, one board-level row names every tile and
+  chip that compares text values. Chips (`in` / `not in`) are not verified on ThoughtSpot either.
+
+Close each by running the same query on both sides for a column with mixed case and NULLs.
+
+## #7 — obj_id derivation for other punctuation — KNOWN
+
+Verified that the server drops spaces, parentheses and commas from a Model name when it generates
+the obj_id. Other punctuation (`_`, `-`, `.`, `&`, `/`) is unverified, and two Models sampled
+carried custom obj_ids. The `--target-model` path is unaffected (it uses the exported obj_id); the
+derived path (`--model-fqn`, every converter) may still mis-bind a name with other punctuation.
+Fix by sampling server-generated obj_ids for those characters.

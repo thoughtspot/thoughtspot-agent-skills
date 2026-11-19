@@ -97,14 +97,16 @@ def test_filter_member_in():
     assert len(chips) == 1
     c = chips[0]
     assert c["column"] == ["Country"]
-    assert c["generic_filter"] == {"oper": "IN", "values": ["US", "CA"]}
+    assert (c["oper"], c["values"]) == ("in", ["US", "CA"])   # exported-Liveboard shape
+    assert "generic_filter" not in c
 
 
 def test_filter_exclude_not_in():
     inv = _dash([{"kind": "exclude", "dim": "[country.Country]", "operator": "exclude",
                   "values": ["XX"], "raw": {"exclude": {"members": ["XX"]}}}])
     chips = extract_liveboard_filters(inv)
-    assert chips[0]["generic_filter"] == {"oper": "NOT_IN", "values": ["XX"]}
+    assert (chips[0]["oper"], chips[0]["values"]) == ("not in", ["XX"])
+    assert "generic_filter" not in chips[0]
 
 
 def test_filter_range_presets():
@@ -159,3 +161,11 @@ def test_filter_top_n_skipped_and_exposure_check():
     # exposure check on: top-N skipped, ghost column dropped
     chips = extract_liveboard_filters(inv, ["Country", "Revenue"], {"Revenue"})
     assert chips == []
+
+
+def test_default_path_never_turns_a_bottom_n_into_a_top_n():
+    from ts_cli.sisense.answers import _rank_note, _widget_top_n
+    bottom = {"filters": [{"kind": "top_n", "operator": "bottom", "values": [5]}]}
+    top = {"filters": [{"kind": "top_n", "operator": "top", "values": [5]}]}
+    assert _widget_top_n(bottom) is None and "bottom" in _rank_note(bottom)
+    assert _widget_top_n(top) == 5 and _rank_note(top) == ""
