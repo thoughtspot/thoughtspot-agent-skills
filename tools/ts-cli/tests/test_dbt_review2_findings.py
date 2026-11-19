@@ -158,6 +158,45 @@ class TestSharedHelpersInManifestBuilder:
         assert metric_aggs == {"SUM"}
 
 
+    def test_percent_of_total_wrapping_a_sibling_lod_ratio_is_collapsed(self):
+        """Round-5 review (blocking #2): the shared `fix_double_aggregation`
+        bug ("does `group_aggregate` appear anywhere") reached dbt's
+        `collapse_double_aggregation` too, on a percent-of-total formula
+        shape — a ratio of a plain `sum()` to a `group_aggregate(...)` grand
+        total. `Pct Total` itself is already a fully-aggregated scalar (the
+        plain `sum()` on its left isn't nested inside the group_aggregate),
+        so a sibling wrapping it in another `sum()` must still collapse."""
+        from ts_cli.dbt.manifest import build_model_tml_from_manifest
+        man = _metric_set_manifest({
+            "Pct Total": {"config": {"meta": {
+                "ts_formula": ("sum ( [TRANSACTIONS::TIP_AMOUNT] ) / "
+                               "group_aggregate ( sum ( [TRANSACTIONS::TIP_AMOUNT] ) , {} , {} )"),
+                "ts_column_type": "measure"}}},
+            "Pct Total Again": {"config": {"meta": {
+                "ts_formula": "sum ( [formula_Pct Total] )", "ts_column_type": "measure"}}}})
+        tml = build_model_tml_from_manifest(man, {}, PATH, "M")
+        exprs = {f["name"]: f["expr"] for f in tml["model"]["formulas"]}
+        assert exprs["Pct Total Again"] == "[formula_Pct Total]"
+
+    def test_naked_aggregate_two_references_removed_is_collapsed(self):
+        """PR #662 maintainer round: `Spread` reaches naked aggregates only
+        through `Tip Rate` (`[formula_Total Tips] / [formula_Revenue]`, no
+        aggregate in its own text), two references removed. Following one level
+        kept `sum ( [formula_Spread] )`; `main` collapses it, and so must this."""
+        from ts_cli.dbt.manifest import build_model_tml_from_manifest
+        man = _metric_set_manifest({
+            "Spread": {"config": {"meta": {
+                "ts_formula": ("[formula_Tip Rate] - group_aggregate ( "
+                               "sum ( [TRANSACTIONS::TIP_AMOUNT] ) , {} , {} )"),
+                "ts_column_type": "measure"}}},
+            "Spread Again": {"config": {"meta": {
+                "ts_formula": "sum ( [formula_Spread] )", "ts_column_type": "measure"}}}})
+        tml = build_model_tml_from_manifest(man, {}, PATH, "M")
+        exprs = {f["name"]: f["expr"] for f in tml["model"]["formulas"]}
+        assert exprs["Tip Rate"] == "[formula_Total Tips] / [formula_Revenue]"
+        assert exprs["Spread Again"] == "[formula_Spread]"
+
+
 class TestSharedHelpersInSchemaYmlBuilder:
     def test_ts_formula_wrapping_an_aggregated_sibling_is_collapsed(self):
         from ts_cli.dbt.model_from_schema_yml import build_model_tml_from_schema_yml

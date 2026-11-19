@@ -16,6 +16,7 @@ from ts_cli.formula_translate.refs import bracketed_name
 from ts_cli.tableau.literals import blank_literals_and_refs, mask_refs
 from ts_cli.tableau.pre_transforms import CONTROL_WORDS
 from ts_cli.tableau.functions import MAPPED_FUNCTIONS
+from ts_cli.tableau.parsing import _extract_function_args
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +264,26 @@ def validate_output(expr: str) -> list[str]:
     code = _code_only(expr)
     _named_checks(code, errors, reported)
     errors.extend(_survivor_reason(name) for name in _unknown_calls(code, reported))
+    # A REAL nested group_aggregate (see _has_nested_group_aggregate's docstring
+    # for which shapes are fine) is a query-planner restriction
+    # (NESTED_GROUP_AGGREGATE_NOT_SUPPORTED), not an import-time schema
+    # violation — TML import accepts it, so without this check the formula
+    # would migrate successfully and only fail the first time someone queries
+    # it. Round-4 review: a LOD decomposing into this shape (e.g. a FIXED LOD
+    # wrapping another FIXED LOD's result) must be skipped here, the same way
+    # any other untranslatable shape is, rather than imported as a ticking
+    # time bomb.
+    if _has_nested_group_aggregate(expr):
+        errors.append(
+            "nested group_aggregate — ThoughtSpot does not support "
+            "group_aggregate inside another group_aggregate's aggregate-"
+            "expression (1st argument) position. The same restriction applies "
+            "to a reference to a group_aggregate-valued sibling formula, which "
+            "this check does not detect. See tableau-formula-translation.md's "
+            "\"Platform limitation: nested group_aggregate not supported\" for "
+            "the fix, by outer-wrapper shape — there is no single universal "
+            "decomposition that works for every shape; translate it by hand"
+        )
     return errors
 
 
@@ -327,6 +348,34 @@ def _check_if_then_else_structure(expr: str, expr_stripped: str) -> list[str]:
     return warnings
 
 
+def _has_nested_group_aggregate(expr: str) -> bool:
+    """One call's 1st-argument span contains another call's start position.
+
+    That's the only nesting position the platform rejects — a sibling call in
+    the 2nd (group-by) or 3rd (filter) argument, or two siblings combined by
+    plain arithmetic, is fine and must NOT be flagged (see the warning text
+    in the caller for the full rationale).
+    """
+    ga_matches = list(re.finditer(r'\bgroup_aggregate\s*\(', expr))
+    if len(ga_matches) < 2:
+        return False
+    first_arg_spans = []
+    for m in ga_matches:
+        open_paren_pos = m.end() - 1
+        extracted = _extract_function_args(expr, open_paren_pos)
+        if extracted is not None and extracted[0]:
+            arg_start = open_paren_pos + 1
+            arg_end = arg_start + len(extracted[0][0])
+        else:
+            arg_end = len(expr)
+        first_arg_spans.append((open_paren_pos, arg_end))
+    return any(
+        i != j and s1 < ga_matches[j].start() < e1
+        for i, (s1, e1) in enumerate(first_arg_spans)
+        for j in range(len(ga_matches))
+    )
+
+
 def validate_pre_import(
     translated: list[dict],
     column_names: set[str] | None = None,
@@ -382,14 +431,11 @@ def validate_pre_import(
         if "Custom SQL Query" in expr:
             warnings.append("Unresolved Custom SQL Query alias")
 
-        # Check for nested group_aggregate (ThoughtSpot limitation)
-        ga_positions = [m.start() for m in re.finditer(r'\bgroup_aggregate\s*\(', expr)]
-        if len(ga_positions) >= 2:
-            warnings.append(
-                "Nested group_aggregate — ThoughtSpot does not support "
-                "group_aggregate inside another group_aggregate. "
-                "Decompose into separate formulas."
-            )
+        # Nested group_aggregate is now caught earlier, in validate_output —
+        # it is skipped (parked) rather than migrated with a warning, since
+        # TML import accepts the shape and only a live query reveals the
+        # failure (round-4 review). A formula reaching this point has
+        # already passed that check, so it can't recur here.
 
         # Check for bare Tableau aggregate keywords
         if re.search(r"\bCOUNTD\b", expr):

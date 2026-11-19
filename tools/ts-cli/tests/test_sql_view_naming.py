@@ -10,6 +10,8 @@ These tests pin both halves: that colliding names are disambiguated, and that
 the rename reaches every reference (``model_tables[].name``, ``column_id``,
 join ``with``/``on``, formula expressions, and the SQL View TML itself).
 """
+import json
+
 from ts_cli.model_builder import (
     _resolve_sqlview_refs,
     build_model_tml,
@@ -676,6 +678,37 @@ def test_merge_mode_leaves_colliding_sql_view_names_unrenamed(tmp_path, monkeypa
     assert [sv["name"] for sv in ds["sql_views"]] == ["Custom SQL Query"]
     assert "Custom SQL Query" in set(ds["col_table_map"].values())
     assert not any("(" in t for t in ds["col_table_map"].values())
+
+
+def test_merge_mode_export_failure_still_prints_full_report_for_every_datasource(tmp_path, monkeypatch):
+    """Round-4 review: README.md promises the command "always prints its JSON
+    report" in merge mode, then exits 1 on ERROR. `_export_model_tml` used to
+    `raise SystemExit(1)` directly on a failed `ts tml export`, killing the
+    process mid-loop before `all_results` — covering every datasource already
+    processed — was ever printed. It must now surface as this datasource's
+    own ERROR result instead, letting the loop (and the final JSON print)
+    finish."""
+    from ts_cli.commands import tableau as tableau_cmd
+
+    monkeypatch.setattr(
+        tableau_cmd, "_export_model_tml",
+        lambda guid, profile: (_ for _ in ()).throw(
+            tableau_cmd._ExportFailed("Export failed: no such object GUID-1")
+        ),
+    )
+    twb = _twb(tmp_path, _csq_ds_xml("Marketing", "Custom SQL Query"),
+               _csq_ds_xml("Sales", "Custom SQL Query 2"))
+
+    result = runner.invoke(app, [
+        "tableau", "build-model", str(twb), "--existing-guid", "GUID-1",
+        "--profile", "p", "--output-dir", str(tmp_path / "out"), "--dry-run",
+    ])
+    assert result.exit_code == 1, result.stdout + result.stderr
+
+    payload = json.loads(result.stdout[result.stdout.index("["):])
+    assert len(payload) == 2
+    assert all(r["import_status"] == "ERROR" for r in payload)
+    assert all("Export failed" in r["import_error"] for r in payload)
 
 
 def test_generate_mode_still_disambiguates_colliding_sql_view_names(tmp_path):
