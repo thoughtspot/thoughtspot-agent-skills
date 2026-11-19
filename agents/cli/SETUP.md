@@ -137,6 +137,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snow
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
       ~/.snowflake/cortex/skills/ts-recipe-formula-hms-display-snowflake
 
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-answer-period-comparison \
+      ~/.snowflake/cortex/skills/ts-recipe-answer-period-comparison
+
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-databricks \
       ~/.snowflake/cortex/skills/ts-profile-databricks
 
@@ -253,6 +256,9 @@ ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-business-days-snow
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-formula-hms-display-snowflake \
       ~/.claude/skills/ts-recipe-formula-hms-display-snowflake
+
+ln -s ~/thoughtspot-agent-skills/agents/cli/ts-recipe-answer-period-comparison \
+      ~/.claude/skills/ts-recipe-answer-period-comparison
 
 ln -s ~/thoughtspot-agent-skills/agents/cli/ts-profile-databricks \
       ~/.claude/skills/ts-profile-databricks

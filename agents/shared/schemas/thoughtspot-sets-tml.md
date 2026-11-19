@@ -56,6 +56,9 @@ cohort:
     id: "Model Display Name"    # (live-verified 26.6.0: `model:` fails import with
     name: "Model Display Name"  #  "Invalid save request, Table cant be empty")
     obj_id: "MODEL_OBJ_ID-<guidprefix>"   # stable object id from the model's exported TML header
+    # or, in place of obj_id: fqn: "{model_guid}". {id, name, obj_id}, {id, name, fqn} and
+    # {id, name} all import; the export returns {id, name} only (live 2026-11-18,
+    # ts-recipe-answer-period-comparison open item #3).
   # Multi-model sets: repeat under `worksheets:` (list of {id, name, obj_id}).
 
   config:
@@ -141,13 +144,50 @@ cohort:
         show_headline: false
 ```
 
+### Date-range condition (GROUP_BASED on a date column)
+
+A group condition that matches a date range takes this shape. Live-verified 2026-11-18 as a
+reusable Set on a DATE column: it imports, and the export returns it unchanged (dates in
+`MM/DD/YYYY`, `date_period` and `for_each_period` kept). Both bounds are inclusive: AgentQL
+compiles each condition to `col >= start AND col <= end`
+([ts-recipe-answer-period-comparison open item #3](../../cli/ts-recipe-answer-period-comparison/references/open-items.md)).
+
+```yaml
+groups:
+- name: "Black Friday Days"
+  combine_type: ANY             # OR across the windows
+  conditions:
+  - operator: BW
+    column_name: Order Date
+    filter_value_type: DATE_FILTER
+    date_filter_values:
+    - type: EXACT_DATE_RANGE
+      oper: between
+      date_range:
+        start_date: 11/29/2019    # MM/DD/YYYY
+        end_date: 12/02/2019
+      date_period: DAY
+      for_each_period: NUM_DATE_PERIODS
+```
+
+The condition names the bare column, so on a DATE_TIME column a window's end day may lose
+its rows after midnight. That case is not verified.
+
 ---
 
 ## Answer-Level Set (inline in Answer TML)
 
 When a set is answer-level (not reusable), it appears in `answer.cohorts[]` without a
-GUID. The structure is the same as the `cohort:` body above, minus the `worksheet:`
-binding (the model is inherited from the Answer's `tables[]`).
+GUID. The structure is the same as the `cohort:` body above. The `worksheet:` binding is
+**required**: without it the import fails with error 14500, `Invalid save request, Table
+can't be empty.`, and `worksheet: {id: <Model name>, name: <Model name>, fqn: <Model GUID>}`
+imports (live 2026-11-18,
+[ts-recipe-answer-period-comparison open item #2](../../cli/ts-recipe-answer-period-comparison/references/open-items.md)).
+
+**An Answer formula cannot name an answer-level Set.** Import fails with error 14516
+(`Search did not find "<Set name> = '<value>' ,"`), even for a Set built in the UI. A formula
+can name a reusable Set. Filed as SCAL-353379 (live 2026-11-18,
+ts-recipe-answer-period-comparison open item #5).
 
 The example below is a **column set** (`cohort_type: SIMPLE`, `cohort_grouping_type: BIN_BASED`).
 
@@ -311,7 +351,8 @@ To convert an answer-level set to a reusable standalone set:
        "cohort": {
            "name": cohort_entry["name"],
            "owner": cohort_entry.get("owner", ""),
-           "model": {
+           # `worksheet:`, not `model:` — `model:` fails import (see "Reusable Set TML")
+           "worksheet": {
                "id": answer_tml["answer"]["tables"][0]["name"],
                "name": answer_tml["answer"]["tables"][0]["name"],
            },
@@ -340,3 +381,8 @@ To convert an answer-level set to a reusable standalone set:
 - Bin-based sets only support continuous numeric columns.
 - Query sets run a full search at render time — complex embedded searches may affect
   Liveboard load performance.
+- **Many conditions import but stop querying.** A reusable GROUP_BASED Set with 1,400
+  date-range conditions imported and round-tripped, but at 700 conditions (600 in one
+  group) the query failed with error 10000, `java.lang.StackOverflowError`; 525 (450 in
+  one group) worked. No documented limit; the ceiling may vary by build (live 2026-11-18,
+  [ts-recipe-answer-period-comparison open item #3](../../cli/ts-recipe-answer-period-comparison/references/open-items.md)).
