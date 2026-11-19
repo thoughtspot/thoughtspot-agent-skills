@@ -554,6 +554,8 @@ for #7). On Answers `ZZ_smoke_period_comparison_set_answer` and
 "ZZ_smoke_period_comparison%"` returns nothing for LIVEBOARD or ANSWER, and
 `ts sets inventory` on the Model reports discovery COMPLETE with no Sets.
 
+**Re-run backup, 2026-11-19, live:** an Answer's `edoc` from `ts tml export --fqn` (no `--parse`) is JSON TML; saved as a `.tml` file, `ts tml import --policy VALIDATE_ONLY` returned OK (SKILL.md Step 7).
+
 ---
 
 ## Probe objects

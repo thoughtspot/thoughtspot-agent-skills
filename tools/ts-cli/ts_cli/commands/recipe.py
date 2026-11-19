@@ -207,8 +207,8 @@ def period_comparison(
              "Default: the built-in event's name"),
     event_dates: Optional[Path] = typer.Option(
         None, "--event-dates",
-        help="Custom event only: YAML/JSON mapping each year to a start date or a list of "
-             "(start, end) date ranges"),
+        help="Custom event only: YAML/JSON mapping each year to a start date "
+             "(2025: '2025-05-11') or to one (start, end) date range"),
     offset: int = typer.Option(0, "--offset", help="Event window start, in days from the anchor day"),
     length: int = typer.Option(4, "--length", help="Event window length in days"),
     years: Optional[str] = typer.Option(None, "--years", help="2025 or 2020-2030; or use --last"),

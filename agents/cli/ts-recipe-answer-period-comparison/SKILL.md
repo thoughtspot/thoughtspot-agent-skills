@@ -210,9 +210,23 @@ ts sets inventory --model {model_guid} --profile "{profile}"   # reusable-set on
 ```
 
 In the Sets inventory, check `orgs[].models[].discovery` is `COMPLETE` (an `INCOMPLETE`
-Model's empty `sets[]` means unknown, not none), then look for the name in `sets[].name`. If
-either exists, ask: update it in place (pass `--answer-guid` / `--set-guid` in Step 6, back
-it up and drop `--create-new` in Step 7), or pick new names.
+Model's empty `sets[]` means unknown, not none), then look for the name in `sets[].name`.
+
+**An Answer of that name may be on another Model.** The Answer search covers the whole
+Org, and the default name is the same for everyone analysing the same event. For each
+Answer found, export it and check what it searches:
+
+```bash
+ts tml export {found_answer_guid} --fqn --parse --profile "{profile}"
+```
+
+Offer the in-place update only when its `answer.tables[].fqn` equals this Model's GUID, and
+show its author (`metadata_header.authorDisplayName` in the search result, or `authorName`)
+so the user knows whose Answer it is. Otherwise, create a new Answer under a distinct name
+and never pass that GUID as `--answer-guid`.
+
+If a matching object exists, ask: update it in place (pass `--answer-guid` / `--set-guid`
+in Step 6, back it up and drop `--create-new` in Step 7), or pick new names.
 
 **Updating a Set in place changes every Answer that uses it.** First list its consumers:
 that Set's `dependents[]` in the same inventory (if `dependents_complete` is `false`, the
@@ -288,11 +302,22 @@ ts tml export {answer_guid} --fqn --profile "{profile}" > "{out_dir}/before-answ
 ts tml export {set_guid} --fqn --profile "{profile}" > "{out_dir}/before-set.json"   # a Set update only
 ```
 
-Without `--parse`, each item's `edoc` is the object's TML exactly as the server wrote it
-(YAML, root `guid` included). Write each `edoc` to its own file, `before-answer.tml` and
-`before-set.tml`, and check each is non-empty. If an export fails, stop: do not import
-without the backup. **Re-importing a backup file is the rollback**, the Set before the
-Answer, without `--create-new`, so its `guid` updates the object in place:
+Without `--parse`, each item's `edoc` is the object's TML exactly as the server returned
+it, root `guid` included. On current builds that is JSON TML (the export ignores a
+requested format, BL-567), and ThoughtSpot imports it. Save each `edoc` exactly as
+returned to its own file, `before-answer.tml` and `before-set.tml`, and check each is
+non-empty. If an export fails, stop: do not import without the backup.
+
+Check each backup imports before relying on it:
+
+```bash
+ts tml import --file "{out_dir}/before-set.tml" --policy VALIDATE_ONLY --profile "{profile}"   # a Set update only
+ts tml import --file "{out_dir}/before-answer.tml" --policy VALIDATE_ONLY --profile "{profile}"
+```
+
+If validation fails, stop before the update. **Re-importing a backup file is the
+rollback**, the Set before the Answer, with `--policy ALL_OR_NONE` and without
+`--create-new`, so its `guid` updates the object in place:
 
 ```bash
 ts tml import --file "{out_dir}/before-set.tml" --policy ALL_OR_NONE --profile "{profile}"
@@ -379,7 +404,7 @@ The decisions the agent would otherwise make:
 | Calendar | If the date column has a custom or fiscal calendar, the year rows follow it, not the Gregorian years the windows are placed in |
 | Clash | Prefer `--on-clash skip`: keeping a window that holds a built-in event's anchor day (another event's, or this event's own when `--offset` moves off it) raises the baseline and shrinks the lift |
 | Import timeout | Do not retry at once. Wait a few minutes, search by name (`ts metadata search --type ANSWER --name …`; for a Set, `ts sets inventory --model <guid>` with `discovery` `COMPLETE`), and retry only if it is missing |
-| Re-run | Same names exist already: pass `--answer-guid` / `--set-guid`, back up each object first (`ts tml export <guid> --fqn`, saving each item's `edoc` YAML as a `.tml` file; re-importing that file is the rollback), and import without `--create-new`. Updating a Set changes every Answer that uses it (its `dependents[]` in the inventory); a changed label makes their measures read 0 |
+| Re-run | Same names exist already: pass `--answer-guid` / `--set-guid`, back up each object first (`ts tml export <guid> --fqn`, saving each item's `edoc` exactly as returned, JSON on current builds, as a `.tml` file, and checking it with `ts tml import --policy VALIDATE_ONLY`; re-importing that file with `ALL_OR_NONE`, Set first, is the rollback), and import without `--create-new`. A same-name Answer found by the search counts only if its `tables[].fqn` is this Model's GUID (Step 5). Updating a Set changes every Answer that uses it (its `dependents[]` in the inventory); a changed label makes their measures read 0 |
 | SQL check | In the UI query view: no `CROSS JOIN`, measures as a flat `sum` from the fact table, one row per year |
 
 ---

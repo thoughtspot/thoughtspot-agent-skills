@@ -502,6 +502,7 @@ are roughly ordered by value÷effort.
 | BL-603 | Period-comparison recipe on a DATE_TIME date column: four cases untested (open item #9) | 2027-02-28 |
 | BL-604 | `ts tml lint` flags the viz-level `fqn` binding that the period-comparison probes imported and rendered | 2027-01-31 |
 | BL-605 | The Tableau docs say a cohort needs the Model's `obj_id` to bind; the Sets schema says `{id, name, fqn}` and `{id, name}` import | 2027-01-31 |
+| BL-606 | A Tableau static Set on a DATE anchor writes raw member strings as `date_filter_values`; the mapping says one `EXACT_DATE` object per date | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17931,7 +17932,22 @@ commit that filed this item.
     with `--no-cleanup` on the test Model (its default `--years 2017-2019`) and record the 2019 row in
     open item #7: event about 72,526.22 and comparison about 65,967.57 average daily
     sales, the values from the #3 probes (`references/open-items.md`, #8). Then delete
-    the objects by hand.
+    the objects by hand. Check those figures against the warehouse too: for 2019, the
+    measure's sum divided by its count of distinct dates over 29 Nov to 2 Dec 2019, and
+    the same over each of the six prior windows. Record the query beside the figures in
+    open item #7.
+22. **`--labels` keys are case-sensitive, and a miscased key is swallowed.** `_LABEL_SPLIT`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:38`) splits only at a lower-case `event=`,
+    `comparison=` or `other=`. So `event=A,Other=B` makes the event label `A,Other=B`, keeps
+    the default "other" label, and exits 0. Match keys case-insensitively, or reject an
+    unknown `key=` part. Lines for items 22 and 23 are at the commit that added them
+    (2026-11-19, the final pre-PR fixes).
+23. **`_file_stem` is a weaker copy of an existing helper.** `_file_stem`
+    (`recipe.py:94-99`) duplicates `safe_name` (`tools/ts-cli/ts_cli/sets/export.py:45`),
+    which keeps only letters, marks, digits and `. _ -` and space, strips leading and
+    trailing dots, and caps the length in characters and UTF-8 bytes. Reuse `safe_name`;
+    that closes item 18, the length limit and the unsafe characters of item 7. Windows
+    reserved names such as `CON` still need a check of their own.
 
 **Target:** 2027-02-28.
 
@@ -18044,6 +18060,20 @@ commit). More twins of the same rule:
   (`ts-databricks/ts-databricks-formula-translation.md`) or ts-convert-to-dbt
   (`ts-dbt/ts-dbt-formula-translation.md`).
 
+**Widened again 2026-11-19** (final pre-PR fixes of the period-comparison recipe; lines at
+that commit):
+
+- **Excel function map:** `docs/function-maps/ts-excel-function-mapping.md:358` (`SUMIFS`),
+  `:610` (`NETWORKDAYS`, the inline-holiday term) and `:706` (`N`).
+- **Sheets function map:** `ts-sheets-function-mapping.md:274` (`EPOCHTODATE`).
+- **Sigma function map,** not yet in this item: `ts-sigma-function-mapping.md:266`
+  (`DateFromUnix`).
+- **Snowflake SV translator:** `tools/ts-cli/ts_cli/sv_sql.py:414-415` passes a `TO_DATE`
+  format through raw, the twin of `databricks/mv_sql.py:421-424`.
+- **The period-comparison recipe** already emits `'%Y-%m-%d'`
+  (`tools/ts-cli/ts_cli/period_comparison/emit.py:258-259`, its `to_date` literal). When
+  the shared helper lands (Do, step 2), import it there too.
+
 `agents/shared/schemas/thoughtspot-formula-patterns.md` (its date literal warning, about
 line 414) points here and stays accurate.
 
@@ -18121,6 +18151,15 @@ hits (another build, `id`/`name` not matching the Model, or no `id`/`name` at al
    shape is still flagged.
 4. Remove the "lint flags this; expected" note from the recipe's SKILL.md Step 6 and the
    ts-cli README.
+5. Change every converter doc and code comment that repeats "a viz-level `fqn` is
+   dropped" in the same PR as the rule. Their `obj_id` output stays correct; only the
+   reason they give changes. Lines at 2026-11-19:
+   - `agents/cli/ts-convert-from-looker/SKILL.md:640`;
+   - `agents/cli/ts-convert-from-tableau/SKILL.md:2071`;
+   - `agents/cli/ts-convert-from-tableau/references/step-10-liveboard-generation.md:233`;
+   - `tools/ts-cli/ts_cli/tml_common.py:224` (the `derive_viz_obj_id` docstring);
+   - `tools/ts-cli/ts_cli/tableau/liveboard.py:249` and `:306`;
+   - `tools/ts-cli/ts_cli/qlik/answers.py:169`.
 
 **Target:** 2027-01-31.
 
@@ -18157,6 +18196,53 @@ no `obj_id`. The 2026-11-18 probes ran against a long-lived Model, which may hav
 2. Fix the prose to match: the mapping (lines 618-623), step 5 (lines 390-392) and the
    Tableau `SKILL.md` (lines 1544-1549). If `{id, name}` binds, drop the `obj_id`
    read-back and re-import; if it does not, `tableau/sets.py` needs the `obj_id` it omits.
+   The same claim is also at (lines at 2026-11-19):
+   - `agents/cli/ts-convert-from-tableau/SKILL.md:1314-1328`, the primary statement. It
+     records the error 14500 failure, live 2026-07-23, for a Model and cohort imported in
+     one batch; and `:1710`, which says cohort binding "may resolve by name";
+   - `agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md:974`
+     (the Top-N query set binds by `id`/`name`/`obj_id`);
+   - `agents/shared/worked-examples/tableau/static-set-to-column-set.md:41` and `:68`;
+   - `agents/shared/worked-examples/tableau/topn-set-to-query-set.md:117`, `:154`, `:181`,
+     `:218`, `:249` and `:287`.
 3. Record the result in `thoughtspot-sets-tml.md`.
+
+**Target:** 2027-01-31.
+
+## BL-606 — Tableau static Set on a DATE anchor: `sets.py` and the mapping disagree on `date_filter_values` `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** final pre-PR fixes of the ts-recipe-answer-period-comparison
+build. Lines at that commit.
+
+**What.** The code and the docs give two shapes for a GROUP_BASED cohort condition on a DATE
+anchor column, and neither is verified for this case:
+
+- **Code:** `_member_condition` (`tools/ts-cli/ts_cli/tableau/sets.py:72-75`) writes
+  `date_filter_values: list(values)`, the raw member strings, in one condition.
+- **Mapping:** `agents/shared/mappings/tableau/tableau-formula-translation.md:692-694`, and
+  ts-convert-from-tableau changelog 1.5.9
+  (`agents/cli/ts-convert-from-tableau/references/changelog-archive.md:107`), say one
+  condition per date, each `date_filter_values: [{type: EXACT_DATE, date: MM/DD/YYYY,
+  oper: "="}]`, combined with `combine_type: ANY`.
+- **Sets schema:** `agents/shared/schemas/thoughtspot-sets-tml.md:147-175` documents only
+  the `EXACT_DATE_RANGE` / `BW` object form, verified live 2026-11-18. The recipe's design
+  spec noted the mismatch
+  (`docs/superpowers/specs/2026-11-18-recipe-answer-period-comparison-design.md:311-312`,
+  "writes a different list form").
+
+No test covers a date anchor: `tools/ts-cli/tests/test_tableau_sets_build.py` has no date
+case. If the server rejects raw strings, a converted static Set on a date fails to import;
+if it reads them some other way, the Set may hold the wrong dates.
+
+**Do.**
+1. Probe live: build a workbook with a static Set on a DATE column through
+   `ts tableau build-model`, import the cohort with `VALIDATE_ONLY`, then for real, and
+   export it to see the shape the server keeps.
+2. Make `sets.py` emit the shape the mapping specifies (or the one the probe shows), and
+   correct the mapping if the probe disagrees.
+3. Add the single-date `EXACT_DATE` shape to `thoughtspot-sets-tml.md`, beside the
+   date-range form.
+4. Add a test in `test_tableau_sets_build.py` for a DATE anchor, checking the emitted
+   condition shape.
 
 **Target:** 2027-01-31.

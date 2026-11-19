@@ -214,8 +214,10 @@ import. See `ts-object-answer-promote` Step 4 (option P) for the full promotion 
 
 ### `cohorts[]` fields — Sets
 
-Sets appear as `cohorts[]` in Answer TML and are also listed in `answer_columns[]` by name.
-They are **not** `formulas[]` entries.
+Answer-level Sets appear as `cohorts[]` in Answer TML and are also listed in
+`answer_columns[]` by name. They are **not** `formulas[]` entries. A reusable Set is
+different: the Answer names it only, with no `cohorts[]` entry (see "Answer-level vs
+reusable sets" below, and ts-recipe-answer-period-comparison open item #6).
 
 | Field | Notes |
 |---|---|

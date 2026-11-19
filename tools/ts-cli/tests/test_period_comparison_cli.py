@@ -289,5 +289,5 @@ def test_help_keeps_the_range_text():
     r = runner.invoke(app, ["recipe", "period-comparison", "--help"], terminal_width=200)
     assert r.exit_code == 0
     text = " ".join(plain(r).replace("│", " ").split())
-    assert "a start date or a list of (start, end) date ranges" in text
+    assert "a start date (2025: '2025-05-11') or to one (start, end) date range" in text
     assert "each year to a list of (start, end) date ranges" in text

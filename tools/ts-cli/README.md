@@ -5455,15 +5455,32 @@ ts metadata search --type ANSWER --name "Black Friday Period Comparison"
 ts sets inventory --model <model-guid>
 ```
 
+**A same-name Answer may be on another Model.** The Answer search covers the whole Org,
+and the default name is shared by everyone analysing the same event. Before updating one
+in place, export it and compare what it searches with your Model:
+
+```bash
+ts tml export <found-answer-guid> --fqn --parse   # answer.tables[].fqn must be <model-guid>
+```
+
+Update it only when its `tables[].fqn` equals your Model's GUID, and check its author
+(`metadata_header.authorDisplayName` in the search result) first. Otherwise generate a new
+Answer with a distinct `--name`, and never pass that GUID as `--answer-guid`.
+
 To update objects already imported, pass `--answer-guid` (and `--set-guid`) in step 3 and
 drop `--create-new` from the import. Updating a Set changes every Answer that uses it
 (its `dependents[]` in the inventory); if a label changes, the other Answers' measures
-read 0. Back up each object before that import; re-importing the backup (Set first) is the
-rollback:
+read 0. Back up each object before that import. Without `--parse`, each item's `edoc` is
+the TML as the server returned it: JSON on current builds (the export ignores a requested
+format, BL-567), which ThoughtSpot imports. Save each `edoc` exactly as returned as
+`before-*.tml`, and check it with `VALIDATE_ONLY`; if validation fails, stop before the
+update. Re-importing the backup with `ALL_OR_NONE`, without `--create-new`, Set first, is
+the rollback:
 
 ```bash
-ts tml export <answer-guid> --fqn > "$OUT/before-answer.json"   # and <set-guid>; save each item's "edoc" (YAML) as before-*.tml
-ts tml import --file "$OUT/before-answer.tml" --policy ALL_OR_NONE   # rollback (Set first)
+ts tml export <answer-guid> --fqn > "$OUT/before-answer.json"   # and <set-guid>; save each item's "edoc" as before-*.tml
+ts tml import --file "$OUT/before-answer.tml" --policy VALIDATE_ONLY   # check the backup first
+ts tml import --file "$OUT/before-answer.tml" --policy ALL_OR_NONE     # rollback (Set first)
 ```
 
 | Option | Default | Description |
