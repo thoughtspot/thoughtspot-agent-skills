@@ -368,7 +368,7 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
-| BL-607 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
+| BL-608 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -496,7 +496,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
-| BL-608 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
+| BL-609 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
 | BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 
 ### Tier 4 — Deferred
@@ -17842,7 +17842,7 @@ confirm every block commits. Mark the items VERIFIED.
 
 **Target:** 2027-01-31.
 
-## BL-607 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
+## BL-608 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 
@@ -17862,7 +17862,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 **Target:** 2027-01-31.
 
-## BL-608 — a DAX `<>` or `NOT ... IN {...}` comparison drops blank rows that DAX keeps `Tier 3`
+## BL-609 — a DAX `<>` or `NOT ... IN {...}` comparison drops blank rows that DAX keeps `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 

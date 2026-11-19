@@ -340,13 +340,13 @@ _NEW_FILTERS = {
 def test_calculate_the_quote_aware_split_newly_reads_stays_needs_review(shape, filt):
     """_calc_approx keeps only the first aggregate's argument (a ratio became its
     numerator, `* 100` vanished, ALL was dropped). Before the quote-aware splitter these
-    inputs failed to split and were NEEDS REVIEW; they still are (BL-607)."""
+    inputs failed to split and were NEEDS REVIEW; they still are (BL-608)."""
     expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f=_NEW_FILTERS[filt]))
     assert (expr, status) == (None, "NEEDS REVIEW")
 
 
-@pytest.mark.xfail(strict=True, reason="BL-607: _calc_approx drops parts of the expression "
-                   "on an `=` filter, as on main; flips to a pass when BL-607 lands")
+@pytest.mark.xfail(strict=True, reason="BL-608: _calc_approx drops parts of the expression "
+                   "on an `=` filter, as on main; flips to a pass when BL-608 lands")
 @pytest.mark.parametrize("shape", sorted(_CALC_SHAPES))
 def test_calculate_with_an_equals_filter_should_need_review(shape):
     expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f='Sales[Region] = "East"'))
@@ -373,11 +373,11 @@ def test_plain_equals_calculate_still_approximates_as_on_main():
 ])
 def test_not_before_an_in_set_needs_review(dax):
     """A blank s is not in the set: TRUE in DAX, but ThoughtSpot's not ( NULL in {…} )
-    is NULL and falls to else. Inferred, not probed (BL-608). The gated parser refuses
+    is NULL and falls to else. Inferred, not probed (BL-609). The gated parser refuses
     the same shape."""
     expr, status, note = translate_dax(dax)
     assert (expr, status) == (None, "NEEDS REVIEW")
-    assert "BL-608" in note
+    assert "BL-609" in note
 
 
 @pytest.mark.parametrize("dax", [
@@ -482,11 +482,11 @@ def test_calculate_all_the_quote_aware_split_newly_reads_stays_needs_review(dax)
 ])
 def test_a_negated_or_compared_in_set_needs_review(dax):
     """A blank s is not in the set: FALSE in DAX, NULL in ThoughtSpot. As a condition the
-    two agree (both take else); negated or compared they do not (BL-608). The last four
+    two agree (both take else); negated or compared they do not (BL-609). The last four
     were Migrated on main too, because their set's commas sat inside parens."""
     expr, status, note = translate_dax(dax)
     assert (expr, status) == (None, "NEEDS REVIEW")
-    assert "BL-608" in note
+    assert "BL-609" in note
 
 
 @pytest.mark.parametrize("dax", [
