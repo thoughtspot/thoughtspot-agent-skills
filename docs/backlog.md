@@ -508,6 +508,7 @@ are roughly ordered by value÷effort.
 | BL-606 | A Tableau static Set on a DATE anchor writes raw member strings as `date_filter_values`; the mapping says one `EXACT_DATE` object per date | 2027-01-31 |
 | BL-607 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
 | BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
+| BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17655,7 +17656,8 @@ with a cycle guard. A refs-only ratio of two LODs (`M = [A] / [B]`, both `group_
 still reaches no naked aggregate, so its wrapper stays; a guard test pins that, because
 simply dropping the gate would have stripped it, a wrong number. See `TestDoubleAggregation`
 in `test_model_builder.py` and the two-level tests in `test_build_model_helpers.py` (Tableau)
-and `test_dbt_review2_findings.py` (dbt). None of these fixes confirms or
+and `test_dbt_review2_findings.py` (dbt). A related blind spot, an aggregate name inside a
+reference or literal read as an aggregate, is BL-612. None of these fixes confirms or
 resolves the still-open question below (the average()/stddev()-dependent import-failure
 case); that still needs a live probe.
 
@@ -18489,5 +18491,32 @@ points to BL-607 item 21 rather than repeating it.
    - SKILL says a year missing from a custom file is an error (`SKILL.md:140`, `:259`).
      Under `--last N` the current year is an exception (`windows.py:27-28`): it is dropped
      while its event window is unknown. Say so.
+
+**Target:** 2027-01-31.
+
+## BL-612 — `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal as a naked aggregate `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the maintainer round on PR #662. **Relates to:** BL-581.
+
+**What.** `_AGG_FUNCTIONS` in `tools/ts-cli/ts_cli/formula_common.py` matches an aggregate
+name followed by `(` anywhere in a formula's text, including inside a column reference or a
+string literal. So `X = [T::Median (USD)] * 2`, a row-level formula, reads as aggregated,
+and `fix_double_aggregation` strips the `sum()` from `sum ( [formula_X] )`: the sum is lost.
+`if ( [T::N] = 'max_if (x' ) then 1 else 0` does the same through a literal. `main` already
+did this for the names it listed (`sum`, `count`, `max`, `min` and the rest: a column named
+`Sum (USD)` is enough); PR #662 added `median`, `min_if`, `max_if`, `stddev_if` and
+`variance_if` to the list, so five more names can now trigger it. `expr_is_aggregated` has
+the same blind spot, and the Sisense, Databricks MV, dbt and SQL-form code calls it too
+(Sisense uses it to choose MEASURE or ATTRIBUTE).
+
+**Do.**
+1. In `expr_is_aggregated` and `_has_naked_aggregate`, skip any `_AGG_FUNCTIONS` match that
+   starts inside a `_quoted_spans` range (that helper already treats a `[…]` reference as a
+   span, as well as `'…'` and `"…"` literals).
+2. Tests: `[T::Median (USD)] * 2` and `[T::Sum (USD)] * 2` keep their `sum()`; an aggregate
+   name inside a literal does not count; a real aggregate beside such a reference still does.
+3. Check the other `expr_is_aggregated` callers (`sisense/build_model.py`, `databricks/mv_sql*.py`,
+   `dbt/formula_pass.py`, `sql_forms.py`, `sv_sql_exact.py`) for anything that relied on the
+   old reading.
 
 **Target:** 2027-01-31.
