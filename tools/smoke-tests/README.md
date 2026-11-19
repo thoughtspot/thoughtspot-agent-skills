@@ -54,6 +54,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Live (TS + SF) |
 | `smoke_ts_object_model_agentql_query.py` | ts-object-model-agentql-query | Live (TS) |
 | `smoke_ts_variable_timezone.py` | ts-variable-timezone | Live (TS) |
+| `smoke_ts_recipe_answer_period_comparison.py` | ts-recipe-answer-period-comparison | Live (TS) |
 | `smoke_ts_recipe_formula_business_days_snowflake.py` | ts-recipe-formula-business-days-snowflake | Live (SF) |
 | `smoke_ts_recipe_formula_hms_display_snowflake.py` | ts-recipe-formula-hms-display-snowflake | Live (SF) |
 
