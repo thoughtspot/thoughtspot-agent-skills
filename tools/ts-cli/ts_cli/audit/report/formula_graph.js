@@ -2,8 +2,8 @@
    One Model's formula lineage drawn left to right: table columns and parameters on the
    left, the formulas built on them to the right, each formula after everything it uses.
    Cytoscape.js draws it and dagre lays it out (vendor/README.md); both travel in the
-   data (`D.V`, report.py `render_report`) only when some Model has a formula built on
-   another, and run the first time a graph opens. Clicking a node opens the same
+   data (`D.V`, report.py `render_report`) only when some Model has a formula
+   (`has_formulas`), and run the first time a graph opens. Clicking a node opens the same
    definition panel as the tree (views/formulas.js) and highlights everything upstream
    and downstream of it; a link in the panel moves the graph to that node. A Model past
    FORMULA_GRAPH_CAP nodes is drawn one lineage at a time: the selected node, what it
@@ -12,7 +12,7 @@
    so switching columns off can draw a large Model whole. The canvas is not
    keyboard-reachable; the tree is the accessible form of the same data, one click away. */
 var FORMULA_GRAPH_CAP = 300;  /* nodes drawn whole; beyond it, one lineage at a time */
-var FORMULA_GRAPH_MIN_ZOOM = 0.7;  /* a wider graph opens at its left edge, panned from there */
+var FORMULA_GRAPH_MIN_ZOOM = 0.35;  /* a graph needing less opens at its top-left, panned from there */
 var FORMULA_GRAPH_MAX_FIT = 1.2;   /* a small graph is not blown up to fill the canvas */
 var FORMULA_GRAPH_MIN_VISIBLE = 120;  /* px of canvas above a narrow screen's sheet */
 
@@ -143,41 +143,47 @@ function graphNote(total, tree, target, drawn, off){
     total+" formulas, columns and parameters"+hid+". Click a node to see its definition and its lineage.";
 }
 
-/* Where a Model too big to draw whole opens: the root whose lineage is the largest that
-   still fits under the cap, or, when none does, the smallest (a click draws any other). */
+/* Where a Model too big to draw whole opens: the root of a type the chips show whose
+   lineage is the largest that still fits under the cap, or, when none does, the
+   smallest (a click draws any other); with no such root, a formula of a shown type,
+   then a shown column or parameter, so the note never names a node that is not drawn. */
 function graphStart(tree){
   var best = null, size = -1, smallest = null, least = Infinity;
-  tree.r.forEach(function(i){
+  tree.r.filter(function(i){ return useShown(tree, [0, i]); }).forEach(function(i){
     var n = Object.keys(graphShownIds(tree, graphLineage(tree, [0, i]))).length;
     if(n <= FORMULA_GRAPH_CAP && n > size){ size = n; best = i; }
     if(n < least){ least = n; smallest = i; }
   });
-  return [0, best !== null ? best : smallest];
+  if(best !== null || smallest !== null) return [0, best !== null ? best : smallest];
+  for(var i = 0; i < tree.n.length; i++) if(useShown(tree, [0, i])) return [0, i];
+  for(i = 0; i < tree.n.length; i++){
+    var u = tree.n[i].u.filter(function(x){ return x[0] !== 0 && useShown(tree, x); })[0];
+    if(u) return u;
+  }
+  return [0, tree.r[0]];
 }
 
-/* Lay out the graph: dagre for the nodes joined by an edge, and the nodes left with
-   none (a type switched off can strand most of them) in a grid beside that part, its
-   columns chosen so the whole is about the canvas's shape. Without the grid dagre
-   stacks them in one tall column, most of it off screen. */
+/* Lay out the graph: dagre for each connected part on its own, then the parts, the
+   largest first and lone nodes last, packed in rows about the canvas's shape. dagre
+   over the whole graph stacks unconnected parts in one tall column (a type switched off
+   can strand most nodes), most of it off screen. */
 function graphArrange(cy){
-  var lone = cy.nodes().filter(function(n){ return n.degree(false) === 0; });
-  var linked = cy.elements().not(lone);
-  if(linked.length) linked.layout({name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}).run();
-  if(!lone.length) return;
-  var gap = 40, cellH = 36, cellW = 0;
-  lone.forEach(function(n){ cellW = Math.max(cellW, n.data("w") + 16); });
-  var bb = linked.length ? linked.boundingBox() : {x1: 0, y1: 0, x2: -gap, w: 0, h: 0};
-  var aspect = (cy.width() && cy.height()) ? cy.width() / cy.height() : 1.6;
-  var best = 1, bestScore = Infinity;
-  for(var cols = 1; cols <= lone.length; cols++){
-    var rows = Math.ceil(lone.length / cols);
-    var w = bb.w + (bb.w ? gap : 0) + cols * cellW, h = Math.max(bb.h, rows * cellH);
-    var score = Math.abs(Math.log(w / h / aspect));
-    if(score < bestScore){ bestScore = score; best = cols; }
-  }
-  var x0 = bb.x2 + gap + cellW / 2, y0 = bb.y1 + cellH / 2;
-  lone.forEach(function(n, i){
-    n.position({x: x0 + (i % best) * cellW, y: y0 + Math.floor(i / best) * cellH});
+  var gapX = 40, gapY = 14, aspect = (cy.width() && cy.height()) ? cy.width() / cy.height() : 1.6;
+  var parts = cy.elements().components().map(function(part){
+    if(part.edges().length) part.layout({name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}).run();
+    var bb = part.boundingBox();
+    return {part: part, bb: bb, n: part.nodes().length};
+  }).sort(function(a, b){ return b.n - a.n || b.bb.h - a.bb.h; });
+  if(parts.length < 2) return;
+  var area = 0, widest = 0;
+  parts.forEach(function(p){ area += (p.bb.w + gapX) * (p.bb.h + gapY); widest = Math.max(widest, p.bb.w); });
+  var rowW = Math.max(widest, Math.sqrt(area * aspect)), x = 0, y = 0, rowH = 0;
+  parts.forEach(function(p){
+    if(x > 0 && x + p.bb.w > rowW){ x = 0; y += rowH + gapY; rowH = 0; }
+    var dx = x - p.bb.x1, dy = y - p.bb.y1;
+    p.part.nodes().positions(function(node){ var q = node.position(); return {x: q.x + dx, y: q.y + dy}; });
+    x += p.bb.w + gapX;
+    rowH = Math.max(rowH, p.bb.h);
   });
 }
 
@@ -202,11 +208,10 @@ function graphFit(cy, panTo){
     cy.resize();
     cy.fit(undefined, 24);
     if(cy.zoom() > FORMULA_GRAPH_MAX_FIT){ cy.zoom(FORMULA_GRAPH_MAX_FIT); cy.center(); }
-    if(cy.zoom() < FORMULA_GRAPH_MIN_ZOOM && cy.elements().length){  /* readable labels over seeing it all */
+    if(cy.zoom() < FORMULA_GRAPH_MIN_ZOOM && cy.elements().length){  /* labels still legible */
       var bb = cy.elements().boundingBox();
       cy.zoom(FORMULA_GRAPH_MIN_ZOOM);
-      cy.pan({x: 24 - bb.x1 * FORMULA_GRAPH_MIN_ZOOM,
-              y: cy.container().clientHeight / 2 - (bb.y1 + bb.y2) / 2 * FORMULA_GRAPH_MIN_ZOOM});
+      cy.pan({x: 24 - bb.x1 * FORMULA_GRAPH_MIN_ZOOM, y: 24 - bb.y1 * FORMULA_GRAPH_MIN_ZOOM});
     }
     var sel = cy.$(".focus");
     if(sel.length) cy.pan(panTo(sel));

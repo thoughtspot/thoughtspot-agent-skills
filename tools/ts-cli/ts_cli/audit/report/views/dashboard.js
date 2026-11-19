@@ -13,8 +13,7 @@ function readinessByGuid(){
    not record its angles (`ar` empty) keeps the column. */
 function dataCacheByGuid(){
   var out = {};
-  var ran = D.C && D.C.ar && D.C.ar.length ? D.C.ar.indexOf("P") !== -1 : true;
-  if(ran && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
+  if(dataCacheRan() && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
   return out;
 }
 /* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking to the

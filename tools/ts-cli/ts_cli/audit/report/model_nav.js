@@ -9,6 +9,18 @@
    report carries Data Cache readiness, which is all its Models or none. */
 var MODEL_TAB_LABELS = {scorecard: "Scorecard", erd: "ERD", formulas: "Formulas", datacache: "Data Cache"};
 
+/* The report lists this Model: only then does a page about it get the tabs. */
+function knownModel(guid){
+  return !!(D.L && D.L.some(function(m){ return m && m.g === guid; }));
+}
+
+/* Whether the run assessed Data Cache readiness: the Performance angle ran (P19 to P28),
+   or the report does not record its angles. JSON before 3.23.0 carries no readiness at
+   all. The Dashboard's Data Cache column and the Data Cache tab both ask this. */
+function dataCacheRan(){
+  return D.C && D.C.ar && D.C.ar.length ? D.C.ar.indexOf("P") !== -1 : true;
+}
+
 /* Why a Model has no Formulas page, or "" when it has one. */
 function noFormulasReason(cm){
   if(!cm) return "This report holds no formula data for this Model.";
@@ -17,11 +29,12 @@ function noFormulasReason(cm){
     : "This Model has no formulas.";
 }
 
-/* The tabs, `current` ("scorecard", "erd", "formulas" or "datacache") marked. */
+/* The tabs, `current` ("scorecard", "erd", "formulas" or "datacache") marked. A caller
+   adds them only for a Model the report lists (knownModel). */
 function modelTabs(guid, current){
   var cm = findCorpusModel(guid), g = esc(guid);
   var tabs = [["scorecard", "#model/"+g], ["erd", "#model/"+g+"/erd"], ["formulas", "#formulas/"+g]];
-  if((cm && cm.dc) || current === "datacache") tabs.push(["datacache", "#datacache/"+g]);
+  if((cm && cm.dc && dataCacheRan()) || current === "datacache") tabs.push(["datacache", "#datacache/"+g]);
   var nav = el("nav", "model-tabs");
   nav.setAttribute("aria-label", "Pages for this Model");
   nav.innerHTML = tabs.map(function(t){

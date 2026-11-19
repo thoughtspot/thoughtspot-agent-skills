@@ -191,7 +191,9 @@ _TEMPLATE = """<!doctype html>
 def render_html(bundle, *, title="Model ERD"):
     css = _asset("renderer.css")
     js = _asset("renderer.js")
-    data = json.dumps(bundle, ensure_ascii=False)
+    # Every < and > escaped (JSON reads \u003c as "<"): a name holding "</script>" or
+    # "<!--<script" would otherwise end or swallow the data script.
+    data = json.dumps(bundle, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
     return _TEMPLATE.format(title=title, css=css, js=js, body=_BODY, data=data)
 
 

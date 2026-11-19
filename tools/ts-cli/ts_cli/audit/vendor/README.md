@@ -1,6 +1,6 @@
 # Vendored JavaScript for the audit report's formula graph
 
-Third-party code, embedded as it is in an audit report that has formula chains to draw
+Third-party code, embedded as it is in an audit report where some Model has a formula to draw
 (`report.py`, `graph_script`, which puts each LICENSE file's text in a comment ahead of the code). Nothing here is edited by hand. `MANIFEST` pins each
 file's SHA-256; `check_file_size.py` skips a file here only while its hash matches, and
 `tests/test_audit_formula_graph.py` fails if a file and the manifest disagree. The directory

@@ -128,3 +128,52 @@ def test_a_drag_while_filtered_does_not_overwrite_the_saved_layout(FULFIL, tmp_p
       return {saved: !!savedPos[layoutName], badge: document.getElementById('saved-badge').classList.contains('on')};""",
         tmp_path)
     assert r == {"saved": False, "badge": False}
+
+
+def test_share_html_while_tables_are_hidden_does_not_move_the_diagram(FULFIL, tmp_path):
+    """computeOrganic moves the node objects themselves; working out the whole model's
+    layout for Share HTML must put the shown tables back where they were."""
+    r = browser.probe(FULFIL, _STATE + """
+      click('alias');
+      const sel=document.getElementById('col-mode'); sel.value='all'; sel.onchange();
+      const before=pos(); const st=shareState(); const after=pos();
+      return {same: JSON.stringify(before)===JSON.stringify(after), baked: Object.keys(st.positions).length,
+              tables: MODEL.tables.length};""", tmp_path)
+    assert r["same"] is True
+    assert r["baked"] == r["tables"], "Share HTML still bakes the whole model"
+
+
+def test_share_html_in_network_view_while_filtered_does_not_move_it(FULFIL, tmp_path):
+    r = browser.probe(FULFIL, _STATE + """
+      click('alias'); setView('network');
+      const before=pos(); shareState(); return JSON.stringify(before)===JSON.stringify(pos());""",
+        tmp_path)
+    assert r is True
+
+
+def test_a_name_holding_script_markup_does_not_break_the_page(tmp_path):
+    import render
+    bundle = {"models": [{"model": {"name": "Evil </script><!--<script> x", "guid": "a", "description": ""},
+                          "tables": [], "joins": [], "formulas": {}, "findings": []}],
+              "index": [{"name": "e", "guid": "a", "tables": 0, "joins": 0, "findings": 0, "rls": 0}],
+              "dropped": []}
+    html = render.render_html(bundle)
+    data = html.split('<script id="erd-data">', 1)[1].split("</script>", 1)[0]
+    assert "<" not in data.replace("<script", "") and "</script" not in data
+    out = tmp_path / "evil.html"
+    out.write_text(html, encoding="utf-8")
+    r = browser.probe(str(out), "return document.querySelector('.brand h1').textContent;", tmp_path)
+    assert r == "Evil </script><!--<script> x"
+
+
+def test_share_html_escapes_a_note_holding_script_markup(FULFIL, tmp_path):
+    """The baked state ends at the data script's own closing tag, and reads back whole."""
+    r = browser.probe(FULFIL, """
+      const note='<'+'/script><'+'!--<script>', id=MODEL.tables[0].id; notes[id]=note;
+      let html=null; const RB=Blob; window.Blob=function(parts,o){html=parts.join('');return new RB(parts,o);};
+      URL.createObjectURL=()=>'blob:x'; HTMLAnchorElement.prototype.click=function(){};
+      shareHTML(); window.Blob=RB;
+      const state=html.split('window.ERD_INITIAL_STATE = ')[1], end=state.indexOf('<'+'/script>');
+      return {opener: state.slice(0, end).indexOf('<'+'!--'),
+              readBack: JSON.parse(state.slice(0, end).replace(/;\\s*$/, '')).notes[id]===note};""", tmp_path)
+    assert r == {"opener": -1, "readBack": True}

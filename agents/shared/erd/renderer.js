@@ -494,10 +494,13 @@ function computeShown(name){
   try{return computeFor(name);}finally{MODEL=keepM;undir=keepU;}
 }
 // The whole model's layout, whatever is hidden (Share HTML bakes the whole model).
+// computeOrganic moves the node objects themselves, which are the ones on screen, so
+// their places are put back: working out a layout must never move the diagram.
 function fullLayout(name){
   if(layoutCache[name])return layoutCache[name];
-  const keepN=nodes,keepE=edges;nodes=allNodes;edges=allEdges;
-  try{return layoutCache[name]=computeFor(name);}finally{nodes=keepN;edges=keepE;}
+  const keepN=nodes,keepE=edges,at=allNodes.map(n=>[n.x,n.y]);nodes=allNodes;edges=allEdges;
+  try{return layoutCache[name]=computeFor(name);}
+  finally{nodes=keepN;edges=keepE;allNodes.forEach((n,i)=>{n.x=at[i][0];n.y=at[i][1];});}
 }
 
 // ---- tween ----
@@ -1245,7 +1248,8 @@ function shareHTML(){
   const doc=document.documentElement.outerHTML;
   const dataEl=document.getElementById("erd-data");
   if(!dataEl)return;
-  const state=JSON.stringify(shareState());
+  // escaped as render.py escapes the data: a note holding a closing script tag must not end it
+  const state=JSON.stringify(shareState()).replace(/</g,"\\u003c").replace(/>/g,"\\u003e");
   const newScript=`window.__ERD_DATA__ = ${dataEl.textContent.split("=").slice(1).join("=").trim().replace(/;$/,"")};
 window.ERD_INITIAL_STATE = ${state};`;
   const full=doc.replace(dataEl.outerHTML,`<script id="erd-data">${newScript}<\/script>`);

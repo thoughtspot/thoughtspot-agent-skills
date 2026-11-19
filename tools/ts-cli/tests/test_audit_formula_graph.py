@@ -1,5 +1,5 @@
 """The Formulas view's graph mode (report/formula_graph.js) and its vendored libraries
-(ts_cli/audit/vendor/), carried in the data only when some Model has a formula chain."""
+(ts_cli/audit/vendor/), carried in the data only when some Model has a formula."""
 from __future__ import annotations
 
 import hashlib

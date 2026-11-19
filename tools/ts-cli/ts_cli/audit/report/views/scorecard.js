@@ -55,7 +55,12 @@ function erdPageHtml(cm){
     '<meta name="viewport" content="width=device-width, initial-scale=1">'+
     '<title>ERD: '+esc(erdData.model.name)+'</title>'+
     '<style>'+D.E.css+'</style></head><body>'+D.E.body+
-    '<script>window.__ERD_DATA__ = '+JSON.stringify(bundle).replace(/<\//g, "<\\/")+';<\/script>'+
+    /* every < and > escaped, as report.py escapes the report's own data: a name holding
+       a closing script tag, or a comment opener before an opening one, must not end or
+       swallow the script. id="erd-data" is
+       what the ERD's Share HTML reads (renderer.js shareHTML). */
+    '<script id="erd-data">window.__ERD_DATA__ = '+
+    JSON.stringify(bundle).replace(/</g, "\\u003c").replace(/>/g, "\\u003e")+';<\/script>'+
     '<script>'+D.E.js+'<\/script></body></html>';
 }
 
@@ -89,12 +94,14 @@ function erdSection(guid, cm, open){
     body.appendChild(frame);
   }
   sec.addEventListener("toggle", function(){ if(sec.open) fill(); });
-  if(open){
+  /* open it and bring it into view; after this turn, as the router shows the view once
+     it is built */
+  sec._show = function(){
     sec.open = true;
     fill();
-    /* after this turn: the router shows the view once it is built */
     setTimeout(function(){ sec.scrollIntoView({block: "start"}); }, 0);
-  }
+  };
+  if(open) sec._show();
   return sec;
 }
 
@@ -213,9 +220,16 @@ function buildScorecard(D, guid, filterAngle, showErd){
   if(_sevFilterListener) document.removeEventListener("sev-filter-changed", _sevFilterListener);
 
   var cm = findCorpusModel(guid);
-  c.appendChild(modelTabs(guid, showErd ? "erd" : "scorecard"));
+  if(knownModel(guid)) c.appendChild(modelTabs(guid, showErd ? "erd" : "scorecard"));
   c.appendChild(scorecardHeader(guid, cm));
-  c.appendChild(erdSection(guid, cm, showErd));
+  var erd = erdSection(guid, cm, showErd);
+  c.appendChild(erd);
+  /* on #model/<guid>/erd the ERD tab's link is the page itself, so following it changes
+     nothing: open the section again (it may have been closed) instead */
+  var erdTab = $('.model-tabs a[data-tab="erd"]', c);
+  if(erdTab) erdTab.addEventListener("click", function(e){
+    if(location.hash === erdTab.getAttribute("href")){ e.preventDefault(); erd._show(); }
+  });
   if(cm && cm.ai) c.appendChild(scorecardAiPanel(cm));
 
   /* ── Angle sections ── */

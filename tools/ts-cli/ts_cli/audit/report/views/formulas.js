@@ -398,7 +398,11 @@ function revealRow(ul, tree, target, from){
         return r._target && useKey(r._target) === useKey(target); })[0]);
     if(hit) return target[0] === 0 ? hit.firstChild : hit;
   }
-  var at = target[0] === 0 ? target[1] : directUsers(tree, target)[0];
+  /* a column or parameter: under the first formula using it that the tree shows */
+  var users = target[0] === 0 ? [] : directUsers(tree, target), st = treeStates(tree);
+  var at = target[0] === 0 ? target[1] :
+    (users.filter(function(j){ return st[j] >= 1; })[0] !== undefined ?
+      users.filter(function(j){ return st[j] >= 1; })[0] : users[0]);
   if(at === undefined) return null;
   var path = pathTo(tree, at);
   if(!path) return null;
@@ -519,8 +523,8 @@ function buildFormulaTree(c, guid){
   if(!tree || !tree.n.length){
     var why = !cm ? "This report has no such Model." :
       (predatesTree(cm) ? FORMULA_PREDATES : "This Model has no formulas.");
-    c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
-      '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>';
+    c.insertAdjacentHTML("beforeend", '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
+      '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>');
     return;
   }
   var hdr = el("div","ftree-header");
@@ -534,7 +538,7 @@ function buildFormulaTree(c, guid){
     (graphAvailable(tree) ? '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'/graph">Graph</a>' : '')+
     '</div>';
   c.appendChild(hdr);
-  var bar = ftypeBar(tree, retype, false);
+  var bar = ftypeBar(tree, retype, false, function(){ return treeShownCount(tree); });
   hdr.appendChild(bar);
   var results = el("div","ftree-results");
   c.appendChild(results);
@@ -587,7 +591,7 @@ function buildFormulaTree(c, guid){
     results.innerHTML = searchResultsHtml(tree, $(".ftree-search", hdr).value);
     var sel = $(".ftree-selected", ul);
     bar._note(tree, tree._selected, !!sel && sel.offsetParent !== null);
-    note.textContent = ftypeKey() === "0000" ? "Every type is switched off: switch one back on to see the tree." : "";
+    note.textContent = treeEmptyNote(tree, graphAvailable(tree));
   }
   function closePanel(byMouse){
     var sel = $(".ftree-selected", ul);
@@ -613,6 +617,7 @@ function buildFormulaTree(c, guid){
     if(li._open) li._open();  /* roots open one level */
   });
   applyTreeFtypes(ul, tree);
+  note.textContent = treeEmptyNote(tree, graphAvailable(tree));  /* the chips carry over */
   c.appendChild(layout);
   wireTreeKeys(ul);
   /* after this turn: the router shows this view once it is built, and a hidden row
@@ -644,7 +649,7 @@ function buildFormulas(D, guid, mode){
   if(c._cy){ c._cy.destroy(); c._cy = null; }  /* a graph left running would keep rendering */
   c.innerHTML = "";
   var cm = guid && findCorpusModel(guid);
-  if(cm) c.appendChild(modelTabs(guid, "formulas"));
+  if(guid && knownModel(guid)) c.appendChild(modelTabs(guid, "formulas"));
   if(mode === "graph" && cm && graphAvailable(cm.ft)){ buildFormulaGraph(c, guid, cm.ft); return true; }
   if(guid) buildFormulaTree(c, guid);
   else buildFormulasPicker(c);

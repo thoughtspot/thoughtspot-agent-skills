@@ -77,12 +77,16 @@ function ftypeLegendHtml(counts, graph){
    count), the legend and the note, as one element. `onChange` runs after a chip flips;
    the search box is the view's own (class ftree-search), which wires it.
    `wrap._note(tree, target, visible)` says when `target` is not on screen because its
-   type is switched off (and clears the note otherwise). */
-function ftypeBar(tree, onChange, graph){
+   type is switched off, or, for a column or parameter, because every formula it sits
+   under is (and clears the note otherwise). `shownCount`, when given, counts what the
+   view shows (the tree: treeShownCount); without it the graph's count, every item of a
+   type switched on, since the graph draws them all. */
+function ftypeBar(tree, onChange, graph, shownCount){
   var counts = ftypeCounts(tree), wrap = el("div", "ftype-bar");
   var all = FTYPES.reduce(function(n, t){ return n + counts[t[0]]; }, 0);
   function total(){
-    var shown = FTYPES.reduce(function(n, t){ return n + (_ftypeShown[t[0]] ? counts[t[0]] : 0); }, 0);
+    var shown = shownCount ? shownCount() :
+      FTYPES.reduce(function(n, t){ return n + (_ftypeShown[t[0]] ? counts[t[0]] : 0); }, 0);
     bar._total(shown+" of "+all+" items shown");
   }
   var bar = filterBar({label: "Show these types", on: _ftypeShown,
@@ -100,19 +104,33 @@ function ftypeBar(tree, onChange, graph){
   wrap.addEventListener("click", function(e){
     var b = e.target.closest && e.target.closest(".ftype-reveal");
     if(!b) return;
-    var type = b.getAttribute("data-ftype");
-    _ftypeShown[type] = true;
+    var types = b.getAttribute("data-ftype").split(",");
+    types.forEach(function(type){ _ftypeShown[type] = true; });
     bar._sync();
     total();
     onChange();
-    $('.fbar-chip[data-f="'+type+'"]', bar).focus();
+    $('.fbar-chip[data-f="'+types[0]+'"]', bar).focus();
   });
+  function chipLabel(type){ return FTYPES.filter(function(x){ return x[0] === type; })[0][1]; }
   wrap._note = function(t, target, visible){
     var note = $(".ftype-note", wrap), type = target && useFtype(t, target);
-    if(!target || visible || _ftypeShown[type]){ note.innerHTML = ""; return; }
-    var label = FTYPES.filter(function(x){ return x[0] === type; })[0][1];
-    note.innerHTML = esc(useLabel(t, target))+' is not shown: '+esc(label)+' are switched off. '+
-      '<button type="button" class="ftype-reveal" data-ftype="'+type+'">Show '+esc(label.toLowerCase())+'</button>';
+    if(!target || visible){ note.innerHTML = ""; return; }
+    if(!_ftypeShown[type]){
+      note.innerHTML = esc(useLabel(t, target))+' is not shown: '+esc(chipLabel(type))+' are switched off. '+
+        '<button type="button" class="ftype-reveal" data-ftype="'+type+'">Show '+esc(chipLabel(type).toLowerCase())+'</button>';
+      return;
+    }
+    /* a column or parameter of a shown type, every formula it sits under switched off */
+    var off = [];
+    directUsers(t, target).forEach(function(j){
+      var ty = useFtype(t, [0, j]);
+      if(!_ftypeShown[ty] && off.indexOf(ty) === -1) off.push(ty);
+    });
+    if(target[0] === 0 || !off.length){ note.innerHTML = ""; return; }
+    var names = off.map(function(ty){ return chipLabel(ty); });
+    note.innerHTML = esc(useLabel(t, target))+' is not shown: the formulas it sits under are switched off ('+
+      esc(names.join(", "))+'). <button type="button" class="ftype-reveal" data-ftype="'+off.join(",")+'">Show '+
+      esc(names.join(" and ").toLowerCase())+'</button>';
   };
   return wrap;
 }
@@ -132,10 +150,40 @@ function treeFtypeStates(tree){
   return tree.n.map(function(node, i){ return useShown(tree, [0, i]) ? 2 : reach[i] ? 1 : 0; });
 }
 
+/* treeFtypeStates, worked out once per chip setting. */
+function treeStates(tree){
+  if(tree._ftKey !== ftypeKey()){ tree._ftStates = treeFtypeStates(tree); tree._ftKey = ftypeKey(); }
+  return tree._ftStates;
+}
+
+/* How many items the tree shows: the formulas of a shown type, and the columns and
+   parameters of a shown type under a formula row the tree shows (a kept, faded row is
+   switched off itself, so it is not counted, but what is under it is shown). The tree
+   reaches a column only through a formula, so with both formula types off it is 0. */
+function treeShownCount(tree){
+  var st = treeStates(tree), seen = {}, n = 0;
+  tree.n.forEach(function(node, i){
+    if(st[i] === 2) n++;
+    if(st[i] >= 1) node.u.forEach(function(u){
+      if(u[0] !== 0 && useShown(tree, u) && !seen[useKey(u)]){ seen[useKey(u)] = true; n++; }
+    });
+  });
+  return n;
+}
+
+/* Why the tree shows nothing, or "" when it shows something. */
+function treeEmptyNote(tree, graph){
+  if(treeShownCount(tree)) return "";
+  if(ftypeKey() === "0000") return "Every type is switched off: switch one back on to see the tree.";
+  if(!_ftypeShown.measure && !_ftypeShown.attribute)
+    return "Columns and parameters are shown only under a formula: switch a formula type on"+
+      (graph ? ", or use the Graph." : ".");
+  return "No formula of a type switched on: switch another type on.";
+}
+
 /* Hide and fade the built rows under `root` as the chips say. */
 function applyTreeFtypes(root, tree){
-  if(tree._ftKey !== ftypeKey()){ tree._ftStates = treeFtypeStates(tree); tree._ftKey = ftypeKey(); }
-  var st = tree._ftStates;
+  var st = treeStates(tree);
   $$("li.ftree-node", root).forEach(function(li){
     var s = st[+li.getAttribute("data-i")];
     li.classList.toggle("ftype-off", s === 0);

@@ -216,3 +216,63 @@ def test_tab_links_carry_an_awkward_guid_verbatim(tmp_path):
     assert shown["errors"] == []
     assert shown["extra"] == ["#model/" + guid, "#model/" + guid + "/erd", "#formulas/" + guid,
                               "#datacache/" + guid]
+
+
+@needs_chrome
+def test_no_data_cache_tab_when_the_performance_angle_did_not_run(tmp_path):
+    """The same check as the Dashboard's Data Cache column: without P, every Model
+    would read Not assessed."""
+    ctx = make_context(models=[{"guid": "m-1", "model": SALES}], model_guids=["m-1"])
+    page = render_report(run_audit(None, ["m-1"], ["D"], ctx=ctx))
+    shown = report_browser.render(page, tmp_path, "model/m-1", actions=_NAV)
+    assert shown["errors"] == []
+    assert [t[0] for t in shown["extra"]["tabs"]] == ["scorecard", "erd", "formulas"]
+
+
+@needs_chrome
+@pytest.mark.parametrize("route, tabs", [
+    ("formulas/m-9", ["scorecard", "erd", "formulas", "datacache"]),   # known, no formulas
+    ("model/no-such", None), ("formulas/no-such", None), ("datacache/no-such", None),
+])
+def test_tabs_show_for_a_known_model_and_never_for_an_unknown_one(tmp_path, route, tabs):
+    shown = report_browser.render(_page(), tmp_path, route, actions=_NAV)
+    assert shown["errors"] == []
+    got = shown["extra"]["tabs"]
+    assert (None if got is None else [t[0] for t in got]) == tabs
+
+
+_FRAME = ('function frame(){ return document.querySelector("#v-scorecard iframe.erd-frame"); }')
+
+
+@needs_chrome
+def test_the_inline_erd_survives_a_name_holding_script_markup(tmp_path):
+    evil = dict(SALES, name="Sales </script><!--<script> x")
+    shown = report_browser.render(_page(("m-1", evil)), tmp_path, "model/m-1/erd", actions=_FRAME + (
+        'setTimeout(function(){ var h = frame().contentDocument.querySelector(".brand h1");'
+        ' window.__extra = h && h.textContent; }, 300);'), settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == "Sales </script><!--<script> x"
+
+
+@needs_chrome
+def test_the_inline_erds_share_html_works(tmp_path):
+    """It reads the data script by id="erd-data"; without the id it did nothing."""
+    shown = report_browser.render(_page(), tmp_path, "model/m-1/erd", actions=_FRAME + (
+        'setTimeout(function(){ var w = frame().contentWindow, html = null, RB = w.Blob;'
+        ' w.Blob = function(parts, o){ html = parts.join(""); return new RB(parts, o); };'
+        ' w.URL.createObjectURL = function(){ return "blob:x"; };'
+        ' w.HTMLAnchorElement.prototype.click = function(){};'
+        ' w.document.getElementById("share-btn").click();'
+        ' window.__extra = !!html && html.indexOf("window.ERD_INITIAL_STATE") !== -1'
+        '  && html.indexOf("Sales") !== -1; }, 300);'), settle_ms=600)
+    assert shown["errors"] == [] and shown["extra"] is True
+
+
+@needs_chrome
+def test_the_erd_tab_reopens_a_closed_erd_on_its_own_route(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "model/m-1/erd", actions=(
+        'var sec = document.querySelector("#v-scorecard details.erd-panel"); sec.open = false;'
+        'document.querySelector(\'#v-scorecard .model-tabs a[data-tab="erd"]\').click();'
+        'window.__extra = {open: sec.open, hash: location.hash};'))
+    assert shown["errors"] == []
+    assert shown["extra"] == {"open": True, "hash": "#model/m-1/erd"}
