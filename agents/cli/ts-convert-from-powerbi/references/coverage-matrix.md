@@ -1,4 +1,4 @@
-<!-- coverage-matrix last-reviewed: 2026-07-16 -->
+<!-- coverage-matrix last-reviewed: 2026-11-17 -->
 # Coverage matrix — Power BI → ThoughtSpot
 
 Every Power BI construct and its conversion status. Cite in the migration report. Within
@@ -21,6 +21,10 @@ Mapped: **Mapped** (deterministic) · **Approximated** (mapped with a caveat).
 | `a * b / c` | Mapped | → `( a * b ) / c`. **Fixed ts-cli 0.165.0 (BL-365):** ThoughtSpot reads `a * b / c` as `a * ( b / c )`, and a division of two integers is fixed-point at scale 6 in Snowflake (`[n] * 4 / 3` = 3.999999). Every product under a division is bracketed (`formula_text.ts_finalize_formula`) |
 | `IF` / nested `IF` | Mapped | → conditional expressions |
 | `CALCULATE(<agg>, FILTER/cond)` | Approximated | → `sum_if`; verify vs Power BI |
+| `CALCULATE(DISTINCTCOUNT(t[k]), <filters>)` | Approximated | → `unique_count_if ( <conditions> , [t::k] )`, measures only (a calculated column stays NEEDS REVIEW). Each filter argument must be exactly `t[c] = <literal>`, `t[c] IN {<literals>}`, `NOT ISBLANK(t[c])` / `NOT(ISBLANK(t[c]))`, or `USERELATIONSHIP(t[a], u[b])` (no condition; adds a role-playing-date note). Anything else refuses the measure, as do a DAX comment, a filter on `0` or `""`, a mixed set holding a non-integer number, a column off the home table, and a nested CALCULATE filtering the same column (case-insensitive; different columns AND). **Not Migrated:** CALCULATE *replaces* an existing filter on the filtered column while `unique_count_if` *ANDs* with it, so the two differ whenever the query filters that column: grouping, a slicer, a page or Liveboard filter (emitted side live-probed 2026-10-08; the Power BI side is inferred), and `DISTINCTCOUNT` counts a blank key that `unique_count_if` ignores. Full rules: the mapping doc's Pattern rewrites |
+| `VAR a = CALCULATE(DISTINCTCOUNT(t[k]), …) VAR b = … RETURN a/b` | Approximated | the two gated terms divided. Both VARs must count the same key; a VAR defined twice, text between definitions, or a `RETURN` doing anything else (`DIVIDE(a,b)`, `1 - a/b`, `a/b*2`) is refused |
+| `CALCULATE(DISTINCTCOUNT(t[k]), USERELATIONSHIP(…))` alone | Approximated | a plain `DISTINCTCOUNT` (the `DISTINCTCOUNT` row's form and note), plus the note that a page slicing on the role-playing date needs a union fact keyed by measure |
+| `t[c] IN {…}` inside another call (`IF`, `AND`/`OR`) | Mapped | → `[t::c] IN {…}` in place. A `,` `{` `}` `)` inside a string, a quoted table name or a `[column]` is not read as structure |
 | `CALCULATE(m, ALL(Table[Col]))` / `REMOVEFILTERS` / `ALLSELECTED` | Approximated | → `group_aggregate(m, query_groups()-{cols}, query_filters()-{cols})` (worked example) |
 | Measure / calc-column cross-references | Mapped | `[formula_<name>]` id-refs, topo-sorted (resolve on first import — open-item #2) |
 | `CEILING/FLOOR(x[, significance])` | Mapped | 1-arg → `ceil/floor`; 2-arg → `ceil(x/sig)*sig` |
@@ -59,7 +63,8 @@ Flagged (needs a human; never faked) or Dropped (no ThoughtSpot equivalent).
 | Construct | Status | Notes |
 |---|---|---|
 | Point-in-time (`CALCULATE`+`ALL`+`MAX`, headcount-as-of-date) | Flagged | genuine manual rebuild |
-| Iterators (`SUMX`/`RANKX`/`EARLIER`), row-context, `VAR/RETURN`, `SWITCH` | Flagged | no safe deterministic port |
+| Iterators (`SUMX`/`RANKX`/`EARLIER`), row-context, `SWITCH`, and `VAR/RETURN` other than the gated ratio above | Flagged | no safe deterministic port |
+| An IN set whose result is negated or compared (`NOT t[c] IN {…}` in any spelling, `NOT (x && t[c] IN {…})`, `t[c] IN {…} = FALSE`, `<> TRUE`); an IN set mixing strings and numbers; an IN set member that is not a literal (a row constructor `(t[a], t[b]) IN {("x", 1)}`, a column, an expression); a `CALCULATE(<agg>, …)` holding an IN set, a `,` `(` `)` `[` `]` inside a string, a `[column]` whose parens do not nest, or a stray `]` | Flagged | NEEDS REVIEW. Negated or compared: a blank is not in the set, FALSE in DAX and NULL in ThoughtSpot, and only a plain condition treats the two alike (BL-610). Mixed: DAX compares as text (`1.50` as `"1.5"`). Not a literal: ThoughtSpot's `in` takes a list of literals. CALCULATE: the `sum_if` rewrite keeps only the first aggregate's argument (BL-609); the gated distinct count above is the exception |
 | Map / gauge / custom AppSource visual | Flagged/Approximated | needs a geo column / no map equivalent |
 | Tooltip page | Dropped | hover overlay, not a navigable tab |
 | Slicer / `basicShape` / buttons / text boxes | Dropped | filters / decorations, not data visuals |

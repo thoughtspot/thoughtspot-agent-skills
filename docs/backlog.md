@@ -368,6 +368,8 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
+| BL-609 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
+| BL-611 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -495,6 +497,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
+| BL-610 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
 | BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 | BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
 | BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
@@ -18365,3 +18368,53 @@ points to BL-607 item 21 rather than repeating it.
      while its event window is unknown. Say so.
 
 **Target:** 2027-01-31.
+
+## BL-609 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** `ts_cli/powerbi/functions.py` `_calc_approx` rewrites a two-argument `CALCULATE(<agg>, <filter>)` to `sum_if(<cond>, <arg>)` when the first argument *starts* with `SUM(` or `COUNT`/`COUNTA`/`COUNTROWS(`, and keeps only that call's argument. Everything around it is dropped, and the result is labelled Approximated, so `build-model` writes it into the Model as a MEASURE:
+
+- `CALCULATE(SUM(Sales[Profit]) / SUM(Sales[Revenue]), Sales[Region] = "East")` becomes `sum_if(..., [Sales::Profit])`: total profit, not the ratio.
+- `CALCULATE(SUM(Fact[x]) * 100, Fact[s] = "a")` loses the `* 100`.
+- `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
+- `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
+
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite (`_split_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above already behave this way on main.
+
+**Do.**
+1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it.
+3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
+
+**Target:** 2027-01-31.
+
+## BL-610 — a DAX `<>` comparison drops blank rows that DAX keeps; the refused negated IN set is inferred, not probed `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related IN-set forms on the main path, where the set's result is negated or compared (`NOT ... IN {...}` in any spelling, `... IN {...} = FALSE`, `<> TRUE`); they are now NEEDS REVIEW. `<>` still translates as Migrated, as it has on main.
+
+**Do.**
+1. Probe one `!=` and one `not ( ... in { ... } )` formula over a column with NULLs on a live cluster, and record what ThoughtSpot compiles and returns.
+2. If NULL rows drop, emit `( [x] != 'a' or isnull ( [x] ) )` (and the same for `not in`), or flag the comparison Approximated with the reason. Either way, a test per form.
+
+**Target:** 2027-01-31.
+
+## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main`, and PR #517 changes none of them; it only lets the IN-set form of the second through.
+
+**What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
+
+- `_qualify_home_and_dates` qualifies any `[name]` that matches a home column, inside a string too: `IF(Fact[s] = "[Amount]", 1, 0)` with `Amount` a home column becomes `if ([Fact::s] = '[Fact::Amount]') …`, which matches no row that held `[Amount]`.
+- `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b", "c"}, 1, 0)` both compare against `'a and b'`. PR #517 lets IN sets inside a call reach this pass, so the second form was NEEDS REVIEW before it.
+- The same pass lower-cases `NOT` inside a column name: `T[NOT]` becomes `[T::not]`, a different column on a case-sensitive warehouse.
+- The function-name scan (`_map_known_functions`) reads `a(` inside a string or a name as an unknown function, so `IF(T[s] = "a(", 1, 0)` is refused. This one over-refuses rather than giving a wrong value.
+
+**Do.**
+1. Make the three rewrite passes skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding a fourth regex. The first three are wrong values, so they go first.
+2. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
+3. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
+
+**Target:** 2027-01-15.

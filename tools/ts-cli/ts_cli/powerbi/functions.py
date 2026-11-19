@@ -166,36 +166,121 @@ def _sub_col_refs(src: str, repl) -> str:
     return "".join(out)
 
 
+def _opaque_end(s: str, i: int) -> int:
+    """Index just past the "string", 'table name' or [column] opening at ``i``: text the
+    argument splitter and paren matcher must not read as structure. DAX doubles the
+    closing character to escape it (``""``, ``''``, ``]]``); brackets do not nest."""
+    if s[i] != "[":
+        return _quote_end(s, i) + 1
+    j, n = i + 1, len(s)
+    while j < n:
+        if s[j] == "]":
+            if j + 1 < n and s[j + 1] == "]":
+                j += 2
+                continue
+            return j + 1
+        j += 1
+    return n
+
+
 def _split_args(s):
     """Split a function-call argument string on top-level commas (respecting
-    nested parens and brackets). Returns the list of trimmed arg strings."""
-    args, depth, cur = [], 0, []
-    for ch in s:
-        if ch in "([":
+    nested parens, brackets and braces, and skipping quoted text). Returns the list of
+    trimmed arg strings.
+
+    Braces matter: DAX writes a value set as `T[Status] IN {"x","y"}`, and
+    without tracking them the commas inside the set split it into arguments that are not
+    arguments, so any CALCULATE carrying an IN-set is read wrongly. Quoted text matters
+    for the same reason the other way round: a `{`, `)` or `,` inside a "string", a
+    'table name' or a [column name] is not structure, and counting it mis-split
+    `IF(T[c] = 1, "{", "b")`.
+    """
+    args, depth, cur, i, n = [], 0, [], 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch in "\"'[":
+            j = _opaque_end(s, i)
+            cur.append(s[i:j])
+            i = j
+            continue
+        if ch in "({":
             depth += 1
-        elif ch in ")]":
+        elif ch in ")}":
             depth -= 1
         if ch == "," and depth == 0:
             args.append("".join(cur).strip())
             cur = []
         else:
             cur.append(ch)
+        i += 1
     if cur or args:
         args.append("".join(cur).strip())
     return args
 
 
 def _match_paren(s, open_idx):
-    """Given index of a '(', return index of its matching ')' (or -1)."""
-    depth = 0
-    for i in range(open_idx, len(s)):
-        if s[i] == "(":
+    """Given index of a '(', return index of its matching ')' (or -1). A paren inside a
+    "string", a 'table name' or a [column] is skipped, as in _split_args."""
+    depth, i, n = 0, open_idx, len(s)
+    while i < n:
+        ch = s[i]
+        if ch in "\"'[":
+            i = _opaque_end(s, i)
+            continue
+        if ch == "(":
             depth += 1
-        elif s[i] == ")":
+        elif ch == ")":
             depth -= 1
             if depth == 0:
                 return i
+        i += 1
     return -1
+
+
+def _parens_nest(body: str) -> bool:
+    """True when every ``)`` in ``body`` closes an earlier ``(`` and none is left open.
+    Equal counts are not enough: the earlier splitter read the ``)`` in ``T[a),(b]`` as
+    closing, so the ``,`` after it split the call."""
+    depth = 0
+    for c in body:
+        depth += (c == "(") - (c == ")")
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def _split_reads_differently(s: str) -> bool:
+    """True when ``s`` holds something the quote-aware ``_split_args`` / ``_match_paren``
+    read differently from the earlier splitter, which tracked neither braces nor quoted
+    text and counted ``[`` and ``]`` as depth everywhere: a ``{`` ``}`` or a stray ``]``
+    outside quotes, a ``,`` ``(`` ``)`` ``[`` or ``]`` inside a "string" or a 'table name',
+    or a [column] whose parens do not nest, that holds a ``[`` or that uses a ``]]`` escape.
+    A conservative superset: it may refuse a few inputs the old splitter also read
+    correctly.
+
+    The CALCULATE rewrites below were written against the old splitter, and a CALCULATE
+    holding such text used to fail to split and fall to NEEDS REVIEW. Reading it correctly
+    let ``_calc_approx`` see it, and that rewrite keeps only the first aggregate's argument,
+    so ``CALCULATE(SUM(a) / SUM(b), T[s] IN {"x","y"})`` became ``sum_if(..., a)``. Such a
+    CALCULATE stays NEEDS REVIEW, as before; the same loss on `=` filters, which the old
+    splitter already let through, is BL-609."""
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch in "\"'[":
+            j = _opaque_end(s, i)
+            body = s[i + 1:j - 1]
+            if ch == "[":
+                if "]]" in s[i:j + 1] or "[" in body or not _parens_nest(body):
+                    return True
+            elif any(c in body for c in ",()[]"):
+                return True
+            i = j
+            continue
+        if ch in "{}]":
+            return True
+        i += 1
+    return False
 
 
 def _calc_approx(args):
@@ -272,7 +357,7 @@ def _calc_all_to_group_agg(s):
         if not m:
             return out
         close = _match_paren(out, m.end() - 1)
-        if close < 0:
+        if close < 0 or _split_reads_differently(out[m.end():close]):
             return out
         args = _split_args(out[m.end():close])
         if len(args) < 2:
@@ -308,7 +393,7 @@ def _approx_calculate(s):
         if not m:
             return out
         close = _match_paren(out, m.end() - 1)
-        if close < 0:
+        if close < 0 or _split_reads_differently(out[m.end():close]):
             return None
         repl = _calc_approx(_split_args(out[m.end():close]))
         if repl is None:
@@ -364,12 +449,187 @@ def _expand_functions(expr):
     return expr
 
 
+# A DAX "double" string literal: no backslash escapes, "" is one embedded quote.
+DAX_STRING = re.compile(r'"((?:[^"]|"")*)"')
+
+
+def dax_string_value(m: re.Match) -> str:
+    """The text a ``DAX_STRING`` match denotes. The single DAX literal decoder, shared
+    with the gated-measure parser so neither invents its own escapes (BL-365)."""
+    return m.group(1).replace('""', '"')
+
+
+_PLAIN_INT = re.compile(r"0|-?[1-9]\d*")
+
+
+def plain_int64(text: str) -> bool:
+    """True when ``text`` is a plain integer DAX would print the same way as text (no
+    sign but ``-``, no leading zero, no decimal point) and that fits DAX's 64-bit integer.
+    DAX compares a mixed value set as text, converting each number to its own canonical
+    form: ``1.50`` compares as ``"1.5"``, ``1.0`` and ``01`` as ``"1"``. Only a plain
+    integer's text is the digits as written. Shared with the gated parser."""
+    t = text.strip()
+    return (len(t) <= 20 and bool(_PLAIN_INT.fullmatch(t))
+            and -2 ** 63 <= int(t) <= 2 ** 63 - 1)
+
+
+_IN_SET_AT = re.compile(r"IN\s*\{", re.I)
+_NUMBER_LITERAL = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _in_sets(src: str):
+    """``(start, end, members)`` for each ``IN { … }`` set in DAX ``src``: ``start`` is
+    where the IN keyword begins, ``end`` just past the closing brace, ``members`` the set's
+    trimmed members. Quoted text and [columns] are skipped, so an IN or a brace inside
+    them is not a set."""
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch in "\"'[":
+            i = _opaque_end(src, i)
+            continue
+        m = _IN_SET_AT.match(src, i)
+        if m and (i == 0 or not (src[i - 1].isalnum() or src[i - 1] == "_")):
+            j = m.end()
+            while j < n and src[j] != "}":
+                j = _opaque_end(src, j) if src[j] in "\"'[" else j + 1
+            yield i, min(j + 1, n), [a.strip() for a in _split_args(src[m.end():j])]
+            i = j + 1
+            continue
+        i += 1
+
+
+_WORD = re.compile(r"[A-Za-z_]\w*")
+_COMPARISON = re.compile(r"<>|<=|>=|==|[=<>]")
+# A bare paren and these calls hand on their operands' truth value, so a set inside one
+# reaches whatever compares the group. IF( and any other call give a value of their own.
+_TRUTH_PASSING = frozenset({None, "AND", "OR", "NOT"})
+
+
+class _Level:
+    """One paren or brace level of ``_in_set_negated``'s scan."""
+    __slots__ = ("inherited", "passes_truth", "nots", "compared", "left_has_set", "has_set")
+
+    def __init__(self, inherited: bool, passes_truth: bool):
+        self.inherited = inherited          # an enclosing NOT or comparison covers it all
+        self.passes_truth = passes_truth    # a bare paren, AND(, OR( or NOT(
+        self.nots = 0                       # NOTs whose operand is still open here
+        self.compared = False               # a comparison's right operand is open here
+        self.left_has_set = False           # the operand since the last && || , holds a set
+        self.has_set = False
+
+    def negating(self) -> bool:
+        return self.inherited or self.nots > 0 or self.compared
+
+    def end_operand(self) -> None:          # && || or , on this level
+        self.nots, self.compared, self.left_has_set = 0, False, False
+
+
+def _in_set_negated(src: str, spans) -> bool:
+    """True when an IN set's result is negated or compared, however it is spelled: under a
+    NOT (``NOT T[s] IN {…}``, ``NOT UPPER(T[s]) IN {…}``, ``NOT (x && T[s] IN {…})``,
+    ``NOT OR(x, T[s] IN {…})``), or an operand of a comparison (``T[s] IN {…} = FALSE``,
+    ``<> TRUE``, ``FALSE = (T[s] IN {…})``, ``(T[s] IN {…} && x) = FALSE``). A blank ``s``
+    is not in the set: FALSE in DAX, NULL in ThoughtSpot. As a condition the two agree,
+    both taking ``else``; negated or compared they do not.
+
+    One linear pass over ``spans`` (``(start, end)`` of each set). DAX binds NOT looser than
+    a comparison or IN and tighter than ``&&`` / ``||``, so the operand of a NOT, and the
+    right operand of a comparison, run to the next ``&&``, ``||`` or ``,`` on their own
+    level or to that level's end; a comparison's left operand runs back to the last of
+    those. A bare paren, AND(, OR( and NOT( pass a set they hold out to that left operand;
+    IF( and other calls do not, so ``IF(T[s] IN {…}, 1, 0) = 1`` still translates.
+    Conservative: ``X = T[s] IN {…}``, which DAX reads ``(X = T[s]) IN {…}``, refuses."""
+    ends = dict(spans)
+    levels = [_Level(False, False)]
+    word, i, n = None, 0, len(src)
+    while i < n:
+        lvl, ch = levels[-1], src[i]
+        if i in ends:
+            if lvl.negating():
+                return True
+            lvl.left_has_set = lvl.has_set = True
+            word, i = None, ends[i]
+        elif ch in "\"'[":
+            word, i = None, _opaque_end(src, i)
+        elif ch.isascii() and (ch.isalpha() or ch == "_"):   # _WORD's own first class
+            m = _WORD.match(src, i)
+            word = m.group(0).upper()
+            lvl.nots += word == "NOT"
+            i = m.end()
+        elif ch.isspace():
+            i += 1
+        else:
+            i = _scan_operator(src, i, levels, word)
+            if i < 0:
+                return True
+            word = None
+    return False
+
+
+def _scan_operator(src: str, i: int, levels: list, word) -> int:
+    """``_in_set_negated``'s step over the bracket or operator at ``i``, updating
+    ``levels``: the index after it, or -1 when it compares an operand holding a set.
+    ``word`` is the name just before it, if any, to tell AND( from IF(."""
+    lvl, ch = levels[-1], src[i]
+    if ch in "({":
+        levels.append(_Level(lvl.negating(), ch == "(" and word in _TRUTH_PASSING))
+    elif ch in ")}":
+        if len(levels) > 1:
+            done = levels.pop()
+            if done.passes_truth and done.has_set:
+                levels[-1].left_has_set = levels[-1].has_set = True
+    elif ch == "," or src.startswith(("&&", "||"), i):
+        lvl.end_operand()
+        return i + (1 if ch == "," else 2)
+    else:
+        m = _COMPARISON.match(src, i)
+        if m:
+            if lvl.left_has_set:
+                return -1
+            lvl.compared = True
+            return m.end()
+    return i + 1
+
+
+def _in_set_reason(src: str):
+    """A NEEDS-REVIEW reason for an IN set ``translate_dax`` cannot write exactly, else
+    None. Three shapes (the gated parser reads only literal sets with nothing negating or
+    comparing them, so it refuses the first and third, and writes the second exactly):
+
+    * The set's result negated or compared (``_in_set_negated``): ``NOT T[s] IN {"a"}``,
+      ``T[s] IN {"a"} = FALSE``. A blank ``s`` is not in the set, so DAX gives FALSE and
+      its negation TRUE; ThoughtSpot's ``NULL in { … }`` is NULL, and so is its negation,
+      which falls to ``else``. Inferred from DAX and SQL semantics, not probed (BL-610).
+    * A set mixing a string with anything else (``{"a", 1}``, ``{"a", TRUE}``). DAX
+      compares it as text, each number in its own canonical form (``1.50`` as ``"1.5"``).
+      The gated parser writes a plain integer as its text (``plain_int64``); this path
+      rewrites no literal, so it would emit the bare value against a text column, and it
+      refuses every mixed set.
+    * A member that is not a string or number literal: a row constructor
+      (``(T[a], T[b]) IN {("x", 1)}``), a column, or an expression. ThoughtSpot's ``in``
+      takes a list of literals."""
+    sets = list(_in_sets(src))
+    if _in_set_negated(src, ((start, end) for start, end, _ in sets)):
+        return ("an IN set's result is negated or compared (NOT, = FALSE, <> TRUE): a blank "
+                "value is FALSE in DAX but NULL in ThoughtSpot (BL-610); rebuild by hand")
+    for _, _, members in sets:
+        strings = [bool(DAX_STRING.fullmatch(v)) for v in members if v]
+        if any(strings) and not all(strings):
+            return ("an IN set mixes strings with other values, which DAX compares as "
+                    "text (1.50 as \"1.5\"); rebuild by hand")
+        if not all(DAX_STRING.fullmatch(v) or _NUMBER_LITERAL.fullmatch(v) for v in members):
+            return ("an IN set member is not a string or number literal (a row "
+                    "constructor, a column or an expression), and ThoughtSpot's in takes a "
+                    "list of literals; rebuild by hand")
+    return None
+
+
 def _normalize_operators(expr):
     """DAX string literals + operators -> ThoughtSpot. Returns (expr, concat_note|None)."""
     # DAX "double" string literals ("" is an embedded quote) -> SQL-standard 'single',
     # printed in ThoughtSpot's exact form at the end by ts_finalize_formula (BL-365).
-    expr = re.sub(r'"((?:[^"]|"")*)"', lambda m: sql_std_literal(m.group(1).replace('""', '"')),
-                  expr)
+    expr = DAX_STRING.sub(lambda m: sql_std_literal(dax_string_value(m)), expr)
     expr = expr.replace("<>", "!=")
     expr = expr.replace("&&", " and ").replace("||", " or ")
     expr = re.sub(r"\bNOT\b", "not", expr)
@@ -433,12 +693,15 @@ def _qualify_home_and_dates(expr, home_table, home_cols, date_cols):
     return expr
 
 
-def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_dax=None, physical_cols=None):
+def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_dax=None,
+                  physical_cols=None, is_measure=True):
     """Translate a DAX measure/calc-column expression to a ThoughtSpot formula.
 
     home_table / home_cols qualify bare refs like [HireDate] to [Employee::HireDate];
     date_cols turns DATE subtraction into diff_days(); measure_dax lets sibling measure
-    refs become [formula_<name>] id-references. Returns (expr, status, note); expr is
+    refs become [formula_<name>] id-references; is_measure=False (a calculated column)
+    keeps the gated distinct-count shapes NEEDS REVIEW, because DAX evaluates a calculated
+    column per row and the emitted aggregate would not. Returns (expr, status, note); expr is
     None for NEEDS REVIEW (the caller preserves the original DAX). The pipeline runs as
     phase helpers so each stays simple: calculate-rewrites -> review gate -> qualify ->
     expand -> normalize -> map -> home/date qualify."""
@@ -451,6 +714,19 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
         note_bits.append(DISTINCTCOUNT_NOTE)
 
     reason = _review_reason(src)
+    if reason:
+        # Two of the shapes the gate rejects are mechanical and fully described by the
+        # DAX: a gated distinct count and a gated ratio over the same grain. Recognising
+        # them here is the difference between a migrated measure and a human retyping
+        # what the expression already says. Anything still unrecognised keeps its
+        # NEEDS REVIEW, so nothing is ever guessed.
+        from ts_cli.powerbi.gated import translate as _translate_gated
+        g_expr, g_status, g_note = (_translate_gated(src, home_table) if is_measure
+                                    else (None, None, None))
+        if g_expr:
+            return g_expr, g_status, g_note
+        return None, "NEEDS REVIEW", reason
+    reason = _in_set_reason(src)
     if reason:
         return None, "NEEDS REVIEW", reason
 
