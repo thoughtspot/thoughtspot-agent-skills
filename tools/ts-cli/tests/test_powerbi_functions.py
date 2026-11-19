@@ -460,3 +460,61 @@ def test_calculate_all_the_quote_aware_split_newly_reads_stays_needs_review(dax)
     rewritten by code written against that splitter."""
     expr, status, _ = translate_dax(dax)
     assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+# --- Round-6 review: refuse the NOT ... IN class, not its spellings -------------------
+
+@pytest.mark.parametrize("dax", [
+    # NOT over an operand holding the set, however the operand is spelled
+    'IF(NOT ((T[s])) IN {"a","b"}, 1, 0)',
+    'IF(NOT UPPER(T[s]) IN {"A","B"}, 1, 0)',
+    'IF(NOT T[n] + 0 IN {1, 2}, 1, 0)',
+    'IF(NOT (T[n] > 1 && T[s] IN {"a","b"}), 1, 0)',
+    'IF(NOT OR(T[n] > 1, T[s] IN {"a","b"}), 1, 0)',
+    'IF(T[n] > 1 && NOT T[s] IN {"a","b"}, 1, 0)',
+    # the set's result compared, which negates it as surely as NOT does
+    'IF(T[s] IN {"a","b"} = FALSE, 1, 0)',
+    'IF(T[s] IN {"a","b"} <> TRUE, 1, 0)',
+    'IF(T[s] IN {"a","b"} == FALSE(), 1, 0)',
+    'IF(FALSE = (T[s] IN {"a","b"}), 1, 0)',
+    'IF((T[s] IN {"a","b"} && T[n] > 1) = FALSE, 1, 0)',
+    'IF(AND(T[s] IN {"a","b"}, T[n] > 1) <> TRUE, 1, 0)',
+])
+def test_a_negated_or_compared_in_set_needs_review(dax):
+    """A blank s is not in the set: FALSE in DAX, NULL in ThoughtSpot. As a condition the
+    two agree (both take else); negated or compared they do not (BL-591). The last four
+    were Migrated on main too, because their set's commas sat inside parens."""
+    expr, status, note = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-591" in note
+
+
+@pytest.mark.parametrize("dax", [
+    'IF((T[a], T[b]) IN {("x", 1), ("y", 2)}, 1, 0)',
+    '(T[a], T[b]) IN {("x", 1), ("y", 2)}',
+    'IF(T[n] IN {T[m], 2}, 1, 0)',
+    'IF(T[n] IN {1 + 1, 3}, 1, 0)',
+])
+def test_an_in_set_member_that_is_not_a_literal_needs_review(dax):
+    """ThoughtSpot's `in` takes a list of literals: a row constructor, a column or an
+    expression in the set is refused (the second was Migrated on main)."""
+    expr, status, note = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "literal" in note
+
+
+@pytest.mark.parametrize("dax,expected", [
+    # a comparison or NOT beside the set, not over it, leaves it a plain condition
+    ('IF(T[n] > 1 && T[s] IN {"a","b"}, 1, 0)',
+     "(if ([T::n] > 1 and [T::s] IN {'a','b'}) then 1 else 0)"),
+    ('IF(T[s] IN {"a","b"} && T[n] > 1, 1, 0)',
+     "(if ([T::s] IN {'a','b'} and [T::n] > 1) then 1 else 0)"),
+    ('IF(NOT ISBLANK(T[a]) || T[s] IN {"a","b"}, 1, 0)',
+     "(if (not isnull([T::a]) or [T::s] IN {'a','b'}) then 1 else 0)"),
+    # IF turns the set back into a value both sides agree on, so comparing that is exact
+    ('IF(IF(T[s] IN {"a","b"}, 1, 0) = 1, 1, 0)',
+     "(if ((if ([T::s] IN {'a','b'}) then 1 else 0) = 1) then 1 else 0)"),
+])
+def test_a_set_beside_a_negation_it_is_not_under_still_translates(dax, expected):
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (expected, "Migrated")
