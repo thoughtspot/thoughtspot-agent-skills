@@ -18550,7 +18550,7 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
 
 **Target:** 2027-01-31.
 
-## BL-614 — ts-audit Data Cache and Formulas: review nits deferred from #744
+## BL-615 — ts-audit Data Cache and Formulas: review nits deferred from #744
 
 **Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
 blocker or should-fix left; these were deferred, not declined).
