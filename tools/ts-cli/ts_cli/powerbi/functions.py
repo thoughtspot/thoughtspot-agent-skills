@@ -263,7 +263,7 @@ def _split_reads_differently(s: str) -> bool:
     let ``_calc_approx`` see it, and that rewrite keeps only the first aggregate's argument,
     so ``CALCULATE(SUM(a) / SUM(b), T[s] IN {"x","y"})`` became ``sum_if(..., a)``. Such a
     CALCULATE stays NEEDS REVIEW, as before; the same loss on `=` filters, which the old
-    splitter already let through, is BL-608."""
+    splitter already let through, is BL-609."""
     i, n = 0, len(s)
     while i < n:
         ch = s[i]
@@ -600,7 +600,7 @@ def _in_set_reason(src: str):
     * The set's result negated or compared (``_in_set_negated``): ``NOT T[s] IN {"a"}``,
       ``T[s] IN {"a"} = FALSE``. A blank ``s`` is not in the set, so DAX gives FALSE and
       its negation TRUE; ThoughtSpot's ``NULL in { … }`` is NULL, and so is its negation,
-      which falls to ``else``. Inferred from DAX and SQL semantics, not probed (BL-609).
+      which falls to ``else``. Inferred from DAX and SQL semantics, not probed (BL-610).
     * A set mixing a string with anything else (``{"a", 1}``, ``{"a", TRUE}``). DAX
       compares it as text, each number in its own canonical form (``1.50`` as ``"1.5"``).
       The gated parser writes a plain integer as its text (``plain_int64``); this path
@@ -612,7 +612,7 @@ def _in_set_reason(src: str):
     sets = list(_in_sets(src))
     if _in_set_negated(src, ((start, end) for start, end, _ in sets)):
         return ("an IN set's result is negated or compared (NOT, = FALSE, <> TRUE): a blank "
-                "value is FALSE in DAX but NULL in ThoughtSpot (BL-609); rebuild by hand")
+                "value is FALSE in DAX but NULL in ThoughtSpot (BL-610); rebuild by hand")
     for _, _, members in sets:
         strings = [bool(DAX_STRING.fullmatch(v)) for v in members if v]
         if any(strings) and not all(strings):

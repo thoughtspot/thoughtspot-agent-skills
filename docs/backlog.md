@@ -368,8 +368,8 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
-| BL-608 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
-| BL-610 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
+| BL-609 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
+| BL-611 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -497,7 +497,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
-| BL-609 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
+| BL-610 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
 | BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 | BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
 | BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
@@ -18276,7 +18276,7 @@ commit that filed this item.
 
 **Target:** 2027-02-28.
 
-## BL-608 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
+## BL-609 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 
@@ -18296,7 +18296,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 **Target:** 2027-01-31.
 
-## BL-609 — a DAX `<>` comparison drops blank rows that DAX keeps; the refused negated IN set is inferred, not probed `Tier 3`
+## BL-610 — a DAX `<>` comparison drops blank rows that DAX keeps; the refused negated IN set is inferred, not probed `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 
@@ -18308,7 +18308,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 **Target:** 2027-01-31.
 
-## BL-610 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
+## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
 
 **Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main`, and PR #517 changes none of them; it only lets the IN-set form of the second through.
 
