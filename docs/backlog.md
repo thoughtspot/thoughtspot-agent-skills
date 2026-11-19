@@ -509,6 +509,7 @@ are roughly ordered by value÷effort.
 | BL-607 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
 | BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
 | BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
+| BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18518,5 +18519,33 @@ the same blind spot, and the Sisense, Databricks MV, dbt and SQL-form code calls
 3. Check the other `expr_is_aggregated` callers (`sisense/build_model.py`, `databricks/mv_sql*.py`,
    `dbt/formula_pass.py`, `sql_forms.py`, `sv_sql_exact.py`) for anything that relied on the
    old reading.
+
+**Target:** 2027-01-31.
+
+## BL-613 — DAX translator: an IN set's result used as a value translates, and may differ from DAX for a blank `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the independent review of the maintainer commits on PR #517.
+
+**What.** PR #517 refuses an IN set whose result is negated or compared to TRUE/FALSE,
+because DAX and ThoughtSpot may disagree on a blank operand. Two shapes that use the IN result
+as a value still translate, on `main` as well as on that branch, so the PR did not introduce
+them:
+
+- `IF(ISBLANK(T[s] IN {"a","b"}), 1, 0)`. For a blank `T[s]`, DAX evaluates the IN to FALSE,
+  so the IF gives 0. If ThoughtSpot evaluates `[T::s] in {…}` to NULL for a NULL operand, the
+  translation gives 1.
+- A calculated column `Flag = T[s] IN {"a","b"}`, later used as `IF(NOT T[Flag], 1, 0)`. The
+  negation check sees only the measure, not the column definition behind `T[Flag]`.
+
+Arithmetic on an IN result probably fails at import as a ThoughtSpot type error; unverified.
+
+**Do.**
+1. Probe live first: what ThoughtSpot returns for `[col] in {…}` when `[col]` is NULL. The
+   whole class, and PR #517's own refusals, rest on the NULL premise, which nothing has
+   verified on a cluster yet.
+2. If it is NULL: refuse an IN set whose result is used as anything other than an IF or
+   SWITCH condition or an AND/OR operand, and carry the "IN-derived" property through a
+   calculated column, so a measure that negates such a column refuses too.
+3. Tests for both shapes, plus arithmetic on an IN result.
 
 **Target:** 2027-01-31.
