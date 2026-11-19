@@ -369,6 +369,7 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-608 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
+| BL-610 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -17873,3 +17874,21 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 2. If NULL rows drop, emit `( [x] != 'a' or isnull ( [x] ) )` (and the same for `not in`), or flag the comparison Approximated with the reason. Either way, a test per form.
 
 **Target:** 2027-01-31.
+
+## BL-610 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main`, and PR #517 changes none of them; it only lets the IN-set form of the second through.
+
+**What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
+
+- `_qualify_home_and_dates` qualifies any `[name]` that matches a home column, inside a string too: `IF(Fact[s] = "[Amount]", 1, 0)` with `Amount` a home column becomes `if ([Fact::s] = '[Fact::Amount]') …`, which matches no row that held `[Amount]`.
+- `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b", "c"}, 1, 0)` both compare against `'a and b'`. PR #517 lets IN sets inside a call reach this pass, so the second form was NEEDS REVIEW before it.
+- The same pass lower-cases `NOT` inside a column name: `T[NOT]` becomes `[T::not]`, a different column on a case-sensitive warehouse.
+- The function-name scan (`_map_known_functions`) reads `a(` inside a string or a name as an unknown function, so `IF(T[s] = "a(", 1, 0)` is refused. This one over-refuses rather than giving a wrong value.
+
+**Do.**
+1. Make the three rewrite passes skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding a fourth regex. The first three are wrong values, so they go first.
+2. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
+3. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
+
+**Target:** 2027-01-15.
