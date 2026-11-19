@@ -59,7 +59,7 @@ RATCHET: dict[str, tuple[int, str]] = {
     # ts tableau command module grew past 1000 lines with the multi-table
     # build-model fixes (v0.35-0.36). Split into per-flow submodules tracked
     # in BL-089 (M10); ratcheted until then. Lower this number as it shrinks.
-    # 1596 as of ts-cli v0.217.2: _export_model_tml raises _ExportFailed
+    # 1596 as of ts-cli v0.219.2: _export_model_tml raises _ExportFailed
     # instead of exiting the process directly, so a failed export on one
     # datasource no longer kills the per-datasource loop before every other
     # datasource's result is printed (round-4 PR #662 review).

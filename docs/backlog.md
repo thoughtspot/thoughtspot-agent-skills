@@ -481,7 +481,7 @@ are roughly ordered by value÷effort.
 | BL-568 | Exported TML parsed without stripping non-printables: `export_item_doc` and 9 raw `yaml.safe_load(edoc)` sites | 2026-12-31 |
 | BL-569 | `dependency/backup.py` `backup_filename`: 60-character cap overruns the 255-byte limit; keeps Windows-reserved characters | 2026-12-31 |
 | BL-581 | Unconfirmed whether `fix_double_aggregation`'s blanket `sum([formula_X])` → `[formula_X]` simplification silently undoes a `group_aggregate(...)`-wrapped reference another formula shape needs to avoid a misleading import failure | 2026-12-31, or the next converter work touching `fix_double_aggregation` |
-| BL-582 | A CHAR list parameter's runtime value: tableau-formula-translation.md:193 says it's the migrated `display_name`; the translator still compares formula literals against Tableau's internal `list_config.value` | 2026-12-31, or the next converter work touching parameter comparisons |
+| BL-582 | A CHAR list parameter's runtime value is unconfirmed (migrated `display_name` or Tableau's internal `list_config.value`); the translator compares formula literals against the internal value, and tableau-formula-translation.md:193 is hedged until a live probe settles it | 2026-12-31, or the next converter work touching parameter comparisons |
 | BL-583 | `check_references.py` does not scan `agents/cli/SETUP.md`, so a broken link there passes every gate | 2026-12-31 |
 | BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
@@ -17625,19 +17625,30 @@ where `A` is a FIXED LOD. Fixed by excluding `group_aggregate`-valued refs from 
 See `tools/ts-cli/ts_cli/formula_common.py`'s `fix_double_aggregation` and
 `tools/ts-cli/tests/test_model_builder.py::TestDoubleAggregation::test_sum_of_group_aggregate_ref_not_unwrapped`.
 
-**Update (2026-11-17, round-7 PR #662 review):** the round-4 fix only checked `X`'s own
-inline text, so a `group_aggregate`-valued sibling reached one level removed through
-another `[formula_*]` reference (e.g. `X = [formula_Rev] / group_aggregate(...)` with
-`Rev = sum(S)`) was still wrongly stripped — the same wrong-number class as round-4's case,
-just indirect. `_every_aggregate_is_inside_a_group_aggregate` now follows `[formula_*]`
-references recursively (with a cycle guard), recognizes the full ThoughtSpot aggregate list
-(`median`, `min_if`, `max_if`, `stddev_if`, `variance_if` were missing from
-`_AGG_FUNCTIONS`), and finds each `group_aggregate(...)` call's span with the module's own
-quote-aware `_close_paren` instead of a Tableau-only, non-quote-aware helper (an unbalanced
-`(` inside a string literal in the LOD's own filter argument used to throw the span off).
-See the new cases added to `TestDoubleAggregation` this round. Neither round's fix confirms
-or resolves the still-open question below (the average()/stddev()-dependent import-failure
-case) — that still needs a live probe.
+**Update (2026-11-17, round-7 PR #662 review; corrected 2026-11-19):** the round-4/5 check
+read only `X`'s own inline text, so when `X` reached a naked aggregate through another
+reference (e.g. `X = [Rev] / group_aggregate(...)` with `Rev = sum(S)`), `X` looked
+LOD-shaped and the `sum()` wrapper was wrongly KEPT: `sum ( [formula_X] )` aggregates an
+already-aggregated formula, and failed at import. (This note first said the wrapper was
+wrongly stripped, giving a wrong number; that was backwards.) The check now follows
+references, recognizes the full ThoughtSpot aggregate list (`median`, `min_if`, `max_if`,
+`stddev_if`, `variance_if` were missing from `_AGG_FUNCTIONS`), and finds each
+`group_aggregate(...)` call's span with the module's own quote-aware `_close_paren` instead
+of a Tableau-only, non-quote-aware helper (an unbalanced `(` inside a string literal in the
+LOD's arguments used to throw the span off).
+
+**Update (2026-11-19, maintainer round on PR #662):** the round-7 walk went only one level
+deep. It followed a reference only when that reference's own text held an aggregate, so
+`X = [M] - group_aggregate(...)` with `M = [P] / [Q]` and `P`, `Q` plain sums kept its
+wrapper again, through every converter. `_has_naked_aggregate`, which replaces
+`_every_aggregate_is_inside_a_group_aggregate`, recurses through every resolved reference
+with a cycle guard. A refs-only ratio of two LODs (`M = [A] / [B]`, both `group_aggregate`)
+still reaches no naked aggregate, so its wrapper stays; a guard test pins that, because
+simply dropping the gate would have stripped it, a wrong number. See `TestDoubleAggregation`
+in `test_model_builder.py` and the two-level tests in `test_build_model_helpers.py` (Tableau)
+and `test_dbt_review2_findings.py` (dbt). None of these fixes confirms or
+resolves the still-open question below (the average()/stddev()-dependent import-failure
+case); that still needs a live probe.
 
 **Do.** Confirm live, on a real cluster: does `fix_double_aggregation` ever fire on a
 formula `X` that itself has `average()`/`stddev()` dependents? If yes, does the simplified
