@@ -27,8 +27,9 @@ REPORT_DIR = Path(__file__).parent / "report"
 VENDOR_DIR = Path(__file__).parent / "vendor"
 
 #: Scripts every view may call, between core.js and the views: shared code that is not
-#: a view of its own (the Formulas view's graph mode).
-REPORT_LIBS: List[str] = ["formula_graph.js"]
+#: a view of its own (the tab bar and breadcrumb of a Model's pages, the formula type
+#: filter and legend, the Formulas view's graph mode).
+REPORT_LIBS: List[str] = ["model_nav.js", "formula_types.js", "formula_graph.js"]
 
 #: The graph's libraries, in load order (vendor/README.md): dagre, then Cytoscape, then
 #: the Cytoscape layout that drives dagre, which registers itself with Cytoscape.

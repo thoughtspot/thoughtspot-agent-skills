@@ -11,7 +11,9 @@
    for it. The
    readiness is read off the fields the rules P19-P28 judge by, so it says what their
    findings say. JSON written before this view has no `dc`: its Models read "Not
-   assessed". */
+   assessed". #datacache lists every Model; #datacache/<guid> is one Model's page
+   (model_nav.js), its row alone under the Model's tabs, with a way back to the list:
+   the filter pills and search, which belong to the list, are left out there. */
 var DC_STATES = {
   ready: {label: "Can use", cls: "dc-ready"},
   blocked: {label: "Can’t use", cls: "dc-blocked"},
@@ -149,10 +151,28 @@ function dcShown(rows){
   });
 }
 
-function buildDataCache(D){
+/* One Model's page: its tabs, its row, and the way back to every Model. */
+function buildDataCacheModel(c, rows, guid){
+  var row = rows.filter(function(r){ return r.guid === guid; })[0];
+  if(row) c.appendChild(modelTabs(guid, "datacache"));
+  var back = el("div", "crossmodel-filter dc-one", row ?
+    'Showing 1 Model of '+rows.length+'. <a class="dc-all" href="#datacache">Show all '+rows.length+' Models</a>' :
+    'This report has no such Model. <a class="dc-all" href="#datacache">Show all '+rows.length+' Models</a>');
+  c.appendChild(back);
+  if(!row) return;
+  var table = el("table", "cleanup-table dc-table");
+  table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
+    '<th>Calendars in use</th></tr></thead><tbody>'+dcRowHtml(row)+'</tbody>';
+  var wrap = el("div", "crossmodel-wrap");
+  wrap.appendChild(table);
+  c.appendChild(wrap);
+}
+
+function buildDataCache(D, guid){
   var c = document.getElementById("v-datacache");
   c.innerHTML = "";
   var rows = dcRows();
+  if(rows.length && guid){ buildDataCacheModel(c, rows, guid); return; }
   if(!rows.length){
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">⚡</div>'+
       '<div class="ph-text">No Models in this report</div>'+
@@ -192,6 +212,8 @@ function buildDataCache(D){
 registerView({id: "datacache", routes: ["datacache"],
   nav: {hash: "#datacache", icon: "⚡", label: "Data Cache"},
   show: function(route){
-  buildDataCache(D);
-  return {crumbs: ["Data Cache"], links: []};
+  buildDataCache(D, route.id);
+  if(!route.id || !findCorpusModel(route.id)) return {crumbs: ["Data Cache"], links: []};
+  highlightSidebarModel(route.id);
+  return modelCrumbs(route.id, "Data Cache");
 }});

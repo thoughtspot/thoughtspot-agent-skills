@@ -66,13 +66,13 @@ RATCHET: dict[str, tuple[int, str]] = {
 }
 
 # The same ratchet for top-level JS functions: (path, function name) -> (recorded
-# length in lines, backlog reference). Both were past JS_FUNCTION_FAIL when the gate
-# arrived (BL-503); BL-520 splits them. Lower these as they shrink.
+# length in lines, backlog reference). Each was past JS_FUNCTION_FAIL when the gate
+# arrived (BL-503); BL-520 splits them. Lower these as they shrink, and drop one once
+# it is under the limit.
 JS_FUNCTION_RATCHET: dict[tuple[str, str], tuple[int, str]] = {
     ("tools/ts-cli/ts_cli/audit/report/views/crossmodel.js", "buildCrossModel"):
         (332, "BL-520"),
-    ("tools/ts-cli/ts_cli/audit/report/views/scorecard.js", "buildScorecard"):
-        (302, "BL-520"),
+    # views/scorecard.js buildScorecard (302) was split under the limit on 2026-11-19
 }
 
 _JS_FUNCTION = re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(")

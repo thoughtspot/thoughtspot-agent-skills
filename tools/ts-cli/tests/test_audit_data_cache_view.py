@@ -264,7 +264,7 @@ _HEATMAP = ('window.__extra = Array.prototype.map.call(document.querySelectorAll
 @needs_chrome
 def test_the_dashboard_heatmap_has_a_data_cache_column(tmp_path):
     """Each heatmap row shows its Model's Data Cache readiness, as the Data Cache view
-    labels it, with the reasons on hover and a link to that view."""
+    labels it, with the reasons on hover and a link to that Model's Data Cache page."""
     shown = report_browser.render(_page(), tmp_path, "dashboard", actions=_HEATMAP)
     assert shown["errors"] == []
     assert "DATA CACHE" in shown["visible"].upper()
@@ -273,7 +273,9 @@ def test_the_dashboard_heatmap_has_a_data_cache_column(tmp_path):
     assert {n: r[0] for n, r in rows.items()} == {
         "Blocked Sales": "Can’t use", "Passthrough Sales": "Can’t use",
         "Warned Sales": "Warning"}
-    assert {r[1] for r in rows.values()} == {"#datacache"}
+    assert {n: r[1] for n, r in rows.items()} == {
+        "Blocked Sales": "#datacache/m-blocked", "Passthrough Sales": "#datacache/m-sql",
+        "Warned Sales": "#datacache/m-warn"}
     assert rows["Blocked Sales"][2] == (
         "Data Cache: Can’t use — P19 Custom calendar")
     assert rows["Warned Sales"][2] == (

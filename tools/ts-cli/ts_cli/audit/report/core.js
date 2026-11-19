@@ -174,7 +174,7 @@ function updateBreadcrumb(parts, links){
       html += '<span class="current">'+esc(p)+'</span>';
     } else {
       var href = (links && links[i]) ? links[i] : "#dashboard";
-      html += '<a href="'+href+'" style="color:var(--muted);text-decoration:none;">'+esc(p)+'</a>';
+      html += '<a href="'+esc(href)+'" style="color:var(--muted);text-decoration:none;">'+esc(p)+'</a>';
     }
   });
   bc.innerHTML = html;

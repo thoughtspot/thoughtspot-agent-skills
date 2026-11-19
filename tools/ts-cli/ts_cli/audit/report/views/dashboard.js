@@ -13,15 +13,16 @@ function dataCacheByGuid(){
   if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
   return out;
 }
-/* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking there. */
-function dataCacheCell(dc){
+/* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking to the
+   Model's own Data Cache page (#datacache/<guid>). */
+function dataCacheCell(dc, guid){
   if(!dc) return '<td></td>';
   var st = DC_STATES[dc.s] || DC_STATES.unknown;
   var why = (dc.r || []).map(function(r){
     return r.c+' '+r.l+(r.q ? ' (to confirm)' : '');
   });
   if(dc.na && dc.na.length) why.push('Not checked: '+dc.na.join(', '));
-  return '<td><a class="dc-state '+st.cls+'" href="#datacache" title="'+
+  return '<td><a class="dc-state '+st.cls+'" href="#datacache/'+esc(guid)+'" title="'+
     esc('Data Cache: '+st.label+(why.length ? ' — '+why.join('; ') : ''))+'">'+
     st.label+'</a></td>';
 }
@@ -256,7 +257,7 @@ function buildHeatmap(){
       html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
                    Math.floor(rs.s)+'</span></td>' : '<td></td>';
     }
-    if(showDataCache) html += dataCacheCell(dataCache[r.g]);
+    if(showDataCache) html += dataCacheCell(dataCache[r.g], r.g);
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);

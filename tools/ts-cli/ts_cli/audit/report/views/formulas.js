@@ -11,6 +11,8 @@
    when that differs, the expression as the TML writes it, to copy; the tree's inline
    line shows it by label. Following a link opens the tree down to that formula. The tree is
    one tab stop, moved through with the arrow keys.
+   Above the tree, the Model's tabs (model_nav.js) and the type chips and legend
+   (formula_types.js, which says how the chips filter the tree, the graph and search).
    Children are built only when a node is opened, since a formula many others use would
    otherwise be drawn once per path; a node already on the path is a circular reference. */
 var FORMULA_EXPAND_ALL_CAP = 2000;
@@ -76,7 +78,7 @@ function hiddenTag(node){
 function formulaRow(node){
   var row = el("div","ftree-row");
   var renamed = node.f && node.f !== node.n;
-  var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+
+  var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+ftypeIcon(nodeMark(node), true)+
     '<span class="ftree-name"'+(renamed ? ' title="Formula: '+esc(node.f)+'"' : '')+'>'+esc(node.n)+'</span>';
   if(FORMULA_KINDS[node.k]) html += '<span class="ftree-tag ftree-kind" data-kind="'+node.k+'">'+node.k+'</span>';
   html += hiddenTag(node);
@@ -132,10 +134,11 @@ function formulaNode(tree, i, path, budget){
       }
       node.u.forEach(function(use){
         if(use[0] === 1){
-          ul.appendChild(formulaLeaf('<code class="ftree-col">'+esc(use[1])+'</code>', "ftree-colleaf", use, tree._view));
+          ul.appendChild(formulaLeaf(ftypeIcon("column", true)+'<code class="ftree-col">'+esc(use[1])+'</code>',
+            "ftree-colleaf", use, tree._view));
           budget.rows++;
         } else if(use[0] === 2){
-          ul.appendChild(formulaLeaf('<span class="ftree-tag ftree-param">parameter</span>'+
+          ul.appendChild(formulaLeaf(ftypeIcon("parameter", true)+'<span class="ftree-tag ftree-param">parameter</span>'+
             '<span class="ftree-name">'+esc(use[1])+'</span>', "ftree-paramleaf", use, tree._view));
           budget.rows++;
         } else if(here.indexOf(use[1]) !== -1){
@@ -148,6 +151,7 @@ function formulaNode(tree, i, path, budget){
       });
       li.appendChild(ul);
       li._built = true;
+      applyTreeFtypes(ul, tree);
     }
     li.classList.remove("collapsed");
     row.setAttribute("aria-expanded","true");
@@ -415,13 +419,16 @@ function searchHits(tree, q){
   return other.concat(byName, byDef);
 }
 
+/* The matches of a shown type (formula_types.js), the rest counted. */
 function searchResultsHtml(tree, value){
   if(!value.trim()) return "";
-  var hits = searchHits(tree, value);
-  if(!hits.length) return '<span class="fdetail-none">No formula, column or parameter matches.</span>';
+  var all = searchHits(tree, value);
+  if(!all.length) return '<span class="fdetail-none">No formula, column or parameter matches.</span>';
+  var hits = all.filter(function(u){ return useShown(tree, u); }), off = all.length - hits.length;
   var more = hits.length - FORMULA_SEARCH_CAP;
   return hits.slice(0, FORMULA_SEARCH_CAP).map(function(u){ return refLink(tree, u); }).join("")+
-    (more > 0 ? '<span class="ftree-more">and '+more+' more: type more to narrow the list</span>' : '');
+    (more > 0 ? '<span class="ftree-more">and '+more+' more: type more to narrow the list</span>' : '')+
+    (off ? '<span class="ftree-more ftype-offcount">'+off+(hits.length ? ' more' : '')+' of a switched-off type</span>' : '');
 }
 
 /* The tree is one tab stop: the arrow keys move between visible rows (Right opens a
@@ -440,7 +447,7 @@ function wireTreeKeys(ul){
       var up = stop.parentNode.parentNode.closest("li.ftree-node");
       stop = up ? up.firstChild : null;
     }
-    stop = stop || $(".ftree-row[role=button]", ul);
+    stop = stop || rows()[0] || $(".ftree-row[role=button]", ul);  /* the first a chip left shown */
     if(stop) current(stop);
   };
   ul._keepTabStop();
@@ -502,8 +509,10 @@ function buildFormulaTree(c, guid){
     '<button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
     (graphAvailable(tree) ? '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'/graph">Graph</a>' : '')+
-    '<a class="ts-link-btn" href="#model/'+esc(guid)+'">Model scorecard</a></div>';
+    '</div>';
   c.appendChild(hdr);
+  var bar = ftypeBar(tree, retype, false);
+  hdr.appendChild(bar);
   var results = el("div","ftree-results");
   c.appendChild(results);
   var note = el("div","ftree-note");
@@ -544,9 +553,19 @@ function buildFormulaTree(c, guid){
            screen, under the sheet (its scroll-margin-bottom) */
         if(row.scrollIntoView) row.scrollIntoView({block: "nearest"});
       }
+      bar._note(tree, target, !!row && row.offsetParent !== null);
       if(focusPanel) $(".fdetail-title", panel).focus();
     }
   };
+  /* a chip flipped: hide and fade rows, and say when the selection is off screen */
+  function retype(){
+    applyTreeFtypes(ul, tree);
+    ul._keepTabStop();
+    results.innerHTML = searchResultsHtml(tree, $(".ftree-search", hdr).value);
+    var sel = $(".ftree-selected", ul);
+    bar._note(tree, tree._selected, !!sel && sel.offsetParent !== null);
+    note.textContent = ftypeKey() === "0000" ? "Every type is switched off: switch one back on to see the tree." : "";
+  }
   function closePanel(byMouse){
     var sel = $(".ftree-selected", ul);
     tree._selected = null;
@@ -554,6 +573,7 @@ function buildFormulaTree(c, guid){
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
     clearSelection();
+    bar._note(tree, null);
     if(!sel || sel.offsetParent === null) sel = $('.ftree-row[tabindex="0"]', ul);
     if(sel) sel.focus({preventScroll: !!byMouse});
   }
@@ -569,6 +589,7 @@ function buildFormulaTree(c, guid){
     ul.appendChild(li);
     if(li._open) li._open();  /* roots open one level */
   });
+  applyTreeFtypes(ul, tree);
   c.appendChild(layout);
   wireTreeKeys(ul);
   /* after this turn: the router shows this view once it is built, and a hidden row
@@ -594,21 +615,25 @@ function buildFormulaTree(c, guid){
   });
 }
 
+/* Builds the view; returns whether it drew the graph. */
 function buildFormulas(D, guid, mode){
   var c = document.getElementById("v-formulas");
   if(c._cy){ c._cy.destroy(); c._cy = null; }  /* a graph left running would keep rendering */
   c.innerHTML = "";
   var cm = guid && findCorpusModel(guid);
-  if(mode === "graph" && cm && graphAvailable(cm.ft)) buildFormulaGraph(c, guid, cm.ft);
-  else if(guid) buildFormulaTree(c, guid);
+  if(cm) c.appendChild(modelTabs(guid, "formulas"));
+  if(mode === "graph" && cm && graphAvailable(cm.ft)){ buildFormulaGraph(c, guid, cm.ft); return true; }
+  if(guid) buildFormulaTree(c, guid);
   else buildFormulasPicker(c);
+  return false;
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
 registerView({id: "formulas", routes: ["formulas"],
   nav: {hash: "#formulas", icon: "ƒ", label: "Formulas"},
   show: function(route){
-  buildFormulas(D, route.id, route.sub);
-  if(route.id) return {crumbs: ["Formulas", findModelName(route.id)], links: ["#formulas"]};
-  return {crumbs: ["Formulas"], links: []};
+  var graph = buildFormulas(D, route.id, route.sub);
+  if(!route.id) return {crumbs: ["Formulas"], links: []};
+  highlightSidebarModel(route.id);
+  return modelCrumbs(route.id, graph ? "Formula graph" : "Formulas");
 }});
