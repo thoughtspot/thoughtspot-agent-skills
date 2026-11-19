@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-19
+- feat: the `ts audit` report gives every page about one Model the same tabs (Scorecard, ERD, Formulas, Data Cache) and breadcrumb, adds `#model/<guid>/erd` (the ERD drawn inline) and `#datacache/<guid>` (one Model's Data Cache row), and the Formulas view gains type chips and a legend shared by its tree and graph (ts-audit 3.25.0)
+- chore: bump ts-cli to v0.221.0
 - feat: the `ts audit` report's Dashboard heatmap shows each Model's Data Cache readiness in a column of its own, linking to the Data Cache view (ts-audit 3.24.0)
 - fix: `ts audit` P24 reads a Databricks connection whose only OAuth settings are `OAuth2ClientId` and `OAuth2Secret` as OAuth to confirm, since per-user OAuth and a service principal both hold that pair; its Models read To confirm instead of Can't use. P23 names an Analyst Studio source (`RDBMS_MODE`) "Analyst Studio", still blocked (ts-audit 3.24.0)
 - chore: bump ts-cli to v0.220.0
