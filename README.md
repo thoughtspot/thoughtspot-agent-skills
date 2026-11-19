@@ -8,7 +8,7 @@ model authoring, multi-tenancy governance, and data querying. Packaged for
 
 ## Skills
 
-The catalog has <!-- BEGIN GENERATED: skills-total -->37 skills across seven categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
+The catalog has <!-- BEGIN GENERATED: skills-total -->38 skills across seven categories<!-- END GENERATED: skills-total -->. Every skill runs in both Claude Code and Cortex Code
 CLI except `ts-profile-snowflake`, which is Claude Code only (Cortex Code manages Snowflake
 connections natively), and the two Custom Charts skills, which link into Claude Code only
 (they drive a local browser and the ThoughtSpot MCP, and have not been run on Cortex Code
@@ -25,7 +25,7 @@ see [skill personas](docs/skill-personas.md).
 | [Semantic Authoring](#semantic-authoring) | A Model that imports cleanly can still answer badly or run slowly | 8 |
 | [Platform & Governance](#platform--governance) | Many audiences, one definition, without a copy per tenant | 5 |
 | [Query](#query) | Getting data out programmatically, and seeing the SQL behind a disputed number | 1 |
-| [Recipes](#recipes) | The same analytical need recurs account after account | 2 |
+| [Recipes](#recipes) | The same analytical need recurs account after account | 3 |
 | [Custom Charts](#custom-charts) | A native chart can't show the story, and a hand-built custom chart ships as a blank tile | 2 |
 
 <!-- END GENERATED: skills-overview -->
@@ -154,6 +154,7 @@ see [skill personas](docs/skill-personas.md).
 
 | Skill | What it builds |
 |---|---|
+| [`ts-recipe-answer-period-comparison`](agents/cli/ts-recipe-answer-period-comparison/SKILL.md) | Event-period comparison Answer: average daily sales in a retail event vs prior weeks, per year, as a reusable Set or Answer formula |
 | [`ts-recipe-formula-business-days-snowflake`](agents/cli/ts-recipe-formula-business-days-snowflake/SKILL.md) | Business-day formula: deploy three Snowflake UDFs for weekday-only date arithmetic, then show ThoughtSpot formula syntax |
 | [`ts-recipe-formula-hms-display-snowflake`](agents/cli/ts-recipe-formula-hms-display-snowflake/SKILL.md) | Duration display formula: deploy four Snowflake UDFs to format integer seconds/minutes as `HH:MM:SS`, `DD:HH:MM:SS`, `HH:MM`, or `DD:HH:MM` strings |
 

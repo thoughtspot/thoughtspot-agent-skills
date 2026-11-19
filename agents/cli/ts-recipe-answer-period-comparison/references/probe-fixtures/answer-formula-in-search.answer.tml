@@ -1,0 +1,46 @@
+answer:
+  name: ZZ_probe_period_comparison_a_formula_q
+  tables:
+  - id: '{model_name}'
+    name: '{model_name}'
+    fqn: '{model_guid}'
+  formulas:
+  - id: formula_Period Bucket
+    name: Period Bucket
+    expr: if ( ( date ( [Order Date] ) >= to_date ( '2018-11-23' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-11-26' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-11-29' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-12-02' , '%Y-%m-%d' ) ) ) then 'Black Friday Days' else if ( ( date ( [Order Date] ) >= to_date ( '2018-11-16' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-11-19' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2018-11-09' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-11-12' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2018-11-02' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-11-05' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2018-10-26' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-10-29' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2018-10-19' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-10-22' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2018-10-12' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2018-10-15' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-11-22' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-11-25' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-11-15' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-11-18' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-11-08' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-11-11' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-11-01' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-11-04' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-10-25' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-10-28' , '%Y-%m-%d' ) ) or ( date ( [Order Date] ) >= to_date ( '2019-10-18' , '%Y-%m-%d' ) and date ( [Order Date] ) <= to_date ( '2019-10-21' , '%Y-%m-%d' ) ) ) then '6 Prior Weeks' else 'Not Black Friday'
+  - id: formula_Average Black Friday Sales
+    name: Average Black Friday Sales
+    expr: safe_divide ( sum_if ( [formula_Period Bucket] = 'Black Friday Days' , [Amount] ) , unique_count_if ( [formula_Period Bucket] = 'Black Friday Days' , date ( [Order Date] ) ) )
+  - id: formula_Average Comparison Sales
+    name: Average Comparison Sales
+    expr: safe_divide ( sum_if ( [formula_Period Bucket] = '6 Prior Weeks' , [Amount] ) , unique_count_if ( [formula_Period Bucket] = '6 Prior Weeks' , date ( [Order Date] ) ) )
+  - id: formula_Variance to Baseline
+    name: Variance to Baseline
+    expr: '[formula_Average Black Friday Sales] - [formula_Average Comparison Sales]'
+  search_query: '[Order Date].yearly [formula_Average Black Friday Sales] [formula_Average Comparison Sales] [formula_Variance to Baseline] [Order Date] between [Order Date].01/01/2018 and [Order Date].12/31/2019 [formula_Period Bucket]'
+  answer_columns:
+  - name: Average Black Friday Sales
+  - name: Average Comparison Sales
+  - name: Period Bucket
+  - name: Variance to Baseline
+  - name: Year(Order Date)
+  table:
+    table_columns:
+    - column_id: Average Black Friday Sales
+      show_headline: false
+    - column_id: Average Comparison Sales
+      show_headline: false
+    - column_id: Period Bucket
+      show_headline: false
+    - column_id: Variance to Baseline
+      show_headline: false
+    - column_id: Year(Order Date)
+      show_headline: false
+    ordered_column_ids:
+    - Year(Order Date)
+    - Average Black Friday Sales
+    - Average Comparison Sales
+    - Period Bucket
+    - Variance to Baseline
+    client_state: ''
+  display_mode: TABLE_MODE

@@ -214,8 +214,10 @@ import. See `ts-object-answer-promote` Step 4 (option P) for the full promotion 
 
 ### `cohorts[]` fields — Sets
 
-Sets appear as `cohorts[]` in Answer TML and are also listed in `answer_columns[]` by name.
-They are **not** `formulas[]` entries.
+Answer-level Sets appear as `cohorts[]` in Answer TML and are also listed in
+`answer_columns[]` by name. They are **not** `formulas[]` entries. A reusable Set is
+different: the Answer names it only, with no `cohorts[]` entry (see "Answer-level vs
+reusable sets" below, and ts-recipe-answer-period-comparison open item #6).
 
 | Field | Notes |
 |---|---|
@@ -227,7 +229,12 @@ They are **not** `formulas[]` entries.
 | `config.bins` | Bin-based set config: `minimum_value`, `maximum_value`, `bin_size` |
 | `config.groups` | Group-based set config: named groups with conditions |
 | `answer` | Query set only: embedded Answer that defines the set members |
-| `worksheet` | Data source reference (id, name, fqn) |
+| `worksheet` | Data source reference (id, name, fqn). **Required**: without it the import fails with error 14500 (live 2026-11-18, [ts-recipe-answer-period-comparison open item #2](../../cli/ts-recipe-answer-period-comparison/references/open-items.md)) |
+
+A `cohorts[]` Set left out of `answer_columns[]` still imports; the export adds it back,
+derived from `search_query` (same open item). An Answer formula **cannot** name a
+`cohorts[]` Set: import fails with error 14516 (SCAL-353379,
+ts-recipe-answer-period-comparison open item #5).
 
 **Answer-level vs reusable sets:**
 - **Answer-level** (what appears in `cohorts[]` above): scoped to this Answer only.
@@ -242,15 +249,21 @@ cohort:
   name: "My Reusable Set"
   description: ""
   owner: "analyst@company.com"
-  model:                         # or `models:` for multi-model sets
+  worksheet:                     # `worksheet:`, not `model:` — `model:` fails import
     id: "Model Display Name"
     name: "Model Display Name"
+    fqn: "{model_guid}"          # or obj_id; see thoughtspot-sets-tml.md
   config:
     # same config structure as answer-level cohorts
 ```
 
-When an Answer uses a reusable set, the `cohorts[]` entry in the Answer TML will include
-a GUID reference to the standalone set object.
+**An Answer names a reusable set by name only, with no `cohorts[]` entry** (live
+2026-11-18, [ts-recipe-answer-period-comparison open item #6](../../cli/ts-recipe-answer-period-comparison/references/open-items.md)).
+The Set name goes in `search_query` and in formulas (`[<Set name>] = '<group>'` works
+inside a formula, ts-recipe-answer-period-comparison open item #5), and the export has no `cohorts` key. Adding
+`cohorts: [{name: <Set name>, guid: <Set GUID>}]` fails with `Duplicate cohort name: … found
+in data source`: the server reads every `cohorts[]` entry as an answer-level Set to create.
+Import the Set first, then the Answer that names it.
 
 ### `answer_columns[]` fields
 

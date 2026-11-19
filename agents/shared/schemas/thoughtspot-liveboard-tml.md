@@ -206,6 +206,10 @@ Inside a viz, the `answer.tables[]` entry binds the viz to its Model. **Use `obj
 not a bare `fqn` GUID** — a viz-level `fqn` is dropped on import, leaving the viz with no
 data source, which renders as an error (the chart shows but has nothing to query).
 
+> **Under review (BL-604).** BL-604 records live evidence that a viz-level `tables[]`
+> binding of `{id, name, fqn}` imported and rendered (the period-comparison recipe's probe
+> Liveboards and smoke test), so this rule may be broader than the failure it came from.
+
 ```yaml
 tables:
 - id: "Model Name"
