@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // liveboard-pack.mjs [--liveboard <dir>] [--commit | --validate | --check]   (--commit requires --liveboard) (<slug> ... | --all)
-//                   [--backup <file>] [--adopt] [--adopt-by-position] [--relayout] [--reuse <guid>] [--core-ref] [--max 60000] [--list]
+//                   [--backup <file>] [--adopt] [--adopt-by-position] [--relayout] [--reuse <guid>] [--core-ref] [--max 20000] [--list]
 //
 // Turns library charts into ready-to-paste MCP code that writes them straight into the target Liveboard.
 // The Liveboard is its own store: nothing else is created in ThoughtSpot.

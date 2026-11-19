@@ -370,6 +370,35 @@ await scenario("a multi-block commit run passes with one backup taken before it"
   ok(vizNamed(st.doc, "Native"), "native chart lost");
 });
 
+await scenario("a chart replaced at the same spec position takes no viz_guid of the chart it replaced", async () => {
+  // Found in the fifth PR 711 review: with no test, the own-slug viz_guid check could be removed and every
+  // scenario still passed, while the new chart silently took the old one's viz_guid.
+  const doc = clone(base);
+  doc.liveboard.visualizations.forEach((v, i) => { v.viz_guid = "00000000-0000-4000-8000-00000000002" + i; });
+  const bestGuid = vizNamed(doc, "Best").viz_guid;
+  const d = path.join(TMP, "lb-replaced"); fs.mkdirSync(d, { recursive: true });
+  const sp = JSON.parse(fs.readFileSync(path.join(DIR, "liveboard.spec.json"), "utf8"));
+  Object.assign(sp.tabs[0].tiles.find((t) => t.slug === "pulse-kpi-best"), { slug: "pulse-kpi-sales", title: "Sales", search: "[sales]" });
+  fs.writeFileSync(path.join(d, "liveboard.spec.json"), JSON.stringify(sp));
+  const st = { doc: clone(doc) };
+  committed(await run(pack(["--commit", "--backup", backup(doc, "replaced.json"), "pulse-kpi-sales"], d).blocks[0], st));
+  const s = vizNamed(st.doc, "Sales");
+  ok(s && s.viz_guid !== bestGuid, "the replacing chart took Best's viz_guid: " + (s && s.viz_guid));
+});
+
+await scenario("with --relayout, a new tile outside the run at a moved tile's old place is refused, never given its code", async () => {
+  // Found in the fifth PR 711 review: with no test, the otherOwn check on the kept-by-position fallback could be
+  // removed and every scenario still passed, while the new tile was committed carrying the moved tile's code.
+  const doc = clone(base);
+  const d = path.join(TMP, "lb-relayout-outside"); fs.mkdirSync(d, { recursive: true });
+  const sp = JSON.parse(fs.readFileSync(path.join(DIR, "liveboard.spec.json"), "utf8"));
+  sp.tabs[0].tiles.find((t) => t.slug === "pulse-kpi-best").y = 8;
+  sp.tabs[0].tiles.unshift({ slug: "pulse-kpi-sales", title: "Sales", search: "[sales]", x: 0, y: 0, w: 6, h: 4 });
+  fs.writeFileSync(path.join(d, "liveboard.spec.json"), JSON.stringify(sp));
+  const r = await run(pack(["--commit", "--relayout", "--backup", backup(doc, "relayout-outside.json"), "pulse-kpi-best"], d).blocks[0], { doc: clone(doc) });
+  ok(r.refused && /MISSING/.test(JSON.stringify(r.problems || [])), "expected a MISSING refusal: " + JSON.stringify(r).slice(0, 400));
+});
+
 fs.rmSync(TMP, { recursive: true, force: true });
 for (const [s, m] of results) console.log(s + " " + m);
 process.exit(results.some(([s]) => s === "FAIL") ? 1 : 0);
