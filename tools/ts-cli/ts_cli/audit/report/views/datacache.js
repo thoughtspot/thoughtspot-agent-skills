@@ -13,7 +13,9 @@
    findings say. JSON written before this view has no `dc`: its Models read "Not
    assessed". #datacache lists every Model; #datacache/<guid> is one Model's page
    (model_nav.js), its row alone under the Model's tabs, with a way back to the list:
-   the filter pills and search, which belong to the list, are left out there. */
+   the filter bar, which belongs to the list, is left out there. The list's filter bar is
+   the shared one (filter_bar.js): a chip per readiness, multi-select, all on at first,
+   switching one off hides its Models; the search narrows what the chips leave. */
 var DC_STATES = {
   ready: {label: "Can use", cls: "dc-ready"},
   blocked: {label: "Can’t use", cls: "dc-blocked"},
@@ -21,13 +23,12 @@ var DC_STATES = {
   warning: {label: "Warning", cls: "dc-warning"},
   unknown: {label: "Not assessed", cls: "dc-unknown"}
 };
-var DC_FILTERS = [["all", "All"], ["ready", "Can use"], ["blocked", "Can’t use"],
-  ["confirm", "To confirm"], ["warning", "Warning"], ["unknown", "Not assessed"]];
+var DC_ORDER = ["ready", "blocked", "confirm", "warning", "unknown"];
 var DC_CHECKS = {P19: "custom calendars", P20: "SQL pass-through", P21: "semantic query",
   P22: "connection calendars", P23: "source types", P24: "connection settings",
   P25: "Table variables", P26: "formula parameters", P27: "SQL Views", P28: "RLS rules"};
 var DC_NO_DATA = {s: "unknown", r: [], k: [], cc: null, na: []};
-var _dcFilter = "all";
+var _dcOn = {ready: true, blocked: true, confirm: true, warning: true, unknown: true};
 var _dcSearch = "";
 
 function dcRows(){
@@ -120,34 +121,23 @@ function dcRowHtml(row){
     '<td>'+dcCalendarsHtml(row)+'</td></tr>';
 }
 
+/* The list's filter bar: a chip per readiness, with its count, and the search box. */
 function dcToolbar(rows, onChange){
-  var bar = el("div", "crossmodel-filter dc-filter");
-  var counts = {all: rows.length};
+  var counts = {};
   rows.forEach(function(r){ counts[r.state] = (counts[r.state] || 0) + 1; });
-  DC_FILTERS.forEach(function(f){
-    var b = el("button", "dc-pill"+(f[0] === _dcFilter ? " active" : ""),
-      esc(f[1])+' <span class="dc-pill-count">'+(counts[f[0]] || 0)+'</span>');
-    b.setAttribute("data-filter", f[0]);
-    b.setAttribute("aria-pressed", f[0] === _dcFilter ? "true" : "false");
-    b.addEventListener("click", function(){ _dcFilter = f[0]; onChange(); });
-    bar.appendChild(b);
-  });
-  var search = document.createElement("input");
-  search.type = "search";
-  search.placeholder = "Search Models, reasons, calendars…";
-  search.setAttribute("aria-label", "Search Data Cache readiness");
-  search.value = _dcSearch;
-  search.addEventListener("input", function(){ _dcSearch = search.value; onChange(true); });
-  bar.appendChild(search);
-  bar.appendChild(el("span", "cm-count dc-count", ""));
-  return bar;
+  var panel = el("div", "fbar-panel dc-filter");
+  panel.appendChild(filterBar({label: "Show Models by Data Cache readiness", on: _dcOn,
+    chips: DC_ORDER.map(function(f){ return {f: f, label: DC_STATES[f].label, count: counts[f] || 0}; }),
+    search: {cls: "dc-search", placeholder: "Search Models, reasons, calendars…",
+             aria: "Search Data Cache readiness", value: _dcSearch}},
+    onChange, function(value){ _dcSearch = value; onChange(); }));
+  return panel;
 }
 
 function dcShown(rows){
   var term = _dcSearch.trim().toLowerCase();
   return rows.filter(function(r){
-    return (_dcFilter === "all" || r.state === _dcFilter)
-      && (!term || dcSearchText(r).indexOf(term) !== -1);
+    return _dcOn[r.state] && (!term || dcSearchText(r).indexOf(term) !== -1);
   });
 }
 
@@ -195,18 +185,16 @@ function buildDataCache(D, guid){
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';
   var wrap = el("div", "crossmodel-wrap");
   wrap.appendChild(table);
-  function render(keepToolbar){
+  var bar = dcToolbar(rows, render);
+  function render(){
     var shown = dcShown(rows);
     table.tBodies[0].innerHTML = shown.length ? shown.map(dcRowHtml).join("") :
       '<tr><td colspan="4" class="empty-state">No Models match.</td></tr>';
-    if(!keepToolbar){
-      var old = c.querySelector(".dc-filter"), fresh = dcToolbar(rows, render);
-      if(old) c.replaceChild(fresh, old); else c.insertBefore(fresh, wrap);
-    }
-    c.querySelector(".dc-count").textContent = shown.length+" of "+rows.length+" Models";
+    $(".fbar", bar)._total(shown.length+" of "+rows.length+" Models shown");
   }
+  c.appendChild(bar);
   c.appendChild(wrap);
-  render(false);
+  render();
 }
 
 registerView({id: "datacache", routes: ["datacache"],

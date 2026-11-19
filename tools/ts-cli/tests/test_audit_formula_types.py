@@ -50,14 +50,14 @@ def _page(*models):
 
 
 def _chip(t):
-    return 'document.querySelector(\'#v-formulas .ftype-chip[data-ftype="' + t + '"]\')'
+    return 'document.querySelector(\'#v-formulas .fbar-chip[data-f="' + t + '"]\')'
 
 
 _CY = 'function cy(){ return document.getElementById("v-formulas")._cy; }'
 _LABELS = 'function labels(){ return cy().nodes().map(function(n){ return n.data("label"); }).sort(); }'
 _CHIPS = ('function chips(){ return Array.prototype.map.call(document.querySelectorAll('
-          '"#v-formulas .ftype-chip"), function(b){ return [b.getAttribute("data-ftype"),'
-          ' b.getAttribute("aria-pressed"), b.querySelector(".ftype-count").textContent]; }); }')
+          '"#v-formulas .fbar-chip:not(.fbar-all)"), function(b){ return [b.getAttribute("data-f"),'
+          ' b.getAttribute("aria-pressed"), b.querySelector(".fbar-count").textContent]; }); }')
 ALL = sorted(["Revenue", "Helper", "Top", "Region Label", "Label Two",
               "ORDERS::AMOUNT", "ORDERS::COST", "ORDERS::REGION", "Sep"])
 
@@ -176,7 +176,7 @@ def test_a_link_to_a_switched_off_node_says_so_and_offers_to_show_it(tmp_path):
         'window.__extra = {said: said, after: note.textContent,'
         ' pressed: ' + _chip("column") + '.getAttribute("aria-pressed"),'
         ' focus: cy().$(".focus").map(function(n){ return n.data("label"); }),'
-        ' active: document.activeElement.getAttribute("data-ftype")};'))
+        ' active: document.activeElement.getAttribute("data-f")};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert x["said"]["title"] == "ORDERS::AMOUNT", "the definition still opens"
@@ -227,7 +227,7 @@ def test_past_the_cap_switching_columns_off_can_draw_the_model_whole(tmp_path):
 def test_the_tree_shows_the_legend_and_says_when_every_type_is_off(tmp_path):
     shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=(
         'var legend = document.querySelector("#v-formulas .ftype-legend").textContent;'
-        'Array.prototype.forEach.call(document.querySelectorAll("#v-formulas .ftype-chip"),'
+        'Array.prototype.forEach.call(document.querySelectorAll("#v-formulas .fbar-chip:not(.fbar-all)"),'
         ' function(b){ b.click(); });'
         'window.__extra = {legend: legend, note: document.querySelector("#v-formulas .ftree-note").textContent,'
         ' rows: Array.prototype.filter.call(document.querySelectorAll("#v-formulas .ftree-row[role=button]"),'
@@ -267,3 +267,24 @@ def test_nodes_left_without_edges_are_gridded_beside_the_rest_and_all_start_in_v
     assert x["nodes"] == 33
     assert x["out"] == 0, "every node starts in view"
     assert x["ratio"] < 1.5, "not one tall column"
+
+
+@needs_chrome
+def test_the_chips_are_multi_select_with_counts_and_all_resets(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_CHIPS + (
+        'function all(){ var b = ' + _chip("all") + '; return [b.getAttribute("aria-pressed"),'
+        ' b.querySelector(".fbar-count").textContent]; }'
+        'function total(){ return document.querySelector("#v-formulas .fbar-total").textContent; }'
+        'var first = {all: all(), total: total()};'
+        + _chip("column") + '.click();' + _chip("parameter") + '.click();'
+        'var two = {all: all(), chips: chips(), total: total()};'
+        + _chip("all") + '.click();'
+        'window.__extra = {first: first, two: two, reset: {all: all(), chips: chips(), total: total()}};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["first"] == {"all": ["true", "9"], "total": "9 of 9 items shown"}
+    assert x["two"]["all"] == ["false", "9"]
+    assert [c[1] for c in x["two"]["chips"]] == ["false", "false", "true", "true"]
+    assert x["two"]["total"] == "5 of 9 items shown"
+    assert x["reset"]["all"][0] == "true" and all(c[1] == "true" for c in x["reset"]["chips"])
+    assert x["reset"]["total"] == "9 of 9 items shown"

@@ -183,14 +183,13 @@ function graphArrange(cy){
   });
 }
 
-/* The graph's header: the Model, the note on what is drawn, search and the way back to
-   the tree. The type chips go in below (buildFormulaGraph). */
+/* The graph's header: the Model, the note on what is drawn and the way back to the tree.
+   The filter bar, with the search box, goes in below (buildFormulaGraph). */
 function graphHeader(guid){
   var hdr = el("div","ftree-header");
   hdr.innerHTML = '<div class="model-title">'+esc(findModelName(guid))+'</div>'+
     '<div class="ftree-sub fgraph-sub"></div>'+
-    '<div class="header-actions"><input class="ftree-search" type="search" '+
-    'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
+    '<div class="header-actions">'+
     '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'">Tree</a></div>';
   return hdr;
 }

@@ -146,7 +146,7 @@ def test_the_data_cache_model_page_shows_that_model_and_a_way_back_to_all(tmp_pa
     shown = report_browser.render(_page(), tmp_path, "datacache/m-1", actions=(
         'var one = ' + rows + ';'
         'var back = document.querySelector("#v-datacache a.dc-all");'
-        'var pills = document.querySelectorAll("#v-datacache .dc-pill").length;'
+        'var pills = document.querySelectorAll("#v-datacache .fbar, #v-datacache .fbar-chip").length;'
         'back.click();'
         'setTimeout(function(){ window.__extra = {one: one, back: back.getAttribute("href"),'
         ' text: back.parentNode.textContent, pills: pills, all: ' + rows + ','
@@ -161,10 +161,10 @@ def test_the_data_cache_model_page_shows_that_model_and_a_way_back_to_all(tmp_pa
 
 @needs_chrome
 def test_the_lists_filter_does_not_hide_the_model_on_its_own_page(tmp_path):
-    # Sales reads Not assessed (its Table's TML was not read): pick "Can use" on the
-    # list, which hides it there, then open Sales's page
+    # Sales reads Not assessed (its Table's TML was not read): switch Not assessed off
+    # on the list, which hides it there, then open Sales's page
     shown = report_browser.render(_page(), tmp_path, "datacache", actions=(
-        'document.querySelector(\'#v-datacache .dc-pill[data-filter="ready"]\').click();'
+        'document.querySelector(\'#v-datacache .fbar-chip[data-f="unknown"]\').click();'
         'if(document.querySelectorAll("#v-datacache tbody tr[data-state]").length) throw "not filtered";'
         'location.hash = "#datacache/m-1";'
         'setTimeout(function(){ window.__extra = Array.prototype.map.call('
@@ -184,7 +184,7 @@ def test_an_unknown_model_on_the_data_cache_route_says_so(tmp_path):
 @needs_chrome
 @pytest.mark.parametrize("route, view, marker", [
     ("dashboard", "v-dashboard", "Sales"),
-    ("datacache", "v-datacache", "2 of 2 Models"),
+    ("datacache", "v-datacache", "2 of 2 Models shown"),
     ("formulas", "v-formulas", "Pick a Model"),
     ("model/m-1", "v-scorecard", "Sales"),
     ("formulas/m-1", "v-formulas", "Double Revenue"),

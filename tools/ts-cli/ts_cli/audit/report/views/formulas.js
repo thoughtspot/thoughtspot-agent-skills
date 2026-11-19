@@ -504,8 +504,7 @@ function buildFormulaTree(c, guid){
     '<div class="ftree-sub">'+tree.n.length+' formula'+(tree.n.length === 1 ? '' : 's')+', '+
     tree.r.length+' at the top. Click a formula to see its definition and open what it uses; '+
     'in the tree, the arrow keys move between rows and Escape closes the definition.</div>'+
-    '<div class="header-actions"><input class="ftree-search" type="search" '+
-    'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
+    '<div class="header-actions">'+
     '<button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
     (graphAvailable(tree) ? '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'/graph">Graph</a>' : '')+

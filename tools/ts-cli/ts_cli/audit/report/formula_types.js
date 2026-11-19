@@ -6,7 +6,8 @@
    not state. Each type has one mark, a shape filled and outlined in its colour, used in
    the tree's rows, the graph's nodes (formula_graph.js graphStyle), the chips and the
    legend; the shape carries the type without the colour.
-   The chips are shared by every Model and both modes for the session, in memory only.
+   The chips are the shared filter bar (filter_bar.js), and their state is shared by every
+   Model and both modes for the session, in memory only.
    In the graph a switched-off type is hidden, nodes and edges, and the rest laid out
    again. In the tree a row of a switched-off type is hidden, unless something shown is
    under it: a formula row is then kept, dimmed, since the tree reaches a row only
@@ -72,42 +73,48 @@ function ftypeLegendHtml(counts, graph){
   return '<div class="ftype-legend" role="note" aria-label="Legend">'+html+'</div>';
 }
 
-/* The chips, the legend and the note, as one element. `onChange` runs after a chip
-   flips; `bar._note(tree, target, visible)` says when `target` is not on screen
-   because its type is switched off (and clears the note otherwise). */
+/* The filter bar (filter_bar.js: "Show", All, the four type chips, search and the shown
+   count), the legend and the note, as one element. `onChange` runs after a chip flips;
+   the search box is the view's own (class ftree-search), which wires it.
+   `wrap._note(tree, target, visible)` says when `target` is not on screen because its
+   type is switched off (and clears the note otherwise). */
 function ftypeBar(tree, onChange, graph){
-  var counts = ftypeCounts(tree), bar = el("div", "ftype-bar");
-  var chips = FTYPES.map(function(t){
-    var tip = t[0] === "attribute" && counts.nokind ? ' title="'+esc("Includes "+counts.nokind+
-      " formula"+(counts.nokind === 1 ? "" : "s")+" of no stated kind (no column surfaces it)")+'"' : "";
-    return '<button type="button" class="ftype-chip" data-ftype="'+t[0]+'" aria-pressed="'+
-      (_ftypeShown[t[0]] ? "true" : "false")+'"'+tip+'>'+ftypeIcon(t[0])+esc(t[1])+
-      ' <span class="ftype-count">'+counts[t[0]]+'</span></button>';
-  }).join("");
-  bar.innerHTML = '<div class="ftype-chips" role="group" aria-label="Show these types">'+
-    '<span class="ftype-chips-label">Show</span>'+chips+'</div>'+ftypeLegendHtml(counts, graph)+
-    '<div class="ftype-note" role="status"></div>';
-  function set(type, on){
-    _ftypeShown[type] = on;
-    $$(".ftype-chip", bar).forEach(function(b){
-      b.setAttribute("aria-pressed", _ftypeShown[b.getAttribute("data-ftype")] ? "true" : "false"); });
-    onChange();
+  var counts = ftypeCounts(tree), wrap = el("div", "ftype-bar");
+  var all = FTYPES.reduce(function(n, t){ return n + counts[t[0]]; }, 0);
+  function total(){
+    var shown = FTYPES.reduce(function(n, t){ return n + (_ftypeShown[t[0]] ? counts[t[0]] : 0); }, 0);
+    bar._total(shown+" of "+all+" items shown");
   }
-  bar.addEventListener("click", function(e){
-    var b = e.target.closest && e.target.closest(".ftype-chip, .ftype-reveal");
+  var bar = filterBar({label: "Show these types", on: _ftypeShown,
+    chips: FTYPES.map(function(t){
+      return {f: t[0], label: t[1], count: counts[t[0]], icon: ftypeIcon(t[0]),
+        title: t[0] === "attribute" && counts.nokind ? "Includes "+counts.nokind+" formula"+
+          (counts.nokind === 1 ? "" : "s")+" of no stated kind (no column surfaces it)" : ""};
+    }),
+    search: {cls: "ftree-search", placeholder: "Find a formula, column or parameter",
+             aria: "Find a formula, column or parameter"}},
+    function(){ total(); onChange(); }, function(){});
+  total();
+  wrap.appendChild(bar);
+  wrap.insertAdjacentHTML("beforeend", ftypeLegendHtml(counts, graph)+'<div class="ftype-note" role="status"></div>');
+  wrap.addEventListener("click", function(e){
+    var b = e.target.closest && e.target.closest(".ftype-reveal");
     if(!b) return;
     var type = b.getAttribute("data-ftype");
-    set(type, b.classList.contains("ftype-reveal") ? true : !_ftypeShown[type]);
-    if(b.classList.contains("ftype-reveal")) $('.ftype-chip[data-ftype="'+type+'"]', bar).focus();
+    _ftypeShown[type] = true;
+    bar._sync();
+    total();
+    onChange();
+    $('.fbar-chip[data-f="'+type+'"]', bar).focus();
   });
-  bar._note = function(t, target, visible){
-    var note = $(".ftype-note", bar), type = target && useFtype(t, target);
+  wrap._note = function(t, target, visible){
+    var note = $(".ftype-note", wrap), type = target && useFtype(t, target);
     if(!target || visible || _ftypeShown[type]){ note.innerHTML = ""; return; }
     var label = FTYPES.filter(function(x){ return x[0] === type; })[0][1];
     note.innerHTML = esc(useLabel(t, target))+' is not shown: '+esc(label)+' are switched off. '+
       '<button type="button" class="ftype-reveal" data-ftype="'+type+'">Show '+esc(label.toLowerCase())+'</button>';
   };
-  return bar;
+  return wrap;
 }
 
 /* Per formula index: 2 shown, 1 kept (switched off, but something shown is under it),
