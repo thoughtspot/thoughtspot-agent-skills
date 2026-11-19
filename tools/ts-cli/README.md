@@ -4905,8 +4905,11 @@ unreadable source no longer ends the audit.
 The connection search answers each connection's configuration, credentials included:
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
 PrivateLink or a template variable (and whether the OAuth reading rests only on a
-`client_id` and `client_secret` pair, `oauth_m2m`), and keeps, logs and reports no
-configuration value. The search shows a parameterized connection's settings without
+client ID and secret, `oauth_m2m`: a `client_id` and `client_secret` pair on any
+connection, or on a Databricks connection an `OAuth2ClientId` and `OAuth2Secret` pair
+with no other setting naming OAuth, which per-user OAuth and a service principal both
+hold, so P24 reads it as to confirm), and keeps, logs and reports no configuration
+value. The search shows a parameterized connection's settings without
 their `${var}` tokens, so a paged `metadata/search` of CONNECTION headers adds whether
 each connection is parameterized (`parameterizedConnection` or `isParameterized`). A
 connection with no header, or every connection when that search fails, reads as
@@ -4914,7 +4917,10 @@ unknown, and P24 leaves its Models not assessed. A refused connection search is 
 alone, never its response body.
 Any other exception is a bug and propagates unchanged. A snapshot captured before
 ts-cli 0.219.0 holds neither calendars nor connection settings, so replaying the P
-angle from it is refused (P22 and P24 read them): capture it again.
+angle from it is refused (P22 and P24 read them): capture it again. Its connection
+facts are derived when they are fetched and the settings are dropped, so a snapshot
+captured before ts-cli 0.220.0, which read the Databricks pair as firm OAuth, has its
+connection facts counted as not captured, and replaying P from it is refused too.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

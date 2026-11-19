@@ -20,10 +20,10 @@ or a log line.
                    product owner's team is to confirm (open-items #18): the
                    `client_id` and `client_secret` pair on any connection, or, on a
                    Databricks connection, `OAuth2ClientId` and `OAuth2Secret` with no
-                   other setting naming OAuth. Every Databricks OAuth connection on the
-                   SE demo cluster holds just that pair (12 of 14, 2026-11-19), which
-                   per-user OAuth and a service principal (M2M) both use, so the names
-                   cannot tell them apart.
+                   other setting naming OAuth. On the SE demo cluster, 12 of its 14
+                   Databricks connections use OAuth, and each holds just that pair
+                   (2026-11-19), which per-user OAuth and a service principal (M2M)
+                   both use, so the names cannot tell them apart.
     privatelink    a `host` or `accountName` value (any case of key) containing
                    `privatelink` (any case): a Snowflake PrivateLink URL carries
                    `.privatelink.`. No configuration key names PrivateLink; the team is
@@ -143,6 +143,17 @@ def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
     return present, keys, hosts, parameterized
 
 
+def warehouse_type(kind: Any) -> Optional[str]:
+    """A warehouse type as compared: upper case, edge spaces and an `RDBMS_` prefix
+    dropped (a connection's `data_warehouse_type` was seen bare, a Table header's
+    `dataSourceType` prefixed); None for anything blank or not text. P23 and P24 both
+    compare types through it."""
+    if not isinstance(kind, str) or not kind.strip():
+        return None
+    text = kind.strip().upper()
+    return text[len("RDBMS_"):] if text.startswith("RDBMS_") else text
+
+
 def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[bool]]:
     """The four flags of a parsed configuration (module docstring). OAuth and PrivateLink
     are None, unknown, when no key they read is present (_M2M_KEYS, a key naming OAuth,
@@ -159,7 +170,7 @@ def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[
     oauth_keys = {k for k in keys if "oauth" in k}
     named = bool(oauth_keys)
     m2m = (not named and set(_M2M_KEYS) <= keys) or (
-        (warehouse or "").strip().upper() == "DATABRICKS"
+        warehouse_type(warehouse) == "DATABRICKS"
         and oauth_keys == _DATABRICKS_OAUTH_PAIR)
     privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
     return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,

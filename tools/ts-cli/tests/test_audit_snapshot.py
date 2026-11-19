@@ -402,3 +402,36 @@ def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert "Cannot write snapshot" in plain(result) and "git work tree" in plain(result)
     assert "fetch" not in calls and not (repo / "snap").exists()
+
+
+@pytest.mark.parametrize("version, kept", [
+    ("0.219.1", False), ("0.219.0", False), ("0.220.0", True), ("0.221.3", True),
+    ("1.0.0", True), ("not a version", False), (None, False)])
+def test_connection_facts_derived_before_0_220_count_as_not_captured(version, kept):
+    """0.220.0 reads a Databricks OAuth2ClientId/OAuth2Secret pair differently, and a
+    snapshot keeps only the derived facts, so an older snapshot's connection facts are
+    not replayed: P24 would give the old verdict. A replay reading them is refused."""
+    from ts_cli.audit.snapshot import captured_needs
+    manifest = {"ts_cli_version": version, "angles": ["P"],
+                "needs": ["model_tml", "connections", "calendars"]}
+    needs = captured_needs(manifest)
+    assert ("connections" in needs) is kept
+    assert {"model_tml", "calendars"} <= needs
+
+
+def test_a_p_replay_of_a_snapshot_from_before_0_220_is_refused(tmp_path):
+    from typer.testing import CliRunner
+
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import data_needs
+    from ts_cli.cli import app
+    ctx = fx.build_cache_ctx(connections=[fx.build_cache_connection()], calendars=[])
+    snap = tmp_path / "snap"
+    write_snapshot(ctx, snap, ["P"], needs=sorted(data_needs(["P"], ["general"])))
+    manifest_path = snap / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["ts_cli_version"] = "0.219.1"
+    manifest_path.write_text(json.dumps(manifest))
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
+    assert res.exit_code != 0
+    assert "connections" in res.output and "P24" in res.output, res.output

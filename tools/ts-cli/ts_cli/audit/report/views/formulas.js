@@ -237,9 +237,10 @@ function namedText(tree, x){
   return (x || []).map(function(s){ return typeof s === "string" ? s : named(tree, s); }).join("");
 }
 
-/* The expression as plain text, as written (`asWritten`, the panel's form) or by label
-   (the tree's inline line): search reads both, each whole, so a query may span
-   references and the text between them. */
+/* The expression as plain text, as the TML writes it (`asWritten`: the panel's "As
+   written in TML" form) or by label (the tree's inline line). Search reads these and
+   the panel's own form (namedText), each whole, so a query may span references and the
+   text between them. */
 function exprText(tree, x, asWritten){
   return (x || []).map(function(s){
     return typeof s === "string" ? s : asWritten ? written(s) : useLabel(tree, s);
@@ -297,6 +298,21 @@ function inlinedHtml(tree, x, open){
   }).join("");
 }
 
+/* inlinedHtml's text, each helper pasted in as it pastes them, every other reference in
+   `form` (`written`: the TML's own form, to copy; `named`: the panel's). */
+function inlinedText(tree, x, open, form){
+  return x.map(function(s){
+    if(typeof s === "string") return s;
+    var helper = s[0] === 0 && tree.n[s[1]];
+    if(!helper || !singleUse(helper) || !helper.x || !helper.x.length || open[s[1]])
+      return form === written ? written(s) : named(tree, s);
+    open[s[1]] = true;
+    var inner = inlinedText(tree, helper.x, open, form);
+    delete open[s[1]];
+    return "( "+inner+" )";
+  }).join("");
+}
+
 function linkList(tree, cls, uses, none){
   if(!uses.length) return '<div class="'+cls+' fdetail-none">'+esc(none)+'</div>';
   return '<ul class="'+cls+'">'+uses.map(function(u){ return '<li>'+refLink(tree, u)+'</li>'; }).join("")+'</ul>';
@@ -321,6 +337,11 @@ function detailHtml(tree, target){
     if(node.x && usesSingleUse(tree, node)){
       html += '<div class="fdetail-label">Definition with single-use helpers pasted in</div>'+
         '<pre class="fdetail-expr fdetail-inlined">'+inlinedHtml(tree, node.x, opened(target[1]))+'</pre>';
+      var tmlInlined = inlinedText(tree, node.x, opened(target[1]), written);
+      if(tmlInlined !== inlinedText(tree, node.x, opened(target[1]), named)){
+        html += '<div class="fdetail-label">Pasted in, as written in TML</div>'+
+          '<pre class="fdetail-expr fdetail-written fdetail-inlined-written">'+esc(tmlInlined)+'</pre>';
+      }
     }
     html += '<div class="fdetail-label">Uses ('+node.u.length+')</div>'+
       linkList(tree, "fdetail-uses", node.u, "No columns, parameters or formulas.");
@@ -394,7 +415,7 @@ function revealRow(ul, tree, target, from){
 
 /* Every match, ranked: columns and parameters by name (there are few, and a column must
    not be pushed out of the shown list), then formulas by name, then formulas by
-   definition (as written or by label). The caller shows the first
+   definition (as the panel shows it, as the TML writes it, or by label). The caller shows the first
    FORMULA_SEARCH_CAP and says how many more there are. */
 function searchHits(tree, q){
   q = q.trim().toLowerCase();
@@ -404,7 +425,8 @@ function searchHits(tree, q){
     if(node.n.toLowerCase().indexOf(q) !== -1 || String(node.f).toLowerCase().indexOf(q) !== -1){
       byName.push([0, j]); return;
     }
-    if(exprText(tree, node.x, true).toLowerCase().indexOf(q) !== -1 ||
+    if(namedText(tree, node.x).toLowerCase().indexOf(q) !== -1 ||
+       exprText(tree, node.x, true).toLowerCase().indexOf(q) !== -1 ||
        exprText(tree, node.x, false).toLowerCase().indexOf(q) !== -1) byDef.push([0, j]);
   });
   tree.n.forEach(function(node){ node.u.forEach(function(u){

@@ -40,6 +40,7 @@ import dataclasses
 import datetime
 import json
 from pathlib import Path
+from typing import Optional
 
 from ts_cli import __version__
 from ts_cli.audit.context import ALWAYS_FETCHED, AuditContext
@@ -231,15 +232,38 @@ def _read_manifest(in_dir: Path) -> dict:
     return manifest
 
 
+#: Data kinds stored as facts derived at fetch time, by the ts-cli version that changed
+#: how they are derived. A snapshot captured before it holds facts the current reading
+#: would not give and cannot re-derive (the source is not kept), so its copy counts as
+#: not captured and a replay that reads it is refused: capture it again.
+#: `connections`: 0.220.0 reads a Databricks OAuth2ClientId/OAuth2Secret pair as
+#: `oauth_m2m` (connection_facts), so P24's verdict on such a connection changed.
+REDERIVED_NEEDS = {"connections": (0, 220, 0)}
+
+
+def _version(text: object) -> Optional[tuple]:
+    """A dotted version as a tuple of ints, or None when it is not one."""
+    if not isinstance(text, str):
+        return None
+    parts = text.strip().split(".")
+    return tuple(int(p) for p in parts) if all(p.isdigit() for p in parts) else None
+
+
 def captured_needs(manifest: dict) -> set:
     """What the snapshot fetched: its manifest's ``needs``, or for a legacy manifest
-    without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``)."""
+    without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``), less any kind
+    ``REDERIVED_NEEDS`` says its ts-cli version derived differently (an unreadable
+    version counts as older)."""
     if manifest.get("needs") is not None:
-        return set(manifest["needs"])
-    out = set(ALWAYS_FETCHED)
-    for angle in manifest["angles"]:
-        out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
-    return out
+        out = set(manifest["needs"])
+    else:
+        out = set(ALWAYS_FETCHED)
+        for angle in manifest["angles"]:
+            out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
+    version = _version(manifest.get("ts_cli_version"))
+    return {need for need in out
+            if need not in REDERIVED_NEEDS or (version is not None
+                                               and version >= REDERIVED_NEEDS[need])}
 
 
 def read_snapshot(in_dir: Path) -> tuple[AuditContext, list[str]]:

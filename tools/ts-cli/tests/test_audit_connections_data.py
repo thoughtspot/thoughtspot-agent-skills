@@ -160,6 +160,8 @@ def _dbx(configuration, kind="DATABRICKS", via="data_warehouse_type"):
      "DATABRICKS", "data_warehouse_type", (True, True)),
     ('{"oauth2clientid": "x", "OAUTH2SECRET": "y", "host": "h"}',
      " databricks ", "details.type", (True, True)),
+    ('{"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}',
+     "RDBMS_DATABRICKS", "details.type", (True, True)),
     # One of the pair alone is still a setting named for OAuth: firm.
     ('{"OAuth2ClientId": "x", "host": "h"}', "DATABRICKS", "data_warehouse_type",
      (True, False)),
