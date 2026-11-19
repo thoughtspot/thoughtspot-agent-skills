@@ -293,6 +293,15 @@ class TestDoubleAggregation:
         result = fix_double_aggregation("sum ( [formula_W] )", formula_exprs)
         assert result == "[formula_W]"
 
+    @pytest.mark.parametrize("agg", ["min_if", "stddev_if", "variance_if"])
+    def test_lod_divided_by_the_other_conditional_aggregates_is_unwrapped(self, agg):
+        """The other three names added to `_AGG_FUNCTIONS` with `max_if`:
+        missing, each naked sibling read as row-level and the wrapper stayed."""
+        formula_exprs = {
+            "W": f"group_aggregate ( sum ( [T::Sales] ) , {{}} , {{}} ) / {agg} ( [T::Flag] = 'y' , [T::Sales] )",
+        }
+        assert fix_double_aggregation("sum ( [formula_W] )", formula_exprs) == "[formula_W]"
+
     def test_naked_aggregate_two_references_removed_is_unwrapped(self):
         """X reaches naked aggregates through M, whose own text has none."""
         formula_exprs = {
