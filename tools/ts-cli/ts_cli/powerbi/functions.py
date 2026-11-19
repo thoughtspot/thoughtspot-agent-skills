@@ -552,7 +552,7 @@ def _in_set_negated(src: str, spans) -> bool:
             word, i = None, ends[i]
         elif ch in "\"'[":
             word, i = None, _opaque_end(src, i)
-        elif ch.isalpha() or ch == "_":
+        elif ch.isascii() and (ch.isalpha() or ch == "_"):   # _WORD's own first class
             m = _WORD.match(src, i)
             word = m.group(0).upper()
             lvl.nots += word == "NOT"

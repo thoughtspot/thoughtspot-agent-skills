@@ -518,3 +518,37 @@ def test_an_in_set_member_that_is_not_a_literal_needs_review(dax):
 def test_a_set_beside_a_negation_it_is_not_under_still_translates(dax, expected):
     expr, status, _ = translate_dax(dax)
     assert (expr, status) == (expected, "Migrated")
+
+
+# --- A non-ASCII letter outside quotes must not crash the IN-set scan ----------------
+
+_NON_ASCII = [
+    "SUM(Fact[Amount]) // 1º trimestre",
+    "SUM(Fact[Amount]) -- Ärger",
+    "SUM(Fact[Amount]) // 売上",
+    'IF(Fact[s] IN {"a","b"}, 1, 0) // é',
+]
+
+
+@pytest.mark.parametrize("dax", _NON_ASCII)
+def test_a_non_ascii_letter_outside_quotes_does_not_raise(dax):
+    """_in_set_negated matched a word only from an ASCII letter but entered that branch
+    for any letter, so a comment such as `// 売上` raised AttributeError and took the
+    whole build down; main translated these measures."""
+    expr, status, _ = translate_dax(dax, home_table="Fact")
+    assert status in ("Migrated", "Approximated", "NEEDS REVIEW")
+
+
+def test_build_model_survives_a_measure_with_a_non_ascii_comment():
+    import pathlib
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent))
+    from test_powerbi_build_model import _inv
+    from ts_cli.powerbi.build_model import assemble
+    inv = _inv()
+    fact = inv["tables"][0]
+    fact["measures"] += [{"name": f"Commented {i}", "expression": dax}
+                         for i, dax in enumerate(_NON_ASCII[:3])]
+    _, mapping = assemble(inv, {}, "C", "d", "s", "LEFT_OUTER", False)
+    names = {r["name"] for r in mapping["measures"]}
+    assert {f"Commented {i}" for i in range(3)} <= names
