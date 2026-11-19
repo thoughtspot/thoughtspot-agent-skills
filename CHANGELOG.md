@@ -8,6 +8,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ## 2026-11-19
 - feat: the `ts audit` report's Dashboard heatmap gains a Data Cache column: each listed Model's Data Cache readiness, linking to the Data Cache view, when the Performance angle ran (ts-audit 3.24.0)
 - fix: `ts audit` P24 reads a Databricks connection whose only OAuth settings are `OAuth2ClientId` and `OAuth2Secret` as OAuth to confirm, since per-user OAuth and a service principal both hold that pair; a Model P24 blocked only on that pair now reads To confirm (Not assessed if another check could not read it). A snapshot records the version of its connection-facts derivation; one from before this release holds the old reading, so replaying the P angle from it, or `ts audit fire-rates` on it, is refused: capture it again. P23 names an Analyst Studio source (`RDBMS_MODE`) "Analyst Studio", still blocked (ts-audit 3.24.0)
+- chore: bump ts-cli to v0.221.0
+- feat: add ts-recipe-answer-period-comparison skill
+- feat: add ts recipe period-comparison (ts-cli 0.220.0)
 - chore: bump ts-cli to v0.220.0
 
 ## 2026-11-18

@@ -56,6 +56,15 @@
         "--sv-fqn",     "YOUR_DATABASE.YOUR_SCHEMA.YOUR_VIEW"
       ]
     },
+    "ts-recipe-answer-period-comparison": {
+      "extra_args": [
+        "--model-guid",     "YOUR_MODEL_GUID",
+        "--model-name",     "Your Model Name",
+        "--date-column",    "Order Date",
+        "--measure-column", "Amount",
+        "--years",          "2017-2019"
+      ]
+    },
     "ts-recipe-formula-business-days-snowflake": {
       "extra_args": [
         "--sf-profile",       "YOUR_SF_PROFILE",
