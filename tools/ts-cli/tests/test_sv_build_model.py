@@ -490,6 +490,29 @@ class TestBuildColumnsAndFormulas:
                             if f["name"] == "Days Active")
         assert days_formula["properties"]["column_type"] == "ATTRIBUTE"
 
+    def test_double_aggregation_collapses_through_this_converter(self):
+        """Round-5 review (blocking #2): the shared `fix_double_aggregation`
+        bug ("does `group_aggregate` appear anywhere") reached every
+        converter that calls it, not just Tableau's — this exercises it
+        through `build_columns_and_formulas`'s own call path, with the
+        Snowflake SV shape the review specifically names: a plain aggregate
+        wrapping a `group_aggregate(...)`."""
+        translated = [
+            {"name": "NET_RATIO", "role": "metric", "output_kind": "formula",
+             "column_type": "MEASURE", "table": None, "column": None,
+             "ts_expr": "average ( group_aggregate ( sum ( [ORDERS::AMOUNT] ) , {} , {} ) )",
+             "aggregation": None, "comment": None, "synonyms": [],
+             "is_private": False, "annotations": []},
+            {"name": "NET_RATIO_TOTAL", "role": "metric", "output_kind": "formula",
+             "column_type": "MEASURE", "table": None, "column": None,
+             "ts_expr": "sum ( [Net Ratio] )",
+             "aggregation": None, "comment": None, "synonyms": [],
+             "is_private": False, "annotations": []},
+        ]
+        _, formulas, _ = build_columns_and_formulas(translated)
+        total = next(f for f in formulas if f["name"] == "Net Ratio Total")
+        assert total["expr"] == "[formula_Net Ratio]"
+
     def test_private_column(self):
         translated = [
             {"name": "INTERNAL_ID", "role": "dimension",
