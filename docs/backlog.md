@@ -17854,7 +17854,7 @@ confirm every block commits. Mark the items VERIFIED.
 - `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
 - `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
 
-PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set, or a `,` `(` `)` inside a string) away from this rewrite (`_split_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above already behave this way on main.
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite (`_split_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above already behave this way on main.
 
 **Do.**
 1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
@@ -17863,11 +17863,11 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 **Target:** 2027-01-31.
 
-## BL-609 — a DAX `<>` or `NOT ... IN {...}` comparison drops blank rows that DAX keeps `Tier 3`
+## BL-609 — a DAX `<>` comparison drops blank rows that DAX keeps; the refused negated IN set is inferred, not probed `Tier 3`
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 
-**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related `NOT ... IN {...}` form on the main path (it is now NEEDS REVIEW); `<>` still translates as Migrated, as it has on main.
+**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related IN-set forms on the main path, where the set's result is negated or compared (`NOT ... IN {...}` in any spelling, `... IN {...} = FALSE`, `<> TRUE`); they are now NEEDS REVIEW. `<>` still translates as Migrated, as it has on main.
 
 **Do.**
 1. Probe one `!=` and one `not ( ... in { ... } )` formula over a column with NULLs on a live cluster, and record what ThoughtSpot compiles and returns.
