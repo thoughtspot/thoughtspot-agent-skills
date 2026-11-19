@@ -363,6 +363,22 @@ Findings first, ranked:
 ### Should-fix
 ### Nit
 
+Rank strictly; the rank decides whether the PR ships (the `pr-ready` skill's Step 7):
+
+- **Blocker**: in normal use the change breaks a requirement the caller states,
+  gives silently wrong output, lets something unread or an open question read as a
+  clean result, leaks a credential or customer data, or weakens a gate.
+- **Should-fix**: a real defect a user would hit, that is not a Blocker.
+- **Nit**: everything else: an edge case not seen in real data (say whether it was),
+  wording, polish, a test that could be stronger, a claim that is loose rather than
+  false. Nits go to one dated backlog item; they do not hold the PR.
+
+Uncertainty raises your stated confidence, not the rank.
+
+**A re-review** (the caller says so, names the earlier review and the fix commits)
+checks only that each earlier Blocker and Should-fix is fixed for its class, and that
+the fix commits break nothing: read the fix commits' diff, not the whole range again.
+
 Each finding is one bullet with:
 
 - `file:line`, repo-relative (`tools/validate/run_checks.py:42`): never an absolute

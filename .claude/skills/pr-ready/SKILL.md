@@ -317,6 +317,31 @@ When both scans are clean, report:
 - that the whole block goes in the **Evidence** section of the PR template
   (`.github/pull_request_template.md`), pasted as it is.
 
+## Step 7: triage, fix once, ship
+
+The review is a gate, not a loop. A reviewer briefed to refute always finds
+something, so rounds only end when you stop them (2026-11-19: one PR took six
+rounds, another four, each finding new edge cases in the previous round's fixes).
+
+1. **Fix every Blocker. Fix a Should-fix only when it breaks a requirement the user
+   stated**, or a user would hit it in normal use.
+2. **Everything else goes to one dated backlog item** (`docs/backlog.md`, a
+   `**Target:**` date), named in the PR description: Nits, edge cases not seen in real
+   data, wording, and a Should-fix that is neither of the above. Re-derive the free
+   `BL-` id from `origin/main` and every open PR's diff first.
+3. **At most one fix round, then one re-review.** Brief the fixer to fix each finding
+   for its class across the branch and to test what the fix itself introduces (a fix
+   that adds normalisation or a new layout path is new surface). Then run Steps 1-6
+   again, dispatching the `pr-reviewer` as a re-review: name the earlier review and
+   the fix commits, so it reads those, not the whole range.
+4. **Ship when a round has no Blocker.** Anything the re-review raises that is not a
+   Blocker joins the backlog item; it does not start another round.
+5. **A merge of `main` that touches none of the branch's files needs no new review**:
+   re-run Step 1 for fresh evidence, and say in the PR that the review describes the
+   head before the merge.
+
+Ask the user before going past one re-review.
+
 ## Posting
 
 **Never post on your own.** Posting the block to a PR is the user's explicit choice,
@@ -331,6 +356,7 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.0 | 2026-11-19 | Step 7, triage, fix once, ship: fix Blockers (and a Should-fix only when it breaks a stated requirement or normal use), send everything else to one dated backlog item, at most one fix round and one re-review of the fix commits, ship when a round has no Blocker, and no new review for a merge of `main` that touches none of the branch's files. The `pr-reviewer` gains strict rank definitions and a re-review scope |
 | 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |
 | 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 exports an interpreter the user named as given (a typo stops the run), else keeps a `CHECKS_PYTHON` already set, else sets it to `~/.venvs/tas-ci/bin/python3.12` when that exists; Step 2 reports no evidence on exit 2; link to `.github/CONTRIBUTING.md` |
 | 1.0.0 | 2026-10-28 | Initial release: on your own branch only (asks first), the CI-superset run, then the `pr-reviewer` agent (plus the conversion-consistency auditor on converter changes), both scanned and appended to one evidence block |
