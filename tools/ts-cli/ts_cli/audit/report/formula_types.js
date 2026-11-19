@@ -78,9 +78,10 @@ function ftypeLegendHtml(counts, graph){
    the search box is the view's own (class ftree-search), which wires it.
    `wrap._note(tree, target, visible)` says when `target` is not on screen because its
    type is switched off, or, for a column or parameter, because every formula it sits
-   under is (and clears the note otherwise). `shownCount`, when given, counts what the
-   view shows (the tree: treeShownCount); without it the graph's count, every item of a
-   type switched on, since the graph draws them all. */
+   under is (and clears the note otherwise). `shownCount` counts what the view shows:
+   the tree's treeShownCount, the graph's drawn nodes (past the cap only a lineage is
+   drawn); without it, every item of a type switched on. `wrap._recount()` refreshes the
+   count, for a view that changes what it shows after a chip's onChange (a redraw). */
 function ftypeBar(tree, onChange, graph, shownCount){
   var counts = ftypeCounts(tree), wrap = el("div", "ftype-bar");
   var all = FTYPES.reduce(function(n, t){ return n + counts[t[0]]; }, 0);
@@ -99,6 +100,7 @@ function ftypeBar(tree, onChange, graph, shownCount){
              aria: "Find a formula, column or parameter"}},
     function(){ total(); onChange(); }, function(){});
   total();
+  wrap._recount = total;
   wrap.appendChild(bar);
   wrap.insertAdjacentHTML("beforeend", ftypeLegendHtml(counts, graph)+'<div class="ftype-note" role="status"></div>');
   wrap.addEventListener("click", function(e){

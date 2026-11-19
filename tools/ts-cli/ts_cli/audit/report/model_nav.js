@@ -34,7 +34,7 @@ function noFormulasReason(cm){
 function modelTabs(guid, current){
   var cm = findCorpusModel(guid), g = esc(guid);
   var tabs = [["scorecard", "#model/"+g], ["erd", "#model/"+g+"/erd"], ["formulas", "#formulas/"+g]];
-  if((cm && cm.dc && dataCacheRan()) || current === "datacache") tabs.push(["datacache", "#datacache/"+g]);
+  if(cm && cm.dc && dataCacheRan()) tabs.push(["datacache", "#datacache/"+g]);
   var nav = el("nav", "model-tabs");
   nav.setAttribute("aria-label", "Pages for this Model");
   nav.innerHTML = tabs.map(function(t){

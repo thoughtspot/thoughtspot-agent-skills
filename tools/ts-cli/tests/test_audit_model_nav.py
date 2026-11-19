@@ -4,6 +4,8 @@ Formulas (#formulas/<guid> and its graph) and Data Cache (#datacache/<guid>, the
 Cache view filtered to the Model). The older routes keep working."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import report_browser
@@ -224,9 +226,10 @@ def test_no_data_cache_tab_when_the_performance_angle_did_not_run(tmp_path):
     would read Not assessed."""
     ctx = make_context(models=[{"guid": "m-1", "model": SALES}], model_guids=["m-1"])
     page = render_report(run_audit(None, ["m-1"], ["D"], ctx=ctx))
-    shown = report_browser.render(page, tmp_path, "model/m-1", actions=_NAV)
-    assert shown["errors"] == []
-    assert [t[0] for t in shown["extra"]["tabs"]] == ["scorecard", "erd", "formulas"]
+    for route in ("model/m-1", "datacache/m-1"):   # the Data Cache page itself too
+        shown = report_browser.render(page, tmp_path, route, actions=_NAV)
+        assert shown["errors"] == []
+        assert [t[0] for t in shown["extra"]["tabs"]] == ["scorecard", "erd", "formulas"], route
 
 
 @needs_chrome
@@ -276,3 +279,29 @@ def test_the_erd_tab_reopens_a_closed_erd_on_its_own_route(tmp_path):
         'window.__extra = {open: sec.open, hash: location.hash};'))
     assert shown["errors"] == []
     assert shown["extra"] == {"open": True, "hash": "#model/m-1/erd"}
+
+
+DOLLARS = "$' $& $$ $` $1"
+
+
+@needs_chrome
+def test_the_inline_erds_share_html_keeps_replacement_patterns(tmp_path):
+    """Share HTML saves the page with String.replace; a replacement string would read
+    $&, $', $` and $$ in a name or a note as patterns and splice the page."""
+    model = dict(SALES, name="Sales " + DOLLARS)
+    shown = report_browser.render(_page(("m-1", model)), tmp_path, "model/m-1/erd", actions=_FRAME + (
+        'setTimeout(function(){ var w = frame().contentWindow, html = null, RB = w.Blob;'
+        ' w.eval("notes[MODEL.tables[0].id] = " + JSON.stringify(' + json.dumps("Note " + DOLLARS) + '));'
+        ' w.Blob = function(parts, o){ html = parts.join(""); return new RB(parts, o); };'
+        ' w.URL.createObjectURL = function(){ return "blob:x"; };'
+        ' w.HTMLAnchorElement.prototype.click = function(){};'
+        ' var doc = w.document.documentElement.outerHTML.length;'
+        ' w.document.getElementById("share-btn").click();'
+        ' var data = html.split(\'<script id="erd-data">\')[1].split("<"+"/script>")[0], g = {};'
+        ' new Function("window", data)(g);'
+        ' window.__extra = {name: g.__ERD_DATA__.models[0].model.name,'
+        '  note: Object.values(g.ERD_INITIAL_STATE.notes)[0], ratio: html.length / doc}; }, 300);'), settle_ms=600)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["name"] == "Sales " + DOLLARS and x["note"] == "Note " + DOLLARS
+    assert 0.9 < x["ratio"] < 1.2

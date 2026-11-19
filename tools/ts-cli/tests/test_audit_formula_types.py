@@ -397,3 +397,42 @@ def test_past_the_cap_the_graph_opens_on_a_shown_root(tmp_path):
     x = shown["extra"]
     assert "too many to draw at once" in x["sub"]
     assert x["named"] != "Big Attr" and x["drawn"] == 1, x["sub"]
+
+
+def _on_columns(n, k):
+    """n formulas, each summing one of k columns: one connected part per column, its
+    formulas in one tall rank."""
+    return {"name": "Tall", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": [_f(f"formula_T{i}", f"Total {i}", f"sum ( [ORDERS::C{i % k}] )") for i in range(n)],
+            "columns": [_col(f"Total {i}", f"formula_T{i}") for i in range(n)]}
+
+
+_IN_VIEW_Z = ('setTimeout(function(){ var c = cy(), w = c.width(), h = c.height();'
+              '  window.__extra = {nodes: c.nodes().length, zoom: c.zoom(), out: c.nodes().filter(function(n){'
+              '    var b = n.renderedBoundingBox(); return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length}; }, 100);')
+
+
+@needs_chrome
+@pytest.mark.parametrize("size", ["1400,900", "1280,720"])
+@pytest.mark.parametrize("n, k", [(40, 1), (80, 1), (150, 5)])
+def test_a_tall_part_opens_wholly_in_view_and_legible(tmp_path, n, k, size):
+    """Many measures over one amount column: dagre puts them in one rank, one tall
+    column. The rank is wrapped into several columns, so every node starts in view."""
+    shown = report_browser.render(_page(("m-t", _on_columns(n, k))), tmp_path, "formulas/m-t/graph",
+                                  actions=_CY + _IN_VIEW_Z, size=size, settle_ms=600)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["nodes"] == n + k and x["out"] == 0
+    assert x["zoom"] >= 0.35, "labels stay legible"
+
+
+@needs_chrome
+def test_past_the_cap_the_graph_counts_what_it_draws(tmp_path):
+    shown = report_browser.render(_page(("m-3", _big(200))), tmp_path, "formulas/m-3/graph", actions=_CY + _TOTAL + (
+        'var first = {drawn: cy().nodes().length, total: total()};'
+        + _chip("column") + '.click();'
+        'window.__extra = {first: first, drawn: cy().nodes().length, total: total()};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["first"] == {"drawn": 10, "total": "10 of 400 items shown"}
+    assert x["total"] == "%d of 400 items shown" % x["drawn"]

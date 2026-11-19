@@ -12,7 +12,6 @@
    so switching columns off can draw a large Model whole. The canvas is not
    keyboard-reachable; the tree is the accessible form of the same data, one click away. */
 var FORMULA_GRAPH_CAP = 300;  /* nodes drawn whole; beyond it, one lineage at a time */
-var FORMULA_GRAPH_MIN_ZOOM = 0.35;  /* a graph needing less opens at its top-left, panned from there */
 var FORMULA_GRAPH_MAX_FIT = 1.2;   /* a small graph is not blown up to fill the canvas */
 var FORMULA_GRAPH_MIN_VISIBLE = 120;  /* px of canvas above a narrow screen's sheet */
 
@@ -163,14 +162,50 @@ function graphStart(tree){
   return [0, tree.r[0]];
 }
 
-/* Lay out the graph: dagre for each connected part on its own, then the parts, the
-   largest first and lone nodes last, packed in rows about the canvas's shape. dagre
-   over the whole graph stacks unconnected parts in one tall column (a type switched off
-   can strand most nodes), most of it off screen. */
+/* dagre puts every node of a rank in one column: many measures over one amount column
+   make one rank far taller than the canvas. Wrap each rank of `part` into as many
+   columns as bring the part nearest the canvas's shape (`aspect`), in dagre's order,
+   ranks still left to right. A part whose tallest rank is short is left as it is. */
+function graphWrapRanks(part, aspect){
+  var ROW = 36, RANK_GAP = 70, COL_GAP = 16, ranks = {};
+  part.nodes().forEach(function(n){ var k = Math.round(n.position("x")); (ranks[k] = ranks[k] || []).push(n); });
+  var keys = Object.keys(ranks).map(Number).sort(function(a, b){ return a - b; });
+  var tallest = Math.max.apply(null, keys.map(function(k){ return ranks[k].length; }));
+  if(tallest < 8) return;
+  var colW = {};
+  keys.forEach(function(k){
+    colW[k] = Math.max.apply(null, ranks[k].map(function(n){ return n.data("w"); })) + COL_GAP;
+  });
+  function shape(rows){
+    var w = RANK_GAP * (keys.length - 1);
+    keys.forEach(function(k){ w += Math.ceil(ranks[k].length / rows) * colW[k]; });
+    return Math.abs(Math.log(w / (Math.min(tallest, rows) * ROW) / aspect));
+  }
+  var best = tallest, score = shape(tallest);
+  for(var rows = 4; rows < tallest; rows++){ var d = shape(rows); if(d < score){ score = d; best = rows; } }
+  if(best >= tallest) return;
+  var x = part.boundingBox().x1, top = part.boundingBox().y1;
+  keys.forEach(function(k){
+    var list = ranks[k].sort(function(a, b){ return a.position("y") - b.position("y"); });
+    var high = Math.min(list.length, best) * ROW, off = (best * ROW - high) / 2;
+    list.forEach(function(n, i){
+      n.position({x: x + Math.floor(i / best) * colW[k] + colW[k] / 2, y: top + off + (i % best) * ROW + ROW / 2});
+    });
+    x += Math.ceil(list.length / best) * colW[k] + RANK_GAP;
+  });
+}
+
+/* Lay out the graph: dagre for each connected part on its own, its tall ranks wrapped
+   (graphWrapRanks), then the parts, the largest first and lone nodes last, packed in
+   rows about the canvas's shape. dagre over the whole graph stacks unconnected parts in
+   one tall column (a type switched off can strand most nodes), most of it off screen. */
 function graphArrange(cy){
   var gapX = 40, gapY = 14, aspect = (cy.width() && cy.height()) ? cy.width() / cy.height() : 1.6;
   var parts = cy.elements().components().map(function(part){
-    if(part.edges().length) part.layout({name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}).run();
+    if(part.edges().length){
+      part.layout({name: "dagre", rankDir: "LR", nodeSep: 10, rankSep: 70, edgeSep: 6}).run();
+      graphWrapRanks(part, aspect);
+    }
     var bb = part.boundingBox();
     return {part: part, bb: bb, n: part.nodes().length};
   }).sort(function(a, b){ return b.n - a.n || b.bb.h - a.bb.h; });
@@ -207,12 +242,9 @@ function graphFit(cy, panTo){
     cy.stop(true);  /* an animation begun while hidden ends on a pan worked out for no size */
     cy.resize();
     cy.fit(undefined, 24);
+    /* every node in view, however small that makes it: the layout (graphArrange) keeps
+       common shapes legible, and a shape it cannot (a very long chain) still opens whole */
     if(cy.zoom() > FORMULA_GRAPH_MAX_FIT){ cy.zoom(FORMULA_GRAPH_MAX_FIT); cy.center(); }
-    if(cy.zoom() < FORMULA_GRAPH_MIN_ZOOM && cy.elements().length){  /* labels still legible */
-      var bb = cy.elements().boundingBox();
-      cy.zoom(FORMULA_GRAPH_MIN_ZOOM);
-      cy.pan({x: 24 - bb.x1 * FORMULA_GRAPH_MIN_ZOOM, y: 24 - bb.y1 * FORMULA_GRAPH_MIN_ZOOM});
-    }
     var sel = cy.$(".focus");
     if(sel.length) cy.pan(panTo(sel));
   }, 0);
@@ -257,7 +289,7 @@ function buildFormulaGraph(c, guid, tree){
       'The graph could not be drawn</div><div class="ph-sub">Its libraries did not load: use the tree.</div></div>';
     return;
   }
-  var hdr = graphHeader(guid), bar = ftypeBar(tree, retype, true);
+  var hdr = graphHeader(guid), bar = ftypeBar(tree, retype, true, function(){ return cy ? cy.nodes().length : 0; });
   hdr.appendChild(bar);
   c.appendChild(hdr);
   var results = el("div","ftree-results");
@@ -288,6 +320,7 @@ function buildFormulaGraph(c, guid, tree){
     /* a click or a drag on the empty canvas leaves focus on <body>: keep Escape working */
     cy.on("tapend", function(){ box.focus({preventScroll: true}); });
     graphFit(cy, panTo);
+    bar._recount();  /* the bar counts what is drawn */
   }
   function setSub(target){
     $(".fgraph-sub", hdr).textContent = graphNote(total, tree, target, cy.nodes().length, off);

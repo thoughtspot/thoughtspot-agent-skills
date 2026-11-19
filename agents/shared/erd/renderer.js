@@ -575,9 +575,17 @@ function syncShowBar(){
     const on=all?Object.keys(SHOW_CHIPS).every(k=>!counts[k]||showOn[k]):showOn[f];
     b.setAttribute("aria-pressed",on?"true":"false");
   });
-  bar.querySelector(".fbar-total").textContent=nodes.length+" of "+MODEL.tables.length+" tables shown";
+  syncShownTotal();
   $("focus-rls").setAttribute("aria-pressed",String(focusRls));$("focus-rls").disabled=!securedTables.length;
   $("focus-notes").setAttribute("aria-pressed",String(focusNotes));
+}
+// "N of M tables shown" counts what is drawn: a join-tree or compare focus hides the
+// tables outside it (hideOutOfFocus), so renderNodes refreshes it after every draw.
+function syncShownTotal(){
+  const el=document.querySelector("#filter-chips .fbar-total");if(!el)return;
+  const keep=hideOutOfFocus()?focusGroup():null;
+  const drawn=keep?nodes.filter(n=>keep.has(n.t.id)).length:nodes.length;
+  el.textContent=drawn+" of "+MODEL.tables.length+" tables shown";
 }
 // Something hidden was asked for (the finder, a link in the side panel): show everything.
 function revealAll(){Object.keys(showOn).forEach(k=>showOn[k]=true);focusRls=focusNotes=false;applyShow();}
@@ -813,6 +821,7 @@ function renderNodes(){
     g.addEventListener("dblclick",ev=>{ev.stopPropagation();const tree=joinTree(t.id);focusSet=[...tree];focusMode="tree";selected={type:"table",id:t.id};renderAll();showTable(t.id);});
   });
   lastLod=isLod;
+  syncShownTotal();
 }
 function renderAll(){renderEdges();renderNodes();}
 
@@ -1252,7 +1261,9 @@ function shareHTML(){
   const state=JSON.stringify(shareState()).replace(/</g,"\\u003c").replace(/>/g,"\\u003e");
   const newScript=`window.__ERD_DATA__ = ${dataEl.textContent.split("=").slice(1).join("=").trim().replace(/;$/,"")};
 window.ERD_INITIAL_STATE = ${state};`;
-  const full=doc.replace(dataEl.outerHTML,`<script id="erd-data">${newScript}<\/script>`);
+  // a function, not a string: a replacement string reads $&, $', $` and $$ as patterns,
+  // so a note or a name holding one would splice the page
+  const full=doc.replace(dataEl.outerHTML,()=>`<script id="erd-data">${newScript}<\/script>`);
   const blob=new Blob(["<!doctype html>\n"+full],{type:"text/html"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download=(MODEL.model.name||"erd").replace(/[^a-zA-Z0-9_-]/g,"_")+"-erd.html";

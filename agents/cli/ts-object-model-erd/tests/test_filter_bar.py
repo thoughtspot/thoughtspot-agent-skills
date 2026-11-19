@@ -177,3 +177,63 @@ def test_share_html_escapes_a_note_holding_script_markup(FULFIL, tmp_path):
       return {opener: state.slice(0, end).indexOf('<'+'!--'),
               readBack: JSON.parse(state.slice(0, end).replace(/;\\s*$/, '')).notes[id]===note};""", tmp_path)
     assert r == {"opener": -1, "readBack": True}
+
+
+def test_the_shown_count_counts_what_a_focus_leaves_drawn(FULFIL, tmp_path):
+    """A join-tree (double-click) or compare (shift-click) focus hides the tables outside
+    it; the count says how many are drawn, not how many the chips allow."""
+    r = browser.probe(FULFIL, _STATE + """
+      const hub=MODEL.tables.slice().sort((a,b)=>(undir[b.id]||[]).length-(undir[a.id]||[]).length)[0].id;
+      focusSet=[...joinTree(hub)]; focusMode='tree'; selected={type:'table',id:hub}; renderAll();
+      const tree={drawn: drawn(), total: total()};
+      focusSet=[]; focusMode=null; renderAll();
+      return {tree, after: total(), tables: MODEL.tables.length};""", tmp_path)
+    assert r["tree"]["drawn"] < r["tables"]
+    assert r["tree"]["total"] == "%d of %d tables shown" % (r["tree"]["drawn"], r["tables"])
+    assert r["after"] == "%d of %d tables shown" % (r["tables"], r["tables"])
+
+
+DOLLARS = "$' $& $$ $` $1"
+
+
+@pytest.fixture(scope="session")
+def DOLLAR_ERD(tmp_path_factory):
+    """The mini fixture with a table and a column named with every replacement pattern."""
+    import os
+    import shutil
+    import build_erd
+    src = os.path.join(os.path.dirname(__file__), "fixtures")
+    tml = tmp_path_factory.mktemp("dollar-tml")
+    for name in os.listdir(src):
+        if name.endswith(".tml"):
+            text = open(os.path.join(src, name), encoding="utf-8").read()
+            text = text.replace("CUSTOMER", "CUST " + DOLLARS).replace("name: Amount", "name: Amt " + DOLLARS)
+            (tml / name).write_text(text, encoding="utf-8")
+    out = str(tmp_path_factory.mktemp("dollar") / "erd.html")
+    build_erd.build([str(tml)], out, log=lambda *_: None)
+    return out
+
+
+_SAVE = """
+  let html=null; const RB=Blob; window.Blob=function(parts,o){html=parts.join('');return new RB(parts,o);};
+  URL.createObjectURL=()=>'blob:x'; HTMLAnchorElement.prototype.click=function(){};
+  shareHTML(); window.Blob=RB;
+  const data=html.split('<script id="erd-data">')[1].split('<'+'/script>')[0], w={};
+  new Function('window', data)(w);
+"""
+
+
+def test_share_html_keeps_replacement_patterns_in_names_and_notes(DOLLAR_ERD, tmp_path):
+    """The page is saved with String.replace: a replacement STRING reads $&, $', $` and $$
+    as patterns, so a name or note holding one spliced the saved page."""
+    r = browser.probe(DOLLAR_ERD, """
+      const t=MODEL.tables.find(x=>x.id.indexOf('CUST')===0).id, doc=document.documentElement.outerHTML.length;
+      notes[t]='Revenue in ' + %r;
+    """ % DOLLARS + _SAVE + """
+      const m=w.__ERD_DATA__.models[0];
+      return {tables: m.tables.map(x=>x.id).sort(), cols: m.tables.map(x=>x.cols.map(c=>c.name)).flat(),
+              note: w.ERD_INITIAL_STATE.notes[t], ratio: html.length/doc};""", tmp_path)
+    assert "CUST " + DOLLARS in r["tables"]
+    assert "Amt " + DOLLARS in r["cols"]
+    assert r["note"] == "Revenue in " + DOLLARS
+    assert 0.9 < r["ratio"] < 1.2, "the saved page is the page, not a splice of it"
