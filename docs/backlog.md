@@ -16648,7 +16648,7 @@ names and redundant enclosing brackets (move H16's normalisation into `spotql_op
 **What.** BL-503 gated the report's own JS parts and ratcheted what was already over:
 `views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
 limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
-`views/scorecard.js`). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
+`views/scorecard.js`; split to 126 lines and its ratchet entry dropped on 2026-11-19, ts-audit 3.25.0). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
 (1,338 lines; `audit/report.py` reads it into the page), which sits outside
 `check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
 measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
@@ -18583,5 +18583,27 @@ the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered
    condition (one walker taking a renderer would stop them drifting); no test checks the
    Dashboard Data Cache cell's "(to confirm)" or "Not checked:" hover text (both verified by
    hand in headless Chrome).
+
+**Target:** 2027-01-31.
+
+## BL-616 — the hook's interpreter search falls back to a bare `python3` that may lack pytest
+
+**Filed:** 2026-11-19. **Source:** a Homebrew upgrade on a maintainer's machine.
+
+**What.** `scripts/lib/python-bin.sh` takes the newest `python3.1x` on `PATH` (3.14 down to
+3.10) that imports pytest, else falls back to bare `python3` with a warning. Homebrew moved
+`python3` to 3.15, which has no pytest or PyYAML and which ts-cli does not yet support
+(`requires-python <3.15`); with no other 3.10-3.14 holding pytest on `PATH`, the pre-commit
+hook then failed every Python check within a second, and every commit needed
+`CHECKS_PYTHON` set by hand. The CI-equivalent virtual environment the repo documents
+(`~/.venvs/tas-ci`, `.github/CONTRIBUTING.md`) was there all along.
+
+**What should change.**
+1. Before falling back to bare `python3`, try `~/.venvs/tas-ci/bin/python3.12` (the path
+   CONTRIBUTING documents and pr-ready's skill already defaults to), with the same probe.
+2. When the fallback is a Python ts-cli does not support (3.15+, or below 3.10), stop with a
+   message naming `CHECKS_PYTHON` instead of reporting every check as a FAIL.
+3. Two tests (`test_quest_build`, `test_pre_commit_paths`) shell out to bare `python3`; run
+   them with `sys.executable` so they use the interpreter running the suite.
 
 **Target:** 2027-01-31.
