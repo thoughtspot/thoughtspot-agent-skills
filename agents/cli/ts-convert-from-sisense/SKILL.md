@@ -239,13 +239,33 @@ Approximated / NEEDS REVIEW / Skipped), plus `warnings`. Hand it to the user as 
 deliverable, calling out every NEEDS REVIEW row (window/time-intelligence formulas, unknown
 widgets, unresolved fields) for manual rebuild.
 
+On the `--target-model` path the report is `migration-report.json`. Also render the one-page
+HTML report people read, with the same sections and look as the Power BI skill's report:
+coverage of the dashboard's data widgets, what shipped, source-dashboard findings, how the model
+was adapted, every NEEDS REVIEW reason grouped board-wide vs tile-specific, and folded per-widget
+detail.
+
+```bash
+python3 scripts/render_report_html.py --bundle <bundle.json> --out-dir out/ \
+  --target-model target-model.json [--overrides overrides.json] \
+  [--readback readback.json] [--dropped dropped.json] [--reconcile reconcile.json] \
+  [--notes notes.json] [--title "<dashboard>"] [--board-url <url>] --html report.html
+```
+
+Without `--readback` (the imported board's tiles read back off the cluster) the page says it is a
+preview, never that anything is live. Report-specific facts the converter cannot derive (a defect
+in the source dashboard and its evidence, an adaptation decided with the customer, a Sisense-side
+reconciliation) go in `--notes`, never in the script. A tile `ts tml lint` reports as blank (no
+`axis_configs` because its only measure was not carried) is held back from the import and listed
+with `--dropped`, not shipped empty.
+
 ---
 
 ## Changelog
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.1.0 | 2026-11-20 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Region > Country > City) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. An allowlist at every level of the dashboard export and of the target Model (its filters, join types, join_progressive, column properties and warehouse tables) decides what is carried; anything not read or not verified is NEEDS REVIEW on the chip and every tile it affects, and an accounting gate names any plotted field a tile does not show. |
+| 1.1.0 | 2026-11-20 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Region > Country > City) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. An allowlist at every level of the dashboard export and of the target Model (its filters, join types, join_progressive, column properties and warehouse tables) decides what is carried; anything not read or not verified is NEEDS REVIEW on the chip and every tile it affects, and an accounting gate names any plotted field a tile does not show. Step 4 adds `agents/cli/ts-convert-from-sisense/scripts/render_report_html.py`, a one-page HTML migration report in the Power BI skill's format (coverage, what shipped, source findings, adaptations, grouped review reasons, reconciliation, per-widget detail), fed by `--notes` for anything report-specific. |
 | 1.0.8 | 2026-11-08 | **The aggregation table no longer maps `count` to `COUNT_DISTINCT` (BL-447).** Sisense `count` is a distinct count; the mapping doc and coverage matrix now give the `unique count` formula, as invariant I5 requires. The uncalled `AGG_MAP` / `translate_agg` behind that row was deleted; no Model output changes |
 | 1.0.7 | 2026-11-08 | **Lint and import read TML only (BL-545).** Steps 2 and 3 read `--dir out/` with no filter, which also reads `mapping.json` as a document, so the `ALL_OR_NONE` import sent it to ThoughtSpot beside the Tables and Model. Both steps now add `--pattern`: Step 2 imports `*.table.tml` and `*.model.tml`, Step 3 imports every `*.tml` (Tables, Model, Liveboard and its Answers) |
 | 1.0.6 | 2026-11-04 | **Calculated-column formulas are surfaced again, and declare an aggregation.** A migrated calc column's formula was emitted with no `columns[]` entry binding it (the name-collision pass dropped the formula's own column with the physical one it replaces), so it never appeared in the Model; its column is now kept, and a MEASURE one carries `aggregation:` (BL-509). |
