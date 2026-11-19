@@ -6,8 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-19
-- fix: `ts audit` P24 reads a Databricks connection whose only OAuth settings are `OAuth2ClientId` and `OAuth2Secret` as OAuth to confirm, since per-user OAuth and a service principal both hold that pair; its Models read To confirm instead of Can't use. P23 names an Analyst Studio source (`RDBMS_MODE`) "Analyst Studio", still blocked (ts-audit 3.23.1)
-- chore: bump ts-cli to v0.219.2
+- feat: the `ts audit` report's Dashboard heatmap shows each Model's Data Cache readiness in a column of its own, linking to the Data Cache view (ts-audit 3.24.0)
+- fix: `ts audit` P24 reads a Databricks connection whose only OAuth settings are `OAuth2ClientId` and `OAuth2Secret` as OAuth to confirm, since per-user OAuth and a service principal both hold that pair; its Models read To confirm instead of Can't use. P23 names an Analyst Studio source (`RDBMS_MODE`) "Analyst Studio", still blocked (ts-audit 3.24.0)
+- chore: bump ts-cli to v0.220.0
 
 ## 2026-11-18
 - docs: object, calendar and user names that carried a person's or a company's name in recorded evidence are replaced with synthetic ones; findings unchanged

@@ -255,6 +255,43 @@ def test_the_view_lists_every_model_with_its_readiness(tmp_path):
     assert "Data Cache" in nav["extra"]
 
 
+_HEATMAP = ('window.__extra = Array.prototype.map.call(document.querySelectorAll('
+            '".heatmap tbody tr"), function(tr){ var dc = tr.querySelector("a.dc-state"); '
+            'return [tr.querySelector(".model-name a").textContent, dc && dc.textContent, '
+            'dc && dc.getAttribute("href"), dc && dc.getAttribute("title")]; });')
+
+
+@needs_chrome
+def test_the_dashboard_heatmap_has_a_data_cache_column(tmp_path):
+    """Each heatmap row shows its Model's Data Cache readiness, as the Data Cache view
+    labels it, with the reasons on hover and a link to that view."""
+    shown = report_browser.render(_page(), tmp_path, "dashboard", actions=_HEATMAP)
+    assert shown["errors"] == []
+    assert "DATA CACHE" in shown["visible"].upper()
+    rows = {name: (label, href, title) for name, label, href, title in shown["extra"]}
+    # The heatmap lists the Models with findings; Ready Sales has none.
+    assert {n: r[0] for n, r in rows.items()} == {
+        "Blocked Sales": "Can’t use", "Passthrough Sales": "Can’t use",
+        "Warned Sales": "Warning"}
+    assert {r[1] for r in rows.values()} == {"#datacache"}
+    assert rows["Blocked Sales"][2] == (
+        "Data Cache: Can’t use — P19 Custom calendar")
+    assert rows["Warned Sales"][2] == (
+        "Data Cache: Warning — P22 Connection defines custom calendars")
+
+
+@needs_chrome
+def test_the_heatmap_has_no_data_cache_column_for_json_from_before_it(tmp_path):
+    data = run_audit(None, [], ["P"], ctx=_estate())
+    for m in data["corpus"]["models"]:
+        m.pop("data_cache", None)
+    shown = report_browser.render(render_report(data), tmp_path, "dashboard",
+                                  actions=_HEATMAP)
+    assert shown["errors"] == []
+    assert all(row[1] is None for row in shown["extra"])
+    assert ">Data Cache</th>" not in render_report(data).split("<script")[0]
+
+
 @needs_chrome
 @pytest.mark.parametrize("pill, expected", [
     ("blocked", ["Blocked Sales", "Passthrough Sales"]), ("ready", ["Ready Sales"]),
