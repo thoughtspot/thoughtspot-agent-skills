@@ -5462,8 +5462,8 @@ read 0. Back up each object before that import; re-importing the backup (Set fir
 rollback:
 
 ```bash
-ts tml export <answer-guid> --fqn --split-dir "$OUT/before"   # and <set-guid>; prints "written"
-ts tml import --file "$OUT/before/<written file>" --policy ALL_OR_NONE   # rollback
+ts tml export <answer-guid> --fqn > "$OUT/before-answer.json"   # and <set-guid>; save each item's "edoc" (YAML) as before-*.tml
+ts tml import --file "$OUT/before-answer.tml" --policy ALL_OR_NONE   # rollback (Set first)
 ```
 
 | Option | Default | Description |
