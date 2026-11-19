@@ -146,13 +146,14 @@ def connection_readings(item: dict, ctx: Any) -> List[Dict[str, Any]]:
 
 def _flag_reading(key: str, facts: list) -> Tuple[str, bool]:
     """How a finding names one flag, and whether it is a reading the team is to confirm
-    (open-items #18): OAuth read only from a client ID and secret (oauth_m2m, which
-    per-user OAuth and a service principal both hold), and PrivateLink read from the
+    (open-items #18): OAuth read only from client credentials, a client ID, a secret or
+    both (oauth_m2m, which per-user OAuth and a service principal both hold), and
+    PrivateLink read from the
     host. A template variable, and OAuth read from any other setting named for it, are
     firm."""
     if key == "oauth":
         m2m = all(f.get("oauth_m2m") is True for f in facts if f.get("oauth") is True)
-        return ("OAuth client ID and secret", True) if m2m else ("OAuth", False)
+        return ("OAuth client credentials", True) if m2m else ("OAuth", False)
     if key == "privatelink":
         return "PrivateLink read from the host", True
     return "template variable", False

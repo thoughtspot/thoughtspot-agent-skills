@@ -10,17 +10,21 @@ on that: `connection_facts` parses it, derives four booleans and drops it, so no
 configuration value reaches the audit context, a snapshot, the audit JSON, a warning
 or a log line.
 
-    oauth          a configuration key, at any depth, containing `oauth` (any case:
-                   `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or a
-                   `client_id` or `client_secret` (an OAuth M2M service principal; one
-                   set without the other is an open question, so it reads as OAuth to
-                   confirm, never as no OAuth: the product owner's rule, 2026-11-19).
+    oauth          a configuration key, at any depth, containing `oauth` (`OAuth2ClientId`,
+                   `OAuth2Secret`, `oauth_pvt_key` were seen), or a key ending in
+                   `clientid` or `clientsecret` (an OAuth M2M service principal:
+                   `client_id`, `clientId`, `ClientID`, `client-secret`,
+                   `azure_client_id`), alone or together. Keys are compared normalised
+                   (_norm: any case, `_` and `-` dropped). One set without the other is
+                   an open question, so it reads as OAuth to confirm, never as no OAuth:
+                   the product owner's rule, 2026-11-19.
                    Read from key names: the response has no auth-type field. A key
                    counts only when its value is set (_is_set): not null, false,
                    empty, or text reading "false" or "null".
     oauth_m2m      `oauth` rests only on a client ID and secret, whose kind of OAuth the
-                   product owner's team is to confirm (open-items #18): a set
-                   `client_id`, `client_secret` or both on any connection, or, on a
+                   product owner's team is to confirm (open-items #18): a set client ID
+                   or secret key (any spelling above), or both, with no other key naming
+                   OAuth, on any connection, or, on a
                    Databricks connection or one whose type is not given, OAuth read
                    only from `OAuth2ClientId`, `OAuth2Secret` or both (no other setting
                    naming OAuth). On the SE demo cluster, 12 of its 14
@@ -64,7 +68,8 @@ from ts_cli.publish_plan import parse_variable_token
 #: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
 #: 3: from ts-cli 0.222.0, a `client_id` or `client_secret` set alone (the other blank or
 #: absent), on any warehouse, reads as `oauth` and `oauth_m2m` (to confirm), as the pair
-#: does; it read as no OAuth, so its Model could read Can use.
+#: does; it read as no OAuth, so its Model could read Can use. Keys are compared
+#: normalised, so `clientId`, `client-secret` or `azure_client_id` read the same way.
 FACTS_VERSION = 3
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
@@ -131,23 +136,35 @@ def _is_set(value: Any) -> bool:
 
 
 #: Keys whose presence lets the OAuth and PrivateLink readings judge a configuration:
-#: one naming OAuth, an M2M client pair, or a host. A configuration with none of them
-#: (`{}`, or only a user and password) says nothing either way.
-_M2M_KEYS = ("client_id", "client_secret")
-#: The client ID and secret a Databricks OAuth connection holds (case folded), used by
+#: one naming OAuth, one ending in one of these (an OAuth client ID or secret, normalised
+#: by _norm), or a host. A configuration with none of them (`{}`, or only a user and
+#: password) says nothing either way.
+_CLIENT_SUFFIXES = ("clientid", "clientsecret")
+#: The client ID and secret a Databricks OAuth connection holds (normalised), used by
 #: per-user OAuth and by a service principal alike (oauth_m2m in the module docstring).
 _DATABRICKS_OAUTH_PAIR = frozenset(("oauth2clientid", "oauth2secret"))
 
 
+def _norm(key: Any) -> str:
+    """A key as compared: any case, `_` and `-` dropped, so `client_id`, `clientId`,
+    `ClientID` and `client-id` are one key. Keys only: no value is read beyond _is_set."""
+    return (key or "").casefold().replace("_", "").replace("-", "")
+
+
+def _client_key(key: str) -> bool:
+    """A normalised key naming an OAuth client ID or secret."""
+    return key.endswith(_CLIENT_SUFFIXES)
+
+
 def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
-    """What _flags reads of a configuration: every key (case folded), the keys whose
+    """What _flags reads of a configuration: every key (normalised, _norm), the keys whose
     value is set (_is_set), the text of each host or account name, and whether any value
     is wholly a template token. A blank host or account name holds no text, so it is
     not a host."""
     present, keys, hosts = set(), set(), []
     parameterized = False
     for key, value in _entries(config):
-        folded = (key or "").casefold()
+        folded = _norm(key)
         present.add(folded)
         if _is_set(value):
             keys.add(folded)
@@ -173,26 +190,37 @@ def warehouse_type(kind: Any) -> Optional[str]:
 
 def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[bool]]:
     """The four flags of a parsed configuration (module docstring). OAuth and PrivateLink
-    are None, unknown, when no key they read is present (_M2M_KEYS, a key naming OAuth,
-    _HOST_KEYS); PrivateLink is None too when no host or account name holds text. A
+    are None, unknown, when no key they read is present (a client ID or secret key, a key
+    naming OAuth, _HOST_KEYS); PrivateLink is None too when no host or account name holds text. A
     template variable is True when a value is one, else False for a configuration the
     readings can judge and None for one they cannot. `warehouse` is the connection's
     type: on DATABRICKS, or with no type given, OAuth resting only on keys of
     _DATABRICKS_OAUTH_PAIR is oauth_m2m."""
     present, keys, hosts, parameterized = _read_entries(config)
-    readable = any("oauth" in k for k in present) or bool(
-        present & (set(_M2M_KEYS) | set(_HOST_KEYS)))
-    if not readable:
+    if not _readable(present):
         return {"oauth": None, "oauth_m2m": None, "privatelink": None,
                 "parameterized": True if parameterized else None}
+    oauth, m2m = _oauth(keys, warehouse)
+    privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
+    return {"oauth": oauth, "oauth_m2m": m2m, "privatelink": privatelink,
+            "parameterized": parameterized}
+
+
+def _readable(present: set) -> bool:
+    """Some key the OAuth or PrivateLink reading reads is present, set or not."""
+    return any("oauth" in k or _client_key(k) for k in present) or bool(present & set(_HOST_KEYS))
+
+
+def _oauth(keys: set, warehouse: Optional[str]) -> Tuple[bool, bool]:
+    """(oauth, oauth_m2m) from the set keys (module docstring): a key naming OAuth is
+    firm OAuth, unless it is only the Databricks pair on a Databricks connection or one
+    with no type; with none, a client ID or secret key is OAuth to confirm."""
     oauth_keys = {k for k in keys if "oauth" in k}
     named = bool(oauth_keys)
-    m2m = (not named and bool(set(_M2M_KEYS) & keys)) or (
+    m2m = (not named and any(_client_key(k) for k in keys)) or (
         warehouse_type(warehouse) in ("DATABRICKS", None)
         and named and oauth_keys <= _DATABRICKS_OAUTH_PAIR)
-    privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
-    return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,
-            "parameterized": parameterized}
+    return named or m2m, m2m
 
 
 def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:

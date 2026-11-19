@@ -546,7 +546,8 @@
   description: >-
     A Model on a connection that uses OAuth, PrivateLink or a template variable, which
     Data Cache cannot serve. Read from the connection's settings: OAuth when a setting
-    name contains `oauth`, or names both `client_id` and `client_secret`; PrivateLink
+    name contains `oauth`, or names an OAuth client ID or secret (`client_id`, `clientId`,
+    `client-secret` and the like, either alone or both); PrivateLink
     when its host or account name contains `privatelink`; a template variable when a
     setting is wholly a `${var}` token, or when the connection's metadata header says it
     is parameterized (`parameterizedConnection` or `isParameterized`), since the search
@@ -556,9 +557,11 @@
     connection is matched by its metadata header's connection name. A connection missing
     from the search, whose settings or header could not be read, or that nothing names,
     is not judged, and the Model's Data Cache readiness reads Not assessed. OAuth read only
-    from a client ID and secret (`client_id` and `client_secret`, or on a Databricks
-    connection `OAuth2ClientId` and `OAuth2Secret` with no other setting naming OAuth,
-    which per-user OAuth and a service principal both hold), and PrivateLink read from
+    from client credentials (a client ID or secret, or both, in any spelling, with no
+    other setting naming OAuth, on any connection; or on a Databricks connection, or one
+    whose type the search does not give, `OAuth2ClientId`, `OAuth2Secret` or both with no
+    other setting naming OAuth, which
+    per-user OAuth and a service principal both hold), and PrivateLink read from
     the host, are for the product team to confirm: a finding resting only on them says
     the Model may not be able to use Data Cache. The finding lists each connection and
     what it uses.

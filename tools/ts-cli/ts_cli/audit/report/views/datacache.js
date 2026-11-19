@@ -176,7 +176,7 @@ function buildDataCache(D, guid){
     "View, or an RLS rule beyond its Table\u2019s own columns. A connection that defines "+
     "custom calendars is a warning, since a query that picks one at run time is not cached. "+
     "To confirm: the only reasons are readings the product team is to review (OAuth read "+
-    "from a client ID and secret, PrivateLink read from the host, a measure only flagged "+
+    "from client credentials (a client ID or secret), PrivateLink read from the host, a measure only flagged "+
     "pre-aggregated, an RLS rule\u2019s \u201c= null\u201d test, a custom calendar named in "+
     "a formula, a code-based calendar name that a custom calendar also has). Anything "+
     "the audit could not read makes a Model Not assessed, never Can use."));

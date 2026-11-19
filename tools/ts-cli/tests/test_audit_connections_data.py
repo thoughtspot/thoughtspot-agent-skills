@@ -65,6 +65,10 @@ SECRET_CONNECTIONS = [
     ({"Client_ID": "x", "CLIENT_SECRET": "y"}, True),
     # one of the client pair alone is an open question: OAuth to confirm, never "no"
     ({"client_id": "x"}, True), ({"client_secret": "y", "host": "h"}, True),
+    # any spelling of a client ID or secret key, alone or together (keys normalised)
+    ({"clientId": "x", "clientSecret": "y"}, True), ({"ClientID": "x"}, True),
+    ({"client-id": "x", "client-secret": "y"}, True),
+    ({"azure_client_id": "x", "azure_client_secret": "y"}, True), ({"nested": {"ClientSecret": "y"}}, True),
     ({"user": "u", "password": "p", "host": "h"}, False),
     ({"auth": {"oauth_scope": "x"}}, True), ({"note": "uses oauth", "host": "h"}, False),
 ])
@@ -446,6 +450,12 @@ GOLDEN = [
     ("SNOWFLAKE", {"client_secret": "y", "host": "h"}, (True, True, False, False)),
     ("SNOWFLAKE", {"client_id": "x", "client_secret": "", "host": "h"}, (True, True, False, False)),
     ("SNOWFLAKE", {"client_id": "", "client_secret": None, "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"clientId": "x", "clientSecret": "y"}, (True, True, None, False)),
+    ("SNOWFLAKE", {"ClientID": "x", "host": "h"}, (True, True, False, False)),
+    ("POSTGRES", {"client-id": "x", "client-secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"azure_client_id": "x", "azure_client_secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"oauth_client_id": "x", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"clientId": "", "host": "h"}, (False, False, False, False)),
     ("SNOWFLAKE", {"oauth_pvt_key": "k", "accountName": "a.privatelink.b"}, (True, False, True, False)),
     ("SNOWFLAKE", {"user": "u", "password": "p", "host": "h", "db": "${tenant_db}"}, (False, False, False, True)),
     ("SNOWFLAKE", {"user": "u", "password": "p"}, (None, None, None, None)),

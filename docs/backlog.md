@@ -510,6 +510,8 @@ are roughly ordered by value÷effort.
 | BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
 | BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
 | BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
+| BL-615 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
+| BL-616 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -16648,7 +16650,7 @@ names and redundant enclosing brackets (move H16's normalisation into `spotql_op
 **What.** BL-503 gated the report's own JS parts and ratcheted what was already over:
 `views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
 limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
-`views/scorecard.js`; split to 126 lines and its ratchet entry dropped on 2026-11-19, ts-audit 3.25.0). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
+`views/scorecard.js`; split under the 250-line limit and its ratchet entry dropped on 2026-11-19, ts-audit 3.25.0). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
 (1,338 lines; `audit/report.py` reads it into the page), which sits outside
 `check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
 measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
@@ -17832,7 +17834,7 @@ disagree.
 
 **What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each open reading reads To confirm or Not assessed, never Can use, with two qualifications. Point 2's negative side is excepted by decision (a host without `privatelink` reads as no PrivateLink), and point 3 is firm, since the product owner answered it:
 
-- P24 reads OAuth from a client ID and secret alone (point 1): a `client_id` and `client_secret` pair, or on a Databricks connection `OAuth2ClientId` and `OAuth2Secret`, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
+- P24 reads OAuth from client credentials alone (point 1): a client ID or secret key in any spelling (`client_id`, `clientId`, `client-secret`), alone or both, or on a Databricks connection (or one whose type the search does not give) `OAuth2ClientId`, `OAuth2Secret` or both, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
 - P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the operator forms S12 accepts (`= null`, `!= null`, `<= null`, `>= null`) to confirm (point 4).
 - P19 lists a formula that names a custom calendar (point 5), and a code-based value on a column or in a formula that a custom calendar is also named (point 9), to confirm.
 - P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
@@ -18550,7 +18552,7 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
 
 **Target:** 2027-01-31.
 
-## BL-615 — ts-audit Data Cache and Formulas: review nits deferred from #744
+## BL-615 — ts-audit Data Cache and Formulas: review nits deferred from #744 `Tier 3`
 
 **Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
 blocker or should-fix left; these were deferred, not declined).
@@ -18565,11 +18567,11 @@ the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered
    `data_warehouse_type` of only spaces does the same, since `_text(" ")` stops the fallback to
    `details.type`: run `warehouse_type` on each candidate before choosing. Both lean to To
    confirm, never Can use, and neither has been seen live.
-2. **P24's rule text.** `perf.yaml`'s P24 description (and README, CHANGELOG, BL-590) names
-   the OAuth2 pair only "on a Databricks connection"; the code also reads either key alone, and
-   a connection with no type, as to confirm. Its remediation ("switch it to a service account")
-   is circular for a connection that may already be a service principal: give readings to
-   confirm a line of their own, and add P24 to BL-590's step 2.
+2. **P24's remediation.** Its description, README and BL-590 name every reading to confirm
+   since ts-audit 3.25.0 (either key alone, any spelling, a connection with no type). Its
+   remediation ("switch it to a service account") is circular for a connection that may
+   already be a service principal: give readings to confirm a line of their own, and add P24
+   to BL-590's step 2.
 3. **The golden table pins rows, not the derivation.** `test_audit_connections_data.py`'s table
    fails only when a pinned row changes; a change no row covers (or `header_parameterized`,
    which has no row) passes without a `FACTS_VERSION` bump. Pin one row per derivation path,
@@ -18586,7 +18588,7 @@ the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered
 
 **Target:** 2027-01-31.
 
-## BL-616 — the hook's interpreter search falls back to a bare `python3` that may lack pytest
+## BL-616 — the hook's interpreter search falls back to a bare `python3` that may lack pytest `Tier 3`
 
 **Filed:** 2026-11-19. **Source:** a Homebrew upgrade on a maintainer's machine.
 
