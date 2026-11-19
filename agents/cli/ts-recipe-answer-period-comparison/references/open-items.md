@@ -562,7 +562,7 @@ Every object was named `ZZ_probe_period_comparison_*` and created by these probe
 `simba-test`; nothing else was changed. The Model was only read: its TML export before and
 after the first round of probes is identical. The later probes imported Sets, Answers and
 Liveboards that reference the Model; the Model's TML was not compared again after them.
-GUIDs are kept in the build's working notes, not in this public file.
+Their GUIDs are not recorded publicly.
 
 **Deleted 2026-11-18 (first round):**
 

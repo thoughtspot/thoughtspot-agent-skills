@@ -58,7 +58,7 @@ Display, then wait for Y:
       4. Comparison windows ...................... you choose
       5. Bucket form (formula or reusable Set) ... you choose
       6. Generate and check the dates ............ you confirm
-      7. Import .................................. auto
+      7. Back up (if updating) and import ........ auto
       8. Verify, plus one check in the UI ........ you check
 
     Ready? [Y / N]
@@ -109,8 +109,9 @@ column's type is on its Table: match `column_id` (`TABLE::column`) to that Table
   nor the Table entry gives a cardinality, ask the user which side has one row per key.
   Never assume `MANY_TO_ONE`.
   If the date column is on neither, warn: `sum_if` would add each sales value once per
-  joined row and inflate the result. Step 8's UI check looks for a `CROSS JOIN` only, so
-  it would not catch an ordinary join that repeats rows.
+  joined row and inflate the result. Step 8's UI check (no `CROSS JOIN`, each measure a
+  flat `sum` from the fact table) shows the SQL's shape, not how many rows a join
+  repeats, so it would not catch an ordinary join that repeats rows.
 - **A DATE_TIME date column.** Note it now: Step 5 then offers only the formula form.
 - **A custom or fiscal calendar.** Look at the date column's `properties.calendar`, on the
   Model column or its Table column. If it names a calendar other than the literal
@@ -120,7 +121,7 @@ column's type is on its Table: match `column_id` (`TABLE::column`) to that Table
 
 ## Step 3 — Event, window and years
 
-Batch these three questions.
+Batch these four questions: event, window, years and the last loaded date.
 
 **Event.** A built-in event, or a custom one:
 
@@ -143,7 +144,11 @@ window must fall inside one calendar year: a window that crosses 1 January is an
 a long Christmas window needs an earlier start or a shorter length.
 
 **Years.** `--years 2020-2025` (or one year), or `--last N` for the last N finished years.
-Ask what years the Model's data covers. A year with no data at all gives no row.
+Ask what years the Model's data covers, and the first day it is loaded from. A year with no
+data at all gives no row. `--data-through` guards only the end of the data: a year whose
+data starts after its comparison windows but before its event gets a comparison average of
+0 and a variance equal to the event average. Leave out each year whose earliest
+comparison window starts before that first loaded day.
 
 **Last loaded date.** Establish the last day the data is loaded through, and pass it as
 `--data-through YYYY-MM-DD`. A year with any window ending after it is dropped and
@@ -154,7 +159,7 @@ negative variance. Ask the user. If the Model is on an external cloud data wareh
 recipe; see [ts-object-model-agentql-query](../ts-object-model-agentql-query/SKILL.md)):
 
 ```bash
-ts agentql fetch-data 'SELECT MAX("{date_column}") AS last_day FROM "{model_name}" AS "t1"' \
+ts agentql fetch-data 'SELECT MAX("t1"."{date_column}") AS "Last Day" FROM "{model_name}" AS "t1"' \
   --model {model_guid} --profile "{profile}"
 ```
 
@@ -206,8 +211,8 @@ ts sets inventory --model {model_guid} --profile "{profile}"   # reusable-set on
 
 In the Sets inventory, check `orgs[].models[].discovery` is `COMPLETE` (an `INCOMPLETE`
 Model's empty `sets[]` means unknown, not none), then look for the name in `sets[].name`. If
-either exists, ask: update it in place (pass `--answer-guid` / `--set-guid` in Step 6 and drop
-`--create-new` in Step 7), or pick new names.
+either exists, ask: update it in place (pass `--answer-guid` / `--set-guid` in Step 6, back
+it up and drop `--create-new` in Step 7), or pick new names.
 
 **Updating a Set in place changes every Answer that uses it.** First list its consumers:
 that Set's `dependents[]` in the same inventory (if `dependents_complete` is `false`, the
@@ -237,7 +242,7 @@ The command is offline: it writes TML and imports nothing. Read its exit code fi
 | 0 | The plan, with `files` | Files written. Show the windows table (below) |
 | 2 | JSON with `needs_clash_decision: true` | A clash: explain it and ask (below). Nothing written |
 | 2 | Empty (usage message on stderr) | The command line is wrong: a missing or misspelt option. Fix it and re-run |
-| 1 | `{"error": "…"}` | The request cannot be built: a window crossing 1 January, a year missing from a custom file, more than 300 windows in a group, a bad label. Show the message and change the input with the user |
+| 1 | `{"error": "…"}` | The request cannot be built: a window crossing 1 January (or a custom date typed in another year), a year missing from a custom file, more than 300 windows in a group, a bad label. Show the message and change the input with the user |
 
 **A clash** is a prior-week window that holds a built-in event's anchor day. That is
 another event's day (Boxing Day 2025's 4th prior window is Black Friday to Cyber Monday),
@@ -273,7 +278,28 @@ smoke test). Do not "fix" it to `obj_id`. BL-604 narrows the lint rule.
 
 Wait for the user to confirm the dates.
 
-## Step 7 — Import
+## Step 7 — Back up, then import
+
+**Back up before an in-place update.** If Step 6 passed `--answer-guid` or `--set-guid`,
+export what is on the server now into the run directory, before any import:
+
+```bash
+ts tml export {answer_guid} --fqn --split-dir "{out_dir}/before" --profile "{profile}"
+ts tml export {set_guid} --fqn --split-dir "{out_dir}/before" --profile "{profile}"   # a Set update only
+```
+
+`--split-dir` implies `--parse` and writes each object's TML, root `guid` included, to its
+own JSON file; stdout lists them in `written`. ThoughtSpot imports JSON TML as well as YAML
+(`ts_cli/sets/export.py`). If an export fails, stop: do not import without the backup.
+**Re-importing a backup file is the rollback**, the Set before the Answer, without
+`--create-new`, so its `guid` updates the object in place:
+
+```bash
+ts tml import --file "{out_dir}/before/{written_file}" --policy ALL_OR_NONE --profile "{profile}"
+```
+
+A Set update changes every Answer that uses the Set (Step 5), so the Set's backup restores
+all of them. Tell the user where the backup is, as ts-object-model-coach does (its Step 8a).
 
 Import the Set first (reusable-set only), then the Answer, which names it:
 
@@ -320,7 +346,8 @@ ts tml export {answer_guid} --fqn --parse --profile "{profile}"
 The recipe passed this check on a test Model (open items #4 and #7). Ask for it anyway:
 it is the only way to see the rows and SQL on the user's own Model.
 
-**Report to the user:** the Answer's name and GUID (and the Set's), the windows table, and:
+**Report to the user:** the Answer's name and GUID (and the Set's), the windows table, the
+backup directory and its rollback command after an in-place update (Step 7), and:
 
 - **Days with data.** Each average is sales ÷ the number of days *with data* in the window.
   Filtering the Answer (to one product, say) changes that count, since days on which the
@@ -349,9 +376,9 @@ The decisions the agent would otherwise make:
 | Sales column | A measure summed per day. Never a formula built on `group_aggregate` or a `group_*` function: it repeats a fixed-level total on every row |
 | Joins | The date column on the sales column's Table, or on a Table it joins many-to-one. Otherwise each sales value is summed once per joined row |
 | Calendar | If the date column has a custom or fiscal calendar, the year rows follow it, not the Gregorian years the windows are placed in |
-| Clash | Prefer `--on-clash skip`: keeping a window that holds another event raises the baseline and shrinks the lift |
+| Clash | Prefer `--on-clash skip`: keeping a window that holds a built-in event's anchor day (another event's, or this event's own when `--offset` moves off it) raises the baseline and shrinks the lift |
 | Import timeout | Do not retry at once. Wait a few minutes, search by name (`ts metadata search --type ANSWER --name …`; for a Set, `ts sets inventory --model <guid>` with `discovery` `COMPLETE`), and retry only if it is missing |
-| Re-run | Same names exist already: pass `--answer-guid` / `--set-guid` and import without `--create-new`. Updating a Set changes every Answer that uses it (its `dependents[]` in the inventory); a changed label makes their measures read 0 |
+| Re-run | Same names exist already: pass `--answer-guid` / `--set-guid`, back up each object first (`ts tml export <guid> --fqn --split-dir <dir>/before`; re-importing that file is the rollback), and import without `--create-new`. Updating a Set changes every Answer that uses it (its `dependents[]` in the inventory); a changed label makes their measures read 0 |
 | SQL check | In the UI query view: no `CROSS JOIN`, measures as a flat `sum` from the fact table, one row per year |
 
 ---
@@ -361,7 +388,7 @@ The decisions the agent would otherwise make:
 | Symptom | Cause | Action |
 |---|---|---|
 | `No such command 'recipe'` | ts-cli older than 0.220.0 | Reinstall ts-cli from this repo |
-| Exit 1, `runs outside calendar year` | A window crosses 1 January | Shorten the window or move its start |
+| Exit 1, `runs outside calendar year` | A window crosses 1 January, or a custom file has a date typed in another year | Shorten the window or move its start; correct the date in the file |
 | Exit 1, `the limit is 300 per group` | Too many years × prior weeks | Fewer years or fewer prior weeks |
 | Import `ERROR` 14516, `Search did not find …` | A column or Set name in a formula does not exist on the Model | Check `--date-column`, `--measure-column` and, for reusable-set, that the Set imported first |
 | Import says "not retried" | Client timeout; the server may still finish | Step 7: wait, search, then retry only if missing |

@@ -4,7 +4,11 @@ Pure date arithmetic apart from ``load_custom_windows``, which reads one file. T
 plan says, for each year, which days are the event and which are its comparison
 windows; later modules turn it into ThoughtSpot TML.
 
-``build_plan`` applies these rules, in order:
+``build_plan`` applies these rules. Rules 4 and 6 run first, for every year it
+reads: each given window (the event window, and custom comparison ranges) is
+checked against rule 4 before rule 6 judges whether the year is finished, so a
+date typed into the wrong year is an error, never an unfinished year dropped.
+Rules 2, 3, 5 and rule 4 for prior-weeks windows then run on the kept years.
 
 1. Event window = anchor + offset .. anchor + offset + length - 1 (a custom start
    date the same way; a custom range as given).
@@ -16,7 +20,9 @@ windows; later modules turn it into ThoughtSpot TML.
    replaces the window with the next earlier non-clashing step, "keep" uses it.
 4. Every window must sit inside the event's calendar year.
 5. In custom comparison mode, no two windows (event included) may overlap.
-6. A year whose latest window has not ended before ``today`` is dropped.
+6. A year whose latest window has not ended before ``today`` is dropped. As every
+   window sits in its own year, a dropped year is always later than every kept
+   year, so the kept years of a consecutive request stay consecutive.
    ``today`` is the first day the data does not cover: the run date, or the day
    after ``--data-through``. A year missing from a custom file is an error,
    except the current year under ``last=N`` while its event window is unknown or
@@ -210,11 +216,16 @@ def _is_unfinished(spec: PlanSpec, year: int, event: Window, today: date) -> boo
 
     Prior-weeks windows all precede the event, so the event's end is the latest.
     A custom comparison may sit after the event, so its ranges count too. They
-    are read for every year, finished or not, so a missing year always surfaces.
+    are read for every year, finished or not, so a missing year always surfaces,
+    and checked against rule 4 first: a range typed into a later year would
+    otherwise make its year look unfinished, and the year would be dropped.
     """
     latest = event.end
     if spec.comparison == "custom":
-        latest = max([latest, *(w.end for w in _custom_comparisons(spec, year))])
+        comparisons = _custom_comparisons(spec, year)
+        for window in comparisons:
+            _check_in_year(year, window, "comparison window")
+        latest = max([latest, *(w.end for w in comparisons)])
     return latest >= today
 
 
@@ -240,6 +251,7 @@ def _sort_years(
         event: Optional[Window] = None
         try:
             event = _event_window(spec, year)
+            _check_in_year(year, event, "event window")
             unfinished = _is_unfinished(spec, year, event, today)
         except _MissingYearError as exc:
             if not (walking_back and year == today.year):
@@ -357,12 +369,9 @@ def build_plan(spec: PlanSpec, today: date) -> PlanResult:
 
     plans: list[YearPlan] = []
     clashes: list[Clash] = []
-    for year, event in kept:
-        _check_in_year(year, event, "event window")
+    for year, event in kept:  # rule 4 already checked by _sort_years
         if spec.comparison == "custom":
             comparisons = _custom_comparisons(spec, year)
-            for window in comparisons:
-                _check_in_year(year, window, "comparison window")
             _check_no_overlap(year, event, comparisons)
             plans.append(YearPlan(year, event, comparisons, ()))
             continue

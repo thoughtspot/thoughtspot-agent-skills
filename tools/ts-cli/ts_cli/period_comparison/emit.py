@@ -74,15 +74,27 @@ class ModelRef:
 # --- names --------------------------------------------------------------------
 
 # Labels sit inside '…' in formulas, and names inside […] references, so a quote
-# or a bracket would end one early. Control characters cannot be typed back.
-_FORBIDDEN = {"'": "a single quote", '"': "a double quote", "[": "a bracket",
-              "]": "a bracket"}
+# or a bracket would end one early. Control characters cannot be typed back. In a
+# single-quoted literal a lone backslash is dropped (probed live, formula_text.py),
+# so a reusable Set's group 'A\B' and the measure's literal 'A\B' (read as 'AB')
+# would never match and the measure would read 0. formula_text.ts_string_literal
+# could write such text exactly; BL-599 records that option.
+_ENDS_EARLY = "which would end it early inside a ThoughtSpot formula"
+_FORBIDDEN = {
+    "'": ("a single quote", _ENDS_EARLY),
+    '"': ("a double quote", _ENDS_EARLY),
+    "[": ("a bracket", _ENDS_EARLY),
+    "]": ("a bracket", _ENDS_EARLY),
+    "\\": ("a backslash", "which ThoughtSpot drops from a quoted formula string, so "
+                          "the label would not read as typed and a reusable Set's group "
+                          "would not match the measures that compare with it"),
+}
 
 
 def _check_text(value: str, what: str, *, quotes: bool = True) -> None:
     """Raise ``PlanError`` unless ``value`` can be written into a formula.
 
-    ``quotes=False`` allows quote marks, for names that only ever sit inside
+    ``quotes=False`` allows quote marks and backslashes, for names that only ever sit inside
     ``[…]`` and that come from the Model rather than from the generator.
     """
     if not value or not value.strip():
@@ -91,11 +103,11 @@ def _check_text(value: str, what: str, *, quotes: bool = True) -> None:
         raise PlanError(f"The {what} '{value}' starts or ends with a space.")
     if any(ord(ch) < 32 for ch in value):
         raise PlanError(f"The {what} '{value}' holds a line break or control character.")
-    for ch, name in _FORBIDDEN.items():
+    for ch, (name, why) in _FORBIDDEN.items():
         if ch in value and (quotes or ch in "[]"):
             raise PlanError(
-                f"The {what} {value!r} holds {name} ({ch}), which would end it early "
-                "inside a ThoughtSpot formula. Remove it (e.g. \"Mothers Day\")."
+                f"The {what} {value!r} holds {name} ({ch}), {why}. Remove it "
+                "(e.g. \"Mothers Day\", \"Sales and Returns\")."
             )
 
 
@@ -142,8 +154,8 @@ def _groups(plan: PlanResult, labels: Labels) -> list[tuple[str, list[Window]]]:
     validate_labels(labels)
     if plan.needs_clash_decision:
         raise PlanError(
-            "Some comparison windows clash with another event and no clash choice "
-            "was given (skip or keep); no TML is written until one is."
+            "Some comparison windows hold a built-in event's anchor day and no clash "
+            "choice was given (skip or keep); no TML is written until one is."
         )
     groups = [
         (labels.event, [y.event for y in plan.years]),
@@ -160,8 +172,24 @@ def _groups(plan: PlanResult, labels: Labels) -> list[tuple[str, list[Window]]]:
 
 
 def _year_span(plan: PlanResult) -> tuple[int, int]:
-    years = [y.year for y in plan.years]
-    return min(years), max(years)
+    """First and last year of the plan, for the Answer's year filter.
+
+    The filter runs from 1 January of the first year to 31 December of the last,
+    so every year between them gets a row. A year missing from the middle would
+    show as a row of zeros, so the plan's years must be consecutive. (A year
+    ``build_plan`` drops is always later than every kept year, so a consecutive
+    request stays consecutive; this guards a caller that asks for a gap.)
+    """
+    years = sorted(y.year for y in plan.years)
+    missing = sorted(set(range(years[0], years[-1] + 1)) - set(years))
+    if missing:
+        raise PlanError(
+            "The plan's years (" + ", ".join(str(y) for y in years) + ") are not "
+            "consecutive. The Answer's year filter runs from the first to the last, "
+            "so " + ", ".join(str(y) for y in missing) + " would show as a row of "
+            "zeros. Choose a consecutive run of years."
+        )
+    return years[0], years[-1]
 
 
 # --- reusable Set -------------------------------------------------------------

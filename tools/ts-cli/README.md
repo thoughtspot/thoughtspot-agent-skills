@@ -5458,7 +5458,13 @@ ts sets inventory --model <model-guid>
 To update objects already imported, pass `--answer-guid` (and `--set-guid`) in step 3 and
 drop `--create-new` from the import. Updating a Set changes every Answer that uses it
 (its `dependents[]` in the inventory); if a label changes, the other Answers' measures
-read 0.
+read 0. Back up each object before that import; re-importing the backup (Set first) is the
+rollback:
+
+```bash
+ts tml export <answer-guid> --fqn --split-dir "$OUT/before"   # and <set-guid>; prints "written"
+ts tml import --file "$OUT/before/<written file>" --policy ALL_OR_NONE   # rollback
+```
 
 | Option | Default | Description |
 |---|---|---|
@@ -5466,7 +5472,7 @@ read 0.
 | `--date-column` / `--measure-column` | *(required)* | Model columns, as the Model spells them, e.g. `"Order Date"` and `"Amount"`. The bucket formula and the measures wrap the date column in `date ( … )`, so they should count days on a DATE_TIME column (not yet verified on one). A reusable Set names the bare column, so use `--bucket formula` on DATE_TIME. The year filter names the bare column in both forms: on DATE_TIME, a window ending on 31 December of the last year in the plan's `years[]` may lose that day's late rows. The measure column must not be a `group_aggregate` or other fixed-level formula |
 | `--event` | *(required)* | `black-friday`, `cyber-monday`, `christmas`, `boxing-day`, `easter` or `custom` |
 | `--event-name` | built-in name | Display name used in the labels and the measure (`Average <name> Sales`). Required for `custom` |
-| `--event-dates` | — | `custom` only: YAML/JSON mapping each year to a start date (`2025: '2025-05-11'`) or to one `[start, end]` range |
+| `--event-dates` | — | `custom` only: YAML/JSON mapping each year to a start date (`2025: '2025-05-11'`) or to one `[start, end]` range. A date in another year is an error (exit 1), never a dropped year |
 | `--offset` / `--length` | `0` / `4` | Event window: starts `offset` days from the anchor day and runs `length` days. Black Friday to Cyber Monday is `0` / `4`; Good Friday to Easter Monday is `-2` / `4` |
 | `--years` / `--last` | — | `2025` or `2020-2030`, or the last N finished years. Give exactly one |
 | `--comparison` | `prior-weeks` | `prior-weeks`, or `custom` with `--comparison-dates` (YAML/JSON mapping each year to `[start, end]` ranges) |
@@ -5497,7 +5503,7 @@ The files are `<dir>/<set name>.cohort.tml` (reusable-set only) and `<dir>/<name
 |---|---|
 | `0` | Files written |
 | `1` | The request cannot be built (a window crossing 1 January, a missing year in a custom file, a bad label…). Stdout is `{"error": "…"}` and nothing is written |
-| `2` | Comparison windows clash with another event and `--on-clash` was not given. Stdout is the plan with `files: []`, and nothing is written. (A missing required option also exits 2, with a usage message and no JSON) |
+| `2` | A comparison window holds a built-in event's anchor day (another event's, or the analysed event's own when `--offset` moves off it) and `--on-clash` was not given. Stdout is the plan with `files: []`, and nothing is written. (A missing required option also exits 2, with a usage message and no JSON) |
 
 ## `ts link` — Link a semantic-layer object for direct query
 

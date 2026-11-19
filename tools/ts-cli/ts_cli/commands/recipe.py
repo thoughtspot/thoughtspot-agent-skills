@@ -207,7 +207,8 @@ def period_comparison(
              "Default: the built-in event's name"),
     event_dates: Optional[Path] = typer.Option(
         None, "--event-dates",
-        help="Custom event only: YAML/JSON mapping each year to a start date or [start, end] ranges"),
+        help="Custom event only: YAML/JSON mapping each year to a start date or a list of "
+             "(start, end) date ranges"),
     offset: int = typer.Option(0, "--offset", help="Event window start, in days from the anchor day"),
     length: int = typer.Option(4, "--length", help="Event window length in days"),
     years: Optional[str] = typer.Option(None, "--years", help="2025 or 2020-2030; or use --last"),
@@ -216,7 +217,7 @@ def period_comparison(
     prior_weeks: int = typer.Option(6, "--prior-weeks", help="Comparison windows per year (prior-weeks)"),
     comparison_dates: Optional[Path] = typer.Option(
         None, "--comparison-dates",
-        help="Custom comparison only: YAML/JSON mapping each year to [start, end] ranges"),
+        help="Custom comparison only: YAML/JSON mapping each year to a list of (start, end) date ranges"),
     on_clash: Optional[str] = typer.Option(
         None, "--on-clash",
         help="skip | keep: what to do with a comparison window holding a built-in event's "
@@ -246,8 +247,9 @@ def period_comparison(
 
     Writes <name>.answer.tml and, for --bucket reusable-set, <set name>.cohort.tml
     (import the Set first). Prints the windows per year as JSON. Exit 1 on an
-    error ({"error": …}); exit 2, writing nothing, when comparison windows clash
-    with another event and --on-clash is not given.
+    error ({"error": …}); exit 2, writing nothing, when a comparison window holds a
+    built-in event's anchor day (another event's, or this event's own when --offset
+    moves off it) and --on-clash is not given.
     """
     try:
         _check_options(event=event, event_name=event_name, event_dates=event_dates,

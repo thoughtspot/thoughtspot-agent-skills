@@ -113,7 +113,9 @@ ts recipe period-comparison
   --event black-friday|cyber-monday|christmas|boxing-day|easter|custom
   --event-dates <file>           # custom only: YAML/JSON, one start date per year, or ranges
   --offset <int>  --length <int> # window shape relative to the anchor day (default 0 / 4)
-  --years 2020-2030              # or --last N (counted back from the current year)
+  --years 2020-2030              # or --last N: the last N finished years, where a year is
+                                 # finished when every window ends on or before
+                                 # --data-through (default: the day before the run date)
   --comparison prior-weeks|custom
   --prior-weeks <N>              # default 6
   --comparison-dates <file>      # custom comparison only

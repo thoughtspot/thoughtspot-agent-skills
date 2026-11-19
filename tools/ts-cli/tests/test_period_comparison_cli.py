@@ -269,3 +269,25 @@ def test_data_through_option_is_documented():
     r = runner.invoke(app, ["recipe", "period-comparison", "--help"])
     assert r.exit_code == 0
     assert "--data-through" in plain(r)
+
+
+def test_comparison_range_typed_in_a_future_year_is_an_error(tmp_path):
+    dates = tmp_path / "cmp.yaml"
+    dates.write_text(
+        "2023: [['2023-11-01', '2023-11-04']]\n"
+        "2024: [['2024-10-01', '2024-10-04'], ['2027-11-01', '2027-11-04']]\n"
+        "2025: [['2025-11-01', '2025-11-04']]\n")
+    r = _run_through(tmp_path, "2026-11-18", "--event", "black-friday", "--years", "2023-2025",
+                     "--comparison", "custom", "--comparison-dates", str(dates))
+    assert r.exit_code == 1, plain(r)
+    assert "outside calendar year 2024" in _json(r)["error"]
+    assert _files(tmp_path) == []
+
+
+def test_help_keeps_the_range_text():
+    # "[start, end]" was read as Rich markup and vanished from the help.
+    r = runner.invoke(app, ["recipe", "period-comparison", "--help"], terminal_width=200)
+    assert r.exit_code == 0
+    text = " ".join(plain(r).replace("│", " ").split())
+    assert "a start date or a list of (start, end) date ranges" in text
+    assert "each year to a list of (start, end) date ranges" in text

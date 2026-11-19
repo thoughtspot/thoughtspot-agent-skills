@@ -355,3 +355,39 @@ def test_template_ships_as_package_data():
     globs = [g.strip().strip('"') for g in line.split("=", 1)[1].strip().strip("[]").split(",")]
     covered = {p for g in globs if g for p in pkg_root.glob(g)}
     assert pkg_root / "period_comparison/templates/answer.yaml" in covered
+
+
+# --- the year filter spans the plan's years, which must be consecutive ---
+
+def test_year_filter_spans_kept_years_only():
+    plan = build_plan(PlanSpec("black-friday", years=(2023, 2024, 2025)), date(2025, 11, 30))
+    assert plan.dropped_years == (2025,)
+    q = _answer(plan, "formula")["answer"]["search_query"]
+    assert ".01/01/2023 and" in q and ".12/31/2024" in q
+
+
+def test_non_consecutive_years_refused():
+    # The filter runs first..last, so a missing middle year would be a row of zeros.
+    plan = build_plan(PlanSpec("black-friday", years=(2022, 2024)), T)
+    for bucket in ("formula", "reusable-set"):
+        with pytest.raises(PlanError, match="2023"):
+            _answer(plan, bucket)
+
+
+# --- a backslash is dropped from a single-quoted literal (formula_text.py) ---
+
+@pytest.mark.parametrize("bad", ["A\\B", "Days\\"])
+def test_backslash_in_label_rejected(bad):
+    with pytest.raises(PlanError, match="backslash"):
+        validate_labels(Labels(bad, "C", "O"))
+
+
+@pytest.mark.parametrize("kw", [{"bucket_name": "BF\\Period"}, {"event_title": "BF\\X"}])
+def test_backslash_in_name_rejected(plan_bf_2024_2025, kw):
+    with pytest.raises(PlanError, match="backslash"):
+        _answer(plan_bf_2024_2025, "reusable-set", **kw)
+
+
+def test_backslash_in_set_name_rejected(plan_bf_2024_2025):
+    with pytest.raises(PlanError, match="backslash"):
+        reusable_set_tml(plan_bf_2024_2025, LBL, "order date", "A\\B", MODEL, None)

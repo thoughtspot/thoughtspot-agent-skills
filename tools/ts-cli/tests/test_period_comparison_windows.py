@@ -290,3 +290,47 @@ def test_last_n_unended_current_year_missing_from_comparison_file_is_dropped():
     r = build_plan(spec, date(2026, 4, 1))
     assert [y.year for y in r.years] == [2023, 2024, 2025]
     assert r.dropped_years == (2026,)
+
+
+# --- a date typed into the wrong year is an error, never an unfinished year ---
+
+def _ranges(year, *, month=11):
+    return [Window(date(year, month, 1), date(year, month, 4))]
+
+
+def test_custom_comparison_in_a_future_year_is_out_of_year_error_not_a_drop():
+    # 2024's second range typed as 2027: before the fix, 2024 looked unfinished
+    # and was dropped silently, leaving a 2024 row of zeros in the Answer.
+    cmp_ = {2023: _ranges(2023), 2025: _ranges(2025),
+            2024: [Window(date(2024, 10, 1), date(2024, 10, 4)),
+                   Window(date(2027, 11, 1), date(2027, 11, 4))]}
+    spec = PlanSpec("black-friday", years=(2023, 2024, 2025), comparison="custom",
+                    custom_comparison=cmp_)
+    with pytest.raises(PlanError, match="outside calendar year 2024") as exc:
+        build_plan(spec, date(2026, 11, 19))
+    assert "2027-11-01 to 2027-11-04" in str(exc.value)
+
+
+def test_custom_event_in_a_future_year_is_out_of_year_error_not_a_drop():
+    ev = {2023: date(2023, 5, 14), 2024: date(2027, 5, 12), 2025: date(2025, 5, 11)}
+    spec = PlanSpec("custom", years=(2023, 2024, 2025), length=1, custom_event=ev,
+                    on_clash="keep")
+    with pytest.raises(PlanError, match="outside calendar year 2024"):
+        build_plan(spec, date(2026, 11, 19))
+
+
+def test_last_n_current_year_custom_event_in_wrong_year_is_error():
+    ev = {y: date(y, 5, 12) for y in (2023, 2024, 2025)}
+    ev[2026] = date(2027, 5, 12)
+    with pytest.raises(PlanError, match="outside calendar year 2026"):
+        build_plan(PlanSpec("custom", last=2, length=1, custom_event=ev, on_clash="keep"),
+                   date(2026, 11, 19))
+
+
+def test_dropped_years_only_ever_follow_the_kept_years():
+    # Every window sits in its own year, so an unfinished year is always later
+    # than every finished one: a dropped year cannot fall between kept years.
+    r = build_plan(PlanSpec("black-friday", years=(2023, 2024, 2025, 2026)),
+                   date(2025, 11, 30))
+    assert [y.year for y in r.years] == [2023, 2024]
+    assert r.dropped_years == (2025, 2026)

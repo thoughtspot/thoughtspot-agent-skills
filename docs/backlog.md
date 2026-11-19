@@ -498,9 +498,10 @@ are roughly ordered by value÷effort.
 | BL-599 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
 | BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
 | BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
-| BL-602 | `to_date` format: the Tableau and Databricks docs and translators, and the Snowflake SV translator, still emit `'yyyy-MM-dd'`; formula-patterns now gives `'%Y-%m-%d'` | 2027-01-31 |
+| BL-602 | `to_date` format: the mappings, function maps and translators (Tableau, Databricks, Snowflake SV, Qlik, Ossie, Excel, Sheets, Omni) still emit or pass through `'yyyy-MM-dd'`-style formats; formula-patterns now gives `'%Y-%m-%d'` | 2027-01-31 |
 | BL-603 | Period-comparison recipe on a DATE_TIME date column: four cases untested (open item #9) | 2027-02-28 |
 | BL-604 | `ts tml lint` flags the viz-level `fqn` binding that the period-comparison probes imported and rendered | 2027-01-31 |
+| BL-605 | The Tableau docs say a cohort needs the Model's `obj_id` to bind; the Sets schema says `{id, name, fqn}` and `{id, name}` import | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17883,44 +17884,54 @@ commit that filed this item.
 11. **`PARTIAL` is not flagged.** As BL-587 does for `TO VERIFY`: `check_open_items.py`
     (`_UNRESOLVED_MARKERS`, line 54) should treat `PARTIAL` as unresolved. This recipe's
     status legend uses it.
-
-12. **Step 3 miscounts its questions.** It says "Batch these three questions"
-    (`agents/cli/ts-recipe-answer-period-comparison/SKILL.md:123`) but asks four: event,
-    window, years and the last loaded date.
-13. **Step 2 understates Step 8's check.** "Step 8's UI check looks for a `CROSS JOIN`
-    only" (`SKILL.md:112-113`) overstates: Step 8 (`SKILL.md:316-317`) also checks that
-    each measure is a flat `sum` from the fact table.
-14. **`--data-through` after the run date is accepted silently**
+12. **`--data-through` after the run date is accepted silently**
     (`_first_day_without_data`, `tools/ts-cli/ts_cli/commands/recipe.py:87-88`). A date
     in the future keeps windows that cannot have data yet.
-15. **`--data-through 9999-12-31` gives an `OverflowError` traceback**, not
+13. **`--data-through 9999-12-31` gives an `OverflowError` traceback**, not
     `{"error": …}`: the day after it is out of range (`recipe.py:88`).
-16. **The "not finished" error ignores `--data-through`.** `--years 2025
+14. **The "not finished" error ignores `--data-through`.** `--years 2025
     --data-through 2025-06-30` says "None of the requested years has finished yet"
     (`period_comparison/windows.py:268-272`). The message should say the years end after
     the `--data-through` date.
-17. **Leftover "another event" clash wording.** A clash can also be the analysed event's
-    own day (`SKILL.md:242-245` says so), but three places still say "another event": the
-    SKILL.md Clash row (`SKILL.md:352`), the ts-cli README's exit-2 row
-    (`tools/ts-cli/README.md:5500`) and the `period_comparison` docstring (`recipe.py:250`).
-18. **The tile-binding fact is not on a public line.** BL-601 (its #1) and BL-604 rest on
+15. **The tile-binding fact is not on a public line.** BL-601 (its #1) and BL-604 rest on
     the probe Liveboards binding their tiles `{id, name, fqn}`. Add that fact to open
     item #3 (`references/open-items.md:110`), whose binding note covers the Set's
     `worksheet` binding, not the tiles'.
-19. **The Step 3 AgentQL query does not alias its column.** `SKILL.md:157` uses
-    `MAX("{date_column}")`. Per `agents/cli/ts-object-model-agentql-query/references/agentql-rules.md`
-    it should be `SELECT MAX("t1"."{date_column}") AS "Last Day" FROM "{model_name}" AS "t1"`.
-20. **A pointer to gitignored notes.** `references/open-items.md:565` says the probe GUIDs
-    are kept in the build's working notes, which are not in the repo. Say they are not
-    recorded publicly, or drop the line.
-21. **The spec's `--last` line omits `--data-through`.** "counted back from the current
-    year" (`docs/superpowers/specs/2026-11-18-recipe-answer-period-comparison-design.md:116`)
-    should say that the last finished year depends on `--data-through`.
-22. **A comparison window after the event errors instead of dropping the year.** With
+16. **A comparison window after the event errors instead of dropping the year.** With
     `--last N` and custom comparison ranges after the event (weeks after Easter, say), the
     current year's ranges may not be known yet once the event has ended. `_sort_years`
     (`windows.py:247-254`) assumes they are knowable and raises rather than dropping that
     year.
+17. **`OverflowError` tracebacks from a huge `--length` or `--prior-weeks`.**
+    `--length 3000000` and `--prior-weeks 200000` both end in `OverflowError: date value
+    out of range`, not `{"error": …}`. The date arithmetic is in `_expand`
+    (`period_comparison/windows.py:180-182`) and the prior-weeks list in `_prior_weeks`
+    (`windows.py:329`). Line numbers for items 17 to 21 are at the commit that added them
+    (2026-11-19, the pre-PR review fixes).
+18. **On Windows, a name can escape `-o`.** `_file_stem`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:94-99`) turns `D:\x` into `D:_x`, and
+    `out_dir / file_name` (`recipe.py:185`) reads `D:_x.answer.tml` as a path on drive
+    `D:`, not a file inside the output directory. Replace `:` too, as item 7 does, and test
+    that every written path is inside `out_dir`.
+19. **The smoke test's prefix cleanup can delete a concurrent run's objects.**
+    `_leftovers` (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:118-132`)
+    finds every object named `ZZ_smoke_period_comparison_*`, and `_to_remove`
+    (`:269-279`) deletes all of them. Its docstring rests on the start-of-run check finding
+    none, which a second run started after that check breaks. Add a per-run suffix to the
+    names, or record and delete only this run's GUIDs.
+20. **Labels could allow apostrophes and backslashes.** `_check_text`
+    (`period_comparison/emit.py`) rejects `'`, `"`, `[`, `]` and, since 2026-11-19, `\`,
+    which a single-quoted literal drops (`tools/ts-cli/ts_cli/formula_text.py:29`).
+    `formula_text.ts_string_literal` writes any text exactly, so `Mother's Day` could be a
+    label. It must be used for every literal that names a label: the bucket formula and
+    the measures' comparisons. A reusable Set's group name is TML, not a formula literal,
+    so it needs no escaping. Probe one label with a quote in both forms before relying on it.
+21. **The Answer's numbers were never checked against an expected value on the final
+    code.** The smoke test checks the round trip and the render, not the values. Re-run it
+    with `--no-cleanup` on the test Model (its default `--years 2017-2019`) and record the 2019 row in
+    open item #7: event about 72,526.22 and comparison about 65,967.57 average daily
+    sales, the values from the #3 probes (`references/open-items.md`, #8). Then delete
+    the objects by hand.
 
 **Target:** 2027-02-28.
 
@@ -18002,11 +18013,51 @@ verbatim, which works on Snowflake only because its format elements are case-ins
 On Databricks `'yyyy-MM-dd'` is Spark's own pattern, so a verbatim pass-through probably
 works there; no other warehouse was probed.
 
+**Widened 2026-11-19** (pre-PR review of the period-comparison recipe; lines at that
+commit). More twins of the same rule:
+
+- **Databricks, probably wrong already:** `ts-databricks/ts-from-databricks-rules.md:458`
+  gives `to_date('date', 'yyyy/MM/dd')`, slashes against an ISO `'YYYY-MM-DD'` literal.
+  `databricks/mv_sql.py:421-424` is a second site that passes Spark's format through
+  (`TO_DATE` with string arguments, emitted raw).
+- **Tableau:** `tableau/functions.py:276` (`DATEPARSE` → `to_date ( s , format )`, the
+  format passed through) is the code twin of `tableau-formula-translation.md:236`.
+  `tableau/literals.py:132` emits `'yyyy-MM-dd HH:mm:ss'` for a date-time literal. On
+  Snowflake, whose format elements are case-insensitive, `mm` is the month and `MI` the
+  minutes, so that literal is likely wrong, not just non-portable (an inference, not
+  probed).
+- **Qlik:** `qlik/functions.py:141` maps `date` to `to_date` by name, so a Qlik format
+  (`'YYYY-MM-DD'`) passes through verbatim, while
+  `qlik/qlik-thoughtspot-formula-translation.md:182` and `:276` say the formats differ.
+- **Ossie:** `docs/ossie/ts-ossie-construct-mapping.md:289` ("Emit only the documented
+  `yyyy-MM-dd` pattern style") and `docs/ossie/ts-ossie-function-mapping.md:207`, `:210`,
+  `:212` and `:483`. `check_ossie_mapping_sync.py` compares that doc with upstream
+  apache/ossie-converters, so change both sides together.
+- **Function maps read by ts-object-formula-translate:**
+  `docs/function-maps/ts-excel-function-mapping.md:222`, `:600`, `:1144`;
+  `ts-sheets-function-mapping.md:83`, `:86`, `:275`, `:280`, `:283`, `:349`;
+  `ts-omni-function-mapping.md:139`, `:227`, `:622`, `:623`. The Excel translator already
+  emits `'%Y-%m-%d'` (`excel/coerce.py:27`), so the Excel doc disagrees with its own code.
+- **The to-direction:** no ThoughtSpot → SQL mapping has a `to_date` row, so a
+  `to_date ( … , '%Y-%m-%d' )` in a source Model has no documented translation for
+  ts-convert-to-snowflake-sv (`mappings/ts-snowflake/`), ts-convert-to-databricks-mv
+  (`ts-databricks/ts-databricks-formula-translation.md`) or ts-convert-to-dbt
+  (`ts-dbt/ts-dbt-formula-translation.md`).
+
+`agents/shared/schemas/thoughtspot-formula-patterns.md` (its date literal warning, about
+line 414) points here and stays accurate.
+
 **Do.**
 1. Decide per translator whether to emit `'%Y-%m-%d'` (portable) or keep the verbatim form
    for its one warehouse; probe one non-Snowflake warehouse if a translator stays.
-2. Change each doc with its translator, and the catalog citation, in one PR.
-3. Prove it with a test per translator on the emitted format.
+2. Write one shared date-literal helper in `ts_cli/formula_common.py` and import it in
+   every translator, rather than fixing each spelling in place (BL-217's rule).
+3. Change each doc with its translator, and the catalog citation, in one PR. Translate a
+   source format's tokens (Qlik, Tableau `DATEPARSE`, Spark) instead of passing them
+   through, or flag the formula.
+4. Add `to_date` rows to the to-direction mappings and their translators.
+5. Prove it with a test per translator on the emitted format, and once fixed, add a hard
+   rule to `check_mapping_code_sync.py` against `to_date ( … , 'yyyy…' )` in docs and code.
 
 **Target:** 2027-01-31.
 
@@ -18070,5 +18121,42 @@ hits (another build, `id`/`name` not matching the Model, or no `id`/`name` at al
    shape is still flagged.
 4. Remove the "lint flags this; expected" note from the recipe's SKILL.md Step 6 and the
    ts-cli README.
+
+**Target:** 2027-01-31.
+
+## BL-605 — Tableau cohort binding: `obj_id` required, or `{id, name}` enough? `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** pre-PR review of the ts-recipe-answer-period-comparison
+build. Lines at that commit.
+
+**What.** Two claims about how a Set (cohort) binds to its Model disagree:
+
+- `agents/shared/mappings/tableau/tableau-formula-translation.md:618-623` says the Model
+  must have an `obj_id` for a cohort to bind: a fresh Model has none, and a cohort that
+  references it "by `fqn` (GUID) alone" fails with "Worksheet not found". Its fix sets the
+  Model's `obj_id`, re-imports the Model and points `worksheet.obj_id` at it.
+  `agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md:390-392` says a
+  cohort is "bound to the model by `obj_id`", and the Tableau `SKILL.md` (lines 1544-1549)
+  tells the agent to read back the Model's `obj_id` and patch every cohort.
+- `agents/shared/schemas/thoughtspot-sets-tml.md` (lines 59-61, live 2026-11-18, the
+  period-comparison recipe's open item #3) says `{id, name, obj_id}`, `{id, name, fqn}`
+  and `{id, name}` all import. `tools/ts-cli/ts_cli/tableau/sets.py:32-44` already emits
+  `{id, name}` with no `obj_id` on a fresh build.
+
+The two may both hold. The old failures were a cohort naming the Model by `fqn` with no
+`id`/`name`, it seems ("`fqn`-only refs", ts-convert-from-tableau 1.5.3, 2026-06-09), and a
+cohort imported in the same batch as a Model that did not exist yet (BL-067's
+`VALIDATE_ONLY`, error 14500). Neither tests `{id, name}` against an imported Model with
+no `obj_id`. The 2026-11-18 probes ran against a long-lived Model, which may have had an
+`obj_id` the export does not show.
+
+**Do.**
+1. On one build, import a fresh Model with no `obj_id`, then a cohort bound each way:
+   `{fqn}` alone, `{id, name}`, `{id, name, fqn}`. Then repeat `{id, name}` with the cohort
+   in the same batch as the Model.
+2. Fix the prose to match: the mapping (lines 618-623), step 5 (lines 390-392) and the
+   Tableau `SKILL.md` (lines 1544-1549). If `{id, name}` binds, drop the `obj_id`
+   read-back and re-import; if it does not, `tableau/sets.py` needs the `obj_id` it omits.
+3. Record the result in `thoughtspot-sets-tml.md`.
 
 **Target:** 2027-01-31.
