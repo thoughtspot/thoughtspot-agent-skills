@@ -912,38 +912,29 @@ def _resolve_formula_ref(name: str, formula_exprs: dict[str, str]) -> str | None
     return name if name in formula_exprs else stripped if stripped in formula_exprs else None
 
 
-def _every_aggregate_is_inside_a_group_aggregate(
+def _has_naked_aggregate(
     expr: str, formula_exprs: dict[str, str] | None = None, _seen: frozenset[str] = frozenset(),
 ) -> bool:
-    """True if `expr` has a `group_aggregate(...)` call, and every OTHER
-    aggregate — inline, or via a `[Rev]` ref resolved against `formula_exprs`
-    — nests inside some `group_aggregate(...)` span. A naked aggregate
-    elsewhere (`sum(S) / group_aggregate(...)`, inline or via a ref) means
-    `expr` is already fully-aggregated, not per-group LOD — False even with
-    `group_aggregate` present. Two siblings stay True. `_seen` guards a cycle.
+    """True if `expr` reaches an aggregate outside every `group_aggregate(...)` span,
+    inline or through `[Rev]` refs resolved against `formula_exprs` at any depth (a
+    refs-only `[P] / [Q]` counts). Such an `expr` is fully aggregated; with none it is
+    LOD-shaped or row-level. An unresolved ref counts as none; `_seen` guards a cycle.
     """
     formula_exprs = formula_exprs or {}
     ga_spans = _group_aggregate_spans(expr)
-    if not ga_spans:
-        return False
 
-    def _outside_every_span(pos: int) -> bool:
+    def _outside(pos: int) -> bool:
         return not any(start <= pos < end for start, end in ga_spans)
 
-    for m in _AGG_FUNCTIONS.finditer(expr):
-        if m.group(1).lower() != "group_aggregate" and _outside_every_span(m.start()):
-            return False
+    if any(m.group(1).lower() != "group_aggregate" and _outside(m.start())
+           for m in _AGG_FUNCTIONS.finditer(expr)):
+        return True
     for m in _BRACKET_REF_RE.finditer(expr):
-        if not _outside_every_span(m.start()):
-            continue  # already inside a group_aggregate
-        ref_name = _resolve_formula_ref(m.group(1), formula_exprs)
-        if ref_name is None or ref_name in _seen:
-            continue  # not a formula ref (e.g. a column), or a cycle
-        ref_expr = formula_exprs[ref_name]
-        if expr_is_aggregated(ref_expr) and not _every_aggregate_is_inside_a_group_aggregate(
-                ref_expr, formula_exprs, _seen | {ref_name}):
-            return False
-    return True
+        name = _resolve_formula_ref(m.group(1), formula_exprs) if _outside(m.start()) else None
+        if name is not None and name not in _seen and _has_naked_aggregate(
+                formula_exprs[name], formula_exprs, _seen | {name}):
+            return True
+    return False
 
 
 def fix_double_aggregation(
@@ -953,7 +944,7 @@ def fix_double_aggregation(
     """Replace sum([formula_X]) with [formula_X] when X is already aggregated.
 
     Handles sum, count, average, max, min and their _if variants. Does NOT
-    strip when X is LOD-shaped (see `_every_aggregate_is_inside_a_group_aggregate`).
+    strip when X is LOD-shaped (see `_has_naked_aggregate`).
     """
     _WRAPPED_REF = re.compile(
         r"\b(sum|average|count|max|min)\s*\(\s*\[formula_([^\]]+)\]\s*\)",
@@ -963,7 +954,7 @@ def fix_double_aggregation(
     def _replace(m: re.Match) -> str:
         ref_name = m.group(2)
         ref_expr = formula_exprs.get(ref_name, "")
-        if expr_is_aggregated(ref_expr) and not _every_aggregate_is_inside_a_group_aggregate(ref_expr, formula_exprs):
+        if expr_is_aggregated(ref_expr) and _has_naked_aggregate(ref_expr, formula_exprs):
             return f"[formula_{ref_name}]"
         return m.group(0)
 

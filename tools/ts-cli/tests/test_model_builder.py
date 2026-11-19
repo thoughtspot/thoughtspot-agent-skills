@@ -293,6 +293,35 @@ class TestDoubleAggregation:
         result = fix_double_aggregation("sum ( [formula_W] )", formula_exprs)
         assert result == "[formula_W]"
 
+    def test_naked_aggregate_two_references_removed_is_unwrapped(self):
+        """X reaches naked aggregates through M, whose own text has none."""
+        formula_exprs = {
+            "P": "sum ( [T::Profit] )",
+            "Q": "sum ( [T::Sales] )",
+            "M": "[P] / [Q]",
+            "X": "[M] - group_aggregate ( sum ( [T::Sales] ) , {} , {} )",
+        }
+        assert fix_double_aggregation("sum ( [formula_X] )", formula_exprs) == "[formula_X]"
+
+    def test_refs_only_ratio_of_two_lods_stays_lod_shaped(self):
+        """Guards the naive fix: M reaches only LODs, so X keeps its sum()."""
+        formula_exprs = {
+            "A": "group_aggregate ( sum ( [T::Profit] ) , { [T::Region] } , {} )",
+            "B": "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , {} )",
+            "M": "[A] / [B]",
+            "X": "[M] * group_aggregate ( sum ( [T::Sales] ) , {} , {} )",
+        }
+        assert fix_double_aggregation("sum ( [formula_X] )", formula_exprs) == "sum ( [formula_X] )"
+
+    def test_unbalanced_paren_in_the_aggregate_argument_is_quote_aware(self):
+        """The literal sits in the 1st argument, outside {...}: the old,
+        non-quote-aware span ran to the end and swallowed the naked sum()."""
+        formula_exprs = {
+            "X": "group_aggregate ( sum_if ( [T::N] = 'a ( b' , [T::Sales] ) , { [T::R] } , {} )"
+                 " / sum ( [T::Sales] )",
+        }
+        assert fix_double_aggregation("sum ( [formula_X] )", formula_exprs) == "[formula_X]"
+
     def test_unbalanced_paren_in_a_literal_inside_the_lod_does_not_break_span_matching(self):
         """Round-6 review: `_extract_function_args` isn't quote-aware, so an
         unbalanced `(` inside a string literal in the LOD's filter argument

@@ -1231,6 +1231,18 @@ class TestConvertStringConcat:
         assert result.count("concat (") == 31
         assert "+ '" not in result
 
+    def test_long_case_ladder_through_the_pipeline_converts_every_branch(self):
+        """The 2026-11-18 review's repro runs through translate_single: CASE
+        becomes if/else-if with the rejected numeric pair repeated in every
+        branch, which is what exhausted the old per-pass budget. Fed raw to
+        convert_string_concat (the test above), the pair appears once and the
+        old code passes too."""
+        branches = " ".join(f"WHEN {i} THEN [F] + ' #{i}'" for i in range(1, 31))
+        expr = f"CASE ROUND([n],0) + [n] {branches} ELSE [F] + ' other' END"
+        out, _errors, _ = translate_single(expr, role="dimension", datatype="string")
+        assert out.count("concat (") == 31
+        assert "+ '" not in out
+
     def test_str_wrapping_a_boolean_comparison_keeps_its_wrapper(self):
         """Round-5 review nit: `STR([a] + 'x' = [b])`'s argument converts to
         `concat ( [a] , 'x' ) = [b]` — a boolean comparison whose LEFT side
