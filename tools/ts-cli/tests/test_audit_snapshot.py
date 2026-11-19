@@ -442,7 +442,7 @@ def test_a_p_replay_of_a_snapshot_from_an_older_derivation_is_refused(tmp_path):
     assert ok.exit_code == 0, ok.output
     manifest_path = snap / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    del manifest["derived"]   # as a snapshot written by ts-cli 0.219.x is
+    del manifest["derived"]   # as a snapshot written by ts-cli 0.219.0 to 0.220.0 is
     manifest_path.write_text(json.dumps(manifest))
     res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
     assert res.exit_code != 0

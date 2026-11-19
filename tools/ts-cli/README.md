@@ -4920,7 +4920,7 @@ ts-cli 0.219.0 holds neither calendars nor connection settings, so replaying the
 angle from it is refused (P22 and P24 read them): capture it again. Its connection
 facts are derived when they are fetched and the settings are dropped, so the snapshot
 records the version of that derivation (`derived` in its manifest). One that records
-an older version, or none (any snapshot written before this release, which read the
+an older version, or none (any snapshot written before ts-cli 0.221.0, which read the
 Databricks pair as firm OAuth), has its connection facts counted as not captured:
 replaying P from it is refused, saying so, and so is `ts audit fire-rates` on it,
 which replays every angle the snapshot captured. Capture it again.

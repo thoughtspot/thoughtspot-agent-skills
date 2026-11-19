@@ -64,7 +64,7 @@ def _uncaptured(selection: list, profile: str, captured: set) -> Optional[str]:
     cats = list(dict.fromkeys(c for r in readers for c in r.categories if c in known))
     return (f"Angle(s) {', '.join(cats)} read data not captured in this snapshot: "
             f"{', '.join(missing)} (rules {', '.join(r.id for r in readers)}). "
-            "Re-capture with those angles, or drop them from --angles.")
+            "Re-capture with those angles, or drop them from `ts audit run --angles`.")
 
 
 def _stale_note(snapshot_in: Path, why: str) -> str:

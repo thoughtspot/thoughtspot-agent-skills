@@ -56,7 +56,7 @@ from ts_cli.publish_plan import parse_variable_token
 #: whenever any entry's facts change, and a snapshot recording an older version (or
 #: none) is refused for the rules that read them (audit/snapshot.py). The golden table
 #: in tests/test_audit_connections_data.py fails until it is bumped.
-#: 1: until ts-cli 0.220.0. 2: a Databricks OAuth2ClientId/OAuth2Secret pair alone
+#: 1: ts-cli 0.219.0 to 0.220.0 (no `derived` recorded). 2: from 0.221.0, a Databricks OAuth2ClientId/OAuth2Secret pair alone
 #: (either key or both, on Databricks or a connection with no type) reads as
 #: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
 FACTS_VERSION = 2
