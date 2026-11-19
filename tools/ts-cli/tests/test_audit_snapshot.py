@@ -402,3 +402,72 @@ def test_cli_snapshot_out_refuses_before_fetching(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert "Cannot write snapshot" in plain(result) and "git work tree" in plain(result)
     assert "fetch" not in calls and not (repo / "snap").exists()
+
+
+@pytest.mark.parametrize("derived, kept", [
+    (None, False), ({}, False), ({"connections": 1}, False), ({"connections": "2"}, False),
+    ({"connections": 2}, True), ({"connections": 3}, True)])
+def test_connection_facts_from_an_older_derivation_count_as_not_captured(derived, kept):
+    """A snapshot keeps only derived connection facts, so facts recorded under an older
+    derivation (connection_facts.FACTS_VERSION), or with none recorded, are not
+    replayed: P24 would give the old verdict. Keyed on the derivation, not the release."""
+    from ts_cli.audit.connection_facts import FACTS_VERSION
+    from ts_cli.audit.snapshot import captured_needs
+    assert FACTS_VERSION == 2
+    manifest = {"ts_cli_version": "9.9.9", "angles": ["P"],
+                "needs": ["model_tml", "connections", "calendars"]}
+    if derived is not None:
+        manifest["derived"] = derived
+    needs = captured_needs(manifest)
+    assert ("connections" in needs) is kept
+    assert {"model_tml", "calendars"} <= needs
+
+
+def test_a_snapshot_records_each_derivation_version(tmp_path):
+    from ts_cli.audit.connection_facts import FACTS_VERSION
+    write_snapshot(make_context(), tmp_path / "s", ["A"])
+    manifest = json.loads((tmp_path / "s" / "manifest.json").read_text())
+    assert manifest["derived"] == {"connections": FACTS_VERSION}
+
+
+def test_a_p_replay_of_a_snapshot_from_an_older_derivation_is_refused(tmp_path):
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import data_needs
+    from ts_cli.cli import app
+    ctx = fx.build_cache_ctx(connections=[fx.build_cache_connection()], calendars=[])
+    snap = tmp_path / "snap"
+    write_snapshot(ctx, snap, ["P"], needs=sorted(data_needs(["P"], ["general"])))
+    ok = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P",
+                                  "-o", str(tmp_path / "ok.json")])
+    assert ok.exit_code == 0, ok.output
+    manifest_path = snap / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["derived"]   # as a snapshot written by ts-cli 0.219.0 to 0.220.0 is
+    manifest_path.write_text(json.dumps(manifest))
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
+    assert res.exit_code != 0
+    out = " ".join(plain(res).split())
+    assert "P24" in out and "derived by an older ts-cli" in out, out
+    # the other angles still replay
+    rest = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap),
+                                    "--angles", "D", "-o", str(tmp_path / "d.json")])
+    assert rest.exit_code == 0, rest.output
+
+
+def test_a_snapshot_that_never_fetched_connections_is_not_called_stale(tmp_path):
+    """A snapshot without P (no `derived`, as before it was recorded) never fetched
+    connections: a P replay says they were not captured, not that they are old."""
+    import audit_rule_fixtures as fx
+    from ts_cli.audit import data_needs
+    from ts_cli.cli import app
+    snap = tmp_path / "snap"
+    write_snapshot(fx.registry_populated_context(), snap, ["D"],
+                   needs=sorted(data_needs(["D"], ["general"])))
+    manifest_path = snap / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["derived"]
+    manifest_path.write_text(json.dumps(manifest))
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "P"])
+    out = " ".join(plain(res).split())
+    assert res.exit_code != 0 and "not captured" in out and "connections" in out, out
+    assert "derived by an older ts-cli" not in out

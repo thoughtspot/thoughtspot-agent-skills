@@ -320,6 +320,10 @@ whichever category selected each rule:
   answers each connection's configuration, credentials included; the fetch keeps no
   value of it, so neither may a rule, a field or a test. Null when not fetched or the
   search failed, as for `calendars` (P24; P23 falls back to the metadata header).
+  A snapshot keeps these derived facts, never the settings, so changing how
+  `connection_facts` derives any of them needs a `FACTS_VERSION` bump in that module
+  (an older snapshot is then refused for the rules that read them) and the matching
+  golden-table rows in `tests/test_audit_connections_data.py`.
 - Neither key is overridable per profile.
 
 **The read-declaration gate.** Each derived field (`@register(name, uses=...)`), code rule

@@ -61,6 +61,9 @@ GATE_MODULES = ("catalog_model.py", "catalog_validate.py", "catalog_expr.py",
                 # stdlib and engine/tml.py only: the report's formula tree, which H16's
                 # single-use-helper fields read inside the function (2026-11).
                 "formula_tree.py",
+                # stdlib and publish_plan only: the warehouse-type normalisation P23
+                # and P24 share (warehouse_type; 2026-11).
+                "connection_facts.py",
                 # Read as SOURCE, never imported (it needs typer): the read check follows
                 # the engine's function-local imports of it (catalog_reads.load_module).
                 "context.py")

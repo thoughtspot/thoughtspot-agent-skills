@@ -12,13 +12,19 @@ or a log line.
 
     oauth          a configuration key, at any depth, containing `oauth` (any case:
                    `OAuth2ClientId`, `OAuth2Secret`, `oauth_pvt_key` were seen), or both
-                   `client_id` and `client_secret` (a Databricks OAuth M2M service
-                   principal). Read from key names: the response has no auth-type
-                   field. A key counts only when its value is set (_is_set): not null,
-                   false, empty, or text reading "false" or "null".
-    oauth_m2m      `oauth` rests only on the `client_id` and `client_secret` pair, which
-                   the product owner's team is to confirm counts as OAuth
-                   (open-items #18).
+                   `client_id` and `client_secret` (an OAuth M2M service principal).
+                   Read from key names: the response has no auth-type field. A key
+                   counts only when its value is set (_is_set): not null, false,
+                   empty, or text reading "false" or "null".
+    oauth_m2m      `oauth` rests only on a client ID and secret, whose kind of OAuth the
+                   product owner's team is to confirm (open-items #18): the
+                   `client_id` and `client_secret` pair on any connection, or, on a
+                   Databricks connection or one whose type is not given, OAuth read
+                   only from `OAuth2ClientId`, `OAuth2Secret` or both (no other setting
+                   naming OAuth). On the SE demo cluster, 12 of its 14
+                   Databricks connections use OAuth, and each holds just that pair
+                   (2026-11-19), which per-user OAuth and a service principal (M2M)
+                   both use, so the names cannot tell them apart.
     privatelink    a `host` or `accountName` value (any case of key) containing
                    `privatelink` (any case): a Snowflake PrivateLink URL carries
                    `.privatelink.`. No configuration key names PrivateLink; the team is
@@ -44,6 +50,16 @@ import json
 from typing import Any, Dict, Iterator, Optional, Tuple
 
 from ts_cli.publish_plan import parse_variable_token
+
+#: The version of how `connection_facts` derives its flags. A snapshot keeps only the
+#: derived facts, never the settings, so a replay cannot derive them again: bump this
+#: whenever any entry's facts change, and a snapshot recording an older version (or
+#: none) is refused for the rules that read them (audit/snapshot.py). The golden table
+#: in tests/test_audit_connections_data.py fails until it is bumped.
+#: 1: ts-cli 0.219.0 to 0.220.0 (no `derived` recorded). 2: from 0.221.0, a Databricks OAuth2ClientId/OAuth2Secret pair alone
+#: (either key or both, on Databricks or a connection with no type) reads as
+#: `oauth_m2m` (to confirm); the Databricks comparison ignores an `RDBMS_` prefix.
+FACTS_VERSION = 2
 
 #: The keys `connection_facts` returns, and the only ones the audit stores.
 CONNECTION_KEYS = ("id", "name", "type", "oauth", "oauth_m2m", "privatelink", "parameterized",
@@ -112,6 +128,9 @@ def _is_set(value: Any) -> bool:
 #: one naming OAuth, an M2M client pair, or a host. A configuration with none of them
 #: (`{}`, or only a user and password) says nothing either way.
 _M2M_KEYS = ("client_id", "client_secret")
+#: The client ID and secret a Databricks OAuth connection holds (case folded), used by
+#: per-user OAuth and by a service principal alike (oauth_m2m in the module docstring).
+_DATABRICKS_OAUTH_PAIR = frozenset(("oauth2clientid", "oauth2secret"))
 
 
 def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
@@ -135,20 +154,36 @@ def _read_entries(config: dict) -> Tuple[set, set, list, bool]:
     return present, keys, hosts, parameterized
 
 
-def _flags(config: dict) -> Dict[str, Optional[bool]]:
+def warehouse_type(kind: Any) -> Optional[str]:
+    """A warehouse type as compared: upper case, edge spaces and an `RDBMS_` prefix
+    dropped (a connection's `data_warehouse_type` was seen bare, a Table header's
+    `dataSourceType` prefixed); None for anything blank or not text. P23 and P24 both
+    compare types through it."""
+    if not isinstance(kind, str) or not kind.strip():
+        return None
+    text = kind.strip().upper()
+    return text[len("RDBMS_"):] if text.startswith("RDBMS_") else text
+
+
+def _flags(config: dict, warehouse: Optional[str] = None) -> Dict[str, Optional[bool]]:
     """The four flags of a parsed configuration (module docstring). OAuth and PrivateLink
     are None, unknown, when no key they read is present (_M2M_KEYS, a key naming OAuth,
     _HOST_KEYS); PrivateLink is None too when no host or account name holds text. A
     template variable is True when a value is one, else False for a configuration the
-    readings can judge and None for one they cannot."""
+    readings can judge and None for one they cannot. `warehouse` is the connection's
+    type: on DATABRICKS, or with no type given, OAuth resting only on keys of
+    _DATABRICKS_OAUTH_PAIR is oauth_m2m."""
     present, keys, hosts, parameterized = _read_entries(config)
     readable = any("oauth" in k for k in present) or bool(
         present & (set(_M2M_KEYS) | set(_HOST_KEYS)))
     if not readable:
         return {"oauth": None, "oauth_m2m": None, "privatelink": None,
                 "parameterized": True if parameterized else None}
-    named = any("oauth" in k for k in keys)
-    m2m = not named and set(_M2M_KEYS) <= keys
+    oauth_keys = {k for k in keys if "oauth" in k}
+    named = bool(oauth_keys)
+    m2m = (not named and set(_M2M_KEYS) <= keys) or (
+        warehouse_type(warehouse) in ("DATABRICKS", None)
+        and named and oauth_keys <= _DATABRICKS_OAUTH_PAIR)
     privatelink = any("privatelink" in h.casefold() for h in hosts) if hosts else None
     return {"oauth": named or m2m, "oauth_m2m": m2m, "privatelink": privatelink,
             "parameterized": parameterized}
@@ -164,11 +199,11 @@ def connection_facts(entry: Any) -> Optional[Dict[str, Any]]:
         return None
     details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
     config = _configuration(details.get("configuration"))
-    flags = _flags(config) if config is not None else \
+    kind = _text(entry.get("data_warehouse_type")) or _text(details.get("type"))
+    flags = _flags(config, kind) if config is not None else \
         {"oauth": None, "oauth_m2m": None, "privatelink": None, "parameterized": None}
     return {"id": _text(entry.get("id")), "name": _text(entry.get("name")),
-            "type": _text(entry.get("data_warehouse_type")) or _text(details.get("type")),
-            **flags, "parameterized_connection": None}
+            "type": kind, **flags, "parameterized_connection": None}
 
 
 def header_parameterized(header: Any) -> Optional[bool]:

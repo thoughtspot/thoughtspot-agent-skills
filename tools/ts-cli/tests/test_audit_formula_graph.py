@@ -146,7 +146,7 @@ def test_a_node_opens_its_definition_and_lights_its_lineage(tmp_path):
         '  .map(function(n){ return n.data("label"); }).sort();'
         # a link in the panel moves the graph to that node
         'Array.prototype.find.call(p.querySelectorAll("a.fref"), function(a){'
-        '  return a.textContent === "[formula_Rev]"; }).click();'
+        '  return a.textContent === "[Revenue]"; }).click();'
         'window.__extra = {title: title, lit: lit, focus: labels("node.focus"),'
         ' title2: p.querySelector(".fdetail-title").textContent};'))
     assert shown["errors"] == []

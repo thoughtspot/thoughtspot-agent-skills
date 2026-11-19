@@ -172,6 +172,7 @@ def write_snapshot(ctx: AuditContext, out_dir: Path, angles: list[str],
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "angles": list(angles),
         "files": sorted(files),
+        "derived": derived_versions(),
     }
     if needs is not None:
         manifest["needs"] = sorted(set(needs) | ALWAYS_FETCHED)
@@ -231,7 +232,16 @@ def _read_manifest(in_dir: Path) -> dict:
     return manifest
 
 
-def captured_needs(manifest: dict) -> set:
+def derived_versions() -> dict:
+    """The data kinds stored as facts derived at fetch time, each with the version of
+    its derivation (the manifest's ``derived``). A snapshot holding an older version, or
+    none (written before versions were recorded), holds facts the current code would
+    not give and cannot derive again, since the source is not kept: stale_needs."""
+    from ts_cli.audit.connection_facts import FACTS_VERSION
+    return {"connections": FACTS_VERSION}
+
+
+def _fetched(manifest: dict) -> set:
     """What the snapshot fetched: its manifest's ``needs``, or for a legacy manifest
     without them, what its angles fetched (``LEGACY_ANGLE_NEEDS``)."""
     if manifest.get("needs") is not None:
@@ -240,6 +250,26 @@ def captured_needs(manifest: dict) -> set:
     for angle in manifest["angles"]:
         out |= LEGACY_ANGLE_NEEDS.get(angle, frozenset())
     return out
+
+
+def stale_needs(manifest: dict) -> set:
+    """The derived kinds the snapshot fetched under an older derivation, or with none
+    recorded; what it never fetched is not stale, only missing."""
+    recorded = manifest.get("derived") if isinstance(manifest.get("derived"), dict) else {}
+    return {need for need, version in derived_versions().items()
+            if need in _fetched(manifest)
+            and (not isinstance(recorded.get(need), int) or recorded[need] < version)}
+
+
+def snapshot_stale_needs(in_dir: Path) -> set:
+    """stale_needs for the snapshot in ``in_dir`` (SnapshotError if it is not one)."""
+    return stale_needs(_read_manifest(Path(in_dir)))
+
+
+def captured_needs(manifest: dict) -> set:
+    """What the snapshot fetched (_fetched), less what it derived under an older
+    derivation (stale_needs): a replay reading that is refused."""
+    return _fetched(manifest) - stale_needs(manifest)
 
 
 def read_snapshot(in_dir: Path) -> tuple[AuditContext, list[str]]:
