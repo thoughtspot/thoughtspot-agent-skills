@@ -173,9 +173,9 @@ function buildCrossModel(D, initialFilters){
     var tdModel = el("td","col-model");
     var model = D.L[mi];
     if(model){
-      var mHtml = '<a class="model-link" href="#model/'+model.g+'" data-route="#model/'+model.g+'">'+esc(model.n)+'</a>';
+      var mHtml = '<a class="model-link" href="#model/'+esc(model.g)+'" data-route="#model/'+esc(model.g)+'">'+esc(model.n)+'</a>';
       if(D.C && D.C.u){
-        mHtml += '<a class="ts-icon" href="'+D.C.u+'/#/data/tables/'+model.g+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
+        mHtml += '<a class="ts-icon" href="'+esc(D.C.u+'/#/data/tables/'+model.g)+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
       }
       tdModel.innerHTML = mHtml;
     } else {

@@ -134,7 +134,7 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
     /* Name */
     var tdName = el("td","");
     if(model){
-      tdName.innerHTML = '<a href="#model/'+guid+'">'+esc(name)+'</a>';
+      tdName.innerHTML = '<a href="#model/'+esc(guid)+'">'+esc(name)+'</a>';
     } else {
       tdName.textContent = name;
     }

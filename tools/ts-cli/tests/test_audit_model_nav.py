@@ -305,3 +305,23 @@ def test_the_inline_erds_share_html_keeps_replacement_patterns(tmp_path):
     x = shown["extra"]
     assert x["name"] == "Sales " + DOLLARS and x["note"] == "Note " + DOLLARS
     assert 0.9 < x["ratio"] < 1.2
+
+
+@needs_chrome
+def test_open_in_thoughtspot_and_model_links_carry_awkward_values_verbatim(tmp_path):
+    """Every href the report builds from data is escaped: the cluster URL and the guid in
+    "Open in ThoughtSpot", and the guid in the sidebar's and the Dashboard's Model links."""
+    guid, url = "m&amp;1'x", 'https://acme.example/"q&amp;'
+    data = _data((guid, SALES), ("m-9", PLAIN))
+    data["corpus"]["cluster_url"] = url
+    page = render_report(data)
+    shown = report_browser.render(page, tmp_path, "model/" + guid, actions=(
+        'var open = document.querySelector("#v-scorecard .header-actions a.ts-link-btn");'
+        'var side = Array.prototype.map.call(document.querySelectorAll(".sidebar-model-list a"),'
+        ' function(a){ return a.getAttribute("href"); });'
+        'window.__extra = {open: open && open.getAttribute("href"), side: side,'
+        ' injected: document.querySelectorAll("[q]").length};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["open"] == url + "/#/data/tables/" + guid
+    assert "#model/" + guid in x["side"] and x["injected"] == 0

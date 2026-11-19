@@ -35,7 +35,7 @@ function scorecardHeader(guid, cm){
   /* Actions: the ERD and the Formulas are tabs (model_nav.js) */
   if(D.C && D.C.u){
     titleHtml += '<div class="header-actions">'+
-      '<a class="ts-link-btn" href="'+D.C.u+'/#/data/tables/'+guid+'" target="_blank" rel="noopener">Open in ThoughtSpot ↗</a></div>';
+      '<a class="ts-link-btn" href="'+esc(D.C.u+'/#/data/tables/'+guid)+'" target="_blank" rel="noopener">Open in ThoughtSpot ↗</a></div>';
   }
   hdr.innerHTML = titleHtml;
   return hdr;

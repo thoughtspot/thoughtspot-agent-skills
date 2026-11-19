@@ -436,3 +436,52 @@ def test_past_the_cap_the_graph_counts_what_it_draws(tmp_path):
     x = shown["extra"]
     assert x["first"] == {"drawn": 10, "total": "10 of 400 items shown"}
     assert x["total"] == "%d of 400 items shown" % x["drawn"]
+
+
+_OFF = ('function off(){ var c = cy(), w = c.width(), h = c.height(); return c.nodes().filter(function(n){'
+        ' var b = n.renderedBoundingBox(); return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length; }')
+
+
+def _pick_in_tree(name):
+    return ('var row = Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-row"),'
+            ' function(r){ var n = r.querySelector(".ftree-name"); return n && n.textContent === "' + name + '"; });'
+            'row.click();')
+
+
+@needs_chrome
+@pytest.mark.parametrize("size", ["1400,900", "1280,720"])
+@pytest.mark.parametrize("model, guid, name", [
+    (_singles(12), "m-s", "Single 0"), (_on_columns(40, 1), "m-t", "Total 0")])
+def test_a_selection_carried_from_the_tree_keeps_every_node_in_view(tmp_path, size, model, guid, name):
+    """The fit shows every node; the selection must not re-centre the graph off it."""
+    shown = report_browser.render(_page((guid, model)), tmp_path, "formulas/" + guid, actions=(
+        _CY + _OFF + _pick_in_tree(name) + 'location.hash = "#formulas/' + guid + '/graph";'
+        'setTimeout(function(){ window.__extra = {off: off(),'
+        ' focus: cy().$(".focus").map(function(n){ return n.data("label"); })}; }, 150);'),
+        size=size, settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "focus": [name]}
+
+
+@needs_chrome
+def test_flipping_a_chip_with_a_selection_keeps_every_node_in_view(tmp_path):
+    shown = report_browser.render(_page(("m-t", _on_columns(40, 1))), tmp_path, "formulas/m-t/graph", actions=(
+        _CY + _OFF + 'cy().nodes().filter(function(n){ return n.data("label") === "Total 39"; }).emit("tap");'
+        + _chip("column") + '.click();'
+        'setTimeout(function(){ window.__extra = {off: off(), nodes: cy().nodes().length}; }, 150);'),
+        size="1280,720", settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "nodes": 40}
+
+
+@needs_chrome
+def test_a_deep_chain_opens_whole(tmp_path):
+    formulas = [_f("formula_D0", "Deep formula number 0", "sum ( [ORDERS::A] )")] + [
+        _f(f"formula_D{i}", f"Deep formula number {i}", f"[formula_D{i - 1}] + 1") for i in range(1, 100)]
+    model = {"name": "Deep", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}], "formulas": formulas,
+             "columns": [_col("Deep formula number 99", "formula_D99")]}
+    shown = report_browser.render(_page(("m-d", model)), tmp_path, "formulas/m-d/graph", actions=(
+        _CY + _OFF + 'setTimeout(function(){ window.__extra = {off: off(), nodes: cy().nodes().length}; }, 150);'),
+        settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "nodes": 101}

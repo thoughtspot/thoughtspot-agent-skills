@@ -255,7 +255,7 @@ function buildHeatmap(){
 
   rows.forEach(function(r){
     html += '<tr>';
-    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
+    html += '<td class="model-name"><a href="#model/'+esc(r.g)+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
     if(showReadiness){
       var rs = readiness[r.g];
       html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
@@ -265,7 +265,7 @@ function buildHeatmap(){
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);
-      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
+      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+esc(r.g)+'" data-angle="'+a+
               '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0">'+cellText+'</span></td>';
     });
     html += '</tr>';

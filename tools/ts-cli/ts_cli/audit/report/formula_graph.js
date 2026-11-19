@@ -235,7 +235,9 @@ function graphHeader(guid){
 
 /* The view may be built before its container is shown (the router shows it after, in
    the same turn), when Cytoscape reads a size of nothing: measure and fit once this
-   turn is over, then bring the selected node into view with `panTo`. */
+   turn is over. A selected node is then brought into the canvas's visible part with
+   `panTo`, which moves nothing when it is already there (it is, unless a narrow
+   screen's sheet covers it), so the fit's every-node-in-view holds. */
 function graphFit(cy, panTo){
   setTimeout(function(){
     if(!cy || cy.destroyed()) return;  /* the view was rebuilt before this frame */
@@ -250,11 +252,12 @@ function graphFit(cy, panTo){
   }, 0);
 }
 
-/* The pan that puts `n` in the middle of the canvas's visible part: on a narrow screen
-   the definition is a sheet fixed over the foot of the page (styles.css), and a node
-   centred in the whole canvas would sit under it. */
+/* The smallest pan that brings `n` into the canvas's visible part, or the current pan
+   when it is in it already: on a narrow screen the definition is a sheet fixed over the
+   foot of the page (styles.css), which hides the foot of the canvas. Moving no further
+   keeps the rest of a fitted graph in view. */
 function graphPanTo(cy, box, panel, n){
-  var w = cy.width(), h = cy.height(), pos = n.position(), z = cy.zoom();
+  var w = cy.width(), h = cy.height(), pan = cy.pan(), M = 12;
   if(getComputedStyle(panel).position === "fixed" && !panel.classList.contains("fdetail-empty")){
     var sheet = panel.getBoundingClientRect().top, rect = box.getBoundingClientRect();
     if(sheet - rect.top < FORMULA_GRAPH_MIN_VISIBLE){
@@ -266,7 +269,12 @@ function graphPanTo(cy, box, panel, n){
     var under = rect.bottom - sheet;
     if(under > 0) h = Math.max(40, h - under);
   }
-  return {x: w / 2 - pos.x * z, y: h / 2 - pos.y * z};
+  var b = n.renderedBoundingBox();
+  function shift(lo, hi, size){  /* how far to move [lo, hi] into [M, size - M] */
+    if(hi - lo > size - 2 * M) return (size - lo - hi) / 2;  /* too big: centre it */
+    return lo < M ? M - lo : hi > size - M ? size - M - hi : 0;
+  }
+  return {x: pan.x + shift(b.x1, b.x2, w), y: pan.y + shift(b.y1, b.y2, h)};
 }
 
 /* The canvas and the definition panel beside it. */
@@ -310,7 +318,7 @@ function buildFormulaGraph(c, guid, tree){
   function draw(keep){
     if(cy) cy.destroy();
     cy = c._cy = window.cytoscape({container: box, elements: graphElements(tree, graphShownIds(tree, keep)),
-      style: graphStyle(), minZoom: 0.05, maxZoom: 3, layout: {name: "preset"}});
+      style: graphStyle(), minZoom: 0.005, maxZoom: 3, layout: {name: "preset"}});  /* the fit is never capped */
     graphArrange(cy);
     cy.on("tap", "node", function(e){
       box.focus({preventScroll: true});  /* so Escape reaches the view, not <body> */

@@ -117,7 +117,7 @@ function buildSidebar(){
   var mlist = document.getElementById("sidebar-models");
   var mhtml = "";
   models.forEach(function(m){
-    mhtml += '<a href="#model/'+m.g+'" data-route="#model/'+m.g+'" title="'+esc(m.n)+'">'+esc(m.n)+'</a>';
+    mhtml += '<a href="#model/'+esc(m.g)+'" data-route="#model/'+esc(m.g)+'" title="'+esc(m.n)+'">'+esc(m.n)+'</a>';
   });
   mlist.innerHTML = mhtml;
 
@@ -271,7 +271,7 @@ function tsLink(clusterUrl, guid, type){
   if(!clusterUrl || !guid) return "";
   if(type === "SET") return "";  /* a Set has no page of its own; data/tables/<set> is a broken link */
   var path = type === "ANSWER" ? "saved-answer" : (type === "LIVEBOARD" ? "pinboard" : "data/tables");
-  return '<a class="dep-link ts-link-btn" href="'+clusterUrl+'/#/'+path+'/'+guid+'" target="_blank" rel="noopener">Open ↗</a>';
+  return '<a class="dep-link ts-link-btn" href="'+esc(clusterUrl+'/#/'+path+'/'+guid)+'" target="_blank" rel="noopener">Open ↗</a>';
 }
 
 function findCorpusModel(guid){

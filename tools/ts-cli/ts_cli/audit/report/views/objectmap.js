@@ -131,12 +131,12 @@ function buildOverlapsTab(D){
 
       /* Model A */
       var tdA = el("td","");
-      tdA.innerHTML = '<a href="#model/'+o.a.g+'">'+esc(o.a.n)+'</a>';
+      tdA.innerHTML = '<a href="#model/'+esc(o.a.g)+'">'+esc(o.a.n)+'</a>';
       tr.appendChild(tdA);
 
       /* Model B */
       var tdB = el("td","");
-      tdB.innerHTML = '<a href="#model/'+o.b.g+'">'+esc(o.b.n)+'</a>';
+      tdB.innerHTML = '<a href="#model/'+esc(o.b.g)+'">'+esc(o.b.n)+'</a>';
       tr.appendChild(tdB);
 
       /* Jaccard */
@@ -224,7 +224,7 @@ function buildDuplicatesTab(D){
       var model = D.L[f.mi];
       var html = severityPill(f.s);
       if(model){
-        html += ' <a href="#model/'+model.g+'">'+esc(model.n)+'</a>';
+        html += ' <a href="#model/'+esc(model.g)+'">'+esc(model.n)+'</a>';
       }
       row.innerHTML = html;
       grp.appendChild(row);
@@ -356,7 +356,7 @@ function buildTableReuseTab(D){
 
       var tdMS = el("td","");
       var links = r.ms.map(function(m){
-        return '<a href="#model/'+m.g+'">'+esc(m.n)+'</a>';
+        return '<a href="#model/'+esc(m.g)+'">'+esc(m.n)+'</a>';
       });
       tdMS.innerHTML = links.join(", ");
       tr.appendChild(tdMS);
@@ -728,7 +728,7 @@ function buildSortableDepTable(rows, colDefs, defaultSort){
       colDefs.forEach(function(cd){
         var td = el("td","");
         if(cd.key === "name" && r.guid){
-          td.innerHTML = '<a href="#model/'+r.guid+'">'+esc(r[cd.key])+'</a>';
+          td.innerHTML = '<a href="#model/'+esc(r.guid)+'">'+esc(r[cd.key])+'</a>';
         } else {
           td.textContent = r[cd.key];
           if(cd.key === "count"){ td.style.fontWeight = "600"; }
