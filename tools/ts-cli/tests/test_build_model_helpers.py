@@ -350,6 +350,21 @@ def test_parse_import_error_truncates_detail_to_120():
     assert len(detail) == 120
 
 
+def test_parse_import_error_formula_name_containing_a_comma():
+    """A real formula name can itself contain a comma (e.g. Tableau's own
+    LOD-scope naming convention, "Order Count {F} Region, Date {E} Channel,
+    Segment") — a greedy-up-to-first-comma pattern stops at the name's own
+    internal comma and never finds the real ", Error:" boundary."""
+    msg = (
+        "Formula: Order Count {F} Region, Date {E} Channel, Segment, "
+        "Error: Invalid token near ')'"
+    )
+    assert parse_import_error(msg) == (
+        "Order Count {F} Region, Date {E} Channel, Segment",
+        "Invalid token near ')'",
+    )
+
+
 # --- remove_formula ---
 
 def test_remove_formula_drops_formula_and_its_columns():
@@ -419,6 +434,65 @@ def test_apply_prefix_and_double_agg_mutates_in_place():
     apply_prefix_and_double_agg(formulas, {"Total", "UsesTotal"}, set())
     assert formulas[0]["expr"] == "sum([Sales])"
     assert formulas[1]["expr"] == "[formula_Total]"
+
+
+def test_apply_prefix_and_double_agg_follows_a_naked_aggregate_through_a_reference():
+    """PR #662 round-7 review: through this real Tableau call path (not a
+    direct `fix_double_aggregation` unit test), a ref one level removed from
+    a naked aggregate — `X = [Rev] / group_aggregate(sum([Sales]), {}, {})`
+    with `Rev = sum([Sales])` — must still unwrap `sum([X])`, since `X` as a
+    whole is a ratio of two complete aggregates, not a per-group LOD value.
+    `formula_exprs` is snapshotted here BEFORE this loop prefixes anything,
+    so `X`'s own stored text carries the bare `[Rev]` ref this test relies
+    on, exactly as it does for every real converter."""
+    formulas = [
+        {"name": "Rev", "expr": "sum([Sales])"},
+        {"name": "X", "expr": "[Rev] / group_aggregate(sum([Sales]), {}, {})"},
+        {"name": "UsesX", "expr": "sum([X])"},
+    ]
+    apply_prefix_and_double_agg(formulas, {"Rev", "X", "UsesX"}, set())
+    assert formulas[2]["expr"] == "[formula_X]"
+
+
+# PR #662 maintainer round (2026-11-19): X reaches its naked aggregates TWO
+# references removed, through M, whose own text has no aggregate at all. Following
+# references only one level deep kept `sum ( [formula_X] )`, an aggregate of an
+# already-aggregated formula; `main` strips it. Pinned through both Tableau call
+# paths: generate (apply_prefix_and_double_agg) and merge (prepare_formulas_for_merge).
+_TWO_LEVEL = [
+    {"name": "P", "expr": "sum ( [T::Profit] )"},
+    {"name": "Q", "expr": "sum ( [T::Sales] )"},
+    {"name": "M", "expr": "[P] / [Q]"},
+    {"name": "X", "expr": "[M] - group_aggregate ( sum ( [T::Sales] ) , {} , {} )"},
+    {"name": "UsesX", "expr": "sum ( [X] )"},
+]
+
+
+def test_apply_prefix_and_double_agg_follows_a_naked_aggregate_two_references_removed():
+    formulas = [dict(f) for f in _TWO_LEVEL]
+    apply_prefix_and_double_agg(formulas, {f["name"] for f in formulas}, set())
+    assert formulas[-1]["expr"] == "[formula_X]"
+
+
+def test_prepare_formulas_follows_a_naked_aggregate_two_references_removed():
+    ctx = collect_existing_model_context(_model_tml(tables=()))
+    dicts, _ = prepare_formulas_for_merge([dict(f) for f in _TWO_LEVEL], ctx)
+    assert {d["name"]: d["expr"] for d in dicts}["UsesX"] == "[formula_X]"
+
+
+def test_prepare_formulas_keeps_sum_around_a_refs_only_ratio_of_two_lods():
+    """The guard: every aggregate X reaches sits inside a group_aggregate, so X
+    is LOD-shaped and `sum()` re-aggregates it — stripping it is a wrong number."""
+    ctx = collect_existing_model_context(_model_tml(tables=()))
+    cleaned = [
+        {"name": "A", "expr": "group_aggregate ( sum ( [T::Profit] ) , { [T::Region] } , {} )"},
+        {"name": "B", "expr": "group_aggregate ( sum ( [T::Sales] ) , { [T::Region] } , {} )"},
+        {"name": "M", "expr": "[A] / [B]"},
+        {"name": "X", "expr": "[M] * group_aggregate ( sum ( [T::Sales] ) , {} , {} )"},
+        {"name": "UsesX", "expr": "sum ( [X] )"},
+    ]
+    dicts, _ = prepare_formulas_for_merge(cleaned, ctx)
+    assert {d["name"]: d["expr"] for d in dicts}["UsesX"] == "sum ( [formula_X] )"
 
 
 # --- rewrite_formula_refs + prepare_formulas_for_merge + filter_unresolvable_formulas ---

@@ -1,0 +1,1 @@
+[sales] [store] [region] [date].monthly [date].'this year' [date].'last year'

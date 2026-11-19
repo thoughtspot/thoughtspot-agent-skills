@@ -83,6 +83,48 @@ added since are `ADVANCED_*` types (see "Which types the new library covers" bel
 anchor column is geo-tagged in ThoughtSpot. `CANDLESTICK`/`WHISKER_SCATTER` import but only
 render meaningfully with OHLC / distribution-shaped inputs.
 
+**`GEO_BUBBLE` also requires an explicit `chart.axis_configs` block — unlike every other
+chart type in this table, a bare `chart_columns` list with no `axis_configs` is not
+sufficient and the tile renders empty with no error anywhere.** Live-verified on a Tableau
+migration, 2026-10-14: a `GEO_BUBBLE` tile with geo-tagged lat/long columns and a measure, but no
+`axis_configs`, imported clean and stayed blank; diffing against a confirmed-working
+`GEO_BUBBLE` tile on a different liveboard showed the only structural difference was this
+block:
+```yaml
+chart:
+  type: GEO_BUBBLE
+  chart_columns:
+  - column_id: "{Latitude column}"
+  - column_id: "{Longitude column}"
+  - column_id: "{Measure column}"
+  axis_configs:
+  - x:
+    - "{Latitude column}"
+    - "{Longitude column}"
+    y:
+    - "{Measure column}"
+```
+Adding it fixed the render. Treat `GEO_BUBBLE`'s full requirement as three things together,
+not any one in isolation: (1) the geo dimension(s) geo-tagged on the model
+(`properties.geo_config`), (2) a measure present in `chart_columns`, and (3) this explicit
+`axis_configs` block — each was independently verified necessary and none was sufficient
+alone.
+
+**The `TABLE` guidance above ("omit `chart`, set `display_mode: TABLE_MODE`") does not
+survive a reimport if the tile's existing chart type was a grouping type.** Live-verified on
+a Tableau migration, 2026-10-15: a tile whose `chart.type` was `ADVANCED_SCATTER` (with x/y/slice axis grouping) kept
+reverting to that exact same `ADVANCED_SCATTER` block on every reimport, even submitted
+with `chart` fully omitted each time. If a flat per-row list looks pivoted/grouped and this
+doesn't fix it, check first whether a column feeding the table is model-typed `MEASURE` —
+it auto-aggregates (per its `aggregation` property) when dropped bare into a table instead
+of showing the literal per-row value, which can look identical to a chart-type problem.
+Retype to `ATTRIBUTE` if every formula using that column already wraps it in an explicit
+aggregate function (so aggregation stays formula-specified, not column-type-driven). If a
+genuinely **pivoted/nested-row** table is wanted (a Tableau-style repeat-suppressed grouped
+row display), use `ADVANCED_PIVOT_TABLE` instead of fighting `TABLE_MODE` — it auto-resolves
+its row/column grouping from `chart_columns` + `search_query` (no `custom_chart_config`
+needed) and stuck cleanly on reimport in the same test.
+
 ## The new charts library (Muze, `ADVANCED_*` types) — GA, the product default since 26.7
 
 ThoughtSpot has two charting libraries:
@@ -282,6 +324,52 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 - `client_state_v2` differs slightly between the two (the Muze export omits
   `responsiveLayoutPreference` and trims some `kpiColumnProperties`/`systemSeriesColors`
   defaults) — these are cosmetic defaults, not required for a valid import.
+
+## Custom chart (BYOC) answers — `MUZE_STUDIO` carrying its own code
+
+A custom chart tile is an answer whose `chart.type` is `MUZE_STUDIO` and whose
+`chart.custom_visual_props` carries the tile's HTML, CSS and JS. It is not one of the
+Muze shelf types above. `ts-object-answer-chart-builder` (`helpers/answer-patch.js`) and
+`ts-object-liveboard-chart-builder` (`scripts/patch.js`) write it; those two files are
+the codified source for this shape, and both import `VALIDATE_ONLY` first and export the
+result back to check that the code arrived unchanged.
+
+```yaml
+answer:
+  name: <title>
+  tables:
+  - id: <model name>
+    name: <model name>
+    fqn: <model guid>
+  search_query: <search>
+  answer_columns: [{ name: <resolved column> }, ...]
+  chart:
+    type: MUZE_STUDIO
+    chart_columns: [{ column_id: <resolved column> }, ...]
+    custom_chart_config:
+    - key: basic
+      dimensions:
+      - key: fields
+        columns: [<attributes first>, ..., <measures>]   # resolved names, not GUIDs
+        mode: COLUMN_DRIVEN
+    custom_visual_props: '<JSON string>'   # see below
+  display_mode: CHART_MODE
+```
+
+`custom_visual_props` is a JSON string whose `clientState` is itself a JSON string:
+`{ version: 1, playground: { version: 'v1', code: { jsCodeBase64, cssCodeBase64,
+htmlCodeBase64 }, splitSizes: [55], editorConsoleSplitSizes: [99] } }`, beside empty
+`axisVisualProps`, `columnVisualProps`, `dataLabelVisualProps`, `tooltipVisualProps`,
+`legendVisualProps` and `displayVisualProps` objects. Each `*CodeBase64` is the file's
+UTF-8 text, base64-encoded.
+
+- The `fields` dimension with `COLUMN_DRIVEN` lists resolved column **names**, so it is
+  the one `custom_chart_config` that is authored rather than captured: the GUID
+  capture-and-replay rule above applies to the `ADVANCED_*` shelves.
+- Bind the model by guid (`fqn`), never by name: two models in one org can share a name.
+- The tile code runs in a sandboxed iframe that blocks `fetch()`; CDN `<script>` loads
+  work. The skills pin each CDN URL to an exact version and give it a sha384
+  `integrity`.
 
 ## Analytical intent → chart type (recommendation mapping)
 

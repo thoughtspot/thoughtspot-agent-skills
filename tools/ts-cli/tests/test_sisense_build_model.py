@@ -445,3 +445,31 @@ def test_many_to_many_relation_is_skipped_and_flagged():
     flagged = [r for r in mapping["relationships"] if "bridge table" in r.get("note", "")]
     assert len(flagged) == 1 and flagged[0]["status"] == "NEEDS REVIEW"
     assert not [f for f in lint_tml(model_doc) if f.startswith("I20")]
+
+
+def test_double_aggregation_collapses_through_this_converter(monkeypatch):
+    """Round-5 review (blocking #2): the shared `fix_double_aggregation` bug
+    ("does `group_aggregate` appear anywhere") reached every converter that
+    calls it, not just Tableau's. Sisense's own JAQL translator never emits
+    `group_aggregate` itself (no LOD-equivalent construct), so this stubs
+    `translate_jaql` to return the mixed shape directly — exercising
+    `_build_formulas`'s own `add_formula_prefix` + `fix_double_aggregation`
+    call path for real, the same as it would run if some future JAQL
+    construct ever did produce this shape."""
+    from ts_cli.sisense import build_model as sisense_build_model
+
+    def fake_translate_jaql(expr, context=None):
+        return expr, "Migrated", None
+
+    monkeypatch.setattr(sisense_build_model, "translate_jaql", fake_translate_jaql)
+
+    tables = [{"id": "Fact", "name": "Fact", "columns": [
+        {"id": "Amount", "name": "Amount", "data_type": "double", "calculated": False},
+        {"id": "NetRatio", "name": "NetRatio", "data_type": "double", "calculated": True,
+         "expression": "average ( group_aggregate ( sum ( [Fact::Amount] ) , {} , {} ) )"},
+        {"id": "NetRatioTotal", "name": "NetRatioTotal", "data_type": "double",
+         "calculated": True, "expression": "sum ( [NetRatio] )"},
+    ]}]
+    formulas, _, _ = sisense_build_model._build_formulas(tables, [])
+    total = next(f for f in formulas if f["name"] == "NetRatioTotal")
+    assert total["expr"] == "[formula_NetRatio]"

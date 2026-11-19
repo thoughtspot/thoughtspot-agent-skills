@@ -28,9 +28,10 @@ confirm (TO_CONFIRM): its reason then "may block".
                           confirm, so it is never hidden
                 confirm   nothing firm and nothing unread, but a blocking rule fires on
                           readings to confirm only (P24's OAuth client ID and
-                          secret, or PrivateLink read from the host; P21's measure only flagged pre-aggregated;
-                          P28's `= null` test; P19's calendar named in a formula, or a
-                          code-based value a custom calendar is also named)
+                          secret, or PrivateLink read from the host; P21's measure
+                          only flagged pre-aggregated; P28's `= null` test; P19's
+                          calendar named in a formula, or a code-based value a
+                          custom calendar is also named)
                 warning   no blocking rule fires and every rule ran; P22 fires
                 ready     no rule fires and every rule ran
     reasons     [{rule, effect: "blocks" | "may block" | "warns", label, items}]

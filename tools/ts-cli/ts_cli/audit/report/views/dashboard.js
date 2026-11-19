@@ -6,11 +6,15 @@ function readinessByGuid(){
   if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.rs) out[m.g] = cm.rs; });
   return out;
 }
-/* Each Model's Data Cache readiness (`dc`, see views/datacache.js), by GUID; empty for
-   JSON written before 3.23.0, which carries none, so the heatmap shows no column. */
+/* Each Model's Data Cache readiness (`dc`, see views/datacache.js), by GUID; empty, so
+   the heatmap shows no column, for JSON written before 3.23.0 (none carries it) and for
+   a run without the Performance angle (P19 to P28 did not run, so every Model would read
+   Not assessed), as Spotter readiness shows only when its angle ran. A report that does
+   not record its angles (`ar` empty) keeps the column. */
 function dataCacheByGuid(){
   var out = {};
-  if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
+  var ran = D.C && D.C.ar && D.C.ar.length ? D.C.ar.indexOf("P") !== -1 : true;
+  if(ran && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
   return out;
 }
 /* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking to the
@@ -21,7 +25,8 @@ function dataCacheCell(dc, guid){
   var why = (dc.r || []).map(function(r){
     return r.c+' '+r.l+(r.q ? ' (to confirm)' : '');
   });
-  if(dc.na && dc.na.length) why.push('Not checked: '+dc.na.join(', '));
+  if(dc.na && dc.na.length) why.push('Not checked: '+dc.na.map(function(c){
+    return DC_CHECKS[c] || c; }).join(', '));
   return '<td><a class="dc-state '+st.cls+'" href="#datacache/'+esc(guid)+'" title="'+
     esc('Data Cache: '+st.label+(why.length ? ' — '+why.join('; ') : ''))+'">'+
     st.label+'</a></td>';

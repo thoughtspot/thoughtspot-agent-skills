@@ -1,0 +1,167 @@
+# Answer template for `ts recipe period-comparison` (read by ../emit.py).
+#
+# Built from a working base Answer exported from a demo Model, with every guid, obj_id
+# and owner removed and the Model binding replaced by placeholders. Layout (b) from open
+# item #7: the bucket is in no search, column, table or chart; the measures name it, so
+# the Answer groups by year alone, one row per year (open item #7, VERIFIED).
+#
+# Verified live: the search, columns and table layout (probe fixtures, TABLE_MODE), and
+# the chart section (CHART_MODE, ADVANCED_COLUMN, custom_chart_config,
+# custom_visual_props, the trimmed client_state_v2; the user's base Answer chart,
+# trimmed). The live smoke test (tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py)
+# imported it, and the export kept its chart type and display mode; the user's UI check
+# saw it draw: year on the x-axis, the three measures on one y-axis (open item #7).
+#
+# Placeholders are filled by walking the loaded mapping (keys and string values), never
+# by formatting this text. `formulas` is filled by emit.py. The three `*_json` mappings
+# are written out as the JSON strings ThoughtSpot stores in `client_state_v2` and
+# `custom_visual_props`. The chart's `axisProperties` (cluster-generated axis ids) are
+# left out: `custom_chart_config` sets the axes.
+#
+# Placeholders: {answer_name} {model_name} {model_guid} {date_column} {year_column}
+# {measure_event} {measure_comparison} {measure_variance} {first_year} {last_year}
+answer:
+  name: '{answer_name}'
+  tables:
+  - id: '{model_name}'
+    name: '{model_name}'
+    fqn: '{model_guid}'
+  formulas: []
+  search_query: '[{date_column}].yearly [formula_{measure_event}] [formula_{measure_comparison}] [formula_{measure_variance}] [{date_column}] between [{date_column}].01/01/{first_year} and [{date_column}].12/31/{last_year}'
+  answer_columns:
+  - name: '{measure_event}'
+  - name: '{measure_comparison}'
+  - name: '{measure_variance}'
+  - name: '{year_column}'
+  table:
+    table_columns:
+    - column_id: '{measure_event}'
+      show_headline: false
+    - column_id: '{measure_comparison}'
+      show_headline: false
+    - column_id: '{measure_variance}'
+      show_headline: false
+    - column_id: '{year_column}'
+      show_headline: false
+    ordered_column_ids:
+    - '{year_column}'
+    - '{measure_event}'
+    - '{measure_comparison}'
+    - '{measure_variance}'
+    client_state: ''
+    client_state_v2_json:
+      tableVizPropVersion: V1
+  chart:
+    type: ADVANCED_COLUMN
+    chart_columns:
+    - column_id: '{measure_event}'
+    - column_id: '{measure_comparison}'
+    - column_id: Measure names
+      type: MEASURE_NAMES
+    - column_id: '{measure_variance}'
+    - column_id: '{year_column}'
+    client_state: ''
+    client_state_v2_json:
+      version: V4DOT2
+      chartProperties:
+        chartSpecific:
+          pivotSummariesState: {}
+    custom_chart_config:
+    - key: basic
+      dimensions:
+      - key: x-axis
+        axes:
+        - type: FLAT
+          column: '{year_column}'
+        mode: AXIS_DRIVEN
+      - key: y-axis
+        axes:
+        - type: MERGED
+          columns:
+          - '{measure_event}'
+          - '{measure_comparison}'
+          - '{measure_variance}'
+        mode: AXIS_DRIVEN
+      - key: slice-with-color
+        axes:
+        - type: FLAT
+          column: Measure names
+        mode: AXIS_DRIVEN
+      - key: trellis-by
+        mode: AXIS_DRIVEN
+    custom_visual_props_json:
+      clientState: ''
+      axisVisualProps:
+        '{year_column}':
+          name-color: {color: '#2E75F0', style: []}
+          label-color: {color: '#2E75F0', style: []}
+          show-x-axis-gridlines: false
+        '{measure_event}__{measure_comparison}__{measure_variance}':
+          sync-axis-domains: false
+          log-scale: false
+          axis-name:
+            name: Average Daily Sales
+            dynamic-title: Average Daily Sales
+          inheritAxisNameStyle:
+            textStyle: {color: '#2E75F0', style: []}
+            isLinked: true
+          inheritNF:
+            format:
+              category: NUMBER
+              isCategoryEditable: true
+              numberFormatConfig:
+                decimals: 0
+                negativeValueFormat: PREFIX_DASH
+                removeTrailingZeroes: false
+                toSeparateThousands: true
+                unit: AUTO
+            isLinked: true
+          inheritValueLabelStyle:
+            textStyle: {color: '#2E75F0', style: []}
+            isLinked: true
+          show-y-axis-gridlines: true
+          y-axis-gridline-style: {dashStyle: Solid, thickness: 1, color: '#EAEDF2'}
+      columnVisualProps:
+        '{measure_event}': {bar-size-auto: true, bar-color: '#F04152'}
+        '{measure_comparison}': {bar-size-auto: true, bar-color: '#8C62F5'}
+        '{measure_variance}': {bar-size-auto: true, bar-color: '#2E75F0'}
+        '{year_column}': {cartesian-hide-null-values: true}
+      dataLabelVisualProps:
+        cartesian-data-labels: {show-labels: false}
+        '{measure_event}': {cartesian-data-labels: {cartesian-data-labels-enable: false}}
+        '{measure_comparison}': {cartesian-data-labels: {cartesian-data-labels-enable: false}}
+        '{measure_variance}': {cartesian-data-labels: {cartesian-data-labels-enable: false}}
+      tooltipVisualProps:
+        global-tooltip:
+          show-tooltip: true
+          tooltip-show-details: true
+          tooltip-show-aggregates: true
+          tooltipBackground: {backgroundColor: '#1d232f', borderColor: '#1d232f', backgroundOpacity: '100'}
+          tooltip-column-name: {size: '12', color: '#ffffff', style: []}
+          tooltip-column-value: {size: '12', color: '#ffffff', style: []}
+      legendVisualProps:
+        legend: {show-legend: true, legend-position: Right}
+      displayVisualProps:
+        display: {fit-to-screen: false}
+        axis-display:
+          x-axis-display: {show-axis: true, show-axis-name: true, show-axis-intervals: false}
+          y-axis-display: {show-axis: true, show-axis-name: true, show-axis-intervals: false}
+        totals-summary:
+          show-row-grand-totals: false
+          show-column-grand-totals: false
+          show-row-sub-totals: false
+          show-column-sub-totals: false
+          totals-position: End
+          gradient-legend-include-summaries: false
+        trellis:
+          trellis-shared-axis: false
+          trellis-title-show: false
+          trellis-title-color: '#000000'
+          trellis-border-show: false
+          trellis-border-color: '#000000'
+        other:
+          chart-background-color: {backgroundColor: '#ffffff', borderColor: '#ffffff'}
+          plotted-area-background-color: {backgroundColor: '#ffffff', borderColor: '#ffffff'}
+      chartSettingsVersion: '1'
+    viz_style: '{}'
+  display_mode: CHART_MODE

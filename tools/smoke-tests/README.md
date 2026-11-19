@@ -35,6 +35,8 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_object_model_erd.py` | ts-object-model-erd | Pure |
 | `smoke_ts_link_semantic_layer.py` | ts-link-semantic-layer | Pure |
 | `smoke_ts_object_calendar_builder.py` | ts-object-calendar-builder | Pure |
+| `smoke_ts_object_answer_chart_builder.py` | ts-object-answer-chart-builder | Pure (needs `node`; the two render steps skip without the helpers' Playwright + Chromium) |
+| `smoke_ts_object_liveboard_chart_builder.py` | ts-object-liveboard-chart-builder | Pure (needs `node`) |
 | `smoke_ts-convert-to-databricks-mv.py` | ts-convert-to-databricks-mv (codified emitter) | Pure (`--live` opts in) |
 | `smoke_ts_convert_from_qlik.py` | ts-convert-from-qlik | CLI-only |
 | `smoke_ts_load_source_data.py` | ts-load-source-data | CLI-only |
@@ -52,6 +54,7 @@ imports `run_ts` yet needs no credentials; it just needs the CLI installed).
 | `smoke_ts_object_model_aggregates.py` | ts-object-model-aggregates | Live (TS + SF) |
 | `smoke_ts_object_model_agentql_query.py` | ts-object-model-agentql-query | Live (TS) |
 | `smoke_ts_variable_timezone.py` | ts-variable-timezone | Live (TS) |
+| `smoke_ts_recipe_answer_period_comparison.py` | ts-recipe-answer-period-comparison | Live (TS) |
 | `smoke_ts_recipe_formula_business_days_snowflake.py` | ts-recipe-formula-business-days-snowflake | Live (SF) |
 | `smoke_ts_recipe_formula_hms_display_snowflake.py` | ts-recipe-formula-hms-display-snowflake | Live (SF) |
 

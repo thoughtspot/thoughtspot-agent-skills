@@ -38,6 +38,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from ts_cli.audit.connection_facts import warehouse_type
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.fields_data import _code, _own_table_and_paths, _rls_rules_of
@@ -65,13 +66,7 @@ CACHEABLE_WAREHOUSES = ("SNOWFLAKE", "DATABRICKS")
 _SOURCE_LABELS = {"MODE": "Analyst Studio"}
 
 
-def _warehouse(kind: Any) -> Optional[str]:
-    """A warehouse type as compared: upper case, edge spaces and an `RDBMS_` prefix
-    dropped; None for anything blank or not text."""
-    if not isinstance(kind, str) or not kind.strip():
-        return None
-    text = kind.strip().upper()
-    return text[len("RDBMS_"):] if text.startswith("RDBMS_") else text
+_warehouse = warehouse_type   # one normalisation, shared with P24's reading
 
 
 def source_type_problem(source: Dict[str, Any], connections: Any = None) -> Optional[str]:

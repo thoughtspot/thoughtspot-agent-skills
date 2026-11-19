@@ -141,6 +141,11 @@ ts_cli/
     tsast.py            — ThoughtSpot AST constructors + canonical printer; the AST is databricks/mv_emit_expr.parse_formula's, the repo's one ThoughtSpot parser
     to_excel.py / to_excel_calls.py — ThoughtSpot → Excel emitter (`--to excel`)
     map_index.py        — vendored inventory of the two maps' rows (name → section, class) so NEEDS_REVIEW cites its row; a test pins it to the maps
+  period_comparison/
+    (the event-period comparison recipe behind `ts recipe period-comparison`; pure functions apart from reading a custom-dates file and the packaged Answer template)
+    events.py           — anchor day per built-in retail event (Black Friday, Cyber Monday, Christmas, Boxing Day, Easter)
+    windows.py          — PlanSpec → PlanResult: event and comparison windows per year, clash detection and --on-clash, unfinished-year dropping, custom date files (load_custom_windows); PlanError messages reach end users
+    emit.py             — reusable Set (cohort) TML, bucket and measure formulas, and the Answer TML from templates/answer.yaml; the 300-windows-per-group cap
   commands/
     auth.py       — ts auth (whoami, logout)
     profiles.py   — ts profiles (list, add, update, remove, sync-env) — thoughtspot/snowflake/databricks/tableau/dbt-cloud. dbt-cloud (--auth-type token) persists dbt_url/account_id/project_id/dbt_env_id/project_name as plain fields, read directly by ts-convert-from-dbt (not resolved through a ts command's own auth path like the other platforms) so its Discovery API calls (Steps 5/10.3) don't need these re-entered every session — ThoughtSpot's own dbt/search response never echoes them back after connection creation. Logic in profile_ops.py (pure functions: slug/env-var/keychain-command derivation, no I/O)
@@ -173,6 +178,7 @@ ts_cli/
     dbt_export.py — ts dbt-export (build, diff, sync, build-model) — the REVERSE direction (ThoughtSpot Model -> dbt project scaffold) for ts-convert-to-dbt. `build` is Case A (new project); `diff`/`sync` are Case B (update an existing project in place — `diff` never writes anything, `sync` writes only new tables, additive-only); `build-model` assembles a single unified ThoughtSpot Model TML from a schema.yml's ts_join_* relationship tests (addresses the multi-fact split case, open-items.md #11). Formula columns are emitted as `ts_formula` meta config entries in schema.yml (two-way sync: ThoughtSpot formulas → schema.yml → dbt manifest → ThoughtSpot via build-model on resync). Emit-only offline file transform (the `ts snowflake build-sv`/`ts databricks build-mv` precedent): no ThoughtSpot or dbt connection used or needed. Logic in dbt_build_export.py (Case A + build-model) / dbt_diff.py (Case B change-set)
     aggregate.py  — ts aggregate (signatures, recommend, profile, history, generate) — aggregate-model advisor engine
     aggregate_rls.py — RLS command-layer wiring for `ts aggregate` (Task 23): _attach_rls_conflicts (recommend advisory surfacing) + _propagate_rls_or_fail_closed (generate security gate — fails closed on incomplete tables-dir or grain missing an RLS filter column) over the pure aggregate/rls.py engine; split out of aggregate.py to stay under the file-size gate, imported lazily from recommend/generate
+    recipe.py     — ts recipe period-comparison — offline: builds every document before writing any file, writes <name>.answer.tml (and <set name>.cohort.tml), prints the plan as JSON; exit 2 with no files when a clash needs --on-clash (I/O only; logic in ts_cli/period_comparison/)
   audit/
     __init__.py       — run_audit(): selects catalog rules by category/profile, fetches what they declare, runs the engine; build_corpus; REPORT_NEEDS
     catalog/          — THE RULES: categories.yaml, profiles.yaml, rules/*.yaml (one entry per rule; edit thresholds/severities/wording here)

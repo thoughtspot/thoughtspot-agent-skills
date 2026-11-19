@@ -1,0 +1,212 @@
+answer:
+  name: ZZ_probe_period_comparison_a_inline_nows_q
+  tables:
+  - id: '{model_name}'
+    name: '{model_name}'
+    fqn: '{model_guid}'
+  formulas:
+  - id: formula_Average Black Friday Sales
+    name: Average Black Friday Sales
+    expr: safe_divide ( sum_if ( [ZZ_probe_period_comparison_bucket_inline] = 'Black Friday Days' , [Amount] ) , unique_count_if ( [ZZ_probe_period_comparison_bucket_inline] = 'Black Friday Days' , date ( [Order Date] ) ) )
+  - id: formula_Average Comparison Sales
+    name: Average Comparison Sales
+    expr: safe_divide ( sum_if ( [ZZ_probe_period_comparison_bucket_inline] = '6 Prior Weeks' , [Amount] ) , unique_count_if ( [ZZ_probe_period_comparison_bucket_inline] = '6 Prior Weeks' , date ( [Order Date] ) ) )
+  - id: formula_Variance to Baseline
+    name: Variance to Baseline
+    expr: '[formula_Average Black Friday Sales] - [formula_Average Comparison Sales]'
+  search_query: '[Order Date].yearly [formula_Average Black Friday Sales] [formula_Average Comparison Sales] [formula_Variance to Baseline] [Order Date] between [Order Date].01/01/2018 and [Order Date].12/31/2019 [ZZ_probe_period_comparison_bucket_inline]'
+  answer_columns:
+  - name: Average Black Friday Sales
+  - name: Average Comparison Sales
+  - name: ZZ_probe_period_comparison_bucket_inline
+  - name: Variance to Baseline
+  - name: Year(Order Date)
+  table:
+    table_columns:
+    - column_id: Average Black Friday Sales
+      show_headline: false
+    - column_id: Average Comparison Sales
+      show_headline: false
+    - column_id: ZZ_probe_period_comparison_bucket_inline
+      show_headline: false
+    - column_id: Variance to Baseline
+      show_headline: false
+    - column_id: Year(Order Date)
+      show_headline: false
+    ordered_column_ids:
+    - Year(Order Date)
+    - Average Black Friday Sales
+    - Average Comparison Sales
+    - ZZ_probe_period_comparison_bucket_inline
+    - Variance to Baseline
+    client_state: ''
+  display_mode: TABLE_MODE
+  cohorts:
+  - name: ZZ_probe_period_comparison_bucket_inline
+    config:
+      cohort_type: SIMPLE
+      cohort_grouping_type: GROUP_BASED
+      anchor_column_id: Order Date
+      groups:
+      - name: Black Friday Days
+        conditions:
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/23/2018
+              end_date: 11/26/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/29/2019
+              end_date: 12/02/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        combine_type: ANY
+      - name: 6 Prior Weeks
+        conditions:
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/16/2018
+              end_date: 11/19/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/09/2018
+              end_date: 11/12/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/02/2018
+              end_date: 11/05/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 10/26/2018
+              end_date: 10/29/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 10/19/2018
+              end_date: 10/22/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 10/12/2018
+              end_date: 10/15/2018
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/22/2019
+              end_date: 11/25/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/15/2019
+              end_date: 11/18/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/08/2019
+              end_date: 11/11/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 11/01/2019
+              end_date: 11/04/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 10/25/2019
+              end_date: 10/28/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        - operator: BW
+          column_name: Order Date
+          filter_value_type: DATE_FILTER
+          date_filter_values:
+          - type: EXACT_DATE_RANGE
+            oper: between
+            date_range:
+              start_date: 10/18/2019
+              end_date: 10/21/2019
+            date_period: DAY
+            for_each_period: NUM_DATE_PERIODS
+        combine_type: ANY
+      null_output_value: Not Black Friday
+      combine_non_group_values: true

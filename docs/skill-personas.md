@@ -328,6 +328,57 @@ and each SE solves it from scratch. A recipe is the solved version, deployable i
 - **Use when** call duration, handle time or ticket age should read as `HH:MM:SS`,
   `DD:HH:MM:SS`, `HH:MM` or `DD:HH:MM`. Deploys four Snowflake UDFs plus the formula syntax.
 
+### `ts-recipe-answer-period-comparison`
+
+- **Business problem.** "How much did Black Friday lift daily sales over a normal week?",
+  asked for every year at once. Built by hand, the Answer needs dozens of typed date
+  ranges that drift, and a fixed-level measure can quietly inflate the numbers.
+- **Who asks.** SE and CSA on retail and e-commerce use cases; analysts measuring
+  promotion uplift.
+- **Use when** someone wants an event (Black Friday, Cyber Monday, Christmas, Boxing Day,
+  Easter, or their own) compared with the weeks before it, one row per year with the
+  variance. Creates one Answer, and optionally a reusable Set on the Model.
+- **Watch for.** A DATE_TIME date column is not verified live; the skill offers only the
+  formula form there. Give the last loaded date, or a year whose data is not loaded yet
+  shows an average of 0.
+
+---
+
+## Custom Charts
+
+Custom chart (BYOC) tiles, and Liveboards made of them.
+
+The shared business problem: a native chart cannot always show the story a customer needs
+to see, and a hand-written custom chart that looked fine locally often ships as a blank or
+broken tile, because the host passes data and sizes the tile differently from a local page.
+
+### `ts-object-answer-chart-builder`
+
+- **Business problem.** A demo or customer request calls for a visual ThoughtSpot does not
+  have natively (a Sankey, a hex cartogram, a bullet chart), and building a custom chart by
+  hand means several paste-and-reload rounds in the product before it renders.
+- **Who asks.** SE building a differentiated demo, PS delivering a bespoke visual, anyone
+  rebuilding or debugging an existing custom chart tile.
+- **Use when** you need paste-ready `chart.html` / `chart.css` / `chart.js` for a tile.
+  Start from the nearest of the 58 library charts where one fits.
+- **Watch for** the first run installing Playwright and Chromium into the skill's
+  `helpers/`. A chart is only verified in ThoughtSpot once it has been screenshotted there
+  (see `ts-object-liveboard-chart-builder`); before that it is verified against a stub.
+
+### `ts-object-liveboard-chart-builder`
+
+- **Business problem.** A set of good charts is not a story. A storytelling demo
+  Liveboard of custom tiles takes days to plan, lay out and import by hand, and one wrong
+  character in a pasted tile breaks it.
+- **Who asks.** SE preparing a flagship demo on a customer's own Model, PM or marketing
+  wanting a showcase Liveboard.
+- **Use when** you want a whole Liveboard of custom charts across numbered tabs, each tab
+  answering one question, with narrative tiles and filters, imported and screenshotted on a
+  real cluster.
+- **Watch for** it needing the ThoughtSpot MCP (`execute-thoughtspot-code`) and a
+  logged-in browser for the screenshots. It patches the target Liveboard itself and
+  creates no other objects.
+
 ---
 
 ## Keeping this page honest

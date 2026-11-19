@@ -404,9 +404,14 @@ live-verified for all seven start days on 120 dates, 2026-10-07).** Rebuild it f
 the opposite of most SQL `DATEDIFF` functions which take `(unit, start, end)`.
 
 **Date literal warning:** A bare `'2024-05-01'` is parsed as subtraction
-(`'2024' - 05 - 01`). Wrap in `to_date ( '2024-05-01' , 'yyyy-MM-dd' )` —
+(`'2024' - 05 - 01`). Wrap in `to_date ( '2024-05-01' , '%Y-%m-%d' )` —
 hyphens are fine inside `to_date()` since the parser treats the argument as
 a string. No reformatting needed; just provide a matching format pattern.
+Use the strftime form (`%Y`, `%m`, `%d`): ThoughtSpot translates it for the warehouse.
+`'yyyy-MM-dd'` is passed through verbatim and works on Snowflake only because its
+format elements are case-insensitive (live 2026-10-06,
+[probe record](../../../docs/reviews/2026-10-06-formula-semantics-probes.md)).
+The mapping docs and translators that still emit `'yyyy-MM-dd'` are tracked in BL-602.
 
 ---
 

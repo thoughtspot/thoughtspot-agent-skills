@@ -189,3 +189,14 @@ or INSERT VALUES for Databricks).
 **Prerequisites:** Tableau profile configured via `/ts-profile-tableau` (optional — skill
 degrades gracefully); `ts` CLI v0.73.0+ (includes `ts tableau build-model` with
 `--max-retries`, enriched error reporting, GENERATE mode output, and `--table-name-map`).
+
+## `(copy)` / `(copy N)` field-name suffixes resolve via the alias map, never by string-stripping
+
+Tableau's duplicate-tracking appends `(copy)`, `(copy 2)`, etc. to a field reference when a
+calculated field is duplicated — but the suffix is **not** a promise that the alias means
+"same definition as the base name." The real alias map (keyed by both `"Name (copy)"` and
+`"[Name (copy)]"`) can point to a **completely different field**. Synthetic example: a field
+named `[Discount (copy)]` can legitimately resolve to a field called `Promotion Rate`, with
+no relationship to a base field literally named `Discount`. `resolve_all_internal_refs` (Step
+3c) applies this lookup for the main pipeline; any hand-written dependency trace (e.g. while
+debugging why a formula didn't merge) must do the same lookup, never guess from the name.

@@ -112,7 +112,7 @@ are roughly ordered by value÷effort.
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
-| BL-552 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
+| BL-599 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
 | BL-553 | Looker filtered `count_distinct` maps to `count_if` (counts rows, not distinct values) | 2026-11-30 |
 | BL-554 | Snowflake SV parser drops every dimension when a view has a root-level LOD fact | 2026-11-30 |
 
@@ -368,6 +368,7 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
+| BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -479,6 +480,8 @@ are roughly ordered by value÷effort.
 | BL-567 | TML export sends `formattype`, which v2 ignores: `ts tml export --format YAML` returns JSON | 2026-12-31 |
 | BL-568 | Exported TML parsed without stripping non-printables: `export_item_doc` and 9 raw `yaml.safe_load(edoc)` sites | 2026-12-31 |
 | BL-569 | `dependency/backup.py` `backup_filename`: 60-character cap overruns the 255-byte limit; keeps Windows-reserved characters | 2026-12-31 |
+| BL-581 | Unconfirmed whether `fix_double_aggregation`'s blanket `sum([formula_X])` → `[formula_X]` simplification silently undoes a `group_aggregate(...)`-wrapped reference another formula shape needs to avoid a misleading import failure | 2026-12-31, or the next converter work touching `fix_double_aggregation` |
+| BL-582 | A CHAR list parameter's runtime value is unconfirmed (migrated `display_name` or Tableau's internal `list_config.value`); the translator compares formula literals against the internal value, and tableau-formula-translation.md:193 is hedged until a live probe settles it | 2026-12-31, or the next converter work touching parameter comparisons |
 | BL-583 | `check_references.py` does not scan `agents/cli/SETUP.md`, so a broken link there passes every gate | 2026-12-31 |
 | BL-584 | The open-items index reads an unrecognised status as OPEN instead of failing on it | 2026-12-31 |
 | BL-585 | Nothing warns when a converter step is removed and its `coverage-matrix.md` is not touched | 2026-12-31 |
@@ -495,6 +498,18 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
+| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
+| BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
+| BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
+| BL-602 | `to_date` format: the mappings, function maps and translators (Tableau, Databricks, Snowflake SV, Qlik, Ossie, Excel, Sheets, Omni) still emit or pass through `'yyyy-MM-dd'`-style formats; formula-patterns now gives `'%Y-%m-%d'` | 2027-01-31 |
+| BL-603 | Period-comparison recipe on a DATE_TIME date column: four cases untested (open item #9) | 2027-02-28 |
+| BL-604 | `ts tml lint` flags the viz-level `fqn` binding that the period-comparison probes imported and rendered | 2027-01-31 |
+| BL-605 | The Tableau docs say a cohort needs the Model's `obj_id` to bind; the Sets schema says `{id, name, fqn}` and `{id, name}` import | 2027-01-31 |
+| BL-606 | A Tableau static Set on a DATE anchor writes raw member strings as `date_filter_values`; the mapping says one `EXACT_DATE` object per date | 2027-01-31 |
+| BL-607 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
+| BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
+| BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
+| BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -17221,7 +17236,7 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 
 **Target:** 2026-12-31.
 
-## BL-552 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
+## BL-599 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
 
 **Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
 
@@ -17565,6 +17580,130 @@ BL-505 covers the converters' side only.
 3. Move the S17 helpers (`_formula_tables` through `_rls_root_fix`) into their own module, such as `fields_rls_root.py`. Import the new module where `fields.py` imports `fields_data`, so its `@register` fields are registered.
 
 **Target:** 2027-02-28.
+## BL-580 — Correct Step 7's "rerun when formulas are filtered" explanation `Tier 2`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission.
+`references/step-7-review-templates.md` tells the reader that a non-zero
+`formulas_filtered` from `build-model --existing-guid` can be a same-batch ordering
+artifact — a formula depending on another formula added in the *same* batch, filtered
+because its dependency "wasn't live yet" — and that an identical retry often clears it once
+the dependency is live. That explanation is wrong: a same-batch `[Base]` dependency is
+rewritten to the resolved `[formula_Base]` reference and kept, not filtered, so retrying
+fixes nothing in that case. Left as-is, this sends the next reader down the wrong
+diagnostic path on a genuine `formulas_filtered` result.
+
+**Do.** Identify the actual mechanism `filter_unresolvable_formulas` uses that makes a
+second identical run sometimes clear previously-filtered formulas (if one still exists —
+confirm live, don't assume the prose was describing a real behavior that just had the wrong
+cause), and correct the step-7 reference accordingly. If no such mechanism survives
+scrutiny, remove the "retry once" advice entirely rather than leave a plausible-sounding but
+false explanation in place.
+
+**Target:** next Tableau skill touch that reaches Step 7, or 2026-12-31, whichever comes
+first.
+
+## BL-581 — Check whether `fix_double_aggregation` (formula_common.py) undoes a wrapper a different formula shape actually needs `Tier 3`
+
+**Filed:** 2026-10-15. **Source:** PR review on an earlier Tableau submission, flagging a
+tension between two findings from the same session:
+
+1. A Tableau-specific finding: when a formula references another `group_aggregate`-valued
+   formula and the combination hits ThoughtSpot's nested-`group_aggregate` restriction, one
+   fix shape is to wrap the reference in `group_aggregate(sum([formula_X]), query_groups(),
+   {})` rather than a bare `sum([formula_X])` — specifically because a bare `sum(...)`
+   around a reference to a formula with `average()`/`stddev()` dependents fails import with
+   a misleading `Formula addition failed... Search did not find` error, while the
+   `group_aggregate(...)`-wrapped form does not.
+2. The shared `fix_double_aggregation` (`tools/ts-cli/ts_cli/formula_common.py`, used by
+   Table/SV/Sisense/Tableau/Qlik/dbt/Databricks-MV model building — Power BI and Looker
+   never call it) replaces `sum([formula_X])` with bare `[formula_X]` whenever `X` is
+   already aggregated — intended to avoid a genuine double-aggregation, but applied as a
+   blanket simplification regardless of what depends on `X` downstream.
+
+If (1) is a real, general pattern (not Tableau-specific), (2) could be silently undoing the
+exact wrapper (1) says is required — reintroducing the same avg/stdev-dependent import
+failure for *any* converter's formula that happens to match this shape, not just Tableau's.
+
+**Update (2026-11-17, round-4 PR #662 review):** a related but distinct case is now fixed
+in code, not just documented: `fix_double_aggregation` also stripped `sum([formula_X])`
+whenever `X`'s own expr was a `group_aggregate(...)` call (a FIXED/INCLUDE/EXCLUDE LOD) —
+`expr_is_aggregated` matches `group_aggregate` too, so this hit the SAME blanket check as
+(2). Unlike simplifying `sum(sum(...))`, stripping `sum()` around a `group_aggregate` ref is
+not redundant — it re-aggregates the LOD's per-group values to the query's own grain, a
+different, legitimate number. That was a silent WRONG NUMBER (not an import failure, unlike
+(1)'s dependents case), live in a ratio like `unique_count([Order ID]) / sum([formula_A])`
+where `A` is a FIXED LOD. Fixed by excluding `group_aggregate`-valued refs from the strip.
+See `tools/ts-cli/ts_cli/formula_common.py`'s `fix_double_aggregation` and
+`tools/ts-cli/tests/test_model_builder.py::TestDoubleAggregation::test_sum_of_group_aggregate_ref_not_unwrapped`.
+
+**Update (2026-11-17, round-7 PR #662 review; corrected 2026-11-19):** the round-4/5 check
+read only `X`'s own inline text, so when `X` reached a naked aggregate through another
+reference (e.g. `X = [Rev] / group_aggregate(...)` with `Rev = sum(S)`), `X` looked
+LOD-shaped and the `sum()` wrapper was wrongly KEPT: `sum ( [formula_X] )` aggregates an
+already-aggregated formula, and failed at import. (This note first said the wrapper was
+wrongly stripped, giving a wrong number; that was backwards.) The check now follows
+references, recognizes the full ThoughtSpot aggregate list (`median`, `min_if`, `max_if`,
+`stddev_if`, `variance_if` were missing from `_AGG_FUNCTIONS`), and finds each
+`group_aggregate(...)` call's span with the module's own quote-aware `_close_paren` instead
+of a Tableau-only, non-quote-aware helper (an unbalanced `(` inside a string literal in the
+LOD's arguments used to throw the span off).
+
+**Update (2026-11-19, maintainer round on PR #662):** the round-7 walk went only one level
+deep. It followed a reference only when that reference's own text held an aggregate, so
+`X = [M] - group_aggregate(...)` with `M = [P] / [Q]` and `P`, `Q` plain sums kept its
+wrapper again, through every converter. `_has_naked_aggregate`, which replaces
+`_every_aggregate_is_inside_a_group_aggregate`, recurses through every resolved reference
+with a cycle guard. A refs-only ratio of two LODs (`M = [A] / [B]`, both `group_aggregate`)
+still reaches no naked aggregate, so its wrapper stays; a guard test pins that, because
+simply dropping the gate would have stripped it, a wrong number. See `TestDoubleAggregation`
+in `test_model_builder.py` and the two-level tests in `test_build_model_helpers.py` (Tableau)
+and `test_dbt_review2_findings.py` (dbt). A related blind spot, an aggregate name inside a
+reference or literal read as an aggregate, is BL-612. None of these fixes confirms or
+resolves the still-open question below (the average()/stddev()-dependent import-failure
+case); that still needs a live probe.
+
+**Do.** Confirm live, on a real cluster: does `fix_double_aggregation` ever fire on a
+formula `X` that itself has `average()`/`stddev()` dependents? If yes, does the simplified
+(bare-reference) output actually fail import the way a bare `sum(...)` wrap does in finding
+(1)? If the interaction is real, either make `fix_double_aggregation` skip simplifying when
+`X` has such a dependent, or confirm the two shapes are safe together and document why.
+
+**Target:** 2026-12-31, or the next converter work that touches `fix_double_aggregation` or
+the nested-`group_aggregate` reconstruction guidance, whichever comes first.
+
+## BL-582 — CHAR list parameter: translator compares Tableau's internal value, runtime value unconfirmed `Tier 3`
+
+**Filed:** 2026-11-17. **Source:** PR #662 round-4 review.
+`tableau-formula-translation.md:193` originally said a CHAR list parameter's runtime value
+is its migrated `display_name`, not Tableau's internal `list_config.value` — e.g. a choice
+with internal value `"1"` and display name `"Last Month"` has a runtime value of
+`"Last Month"`. `tools/ts-cli/ts_cli/tableau/twb.py` agrees for the parameter OBJECT itself:
+`default_value` is set from `alias` (the display name), not `value`, for any list-based
+(CHAR) parameter.
+
+But a FORMULA that compares against the same parameter (e.g. `IF [Period] = '1' THEN ...`)
+is not rewritten at all — the comparison literal passes through untouched, still the
+internal `list_config.value`, not the display name. If the display-name claim is right,
+every such formula compares against the wrong thing and silently takes the wrong branch
+once a user actually changes the parameter.
+
+**Update (round-5, PR #662 review):** since this contradiction was unresolved and risked
+shipping a flatly wrong instruction, `tableau-formula-translation.md:193` was hedged rather
+than asserted either way: it now flags the question as **unverified, see BL-582**, and
+tells the skill to let an already-working sibling formula's own comparison be the guide
+instead of assuming a convention. This backlog item is still the one that needs the live
+probe below — the hedge only stops the doc from asserting something unconfirmed, it doesn't
+settle which value is actually correct.
+
+**Do.** Confirm live, on a real cluster: when a CHAR list parameter changes value, does a
+formula's `=` comparison see the choice's display name or something else? If display name,
+rewrite formula-side literal comparisons against a list parameter's known choices from
+`value` to `display_name` (the choices are already carried on the parameter's
+`list_config.list_choice`) — mirroring what `twb.py` already does for the parameter's own
+`default_value`. If the doc is wrong instead, correct
+`tableau-formula-translation.md:193`.
+
+**Target:** 2026-12-31, or the next converter work that touches parameter comparisons.
 
 ## BL-583 — `check_references.py` does not scan `agents/cli/SETUP.md` `Tier 3`
 
@@ -17811,5 +17950,642 @@ A converted Model can be uncached without the user being told, and the invariant
 1. Raise it upstream on apache/ossie-converters with a minimal TML fixture: a Table column carrying `calendar`, surfaced by a Model field.
 2. Ask for the property to be stashed and restored, or for an issue to be raised when it is dropped.
 3. Update `docs/ossie/ts-ossie-construct-mapping.md` (V-items intro and V1) when it lands.
+
+**Target:** 2027-01-31.
+
+## BL-552 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
+
+**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
+open items #4 and #5, deferred here so the write path's live run could close the PR).
+
+**What.** Three things the skills' 2026-11-05 live run on ps-internal did not cover:
+
+1. Liveboard open item #4: of the 58 library charts, 48 moved to MayaCharts 0.18.1 and render
+   in the local preview in every data mode. The live run put four of them on a cluster (all
+   rendered, `.preview-only` cleared); the other 44 carry `.preview-only` until each has been on a
+   Liveboard and screenshotted.
+2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
+   exclude the current month; that has not been confirmed on a screenshot.
+3. Liveboard open item #6 (third and fourth PR 711 reviews): every block but the last of a run
+   carries the spec tiles it does not write over unchanged, so a spec change commits every block.
+   Mock-only so far.
+
+**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
+`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
+days of a month, screenshot a monthly tile with the filter applied. For #6, retitle one tile outside
+the run and change another's search, run `--commit` on two other slugs with a small `--max`, and
+confirm every block commits. Mark the items VERIFIED.
+
+**Target:** 2027-01-31.
+
+## BL-600 — `ts` command to fetch a saved Answer's SQL `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the ts-recipe-answer-period-comparison build (spec
+`docs/superpowers/specs/2026-11-18-recipe-answer-period-comparison-design.md`, step 8).
+
+**What.** No `ts` command returns the SQL, or the rows, of a saved Answer. `ts agentql` runs
+against a Model and cannot see an Answer's own formulas. `ts tml verify-render` reports only
+whether a Liveboard's tiles render. So the recipe's Step 8 asks the user to open the Answer
+in the UI and check its SQL: no `CROSS JOIN`, and each measure a flat `sum` from the fact
+table. The recipe's open items #4 (the SQL) and #7 (one row per year) close only through
+that manual check.
+
+**Do.**
+1. Find the endpoints with the SpotterCode MCP first (`.claude/rules/api-research.md`).
+   Candidates to confirm: v2 `metadata/answer/sql` for the SQL and `metadata/answer/data`
+   for the rows.
+2. Add `ts answer sql <guid>` (and rows, if the second endpoint fits), following
+   `tools/ts-cli/CLAUDE.md`'s "Adding a command".
+3. Replace the UI check in the recipe's Step 8 with the command, and check the SQL and the
+   row count in the recipe's smoke test.
+
+**Target:** 2027-01-31.
+
+## BL-601 — Answer-level Set bucket form for ts-recipe-answer-period-comparison `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the ts-recipe-answer-period-comparison build. The user
+asked for this form; it was dropped from v1 the same day (user decision).
+
+**What.** v1 buckets the days with a reusable Set or an Answer formula. An answer-level Set
+(`answer.cohorts[]`) would keep the bucket inside the Answer without a long formula, but an
+Answer formula cannot name one: import fails with error 14516 (SCAL-353379, a product bug).
+So the form could carry no variance column. The evidence is in
+`agents/cli/ts-recipe-answer-period-comparison/references/open-items.md`:
+
+- **#1:** what an import returns when the feature is off was never seen (one cluster, with
+  the feature on). `ts tml verify-render` reported `No data source found` for every Answer
+  with an answer-level Set, including one built in the UI that shows data, so it cannot
+  check this form. Tile binding is ruled out as the cause: the probe Liveboards, including
+  the one embedding the user's UI-built control Answer, bound their tiles `{id, name, fqn}`,
+  the same binding as the tiles that rendered.
+- **#2:** `worksheet: {id, name, fqn}` is required on the inline Set.
+- **#5:** the 14516 failure and a minimal repro, as filed in SCAL-353379.
+- **#8:** a reduced layout (the Set as a grouping column, one `Average Daily Sales` measure
+  spelled `unique count`) imports. Three variants for hiding the third (`Not <event>`)
+  bar imported and round-tripped: a `!=` search filter on the Set's value, an `=` filter
+  on the two wanted values, and `combine_non_group_values: false`. Only their rendering is
+  unchecked.
+
+**Do.**
+1. When SCAL-353379 is fixed, re-run #5's repro. If formulas can name the Set, add
+   `--bucket answer-set` with the full three-measure layout.
+2. Otherwise decide with the user whether the reduced layout (#8) is worth shipping, and
+   find the variant that hides the third bar in the UI.
+3. Find a render check that works for these Answers (#1), and see an import on a cluster
+   without the feature.
+
+**Target:** 2027-03-31 (re-check SCAL-353379's status then).
+
+## BL-602 — `to_date` format: the mappings and translators still emit `'yyyy-MM-dd'` `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the ts-recipe-answer-period-comparison build, which
+corrected `thoughtspot-formula-patterns.md`. It now gives `to_date ( '2024-05-01' , '%Y-%m-%d' )`, per
+the probe record (`docs/reviews/2026-10-06-formula-semantics-probes.md`): ThoughtSpot
+translates the strftime pattern for the warehouse, but passes `'yyyy-MM-dd'` through
+verbatim, which works on Snowflake only because its format elements are case-insensitive.
+
+**What.** The old form is still in doc/translator twins, which must change together:
+- Docs: `agents/shared/mappings/tableau/tableau-formula-translation.md` (line 236, "pass the
+  format through unchanged"; line 341), `tableau-tml-rules.md` (lines 486–510),
+  `ts-databricks/ts-databricks-formula-translation.md` (line 955) and
+  `ts-databricks/ts-from-databricks-rules.md` (lines 477, 981).
+- Translators: `tableau/literals.py` (`_date_literal_to_ts`), `sv_sql.py`,
+  `databricks/mv_sql.py`, and the hint in `tableau/validate.py`.
+- `formula_translate/catalog.py` quotes the old example in its `to_date` citation.
+
+On Databricks `'yyyy-MM-dd'` is Spark's own pattern, so a verbatim pass-through probably
+works there; no other warehouse was probed.
+
+**Widened 2026-11-19** (pre-PR review of the period-comparison recipe; lines at that
+commit). More twins of the same rule:
+
+- **Databricks, probably wrong already:** `ts-databricks/ts-from-databricks-rules.md:458`
+  gives `to_date('date', 'yyyy/MM/dd')`, slashes against an ISO `'YYYY-MM-DD'` literal.
+  `databricks/mv_sql.py:421-424` is a second site that passes Spark's format through
+  (`TO_DATE` with string arguments, emitted raw).
+- **Tableau:** `tableau/functions.py:276` (`DATEPARSE` → `to_date ( s , format )`, the
+  format passed through) is the code twin of `tableau-formula-translation.md:236`.
+  `tableau/literals.py:132` emits `'yyyy-MM-dd HH:mm:ss'` for a date-time literal. On
+  Snowflake, whose format elements are case-insensitive, `mm` is the month and `MI` the
+  minutes, so that literal is likely wrong, not just non-portable (an inference, not
+  probed).
+- **Qlik:** `qlik/functions.py:141` maps `date` to `to_date` by name, so a Qlik format
+  (`'YYYY-MM-DD'`) passes through verbatim, while
+  `qlik/qlik-thoughtspot-formula-translation.md:182` and `:276` say the formats differ.
+- **Ossie:** `docs/ossie/ts-ossie-construct-mapping.md:289` ("Emit only the documented
+  `yyyy-MM-dd` pattern style") and `docs/ossie/ts-ossie-function-mapping.md:207`, `:210`,
+  `:212` and `:483`. `check_ossie_mapping_sync.py` compares that doc with upstream
+  apache/ossie-converters, so change both sides together.
+- **Function maps read by ts-object-formula-translate:**
+  `docs/function-maps/ts-excel-function-mapping.md:222`, `:600`, `:1144`;
+  `ts-sheets-function-mapping.md:83`, `:86`, `:275`, `:280`, `:283`, `:349`;
+  `ts-omni-function-mapping.md:139`, `:227`, `:622`, `:623`. The Excel translator already
+  emits `'%Y-%m-%d'` (`excel/coerce.py:27`), so the Excel doc disagrees with its own code.
+- **The to-direction:** no ThoughtSpot → SQL mapping has a `to_date` row, so a
+  `to_date ( … , '%Y-%m-%d' )` in a source Model has no documented translation for
+  ts-convert-to-snowflake-sv (`mappings/ts-snowflake/`), ts-convert-to-databricks-mv
+  (`ts-databricks/ts-databricks-formula-translation.md`) or ts-convert-to-dbt
+  (`ts-dbt/ts-dbt-formula-translation.md`).
+
+**Widened again 2026-11-19** (final pre-PR fixes of the period-comparison recipe; lines at
+that commit):
+
+- **Excel function map:** `docs/function-maps/ts-excel-function-mapping.md:358` (`SUMIFS`),
+  `:610` (`NETWORKDAYS`, the inline-holiday term) and `:706` (`N`).
+- **Sheets function map:** `ts-sheets-function-mapping.md:274` (`EPOCHTODATE`).
+- **Sigma function map:** `ts-sigma-function-mapping.md:266` (`DateFromUnix`).
+- **Snowflake SV translator:** `tools/ts-cli/ts_cli/sv_sql.py:414-415` passes a `TO_DATE`
+  format through raw, the twin of `databricks/mv_sql.py:421-424`.
+- **The period-comparison recipe** already emits `'%Y-%m-%d'`
+  (`tools/ts-cli/ts_cli/period_comparison/emit.py:258-259`, its `to_date` literal). When
+  the shared helper lands (Do, step 2), import it there too.
+
+**Widened after merge, 2026-11-19** (the final pr-ready review of PR #742; lines at its
+merge commit):
+
+- **Qlik mapping:** `agents/shared/mappings/qlik/qlik-thoughtspot-formula-translation.md:183`
+  (`Timestamp`) and `:277` (`Date#`). Both map to `to_date(col, format)` and pass the
+  Qlik format through, with no note that the formats differ.
+- **Coverage matrices:** `agents/cli/ts-convert-from-databricks-mv/references/coverage-matrix.md:139`
+  (`TO_DATE`, raw string arguments) and
+  `agents/cli/ts-convert-from-tableau/references/coverage-matrix.md:58` (`DATEPARSE`).
+- **Not a site:** `agents/cli/ts-recipe-answer-period-comparison/references/open-items.md:136`
+  quotes `to_date('2019-11-29', 'yyyy-MM-dd')`. That is ThoughtSpot's generated SQL, not
+  emitted TML, so leave it.
+
+`agents/shared/schemas/thoughtspot-formula-patterns.md` (its date literal warning, about
+line 414) points here and stays accurate.
+
+**Do.**
+1. Decide per translator whether to emit `'%Y-%m-%d'` (portable) or keep the verbatim form
+   for its one warehouse; probe one non-Snowflake warehouse if a translator stays.
+2. Write one shared date-literal helper in `ts_cli/formula_common.py` and import it in
+   every translator, rather than fixing each spelling in place (BL-217's rule).
+3. Change each doc with its translator, and the catalog citation, in one PR. Translate a
+   source format's tokens (Qlik, Tableau `DATEPARSE`, Spark) instead of passing them
+   through, or flag the formula.
+4. Add `to_date` rows to the to-direction mappings and their translators.
+5. Prove it with a test per translator on the emitted format, and once fixed, add a hard
+   rule to `check_mapping_code_sync.py` against `to_date ( … , 'yyyy…' )` in docs and code.
+
+**Target:** 2027-01-31.
+
+## BL-603 — period-comparison recipe on a DATE_TIME date column: four untested cases `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** open item #9 of ts-recipe-answer-period-comparison,
+deferred because the test Model has only DATE columns.
+
+**What.** On a DATE_TIME date column the recipe offers only the formula form (SKILL.md
+Step 5), but nothing about DATE_TIME is verified live:
+
+1. **The formula form on a real DATE_TIME column.** The probe used
+   `add_minutes ( [Order Date] , 90 )` as a stand-in. It shows `date ( )` accepts an
+   expression, not that a physical column behaves the same.
+2. **The reusable Set on DATE_TIME.** A Set condition takes the bare column, so a window's
+   last day may lose its rows after midnight.
+3. **The year filter's end bound and `.yearly`.** Both name the bare column. Whether
+   `[<date>].12/31/<last>` keeps 31 December's late rows is untested.
+4. **`ts_user_timezone`.** `date ( )` on a timestamp may follow the user's timezone
+   variable, moving rows across a window edge. The Set's bounds and the year filter may
+   move too.
+
+**Do.**
+1. Use a Model with a real DATE_TIME date column, with rows late on 31 December and near
+   window edges.
+2. Generate both forms, plus a window ending on 31 December of the last year
+   (`--event christmas --length 7 --on-clash skip`).
+3. Compare each window's sum and day count with an oracle that casts the column to DATE in
+   the warehouse.
+4. Repeat with `ts_user_timezone` set far from UTC (`ts-variable-timezone`).
+5. Record the result in open item #9, and update SKILL.md Steps 5 and 6 and the README.
+   If the Set form holds, offer it on DATE_TIME again.
+
+**Target:** 2027-02-28.
+
+## BL-604 — `ts tml lint` flags a viz-level `fqn` binding that imports and renders `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the ts-recipe-answer-period-comparison build.
+
+**What.** `agents/shared/schemas/thoughtspot-liveboard-tml.md` (lines 203–210) says a
+viz-level `fqn` in `answer.tables[]` is dropped on import. `_check_viz_table_binding` in
+`tools/ts-cli/ts_cli/tml_lint.py` flags every `tables[]` entry with `fqn` and no `obj_id`,
+standalone Answers included. So `ts tml lint` flags every Answer that
+`ts recipe period-comparison` generates. The live evidence says the binding works:
+
+- The probe Liveboards in the recipe's open item #3 bound their tiles `{id, name, fqn}`.
+  `ts tml verify-render` rendered them, the two 300-window tiles included.
+- The smoke test (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py`) imports
+  the generated Answers with `{id, name, fqn}`. Its Liveboard rendered 2 of 2 tiles, and
+  the user saw both Answers draw.
+
+So the rule is broader than the failure, or the failure needs a case the recipe never
+hits (another build, `id`/`name` not matching the Model, or no `id`/`name` at all).
+
+**Do.**
+1. Find the case the rule came from (audit finding 14.2). Re-probe it beside an
+   `{id, name, fqn}` tile on one build.
+2. Narrow the rule to the shape that is dropped, or make it a warning. Correct lines
+   203–210 of the schema doc to match.
+3. Prove it with tests: the recipe's generated Answer lints clean, and the original failing
+   shape is still flagged.
+4. Remove the "lint flags this; expected" note from the recipe's SKILL.md Step 6 and the
+   ts-cli README.
+5. Change every converter doc and code comment that repeats "a viz-level `fqn` is
+   dropped" in the same PR as the rule. Their `obj_id` output stays correct; only the
+   reason they give changes. Lines at 2026-11-19:
+   - `agents/cli/ts-convert-from-looker/SKILL.md:640`;
+   - `agents/cli/ts-convert-from-looker/references/step-10-liveboard-generation.md:138`;
+   - `agents/cli/ts-convert-from-tableau/SKILL.md:2071`;
+   - `agents/cli/ts-convert-from-tableau/references/step-10-liveboard-generation.md:220`
+     and `:233`;
+   - `tools/ts-cli/ts_cli/tml_common.py:224` (the `derive_viz_obj_id` docstring);
+   - `tools/ts-cli/ts_cli/tableau/liveboard.py:249` and `:306`;
+   - `tools/ts-cli/ts_cli/qlik/answers.py:169`.
+
+**Target:** 2027-01-31.
+
+## BL-605 — Tableau cohort binding: `obj_id` required, or `{id, name}` enough? `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** pre-PR review of the ts-recipe-answer-period-comparison
+build. Lines at that commit.
+
+**What.** Two claims about how a Set (cohort) binds to its Model disagree:
+
+- `agents/shared/mappings/tableau/tableau-formula-translation.md:618-623` says the Model
+  must have an `obj_id` for a cohort to bind: a fresh Model has none, and a cohort that
+  references it "by `fqn` (GUID) alone" fails with "Worksheet not found". Its fix sets the
+  Model's `obj_id`, re-imports the Model and points `worksheet.obj_id` at it.
+  `agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md:390-392` says a
+  cohort is "bound to the model by `obj_id`", and the Tableau `SKILL.md` (lines 1544-1549)
+  tells the agent to read back the Model's `obj_id` and patch every cohort.
+- `agents/shared/schemas/thoughtspot-sets-tml.md` (lines 59-61, live 2026-11-18, the
+  period-comparison recipe's open item #3) says `{id, name, obj_id}`, `{id, name, fqn}`
+  and `{id, name}` all import. `tools/ts-cli/ts_cli/tableau/sets.py:32-44` already emits
+  `{id, name}` with no `obj_id` on a fresh build.
+
+The two may both hold. The old failures were a cohort naming the Model by `fqn` with no
+`id`/`name`, it seems ("`fqn`-only refs", ts-convert-from-tableau 1.5.3, 2026-06-09), and a
+cohort imported in the same batch as a Model that did not exist yet (BL-067's
+`VALIDATE_ONLY`, error 14500). Neither tests `{id, name}` against an imported Model with
+no `obj_id`. The 2026-11-18 probes ran against a long-lived Model, which may have had an
+`obj_id` the export does not show.
+
+**Do.**
+1. On one build, import a fresh Model with no `obj_id`, then a cohort bound each way:
+   `{fqn}` alone, `{id, name}`, `{id, name, fqn}`. Then repeat `{id, name}` with the cohort
+   in the same batch as the Model.
+2. Fix the prose to match: the mapping (lines 618-623), step 5 (lines 390-392) and the
+   Tableau `SKILL.md` (lines 1544-1549). If `{id, name}` binds, drop the `obj_id`
+   read-back and re-import; if it does not, `tableau/sets.py` needs the `obj_id` it omits.
+   The same claim is also at (lines at 2026-11-19):
+   - `agents/cli/ts-convert-from-tableau/SKILL.md:1314-1328`, the primary statement. It
+     records the error 14500 failure, live 2026-07-23, for a Model and cohort imported in
+     one batch; and `:1710`, which says cohort binding "may resolve by name";
+   - `agents/cli/ts-convert-from-tableau/references/step-5-tml-generation.md:974`
+     (the Top-N query set binds by `id`/`name`/`obj_id`);
+   - `agents/shared/worked-examples/tableau/static-set-to-column-set.md:41` and `:68`;
+   - `agents/shared/worked-examples/tableau/topn-set-to-query-set.md:117`, `:154`, `:181`,
+     `:218`, `:249` and `:287`;
+   - `agents/shared/mappings/tableau/tableau-formula-translation.md:591-592` (a fixed-size
+     bin's cohort is "bound to the model (worksheet) by `obj_id`") and `:662` (its example's
+     `worksheet` comment, "model obj_id, set it first").
+3. Record the result in `thoughtspot-sets-tml.md`.
+
+**Target:** 2027-01-31.
+
+## BL-606 — Tableau static Set on a DATE anchor: `sets.py` and the mapping disagree on `date_filter_values` `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** final pre-PR fixes of the ts-recipe-answer-period-comparison
+build. Lines at that commit.
+
+**What.** The code and the docs give two shapes for a GROUP_BASED cohort condition on a DATE
+anchor column, and neither is verified for this case:
+
+- **Code:** `_member_condition` (`tools/ts-cli/ts_cli/tableau/sets.py:72-75`) writes
+  `date_filter_values: list(values)`, the raw member strings, in one condition.
+- **Mapping:** `agents/shared/mappings/tableau/tableau-formula-translation.md:692-694`, and
+  ts-convert-from-tableau changelog 1.5.9
+  (`agents/cli/ts-convert-from-tableau/references/changelog-archive.md:107`), say one
+  condition per date, each `date_filter_values: [{type: EXACT_DATE, date: MM/DD/YYYY,
+  oper: "="}]`, combined with `combine_type: ANY`.
+- **Sets schema:** `agents/shared/schemas/thoughtspot-sets-tml.md:147-175` documents only
+  the `EXACT_DATE_RANGE` / `BW` object form, verified live 2026-11-18. The recipe's design
+  spec noted the mismatch
+  (`docs/superpowers/specs/2026-11-18-recipe-answer-period-comparison-design.md:311-312`,
+  "writes a different list form").
+
+No test covers a date anchor: `tools/ts-cli/tests/test_tableau_sets_build.py` has no date
+case. If the server rejects raw strings, a converted static Set on a date fails to import;
+if it reads them some other way, the Set may hold the wrong dates.
+
+**Do.**
+1. Probe live: build a workbook with a static Set on a DATE column through
+   `ts tableau build-model`, import the cohort with `VALIDATE_ONLY`, then for real, and
+   export it to see the shape the server keeps.
+2. Make `sets.py` emit the shape the mapping specifies (or the one the probe shows), and
+   correct the mapping if the probe disagrees.
+3. Add the single-date `EXACT_DATE` shape to `thoughtspot-sets-tml.md`, beside the
+   date-range form.
+4. Add a test in `test_tableau_sets_build.py` for a DATE anchor, checking the emitted
+   condition shape.
+
+**Target:** 2027-01-31.
+
+## BL-607 — ts-recipe-answer-period-comparison hardening `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** review of the ts-recipe-answer-period-comparison build.
+None of these changes a correct run's output; fix them in one PR. Line numbers are at the
+commit that filed this item.
+
+**What and do.**
+
+1. **Tracebacks with no JSON.** These exit with a Python traceback, not `{"error": …}`:
+   - `--years 0000`: `ValueError: year 0 is out of range` (`_parse_years`,
+     `tools/ts-cli/ts_cli/commands/recipe.py:44`, reached through `anchor_date`,
+     `period_comparison/events.py:63`).
+   - A huge `--offset`: `OverflowError` (`_expand`, `period_comparison/windows.py:174`).
+   - A custom dates file with a time (`2025: 2025-07-08 10:00:00`). YAML returns a
+     `datetime`, `_parse_day` (`windows.py:384`) accepts it, and a comparison raises
+     `TypeError`.
+   - A custom dates file that is not UTF-8: `UnicodeDecodeError`. `_read_mapping`
+     (`windows.py:415`) catches `OSError` only.
+
+   Also, `--model-guid ""` is accepted (`recipe.py:198`) and written into the TML.
+2. **Options silently ignored.** `--prior-weeks` and `--on-clash` with
+   `--comparison custom`, and `--offset` / `--length` with a custom event given as ranges,
+   are accepted and ignored. `_check_options` (`recipe.py:132`) should reject them. And
+   `step` (`recipe.py:118`) is reported for custom comparison, which uses no step.
+3. **Test gaps and stale tests** (`tools/ts-cli/tests/test_period_comparison_*.py`):
+   - No CLI test for `--on-clash keep`, for `--set-guid` with `--bucket formula`, or for a
+     write failure removing what it wrote.
+   - `test_last_n` (`test_period_comparison_cli.py:121`) does not assert `dropped_years`.
+   - `test_analysed_event_is_not_a_clash_with_itself` (`test_period_comparison_windows.py:120`)
+     cannot fail: no comparison window reaches Black Friday at offset 0. Its comment is
+     stale too.
+   - `test_last_n_with_custom_event_uses_supplied_years` (`:171`) has a stale name.
+   - No test for a year needing several replacements, or a replacement that also clashes.
+   - `test_brace_in_label_is_kept_verbatim` (`test_period_comparison_emit.py:73`) never
+     reaches `_fill`.
+4. **Misleading advice on a column error.** `_check_text`
+   (`period_comparison/emit.py:96-99`) ends every message with
+   'Remove it (e.g. "Mothers Day")'. For a column name holding `[` or `]`, the fix is the
+   Model's column name, not an apostrophe.
+5. **Route the Set-delete finding.** The recipe's open items (`references/open-items.md:599-603`)
+   found that `ts metadata delete --type LOGICAL_COLUMN` deletes a reusable Set, and
+   `LOGICAL_TABLE` returns HTTP 500. That answers ts-dependency-manager open item #11;
+   record it there.
+6. **Non-atomic writes on a re-run.** `_write_all` (`recipe.py:179`) writes each file in
+   place. On a failure it unlinks what it wrote, so a failed re-run removes the previous
+   run's files of the same name. Write to a temporary file and `os.replace` it.
+7. **File names unsafe on Windows.** `_UNSAFE_IN_FILE_NAME` (`recipe.py:41`) replaces only
+   `/`, `\` and control characters. `: * ? " < > |` and reserved names such as `CON` fail
+   on Windows.
+8. **Errors that do not name the option.** "Give either a list of years or a number of
+   recent years" (`windows.py:163-167`) should name `--years` and `--last`. Custom-file errors
+   name the path, not `--event-dates` or `--comparison-dates`. A quote in `--event-name`
+   is reported against a label or the bucket name derived from it.
+9. **The clash is asked before names are checked.** Exit 2 (`recipe.py:267`) comes before
+   `_build_documents` checks the labels and names. The user settles a clash, then meets a
+   name error.
+10. **The smoke test deletes an unrecorded duplicate silently.** `_to_remove`
+    (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:269`) adds every
+    prefixed object it did not record to the delete list. Such an object is a duplicate
+    from a timed-out import, so the run should warn or fail as well as delete it.
+11. **`PARTIAL` is not flagged.** As BL-587 does for `TO VERIFY`: `check_open_items.py`
+    (`_UNRESOLVED_MARKERS`, line 54) should treat `PARTIAL` as unresolved. This recipe's
+    status legend uses it.
+12. **`--data-through` after the run date is accepted silently**
+    (`_first_day_without_data`, `tools/ts-cli/ts_cli/commands/recipe.py:87-88`). A date
+    in the future keeps windows that cannot have data yet.
+13. **`--data-through 9999-12-31` gives an `OverflowError` traceback**, not
+    `{"error": …}`: the day after it is out of range (`recipe.py:88`).
+14. **The "not finished" error ignores `--data-through`.** `--years 2025
+    --data-through 2025-06-30` says "None of the requested years has finished yet"
+    (`period_comparison/windows.py:268-272`). The message should say the years end after
+    the `--data-through` date.
+15. **The tile-binding fact is not on a public line.** BL-601 (its #1) and BL-604 rest on
+    the probe Liveboards binding their tiles `{id, name, fqn}`. Add that fact to open
+    item #3 (`references/open-items.md:110`), whose binding note covers the Set's
+    `worksheet` binding, not the tiles'.
+16. **A comparison window after the event errors instead of dropping the year.** With
+    `--last N` and custom comparison ranges after the event (weeks after Easter, say), the
+    current year's ranges may not be known yet once the event has ended. `_sort_years`
+    (`windows.py:247-254`) assumes they are knowable and raises rather than dropping that
+    year.
+17. **`OverflowError` tracebacks from a huge `--length` or `--prior-weeks`.**
+    `--length 3000000` and `--prior-weeks 200000` both end in `OverflowError: date value
+    out of range`, not `{"error": …}`. The date arithmetic is in `_expand`
+    (`period_comparison/windows.py:180-182`) and the prior-weeks list in `_prior_weeks`
+    (`windows.py:329`). Line numbers for items 17 to 21 are at the commit that added them
+    (2026-11-19, the pre-PR review fixes).
+18. **On Windows, a name can escape `-o`.** `_file_stem`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:94-99`) turns `D:\x` into `D:_x`, and
+    `out_dir / file_name` (`recipe.py:185`) reads `D:_x.answer.tml` as a path on drive
+    `D:`, not a file inside the output directory. Replace `:` too, as item 7 does, and test
+    that every written path is inside `out_dir`.
+19. **The smoke test's prefix cleanup can delete a concurrent run's objects.**
+    `_leftovers` (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:118-132`)
+    finds every object named `ZZ_smoke_period_comparison_*`, and `_to_remove`
+    (`:269-279`) deletes all of them. Its docstring rests on the start-of-run check finding
+    none, which a second run started after that check breaks. Add a per-run suffix to the
+    names, or record and delete only this run's GUIDs.
+20. **Labels could allow apostrophes and backslashes.** `_check_text`
+    (`period_comparison/emit.py`) rejects `'`, `"`, `[`, `]` and, since 2026-11-19, `\`,
+    which a single-quoted literal drops (`tools/ts-cli/ts_cli/formula_text.py:29`).
+    `formula_text.ts_string_literal` writes any text exactly, so `Mother's Day` could be a
+    label. It must be used for every literal that names a label: the bucket formula and
+    the measures' comparisons. A reusable Set's group name is TML, not a formula literal,
+    so it needs no escaping. Probe one label with a quote in both forms before relying on it.
+21. **The Answer's numbers were never checked against an expected value on the final
+    code.** The smoke test checks the round trip and the render, not the values. Re-run it
+    with `--no-cleanup` on the test Model (its default `--years 2017-2019`) and record the 2019 row in
+    open item #7: event about 72,526.22 and comparison about 65,967.57 average daily
+    sales, the values from the #3 probes (`references/open-items.md`, #8). Then delete
+    the objects by hand. Check those figures against the warehouse too: for 2019, the
+    measure's sum divided by its count of distinct dates over 29 Nov to 2 Dec 2019, and
+    the same over each of the six prior windows. Record the query beside the figures in
+    open item #7.
+22. **`--labels` keys are case-sensitive, and a miscased key is swallowed.** `_LABEL_SPLIT`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:38`) splits only at a lower-case `event=`,
+    `comparison=` or `other=`. So `event=A,Other=B` makes the event label `A,Other=B`, keeps
+    the default "other" label, and exits 0. Match keys case-insensitively, or reject an
+    unknown `key=` part. Lines for items 22 and 23 are at the commit that added them
+    (2026-11-19, the final pre-PR fixes).
+23. **`_file_stem` is a weaker copy of an existing helper.** `_file_stem`
+    (`recipe.py:94-99`) duplicates `safe_name` (`tools/ts-cli/ts_cli/sets/export.py:45`),
+    which keeps only letters, marks, digits and `. _ -` and space, strips leading and
+    trailing dots, and caps the length in characters and UTF-8 bytes. Reuse `safe_name`;
+    that closes item 18, the length limit and the unsafe characters of item 7. Windows
+    reserved names such as `CON` still need a check of their own.
+
+**Target:** 2027-02-28.
+
+
+## BL-608 — ts-recipe-answer-period-comparison follow-ups after merge `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the final pr-ready review and the
+converter-consistency audit of PR #742. Line numbers are at its merge commit.
+
+Two of these can give a wrong Answer with no warning (items 1 and 3). Three make a re-run
+or its rollback unsafe (items 2, 5 and 6). Fix items 1 to 7 before the smaller ones. Item 4
+points to BL-607 item 21 rather than repeating it.
+
+**What and do.**
+
+1. **A year repeated in a custom dates file is silently merged.** `load_custom_windows`
+   (`tools/ts-cli/ts_cli/period_comparison/windows.py:418`) stores each year in a dict.
+   `_read_mapping` (`:429`) parses with `json.loads` or `yaml.safe_load`, and both keep
+   the last of two equal keys. So a second `2024:` key, or `2024` beside `'2024'`, keeps
+   only the last entry. Nothing warns.
+   Fix: refuse a year already loaded. Also reject a duplicate key at parse: an
+   `object_pairs_hook` for `json.loads`, and a `SafeLoader` subclass that raises on one.
+2. **Step 8 cannot tell whether an in-place update landed.** Its checks
+   (`agents/cli/ts-recipe-answer-period-comparison/SKILL.md:360-363`) are the formula ids,
+   the absent `cohorts` and `tables[].fqn`. All three are the same before and after a
+   re-run.
+   Fix: compare the exported `search_query` year span and the bucket formula's `expr` (or
+   the Set's conditions) with the generated files. After an in-place import times out
+   (Step 7, `SKILL.md:342-348`), export and compare. Do not search by name: an in-place
+   target is never missing.
+3. **Clashes are checked on anchor days only.** `_clashing_events` (`windows.py:301-313`)
+   flags a comparison window only when it holds a built-in event's anchor day. A window of
+   1 or 2 days can hold Black Friday's Saturday or Sunday unflagged. I.e.
+   `--event christmas --length 1 --years 2021` gives `clashes: []`, and its 4th comparison
+   window is 2021-11-27, the Saturday after Black Friday. Across 2000–2025, 19 of 104
+   Christmas or Boxing Day runs at length 1 or 2 hit this.
+   Fix: test overlap with each built-in event's default window (`--offset 0 --length 4`).
+   Or document the gap in SKILL Step 4 and Step 6's clash note (`SKILL.md:261-263`).
+4. **The Answer's numbers have never been compared with an expected value.** This is the
+   gap most likely to hide a wrong number. The steps are BL-607 item 21: run
+   `tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py` with `--no-cleanup`.
+   Then check the 2019 row against the warehouse: the measure's sum ÷ its distinct dates
+   over 29 Nov–2 Dec 2019, and over the six prior windows. The probe record gives event
+   ≈72,526.22 and comparison ≈65,967.57. Record the query and result in open item #7.
+   Do it once, under BL-607, and close both entries together.
+5. **Rollback backups go to a directory the OS may clear.** Step 6 (`SKILL.md:246`)
+   suggests `mktemp -d` for the run directory, and Step 7 (`:297-328`) writes the backups
+   there. The ts-cli README's recipe example does the same
+   (`tools/ts-cli/README.md:5399`).
+   Fix: use a persistent run directory, as ts-object-model-coach does
+   (`~/Dev/coaching-runs/<slug>-<ts>/`), and give the user the path.
+6. **The re-run search treats `_` and `%` as wildcards.** Step 5 (`SKILL.md:208`) runs
+   `ts metadata search --name "{answer_name}"`, which matches with SQL LIKE. I.e. a search
+   for `Q4_Sales` also finds `Q4-Sales`, and Step 5 may offer it for an in-place overwrite.
+   Fix: keep only exact name matches before offering. The smoke test already does
+   (`smoke_ts_recipe_answer_period_comparison.py:111-115`).
+7. **`--create-new` is stated per run, not per file.** Step 5 (`SKILL.md:228-229`), Step 7
+   (`:338-339`) and the re-run row (`:407`) say to drop it when updating in place. In a
+   mixed run the Set is updated in place and the Answer is new. Then only the Set's
+   import (`:333`) drops it; the Answer's (`:334`) keeps it. Say so per file.
+8. **Smaller items.**
+   - The reusable-Set form does not check the bucket name against the measure names.
+     The formula form does (`period_comparison/emit.py:365`); the Set form passes the
+     measure names only (`:371`).
+   - The Answer name is only checked for being blank (`emit.py:357`). Control characters
+     and leading or trailing spaces pass. `_check_text` (`:94`) already rejects both.
+   - `ts powerbi build-timeintel --help` shows `{base_name, base_expr, }`. Rich reads
+     `[sply_name, yoy_name, yoy_pct_name]` as markup
+     (`tools/ts-cli/ts_cli/commands/powerbi.py:162`). Escape the brackets.
+   - The Set backup (Step 7, `SKILL.md:300-308`) extracts `edoc` by hand.
+     `ts sets inventory --model <guid> --export-tml <dir>` writes each Set's TML and
+     could replace it.
+   - SKILL says a year missing from a custom file is an error (`SKILL.md:140`, `:259`).
+     Under `--last N` the current year is an exception (`windows.py:27-28`): it is dropped
+     while its event window is unknown. Say so.
+
+**Target:** 2027-01-31.
+
+## BL-612 — `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal as a naked aggregate `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the maintainer round on PR #662. **Relates to:** BL-581.
+
+**What.** `_AGG_FUNCTIONS` in `tools/ts-cli/ts_cli/formula_common.py` matches an aggregate
+name followed by `(` anywhere in a formula's text, including inside a column reference or a
+string literal. So `X = [T::Median (USD)] * 2`, a row-level formula, reads as aggregated,
+and `fix_double_aggregation` strips the `sum()` from `sum ( [formula_X] )`: the sum is lost.
+`if ( [T::N] = 'max_if (x' ) then 1 else 0` does the same through a literal. `main` already
+did this for the names it listed (`sum`, `count`, `max`, `min` and the rest: a column named
+`Sum (USD)` is enough); PR #662 added `median`, `min_if`, `max_if`, `stddev_if` and
+`variance_if` to the list, so five more names can now trigger it. `expr_is_aggregated` has
+the same blind spot, and the Sisense, Databricks MV, dbt and SQL-form code calls it too
+(Sisense uses it to choose MEASURE or ATTRIBUTE).
+
+**Do.**
+1. In `expr_is_aggregated` and `_has_naked_aggregate`, skip any `_AGG_FUNCTIONS` match that
+   starts inside a `_quoted_spans` range (that helper already treats a `[…]` reference as a
+   span, as well as `'…'` and `"…"` literals).
+2. Tests: `[T::Median (USD)] * 2` and `[T::Sum (USD)] * 2` keep their `sum()`; an aggregate
+   name inside a literal does not count; a real aggregate beside such a reference still does.
+3. Check the other `expr_is_aggregated` callers (`sisense/build_model.py`, `databricks/mv_sql*.py`,
+   `dbt/formula_pass.py`, `sql_forms.py`, `sv_sql_exact.py`) for anything that relied on the
+   old reading.
+
+**Target:** 2027-01-31.
+
+## BL-613 — DAX translator: an IN set's result used as a value translates, and may differ from DAX for a blank `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the independent review of the maintainer commits on PR #517.
+
+**What.** PR #517 refuses an IN set whose result is negated or compared to TRUE/FALSE,
+because DAX and ThoughtSpot may disagree on a blank operand. Two shapes that use the IN result
+as a value still translate, on `main` as well as on that branch, so the PR did not introduce
+them:
+
+- `IF(ISBLANK(T[s] IN {"a","b"}), 1, 0)`. For a blank `T[s]`, DAX evaluates the IN to FALSE,
+  so the IF gives 0. If ThoughtSpot evaluates `[T::s] in {…}` to NULL for a NULL operand, the
+  translation gives 1.
+- A calculated column `Flag = T[s] IN {"a","b"}`, later used as `IF(NOT T[Flag], 1, 0)`. The
+  negation check sees only the measure, not the column definition behind `T[Flag]`.
+
+Arithmetic on an IN result probably fails at import as a ThoughtSpot type error; unverified.
+
+**Do.**
+1. Probe live first: what ThoughtSpot returns for `[col] in {…}` when `[col]` is NULL. The
+   whole class, and PR #517's own refusals, rest on the NULL premise, which nothing has
+   verified on a cluster yet.
+2. If it is NULL: refuse an IN set whose result is used as anything other than an IF or
+   SWITCH condition or an AND/OR operand, and carry the "IN-derived" property through a
+   calculated column, so a measure that negates such a column refuses too.
+3. Tests for both shapes, plus arithmetic on an IN result.
+
+**Target:** 2027-01-31.
+
+## BL-614 — ts-audit Data Cache and Formulas: review nits deferred from #744
+
+**Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
+blocker or should-fix left; these were deferred, not declined).
+
+**What.**
+
+1. **One OAuth key on the `client_id` spelling.** `connection_facts._flags` reads a set
+   `client_id` alone (or with a blank `client_secret`) as no OAuth, so the Model reads Can use,
+   while `OAuth2ClientId` alone reads to confirm. Read either spelling alone the same way, or
+   record in ts-audit open-items #18 why `client_id` alone is firm "no OAuth". No connection on
+   the SE demo cluster holds `client_id`.
+2. **A connection with no type ignores its Table header.** P24 reads a connection whose search
+   entry has no warehouse type as maybe Databricks, though P23 may read the source as Snowflake
+   from its Table header; a Snowflake OAuth2 pair then reads To confirm, not Can't use. A
+   `data_warehouse_type` of only spaces does the same, since `_text(" ")` stops the fallback to
+   `details.type`: run `warehouse_type` on each candidate before choosing. Both lean to To
+   confirm, never Can use, and neither has been seen live.
+3. **P24's rule text.** `perf.yaml`'s P24 description (and README, CHANGELOG, BL-590) names
+   the OAuth2 pair only "on a Databricks connection"; the code also reads either key alone, and
+   a connection with no type, as to confirm. Its remediation ("switch it to a service account")
+   is circular for a connection that may already be a service principal: give readings to
+   confirm a line of their own, and add P24 to BL-590's step 2.
+4. **The golden table pins rows, not the derivation.** `test_audit_connections_data.py`'s table
+   fails only when a pinned row changes; a change no row covers (or `header_parameterized`,
+   which has no row) passes without a `FACTS_VERSION` bump. Pin one row per derivation path,
+   or a digest of the outputs per version.
+5. **Snapshot docs and tests.** README's `--snapshot-out` / `--snapshot-in` table rows predate
+   the manifest's `derived` key, and so does `snapshot.py`'s docstring example (the README's
+   snapshot paragraph is right). No test runs `ts audit fire-rates` on a P snapshot with
+   no `derived` (verified by hand: refused, with the right message). A newer `derived` version
+   replays silently; a note on stderr would keep engine comparisons honest.
+6. **Report code and tests.** `formulas.js`'s `inlinedText` repeats `inlinedHtml`'s paste
+   condition (one walker taking a renderer would stop them drifting); no test checks the
+   Dashboard Data Cache cell's "(to confirm)" or "Not checked:" hover text (both verified by
+   hand in headless Chrome); `connection_facts.py`'s FACTS_VERSION comment has a 125-character
+   line.
 
 **Target:** 2027-01-31.

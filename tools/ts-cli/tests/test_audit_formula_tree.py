@@ -534,16 +534,20 @@ def test_search_finds_formulas_by_name_and_definition_and_columns(tmp_path):
               ' function(a){ return a.textContent; }); }')
     shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=search + _ROW + (
         'var byName = find("margin"); var byExpr = find("orders::cost"); var none = find("zzz");'
+        'var shownForm = find("[gross margin] / [revenue]"); var tmlForm = find("[formula_gm] /");'
         'find("loop b"); document.querySelector("#v-formulas .ftree-results a.fref").click();'
         'var title = panel().querySelector(".fdetail-title").textContent;'
         'var cleared = find("");'
         'window.__extra = {byName: byName, byExpr: byExpr, none: none, title: title, cleared: cleared,'
+        ' shownForm: shownForm, tmlForm: tmlForm,'
         ' empty: document.querySelector("#v-formulas .ftree-results").textContent};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert x["byName"] == ["Gross Margin %", "Gross Margin"]
     assert "Cost" in x["byExpr"] and "ORDERS::COST" in x["byExpr"]
     assert x["none"] == [] and x["title"] == "Loop B" and x["cleared"] == [] and x["empty"] == ""
+    # a definition is found by the panel's form, by name, and by the TML's form
+    assert x["shownForm"] == ["Gross Margin %"] and x["tmlForm"] == ["Gross Margin %"]
 
 
 @needs_chrome
@@ -830,17 +834,27 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
         '  row(name).querySelectorAll(".ftree-tag"), function(t){ return t.textContent; }); };'
         'row("Gross Margin %").click();'
         'var inl = panel().querySelector(".fdetail-inlined");'
+        'var inlTml = panel().querySelector(".fdetail-inlined-written");'
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        'function find(q){ s.value = q; s.dispatchEvent(new Event("input"));'
+        ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+        ' function(a){ return a.textContent; }); }'
+        'var pasted = find("( [revenue] - ( sum"), pastedTml = find("( [formula_rev] - ( sum"); find("");'
         'var gmTags = tags("Gross Margin"), gmpTags = tags("Gross Margin %");'
         'row("Revenue").click();'
         'var revInl = panel().querySelector(".fdetail-inlined");'
         'window.__extra = {gm: gmTags, gmp: gmpTags, inl: inl && inl.textContent,'
         ' links: inl ? Array.prototype.map.call(inl.querySelectorAll("a.fref"), function(a){ return a.textContent; }) : null,'
-        ' revInl: revInl === null};'))
+        ' inlTml: inlTml && inlTml.textContent, revInl: revInl === null, pasted: pasted, pastedTml: pastedTml};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
     assert x["inl"] == "( [Revenue] - ( sum ( [ORDERS::COST] ) ) ) / [Revenue]"
     assert x["links"] == ["[Revenue]", "[ORDERS::COST]", "[Revenue]"]
+    # the TML's own form, to copy into the formula that uses the helper
+    assert x["inlTml"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
+    # search finds a formula by its pasted-in definition, in either form
+    assert x["pasted"] == ["Gross Margin %"] and x["pastedTml"] == ["Gross Margin %"]
     assert x["revInl"]   # uses no single-use helper: no second definition
 
 
