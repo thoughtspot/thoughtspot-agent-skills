@@ -213,10 +213,11 @@ _RANGE_TERM_OPS = {">=", "<=", ">", "<"}
 _PRESENTATION_FILTER_KEYS = ("explicit", "multiSelection")
 
 
-def condition_key(raw, level=None) -> tuple:
+def condition_key(raw, level=None, agg=None) -> tuple:
     """A Sisense filter's condition, comparable: every key and value of the filter except the
     UI-only ones (members as a sorted list of strings, nested objects in full), plus the date
-    level it filters at, which lives beside the filter on the JAQL item."""
+    level it filters at and the aggregation it filters (a measure filter), which live beside the
+    filter on the JAQL item."""
     raw = raw if isinstance(raw, dict) else {}
 
     def norm(v):
@@ -226,11 +227,12 @@ def condition_key(raw, level=None) -> tuple:
             return tuple(sorted(str(norm(x)) for x in v))
         return str(v)
     body = tuple(sorted((k, norm(v)) for k, v in raw.items() if k not in _PRESENTATION_FILTER_KEYS and k != "level"))
-    return body + ((("level", str(level or raw.get("level") or "").lower()),) if (level or raw.get("level")) else ())
+    lvl = level or raw.get("level")
+    return body + ((("level", str(lvl).lower()),) if lvl else ()) + ((("agg", str(agg).lower()),) if agg else ())
 
 
 def _show(sf: dict) -> str:
-    return ", ".join(f"{k}={v}" for k, v in condition_key(sf.get("raw"), sf.get("level"))) or "no condition"
+    return ", ".join(f"{k}={v}" for k, v in condition_key(sf.get("raw"), sf.get("level"), sf.get("agg"))) or "no condition"
 
 
 def _text_value_problem(sf: dict, numeric: bool) -> str:

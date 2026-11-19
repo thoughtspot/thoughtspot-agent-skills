@@ -18496,6 +18496,25 @@ points to BL-607 item 21 rather than repeating it.
      Under `--last N` the current year is an exception (`windows.py:27-28`): it is dropped
      while its event window is unknown. Say so.
 
+## BL-620 — ts-convert-from-sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** PR #672 review, round 6 (should-fix 4).
+
+**What.** Five modules each check part of a tile's join path: `target_paths.path_problem`,
+`target_paths.loop_problem` / `sisense_closure`, `target_model.role_conflict`,
+`target_chips._reach_problem` / `_copy_problem`, and `target_answers._Binder.no_fact_problem`.
+Each chip is checked against a tile alone, with one combined pass on top
+(`target_chips._tree_rows`, for multi-fact queries and loops only). Today every chip with a
+condition flags its tiles anyway, through the range-chip open item (#5) or the value-matching
+row (#8). That hides the cases the per-chip checks still see one at a time; once #5 and #8 are
+verified, those cases will surface.
+
+**Do.** Build each tile's whole join tree once, on both sides: the Model's tree from its facts to
+every instance its columns, filters and chips read, and Sisense's tree from its fact tables (or
+its one linking table) over the relations. Compare the two trees hop for hop. Then retire the
+per-case checks it subsumes, keeping their tests as regression cases. Land it before #5 or #8 is
+closed.
+
 **Target:** 2027-01-31.
 
 ## BL-612 — `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal as a naked aggregate `Tier 3`

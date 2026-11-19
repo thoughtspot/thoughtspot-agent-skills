@@ -360,7 +360,7 @@ class _Binder:
         for w in widgets or []:
             for sf in w.get("filters", []):
                 if sf.get("dim") and not is_all(sf) and sf.get("kind") != "top_n":
-                    self.conditions.setdefault(sf["dim"], set()).add(condition_key(sf.get("raw"), sf.get("level")))
+                    self.conditions.setdefault(sf["dim"], set()).add(condition_key(sf.get("raw"), sf.get("level"), sf.get("agg")))
 
     def _filter_map_entry(self, dim: str, sf: dict) -> tuple:
         """-> (search fragment | None, note). An entry is a fragment, used only when every filter
@@ -374,7 +374,7 @@ class _Binder:
                               '([{"when": <Sisense filter>, "search": <fragment>}])')
             return entry, ""
         entries = entry if isinstance(entry, list) else [entry]
-        key = condition_key(sf.get("raw"), sf.get("level"))
+        key = condition_key(sf.get("raw"), sf.get("level"), sf.get("agg"))
         hit = next((e.get("search") for e in entries if isinstance(e, dict) and isinstance(e.get("when"), dict)
                     and condition_key(e["when"]) == key), None)
         return (hit, "") if hit else (None, f"filter_map for {dim} has no entry for this condition ({_show(sf)})")
@@ -529,6 +529,9 @@ class _Binder:
         """-> (fragment | None, model column | None, note)."""
         dim = sf.get("dim") or ""
         if dim in self.filter_map and not is_all(sf) and sf.get("kind") != "top_n":
+            unread = _unmappable(sf)
+            if unread:
+                return None, None, f"filter on {dim}: filter_map cannot replace a filter that {unread}"
             frag, col, note = self.mapped_filter(dim, sf)
             return (frag, col, note) if note or not frag else self._mapped_filter_path(dim, frag, anchors)
         name, _, note = self.column(dim, anchors)
@@ -577,8 +580,9 @@ def _collect_filters(widget: dict, binder: _Binder, anchors: list) -> tuple:
         cols = {col} if col else set(_TOKEN.findall(frag or "")) | ({binder.column(sf.get("dim") or "", anchors)[0]} - {None}
                                                                     if mapped else set())
         own.update(cols)
-        if fnote:
-            notes.append(fnote)
+        note = fnote or _unaccounted_filter(sf, frag)
+        if note:
+            notes.append(note)
         if sf.get("kind") != "top_n" and not is_all(sf):
             for c in cols:
                 seen[c] = seen.get(c, 0) + 1
@@ -644,6 +648,23 @@ def _answer_for(widget: dict, binder: _Binder, ctx: dict, title_override=None) -
                        ctx.get("description"), acc["measure_outs"])
     row["_read"] = read           # for the per-tile join-tree check with every chip (target_chips)
     return a, row, own, binder.t.facts_for(read)
+
+
+def _unaccounted_filter(sf: dict, frag) -> str:
+    """Accounting gate for filters: a filter with a condition is carried as a fragment or reported."""
+    if frag or sf.get("kind") == "top_n" or is_all(sf):
+        return ""
+    return f"filter on {sf.get('dim') or '?'} is not carried and no check reported why"
+
+
+def _unmappable(sf: dict) -> str:
+    """A Sisense filter filter_map may not stand in for: an aggregate filter (the fragment would
+    filter rows instead), or one carrying settings this converter does not read."""
+    if sf.get("agg"):
+        return f"filters an aggregate ({sf['agg']}), where a search fragment would filter rows"
+    if sf.get("unsupported"):
+        return "carries settings this converter does not read: " + ", ".join(sf["unsupported"])
+    return ""
 
 
 def _unfit_field(f: dict, dim, agg: str) -> str:
