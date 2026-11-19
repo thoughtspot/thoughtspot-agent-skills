@@ -88,6 +88,7 @@ EXPECTED_CI_SMOKES = (
     "smoke_ts_convert_to_dbt",
     "smoke_ts_object_answer_chart_builder",
     "smoke_ts_object_liveboard_chart_builder",
+    "smoke_ts_convert_from_sisense",
 )
 EXPECTED_CI_ONLY_CHECKS = {
     "mapping-currency": ("check_mapping_currency.py", ("--root", ".", "--check"), True),
