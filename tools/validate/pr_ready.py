@@ -267,13 +267,31 @@ _PIP_INSTALLS = frozenset(SUITE_PIP_INSTALLS + (
 ))
 #: An `echo` that only prints: no pipe, chaining, substitution or redirection.
 _ECHO = re.compile(r"echo [^|;&`<>]*")
+#: The Node installs CI's suite job makes for the chart-builder smoke suites' browser
+#: render. Locally a missing browser skips that render step (the run says so); in CI the
+#: smoke fails instead. Exact copies, like _PIP_INSTALLS.
+_NODE_INSTALLS = frozenset({
+    "npm ci --ignore-scripts --prefix agents/cli/ts-object-answer-chart-builder/helpers",
+    "npm exec --prefix agents/cli/ts-object-answer-chart-builder/helpers -- playwright install --with-deps chromium",
+})
 _USES_PLUMBING = ("actions/checkout@", "actions/setup-python@")
+#: setup-node and cache only provide Node and restore the chart helpers' npm and browser
+#: caches for the installs above; they run no check. Plumbing only as exactly these steps,
+#: pinned action and `with:` both, so another use of either action stays unaccounted.
+_LOCK = "agents/cli/ts-object-answer-chart-builder/helpers/package-lock.json"
+_EXACT_USES = {
+    "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1": {
+        "node-version": "22", "cache": "npm", "cache-dependency-path": _LOCK},
+    "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9": {
+        "path": "~/.cache/ms-playwright",
+        "key": "playwright-${{ runner.os }}-${{ hashFiles('" + _LOCK + "') }}"},
+}
 #: The workflow, job and step keys the classifier understands. Anything else (`env`,
 #: `defaults`, `shell`, `working-directory`, `continue-on-error`, a job-level `uses`
 #: calling a reusable workflow, ...) can change what a line does, so it is unaccounted.
 _WORKFLOW_KEYS = frozenset({"name", "on", True, "jobs"})   # YAML 1.1 reads `on` as True
 _JOB_KEYS = frozenset({"if", "runs-on", "needs", "steps", "strategy"})
-_STEP_KEYS = frozenset({"name", "uses", "with", "if", "run"})
+_STEP_KEYS = frozenset({"name", "uses", "with", "if", "run", "id"})   # id: names a step for a later `if`
 #: The aggregate `validate` job's failure condition; `exit 1` is plumbing only under it.
 _AGGREGATE_IF = ("contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') "
                  "|| contains(needs.*.result, 'skipped')")
@@ -303,7 +321,7 @@ def _line_reproduced(job: str, step: dict, line: str, pytest_args: List[List[str
     """Whether pr-ready runs `line`, or `line` is plumbing that checks nothing.
     (The quality-gates step is matched whole, by `_qg_step_matches`.)"""
     name = step.get("name", "")
-    if line in _PLUMBING or line in _PIP_INSTALLS or _is_echo(line):
+    if line in _PLUMBING or line in _PIP_INSTALLS or line in _NODE_INSTALLS or _is_echo(line):
         return True
     if job == "validate" and line == "exit 1" and str(step.get("if", "")).strip() == _AGGREGATE_IF:
         return True   # the aggregate gate failing on a dependency's result
@@ -341,7 +359,8 @@ def ci_lines_not_reproduced(repo_root: Path) -> List[str]:
             label = f"{job_name} / {step.get('name') or step.get('uses') or '?'}"
             missing += [f"{label}: step key {k!r}" for k in step if k not in _STEP_KEYS]
             uses = step.get("uses")
-            if uses and not str(uses).startswith(_USES_PLUMBING):
+            if uses and not str(uses).startswith(_USES_PLUMBING) \
+                    and _EXACT_USES.get(str(uses)) != (step.get("with") or {}):
                 missing.append(f"{label}: uses {uses}")
             lines = _code_lines(step.get("run", ""))
             if step.get("name") == QUALITY_GATES_STEP:

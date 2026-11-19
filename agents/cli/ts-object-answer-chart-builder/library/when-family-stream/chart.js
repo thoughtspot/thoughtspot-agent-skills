@@ -1,0 +1,16 @@
+// Search: [sales] [item type] [date].quarterly. Stacked family areas; the Layout control switches to share of quarter; a part quarter at either end is left out.
+document.getElementById('chart')?.style.setProperty('color-scheme', (([r, g, b]) => r * .299 + g * .587 + b * .114 > 140)(getComputedStyle(document.body).color.match(/\d+/g)) ? 'dark' : 'light');
+const MAYA = 'https://cdn.jsdelivr.net/npm/mayacharts@0.18.1/dist/maya.core.global.js'; const SRI = 'sha384-KZQbG8OHSEU86UWT5Pp3LATC64UAhHxwg1UMKN/lZtsu02CeDifcSVWCewQO2h/6'; const FAM = { Jackets: 'Outerwear', Vests: 'Outerwear', Sweatshirts: 'Outerwear', Sweaters: 'Outerwear', Shirts: 'Tops and dresses', Dresses: 'Tops and dresses', Pants: 'Bottoms', Jeans: 'Bottoms', Shorts: 'Bottoms', Skirts: 'Bottoms', Swimwear: 'Swim and basics', Underwear: 'Swim and basics', Socks: 'Swim and basics', Bags: 'Accessories', Headwear: 'Accessories' };
+const un = (c) => c?.value?.() ?? c?.value ?? c, ms = (v) => (v < 1e11 ? v * 1000 : v), qn = (t) => 'Q' + (Math.floor(new Date(t).getUTCMonth() / 3) + 1) + ' ' + new Date(t).getUTCFullYear();
+const derive = (d) => {
+  if (!d?.data?.length) return { table: d };
+  const ix = (re) => d.schema.findIndex((c) => re.test(c.name)), [i, t, v] = [/item/i, /quarter|date/i, /sales/i].map(ix), tot = new Map();
+  d.data.forEach((r) => tot.set(ms(un(r[t])), (tot.get(ms(un(r[t]))) ?? 0) + (Number(un(r[v])) || 0)));
+  const ks = [...tot.keys()].sort((a, b) => a - b), med = (a) => a.map((k) => tot.get(k)).sort((x, y) => x - y)[a.length >> 1];
+  const keep = ks.slice(ks.length > 4 && tot.get(ks[0]) < 0.6 * med(ks.slice(1, 4)) ? 1 : 0, ks.length > 4 && tot.get(ks.at(-1)) < 0.6 * med(ks.slice(-4, -1)) ? -1 : undefined);
+  return { last: keep.at(-1), table: { schema: [...d.schema, { name: 'Family' }], data: d.data.filter((r) => keep.includes(ms(un(r[t])))).map((r) => [...r, FAM[un(r[i])]]) } };
+};
+const go = () => { const d = derive(viz?.getDataFromSearchQuery?.()?.getData()); maya.host.thoughtspot({ events: viz?.events, getDataFromSearchQuery: () => ({ getData: () => d.table }) },
+  { type: 'area', x: 'Quarter(date)', xType: 'time', y: 'Total sales', series: 'Family', stack: [true, 'percent'], zoom: true, subtitle: d.last ? 'The Percent view shows each family as a share of the total, through ' + qn(d.last) : '', colors: { Outerwear: '#D1543A', 'Tops and dresses': '#2A6FD0', Bottoms: '#0F9D8A', 'Swim and basics': '#D99A00', Accessories: '#C2477A' },
+    titles: { 'Total sales': 'Sales' }, format: { 'Total sales': { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }, 'Quarter(date)': { month: 'short', year: 'numeric', timeZone: 'UTC' } }, text: { noData: 'No rows yet: bind [sales] [item type] [date].quarterly' } }); };
+if (window.maya?.host) go(); else { const s = document.querySelector('script[src="' + MAYA + '"]') ?? document.head.appendChild(Object.assign(document.createElement('script'), { src: MAYA, integrity: SRI, crossOrigin: 'anonymous' })); s.addEventListener('load', go); s.addEventListener('error', () => { (document.getElementById('chart') ?? document.body).textContent = 'MayaCharts could not load from ' + MAYA; viz?.events?.emitRenderCompletedEvent?.(); }); }
