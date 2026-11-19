@@ -78,7 +78,7 @@ class ModelRef:
 # single-quoted literal a lone backslash is dropped (probed live, formula_text.py),
 # so a reusable Set's group 'A\B' and the measure's literal 'A\B' (read as 'AB')
 # would never match and the measure would read 0. formula_text.ts_string_literal
-# could write such text exactly; BL-599 records that option.
+# could write such text exactly; BL-607 records that option.
 _ENDS_EARLY = "which would end it early inside a ThoughtSpot formula"
 _FORBIDDEN = {
     "'": ("a single quote", _ENDS_EARLY),

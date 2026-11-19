@@ -112,7 +112,7 @@ are roughly ordered by value÷effort.
 | BL-451 | Smoke-test ALLOWLIST cites closed or unrelated BL items and `check_smoke_tests` passes | 2026-11-15 |
 | BL-460 | Tableau: unknown functions pass through verbatim and are dropped unreported — generic survivor catch | PARTIAL — catch + UNION done 2026-11-08 (ts-cli 0.211.0); remains: mappings after a live check, wrong-arity and nested-LOD survivors, RANK_*/RUNNING_* conversion, 2026-11-30 |
 | ~~BL-545~~ | ~~from-powerbi / from-qlik run `ts tml lint` and `ts tml import` with positional files, which both commands reject, so neither converter has a working lint gate~~ | DONE (2026-11-08) |
-| BL-552 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
+| BL-599 | Qlik `Count(DISTINCT …)` inside a larger expression is emitted untranslated, marked Migrated | 2026-11-30 |
 | BL-553 | Looker filtered `count_distinct` maps to `count_if` (counts rows, not distinct values) | 2026-11-30 |
 | BL-554 | Snowflake SV parser drops every dimension when a view has a root-level LOD fact | 2026-11-30 |
 
@@ -495,7 +495,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
-| BL-599 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
+| BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 | BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
 | BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
 | BL-602 | `to_date` format: the mappings, function maps and translators (Tableau, Databricks, Snowflake SV, Qlik, Ossie, Excel, Sheets, Omni) still emit or pass through `'yyyy-MM-dd'`-style formats; formula-patterns now gives `'%Y-%m-%d'` | 2027-01-31 |
@@ -503,6 +503,7 @@ are roughly ordered by value÷effort.
 | BL-604 | `ts tml lint` flags the viz-level `fqn` binding that the period-comparison probes imported and rendered | 2027-01-31 |
 | BL-605 | The Tableau docs say a cohort needs the Model's `obj_id` to bind; the Sets schema says `{id, name, fqn}` and `{id, name}` import | 2027-01-31 |
 | BL-606 | A Tableau static Set on a DATE anchor writes raw member strings as `date_filter_values`; the mapping says one `EXACT_DATE` object per date | 2027-01-31 |
+| BL-607 | ts-recipe-answer-period-comparison hardening: tracebacks, ignored options, file writes, tests | 2027-02-28 |
 
 ### Tier 4 — Deferred
 
@@ -17229,7 +17230,7 @@ Each is a doc or template fix unless noted. None is known to produce a wrong num
 
 **Target:** 2026-12-31.
 
-## BL-552 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
+## BL-599 — Qlik `Count(DISTINCT …)` anywhere but the whole measure is emitted untranslated and marked Migrated `Tier 1`
 
 **Filed:** 2026-11-11. **Source:** the 2026-11-08/11 fix wave (PRs #720–#725) and its reviews.
 
@@ -17822,134 +17823,30 @@ A converted Model can be uncached without the user being told, and the invariant
 
 **Target:** 2027-01-31.
 
-## BL-599 — ts-recipe-answer-period-comparison hardening `Tier 3`
+## BL-552 — chart builders: the library on a cluster, and the monthly date filter `Tier 3`
 
-**Filed:** 2026-11-19. **Source:** review of the ts-recipe-answer-period-comparison build.
-None of these changes a correct run's output; fix them in one PR. Line numbers are at the
-commit that filed this item.
+**Filed:** 2026-11-05. **Source:** the PR 711 review (`ts-object-liveboard-chart-builder`
+open items #4 and #5, deferred here so the write path's live run could close the PR).
 
-**What and do.**
+**What.** Three things the skills' 2026-11-05 live run on ps-internal did not cover:
 
-1. **Tracebacks with no JSON.** These exit with a Python traceback, not `{"error": …}`:
-   - `--years 0000`: `ValueError: year 0 is out of range` (`_parse_years`,
-     `tools/ts-cli/ts_cli/commands/recipe.py:44`, reached through `anchor_date`,
-     `period_comparison/events.py:63`).
-   - A huge `--offset`: `OverflowError` (`_expand`, `period_comparison/windows.py:174`).
-   - A custom dates file with a time (`2025: 2025-07-08 10:00:00`). YAML returns a
-     `datetime`, `_parse_day` (`windows.py:384`) accepts it, and a comparison raises
-     `TypeError`.
-   - A custom dates file that is not UTF-8: `UnicodeDecodeError`. `_read_mapping`
-     (`windows.py:415`) catches `OSError` only.
+1. Liveboard open item #4: of the 58 library charts, 48 moved to MayaCharts 0.18.1 and render
+   in the local preview in every data mode. The live run put four of them on a cluster (all
+   rendered, `.preview-only` cleared); the other 44 carry `.preview-only` until each has been on a
+   Liveboard and screenshotted.
+2. Liveboard open item #5: the default date filter `LAST_N_PERIOD` with `oper: '='` is meant to
+   exclude the current month; that has not been confirmed on a screenshot.
+3. Liveboard open item #6 (third and fourth PR 711 reviews): every block but the last of a run
+   carries the spec tiles it does not write over unchanged, so a spec change commits every block.
+   Mock-only so far.
 
-   Also, `--model-guid ""` is accepted (`recipe.py:198`) and written into the TML.
-2. **Options silently ignored.** `--prior-weeks` and `--on-clash` with
-   `--comparison custom`, and `--offset` / `--length` with a custom event given as ranges,
-   are accepted and ignored. `_check_options` (`recipe.py:132`) should reject them. And
-   `step` (`recipe.py:118`) is reported for custom comparison, which uses no step.
-3. **Test gaps and stale tests** (`tools/ts-cli/tests/test_period_comparison_*.py`):
-   - No CLI test for `--on-clash keep`, for `--set-guid` with `--bucket formula`, or for a
-     write failure removing what it wrote.
-   - `test_last_n` (`test_period_comparison_cli.py:121`) does not assert `dropped_years`.
-   - `test_analysed_event_is_not_a_clash_with_itself` (`test_period_comparison_windows.py:120`)
-     cannot fail: no comparison window reaches Black Friday at offset 0. Its comment is
-     stale too.
-   - `test_last_n_with_custom_event_uses_supplied_years` (`:171`) has a stale name.
-   - No test for a year needing several replacements, or a replacement that also clashes.
-   - `test_brace_in_label_is_kept_verbatim` (`test_period_comparison_emit.py:73`) never
-     reaches `_fill`.
-4. **Misleading advice on a column error.** `_check_text`
-   (`period_comparison/emit.py:96-99`) ends every message with
-   'Remove it (e.g. "Mothers Day")'. For a column name holding `[` or `]`, the fix is the
-   Model's column name, not an apostrophe.
-5. **Route the Set-delete finding.** The recipe's open items (`references/open-items.md:599-603`)
-   found that `ts metadata delete --type LOGICAL_COLUMN` deletes a reusable Set, and
-   `LOGICAL_TABLE` returns HTTP 500. That answers ts-dependency-manager open item #11;
-   record it there.
-6. **Non-atomic writes on a re-run.** `_write_all` (`recipe.py:179`) writes each file in
-   place. On a failure it unlinks what it wrote, so a failed re-run removes the previous
-   run's files of the same name. Write to a temporary file and `os.replace` it.
-7. **File names unsafe on Windows.** `_UNSAFE_IN_FILE_NAME` (`recipe.py:41`) replaces only
-   `/`, `\` and control characters. `: * ? " < > |` and reserved names such as `CON` fail
-   on Windows.
-8. **Errors that do not name the option.** "Give either a list of years or a number of
-   recent years" (`windows.py:163-167`) should name `--years` and `--last`. Custom-file errors
-   name the path, not `--event-dates` or `--comparison-dates`. A quote in `--event-name`
-   is reported against a label or the bucket name derived from it.
-9. **The clash is asked before names are checked.** Exit 2 (`recipe.py:267`) comes before
-   `_build_documents` checks the labels and names. The user settles a clash, then meets a
-   name error.
-10. **The smoke test deletes an unrecorded duplicate silently.** `_to_remove`
-    (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:269`) adds every
-    prefixed object it did not record to the delete list. Such an object is a duplicate
-    from a timed-out import, so the run should warn or fail as well as delete it.
-11. **`PARTIAL` is not flagged.** As BL-587 does for `TO VERIFY`: `check_open_items.py`
-    (`_UNRESOLVED_MARKERS`, line 54) should treat `PARTIAL` as unresolved. This recipe's
-    status legend uses it.
-12. **`--data-through` after the run date is accepted silently**
-    (`_first_day_without_data`, `tools/ts-cli/ts_cli/commands/recipe.py:87-88`). A date
-    in the future keeps windows that cannot have data yet.
-13. **`--data-through 9999-12-31` gives an `OverflowError` traceback**, not
-    `{"error": …}`: the day after it is out of range (`recipe.py:88`).
-14. **The "not finished" error ignores `--data-through`.** `--years 2025
-    --data-through 2025-06-30` says "None of the requested years has finished yet"
-    (`period_comparison/windows.py:268-272`). The message should say the years end after
-    the `--data-through` date.
-15. **The tile-binding fact is not on a public line.** BL-601 (its #1) and BL-604 rest on
-    the probe Liveboards binding their tiles `{id, name, fqn}`. Add that fact to open
-    item #3 (`references/open-items.md:110`), whose binding note covers the Set's
-    `worksheet` binding, not the tiles'.
-16. **A comparison window after the event errors instead of dropping the year.** With
-    `--last N` and custom comparison ranges after the event (weeks after Easter, say), the
-    current year's ranges may not be known yet once the event has ended. `_sort_years`
-    (`windows.py:247-254`) assumes they are knowable and raises rather than dropping that
-    year.
-17. **`OverflowError` tracebacks from a huge `--length` or `--prior-weeks`.**
-    `--length 3000000` and `--prior-weeks 200000` both end in `OverflowError: date value
-    out of range`, not `{"error": …}`. The date arithmetic is in `_expand`
-    (`period_comparison/windows.py:180-182`) and the prior-weeks list in `_prior_weeks`
-    (`windows.py:329`). Line numbers for items 17 to 21 are at the commit that added them
-    (2026-11-19, the pre-PR review fixes).
-18. **On Windows, a name can escape `-o`.** `_file_stem`
-    (`tools/ts-cli/ts_cli/commands/recipe.py:94-99`) turns `D:\x` into `D:_x`, and
-    `out_dir / file_name` (`recipe.py:185`) reads `D:_x.answer.tml` as a path on drive
-    `D:`, not a file inside the output directory. Replace `:` too, as item 7 does, and test
-    that every written path is inside `out_dir`.
-19. **The smoke test's prefix cleanup can delete a concurrent run's objects.**
-    `_leftovers` (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:118-132`)
-    finds every object named `ZZ_smoke_period_comparison_*`, and `_to_remove`
-    (`:269-279`) deletes all of them. Its docstring rests on the start-of-run check finding
-    none, which a second run started after that check breaks. Add a per-run suffix to the
-    names, or record and delete only this run's GUIDs.
-20. **Labels could allow apostrophes and backslashes.** `_check_text`
-    (`period_comparison/emit.py`) rejects `'`, `"`, `[`, `]` and, since 2026-11-19, `\`,
-    which a single-quoted literal drops (`tools/ts-cli/ts_cli/formula_text.py:29`).
-    `formula_text.ts_string_literal` writes any text exactly, so `Mother's Day` could be a
-    label. It must be used for every literal that names a label: the bucket formula and
-    the measures' comparisons. A reusable Set's group name is TML, not a formula literal,
-    so it needs no escaping. Probe one label with a quote in both forms before relying on it.
-21. **The Answer's numbers were never checked against an expected value on the final
-    code.** The smoke test checks the round trip and the render, not the values. Re-run it
-    with `--no-cleanup` on the test Model (its default `--years 2017-2019`) and record the 2019 row in
-    open item #7: event about 72,526.22 and comparison about 65,967.57 average daily
-    sales, the values from the #3 probes (`references/open-items.md`, #8). Then delete
-    the objects by hand. Check those figures against the warehouse too: for 2019, the
-    measure's sum divided by its count of distinct dates over 29 Nov to 2 Dec 2019, and
-    the same over each of the six prior windows. Record the query beside the figures in
-    open item #7.
-22. **`--labels` keys are case-sensitive, and a miscased key is swallowed.** `_LABEL_SPLIT`
-    (`tools/ts-cli/ts_cli/commands/recipe.py:38`) splits only at a lower-case `event=`,
-    `comparison=` or `other=`. So `event=A,Other=B` makes the event label `A,Other=B`, keeps
-    the default "other" label, and exits 0. Match keys case-insensitively, or reject an
-    unknown `key=` part. Lines for items 22 and 23 are at the commit that added them
-    (2026-11-19, the final pre-PR fixes).
-23. **`_file_stem` is a weaker copy of an existing helper.** `_file_stem`
-    (`recipe.py:94-99`) duplicates `safe_name` (`tools/ts-cli/ts_cli/sets/export.py:45`),
-    which keeps only letters, marks, digits and `. _ -` and space, strips leading and
-    trailing dots, and caps the length in characters and UTF-8 bytes. Reuse `safe_name`;
-    that closes item 18, the length limit and the unsafe characters of item 7. Windows
-    reserved names such as `CON` still need a check of their own.
+**Do.** Rebuild the worked example (`liveboards/amuzing-chart-samples`) on a cluster and run
+`cluster-shot.mjs` on every tab; clear `.preview-only` from each chart that renders. In the last
+days of a month, screenshot a monthly tile with the filter applied. For #6, retitle one tile outside
+the run and change another's search, run `--commit` on two other slugs with a small `--max`, and
+confirm every block commits. Mark the items VERIFIED.
 
-**Target:** 2027-02-28.
+**Target:** 2027-01-31.
 
 ## BL-600 — `ts` command to fetch a saved Answer's SQL `Tier 3`
 
@@ -18246,3 +18143,133 @@ if it reads them some other way, the Set may hold the wrong dates.
    condition shape.
 
 **Target:** 2027-01-31.
+
+## BL-607 — ts-recipe-answer-period-comparison hardening `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** review of the ts-recipe-answer-period-comparison build.
+None of these changes a correct run's output; fix them in one PR. Line numbers are at the
+commit that filed this item.
+
+**What and do.**
+
+1. **Tracebacks with no JSON.** These exit with a Python traceback, not `{"error": …}`:
+   - `--years 0000`: `ValueError: year 0 is out of range` (`_parse_years`,
+     `tools/ts-cli/ts_cli/commands/recipe.py:44`, reached through `anchor_date`,
+     `period_comparison/events.py:63`).
+   - A huge `--offset`: `OverflowError` (`_expand`, `period_comparison/windows.py:174`).
+   - A custom dates file with a time (`2025: 2025-07-08 10:00:00`). YAML returns a
+     `datetime`, `_parse_day` (`windows.py:384`) accepts it, and a comparison raises
+     `TypeError`.
+   - A custom dates file that is not UTF-8: `UnicodeDecodeError`. `_read_mapping`
+     (`windows.py:415`) catches `OSError` only.
+
+   Also, `--model-guid ""` is accepted (`recipe.py:198`) and written into the TML.
+2. **Options silently ignored.** `--prior-weeks` and `--on-clash` with
+   `--comparison custom`, and `--offset` / `--length` with a custom event given as ranges,
+   are accepted and ignored. `_check_options` (`recipe.py:132`) should reject them. And
+   `step` (`recipe.py:118`) is reported for custom comparison, which uses no step.
+3. **Test gaps and stale tests** (`tools/ts-cli/tests/test_period_comparison_*.py`):
+   - No CLI test for `--on-clash keep`, for `--set-guid` with `--bucket formula`, or for a
+     write failure removing what it wrote.
+   - `test_last_n` (`test_period_comparison_cli.py:121`) does not assert `dropped_years`.
+   - `test_analysed_event_is_not_a_clash_with_itself` (`test_period_comparison_windows.py:120`)
+     cannot fail: no comparison window reaches Black Friday at offset 0. Its comment is
+     stale too.
+   - `test_last_n_with_custom_event_uses_supplied_years` (`:171`) has a stale name.
+   - No test for a year needing several replacements, or a replacement that also clashes.
+   - `test_brace_in_label_is_kept_verbatim` (`test_period_comparison_emit.py:73`) never
+     reaches `_fill`.
+4. **Misleading advice on a column error.** `_check_text`
+   (`period_comparison/emit.py:96-99`) ends every message with
+   'Remove it (e.g. "Mothers Day")'. For a column name holding `[` or `]`, the fix is the
+   Model's column name, not an apostrophe.
+5. **Route the Set-delete finding.** The recipe's open items (`references/open-items.md:599-603`)
+   found that `ts metadata delete --type LOGICAL_COLUMN` deletes a reusable Set, and
+   `LOGICAL_TABLE` returns HTTP 500. That answers ts-dependency-manager open item #11;
+   record it there.
+6. **Non-atomic writes on a re-run.** `_write_all` (`recipe.py:179`) writes each file in
+   place. On a failure it unlinks what it wrote, so a failed re-run removes the previous
+   run's files of the same name. Write to a temporary file and `os.replace` it.
+7. **File names unsafe on Windows.** `_UNSAFE_IN_FILE_NAME` (`recipe.py:41`) replaces only
+   `/`, `\` and control characters. `: * ? " < > |` and reserved names such as `CON` fail
+   on Windows.
+8. **Errors that do not name the option.** "Give either a list of years or a number of
+   recent years" (`windows.py:163-167`) should name `--years` and `--last`. Custom-file errors
+   name the path, not `--event-dates` or `--comparison-dates`. A quote in `--event-name`
+   is reported against a label or the bucket name derived from it.
+9. **The clash is asked before names are checked.** Exit 2 (`recipe.py:267`) comes before
+   `_build_documents` checks the labels and names. The user settles a clash, then meets a
+   name error.
+10. **The smoke test deletes an unrecorded duplicate silently.** `_to_remove`
+    (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:269`) adds every
+    prefixed object it did not record to the delete list. Such an object is a duplicate
+    from a timed-out import, so the run should warn or fail as well as delete it.
+11. **`PARTIAL` is not flagged.** As BL-587 does for `TO VERIFY`: `check_open_items.py`
+    (`_UNRESOLVED_MARKERS`, line 54) should treat `PARTIAL` as unresolved. This recipe's
+    status legend uses it.
+12. **`--data-through` after the run date is accepted silently**
+    (`_first_day_without_data`, `tools/ts-cli/ts_cli/commands/recipe.py:87-88`). A date
+    in the future keeps windows that cannot have data yet.
+13. **`--data-through 9999-12-31` gives an `OverflowError` traceback**, not
+    `{"error": …}`: the day after it is out of range (`recipe.py:88`).
+14. **The "not finished" error ignores `--data-through`.** `--years 2025
+    --data-through 2025-06-30` says "None of the requested years has finished yet"
+    (`period_comparison/windows.py:268-272`). The message should say the years end after
+    the `--data-through` date.
+15. **The tile-binding fact is not on a public line.** BL-601 (its #1) and BL-604 rest on
+    the probe Liveboards binding their tiles `{id, name, fqn}`. Add that fact to open
+    item #3 (`references/open-items.md:110`), whose binding note covers the Set's
+    `worksheet` binding, not the tiles'.
+16. **A comparison window after the event errors instead of dropping the year.** With
+    `--last N` and custom comparison ranges after the event (weeks after Easter, say), the
+    current year's ranges may not be known yet once the event has ended. `_sort_years`
+    (`windows.py:247-254`) assumes they are knowable and raises rather than dropping that
+    year.
+17. **`OverflowError` tracebacks from a huge `--length` or `--prior-weeks`.**
+    `--length 3000000` and `--prior-weeks 200000` both end in `OverflowError: date value
+    out of range`, not `{"error": …}`. The date arithmetic is in `_expand`
+    (`period_comparison/windows.py:180-182`) and the prior-weeks list in `_prior_weeks`
+    (`windows.py:329`). Line numbers for items 17 to 21 are at the commit that added them
+    (2026-11-19, the pre-PR review fixes).
+18. **On Windows, a name can escape `-o`.** `_file_stem`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:94-99`) turns `D:\x` into `D:_x`, and
+    `out_dir / file_name` (`recipe.py:185`) reads `D:_x.answer.tml` as a path on drive
+    `D:`, not a file inside the output directory. Replace `:` too, as item 7 does, and test
+    that every written path is inside `out_dir`.
+19. **The smoke test's prefix cleanup can delete a concurrent run's objects.**
+    `_leftovers` (`tools/smoke-tests/smoke_ts_recipe_answer_period_comparison.py:118-132`)
+    finds every object named `ZZ_smoke_period_comparison_*`, and `_to_remove`
+    (`:269-279`) deletes all of them. Its docstring rests on the start-of-run check finding
+    none, which a second run started after that check breaks. Add a per-run suffix to the
+    names, or record and delete only this run's GUIDs.
+20. **Labels could allow apostrophes and backslashes.** `_check_text`
+    (`period_comparison/emit.py`) rejects `'`, `"`, `[`, `]` and, since 2026-11-19, `\`,
+    which a single-quoted literal drops (`tools/ts-cli/ts_cli/formula_text.py:29`).
+    `formula_text.ts_string_literal` writes any text exactly, so `Mother's Day` could be a
+    label. It must be used for every literal that names a label: the bucket formula and
+    the measures' comparisons. A reusable Set's group name is TML, not a formula literal,
+    so it needs no escaping. Probe one label with a quote in both forms before relying on it.
+21. **The Answer's numbers were never checked against an expected value on the final
+    code.** The smoke test checks the round trip and the render, not the values. Re-run it
+    with `--no-cleanup` on the test Model (its default `--years 2017-2019`) and record the 2019 row in
+    open item #7: event about 72,526.22 and comparison about 65,967.57 average daily
+    sales, the values from the #3 probes (`references/open-items.md`, #8). Then delete
+    the objects by hand. Check those figures against the warehouse too: for 2019, the
+    measure's sum divided by its count of distinct dates over 29 Nov to 2 Dec 2019, and
+    the same over each of the six prior windows. Record the query beside the figures in
+    open item #7.
+22. **`--labels` keys are case-sensitive, and a miscased key is swallowed.** `_LABEL_SPLIT`
+    (`tools/ts-cli/ts_cli/commands/recipe.py:38`) splits only at a lower-case `event=`,
+    `comparison=` or `other=`. So `event=A,Other=B` makes the event label `A,Other=B`, keeps
+    the default "other" label, and exits 0. Match keys case-insensitively, or reject an
+    unknown `key=` part. Lines for items 22 and 23 are at the commit that added them
+    (2026-11-19, the final pre-PR fixes).
+23. **`_file_stem` is a weaker copy of an existing helper.** `_file_stem`
+    (`recipe.py:94-99`) duplicates `safe_name` (`tools/ts-cli/ts_cli/sets/export.py:45`),
+    which keeps only letters, marks, digits and `. _ -` and space, strips leading and
+    trailing dots, and caps the length in characters and UTF-8 bytes. Reuse `safe_name`;
+    that closes item 18, the length limit and the unsafe characters of item 7. Windows
+    reserved names such as `CON` still need a check of their own.
+
+**Target:** 2027-02-28.
+

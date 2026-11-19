@@ -602,4 +602,4 @@ no Sets.
 deletes it (v2 `metadata/delete`). `--type LOGICAL_TABLE` returns HTTP 500 ("Failed to
 delete LOGICAL_TABLE entries"), and `COHORT` and `SET` are rejected as not in the
 `DeleteMetadatatype` enum. This answers the question in ts-dependency-manager open item #11
-(not edited here; BL-599 routes it there).
+(not edited here; BL-607 routes it there).

@@ -31,12 +31,23 @@ iterative retry, double-aggregation detection) that manual scripts will miss.
 Do not work around it with manual scripting — that hides the bug and ensures the next
 migration hits the same issue.
 
-**Exception — direct API calls are legitimate in one place:**
+**Exceptions — direct API calls are legitimate in:**
 - `references/open-items.md` — self-contained test scripts to verify unverified API behaviour
   before a CLI command is written. These are temporary scaffolding, not skill logic.
+- `agents/cli/ts-object-answer-chart-builder` and `agents/cli/ts-object-liveboard-chart-builder` — their
+  calls run as `ts.post` / `ts.get` inside the ThoughtSpot MCP sandbox (`execute-thoughtspot-code`), where
+  `ts` cannot run, and a user without a `ts` profile can still create a chart or Liveboard through the MCP
+  (updating an existing one needs a profile for the `ts tml export` backup, which both skills check in Step 0).
+  On two conditions:
+  1. Every call lives in a versioned block file (`helpers/mcp/*.js`, `helpers/answer-patch.js`,
+     `scripts/patch.js`, `scripts/mcp/*.js`), printed by a script; never inline in a SKILL.md or reference.
+  2. Every block runs against a mock `ts` in `tools/smoke-tests/_answer_patch_mock.mjs` and
+     `_liveboard_patch_mock.mjs`, which the skills' smoke suites run in CI.
+  The one call outside the sandbox is `helpers/cluster-shot.mjs`'s read-only TML export from inside the
+  user's own signed-in browser page, to count each tab's custom-chart tiles; it holds no credential.
 
 (The retired CoCo Snowsight runtime, which had no `ts` CLI and called stored procedures
-instead, was the second exception until 2026-11-08. Every skill runtime left has the CLI.)
+instead, was a third exception until 2026-11-08. Every skill runtime left has the CLI.)
 
 ---
 
