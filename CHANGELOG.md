@@ -5,6 +5,11 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-19
+- feat: add ts-recipe-answer-period-comparison skill
+- feat: add ts recipe period-comparison (ts-cli 0.220.0)
+- chore: bump ts-cli to v0.220.0
+
 ## 2026-11-18
 - docs: object, calendar and user names that carried a person's or a company's name in recorded evidence are replaced with synthetic ones; findings unchanged
 - chore: bump ts-cli to v0.219.1 (docstrings only)

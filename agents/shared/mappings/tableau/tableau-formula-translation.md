@@ -623,6 +623,11 @@ re-import the model in place (root `guid` + `--no-create-new`), then have the co
 `worksheet.obj_id` point at that same value. (This is also the `obj_id` a liveboard viz uses
 to bind to the model — set it once, reuse everywhere.)
 
+> **Under review (BL-605).** `thoughtspot-sets-tml.md` records `{id, name}` and
+> `{id, name, fqn}` cohort bindings importing (live 2026-11-18), and `ts tableau` already
+> emits `{id, name}` with no `obj_id` on a fresh build. The failure above may need `fqn` with no `id`/`name`,
+> or a Model in the same batch; BL-605 settles it.
+
 ### `Number of Records` / row counts → `count([column])`
 
 Tableau's auto-generated **`Number of Records`** field (`formula = 1`) is a row count. Don't

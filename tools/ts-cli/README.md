@@ -5369,6 +5369,159 @@ ts calendar search --connection "Snowflake Prod"
 stdout. An answer that cannot be paged (not a list, or a full page repeated) is an error,
 exit 1.
 
+## `ts recipe` — Generate the objects for an analytical recipe
+
+Offline: no `ts recipe` command calls the ThoughtSpot API. Each one writes TML files for a
+later `ts tml import`, so you can check what it generated before anything lands. Used by
+the `ts-recipe-answer-period-comparison` skill.
+
+### `ts recipe period-comparison`
+
+Build an Answer that shows, one row per year, average daily sales during a retail event
+against its comparison windows, and the variance, as a column chart: year on the x-axis,
+the three measures on one y-axis. The default comparison is the six windows of the same
+shape in the weeks before the event. Dates are computed per year, never typed by hand.
+
+**Run it end to end without an agent:**
+
+```bash
+# 1. Find the Model's GUID (metadata_id) and name (metadata_header.name)
+ts metadata search --subtype WORKSHEET --name "%Retail Sales%"
+
+# 2. Read the column names and types: the Model's columns and formulas, and each
+#    Table's db_column_properties.data_type (DATE or DATE_TIME)
+ts tml export <model-guid> --associated --parse
+
+# 3. Generate the TML (writes to $OUT, imports nothing). --bucket formula is the default.
+#    Name the columns exactly as the Model spells them. Write outside the repo: the
+#    files hold the Model's name and GUID, and *.answer.tml is not gitignored.
+#    --data-through is the last day the data is loaded through.
+OUT=$(mktemp -d)
+ts recipe period-comparison --model-name "Retail Sales" --model-guid <model-guid> \
+  --date-column "Order Date" --measure-column "Amount" \
+  --event black-friday --years 2022-2025 --data-through 2025-12-31 -o "$OUT"
+
+# 4. Exit 2 means a comparison window holds a built-in event's anchor day: another
+#    event's (e.g. Black Friday inside Boxing Day's prior weeks), or the event's own
+#    when --offset moves the window off it. Read "clashes", then re-run step 3 adding
+#    --on-clash skip (take the next earlier week instead) or --on-clash keep.
+
+# 5. Import the Answer
+ts tml import --file "$OUT/Black Friday Period Comparison.answer.tml" --policy ALL_OR_NONE --create-new
+```
+
+Check three things in step 2 before generating:
+
+- **A DATE_TIME date column needs `--bucket formula`.** The bucket formula and the
+  measures wrap the date column in `date ( … )`, so they should count days; the formula
+  form is not itself verified on a real DATE_TIME column. A reusable Set's conditions name
+  the bare column: a window's last day may lose rows after midnight. The search's year
+  filter names the bare column too, in both forms, so a window ending on 31 December of the
+  last year in the plan's `years[]` (`--event christmas --length 7` or `--event boxing-day
+  --length 6`, each with `--on-clash` at the default six prior weeks, or a custom window)
+  may lose that day's late rows. Check that year's figures, or end the window a day
+  earlier.
+- **`--measure-column` must not be a formula built on `group_aggregate`** or another
+  fixed-level function. Such a measure is repeated on every row and inflates the numbers.
+- **The date column should be on the measure column's Table,** or on a Table that the
+  measure's Table joins `MANY_TO_ONE`. Otherwise `sum_if` adds each sales value once per
+  joined row. A check of the SQL for `CROSS JOIN` would not catch an ordinary join.
+  Exported Table TML usually omits `joins_with[].cardinality` (it is never emitted on
+  export; see `agents/shared/schemas/thoughtspot-table-tml.md`). When neither the Model
+  join nor the Table entry gives a cardinality, ask which side has one row per key; never
+  assume `MANY_TO_ONE`.
+
+`--bucket reusable-set` shares the bucket as a Set on the Model, so other Answers can use
+it. It writes `<set name>.cohort.tml` as well; import that file first, then the Answer:
+
+```bash
+ts tml import --file "$OUT/Black Friday Period.cohort.tml" --policy ALL_OR_NONE --create-new
+```
+
+`ts tml lint` flags the generated Answer's `tables[].fqn` binding (a bare `fqn` with no
+`obj_id`). That is expected: it is the binding verified live (the recipe's open item #3
+and its smoke test). Do not change it to `obj_id`; BL-604 narrows the lint rule.
+
+**If an import times out, do not retry at once.** A large import finishes on the server
+after the client gives up. In the probes, a 525-window import timed out and a search
+straight after found nothing, yet it had been created; a 300-window Answer timed out and
+was on the server within 2 minutes. Wait a few minutes, search by name, and retry only if
+the object is still missing; otherwise a retry creates a duplicate.
+
+```bash
+ts metadata search --type ANSWER --name "Black Friday Period Comparison"
+# A Set: list the Model's Sets. Check orgs[].models[].discovery is COMPLETE (INCOMPLETE
+# means the list is unknown, not empty), then look for the name in sets[].name
+ts sets inventory --model <model-guid>
+```
+
+**A same-name Answer may be on another Model.** The Answer search covers the whole Org,
+and the default name is shared by everyone analysing the same event. Before updating one
+in place, export it and compare what it searches with your Model:
+
+```bash
+ts tml export <found-answer-guid> --fqn --parse   # answer.tables[].fqn must be <model-guid>
+```
+
+Update it only when its `tables[].fqn` equals your Model's GUID, and check its author
+(`metadata_header.authorDisplayName` in the search result) first. Otherwise generate a new
+Answer with a distinct `--name`, and never pass that GUID as `--answer-guid`.
+
+To update objects already imported, pass `--answer-guid` (and `--set-guid`) in step 3 and
+drop `--create-new` from the import. Updating a Set changes every Answer that uses it
+(its `dependents[]` in the inventory); if a label changes, the other Answers' measures
+read 0. Back up each object before that import. Without `--parse`, each item's `edoc` is
+the TML as the server returned it: JSON on current builds (the export ignores a requested
+format, BL-567), which ThoughtSpot imports. Save each `edoc` exactly as returned as
+`before-*.tml`, and check it with `VALIDATE_ONLY`; if validation fails, stop before the
+update. Re-importing the backup with `ALL_OR_NONE`, without `--create-new`, Set first, is
+the rollback:
+
+```bash
+ts tml export <answer-guid> --fqn > "$OUT/before-answer.json"   # and <set-guid>; save each item's "edoc" as before-*.tml
+ts tml import --file "$OUT/before-answer.tml" --policy VALIDATE_ONLY   # check the backup first
+ts tml import --file "$OUT/before-answer.tml" --policy ALL_OR_NONE     # rollback (Set first)
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model-name` / `--model-guid` | *(required)* | The Model the Answer searches. The command is offline, so it takes both rather than looking one up |
+| `--date-column` / `--measure-column` | *(required)* | Model columns, as the Model spells them, e.g. `"Order Date"` and `"Amount"`. The bucket formula and the measures wrap the date column in `date ( … )`, so they should count days on a DATE_TIME column (not yet verified on one). A reusable Set names the bare column, so use `--bucket formula` on DATE_TIME. The year filter names the bare column in both forms: on DATE_TIME, a window ending on 31 December of the last year in the plan's `years[]` may lose that day's late rows. The measure column must not be a `group_aggregate` or other fixed-level formula |
+| `--event` | *(required)* | `black-friday`, `cyber-monday`, `christmas`, `boxing-day`, `easter` or `custom` |
+| `--event-name` | built-in name | Display name used in the labels and the measure (`Average <name> Sales`). Required for `custom` |
+| `--event-dates` | — | `custom` only: YAML/JSON mapping each year to a start date (`2025: '2025-05-11'`) or to one `[start, end]` range. A date in another year is an error (exit 1), never a dropped year |
+| `--offset` / `--length` | `0` / `4` | Event window: starts `offset` days from the anchor day and runs `length` days. Black Friday to Cyber Monday is `0` / `4`; Good Friday to Easter Monday is `-2` / `4` |
+| `--years` / `--last` | — | `2025` or `2020-2030`, or the last N finished years. Give exactly one |
+| `--comparison` | `prior-weeks` | `prior-weeks`, or `custom` with `--comparison-dates` (YAML/JSON mapping each year to `[start, end]` ranges) |
+| `--prior-weeks` | `6` | Comparison windows per year. Window *k* is the event window moved back *k* × step days, where step is the length rounded up to whole weeks |
+| `--on-clash` | — | `skip` or `keep`, for comparison windows holding a built-in event's anchor day: another event's, or the analysed event's own when `--offset` moves the event window off it |
+| `--bucket` | `formula` | `formula` (a bucket formula private to the Answer) or `reusable-set` (a Set shared on the Model, written as its own file) |
+| `--name` | `<event name> Period Comparison` | Answer name |
+| `--set-name` | `<event name> Period` | Bucket name: the reusable Set, or the Answer's bucket formula |
+| `--labels` | `<event name> Days`, `<N> Prior Weeks` (or `Comparison Periods`), `Not <event name>` | `event=…,comparison=…,other=…`; parts left out keep their defaults |
+| `--answer-guid` / `--set-guid` | — | Written at the TML root, so a re-import updates that object in place. `--set-guid` is for `reusable-set` only |
+| `--data-through` | the day before the run date | `YYYY-MM-DD`, the last day the Model's data is loaded through. A year with a window ending after it is dropped and reported in `dropped_years`, so a window with no data yet is not averaged as 0 |
+| `-o` / `--output` | *(required)* | Directory for the TML files. A `/`, `\` or control character in a name becomes `_` in the file name; the TML keeps the name as given |
+
+A year with a window ending after `--data-through` (default: on or after the run date) is
+dropped and reported in `dropped_years`. Every window must fall inside its event's
+calendar year, and a group holds no more than 300 windows. The averages count days *with
+data* in each window, so filtering the Answer (to one product, say) can change the
+denominator. An average of 0 means the window has no data, not zero sales.
+
+**Output:** JSON to stdout: `{years[], step, dropped_years[], clashes[], needs_clash_decision, files[]}`.
+Each year carries `event` and `comparisons` as `[start, end]` pairs and `substitutions`
+(`{replaced, with}`) when `--on-clash skip` moved a window. Each clash is `{year, window, event}`.
+The files are `<dir>/<set name>.cohort.tml` (reusable-set only) and `<dir>/<name>.answer.tml`.
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| `0` | Files written |
+| `1` | The request cannot be built (a window crossing 1 January, a missing year in a custom file, a bad label…). Stdout is `{"error": "…"}` and nothing is written |
+| `2` | A comparison window holds a built-in event's anchor day (another event's, or the analysed event's own when `--offset` moves off it) and `--on-clash` was not given. Stdout is the plan with `files: []`, and nothing is written. (A missing required option also exits 2, with a usage message and no JSON) |
+
 ## `ts link` — Link a semantic-layer object for direct query
 
 Register a semantic object (Snowflake Semantic View, Databricks Metric View, Honeydew, Cube,
