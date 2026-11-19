@@ -69,7 +69,7 @@ function ftypeLegendHtml(counts, graph){
     return '<span class="ftype-key">'+ftypeIcon(m)+esc(FTYPE_NAMES[m])+'</span>'; }).join("");
   html += graph ? '<span class="ftype-key"><span class="ftype-swatch ftype-sw-hidden"></span>Dashed: hidden</span>'+
     '<span class="ftype-key"><span class="ftype-swatch ftype-sw-single"></span>Amber: hidden, used once (H16)</span>'
-    : '<span class="ftype-key"><span class="ftype-swatch ftype-sw-dim"></span>Faded: switched off, kept for what is shown under it</span>';
+    : '<span class="ftype-key"><span class="ftype-swatch ftype-sw-dim"></span>Faded: switched off, kept as the way to a shown formula under it</span>';
   return '<div class="ftype-legend" role="note" aria-label="Legend">'+html+'</div>';
 }
 
@@ -117,14 +117,16 @@ function ftypeBar(tree, onChange, graph){
   return wrap;
 }
 
-/* Per formula index: 2 shown, 1 kept (switched off, but something shown is under it),
-   0 hidden. Worked upward from what is shown, so a cycle cannot loop it. */
+/* Per formula index: 2 shown, 1 kept (switched off, but a formula of a shown type is
+   under it, so the row stays, faded, as the way down to it), 0 hidden with everything
+   under it. A shown column or parameter under a switched-off formula does not keep it:
+   switching Measure formulas off must hide the measures, though every one uses a
+   column. Worked upward from the shown formulas, so a cycle cannot loop it. */
 function treeFtypeStates(tree){
   var reach = {}, queue = [];
   function reached(i){ if(!reach[i]){ reach[i] = true; queue.push(i); } }
   tree.n.forEach(function(node, i){
     if(useShown(tree, [0, i])) directUsers(tree, [0, i]).forEach(reached);
-    if(node.u.some(function(u){ return u[0] !== 0 && useShown(tree, u); })) reached(i);
   });
   for(var q = 0; q < queue.length; q++) directUsers(tree, [0, queue[q]]).forEach(reached);
   return tree.n.map(function(node, i){ return useShown(tree, [0, i]) ? 2 : reach[i] ? 1 : 0; });

@@ -445,12 +445,14 @@ def graph_script() -> str:
                      + [(VENDOR_DIR / name).read_text(encoding="utf-8") for name in GRAPH_VENDOR])
 
 
-def has_formula_chains(payload: dict) -> bool:
-    """Some audited Model has a formula built on another formula: only then is there a
-    graph worth drawing, and only then does the report carry its libraries."""
+def has_formulas(payload: dict) -> bool:
+    """Some audited Model has a formula: only then is there a graph to draw (its
+    formulas and the columns and parameters they use), and only then does the report
+    carry the graph's libraries. Every Model with formulas gets the Graph button, not
+    only one with a formula built on another (product owner, 2026-11-19: the lineage
+    from columns to formulas is worth drawing too)."""
     models = ((payload.get("C") or {}).get("m")) or []
-    return any(use[0] == 0 for cm in models for node in ((cm.get("ft") or {}).get("n") or [])
-               for use in node.get("u") or [])
+    return any((cm.get("ft") or {}).get("n") for cm in models)
 
 
 def render_report(data: dict) -> str:
@@ -458,7 +460,7 @@ def render_report(data: dict) -> str:
     erd_assets = _read_erd_assets()
     if erd_assets:
         payload["E"] = erd_assets
-    if has_formula_chains(payload):
+    if has_formulas(payload):
         # In the data, not the page's script: it runs only when a graph is first opened
         payload["V"] = graph_script()
     json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")

@@ -16,11 +16,9 @@ var FORMULA_GRAPH_MIN_ZOOM = 0.7;  /* a wider graph opens at its left edge, pann
 var FORMULA_GRAPH_MAX_FIT = 1.2;   /* a small graph is not blown up to fill the canvas */
 var FORMULA_GRAPH_MIN_VISIBLE = 120;  /* px of canvas above a narrow screen's sheet */
 
-/* The graph libraries are in this report, and the Model has a formula built on another. */
+/* The graph libraries are in this report, and the Model has a formula. */
 function graphAvailable(tree){
-  return !!(D.V && tree && tree.n.some(function(node){
-    return node.u.some(function(u){ return u[0] === 0; });
-  }));
+  return !!(D.V && tree && tree.n.length);
 }
 
 /* Run the libraries once; true when Cytoscape is ready. */

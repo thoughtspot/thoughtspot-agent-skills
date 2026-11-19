@@ -11,7 +11,7 @@ import pytest
 import report_browser
 from ts_cli.audit import run_audit
 from ts_cli.audit.context import make_context
-from ts_cli.audit.report import (GRAPH_VENDOR, VENDOR_DIR, compact_payload, has_formula_chains,
+from ts_cli.audit.report import (GRAPH_VENDOR, VENDOR_DIR, compact_payload, has_formulas,
                                  render_report)
 
 needs_chrome = pytest.mark.skipif(report_browser.CHROME is None,
@@ -44,12 +44,19 @@ CHAIN = {
                 _col("Gross Margin", "formula_GM"), _col("Gross Margin %", "formula_GMP"),
                 _col("Order Count", "formula_Cnt")],
 }
-#: Formulas, but none built on another: no graph, no libraries.
+#: Formulas, but none built on another: a graph of columns to formulas all the same.
 FLAT = {
     "name": "Flat",
     "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
     "formulas": [_f("formula_A", "A", "sum ( [ORDERS::A] )"), _f("formula_B", "B", "max ( [ORDERS::B] )")],
     "columns": [_col("A", "formula_A"), _col("B", "formula_B")],
+}
+#: No formulas at all: no graph, and no libraries.
+BARE = {
+    "name": "Bare",
+    "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+    "formulas": [],
+    "columns": [{"name": "A", "column_id": "ORDERS::A", "properties": {"column_type": "ATTRIBUTE"}}],
 }
 
 
@@ -76,11 +83,12 @@ def _big(n):
 
 # ── data ────────────────────────────────────────────────────────────────────
 
-def test_the_libraries_travel_only_with_a_formula_chain():
-    assert has_formula_chains(compact_payload(_data(("m-1", CHAIN))))
-    assert not has_formula_chains(compact_payload(_data(("m-2", FLAT))))
-    assert not has_formula_chains({})
-    chained, flat = _report(("m-1", CHAIN)), _report(("m-2", FLAT))
+def test_the_libraries_travel_only_with_a_formula():
+    assert has_formulas(compact_payload(_data(("m-1", CHAIN))))
+    assert has_formulas(compact_payload(_data(("m-2", FLAT))))   # no chain: still drawn
+    assert not has_formulas(compact_payload(_data(("m-5", BARE))))
+    assert not has_formulas({})
+    chained, flat = _report(("m-1", CHAIN)), _report(("m-5", BARE))
     data = {}
     for name, page in (("chained", chained), ("flat", flat)):
         data[name] = json.loads(re.search(r'<script id="audit-data" type="application/json">(.*?)</script>', page, re.S).group(1))
@@ -177,18 +185,21 @@ def test_the_tree_and_the_graph_link_each_other_and_keep_the_selection(tmp_path)
 
 
 @needs_chrome
-def test_a_model_with_no_chain_has_no_graph_and_the_graph_route_shows_the_tree(tmp_path):
+def test_a_model_with_formulas_but_no_chain_still_has_a_graph(tmp_path):
+    """Columns to formulas is lineage worth drawing (product owner, 2026-11-19): only
+    a Model with no formulas has no graph, and its graph route shows the tree."""
     page = _report(("m-1", CHAIN), ("m-2", FLAT))
-    shown = report_browser.render(page, tmp_path, "formulas/m-2/graph", actions=(
-        'window.__extra = {link: !!document.querySelector("#v-formulas .fgraph-mode"),'
-        ' tree: !!document.querySelector("#v-formulas ul.ftree"),'
-        ' graph: !!document.querySelector("#v-formulas .fgraph")};'))
-    assert shown["errors"] == []
-    assert shown["extra"] == {"link": False, "tree": True, "graph": False}
-    # a report with no chain anywhere: no libraries, no graph link either
-    flat = report_browser.render(_report(("m-2", FLAT)), tmp_path, "formulas/m-2/graph", actions=(
+    tree = report_browser.render(page, tmp_path, "formulas/m-2", actions=(
         'window.__extra = !!document.querySelector("#v-formulas .fgraph-mode");'))
-    assert flat["errors"] == [] and flat["extra"] is False
+    assert tree["errors"] == [] and tree["extra"] is True
+    shown = report_browser.render(page, tmp_path, "formulas/m-2/graph", actions=(
+        'window.__extra = {graph: !!document.querySelector("#v-formulas .fgraph"),'
+        ' canvas: document.querySelectorAll("#v-formulas canvas").length};'), settle_ms=800)
+    assert shown["errors"] == [] and shown["extra"]["graph"] and shown["extra"]["canvas"] > 0
+    # a report whose only Model has formulas but no chain carries the libraries too
+    alone = report_browser.render(_report(("m-2", FLAT)), tmp_path, "formulas/m-2", actions=(
+        'window.__extra = !!document.querySelector("#v-formulas .fgraph-mode");'))
+    assert alone["errors"] == [] and alone["extra"] is True
 
 
 @needs_chrome

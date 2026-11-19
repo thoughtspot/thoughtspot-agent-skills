@@ -145,6 +145,24 @@ def test_the_tree_hides_rows_and_keeps_a_switched_off_formula_with_shown_rows_un
 
 
 @needs_chrome
+def test_switching_measures_off_hides_measures_though_their_columns_are_shown(tmp_path):
+    """The owner's bug (2026-11-19): with only Measure formulas off, a measure over a
+    column stayed, faded, because its column was shown, so nothing seemed to hide.
+    A shown column or parameter does not keep a switched-off formula; only a shown
+    formula under it does, as the way down to that formula."""
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_ROWS + (
+        'document.querySelector(".ftree-expand").click();'
+        + _chip("measure") + '.click();'
+        'window.__extra = rows();'))
+    assert shown["errors"] == []
+    # Revenue (a measure over ORDERS::AMOUNT) goes with its column; Top stays faded,
+    # as the way to Helper (of no stated kind, shown with the attributes)
+    assert shown["extra"] == [["Top", True], ["Helper", False], ["ORDERS::COST", False],
+                              ["Label Two", False], ["Region Label", False],
+                              ["ORDERS::REGION", False], ["Sep", False]]
+
+
+@needs_chrome
 def test_search_leaves_out_switched_off_types_and_counts_them(tmp_path):
     shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=(
         'var s = document.querySelector("#v-formulas .ftree-search");'
@@ -235,7 +253,7 @@ def test_the_tree_shows_the_legend_and_says_when_every_type_is_off(tmp_path):
     assert shown["errors"] == []
     x = shown["extra"]
     for text in ("Table column", "Parameter", "Measure formula", "Attribute formula",
-                 "Faded: switched off, kept for what is shown under it"):
+                 "Faded: switched off, kept as the way to a shown formula under it"):
         assert text in x["legend"]
     assert x["rows"] == 0 and "Every type is switched off" in x["note"]
 
