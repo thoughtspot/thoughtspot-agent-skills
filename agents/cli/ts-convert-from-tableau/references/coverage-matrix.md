@@ -148,7 +148,7 @@ Use this as the canonical limitations reference.
 | 86 | Stepped range parameters (granularity attribute) | `list_config` (enumerate min→max by step) | NOT `range_config` |
 | 87 | Free-form parameters (`param-domain-type="any"`) | Free-form parameter (no config) | |
 | 88 | `[Parameters].[Name]` formula references | Strip prefix to `[Name]` | |
-| 89 | Parameter on liveboard header | `ordered_chips[]` + `parameter_overrides[]` with UUID | |
+| 89 | Parameter on liveboard header | Described to SpotterViz as an adjustable-control request in the Step 10 build instructions | SpotterViz builds and owns the actual TML — no hand-authored `ordered_chips[]`/`parameter_overrides[]` |
 
 ### Bins and Manual Groups
 
@@ -163,25 +163,25 @@ Use this as the canonical limitations reference.
 | # | Tableau Construct | ThoughtSpot Equivalent | Notes |
 |---|---|---|---|
 | 93 | Dashboard zones → layout | 12-column responsive grid | Container-tree walk (horz/vert) with proportional column split (largest-remainder → sum 12) + aspect-ratio height; band-based coordinate mapping is the fallback (Step 9c) |
-| 94 | Chart zones → visualization tiles | Answer TML with `search_query`, chart type, axis configs | |
-| 95 | Text/title zones | Note tiles (`note_tile.html_parsed_string`) | |
-| 96 | Mark types (bar/line/circle/pie/area/text) | BAR/LINE/SCATTER/PIE/AREA/TABLE | |
-| 97 | Measure Names/Values KPI blocks | One KPI tile per measure with sparkline | `client_state_v2` rendering |
-| 98 | Filter zones | Liveboard `filters[]` | |
-| 99 | Parameter control zones | Model `parameters[]` + header chips | |
+| 94 | Chart zones → visualization tiles | Described to SpotterViz as a chart-intent instruction (Step 10) | SpotterViz builds and owns the actual Answer TML — no hand-authored `search_query`/axis configs |
+| 95 | Text/title zones | Described to SpotterViz as short explanatory text (Step 10) | SpotterViz's own text-tile capability — no hand-authored `note_tile.html_parsed_string` |
+| 96 | Mark types (bar/line/circle/pie/area/text) | Chart-intent wording in the Step 10 instructions, from `thoughtspot-chart-types.md`'s vocabulary (BAR/LINE/SCATTER/PIE/AREA/TABLE, plus FUNNEL/WATERFALL/PARETO/SPIDER_WEB — see #5 below) | SpotterViz resolves the actual chart type |
+| 97 | Measure Names/Values KPI blocks | Described to SpotterViz as one KPI tile per measure with a trend (Step 10) | SpotterViz builds and owns the actual KPI tile TML |
+| 98 | Filter zones | Named per tile in the Step 10 instructions (which tiles a filter applies to, which it doesn't) | SpotterViz resolves the actual `filters[]`; a generic "respect the filter" instruction leaves it to infer scoping |
+| 99 | Parameter control zones | Described to SpotterViz as an adjustable-control request (same as #89) | SpotterViz builds and owns the actual `parameters[]`/header chips |
 | 100 | Orphan worksheets (not on any dashboard) | Prompted to user; added as tiles or excluded | |
-| 101 | Styling/themes | 6 curated themes with brand tokens + `viz_style` palettes | |
-| 102 | Sections/groups | Inferred `groups[]` + `group_layouts[]` | From viz relationships |
+| 101 | Styling/themes | Not applicable — SpotterViz-built liveboards use the platform's own default styling | The charting-library choice, 6-theme styling pass and brand-token palettes were hand-authored-TML-era mechanisms, removed in 2.0.0 |
+| 102 | Sections/groups | Described to SpotterViz as a grouping instruction (which tiles belong together), from viz relationships (Step 10) | SpotterViz resolves the actual `groups[]`/layout — no hand-authored `group_layouts[]` |
 | 103 | Formula coverage answers | Every uncovered formula gets a testable answer | |
-| 104 | Migration Summary tab | Note tile tab | Documents items migrated, decisions, partial/omitted |
-| 117 | Multiple dashboards → single liveboard with tabs (Step 8 option **T**) | `layout.tabs[]` — one tab per dashboard + the Migration Summary tab | Implemented v1.5.20–v1.5.24; verified against `thoughtspot-liveboard-tml.md` schema (`layout.tabs[]`: `name`, `description`, `tiles[]`) |
-| 118 | Dual-axis combo (two mark classes, e.g. Bar + Line, secondary axis) | `ADVANCED_LINE_COLUMN` (Muze) with durable `custom_chart_config` (`y-axis-column` / `y-axis-line`, `type: MERGED`) | Step 10a; `client_state_v2` split decays on re-render. Legacy path: split into separate COLUMN + LINE tiles + flag |
-| 119 | Color shelf (dimension) → series/color split | Muze `slice-with-color` shelf (or a 2nd `chart_columns` entry on Legacy) | Step 10b/10a; supersedes the old "color zones skipped" (L21 was legend zones only) |
-| 120 | Small multiples (row/col trellis) | Muze `trellis-by` shelf | Step 10b; **not expressible** on Legacy — flag |
-| 121 | Specific series color palette | Per-tile `viz_style` per-series palette | Step 10b/10.5; carries brand/fixed category colors instead of auto-assign |
-| 122 | Column display format — percent | `answer_columns[].format` `category: PERCENTAGE` | Verified (Step 10b) |
-| 123 | Column display format — currency / number / decimals / thousands | `answer_columns[].format` `category: CURRENCY` / `NUMBER` (parallel `*FormatConfig`) | Step 10b; exact sub-config field names unverified — open item #18 |
-| 124 | Measure/dimension sort (asc/desc, non-Top-N) | `sorted by [col] descending`/`ascending` in `search_query` | Step 10b; token unverified — open item #19; manual sort has no equivalent |
+| 104 | Migration Summary tab | Described to SpotterViz as a final tab in the same build instructions (Step 10) | SpotterViz builds and owns the actual note tile — content shape still per `migration-report-format.md` |
+| 117 | Multiple dashboards → single liveboard with tabs (Step 8 option **T**) | One Step 10 `create_dashboard` build instruction per dashboard/tab, then Step 11.5 asks `modify_dashboard` to add each extra tab | SpotterViz builds and owns the actual `layout.tabs[]` — no hand-splicing into exported TML (2.1.0) |
+| 118 | Dual-axis combo (two mark classes, e.g. Bar + Line, secondary axis) | A SpotterViz-built combo chart, requested as a specific chart-intent description (Step 10) | SpotterViz builds and owns the actual chart TML — this skill no longer emits `custom_chart_config` directly. Verify the result with `ts tml verify-render`; if SpotterViz can't produce a true combo, ask for the closest single-series substitute and log it as a gap in the Migration Summary tab (per the placeholder-tile principle) |
+| 119 | Color shelf (dimension) → series/color split | Described in the Step 10 instructions as a color/series-split chart intent | SpotterViz resolves the actual shelf assignment; describe the dimension and the split explicitly rather than assuming it's inferred from field order |
+| 120 | Small multiples (row/col trellis) | Described in Step 10 instructions as a trellis/small-multiples intent | Not every ThoughtSpot chart type supports this the way Muze's `trellis-by` shelf did — if SpotterViz can't produce it, ask for the closest substitute (e.g. one chart per category as separate tiles) and log the gap |
+| 121 | Specific series color palette | Requested in Step 10 instructions as named/hex colors per series, if the source dashboard used a fixed (non-default) palette | `spotterviz-liveboard-build.md`'s "Known gotchas" notes styling/theme isn't reliably requestable through `instructions` today — treat a specific palette as a known limitation, not guaranteed, and don't try to hand-patch the resulting TML to force it |
+| 122 | Column display format — percent | Requested in Step 10 instructions (e.g. "format as a percentage") | SpotterViz sets `answer_columns[].format` itself; this skill no longer emits it directly. Spot-check the rendered tile rather than asserting the exact TML shape |
+| 123 | Column display format — currency / number / decimals / thousands | Requested in Step 10 instructions | Same as above — SpotterViz owns the format TML now; open item #18 (RESOLVED, superseded) covers why the old hand-authored sub-config fields no longer apply |
+| 124 | Measure/dimension sort (asc/desc, non-Top-N) | Requested in Step 10 instructions (e.g. "sorted by {measure} descending") | SpotterViz resolves sort itself; open item #19 (RESOLVED, superseded) covers why the old `search_query` token no longer applies. A Top-N or manual/custom sort still has no equivalent — log it as a gap |
 | 125 | Spotter last-mile coverage tile (Step 12.6) | Coverage tile seeded from Spotter `tokens` + `visualization_type` | Human-verified number match required before adopting; opt-in |
 
 ### Operational Modes

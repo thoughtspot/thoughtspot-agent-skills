@@ -92,7 +92,17 @@ def chart_tiles_missing_axis(doc: dict) -> list:
     whose ``chart.type`` is in ``_CHART_NEEDS_AXIS`` but which carries neither
     ``chart.axis_configs`` nor ``chart.custom_chart_config``. Empty for model/table TML,
     tables, KPIs, and correctly-encoded charts. Pure — used by both `ts tml lint` (pre-import)
-    and `ts tml verify-render` (post-import, re-exported through render_check)."""
+    and `ts tml verify-render` (post-import, re-exported through render_check).
+
+    **Known false-positive risk, unconfirmed live (BL-616):** `thoughtspot-chart-types.md`'s
+    "Verified rules" section documents that ThoughtSpot itself drops BOTH blocks on export
+    for a trivial x/y Muze (`ADVANCED_*`) chart, auto-resolving from `chart_columns` instead
+    — the same shape this function treats as blank. A correctly-rendering, simple
+    SpotterViz-built `ADVANCED_*` tile may therefore false-flag here. Not yet confirmed
+    against a live `verify-render` run on such a tile — don't tighten this check without
+    that confirmation, since a false negative (missing a real blank tile) is worse than
+    the current false positive.
+    """
     out = []
     for name, a in _tile_answers(doc):
         chart = a.get("chart") if isinstance(a.get("chart"), dict) else {}

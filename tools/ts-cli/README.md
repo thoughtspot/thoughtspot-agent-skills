@@ -2722,8 +2722,10 @@ new `aggregated_models` entry patched in) to `--out-dir`. Stdout: `{"candidate",
 ### `ts tableau build-liveboard`
 
 Emit Answer + tabbed-Liveboard TML deterministically from a parsed Tableau dashboard
-spec — the codified replacement for the LLM-executed chart/liveboard prose templates
-(SKILL.md Step 10). Role-aware axis layout (Columns→x, Color→series/color, Rows→pivot
+spec — a standalone deterministic TML generator. Since the 2.0.0 SpotterViz-mandatory
+redesign, `ts-convert-from-tableau`'s own Step 10 no longer calls this command (it builds
+every liveboard via SpotterViz instead); this command still exists and still works, in
+case a deterministic fallback is restored — see BL-530. Role-aware axis layout (Columns→x, Color→series/color, Rows→pivot
 rows, measures→y), a chart-type requirement floor (flags a chart that lacks the measures
 it needs — never silently downgrades it), and overrides capture-and-replay (per-column
 `format`, `client_state_v2`, the authoritative `custom_chart_config` for combos, and

@@ -369,6 +369,9 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
+| BL-614 | `create_dashboard`/`modify_dashboard` take exactly one `data_source_id` per call, so a Looker dashboard built from more than one explore cannot bind each tile to its own separate Model | 2026-12-31, or when SpotterViz's API adds per-tile data-source binding |
+| BL-615 | Confirm live whether `modify_dashboard`'s `completed` status means every requested change was actually applied, or can silently no-op on an unsupported request (e.g. asking it to change an existing chart's type) | 2026-12-31, or the next SpotterViz-liveboard work with live access |
+| BL-616 | `verify-render`'s blank-chart check may false-flag a simple `ADVANCED_*` tile, since ThoughtSpot itself drops both encoding blocks on export for a trivial x/y Muze chart | 2026-12-31, or the next SpotterViz-liveboard work with live access |
 
 ### Tier 3 — Opportunistic
 
@@ -16889,6 +16892,12 @@ SpotterViz:
 Deliberately not decided at #679's merge: the converters that build Liveboards
 deterministically work today, and SpotterViz had no field history yet.
 
+**Update (2026-11-17, #679 design review):** a reviewer raised the fallback question
+again (point 2 above) directly on the PR. Per the maintainer's own original direction
+decision this item already records, #679 stays SpotterViz-only with no fallback added —
+this item remains the place that question is tracked and decided, not something #679
+itself resolves.
+
 **Target:** 2026-12-17.
 
 ## BL-531 — Confirm and allowlist the public SpotterViz MCP endpoint `Tier 3`
@@ -16908,6 +16917,37 @@ the placeholder safe, but setup is not self-service.
    `spotterviz-liveboard-build.md` reference.
 3. Add the host to whatever allowlist applies (the customer-reference gate's allowed
    hosts, and `.claude/settings.json` `WebFetch` rules if a skill fetches it).
+
+**Update (2026-11-17, #679 design review):** (2) and the `check_customer_references.py`
+allowlist half of (3) are done — the placeholder is now
+`https://agent.thoughtspot.app/mcp?api-version=latest` everywhere, and
+`agent.thoughtspot.app` is on `ALLOWED_HOSTS`. No skill fetches this URL via `WebFetch`
+(it's an MCP server connection, not an HTTP fetch), so that half of (3) doesn't apply.
+(1) is **not** independently confirmed by this update — the URL came from the user
+directly as their own working config, not from a located ThoughtSpot public-docs page; a
+documentation search for it (docs.thoughtspot.com, web search) found no page describing
+this MCP server at all. Also unconfirmed: a dated `api-version` value more specific than
+`latest` (a separate reviewer concern — the server's own source reportedly defaults an
+unversioned request to an older tool surface) and the server's minimum ThoughtSpot
+cluster version / privilege / Node.js prerequisites a reviewer cited — none of these were
+locatable in ThoughtSpot's public docs either. Confirming (1) and these specifics with the
+SpotterViz team directly is still open.
+
+**Update (2026-11-19, #679 round-2 review):** the "no page describing this MCP server"
+search above missed it because it searched for "SpotterViz" — the server is publicly
+documented at
+[developers.thoughtspot.com/docs/connect-mcp-server-to-clients](https://developers.thoughtspot.com/docs/connect-mcp-server-to-clients)
+under the name **"ThoughtSpot Spotter MCP Server"**, not "SpotterViz" (an internal/skill
+name for the same server). That page gives the endpoint, dated `api-version` example
+values, and the prerequisites a reviewer separately asked about (cluster version, Spotter
+privilege, Node 22+ for `mcp-remote`). Cited now in `spotterviz-liveboard-build.md` and in
+the `check_customer_references.py` allowlist comment, replacing the "BL-531, unconfirmed"
+framing. `api-version` is pinned to `2026-10-14` (the page's own dated example) rather than
+left as `latest`. Still open: an independent SpotterViz-team confirmation that
+`agent.thoughtspot.app` (vs. a per-tenant/regional host) is the one correct endpoint for
+every customer, and whether SpotterViz supports per-tile filter exclusion, parameter
+chips and number formats — the public page documents the server's existence and setup,
+not its full tile-building feature surface.
 
 **Target:** 2026-12-17.
 
@@ -18549,3 +18589,70 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
 3. Tests for both shapes, plus arithmetic on an IN result.
 
 **Target:** 2027-01-31.
+
+## BL-614 — Looker multi-explore dashboards can't bind each tile to its own Model `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** PR #679 round-2 review.
+
+**What.** `create_dashboard` and `modify_dashboard` each take exactly one optional
+`data_source_id` for the whole call (confirmed against the live MCP tool schemas), not one
+per tile. `ts-convert-from-looker`'s Step 9 already notes saving `{model_guid}` "per
+explore, if migrating more than one," but Step 10 can only pass ONE explore's
+`{model_guid}` into the `create_dashboard` call that builds the whole dashboard — a Looker
+dashboard sourced from two or more explores (and therefore two or more separate ThoughtSpot
+Models) cannot have each tile bound to its own correct Model through this mechanism.
+
+**Do.** Confirm with the SpotterViz team whether per-tile data-source binding is planned.
+If not, document the limitation explicitly in the Step 10 instructions (already done this
+round) and in the Migration Summary when a multi-explore dashboard is detected, so the user
+knows to verify tile-to-Model binding manually rather than assuming it's correct.
+
+**Target:** 2026-12-31, or when SpotterViz's API adds per-tile data-source binding.
+
+## BL-615 — Confirm whether `modify_dashboard` can silently no-op an unsupported change request `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** PR #679 round-2 review ("the fix paths... never check
+`changes_applied`").
+
+**What.** The live `modify_dashboard`/`create_dashboard`/`get_dashboard_status` MCP tool
+schemas expose only `status`, `message`, `dashboard_url` and `task_id` — no
+`changes_applied` field exists today, so a literal check for one isn't possible against
+the current schema. The underlying concern still stands: `create_dashboard`'s own schema
+says changing an existing chart's type or query is "not supported," but its description
+doesn't say what happens if `modify_dashboard` is asked to do it anyway — a silent no-op
+that still returns `status: completed` would look identical to a successful fix from this
+skill's side, with no field to catch the difference.
+
+**Do.** Confirm live, on a real cluster: when `modify_dashboard` is asked to do something
+its schema says it doesn't support, does it return `needs_input`/`failed`, or `completed`
+with no actual change made? If the latter, this skill's retry-and-verify-via-`ts tml
+verify-render` flow is already the only reliable check (since it independently re-inspects
+the real exported tile rather than trusting the tool's own status) — document that
+explicitly rather than implying `modify_dashboard`'s own response is trustworthy here.
+
+**Target:** 2026-12-31, or the next SpotterViz-liveboard work with live access.
+
+## BL-616 — `verify-render` may false-flag a simple ADVANCED_* tile as blank `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** PR #679 round-2 review.
+
+**What.** `tml_lint.chart_tiles_missing_axis` (shared by `ts tml lint` and `ts tml
+verify-render`, via `_CHART_NEEDS_AXIS`) flags any tile of a phase-1 cartesian `ADVANCED_*`
+type carrying neither `axis_configs` nor `custom_chart_config` as blank. But
+`thoughtspot-chart-types.md`'s "Verified rules" section (live-verified on se-thoughtspot)
+documents that ThoughtSpot itself drops BOTH blocks on export for a trivial x/y Muze
+chart, auto-resolving from `chart_columns` instead — the exact same shape. A correctly
+rendering, simple SpotterViz-built `ADVANCED_*` tile may therefore false-flag as
+`blank_chart_tiles`, sending the skill down the "ask `modify_dashboard` to add a
+replacement" path for a tile that was never actually broken.
+
+**Do.** Export one SpotterViz-built Liveboard with a simple `ADVANCED_*` tile on a 26.7+
+cluster, run `ts tml verify-render` against it, and open the tile in the product to
+confirm whether it actually renders. If it renders fine despite the flag, either narrow
+`_CHART_NEEDS_AXIS` to exclude the phase-1 cartesian types for the no-block case
+specifically, or find another signal (e.g. `chart_columns` count/shape) that
+distinguishes "trivially auto-resolved" from "genuinely missing an encoding it needs" —
+don't guess at the distinction without a live render check, since a false negative here
+(missing a real blank tile) is worse than today's false positive.
+
+**Target:** 2026-12-31, or the next SpotterViz-liveboard work with live access.

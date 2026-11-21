@@ -61,6 +61,14 @@ directory. Plain markdown — no external library needed.
 
 ### Classification rules
 
+**Dashboard-tile zones describe what's recognizable from the LookML alone, not a
+guarantee of the built result.** Audit mode never calls SpotterViz (no ThoughtSpot auth,
+no TMLs generated) — it classifies what the *source* construct is, so the migrate-mode
+report can set expectations before the build runs. A "CLEAN" dashboard tile means the
+construct has a clear SpotterViz instruction to compose from; it still goes through
+`ts tml verify-render` and a filter-scoping check in migrate mode (`spotterviz-liveboard-
+build.md`), same as any other tile — "CLEAN" here is not "self-verifying."
+
 Assign every field and every dashboard tile to exactly one zone:
 
 **CLEAN** — no post-import action needed:
@@ -85,6 +93,11 @@ Assign every field and every dashboard tile to exactly one zone:
 - `looker_donut_multiples` tile (split into N PIE tiles)
 - PDT SQL adapted from one warehouse dialect to another
 - `extends:` view inheritance (flattened at parse time)
+- `looker_funnel` tile — ThoughtSpot's `FUNNEL` chart type is a direct equivalent; migrates
+  as a `FUNNEL` tile, not a substitute
+- `looker_map` / `looker_geo_choropleth` tile — ThoughtSpot's `GEO_AREA`/`GEO_BUBBLE` chart
+  types are a direct equivalent, but need the underlying dimension geo-tagged (else the
+  tile exports empty); verify the geo dimension's config after import
 
 **BLOCKED** — will not appear in ThoughtSpot after migration:
 - `type: location`
@@ -93,8 +106,6 @@ Assign every field and every dashboard tile to exactly one zone:
 - `all_access_grants:` / `required_access_grants:`
 - `derived_table: { explore_source: }` (native derived table)
 - Liquid/Jinja templating (`{{ }}`) in SQL
-- `looker_map` / `looker_geo_choropleth` tile
-- `looker_funnel` tile
 - Dashboard `link:` (cross-dashboard navigation)
 - `sql_always_having:`
 
@@ -201,6 +212,8 @@ Table — one row per caveat type found; omit rows with count = 0:
 | 6 | Running total measures | {n} fields ({names}) | Cumulative sum needs a sort column — verify sort direction is correct | Open an answer using this field and check sort order |
 | 7 | Complex calculated measures | {n} fields ({names}) | SQL inlined and translated — spot-check output values against Looker | Side-by-side comparison of a known total recommended |
 | 8 | Derived table SQL adapted | {n} views ({names}) | SQL rewritten for the ThoughtSpot warehouse — verify row counts match | Run a search on the SQL view; compare counts to source |
+| 9 | Map chart tiles | {n} tiles ({names}) | ThoughtSpot's `GEO_AREA`/`GEO_BUBBLE` chart type needs the dimension geo-tagged, else the tile exports empty | Worksheet → column settings → Geo; re-verify the tile isn't blank |
+| 10 | Funnel chart tiles | {n} tiles ({names}) | Migrates to ThoughtSpot's `FUNNEL` chart type — verify stage order and drop-off values match Looker | Open the funnel tile in the liveboard |
 
 If no CAVEAT items found: write single line "No items in this category. ✅"
 
@@ -227,12 +240,10 @@ flag `sql_always_where:` rows with "⚠️ Go-live blocker" in the Recommended a
 | 1 | Row-level security rules | {n} explores | Looker's always-on row filters have no ThoughtSpot TML equivalent | ⚠️ Go-live blocker — configure Row Level Security in ThoughtSpot Admin before giving users access |
 | 2 | Column-level access grants | {n} fields | Looker permission groups have no TML equivalent | Set column visibility per group manually in ThoughtSpot after import |
 | 3 | Spatial / map dimensions | {n} fields ({names}) | No lat/lon spatial column type in ThoughtSpot | Keep as plain number columns; use geo address config if map display is needed |
-| 4 | Map chart tiles | {n} tiles ({names}) | No map chart type in ThoughtSpot Liveboard TML | Rebuild as a table or bar chart; or use ThoughtSpot's built-in geo search |
-| 5 | Native derived tables | {n} views ({names}) | Defined using a Looker explore, not raw SQL | Rewrite as raw SQL in Looker first, then re-run the audit |
-| 6 | Dynamic SQL (Liquid/Jinja) | {n} fields ({names}) | Template expressions cannot be resolved without Looker | Provide the resolved literal values (e.g. actual schema name) and re-run |
-| 7 | Multi-value list dimensions | {n} fields ({names}) | No multi-value column type in ThoughtSpot | Use a text concatenation formula post-migration if needed |
-| 8 | Funnel chart tiles | {n} tiles ({names}) | No funnel chart type in ThoughtSpot Liveboard TML | Replaced with a table placeholder — rebuild as a funnel in ThoughtSpot UI |
-| 9 | Cross-dashboard navigation | {n} links | ThoughtSpot liveboards have no tile-to-liveboard links in TML | Add navigation links manually after import |
+| 4 | Native derived tables | {n} views ({names}) | Defined using a Looker explore, not raw SQL | Rewrite as raw SQL in Looker first, then re-run the audit |
+| 5 | Dynamic SQL (Liquid/Jinja) | {n} fields ({names}) | Template expressions cannot be resolved without Looker | Provide the resolved literal values (e.g. actual schema name) and re-run |
+| 6 | Multi-value list dimensions | {n} fields ({names}) | No multi-value column type in ThoughtSpot | Use a text concatenation formula post-migration if needed |
+| 7 | Cross-dashboard navigation | {n} links | ThoughtSpot liveboards have no tile-to-liveboard links in TML | Add navigation links manually after import |
 
 If no BLOCKED items found: write single line "No items in this category. ✅"
 

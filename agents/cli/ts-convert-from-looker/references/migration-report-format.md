@@ -82,7 +82,7 @@ Opening paragraph (plain English):
 | Tables registered | {n} |
 | Tables skipped (PDT/derived) | {n} |
 | Models imported | {n} |
-| Liveboards imported | {n} |
+| Liveboards imported | {n} ({reason if 0 despite dashboards present — e.g. "SpotterViz unavailable: {why}") |
 | Formulas translated | {n} ({n} exact, {n} approximate, {n} omitted) |
 | **Items ready to use** | **{n} — no action needed** |
 | **Items to verify** | **{n} — spot-check recommended** |

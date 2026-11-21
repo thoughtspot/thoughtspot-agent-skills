@@ -355,7 +355,8 @@ express the step). Plain ranges (no `granularity`) keep `range_config`.
   aggregation function.
 - After importing a model with parameters, **export the model** and read the
   `parameters[].id` field — ThoughtSpot assigns the UUID on import. You need this UUID
-  for Step 10f (liveboard parameter chips).
+  for the Step 10 SpotterViz build instructions (describing a parameter as an
+  adjustable control).
 
 ---
 
@@ -809,7 +810,7 @@ references the parameter, which must exist on the model first.
 > *semantic reinterpretations*, not literal 1:1 translations — a column set, a filter, dropped
 > scaffolding, or a deferral may not behave exactly like the Tableau set. For **each** set, surface
 > its outcome and ask the user to confirm it matches intent, in **both** the Step 7 review checkpoint
-> and the Migration Summary (Step 10g) / Step 12 report. Show a per-set line with its kind and how it
+> and the Migration Summary (part of the Step 10 SpotterViz build instructions) / Step 12 report. Show a per-set line with its kind and how it
 > was handled, e.g.:
 > ```
 > Sets ({N}) — review each result matches intent:
