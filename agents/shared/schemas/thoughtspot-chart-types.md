@@ -299,11 +299,17 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
 - So: **Legacy type → `axis_configs`; Muze type → `custom_chart_config`** (or omit both for a
   trivial x/y Muze chart). Never mix a Legacy type with `custom_chart_config`.
 
-### Guidance for generators (Tableau skill, liveboard-builder)
+### Guidance for generators (liveboard-builder; no longer `ts-convert-from-tableau`)
+
+**Since the 2.0.0 SpotterViz-mandatory redesign, `ts-convert-from-tableau` no longer emits
+Answer/visualization TML directly — SpotterViz builds and owns it, choosing its own chart
+type and encoding.** This Legacy-vs-`ADVANCED_*` choice does not apply to that skill
+anymore; it remains relevant to any other generator that still emits chart TML by hand (the
+still-unbuilt `ts-object-liveboard-builder`, or a converter that hasn't moved to SpotterViz).
 
 - **The new library is the product default (26.7+), so a Legacy tile is now an opt-out,
-  not a neutral default.** The repo's generators still emit Legacy names by default (the
-  Tableau skill asks, Legacy first). Two things hold the switch back (BL-449):
+  not a neutral default.** A hand-authoring generator still emitting Legacy names by
+  default should flip that. Two things hold the switch back (BL-449):
   1. The added types are verified only in a dev build's enum, whose release cannot be
      read. Emitting one into a cluster on an earlier release fails the **whole** import.
   2. `ADVANCED_*` + `axis_configs` loses the encoding on export (below), so a Tableau Color
@@ -319,8 +325,9 @@ Example: a Tableau bar of customers by Region, colored by Gender → one
   verified on a named release. Map Tableau's Color shelf → `slice-with-color` and small
   multiples → `trellis-by` for a closer migration. Respect the limits: at most 2 axes and
   one slice-by-color attribute.
-- The shelf model is also a cleaner fit for the liveboard-builder's intent → encoding step
-  (series and small-multiples become first-class shelves rather than implicit extra columns).
+- The shelf model is also a cleaner fit for a hand-authoring generator's intent → encoding
+  step (series and small-multiples become first-class shelves rather than implicit extra
+  columns).
 - `client_state_v2` differs slightly between the two (the Muze export omits
   `responsiveLayoutPreference` and trims some `kpiColumnProperties`/`systemSeriesColors`
   defaults) — these are cosmetic defaults, not required for a valid import.
@@ -373,7 +380,8 @@ UTF-8 text, base64-encoded.
 
 ## Analytical intent → chart type (recommendation mapping)
 
-Used by the liveboard-builder recommendation engine and the Tableau skill's Step 10a.
+Used by a hand-authoring generator's recommendation engine, and by the Tableau/Looker
+skills' Step 10 chart-intent wording when composing SpotterViz build instructions.
 
 | Analytical intent | First choice | Alternatives |
 |---|---|---|

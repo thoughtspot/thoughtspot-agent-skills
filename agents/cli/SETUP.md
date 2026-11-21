@@ -35,6 +35,36 @@ Then run `claude` to launch.
 - Python 3.9–3.13 (Python 3.14 has a macOS `libexpat` incompatibility — see [Troubleshooting](#troubleshooting))
 - Git (to clone or update the repo)
 
+### 3. SpotterViz MCP server (for Tableau/Looker liveboard migration)
+
+If you plan to use `ts-convert-from-tableau` or `ts-convert-from-looker` to build
+Liveboards (not just convert Models/Tables), set up and connect the **SpotterViz** MCP
+server *before* you reach that step — these skills no longer hand-author Liveboard TML, so
+without it liveboard generation cannot run (Model/Table conversion is unaffected either
+way). Check these up front, before starting a migration — `check_connectivity` only
+confirms the token/instance URL are valid, not these, so a user missing one of them
+passes connectivity and fails partway through instead:
+
+- **ThoughtSpot cluster version**: 10.11.0.cl or later (26.2.0.cl or later for Spotter 3).
+- **Privileges**: data download and content-creation privileges on the target
+  ThoughtSpot instance.
+- **Node.js 22+**: required by `mcp-remote` (the MCP transport Claude Code uses to reach
+  the SpotterViz server; Cortex Code CLI's native `cortex mcp add` doesn't need it).
+
+See [`agents/shared/schemas/spotterviz-liveboard-build.md`](../shared/schemas/spotterviz-liveboard-build.md)
+for the MCP config (including the version-pinned `mcp-remote` command), the interactive
+OAuth login, and the per-Model `is_spotter_enabled` gate.
+
+**Works in both runtimes, but has to be added in each.** Claude Code picks up SpotterViz
+either as a claude.ai connector (tools surface as `mcp__claude_ai_ThoughtSpot_Spotter__*`)
+or as a local/project `mcp.json` entry. Cortex Code CLI adds it via `cortex mcp add
+<name> <url>` instead (Snowflake's documented way to add an MCP server); either way the
+skill's connectivity check looks for the SpotterViz tool capability under whatever prefix
+your setup produced, not a hardcoded name — see `spotterviz-liveboard-build.md` for the
+exact config for each runtime. If setup hasn't been done yet, the skill detects that and
+stops cleanly at the liveboard step rather than failing partway through a migration; Model/
+Table conversion is unaffected either way.
+
 ---
 
 ## Step 1: Clone the repository

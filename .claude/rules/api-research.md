@@ -100,9 +100,14 @@ on a newer build.
   invariants"). MCP queries about TML shape may contradict the schemas — trust
   the schemas, not the MCP, when they disagree.
 - **Snowflake-side behaviour** — out of scope. Use Snowflake docs directly.
-- **In-skill runtime decisions** — skills should call `ts` CLI, not the MCP,
-  during execution. The MCP is a research/authoring tool; the CLI is the
-  runtime tool. Mixing them adds complexity without benefit.
+- **In-skill runtime decisions** — skills should call `ts` CLI, not the
+  **SpotterCode** MCP, during execution. SpotterCode is a research/authoring
+  tool; the CLI is the runtime tool for everything SpotterCode covers. Mixing
+  them adds complexity without benefit. This doesn't extend to **SpotterViz**,
+  a different MCP server with a genuine runtime purpose (building Liveboards).
+  `ts tableau build-liveboard` is a real, existing deterministic alternative
+  (BL-530 tracks whether to keep it as a fallback) — see
+  `agents/shared/schemas/spotterviz-liveboard-build.md`.
 
 ---
 
