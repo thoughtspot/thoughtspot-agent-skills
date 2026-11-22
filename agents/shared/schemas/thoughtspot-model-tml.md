@@ -1,4 +1,4 @@
-<!-- currency: thoughtspot — 2026-11 (2026-11-22: as-of joins REMOVED as a claimed capability -- a bare `>=` is not an as-of join and fans the fact table out (live probe on se-thoughtspot: half-open range 32 = correct, end condition dropped 88; warehouse oracle agreed on both). Confirms the 2026-09-08 fidelity study and BL-240. Range joins live-verified the same day, generated SQL captured. 2026-11-17: live-verified that joins[].cardinality REJECTS MANY_TO_MANY, in both the Model inline and Table joins_with contexts; the enum is MANY_TO_ONE/ONE_TO_MANY/ONE_TO_ONE. 2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep; 2026-07-31: live-verified (VALIDATE_ONLY on se-thoughtspot) that an inline model join REQUIRES type and cardinality together -- "both  type and cardinality should be defined" -- and re-confirmed LEFT_OUTER accepted on a real Model's inline joins (BL-174); 2026-09-23: documented model_instructions.data_model_instructions, which had been absent from this file while being read in production -- written up from EXISTING live evidence (confirmed in exported TML, and the ai/instructions/get twin tested on champ-staging 2026-06-18), NOT from a new product probe, so the leading anchor date is deliberately left at 2026-07) -->
+<!-- currency: thoughtspot — 2026-11 (2026-11-22: as-of joins REMOVED as a claimed capability -- a bare `>=` FILTERS, it does not SELECT the latest of several qualifying rows, so it is sound only where the data guarantees one match (live probe on se-thoughtspot: half-open range 32 = correct, end condition dropped 88; warehouse oracle agreed on both). Confirms the 2026-09-08 fidelity study and BL-240. Range joins live-verified the same day, generated SQL captured. 2026-11-17: live-verified that joins[].cardinality REJECTS MANY_TO_MANY, in both the Model inline and Table joins_with contexts; the enum is MANY_TO_ONE/ONE_TO_MANY/ONE_TO_ONE. 2026-07-30: live-verified on se-thoughtspot — columns[].description confirmed on formula-backed entries, no data_type on formulas[]/columns[], and the single join-type vocabulary INNER/LEFT_OUTER/RIGHT_OUTER/OUTER confirmed in both Model and Table contexts; earlier 2026-07-30: added columns[] properties.calendar / index_priority / is_attribution_dimension, widened index_type + currency_type from a product-docs sweep; also 2026-07-30, from a 500-document TML property census on se-thoughtspot covering 143 Models: added action_object_associations[] and columns[].properties.value_casing, extended geo_config with the country boolean and custom-map roles, rewrote the calendar value vocabulary, recorded index_priority as a non-integral number, loosened the joins[] either/or framing for 12 observed hybrids, and raised the lesson_plans evidence to 8 Models; prior: validated in 2026-07-11 external sweep; 2026-07-31: live-verified (VALIDATE_ONLY on se-thoughtspot) that an inline model join REQUIRES type and cardinality together -- "both  type and cardinality should be defined" -- and re-confirmed LEFT_OUTER accepted on a real Model's inline joins (BL-174); 2026-09-23: documented model_instructions.data_model_instructions, which had been absent from this file while being read in production -- written up from EXISTING live evidence (confirmed in exported TML, and the ai/instructions/get twin tested on champ-staging 2026-06-18), NOT from a new product probe, so the leading anchor date is deliberately left at 2026-07) -->
 
 # ThoughtSpot Model TML — Construction Reference
 
@@ -162,8 +162,8 @@ form — emitting both is not necessary and the precedence between them is unver
 
 **Non-equality joins: zero observed.** No inline join in the 143-Model census contains `>=`, `<=`,
 `>` or `<` in its `on` expression. The range support documented below is **live-verified**
-(2026-11-22, see below); as-of is **not expressible at all** and the claim that it was has been
-removed.
+(2026-11-22, see below). As-of is **not expressible at all** and the claim that it was has been
+removed; a bare `>=` is still a sound condition where the data guarantees one qualifying row.
 
 **Join-type vocabulary — re-verified 2026-07-30 on `se-thoughtspot`.** The `FULL_OUTER`
 rejection recorded here from an earlier real import failure is **still current** on this
@@ -215,11 +215,20 @@ tables with valid-from/valid-to windows.
 
 > **As-of joins are NOT expressible in a ThoughtSpot join.** This file previously carried a
 > second example labelled "ASOF join", using `=` on a key plus a bare `>=` on a temporal
-> column. That is not an as-of join: `>=` matches **every** row at or before the probe value,
-> where as-of matches only the latest one. It silently fans the fact table out and inflates
-> every measure over it. An as-of needs a top-1-per-group (`QUALIFY ROW_NUMBER() = 1`, or a
-> native `ASOF JOIN`), which the `on` expression cannot express. Model it as a **range** join
-> by giving the dimension an end column, or decline it.
+> column. That is not an as-of join. **As-of *selects* the latest qualifying row; `>=` only
+> *filters*,** and matches every row at or before the probe value. Selecting one of several
+> needs a top-1-per-group (`QUALIFY ROW_NUMBER() = 1`, or a native `ASOF JOIN`), which the
+> `on` expression cannot express.
+>
+> **A bare `>=` is a sound join condition where the data guarantees one qualifying row** — a
+> single effective-from row per key, say. Nothing here says otherwise. The defect is using it
+> to stand in for as-of, whose whole purpose is to pick the latest when *several* qualify.
+> That substitution moves the correctness burden from the query to the data: right for data
+> with one match, silently wrong for data with many, with no error and a clean lint either
+> way. Nothing in the join or the document declares which kind of data it is.
+>
+> Where several rows can qualify, model it as a **range** join by giving the dimension an end
+> column, or decline the construct.
 >
 > Measured twice, independently:
 >
@@ -227,10 +236,13 @@ tables with valid-from/valid-to windows.
 >   silent and clean-linting (`ts-convert-from-snowflake-sv/references/coverage-matrix.md`
 >   row 9; **BL-240**);
 > - a direct probe on `se-thoughtspot`, 2026-11-22. One fact table of 4 rows against a
->   6-row period dimension, with the warehouse as oracle. The half-open range returned
->   **32**, the correct figure; the same model with the end condition dropped returned
->   **88**. ThoughtSpot passes both conditions through verbatim to the warehouse, so the
->   fan-out happens in the generated SQL, not in a ThoughtSpot layer that might guard it.
+>   6-row period dimension holding **three qualifying rows per key**, with the warehouse as
+>   oracle. The half-open range returned **32**, the correct figure; the same model with the
+>   end condition dropped returned **88**. ThoughtSpot passes both conditions through
+>   verbatim to the warehouse, so the fan-out happens in the generated SQL, not in a
+>   ThoughtSpot layer that might guard it. (With one qualifying row per key both forms would
+>   have returned 32 — which is the point: the operator alone does not tell you which case
+>   you are in.)
 
 **Notes:**
 - Use `LEFT_OUTER` — if the range has no match, the fact row is preserved with
