@@ -510,8 +510,8 @@ are roughly ordered by value÷effort.
 | BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
 | BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
 | BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
-| BL-615 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
-| BL-616 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
+| BL-617 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
+| BL-618 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18552,7 +18552,7 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
 
 **Target:** 2027-01-31.
 
-## BL-615 — ts-audit Data Cache and Formulas: review nits deferred from #744 `Tier 3`
+## BL-617 — ts-audit Data Cache and Formulas: review nits deferred from #744 `Tier 3`
 
 **Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
 blocker or should-fix left; these were deferred, not declined).
@@ -18586,9 +18586,28 @@ the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered
    Dashboard Data Cache cell's "(to confirm)" or "Not checked:" hover text (both verified by
    hand in headless Chrome).
 
+**Added from the final review of the Model tabs PR (2026-11-25), all Nits, none seen in
+real data:**
+
+- **A mid-word `oauth` now reads no OAuth.** The word-start test that stopped `no_auth`
+  reading as OAuth also drops `useoauth`, `snowflakeoauthtoken`, `SFOAuthToken` and
+  `AADOAuthTenant`, which 0.221.0 read as firm OAuth; with a plain host such a Model can
+  read Can use. Read a set key with a mid-word `oauth` as OAuth to confirm (`oauth_m2m`)
+  instead, or settle it with a names-only listing of the cluster's connection keys (as for
+  open-items #17). Settle this one first: if such a key exists it is a Blocker-class result.
+- **`_names_oauth` can raise `IndexError`** (`connection_facts.py:176-179`): it searches
+  `text.lower()` but indexes `text`, and `lower()` lengthens "İ". Match case-insensitively on
+  `text` itself.
+- **P24's rule text**: the OAuth-name clause omits that the setting must be set, and never
+  defines a word start; CHANGELOG, the FACTS_VERSION note and SKILL.md 3.25.0 cite `no_auth`
+  as the change since 0.221.0 where it was `noAuth` and mid-word `oauth`; host-key
+  normalisation also lets a configuration whose only readable key is `account_name` be
+  judged rather than read Not assessed; `data_cache.py:30` still says "OAuth client ID and
+  secret".
+
 **Target:** 2027-01-31.
 
-## BL-616 — the hook's interpreter search falls back to a bare `python3` that may lack pytest `Tier 3`
+## BL-618 — the hook's interpreter search falls back to a bare `python3` that may lack pytest `Tier 3`
 
 **Filed:** 2026-11-19. **Source:** a Homebrew upgrade on a maintainer's machine.
 
