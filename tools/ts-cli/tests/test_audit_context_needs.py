@@ -131,7 +131,8 @@ def test_build_context_rejects_what_is_not_a_requires_value(bad):
 def test_needs_for_is_the_union_of_the_selected_rules_requires():
     cat = load_catalog()
     assert needs_for(cat, ["A"], "general") == {"model_tml", "ai_instructions"}
-    assert needs_for(cat, ["H"], "general") == {"model_tml", "dependents", "sets", "answers"}
+    assert needs_for(cat, ["H"], "general") == {"model_tml", "dependents", "sets", "answers",
+                                                "usage"}
     assert needs_for(cat, ["P"], "general") == {"model_tml", "metadata", "table_tml",
                                                 "calendars", "connections"}
     assert needs_for(cat, [], "general") == set()
@@ -147,7 +148,8 @@ SHIPPED_NEEDS = {
     "A": {"model_tml", "ai_instructions"},
     # D15 (duplicate Table-level joins, 2026-11) declares Table TML, always fetched anyway.
     "D": {"model_tml", "metadata", "table_tml"},
-    "H": {"model_tml", "dependents", "sets", "answers"},
+    # H17 (a Model not queried in more than 90 days, 2026-11-25) requires the usage.
+    "H": {"model_tml", "dependents", "sets", "answers", "usage"},
     # P22 (a connection defining custom calendars, 2026-11-18) requires the calendars,
     # and P24 (a connection using OAuth, PrivateLink or a template variable) the
     # connections' settings.

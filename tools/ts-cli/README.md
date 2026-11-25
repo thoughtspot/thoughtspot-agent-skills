@@ -4874,7 +4874,7 @@ ts audit report audit.json -o report.html
 | `--angles`, `-a` | all | Comma-separated catalog categories, a subset of `A,D,H,P,S`; a rule runs when any of its categories is selected. A repeated letter counts once; an unknown letter, or a value naming none (`""`, `","`), is a usage error — omit the flag for all |
 | `--assessment` | `general` | The assessment profile (`spotter` = Spotter-ready, `general`): which bar the profile-aware rules measure against. What each profile changes — pass marks, severities, lines — is generated from the rule catalog into `agents/cli/ts-audit/SKILL.md` (Step 2b) and `agents/cli/ts-audit/references/check-catalog.md`; it lives in `ts_cli/audit/catalog/` (`profiles.yaml` and each rule's `profiles:` block). The report header names the assessment used. With `--snapshot-in` the default is the assessment the snapshot was captured with; passing the flag overrides it (noted on stderr) |
 | `--output`, `-o` | stdout | Write the JSON report to a file |
-| `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, custom calendars, connection settings (derived facts only), warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `needs` — the data fetched —, `files`). Refused if the data would not read back unchanged. The directory is checked before anything is fetched: refused inside a git work tree (a snapshot is real exported TML), or when it is non-empty and holds no earlier snapshot (a `manifest.json` that reads as one `--snapshot-out` wrote; any other file of that name does not count) |
+| `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, custom calendars, connection settings (derived facts only), usage (GUIDs and counts), warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `needs` — the data fetched —, `files`). Refused if the data would not read back unchanged. The directory is checked before anything is fetched: refused inside a git work tree (a snapshot is real exported TML), or when it is non-empty and holds no earlier snapshot (a `manifest.json` that reads as one `--snapshot-out` wrote; any other file of that name does not count) |
 | `--snapshot-in` | — | Audit a `--snapshot-out` directory instead of fetching: no profile, no network. `--angles` defaults to the captured angles. Any selection may be replayed whose rules read only data the snapshot captured (its manifest's `needs`); one whose rules read data that was not captured is an error naming the rules and the missing data — e.g. `--angles H` (Answers, Sets) on a snapshot taken with `--angles A`, while `--angles D` on the same snapshot replays, since D reads only always-fetched data. Cannot be combined with `--snapshot-out` |
 
 **Fire rates.** `ts audit fire-rates --snapshot-in <dir> [--assessment general|spotter]`
@@ -4891,8 +4891,8 @@ whatever it finds (1 on a usage error or an unreadable snapshot). `scripts/pr-re
 
 **What is fetched.** Model TML with its associated Table TML, metadata headers (of the
 Models and of every source they use, SQL Views included) and dependents, always; AI
-instructions, Answer TML, Sets, the connections' custom calendars and the connections'
-settings only when a selected rule declares them (`requires`/`uses`), so a narrow
+instructions, Answer TML, Sets, the connections' custom calendars, the connections'
+settings and each Model's usage only when a selected rule declares them (`requires`/`uses`), so a narrow
 `--angles` fetches less. The JSON records
 what was fetched as `corpus.fetched_needs`. On the AI-instructions lookup, a final 401 (after
 the client's one re-authentication), a 429, or any `requests` exception raised by the
@@ -4933,6 +4933,27 @@ an older version, or none (any snapshot written before ts-cli 0.221.0, which rea
 Databricks pair as firm OAuth), has its connection facts counted as not captured:
 replaying P from it is refused, saying so, and so is `ts audit fire-rates` on it,
 which replays every angle the snapshot captured. Capture it again.
+
+**Usage (`usage`, for H17 and the report).** Read from ThoughtSpot's own system Model
+"TS: AI and BI Stats", found by its exact name with `metadata/search`, through
+`POST /api/rest/2.0/searchdata` (`record_size: -1`): the history's first and last query
+time, each Model's last query time over all the history it keeps, and each Model's
+queries and distinct users over the last 180 days (the keyword filter
+`[TS Query Start Time].'last 180 days'`). Every value is read by its column name, since
+`searchdata` answers its columns in an order of its own. A paged `metadata/search` of
+the LOGICAL_TABLEs the user can see (500 a page, hidden objects included) says which
+Model IDs match nothing visible now. The current Org comes from `auth/session/user`
+(`current_org`) and is recorded with the usage: `searchdata` answers the usage of the
+Org the session is in, not the Primary Org's. The audit keeps GUIDs and counts only
+(the system Model has no Model names); a row with a blank Model ID is dropped and
+counted. The history lags by about a day. A final 401, a 429 or a `requests` exception
+aborts once; the system Model missing or ambiguous, any other refusal, a non-JSON
+answer or one that cannot be read whole leaves the usage unread (null), with a warning
+naming the status and path only, and H17 judges no Model while the report says "Not
+read". A failed session or visible-object search is a warning that leaves the Org, or
+the list of Models that no longer exist, unknown. A snapshot written before ts-cli
+0.223.0 holds no usage, so replaying H from it is refused: capture it again. Logic in
+`ts_cli/audit/usage.py`.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

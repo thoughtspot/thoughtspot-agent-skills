@@ -33,6 +33,11 @@ class AuditContext:
     # value. Fetched when a selected rule declares `connections`; None when not fetched
     # or the search failed, as for `calendars` (P24 then skips every Model).
     connections: Optional[list] = None
+    # Per-Model usage from the system Model "TS: AI and BI Stats" (audit/usage.py:
+    # GUIDs and counts, the Org it was read in), fetched when a selected rule declares
+    # `usage`. None when not fetched or not read, never an empty reading: H17 then
+    # judges no Model, and the report says "Not read", never "unused".
+    usage: Optional[dict] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -139,6 +144,7 @@ def make_context(
     assessment="general",
     calendars=None,
     connections=None,
+    usage=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -149,6 +155,7 @@ def make_context(
         answers=answers or [],
         calendars=calendars,  # None and [] differ: not fetched, and fetched with none
         connections=connections,  # likewise
+        usage=usage,  # None: not fetched or not read
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -256,16 +263,18 @@ _FATAL_STATUSES = {401: "the credential was refused after re-authentication",
                    429: "rate limited — retry later"}
 
 
-def _read_answer(resp: Any, path: str, body: bool = True) -> Tuple[Any, Optional[str]]:
+def _read_answer(resp: Any, path: str, body: bool = True,
+                 method: str = "POST") -> Tuple[Any, Optional[str]]:
     """`(decoded JSON, None)` for a 2xx JSON answer to a conditional fetch; `(None,
     reason)` for any other answer, the reason being `format_http_error`'s secret-free
     line (a final 1xx or 3xx too: `resp.ok` passes both) or the JSON error. A final 401
     or a 429 (_FATAL_STATUSES) ends the run once, `SystemExit(1)`. With `body=False`
     the line names the status and path only, never the response body (format_http_error
-    quotes up to 500 characters of it): for a search whose answers hold credentials."""
+    quotes up to 500 characters of it): for a search whose answers hold credentials.
+    `method` is the request's, for the line."""
     from ts_cli.client import format_http_error
-    line = format_http_error("POST", path, resp) if body \
-        else f"ThoughtSpot API {resp.status_code} on POST {path}"
+    line = format_http_error(method, path, resp) if body \
+        else f"ThoughtSpot API {resp.status_code} on {method} {path}"
     if resp.status_code in _FATAL_STATUSES:
         print(f"{line} — {_FATAL_STATUSES[resp.status_code]}; aborting the audit",
               file=sys.stderr)
@@ -676,7 +685,8 @@ def build_context(
     TML of the dependents' Answers), `sets` (Set discovery and each Set's consumers) and
     `calendars` (every connection's registered custom calendars, one paged search) and
     `connections` (each connection's derived facts: two paged searches, the
-    connections with details and their CONNECTION metadata headers).
+    connections with details and their CONNECTION metadata headers) and `usage` (each
+    Model's queries, from the system Model TS: AI and BI Stats: audit/usage.py).
     `dependents` may be in `needs` but is fetched regardless. Anything that is not a
     `requires` value — a category letter from a caller still passing angles — is
     rejected, not silently ignored.
@@ -692,6 +702,7 @@ def build_context(
     answers = []
     calendars = None
     connections = None
+    usage = None
 
     # Model TML (with associated Table TML), metadata and dependents below are fetched
     # for every audit and must stay so: rules read Model and Table TML without declaring
@@ -767,6 +778,9 @@ def build_context(
         calendars = _fetch_calendars(client, warnings)
     if "connections" in needs:
         connections = _fetch_connections(client, warnings)
+    if "usage" in needs:
+        from ts_cli.audit.usage import fetch_usage
+        usage = fetch_usage(client, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")
@@ -780,6 +794,7 @@ def build_context(
         answers=answers,
         calendars=calendars,
         connections=connections,
+        usage=usage,
         model_guids=model_guids,
         warnings=warnings,
     )

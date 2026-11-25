@@ -51,6 +51,9 @@ function buildCleanup(D){
     }
   });
 
+  /* Models the usage history names that match nothing the audit's user can see now */
+  buildGoneSection(c);
+
   /* Wire severity filter */
   function applySevFilter(){
     $$("tr[data-severity]",c).forEach(function(tr){
@@ -183,6 +186,59 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
     sec.appendChild(showBtn);
   }
 
+  container.appendChild(sec);
+}
+
+/* "Used but no longer exist": each Model ID in the usage (D.C.us.g, usage.js) that
+   matches no Model, Table or View the audit's user can see in that Org now, with its
+   queries, users and last query. The system Model keeps no names, so only the ID. Not
+   shown when no selected rule fetched usage; "Not read" when it was fetched and not read,
+   or when the objects the user can see could not be listed. */
+function buildGoneSection(container){
+  var state = usageState();
+  if(state === "absent") return;
+  var sec = el("div", "cleanup-section usage-gone");
+  var gone = state === "read" ? D.C.us.g : null;
+  var head = "Used but no longer exist"+(state === "read" ? " — usage of "+usageOrgName() : "");
+  sec.innerHTML = '<h3>'+esc(head)+(gone ? ' ('+gone.length+')' : '')+'</h3>';
+  if(state === "not_read" || !gone){
+    var why = state === "not_read"
+      ? "Not read: the audit could not read usage, so it cannot say which Models no longer exist."
+      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models no longer exist.";
+    sec.appendChild(mutedNote(why, "empty-state"));
+    container.appendChild(sec);
+    return;
+  }
+  var w = D.C.us.w || 180;
+  sec.appendChild(mutedNote("Model IDs in the usage history that match no Model, Table or View "+
+    "the audit's user can see in this Org now: deleted, or not shared with that user. The "+
+    "usage history keeps no names, only the ID.", "usage-gone-note"));
+  if(!gone.length){
+    sec.appendChild(mutedNote("None.", "empty-state"));
+    container.appendChild(sec);
+    return;
+  }
+  var MAX_VISIBLE = 20;
+  var html = '<div style="overflow-x:auto"><table class="cleanup-table usage-gone-table"><thead><tr>'+
+    '<th>Model ID</th><th>Queries ('+w+' days)</th><th>Users ('+w+' days)</th><th>Last queried</th>'+
+    '</tr></thead><tbody>';
+  gone.forEach(function(g, i){
+    html += '<tr'+(i >= MAX_VISIBLE ? ' class="usage-overflow" style="display:none"' : '')+'>'+
+      '<td style="font-family:var(--mono);font-size:11px">'+esc(String(g[0]))+'</td>'+
+      '<td>'+esc(String(g[1]))+'</td><td>'+esc(String(g[2]))+'</td>'+
+      '<td>'+esc(usageDate(g[3]))+'</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  sec.insertAdjacentHTML("beforeend", html);
+  if(gone.length > MAX_VISIBLE){
+    var showBtn = el("button", "show-all-btn", "Show all "+gone.length+" IDs");
+    showBtn.style.cssText = "margin:8px 0 4px;padding:6px 16px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-card);cursor:pointer;font-size:12px;color:var(--accent);";
+    showBtn.addEventListener("click", function(){
+      $$(".usage-overflow", sec).forEach(function(tr){ tr.style.display = ""; });
+      showBtn.style.display = "none";
+    });
+    sec.appendChild(showBtn);
+  }
   container.appendChild(sec);
 }
 

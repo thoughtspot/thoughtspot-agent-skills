@@ -24,6 +24,7 @@ function scorecardHeader(guid, cm){
       titleHtml += '<div class="stat-item" title="'+esc(READINESS_TITLE)+'"><div class="stat-val readiness" data-level="'+esc(cm.rs.l)+'">'+
                    Math.floor(cm.rs.s)+'/100</div><div class="stat-lbl">Spotter readiness</div></div>';
     }
+    titleHtml += scorecardUsageStats(cm);
     titleHtml += '</div>';
   }
 
@@ -39,6 +40,26 @@ function scorecardHeader(guid, cm){
   }
   hdr.innerHTML = titleHtml;
   return hdr;
+}
+
+/* The Model's usage in its header: days since its last query, and its queries and
+   distinct users over the window (usage.js); each "Not read" when usage was fetched and
+   not read, nothing when no selected rule fetched it. */
+function scorecardUsageStats(cm){
+  var state = usageState();
+  if(state === "absent") return "";
+  var lu = usageLastUsed(cm), us = cm.us, w = state === "read" ? (D.C.us.w || 180) : 180;
+  var items = [
+    {v: lu.text, l: "Last used", t: lu.title},
+    {v: state === "read" ? (us ? String(us.q) : "") : USAGE_NOT_READ, l: "Queries ("+w+" days)",
+     t: state === "read" ? "Queries on this Model in the last "+w+" days ("+usageOrgName()+")" : lu.title},
+    {v: state === "read" ? (us ? String(us.u) : "") : USAGE_NOT_READ, l: "Users ("+w+" days)",
+     t: state === "read" ? "Distinct users who queried this Model in the last "+w+" days ("+usageOrgName()+")" : lu.title}
+  ];
+  return items.map(function(s){
+    return '<div class="stat-item usage-stat" title="'+esc(s.t)+'"><div class="stat-val">'+esc(s.v)+
+      '</div><div class="stat-lbl">'+esc(s.l)+'</div></div>';
+  }).join("");
 }
 
 /* ── The Model's ERD, drawn inline (agents/shared/erd, carried in D.E) ── */

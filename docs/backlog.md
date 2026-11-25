@@ -2889,6 +2889,13 @@ requires querying the TS: BI Server system model — a `ts data search` command 
 **Target:** 2027-01-31. Re-dated 2026-11-18: the first target, 2026-10-31, passed with
 the item open. Usage stats is the next ts-audit work after the Data Cache rules.
 
+**Progress 2026-11-25 (ts-audit 3.26.0, ts-cli 0.223.0):** per-Model usage is built, read
+inside `ts audit` rather than through a `ts data search` command: the `usage` data kind
+(last query, 180-day queries and distinct users, the Org), H17 (a Model not queried in
+more than 90 days) and the report's usage views; the probe is ts-audit open-items #9.
+Still open here: dead-column detection (open-items #12), Spotter coverage (#10) and the
+user-action filter (#11).
+
 ---
 
 ## BL-082 — Drop the `source ~/.zshenv &&` prefix repo-wide (after Linux keyring verify)

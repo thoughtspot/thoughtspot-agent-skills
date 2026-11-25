@@ -15,8 +15,8 @@ from ts_cli.audit.fire_rates import fire_rates, object_kind
 CAT = load_catalog(PKG_CATALOG)
 #: What a capture of every angle fetches: a snapshot written without `needs` reads as a
 #: legacy one, which lacks the calendars and connections P22 and P24 read, so its P
-#: selection would be refused.
-ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections"}
+#: selection would be refused (and usage, which H17 reads).
+ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections", "usage"}
 TODAY = datetime.date(2026, 11, 2)
 COUNTS = {"model": 4, "table": 10, "answer": 0, "set": 3}
 
