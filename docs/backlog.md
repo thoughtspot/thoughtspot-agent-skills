@@ -513,6 +513,8 @@ are roughly ordered by value÷effort.
 | BL-617 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
 | BL-618 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
 | BL-619 | ts-audit follow-ups promised in #741 and #735 and never filed (null-test wording, P28 docstring, a calendar listed twice, a test-only helper, Ossie row 290, two H16 column reads) | 2027-01-31 |
+| BL-621 | Connection health check: `ts connections diagnose` + `ts-object-connection-health`, a stopgap for PDM-5106 (design drafted, not built) | 2027-01-31 |
+| BL-622 | ts-audit: flag idle connections that are still active, and recommend deactivating them (connection health piece 2) | 2027-02-28 |
 
 ### Tier 4 — Deferred
 
@@ -18746,3 +18748,64 @@ From the re-review of the fix round:
 17. `D.G.ur` (rules that require usage) and `D.C.ur` (unreadable items) share a key name;
     `_usage_rule_ids` in `report.py` loads the catalog a second time and includes retired
     rules, where `report_meta` takes only active ones.
+
+## BL-621 — Connection health check: `ts connections diagnose` and `ts-object-connection-health` `Tier 3`
+
+**Filed:** 2026-11-25. **Source:** PDM-5106, which asks ThoughtSpot to show each
+connection's health on the connection list. This is the stopgap until it does.
+**Target:** 2027-01-31.
+
+**Why.** ThoughtSpot gives no sign that a connection is stale. Nobody notices until
+someone edits it or a query fails. Spotter indexing and row-count stats keep running
+against dead connections.
+
+**What.** Piece 1, designed in
+`docs/superpowers/specs/2026-11-19-connection-health-design.md`:
+
+- `ts connections diagnose`: checks connections through the internal route
+  `GET /callosum/v1/connection/diagnose?connection_id=<guid>`, live-verified on the SE demo
+  cluster 2026-11-18. Writes JSON with one status per connection (`healthy`, `down`,
+  `drifted`, `unknown`) and the failing tables and columns.
+- `ts-object-connection-health`: a skill that scopes the run, confirms the cost, runs it and
+  summarises what to fix.
+
+Piece 2, not designed yet: connections as a subject in `ts audit`, reading piece 1's JSON.
+
+**Decided.** Approach B, a command plus a small skill (2026-11-19). Admins only in v1
+(2026-11-25).
+
+**Next step.** The user approves the design doc. Then write the implementation plan.
+Three live probes in the doc's open items must pass before merge.
+
+## BL-622 — ts-audit: flag idle connections that are still active, and recommend deactivating them `Tier 3`
+
+**Filed:** 2026-11-25. **Source:** connection deactivation probe on the SE demo cluster,
+recorded in `docs/superpowers/specs/2026-11-19-connection-health-design.md` Appendix B.
+**Target:** 2027-02-28. **Depends on:** BL-621 (piece 1).
+
+**Why.** A connection nobody queries can still cost warehouse compute. The connection health
+design says Spotter indexing and row-count stats keep running against it. ThoughtSpot can
+deactivate a connection instead of deleting it, which blocks every query until it is
+activated again.
+
+**What.** Connection health piece 2: connections as a subject in `ts audit`.
+
+- A rule for a connection that is active and idle. Idle means no Model or Table on it was
+  queried in 90 days, by H17's usage read. How to roll Model usage up to a connection, and
+  whether direct queries on a Table count, is open.
+- Its remediation: deactivate it with
+  `POST /api/rest/2.0/connections/{id}/status` and `{"status": "DEACTIVATED"}` (26.6.0.cl or
+  later). It is reversible with `{"status": "ACTIVATED"}`.
+- Read each connection's state from `connectionDisabled` in its `metadata/search` header.
+  Report deactivated connections, and never flag one as idle.
+
+**Facts, live-verified 2026-11-25 on 26.11.0.cl.** Deactivating returns 204 and sets
+`connectionDisabled` to `true`. A query then fails with 500, code 12332, `CONNECTION_INACTIVE`.
+Activating restores both. Nothing records when a connection was deactivated: `modified` does
+not change.
+
+**Decided.** No warehouse test of background work (user, 2026-11-25). The rule relies on the
+docs: deactivation suspends "all activity". Its finding should say so, not claim a measured
+saving (design doc open item 6).
+
+**Next step.** Design piece 2.
