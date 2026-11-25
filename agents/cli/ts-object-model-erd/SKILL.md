@@ -260,7 +260,17 @@ HTML file; no ThoughtSpot login required to view.
 - Two notations: Arrow (ThoughtSpot-style), Crow's foot (cardinality)
 - Column modes: Collapsed, Join keys, Flagged only, All columns
 - Focus mode: click a table to highlight its neighbourhood; shift-click to compare two tables
-- RLS overlay: toggle to see secured subgraph
+- Show bar: **Show** with a toggle chip per table kind (Fact, Dim, SQL View, Alias, RLS),
+  each with its count, plus **All**, the find-a-table box and the shown count. Every chip
+  starts on; switching one off hides the tables it covers (a table any switched-off chip
+  covers is hidden) and their joins, and the diagram is laid out again over what is left;
+  **All** switches every chip back on. A table asked for while hidden (the find box, a link
+  in the side panel) shows everything again. It is the same bar, with the same classes and
+  behaviour, as the ts-audit report's Formulas and Data Cache views. While tables are
+  hidden a drag moves only that filtered layout; the saved positions are never overwritten
+- Focus: **RLS subgraph** (only the tables a rule is defined on or references, with the
+  secured-subgraph panel) and **Noted only** (only the tables with a note and both ends of
+  every noted join); each hides everything outside it and combines with the Show bar
 - Findings overlay: toggle to see structural findings
 - Drag to reposition tables; positions auto-save in localStorage
 - Multi-model switcher (when multiple models rendered)
@@ -281,10 +291,11 @@ HTML file; no ThoughtSpot login required to view.
   severity/focus), click-to-focus, drag, and the minimap all keep working at either scale.
 - Notes: attach a free-text note to any table or join from its inspector panel — Save
   and Delete give immediate feedback (a self-dismissing "Saved ✓" / "Note deleted"
-  confirmation, with Delete reachable in the same session, no reload needed). A **Notes**
-  filter chip highlights every noted object — including at overview/LOD zoom, where the
-  note badge itself isn't drawn — and disables itself automatically when no notes exist
-  (enables the instant a note is saved, including notes baked into a shared HTML export).
+  confirmation, with Delete reachable in the same session, no reload needed). **Noted
+  only** (under Focus) shows only the noted tables and both ends of every noted join —
+  so they stand out at overview/LOD zoom too, where the note badge itself isn't drawn —
+  and disables itself automatically when no notes exist (enables the instant a note is
+  saved, including notes baked into a shared HTML export).
   A **Review notes** button lists every note at once (table/join tag, or "not in model"
   for a note whose object was since renamed or removed); clicking a row jumps to and
   centers that object, and each row can be deleted inline.
@@ -313,6 +324,7 @@ HTML file; no ThoughtSpot login required to view.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.11.0 | 2026-11-19 | **One filter bar, shared with the ts-audit report; filters hide, and the diagram is laid out again.** The Filter chips become the Show bar the audit report's Formulas and Data Cache views use (same markup, classes, behaviour and wording, and byte-identical CSS between the `filter-bar` markers in `renderer.css` and the report's `styles.css`, which a ts-cli test checks): Show, All, then Fact, Dim, SQL View, Alias and RLS, each a toggle with its count, then the find-a-table box (it was its own Search group) and the count of tables shown. Every chip starts on, and switching one off hides the tables it covers and their joins and lays the rest out again (it used to select tables and fade the rest; product owner, 2026-11-19); All switches every chip back on, and a chip covering no table is disabled. RLS subgraph and Notes, which are views of the model rather than kinds of table, become the Focus toggles RLS subgraph and Noted only; each hides everything outside it (Noted only keeps both ends of every noted join) and combines with the chips. Asking for a hidden table, from the find box or the side panel, shows everything again. A layout is cached per set of hidden tables; while some are hidden a drag moves only that layout and never overwrites the saved positions, and Share HTML still bakes the whole model's, without moving what is on screen (computing it moved the shown tables). The page's data, and the state Share HTML bakes, escape every `<` and `>`, so a table name or a note holding script markup no longer ends or swallows its script; and Share HTML no longer reads `$&`, `$'`, `` $` `` or `$$` in a name or a note as a replacement pattern, which spliced the saved page (a note reading "Revenue in $'000s" saved a blank one). The shown count counts the tables a join-tree or compare focus leaves drawn. The examples and their screenshots are re-rendered. |
 | 1.10.0 | 2026-11-01 | **Table roles from join direction (shared with ts-audit, roadmap PR 4.1).** Each table's role comes from `agents/shared/erd/roles.py`: fact (a root of the joins holding a measure), factless (a root holding none: a bridge or factless fact), dimension, or dimension holding measures (joined to, yet holding measures: an order header's freight; ThoughtSpot aggregates these correctly only while the joins' cardinality is declared correctly), plus outrigger and attribute-heavy flags. The side panel's pill names the role, with a tooltip saying what it means. A referencing join's direction uses its Table TML's cardinality when there is one. Before, any table with a visible measure was a fact, so a dimension holding a price was drawn as one, and a "bridge" kind the renderer never handled left such tables outside both filter chips; factless tables are now drawn as facts. Bundle: `kind` is fact or dim only, plus `role`, `outrigger`, `attribute_heavy`, `unjoined`, `role_label`, `role_note`. |
 | 1.9.5 | 2026-10-30 | **Parser fix (shared with ts-audit):** a column whose `properties` is a list or a scalar, which the TML schema defines as a mapping, no longer raises `AttributeError` and ends the render; it reads as absent, so the column takes the default role (BL-406 item 10). |
 | 1.9.4 | 2026-10-22 | **Organic layout no longer flings nodes off-screen.** Repulsion was `repK/d²` with no cap, so two nodes that started close could throw one thousands of pixels in a single step, and the springs and centring pull could not bring it back before the layout cooled: the 28-table Order Fulfilment example opened with its PRODUCT → CATEGORY tail about 7,000 px from the rest (layout span 10,333 px). A repulsion step is now capped at 0.6 card widths. Measured over 42 Models (40 real ones from the SE demo cluster, plus both examples) and 10 synthetic 30-60-table star/snowflake graphs, the farthest node's distance from the centroid divided by the median's: the example goes from 5.17 to 1.47 (span 4,561 px), and nothing else gets worse by more than 0.3. Also refreshes the Order Fulfilment screenshots, which still showed the manager table removed in 1.9.3. |

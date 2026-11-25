@@ -63,8 +63,16 @@ SECRET_CONNECTIONS = [
     ({"OAuth2ClientId": "x"}, True), ({"oauth_pvt_key": "x"}, True),
     ({"OAUTH": "x"}, True), ({"client_id": "x", "client_secret": "y"}, True),
     ({"Client_ID": "x", "CLIENT_SECRET": "y"}, True),
-    ({"client_id": "x"}, False), ({"user": "u", "password": "p", "host": "h"}, False),
+    # one of the client pair alone is an open question: OAuth to confirm, never "no"
+    ({"client_id": "x"}, True), ({"client_secret": "y", "host": "h"}, True),
+    # any spelling of a client ID or secret key, alone or together (keys normalised)
+    ({"clientId": "x", "clientSecret": "y"}, True), ({"ClientID": "x"}, True),
+    ({"client-id": "x", "client-secret": "y"}, True),
+    ({"azure_client_id": "x", "azure_client_secret": "y"}, True), ({"nested": {"ClientSecret": "y"}}, True),
+    ({"user": "u", "password": "p", "host": "h"}, False),
     ({"auth": {"oauth_scope": "x"}}, True), ({"note": "uses oauth", "host": "h"}, False),
+    ({"no_auth": "true", "host": "h"}, False), ({"noAuth": True, "host": "h"}, False),
+    ({"Client Secret": "y"}, True), ({"clientIdentifier": "x"}, True),
 ])
 def test_oauth_is_read_from_key_names_at_any_depth(settings, oauth):
     assert connection_facts(_connection(0, **settings))["oauth"] is oauth
@@ -96,8 +104,10 @@ def test_a_whole_template_token_is_a_parameterized_connection(settings, paramete
     ({"OAuth2ClientId": ""}, False), ({"oauth_enabled": False}, False),
     ({"oauth_enabled": "false"}, False), ({"oauth_enabled": " FALSE "}, False),
     ({"OAUTH": None}, False), ({"oauth": "null"}, False), ({"oauth": {}}, False),
-    ({"oauth": []}, False), ({"client_id": "x", "client_secret": ""}, False),
-    ({"client_id": None, "client_secret": "y"}, False),
+    ({"oauth": []}, False), ({"client_id": "", "client_secret": None}, False),
+    ({"client_id": "false", "client_secret": "null", "host": "h"}, False),
+    # one of the pair set is enough (FACTS_VERSION 3): the other's blank does not cancel it
+    ({"client_id": "x", "client_secret": ""}, True), ({"client_id": None, "client_secret": "y"}, True),
     ({"oauth_enabled": True}, True), ({"oauth": {"client": "x"}}, True),
     ({"OAuth2Secret": "******"}, True),
 ])
@@ -429,7 +439,7 @@ def test_no_configuration_value_reaches_the_context_snapshot_json_report_or_logs
 #: version they were derived by. A snapshot keeps only these facts, so when any row
 #: changes, bump connection_facts.FACTS_VERSION (an older snapshot is then refused for
 #: P24) and update GOLDEN_VERSION and the row together.
-GOLDEN_VERSION = 2
+GOLDEN_VERSION = 3
 GOLDEN = [
     ("DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
     ("RDBMS_DATABRICKS", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, True, False, False)),
@@ -438,6 +448,33 @@ GOLDEN = [
     ("DATABRICKS", {"host": "h", "personal_access_token": "t"}, (False, False, False, False)),
     ("SNOWFLAKE", {"OAuth2ClientId": "x", "OAuth2Secret": "y", "host": "h"}, (True, False, False, False)),
     ("SNOWFLAKE", {"client_id": "x", "client_secret": "y", "host": "h"}, (True, True, False, False)),
+    ("DATABRICKS", {"client_id": "x", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client_secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client_id": "x", "client_secret": "", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client_id": "", "client_secret": None, "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"clientId": "x", "clientSecret": "y"}, (True, True, None, False)),
+    ("SNOWFLAKE", {"ClientID": "x", "host": "h"}, (True, True, False, False)),
+    ("POSTGRES", {"client-id": "x", "client-secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"azure_client_id": "x", "azure_client_secret": "y", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"oauth_client_id": "x", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"clientId": "", "host": "h"}, (False, False, False, False)),
+    # a key names OAuth only with a word starting `oauth` (not no_auth joined by _norm)
+    ("SNOWFLAKE", {"no_auth": "true", "user": "u", "password": "p", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"noAuth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"sso_auth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"two-auth": "true", "host": "h"}, (False, False, False, False)),
+    ("SNOWFLAKE", {"oauth_pvt_key": "k", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"OAuth2Secret": "s", "host": "h"}, (True, False, False, False)),
+    ("SNOWFLAKE", {"azureOAuthKey": "k", "host": "h"}, (True, False, False, False)),
+    # a client key: its name, ignoring case and punctuation, contains clientid or clientsecret
+    ("SNOWFLAKE", {"Client Secret": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client.id": "x", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"clientSecretKey": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"client_secret_value": "s", "host": "h"}, (True, True, False, False)),
+    ("SNOWFLAKE", {"clientIdentifier": "x", "host": "h"}, (True, True, False, False)),
+    # a host or account name key is matched ignoring case and punctuation
+    ("SNOWFLAKE", {"account_name": "acme.privatelink.snowflakecomputing.com", "host": "h"}, (False, False, True, False)),
+    ("SNOWFLAKE", {"Account-Name": "acme", "user": "u"}, (False, False, False, False)),
     ("SNOWFLAKE", {"oauth_pvt_key": "k", "accountName": "a.privatelink.b"}, (True, False, True, False)),
     ("SNOWFLAKE", {"user": "u", "password": "p", "host": "h", "db": "${tenant_db}"}, (False, False, False, True)),
     ("SNOWFLAKE", {"user": "u", "password": "p"}, (None, None, None, None)),

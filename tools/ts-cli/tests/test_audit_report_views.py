@@ -194,3 +194,16 @@ def test_every_function_a_report_script_calls_is_defined_somewhere():
             if fn not in defined and fn not in _JS_GLOBALS and fn not in _JS_KEYWORDS:
                 missing.setdefault(fn, name)
     assert missing == {}, f"called but defined nowhere in the report: {missing}"
+
+
+def test_no_inlined_script_holds_a_closing_script_tag_or_a_comment_opener():
+    """Each report part, and the ERD's renderer.js (inlined into the ERD's own page), sits
+    inside a <script> element: a literal closing script tag ends it early, and a comment
+    opener can swallow the rest, even inside a JS comment or string. Write `<\\/script>`."""
+    erd = Path(__file__).resolve().parents[3] / "agents" / "shared" / "erd" / "renderer.js"
+    bad = []
+    for path in [REPORT_DIR / p for p in _PARTS] + [erd]:
+        text = path.read_text(encoding="utf-8").lower()
+        if "</script" in text or "<!--" in text:
+            bad.append(path.name)
+    assert bad == []
