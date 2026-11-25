@@ -512,6 +512,7 @@ are roughly ordered by value÷effort.
 | BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
 | BL-617 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
 | BL-618 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
+| BL-619 | ts-audit follow-ups promised in #741 and #735 and never filed (null-test wording, P28 docstring, a calendar listed twice, a test-only helper, Ossie row 290, two H16 column reads) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18594,7 +18595,10 @@ real data:**
   `AADOAuthTenant`, which 0.221.0 read as firm OAuth; with a plain host such a Model can
   read Can use. Read a set key with a mid-word `oauth` as OAuth to confirm (`oauth_m2m`)
   instead, or settle it with a names-only listing of the cluster's connection keys (as for
-  open-items #17). Settle this one first: if such a key exists it is a Blocker-class result.
+  open-items #17). **Checked 2026-11-25, names only, on the SE demo cluster:** of 1,863
+  connections, the only key names containing `oauth` are `OAuth2ClientId` and `OAuth2Secret`
+  (12 Databricks connections each) and `oauth_pvt_key` (5 BigQuery); none has `oauth`
+  mid-word, so no Model there reads Can use this way. Low priority.
 - **`_names_oauth` can raise `IndexError`** (`connection_facts.py:176-179`): it searches
   `text.lower()` but indexes `text`, and `lower()` lengthens "İ". Match case-insensitively on
   `text` itself.
@@ -18626,5 +18630,40 @@ hook then failed every Python check within a second, and every commit needed
    message naming `CHECKS_PYTHON` instead of reporting every check as a FAIL.
 3. Two tests (`test_quest_build`, `test_pre_commit_paths`) shell out to bare `python3`; run
    them with `sys.executable` so they use the interpreter running the suite.
+
+**Target:** 2027-01-31.
+
+## BL-619 — ts-audit follow-ups promised in #741 and #735 and never filed `Tier 3`
+
+**Filed:** 2026-11-25. **Source:** the final reviews of #741 (Data Cache readiness) and #735
+(H16), whose leftovers were noted in the session but not backlogged.
+
+**What.**
+
+From #741:
+
+1. **Null-test wording.** P28 reads every operator null test S12 accepts (`= null`,
+   `!= null`, `<= null`, `>= null`), but the Data Cache view's text
+   (`tools/ts-cli/ts_cli/audit/report/views/datacache.js:180`), `audit/data_cache.py:32`,
+   `audit/engine/fields_data_cache_sources.py` and ts-audit SKILL.md's 3.23.0 row still name
+   only "`= null`". Say "an operator null test".
+2. **P28's unresolved path.** The readiness docstring (`audit/data_cache.py`) and the
+   3.23.0 row do not say that an RLS rule path P28 cannot resolve leaves P28 not assessed for
+   the Model.
+3. **A calendar listed twice.** A formula that names one calendar twice is listed twice in
+   the Model's calendars in use (`audit/engine/fields_data_cache.py`, near
+   `formula_calendar_names`). List each (formula, calendar) once.
+4. **A test-only helper.** `formula_calendar_names` (`audit/engine/fields_data_cache.py:160`)
+   is called only by a test; fold it into its caller or test the caller instead.
+5. **Ossie row 290.** `docs/ossie/ts-ossie-construct-mapping.md` row 290's fidelity cell does
+   not use the legend's notation.
+
+From #735 (H16, `audit/engine/fields_single_use.py`):
+
+6. `_named_columns` (line 34) misses columns named by
+   `aggregated_models[].date_aggregation_info[].column_id`, so a helper such a column shows
+   could be reported as pasteable.
+7. `_join_columns` (line 63) parses join `on` clauses itself; use the shared
+   `tml_join_graph.on_clause_refs`, as P6 and D16 do, so escaped names read the same way.
 
 **Target:** 2027-01-31.
