@@ -18674,3 +18674,62 @@ From #735 (H16, `audit/engine/fields_single_use.py`):
    `tml_join_graph.on_clause_refs`, as P6 and D16 do, so escaped names read the same way.
 
 **Target:** 2027-01-31.
+
+## BL-620 — ts-audit usage (H17): review leftovers and open questions from the usage PR `Tier 3`
+
+**Filed:** 2026-11-25. **Source:** the pr-ready review of `feat/audit-usage-stats` (ts-cli
+0.223.0), and the build's own notes. Triaged under pr-ready Step 7: none breaks a stated
+requirement on the clusters probed so far. **Target:** 2026-12-31.
+
+**What.**
+
+Open questions, each settled by a live probe:
+
+1. **Non-admin auditors.** ts-audit needs only VIEW access, but the probe varied the Org, not
+   the user. If the system Model shows a non-admin only some rows, every Model that user did
+   not query reads "No query" and gets H17, still labelled as the Org's usage. Probe as a
+   non-admin; if rows are restricted, record `privileges` from the `auth/session/user` call
+   the fetch already makes (`ts_cli/dependency/cascade.py` `is_admin`) and treat a non-admin
+   reading as not read, or say so in the header.
+2. **REST spec check for `searchdata`.** ts-audit open-items #9 was verified live only; the
+   SpotterCode spec (`get-rest-api-reference(apiName: "searchData")`) was not read (it needed
+   a sign-in). It would settle whether `record_size: -1` can return fewer rows than exist
+   without `available_data_row_count` showing it, and whether an answer can be sampled.
+3. **Whose Models the unmatched IDs are.** On the SE demo cluster, 1,099 used Model IDs match
+   no object of any type in the Primary Org, some queried by up to 8 users in the last week.
+   Probe whether the Primary Org's usage includes other Orgs' Models; if so, say so in the
+   report and consider splitting the list by Org.
+
+Behaviour:
+
+4. **New Models read as never queried.** H17 reports a Model created inside the last
+   `idle_days` that nobody has queried yet, worded "…which starts on <history start>", which
+   implies years idle. Skip, or reword, a Model whose creation time (in the metadata header)
+   is under `idle_days` old.
+5. **"(0) No findings." for rules that did not run.** The Cleanup view prints it for H4, H5
+   and H10 when their data was not collected (pre-existing; H17 was fixed in the usage PR).
+   Key every cleanup section on `collected()` of its rule's `requires`.
+6. **Clock skew and units.** `usage.py` `days_since` rounds a negative age up to 0, so a
+   `last_used` after the read time (auditor clock behind, or milliseconds) reads "Today" and
+   never fires. Compare `history.end` with `fetched_at` and read a future time as not read.
+7. **A repeated Model ID overwrites** instead of refusing in the window and last-used
+   readers. Raise NotRead on a repeat.
+8. **Cost and timeout.** Every H run pages every LOGICAL_TABLE in the Org for the Cleanup
+   list, and runs an all-history aggregate under the client's 60 s default timeout; a
+   persistent read timeout stops the whole audit. Time both on a large cluster.
+9. **Locale.** Columns are matched by English display names ("Maximum TS Query Start Time",
+   "Unique Number of User ID"); another locale would read Not read on every run.
+
+Wording and hardening (nits):
+
+10. SKILL.md's Usage section and 3.26.0 row say the not-found list shows ID, queries and last
+    query date "only"; it also shows users.
+11. The "no longer exist" reading survives in the audit JSON key `corpus.usage.gone`, the
+    test name `test_the_cleanup_view_lists_idle_models_and_models_that_no_longer_exist`, and
+    open-items #9's "(deleted, or in another Org)", which drops "not shared".
+12. `report/views/cleanup.js` puts `D.C.us.w` (the window days) into a table header
+    unescaped; a hand-edited audit JSON can inject markup. Escape it, or cast to int in
+    `_compact_usage`.
+13. H17's title and description write the threshold as "90", but `idle_days` can be
+    overridden by a profile, which would leave the title wrong.
+14. No `ts data search` command: BL-081 asked for one; usage is read inside the audit only.
