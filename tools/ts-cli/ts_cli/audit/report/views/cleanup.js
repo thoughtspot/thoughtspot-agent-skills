@@ -257,7 +257,10 @@ function buildOwnAndOtherOrgs(container, split){
 
 /* "Used in other Orgs": one collapsed group per Org, opened to its ID table. */
 function buildOtherOrgs(container, split){
-  var ids = split.others.reduce(function(n, o){ return n + o.rows.length; }, 0);
+  /* distinct IDs: one queried in two of these Orgs is listed in both groups, counted once */
+  var seen = {};
+  split.others.forEach(function(o){ o.rows.forEach(function(p){ seen[p[0][0]] = 1; }); });
+  var ids = Object.keys(seen).length;
   var sec = goneSection(container, (split.own ? "Used in other Orgs" : "Not found, by the Org queried in")+
     " ("+usagePlural(ids, "ID")+" in "+usagePlural(split.others.length, "Org")+")", null,
     "usage-gone-orgs");
@@ -271,6 +274,22 @@ function buildOtherOrgs(container, split){
     goneTable(det, o.rows);
     sec.appendChild(det);
   });
+}
+
+/* Where else a not-found ID listed under Org `o` was queried: "this Org" (the audit's,
+   never counted as another), "N other Org(s)", both, or "" for none. */
+function goneAlsoIn(g, o){
+  var mine = D.C.us.oi === null || D.C.us.oi === undefined ? null : String(D.C.us.oi);
+  var here = o ? String(o[0]) : null, inMine = false, others = 0;
+  (g[4] || []).forEach(function(x){
+    var k = String(x[0]);
+    if(k === here) return;
+    if(k === mine) inMine = true; else others++;
+  });
+  var parts = [];
+  if(inMine) parts.push("this Org");
+  if(others) parts.push(usagePlural(others, "other Org"));
+  return parts.join(" and ");
 }
 
 function goneSection(container, head, count, cls){
@@ -290,11 +309,11 @@ function goneTable(sec, pairs){
     '<th>Model ID</th><th>Queries ('+esc(usageSpanLabel())+')</th><th>Users ('+esc(usageSpanLabel())+')</th><th>Last queried</th>'+
     '</tr></thead><tbody>';
   pairs.forEach(function(p, i){
-    var g = p[0], o = p[1], more = (g[4] || []).length - 1;
+    var g = p[0], o = p[1], more = goneAlsoIn(g, o);
     html += '<tr'+(i >= MAX_VISIBLE ? ' class="usage-overflow" style="display:none"' : '')+'>'+
       '<td style="font-family:var(--mono);font-size:11px">'+esc(String(g[0]))+
-      (more > 0 ? '<span class="usage-multi-org" title="Queries and users are this ID’s across every Org it was queried in" style="font-family:var(--sans);color:var(--muted)"> · also queried in '+
-        esc(usagePlural(more, "other Org"))+'</span>' : '')+'</td>'+
+      (more ? '<span class="usage-multi-org" title="Queries and users are this ID’s across every Org it was queried in" style="font-family:var(--sans);color:var(--muted)"> · also queried in '+
+        esc(more)+'</span>' : '')+'</td>'+
       '<td>'+esc(String(g[1]))+'</td><td>'+esc(String(g[2]))+'</td>'+
       '<td>'+esc(usageDate(o ? o[2] : g[3]))+'</td></tr>';
   });

@@ -106,6 +106,40 @@ def org_label(usage: Optional[dict]) -> str:
     return "the audit's Org (its name could not be read)"
 
 
+def usage_scope(usage: Optional[dict]) -> Tuple[str, int]:
+    """Whose usage a reading is, as `(kind, Orgs it names)`; the report's usage.js
+    `usageScope` mirrors it, so a finding and the page agree:
+
+    * "all": read from the Primary Org and naming more than one Org — every Org's usage;
+    * "many": read from another Org (or an unread one) yet naming more than one;
+    * "hedge": read from the Primary Org with its Orgs not read, or taken before they
+      were (ts-cli 0.223.0), so which Orgs it covers is not known;
+    * "org": otherwise, the usage of the Org it was read in."""
+    usage = usage or {}
+    model_orgs, org_read = _model_orgs_of(usage)
+    count = len({o["id"] for rows in (model_orgs or {}).values() for o in rows})
+    primary = is_primary(usage)
+    if count > 1:
+        return ("all" if primary else "many"), count
+    if primary and org_read is not True:
+        return "hedge", count
+    return "org", count
+
+
+def usage_label(usage: Optional[dict]) -> str:
+    """Whose usage a reading is, in words (usage_scope): "usage of all Orgs, read from
+    the Primary Org", "usage of 3 Orgs, read from the Org 'X'", "usage read from the
+    Primary Org; which Orgs it covers was not read" or "usage of the Org 'X'"."""
+    kind, count = usage_scope(usage)
+    if kind == "all":
+        return "usage of all Orgs, read from the Primary Org"
+    if kind == "many":
+        return f"usage of {count} Orgs, read from {org_label(usage)}"
+    if kind == "hedge":
+        return "usage read from the Primary Org; which Orgs it covers was not read"
+    return f"usage of {org_label(usage)}"
+
+
 def model_usage(usage: dict, guid: str) -> Dict[str, Any]:
     """One Model's reading: `last_used` (epoch seconds, or None), `days` since it (None
     when never queried or not recorded), `queries` and `users` over the window, and

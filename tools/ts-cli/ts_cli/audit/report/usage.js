@@ -63,12 +63,12 @@ function usageLastUsed(cm){
   if(us.n){
     var start = usageDate(D.C.us.hs);
     return {text: "No query", title: "No query in the usage history"+
-      (start ? ", which starts on "+start : "")+" ("+usageOrgName()+")"};
+      (start ? ", which starts on "+start : "")+" ("+usageWhose()+")"};
   }
   if(typeof us.d !== "number") return {text: "Unknown",
     title: "The history holds this Model but no query time; "+counts};
   return {text: us.d === 0 ? "Today" : usagePlural(us.d, "day")+" ago",
-          title: "Last queried on "+usageDate(us.l)+"; "+counts+" ("+usageOrgName()+")"};
+          title: "Last queried on "+usageDate(us.l)+"; "+counts+" ("+usageWhose()+")"};
 }
 
 /* How many Orgs the usage names (D.C.us.os); 0 when its Orgs were not read. */
@@ -77,21 +77,40 @@ function usageOrgCount(){
   return u && u.os ? u.os.length : 0;
 }
 
-/* The header line naming whose usage the report shows and when it was read, and a note
-   when that is not the Primary Org's usage. Read from the Primary Org with more than one
-   Org in it, that is all Orgs; with more than one Org from another Org, it says the
-   count the data shows. "" when usage is absent. */
+/* Whose usage the reading is, as ts_cli/audit/usage.py usage_scope decides it, so the
+   page and H17's findings agree: "all" (read from the Primary Org, naming more than one
+   Org), "many" (read elsewhere yet naming more than one), "hedge" (read from the Primary
+   Org with its Orgs not read, or before they were: 0.223.0) or "org" (that Org's). */
+function usageScope(){
+  var u = D.C.us, n = usageOrgCount();
+  if(n > 1) return u.pr === 1 ? "all" : "many";
+  if(u.pr === 1 && u.or !== 1) return "hedge";
+  return "org";
+}
+/* The same, in words (usage_label): "usage of all Orgs, read from the Primary Org",
+   "usage of 3 Orgs, read from the Org ‘X’", "usage read from the Primary Org; which Orgs
+   it covers was not read", "usage of the Org ‘X’". */
+function usageWhose(){
+  var kind = usageScope();
+  if(kind === "all") return "usage of all Orgs, read from the Primary Org";
+  if(kind === "many") return "usage of "+usageOrgCount()+" Orgs, read from "+usageOrgName();
+  if(kind === "hedge") return "usage read from the Primary Org; which Orgs it covers was not read";
+  return "usage of "+usageOrgName();
+}
+
+/* The header line naming whose usage the report shows (usageScope) and when it was read,
+   and a note when it is one non-primary Org's only. "" when usage is absent. */
 function usageHeaderHtml(){
   var state = usageState();
   if(state === "absent") return "";
   if(state === "not_read") return '<span class="meta-item usage-meta">Usage: <strong>'+
     USAGE_NOT_READ+'</strong></span>';
-  var u = D.C.us, n = usageOrgCount(), on = esc(usageDate(u.at));
-  var text = n > 1 && u.pr === 1
+  var u = D.C.us, n = usageOrgCount(), on = esc(usageDate(u.at)), kind = usageScope();
+  var text = kind === "all"
     ? 'Usage of <strong>all Orgs</strong> ('+n+' in the usage history), read from the Primary Org on '+on
-    : n > 1
+    : kind === "many"
     ? 'Usage of <strong>'+n+' Orgs</strong>, read from '+esc(usageOrgName())+' on '+on
-    : u.pr === 1 && u.or === 0
+    : kind === "hedge"
     ? 'Usage read from <strong>the Primary Org</strong> on '+on+'; which Orgs it covers was not read'
     : 'Usage of <strong>'+esc(usageOrgName())+'</strong>, read on '+on;
   return '<span class="meta-item usage-meta">'+text+'</span>';

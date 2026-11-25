@@ -123,15 +123,17 @@ def _dash(data, tmp_path):
 @needs_chrome
 def test_the_dashboard_names_the_org_and_shows_last_used(tmp_path):
     seen = _dash(_data(_usage()), tmp_path)
-    assert seen["meta"] == "Usage of the Org ‘Primary’, read on 2026-11-25"
+    # a reading with no Orgs (as 0.223.0 took it) from the Primary Org: not known whose
+    assert seen["meta"] == ("Usage read from the Primary Org on 2026-11-25; which Orgs it "
+                            "covers was not read")
     assert seen["note"] is None          # the Primary Org's usage needs no note
     assert "Last used" in seen["th"]
     assert seen["rows"]["Idle Sales"][0] == "120 days ago"
     assert seen["rows"]["Idle Sales"][1] == ("Last queried on 2026-07-28; 12 queries by 3 "
-                                             "users in the last 180 days (the Org ‘Primary’)")
+                                             "users in the last 180 days (usage read from the Primary Org; which Orgs it covers was not read)")
     assert seen["rows"]["Never Sales"] == [
         "No query", "No query in the usage history, which starts on 2023-10-01 "
-                    "(the Org ‘Primary’)"]
+                    "(usage read from the Primary Org; which Orgs it covers was not read)"]
 
 
 @needs_chrome
@@ -362,7 +364,7 @@ _TITLE = ('var s = document.querySelector(".scorecard-header .usage-stat");'
 def test_a_30_day_history_words_the_last_used_tooltip_by_its_span(tmp_path):
     shown = report_browser.render(_short(30), tmp_path, f"model/{BUSY}", actions=_TITLE)
     assert shown["extra"] == ("Last queried on 2026-11-15; 12 queries by 3 users in the "
-                              "30 days the history holds (the Org ‘Primary’)")
+                              "30 days the history holds (usage read from the Primary Org; which Orgs it covers was not read)")
 
 
 @needs_chrome
@@ -380,7 +382,7 @@ def test_a_400_day_history_keeps_the_usual_wording(tmp_path):
     heads = report_browser.render(page, tmp_path, "cleanup", actions=_HEADS)
     assert heads["extra"][1] == "Queries (180 days)"
     title = report_browser.render(page, tmp_path, f"model/{BUSY}", actions=_TITLE)
-    assert title["extra"].endswith("12 queries by 3 users in the last 180 days (the Org ‘Primary’)")
+    assert title["extra"].endswith("12 queries by 3 users in the last 180 days (usage read from the Primary Org; which Orgs it covers was not read)")
 
 
 # ── the Org each used Model was queried in (since 0.224.0) ──────────────────
@@ -519,7 +521,7 @@ def test_cleanup_splits_this_orgs_ids_from_other_orgs_and_unrecorded(tmp_path):
     assert own["head"] == "Used in this Org, but not found (1)"
     assert own["rows"] == [[GONE_A, "40", "6", "2026-11-20"]]
     assert "deleted, or not shared with that user" in own["text"]
-    assert others["head"] == "Used in other Orgs (3 IDs in 2 Orgs)"
+    assert others["head"] == "Used in other Orgs (2 IDs in 2 Orgs)"   # GONE_C once
     assert "does not judge whether they still exist" in others["text"]
     assert "deleted" not in others["text"]
     # one collapsed group per Org, the most IDs first; an ID in two Orgs is in both,
@@ -543,6 +545,10 @@ def test_cleanup_from_another_org_puts_that_orgs_ids_first(tmp_path):
     assert [r[0].split(" ")[0] for r in own["rows"]] == [GONE_C, GONE_B]
     assert [g[0] for g in others["groups"]] == ["the Org ‘Primary’ — 1 Model ID",
                                                 "the Org ‘" + MARKUP + "’ — 1 Model ID"]
+    # GONE_C was queried here (Tenant B) and in the markup Org: the audit's own Org is
+    # "this Org", never one of the "other" Orgs
+    assert own["rows"][0][0] == GONE_C + " · also queried in 1 other Org"
+    assert others["groups"][1][2][0][0] == GONE_C + " · also queried in this Org"
 
 
 @needs_chrome
@@ -551,7 +557,7 @@ def test_cleanup_with_the_audits_org_not_read_lists_every_id_by_org(tmp_path):
     own, others, _ = seen["sections"]
     assert own["head"] == "Used in this Org, but not found"
     assert own["text"].endswith("every ID is listed by its Org below.")
-    assert others["head"] == "Not found, by the Org queried in (4 IDs in 3 Orgs)"
+    assert others["head"] == "Not found, by the Org queried in (3 IDs in 3 Orgs)"
 
 
 @needs_chrome
@@ -570,3 +576,48 @@ def test_cleanup_of_a_reading_from_0_223_says_org_not_recorded(tmp_path):
     assert only["head"] == "Org not recorded (2)"
     assert "read before the audit read each Model's Org" in only["text"]
     assert [r[0] for r in only["rows"]] == [GONE_A, GONE_B]
+
+
+@needs_chrome
+def test_one_id_in_two_other_orgs_counts_once(tmp_path):
+    orgs = {GONE_C: [_org("7", "Tenant B", 3), _org("9", "Tenant C", 4)]}
+    usage = _org_usage(model_orgs=orgs)
+    usage["not_visible"] = [GONE_C]
+    seen = _split(_data(usage), tmp_path)
+    own, others = seen["sections"]
+    assert own["head"] == "Used in this Org, but not found (0)"
+    assert others["head"] == "Used in other Orgs (1 ID in 2 Orgs)"
+    assert [g[2][0][0] for g in others["groups"]] == [
+        GONE_C + " · also queried in 1 other Org"] * 2
+
+
+_TITLES = ('window.__extra = Array.prototype.map.call(document.querySelectorAll('
+           '".scorecard-header .usage-stat"), function(s){ return s.getAttribute("title"); });')
+
+
+@needs_chrome
+def test_titles_say_all_orgs_from_the_primary_org_with_several(tmp_path):
+    data = _data(_org_usage())
+    seen = _dash(data, tmp_path)
+    assert seen["rows"]["Idle Sales"][1].endswith(
+        "(usage of all Orgs, read from the Primary Org)")
+    stats = report_browser.render(render_report(data), tmp_path, f"model/{BUSY}",
+                                  actions=_TITLES)
+    assert stats["errors"] == []
+    assert all(t.endswith("(usage of all Orgs, read from the Primary Org)")
+               for t in stats["extra"]) and len(stats["extra"]) == 3
+    # H17's finding says the same
+    [h17] = [f for f in data["findings"] if f["check_id"] == "H17"
+             and f["object_guid"] == IDLE]
+    assert h17["detail"].endswith("(usage of all Orgs, read from the Primary Org)")
+
+
+@needs_chrome
+def test_titles_from_another_org_keep_its_wording(tmp_path):
+    only = {GONE_B: [_org("7", "Tenant B", 200)]}
+    data = _data(_org_usage(org={"id": 7, "name": "Tenant B"}, model_orgs=only))
+    seen = _dash(data, tmp_path)
+    assert seen["rows"]["Idle Sales"][1].endswith("(usage of the Org ‘Tenant B’)")
+    stats = report_browser.render(render_report(data), tmp_path, f"model/{BUSY}",
+                                  actions=_TITLES)
+    assert all(t.endswith("(usage of the Org ‘Tenant B’)") for t in stats["extra"])
