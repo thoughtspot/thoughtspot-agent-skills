@@ -247,7 +247,7 @@ function buildCrossModel(D, initialFilters){
         ghTd.colSpan = cols.length;
         var ghHtml = '<span class="gh-id">'+esc(key)+'</span>';
         if(checkDesc) ghHtml += '<span class="gh-desc">'+esc(checkDesc)+'</span>';
-        ghHtml += '<span class="gh-count">'+gFindings.length+' finding'+(gFindings.length!==1?'s':'')+'</span>';
+        ghHtml += '<span class="gh-count">'+esc(usageGroupCount(key, gFindings.length))+'</span>';
         if(checkThresh) ghHtml += '<span class="gh-thresh">'+esc(checkThresh)+'</span>';
         ghTd.innerHTML = ghHtml;
         ghTr.appendChild(ghTd);
@@ -258,7 +258,7 @@ function buildCrossModel(D, initialFilters){
           emptyTr.className = "group-empty";
           var emptyTd = document.createElement("td");
           emptyTd.colSpan = cols.length;
-          emptyTd.textContent = "No findings — all checks passed";
+          emptyTd.textContent = usageUnjudged(key) || "No findings — all checks passed";
           emptyTr.appendChild(emptyTd);
           tbody.appendChild(emptyTr);
         } else {

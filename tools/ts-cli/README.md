@@ -4948,7 +4948,7 @@ Org the session is in, not the Primary Org's. The audit keeps GUIDs and counts o
 (the system Model has no Model names); a row with a blank Model ID is dropped and
 counted. The history lags by about a day. A final 401, a 429 or a `requests` exception
 aborts once; the system Model missing or ambiguous, any other refusal, a non-JSON
-answer or one that cannot be read whole leaves the usage unread (null), with a warning
+answer, one that cannot be read whole, or a history with no first query leaves the usage unread (null), with a warning
 naming the status and path only, and H17 judges no Model while the report says "Not
 read". A failed session or visible-object search is a warning that leaves the Org, or
 the list of used Models not found in this Org, unknown. A snapshot written before ts-cli

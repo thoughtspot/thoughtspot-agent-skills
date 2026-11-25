@@ -136,6 +136,13 @@ def metric_bar(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return _bar(value, green, value >= green, "%", "higher_is_better")
 
 
+def _usage_rule_ids() -> List[str]:
+    """The rules that require `usage` (H17): with usage not read they judge no Model, so
+    the report must not show their empty sections as clean (report/usage.js)."""
+    from ts_cli.audit.catalog_model import load_catalog
+    return [r.id for r in load_catalog().rules.values() if "usage" in (r.requires or [])]
+
+
 def _catalog_meta() -> Dict[str, Any]:
     from ts_cli.audit.catalog_model import load_catalog
     from ts_cli.audit.generate import report_meta
@@ -397,7 +404,7 @@ def compact_payload(data: dict) -> dict:
         "S": compact_summary,
         "K": _check_text(meta, data.get("check_meta") or {}),
         "G": {"categories": meta["categories"], "views": meta["views"],
-              "profiles": meta["profiles"]},
+              "profiles": meta["profiles"], "ur": _usage_rule_ids()},
     }
 
     if corpus:

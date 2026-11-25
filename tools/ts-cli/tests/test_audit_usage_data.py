@@ -336,7 +336,19 @@ def test_usage_is_available_only_when_read():
     ctx = make_context(models=[MODEL])
     item = next(scopes.iterate(ctx, "model"))
     assert not scopes.has_data(item, ctx, "usage")
-    assert scopes.has_data(item, make_context(models=[MODEL], usage={"models": {}}), "usage")
+    read = {"models": {}, "history": {"start": 1_696_118_400, "end": None}}
+    assert scopes.has_data(item, make_context(models=[MODEL], usage=read), "usage")
+    # a history with no first query says nothing: not read
+    empty = {"models": {}, "history": {"start": None, "end": None}}
+    assert not scopes.has_data(item, make_context(models=[MODEL], usage=empty), "usage")
+
+
+def test_an_empty_history_is_not_read(capsys):
+    answers = dict(ANSWERS)
+    answers[HISTORY_QUERY[0]] = _table(["Minimum TS Query Start Time",
+                                        "Maximum TS Query Start Time"], [])
+    warning = _not_read(Client(answers=answers), capsys)
+    assert warning.endswith("the usage history holds no query")
 
 
 # ── snapshots ───────────────────────────────────────────────────────────────

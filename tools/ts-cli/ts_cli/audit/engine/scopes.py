@@ -242,8 +242,10 @@ def _connections_fetched(item: Item, ctx) -> bool:
 
 def _usage_read(item: Item, ctx) -> bool:
     """Usage was read (one read per audit, as for calendars): None is "not fetched, or
-    not read", never "no queries" (audit/usage.py)."""
-    return ctx.usage is not None
+    not read", never "no queries"; a reading whose history has no start reads as not
+    read too (audit/usage.py usage_readable)."""
+    from ts_cli.audit.usage import usage_readable
+    return usage_readable(ctx.usage)
 
 
 def _set_looked_up(item: Item, ctx) -> bool:

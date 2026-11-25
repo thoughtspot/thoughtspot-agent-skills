@@ -210,6 +210,8 @@ _CLEANUP = ('var gone = document.querySelector("#v-cleanup .usage-gone");'
             ' function(tr){ return Array.prototype.map.call(tr.cells, function(c){'
             ' return c.textContent; }); }) : null,'
             ' text: gone && gone.textContent,'
+            ' h17_text: (function(){ var s = document.querySelector('
+            '"#v-cleanup .usage-unjudged .empty-state"); return s && s.textContent; })(),'
             ' sections: Array.prototype.map.call(document.querySelectorAll('
             '"#v-cleanup .cleanup-section h3"), function(h){ return h.textContent; }),'
             ' idle: Array.prototype.map.call(document.querySelectorAll('
@@ -238,7 +240,11 @@ def test_the_cleanup_view_reads_not_read(tmp_path):
     assert shown["errors"] == []
     assert shown["extra"]["head"] == "Used, but not found in this Org"
     assert "Not read: the audit could not read usage" in shown["extra"]["text"]
-    assert shown["extra"]["idle"] in (None, [])
+    # H17's own section must not read as clean: no "(0)", no "No findings."
+    [h17] = [h for h in shown["extra"]["sections"] if "H17" in h]
+    assert h17.endswith("— H17 — Not read") and "(0)" not in h17
+    assert shown["extra"]["h17_text"] == ("Not read: the audit could not read usage, so "
+                                          "this rule judged no Model.")
 
 
 @needs_chrome
@@ -248,3 +254,40 @@ def test_an_unlisted_visible_set_reads_not_read_in_cleanup(tmp_path):
     shown = report_browser.render(render_report(_data(usage)), tmp_path, "cleanup",
                                   actions=_CLEANUP)
     assert "the objects this user can see could not be listed" in shown["extra"]["text"]
+
+
+@needs_chrome
+def test_h17_says_not_collected_in_cleanup_when_no_rule_fetched_usage(tmp_path):
+    """A D-only run never fetched usage: H17's Cleanup section says so, never "(0)"."""
+    data = _data(None, needs=data_needs(["D"]) | ALWAYS_FETCHED, angles=("D",))
+    shown = report_browser.render(render_report(data), tmp_path, "cleanup", actions=_CLEANUP)
+    assert shown["errors"] == []
+    [h17] = [h for h in shown["extra"]["sections"] if "H17" in h]
+    assert h17.endswith("— H17 — Not collected") and "(0)" not in h17
+    assert shown["extra"]["h17_text"].startswith("Not collected for this selection")
+    assert shown["extra"]["head"] is None        # no usage list either
+
+
+_GROUPS = ('document.getElementById("cm-group-by-check").click();'
+           'document.getElementById("cm-show-all-checks").click();'
+           'var out = {}; Array.prototype.forEach.call(document.querySelectorAll('
+           '"#v-crossmodel tr.group-header"), function(tr){'
+           ' var next = tr.nextElementSibling;'
+           ' out[tr.querySelector(".gh-id").textContent] = [tr.querySelector(".gh-count")'
+           '.textContent, next && next.className === "group-empty" ? next.textContent : null]; });'
+           'window.__extra = out;')
+
+
+@needs_chrome
+def test_h17_says_not_read_in_the_cross_model_groups(tmp_path):
+    shown = report_browser.render(render_report(_data(None)), tmp_path, "crossmodel",
+                                  actions=_GROUPS)
+    assert shown["errors"] == []
+    assert shown["extra"]["H17"] == [
+        "Not read", "Not read: the audit could not read usage, so this rule judged no Model."]
+    # another rule with no findings still reads as before
+    clean = [v for k, v in shown["extra"].items() if k != "H17" and v[0] == "0 findings"]
+    assert clean and all(v[1] == "No findings — all checks passed" for v in clean)
+    read = report_browser.render(render_report(_data(_usage())), tmp_path, "crossmodel",
+                                 actions=_GROUPS)
+    assert read["extra"]["H17"][0] == "2 findings"

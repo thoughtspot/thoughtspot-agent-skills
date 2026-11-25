@@ -72,3 +72,26 @@ function usageOrgNoteHtml(){
       "audit ran in only, and queries made in other Orgs are not counted.";
   return '<div class="unread usage-note" role="note">'+esc(text)+'</div>';
 }
+
+/* For a rule that requires usage (D.G.ur, e.g. H17) and has no findings: why it judged
+   no Model — "Not read" when the run fetched usage and could not read it, the
+   not-collected wording when no selected rule fetched it — so its empty section never
+   reads as clean. "" for any other rule, or when usage was read. */
+function usageUnjudged(ci){
+  var rules = (D.G && D.G.ur) || [];
+  if(rules.indexOf(ci) === -1) return "";
+  var state = usageState();
+  if(state === "read") return "";
+  if(state === "not_read") return "Not read: the audit could not read usage, so this rule judged no Model.";
+  return NOT_COLLECTED;
+}
+/* A Cross-Model group's count: "<n> finding(s)", or for a usage rule that judged
+   nothing, why ("Not read", "Not collected"), never "0 findings". */
+function usageGroupCount(ci, n){
+  if(n === 0 && usageUnjudged(ci)) return usageUnjudgedLabel(ci);
+  return n+" finding"+(n !== 1 ? "s" : "");
+}
+function usageUnjudgedLabel(ci){
+  if(!usageUnjudged(ci)) return "";
+  return usageState() === "not_read" ? USAGE_NOT_READ : "Not collected";
+}

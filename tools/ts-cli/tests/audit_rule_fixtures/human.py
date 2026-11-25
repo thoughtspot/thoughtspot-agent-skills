@@ -899,7 +899,7 @@ def human_helper_visible_or_reused() -> AuditContext:
     return make_context(models=[model])
 
 
-# ── H17: Models with no query in more than 90 days, or none in the history ──
+# ── H17: Models with no query in 90 days or more, or none in the history ──
 
 #: When the synthetic usage was read: 2026-11-25 00:00 UTC, epoch seconds.
 USAGE_READ_AT = 1_795_564_800

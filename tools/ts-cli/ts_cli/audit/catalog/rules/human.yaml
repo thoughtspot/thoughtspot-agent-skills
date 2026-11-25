@@ -447,17 +447,19 @@
     silent: {fixture: human_helper_visible_or_reused}
 
 - id: H17
-  title: Model not queried in more than 90 days
+  title: Model not queried in 90 days or more
   evidence: fact
   description: >-
-    A Model with no query in more than 90 whole days before the audit read its usage,
-    or with no query at all in the usage history ThoughtSpot holds. The usage is read
+    A Model with no query in 90 whole days or more before the audit read its usage, or
+    with no query at all in the usage history ThoughtSpot holds when that history starts
+    at least 90 days before the read (a shorter history says nothing about a Model it
+    does not hold). The usage is read
     from the system Model TS: AI and BI Stats: each Model's last query time over the
     whole history it keeps, which lags by about a day. It is the usage of the Org the
     audit runs in, so a Model queried only from another Org counts as not queried here.
     A Model created since the history's last day reads as never queried. Not judged
-    when the usage could not be read (the system Model missing, refused, or a failed
-    call), never read as unused.
+    when the usage could not be read (the system Model missing, refused, a failed call,
+    or a history with no first query), never read as unused.
   # A code rule (code:idle_model) because its idle days are a tunable parameter and the
   # finding is worded two ways, by days since the last query or by where the history
   # starts; the reading is in audit/usage.py.

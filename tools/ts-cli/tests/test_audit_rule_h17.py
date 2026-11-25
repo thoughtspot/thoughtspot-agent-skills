@@ -1,4 +1,4 @@
-"""H17: a Model with no query in more than 90 days, or none in the usage history.
+"""H17: a Model with no query in 90 days or more, or none in the usage history.
 
 Graded from `ctx.usage` (audit/usage.py), relative to when the usage was read, so a
 replay judges as the live run did. Not judged when the usage was not read: a failed
@@ -23,20 +23,28 @@ def _ctx(usage, guid="m-1"):
 
 
 @pytest.mark.parametrize("profile", ["general", "spotter"])
-@pytest.mark.parametrize("days, fires", [(89, False), (90, False), (91, True)])
-def test_more_than_90_days_since_the_last_query_fires(days, fires, profile):
+@pytest.mark.parametrize("days, fires", [(89, False), (90, True), (91, True)])
+def test_90_days_or_more_since_the_last_query_fires(days, fires, profile):
     found = _h17(_ctx(fx.build_usage({"m-1": days})), profile)
     if not fires:
         assert found == []
         return
     [f] = found
-    assert (f.severity, f.object_guid, f.object_type, f.metric) == ("LOW", "m-1", "model", 91)
-    assert f.detail == ("No query in 91 days; last queried on 2026-08-26 "
+    assert (f.severity, f.object_guid, f.object_type, f.metric) == ("LOW", "m-1", "model", days)
+    last = {90: "2026-08-27", 91: "2026-08-26"}[days]
+    assert f.detail == (f"No query in {days} days; last queried on {last} "
                         "(usage of the Org 'Primary')")
 
 
-def test_a_fraction_of_a_day_past_90_is_still_90_whole_days():
-    usage = fx.build_usage({"m-1": {"last_used": fx.USAGE_READ_AT - 90 * 86400 - 3600,
+def test_90_and_a_half_days_fires_as_90_whole_days():
+    usage = fx.build_usage({"m-1": {"last_used": fx.USAGE_READ_AT - 90 * 86400 - 12 * 3600,
+                                    "queries_180d": 1, "users_180d": 1}})
+    [f] = _h17(_ctx(usage))
+    assert f.metric == 90
+
+
+def test_89_and_a_half_days_is_still_89_whole_days():
+    usage = fx.build_usage({"m-1": {"last_used": fx.USAGE_READ_AT - 89 * 86400 - 12 * 3600,
                                     "queries_180d": 1, "users_180d": 1}})
     assert _h17(_ctx(usage)) == []
 
@@ -48,10 +56,18 @@ def test_a_model_the_history_never_mentions_fires_naming_where_it_starts():
                         "2023-10-01 (usage of the Org 'Primary')")
 
 
-def test_never_queried_without_a_known_start_says_so_plainly():
-    [f] = _h17(_ctx(fx.build_usage({}, start=None)))
-    assert f.detail == ("No query in the usage history ThoughtSpot holds "
-                        "(usage of the Org 'Primary')")
+def test_a_history_with_no_start_is_not_read_and_judges_no_model():
+    """No first query time: the history says nothing about any Model."""
+    usage = fx.build_usage({"m-1": 200}, start=None)
+    assert _h17(_ctx(usage)) == []
+    assert _h17(_ctx(fx.build_usage({}, start=None))) == []
+
+
+@pytest.mark.parametrize("history_days, fires", [(89, False), (90, True), (400, True)])
+def test_never_queried_needs_a_history_of_90_days_or_more(history_days, fires):
+    """A Model missing from a short history may simply be newer than the history."""
+    usage = fx.build_usage({"other": 3}, start=fx.USAGE_READ_AT - history_days * 86400)
+    assert len(_h17(_ctx(usage))) == (1 if fires else 0)
 
 
 def test_a_row_with_no_query_time_says_nothing():

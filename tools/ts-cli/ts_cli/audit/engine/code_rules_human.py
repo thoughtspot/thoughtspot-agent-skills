@@ -142,14 +142,15 @@ def stale_names(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
 
 @code_rule("idle_model", placeholders={"idle", "org"}, severity="severity",
            uses=("usage",), parameters={"idle_days"},
-           label="one finding per Model with no query in more than its idle days, or none "
+           label="one finding per Model with no query in its idle days or more, or none "
                  "in the usage history")
 def idle_model(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     """H17 — per Model, from the usage read from the system Model (audit/usage.py): no
-    query in more than `idle_days` whole days before the usage was read (`{idle}` says
-    how many and when, the metric is the days), or no row in the history at all
-    (`{idle}` names where the history starts, no metric). `{org}` names the Org whose
-    usage was read. A Model is judged only when usage was read (`requires: usage`)."""
+    query in `idle_days` whole days or more before the usage was read (`{idle}` says
+    how many and when, the metric is the days), or no row in a history that starts at
+    least `idle_days` days before it was read (`{idle}` names where the history starts,
+    no metric). `{org}` names the Org whose usage was read. A Model is judged only when
+    usage was read, with a known history start (`requires: usage`)."""
     from ts_cli.audit.usage import idle_reading, org_label
     usage = ctx.usage
     out: List[Finding] = []

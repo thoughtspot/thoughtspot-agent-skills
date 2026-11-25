@@ -17,7 +17,7 @@ from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 from ts_cli.audit.formula_tree import formula_tree
-from ts_cli.audit.usage import corpus_model_usage, corpus_usage
+from ts_cli.audit.usage import corpus_model_usage, corpus_usage, usage_readable
 
 #: The conditional data the report reads that no rule need declare: the AI
 #: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
@@ -306,7 +306,7 @@ def _corpus_model(ctx, model: dict, item: dict, items: Optional[list], i: int,
     entry["ai_analysis"] = _model_ai_analysis(ctx, guid, m, ai_fetched)
     entry["formula_tree"] = formula_tree(m)
     entry["data_cache"] = model_data_cache(item, ctx, ran)
-    if ctx.usage is not None:
+    if usage_readable(ctx.usage):
         entry["usage"] = corpus_model_usage(ctx.usage, guid)
     if items is not None:
         score = readiness_score(items[i], ctx)

@@ -46,6 +46,12 @@ function buildCleanup(D){
         buildCleanupSection(c, title+" ("+esc(kind)+")",
           items.filter(function(f){ return f.ot === kind; }), D, "");
       });
+    } else if(!items.length && usageUnjudged(ci)){
+      /* a usage rule that judged nothing (usage.js): never "(0)" and "No findings." */
+      var sec = el("div", "cleanup-section usage-unjudged");
+      sec.innerHTML = '<h3>'+title+' — '+esc(usageUnjudgedLabel(ci))+'</h3>';
+      sec.appendChild(mutedNote(usageUnjudged(ci), "empty-state"));
+      c.appendChild(sec);
     } else {
       buildCleanupSection(c, title, items, D, "No findings.");
     }

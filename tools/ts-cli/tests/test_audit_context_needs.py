@@ -148,7 +148,7 @@ SHIPPED_NEEDS = {
     "A": {"model_tml", "ai_instructions"},
     # D15 (duplicate Table-level joins, 2026-11) declares Table TML, always fetched anyway.
     "D": {"model_tml", "metadata", "table_tml"},
-    # H17 (a Model not queried in more than 90 days, 2026-11-25) requires the usage.
+    # H17 (a Model not queried in 90 days or more, 2026-11-25) requires the usage.
     "H": {"model_tml", "dependents", "sets", "answers", "usage"},
     # P22 (a connection defining custom calendars, 2026-11-18) requires the calendars,
     # and P24 (a connection using OAuth, PrivateLink or a template variable) the

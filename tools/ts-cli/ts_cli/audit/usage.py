@@ -105,18 +105,32 @@ def model_usage(usage: dict, guid: str) -> Dict[str, Any]:
             "never": False}
 
 
+def usage_readable(usage: Optional[dict]) -> bool:
+    """Usage was read and its history has a known start: an empty history (no first
+    query time) says nothing about any Model, so it reads as not read."""
+    if not isinstance(usage, dict):
+        return False
+    return _number((usage.get("history") or {}).get("start"))
+
+
 def idle_reading(usage: dict, guid: str, idle_days: float) -> Tuple[Optional[int], Optional[str]]:
-    """H17: `(days since last use, wording)` for a Model with no query in more than
-    `idle_days` days, `(None, wording)` for one the history holds no row for, and
-    `(None, None)` otherwise — a recent query, or a row with no query time recorded,
-    which says nothing either way."""
+    """H17: `(days since last use, wording)` for a Model with no query in `idle_days`
+    days or more, `(None, wording)` for one the history holds no row for when the
+    history covers at least `idle_days` days before the usage was read, and `(None,
+    None)` otherwise — a recent query, a row with no query time recorded, a history too
+    short to say, or usage not readable (usage_readable)."""
+    if not usage_readable(usage):
+        return None, None
     reading = model_usage(usage, guid)
     if reading["never"]:
-        start = iso_date(((usage.get("history") or {}).get("start")))
-        since = f", which starts on {start}" if start else ""
-        return None, f"No query in the usage history ThoughtSpot holds{since}"
+        start = usage["history"]["start"]
+        fetched = usage.get("fetched_at")
+        if not _number(fetched) or start > fetched - idle_days * _DAY:
+            return None, None
+        return None, ("No query in the usage history ThoughtSpot holds, which starts on "
+                      f"{iso_date(start)}")
     days = reading["days"]
-    if days is None or days <= idle_days:
+    if days is None or days < idle_days:
         return None, None
     return days, f"No query in {days} days; last queried on {iso_date(reading['last_used'])}"
 
@@ -137,12 +151,13 @@ def corpus_model_usage(usage: dict, guid: str) -> Dict[str, Any]:
 
 
 def corpus_usage(usage: Optional[dict], audited: Any) -> Optional[dict]:
-    """The usage reading for the audit JSON (`corpus.usage`), None when it was not read:
+    """The usage reading for the audit JSON (`corpus.usage`), None when it was not read
+    (usage_readable):
     the Org, whether it is the Primary Org, the window, when it was read, the history's
     span, the rows dropped for a blank Model ID, and `gone` — each Model ID that matches
     no object the user can see now and is not audited, most queried first, or None when
     that could not be listed. GUIDs and counts only: the system Model has no names."""
-    if usage is None:
+    if not usage_readable(usage):
         return None
     gone = None
     if isinstance(usage.get("not_visible"), list):
@@ -263,6 +278,12 @@ def fetch_usage(client: Any, warnings: list) -> Optional[dict]:
         return None
     models, blank = merge_rows(last_used, window)
     span = history[0] if history else {}
+    if not _number(span.get(FIRST_QUERY)):
+        msg = ("Usage was not read, so no Model's usage is known: the usage history "
+               "holds no query")
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        return None
     return {"org": org, "window_days": WINDOW_DAYS, "fetched_at": int(time.time()),
             "history": {"start": _epoch(span.get(FIRST_QUERY)),
                         "end": _epoch(span.get(LAST_QUERY))},
