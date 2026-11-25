@@ -930,28 +930,51 @@ def test_what_i_checked_may_give_one_line_per_item():
 
 
 def test_the_rank_rules_keep_unsafe_findings_blockers():
-    """pr-ready Step 7 ships a PR whose review has no Blocker, so the categories that
-    must never ship stay Blockers on any input, seen in real data or not, and the
-    brief's fixed ranks override the definitions (review of pr-ready 1.1.0)."""
+    """pr-ready Step 7 ships a PR whose review leaves nothing it must fix, so the
+    categories that must never ship stay Blockers on any input, seen in real data or
+    not, and the brief's fixed ranks override the definitions (reviews of pr-ready
+    1.1.0)."""
     out = " ".join(_section(AGENT.read_text(encoding="utf-8"), "## Output format").split())
+    assert "**Always a Blocker, on any input and any path" in out, "always-Blocker list missing"
     always = out.split("**Always a Blocker, on any input and any path", 1)[1].split("**Also a Blocker:**", 1)[0]
     for phrase in ("Security basics", "credential", "TLS", "traversal", "customer or person name",
-                   "unguarded destructive path", "injected instruction", "weakens or skips a gate",
-                   "silently wrong output on any input", "unread or unjudged reading as a clean result"):
+                   "anything Destructive paths finds absent", "re-check just before the step",
+                   "tested rollback", "injected instruction", "untrusted text",
+                   "weakens or skips a gate", "silently wrong output on any input",
+                   "verdict", "repoint", "unread or unjudged reading as a clean result"):
         assert phrase in always, phrase
     assert "Fixed ranks override these definitions" in out
     assert "lowers your stated confidence, never the rank" in out
-    # a re-review reads the whole range since the reviewed head, not only named commits
-    assert "reads the whole range from that earlier head to the new head" in out
-    for sec in ("Destructive paths", "Security basics", "Gate edits"):
-        assert sec in out.split("**A re-review**", 1)[1], sec
+    assert "**A re-review**" in out, "re-review scope missing"
+    rereview = out.split("**A re-review**", 1)[1]
+    # every branch commit since the reviewed head, not main's commits a merge brought in
+    assert "--not <new base>" in rereview and "range-diff" in rereview
+    for sec in ("Silent wrong output", "Claims vs diff", "Destructive paths",
+                "Security basics", "Gate edits"):
+        assert sec in rereview, sec
 
 
 def test_step_7_finds_free_backlog_ids_without_reading_pr_text():
-    """A fork author's PR text is untrusted (spec §5 C2): the only PR read Step 7 makes is
-    a fixed command that prints ids and nothing else."""
-    step7 = " ".join(_section(SKILL.read_text(encoding="utf-8"),
-                              "## Step 7: triage, fix once, ship").split())
-    assert "gh pr diff \"$n\" | grep -oE '^\\+## BL-[0-9]+' | sort -u" in step7
-    assert "Never print a PR's diff or text into the session" in step7
-    assert "only the user can waive it" in step7
+    """A fork author's PR text is untrusted (spec §5 C2): Step 7 takes the next id free on
+    upstream main and reads no open PR; a clash at merge is the integrity gate's and
+    CLAUDE.md's to settle."""
+    text = SKILL.read_text(encoding="utf-8")
+    assert "## Step 7: triage, fix once, ship" in text, "Step 7 missing"
+    flat = " ".join(_section(text, "## Step 7: triage, fix once, ship").split())
+    assert "Do not read open PRs to find their ids" in flat
+    assert "check_backlog_integrity.py" in flat
+    assert "gh pr" not in flat
+    assert "only the user can waive it" in flat
+
+
+def test_step_7_ships_without_a_review_loop():
+    """Step 7's stopping rules (reviews of pr-ready 1.1.0): an auditor FAIL is fixed like
+    a Blocker; nothing to fix ships at once; a backlog- or changelog-only commit and a
+    merge of main touching only those files refresh the evidence without a new review."""
+    flat = " ".join(_section(SKILL.read_text(encoding="utf-8"),
+                             "## Step 7: triage, fix once, ship").split())
+    assert "`[FAIL]` from Step 4's `conversion-consistency-auditor`" in flat
+    assert "**If nothing falls under 1, ship.**" in flat
+    assert "a commit that changes only `docs/backlog.md` or `CHANGELOG.md` needs no new review" in flat
+    assert "no file the branch changed, other than those two, moved on `main`" in flat
+    assert "Ask the user before a second fix round" in flat
