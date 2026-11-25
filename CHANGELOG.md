@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-25
+- docs: `pr-ready` 1.1.0 adds Step 7, a stopping point for review: ship at once when nothing needs fixing, else one fix round (Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement or normal use) and one re-review; the rest goes to one dated backlog item. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text in a credentialed session, a weakened gate and silently wrong output are always Blockers. `CLAUDE.md` asks for one purpose per PR and bounded claims about behaviour
+
 ## 2026-11-19
 - feat: the `ts audit` report gives every page about one Model the same tabs (Scorecard, ERD, Formulas, Data Cache) and breadcrumb, adds `#model/<guid>/erd` (the ERD drawn inline) and `#datacache/<guid>` (one Model's Data Cache row), and one filter bar (Show, All, a toggle chip per kind with its count, search) serves the Formulas view (type chips and a legend shared by its tree and graph), the Data Cache view (multi-select readiness chips) and the ERD; switching a chip off hides what it covers (ts-audit 3.25.0)
 - feat: the ERD (`ts-object-model-erd`, and the audit report's inline ERD) uses that filter bar: switching a table-kind chip off hides those tables and their joins and lays the diagram out again; RLS subgraph and Notes become Focus toggles (ts-object-model-erd 1.11.0)
