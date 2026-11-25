@@ -5,8 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-25
+- docs: `pr-ready` 1.1.0 adds Step 7, a stopping point for review: one fix round (Blockers, and Should-fixes that break a stated requirement or normal use), the rest to one dated backlog item, one re-review of the whole range since the reviewed head; the `pr-reviewer` ranks strictly, with security, destructive paths, injected instructions, gate edits and silent wrong output always Blockers; `CLAUDE.md` asks for one purpose per PR and bounded claims about behaviour
+
 ## 2026-11-19
-- docs: the review process stops: `pr-ready` 1.1.0 adds Step 7 (fix Blockers, backlog the rest in one dated item, at most one fix round and one re-review, ship when a round has no Blocker); the `pr-reviewer` ranks strictly and re-reviews only the fix commits; `CLAUDE.md` asks for one purpose per PR and bounded claims
 - feat: the `ts audit` report's Dashboard heatmap gains a Data Cache column: each listed Model's Data Cache readiness, linking to the Data Cache view, when the Performance angle ran (ts-audit 3.24.0)
 - fix: `ts audit` P24 reads a Databricks connection whose only OAuth settings are `OAuth2ClientId` and `OAuth2Secret` as OAuth to confirm, since per-user OAuth and a service principal both hold that pair; a Model P24 blocked only on that pair now reads To confirm (Not assessed if another check could not read it). A snapshot records the version of its connection-facts derivation; one from before this release holds the old reading, so replaying the P angle from it, or `ts audit fire-rates` on it, is refused: capture it again. P23 names an Analyst Studio source (`RDBMS_MODE`) "Analyst Studio", still blocked (ts-audit 3.24.0)
 - chore: bump ts-cli to v0.221.0
