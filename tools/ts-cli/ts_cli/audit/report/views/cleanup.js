@@ -218,7 +218,7 @@ function buildGoneSection(container){
     return;
   }
   if(D.C.us.or === 0){
-    var all = goneSection(container, "Used, but not found in this Org — usage of "+usageOrgName(),
+    var all = goneSection(container, "Used, but not found in this Org — "+usageWhose(),
       gone.length, "");
     all.appendChild(mutedNote("Org not read: the Org each ID was queried in could not be read, "+
       "so this list may hold other Orgs' IDs as well as this Org's. Each may be deleted, in "+

@@ -564,7 +564,7 @@ def test_cleanup_with_the_audits_org_not_read_lists_every_id_by_org(tmp_path):
 def test_cleanup_with_orgs_not_read_keeps_one_list_and_says_so(tmp_path):
     seen = _split(_data(_org_usage(model_orgs=None)), tmp_path)
     [only] = seen["sections"]
-    assert only["head"] == "Used, but not found in this Org — usage of the Org ‘Primary’ (4)"
+    assert only["head"] == "Used, but not found in this Org — usage read from the Primary Org; which Orgs it covers was not read (4)"
     assert "Org not read: the Org each ID was queried in could not be read" in only["text"]
     assert [r[0] for r in only["rows"]] == [GONE_A, GONE_C, GONE_D, GONE_B]
 
