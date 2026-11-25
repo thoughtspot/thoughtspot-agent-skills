@@ -225,7 +225,7 @@ def test_the_cleanup_view_lists_idle_models_and_models_that_no_longer_exist(tmp_
                                   actions=_CLEANUP)
     assert shown["errors"] == []
     seen = shown["extra"]
-    assert seen["head"] == "Used but no longer exist — usage of the Org ‘Primary’ (2)"
+    assert seen["head"] == "Used, but not found in this Org — usage of the Org ‘Primary’ (2)"
     assert seen["rows"] == [[GONE_A, "40", "6", "2026-11-20"], [GONE_B, "0", "0", "2026-05-09"]]
     assert "keeps no names" in seen["text"]
     assert sorted(seen["idle"]) == ["Idle Sales", "Never Sales"]
@@ -236,7 +236,7 @@ def test_the_cleanup_view_reads_not_read(tmp_path):
     shown = report_browser.render(render_report(_data(None)), tmp_path, "cleanup",
                                   actions=_CLEANUP)
     assert shown["errors"] == []
-    assert shown["extra"]["head"] == "Used but no longer exist"
+    assert shown["extra"]["head"] == "Used, but not found in this Org"
     assert "Not read: the audit could not read usage" in shown["extra"]["text"]
     assert shown["extra"]["idle"] in (None, [])
 

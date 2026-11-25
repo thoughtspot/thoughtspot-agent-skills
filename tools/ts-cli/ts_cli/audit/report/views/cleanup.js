@@ -189,7 +189,7 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
   container.appendChild(sec);
 }
 
-/* "Used but no longer exist": each Model ID in the usage (D.C.us.g, usage.js) that
+/* "Used, but not found in this Org": each Model ID in the usage (D.C.us.g, usage.js) that
    matches no Model, Table or View the audit's user can see in that Org now, with its
    queries, users and last query. The system Model keeps no names, so only the ID. Not
    shown when no selected rule fetched usage; "Not read" when it was fetched and not read,
@@ -199,20 +199,21 @@ function buildGoneSection(container){
   if(state === "absent") return;
   var sec = el("div", "cleanup-section usage-gone");
   var gone = state === "read" ? D.C.us.g : null;
-  var head = "Used but no longer exist"+(state === "read" ? " — usage of "+usageOrgName() : "");
+  var head = "Used, but not found in this Org"+(state === "read" ? " — usage of "+usageOrgName() : "");
   sec.innerHTML = '<h3>'+esc(head)+(gone ? ' ('+gone.length+')' : '')+'</h3>';
   if(state === "not_read" || !gone){
     var why = state === "not_read"
-      ? "Not read: the audit could not read usage, so it cannot say which Models no longer exist."
-      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models no longer exist.";
+      ? "Not read: the audit could not read usage, so it cannot say which used Models are not found."
+      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models are not found.";
     sec.appendChild(mutedNote(why, "empty-state"));
     container.appendChild(sec);
     return;
   }
   var w = D.C.us.w || 180;
   sec.appendChild(mutedNote("Model IDs in the usage history that match no Model, Table or View "+
-    "the audit's user can see in this Org now: deleted, or not shared with that user. The "+
-    "usage history keeps no names, only the ID.", "usage-gone-note"));
+    "the audit's user can see in this Org now. Each may be deleted, in another Org, or not "+
+    "shared with that user; the audit cannot tell which. The usage history keeps no names, "+
+    "only the ID.", "usage-gone-note"));
   if(!gone.length){
     sec.appendChild(mutedNote("None.", "empty-state"));
     container.appendChild(sec);

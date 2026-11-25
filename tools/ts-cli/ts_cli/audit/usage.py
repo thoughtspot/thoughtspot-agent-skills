@@ -246,7 +246,7 @@ def fetch_usage(client: Any, warnings: list) -> Optional[dict]:
          "not_visible": [<guid>, ...] or None}
 
     `not_visible` lists the Model IDs that match no Model, Table or View the user can
-    see in this Org now (deleted, or not shared with them); None, with a warning, when
+    see in this Org now (deleted, in another Org, or not shared with them); None, with a warning, when
     that search failed, which leaves the rest readable."""
     from ts_cli.audit.context import _log
     _log("Fetching usage...")
@@ -350,7 +350,7 @@ def _not_visible(client: Any, models: Dict[str, dict], warnings: list) -> Option
         return search_pages(lambda b: ids(fetch_page(b)), body, 500, id_key="id",
                             what="metadata/search", items="objects")
     found = _paged_fetch(client, METADATA_SEARCH_PATH, "Visible object",
-                         "Models that no longer exist", warnings, search, with_body=False)
+                         "used Models not found in this Org", warnings, search, with_body=False)
     if found is None:
         return None
     visible = {f["id"] for f in found if isinstance(f.get("id"), str)}

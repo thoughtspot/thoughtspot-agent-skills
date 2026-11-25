@@ -4951,7 +4951,7 @@ aborts once; the system Model missing or ambiguous, any other refusal, a non-JSO
 answer or one that cannot be read whole leaves the usage unread (null), with a warning
 naming the status and path only, and H17 judges no Model while the report says "Not
 read". A failed session or visible-object search is a warning that leaves the Org, or
-the list of Models that no longer exist, unknown. A snapshot written before ts-cli
+the list of used Models not found in this Org, unknown. A snapshot written before ts-cli
 0.223.0 holds no usage, so replaying H from it is refused: capture it again. Logic in
 `ts_cli/audit/usage.py`.
 

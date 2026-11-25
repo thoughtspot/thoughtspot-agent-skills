@@ -268,7 +268,7 @@ def test_a_failed_visible_object_search_leaves_the_rest_read(capsys):
     ctx = _read(Client(override=refuse))
     assert ctx.usage["not_visible"] is None and ctx.usage["models"][M1]
     [warning] = ctx.warnings
-    assert "Models that no longer exist were not checked" in warning
+    assert "used Models not found in this Org were not checked" in warning
     assert BODY_MARKER not in warning
 
 
