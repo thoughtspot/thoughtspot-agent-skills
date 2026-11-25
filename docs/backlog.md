@@ -18595,7 +18595,10 @@ real data:**
   `AADOAuthTenant`, which 0.221.0 read as firm OAuth; with a plain host such a Model can
   read Can use. Read a set key with a mid-word `oauth` as OAuth to confirm (`oauth_m2m`)
   instead, or settle it with a names-only listing of the cluster's connection keys (as for
-  open-items #17). Settle this one first: if such a key exists it is a Blocker-class result.
+  open-items #17). **Checked 2026-11-25, names only, on the SE demo cluster:** of 1,863
+  connections, the only key names containing `oauth` are `OAuth2ClientId` and `OAuth2Secret`
+  (12 Databricks connections each) and `oauth_pvt_key` (5 BigQuery); none has `oauth`
+  mid-word, so no Model there reads Can use this way. Low priority.
 - **`_names_oauth` can raise `IndexError`** (`connection_facts.py:176-179`): it searches
   `text.lower()` but indexes `text`, and `lower()` lengthens "İ". Match case-insensitively on
   `text` itself.
