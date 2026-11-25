@@ -513,6 +513,7 @@ are roughly ordered by value÷effort.
 | BL-617 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
 | BL-618 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
 | BL-619 | ts-audit follow-ups promised in #741 and #735 and never filed (null-test wording, P28 docstring, a calendar listed twice, a test-only helper, Ossie row 290, two H16 column reads) | 2027-01-31 |
+| BL-621 | Connection health check: `ts connections diagnose` + `ts-object-connection-health`, a stopgap for PDM-5106 (design drafted, not built) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18745,3 +18746,31 @@ From the re-review of the fix round:
 17. `D.G.ur` (rules that require usage) and `D.C.ur` (unreadable items) share a key name;
     `_usage_rule_ids` in `report.py` loads the catalog a second time and includes retired
     rules, where `report_meta` takes only active ones.
+
+## BL-621 — Connection health check: `ts connections diagnose` and `ts-object-connection-health` `Tier 3`
+
+**Filed:** 2026-11-25. **Source:** PDM-5106, which asks ThoughtSpot to show each
+connection's health on the connection list. This is the stopgap until it does.
+**Target:** 2027-01-31.
+
+**Why.** ThoughtSpot gives no sign that a connection is stale. Nobody notices until
+someone edits it or a query fails. Spotter indexing and row-count stats keep running
+against dead connections.
+
+**What.** Piece 1, designed in
+`docs/superpowers/specs/2026-11-19-connection-health-design.md`:
+
+- `ts connections diagnose`: checks connections through the internal route
+  `GET /callosum/v1/connection/diagnose?connection_id=<guid>`, live-verified on the SE demo
+  cluster 2026-11-18. Writes JSON with one status per connection (`healthy`, `down`,
+  `drifted`, `unknown`) and the failing tables and columns.
+- `ts-object-connection-health`: a skill that scopes the run, confirms the cost, runs it and
+  summarises what to fix.
+
+Piece 2, not designed yet: connections as a subject in `ts audit`, reading piece 1's JSON.
+
+**Decided.** Approach B, a command plus a small skill (2026-11-19). Admins only in v1
+(2026-11-25).
+
+**Next step.** The user approves the design doc. Then write the implementation plan.
+Three live probes in the doc's open items must pass before merge.
