@@ -515,6 +515,10 @@ are roughly ordered by value÷effort.
 | BL-619 | ts-audit follow-ups promised in #741 and #735 and never filed (null-test wording, P28 docstring, a calendar listed twice, a test-only helper, Ossie row 290, two H16 column reads) | 2027-01-31 |
 | BL-621 | Connection health check: `ts connections diagnose` + `ts-object-connection-health`, a stopgap for PDM-5106 (design drafted, not built) | 2027-01-31 |
 | BL-622 | ts-audit: flag idle connections that are still active, and recommend deactivating them (connection health piece 2) | 2027-02-28 |
+| BL-620 | ts-audit usage (H17): review leftovers and open questions (non-admin auditors, the searchdata spec check, new Models, clock skew, cost, locale, nits) | 2026-12-31 |
+| BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
+| BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
+| BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
