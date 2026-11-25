@@ -18733,3 +18733,15 @@ Wording and hardening (nits):
 13. H17's title and description write the threshold as "90", but `idle_days` can be
     overridden by a profile, which would leave the title wrong.
 14. No `ts data search` command: BL-081 asked for one; usage is read inside the audit only.
+
+From the re-review of the fix round:
+
+15. An empty history (no first query) reads "Not read: the audit could not read usage",
+    though the read succeeded and held nothing; SKILL.md and the README put it in a sentence
+    ending "naming the status and path", which its warning does not. Word it as its own case.
+16. The scorecard's Human Readiness section still says "No findings for this angle." when
+    usage was not read and H17 judged nothing (the header on the same page says "Not read").
+    Same per-rule gap as item 5.
+17. `D.G.ur` (rules that require usage) and `D.C.ur` (unreadable items) share a key name;
+    `_usage_rule_ids` in `report.py` loads the catalog a second time and includes retired
+    rules, where `report_meta` takes only active ones.
