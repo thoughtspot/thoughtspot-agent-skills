@@ -18699,6 +18699,7 @@ Open questions, each settled by a live probe:
    no object of any type in the Primary Org, some queried by up to 8 users in the last week.
    Probe whether the Primary Org's usage includes other Orgs' Models; if so, say so in the
    report and consider splitting the list by Org.
+   **Resolved 2026-11-25 (ts-cli 0.224.0):** it does; the header says so and Cleanup splits the list by Org (ts-audit open-items #9).
 
 Behaviour:
 

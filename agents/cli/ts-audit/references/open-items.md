@@ -235,6 +235,26 @@ visible and `searchdata` answers **that Org's** usage, not the Primary Org's. Th
 Org is `GET /api/rest/2.0/auth/session/user` → `current_org` `{id, name}`, which the audit
 records with the usage, and the report says when it is not the Primary Org (id 0).
 
+**Org columns, and the Primary Org's reach — VERIFIED live 2026-11-25** (ts-audit 3.27.0;
+read-only, from the Primary Org; counts only recorded here):
+
+| Query | Answer |
+|---|---|
+| `[Org]` / `[Org ID]` | Answered as columns named `Org` (the name) and `Org ID` (a **string**, `"0"` for the Primary Org, where `current_org.id` is the number 0: the audit compares them as strings) |
+| `[Model ID] max [TS Query Start Time]` | 3,015 rows, 3,015 distinct Model IDs (2 rows with a blank Model ID) |
+| `[Model ID] [Org ID] [Org] max [TS Query Start Time]` | 3,039 rows, still 3,015 distinct Model IDs; columns Model ID, Org ID, Org, Maximum TS Query Start Time. 18 distinct Org IDs, the Primary Org's among them; no blank Org ID; one name per Org ID. **7 Model IDs came back under more than one Org**; the blank Model ID under 17 |
+| `[Model ID] [Queries] unique count [User ID] [TS Query Start Time].'last 180 days'` | 1,850 rows, 1,850 distinct Model IDs |
+| The same with `[Org ID] [Org]` | 1,874 rows, the same 1,850 Model IDs, the same 7 under more than one Org |
+
+So, read from the Primary Org, the usage holds **every Org's** queries, not the Primary
+Org's alone (an earlier check found 5 of the 6 most-queried unmatched Model IDs as Models
+in three other Orgs, 1 in none). Grouping by Org splits a Model ID queried in several
+Orgs into one row per Org, so the audit reads the Orgs with a query of its own
+(`ORG_QUERY`) and keeps its per-Model counts from the queries with no Org column: a
+distinct-user count summed over Orgs would overcount. Not verified: whether a build
+without the Org columns refuses the query (400, as `[Model Name]` is) or answers without
+them; the audit handles both as "Org not read".
+
 **Not verified:** whether `record_size: -1` ever answers fewer rows than exist on a larger
 cluster (the audit refuses an answer holding fewer rows than its
 `available_data_row_count`); and the paging of the visible-object search (500 a page)

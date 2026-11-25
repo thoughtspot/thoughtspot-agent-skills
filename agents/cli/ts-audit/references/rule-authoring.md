@@ -327,7 +327,10 @@ whichever category selected each rule:
 - `usage` is each Model's queries, read once per audit from the system Model TS: AI and
   BI Stats with `searchdata` (`audit/usage.py`): `{org, window_days, fetched_at, history:
   {start, end}, blank_rows, models: {<guid>: {last_used, queries_180d, users_180d}},
-  not_visible}`, GUIDs and counts only, in the Org the audit runs in. It is null when not
+  model_orgs: {<guid>: [{id, name, last_used}]}, not_visible}`, GUIDs, counts and Org
+  names and ids, read in the Org the audit runs in (from the Primary Org it holds every
+  Org's). `model_orgs` is null when the Orgs could not be read, and absent from a reading
+  taken before ts-cli 0.224.0; the rest is still readable. `usage` is null when not
   fetched and when it could not be read (the system Model missing or refused, a failed
   call, or a history with no first query), and the availability check treats a reading
   without a history start as not read too, so a rule that `requires: [usage]` judges no
