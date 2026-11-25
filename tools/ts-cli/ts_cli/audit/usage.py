@@ -152,7 +152,7 @@ def corpus_model_usage(usage: dict, guid: str) -> Dict[str, Any]:
 
 def corpus_usage(usage: Optional[dict], audited: Any) -> Optional[dict]:
     """The usage reading for the audit JSON (`corpus.usage`), None when it was not read
-    (usage_readable):
+    (usage_readable): `history_days`, the whole days the history covers before the read,
     the Org, whether it is the Primary Org, the window, when it was read, the history's
     span, the rows dropped for a blank Model ID, and `gone` — each Model ID that matches
     no object the user can see now and is not audited, most queried first, or None when
@@ -168,8 +168,18 @@ def corpus_usage(usage: Optional[dict], audited: Any) -> Optional[dict]:
         gone.sort(key=lambda g: (-g["queries_180d"], -(g["last_used"] or 0), g["guid"]))
     return {"org": usage.get("org"), "primary": is_primary(usage),
             "window_days": usage.get("window_days"), "fetched_at": usage.get("fetched_at"),
-            "history": usage.get("history"), "blank_rows": usage.get("blank_rows", 0),
-            "gone": gone}
+            "history": usage.get("history"),
+            "history_days": days_since(usage.get("fetched_at"), usage["history"]["start"]),
+            "blank_rows": usage.get("blank_rows", 0), "gone": gone}
+
+
+def idle_days_of(ran: Dict[str, Any]) -> Optional[float]:
+    """The idle days the run's usage rules judged by (their `idle_days` parameter, the
+    smallest when several), or None when none ran: the report compares it with
+    `history_days` to say when a history was too short for "never queried"."""
+    days = [r.parameters["idle_days"] for r in (ran or {}).values()
+            if "usage" in (r.requires or []) and "idle_days" in (r.parameters or {})]
+    return min(days) if days else None
 
 
 def _number(value: Any) -> bool:

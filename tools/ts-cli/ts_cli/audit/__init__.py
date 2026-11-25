@@ -17,7 +17,7 @@ from ts_cli.audit.engine.code_rules import readiness_level, readiness_score
 from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 from ts_cli.audit.formula_tree import formula_tree
-from ts_cli.audit.usage import corpus_model_usage, corpus_usage, usage_readable
+from ts_cli.audit.usage import corpus_model_usage, corpus_usage, idle_days_of, usage_readable
 
 #: The conditional data the report reads that no rule need declare: the AI
 #: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
@@ -473,6 +473,8 @@ def run_audit(
         ran_rules=ran,
     )
     corpus["assessment"] = catalog.profiles[profile].label
+    if corpus.get("usage"):  # what H17 judged by, beside how much history it had
+        corpus["usage"]["idle_days"] = idle_days_of(ran)
     if unreadable:
         corpus["unreadable"] = unreadable
     if not_exported:

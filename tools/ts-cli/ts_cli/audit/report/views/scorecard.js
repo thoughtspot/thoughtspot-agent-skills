@@ -48,13 +48,14 @@ function scorecardHeader(guid, cm){
 function scorecardUsageStats(cm){
   var state = usageState();
   if(state === "absent") return "";
-  var lu = usageLastUsed(cm), us = cm.us, w = state === "read" ? (D.C.us.w || 180) : 180;
+  var lu = usageLastUsed(cm), us = cm.us, w = state === "read" ? usageSpanLabel() : "180 days";
+  var span = state === "read" ? usageSpanPhrase() : "";
   var items = [
     {v: lu.text, l: "Last used", t: lu.title},
-    {v: state === "read" ? (us ? String(us.q) : "") : USAGE_NOT_READ, l: "Queries ("+w+" days)",
-     t: state === "read" ? "Queries on this Model in the last "+w+" days ("+usageOrgName()+")" : lu.title},
-    {v: state === "read" ? (us ? String(us.u) : "") : USAGE_NOT_READ, l: "Users ("+w+" days)",
-     t: state === "read" ? "Distinct users who queried this Model in the last "+w+" days ("+usageOrgName()+")" : lu.title}
+    {v: state === "read" ? (us ? String(us.q) : "") : USAGE_NOT_READ, l: "Queries ("+w+")",
+     t: state === "read" ? "Queries on this Model "+span+" ("+usageOrgName()+")" : lu.title},
+    {v: state === "read" ? (us ? String(us.u) : "") : USAGE_NOT_READ, l: "Users ("+w+")",
+     t: state === "read" ? "Distinct users who queried this Model "+span+" ("+usageOrgName()+")" : lu.title}
   ];
   return items.map(function(s){
     return '<div class="stat-item usage-stat" title="'+esc(s.t)+'"><div class="stat-val">'+esc(s.v)+

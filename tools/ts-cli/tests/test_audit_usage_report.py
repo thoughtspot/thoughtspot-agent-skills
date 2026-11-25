@@ -291,3 +291,83 @@ def test_h17_says_not_read_in_the_cross_model_groups(tmp_path):
     read = report_browser.render(render_report(_data(_usage())), tmp_path, "crossmodel",
                                  actions=_GROUPS)
     assert read["extra"]["H17"][0] == "2 findings"
+
+
+# ── a history shorter than the window, or than H17's idle days ──────────────
+
+def _short(history_days):
+    usage = fx.build_usage({IDLE: 20, BUSY: 10,
+                            GONE_A: {"last_used": fx.USAGE_READ_AT - 5 * 86400,
+                                     "queries_180d": 40, "users_180d": 6}},
+                           start=fx.USAGE_READ_AT - history_days * 86400,
+                           not_visible=(GONE_A,))
+    return render_report(_data(usage))
+
+
+def test_the_corpus_records_how_many_days_the_history_covers():
+    corpus = _data(fx.build_usage({BUSY: 10}, start=fx.USAGE_READ_AT - 30 * 86400))["corpus"]
+    assert corpus["usage"]["history_days"] == 30 and corpus["usage"]["idle_days"] == 90
+    payload = compact_payload(_data(fx.build_usage({BUSY: 10},
+                                                   start=fx.USAGE_READ_AT - 30 * 86400)))
+    assert (payload["C"]["us"]["hd"], payload["C"]["us"]["id"]) == (30, 90)
+
+
+_PARTIAL = ("Partly judged: the usage history starts on 2026-10-26, 30 days before the "
+            "read, under the 90 days H17 needs; Models with no query in it were not judged.")
+
+
+@needs_chrome
+def test_a_30_day_history_says_h17_judged_only_part(tmp_path):
+    page = _short(30)
+    cleanup = report_browser.render(page, tmp_path, "cleanup", actions=_CLEANUP)
+    assert cleanup["errors"] == []
+    [h17] = [h for h in cleanup["extra"]["sections"] if "H17" in h]
+    assert h17.endswith("— H17 — Partly judged") and "(0)" not in h17
+    assert cleanup["extra"]["h17_text"] == _PARTIAL
+    assert "No findings" not in cleanup["visible"].split("H17")[1].split("Used, but")[0]
+    groups = report_browser.render(page, tmp_path, "crossmodel", actions=_GROUPS)
+    assert groups["extra"]["H17"] == ["Partly judged", _PARTIAL]
+
+
+_HEADS = ('window.__extra = Array.prototype.map.call(document.querySelectorAll('
+          '"#v-cleanup .usage-gone thead th"), function(th){ return th.textContent; });')
+
+
+@needs_chrome
+def test_a_30_day_history_labels_the_counts_with_its_span(tmp_path):
+    page = _short(30)
+    stats = report_browser.render(page, tmp_path, f"model/{BUSY}", actions=_STATS)
+    assert stats["extra"] == [["Last used", "10 days ago"], ["Queries (since 2026-10-26)", "12"],
+                              ["Users (since 2026-10-26)", "3"]]
+    heads = report_browser.render(page, tmp_path, "cleanup", actions=_HEADS)
+    assert heads["extra"] == ["Model ID", "Queries (since 2026-10-26)",
+                              "Users (since 2026-10-26)", "Last queried"]
+
+
+_TITLE = ('var s = document.querySelector(".scorecard-header .usage-stat");'
+          'window.__extra = s && s.getAttribute("title");')
+
+
+@needs_chrome
+def test_a_30_day_history_words_the_last_used_tooltip_by_its_span(tmp_path):
+    shown = report_browser.render(_short(30), tmp_path, f"model/{BUSY}", actions=_TITLE)
+    assert shown["extra"] == ("Last queried on 2026-11-15; 12 queries by 3 users in the "
+                              "30 days the history holds (the Org ‘Primary’)")
+
+
+@needs_chrome
+def test_a_400_day_history_keeps_the_usual_wording(tmp_path):
+    page = _short(400)
+    cleanup = report_browser.render(page, tmp_path, "cleanup", actions=_CLEANUP)
+    [h17] = [h for h in cleanup["extra"]["sections"] if "H17" in h]
+    # the history is long enough to judge "never queried": Never Sales is reported
+    assert h17.endswith("— H17 (1)") and cleanup["extra"]["h17_text"] is None
+    assert cleanup["extra"]["idle"] == ["Never Sales"]
+    groups = report_browser.render(page, tmp_path, "crossmodel", actions=_GROUPS)
+    assert groups["extra"]["H17"][0] == "1 finding"
+    stats = report_browser.render(page, tmp_path, f"model/{BUSY}", actions=_STATS)
+    assert stats["extra"][1] == ["Queries (180 days)", "12"]
+    heads = report_browser.render(page, tmp_path, "cleanup", actions=_HEADS)
+    assert heads["extra"][1] == "Queries (180 days)"
+    title = report_browser.render(page, tmp_path, f"model/{BUSY}", actions=_TITLE)
+    assert title["extra"].endswith("12 queries by 3 users in the last 180 days (the Org ‘Primary’)")

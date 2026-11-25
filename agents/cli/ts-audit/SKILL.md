@@ -390,7 +390,10 @@ found by its exact name. It reads, with `searchdata`:
 What it keeps is GUIDs and counts, plus the Org it was read in and when. Its limits:
 
 - **180-day counts.** Query and user counts cover the last 180 days; the last-used date
-  covers all the history kept (on the SE demo cluster, from 2023-10-01).
+  covers all the history kept (on the SE demo cluster, from 2023-10-01). When the history covers fewer than 180
+  days before the read, the report labels the counts with the history's own span ("since <date>") instead, and when it covers fewer
+  days than H17's 90, H17's Cleanup section and Cross-Model group say it was partly
+  judged (Models with no query in that history were not judged) rather than "No findings".
 - **About a day's lag.** The history ends the day before it is read, so a Model created
   or first queried since then reads as never queried.
 - **Org-scoped.** It is the usage of the Org the audit runs in (the session's Org), not

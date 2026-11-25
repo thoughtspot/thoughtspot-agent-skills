@@ -54,6 +54,9 @@ function buildCleanup(D){
       c.appendChild(sec);
     } else {
       buildCleanupSection(c, title, items, D, "No findings.");
+      /* a usage rule with findings on a short history: say what it could not judge */
+      if(usageUnjudged(ci)) c.lastChild.insertBefore(mutedNote(usageUnjudged(ci),
+        "usage-partial"), c.lastChild.children[1] || null);
     }
   });
 
@@ -227,7 +230,7 @@ function buildGoneSection(container){
   }
   var MAX_VISIBLE = 20;
   var html = '<div style="overflow-x:auto"><table class="cleanup-table usage-gone-table"><thead><tr>'+
-    '<th>Model ID</th><th>Queries ('+w+' days)</th><th>Users ('+w+' days)</th><th>Last queried</th>'+
+    '<th>Model ID</th><th>Queries ('+esc(usageSpanLabel())+')</th><th>Users ('+esc(usageSpanLabel())+')</th><th>Last queried</th>'+
     '</tr></thead><tbody>';
   gone.forEach(function(g, i){
     html += '<tr'+(i >= MAX_VISIBLE ? ' class="usage-overflow" style="display:none"' : '')+'>'+

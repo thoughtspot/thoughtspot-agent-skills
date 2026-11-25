@@ -313,8 +313,9 @@ def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
     """`corpus.usage` (audit/usage.py corpus_usage), or None when it was not read: `o`
     the Org's name, `oi` its id, `pr` 1 for the Primary Org, 0 for another, null when the
     Org was not read; `w` the window in days, `at` when it was read, `hs`/`he` the
-    history's first and last query (epoch seconds); `b` rows dropped for a blank Model
-    ID; `g` the Model IDs no visible object matches, each [guid, queries, users, last
+    history's first and last query (epoch seconds); `hd` the whole days the history
+    covers before the read, `id` the idle days H17 judged by (null when it did not run);
+    `b` rows dropped for a blank Model ID; `g` the Model IDs no visible object matches, each [guid, queries, users, last
     query], or null when they could not be listed."""
     if not isinstance(usage, dict):
         return None
@@ -326,6 +327,7 @@ def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
             "pr": None if primary is None else (1 if primary else 0),
             "w": usage.get("window_days"), "at": usage.get("fetched_at"),
             "hs": history.get("start"), "he": history.get("end"),
+            "hd": usage.get("history_days"), "id": usage.get("idle_days"),
             "b": usage.get("blank_rows") or 0,
             "g": None if not isinstance(gone, list) else
             [[g.get("guid", ""), g.get("queries_180d") or 0, g.get("users_180d") or 0,
