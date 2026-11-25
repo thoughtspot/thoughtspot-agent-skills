@@ -143,6 +143,17 @@ One status per connection. The rules are applied in this order:
 Only `SUCCESSFUL` counts as success. I.e. a status of `PARTIAL`, should one ever appear, counts
 as a failure.
 
+**Proposed, not yet approved (2026-11-25): a deactivated connection is `inactive`.** Read
+`connectionDisabled` from the connection's `metadata/search` header before diagnosing. When it is
+`true`, report `status: inactive`, `reason: deactivated`, and skip the diagnose call. Why:
+
+- It is not broken. An admin switched it off on purpose (Appendix B).
+- Diagnosing it likely fails with `CONNECTION_INACTIVE`, which would read `unknown`, `error`.
+  Not probed; a query on one returned 500, code 12332.
+- Skipping it saves a warehouse call.
+
+The header read is one paginated call for every connection, with no warehouse query.
+
 A connection with no registered tables is `healthy` with `tables_checked: 0`, so a consumer can
 tell it apart.
 
@@ -235,6 +246,14 @@ Items 1 to 3 must be verified before merge.
    default stands. If it stops, the default can come down.
 4. **Non-admins (deferred past v1).** Probe what a non-admin sees for a connection they do not
    own. Needed before v1's admin-only check is lifted.
+5. **Diagnose on a deactivated connection.** Only needed if the `inactive` proposal is
+   rejected. Record the status code and error code it returns.
+6. **Does deactivation stop background work? (piece 2).** Indexing, sample values and Data
+   Cache syncs. The docs say it suspends "all activity", and user queries do stop (Appendix B).
+   Background work was not watched. **Not to be tested** (user, 2026-11-25): piece 2 relies
+   on the docs, and its finding says so rather than claiming a measured saving (BL-622).
+7. **Three status-endpoint cases not run (piece 2).** Deactivating twice, a bad `status`
+   value, and `connection/search` while deactivated. The probe script ended before them.
 
 ## Appendix A: live probe, se-thoughtspot, 2026-11-18
 
@@ -264,3 +283,44 @@ Column error codes seen: `EXTERNAL_OBJECT_NOT_FOUND` (column dropped in the ware
 
 **Timings.** 1 to 9 seconds for most connections. 32 and 37 seconds for the two with the most
 registered columns (APJ_TAB has 58 tables).
+
+## Appendix B: connection deactivation, se-thoughtspot, 2026-11-25
+
+ThoughtSpot can deactivate a connection instead of deleting it. A deactivated connection runs
+no queries until it is activated again. The cluster runs 26.11.0.cl.
+
+**Docs.** "Deactivate a Snowflake connection" and "Deactivate a Databricks connection" on
+docs.thoughtspot.com (cloud, latest). The UI needs the New connection configuration
+experience, an Early Access setting. The docs say it suspends "all activity". They do not
+mention indexing, sample values, Data Cache or scheduled jobs.
+
+**API.** From the REST v2 reference and `@thoughtspot/rest-api-sdk` 2.30.0
+(`updateConnectionStatus`):
+
+- `POST /api/rest/2.0/connections/{connection_identifier}/status`, 26.6.0.cl or later.
+- Body: `{"status": "ACTIVATED"}` or `{"status": "DEACTIVATED"}`. The identifier is a GUID or name.
+- Needs `DATAMANAGEMENT`, or `CAN_CREATE_OR_EDIT_CONNECTIONS` under RBAC. Only the owner or an
+  admin may call it.
+- `connection/search` returns no status field, even with `include_details`.
+
+**Probe.** The probe user owned the connection ENCRYPTED_SEARCH_POC, which has one table.
+
+| Step | Result |
+|---|---|
+| Status call on an unknown GUID | 404, code 13003, "Connection not found corresponding to the connection_identifier". The route exists |
+| `connectionDisabled` across all 1,866 connections, before | `false` on every one. `isConnectionConfigurationDisabled` also `false` |
+| `searchdata` on the table | 200, one row |
+| Status `DEACTIVATED` | 204 |
+| `connectionDisabled` in the `metadata/search` header | `true` |
+| `searchdata` on the table | 500, code 12332, `CONNECTION_INACTIVE`: "The 'ENCRYPTED_SEARCH_POC' connection is inactive, so operations can't be performed right now." |
+| Status `ACTIVATED` | 204. `connectionDisabled` back to `false`; `searchdata` 200 again |
+
+**What it shows.**
+
+- `connectionDisabled` is the field to read. `isConnectionConfigurationDisabled` is a different
+  feature: one configuration switched off, not the connection.
+- The header's `modified` did not change. So nothing records when a connection was
+  deactivated; a "deactivated for 90 days" rule would have to track that itself.
+- `ThoughtSpotClient.request` raises `SystemExit(1)` on a non-2xx by default, which
+  `except Exception` does not catch. A command that reads `CONNECTION_INACTIVE` passes
+  `raise_for_status=False`.
