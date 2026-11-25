@@ -388,19 +388,25 @@ def test_the_picker_the_sidebar_and_the_scorecard_link_reach_the_tree(tmp_path):
         '"#v-formulas .ftree-models a"), function(a){ return a.getAttribute("href"); });'))
     assert picker["errors"] == [] and "Sales" in picker["visible"]
     assert picker["extra"] == ["#formulas/m-1"]
+    # the Model's tabs lead back to its scorecard (they replaced the "Model scorecard" button)
     head = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
-        'window.__extra = document.querySelector("#v-formulas .ftree-header a.ts-link-btn").getAttribute("href");'))
+        'window.__extra = document.querySelector(\'#v-formulas .model-tabs a[data-tab="scorecard"]\').getAttribute("href");'))
     assert head["errors"] == [] and head["extra"] == "#model/m-1"
     assert "7 formulas" in picker["visible"] and "Plain" not in picker["visible"]
     nav = ('var nav = document.querySelector(\'#sidebar-nav a[href="#formulas"]\');'
            'var link = document.querySelector(\'#v-scorecard a[href^="#formulas/"]\');'
            'window.__extra = {nav: nav && nav.textContent, link: link && link.getAttribute("href")};')
+    # the scorecard's Formulas tab (it replaced the "Formula tree" button)
     card = report_browser.render(page, tmp_path, "model/m-1", actions=nav)
-    assert card["errors"] == [] and "Formula tree" in card["visible"]
+    assert card["errors"] == [] and "Formulas" in card["visible"]
     assert card["extra"]["link"] == "#formulas/m-1"
     assert "Formulas" in card["extra"]["nav"]
-    other = report_browser.render(page, tmp_path, "model/m-9", actions=nav)
+    # a Model with no formulas has the tab, disabled with the reason, and no link
+    other = report_browser.render(page, tmp_path, "model/m-9", actions=nav + (
+        'var off = document.querySelector(\'#v-scorecard .model-tab-off[data-tab="formulas"]\');'
+        'window.__extra.off = off && [off.getAttribute("aria-disabled"), off.title];'))
     assert other["errors"] == [] and other["extra"]["link"] is None
+    assert other["extra"]["off"] == ["true", "This Model has no formulas."]
 
 
 @needs_chrome

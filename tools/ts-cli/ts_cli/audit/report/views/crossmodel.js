@@ -173,9 +173,9 @@ function buildCrossModel(D, initialFilters){
     var tdModel = el("td","col-model");
     var model = D.L[mi];
     if(model){
-      var mHtml = '<a class="model-link" href="#model/'+model.g+'" data-route="#model/'+model.g+'">'+esc(model.n)+'</a>';
+      var mHtml = '<a class="model-link" href="#model/'+esc(model.g)+'" data-route="#model/'+esc(model.g)+'">'+esc(model.n)+'</a>';
       if(D.C && D.C.u){
-        mHtml += '<a class="ts-icon" href="'+D.C.u+'/#/data/tables/'+model.g+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
+        mHtml += '<a class="ts-icon" href="'+esc(D.C.u+'/#/data/tables/'+model.g)+'" target="_blank" rel="noopener" title="Open in ThoughtSpot">↗</a>';
       }
       tdModel.innerHTML = mHtml;
     } else {
@@ -247,7 +247,7 @@ function buildCrossModel(D, initialFilters){
         ghTd.colSpan = cols.length;
         var ghHtml = '<span class="gh-id">'+esc(key)+'</span>';
         if(checkDesc) ghHtml += '<span class="gh-desc">'+esc(checkDesc)+'</span>';
-        ghHtml += '<span class="gh-count">'+gFindings.length+' finding'+(gFindings.length!==1?'s':'')+'</span>';
+        ghHtml += '<span class="gh-count">'+esc(usageGroupCount(key, gFindings.length))+'</span>';
         if(checkThresh) ghHtml += '<span class="gh-thresh">'+esc(checkThresh)+'</span>';
         ghTd.innerHTML = ghHtml;
         ghTr.appendChild(ghTd);
@@ -258,7 +258,7 @@ function buildCrossModel(D, initialFilters){
           emptyTr.className = "group-empty";
           var emptyTd = document.createElement("td");
           emptyTd.colSpan = cols.length;
-          emptyTd.textContent = "No findings — all checks passed";
+          emptyTd.textContent = usageUnjudged(key) || "No findings — all checks passed";
           emptyTr.appendChild(emptyTd);
           tbody.appendChild(emptyTr);
         } else {

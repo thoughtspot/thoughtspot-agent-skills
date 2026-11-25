@@ -47,6 +47,7 @@ What counts as a read — detection, concretely:
         answers         -> answers
         calendars       -> calendars
         connections     -> connections
+        usage           -> usage
         dependents      -> dependents AND sets
     Set discovery writes into `ctx.dependents` — SET rows under each Model's guid and
     each Set's consumer list under the Set's guid — so the content of any `dependents`
@@ -99,6 +100,7 @@ ATTR_DATA: Dict[str, FrozenSet[str]] = {
     "answers": frozenset({"answers"}),
     "calendars": frozenset({"calendars"}),
     "connections": frozenset({"connections"}),
+    "usage": frozenset({"usage"}),
     "dependents": frozenset({"dependents", "sets"}),
 }
 _PACKAGE = "ts_cli.audit"

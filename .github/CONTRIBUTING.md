@@ -18,7 +18,9 @@ anywhere.
    deferred, validators passing, a smoke test for every new or modified Claude skill (or
    the skill on the smoke-test allowlist, with a reason), and live testing where needed.
 4. **Commit, bring the branch up to date with `main`, and run `pr-ready`** on your own
-   branch (below). Fix whatever it reports and run it again until it says READY.
+   branch (below). Fix whatever it reports and run it again until it says READY. Its
+   review then gets one fix round and one re-review, as its Step 7 sets out; findings
+   it does not require fixing go to a dated backlog item.
 5. **Open the PR** and fill in the template
    ([`.github/pull_request_template.md`](pull_request_template.md)). Paste the evidence
    block into the **Evidence** section. If the PR replaces an earlier one, fill in

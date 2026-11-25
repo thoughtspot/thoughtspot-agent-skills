@@ -195,27 +195,67 @@ covers the TML path. This API would add coverage for instructions set only via t
 
 ---
 
-## Phase 2 — Usage Analysis (future)
+## Phase 2 — Usage Analysis
 
-### #9 — searchdata against BI Server — DEFERRED to BL-081 (usage stats)
+### #9 — searchdata against the usage system Model — VERIFIED live 2026-11-25
 
-Need to verify `POST /api/rest/2.0/searchdata` works with the BI Server system model:
-- Does it accept the BI Server model GUID as `logical_table_identifier`?
-- What is the maximum `record_size`? Does pagination work?
+Live-probed, read-only, on the SE demo cluster on 2026-11-25, for H17 and the report's
+usage (ts-audit 3.26.0). **The SpotterCode REST spec was not consulted:** the MCP asked
+for a sign-in the session could not give, so every row below is a live reading, not a
+spec reading, and should be checked against `get-rest-api-reference(apiName:
+"searchData")` when the MCP is reachable.
 
-### #10 — BI Server Spotter coverage — DEFERRED to BL-081 (usage stats)
+The usage lives in the system Model **TS: AI and BI Stats** (metadata subtype WORKSHEET),
+not "TS: BI Server" as this item first assumed. `metadata/search` finds it by its exact
+name (`name_pattern`). Its TML export is refused (FORBIDDEN), so its columns cannot be
+read from TML; they were found by querying.
 
-Does the TS: BI Server system model capture Spotter/AI search interactions,
-or only classic Search interactions?
+`POST /api/rest/2.0/searchdata` with `{"query_string": ..., "logical_table_identifier":
+<its GUID>, "data_format": "COMPACT", "record_size": -1}`:
 
-### #11 — User Action enum — DEFERRED to BL-081 (usage stats)
+| Query | Answer |
+|---|---|
+| `[Model ID] [Queries] unique count [User ID] max [TS Query Start Time]` | 3,012 rows (every Model ID with a query, all history). `column_names` came back as Model ID, Maximum TS Query Start Time, Queries, Unique Number of User ID: **an order of its own, not the query's.** The audit reads every value by column name |
+| `min [TS Query Start Time] max [TS Query Start Time]` | One row: the history ran from 2023-10-01 to the day before the probe (about a day's lag) |
+| `[Model ID] [Queries] unique count [User ID] [TS Query Start Time].'last 180 days'` | 1,847 rows, 1,513,848 queries in all. **This is the window the audit uses** |
+| The same with `min [TS Query Start Time]` added | 1,847 rows, the same sum, but the min column was **dropped** from the answer: a min or max of the time column beside its keyword filter is not answered. The audit reads the last-used time with its own all-history query |
+| `... [TS Query Start Time] last 180 days` (no `.'...'`) | 400, code 11020, "Invalid value token: last" |
+| `... [TS Query Start Time] >= '2026-05-29'` | 3,012 rows, 17,384,170 queries: **the filter was silently ignored** (every row, all history). Not used |
+| `... [TS Query Start Time] after '05/28/2026'` | 1,847 rows, 1,513,848 queries, oldest query 180.2 days back: the same as the keyword form, which confirms it |
+| `[Model Name]` | 400, code 11020, "Column: model name not found": the Model keeps no names |
 
-Full `User Action` values in BI Server? Need the enum to filter appropriately.
+Columns used: `[Model ID]` (a GUID string; "" for a query on no Model, which the audit
+drops and counts: 2 such rows in the 3,012), `[Queries]` (summed), `[User ID]` (counted
+distinct), `[TS Query Start Time]` (epoch seconds; bare, it buckets by month). Of the
+3,012 Model IDs, 1,911 matched a current Model and 1,101 matched no object visible then
+(deleted, or in another Org); 483 of the 2,394 current Models had no row.
 
-### #12 — Query Text column parsability — DEFERRED to BL-081 (usage stats)
+**The Org.** From a non-primary Org (a client built with an `org`), the system Model is
+visible and `searchdata` answers **that Org's** usage, not the Primary Org's. The session's
+Org is `GET /api/rest/2.0/auth/session/user` → `current_org` `{id, name}`, which the audit
+records with the usage, and the report says when it is not the Primary Org (id 0).
 
-Does `[Query Text]` contain `[column_name]` tokens parseable for column-level
-usage analysis?
+**Not verified:** whether `record_size: -1` ever answers fewer rows than exist on a larger
+cluster (the audit refuses an answer holding fewer rows than its
+`available_data_row_count`); and the paging of the visible-object search (500 a page)
+against a cluster with more than 2,394 Models.
+
+### #10 — Usage: Spotter coverage — DEFERRED to BL-081
+
+Does TS: AI and BI Stats count Spotter (AI) queries alongside classic Search, and can
+they be told apart? Not probed on 2026-11-25. H17 and the report count every query the
+Model holds, whatever produced it, so this changes no reading they give; it matters
+only for a future rule about Spotter use.
+
+### #11 — Usage: the kinds of user action — DEFERRED to BL-081
+
+Which user actions does the Model record, and should any be left out of a Model's query
+count? Not probed. The audit counts `[Queries]` as the Model sums them, unfiltered.
+
+### #12 — Usage: column-level use — DEFERRED to BL-081
+
+Can the query history say which columns a query used, for dead-column detection? Not
+probed. The audit reads usage per Model only.
 
 ---
 
@@ -378,12 +418,15 @@ the next, and point 7 from re-running the sample. Each is what P19, P21, P23, P2
 reads today.
 
 1. **OAuth from a client ID and secret.** P24 reads a connection as OAuth when a
-   configuration key contains `oauth`, or, without one, when it has both `client_id` and
-   `client_secret` (an OAuth M2M service principal). A Databricks connection holding
+   configuration key has a word starting `oauth` (`oauth_pvt_key`, `OAuth2Secret`; not
+   `no_auth` or `noAuth`), or, without one, when it has a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret` (`client_id`, `clientId`,
+   `Client Secret`, `client.id`, `clientSecretKey`, `clientIdentifier`), alone or both (an
+   OAuth M2M service principal); the match errs toward To confirm. One set without the other reads to confirm as
+   the pair does, from ts-cli 0.222.0, since an open question never reads Can use. A Databricks connection holding
    `OAuth2ClientId` and `OAuth2Secret` and no other setting naming OAuth may be per-user
    OAuth or a service principal: the names cannot tell (#17). Does Data Cache treat a
    service-principal connection as an OAuth connection, and how is the kind told apart?
-   Until the team answers, both read "OAuth client ID and secret (to confirm)" and the
+   Until the team answers, both read "OAuth client credentials (to confirm)" and the
    Model reads To confirm (product owner, 2026-11-19: on the 150-Model sample of that
    day all seven Models P24 blocked rested on this pair). The same pair on any other
    warehouse stays firm OAuth. Two edges, neither seen on the cluster (2026-11-19),
