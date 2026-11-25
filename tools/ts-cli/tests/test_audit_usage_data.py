@@ -20,8 +20,9 @@ import yaml
 from ts_cli.audit.context import build_context, make_context
 from ts_cli.audit.engine import scopes
 from ts_cli.audit.snapshot import read_snapshot, read_snapshot_needs, write_snapshot
-from ts_cli.audit.usage import (HISTORY_QUERY, LAST_USED_QUERY, SYSTEM_MODEL_NAME,
-                                WINDOW_QUERY, idle_reading, merge_rows, model_usage)
+from ts_cli.audit.usage import (HISTORY_QUERY, LAST_USED_QUERY, ORG_QUERY,
+                                SYSTEM_MODEL_NAME, WINDOW_QUERY, idle_reading, merge_orgs,
+                                merge_rows, model_usage)
 
 SEARCHDATA = "/api/rest/2.0/searchdata"
 SESSION = "/api/rest/2.0/auth/session/user"
@@ -63,6 +64,13 @@ ANSWERS = {
                                 [1_760_000_000, GONE], [1_762_000_000, ""]]),
     WINDOW_QUERY[0]: _table(["Model ID", "Unique Number of User ID", "Queries"],
                             [[M1, 4, 120], [GONE, 1, 7], ["", 9, 50], [None, 1, 1]]),
+    # GONE was queried in two Orgs; M2's Org is blank; the blank Model ID is dropped
+    ORG_QUERY[0]: _table(["Org", "Maximum TS Query Start Time", "Org ID", "Model ID"],
+                         [["Primary", 1_763_900_000, "0", M1],
+                          ["Tenant B", 1_760_000_000, "7", GONE],
+                          ["Tenant C", 1_750_000_000, "9", GONE],
+                          ["", 1_700_000_000, "", M2],
+                          ["Primary", 1_762_000_000, "0", ""]]),
 }
 
 
@@ -100,6 +108,8 @@ class Client:
         if url.endswith("/metadata/tml/export"):
             return _response(200, [{"edoc": yaml.safe_dump(MODEL)}], url)
         if url.endswith(SEARCHDATA):
+            if json["query_string"] not in self.answers:  # a build that refuses the query
+                return _response(400, {"x": BODY_MARKER})
             return _response(200, self.answers[json["query_string"]])
         if url.endswith("/metadata/search"):
             meta = (json or {}).get("metadata") or [{}]
@@ -152,7 +162,7 @@ def test_every_call_names_the_system_model_and_asks_for_every_row():
     _read(client)
     bodies = [b for m, u, b, _ in client.calls if u.endswith(SEARCHDATA)]
     assert [b["query_string"] for b in bodies] == [HISTORY_QUERY[0], LAST_USED_QUERY[0],
-                                                   WINDOW_QUERY[0]]
+                                                   WINDOW_QUERY[0], ORG_QUERY[0]]
     assert all(b["logical_table_identifier"] == SYS and b["record_size"] == -1
                and b["data_format"] == "COMPACT" for b in bodies)
     assert all(kw.get("raise_for_status") is False for _, _, _, kw in client.usage_calls())
@@ -170,8 +180,64 @@ def test_models_no_visible_object_matches_are_listed():
 def test_usage_keeps_guids_and_counts_only():
     usage = _read(Client()).usage
     assert set(usage) == {"org", "window_days", "fetched_at", "history", "blank_rows",
-                          "models", "not_visible"}
+                          "models", "model_orgs", "not_visible"}
     assert "Sales" not in json.dumps(usage)
+
+
+# ── the Org each used Model was queried in ──────────────────────────────────
+
+def test_each_models_orgs_are_read_by_column_name_not_position():
+    ctx = _read(Client())
+    assert ctx.usage["model_orgs"] == {
+        M1: [{"id": "0", "name": "Primary", "last_used": 1_763_900_000}],
+        GONE: [{"id": "7", "name": "Tenant B", "last_used": 1_760_000_000},
+               {"id": "9", "name": "Tenant C", "last_used": 1_750_000_000}]}
+    assert ctx.warnings == []
+
+
+def test_a_model_id_in_two_orgs_keeps_both_and_its_counts_are_not_summed():
+    usage = _read(Client()).usage
+    assert [o["id"] for o in usage["model_orgs"][GONE]] == ["7", "9"]
+    # the per-Model counts come from the queries with no Org column, never a sum
+    assert usage["models"][GONE] == {"last_used": 1_760_000_000, "queries_180d": 7,
+                                     "users_180d": 1}
+
+
+def test_a_model_id_with_a_blank_org_has_no_org_recorded():
+    usage = _read(Client()).usage
+    assert M2 in usage["models"] and M2 not in usage["model_orgs"]
+    assert "" not in usage["model_orgs"]
+
+
+def test_merge_orgs_keeps_one_entry_per_org_with_the_later_query():
+    rows = [{"Model ID": M1, "Org ID": "7", "Org": "Old name", "Maximum TS Query Start Time": 10},
+            {"Model ID": M1, "Org ID": "7", "Org": "New name", "Maximum TS Query Start Time": 20},
+            {"Model ID": M1, "Org ID": 12.0, "Org": None, "Maximum TS Query Start Time": None},
+            {"Model ID": M1, "Org ID": "10", "Org": "Ten", "Maximum TS Query Start Time": 5},
+            {"Model ID": M2, "Org ID": None, "Org": "X", "Maximum TS Query Start Time": 5},
+            {"Model ID": M2, "Org ID": True, "Org": "X", "Maximum TS Query Start Time": 5}]
+    assert merge_orgs(rows) == {M1: [{"id": "7", "name": "New name", "last_used": 20},
+                                     {"id": "10", "name": "Ten", "last_used": 5},
+                                     {"id": "12", "name": None, "last_used": None}]}
+
+
+@pytest.mark.parametrize("answer, reason", [
+    (_table(["Model ID", "Maximum TS Query Start Time"], [[M1, 1]]), "no column Org ID, Org"),
+    (None, "ThoughtSpot API 400 on POST " + SEARCHDATA),
+])
+def test_org_columns_not_read_leave_the_usage_readable(answer, reason, capsys):
+    answers = dict(ANSWERS)
+    if answer is None:
+        del answers[ORG_QUERY[0]]       # refused, as a build without the columns would
+    else:
+        answers[ORG_QUERY[0]] = answer
+    ctx = _read(Client(answers=answers))
+    assert ctx.usage["model_orgs"] is None
+    assert ctx.usage["models"][M1]["queries_180d"] == 120
+    assert ctx.usage["not_visible"] == [GONE]
+    [warning] = ctx.warnings
+    assert warning.startswith("The Org each used Model was queried in was not read")
+    assert reason in warning and BODY_MARKER not in warning
 
 
 # ── the Org ─────────────────────────────────────────────────────────────────
@@ -359,6 +425,27 @@ def test_a_snapshot_round_trips_usage_and_its_absence(tmp_path):
         snap = tmp_path / f"s{i}"
         write_snapshot(make_context(models=[MODEL], usage=value), snap, ["H"])
         assert read_snapshot(snap)[0].usage == value
+
+
+def test_a_snapshot_from_0_223_replays_with_no_org_recorded(tmp_path):
+    """A 0.223.0 snapshot's usage has no `model_orgs`: it replays H, and each not-found
+    ID reads as "Org not recorded", never as this Org's or another's."""
+    from typer.testing import CliRunner
+
+    from ts_cli.audit import data_needs
+    from ts_cli.cli import app
+    import audit_rule_fixtures as fx
+    old = fx.build_usage({"m-1": 120, GONE: 3}, not_visible=(GONE,))
+    assert "model_orgs" not in old
+    snap = tmp_path / "old"
+    write_snapshot(make_context(models=[fx.build_human_model()], usage=old), snap, ["H"],
+                   needs=data_needs(["H"]))
+    res = CliRunner().invoke(app, ["audit", "run", "--snapshot-in", str(snap), "--angles", "H",
+                                   "-o", str(tmp_path / "h.json")])
+    assert res.exit_code == 0, res.output
+    usage = json.loads((tmp_path / "h.json").read_text())["corpus"]["usage"]
+    assert usage["org_read"] is None and usage["orgs"] == []
+    assert [(g["guid"], g["orgs"]) for g in usage["gone"]] == [(GONE, [])]
 
 
 def test_a_snapshot_written_before_usage_reads_it_as_not_fetched(tmp_path):

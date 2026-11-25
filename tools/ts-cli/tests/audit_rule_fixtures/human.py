@@ -906,10 +906,15 @@ USAGE_READ_AT = 1_795_564_800
 _DAY = 86400
 
 
+_NO_ORGS = object()
+
+
 def build_usage(models=None, org=None, start=1_696_118_400, read_at=USAGE_READ_AT,
-                not_visible=()) -> dict:
+                not_visible=(), model_orgs=_NO_ORGS) -> dict:
     """A `usage` reading as audit/usage.py fetches it: `models` maps a Model GUID to
-    days since its last query (None for a row with no query time) or to a full row."""
+    days since its last query (None for a row with no query time) or to a full row.
+    `model_orgs` ({guid: [{id, name, last_used}]}, or None when not read) is left out
+    unless given, as a reading taken before 0.224.0 read each Model's Org."""
     rows = {}
     for guid, value in (models or {}).items():
         if isinstance(value, dict):
@@ -918,9 +923,12 @@ def build_usage(models=None, org=None, start=1_696_118_400, read_at=USAGE_READ_A
             rows[guid] = {"last_used": None if value is None else read_at - value * _DAY,
                           "queries_180d": 0 if value is None or value > 180 else 12,
                           "users_180d": 0 if value is None or value > 180 else 3}
-    return {"org": org or {"id": 0, "name": "Primary"}, "window_days": 180,
-            "fetched_at": read_at, "history": {"start": start, "end": read_at - _DAY},
-            "blank_rows": 0, "models": rows, "not_visible": list(not_visible)}
+    usage = {"org": org or {"id": 0, "name": "Primary"}, "window_days": 180,
+             "fetched_at": read_at, "history": {"start": start, "end": read_at - _DAY},
+             "blank_rows": 0, "models": rows, "not_visible": list(not_visible)}
+    if model_orgs is not _NO_ORGS:
+        usage["model_orgs"] = model_orgs
+    return usage
 
 
 def human_model_idle() -> AuditContext:
