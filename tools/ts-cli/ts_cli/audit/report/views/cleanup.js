@@ -46,10 +46,22 @@ function buildCleanup(D){
         buildCleanupSection(c, title+" ("+esc(kind)+")",
           items.filter(function(f){ return f.ot === kind; }), D, "");
       });
+    } else if(!items.length && usageUnjudged(ci)){
+      /* a usage rule that judged nothing (usage.js): never "(0)" and "No findings." */
+      var sec = el("div", "cleanup-section usage-unjudged");
+      sec.innerHTML = '<h3>'+title+' — '+esc(usageUnjudgedLabel(ci))+'</h3>';
+      sec.appendChild(mutedNote(usageUnjudged(ci), "empty-state"));
+      c.appendChild(sec);
     } else {
       buildCleanupSection(c, title, items, D, "No findings.");
+      /* a usage rule with findings on a short history: say what it could not judge */
+      if(usageUnjudged(ci)) c.lastChild.insertBefore(mutedNote(usageUnjudged(ci),
+        "usage-partial"), c.lastChild.children[1] || null);
     }
   });
+
+  /* Models the usage history names that match nothing the audit's user can see now */
+  buildGoneSection(c);
 
   /* Wire severity filter */
   function applySevFilter(){
@@ -183,6 +195,60 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
     sec.appendChild(showBtn);
   }
 
+  container.appendChild(sec);
+}
+
+/* "Used, but not found in this Org": each Model ID in the usage (D.C.us.g, usage.js) that
+   matches no Model, Table or View the audit's user can see in that Org now, with its
+   queries, users and last query. The system Model keeps no names, so only the ID. Not
+   shown when no selected rule fetched usage; "Not read" when it was fetched and not read,
+   or when the objects the user can see could not be listed. */
+function buildGoneSection(container){
+  var state = usageState();
+  if(state === "absent") return;
+  var sec = el("div", "cleanup-section usage-gone");
+  var gone = state === "read" ? D.C.us.g : null;
+  var head = "Used, but not found in this Org"+(state === "read" ? " — usage of "+usageOrgName() : "");
+  sec.innerHTML = '<h3>'+esc(head)+(gone ? ' ('+gone.length+')' : '')+'</h3>';
+  if(state === "not_read" || !gone){
+    var why = state === "not_read"
+      ? "Not read: the audit could not read usage, so it cannot say which used Models are not found."
+      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models are not found.";
+    sec.appendChild(mutedNote(why, "empty-state"));
+    container.appendChild(sec);
+    return;
+  }
+  var w = D.C.us.w || 180;
+  sec.appendChild(mutedNote("Model IDs in the usage history that match no Model, Table or View "+
+    "the audit's user can see in this Org now. Each may be deleted, in another Org, or not "+
+    "shared with that user; the audit cannot tell which. The usage history keeps no names, "+
+    "only the ID.", "usage-gone-note"));
+  if(!gone.length){
+    sec.appendChild(mutedNote("None.", "empty-state"));
+    container.appendChild(sec);
+    return;
+  }
+  var MAX_VISIBLE = 20;
+  var html = '<div style="overflow-x:auto"><table class="cleanup-table usage-gone-table"><thead><tr>'+
+    '<th>Model ID</th><th>Queries ('+esc(usageSpanLabel())+')</th><th>Users ('+esc(usageSpanLabel())+')</th><th>Last queried</th>'+
+    '</tr></thead><tbody>';
+  gone.forEach(function(g, i){
+    html += '<tr'+(i >= MAX_VISIBLE ? ' class="usage-overflow" style="display:none"' : '')+'>'+
+      '<td style="font-family:var(--mono);font-size:11px">'+esc(String(g[0]))+'</td>'+
+      '<td>'+esc(String(g[1]))+'</td><td>'+esc(String(g[2]))+'</td>'+
+      '<td>'+esc(usageDate(g[3]))+'</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  sec.insertAdjacentHTML("beforeend", html);
+  if(gone.length > MAX_VISIBLE){
+    var showBtn = el("button", "show-all-btn", "Show all "+gone.length+" IDs");
+    showBtn.style.cssText = "margin:8px 0 4px;padding:6px 16px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-card);cursor:pointer;font-size:12px;color:var(--accent);";
+    showBtn.addEventListener("click", function(){
+      $$(".usage-overflow", sec).forEach(function(tr){ tr.style.display = ""; });
+      showBtn.style.display = "none";
+    });
+    sec.appendChild(showBtn);
+  }
   container.appendChild(sec);
 }
 

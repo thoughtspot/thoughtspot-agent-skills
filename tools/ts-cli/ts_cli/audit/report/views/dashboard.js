@@ -55,6 +55,7 @@ function buildDashboard(){
     if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+esc(D.C.p)+'</strong></span>';
     if(D.C.as) html += '<span class="meta-item">Assessment: <strong>'+esc(D.C.as)+'</strong></span>';
     if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+esc(D.C.dt)+'</strong></span>';
+    html += usageHeaderHtml();
     if(D.C.ar && D.C.ar.length > 0){
       html += '<div class="angles">';
       D.C.ar.forEach(function(code){
@@ -67,6 +68,8 @@ function buildDashboard(){
     html += '<span class="meta-item">Audit report &mdash; no corpus data</span>';
   }
   html += '</div>';
+  /* Usage outside the Primary Org is that Org's only (usage.js). */
+  html += usageOrgNoteHtml();
 
   /* Items no rule judged: malformed TML (BL-406 item 10, BL-501). Shown, never silent. */
   html += notJudgedBox(D.C && D.C.ur, 'Could not be read', 'item', 'not judged',
@@ -247,6 +250,11 @@ function buildHeatmap(){
   var dataCache = dataCacheByGuid();
   var showDataCache = Object.keys(dataCache).length > 0;
   if(showDataCache) html += '<th class="score-col" title="Whether ThoughtSpot’s Data Cache can serve the Model (rules P19 to P28); see the Data Cache view">Data Cache</th>';
+  /* Last used: shown when the run fetched usage (H17), each cell "Not read" when it could not */
+  var showUsage = usageState() !== "absent";
+  var corpusByGuid = {};
+  if(showUsage && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m) corpusByGuid[m.g] = cm; });
+  if(showUsage) html += '<th class="score-col usage-col" title="Days since the Model was last queried, from ThoughtSpot’s own usage history (TS: AI and BI Stats), in the Org named above">Last used</th>';
   angleKeys.forEach(function(a){
     html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
             ANGLE_LABELS[a]+'</th>';
@@ -262,6 +270,10 @@ function buildHeatmap(){
                    Math.floor(rs.s)+'</span></td>' : '<td></td>';
     }
     if(showDataCache) html += dataCacheCell(dataCache[r.g], r.g);
+    if(showUsage){
+      var lu = usageLastUsed(corpusByGuid[r.g]);
+      html += '<td class="usage-cell" title="'+esc(lu.title)+'">'+esc(lu.text)+'</td>';
+    }
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);

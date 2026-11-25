@@ -445,3 +445,36 @@
   examples:
     fires: {fixture: human_single_use_hidden_helper, severity: LOW}
     silent: {fixture: human_helper_visible_or_reused}
+
+- id: H17
+  title: Model not queried in 90 days or more
+  evidence: fact
+  description: >-
+    A Model with no query in 90 whole days or more before the audit read its usage, or
+    with no query at all in the usage history ThoughtSpot holds when that history starts
+    at least 90 days before the read (a shorter history says nothing about a Model it
+    does not hold). The usage is read
+    from the system Model TS: AI and BI Stats: each Model's last query time over the
+    whole history it keeps, which lags by about a day. It is the usage of the Org the
+    audit runs in, so a Model queried only from another Org counts as not queried here.
+    A Model created since the history's last day reads as never queried. Not judged
+    when the usage could not be read (the system Model missing, refused, a failed call,
+    or a history with no first query), never read as unused.
+  # A code rule (code:idle_model) because its idle days are a tunable parameter and the
+  # finding is worded two ways, by days since the last query or by where the history
+  # starts; the reading is in audit/usage.py.
+  categories: [H]
+  requires: [model_tml, usage]
+  implementation: code:idle_model
+  scope: model
+  severity: LOW
+  parameters: {idle_days: 90}
+  message: "{idle} (usage of {org})"
+  remediation: >-
+    Ask the Model's owner whether anyone still needs it. Before removing it, run
+    /ts-dependency-manager to see what depends on it: a Model can feed Liveboards and
+    Answers that nobody opened in the window, and usage counts this Org's queries only
+  examples:
+    fires: {fixture: human_model_idle, severity: LOW}
+    silent: {fixture: human_model_recently_used}
+  views: [cleanup]

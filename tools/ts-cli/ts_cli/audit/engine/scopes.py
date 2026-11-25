@@ -240,6 +240,14 @@ def _connections_fetched(item: Item, ctx) -> bool:
     return ctx.connections is not None
 
 
+def _usage_read(item: Item, ctx) -> bool:
+    """Usage was read (one read per audit, as for calendars): None is "not fetched, or
+    not read", never "no queries"; a reading whose history has no start reads as not
+    read too (audit/usage.py usage_readable)."""
+    from ts_cli.audit.usage import usage_readable
+    return usage_readable(ctx.usage)
+
+
 def _set_looked_up(item: Item, ctx) -> bool:
     """A Set's consumers were looked up cleanly iff its guid keys `dependents`
     (context._add_set_dependents): absence is "unknown", never "no consumers"."""
@@ -254,6 +262,7 @@ def _set_looked_up(item: Item, ctx) -> bool:
 #   sets                 the Set's consumers were looked up
 #   calendars            the calendar search ran and answered (context._fetch_calendars)
 #   connections          the connection search ran and answered (context._fetch_connections)
+#   usage                the system Model's usage was read (usage.fetch_usage)
 #   metadata, dependents always: fetched for every scoped object, so a missing entry
 #                        means "none", which a rule may legitimately report on
 AVAILABILITY: Dict[str, Callable[[Item, Any], bool]] = {
@@ -266,6 +275,7 @@ AVAILABILITY: Dict[str, Callable[[Item, Any], bool]] = {
     "sets": _set_looked_up,
     "calendars": _calendars_fetched,
     "connections": _connections_fetched,
+    "usage": _usage_read,
 }
 
 
