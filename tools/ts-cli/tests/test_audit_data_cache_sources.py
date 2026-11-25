@@ -174,7 +174,7 @@ def test_p24_names_what_each_connection_uses():
     ctx = fx.build_cache_ctx(connections=[conn(parameterized=True)])
     assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A: template variable"]
     m2m = fx.build_cache_ctx(connections=[dict(conn(oauth=True), oauth_m2m=True)])
-    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A: OAuth client ID and secret (to confirm)"]
+    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A: OAuth client credentials (to confirm)"]
 
 
 def test_p24_attaches_to_confirm_to_its_own_reading():
@@ -187,7 +187,7 @@ def test_p24_attaches_to_confirm_to_its_own_reading():
         headers=[header("v1", "ONE_TO_ONE_LOGICAL", connection="Warehouse B")])
     assert _field(ctx, "@connection_cache_blockers") == [
         "Warehouse A: PrivateLink read from the host (to confirm); template variable",
-        "Warehouse B: OAuth client ID and secret (to confirm)"]
+        "Warehouse B: OAuth client credentials (to confirm)"]
 
 
 def test_p24_matches_by_id_when_the_header_carries_one():
@@ -483,5 +483,5 @@ def test_a_databricks_oauth_client_pair_reads_to_confirm_end_to_end():
         return dc["readiness"], _field(ctx, "@connection_cache_blockers")
 
     assert readiness("DATABRICKS") == (
-        "confirm", ["Warehouse A: OAuth client ID and secret (to confirm)"])
+        "confirm", ["Warehouse A: OAuth client credentials (to confirm)"])
     assert readiness("SNOWFLAKE") == ("blocked", ["Warehouse A: OAuth"])

@@ -13,12 +13,12 @@ function readinessByGuid(){
    not record its angles (`ar` empty) keeps the column. */
 function dataCacheByGuid(){
   var out = {};
-  var ran = D.C && D.C.ar && D.C.ar.length ? D.C.ar.indexOf("P") !== -1 : true;
-  if(ran && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
+  if(dataCacheRan() && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
   return out;
 }
-/* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking there. */
-function dataCacheCell(dc){
+/* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking to the
+   Model's own Data Cache page (#datacache/<guid>). */
+function dataCacheCell(dc, guid){
   if(!dc) return '<td></td>';
   var st = DC_STATES[dc.s] || DC_STATES.unknown;
   var why = (dc.r || []).map(function(r){
@@ -26,7 +26,7 @@ function dataCacheCell(dc){
   });
   if(dc.na && dc.na.length) why.push('Not checked: '+dc.na.map(function(c){
     return DC_CHECKS[c] || c; }).join(', '));
-  return '<td><a class="dc-state '+st.cls+'" href="#datacache" title="'+
+  return '<td><a class="dc-state '+st.cls+'" href="#datacache/'+esc(guid)+'" title="'+
     esc('Data Cache: '+st.label+(why.length ? ' — '+why.join('; ') : ''))+'">'+
     st.label+'</a></td>';
 }
@@ -255,17 +255,17 @@ function buildHeatmap(){
 
   rows.forEach(function(r){
     html += '<tr>';
-    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
+    html += '<td class="model-name"><a href="#model/'+esc(r.g)+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
     if(showReadiness){
       var rs = readiness[r.g];
       html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
                    Math.floor(rs.s)+'</span></td>' : '<td></td>';
     }
-    if(showDataCache) html += dataCacheCell(dataCache[r.g]);
+    if(showDataCache) html += dataCacheCell(dataCache[r.g], r.g);
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);
-      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
+      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+esc(r.g)+'" data-angle="'+a+
               '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0">'+cellText+'</span></td>';
     });
     html += '</tr>';

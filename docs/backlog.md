@@ -334,7 +334,7 @@ are roughly ordered by value÷effort.
 | ~~BL-517~~ | ~~`_export_answers` drops a refused Answer batch whole~~ | DONE (2026-11-04) |
 | BL-518 | `ts audit run` still ends on a scalar of the wrong type where a string belongs (a list or number as a guid, `fqn`, `name`, `expr`, `on`, `column_id`): 23 crash sites found by the PR 1 review's fuzzer | 2027-01-31 |
 | BL-519 | Formula aggregation follow-ups: the Snowflake SV, Databricks MV, Tableau and Qlik builders declare their own value on a bare window (an SV `AVG(...) OVER` becomes `group_average` with SUM); probe which aggregation ThoughtSpot applies to a bare window with none declared, and AgentQL on `*_in_period`; `outermost_func` ignores quotes | 2027-01-31 |
-| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332, `buildScorecard` 302 lines), gate the embedded ERD `renderer.js` (1,338 lines, outside the scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
+| BL-520 | Split the report's oversized JS (`objectmap.js` 756 lines; `buildCrossModel` 332 lines; `buildScorecard` is now under the limit), gate the embedded ERD `renderer.js` (about 1,400 lines, still outside `check_file_size`'s scan), and decide whether the length check should see function expressions and `registerView` methods | 2027-01-31 |
 | ~~BL-521~~ | ~~G5e's other half: RLS Tables scoping the tenant through different key columns~~ | DONE (2026-11-05) |
 | ~~BL-506~~ | ~~Rule D13: a bare `group_aggregate` / `last_value` / `first_value` with the wrong aggregation~~ | DONE (roadmap PR 4.4, 2026-11-04) |
 | ~~BL-507~~ | ~~the join-key type lookup misses aliased tables~~ | DONE (2026-11-04) |
@@ -510,6 +510,8 @@ are roughly ordered by value÷effort.
 | BL-608 | ts-recipe-answer-period-comparison follow-ups: repeated years merged, unverifiable in-place updates, weekend clashes missed, backups in a temp directory | 2027-01-31 |
 | BL-612 | `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal (`[T::Median (USD)]`) as a naked aggregate and strips a needed `sum()` | 2027-01-31 |
 | BL-613 | DAX translator: an IN set's result used as a value (`ISBLANK(T[s] IN {…})`, a calculated-column flag later negated) translates, and may differ from DAX for a blank | 2027-01-31 |
+| BL-617 | ts-audit Data Cache and Formulas: review nits deferred from #744 (a typeless connection, P24's remediation, the golden table, snapshot docs, report code) | 2027-01-31 |
+| BL-618 | The hook's interpreter search falls back to a bare `python3` that may lack pytest (Python 3.15 after a Homebrew upgrade) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -16648,8 +16650,8 @@ names and redundant enclosing brackets (move H16's normalisation into `spotql_op
 **What.** BL-503 gated the report's own JS parts and ratcheted what was already over:
 `views/objectmap.js` (756 lines, past the 500 warning) and two functions past the 250-line
 limit, `buildCrossModel` (332, `views/crossmodel.js`) and `buildScorecard` (302,
-`views/scorecard.js`). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
-(1,338 lines; `audit/report.py` reads it into the page), which sits outside
+`views/scorecard.js`; split under the 250-line limit and its ratchet entry dropped on 2026-11-19, ts-audit 3.25.0). Two gaps remain. The report embeds `agents/shared/erd/renderer.js`
+(1,338 lines when filed, about 1,400 since the 2026-11-19 filter bar; `audit/report.py` reads it into the page), which sits outside
 `check_file_size`'s scan root and would fail its 1,000-line limit. And the function check
 measures only a `function name(` declaration at column 0 to the next column-0 `}`: a
 function expression, an arrow, a `registerView({...})` method, an indented declaration or
@@ -17818,7 +17820,7 @@ disagree.
 
 **Filed:** 2026-11-18. **Source:** pr-ready review of the formula graph (ts-audit 3.22.0).
 
-**What.** `tools/ts-cli/ts_cli/audit/vendor/` holds Cytoscape.js 3.30.2, @dagrejs/dagre 1.1.4 (with graphlib 2.2.4) and cytoscape-dagre 2.5.0, which run in every audit report that has a formula chain. `pip-audit` covers Python only, and the repo audit's angle 16 reads only `pyproject.toml` and requirements files (`.claude/workflows/repo-audit.js`, `.claude/rules/repo-audit.md`). Nothing looks for a newer release or an advisory.
+**What.** `tools/ts-cli/ts_cli/audit/vendor/` holds Cytoscape.js 3.30.2, @dagrejs/dagre 1.1.4 (with graphlib 2.2.4) and cytoscape-dagre 2.5.0, which run in every audit report where some Model has a formula (`report.has_formulas`). `pip-audit` covers Python only, and the repo audit's angle 16 reads only `pyproject.toml` and requirements files (`.claude/workflows/repo-audit.js`, `.claude/rules/repo-audit.md`). Nothing looks for a newer release or an advisory.
 
 **Do.**
 1. Add `tools/ts-cli/ts_cli/audit/vendor/` (its README table) to angle 16's scope and the workflow's finder prompt: check each package's latest version and advisories.
@@ -17832,7 +17834,7 @@ disagree.
 
 **What.** The Data Cache rules rest on nine readings the product team is to answer, each a point in ts-audit open-items #18. Until it does, each open reading reads To confirm or Not assessed, never Can use, with two qualifications. Point 2's negative side is excepted by decision (a host without `privatelink` reads as no PrivateLink), and point 3 is firm, since the product owner answered it:
 
-- P24 reads OAuth from a client ID and secret alone (point 1): a `client_id` and `client_secret` pair, or on a Databricks connection `OAuth2ClientId` and `OAuth2Secret`, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
+- P24 reads OAuth from client credentials alone (point 1): a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret` (`client_id`, `clientId`, `Client Secret`), alone or both, or on a Databricks connection (or one whose type the search does not give) `OAuth2ClientId`, `OAuth2Secret` or both, which per-user OAuth and a service principal both hold (2026-11-19), and PrivateLink from a `host` or `accountName` containing `privatelink` (point 2). The negative side of point 2 is open too: a Databricks PrivateLink workspace may keep its usual host, so a host without `privatelink` is not proof of no PrivateLink.
 - P28 counts `isnull` and `is_null` as firm (the product owner confirmed it), which conflicts with S12's advice for outer joins (point 3). It lists the operator forms S12 accepts (`= null`, `!= null`, `<= null`, `>= null`) to confirm (point 4).
 - P19 lists a formula that names a custom calendar (point 5), and a code-based value on a column or in a formula that a custom calendar is also named (point 9), to confirm.
 - P21 lists a measure only flagged `is_pre_aggregated_measure` to confirm (point 6).
@@ -18547,5 +18549,82 @@ Arithmetic on an IN result probably fails at import as a ThoughtSpot type error;
    SWITCH condition or an AND/OR operand, and carry the "IN-derived" property through a
    calculated column, so a measure that negates such a column refuses too.
 3. Tests for both shapes, plus arithmetic on an IN result.
+
+**Target:** 2027-01-31.
+
+## BL-617 — ts-audit Data Cache and Formulas: review nits deferred from #744 `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** the fourth and sixth `pr-reviewer` passes on PR #744 (no
+blocker or should-fix left; these were deferred, not declined).
+
+**What.** (The original item 1, a set `client_id` or `client_secret` alone reading as no
+OAuth, and item 6's long FACTS_VERSION comment line are fixed in ts-audit 3.25.0: one of
+the pair alone reads to confirm, FACTS_VERSION 3. The items below are renumbered.)
+
+1. **A connection with no type ignores its Table header.** P24 reads a connection whose search
+   entry has no warehouse type as maybe Databricks, though P23 may read the source as Snowflake
+   from its Table header; a Snowflake OAuth2 pair then reads To confirm, not Can't use. A
+   `data_warehouse_type` of only spaces does the same, since `_text(" ")` stops the fallback to
+   `details.type`: run `warehouse_type` on each candidate before choosing. Both lean to To
+   confirm, never Can use, and neither has been seen live.
+2. **P24's remediation.** Its description, README and BL-590 name every reading to confirm
+   since ts-audit 3.25.0 (either key alone, every spelling the client-key match takes, a connection with no type). Its
+   remediation ("switch it to a service account") is circular for a connection that may
+   already be a service principal: give readings to confirm a line of their own, and add P24
+   to BL-590's step 2.
+3. **The golden table pins rows, not the derivation.** `test_audit_connections_data.py`'s table
+   fails only when a pinned row changes; a change no row covers (or `header_parameterized`,
+   which has no row) passes without a `FACTS_VERSION` bump. Pin one row per derivation path,
+   or a digest of the outputs per version.
+4. **Snapshot docs and tests.** README's `--snapshot-out` / `--snapshot-in` table rows predate
+   the manifest's `derived` key, and so does `snapshot.py`'s docstring example (the README's
+   snapshot paragraph is right). No test runs `ts audit fire-rates` on a P snapshot with
+   no `derived` (verified by hand: refused, with the right message). A newer `derived` version
+   replays silently; a note on stderr would keep engine comparisons honest.
+5. **Report code and tests.** `formulas.js`'s `inlinedText` repeats `inlinedHtml`'s paste
+   condition (one walker taking a renderer would stop them drifting); no test checks the
+   Dashboard Data Cache cell's "(to confirm)" or "Not checked:" hover text (both verified by
+   hand in headless Chrome).
+
+**Added from the final review of the Model tabs PR (2026-11-25), all Nits, none seen in
+real data:**
+
+- **A mid-word `oauth` now reads no OAuth.** The word-start test that stopped `no_auth`
+  reading as OAuth also drops `useoauth`, `snowflakeoauthtoken`, `SFOAuthToken` and
+  `AADOAuthTenant`, which 0.221.0 read as firm OAuth; with a plain host such a Model can
+  read Can use. Read a set key with a mid-word `oauth` as OAuth to confirm (`oauth_m2m`)
+  instead, or settle it with a names-only listing of the cluster's connection keys (as for
+  open-items #17). Settle this one first: if such a key exists it is a Blocker-class result.
+- **`_names_oauth` can raise `IndexError`** (`connection_facts.py:176-179`): it searches
+  `text.lower()` but indexes `text`, and `lower()` lengthens "İ". Match case-insensitively on
+  `text` itself.
+- **P24's rule text**: the OAuth-name clause omits that the setting must be set, and never
+  defines a word start; CHANGELOG, the FACTS_VERSION note and SKILL.md 3.25.0 cite `no_auth`
+  as the change since 0.221.0 where it was `noAuth` and mid-word `oauth`; host-key
+  normalisation also lets a configuration whose only readable key is `account_name` be
+  judged rather than read Not assessed; `data_cache.py:30` still says "OAuth client ID and
+  secret".
+
+**Target:** 2027-01-31.
+
+## BL-618 — the hook's interpreter search falls back to a bare `python3` that may lack pytest `Tier 3`
+
+**Filed:** 2026-11-19. **Source:** a Homebrew upgrade on a maintainer's machine.
+
+**What.** `scripts/lib/python-bin.sh` takes the newest `python3.1x` on `PATH` (3.14 down to
+3.10) that imports pytest, else falls back to bare `python3` with a warning. Homebrew moved
+`python3` to 3.15, which has no pytest or PyYAML and which ts-cli does not yet support
+(`requires-python <3.15`); with no other 3.10-3.14 holding pytest on `PATH`, the pre-commit
+hook then failed every Python check within a second, and every commit needed
+`CHECKS_PYTHON` set by hand. The CI-equivalent virtual environment the repo documents
+(`~/.venvs/tas-ci`, `.github/CONTRIBUTING.md`) was there all along.
+
+**What should change.**
+1. Before falling back to bare `python3`, try `~/.venvs/tas-ci/bin/python3.12` (the path
+   CONTRIBUTING documents and pr-ready's skill already defaults to), with the same probe.
+2. When the fallback is a Python ts-cli does not support (3.15+, or below 3.10), stop with a
+   message naming `CHECKS_PYTHON` instead of reporting every check as a FAIL.
+3. Two tests (`test_quest_build`, `test_pre_commit_paths`) shell out to bare `python3`; run
+   them with `sys.executable` so they use the interpreter running the suite.
 
 **Target:** 2027-01-31.
