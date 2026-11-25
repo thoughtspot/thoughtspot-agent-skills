@@ -18805,6 +18805,30 @@ while planning):
 - If customers are meant to import the Python rather than run the CLI, name a supported
   function.
 
+**Re-review leftovers** (shipped by the user's decision, 2026-11-26, without a second fix
+round; settle while planning):
+
+- A missing, null or unrecognised table or column status still reads `drifted`. It should
+  read `unknown`, `unrecognised_response`, as at connection level; only a present value
+  other than `SUCCESSFUL` is `drifted`.
+- BL-622's usage rollup misses legacy Worksheets, hidden Models and Views stacked more
+  than three deep (`models_reached` in `ts_cli/audit/scope.py`). A connection used only
+  through those would read idle.
+- Open item 5 becomes pre-merge if the `inactive` proposal is rejected. A deactivated
+  connection answering 200 with `FAILED` would read `down`.
+- A per-user OAuth result is the running admin's view: a table their warehouse role cannot
+  read fails. Mark it as such, and attach no column-removal advice.
+- The `incomplete` check counts `ONE_TO_ONE_LOGICAL` and `SQL_VIEW` Tables. If diagnose does
+  not list SQL Views, every connection with one reads `incomplete`. Name the subtypes,
+  compare counts live on one connection, and make a failed count read `unknown`.
+- The classification table needs a final row, "anything else: `unknown`, `error`". A 204 or
+  other non-200 2xx matches no row.
+- Minor: Org sources other than `--org` (`TS_ORG`, the profile) take the same silent
+  fallback, and `assert_org_context` exits 2 with a sharing message; say how to deactivate
+  (no `ts` command; Early Access UI or 26.6.0.cl API); give `unrecognised_response` and
+  `incomplete` a next step; compare table sets, not counts, and add `tables_registered`;
+  add open item 7 to the `references/open-items.md` obligation.
+
 ## BL-622 — ts-audit: flag idle connections that are still active, and recommend deactivating them `Tier 3`
 
 **Filed:** 2026-11-25. **Source:** connection deactivation probe on the SE demo cluster,
