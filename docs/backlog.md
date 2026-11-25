@@ -18809,3 +18809,77 @@ docs: deactivation suspends "all activity". Its finding should say so, not claim
 saving (design doc open item 6).
 
 **Next step.** Design piece 2.
+
+## BL-623 — ts-audit usage by Org: review nits deferred from the Org PR `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-orgs` (ts-cli
+0.224.0); triaged under pr-ready Step 7. **Target:** 2026-12-31.
+
+**What.**
+
+1. For a 3.26.0 reading, the only not-found list is headed "Org not recorded (N)" and
+   never says its IDs match no visible object; empty, it reads "(0)" and "None."
+   (`report/views/cleanup.js`).
+2. When the audit's own Org, or the Orgs, were not read, notes still assume the groups are
+   other Orgs and that other Orgs' queries are not counted (`cleanup.js`, `report/usage.js`).
+3. Loose claims: the README says the header gives the count of Orgs when read elsewhere
+   (only when more than one); `report.py` and `usage.js` say `or` is "absent before
+   0.224.0" (also absent when 0.224.0 replays a 0.223.0 reading).
+4. No guard for Orgs read but the audit's own Org id matching none of them (an id-format
+   difference for a non-primary Org is not verified live): "Used in this Org, but not
+   found (0)" would read clean.
+5. `usage.py` `_org_sort` checks `isdigit()` then calls `int()` (a non-ASCII digit raises;
+   use `isdecimal()`); a renamed Org's later blank name replaces an earlier name.
+6. The Org query is a fourth all-history query under the 60 s timeout; a persistent socket
+   timeout aborts the whole audit. Add it to BL-620 item 8's timing.
+7. Audited Models in `corpus.models[].usage` carry no Org; only not-found IDs and the
+   `orgs` summary do.
+8. In a not-found row, "Last queried" is that Org's last query while Queries and Users are
+   the ID's totals across Orgs; the tooltip explains only the counts.
+9. Read from the Primary Org, the report carries every Org's name, often customer names on
+   a multi-tenant cluster. SKILL.md says so; consider a note at the report's top.
+10. BL-620 item 1 (non-admin auditors) now also bears on the "Usage of all Orgs" header,
+    which rests on one admin user's probe.
+
+## BL-624 — ts-audit report: link every ThoughtSpot object to ThoughtSpot `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user request: from the report, a click on a Model's name
+(or an Open icon beside it) should open that object in ThoughtSpot, wherever the report
+can build the link. **Target:** 2026-12-31.
+
+**What exists today** (report JS on main at 86c168d7):
+
+- The scorecard's "Open in ThoughtSpot" button (`report/views/scorecard.js`), the
+  Cross-Model ↗ icon beside a Model (`views/crossmodel.js`), the Downstream consumers'
+  "Open" (`core.js` dependency link) and H10's Open column in Cleanup.
+- Two of these build the URL inline (`D.C.u + '/#/data/tables/' + guid`); `core.js` has
+  its own helper. There is no single place that maps an object type to its URL.
+
+**What.**
+
+1. **One URL helper** in `report/core.js` mapping object type (Model, Table, View,
+   Liveboard, Answer, Set) to its ThoughtSpot path, used by every view. Verify each path
+   live on the SE demo cluster before relying on it.
+2. **An Open ↗ icon beside every object name that is a ThoughtSpot object,** keeping the
+   name's own click for in-report navigation: the Dashboard heatmap, Cleanup (H4, H5, H17
+   and the rest), Object Map, Data Cache, the Formulas view's Model list, ERD tables, and
+   the scorecard's Tables.
+3. **Not-found usage IDs:** an ID used in this Org but not found gets no link (it matches no
+   visible object). An ID used in another Org: link only if a URL that switches Org is
+   verified live (the URL form for opening an object in another Org is unverified); else
+   none, and say why in the note.
+4. **Tests:** every link is built through the helper and escaped; a headless-Chrome test
+   per view asserts the icon's href for a synthetic cluster URL.
+
+## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user request 2026-11-25 (approved, then parked on
+2026-11-26 to end the build round on a stable skill). **Target:** 2027-01-31.
+
+**What.** On the Dashboard heatmap, where every audited Model is listed:
+
+1. Clicking "Last used" sorts by it (most idle first, then most recent).
+2. Usage filter chips above the heatmap: Active (queried in the last 90 days), Idle 90+
+   days, Never queried, and Not read (shown only when usage was not read). They combine
+   with the existing angle and severity filters, e.g. "in use, with High findings".
+3. No new section: the heatmap already lists every Model, and Cleanup lists H17's.
