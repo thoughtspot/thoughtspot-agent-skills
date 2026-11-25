@@ -57,9 +57,18 @@ must go through a pull request. `main` has branch protection with `enforce_admin
 `--admin` does not bypass it (see docs/quality-gates.md "Enforcement model").
 
 Workflow for every change:
-1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`)
-2. `git push -u origin <branch>` and open a PR against `main`
-3. After the PR merges:
+1. Work on a feature or wip branch (`feat/<slug>` or `wip/<skill>`). **One purpose per
+   PR:** a fix or feature found along the way goes to its own PR or a dated backlog
+   item, not into the open one; every addition is new code for its review to probe.
+2. When docs, changelogs or PR text say what code handles, state the rule or the limit
+   ("keys whose name contains `clientid`", "up to 300 nodes") rather than "always" or
+   "any": an absolute claim about behaviour invites a counterexample and another
+   review round.
+3. Run `pr-ready` (`.claude/skills/pr-ready/SKILL.md`) and stop as its Step 7 says: one
+   fix round for Blockers and the Should-fixes it names, the rest to a dated backlog
+   item, one re-review; ask the user before going further.
+4. `git push -u origin <branch>` and open a PR against `main`
+5. After the PR merges:
    - For `tools/ts-cli/` changes: `pip install -e tools/ts-cli` in the affected environment
 
 Claude Code changes (via symlinks) take effect immediately — no step needed for `agents/claude/` only.
