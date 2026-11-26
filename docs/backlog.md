@@ -18845,6 +18845,26 @@ saving (design doc open item 6).
 10. BL-620 item 1 (non-admin auditors) now also bears on the "Usage of all Orgs" header,
     which rests on one admin user's probe.
 
+From the re-review of the fix round:
+
+11. **Label for a one-Org history that is not the reading Org** (the remaining Should-fix).
+    Read from the Primary Org with the Org query succeeding, a history naming exactly one
+    Org that is not the Primary Org (or naming none) makes `usage_scope`
+    (`usage.py`, mirrored in `report/usage.js`) return "org", so the header, tooltips and
+    H17 say "usage of the Org 'Primary'" while Cleanup lists "Used in other Orgs".
+    Counts and verdicts are right; only the label is wrong. Return "org" only when the one
+    Org named is the reading Org; otherwise "all" from the Primary Org, or the hedge. The
+    two one-Org tests use Org "0" only; add one with another Org. Also: with the audit's
+    own Org unread, H17 says "the audit's Org (its name could not be read)" even when
+    the reading covers every Org.
+12. The Python and JS labels agree in kind but not in words ('Primary' vs ‘Primary’, the
+    unread-name wording), and the decision is written twice with no cross-check test;
+    carry the kind in `_compact_usage` so the page reads Python's decision.
+13. SKILL.md's H17 sentence and `code_rules_human.py`'s docstring omit the "usage of N
+    Orgs, read from the Org 'X'" form.
+14. The Cleanup heading for unread Orgs puts the count after the hedge ("…was not read
+    (4)"), so the count reads as part of the hedge.
+
 ## BL-624 — ts-audit report: link every ThoughtSpot object to ThoughtSpot `Tier 3`
 
 **Filed:** 2026-11-26. **Source:** user request: from the report, a click on a Model's name
