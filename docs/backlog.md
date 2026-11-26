@@ -19775,7 +19775,7 @@ of `fix/tableau-table-column-physical-names` (ts-cli 0.225.3, ts-convert-from-ta
 names Tableau Table TML columns by physical name. Everything here was outside that PR's one purpose.
 **Target:** 2026-12-15.
 
-**Should-fix (gate).**
+**Should-fix (a lint gate gap, and a silent wrong binding in merge mode).**
 
 1. **`ts tml lint --dir` passes the class of bug that PR fixed.** `_table_column_names`
    (`ts_cli/commands/tml.py`) indexes both a Table column's `name` and its `db_column_name`, so a
@@ -19806,7 +19806,7 @@ names Tableau Table TML columns by physical name. Everything here was outside th
    `db_column_name`, or key `cmap` by it.
 5. The new test checks `column_id` suffixes only; add a two-table fixture with a join and a formula
    on a captioned column so join `on:` and `[TABLE::X]` formula refs are pinned too.
-6. Upgrade note: Tables imported by ts-cli 0.225.1 or earlier still carry caption names, so a Model
+6. Upgrade note: Tables imported by ts-cli 0.225.2 or earlier still carry caption names, so a Model
    exported over them still filters formulas in `--existing-guid` merge mode, and re-importing a
    regenerated Table over its guid renames its columns (Answers/Liveboards on it may be affected).
    Add a line to the skill (re-import Tables first) and to coverage-matrix row 140.
