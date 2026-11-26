@@ -162,12 +162,15 @@ def usage_readable(usage: Optional[dict]) -> bool:
     return _number((usage.get("history") or {}).get("start"))
 
 
-def idle_reading(usage: dict, guid: str, idle_days: float) -> Tuple[Optional[int], Optional[str]]:
+def idle_reading(usage: dict, guid: str, idle_days: float,
+                 created_ms: Any = None) -> Tuple[Optional[int], Optional[str]]:
     """H17: `(days since last use, wording)` for a Model with no query in `idle_days`
     days or more, `(None, wording)` for one the history holds no row for when the
     history covers at least `idle_days` days before the usage was read, and `(None,
     None)` otherwise — a recent query, a row with no query time recorded, a history too
-    short to say, or usage not readable (usage_readable)."""
+    short to say, a Model created less than `idle_days` days before the read
+    (`created_ms`, its metadata header's `created`, epoch milliseconds; not judged
+    when absent), or usage not readable (usage_readable)."""
     if not usage_readable(usage):
         return None, None
     reading = model_usage(usage, guid)
@@ -175,6 +178,8 @@ def idle_reading(usage: dict, guid: str, idle_days: float) -> Tuple[Optional[int
         start = usage["history"]["start"]
         fetched = usage.get("fetched_at")
         if not _number(fetched) or start > fetched - idle_days * _DAY:
+            return None, None
+        if _number(created_ms) and created_ms / 1000 > fetched - idle_days * _DAY:
             return None, None
         return None, ("No query in the usage history ThoughtSpot holds, which starts on "
                       f"{iso_date(start)}")

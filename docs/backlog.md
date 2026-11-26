@@ -18712,7 +18712,8 @@ Behaviour:
 4. **New Models read as never queried.** H17 reports a Model created inside the last
    `idle_days` that nobody has queried yet, worded "…which starts on <history start>", which
    implies years idle. Skip, or reword, a Model whose creation time (in the metadata header)
-   is under `idle_days` old.
+   is under `idle_days` old. **Resolved 2026-11-26** (ts-cli 0.224.1): skipped by the
+   header's `created` time.
 5. **"(0) No findings." for rules that did not run.** The Cleanup view prints it for H4, H5
    and H10 when their data was not collected (pre-existing; H17 was fixed in the usage PR).
    Key every cleanup section on `collected()` of its rule's `requires`.
