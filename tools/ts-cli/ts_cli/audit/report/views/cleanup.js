@@ -198,50 +198,129 @@ function buildCleanupSection(container, title, items, D, emptyMsg){
   container.appendChild(sec);
 }
 
-/* "Used, but not found in this Org": each Model ID in the usage (D.C.us.g, usage.js) that
-   matches no Model, Table or View the audit's user can see in that Org now, with its
-   queries, users and last query. The system Model keeps no names, so only the ID. Not
-   shown when no selected rule fetched usage; "Not read" when it was fetched and not read,
-   or when the objects the user can see could not be listed. */
+/* The used Model IDs that match no Model, Table or View the audit's user can see in its
+   Org now (D.C.us.g, usage.js), with queries, users and last query; the system Model
+   keeps no names, so only the ID. Split by the Org each was queried in (usageGoneByOrg):
+   this Org's (deleted, or not shared with the user), other Orgs' (collapsed per Org, no
+   claim either way) and those with no Org recorded. One list when the Orgs were not read.
+   Not shown when no selected rule fetched usage; "Not read" when it was fetched and not
+   read, or when the objects the user can see could not be listed. */
 function buildGoneSection(container){
   var state = usageState();
   if(state === "absent") return;
-  var sec = el("div", "cleanup-section usage-gone");
   var gone = state === "read" ? D.C.us.g : null;
-  var head = "Used, but not found in this Org"+(state === "read" ? " — usage of "+usageOrgName() : "");
-  sec.innerHTML = '<h3>'+esc(head)+(gone ? ' ('+gone.length+')' : '')+'</h3>';
   if(state === "not_read" || !gone){
-    var why = state === "not_read"
+    var sec = goneSection(container, "Used, but not found in this Org", null, "");
+    sec.appendChild(mutedNote(state === "not_read"
       ? "Not read: the audit could not read usage, so it cannot say which used Models are not found."
-      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models are not found.";
-    sec.appendChild(mutedNote(why, "empty-state"));
-    container.appendChild(sec);
+      : "Not read: the objects this user can see could not be listed, so the audit cannot say which used Models are not found.",
+      "empty-state"));
     return;
   }
-  var w = D.C.us.w || 180;
-  sec.appendChild(mutedNote("Model IDs in the usage history that match no Model, Table or View "+
-    "the audit's user can see in this Org now. Each may be deleted, in another Org, or not "+
-    "shared with that user; the audit cannot tell which. The usage history keeps no names, "+
-    "only the ID.", "usage-gone-note"));
-  if(!gone.length){
-    sec.appendChild(mutedNote("None.", "empty-state"));
-    container.appendChild(sec);
+  if(D.C.us.or === 0){
+    var all = goneSection(container, "Used, but not found in this Org — "+usageWhose(),
+      gone.length, "");
+    all.appendChild(mutedNote("Org not read: the Org each ID was queried in could not be read, "+
+      "so this list may hold other Orgs' IDs as well as this Org's. Each may be deleted, in "+
+      "another Org, or not shared with the audit's user; the audit cannot tell which. The "+
+      "usage history keeps no names, only the ID.", "usage-gone-note"));
+    goneTable(all, gone.map(function(g){ return [g, null]; }));
     return;
   }
+  var split = usageGoneByOrg(gone), before = D.C.us.or === undefined;
+  if(!before) buildOwnAndOtherOrgs(container, split);
+  if(split.unrecorded.length || before){
+    var un = goneSection(container, "Org not recorded", split.unrecorded.length, "usage-gone-unrecorded");
+    un.appendChild(mutedNote(before
+      ? "This usage was read before the audit read each Model's Org (ts-cli 0.224.0), so no ID has one. Each may be deleted, in another Org, or not shared with the audit's user; the audit cannot tell which. The usage history keeps no names, only the ID."
+      : "Model IDs the usage history records no Org for, so the audit cannot say which Org they were queried in.",
+      "usage-gone-note"));
+    goneTable(un, split.unrecorded.map(function(g){ return [g, null]; }));
+  }
+}
+
+/* This Org's not-found IDs, then the other Orgs' (buildOtherOrgs). */
+function buildOwnAndOtherOrgs(container, split){
+  var own = goneSection(container, "Used in this Org, but not found",
+    split.own ? split.own.length : null, "usage-gone-own");
+  if(!split.own){
+    own.appendChild(mutedNote("Not known: the Org this audit ran in was not read, so its IDs "+
+      "cannot be told from other Orgs'; every ID is listed by its Org below.", "empty-state"));
+  } else {
+    own.appendChild(mutedNote("Model IDs queried in "+usageOrgName()+" that match no Model, "+
+      "Table or View the audit's user can see there now: deleted, or not shared with that "+
+      "user. The usage history keeps no names, only the ID.", "usage-gone-note"));
+    goneTable(own, split.own);
+  }
+  if(split.others.length) buildOtherOrgs(container, split);
+}
+
+/* "Used in other Orgs": one collapsed group per Org, opened to its ID table. */
+function buildOtherOrgs(container, split){
+  /* distinct IDs: one queried in two of these Orgs is listed in both groups, counted once */
+  var seen = {};
+  split.others.forEach(function(o){ o.rows.forEach(function(p){ seen[p[0][0]] = 1; }); });
+  var ids = Object.keys(seen).length;
+  var sec = goneSection(container, (split.own ? "Used in other Orgs" : "Not found, by the Org queried in")+
+    " ("+usagePlural(ids, "ID")+" in "+usagePlural(split.others.length, "Org")+")", null,
+    "usage-gone-orgs");
+  sec.appendChild(mutedNote("Model IDs queried in other Orgs, which the audit's user cannot "+
+    "see from this Org. The audit does not judge whether they still exist. Open an Org for "+
+    "its IDs.", "usage-gone-note"));
+  split.others.forEach(function(o){
+    var det = el("details", "usage-org-group");
+    det.innerHTML = '<summary>'+esc(usageOrgLabel(o.id, o.name))+' — '+
+      esc(usagePlural(o.rows.length, "Model ID"))+'</summary>';
+    goneTable(det, o.rows);
+    sec.appendChild(det);
+  });
+}
+
+/* Where else a not-found ID listed under Org `o` was queried: "this Org" (the audit's,
+   never counted as another), "N other Org(s)", both, or "" for none. */
+function goneAlsoIn(g, o){
+  var mine = D.C.us.oi === null || D.C.us.oi === undefined ? null : String(D.C.us.oi);
+  var here = o ? String(o[0]) : null, inMine = false, others = 0;
+  (g[4] || []).forEach(function(x){
+    var k = String(x[0]);
+    if(k === here) return;
+    if(k === mine) inMine = true; else others++;
+  });
+  var parts = [];
+  if(inMine) parts.push("this Org");
+  if(others) parts.push(usagePlural(others, "other Org"));
+  return parts.join(" and ");
+}
+
+function goneSection(container, head, count, cls){
+  var sec = el("div", "cleanup-section usage-gone"+(cls ? " "+cls : ""));
+  sec.innerHTML = '<h3>'+esc(head)+(count === null ? '' : ' ('+count+')')+'</h3>';
+  container.appendChild(sec);
+  return sec;
+}
+
+/* One table of not-found IDs, each [row, org]: the last query is that Org's when org is
+   given, the Model ID's otherwise. Queries and users are the Model ID's in every Org; an
+   ID queried in more than one Org says so. "None." when there are none. */
+function goneTable(sec, pairs){
+  if(!pairs.length){ sec.appendChild(mutedNote("None.", "empty-state")); return; }
   var MAX_VISIBLE = 20;
   var html = '<div style="overflow-x:auto"><table class="cleanup-table usage-gone-table"><thead><tr>'+
     '<th>Model ID</th><th>Queries ('+esc(usageSpanLabel())+')</th><th>Users ('+esc(usageSpanLabel())+')</th><th>Last queried</th>'+
     '</tr></thead><tbody>';
-  gone.forEach(function(g, i){
+  pairs.forEach(function(p, i){
+    var g = p[0], o = p[1], more = goneAlsoIn(g, o);
     html += '<tr'+(i >= MAX_VISIBLE ? ' class="usage-overflow" style="display:none"' : '')+'>'+
-      '<td style="font-family:var(--mono);font-size:11px">'+esc(String(g[0]))+'</td>'+
+      '<td style="font-family:var(--mono);font-size:11px">'+esc(String(g[0]))+
+      (more ? '<span class="usage-multi-org" title="Queries and users are this ID’s across every Org it was queried in" style="font-family:var(--sans);color:var(--muted)"> · also queried in '+
+        esc(more)+'</span>' : '')+'</td>'+
       '<td>'+esc(String(g[1]))+'</td><td>'+esc(String(g[2]))+'</td>'+
-      '<td>'+esc(usageDate(g[3]))+'</td></tr>';
+      '<td>'+esc(usageDate(o ? o[2] : g[3]))+'</td></tr>';
   });
   html += '</tbody></table></div>';
   sec.insertAdjacentHTML("beforeend", html);
-  if(gone.length > MAX_VISIBLE){
-    var showBtn = el("button", "show-all-btn", "Show all "+gone.length+" IDs");
+  if(pairs.length > MAX_VISIBLE){
+    var showBtn = el("button", "show-all-btn", "Show all "+pairs.length+" IDs");
     showBtn.style.cssText = "margin:8px 0 4px;padding:6px 16px;border:1px solid var(--hair);border-radius:6px;background:var(--bg-card);cursor:pointer;font-size:12px;color:var(--accent);";
     showBtn.addEventListener("click", function(){
       $$(".usage-overflow", sec).forEach(function(tr){ tr.style.display = ""; });
@@ -249,7 +328,6 @@ function buildGoneSection(container){
     });
     sec.appendChild(showBtn);
   }
-  container.appendChild(sec);
 }
 
 function showToast(msg){

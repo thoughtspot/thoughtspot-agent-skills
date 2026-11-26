@@ -140,7 +140,7 @@ def stale_names(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
 
 # ── H17: Models nobody has queried ──────────────────────────────────────────
 
-@code_rule("idle_model", placeholders={"idle", "org"}, severity="severity",
+@code_rule("idle_model", placeholders={"idle", "usage"}, severity="severity",
            uses=("usage",), parameters={"idle_days"},
            label="one finding per Model with no query in its idle days or more, or none "
                  "in the usage history")
@@ -149,9 +149,10 @@ def idle_model(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     query in `idle_days` whole days or more before the usage was read (`{idle}` says
     how many and when, the metric is the days), or no row in a history that starts at
     least `idle_days` days before it was read (`{idle}` names where the history starts,
-    no metric). `{org}` names the Org whose usage was read. A Model is judged only when
+    no metric). `{usage}` says whose usage it is (usage.usage_label: all Orgs from the
+    Primary Org, else the Org it was read in). A Model is judged only when
     usage was read, with a known history start (`requires: usage`)."""
-    from ts_cli.audit.usage import idle_reading, org_label
+    from ts_cli.audit.usage import idle_reading, usage_label
     usage = ctx.usage
     out: List[Finding] = []
     for item in scopes.available(ctx, rule):
@@ -159,5 +160,5 @@ def idle_model(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
         if idle is None:
             continue
         out.append(_finding(rule, item, bands.fixed_severity(rule, item, ctx),
-                            {"idle": idle, "org": org_label(usage)}, metric=days))
+                            {"idle": idle, "usage": usage_label(usage)}, metric=days))
     return out
