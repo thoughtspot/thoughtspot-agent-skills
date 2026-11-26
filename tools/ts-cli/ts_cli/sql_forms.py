@@ -197,11 +197,33 @@ def sqlf_null_default_call(name: str, raw_args: list[list[str]], finish, marker:
     return _sqlf_coalesce_chain(texts)
 
 
+def sqlf_if_chain(branches: list[tuple[str, str]], else_: str) -> str:
+    """``( if ( c1 ) then v1 else if ( c2 ) then v2 … else e )``, parenthesised as a whole.
+
+    ThoughtSpot's ``else`` is greedy: a bare ``if ( c ) then a else b = x`` compiles to
+    ``CASE WHEN c THEN a ELSE (b = x) END`` (live-verified 2026-11-26, BL-632), so a
+    conditional that is an operand of anything must be grouped. Every translator emits its
+    conditionals through here so the caller can splice the result anywhere."""
+    out = else_
+    for cond, val in reversed(branches):
+        out = f"if ( {cond} ) then {val} else {out}"
+    return f"( {out} )"
+
+
+def sqlf_unwrap_conditional(expr: str) -> str:
+    """``expr`` without the grouping ``sqlf_if_chain`` adds, when it is one parenthesised
+    conditional standing on its own: the whole formula, or a whole argument of a call. Only
+    for positions where nothing can follow it inside the same group (BL-632)."""
+    e = expr.strip()
+    if e.startswith("( if (") and _sqlf_close(e, 0) == len(e) - 1:
+        return e[1:-1].strip()
+    return expr
+
+
 def _sqlf_coalesce_chain(texts: list[str]) -> str:
     if len(texts) == 1:
         return texts[0]
-    inner = _sqlf_coalesce_chain(texts[1:])
-    return f"if ( {texts[0]} != null ) then {texts[0]} else {inner}"
+    return sqlf_if_chain([(f"{t} != null", t) for t in texts[:-1]], texts[-1])
 
 
 def sqlf_div0(x: str, y: str) -> str:

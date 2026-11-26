@@ -1008,7 +1008,8 @@ class TestNullifRefused:
 
     def test_snowflake_nullif_non_zero_is_case_form(self):
         r = translate("NULLIF(a, b)", "snowflake")
-        assert r["formula"] == "( if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a] )"
+        # the whole formula: the grouping is dropped at the formula-translate boundary (BL-632)
+        assert r["formula"] == "if ( [TABLE::a] = [TABLE::b] ) then null else [TABLE::a]"
 
 
 class TestFidelityM0SnowflakeFixes:

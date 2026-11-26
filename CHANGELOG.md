@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-26
+- fix: the Databricks and Snowflake converters bracket every conditional they emit (CASE, IF/IFF, COALESCE, NVL2). ThoughtSpot's `else` is greedy, so `COALESCE(is_deleted, false) = false` converted to a filter that kept only the deleted and NULL rows; `CASE … END = x` and `IF(…) + 1` were wrong the same way (BL-632)
+- chore: bump ts-cli to v0.224.2
 - docs: `.github/CONTRIBUTING.md` sets a stopping point for reviewing someone else's PR: a full first review labelling every finding Blocking or Backlog, one fix round, one re-review, at most one more round for a Blocking item left unfixed or a regression the fix commits introduced, and after that the maintainer fixes what is left at merge or closes the PR; Blocking items are resolved before merge. The maintainer may commit on the contributor's branch at merge with hooks disabled and nothing from the branch executed. The PR template gains a Coverage section
 - fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
 - chore: bump ts-cli to v0.224.1

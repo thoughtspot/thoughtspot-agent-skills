@@ -67,7 +67,7 @@ from ts_cli.databricks.mv_sql_calls import (
     mvc_trunc,
     mvc_try_divide,
 )
-from ts_cli.sql_forms import (
+from ts_cli.sql_forms import (sqlf_if_chain, sqlf_unwrap_conditional,
     SQLF_BINARY_OPS,
     SQLF_DIV_MARK,
     sqlf_fold_concat,
@@ -407,7 +407,7 @@ _NULLIF0 = "\x00NULLIF0\x00"  # marker prefix; collapsed before joining
 
 
 def _emit(name: str, args: list[str]) -> str:
-    inner = " , ".join(args)
+    inner = " , ".join(sqlf_unwrap_conditional(a) for a in args)
     return f"{name} ( {inner} )" if args else f"{name} ( )"
 
 
@@ -734,7 +734,7 @@ def _call_if(cur: _Cursor, resolver) -> str:
     _need(args, 3, "IF")
     # the compiled safe_divide form, read back as the idiom (BL-374)
     return (sqlf_safe_divide_form(*args)
-            or f"if ( {args[0]} ) then {args[1]} else {args[2]}")
+            or sqlf_if_chain([(args[0], args[1])], args[2]))
 
 
 def _call_pass_through(name: str, cur: _Cursor, resolver) -> str:

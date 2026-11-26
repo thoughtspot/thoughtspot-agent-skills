@@ -220,7 +220,7 @@ class TestTranslateMeasure:
                      "conditional"), TABLES)
         assert out["ts_expr"] == (
             "sum_if ( [TRANSACTIONS::c] > 1 , "
-            "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b] )")
+            "( if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b] ) )")
 
     def test_complex_ratio_golden(self):
         # ts-from-databricks.md Measure 3
@@ -1335,8 +1335,8 @@ class TestGoldenSqlView:
         out = self._translate()
         seg = next(e for e in out["translated"] if e["name"] == "customer_segment")
         assert seg["ts_expr"] == (
-            "if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' "
-            "else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'")
+            "( if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' "
+            "else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic' )")
 
     def test_count_star_golden(self):
         out = self._translate()

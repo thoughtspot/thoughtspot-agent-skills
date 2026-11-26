@@ -157,6 +157,17 @@ with `not ( [col] in { ... } )`.
 This applies to all condition types — BOOL columns, string comparisons, compound
 AND/OR, and NULL checks. Verified 2026-07-10, SE cluster.
 
+**`else` is greedy: bracket a conditional that is an operand.** Live-verified 2026-11-26
+(BL-632) on a Databricks connection. `if ( [c] ) then [a] else [b] = [x]` compiles to
+`CASE WHEN c THEN a ELSE (b = x) END`: everything after `else` belongs to the else branch.
+So `if ( isnull ( [d] ) ) then false else [d] = false` keeps the rows where `[d]` is
+TRUE or NULL, which inverts the intended filter, and `if … else 0 + 1` adds 1 only on
+the else branch. Write `( if ( [c] ) then [a] else [b] ) = [x]` whenever the conditional
+is compared, combined or computed with. On its own, as a whole formula or a function
+argument, no brackets are needed. The translators emit every conditional through
+`sql_forms.sqlf_if_chain`, which adds them. For the two-argument null default,
+`ifnull ( [d] , false ) = false` avoids the question.
+
 Conditions in `if` can include `and` / `or` and function calls:
 
 ```

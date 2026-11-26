@@ -17,7 +17,7 @@ it — this module has no top-level dependency on mv_sql.
 from __future__ import annotations
 
 from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
-from ts_cli.sql_forms import (SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_safe_divide_form,
+from ts_cli.sql_forms import (sqlf_if_chain, SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_safe_divide_form,
                                sqlf_trunc_toward_zero)
 
 
@@ -156,10 +156,7 @@ def _construct_case(cur, resolver) -> str:
         sd = sqlf_safe_divide_form(branches[0][0], branches[0][1], else_val)
         if sd:
             return sd
-    out = else_val
-    for cond, val in reversed(branches):
-        out = f"if ( {cond} ) then {val} else {out}"
-    return out
+    return sqlf_if_chain(branches, else_val)
 
 
 def _construct_cast(cur, resolver) -> str:

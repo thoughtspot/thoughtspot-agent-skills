@@ -96,9 +96,9 @@ class TestNotRecognised:
 
     def test_near_miss_is_the_literal_translation(self):
         assert sf("CASE WHEN b <> 0 THEN a / NULLIF(b, 0) ELSE 0 END", r) == \
-            "if ( [T::b] != 0 ) then [T::a] / [T::b] else 0"
+            "( if ( [T::b] != 0 ) then [T::a] / [T::b] else 0 )"
         assert dbx("CASE WHEN c = 0 THEN 0 ELSE a / NULLIF(b, 0) END", r) == \
-            "if ( [T::c] = 0 ) then 0 else [T::a] / [T::b]"
+            "( if ( [T::c] = 0 ) then 0 else [T::a] / [T::b] )"
 
     @BOTH
     def test_reference_case_is_significant(self, t):

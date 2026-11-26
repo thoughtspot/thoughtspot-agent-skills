@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-632 | COALESCE emits an unparenthesised if/then/else; ThoughtSpot binds a following operator inside the else branch — an MV `COALESCE(is_deleted, false) = false` filter keeps ONLY the deleted rows (live-confirmed) | immediate |
+| ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
@@ -19200,7 +19200,8 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 
 ## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** immediate. **Raised to Tier 1
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.224.2) for the
+Databricks and Snowflake translators; the Tableau translator has the same defect and is the follow-up. **Raised to Tier 1
 2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
