@@ -64,7 +64,8 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-632 | COALESCE emits an unparenthesised if/then/else; ThoughtSpot binds a following operator inside the else branch — an MV `COALESCE(is_deleted, false) = false` filter keeps ONLY the deleted rows (live-confirmed) | immediate |
+| BL-649 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
@@ -537,6 +538,7 @@ are roughly ordered by value÷effort.
 | BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
 | BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
+| BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19205,7 +19207,8 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 
 ## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** immediate. **Raised to Tier 1
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.225.1) for the
+Databricks and Snowflake translators; the Tableau, Sisense and Qlik translators have the same defect, BL-649. **Raised to Tier 1
 2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
@@ -19656,3 +19659,45 @@ From the re-review of the fix rounds:
     them" is loose for Sets (the cohort listing); `dependents_scope` could point at
     `usage.org`; `views/usage.js` reads a Model with no triage as 0 dependents (only a
     hand-edited JSON reaches it); no test covers `discover_sets`' `unrecognised_row` path.
+---
+
+## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
+
+**Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
+
+**What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
+adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two
+others still emit a bare conditional and splice it into a larger expression:
+
+- **Tableau** (`ts_cli/tableau/conditionals.py`: `convert_iif`, `convert_if_then`, the
+  CASE rewrite): `IIF([a] > 1, 1, 0) + 1`, `IF [a] > 1 THEN 1 ELSE 0 END + 1` and
+  `CASE [b] WHEN 'x' THEN 1 ELSE 0 END * 2` all come out with the operator inside the
+  else branch.
+- **Sisense** (`ts_cli/sisense/functions.py`): `IF([a] > 1, 1, 0) = 1` becomes
+  `if (…) then 1 else 0 = 1`, with status TRANSLATED.
+
+- **Qlik** (`ts_cli/qlik/functions.py`): `If(a > 1, 1, 0) * Sum(b)` returns
+  `if ([TABLE::a] > 1) then 1 else 0) * sum([TABLE::b]`, unbalanced, with status TRANSLATED
+  (simpler shapes such as `if(a > 1, 1, 0) + 1` are refused).
+
+Power BI already brackets them.
+
+**Fix direction.** Bracket each emitted conditional, as `sql_forms.sqlf_if_chain` does. Tableau's
+text-rewriting pipeline needs care: `ensure_else_clause` inserts a missing `else` by walking
+each `if … then` block, so the bracket must enclose the inserted clause. Reuse
+`tests/test_conditional_grouping.py`'s detector, with its known gaps fixed (it misses a
+conditional's group closing early and treats `else b + 1` inside a group as a leak; no `in`).
+
+---
+
+## BL-650 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-649 (already wrong before BL-632). **Target:** 2027-01-31.
+
+**What.** In both SQL translators, `NOT COALESCE(a, 0) BETWEEN 0 AND 1` becomes
+`not ( x ) >= 0 and not ( x ) <= 1`: NOT binds to the operand, not to the predicate.
+`COALESCE(a, 0) IN (SELECT 1)` becomes `= [T::SELECT] 1`, reading the subquery as a column.
+Both mostly fail at import rather than silently.
+
+**Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
+with a reason.
