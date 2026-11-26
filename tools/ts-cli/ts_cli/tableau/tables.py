@@ -103,9 +103,16 @@ def _table_columns(table, cmap):
         props = {"column_type": ctype}
         if agg:
             props["aggregation"] = agg
+        # The Table column is NAMED by its physical name, not the Tableau caption:
+        # a Model column_id `TABLE::X` resolves X against the Table column's
+        # `name` (live-verified: a `::<physical name>` id was rejected while the
+        # column was named by its caption), and the model builder, formula translator
+        # and merge filter all build X from db_column_name. The caption stays
+        # the user-facing name on the Model column.
+        db_name = cmap.get(c["name"]) or _dbname(c["name"])
         cols.append({
-            "name": c["name"],
-            "db_column_name": cmap.get(c["name"]) or _dbname(c["name"]),
+            "name": db_name,
+            "db_column_name": db_name,
             "properties": props,
             "db_column_properties": {"data_type": _tml_type(c.get("data_type"))},
         })
@@ -121,8 +128,9 @@ def build_table_tml(table: dict, connection_name: str, db: str, schema: str, *,
     A name-mapping override binds the logical table to an existing physical table:
       table_map[tableau_table]            -> physical db_table
       column_map[tableau_table][tableau_col] -> physical db_column_name
-    Logical display names always stay the Tableau names; only the physical
-    db_table / db_column_name are remapped. v1 has no drop_unmapped: a column
+    The table keeps its Tableau name; each column is named by its physical
+    db_column_name (the Model column carries the Tableau caption), because a
+    Model column_id resolves against the Table column's `name`. v1 has no drop_unmapped: a column
     absent from column_map falls back to its derived physical name rather than
     being dropped (YAGNI — no plan yet needs the model to drop columns for this
     converter; see ts_cli.powerbi.tables.build_table_tml for that contract)."""

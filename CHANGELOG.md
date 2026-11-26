@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-27
+- fix: `ts tableau build-model` names each Table TML column by its physical name, so a Model `column_id` resolves for a column that has a Tableau caption. Before, every captioned column was rejected at import and merge mode dropped every formula referencing one (ts-convert-from-tableau 1.47.1)
+- chore: bump ts-cli to v0.225.2
+
 ## 2026-11-26
 - fix: the Databricks and Snowflake converters bracket every conditional they emit (CASE, IF/IFF, COALESCE, NVL2). ThoughtSpot's `else` is greedy, so `COALESCE(is_deleted, false) = false` converted to a filter that kept only the deleted and NULL rows; `CASE … END = x` and `IF(…) + 1` were wrong the same way; `ts formula translate` for Snowflake and Databricks input too (BL-632)
 - chore: bump ts-cli to v0.225.1
