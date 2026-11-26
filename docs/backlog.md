@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-646 | Tableau and Sisense translators emit unbracketed conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| BL-646 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -19203,7 +19203,7 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 ## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
 **Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.224.2) for the
-Databricks and Snowflake translators; the Tableau and Sisense translators have the same defect, BL-646. **Raised to Tier 1
+Databricks and Snowflake translators; the Tableau, Sisense and Qlik translators have the same defect, BL-646. **Raised to Tier 1
 2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
@@ -19529,7 +19529,7 @@ AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
 
 ---
 
-## BL-646 — Tableau and Sisense translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
+## BL-646 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
 
 **Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
 
@@ -19544,7 +19544,11 @@ others still emit a bare conditional and splice it into a larger expression:
 - **Sisense** (`ts_cli/sisense/functions.py`): `IF([a] > 1, 1, 0) = 1` becomes
   `if (…) then 1 else 0 = 1`, with status TRANSLATED.
 
-Qlik refuses these shapes; Power BI already brackets them.
+- **Qlik** (`ts_cli/qlik/functions.py`): `If(a > 1, 1, 0) * Sum(b)` returns
+  `if ([TABLE::a] > 1) then 1 else 0) * sum([TABLE::b]`, unbalanced, with status TRANSLATED
+  (simpler shapes such as `if(a > 1, 1, 0) + 1` are refused).
+
+Power BI already brackets them.
 
 **Fix direction.** Bracket each emitted conditional, as `sql_forms.sqlf_if_chain` does. Tableau's
 text-rewriting pipeline needs care: `ensure_else_clause` inserts a missing `else` by walking

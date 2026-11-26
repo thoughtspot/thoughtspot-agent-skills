@@ -142,8 +142,8 @@ Use this as the canonical limitations reference.
 
 | # | Databricks SQL | ThoughtSpot Formula | Notes |
 |---|---|---|---|
-| 60 | `CASE WHEN cond THEN val ELSE val END` | `if (cond) then val else val` | Multi-branch → nested `if` (v0.49.0) |
-| 61 | `IF(cond, then_val, else_val)` | `if (cond) then then_val else else_val` | (v0.49.0) |
+| 60 | `CASE WHEN cond THEN val ELSE val END` | `( if (cond) then val else val )` | Multi-branch → nested `if` (v0.49.0); bracketed since ts-cli 0.224.2 (BL-632) |
+| 61 | `IF(cond, then_val, else_val)` | `( if (cond) then then_val else else_val )` | (v0.49.0); bracketed since ts-cli 0.224.2 (BL-632) |
 | 62 | `CAST(expr AS type)` | `INT`/`SMALLINT`/`TINYINT` → `to_integer` (32-bit, truncates); `BIGINT`/`LONG` → `sql_int_op ( "CAST({0} AS BIGINT)" , x )`, sign-split `floor`/`ceil` over an aggregate; `DECIMAL(p,s)` → `sql_double_op ( "CAST({0} AS DECIMAL(p,s))" , x )` (`s > 0`; `round ( x , 10^-s )` over an aggregate) or `sql_int_op` (`s = 0`, also bare `DECIMAL` = `DECIMAL(10,0)`); `DATE` → `to_date`; widening types unwrapped | **Fixed ts-cli 0.163.0 (BL-359):** `BIGINT` was `to_integer`, 32-bit on Databricks (1e12 → 2147483647, M2 `dbx-round-009`); `DECIMAL` was unwrapped, but it rounds half up (`CAST(2.5 AS DECIMAL)` = 3). `DECIMAL(p,0)` over an aggregate is refused |
 | 63 | `x IS NULL` / `x IS NOT NULL` | `isnull([x])` / `not ( isnull([x]) )` | |
 | 64 | `x IN (a, b, c)` | `( [x] = a or [x] = b or [x] = c )` | |
