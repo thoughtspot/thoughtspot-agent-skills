@@ -378,7 +378,7 @@ are roughly ordered by value÷effort.
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
-| BL-651 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
+| BL-652 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -19736,7 +19736,7 @@ with a reason.
 
 ---
 
-## BL-651 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
+## BL-652 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
 
 **Filed:** 2026-11-27. **Source:** the `pr-ready` review (`pr-reviewer` + `conversion-consistency-auditor`)
 of `fix/tableau-table-column-physical-names` (ts-cli 0.225.3, ts-convert-from-tableau 1.47.2), which
