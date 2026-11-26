@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-632 | COALESCE emits an unparenthesised if/then/else; ThoughtSpot binds a following operator inside the else branch — an MV `COALESCE(is_deleted, false) = false` filter keeps ONLY the deleted rows (live-confirmed) | immediate |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
@@ -371,7 +372,6 @@ are roughly ordered by value÷effort.
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 | BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs | 2026-12-15 |
 | BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
-| BL-632 | COALESCE emits an unparenthesised if/then/else; a following operator may bind inside the else branch (MV filters, shared with SV) | 2026-12-15 |
 | BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
@@ -19198,10 +19198,10 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 
 ---
 
-## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it may bind inside the else branch `Tier 2`
+## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15 (move to Tier 1 if
-the probe below shows the greedy reading).
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** immediate. **Raised to Tier 1
+2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
 `if ( a != null ) then a else b` with no outer parentheses, and the caller appends the rest
@@ -19215,19 +19215,26 @@ The first is the shape of a common MV global filter (`COALESCE(is_deleted, false
 `build-model` turns it into the `MV Filter` formula that every query is filtered on.
 
 **Why it matters.** Whether this is right depends on how ThoughtSpot parses an `else`
-branch, and no doc in this repo states it. If `else` is greedy, as in most expression
-grammars, the filter returns `D` itself for every non-null row. It then keeps the rows
-where `is_deleted` is TRUE, which inverts the filter, and `COALESCE(x, 0) + 1` loses the
-`+ 1`. Both would be silent wrong answers. The other reading makes both correct. Not
-verified on a cluster.
+branch, and no doc in this repo stated it.
+
+**Live-confirmed 2026-11-26 (simba-test, Databricks connection, synthetic fixture).** The
+`else` is greedy. The MV filter `if ( [F::D] != null ) then [F::D] else false = false` compiles to
+
+    WHERE CASE WHEN NOT(D IS NULL) THEN D ELSE (FALSE = FALSE) END IN (TRUE)
+
+so it keeps the rows where `D` is TRUE and the rows where it is NULL, and drops the rows where it
+is FALSE: the filter is inverted. A total that should be 361,523 (not deleted) came back 40,173
+(20,726 deleted + 19,447 NULL-flag). It imports and lints clean, with no error anywhere. By the
+same reading `COALESCE(x, 0) + 1` loses the `+ 1`.
 
 **Where it reaches.** `sql_forms` is shared: `sv_sql.py` imports it too, so the Snowflake
 converter emits the same form.
 
-**Fix direction.** Probe first: a formula `if ( true ) then 1 else 0 + 1` returns 1 under the
-greedy reading and 2 under the other. Either way, parenthesise the emitted chain, or emit
-`ifnull ( a , b )` for the two-argument case (`IFNULL`/`NVL` already take that path at
-`sql_forms.py:195-196`). Add the shape to the formula patterns doc once probed.
+**Fix direction.** Parenthesise the emitted chain, and emit `ifnull ( a , b )` for the
+two-argument case (`IFNULL`/`NVL` already take that path at `sql_forms.py:195-196`);
+`ifnull ( D , false ) = false` was live-verified correct in the same run. Add the
+greedy-`else` rule to the formula patterns doc. Then tell users of both converters which
+Models to re-convert: any with a `COALESCE` followed by an operator.
 
 ---
 
