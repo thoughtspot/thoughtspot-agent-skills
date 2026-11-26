@@ -534,9 +534,9 @@ are roughly ordered by value÷effort.
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
 | BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
-| BL-645 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
-| BL-646 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
-| BL-647 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
+| BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
+| BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
+| BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19529,7 +19529,29 @@ reactivation measures, but not the cohort measures without an activation date.
 **Fix direction.** Add (1) and (2) to `ts-databricks-formula-translation.md`, and (3) to the
 AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
 
-## BL-645 — ts-dependency-manager and `ts share`: take a ts-audit candidates file `Tier 3`
+## BL-645 — pr-ready fast checks: review leftovers, and the docs-only review effort `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/pr-ready-scoped-checks`.
+**Target:** 2027-01-31.
+
+1. **Docs-only reviews at `high` (moved out of that PR, one purpose per PR).** Approved by
+   the maintainer: a docs-only diff is reviewed and re-reviewed at effort `high`, where
+   docs-only is an explicit list of people-facing docs. The review found the first
+   attempt's block classed mapping docs (`docs/function-maps/`), plans kept under
+   `docs/superpowers/specs/`, generated files without an uppercase marker
+   (`docs/open-items-index.md`, fidelity reports), deletions, renames and a new
+   `CLAUDE.md` as docs-only, and that it lacked `set -o pipefail`. Rebuild it as an
+   explicit path list; refuse any D/R/C from `git diff --name-status -M`; read names with
+   `-z`; test it as `test_pr_reviewer_brief.py` runs Step 1's block; take the PR template
+   off the list (agents fill it and it carries the confidentiality checkbox); and record
+   the exception in `.claude/rules/model-routing.md` and spec §5 C2 so they do not still
+   read "effort max" unqualified.
+2. **`docs/quality-gates.md` shows the unit-test trigger raw** (`if [ -n "$PY_STAGED" ]`):
+   teach `_humanise_trigger` in `generate_quality_gates.py` the new condition.
+3. **Step 7 has no path for a CI suite failure found after the review.** A fast default
+   makes that more likely; say whether its fix commit needs a re-review.
+
+## BL-646 — ts-dependency-manager and `ts share`: take a ts-audit candidates file `Tier 3`
 
 **Filed:** 2026-11-26. **Source:** the ts-audit Usage view (3.28.0), which exports the
 Models a reviewer selects as a `ts-audit-candidates/1` JSON file. **Target:** 2027-01-31.
@@ -19555,7 +19577,7 @@ object's `status` and `dependents_total` as what the audit saw when it read the 
 (`usage.read_at`), not as current: re-read dependents before any change.
 
 
-## BL-646 — ts-audit: investigate a ThoughtSpot Liveboard as the audit's output `Tier 3`
+## BL-647 — ts-audit: investigate a ThoughtSpot Liveboard as the audit's output `Tier 3`
 
 **Filed:** 2026-11-26. **Source:** user direction: rather than build ever more custom HTML,
 push the audit's results to a destination and present them in a Liveboard, so a later run is
@@ -19580,7 +19602,7 @@ Liveboard are built once over those tables and shipped as TML; each run appends.
    from the audit JSON and versioned, like `ts-audit-candidates/1`.
 3. **Push.** Snowflake first (the existing Snowflake profile and `ts-load-source-data`),
    Databricks later. Read-only on ThoughtSpot, write-only to the named schema.
-4. **Selection and hand-off.** Whether a Liveboard can produce the candidates list (BL-645's
+4. **Selection and hand-off.** Whether a Liveboard can produce the candidates list (BL-646's
    input): a selection, a filtered Answer export, or an HTML widget's export.
 5. **Open questions:** findings carry object, Org and owner names, so the destination must be
    the customer's own warehouse; one Liveboard per cluster or per Org; retention of past runs;
@@ -19588,7 +19610,7 @@ Liveboard are built once over those tables and shipped as TML; each run appends.
 
 **Output:** a short recommendation (per view: where it lives) and the build items that follow.
 
-## BL-647 — ts-audit Usage view (3.28.0): review nits deferred `Tier 3`
+## BL-648 — ts-audit Usage view (3.28.0): review nits deferred `Tier 3`
 
 **Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-page`; triaged
 under pr-ready Step 7. **Target:** 2027-01-31.

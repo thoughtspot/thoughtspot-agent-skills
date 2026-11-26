@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """pr_ready.py — the local run behind `scripts/pr-ready.sh`: everything CI's
 `validate` workflow checks on a pull request, against upstream main, with an
-evidence block.
+evidence block. Since 2026-11-26 a default run is fast: the check list, the PR-only
+gates and pip-audit run, and the smoke suites and pytest are listed NOT RUN and left
+to CI's required `validate` check; `--full` (or `--post`) runs them too.
 
 Before this, "validators pass locally" in a PR meant whatever subset the author
 remembered to run, against whatever `origin/main` happened to be — in a fork, the
-fork's. CI then found the rest, one round trip at a time. This runs the same set
-CI runs, the way CI runs it, and writes down what it ran:
+fork's. CI then found the rest, one round trip at a time. A `--full` run is the
+same set CI runs, the way CI runs it, and every run writes down what it ran:
 
 1. **Upstream by URL, fetched every run, named in full.** `run_checks.resolve_upstream`
    finds the remote whose URL is the canonical repo (adding `upstream` in a fork
@@ -539,6 +541,20 @@ def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result
     return results
 
 
+#: Why a default run leaves the smoke suites and pytest to CI (2026-11-26 amendment to the
+#: PR-quality spec): CI's `validate` is a required check, so a local copy only moves where
+#: a failure shows up, at ~10 minutes a run.
+FAST_REASON = ("fast run: CI's required `validate` check runs it on the PR; "
+               "`scripts/pr-ready.sh --full` runs it here")
+
+
+def not_run_rows(ids: Sequence[str]) -> List[Result]:
+    """NOT RUN rows for the suites a fast run leaves to CI, one per suite, so the
+    evidence lists each one rather than reading as a full run."""
+    return [{"id": i, "status": "NOT RUN", "seconds": 0.0,
+             "output_tail": FAST_REASON, "reason": FAST_REASON} for i in ids]
+
+
 def _denylist_state() -> str:
     try:
         import check_customer_references as ccr
@@ -549,7 +565,7 @@ def _denylist_state() -> str:
 
 
 def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
-                   pip_audit_installed: bool) -> List[str]:
+                   pip_audit_installed: bool, full: bool = True) -> List[str]:
     try:
         wf = _workflow(repo_root)
     except RuntimeError:
@@ -561,17 +577,25 @@ def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
     items = [
         f"CI's runner OS (`{runs_on or 'unknown'}`): this ran on {platform.system()} "
         f"{platform.release()}.",
-        f"CI's pytest matrix ({matrix}): the pytest invocations ran once here, on "
-        f"Python {local_python}.",
     ]
+    if not full:
+        items.append(f"The smoke suites and pytest: not run here (a fast run). CI's "
+                     f"required `validate` check runs them in its suite job on Python "
+                     f"{suite_python or 'the workflow version'}, and its pytest matrix "
+                     f"({matrix}) runs pytest again. `--full` runs them here.")
+    else:
+        items.append(f"CI's pytest matrix ({matrix}): the pytest invocations ran once here, "
+                     f"on Python {local_python}.")
     if suite_python and not local_python.startswith(suite_python + "."):
-        items.append(f"CI's suite job runs on Python {suite_python}; the checks, smokes and "
-                     f"pytest here ran on Python {local_python}.")
-    items += [
+        ran = "the checks, smokes and pytest" if full else "the checks"
+        items.append(f"CI's suite job runs on Python {suite_python}; {ran} here ran on "
+                     f"Python {local_python}.")
+    items += ([
         "pytest ran as `python -m pytest`, which puts the repo root first on sys.path; CI "
         "runs the bare `pytest` script, which does not, so a test importing a top-level "
         "name can pass here and fail there. `-rs --color=no` was added to report every "
         "skip, and PYTEST_ADDOPTS (if set) was dropped, as CI sets none.",
+    ] if full else []) + [
         "CI's fresh dependency install (`pip install -e tools/ts-cli[snowflake,qlik,xlsx]`): "
         "here the checks ran with this interpreter's packages, this checkout's "
         "`tools/ts-cli` first on PYTHONPATH.",
@@ -707,8 +731,8 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
         return 2
     parser = argparse.ArgumentParser(
         prog="scripts/pr-ready.sh",
-        description="Run CI's pull-request checks locally against upstream main and "
-                    "write an evidence block.")
+        description="Run CI's fast pull-request checks locally against upstream main "
+                    "(--full adds the smoke suites and pytest) and write an evidence block.")
     parser.add_argument("--no-review", action="store_true",
                         help="do not print the reminder that the review is the pr-ready "
                              "skill's job (the skill passes this)")
@@ -717,7 +741,12 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
                              "only if the run is green, the tree is clean, the PR's head "
                              "is this head and the block passes the secrets and "
                              "customer-reference scans")
+    parser.add_argument("--full", action="store_true",
+                        help="also run CI's smoke suites and pytest invocations locally "
+                             "(~10 minutes); a default run lists them NOT RUN and leaves "
+                             "them to CI. --post implies --full")
     args = parser.parse_args(argv)
+    full = args.full or args.post is not None
     python = python or sys.executable or "python3"
 
     try:
@@ -752,15 +781,21 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
     audit_installed = _pip_audit_installed(python, repo_root)
     if audit_installed:
         checks.append(_pip_audit(python, repo_root, report))
-    smokes = rc.run_smokes(repo_root, python, report=report)
-    pytests = run_pytest(repo_root, python, report)
+    if full:
+        smokes = rc.run_smokes(repo_root, python, report=report)
+        pytests = run_pytest(repo_root, python, report)
+    else:
+        smokes = not_run_rows(rc.CI_SMOKES)
+        pytests = not_run_rows(["pytest " + " ".join(a) for a in pytest_invocations(repo_root)])
+        for row in smokes + pytests:
+            print(f"NOT RUN {row['id']} ({row['reason']})", flush=True)
 
     text = evidence.render(base_ref=base_ref, base_sha=base_sha, head_sha=head_sha,
                            dirty=dirty, behind=behind, checks=checks, smokes=smokes,
                            pytest=pytests,
                            not_reproduced=not_reproduced(repo_root, base_ref, dirty,
-                                                         audit_installed),
-                           review=None)
+                                                         audit_installed, full),
+                           review=None, fast=not full)
     path = evidence.write(text, repo_root)
 
     failed = [str(r["id"]) for r in checks + smokes + pytests if r["status"] == "FAIL"]
@@ -770,7 +805,7 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
     if behind:
         print(f"pr-ready: NOT READY — {behind} commit(s) behind {base_ref}", flush=True)
     if not code:
-        print("pr-ready: READY" + (" (DIRTY: commit, then re-run for evidence that "
+        print("pr-ready: READY" + ("" if full else " (fast checks; CI runs the suites)") + (" (DIRTY: commit, then re-run for evidence that "
                                    "matches the head SHA)" if dirty else ""), flush=True)
     print(f"pr-ready: evidence written to {path}", flush=True)
 

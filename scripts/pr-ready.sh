@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # scripts/pr-ready.sh
 #
-# Run everything CI's `suite` job checks on a pull request — the check list,
-# the PR-only gates, the smoke suites and the pytest invocations — locally,
+# Run CI's fast pull-request checks locally — the check list and the PR-only
+# gates; with --full also the smoke suites and the pytest invocations —
 # against upstream main (found by URL and fetched every run), and write an
 # evidence block for the PR description. Exits 1 on any hard FAIL or when the
 # branch is behind upstream main; 2 when the run could not start (no usable
 # interpreter — a CHECKS_PYTHON that is missing, older than 3.10 or without pytest —
 # no upstream remote, a failed fetch, an unreadable workflow), with no verdict.
 #
-#   bash scripts/pr-ready.sh [--no-review] [--post PR_NUMBER]
+#   bash scripts/pr-ready.sh [--full] [--no-review] [--post PR_NUMBER]
 #
 # The logic is in tools/validate/pr_ready.py (see its docstring); this wrapper
 # replaces the evidence block and picks the interpreter, the same way pre-commit does.

@@ -1,7 +1,7 @@
 /* ── The Usage view's candidates export (views/usage.js) ──
    The selected rows as CSV or as the ts-audit-candidates/1 JSON, built in the browser
    and handed to the viewer as a download (a Blob and an <a download>): no network.
-   The JSON is the file a later ts-dependency-manager list mode reads (BL-645), so its
+   The JSON is the file a later ts-dependency-manager list mode reads (BL-646), so its
    shape is fixed: ts-audit SKILL.md "Candidates file" documents it. A field is added,
    never renamed or removed, without a new format version. */
 var USAGE_OBJECT_FIELDS = ["guid", "name", "type", "status", "last_used", "days_since_last_use",
