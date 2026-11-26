@@ -161,6 +161,6 @@ def test_no_creation_time_keeps_judging_a_never_queried_model():
     assert len(_h17(_ctx(usage))) == 1
 
 
-def test_a_young_model_with_an_old_query_cannot_exist_but_a_recent_one_is_still_silent():
+def test_a_young_model_queried_recently_is_still_silent():
     usage = fx.build_usage({"m-1": 5})
     assert _h17(_ctx_created(usage, 8)) == []

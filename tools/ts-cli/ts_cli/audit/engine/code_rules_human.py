@@ -163,7 +163,7 @@ def idle_model(rule: "Rule", ctx: Any, profile: str) -> List[Finding]:
     Primary Org, else the Org it was read in). A Model is judged only when
     usage was read, with a known history start (`requires: usage`); one never queried
     and created less than `idle_days` days before the read (its metadata header's
-    `created`) is not judged."""
+    `created`) does not qualify: it has existed for less than `idle_days` days."""
     from ts_cli.audit.usage import idle_reading, usage_label
     usage = ctx.usage
     created = _created_by_id(ctx)

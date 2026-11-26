@@ -168,9 +168,11 @@ def idle_reading(usage: dict, guid: str, idle_days: float,
     days or more, `(None, wording)` for one the history holds no row for when the
     history covers at least `idle_days` days before the usage was read, and `(None,
     None)` otherwise — a recent query, a row with no query time recorded, a history too
-    short to say, a Model created less than `idle_days` days before the read
-    (`created_ms`, its metadata header's `created`, epoch milliseconds; not judged
-    when absent), or usage not readable (usage_readable)."""
+    short to say, a never-queried Model created less than `idle_days` days before the
+    read (`created_ms`, its metadata header's `created`, epoch milliseconds; when absent
+    the never-queried test applies as before), or usage not readable (usage_readable).
+    The age test covers only the never-queried case: a Model the history holds is judged
+    by its last query alone."""
     if not usage_readable(usage):
         return None, None
     reading = model_usage(usage, guid)
