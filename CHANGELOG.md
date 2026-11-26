@@ -7,6 +7,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ## 2026-11-26
 - docs: `.github/CONTRIBUTING.md` sets a stopping point for reviewing someone else's PR: a full first review labelling every finding Blocking or Backlog, one fix round, one re-review, at most one more round for a regression the fix commits introduced, and everything after that the maintainer's to fix at merge or backlog. The maintainer may commit on the contributor's branch at merge with hooks disabled and nothing from the branch executed. The PR template gains a Coverage section
+- fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
+- chore: bump ts-cli to v0.224.1
 
 ## 2026-11-25
 - feat: `ts audit` reads the Org each used Model was queried in (`[Org ID]` and `[Org]`, a query of their own, so a build that refuses them leaves the rest of the usage readable). Read from the Primary Org with more than one Org in the usage, the report header says it covers all Orgs; the Cleanup view splits the used Model IDs not found into this Org's (deleted, or not shared with the audit's user), other Orgs' (one collapsed group per Org, no claim they are deleted) and those with no Org recorded. A Model ID queried in several Orgs is listed under each (ts-audit 3.27.0)

@@ -128,3 +128,39 @@ def test_idle_days_is_a_catalog_parameter():
     assert rule.parameters == {"idle_days": 90}
     assert rule.requires == ["model_tml", "usage"] and rule.severity == "LOW"
     assert rule.evidence == "fact" and "cleanup" in rule.views
+
+
+# ── a Model created after the idle window began is not "never queried" ──
+
+def _meta(guid, created_ms):
+    """A metadata/search row for a Model, its header's `created` in epoch milliseconds."""
+    header = {"id": guid, "name": guid, "type": "WORKSHEET"}
+    if created_ms is not None:
+        header["created"] = created_ms
+    return {"metadata_id": guid, "metadata_type": "LOGICAL_TABLE", "metadata_header": header}
+
+
+def _ctx_created(usage, age_days, guid="m-1"):
+    created = None if age_days is None else (fx.USAGE_READ_AT - age_days * 86400) * 1000
+    return make_context(models=[fx.build_human_model(guid=guid)], usage=usage,
+                        metadata=[_meta(guid, created)])
+
+
+@pytest.mark.parametrize("age_days, fires", [(8, False), (89, False), (90, True), (400, True)])
+def test_a_never_queried_model_younger_than_90_days_is_not_judged(age_days, fires):
+    """Never queried, but created less than 90 days before the usage was read: it has not
+    had 90 days to be queried in, so H17 says nothing."""
+    usage = fx.build_usage({"other": 3})
+    assert len(_h17(_ctx_created(usage, age_days))) == (1 if fires else 0)
+
+
+def test_no_creation_time_keeps_judging_a_never_queried_model():
+    """A header with no `created` (or no header): judged as before."""
+    usage = fx.build_usage({"other": 3})
+    assert len(_h17(_ctx_created(usage, None))) == 1
+    assert len(_h17(_ctx(usage))) == 1
+
+
+def test_a_young_model_queried_recently_is_still_silent():
+    usage = fx.build_usage({"m-1": 5})
+    assert _h17(_ctx_created(usage, 8)) == []
