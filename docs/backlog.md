@@ -19065,7 +19065,7 @@ rather than be assumed.
 **Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/external-review-rounds`
 (the "Review rounds" section of `.github/CONTRIBUTING.md`). **Target:** 2027-01-31.
 
-Nits and one Should-fix the review raised and the PR did not fix:
+Nits the two reviews raised and the PR did not fix:
 
 1. **Re-review scope.** Item 2 has the re-review check each Blocking item "for its class
    across the branch", wider than "a re-review of the fix commits only". Confirm the
@@ -19091,3 +19091,12 @@ Nits and one Should-fix the review raised and the PR did not fix:
    changes behaviour.
 9. **"Why it works this way"** sends readers to the spec, which does not contain the
    review-rounds rules.
+10. **Reading path, `:176`.** "no Claude Code session started in it" limits where a session
+    starts, not what it reads; reuse the exception's wording (no session reads, edits or
+    runs commands in that checkout, wherever it was started).
+11. **Same-repo PRs** have no "allow edits by maintainers" setting, but the exception and
+    item 3 read as if such a PR had edits off. Say the exception covers them.
+12. **"No credentials of any kind"** (item 1) should copy the spec's list (spec §8.3:
+    environment exports, Keychain, token caches, SSH keys and agents, key files, git
+    credential helpers, `gh` auth), and :161's "never run … the PR's tests" should point
+    at that exception.

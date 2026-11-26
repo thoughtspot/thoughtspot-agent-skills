@@ -193,7 +193,7 @@ operation (merge, commit, push) runs with hooks disabled
 runs commands in that checkout, wherever the session was started, and nothing from its work
 tree is executed or sourced. That includes the repo's validators: after resolving a
 `docs/backlog.md` conflict there, run `main`'s copy against the branch's files
-(`python3 -I <your main checkout>/tools/validate/check_backlog_integrity.py --root <that checkout>`),
+(`python3 -E -s <your main checkout>/tools/validate/check_backlog_integrity.py --root <that checkout>`),
 or leave the check to CI. CI checks the pushed result.
 
 ### Review rounds: what blocks, and when review stops
@@ -215,21 +215,20 @@ round trip of days: #662 reached a round-7 review (see BL-581 in
 2. **One fix round, then one re-review of the fix commits.** The re-review checks that
    each Blocking item is fixed for its class across the branch, not only for the input
    the review cited, and that the fix commits introduced no regression.
-3. **After the re-review, a finding goes to the maintainer, not back to you,** with
-   two exceptions:
-   - **A Blocking item from round 1 that the fix round left unfixed,** or fixed only
-     for the input the review cited, is still yours: the PR is not approved until it
-     is fixed for its class.
-   - **A regression the fix commits introduced** goes back to you for **one more
-     round at most**, and only when the maintainer cannot reasonably fix it at merge.
-     The review says so. After that round, anything left is the maintainer's.
+3. **After the re-review, a finding goes to the maintainer, not back to you.** The one
+   exception: a round-1 Blocking item the fix round left unfixed (or fixed only for the
+   input the review cited, including a guard that handles only the cited inputs), or a
+   regression the fix commits introduced, goes back to you for **one more round at
+   most**, and only when the maintainer cannot reasonably fix it at merge. The review
+   says so. After that round, the maintainer fixes what is left at merge, or closes the
+   PR.
 
    Everything else is the maintainer's: a finding that was on the branch at round 1 and
    no review raised gets a fix commit on top of the branch (the exception above), or the
-   Backlog item if it is not Blocking. A guard written in the fix round that misses an
-   input is a regression the fix commits introduced. If the PR does not allow edits by
-   maintainers, the maintainer fixes it in a follow-up PR after merging, or, for a
-   Blocking item, asks you to enable edits.
+   Backlog item if it is not Blocking. A Blocking item, and anything under 6, is
+   resolved **before** merge: if the maintainer cannot push to the branch, they ask you
+   to allow edits by maintainers, or open a replacement PR from your commits plus the
+   fix, under the same exception. Only Backlog items wait for a follow-up PR.
 4. **Wrong output reported as success: the review asks for the guard, not a fix per
    input.** For code that reports an outcome for its own output (Migrated, Merged,
    READY), the Blocking item is the guard: what the code does not recognise is refused
