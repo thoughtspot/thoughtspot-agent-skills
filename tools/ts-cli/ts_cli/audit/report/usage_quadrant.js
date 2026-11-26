@@ -17,8 +17,10 @@ var USAGE_STATUS_ORDER = ["active", "idle", "never", "too_new", "not_judged"];
 var UQ = {w: 760, h: 350, l: 52, r: 12, t: 34, b: 44, zero: 60};
 
 /* Which quadrant a row falls in: idle or never queried split by whether anything depends
-   on it, active, or not judged. */
+   on it, active, or not judged — which holds every Model whose dependents were not read
+   (`deps` null), never the retire zone. */
 function usageQuadrant(r){
+  if(r.deps === null) return "unjudged";
   if(r.status === "active") return "active";
   if(r.status === "idle" || r.status === "never") return r.deps ? "check" : "retire";
   return "unjudged";
@@ -39,7 +41,7 @@ function usageXScale(rows, idleDays){
 
 function usageYScale(rows){
   var max = 10;
-  rows.forEach(function(r){ max = Math.max(max, r.deps); });
+  rows.forEach(function(r){ max = Math.max(max, r.deps || 0); });
   var top = Math.log(max), y1 = UQ.h - UQ.b - UQ.zero - 6, y0 = UQ.t + 6;
   return function(n){
     if(!n) return UQ.h - UQ.b - 20;  /* the band's foot: its top holds the quadrant label */
@@ -59,7 +61,8 @@ function usageDotTitle(r){
   var last = usageLastUsed(r.cm).text || "";
   return r.name+" — "+st.label+"\nLast used: "+last+"\n"+
     usagePlural(r.queries, "query", "queries")+" by "+usagePlural(r.users, "user")+
-    " ("+usageSpanLabel()+")\n"+usagePlural(r.deps, "dependent");
+    " ("+usageSpanLabel()+")\n"+(r.deps === null ? "dependents not read (Sets not read)"
+                                                 : usagePlural(r.deps, "dependent"));
 }
 
 function usageDotXY(r, sx, sy){
@@ -90,7 +93,7 @@ function usageQuadrantFrame(rows, idleDays, sx){
   out += usageText(lx + 6, top + 12, "Idle, has dependents — check first", "uq-q", "start");
   out += usageText(lx + 6, split + 14, "Idle, no dependents — retire candidates", "uq-q", "start");
   out += usageText((g.xd + g.xn) / 2, top - 8, "Never queried", "uq-band-lbl", "middle");
-  out += usageText((g.xn + g.x1) / 2, top - 8, "Too new / not judged", "uq-band-lbl", "middle");
+  out += usageText((g.xn + g.x1) / 2, top - 8, "Not judged", "uq-band-lbl", "middle");
   [0, 7, 30, 90, 180, 365, 730, 1460].forEach(function(d){
     var x = sx(d);
     if(x > g.xd - 4 || (d === idleDays)) return;
@@ -103,7 +106,7 @@ function usageQuadrantFrame(rows, idleDays, sx){
 
 function usageYTicks(rows){
   var sy = usageYScale(rows), max = 0, out = "";
-  rows.forEach(function(r){ max = Math.max(max, r.deps); });
+  rows.forEach(function(r){ max = Math.max(max, r.deps || 0); });
   [0, 1, 10, 100, 1000].forEach(function(n){
     if(n > Math.max(10, max)) return;
     out += usageText(UQ.l - 6, sy(n) + 4, String(n), "uq-tick-lbl", "end");

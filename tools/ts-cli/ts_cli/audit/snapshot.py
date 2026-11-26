@@ -59,7 +59,10 @@ LEGACY_ANGLE_NEEDS = {"A": frozenset({"ai_instructions"}),
 #: written before them reads as: `calendars` and `connections` (2026-11-18) and `usage`
 #: (2026-11-25) as None, not fetched. Such a snapshot's `needs` lacks the data too, so a
 #: replay of a rule that reads it is refused (``captured_needs``), never run on the default.
-ADDED_FIELDS = {"calendars": None, "connections": None, "usage": None}
+#: `sets_incomplete` (ts-cli 0.225.0) reads as None, not recorded: the Usage view then
+#: finds a failed Set lookup by the run's own warning (usage_triage.sets_unread).
+ADDED_FIELDS = {"calendars": None, "connections": None, "usage": None,
+                "sets_incomplete": None}
 
 
 class SnapshotError(Exception):

@@ -5,18 +5,23 @@
    shape is fixed: ts-audit SKILL.md "Candidates file" documents it. A field is added,
    never renamed or removed, without a new format version. */
 var USAGE_OBJECT_FIELDS = ["guid", "name", "type", "status", "last_used", "days_since_last_use",
-  "queries_180d", "users_180d", "dependents_total", "liveboards", "answers", "sets", "owner",
-  "created"];
-var USAGE_CSV_FIELDS = USAGE_OBJECT_FIELDS.concat(["usage_scope", "cluster_url", "audit_read_date"]);
+  "queries_180d", "users_180d", "dependents_total", "liveboards", "answers", "sets", "other",
+  "owner", "created"];
+var USAGE_CSV_FIELDS = USAGE_OBJECT_FIELDS.concat(["usage_scope", "dependents_scope", "cluster_url",
+  "audit_read_date"]);
+/* What the dependent counts cover: the dependents lookup runs as the audit's user, in its Org. */
+var USAGE_DEPENDENTS_SCOPE = "visible to the audit's user in this Org";
 var USAGE_FORMAT = "ts-audit-candidates/1";
 
-/* One row as the file's object: dates as YYYY-MM-DD, null where not known. */
+/* One row as the file's object: dates as YYYY-MM-DD, null where not known (`sets` and
+   `dependents_total` when the Sets were not read). */
 function usageExportObject(r){
   return {guid: r.guid, name: r.name, type: "MODEL", status: r.status,
     last_used: typeof r.last === "number" ? usageDate(r.last) : null,
     days_since_last_use: typeof r.days === "number" ? r.days : null,
     queries_180d: r.queries, users_180d: r.users, dependents_total: r.deps,
-    liveboards: r.lb, answers: r.an, sets: r.sets, owner: r.owner, created: r.created};
+    liveboards: r.lb, answers: r.an, sets: r.sets, other: r.other, owner: r.owner,
+    created: r.created};
 }
 
 /* An ISO time to the second, "2026-11-25T00:00:00Z". */
@@ -37,7 +42,8 @@ function usageCandidatesCsv(rows){
   var lines = [USAGE_CSV_FIELDS.join(",")];
   rows.forEach(function(r){
     var o = usageExportObject(r);
-    o.usage_scope = scope; o.cluster_url = cluster; o.audit_read_date = read;
+    o.usage_scope = scope; o.dependents_scope = USAGE_DEPENDENTS_SCOPE;
+    o.cluster_url = cluster; o.audit_read_date = read;
     lines.push(USAGE_CSV_FIELDS.map(function(f){ return usageCsvCell(o[f]); }).join(","));
   });
   return lines.join("\r\n") + "\r\n";
@@ -49,6 +55,7 @@ function usageCandidatesJson(rows, idleDays){
     format: USAGE_FORMAT,
     generated: usageIsoSecond(new Date()),
     cluster: (D.C && D.C.u) || "",
+    dependents_scope: USAGE_DEPENDENTS_SCOPE,
     usage: {scope: usageWhose(), org: {id: u.oi === undefined ? null : u.oi, name: u.o || null},
             read_at: typeof u.at === "number" ? usageIsoSecond(new Date(u.at * 1000)) : null,
             idle_days: idleDays, window_days: u.w || null},

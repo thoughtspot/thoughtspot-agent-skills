@@ -84,7 +84,8 @@ def test_dependents_split_by_type_and_sets_null_when_not_read():
                                   "LOGICAL_TABLE", "FEEDBACK")]
     assert dependent_counts(rows, True) == {"total": 6, "liveboards": 2, "answers": 1,
                                             "sets": 1, "other": 2}
-    assert dependent_counts(rows, False) == {"total": 5, "liveboards": 2, "answers": 1,
+    # Sets not read: the dependents are not known, so there is no total
+    assert dependent_counts(rows, False) == {"total": None, "liveboards": 2, "answers": 1,
                                              "sets": None, "other": 2}
     assert dependent_counts(None, True)["total"] == 0
 
@@ -148,7 +149,8 @@ def test_a_model_with_no_header_has_no_owner_or_created():
 def test_sets_are_null_when_the_run_did_not_fetch_them():
     by = _by_guid(_data(_usage(), needs=H_NEEDS - {"sets"}))
     assert by[USED_IDLE]["dependents"]["sets"] is None
-    assert by[USED_IDLE]["dependents"]["total"] == 5
+    assert by[USED_IDLE]["dependents"]["total"] is None      # not known, never 5
+    assert by[USED_IDLE]["dependents"]["liveboards"] == 2
 
 
 def test_unread_usage_adds_no_status():
@@ -361,15 +363,16 @@ def test_the_csv_export_holds_the_selected_rows_escaped(tmp_path):
     assert seen["names"] == ["ts-audit-candidates.csv"] and seen["type"].startswith("text/csv")
     lines = seen["text"].strip().split("\r\n")
     assert lines[0] == ("guid,name,type,status,last_used,days_since_last_use,queries_180d,"
-                        "users_180d,dependents_total,liveboards,answers,sets,owner,created,"
-                        "usage_scope,cluster_url,audit_read_date")
+                        "users_180d,dependents_total,liveboards,answers,sets,other,owner,created,"
+                        "usage_scope,dependents_scope,cluster_url,audit_read_date")
     assert len(lines) == 3
     by = {ln.split(",")[0]: ln for ln in lines[1:]}
-    assert by[IDLE].startswith(IDLE + ",Idle Sales,MODEL,idle,2026-07-28,120,12,3,0,0,0,0,ann,"
+    assert by[IDLE].startswith(IDLE + ",Idle Sales,MODEL,idle,2026-07-28,120,12,3,0,0,0,0,0,ann,"
                                "2025-10-21,")
+    assert ",visible to the audit's user in this Org," in by[IDLE]
     assert by[IDLE].endswith(",2026-11-25")
     assert by[USED_IDLE].startswith(USED_IDLE + "," + MARKUP + ",MODEL,idle,")
-    assert ",6,2,1,1," in by[USED_IDLE]
+    assert ",6,2,1,1,2," in by[USED_IDLE]
 
 
 @needs_chrome
@@ -390,6 +393,7 @@ def test_the_json_export_is_the_candidates_format(tmp_path):
     doc = json.loads(seen["text"])
     assert doc["format"] == "ts-audit-candidates/1"
     assert doc["generated"].endswith("Z")
+    assert doc["dependents_scope"] == "visible to the audit's user in this Org"
     assert doc["usage"] == {"scope": "usage read from the Primary Org; which Orgs it covers "
                                      "was not read",
                             "org": {"id": 0, "name": "Primary"},
@@ -400,9 +404,10 @@ def test_the_json_export_is_the_candidates_format(tmp_path):
     assert by[IDLE] == {"guid": IDLE, "name": "Idle Sales", "type": "MODEL", "status": "idle",
                         "last_used": "2026-07-28", "days_since_last_use": 120,
                         "queries_180d": 12, "users_180d": 3, "dependents_total": 0,
-                        "liveboards": 0, "answers": 0, "sets": 0, "owner": "ann",
+                        "liveboards": 0, "answers": 0, "sets": 0, "other": 0, "owner": "ann",
                         "created": "2025-10-21"}
     assert by[USED_IDLE]["name"] == MARKUP and by[USED_IDLE]["sets"] == 1
+    assert by[USED_IDLE]["other"] == 2 and by[USED_IDLE]["dependents_total"] == 6
 
 
 @needs_chrome
@@ -433,3 +438,92 @@ def test_json_from_before_3_28_compacts_without_the_triage():
 def test_json_from_before_3_28_says_to_re_run(tmp_path):
     shown = _render(_before_3_28(_data(_usage())), tmp_path, "")
     assert "predates the Usage view" in shown["visible"]
+
+
+
+# ── a Set lookup that failed: the dependents are not known, never 0 ─────────
+
+def _ctx_sets_unread(usage, unread=(IDLE,), recorded=True):
+    ctx = _ctx(usage)
+    if recorded:
+        ctx.sets_incomplete = list(unread)
+    else:   # a snapshot from before 0.225.0: only the run's warning names the Model
+        ctx.sets_incomplete = None
+        ctx.warnings = [f"Set discovery discovery_failed for {NAMES[g]} ({g}): cohort "
+                        "listing failed: 500" for g in unread]
+    return ctx
+
+
+def _data_ctx(ctx, needs=H_NEEDS):
+    return run_audit(None, [], ["H"], ctx=ctx, fetched_needs=set(needs))
+
+
+@pytest.mark.parametrize("recorded", [True, False])
+def test_a_model_whose_set_lookup_failed_has_unknown_dependents(recorded):
+    by = _by_guid(_data_ctx(_ctx_sets_unread(_usage(), recorded=recorded)))
+    assert by[IDLE]["dependents"] == {"total": None, "liveboards": 0, "answers": 0,
+                                      "sets": None, "other": 0}
+    assert by[NEVER]["dependents"]["total"] == 0      # its lookup was clean
+
+
+def test_dependents_are_unknown_when_what_was_fetched_is_not_known():
+    data = run_audit(None, [], ["H"], ctx=_ctx(_usage()), fetched_needs=None)
+    assert _by_guid(data)[IDLE]["dependents"]["total"] is None
+
+
+def _set_client(get):
+    client = fx.build_client_with_one_model("m1")
+    client.get.side_effect = get
+    return client
+
+
+def _raise(*_a, **_kw):
+    raise RuntimeError("cohort listing refused")
+
+
+@pytest.mark.parametrize("get", [_raise, lambda *a, **kw: fx.build_response({"error": "x"})])
+def test_build_context_records_a_failed_set_lookup(get):
+    from ts_cli.audit.context import build_context
+    ctx = build_context(_set_client(get), ["m1"], data_needs(["H"]))
+    assert ctx.sets_incomplete == ["m1"]
+
+
+def test_build_context_records_no_failure_when_sets_are_not_fetched():
+    from ts_cli.audit.context import build_context
+    ctx = build_context(_set_client(_raise), ["m1"], data_needs(["D"]))
+    assert ctx.sets_incomplete is None
+
+
+def test_a_snapshot_keeps_the_failed_set_lookups(tmp_path):
+    from ts_cli.audit.snapshot import read_snapshot, write_snapshot
+    ctx = _ctx_sets_unread(_usage())
+    write_snapshot(ctx, tmp_path / "snap", ["H"], needs=H_NEEDS)
+    assert read_snapshot(tmp_path / "snap")[0].sets_incomplete == [IDLE]
+
+
+@needs_chrome
+def test_unknown_dependents_are_never_a_retire_candidate(tmp_path):
+    data = _data_ctx(_ctx_sets_unread(_usage()))
+    shown = _render(data, tmp_path,
+                    _ROWS + _CHIP + 'var dot = document.querySelector("#v-usage circle.usage-dot'
+                    '[data-guid=\\"' + IDLE + '\\"]"); var tr = document.querySelector('
+                    '"#v-usage tr[data-guid=\\"' + IDLE + '\\"]");'
+                    'var out = {quadrant: dot.getAttribute("data-quadrant"),'
+                    ' title: dot.querySelector("title").textContent, cell: tr.cells[6].textContent,'
+                    ' cell_title: tr.cells[6].getAttribute("title"), first: rows()[0],'
+                    ' chip: document.querySelector("#v-usage .fbar-chip[data-f=\\"nodeps\\"]")'
+                    '.textContent}; chip("nodeps"); out.nodeps = rows(); window.__extra = out;')
+    seen = shown["extra"]
+    assert seen["quadrant"] == "unjudged" and "dependents not read" in seen["title"]
+    assert seen["cell"] == "Not read" and "Sets not read" in seen["cell_title"]
+    assert seen["first"] != IDLE                       # not sorted as a retire candidate
+    assert seen["chip"] == "No dependents 3" and IDLE not in seen["nodeps"]
+    exported = _export(tmp_path, "json", data)
+    obj = {o["guid"]: o for o in json.loads(exported["text"])["objects"]}[IDLE]
+    assert obj["sets"] is None and obj["dependents_total"] is None
+
+
+@needs_chrome
+def test_the_view_says_whose_dependents_it_counts(tmp_path):
+    shown = _render(_data(_usage()), tmp_path, "")
+    assert "Dependents are those the audit's user can see in this Org" in shown["visible"]

@@ -4973,8 +4973,11 @@ recorded". Logic in `ts_cli/audit/usage.py`.
 **The Usage view (since 0.225.0).** With usage read, each audited Model's
 `corpus.models[].usage` also carries its `status` (`active`, `idle`, `never`, `too_new`
 or `not_judged`, from H17's own reading, so the view and H17 agree), its `dependents`
-(`total`, `liveboards`, `answers`, `sets` — null when Sets were not fetched — and
-`other`, from the dependents the audit already fetches), its `owner` (the metadata
+(`total`, `liveboards`, `answers`, `sets` and `other`, from the dependents lookup the
+audit already runs, which returns the dependents the audit's user can see in its Org;
+`sets` and `total` are null when the Model's Sets were not read — not fetched, not known
+to be fetched, or its Set lookup failed, which the context records as
+`sets_incomplete` and an older snapshot's warnings name — never 0), its `owner` (the metadata
 header's author display name, else author name) and its `created` date; `corpus.usage`
 gains `status_idle_days`, the idle days the statuses used (H17's, else the catalog's).
 No new call. The report's Usage view (`#usage`, a sidebar link only when the run
@@ -4982,7 +4985,8 @@ fetched usage; "Not read" when it could not read it) draws one dot per Model by 
 since its last query and its dependents, lists the Models in a sortable table with
 status and "No dependents" filters, and exports the selected rows as CSV or as the
 `ts-audit-candidates/1` JSON (ts-audit SKILL.md, "Candidates file"), built in the
-browser. Logic in `ts_cli/audit/usage_triage.py`.
+browser, each stating that its dependents are those visible to the audit's user in this
+Org (`dependents_scope`). Logic in `ts_cli/audit/usage_triage.py`.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

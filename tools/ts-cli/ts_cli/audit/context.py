@@ -38,6 +38,11 @@ class AuditContext:
     # `usage`. None when not fetched or not read, never an empty reading: H17 then
     # judges no Model, and the report says "Not read", never "unused".
     usage: Optional[dict] = None
+    # The Models whose Set listing failed or was incomplete (sets/discover.py
+    # `incomplete`), when Sets were looked up; None when they were not, or a snapshot
+    # written before ts-cli 0.225.0 (usage_triage.sets_unread then reads the run's
+    # warnings). Such a Model's Sets, and so its dependents, are not known, never 0.
+    sets_incomplete: Optional[list] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -145,6 +150,7 @@ def make_context(
     calendars=None,
     connections=None,
     usage=None,
+    sets_incomplete=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -156,6 +162,7 @@ def make_context(
         calendars=calendars,  # None and [] differ: not fetched, and fetched with none
         connections=connections,  # likewise
         usage=usage,  # None: not fetched or not read
+        sets_incomplete=sets_incomplete,  # None: Sets not looked up
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -190,7 +197,7 @@ def _model_refs(models: list, model_guids: list) -> list:
 
 
 def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
-                        warnings: list) -> None:
+                        warnings: list) -> list:
     """Record each discovered Set under its Model, and its consumers under its own GUID.
 
     Sets are not in a Model's dependents (BL-324), so H5 had nothing to read.
@@ -199,10 +206,11 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
     ``check_h5`` treats as silence, never as an orphan (BL-302). A Set whose
     dependents are hidden from this user, or whose only dependent is another Set,
     must not read as unused (ruling R14). A Model whose Set listing is incomplete
-    contributes no Set rows at all — only a warning.
+    contributes no Set rows at all — only a warning — and is returned, by GUID, so
+    nothing reads its Sets as none (AuditContext.sets_incomplete).
     """
     if not model_refs:
-        return
+        return []
     _log("Discovering Sets...")
     found = discover_sets(client, model_refs)
     for model_guid, sets in found["sets"].items():
@@ -225,6 +233,7 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         msg = f"Set discovery {note['kind']} for {note['object']}: {note['detail']}"
         _log(f"Warning: {msg}")
         warnings.append(msg)
+    return list(dict.fromkeys(found.get("incomplete") or []))
 
 
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
@@ -703,6 +712,7 @@ def build_context(
     calendars = None
     connections = None
     usage = None
+    sets_incomplete = None
 
     # Model TML (with associated Table TML), metadata and dependents below are fetched
     # for every audit and must stay so: rules read Model and Table TML without declaring
@@ -773,7 +783,8 @@ def build_context(
         answers = _export_answers(client, dependents, warnings)
     if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
-        _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
+        sets_incomplete = _add_set_dependents(client, _model_refs(models, model_guids),
+                                              dependents, warnings)
     if "calendars" in needs:
         calendars = _fetch_calendars(client, warnings)
     if "connections" in needs:
@@ -795,6 +806,7 @@ def build_context(
         calendars=calendars,
         connections=connections,
         usage=usage,
+        sets_incomplete=sets_incomplete,
         model_guids=model_guids,
         warnings=warnings,
     )

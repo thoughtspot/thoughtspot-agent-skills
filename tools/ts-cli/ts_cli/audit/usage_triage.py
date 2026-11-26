@@ -74,19 +74,34 @@ def model_status(usage: dict, guid: str, idle_days: float, created_ms: Any) -> s
     return "not_judged" if reading["days"] is None else "active"
 
 
-def dependent_counts(rows: Any, sets_read: Optional[bool]) -> Dict[str, Optional[int]]:
-    """`{total, liveboards, answers, sets, other}` from a Model's `ctx.dependents` rows;
-    `sets` is None when the run did not fetch Sets (`sets_read` False), and `total` then
-    counts the rest. A Set counts toward the total: removing the Model removes it."""
+def dependent_counts(rows: Any, sets_read: bool) -> Dict[str, Optional[int]]:
+    """`{total, liveboards, answers, sets, other}` from a Model's `ctx.dependents` rows
+    (the dependents the audit's user can see in its Org). A Set counts toward the total:
+    removing the Model removes it. When its Sets were not read (`sets_read` False: not
+    fetched, not known to be fetched, or its lookup failed), `sets` and `total` are None:
+    its dependents are not known, never counted as the rest alone."""
     counts: Dict[str, Optional[int]] = {"liveboards": 0, "answers": 0, "sets": 0, "other": 0}
     for row in rows or []:
         if isinstance(row, dict):
             kind = _KINDS.get(row.get("type"), "other")
             counts[kind] += 1
-    if sets_read is False:
+    if not sets_read:
         counts["sets"] = None
-    counts = {"total": sum(v for v in counts.values() if v), **counts}
-    return counts
+        return {"total": None, **counts}
+    return {"total": sum(counts.values()), **counts}
+
+
+def sets_unread(ctx: Any) -> set:
+    """The Models whose Set lookup failed or was incomplete: `ctx.sets_incomplete` when
+    recorded, else (a snapshot written before ts-cli 0.225.0) each audited Model a
+    "Set discovery ..." warning names by its GUID, as `_add_set_dependents` wrote one."""
+    recorded = getattr(ctx, "sets_incomplete", None)
+    if isinstance(recorded, list):
+        return set(recorded)
+    notes = [w for w in ctx.warnings or [] if isinstance(w, str)
+             and w.startswith("Set discovery ")]
+    guids = {m.get("guid") for m in ctx.models if isinstance(m, dict)}
+    return {g for g in guids if isinstance(g, str) and any(f"({g}):" in w for w in notes)}
 
 
 def status_idle_days(ran: Optional[dict]) -> float:
@@ -106,12 +121,14 @@ def add_triage(models_out: list, ctx: Any, ran: Optional[dict],
                fetched_needs: Optional[set]) -> Optional[float]:
     """Add `status`, `dependents`, `owner` and `created` to each corpus Model's `usage`,
     and return the idle days the statuses used (status_idle_days); None, adding nothing,
-    when usage was not read. `fetched_needs` (None: not known) says whether Sets were
-    fetched, so a Model's Sets read None, not 0, when they were not."""
+    when usage was not read. A Model's Sets, and so its dependent total, are None when
+    `fetched_needs` lacks `sets` or is None (not known), or its lookup failed
+    (sets_unread)."""
     if not usage_readable(ctx.usage):
         return None
     idle_days = status_idle_days(ran)
-    sets_read = None if fetched_needs is None else "sets" in fetched_needs
+    fetched = fetched_needs is not None and "sets" in fetched_needs
+    unread = sets_unread(ctx) if fetched else set()
     headers = headers_by_id(ctx.metadata)
     for m in models_out:
         usage = m.get("usage")
@@ -120,7 +137,8 @@ def add_triage(models_out: list, ctx: Any, ran: Optional[dict],
         header = headers.get(m["guid"]) or {}
         usage.update({
             "status": model_status(ctx.usage, m["guid"], idle_days, header.get("created")),
-            "dependents": dependent_counts(ctx.dependents.get(m["guid"]), sets_read),
+            "dependents": dependent_counts(ctx.dependents.get(m["guid"]),
+                                           fetched and m["guid"] not in unread),
             "owner": owner_of(header),
             "created": created_date(header.get("created")),
         })
