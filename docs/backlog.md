@@ -518,7 +518,8 @@ are roughly ordered by value÷effort.
 | BL-620 | ts-audit usage (H17): review leftovers and open questions (non-admin auditors, the searchdata spec check, new Models, clock skew, cost, locale, nits) | 2026-12-31 |
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
-| BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
+| ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
+| BL-628 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18969,7 +18970,9 @@ can build the link. **Target:** 2026-12-31.
 4. **Tests:** every link is built through the helper and escaped; a headless-Chrome test
    per view asserts the icon's href for a synthetic cluster URL.
 
-## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3`
+## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3` — **RESOLVED 2026-11-26**
+
+**Status:** RESOLVED (2026-11-26, ts-audit 3.28.0): absorbed by the Usage view (`#usage`), whose triage table sorts every audited Model by last use and filters it by status (Active, Idle, Never queried, Too new, Not judged) and by "No dependents". The Dashboard heatmap is unchanged.
 
 **Filed:** 2026-11-26. **Source:** user request 2026-11-25 (approved, then parked on
 2026-11-26 to end the build round on a stable skill). **Target:** 2027-01-31.
@@ -19059,3 +19062,31 @@ fidelity one and should move to Tier 1. The upstream work in apache/ossie-conver
 the decision shape worth copying: the measure is minted as a column rather than taken from a
 field, because a field is never a measure, and its datatype must come from the document
 rather than be assumed.
+
+---
+
+## BL-628 — ts-dependency-manager and `ts share`: take a ts-audit candidates file `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the ts-audit Usage view (3.28.0), which exports the
+Models a reviewer selects as a `ts-audit-candidates/1` JSON file. **Target:** 2027-01-31.
+
+**What.** A list input that reads that file (its format is in ts-audit SKILL.md, "Candidates
+file"), for two consumers:
+
+1. **ts-dependency-manager.** One combined dry run and impact report across every GUID in the
+   file, with the overlaps shown (an Answer or Liveboard that depends on two of the listed
+   Models is one object, reported once against both), then the per-object delete with backup
+   and rollback as today.
+2. **`ts share`.** Revoke sharing on the same list: the gentler first step, which hides the
+   Models from their users without deleting anything, so a Model someone still needs is
+   found by the request to restore access.
+
+**Why.** Today both act on one object at a time (`ts dependency cascade-preview` and
+`cascade-delete` take one ref), so retiring the dozen or so idle Models a Usage view
+selects is a dozen separate runs and a dozen separate reports, and an overlap between two
+of them is seen by neither.
+
+**Notes.** Read the file's `format` and refuse a version it does not know. Treat each
+object's `status` and `dependents_total` as what the audit saw when it read the usage
+(`usage.read_at`), not as current: re-read dependents before any change.
+
