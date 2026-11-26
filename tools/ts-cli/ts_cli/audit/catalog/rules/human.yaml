@@ -460,7 +460,9 @@
     only from another Org is not flagged; read from another Org, it counts that Org's
     queries, so a Model queried only elsewhere counts as not queried there. The finding
     says which it was.
-    A Model created since the history's last day reads as never queried. Not judged
+    A Model never queried and created less than 90 days before the read (its metadata
+    header's creation time) does not qualify: it has existed for less than 90 days. One
+    whose creation time is not recorded or not read is treated as above. Not judged
     when the usage could not be read (the system Model missing, refused, a failed call,
     or a history with no first query), never read as unused.
   # A code rule (code:idle_model) because its idle days are a tunable parameter and the
