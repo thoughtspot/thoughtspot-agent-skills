@@ -19706,12 +19706,19 @@ conditional's group closing early and treats `else b + 1` inside a group as a le
 4. **A right operand's missing ELSE gets `else 0`** (the converter's `ensure_else_clause`) while
    `ts formula translate` gives `else null`: `IF [a]>1 THEN 1 END + IF [b] THEN 2 END` differs
    from Tableau (NULL) on rows where the second condition is false.
-5. Nits: a `CASE` containing `IF … END` is mis-bounded (`parsing.py::_find_matching_end` counts
+5. **A raw `IF … END` inside an `IIF` branch** (IIF converts first, so the inner block is still
+   unconverted when the IIF is grouped): `IIF([c], IF [a] THEN 2 END, 1) + 1` →
+   `( if ( [c] ) then if ( [a] ) then 2 else 1 else null ) + 1`, so the IIF's `else 1` binds to
+   the inner `if`. Wrong differently on main; `convert_if_then`'s uppercase-only `is_inner` is part
+   of the cause. An ELSEIF chain without ELSE inside an IIF does the same.
+6. **Sisense right operand:** `1 + IF(…)` and `[x] = IF(…)` stay bare, as item 2 for Tableau.
+7. Nits: a `CASE` containing `IF … END` is mis-bounded (`parsing.py::_find_matching_end` counts
    CASE only); `… AND IIF([c],TRUE,FALSE) = FALSE` has its `) = false` rewritten to `= 0`.
 
 **Fix direction.** The durable fix is BL-440 (emit through a tree and printer instead of text
 rewrites); until then, apply the grouping as the last pass over the finished text, using block
 markers placed at conversion time.
+
 ---
 
 ## BL-650 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`

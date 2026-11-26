@@ -87,3 +87,14 @@ def test_qlik_guard_ignores_a_bracket_inside_a_quoted_literal():
     assert qlik("If(a = ')', 1, 0)")[:2] == ("if (a = ')') then 1 else 0", False)
     out, needs_review = qlik("If(a = ')', 1, 0) * 2")[:2]
     assert needs_review, out
+
+
+def test_tableau_else_inside_a_field_name_or_literal_does_not_count():
+    # [Else Value] is a field, not a keyword: the CASE still has no ELSE of its own
+    assert tableau("CASE [b] WHEN 'p' THEN [Else Value] END + 1") == \
+        "( if ( [b] = 'p' ) then [Else Value] else null ) + 1"
+
+
+def test_tableau_else_inside_a_nested_group_does_not_count():
+    out = tableau("IIF([c], (CASE [b] WHEN 'p' THEN 1 END), 2) + 1")
+    assert out.count("else null") == 0 and out.startswith("( if ( [c] ) then"), out
