@@ -1,0 +1,100 @@
+"""BL-649: the BL-632 greedy-`else` class in the Tableau, Sisense and Qlik translators.
+
+ThoughtSpot's `else` is greedy (live-verified 2026-11-26): `if ( c ) then a else b + 1`
+adds 1 only on the else branch. A converted conditional that an operator follows is
+grouped; one standing alone keeps its bare form, so the later passes that match on it
+(agg(if …) → agg_if, ensure_else_clause) see the same text as before.
+"""
+import pytest
+
+from ts_cli import tableau_translate
+from ts_cli.qlik.functions import translate as qlik
+from ts_cli.sisense.functions import translate_jaql as sisense
+
+
+def tableau(expr: str, role: str = "measure") -> str:
+    return tableau_translate.translate_single(expr, role=role)[0]
+
+
+@pytest.mark.parametrize("src, want", [
+    ("IIF([a] > 1, 1, 0) + 1", "( if ( [a] > 1 ) then 1 else 0 ) + 1"),
+    ("IF [a] > 1 THEN 1 ELSE 0 END + 1", "( if ( [a] > 1 ) then 1 else 0 ) + 1"),
+    ("CASE [b] WHEN 'x' THEN 1 ELSE 0 END * 2", "( if ( [b] = 'x' ) then 1 else 0 ) * 2"),
+    ("IIF([a] > 1, 'x', 'y') = 'x'", "( if ( [a] > 1 ) then 'x' else 'y' ) = 'x'"),
+    # Tableau returns NULL when no branch matches; a grouped block says so explicitly
+    ("IF [a] > 1 THEN 1 END + 1", "( if ( [a] > 1 ) then 1 else null ) + 1"),
+    ("CASE [b] WHEN 'x' THEN 1 END * 2", "( if ( [b] = 'x' ) then 1 else null ) * 2"),
+    ("IF [a]>1 THEN 1 END + IF [b] THEN 2 END",
+     "( if ( [a]>1 ) then 1 else null ) + if ( [b] ) then 2 else 0"),
+])
+def test_tableau_groups_a_conditional_an_operator_follows(src, want):
+    assert tableau(src) == want
+
+
+@pytest.mark.parametrize("src, want", [
+    ("IIF([a]>1,1,0)", "if ( [a]>1 ) then 1 else 0"),
+    ("SUM(IIF([a]>1,[s],0))", "sum_if ( [a]>1 , [s] )"),
+    ("SUM(IF [a]>1 THEN [s] END) / SUM([s])", "sum_if ( [a]>1 , [s] ) / sum ( [s])"),
+    ("IF [a] > 1 THEN IF [b] THEN 1 END END",
+     "if ( [a] > 1 ) then if ( [b] ) then 1 else null else 0"),
+])
+def test_tableau_leaves_a_standalone_conditional_as_it_was(src, want):
+    assert tableau(src) == want
+
+
+def test_sisense_groups_a_conditional_an_operator_follows():
+    assert sisense("IF([a] > 1, 1, 0) = 1")[0] == "( if ([a] > 1) then 1 else 0 ) = 1"
+    assert sisense("IF([a]>1,1,0) + IF([b]>1,1,0)")[0] == \
+        "( if ([a]>1) then 1 else 0 ) + if ([b]>1) then 1 else 0"
+    assert sisense("SUM(IF([a] > 1, [b], 0))")[0] == "sum(if ([a] > 1) then [b] else 0)"
+
+
+def test_qlik_refuses_an_if_call_that_does_not_span_the_expression():
+    out, needs_review = qlik("If(a > 1, 1, 0) * Sum(b)")[:2]
+    assert needs_review and out.count("(") == out.count(")"), out
+    assert qlik("If(a > 1, 1, 0)")[:2] == ("if (a > 1) then 1 else 0", False)
+
+
+# --- review round: tests that fail on a weakened implementation ------------------------
+
+@pytest.mark.parametrize("op", ["+", "-", "*", "/", "%", "^", "=", "!=", "<>", "<", ">",
+                                "<=", ">=", "AND", "OR", "And"])
+def test_tableau_groups_before_every_binary_operator(op):
+    out = tableau(f"IIF([a] > 1, 1, 0) {op} [b]")
+    assert out.startswith("( if ( [a] > 1 ) then 1 else 0 )"), out
+
+
+@pytest.mark.parametrize("op", ["-", "*", "<", ">=", "!=", "and"])
+def test_sisense_groups_before_every_binary_operator(op):
+    out = sisense(f"IF([a] > 1, 1, 0) {op} [b]")[0]
+    assert out.startswith("( if ([a] > 1) then 1 else 0 )"), out
+
+
+def test_tableau_an_else_inside_a_then_branch_does_not_close_the_outer_block():
+    # the nested IIF's own else belongs to it; the outer IF still has none
+    assert tableau("IF [x] THEN IIF([a]>1,1,0) END + 1") == \
+        "( if ( [x] ) then if ( [a]>1 ) then 1 else 0 else null ) + 1"
+    assert tableau("IF [x] THEN IIF([a]>1,1,0) END + 1", role="attribute") == \
+        "( if ( [x] ) then if ( [a]>1 ) then 1 else 0 else null ) + 1"
+
+
+def test_tableau_elseif_without_else_followed_by_an_operator():
+    assert tableau("IF [a]>1 THEN 1 ELSEIF [b] THEN 2 END + 1") == \
+        "( if ( [a]>1 ) then 1 else if ( [b] ) then 2 else null ) + 1"
+
+
+def test_qlik_guard_ignores_a_bracket_inside_a_quoted_literal():
+    assert qlik("If(a = ')', 1, 0)")[:2] == ("if (a = ')') then 1 else 0", False)
+    out, needs_review = qlik("If(a = ')', 1, 0) * 2")[:2]
+    assert needs_review, out
+
+
+def test_tableau_else_inside_a_field_name_or_literal_does_not_count():
+    # [Else Value] is a field, not a keyword: the CASE still has no ELSE of its own
+    assert tableau("CASE [b] WHEN 'p' THEN [Else Value] END + 1") == \
+        "( if ( [b] = 'p' ) then [Else Value] else null ) + 1"
+
+
+def test_tableau_else_inside_a_nested_group_does_not_count():
+    out = tableau("IIF([c], (CASE [b] WHEN 'p' THEN 1 END), 2) + 1")
+    assert out.count("else null") == 0 and out.startswith("( if ( [c] ) then"), out
