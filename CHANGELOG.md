@@ -6,7 +6,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-27
-- fix: `ts tableau build-model` names each Table TML column by its physical name, so a Model `column_id` resolves for a column that has a Tableau caption. Before, every captioned column was rejected at import and merge mode dropped every formula referencing one (ts-convert-from-tableau 1.47.1)
+- fix: `ts tableau build-model` names each Table TML column by its physical name, so a Model `column_id` resolves for a column that has a Tableau caption. Before, every captioned column was rejected at import and merge mode dropped every formula referencing one (ts-convert-from-tableau 1.47.2)
+- chore: bump ts-cli to v0.225.3
+- fix: the Tableau and Sisense converters bracket an `IIF`/`IF`/`CASE`/`if()` that an operator directly follows (`IIF(…) + 1`, `IF(…) = 1`), which ThoughtSpot's greedy `else` otherwise read into the else branch; a Tableau string concatenation after one (`IIF(…) + 'z'`) now fails at import instead of returning a wrong string; the Qlik converter flags an `If()` followed by more expression for review instead of returning unbalanced text. Partial: conditionals that a later Tableau pass splices (`ZN(IIF(…)) + 1`, `RADIANS(IIF(…))`, `MID(…, IIF(…), …)`) and a conditional as a right operand are still open (BL-649)
 - chore: bump ts-cli to v0.225.2
 
 ## 2026-11-26

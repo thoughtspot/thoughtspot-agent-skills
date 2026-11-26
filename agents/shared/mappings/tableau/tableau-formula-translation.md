@@ -162,9 +162,9 @@ command detects pass-through conflicts automatically and skips them.
 
 | Tableau | ThoughtSpot | Notes |
 |---|---|---|
-| `IF cond THEN a ELSE b END` | `if ( cond ) then a else b` | Parentheses required around condition |
+| `IF cond THEN a ELSE b END` | `if ( cond ) then a else b` | Parentheses required around condition. **Followed by an operator** (`IF … END + 1`), the whole block is grouped: `( if ( cond ) then a else b ) + 1`, because ThoughtSpot's `else` is greedy (BL-632, BL-649); a grouped block with no `ELSE` gets `else null`, Tableau's own result |
 | `ELSEIF` | `else if` | Two words in ThoughtSpot |
-| `CASE [f] WHEN 'a' THEN 1 ... END` | `if ( [f] = 'a' ) then 1 else if ...` | No native CASE; expand to if/else chain |
+| `CASE [f] WHEN 'a' THEN 1 ... END` | `if ( [f] = 'a' ) then 1 else if ...` | No native CASE; expand to if/else chain. Grouped when an operator follows, as `IF` (BL-649) |
 | `IFNULL(a, b)` | `ifnull ( a , b )` | Direct mapping |
 | `ISNULL(a)` | `isnull ( a )` | Maps to `isnull()` — NOT `= ''` (different semantics) |
 | `ZN(a)` | `ifnull ( a , 0 )` | |
@@ -218,7 +218,7 @@ command detects pass-through conflicts automatically and skips them.
 | `COUNTD(x)` | `unique count ( x )` | Aggregate only |
 | `AVG(x)` | `average ( x )` | Aggregate only |
 | `ATTR(x)` | `x` | No equivalent; just reference the column |
-| `IIF(test, a, b)` | `if ( test ) then a else b` | Tableau's inline if; chain: Tableau `IIF` → Snowflake `IFF` → ThoughtSpot `if/then/else` |
+| `IIF(test, a, b)` | `if ( test ) then a else b` | Tableau's inline if; chain: Tableau `IIF` → Snowflake `IFF` → ThoughtSpot `if/then/else`. Grouped when an operator follows (`IIF(…) + 1` → `( if … ) + 1`, BL-649) |
 | `SIGN(x)` | `if ( x > 0 ) then 1 else if ( x < 0 ) then -1 else 0` | No direct `sign()` in ThoughtSpot |
 | `SQUARE(x)` | `pow ( x , 2 )` | |
 | `STDEV(x)` | `stddev ( x )` | Aggregate only |

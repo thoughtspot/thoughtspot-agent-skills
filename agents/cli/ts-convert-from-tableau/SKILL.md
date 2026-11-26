@@ -2507,6 +2507,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.1 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.2). |
+| 1.47.2 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.3). |
 
-**Older entries (v1.0.0–v1.47.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
