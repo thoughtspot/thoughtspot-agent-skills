@@ -2507,6 +2507,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-11-19 | Model/formula-engine fixes (ts-cli v0.220.1). Nested-`group_aggregate` false-flag fixed; a nested FIXED LOD parks, not migrates. `convert_string_concat` no longer concats a numeric `+` just because the formula is string-typed; a rejected pair no longer shares a conversion's budget, so long ladders convert fully. `to_string`/`str` drops only for a whole `concat()` argument; its masking token is control-character-delimited. `fix_double_aggregation` follows refs at any depth, adds `median`/`min_if`/`max_if`/`stddev_if`/`variance_if`, uses a quote-aware paren matcher; strips `sum()` only when some aggregate sits outside every `group_aggregate`. Import-retry no longer fails open; merge prints every datasource's result — BL-580/581/582/612. |
+| 1.47.1 | 2026-11-27 | `IIF`/`IF`/`CASE` + operator bracketed (BL-649, partial) |
 
-**Older entries (v1.0.0–v1.46.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.0):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

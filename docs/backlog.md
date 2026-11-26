@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-649 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| BL-649 | Tableau, Sisense and Qlik conditionals (the BL-632 class): direct shapes fixed 2026-11-27; still open — Tableau later-pass splices (`ZN(IIF)+1`, `RADIANS`, `MID`), right operands, string concat | 2026-12-15 |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -19663,7 +19663,7 @@ From the re-review of the fix rounds:
 
 ## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.2: the direct shapes below are fixed; see "Still open"). **Source:** the adversarial review of the BL-632 fix. **Target:** 2026-12-15.
 
 **What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
 adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two
@@ -19687,6 +19687,37 @@ text-rewriting pipeline needs care: `ensure_else_clause` inserts a missing `else
 each `if … then` block, so the bracket must enclose the inserted clause. Reuse
 `tests/test_conditional_grouping.py`'s detector, with its known gaps fixed (it misses a
 conditional's group closing early and treats `else b + 1` inside a group as a leak; no `in`).
+
+
+**Still open after ts-cli 0.225.2** (found by the PR #763 review; each is the same on main):
+
+1. **A later Tableau pass splices a bare conditional before an operator.** Grouping is decided from
+   the text after the block when it is converted, and later passes change that text:
+   `ZN(IIF([a]>1,[x],[y])) + 1` → `if … else [y] + 1` (`strip_ifnull_zero`, `cleanup.py`);
+   `RADIANS(IIF(…))` / `DEGREES` → `… else [y] * sql_double_op ( "PI()" )` (`functions.py`);
+   `MID([s], IIF(c,2,3), 2)` → `substr ( [s] , if … else 3 - 1 , 2 )`; `SIGN` / `INT` of an
+   IIF fail loudly.
+2. **A conditional as a right operand is never grouped:** `SUM([s]) < IIF(…)`, `[b] = IIF(…)`.
+   BL-060 live-confirmed that `sum(X) < if …` fails import. Whether `x + if … else …` parses as
+   intended is unprobed, and two tests pin that shape.
+3. **String concatenation:** `IIF([a]>1,'x','y') + 'z'` is now `( if … ) + 'z'`, which fails at
+   import (`+` is numeric only) rather than main's silently wrong `… else concat ( 'y' , 'z' )`.
+   The concat rewrite (`strings_types.py`) does not treat a group as an operand.
+4. **A right operand's missing ELSE gets `else 0`** (the converter's `ensure_else_clause`) while
+   `ts formula translate` gives `else null`: `IF [a]>1 THEN 1 END + IF [b] THEN 2 END` differs
+   from Tableau (NULL) on rows where the second condition is false.
+5. **A raw `IF … END` inside an `IIF` branch** (IIF converts first, so the inner block is still
+   unconverted when the IIF is grouped): `IIF([c], IF [a] THEN 2 END, 1) + 1` →
+   `( if ( [c] ) then if ( [a] ) then 2 else 1 else null ) + 1`, so the IIF's `else 1` binds to
+   the inner `if`. Wrong differently on main; `convert_if_then`'s uppercase-only `is_inner` is part
+   of the cause. An ELSEIF chain without ELSE inside an IIF does the same.
+6. **Sisense right operand:** `1 + IF(…)` and `[x] = IF(…)` stay bare, as item 2 for Tableau.
+7. Nits: a `CASE` containing `IF … END` is mis-bounded (`parsing.py::_find_matching_end` counts
+   CASE only); `… AND IIF([c],TRUE,FALSE) = FALSE` has its `) = false` rewritten to `= 0`.
+
+**Fix direction.** The durable fix is BL-440 (emit through a tree and printer instead of text
+rewrites); until then, apply the grouping as the last pass over the finished text, using block
+markers placed at conversion time.
 
 ---
 
