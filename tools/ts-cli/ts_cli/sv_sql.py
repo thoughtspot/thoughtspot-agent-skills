@@ -34,7 +34,7 @@ from ts_cli.formula_text import (
 from ts_cli.sv_sql_exact import EXACT_FORM_CALLS as _EXACT_FORM_CALLS
 from ts_cli.sv_sql_exact import CAST_NUMBER, cast_number, cast_params, datediff_to_ts
 from ts_cli.sv_sql_exact import is_aggregated as _is_aggregated
-from ts_cli.sql_forms import (
+from ts_cli.sql_forms import (sqlf_if_chain, sqlf_unwrap_conditional,
     sqlf_fold_concat,
     sqlf_fold_multiplicative,
     sqlf_group,
@@ -381,7 +381,7 @@ _NULLIF0 = "\x00NULLIF0\x00"
 
 
 def _emit(name: str, args: list[str]) -> str:
-    inner = " , ".join(args)
+    inner = " , ".join(sqlf_unwrap_conditional(a) for a in args)
     return f"{name} ( {inner} )" if args else f"{name} ( )"
 
 
@@ -433,7 +433,7 @@ def _call_with_args(name: str, cur: _Cursor, resolver) -> str:
         return _call_nullif(args)
     if name == "NVL2":
         _need(args, 3, name)
-        return f"if ( {args[0]} != null ) then {args[1]} else {args[2]}"
+        return sqlf_if_chain([(f"{args[0]} != null", args[1])], args[2])
     if name == "LOG":
         return _call_log(args)
     if name == "ROUND":
@@ -627,7 +627,7 @@ def _call_iff(cur: _Cursor, resolver) -> str:
     _need(args, 3, "IFF")
     # the compiled safe_divide form, read back as the idiom (BL-374)
     return (sqlf_safe_divide_form(*args)
-            or f"if ( {args[0]} ) then {args[1]} else {args[2]}")
+            or sqlf_if_chain([(args[0], args[1])], args[2]))
 
 
 def _call_null_default(name: str, cur: _Cursor, resolver) -> str:
@@ -880,10 +880,7 @@ def _construct_case(cur, resolver) -> str:
         sd = sqlf_safe_divide_form(branches[0][0], branches[0][1], else_val)
         if sd:
             return sd
-    out = else_val
-    for cond, val in reversed(branches):
-        out = f"if ( {cond} ) then {val} else {out}"
-    return out
+    return sqlf_if_chain(branches, else_val)
 
 
 def _construct_cast(cur, resolver, try_cast: bool = False) -> str:
