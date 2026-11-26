@@ -18,6 +18,7 @@ from ts_cli.audit.erd import build_erd_for_audit
 from ts_cli.audit.findings import Finding, build_summary
 from ts_cli.audit.formula_tree import formula_tree
 from ts_cli.audit.usage import corpus_model_usage, corpus_usage, idle_days_of, usage_readable
+from ts_cli.audit.usage_triage import add_triage, with_status_days
 
 #: The conditional data the report reads that no rule need declare: the AI
 #: instructions behind each Model's "Business Questions" (`build_corpus`) and its ERD's
@@ -232,13 +233,15 @@ def _ran_rules(angles: list) -> dict:
 
 def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
                  angles: Optional[list] = None, ai_fetched: Optional[bool] = None,
-                 ran_rules: Optional[dict] = None) -> dict:
+                 ran_rules: Optional[dict] = None,
+                 fetched_needs: Optional[set] = None) -> dict:
     """The report's corpus. ``ai_fetched`` says whether ai_instructions was fetched for
     this context: True records each Model's ``ai_analysis.instructions_read`` (whether
     its lookup succeeded), False records it as None (not looked up), and None — the
     caller does not know — leaves it out. ``ran_rules`` (rule id -> rule) are the rules
     the run ran, which decide each Model's ``data_cache`` readiness; None reads them
-    from the catalog for ``angles`` under the default profile."""
+    from the catalog for ``angles`` under the default profile. ``fetched_needs`` (None:
+    not known) says whether Sets were read (usage_triage.add_triage)."""
     if not angles:
         from ts_cli.audit import catalog_model
         angles = list(catalog_model.load_catalog().categories)
@@ -254,6 +257,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         models_out = [_corpus_model(ctx, model, model_items[i], items, i, ai_fetched, ran)
                       for i, model in enumerate(ctx.models)]
 
+    idle_days = add_triage(models_out, ctx, ran, fetched_needs)
     table_reuse = _build_table_reuse_from_ctx(models_out)
     model_overlaps = _build_overlaps_from_ctx(models_out)
 
@@ -275,7 +279,8 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         "model_overlaps": model_overlaps,
         "dependents": dict(ctx.dependents),
         # None when usage was not fetched or not read; `fetched_needs` tells which.
-        "usage": corpus_usage(ctx.usage, {m["guid"] for m in models_out}),
+        "usage": with_status_days(corpus_usage(ctx.usage, {m["guid"] for m in models_out}),
+                                  idle_days),
     }
 
 
@@ -471,6 +476,7 @@ def run_audit(
         angles=angles,
         ai_fetched=None if fetched_needs is None else "ai_instructions" in fetched_needs,
         ran_rules=ran,
+        fetched_needs=fetched_needs,
     )
     corpus["assessment"] = catalog.profiles[profile].label
     if corpus.get("usage"):  # what H17 judged by, beside how much history it had
