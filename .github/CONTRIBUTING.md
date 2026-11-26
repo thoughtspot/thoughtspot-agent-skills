@@ -185,6 +185,69 @@ with the invocation in the header of `scripts/check-pr.sh`; it needs the maintai
 private name list unless run with `--links-only`. An automated reviewer for other people's PRs is a separate design that is
 not built yet (BL-416 in [`docs/backlog.md`](../docs/backlog.md)).
 
+**The one exception to "never commit or merge"** is a maintainer resolving a finding or a
+conflict at merge, as "Review rounds" below allows, on a PR that allows edits by
+maintainers. It is held to spec §5 C5's requirement for someone else's branch: every git
+operation (merge, commit, push) runs with hooks disabled
+(`git -c core.hooksPath=<an empty directory> ...`), no Claude Code session reads, edits or
+runs commands in that checkout, wherever the session was started, and nothing from its work
+tree is executed or sourced. That includes the repo's validators: after resolving a
+`docs/backlog.md` conflict there, run `main`'s copy against the branch's files
+(`python3 -E -s <your main checkout>/tools/validate/check_backlog_integrity.py --root <that checkout>`),
+or leave the check to CI. CI checks the pushed result.
+
+### Review rounds: what blocks, and when review stops
+
+A maintainer's review of your PR has a fixed stopping point, like the one `pr-ready`
+Step 7 sets for your own review. Without one, external PRs ran to many rounds, each a
+round trip of days: #662 reached a round-7 review (see BL-581 in
+[`docs/backlog.md`](../docs/backlog.md)), and #440 went five or more (spec §1, finding F9).
+
+1. **The first review is the full one.** Everything the change needs checked is
+   checked in round 1, not in later rounds. The maintainer reads CI's run, your
+   evidence block and your live evidence, and does not run your branch's code with
+   their credentials (see above). If a run is needed beyond those, it happens only in
+   a disposable environment holding no credentials of any kind, discarded afterwards,
+   and never against a live instance. The review labels every finding
+   **Blocking** or **Backlog** and ends with the terms: fix the Blocking items and the
+   PR is approved. The maintainer files the Backlog items as one dated item in
+   `docs/backlog.md` and names it in the review.
+2. **One fix round, then one re-review of the fix commits.** The re-review checks that
+   each Blocking item is fixed for its class across the branch, not only for the input
+   the review cited, and that the fix commits introduced no regression.
+3. **After the re-review, a finding goes to the maintainer, not back to you.** The one
+   exception: a round-1 Blocking item the fix round left unfixed (or fixed only for the
+   input the review cited, including a guard that handles only the cited inputs), or a
+   regression the fix commits introduced, goes back to you for **one more round at
+   most**, and only when the maintainer cannot reasonably fix it at merge. The review
+   says so. After that round, the maintainer fixes what is left at merge, or closes the
+   PR.
+
+   Everything else is the maintainer's: a finding that was on the branch at round 1 and
+   no review raised gets a fix commit on top of the branch (the exception above), or the
+   Backlog item if it is not Blocking. A Blocking item, and anything under 6, is
+   resolved **before** merge: if the maintainer cannot push to the branch, they ask you
+   to allow edits by maintainers, or open a replacement PR from your commits plus the
+   fix, under the same exception. Only Backlog items wait for a follow-up PR.
+4. **Wrong output reported as success: the review asks for the guard, not a fix per
+   input.** For code that reports an outcome for its own output (Migrated, Merged,
+   READY), the Blocking item is the guard: what the code does not recognise is refused
+   or reported for review, and every input item is accounted for. Inputs the review
+   cites are evidence for the guard, not separate items. Once the guard exists, a wrong
+   output it flags is reported, so it goes to the Backlog item; one it misses is a bug
+   in the guard, Blocking, and resolved under 3.
+5. **A converter or translator states its coverage up front,** in the PR template's
+   **Coverage** section: what it converts, and what it reports for review instead. The
+   review judges the change against that statement.
+6. **Merge conflicts, ts-cli version clashes and taken `BL-` ids are not review
+   rounds.** The maintainer resolves them at merge (the exception above). Spec §5 C5
+   removes most of them (BL-426); until it lands, they are resolved by hand.
+7. **Some findings block in any round,** whoever finds them: the "Always a Blocker"
+   security and destructive-path items in
+   [`.claude/agents/pr-reviewer.md`](../.claude/agents/pr-reviewer.md). The maintainer
+   decides whether to fix one at merge or return it. These are the only findings that
+   can return a PR to you past the cap in 3.
+
 ## Why it works this way
 
 The design, and the analysis of past PRs it came from, is in
