@@ -369,6 +369,10 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
+| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs | 2026-12-15 |
+| BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
+| BL-632 | COALESCE emits an unparenthesised if/then/else; a following operator may bind inside the else branch (MV filters, shared with SV) | 2026-12-15 |
+| BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -519,6 +523,10 @@ are roughly ordered by value÷effort.
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
 | BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
+| BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
+| BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
+| BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
+| BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19059,3 +19067,220 @@ fidelity one and should move to Tier 1. The upstream work in apache/ossie-conver
 the decision shape worth copying: the measure is minted as a column rather than taken from a
 field, because a field is never a measure, and its datatype must come from the document
 rather than be assumed.
+
+---
+
+## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** converting three customer Metric Views offline with
+`ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
+**Target:** 2026-12-15.
+
+**What.** A Metric View dimension may name another dimension: `QUARTER(order_month)`, or a
+CASE over a backticked display name (`` CASE WHEN `Channel Description` ILIKE '%web%' … ``).
+`translate-formulas` resolves every bare identifier through `resolve_parts`
+(`tools/ts-cli/ts_cli/databricks/mv_translate.py:46-67`), which maps a name with no alias
+prefix to the `source` table, so the output is a fake column on the fact table:
+
+    QUARTER(order_month)          -> quarter_number ( [ORDERS::order_month] )
+    `Channel Description` ILIKE … -> sql_bool_op ( "{0} ILIKE …" , [ORDERS::Channel Description] )
+
+The right targets are the other dimension's formula (`[formula_Month]`, via `formula_id`
+at `mv_translate.py:70`) or, for a direct-column dimension, its column
+(`[DIM_CHANNEL::DESCRIPTION]`). Measures already get this treatment (`MEASURE()` inlining);
+dimensions do not.
+
+**Why it matters.** The Model fails at import: there is no such column. The pre-import gate
+does not see it. `ts tml lint --dir`, with the generated Table TMLs in the batch, returned
+`clean: true` on a Model carrying `[ORDERS::order_month]` (probed 2026-11-26), because
+`lint_cross_references` (`tools/ts-cli/ts_cli/tml_lint.py:690`) checks `column_id` and join
+`on:` references only and states that `formulas[].expr` is out of scope.
+
+**Fix direction.** In `translate-formulas`, resolve an identifier that matches a dimension's
+`name` (or backticked display name) before treating it as a column: emit the dimension's
+`[formula_<Title>]` for a computed dimension, its column for a direct one, with a
+dependency order like the measure DAG. Separately, extend XREF to `[TABLE::COL]` references
+inside `formulas[].expr`. That would have caught this, and any later case of this class.
+
+---
+
+## BL-630 — from-databricks-mv: two columns with one display name, and a direct column is silently dropped `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** One MV had `order_month` with `display_name: Month` (a formula) and a direct
+dimension `Month: source.MONTH` (month number). `build-model` exited 0 and the Model had one
+`Month`: the month-number column was gone, with nothing in `name_renames` or on stderr. Two
+other MVs differed only in that `Month` was computed (`MONTH(order_month)`), and those
+failed loud: `duplicate display title(s): ['Month']`.
+
+The difference is the order of two passes in `mv_build_model.py`:
+`resolve_name_collisions` (call at line 108) runs first, and its column-vs-formula rule in
+`tools/ts-cli/ts_cli/formula_common.py:437-442` keeps the formula and drops any column with
+the same name. It computes `dropped` and never reports it. Only a formula-vs-formula clash
+reaches `_check_no_duplicate_display_names` (`mv_build_model.py:400`, called at 428).
+
+**Why it matters.** A column the source defines disappears from the Model, silently. The
+loud path shows the converter already treats a clash as an error, so the two cases should
+behave the same.
+
+**Fix direction.** Fail loud on every display-title clash, or rename deterministically and
+report it in `name_renames`. `resolve_name_collisions` is shared (`formula_common`) with
+other converters, so check what they rely on before changing the drop. The minimum is to
+surface `dropped` instead of discarding it.
+
+---
+
+## BL-631 — from-databricks-mv: `display_title` title-cases names that have no display_name, mangling acronyms `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `display_title` (`tools/ts-cli/ts_cli/databricks/mv_translate.py:76-78`) returns
+`entry["name"].replace("_", " ").title()` when there is no `display_name`. That is right for
+`order_month` → `Order Month`. But a v1.1 MV names most dimensions in their final form, and
+those get re-cased: `SKU Type` → `Sku Type`, `Is eBook` → `Is Ebook`, `API Channel` →
+`Api Channel`.
+
+**Why it matters.** The column names users and Spotter see are not the ones the source
+author wrote. No numbers change.
+
+**Fix direction.** Title-case only a snake_case identifier (no spaces, contains `_` or is
+all lower case). Use any other `name` verbatim. The workaround used was to set
+`display_name = name` in `parsed.json` before `build-model`.
+
+---
+
+## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it may bind inside the else branch `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15 (move to Tier 1 if
+the probe below shows the greedy reading).
+
+**What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
+`if ( a != null ) then a else b` with no outer parentheses, and the caller appends the rest
+of the expression. Reproduced with `translate_sql_expr`:
+
+    COALESCE(source.D, false) = false   ->  if ( [F::D] != null ) then [F::D] else false = false
+    COALESCE(source.D, 0) + 1           ->  if ( [F::D] != null ) then [F::D] else 0 + 1
+    (COALESCE(source.D, false)) = false ->  ( if ( … ) then [F::D] else false ) = false   (correct)
+
+The first is the shape of a common MV global filter (`COALESCE(is_deleted, false) = false`).
+`build-model` turns it into the `MV Filter` formula that every query is filtered on.
+
+**Why it matters.** Whether this is right depends on how ThoughtSpot parses an `else`
+branch, and no doc in this repo states it. If `else` is greedy, as in most expression
+grammars, the filter returns `D` itself for every non-null row. It then keeps the rows
+where `is_deleted` is TRUE, which inverts the filter, and `COALESCE(x, 0) + 1` loses the
+`+ 1`. Both would be silent wrong answers. The other reading makes both correct. Not
+verified on a cluster.
+
+**Where it reaches.** `sql_forms` is shared: `sv_sql.py` imports it too, so the Snowflake
+converter emits the same form.
+
+**Fix direction.** Probe first: a formula `if ( true ) then 1 else 0 + 1` returns 1 under the
+greedy reading and 2 under the other. Either way, parenthesise the emitted chain, or emit
+`ifnull ( a , b )` for the two-argument case (`IFNULL`/`NVL` already take that path at
+`sql_forms.py:195-196`). Add the shape to the formula patterns doc once probed.
+
+---
+
+## BL-633 — `CAST(col AS STRING)` is dropped, including inside a pass-through such as `TO_DATE` `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `TO_DATE(CAST(fact.DATE_KEY AS STRING), 'yyyyMMdd')`, the usual way to turn an
+integer `yyyyMMdd` key into a date, translates to
+
+    sql_date_op ( "to_date({0}, 'yyyyMMdd')" , [FACT::DATE_KEY] )
+
+`STRING` is in `CAST_TYPES_WIDENING` (`tools/ts-cli/ts_cli/formula_common.py:52-55`), so
+`_construct_cast` (`tools/ts-cli/ts_cli/databricks/mv_sql_constructs.py:165-195`) returns the
+inner expression unchanged. Inside a `sql_*_op` pass-through the warehouse then receives
+`to_date(<int>, 'yyyyMMdd')`, an expression the source never wrote.
+
+**Why it matters.** Whether Databricks accepts `to_date(INT, fmt)` through implicit casting
+was not live-checked. If it does, the result matches. If not, every query that touches the
+column fails. Treating a cast to string as a no-op is also wrong more generally:
+ThoughtSpot `concat` and string comparisons do not promote a number.
+
+**Fix direction.** Keep `CAST(x AS STRING)` as `to_string ( x )` in ThoughtSpot context and
+as the literal `CAST({0} AS STRING)` inside a pass-through template. Remove `STRING`,
+`VARCHAR`, `TEXT` and `CHAR` from the widening set for the Databricks engine.
+
+---
+
+## BL-634 — from-databricks-mv: a window ordered by a date built from an integer key is refused, so semi-additive measures on it are skipped `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** Warehouses with integer date keys commonly order a semi-additive window by a
+derived date:
+
+    - name: order_month
+      expr: TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')
+    measures:
+      - name: Opening Balance
+        expr: SUM(source.OPENING_BALANCE)
+        window: [{order: order_month, semiadditive: first, range: current}]
+
+`_find_order_dim` (`tools/ts-cli/ts_cli/databricks/mv_window_translate.py:175-232`) accepts a
+direct column, a `DATE_TRUNC` of one, or a date-shifted `DATE_TRUNC`. Anything else is
+refused with "cannot determine the physical sort column" (line 230). Every measure windowed
+on that dimension goes to `skipped[]`, along with every measure that references one: in the three MVs converted, 12 windowed
+opening/closing balance measures plus 5 variances and averages built on them.
+
+**Why it matters.** The skip is loud, but these are usually the headline measures of a
+balance or subscriber model. The workaround used was to point `window.order` at a synthetic
+direct dimension over the integer key. A `yyyyMMdd` integer sorts exactly as the date does,
+so `first_value(sum(m), query_groups(), {[FACT::DATE_KEY]})` is the same ordering.
+
+**Fix direction.** Either recognise `TO_DATE(CAST(<int col> AS STRING), '<yyyyMMdd-family
+format>')` as day grain with `sort_ref` = the integer column (exact, because the format is
+order-preserving), or order by the dimension's own formula, as the shifted-week branch
+already does at line 208. The second is the general fix, but `first_value`/`last_value`
+ordered by a formula needs a live check first.
+
+---
+
+## BL-635 — from-databricks-mv: a whole-table dimension `MAX(<expr>) OVER ()` is rejected as an unsupported LOD shape `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `Latest Data Month: MAX(TO_DATE(…)) OVER ()`, the latest loaded period used to
+flag a partial month-to-date, fails `parse-mv` with "window function without the
+recognized AGG(...) OVER (PARTITION BY ...) LOD shape". `_LOD_RE`
+(`tools/ts-cli/ts_cli/databricks/mv_expr.py:63-65`) requires `PARTITION BY`, so the empty
+`OVER ()` falls through to the unsupported branch. The parse exits 1, and every dimension
+that references it is lost too (here `Is Month To Date`).
+
+**Mapping used by hand.** `group_aggregate ( max ( [formula_Month] ) , { } , { } )`, with
+the MV `filter:` carried as the model-level `filters:` block. Per the A3 finding
+(`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), the `{}` third argument ignores
+search filters but respects the model filter, which matches a DBX window evaluated after
+the MV's global filter. The whole-table scalar-subquery path already emits this form
+(`mv_translate.py:138`). **Not live-verified** for the `OVER ()` dimension, and not over a
+`sql_date_op` formula.
+
+**Fix direction.** Accept `AGG(expr) OVER ()` as an LOD with an empty partition (`{ }`), and
+use `{ }` rather than `query_filters()` as the filter argument when the MV has a global
+`filter:`. Live-verify one case before shipping.
+
+---
+
+## BL-636 — from-databricks-mv file-only path has no route when the warehouse cannot be described `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: the MV YAML was available, the workspace
+was not. **Target:** 2027-01-31.
+
+**What.** The file-only path (Step 10-FILE, `create: true` in `tables.json`) requires a
+`dbx_type` for every column, taken from `DESCRIBE TABLE`. When only the MV definitions are
+available, nothing produces the Table TMLs. The column list had to be scraped from the
+generated Model's `[T::C]` and `column_id` references, and types guessed from names and
+usage (`*_KEY` → bigint, summed → bigint, flags used in a boolean `COALESCE` → boolean, the
+rest string). Related to L11 (classification on the same path), which does not cover types.
+
+**Why it matters.** Wrong types fail the Table import, or worse, a DECIMAL read as bigint.
+The skill does not say this case exists.
+
+**Fix direction.** A `--infer-columns` mode on `build-model` that derives the column set per
+table from the parsed MV, marks every type `inferred`, and writes those types into a review
+list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` before import.
