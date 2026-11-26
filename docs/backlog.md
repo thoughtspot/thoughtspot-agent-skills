@@ -18745,3 +18745,79 @@ From the re-review of the fix round:
 17. `D.G.ur` (rules that require usage) and `D.C.ur` (unreadable items) share a key name;
     `_usage_rule_ids` in `report.py` loads the catalog a second time and includes retired
     rules, where `report_meta` takes only active ones.
+
+---
+
+## BL-621 — two ThoughtSpot formula facts no schema doc states `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** live probes on an internal ThoughtSpot cluster while
+building apache/ossie-converters#326. Both cost real cluster time to establish and neither
+is written down here. **Target:** 2027-01-31.
+
+**What.**
+
+1. **A formula resolves a column reference by its Table column display name only, never by
+   `db_column_name`.** The warehouse name is rejected at import, not silently misread:
+
+       [LINEORDER::Quantity]      -> imports
+       [LINEORDER::LO_QUANTITY]   -> ERROR, Formula addition failed. Search did not find
+                                     "LINEORDER::LO_QUANTITY" in your data or metadata
+
+   `[TABLE::Column]` appears throughout `thoughtspot-model-tml.md` and nowhere says which of
+   the two names `Column` is. I9 states the display-name rule for formula-to-*formula*
+   references, which is the near miss that makes this easy to assume is covered.
+
+2. **A formula may reference a Table column the Model does not surface** — one with no
+   `columns[]` entry at all. Verified end to end on a Snowflake-backed table: the model
+   imports, AgentQL generates `sum("ta_1"."QUANTITY")`, and the query returns a row.
+   `thoughtspot-model-tml.md:905` says a *formula* not referenced in `columns[]` is not
+   surfaced, which is a different statement and reads as if it covered this.
+
+**Why it matters.** Every `ts-convert-from-*` skill generates formulas, so (1) is a live
+hazard for all of them; it fails loudly, so it costs a cycle rather than correctness. (2)
+fails silently in the other direction: not knowing it does not break anything, it just leads
+to worse designs. It sent the #326 work down a "mint a hidden column, stash it, witness it on
+the return leg" path for an hour before a probe showed none of it was needed.
+
+**Where.** Both in `agents/shared/schemas/thoughtspot-model-tml.md`, in the formula section.
+(1) is also invariant-shaped — a hard rule with a known error and a live probe — so consider
+it as I24 in `ts-model-conversion-invariants.md`; I23 is currently the highest. Check the
+repo's convention for adding an invariant first.
+
+---
+
+## BL-622 — the SV and MV converters do not emit pre-aggregated measures `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** noticed while implementing the same construct upstream in
+apache/ossie-converters#326. **Target:** 2027-01-31.
+
+**What.** Neither `ts-convert-from-snowflake-sv` nor `ts-convert-from-databricks-mv` mentions
+`aggregation: AGGREGATE` or `is_pre_aggregated_measure` anywhere. A Semantic View or Metric
+View measure is a value the source has already aggregated; ThoughtSpot carries one as a
+column handed to the platform's own measure function:
+
+    # Table                           # Model
+    name: total_revenue               name: Revenue
+    db_column_name: total_revenue     column_id: SV_SALES::total_revenue
+    properties:                       properties:
+      column_type: MEASURE              column_type: MEASURE
+      aggregation: AGGREGATE            aggregation: AGGREGATE
+      index_type: DONT_INDEX            index_type: DONT_INDEX
+      is_pre_aggregated_measure: true
+
+`ts link build` writes exactly this (ts-cli 0.214.0), and I16 and I23 state the rules, so the
+knowledge is in the repo. It has not reached the two converters, which take the other route
+and translate a measure into a ThoughtSpot formula instead.
+
+**Why it matters.** Re-aggregating an already-aggregated measure is the silent kind of wrong
+answer, and it is what the pre-aggregated flag exists to prevent: without it a newer build
+plans the column as an ATTRIBUTE and refuses `AGG()` on it with
+`COLUMNS_NOT_GROUPED_OR_AGGREGATED` (I23), rather than quietly substituting an ordinary
+aggregate. A converter that emits a formula instead does not get that protection.
+
+**What to check first.** Whether the two converters currently emit a formula per measure, and
+whether that formula re-aggregates. If it does, this is a correctness gap rather than a
+fidelity one and should move to Tier 1. The upstream work in apache/ossie-converters#326 has
+the decision shape worth copying: the measure is minted as a column rather than taken from a
+field, because a field is never a measure, and its datatype must come from the document
+rather than be assumed.
