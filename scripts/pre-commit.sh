@@ -449,7 +449,11 @@ run_pytest() {
   local t0
   printf "  %-30s " "$label"
   t0=$(_now_ms)
-  if output=$("$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
+  # The chosen interpreter's directory first on PATH: tests that start a shell calling a
+  # bare `python3` must get this interpreter (and its packages), not the system one.
+  local py_dir
+  py_dir="$(dirname "$(command -v "$PYTHON_BIN")")"
+  if output=$(PATH="$py_dir:$PATH" "$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
     printf "PASS "
     _record_duration "$label" "$t0"
   else

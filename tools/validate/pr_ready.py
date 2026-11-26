@@ -86,6 +86,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import platform
 import re
 import shlex
@@ -485,8 +486,16 @@ def _skip_problems(clean: str, listed: int) -> List[str]:
     return []
 
 
-def _pytest_env() -> dict:
-    return {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
+def _pytest_env(python: str = "") -> dict:
+    """The environment pytest runs in. The chosen interpreter's directory goes first on
+    PATH: some tests start a shell that calls a bare `python3`, which otherwise finds
+    whatever is first on the user's PATH (often a system Python without pyyaml), not the
+    interpreter whose packages this run checked."""
+    env = {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
+    found = shutil.which(python) if python else None
+    if found:
+        env["PATH"] = os.path.dirname(found) + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def _install_remedy(python: str) -> List[str]:
@@ -520,7 +529,7 @@ def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result
         # `-rs --color=no` only change reporting (every skip, uncoloured even under
         # FORCE_COLOR / PY_COLORS); PYTEST_ADDOPTS is dropped, as CI sets none.
         code, output, seconds = _run_command(
-            [python, "-m", "pytest", *args, "-rs", "--color=no"], repo_root, env=_pytest_env())
+            [python, "-m", "pytest", *args, "-rs", "--color=no"], repo_root, env=_pytest_env(python))
         clean = _ANSI.sub("", output)
         found = _skips(clean)
         skips = [text + (f" (x{n})" if n > 1 else "") for n, text in found]
