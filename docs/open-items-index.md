@@ -5,7 +5,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 
 ## Summary
 
-**245 total items** across 27 skills — **69 open**, 148 verified, 28 deferred
+**247 total items** across 27 skills — **70 open**, 149 verified, 28 deferred
 
 | Skill | Total | Open | Verified | Deferred |
 |---|---|---|---|---|
@@ -15,9 +15,9 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-coach | 7 | **7** | 0 | 0 |
 | ts-convert-from-looker | 13 | **6** | 7 | 0 |
 | ts-convert-from-qlik | 6 | **5** | 0 | 1 |
+| ts-convert-from-sisense | 10 | **4** | 5 | 1 |
 | ts-convert-from-snowflake-sv | 4 | **4** | 0 | 0 |
 | ts-object-answer-promote | 4 | **4** | 0 | 0 |
-| ts-convert-from-sisense | 8 | **3** | 4 | 1 |
 | ts-convert-from-tableau | 17 | **3** | 12 | 2 |
 | ts-load-source-data | 3 | **3** | 0 | 0 |
 | ts-publish-orgs | 8 | **3** | 4 | 1 |
@@ -36,7 +36,7 @@ Re-run to refresh: `python3 tools/validate/generate_open_items_index.py`
 | ts-object-model-agentql-query | 9 | **0** | 9 | 0 |
 | ts-object-set-manager | 9 | **0** | 9 | 0 |
 | ts-recipe-answer-period-comparison | 9 | **0** | 5 | 4 |
-### Untagged (69 items)
+### Untagged (70 items)
 
 Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 
@@ -57,6 +57,7 @@ Items without a `[needs: ...]` tag. Consider adding one to enable batch triage.
 | ts-convert-from-sisense | #4 | JAQL formula subset breadth | TO VERIFY |
 | ts-convert-from-sisense | #7 | obj_id derivation for other punctuation | OPEN |
 | ts-convert-from-sisense | #8 | Sisense value matching and join type, against a live Sisense query | TO VERIFY |
+| ts-convert-from-sisense | #10 | UNION of timestamps in a hand-written SQL view | OPEN |
 | ts-convert-from-snowflake-sv | #2 | Custom instructions mapping | PARTIALLY IMPLEMENTED |
 | ts-convert-from-snowflake-sv | #3 | Table-level synonyms | NOT IMPLEMENTED |
 | ts-convert-from-snowflake-sv | #4 | Private facts and metrics (`ACCESS_MODIFIER: PRIVATE`) | NOT IMPLEMENTED |

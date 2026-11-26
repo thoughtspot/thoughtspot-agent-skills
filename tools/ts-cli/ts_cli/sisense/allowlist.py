@@ -142,6 +142,31 @@ def _strip_comments(script: str) -> str:
     return re.sub(r"//[^\n\r\u2028\u2029]*", "", re.sub(r"/\*.*?(\*/|$)", "", script or "", flags=re.S)).strip()
 
 
+def blox_text(widget: dict) -> Optional[str]:
+    """The text of a BloX card that plots nothing (every panel empty), else None. Such a card is a
+    banner: its TextBlocks are the whole of what it shows, and it runs no query, so its script
+    (typically one writing the filter values into the text) cannot change a number."""
+    if not isinstance(widget, dict) or (widget.get("type") or "") != "BloX":
+        return None
+    panels = ((widget.get("metadata") or {}).get("panels") or []) if isinstance(widget.get("metadata"), dict) else []
+    if any(isinstance(p, dict) and (p.get("items") or []) for p in panels):
+        return None
+    card = (widget.get("style") or {}).get("currentCard") if isinstance(widget.get("style"), dict) else None
+    texts: list = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "TextBlock" and isinstance(node.get("text"), str):
+                texts.append(node["text"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(card)
+    return " ".join(texts)
+
+
 def script_problem(script) -> Optional[str]:
     if script is None or (isinstance(script, str) and not _strip_comments(script)):
         return None
@@ -181,7 +206,7 @@ def widget_unsupported(widget: dict) -> list:
     A sub-level that is not an object is itself reported (it could not be read)."""
     out = _level({k: v for k, v in widget.items() if k != "script"}, "", _WIDGET_READ,
                  _WIDGET_PRESENTATION, _WIDGET_DEFAULTS)
-    if script_problem(widget.get("script")):
+    if script_problem(widget.get("script")) and blox_text(widget) is None:
         out.append("script")
     for sub, read, pres, defaults in (("options", _OPTIONS_READ, _OPTIONS_PRESENTATION, _OPTIONS_DEFAULTS),
                                       ("metadata", _METADATA_READ, frozenset(), _METADATA_DEFAULTS),
@@ -234,7 +259,9 @@ def _panels(widget: dict) -> list:
     wtype = widget.get("type") or ""
     known = _PANELS.get(wtype)
     if known is None:
-        return [] if wtype in _NO_PANELS else [f"panels of widget type {wtype or '?'} (not read)"]
+        if wtype in _NO_PANELS or blox_text(widget) is not None:
+            return []
+        return [f"panels of widget type {wtype or '?'} (not read)"]
     panels = [p for p in _panel_list(widget) if isinstance(p, dict)]
     extra = sorted({k for p in panels for k in p if k not in _PANEL_KEYS})
     return [f"panel '{p.get('name')}'" for p in panels if p.get("name") not in known] + [f"panel key {k}" for k in extra]
