@@ -154,6 +154,12 @@ def _push_extra_commit(e, target, name):
 
 
 def _main(e, *argv):
+    """A full run (the suites this file tests run only under --full); _fast_main is
+    the default run."""
+    return pr_ready.main(["--full", *argv], repo_root=e.work, python="python3")
+
+
+def _fast_main(e, *argv):
     return pr_ready.main(list(argv), repo_root=e.work, python="python3")
 
 
@@ -811,3 +817,37 @@ def test_scoped_quality_gates_failure_is_hard(env, capsys):
     _commit(env.work, "tools/validate/check_new.py")
     env.checks.answers = {"generate_quality_gates.py": (1, "FAIL  stale\n")}
     assert _main(env, "--no-review") == 1
+
+
+# ---- the default (fast) run leaves the smokes and pytest to CI (2026-11-26) ----
+
+def test_a_default_run_lists_pytest_and_smokes_not_run_and_is_ready(env, capsys):
+    assert _fast_main(env, "--no-review") == 0
+    _, text = _evidence(env)
+    assert "fast checks only" in text
+    assert "**READY**" in text
+    for args in pr_ready.pytest_invocations(env.work):
+        assert f"`pytest {' '.join(args)}` — NOT RUN: fast run" in text
+    for suite in pr_ready.rc.CI_SMOKES:
+        assert f"`{suite}` — NOT RUN: fast run" in text
+    assert "| pytest |" in text and "| PASS |" not in text.split("| pytest |", 1)[1].split("\n", 1)[0]
+
+
+def test_a_default_run_still_fails_on_a_failing_check(env, monkeypatch):
+    # A fast run narrows only the suites: the check list still decides the verdict.
+    real = pr_ready.rc.run
+    def failing(*a, **k):
+        return real(*a, **k) + [{"id": "planted", "status": "FAIL", "seconds": 0.0,
+                                  "output_tail": "FAIL planted"}]
+    monkeypatch.setattr(pr_ready.rc, "run", failing)
+    assert _fast_main(env, "--no-review") == 1
+    assert "NOT READY" in _evidence(env)[1]
+
+
+def test_full_runs_the_suites(env, monkeypatch):
+    ran = []
+    monkeypatch.setattr(pr_ready, "run_pytest", lambda *a, **k: ran.append("pytest") or [])
+    monkeypatch.setattr(pr_ready.rc, "run_smokes", lambda *a, **k: ran.append("smokes") or [])
+    _fast_main(env, "--no-review", "--full")
+    assert ran == ["smokes", "pytest"]
+    assert "fast checks only" not in _evidence(env)[1]

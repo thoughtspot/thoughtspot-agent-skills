@@ -114,8 +114,12 @@ fork, the run adds a remote named `upstream` for `thoughtspot/thoughtspot-agent-
 and fetches its `main`: that is the base, never your fork's `main`. If a remote called
 `upstream` already points somewhere else, the run stops with exit 2 and says so.
 
-The run takes about five minutes: give the Bash call a 600000 ms timeout, or run it
-in the background and wait for it to finish.
+By default the run is **fast checks only** (the check list, the PR-only gates and the
+validators, a minute or two): the smoke suites and pytest are listed NOT RUN, because
+CI's `validate` check runs them on the PR and is required to merge, even with
+`--admin`. Do not add `--full` unless the user asks for it; a contributor may use it
+before asking a maintainer to approve CI on a fork PR. A `--full` run takes about ten
+minutes: give the Bash call a 600000 ms timeout, or run it in the background.
 
 Choosing the interpreter, in the block below:
 
@@ -215,6 +219,12 @@ shell):
 
 Pass the inputs, not your own reading of the change: a reviewer handed a conclusion
 tends to confirm it.
+
+**A docs-only diff gets a lighter review.** Docs-only means every path in
+`git diff --name-only <range>` ends in `.md`. Dispatch the reviewer with the Agent
+tool's `effort: high` in place of its frontmatter `max`; if the harness does not
+apply the override, the review runs at `max`, which fails safe. Step 7 gives a
+docs-only diff no re-review.
 
 ## Step 4: converters also get the converter audit
 
@@ -346,7 +356,9 @@ The ranks are the `pr-reviewer`'s ("Output format" in `.claude/agents/pr-reviewe
 4. **Otherwise, one fix round.** Brief the fixer to fix each item from 1 for its class
    across the branch, and to test what the fix itself introduces: a fix that adds
    normalisation or a new code path is new surface.
-5. **Then one re-review.** Before Step 3 empties `review.md`, copy it to
+5. **Then one re-review,** except for a docs-only diff (Step 3): its fix commits
+   ship on CI and your own read of them, and the PR description says they were not
+   re-reviewed. Otherwise, before Step 3 empties `review.md`, copy it to
    `review-<earlier-head>.md` beside it. Run Steps 1-6 again and dispatch the
    `pr-reviewer` as a re-review, adding to Step 3's inputs the earlier review's head and
    the fix commits. The evidence gets the re-review with the earlier review's Blocker
@@ -374,6 +386,7 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-11-26 | A default run is fast checks only: the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check (`--full` runs them; `--post` implies it). A docs-only diff (every changed path ends in `.md`) gets one review at effort `high` and no re-review of its fix commits |
 | 1.1.0 | 2026-11-25 | Step 7, triage, fix once, ship: fix Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement, normal use or a fixed rank, or that the fixes introduced; send everything else to one dated backlog item (the next id free on upstream `main`, never found by reading PR text); ship at once when nothing needs fixing, else one fix round and one re-review of the branch's commits since the reviewed head; a merge of `main` touching only `CHANGELOG.md` and `docs/backlog.md`, or a commit changing only those, refreshes the evidence without a new review. Step 3 passes the user's stated requirements. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text brought into a credentialed session, a weakened gate, silently wrong output on any input and unread-as-clean are always Blockers |
 | 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |
 | 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 exports an interpreter the user named as given (a typo stops the run), else keeps a `CHECKS_PYTHON` already set, else sets it to `~/.venvs/tas-ci/bin/python3.12` when that exists; Step 2 reports no evidence on exit 2; link to `.github/CONTRIBUTING.md` |

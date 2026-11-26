@@ -539,6 +539,20 @@ def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result
     return results
 
 
+#: Why a default run leaves the smoke suites and pytest to CI (2026-11-26 amendment to the
+#: PR-quality spec): CI's `validate` is a required check, so a local copy only moves where
+#: a failure shows up, at ~10 minutes a run.
+FAST_REASON = ("fast run: CI's required `validate` check runs it on the PR; "
+               "`scripts/pr-ready.sh --full` runs it here")
+
+
+def not_run_rows(ids: Sequence[str]) -> List[Result]:
+    """NOT RUN rows for the suites a fast run leaves to CI, one per suite, so the
+    evidence lists each one rather than reading as a full run."""
+    return [{"id": i, "status": "NOT RUN", "seconds": 0.0, "output_tail": "",
+             "reason": FAST_REASON} for i in ids]
+
+
 def _denylist_state() -> str:
     try:
         import check_customer_references as ccr
@@ -717,7 +731,12 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
                              "only if the run is green, the tree is clean, the PR's head "
                              "is this head and the block passes the secrets and "
                              "customer-reference scans")
+    parser.add_argument("--full", action="store_true",
+                        help="also run CI's smoke suites and pytest invocations locally "
+                             "(~10 minutes); a default run lists them NOT RUN and leaves "
+                             "them to CI. --post implies --full")
     args = parser.parse_args(argv)
+    full = args.full or args.post is not None
     python = python or sys.executable or "python3"
 
     try:
@@ -752,15 +771,21 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
     audit_installed = _pip_audit_installed(python, repo_root)
     if audit_installed:
         checks.append(_pip_audit(python, repo_root, report))
-    smokes = rc.run_smokes(repo_root, python, report=report)
-    pytests = run_pytest(repo_root, python, report)
+    if full:
+        smokes = rc.run_smokes(repo_root, python, report=report)
+        pytests = run_pytest(repo_root, python, report)
+    else:
+        smokes = not_run_rows(rc.CI_SMOKES)
+        pytests = not_run_rows(["pytest " + " ".join(a) for a in pytest_invocations(repo_root)])
+        for row in smokes + pytests:
+            report(row, row["reason"])
 
     text = evidence.render(base_ref=base_ref, base_sha=base_sha, head_sha=head_sha,
                            dirty=dirty, behind=behind, checks=checks, smokes=smokes,
                            pytest=pytests,
                            not_reproduced=not_reproduced(repo_root, base_ref, dirty,
                                                          audit_installed),
-                           review=None)
+                           review=None, fast=not full)
     path = evidence.write(text, repo_root)
 
     failed = [str(r["id"]) for r in checks + smokes + pytests if r["status"] == "FAIL"]

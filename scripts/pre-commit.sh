@@ -460,7 +460,20 @@ run_pytest() {
   fi
 }
 
-if grep -q '\.py$' <<< "$STAGED"; then
+# A merge commit stages every .py file the merged side changed, code its own branch has
+# already tested. Run the suites only for a .py file whose staged content matches
+# neither side's tip unchanged: it differs from HEAD (it is staged) AND from MERGE_HEAD,
+# so it is a conflict resolution or a combination of both sides. CI runs everything.
+PY_STAGED="$(grep '\.py$' <<< "$STAGED")" || PY_STAGED=""
+if [ -n "$PY_STAGED" ] && git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  PY_STAGED="$(comm -12 <(sort <<< "$PY_STAGED") \
+               <(git diff --cached --name-only MERGE_HEAD -- '*.py' | sort))"
+  if [ -z "$PY_STAGED" ]; then
+    echo "  unit tests                     SKIP (merge commit: every staged .py file is the merged side's, already tested; CI runs the suites)"
+  fi
+fi
+
+if [ -n "$PY_STAGED" ]; then
   run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
 fi

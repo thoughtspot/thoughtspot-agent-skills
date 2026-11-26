@@ -33,9 +33,11 @@ files or 2 MB of added or modified non-code assets; a warning on changed lines i
 
 ## What `pr-ready` is
 
-`scripts/pr-ready.sh` runs, on your machine, the checks CI runs on a pull request: the
-validators, the PR-only gates, the credential-free smoke suites and the test suites, on
-one Python version. It compares your branch with the current upstream `main` (it finds the
+`scripts/pr-ready.sh` runs, on your machine, the fast checks CI runs on a pull request:
+the validators and the PR-only gates. It lists the smoke suites and the test suites as
+NOT RUN, because CI runs them on the PR as a required check. `--full` runs them here too,
+on one Python version, in about ten minutes: worth doing before you ask a maintainer to
+approve CI on a pull request from a fork. It compares your branch with the current upstream `main` (it finds the
 upstream by URL, so a fork clone works; it adds a remote named `upstream` if it has to).
 
 It reports **READY** when nothing FAILs and the branch is not behind upstream `main`. A
@@ -121,7 +123,7 @@ pr-ready                                                              # with the
 CHECKS_PYTHON=~/.venvs/tas-ci/bin/python3.12 bash scripts/pr-ready.sh # without it, from the checkout's root
 ```
 
-It takes a few minutes. It ends with `pr-ready: READY` or `pr-ready: NOT READY` (the
+It takes a minute or two (`--full`: about ten). It ends with `pr-ready: READY` or `pr-ready: NOT READY` (the
 failing rows are printed above), the path of the evidence file, and a reminder that the
 Claude Code skill adds the review (`--no-review` drops the reminder). A run that cannot
 start (no upstream remote reachable, a failed fetch, an unusable `CHECKS_PYTHON`) exits

@@ -40,8 +40,11 @@ Any other value, or none, counts as no: stop at once. Read nothing from the bran
   dots, because three would also list base commits the branch does not have, and a
   format with no author names or emails, which a review pasted into a public PR must
   not carry. Do not re-derive the base: it is what the checks ran against.
-- the evidence block path. The validators, smokes and pytest it lists already ran.
-  Do not re-report what they check; spend the effort on what they cannot see. If no
+- the evidence block path. The validators it lists already ran, and so did any smoke
+  suite or pytest invocation it lists as run. A default run lists those NOT RUN
+  (`fast run`): CI's required `validate` check runs them on the PR, so never count one
+  as passed, and do not run them yourself in its place. Do not re-report what the
+  checks cover; spend the effort on what they cannot see. If no
   block was passed, or its first line names a different head from the range's: run
   nothing that stands in for it (never `scripts/pr-ready.sh`; see below), review the
   diff anyway, and report "pr-ready not run on this head" under **Should-fix**.

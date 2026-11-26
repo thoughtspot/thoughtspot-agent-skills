@@ -129,6 +129,7 @@ def _not_run_or_skipped(results: Sequence[Result]) -> List[str]:
 
 def render(*, base_ref: str, base_sha: str, head_sha: str, dirty: bool, behind: int,
            checks: List[Result], smokes: List[Result], pytest: List[Result],
+           fast: bool = False,
            not_reproduced: List[str], review: Optional[str]) -> str:
     """The evidence block as markdown. Sections, in order: header, behind count,
     results table, NOT RUN and SKIP, not reproduced locally, review."""
@@ -151,6 +152,11 @@ def render(*, base_ref: str, base_sha: str, head_sha: str, dirty: bool, behind: 
     out.append("")
     out.append(f"**{verdict}**")
     out.append("")
+    if fast:
+        out.append("Scope: **fast checks only.** The smoke suites and pytest were not run "
+                   "here; CI's required `validate` check runs them on the PR. "
+                   "`--full` runs them locally.")
+        out.append("")
     noun = "commit" if behind == 1 else "commits"
     behind_note = f" — merge or rebase onto `{base_ref}` and re-run" if behind > 0 else ""
     out.append(f"Behind upstream main: {behind} {noun}{behind_note}")
