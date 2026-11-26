@@ -19156,3 +19156,19 @@ under pr-ready Step 7. **Target:** 2027-01-31.
     dropped.
 11. The quadrant's grey band holds both Too new / not judged Models and Models whose Sets
     were not read; each keeps its status colour, so the band mixes colours.
+
+From the re-review of the fix rounds:
+
+12. **H4 has the Usage view's old blind spot** (on main since before 3.28.0): "A Model the
+    dependents lookup did not list has none" (`catalog/rules/human.yaml`), so a VIEW-only
+    auditor whose Model's Liveboards are hidden (`hasInaccessibleDependents` without
+    `areInaccessibleDependentsReturned`), or an odd response shape, gets "Orphan model".
+    3.28.0 now records those Models as `dependents_incomplete`; H4 should not fire on them.
+13. A snapshot written before 3.28.0 cannot say which Models had hidden dependents, so the
+    Usage view reads their totals as complete (flagged on the page and as
+    `corpus.usage.dependents_checked: false`).
+14. The `--snapshot-out` description in the README does not name the `sets_incomplete` and
+    `dependents_incomplete` files; SKILL.md's "as ThoughtSpot's dependents lookup returns
+    them" is loose for Sets (the cohort listing); `dependents_scope` could point at
+    `usage.org`; `views/usage.js` reads a Model with no triage as 0 dependents (only a
+    hand-edited JSON reaches it); no test covers `discover_sets`' `unrecognised_row` path.
