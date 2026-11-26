@@ -1,4 +1,4 @@
-# Changelog Archive (pre-1.47.0)
+# Changelog Archive (pre-1.47.1)
 
 Full version history for **ts-convert-from-tableau** below the version(s) currently kept
 inline in `SKILL.md`'s `## Changelog`. Moved here in the BL-128 second-round context-cost
@@ -10,6 +10,7 @@ archaeology ("when/why did X change"), not for executing the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.47.0 | 2026-11-19 | Model/formula-engine fixes (ts-cli v0.220.1). Nested-`group_aggregate` false-flag fixed; a nested FIXED LOD parks, not migrates. `convert_string_concat` no longer concats a numeric `+` just because the formula is string-typed; a rejected pair no longer shares a conversion's budget, so long ladders convert fully. `to_string`/`str` drops only for a whole `concat()` argument; its masking token is control-character-delimited. `fix_double_aggregation` follows refs at any depth, adds `median`/`min_if`/`max_if`/`stddev_if`/`variance_if`, uses a quote-aware paren matcher; strips `sum()` only when some aggregate sits outside every `group_aggregate`. Import-retry no longer fails open; merge prints every datasource's result — BL-580/581/582/612. |
 | 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, …) is excluded with the function named, not parked at import; DATETIME and `/* */` comments translate; UNION is the 16th spatial function (ts-cli v0.211.0, BL-460). |
 | 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
 | 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
