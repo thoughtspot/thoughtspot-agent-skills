@@ -473,9 +473,16 @@ py_needing_tests() {  # $1 = the staged file list; prints the .py files to test 
   if [ -z "$py" ] || ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
     printf '%s' "$py"; return
   fi
-  for main_ref in refs/remotes/upstream/main refs/remotes/origin/main; do
-    git rev-parse -q --verify "$main_ref" >/dev/null && break
-    main_ref=""
+  # Main is found by the canonical repo's URL, never by remote name: in a fork clone
+  # `origin/main` is the fork's copy, which CI may never have tested.
+  local remote url
+  main_ref=""
+  for remote in $(git remote); do
+    url="$(git remote get-url "$remote" 2>/dev/null)" || continue
+    if grep -Eiq '^(https://([^@/]+@)?github\.com/|ssh://git@github\.com(:22)?/|git@github\.com:)thoughtspot/thoughtspot-agent-skills(\.git)?/?$' <<< "$url" \
+       && git rev-parse -q --verify "refs/remotes/$remote/main" >/dev/null; then
+      main_ref="refs/remotes/$remote/main"; break
+    fi
   done
   if [ -z "$main_ref" ] || ! git merge-base --is-ancestor MERGE_HEAD "$main_ref"; then
     printf '%s' "$py"; return

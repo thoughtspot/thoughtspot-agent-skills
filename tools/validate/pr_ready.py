@@ -579,8 +579,10 @@ def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
         f"{platform.release()}.",
     ]
     if not full:
-        items.append(f"The smoke suites and pytest ({matrix}): not run here (a fast run); "
-                     "CI's required `validate` check runs them. `--full` runs them here.")
+        items.append(f"The smoke suites and pytest: not run here (a fast run). CI's "
+                     f"required `validate` check runs them in its suite job on Python "
+                     f"{suite_python or 'the workflow version'}, and its pytest matrix "
+                     f"({matrix}) runs pytest again. `--full` runs them here.")
     else:
         items.append(f"CI's pytest matrix ({matrix}): the pytest invocations ran once here, "
                      f"on Python {local_python}.")
@@ -786,7 +788,7 @@ def main(argv: Optional[Sequence[str]] = None, *, repo_root: Path = REPO_ROOT,
         smokes = not_run_rows(rc.CI_SMOKES)
         pytests = not_run_rows(["pytest " + " ".join(a) for a in pytest_invocations(repo_root)])
         for row in smokes + pytests:
-            report(row, row["reason"])
+            print(f"NOT RUN {row['id']} ({row['reason']})", flush=True)
 
     text = evidence.render(base_ref=base_ref, base_sha=base_sha, head_sha=head_sha,
                            dirty=dirty, behind=behind, checks=checks, smokes=smokes,

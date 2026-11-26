@@ -860,7 +860,9 @@ def test_a_default_run_never_says_the_suites_ran(env, capsys):
     assert "pytest ran as `python -m pytest`" not in text
     assert "not run here (a fast run)" in text
     out = capsys.readouterr().out
-    assert "prerequisite absent: )" not in out
+    assert "prerequisite absent: fast run" not in out
+    assert "(fast run: CI" in out
+    assert "suite job on Python" in text
     assert "READY (fast checks; CI runs the suites)" in out
 
 

@@ -43,6 +43,15 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+CANONICAL = "https://github.com/thoughtspot/thoughtspot-agent-skills.git"
+
+
+def _main_ref(repo, url=CANONICAL, remote="origin"):
+    """Point refs/remotes/<remote>/main at local main, behind a remote with this URL."""
+    _git(repo, "remote", "add", remote, url)
+    _git(repo, "update-ref", f"refs/remotes/{remote}/main", "main")
+
+
 def _advance(repo, branch, path, text):
     _git(repo, "checkout", "-q", branch)
     (repo / path).write_text(text)
@@ -53,7 +62,7 @@ def _advance(repo, branch, path, text):
 def test_a_clean_merge_of_main_needs_no_tests(tmp_path):
     repo = _repo(tmp_path)
     _advance(repo, "main", "a.py", "a\nmain\n")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    _main_ref(repo)
     _git(repo, "merge", "-q", "--no-commit", "main")
     assert _needing(repo) == ""
 
@@ -61,7 +70,7 @@ def test_a_clean_merge_of_main_needs_no_tests(tmp_path):
 def test_a_conflict_resolved_in_a_py_file_is_tested(tmp_path):
     repo = _repo(tmp_path)
     _advance(repo, "main", "b.py", "b\nmain\n")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    _main_ref(repo)
     subprocess.run(["git", "-C", str(repo), "merge", "-q", "--no-commit", "main"],
                    capture_output=True)
     (repo / "b.py").write_text("b\nresolved\n")
@@ -73,7 +82,7 @@ def test_a_merge_of_another_branch_is_tested(tmp_path):
     repo = _repo(tmp_path)
     _git(repo, "branch", "side", "main")
     _advance(repo, "side", "a.py", "a\nside\n")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    _main_ref(repo)
     _git(repo, "merge", "-q", "--no-commit", "side")
     assert _needing(repo) == "a.py"
 
@@ -98,3 +107,30 @@ def test_the_skip_is_counted_in_the_summary():
     block = block[:block.index("\nfi\n")]
     assert "SKIPPED=$((SKIPPED + 1))" in block
     assert "SKIPPED_LABELS=" in block
+
+
+def test_a_fork_origin_is_not_main(tmp_path):
+    # In a fork clone, origin/main is the fork's copy: CI may never have tested it.
+    repo = _repo(tmp_path)
+    _advance(repo, "main", "a.py", "a\nmain\n")
+    _main_ref(repo, url="https://github.com/someone/thoughtspot-agent-skills.git")
+    _git(repo, "merge", "-q", "--no-commit", "main")
+    assert _needing(repo) == "a.py"
+
+
+def test_upstream_naming_another_repo_is_not_main(tmp_path):
+    repo = _repo(tmp_path)
+    _advance(repo, "main", "a.py", "a\nmain\n")
+    _main_ref(repo, url="git@github.com:someone/other.git", remote="upstream")
+    _git(repo, "merge", "-q", "--no-commit", "main")
+    assert _needing(repo) == "a.py"
+
+
+def test_canonical_upstream_in_a_fork_clone_is_main(tmp_path):
+    repo = _repo(tmp_path)
+    _advance(repo, "main", "a.py", "a\nmain\n")
+    _main_ref(repo, url="https://github.com/someone/thoughtspot-agent-skills.git")
+    _main_ref(repo, url="git@github.com:thoughtspot/thoughtspot-agent-skills.git",
+              remote="upstream")
+    _git(repo, "merge", "-q", "--no-commit", "main")
+    assert _needing(repo) == ""

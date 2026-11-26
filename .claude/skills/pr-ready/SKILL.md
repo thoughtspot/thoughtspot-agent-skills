@@ -26,7 +26,7 @@ on, scanned, as the steps below say.
 ## First: confirm this is your own branch
 
 Steps 1–6 **execute this branch's code with your credentials**: the runner, every
-validator, the smokes and the test suite run in your environment (credential
+validator, and, with `--full`, the smokes and the test suite run in your environment (credential
 variables, the Keychain, the `ts` token cache), and the reviewer may build and run
 the branch's code too. Before running anything, say so to the user and ask:
 

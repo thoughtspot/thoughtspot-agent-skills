@@ -114,8 +114,8 @@ and spot checks, not on finding validator failures or building the first repro.
 > in the branch (their two failures were the local `PATH`); both reviews found real
 > defects. CI runs the same suites as the required `validate` check, which `--admin`
 > cannot bypass, so the local copy only moved where a failure shows up. Pre-commit
-> also stops running the unit suites on a merge commit whose staged `.py` files are
-> all the merged side's. The superset property below still holds for `--full`.
+> also stops running the unit suites on a merge commit of `main` (found by the
+> canonical repo's URL) whose staged `.py` files are all main's. The superset property below still holds for `--full`.
 
 - **Structured list.** A single structured list of checks (`tools/validate/checks.toml`
   or a Python module) records, per check:
