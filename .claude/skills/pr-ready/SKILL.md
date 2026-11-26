@@ -225,7 +225,9 @@ document for people on the list below, and none is generated. The list is
 deliberately short: it never takes in a file that changes what an agent does (any
 `CLAUDE.md`, skill, agent definition, rules file, memory or mapping doc), and a
 rename is never docs-only. Decide it with this block, never by reading the diff; when
-in doubt, it is not docs-only:
+in doubt, it is not docs-only. The block checks the files; it cannot check the lines,
+so a "yes" still needs your read that no changed line is a command, code or config
+(the user's global rule applies on top of this list):
 
 ```bash
 RANGE="$(python3 tools/validate/evidence.py range)" || exit 1
