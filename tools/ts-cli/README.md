@@ -4970,6 +4970,32 @@ the list of used Models not found in this Org, unknown. A snapshot written befor
 by 0.223.0 holds usage without Orgs: it replays, and every not-found ID reads "Org not
 recorded". Logic in `ts_cli/audit/usage.py`.
 
+**The Usage view (since 0.225.0).** With usage read, each audited Model's
+`corpus.models[].usage` also carries its `status` (`active`, `idle`, `never`, `too_new`
+or `not_judged`, from H17's own reading, so the view and H17 agree), its `dependents`
+(`total`, `liveboards`, `answers`, `sets` and `other`, from the dependents lookup the
+audit already runs, which returns the dependents the audit's user can see in its Org;
+`visible`, their sum, and `complete`. `total` is null, and `visible` a lower bound, when
+the Model's dependents were not read in full: its Sets not fetched, not known to be
+fetched, or its Set lookup failed (the context's `sets_incomplete`; an older snapshot's
+warnings name them), or its own dependents reading incomplete — dependents hidden from
+the user and not returned (`hasInaccessibleDependents` without
+`areInaccessibleDependentsReturned`), a body that is not a list, or the Model missing
+from its batch's answer or without a dependents map (the context's
+`dependents_incomplete`, with a warning naming the Model). `complete` is null for a
+snapshot from before 0.225.0, which did not record that check), its `owner` (the metadata
+header's author display name, else author name) and its `created` date; `corpus.usage`
+gains `status_idle_days`, the idle days the statuses used (H17's, else the catalog's),
+and `dependents_checked`, false when the run did not record which dependents were read
+in full (a snapshot from before 0.225.0).
+No new call. The report's Usage view (`#usage`, a sidebar link only when the run
+fetched usage; "Not read" when it could not read it) draws one dot per Model by days
+since its last query and its dependents, lists the Models in a sortable table with
+status and "No dependents" filters, and exports the selected rows as CSV or as the
+`ts-audit-candidates/1` JSON (ts-audit SKILL.md, "Candidates file"), built in the
+browser, each stating that its dependents are those visible to the audit's user in this
+Org (`dependents_scope`). Logic in `ts_cli/audit/usage_triage.py`.
+
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do
 such a Table, the Answers built on either, or the Model's Sets: a list or a single value

@@ -864,8 +864,8 @@ formula equivalents:
 | `date_trunc('hour', col)` | `sql_date_time_op("DATE_TRUNC('HOUR', {0})", col)` — no native TS function returns DATETIME truncated to the hour; `start_of_hour` returns TIME only |
 | `date_trunc('minute', col)` | `sql_date_time_op("DATE_TRUNC('MINUTE', {0})", col)` — same as hour; `start_of_min` returns TIME only |
 | `date_trunc('second', col)` | `sql_date_time_op("DATE_TRUNC('SECOND', {0})", col)` — no native TS equivalent |
-| `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | `if (x) then y else if (z) then w else v` |
-| `COALESCE(a, b)` | `if (a != null) then a else b` |
+| `CASE WHEN x THEN y WHEN z THEN w ELSE v END` | `( if (x) then y else if (z) then w else v )` — bracketed: ThoughtSpot's `else` is greedy, so an unbracketed conditional followed by `=`, `+` etc. takes the operator into the else branch (BL-632, live 2026-11-26). Inside a function call the brackets are dropped |
+| `COALESCE(a, b)` | `( if (a != null) then a else b )` — bracketed, as CASE (BL-632) |
 | `CONCAT(a, ' ', b)` | `concat(a, ' ', b)` |
 | `DATEDIFF(end, start)` | `diff_days(end, start)` — same order; both take the later date first (BL-336) |
 | `DATEDIFF(unit, start, end)` — `MONTH`, `YEAR`, `QUARTER`, `WEEK`, `HOUR`, `MINUTE`, `SECOND`, `MILLISECOND`, `MICROSECOND` | `sql_int_op("DATEDIFF(MONTH, {0}, {1})", start, end)` — an exact pass-through in the source's order (BIGINT, so `sql_int_op`). **Fixed ts-cli 0.160.0 (BL-345):** `MONTH` was `diff_months(end, start)`, but the 3-arg form counts **complete** units elapsed ([datediff (timestamp)](https://docs.databricks.com/aws/en/sql/language-manual/functions/datediff3)) while every TS `diff_*` counts calendar boundaries — Jan 31 → Feb 1 is 0 months in Databricks, 1 in ThoughtSpot. Over an aggregate: refused |
@@ -890,7 +890,7 @@ formula equivalents:
 | `COALESCE(x / NULLIF(y, 0), 0)` | `ifnull ( safe_divide ( x , y ) , 0 )` (BL-357) |
 | `CASE WHEN y = 0 THEN 0 ELSE x / NULLIF(y, 0) END` | `safe_divide ( x , y )` (BL-374 — see "safe_divide Pattern") |
 | `COALESCE(x / NULLIF(y, 0), d)` | `ifnull ( x / y , d )` |
-| `COALESCE(a, b, c, …)` | `if ( a != null ) then a else if ( b != null ) then b else c` — n-ary, as `sv_sql` (BL-362) |
+| `COALESCE(a, b, c, …)` | `( if ( a != null ) then a else if ( b != null ) then b else c )` — n-ary, as `sv_sql` (BL-362), bracketed (BL-632) |
 | `NVL(a, b)` / `IFNULL(a, b)` | `ifnull ( a , b )` (BL-362) |
 | `NVL2(a, b, c)` | `( if ( a != null ) then b else c )` (BL-362) |
 | `zeroifnull(x)` | `ifnull ( x , 0 )` (BL-362) |

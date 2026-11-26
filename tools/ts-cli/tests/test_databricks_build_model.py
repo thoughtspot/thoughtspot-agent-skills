@@ -1312,7 +1312,7 @@ model:
   formulas:
   - id: formula_Customer Segment
     name: Customer Segment
-    expr: "if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic'"
+    expr: "( if ( [Orders_MV_View::total_amount] > 1000 ) then 'Premium' else if ( [Orders_MV_View::total_amount] > 100 ) then 'Standard' else 'Basic' )"
     properties:
       column_type: ATTRIBUTE
   - id: formula_Total Orders

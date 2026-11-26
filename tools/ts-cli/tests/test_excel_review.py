@@ -262,6 +262,7 @@ def test_null_if_zero_is_never_emitted():
     assert not is_known("null_if_zero")
     for dialect in ("snowflake", "databricks"):
         r = translate("NULLIF(x, 0)", dialect)
-        assert r["formula"] == "( if ( [TABLE::x] = 0 ) then null else [TABLE::x] )", dialect
+        # a whole formula: formula-translate drops the conditional's grouping (BL-632)
+        assert r["formula"] == "if ( [TABLE::x] = 0 ) then null else [TABLE::x]", dialect
         r = translate("COALESCE(NULLIF(x, 0), 1)", dialect)
         assert "null_if_zero" not in (r["formula"] or "") and r["status"] != NR, dialect

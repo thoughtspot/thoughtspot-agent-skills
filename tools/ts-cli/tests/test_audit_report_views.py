@@ -30,6 +30,7 @@ ROUTES = {
     "crossmodel": ("crossmodel", "Example Sales"),
     "objectmap": ("objectmap/dependencies", "Example Sales"),
     "cleanup": ("cleanup", "Orphan model with no dependents"),
+    "usage": ("usage", "Not collected"),  # JSON from before usage: the view says so
     "formulas": ("formulas", "No formulas in the audited Models"),  # JSON from before 3.2
     "datacache": ("datacache", "Not assessed"),  # JSON from before 3.23: no readiness
 }

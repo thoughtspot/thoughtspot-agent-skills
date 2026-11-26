@@ -242,7 +242,7 @@ class TestFunctions:
 
     def test_if_then_else_form(self):
         assert t("IF(x > 1, 'a', 'b')") == \
-            "if ( [TRANSACTIONS::x] > 1 ) then 'a' else 'b'"
+            "( if ( [TRANSACTIONS::x] > 1 ) then 'a' else 'b' )"
 
     def test_median(self):
         assert t("MEDIAN(x)") == "median ( [TRANSACTIONS::x] )"
@@ -343,12 +343,12 @@ class TestCaseWhen:
         # ts-from-databricks-sql-view.md Customer Segment
         assert t("CASE WHEN total_amount > 1000 THEN 'Premium' "
                  "WHEN total_amount > 100 THEN 'Standard' ELSE 'Basic' END") == \
-            ("if ( [TRANSACTIONS::total_amount] > 1000 ) then 'Premium' "
-             "else if ( [TRANSACTIONS::total_amount] > 100 ) then 'Standard' else 'Basic'")
+            ("( if ( [TRANSACTIONS::total_amount] > 1000 ) then 'Premium' "
+             "else if ( [TRANSACTIONS::total_amount] > 100 ) then 'Standard' else 'Basic' )")
 
     def test_no_else_defaults_null(self):
         assert t("CASE WHEN x = 1 THEN 'y' END") == \
-            "if ( [TRANSACTIONS::x] = 1 ) then 'y' else null"
+            "( if ( [TRANSACTIONS::x] = 1 ) then 'y' else null )"
 
 
 class TestPostfixConstructs:
@@ -424,11 +424,11 @@ class TestPostfixConstructs:
 
     def test_not_flag_inside_case(self):
         assert t("CASE WHEN NOT is_return THEN 1 ELSE 0 END") == \
-            "if ( [TRANSACTIONS::is_return] = false ) then 1 else 0"
+            "( if ( [TRANSACTIONS::is_return] = false ) then 1 else 0 )"
 
     def test_not_comparison_inside_case(self):
         assert t("CASE WHEN NOT status = 'x' THEN 1 ELSE 0 END") == \
-            "if ( not ( [TRANSACTIONS::status] = 'x' ) ) then 1 else 0"
+            "( if ( not ( [TRANSACTIONS::status] = 'x' ) ) then 1 else 0 )"
 
     def test_between_compound_left_operand_raises(self):
         with pytest.raises(UntranslatableError, match="parenthesize"):
@@ -483,13 +483,13 @@ class TestSafeDivide:
 
     def test_coalesce_two_args(self):
         assert t("COALESCE(a, b)") == \
-            "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b]"
+            "( if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else [TRANSACTIONS::b] )"
 
     def test_coalesce_three_args(self):
         # BL-362: n-ary COALESCE, as sv_sql
         assert t("COALESCE(a, b, c)") == (
-            "if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else "
-            "if ( [TRANSACTIONS::b] != null ) then [TRANSACTIONS::b] else [TRANSACTIONS::c]")
+            "( if ( [TRANSACTIONS::a] != null ) then [TRANSACTIONS::a] else "
+            "if ( [TRANSACTIONS::b] != null ) then [TRANSACTIONS::b] else [TRANSACTIONS::c] )")
 
 
 class TestAggregateFilterClause:
