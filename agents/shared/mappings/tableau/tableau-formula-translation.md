@@ -218,7 +218,7 @@ command detects pass-through conflicts automatically and skips them.
 | `COUNTD(x)` | `unique count ( x )` | Aggregate only |
 | `AVG(x)` | `average ( x )` | Aggregate only |
 | `ATTR(x)` | `x` | No equivalent; just reference the column |
-| `IIF(test, a, b)` | `if ( test ) then a else b` | Tableau's inline if; chain: Tableau `IIF` → Snowflake `IFF` → ThoughtSpot `if/then/else` Grouped when an operator follows (`IIF(…) + 1` → `( if … ) + 1`, BL-649) |
+| `IIF(test, a, b)` | `if ( test ) then a else b` | Tableau's inline if; chain: Tableau `IIF` → Snowflake `IFF` → ThoughtSpot `if/then/else`. Grouped when an operator follows (`IIF(…) + 1` → `( if … ) + 1`, BL-649) |
 | `SIGN(x)` | `if ( x > 0 ) then 1 else if ( x < 0 ) then -1 else 0` | No direct `sign()` in ThoughtSpot |
 | `SQUARE(x)` | `pow ( x , 2 )` | |
 | `STDEV(x)` | `stddev ( x )` | Aggregate only |

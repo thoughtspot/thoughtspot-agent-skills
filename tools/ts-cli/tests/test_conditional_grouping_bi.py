@@ -53,3 +53,37 @@ def test_qlik_refuses_an_if_call_that_does_not_span_the_expression():
     out, needs_review = qlik("If(a > 1, 1, 0) * Sum(b)")[:2]
     assert needs_review and out.count("(") == out.count(")"), out
     assert qlik("If(a > 1, 1, 0)")[:2] == ("if (a > 1) then 1 else 0", False)
+
+
+# --- review round: tests that fail on a weakened implementation ------------------------
+
+@pytest.mark.parametrize("op", ["+", "-", "*", "/", "%", "^", "=", "!=", "<>", "<", ">",
+                                "<=", ">=", "AND", "OR", "And"])
+def test_tableau_groups_before_every_binary_operator(op):
+    out = tableau(f"IIF([a] > 1, 1, 0) {op} [b]")
+    assert out.startswith("( if ( [a] > 1 ) then 1 else 0 )"), out
+
+
+@pytest.mark.parametrize("op", ["-", "*", "<", ">=", "!=", "and"])
+def test_sisense_groups_before_every_binary_operator(op):
+    out = sisense(f"IF([a] > 1, 1, 0) {op} [b]")[0]
+    assert out.startswith("( if ([a] > 1) then 1 else 0 )"), out
+
+
+def test_tableau_an_else_inside_a_then_branch_does_not_close_the_outer_block():
+    # the nested IIF's own else belongs to it; the outer IF still has none
+    assert tableau("IF [x] THEN IIF([a]>1,1,0) END + 1") == \
+        "( if ( [x] ) then if ( [a]>1 ) then 1 else 0 else null ) + 1"
+    assert tableau("IF [x] THEN IIF([a]>1,1,0) END + 1", role="attribute") == \
+        "( if ( [x] ) then if ( [a]>1 ) then 1 else 0 else null ) + 1"
+
+
+def test_tableau_elseif_without_else_followed_by_an_operator():
+    assert tableau("IF [a]>1 THEN 1 ELSEIF [b] THEN 2 END + 1") == \
+        "( if ( [a]>1 ) then 1 else if ( [b] ) then 2 else null ) + 1"
+
+
+def test_qlik_guard_ignores_a_bracket_inside_a_quoted_literal():
+    assert qlik("If(a = ')', 1, 0)")[:2] == ("if (a = ')') then 1 else 0", False)
+    out, needs_review = qlik("If(a = ')', 1, 0) * 2")[:2]
+    assert needs_review, out

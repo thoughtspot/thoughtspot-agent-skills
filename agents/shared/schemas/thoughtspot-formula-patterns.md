@@ -169,8 +169,9 @@ inside a call this way; the live probe tested only the first half). The Databric
 Snowflake translators build their CASE / IF / IFF / COALESCE / NVL2 output through
 `sql_forms.sqlf_if_chain`, which adds them. The Tableau and Sisense translators group a
 conditional only when an operator follows it, so the passes that match a bare
-`sum ( if … )` still see it; Qlik refuses an `If()` that does not span the expression
-(BL-649). For the two-argument null default, `ifnull ( [d] , false ) = false` avoids the
+`sum ( if … )` still see it; Qlik refuses an `If()` that does not span the expression.
+Some Tableau routes are still open: a conditional that a later pass splices (`ZN`,
+`RADIANS`, `MID`) and a conditional as a right operand (BL-649). For the two-argument null default, `ifnull ( [d] , false ) = false` avoids the
 question.
 
 Conditions in `if` can include `and` / `or` and function calls:

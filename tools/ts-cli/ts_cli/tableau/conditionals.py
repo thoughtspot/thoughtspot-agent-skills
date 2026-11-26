@@ -148,9 +148,39 @@ def _group_if_followed(block: str, text: str, end: int) -> str:
     when no branch matches, so ensure_else_clause never has to reach inside a group."""
     if not _followed_by_operator(text, end):
         return block
-    if not re.search(r"\belse\b(?!\s+if\b)", block, re.IGNORECASE):
+    if not _ends_in_else(block):
         block += " else null"
     return f"( {block} )"
+
+
+def _ends_in_else(block: str) -> bool:
+    """True if every ``if`` in ``block``'s own chain has its ``else``. Only keywords outside
+    brackets, quotes and nested ``( … )`` groups count, and each ``else`` closes the
+    innermost open ``if``, so a conditional nested in a THEN branch does not lend the outer
+    block its ``else`` (BL-649 review)."""
+    open_ifs, depth, i, n = 0, 0, 0, len(block)
+    while i < n:
+        c = block[i]
+        if c in "'\"[":
+            close = "]" if c == "[" else c
+            j = block.find(close, i + 1)
+            i = n if j == -1 else j + 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and (i == 0 or not (block[i - 1].isalnum() or block[i - 1] == "_")):
+            word = re.match(r"(if|else)\b", block[i:], re.IGNORECASE)
+            if word:
+                if word.group(1).lower() == "if":
+                    open_ifs += 1
+                else:
+                    open_ifs = max(open_ifs - 1, 0)
+                i += len(word.group(1))
+                continue
+        i += 1
+    return open_ifs == 0
 
 
 # ---------------------------------------------------------------------------
