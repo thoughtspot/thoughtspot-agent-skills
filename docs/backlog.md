@@ -378,6 +378,7 @@ are roughly ordered by value÷effort.
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
+| BL-651 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -19701,3 +19702,52 @@ Both mostly fail at import rather than silently.
 
 **Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
 with a reason.
+
+---
+
+## BL-651 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review (`pr-reviewer` + `conversion-consistency-auditor`)
+of `fix/tableau-table-column-physical-names` (ts-cli 0.225.2, ts-convert-from-tableau 1.47.1), which
+names Tableau Table TML columns by physical name. Everything here was outside that PR's one purpose.
+**Target:** 2026-12-15.
+
+**Should-fix (gate).**
+
+1. **`ts tml lint --dir` passes the class of bug that PR fixed.** `_table_column_names`
+   (`ts_cli/commands/tml.py`) indexes both a Table column's `name` and its `db_column_name`, so a
+   Model `column_id` `TABLE::X` that matches only `db_column_name` reads as resolved, though import
+   resolves X against `name` only (error 14547). `test_lint_dir_renamed_column_resolves_via_db_column_name`
+   pins the wrong behaviour, and `table_aggregations` (`ts_cli/tml_lint.py`) rests on the same
+   premise. Fix: resolve against `name` only (or warn when only `db_column_name` matches), flip that
+   test, add one proving the failure is caught. Also correct the stale claims: lint called "the
+   model<->table name-alignment arbiter" in `tests/test_tableau_build_model_tables.py`, and 14547's
+   cause list in `agents/shared/schemas/ts-model-conversion-invariants.md` and `ts-tml-import-gate.md`.
+2. **Merge mode can silently rewrite a bare ref to the wrong column (pre-existing).**
+   `build_col_table_map` / `build_column_lookup` (`ts_cli/model_builder.py`) put `column_id` suffixes
+   and display names into one upper-cased dict, so a display name (`Region` on one column) can
+   overwrite another column's physical suffix (`REGION`). Reproduced via
+   `prepare_formulas_for_merge`: `[REGION] = 'West'` came out bound to `BILLING_REGION`. Fires only
+   for refs still bare after translation. Fix in its own PR: keep the two namespaces apart, physical
+   suffix first.
+
+**Nits and warnings.**
+
+3. Duplicate Table column `name` is not guarded in the single-datasource path: two parse columns
+   resolving to one physical name (two captions over one `remote-name`, `_dbname` collapsing
+   `Order ID`/`Order_ID`, or a case-only pair `region`/`REGION`) emit duplicate names. Dedupe on
+   `db_name` first-seen-wins as the `table_registry` path does, or lint for duplicate `name`.
+4. `tableau/tables.py` still takes the name through the caption-keyed `cmap`
+   (`commands/tableau.py`): two datasources captioning different physical columns of one table the
+   same way emit the second physical name twice (loud; pre-existing). Name from the parse column's
+   `db_column_name`, or key `cmap` by it.
+5. The new test checks `column_id` suffixes only; add a two-table fixture with a join and a formula
+   on a captioned column so join `on:` and `[TABLE::X]` formula refs are pinned too.
+6. Upgrade note: Tables imported by ts-cli 0.225.1 or earlier still carry caption names, so a Model
+   exported over them still filters formulas in `--existing-guid` merge mode, and re-importing a
+   regenerated Table over its guid renames its columns (Answers/Liveboards on it may be affected).
+   Add a line to the skill (re-import Tables first) and to coverage-matrix row 140.
+7. Step 5a of the skill tells the reviewer to correct `db_column_name` in Table TML; add: change
+   `db_column_name` only, since the Model's `column_id` resolves against `name`.
+8. Wording: `tableau/tables.py`'s module docstring still says it mirrors PowerBI's shape and speaks
+   of a display name; rename `test_build_table_tml_table_map_and_column_map_override_physical_names_only`.
