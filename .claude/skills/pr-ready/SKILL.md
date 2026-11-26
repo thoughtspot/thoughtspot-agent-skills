@@ -1,12 +1,12 @@
 ---
 name: pr-ready
-description: "Run on your OWN branch before opening a PR, and before self-merging one. Runs everything CI checks locally against upstream main (`scripts/pr-ready.sh`), then an adversarial review of the branch's diff by the `pr-reviewer` agent (plus the conversion-consistency auditor when converters change), and writes both into one evidence block for the PR description. Advisory, not a required check. It executes the branch's code with your credentials, so it first asks you to confirm the branch is your own; for someone else's PR it stops and points to main's `scripts/check-pr.sh` and a human review."
+description: "Run on your OWN branch before opening a PR, and before self-merging one. Runs CI's fast checks locally against upstream main (`scripts/pr-ready.sh`; the test suites are left to CI unless `--full`), then an adversarial review of the branch's diff by the `pr-reviewer` agent (plus the conversion-consistency auditor when converters change), and writes both into one evidence block for the PR description. Advisory, not a required check. It executes the branch's code with your credentials, so it first asks you to confirm the branch is your own; for someone else's PR it stops and points to main's `scripts/check-pr.sh` and a human review."
 ---
 
 # pr-ready
 
 One local run of the review a PR would otherwise get only after it is opened: the
-CI-superset checks first, then a reviewer briefed to refute the diff. The output is
+fast checks first (CI runs the test suites), then a reviewer briefed to refute the diff. The output is
 an evidence block naming the head and base SHAs it describes, so a stale block is
 visible.
 
@@ -26,7 +26,7 @@ on, scanned, as the steps below say.
 ## First: confirm this is your own branch
 
 Steps 1–6 **execute this branch's code with your credentials**: the runner, every
-validator, the smokes and the test suite run in your environment (credential
+validator, and, with `--full`, the smokes and the test suite run in your environment (credential
 variables, the Keychain, the `ts` token cache), and the reviewer may build and run
 the branch's code too. Before running anything, say so to the user and ask:
 
@@ -114,8 +114,13 @@ fork, the run adds a remote named `upstream` for `thoughtspot/thoughtspot-agent-
 and fetches its `main`: that is the base, never your fork's `main`. If a remote called
 `upstream` already points somewhere else, the run stops with exit 2 and says so.
 
-The run takes about five minutes: give the Bash call a 600000 ms timeout, or run it
-in the background and wait for it to finish.
+By default the run is **fast checks only** (the check list, the PR-only gates and the
+validators, a minute or two): the smoke suites and pytest are listed NOT RUN, because
+CI's `validate` check runs them on the PR and is required to merge, even with
+`--admin`. Do not add `--full` unless the user asks for it; a contributor may use it
+before asking a maintainer to approve CI on a fork PR. A `--full` run takes about ten
+minutes, about the 600000 ms limit of a foreground Bash call: run it in the
+background and wait for it to finish.
 
 Choosing the interpreter, in the block below:
 
@@ -374,6 +379,7 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-11-26 | A default run is fast checks only: the check list, the PR-only gates and the validators run, and the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check (`--full` runs them; `--post` implies it) |
 | 1.1.0 | 2026-11-25 | Step 7, triage, fix once, ship: fix Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement, normal use or a fixed rank, or that the fixes introduced; send everything else to one dated backlog item (the next id free on upstream `main`, never found by reading PR text); ship at once when nothing needs fixing, else one fix round and one re-review of the branch's commits since the reviewed head; a merge of `main` touching only `CHANGELOG.md` and `docs/backlog.md`, or a commit changing only those, refreshes the evidence without a new review. Step 3 passes the user's stated requirements. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text brought into a credentialed session, a weakened gate, silently wrong output on any input and unread-as-clean are always Blockers |
 | 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |
 | 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 exports an interpreter the user named as given (a typo stops the run), else keeps a `CHECKS_PYTHON` already set, else sets it to `~/.venvs/tas-ci/bin/python3.12` when that exists; Step 2 reports no evidence on exit 2; link to `.github/CONTRIBUTING.md` |
