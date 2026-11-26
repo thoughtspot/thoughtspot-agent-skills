@@ -35,6 +35,13 @@ Review section reads "Not run": to share a reviewed block, paste the file before
 that record it (skill and item number). Otherwise "N/A" and why (e.g. "docs only",
 "offline tooling, covered by unit tests"). -->
 
+## Coverage
+
+<!-- For a converter, a translator, or other code that reports an outcome for its own
+output (Migrated, Merged, READY): what it converts, and what it reports for review
+instead of converting. The review judges the change against this ("Review rounds" in
+`.github/CONTRIBUTING.md`). Otherwise "N/A". -->
+
 ## New runtime dependencies
 
 <!-- Each new third-party package a skill or `ts-cli` needs at run time, with its
