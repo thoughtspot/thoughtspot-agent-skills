@@ -939,6 +939,8 @@ a.model-tab:focus-visible{outline-offset:-2px;}
 .usage-quadrant .uq-band{fill:var(--ground);}
 .usage-quadrant .usage-dot{stroke:var(--surface);stroke-width:2;cursor:pointer;}
 .usage-quadrant .usage-dot:hover{stroke:var(--ink);stroke-width:1.5;}
+.usage-quadrant .usage-dot.partial{fill:var(--surface);stroke-width:2;stroke-dasharray:2 1.5;}
+.usage-quadrant .usage-dot.partial.selected{stroke-dasharray:none;}
 .usage-quadrant .usage-dot.selected{stroke:var(--ink);stroke-width:2.5;r:6.5;}
 .usage-filters .fbar + .fbar{margin-top:8px;}
 .usage-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 10px;}

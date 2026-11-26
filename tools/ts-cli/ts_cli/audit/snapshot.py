@@ -61,8 +61,10 @@ LEGACY_ANGLE_NEEDS = {"A": frozenset({"ai_instructions"}),
 #: replay of a rule that reads it is refused (``captured_needs``), never run on the default.
 #: `sets_incomplete` (ts-cli 0.225.0) reads as None, not recorded: the Usage view then
 #: finds a failed Set lookup by the run's own warning (usage_triage.sets_unread).
+#: `dependents_incomplete` (0.225.0) reads as None too: which Models' dependents were
+#: hidden is not known, so the Usage view reads their completeness as unknown.
 ADDED_FIELDS = {"calendars": None, "connections": None, "usage": None,
-                "sets_incomplete": None}
+                "sets_incomplete": None, "dependents_incomplete": None}
 
 
 class SnapshotError(Exception):

@@ -74,21 +74,29 @@ def model_status(usage: dict, guid: str, idle_days: float, created_ms: Any) -> s
     return "not_judged" if reading["days"] is None else "active"
 
 
-def dependent_counts(rows: Any, sets_read: bool) -> Dict[str, Optional[int]]:
-    """`{total, liveboards, answers, sets, other}` from a Model's `ctx.dependents` rows
-    (the dependents the audit's user can see in its Org). A Set counts toward the total:
-    removing the Model removes it. When its Sets were not read (`sets_read` False: not
-    fetched, not known to be fetched, or its lookup failed), `sets` and `total` are None:
-    its dependents are not known, never counted as the rest alone."""
+def dependent_counts(rows: Any, sets_read: bool,
+                     deps_read: Optional[bool]) -> Dict[str, Any]:
+    """A Model's dependents from its `ctx.dependents` rows (those the audit's user can see
+    in its Org): `liveboards`, `answers`, `sets`, `other`, `visible` (their sum, Sets
+    left out when not read) and, when complete, `total` (= `visible`). A Set counts:
+    removing the Model removes it. `not_read` lists what was not read in full — "sets"
+    (`sets_read` False: not fetched, not known to be fetched, or its lookup failed; then
+    `sets` is None) and "dependents" (`deps_read` False: its own reading was incomplete,
+    AuditContext.dependents_incomplete). Either makes `complete` False and `total` None:
+    `visible` is then a lower bound, never a total. `deps_read` None (a snapshot from
+    before 0.225.0, which cannot say) leaves `complete` None, the total counted as read."""
     counts: Dict[str, Optional[int]] = {"liveboards": 0, "answers": 0, "sets": 0, "other": 0}
     for row in rows or []:
         if isinstance(row, dict):
             kind = _KINDS.get(row.get("type"), "other")
             counts[kind] += 1
+    not_read = ([] if sets_read else ["sets"]) + (["dependents"] if deps_read is False else [])
     if not sets_read:
-        counts["sets"] = None
-        return {"total": None, **counts}
-    return {"total": sum(counts.values()), **counts}
+        counts["sets"] = None  # a Set row seen anyway is not counted: Sets were not read
+    visible = sum(v for v in counts.values() if v)
+    complete = False if not_read else (None if deps_read is None else True)
+    return {"total": None if not_read else visible, "visible": visible, "complete": complete,
+            "not_read": not_read, **counts}
 
 
 def sets_unread(ctx: Any) -> set:
@@ -123,12 +131,14 @@ def add_triage(models_out: list, ctx: Any, ran: Optional[dict],
     and return the idle days the statuses used (status_idle_days); None, adding nothing,
     when usage was not read. A Model's Sets, and so its dependent total, are None when
     `fetched_needs` lacks `sets` or is None (not known), or its lookup failed
-    (sets_unread)."""
+    (sets_unread); its total is None too when its own dependents reading was incomplete
+    (`ctx.dependents_incomplete`; dependent_counts)."""
     if not usage_readable(ctx.usage):
         return None
     idle_days = status_idle_days(ran)
     fetched = fetched_needs is not None and "sets" in fetched_needs
     unread = sets_unread(ctx) if fetched else set()
+    partial = getattr(ctx, "dependents_incomplete", None)
     headers = headers_by_id(ctx.metadata)
     for m in models_out:
         usage = m.get("usage")
@@ -137,16 +147,21 @@ def add_triage(models_out: list, ctx: Any, ran: Optional[dict],
         header = headers.get(m["guid"]) or {}
         usage.update({
             "status": model_status(ctx.usage, m["guid"], idle_days, header.get("created")),
-            "dependents": dependent_counts(ctx.dependents.get(m["guid"]),
-                                           fetched and m["guid"] not in unread),
+            "dependents": dependent_counts(
+                ctx.dependents.get(m["guid"]), fetched and m["guid"] not in unread,
+                None if partial is None else m["guid"] not in partial),
             "owner": owner_of(header),
             "created": created_date(header.get("created")),
         })
     return idle_days
 
 
-def with_status_days(usage: Optional[dict], idle_days: Optional[float]) -> Optional[dict]:
-    """`corpus.usage` with `status_idle_days`, the idle days each Model's status used."""
+def with_status_days(usage: Optional[dict], idle_days: Optional[float],
+                     ctx: Any = None) -> Optional[dict]:
+    """`corpus.usage` with `status_idle_days`, the idle days each Model's status used, and
+    `dependents_checked`: whether the run recorded which Models' dependents were read in
+    full (False for a snapshot written before ts-cli 0.225.0)."""
     if usage is not None:
         usage["status_idle_days"] = idle_days
+        usage["dependents_checked"] = getattr(ctx, "dependents_incomplete", None) is not None
     return usage

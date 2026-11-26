@@ -280,7 +280,7 @@ def build_corpus(ctx, cluster_url: str = "", profile_name: str = "",
         "dependents": dict(ctx.dependents),
         # None when usage was not fetched or not read; `fetched_needs` tells which.
         "usage": with_status_days(corpus_usage(ctx.usage, {m["guid"] for m in models_out}),
-                                  idle_days),
+                                  idle_days, ctx),
     }
 
 

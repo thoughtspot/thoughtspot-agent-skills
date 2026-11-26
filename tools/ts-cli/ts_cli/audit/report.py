@@ -304,7 +304,10 @@ def _compact_model_usage(u: dict) -> dict:
     """A Model's `usage`: `l` its last query (epoch seconds) or null, `d` whole days
     since, `q` queries and `u` distinct users over the window, `n` 1 when the history
     holds no query of it; since 3.28 (audit/usage_triage.py), `s` its status, `dp` its
-    dependents `[total, Liveboards, Answers, Sets (null when not read), other]`, `ow` its
+    dependents `[total (null unless complete), Liveboards, Answers, Sets (null when not
+    read), other, visible (a lower bound when not complete), what was not read in full
+    ("sets", "dependents"; [] when complete)]`, `dc` 0 when completeness is not known (a
+    snapshot from before 0.225.0), `ow` its
     owner and `cr` its creation date (each null when not recorded)."""
     out = {"l": u.get("last_used"), "d": u.get("days"), "q": u.get("queries_180d") or 0,
            "u": u.get("users_180d") or 0}
@@ -314,7 +317,9 @@ def _compact_model_usage(u: dict) -> dict:
         dp = u.get("dependents") or {}
         out.update({"s": u["status"], "ow": u.get("owner"), "cr": u.get("created"),
                     "dp": [dp.get(k) for k in ("total", "liveboards", "answers", "sets",
-                                               "other")]})
+                                               "other", "visible", "not_read")]})
+        if dp.get("complete") is None and not dp.get("not_read"):
+            out["dc"] = 0
     return out
 
 
@@ -329,7 +334,9 @@ def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
     recorded, null when the Orgs were not read — or null when they could not be listed;
     `or` 1 when each Model's Orgs were read, 0 when not (absent before 0.224.0); `os`
     each Org the usage names, `[[id, name, used Model IDs]]`, or null when not read;
-    `si` the idle days each Model's status used (null before 3.28)."""
+    `si` the idle days each Model's status used (null before 3.28); `dk` whether the run
+    recorded which Models' dependents were read in full (false: a snapshot from before
+    0.225.0)."""
     if not isinstance(usage, dict):
         return None
     org = usage.get("org") or {}
@@ -342,7 +349,7 @@ def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
            "hs": history.get("start"), "he": history.get("end"),
            "hd": usage.get("history_days"), "id": usage.get("idle_days"),
            "b": usage.get("blank_rows") or 0, "g": _compact_gone(gone),
-           "si": usage.get("status_idle_days")}
+           "si": usage.get("status_idle_days"), "dk": usage.get("dependents_checked")}
     if usage.get("org_read") is not None:  # absent from JSON written before 0.224.0
         out["or"] = 1 if usage["org_read"] else 0
         orgs = usage.get("orgs")

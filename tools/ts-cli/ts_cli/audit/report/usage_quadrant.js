@@ -16,13 +16,16 @@ var USAGE_STATUS = {
 var USAGE_STATUS_ORDER = ["active", "idle", "never", "too_new", "not_judged"];
 var UQ = {w: 760, h: 350, l: 52, r: 12, t: 34, b: 44, zero: 60};
 
-/* Which quadrant a row falls in: idle or never queried split by whether anything depends
-   on it, active, or not judged — which holds every Model whose dependents were not read
-   (`deps` null), never the retire zone. */
+/* Which quadrant a row falls in. Active stays active. Idle or never queried: "check"
+   with a dependent visible (at least that many, whether or not read in full), "retire"
+   with none and the dependents read in full, else "unjudged" — none visible but not read
+   in full is undecidable, never the retire zone. Too new or not judged: "unjudged". */
 function usageQuadrant(r){
-  if(r.deps === null) return "unjudged";
   if(r.status === "active") return "active";
-  if(r.status === "idle" || r.status === "never") return r.deps ? "check" : "retire";
+  if(r.status === "idle" || r.status === "never"){
+    if(r.deps) return "check";
+    return r.complete === false ? "unjudged" : "retire";
+  }
   return "unjudged";
 }
 
@@ -61,13 +64,16 @@ function usageDotTitle(r){
   var last = usageLastUsed(r.cm).text || "";
   return r.name+" — "+st.label+"\nLast used: "+last+"\n"+
     usagePlural(r.queries, "query", "queries")+" by "+usagePlural(r.users, "user")+
-    " ("+usageSpanLabel()+")\n"+(r.deps === null ? "dependents not read (Sets not read)"
-                                                 : usagePlural(r.deps, "dependent"));
+    " ("+usageSpanLabel()+")\n"+(r.complete === false
+      ? r.deps+"+ dependents ("+usageNotReadText(r)+")" : usagePlural(r.deps, "dependent"));
 }
 
 function usageDotXY(r, sx, sy){
   var g = usageRegions(), q = usageQuadrant(r), y = sy(r.deps);
   y += r.deps ? usageJitter(r.guid, 3) * 4 : usageJitter(r.guid, 3) * 12;
+  /* none visible and not read in full: mid-height in the grey band, never at a known 0 */
+  if(q === "unjudged" && !r.deps && r.complete === false)
+    y = (UQ.t + UQ.h - UQ.b - UQ.zero) / 2 + usageJitter(r.guid, 3) * 12;
   var x;
   if(q === "unjudged") x = (g.xn + g.x1) / 2 + usageJitter(r.guid) * ((g.x1 - g.xn) / 2 - 8);
   else if(r.status === "never") x = (g.xd + g.xn) / 2 + usageJitter(r.guid) * ((g.xn - g.xd) / 2 - 8);
@@ -126,9 +132,11 @@ function usageQuadrantSvg(rows, idleDays, selected){
     var q = usageQuadrant(r), xy = usageDotXY(r, sx, sy);
     counts[q] = (counts[q] || 0) + 1;
     var st = USAGE_STATUS[r.status] || USAGE_STATUS.not_judged;
-    return '<circle class="usage-dot'+(selected[r.guid] ? ' selected' : '')+'" data-guid="'+
-      esc(r.guid)+'" data-quadrant="'+q+'" cx="'+xy[0].toFixed(1)+'" cy="'+xy[1].toFixed(1)+
-      '" r="5" fill="'+st.color+'"><title>'+esc(usageDotTitle(r))+'</title></circle>';
+    var partial = r.complete === false;  /* hollow, dashed: a lower bound, not a count */
+    return '<circle class="usage-dot'+(partial ? ' partial' : '')+(selected[r.guid] ? ' selected' : '')+
+      '" data-guid="'+esc(r.guid)+'" data-quadrant="'+q+'" cx="'+xy[0].toFixed(1)+'" cy="'+
+      xy[1].toFixed(1)+'" r="5" fill="'+st.color+'"'+(partial ? ' stroke="'+st.color+'"' : '')+
+      '><title>'+esc(usageDotTitle(r))+'</title></circle>';
   }).join("");
   var label = "Models by days since their last query and their dependents: "+
     (counts.retire || 0)+" retire candidates, "+(counts.check || 0)+" idle with dependents, "+

@@ -1,8 +1,10 @@
 /* ── Usage view (#usage): which audited Models are used, idle or never queried ──
    One row per audited Model from its usage (D.C.m[].us, ../usage.js): status (`s`, set by
    ts_cli/audit/usage_triage.py from H17's reading), last use, queries and users over the
-   window, dependents (`dp`: [total, Liveboards, Answers, Sets, other]; Sets and total null
-   when the Sets were not read, so the dependents are not known), owner (`ow`)
+   window, dependents (`dp`: [total, Liveboards, Answers, Sets, other, visible, not read];
+   total null when not read in full — Sets not read, or the Model's own dependents reading
+   incomplete — so `visible` is then a lower bound; `dc` 0 when completeness is not known,
+   a snapshot from before ts-cli 0.225.0), owner (`ow`)
    and creation date (`cr`). The quadrant (../usage_quadrant.js) draws the rows the table
    shows; the export (../usage_export.js) writes the selected rows. A sidebar link only when
    the run fetched usage; "Not read" when it was fetched and not read, never an empty table
@@ -17,27 +19,31 @@ function usageRows(){
     if(m) (worst[m.g] = worst[m.g] || []).push(f);
   });
   return (D.C.m || []).map(function(cm){
-    var m = D.L[cm.mi] || {}, us = cm.us || {}, dp = us.dp || [0, 0, 0, 0, 0];
+    var m = D.L[cm.mi] || {}, us = cm.us || {}, dp = us.dp || [0, 0, 0, 0, 0, 0, []];
+    var notRead = dp[6] || [];
     return {guid: m.g || "", name: m.n || "", cm: cm, status: us.s || "not_judged",
       days: typeof us.d === "number" ? us.d : null, never: !!us.n, last: us.l,
-      queries: us.q || 0, users: us.u || 0, deps: typeof dp[0] === "number" ? dp[0] : null,
+      queries: us.q || 0, users: us.u || 0, deps: typeof dp[5] === "number" ? dp[5] : (dp[0] || 0),
+      total: typeof dp[0] === "number" ? dp[0] : null, notRead: notRead,
+      complete: notRead.length ? false : (us.dc === 0 ? null : true),
       lb: dp[1] || 0, an: dp[2] || 0, sets: typeof dp[3] === "number" ? dp[3] : null,
       other: dp[4] || 0, owner: us.ow || null,
       created: us.cr || null, worst: worstSev(worst[m.g] || [])};
   });
 }
 
-/* Retire candidates first (idle or never queried, nothing depending on them), then idle
-   with dependents or dependents not read, too new, not judged, active; within each, the
-   most idle first. */
+/* Retire candidates first (idle or never queried, no dependents, read in full), then
+   idle with dependents or dependents not fully read, too new, not judged, active; within
+   each, the most idle first. `deps` is the visible count: a lower bound when not complete. */
+function usageNoDependents(r){ return r.deps === 0 && r.complete !== false; }
 var USAGE_GROUP = {idle: 1, never: 1, too_new: 2, not_judged: 3, active: 4};
 function usageIdleness(r){
   if(r.never) return Infinity;
   return typeof r.days === "number" ? r.days : -1;
 }
 function usageDefaultOrder(a, b){
-  var ga = USAGE_GROUP[a.status] - (USAGE_GROUP[a.status] === 1 && a.deps === 0 ? 1 : 0);
-  var gb = USAGE_GROUP[b.status] - (USAGE_GROUP[b.status] === 1 && b.deps === 0 ? 1 : 0);
+  var ga = USAGE_GROUP[a.status] - (USAGE_GROUP[a.status] === 1 && usageNoDependents(a) ? 1 : 0);
+  var gb = USAGE_GROUP[b.status] - (USAGE_GROUP[b.status] === 1 && usageNoDependents(b) ? 1 : 0);
   return ga - gb || usageIdleness(b) - usageIdleness(a) || a.name.localeCompare(b.name);
 }
 
@@ -48,7 +54,7 @@ var USAGE_COLUMNS = [
   ["last", "Last used", -1, usageIdleness],
   ["queries", "Queries", -1, function(r){ return r.queries; }],
   ["users", "Users", -1, function(r){ return r.users; }],
-  ["dependents", "Dependents", -1, function(r){ return r.deps === null ? -1 : r.deps; }],
+  ["dependents", "Dependents", -1, function(r){ return r.deps; }],
   ["owner", "Owner", 1, function(r){ return (r.owner || "￿").toLowerCase(); }],
   ["created", "Created", -1, function(r){ return r.created || ""; }],
   ["worst", "Worst finding", 1, function(r){ var i = SEV_ORDER[r.worst]; return i === undefined ? 99 : i; }]
@@ -67,7 +73,7 @@ function usageSorted(rows, sort){
 
 function usageShown(r, st){
   if(!st.on[r.status]) return false;
-  if(st.nodeps && r.deps !== 0) return false;  /* not read is not none */
+  if(st.nodeps && !usageNoDependents(r)) return false;  /* not read in full is not none */
   var q = st.q.trim().toLowerCase();
   return !q || r.name.toLowerCase().indexOf(q) !== -1 ||
     (r.owner || "").toLowerCase().indexOf(q) !== -1;
@@ -76,8 +82,17 @@ function usageShown(r, st){
 function usageDepsTitle(r){
   var parts = [usagePlural(r.lb, "Liveboard"), usagePlural(r.an, "Answer"),
     r.sets === null ? "Sets not read" : usagePlural(r.sets, "Set"), r.other+" other"];
-  return parts.join(", ")+(r.deps === null ? ": the Sets were not read (not fetched, or the "+
-    "lookup failed), so the dependents are not known" : "");
+  return parts.join(", ")+(r.complete === false ? ": "+usageNotReadText(r)+", so "+r.deps+
+    " is a lower bound, not the total" : "");
+}
+
+/* What was not read in full: "Sets not read", "dependents not fully read", or both. */
+var USAGE_NOT_READ_LABEL = {sets: "Sets not read", dependents: "dependents not fully read"};
+function usageNotReadText(r){
+  return r.notRead.map(function(k){ return USAGE_NOT_READ_LABEL[k] || k; }).join("; ");
+}
+function usageDepsText(r){
+  return r.complete === false ? r.deps+"+ ("+usageNotReadText(r)+")" : String(r.deps);
 }
 
 function usageStatusTitle(r, idleDays){
@@ -101,7 +116,7 @@ function usageRowHtml(r, idleDays){
     st.color+'"></span>'+esc(st.label)+'</td>'+
     '<td title="'+esc(lu.title)+'">'+esc(lu.text)+'</td>'+
     '<td>'+r.queries+'</td><td>'+r.users+'</td>'+
-    '<td title="'+esc(usageDepsTitle(r))+'">'+(r.deps === null ? USAGE_NOT_READ : r.deps)+'</td>'+
+    '<td title="'+esc(usageDepsTitle(r))+'">'+esc(usageDepsText(r))+'</td>'+
     '<td>'+(r.owner ? esc(r.owner) : '<span class="usage-none" title="Not recorded">—</span>')+'</td>'+
     '<td>'+esc(r.created || "")+'</td>'+
     '<td>'+(r.worst === "NONE" ? "" : severityPill(r.worst))+'</td></tr>';
@@ -174,9 +189,13 @@ function usageHeadHtml(rows, idleDays){
     esc(usagePlural(rows.length, "audited Model"))+'. '+esc(whose.charAt(0).toUpperCase()+
     whose.slice(1))+', read on '+esc(usageDate(u.at))+'. Idle means no query in '+
     idleDays+' days or more (H17); a Liveboard, an Answer or a Set on a Model counts as a '+
-    'dependent. Dependents are those the audit\'s user can see in this Org. The grey band '+
-    'holds Models too new or with too short a history to judge, and those whose Sets were '+
-    'not read. Check what depends on a Model before removing it.</p></div>';
+    'dependent. Dependents are those the audit\'s user can see in this Org; "5+" is a lower '+
+    'bound, where they were not read in full. The grey band holds Models too new to judge, '+
+    'with too short a history, no query time recorded, or idle with no visible dependents '+
+    'whose dependents are not fully known. Check what depends on a Model before removing it.</p></div>';
+  if(u.dk === false) html += '<div class="unread usage-note" role="note">'+esc("This audit "+
+    "predates the check for dependents hidden from the audit's user (ts-cli 0.225.0), so a "+
+    "dependent count may miss some: run the audit again to check.")+'</div>';
   if(usageHistoryShort(idleDays)) html += '<div class="unread usage-note" role="note">'+
     esc("The usage history starts on "+usageDate(u.hs)+", "+usagePlural(u.hd, "day")+
     " before the read, under the "+idleDays+" days a never-queried Model needs: those read Not judged.")+'</div>';
@@ -192,7 +211,7 @@ function usageControls(v){
     }),
     search: {cls: "usage-search", placeholder: "Search Models or owners", aria: "Search Models or owners"}},
     usageApply, function(q){ v.state.q = q; usageApply(); });
-  var nodeps = v.rows.filter(function(r){ return r.deps === 0; }).length;
+  var nodeps = v.rows.filter(usageNoDependents).length;
   var narrow = el("div", "fbar usage-narrow",
     '<span class="fbar-label">Only</span><button type="button" class="fbar-chip" data-f="nodeps" '+
     'aria-pressed="false" title="Only Models nothing depends on"'+(nodeps ? '' : ' disabled')+

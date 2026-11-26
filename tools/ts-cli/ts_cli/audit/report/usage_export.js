@@ -5,7 +5,8 @@
    shape is fixed: ts-audit SKILL.md "Candidates file" documents it. A field is added,
    never renamed or removed, without a new format version. */
 var USAGE_OBJECT_FIELDS = ["guid", "name", "type", "status", "last_used", "days_since_last_use",
-  "queries_180d", "users_180d", "dependents_total", "liveboards", "answers", "sets", "other",
+  "queries_180d", "users_180d", "dependents_total", "dependents_visible", "dependents_complete",
+  "liveboards", "answers", "sets", "other",
   "owner", "created"];
 var USAGE_CSV_FIELDS = USAGE_OBJECT_FIELDS.concat(["usage_scope", "dependents_scope", "cluster_url",
   "audit_read_date"]);
@@ -13,13 +14,15 @@ var USAGE_CSV_FIELDS = USAGE_OBJECT_FIELDS.concat(["usage_scope", "dependents_sc
 var USAGE_DEPENDENTS_SCOPE = "visible to the audit's user in this Org";
 var USAGE_FORMAT = "ts-audit-candidates/1";
 
-/* One row as the file's object: dates as YYYY-MM-DD, null where not known (`sets` and
-   `dependents_total` when the Sets were not read). */
+/* One row as the file's object: dates as YYYY-MM-DD, null where not known (`sets` when
+   the Sets were not read; `dependents_total` when the dependents were not read in full,
+   `dependents_visible` then a lower bound; `dependents_complete` null when not known). */
 function usageExportObject(r){
   return {guid: r.guid, name: r.name, type: "MODEL", status: r.status,
     last_used: typeof r.last === "number" ? usageDate(r.last) : null,
     days_since_last_use: typeof r.days === "number" ? r.days : null,
-    queries_180d: r.queries, users_180d: r.users, dependents_total: r.deps,
+    queries_180d: r.queries, users_180d: r.users, dependents_total: r.total,
+    dependents_visible: r.deps, dependents_complete: r.complete,
     liveboards: r.lb, answers: r.an, sets: r.sets, other: r.other, owner: r.owner,
     created: r.created};
 }

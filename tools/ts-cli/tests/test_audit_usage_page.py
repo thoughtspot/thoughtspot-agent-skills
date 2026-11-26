@@ -61,7 +61,7 @@ def _ctx(usage, names=None):
         ACTIVE: [_dep(ACTIVE, 7, "ANSWER")],
     }
     return make_context(models=models, model_guids=list(names), usage=usage,
-                        metadata=metadata, dependents=dependents)
+                        metadata=metadata, dependents=dependents, dependents_incomplete=[])
 
 
 def _usage(**kw):
@@ -82,12 +82,21 @@ def _by_guid(data):
 def test_dependents_split_by_type_and_sets_null_when_not_read():
     rows = [{"type": t} for t in ("LIVEBOARD", "LIVEBOARD", "ANSWER", "SET",
                                   "LOGICAL_TABLE", "FEEDBACK")]
-    assert dependent_counts(rows, True) == {"total": 6, "liveboards": 2, "answers": 1,
-                                            "sets": 1, "other": 2}
-    # Sets not read: the dependents are not known, so there is no total
-    assert dependent_counts(rows, False) == {"total": None, "liveboards": 2, "answers": 1,
-                                             "sets": None, "other": 2}
-    assert dependent_counts(None, True)["total"] == 0
+    assert dependent_counts(rows, True, True) == {
+        "total": 6, "visible": 6, "complete": True, "not_read": [], "liveboards": 2,
+        "answers": 1, "sets": 1, "other": 2}
+    # Sets not read: the dependents are not known, so there is no total, only a lower bound
+    assert dependent_counts(rows, False, True) == {
+        "total": None, "visible": 5, "complete": False, "not_read": ["sets"],
+        "liveboards": 2, "answers": 1, "sets": None, "other": 2}
+    # the Model's own dependents reading was incomplete (hidden, missing, not a list)
+    assert dependent_counts(rows, True, False) == {
+        "total": None, "visible": 6, "complete": False, "not_read": ["dependents"],
+        "liveboards": 2, "answers": 1, "sets": 1, "other": 2}
+    # a snapshot from before 0.225.0 cannot say: counted as read, completeness unknown
+    assert dependent_counts(rows, True, None)["total"] == 6
+    assert dependent_counts(rows, True, None)["complete"] is None
+    assert dependent_counts(None, True, True)["total"] == 0
 
 
 def test_owner_is_the_author_display_name_then_the_author_name():
@@ -126,7 +135,8 @@ def test_status_idle_days_is_h17s_and_falls_back_to_the_catalogs():
 def test_the_corpus_carries_status_dependents_owner_and_created():
     by = _by_guid(_data(_usage()))
     assert by[USED_IDLE]["status"] == "idle"
-    assert by[USED_IDLE]["dependents"] == {"total": 6, "liveboards": 2, "answers": 1,
+    assert by[USED_IDLE]["dependents"] == {"total": 6, "visible": 6, "complete": True,
+                                           "not_read": [], "liveboards": 2, "answers": 1,
                                            "sets": 1, "other": 2}
     assert by[USED_IDLE]["owner"] == MARKUP
     assert by[ACTIVE]["owner"] == "Ann Owner" and by[IDLE]["owner"] == "ann"
@@ -160,7 +170,7 @@ def test_unread_usage_adds_no_status():
 def test_the_payload_compacts_the_triage():
     payload = compact_payload(_data(_usage()))
     by = {payload["L"][cm["mi"]]["g"]: cm["us"] for cm in payload["C"]["m"]}
-    assert by[USED_IDLE]["s"] == "idle" and by[USED_IDLE]["dp"] == [6, 2, 1, 1, 2]
+    assert by[USED_IDLE]["s"] == "idle" and by[USED_IDLE]["dp"] == [6, 2, 1, 1, 2, 6, []]
     assert by[USED_IDLE]["ow"] == MARKUP and by[ACTIVE]["cr"] == "2025-10-21"
     assert by[NEVER]["ow"] is None
     assert payload["C"]["us"]["si"] == 90
@@ -363,16 +373,17 @@ def test_the_csv_export_holds_the_selected_rows_escaped(tmp_path):
     assert seen["names"] == ["ts-audit-candidates.csv"] and seen["type"].startswith("text/csv")
     lines = seen["text"].strip().split("\r\n")
     assert lines[0] == ("guid,name,type,status,last_used,days_since_last_use,queries_180d,"
-                        "users_180d,dependents_total,liveboards,answers,sets,other,owner,created,"
+                        "users_180d,dependents_total,dependents_visible,dependents_complete,"
+                        "liveboards,answers,sets,other,owner,created,"
                         "usage_scope,dependents_scope,cluster_url,audit_read_date")
     assert len(lines) == 3
     by = {ln.split(",")[0]: ln for ln in lines[1:]}
-    assert by[IDLE].startswith(IDLE + ",Idle Sales,MODEL,idle,2026-07-28,120,12,3,0,0,0,0,0,ann,"
+    assert by[IDLE].startswith(IDLE + ",Idle Sales,MODEL,idle,2026-07-28,120,12,3,0,0,true,0,0,0,0,ann,"
                                "2025-10-21,")
     assert ",visible to the audit's user in this Org," in by[IDLE]
     assert by[IDLE].endswith(",2026-11-25")
     assert by[USED_IDLE].startswith(USED_IDLE + "," + MARKUP + ",MODEL,idle,")
-    assert ",6,2,1,1,2," in by[USED_IDLE]
+    assert ",6,6,true,2,1,1,2," in by[USED_IDLE]
 
 
 @needs_chrome
@@ -404,7 +415,7 @@ def test_the_json_export_is_the_candidates_format(tmp_path):
     assert by[IDLE] == {"guid": IDLE, "name": "Idle Sales", "type": "MODEL", "status": "idle",
                         "last_used": "2026-07-28", "days_since_last_use": 120,
                         "queries_180d": 12, "users_180d": 3, "dependents_total": 0,
-                        "liveboards": 0, "answers": 0, "sets": 0, "other": 0, "owner": "ann",
+                        "dependents_visible": 0, "dependents_complete": True, "liveboards": 0, "answers": 0, "sets": 0, "other": 0, "owner": "ann",
                         "created": "2025-10-21"}
     assert by[USED_IDLE]["name"] == MARKUP and by[USED_IDLE]["sets"] == 1
     assert by[USED_IDLE]["other"] == 2 and by[USED_IDLE]["dependents_total"] == 6
@@ -461,7 +472,8 @@ def _data_ctx(ctx, needs=H_NEEDS):
 @pytest.mark.parametrize("recorded", [True, False])
 def test_a_model_whose_set_lookup_failed_has_unknown_dependents(recorded):
     by = _by_guid(_data_ctx(_ctx_sets_unread(_usage(), recorded=recorded)))
-    assert by[IDLE]["dependents"] == {"total": None, "liveboards": 0, "answers": 0,
+    assert by[IDLE]["dependents"] == {"total": None, "visible": 0, "complete": False,
+                                      "not_read": ["sets"], "liveboards": 0, "answers": 0,
                                       "sets": None, "other": 0}
     assert by[NEVER]["dependents"]["total"] == 0      # its lookup was clean
 
@@ -514,16 +526,155 @@ def test_unknown_dependents_are_never_a_retire_candidate(tmp_path):
                     ' chip: document.querySelector("#v-usage .fbar-chip[data-f=\\"nodeps\\"]")'
                     '.textContent}; chip("nodeps"); out.nodeps = rows(); window.__extra = out;')
     seen = shown["extra"]
-    assert seen["quadrant"] == "unjudged" and "dependents not read" in seen["title"]
-    assert seen["cell"] == "Not read" and "Sets not read" in seen["cell_title"]
+    assert seen["quadrant"] == "unjudged" and "Sets not read" in seen["title"]
+    assert seen["cell"] == "0+ (Sets not read)" and "Sets not read" in seen["cell_title"]
     assert seen["first"] != IDLE                       # not sorted as a retire candidate
     assert seen["chip"] == "No dependents 3" and IDLE not in seen["nodeps"]
     exported = _export(tmp_path, "json", data)
     obj = {o["guid"]: o for o in json.loads(exported["text"])["objects"]}[IDLE]
     assert obj["sets"] is None and obj["dependents_total"] is None
+    assert obj["dependents_visible"] == 0 and obj["dependents_complete"] is False
 
 
 @needs_chrome
 def test_the_view_says_whose_dependents_it_counts(tmp_path):
     shown = _render(_data(_usage()), tmp_path, "")
     assert "Dependents are those the audit's user can see in this Org" in shown["visible"]
+
+
+
+# ── the Model's own dependents reading: hidden, missing or malformed is not 0 ─
+
+def _deps_client(body):
+    """One Model m1; the dependents lookup answers `body` (a callable for the batch)."""
+    client = fx.build_client_with_one_model("m1")
+    plain = client.post.side_effect
+
+    def post(url, json=None, **kw):
+        if url.endswith("/metadata/search") and (json or {}).get("include_dependent_objects"):
+            return fx.build_response(body)
+        return plain(url, json=json, **kw)
+    client.post.side_effect = post
+    return client
+
+
+_DEP_SHAPES = {
+    "hidden": [{"metadata_id": "m1", "dependent_objects": {
+        "hasInaccessibleDependents": True,
+        "dependents": {"m1": {"PINBOARD_ANSWER_BOOK": [{"id": "l1", "name": "LB"}]}}}}],
+    "not_a_list": {"error": "x"},
+    "missing_from_batch": [],
+    "no_dependents_map": [{"metadata_id": "m1", "dependent_objects": {}}],
+}
+
+
+@pytest.mark.parametrize("shape", list(_DEP_SHAPES))
+def test_build_context_records_an_incomplete_dependents_reading(shape):
+    from ts_cli.audit.context import build_context
+    ctx = build_context(_deps_client(_DEP_SHAPES[shape]), ["m1"], data_needs(["D"]))
+    assert ctx.dependents_incomplete == ["m1"]
+    assert any("Dependents of Model Sales (m1)" in w for w in ctx.warnings)
+    if shape == "hidden":     # what IS visible is still kept
+        assert [d["guid"] for d in ctx.dependents["m1"]] == ["l1"]
+
+
+@pytest.mark.parametrize("body", [
+    [{"metadata_id": "m1", "dependent_objects": {"dependents": {"m1": {}}}}],
+    [{"metadata_id": "m1", "dependent_objects": {"hasInaccessibleDependents": True,
+                                                 "areInaccessibleDependentsReturned": True,
+                                                 "dependents": {"m1": {}}}}]])
+def test_a_clean_zero_or_returned_hidden_dependents_are_complete(body):
+    from ts_cli.audit.context import build_context
+    ctx = build_context(_deps_client(body), ["m1"], data_needs(["D"]))
+    assert ctx.dependents_incomplete == []
+
+
+def test_a_snapshot_keeps_the_incomplete_dependents(tmp_path):
+    from ts_cli.audit.snapshot import read_snapshot, write_snapshot
+    ctx = _ctx(_usage())
+    ctx.dependents_incomplete = [IDLE]
+    write_snapshot(ctx, tmp_path / "snap", ["H"], needs=H_NEEDS)
+    assert read_snapshot(tmp_path / "snap")[0].dependents_incomplete == [IDLE]
+
+
+def test_an_incomplete_reading_has_no_total_and_a_lower_bound():
+    ctx = _ctx(_usage())
+    ctx.dependents_incomplete = [IDLE, USED_IDLE]
+    by = _by_guid(_data_ctx(ctx))
+    assert by[IDLE]["dependents"]["total"] is None
+    assert by[IDLE]["dependents"]["not_read"] == ["dependents"]
+    assert (by[USED_IDLE]["dependents"]["visible"], by[USED_IDLE]["dependents"]["complete"]) \
+        == (6, False)
+
+
+def test_a_snapshot_from_before_the_check_reads_completeness_as_unknown():
+    ctx = _ctx(_usage())
+    ctx.dependents_incomplete = None
+    data = _data_ctx(ctx)
+    assert _by_guid(data)[IDLE]["dependents"]["complete"] is None
+    assert _by_guid(data)[IDLE]["dependents"]["total"] == 0
+    assert data["corpus"]["usage"]["dependents_checked"] is False
+    assert _data(_usage())["corpus"]["usage"]["dependents_checked"] is True
+
+
+_PLACE = (_ROWS + _CHIP + 'function info(g){ var dot = document.querySelector('
+          '"#v-usage circle.usage-dot[data-guid=\\"" + g + "\\"]"); var tr = document.querySelector('
+          '"#v-usage tr[data-guid=\\"" + g + "\\"]"); return {q: dot.getAttribute("data-quadrant"),'
+          ' partial: dot.classList.contains("partial"), cy: +dot.getAttribute("cy"),'
+          ' cell: tr.cells[6].textContent}; }'
+          'var out = {}; ["ACTIVE", "IDLE", "USED_IDLE", "NEVER"].forEach(function(k){'
+          ' out[k] = info(window.__G[k]); });'
+          'out.label = document.querySelector("#v-usage svg.usage-quadrant").getAttribute("aria-label");'
+          'out.legend = document.querySelector("#v-usage .usage-legend").textContent;'
+          'out.chip = document.querySelector("#v-usage .fbar-chip[data-f=\\"nodeps\\"]").textContent;'
+          'chip("nodeps"); out.nodeps = rows();'
+          'window.__extra = out;')
+
+
+def _place(tmp_path, ctx):
+    names = {"ACTIVE": ACTIVE, "IDLE": IDLE, "USED_IDLE": USED_IDLE, "NEVER": NEVER}
+    return _render(_data_ctx(ctx), tmp_path,
+                   "window.__G = " + json.dumps(names) + ";" + _PLACE)["extra"]
+
+
+@needs_chrome
+def test_incomplete_dependents_place_by_status_and_the_visible_count(tmp_path):
+    ctx = _ctx(_usage())
+    ctx.sets_incomplete = [ACTIVE, USED_IDLE]        # Sets unread on these two
+    ctx.dependents_incomplete = [IDLE]               # hidden dependents, 0 visible
+    seen = _place(tmp_path, ctx)
+    # Active stays Active, a lower bound in its cell
+    assert seen["ACTIVE"]["q"] == "active" and seen["ACTIVE"]["partial"]
+    assert seen["ACTIVE"]["cell"] == "1+ (Sets not read)"
+    # idle with visible dependents: check first, at least that many, drawn at that height
+    assert seen["USED_IDLE"]["q"] == "check" and seen["USED_IDLE"]["cell"] == "5+ (Sets not read)"
+    # idle with none visible and dependents not fully read: undecidable, grey band
+    assert seen["IDLE"]["q"] == "unjudged" and seen["IDLE"]["partial"]
+    assert seen["IDLE"]["cell"] == "0+ (dependents not fully read)"
+    # never at the height of a known 0 (NEVER is a clean 0)
+    assert abs(seen["IDLE"]["cy"] - seen["NEVER"]["cy"]) > 20
+    assert seen["NEVER"]["q"] == "retire" and not seen["NEVER"]["partial"]
+    # the chip counts only complete zeros: NEVER, YOUNG, NOTIME
+    assert seen["chip"] == "No dependents 3" and IDLE not in seen["nodeps"]
+
+
+@needs_chrome
+def test_the_chart_summary_agrees_with_the_legend(tmp_path):
+    import re
+    ctx = _ctx(_usage())
+    ctx.sets_incomplete = [ACTIVE, USED_IDLE]
+    ctx.dependents_incomplete = [IDLE]
+    seen = _place(tmp_path, ctx)
+    q = dict((k, int(v)) for v, k in re.findall(r"(\d+) (retire candidates|idle with "
+                                                r"dependents|active|not judged)", seen["label"]))
+    legend = dict((k, int(v)) for k, v in re.findall(r"(Active|Idle|Never queried|Too new|"
+                                                     r"Not judged) (\d+)", seen["legend"]))
+    assert sum(q.values()) == sum(legend.values()) == len(NAMES)
+    assert q["active"] == legend["Active"]
+
+
+@needs_chrome
+def test_the_view_says_what_the_grey_band_holds(tmp_path):
+    shown = _render(_data(_usage()), tmp_path, "")
+    assert ("no query time recorded, or idle with no visible dependents whose dependents "
+            "are not fully known") in shown["visible"]

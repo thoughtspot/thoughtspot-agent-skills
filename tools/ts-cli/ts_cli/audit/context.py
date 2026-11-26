@@ -43,6 +43,12 @@ class AuditContext:
     # written before ts-cli 0.225.0 (usage_triage.sets_unread then reads the run's
     # warnings). Such a Model's Sets, and so its dependents, are not known, never 0.
     sets_incomplete: Optional[list] = None
+    # The Models whose own dependents reading was incomplete (_dependents_incomplete:
+    # dependents hidden from this user, a body that is not a list, the Model missing from
+    # its batch's answer, or no dependents map for it); [] when every one read clean, None
+    # in a snapshot written before ts-cli 0.225.0 (which Models is not known). What WAS
+    # returned stays in `dependents`; the Usage view reads the total as a lower bound.
+    dependents_incomplete: Optional[list] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -151,6 +157,7 @@ def make_context(
     connections=None,
     usage=None,
     sets_incomplete=None,
+    dependents_incomplete=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -163,6 +170,7 @@ def make_context(
         connections=connections,  # likewise
         usage=usage,  # None: not fetched or not read
         sets_incomplete=sets_incomplete,  # None: Sets not looked up
+        dependents_incomplete=dependents_incomplete,  # None: not recorded
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -234,6 +242,34 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         _log(f"Warning: {msg}")
         warnings.append(msg)
     return list(dict.fromkeys(found.get("incomplete") or []))
+
+
+def _dependents_incomplete(body: Any, guids: list, refs: list, warnings: list) -> list:
+    """The Models among `guids` whose dependents this answer does not give in full, each
+    with a warning naming the Model and why: a body that is not a list, an answer with
+    no item carrying a dependents map for it (missing from the batch, or no map), or
+    dependents hidden from this user and not returned (sets/consumers.py, ruling R17: a
+    failure must never read as the more favourable "no dependents"). What it does return
+    is still recorded by the caller."""
+    from ts_cli.sets.consumers import _dependents_hidden, _own_item
+    names = {r["guid"]: r["name"] for r in refs}
+    out = []
+    for guid in guids:
+        if not isinstance(body, list):
+            why = "the dependents answer was not a list"
+        else:
+            item = _own_item(body, guid)
+            if item is None:
+                why = "the dependents answer did not include this Model"
+            elif _dependents_hidden(item.get("dependent_objects") or {}):
+                why = "some dependents are not visible to this user (hasInaccessibleDependents)"
+            else:
+                continue
+        msg = f"Dependents of Model {names.get(guid, guid)} ({guid}) not fully read: {why}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        out.append(guid)
+    return out
 
 
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
@@ -758,6 +794,8 @@ def build_context(
         _build_dependents_payload, _normalize_dependents_response,
     )
     all_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
+    model_set = set(model_guids_from_tml)  # the audited Models: not exported is not judged
+    dependents_incomplete: list = []
 
     if all_guids:
         dep_batch = 15
@@ -768,7 +806,11 @@ def build_context(
                 json=_build_dependents_payload(batch, "LOGICAL_TABLE"),
                 timeout=300,
             )
-            dep_rows = _normalize_dependents_response(resp.json())
+            body = resp.json()
+            dependents_incomplete += _dependents_incomplete(
+                body, [g for g in batch if g in model_set], _model_refs(models, model_guids),
+                warnings)
+            dep_rows = _normalize_dependents_response(body)
             for row in dep_rows:
                 src = row["source_guid"]
                 dependents.setdefault(src, []).append(row)
@@ -807,6 +849,7 @@ def build_context(
         connections=connections,
         usage=usage,
         sets_incomplete=sets_incomplete,
+        dependents_incomplete=sorted(dependents_incomplete),
         model_guids=model_guids,
         warnings=warnings,
     )
