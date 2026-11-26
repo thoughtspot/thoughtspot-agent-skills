@@ -316,22 +316,45 @@ def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
     history's first and last query (epoch seconds); `hd` the whole days the history
     covers before the read, `id` the idle days H17 judged by (null when it did not run);
     `b` rows dropped for a blank Model ID; `g` the Model IDs no visible object matches, each [guid, queries, users, last
-    query], or null when they could not be listed."""
+    query, orgs] — orgs `[[Org id, Org name, last query there]]`, `[]` when no Org is
+    recorded, null when the Orgs were not read — or null when they could not be listed;
+    `or` 1 when each Model's Orgs were read, 0 when not (absent before 0.224.0); `os`
+    each Org the usage names, `[[id, name, used Model IDs]]`, or null when not read."""
     if not isinstance(usage, dict):
         return None
     org = usage.get("org") or {}
     history = usage.get("history") or {}
     gone = usage.get("gone")
     primary = usage.get("primary")
-    return {"o": org.get("name") or "", "oi": org.get("id"),
-            "pr": None if primary is None else (1 if primary else 0),
-            "w": usage.get("window_days"), "at": usage.get("fetched_at"),
-            "hs": history.get("start"), "he": history.get("end"),
-            "hd": usage.get("history_days"), "id": usage.get("idle_days"),
-            "b": usage.get("blank_rows") or 0,
-            "g": None if not isinstance(gone, list) else
-            [[g.get("guid", ""), g.get("queries_180d") or 0, g.get("users_180d") or 0,
-              g.get("last_used")] for g in gone]}
+    out = {"o": org.get("name") or "", "oi": org.get("id"),
+           "pr": None if primary is None else (1 if primary else 0),
+           "w": usage.get("window_days"), "at": usage.get("fetched_at"),
+           "hs": history.get("start"), "he": history.get("end"),
+           "hd": usage.get("history_days"), "id": usage.get("idle_days"),
+           "b": usage.get("blank_rows") or 0, "g": _compact_gone(gone)}
+    if usage.get("org_read") is not None:  # absent from JSON written before 0.224.0
+        out["or"] = 1 if usage["org_read"] else 0
+        orgs = usage.get("orgs")
+        out["os"] = None if not isinstance(orgs, list) else \
+            [[o.get("id"), o.get("name") or "", o.get("models") or 0] for o in orgs]
+    return out
+
+
+def _compact_gone(gone: Any) -> Optional[list]:
+    """`corpus.usage.gone` as `[[guid, queries, users, last query, orgs]]`; null when
+    the not-found IDs could not be listed."""
+    if not isinstance(gone, list):
+        return None
+    return [[g.get("guid", ""), g.get("queries_180d") or 0, g.get("users_180d") or 0,
+             g.get("last_used"), _compact_orgs(g.get("orgs", []))] for g in gone]
+
+
+def _compact_orgs(orgs: Any) -> Optional[list]:
+    """A not-found Model ID's Orgs, `[[id, name, last query]]`; null when not read."""
+    if not isinstance(orgs, list):
+        return None
+    return [[o.get("id"), o.get("name") or "", o.get("last_used")] for o in orgs
+            if isinstance(o, dict)]
 
 
 def _written_use(use: list, ref: str) -> list:

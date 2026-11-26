@@ -53,9 +53,9 @@ function scorecardUsageStats(cm){
   var items = [
     {v: lu.text, l: "Last used", t: lu.title},
     {v: state === "read" ? (us ? String(us.q) : "") : USAGE_NOT_READ, l: "Queries ("+w+")",
-     t: state === "read" ? "Queries on this Model "+span+" ("+usageOrgName()+")" : lu.title},
+     t: state === "read" ? "Queries on this Model "+span+" ("+usageWhose()+")" : lu.title},
     {v: state === "read" ? (us ? String(us.u) : "") : USAGE_NOT_READ, l: "Users ("+w+")",
-     t: state === "read" ? "Distinct users who queried this Model "+span+" ("+usageOrgName()+")" : lu.title}
+     t: state === "read" ? "Distinct users who queried this Model "+span+" ("+usageWhose()+")" : lu.title}
   ];
   return items.map(function(s){
     return '<div class="stat-item usage-stat" title="'+esc(s.t)+'"><div class="stat-val">'+esc(s.v)+
