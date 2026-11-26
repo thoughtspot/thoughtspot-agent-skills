@@ -521,6 +521,7 @@ are roughly ordered by value÷effort.
 | ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
 | BL-628 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
 | BL-629 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
+| BL-630 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19124,3 +19125,34 @@ Liveboard are built once over those tables and shipped as TML; each run appends.
    what stays in the HTML report (offline use, a cluster with no warehouse to write to).
 
 **Output:** a short recommendation (per view: where it lives) and the build items that follow.
+
+## BL-630 — ts-audit Usage view (3.28.0): review nits deferred `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-page`; triaged
+under pr-ready Step 7. **Target:** 2027-01-31.
+
+**What.**
+
+1. `usage_triage.py` `created_date`: an out-of-range `created` (1e17) raises and aborts the
+   run; H17 only compares numbers.
+2. `report/usage_quadrant.js`: the ±3 px jitter is wider than about 1 px per day near the
+   90-day line, so a dot at 89 or 90 days can be drawn on the wrong side (colour and
+   `data-quadrant` stay right).
+3. `views/usage.js`: an audit with no audited Models says the report "predates the Usage
+   view", with backticks shown literally.
+4. The candidates file says `window_days: 180` and `queries_180d` when the history is
+   shorter; it carries no history start.
+5. "Not recorded" (Owner cell, SKILL.md) also covers a header that was not read.
+6. `usage_triage.py`'s docstring says H17 imports it (H17 imports `usage.py`); `headers_by_id`
+   and `created_date` repeat `engine/code_rules_human._created_by_id` and `usage.iso_date`.
+7. The idle-days test exercises only the fallback.
+8. Export: no test writes a real file; the object URL is revoked at 0 ms (reported to break
+   downloads in some browsers); the CSV has no UTF-8 BOM, so Excel on Windows may garble
+   non-ASCII owner names and the curly quotes in `usage_scope`.
+9. `tools/ts-cli/CLAUDE.md`'s `REPORT_LIBS` list misses `usage.js`, `usage_quadrant.js` and
+   `usage_export.js`.
+10. BL-625 item 2 asked for chips that combine with the angle and severity filters; the view
+    gives a Worst-finding sort instead, and BL-625's resolution does not say that part was
+    dropped.
+11. The quadrant's grey band holds both Too new / not judged Models and Models whose Sets
+    were not read; each keeps its status colour, so the band mixes colours.
