@@ -2,7 +2,8 @@
 
 ThoughtSpot keeps its own query history in the system Model "TS: AI and BI Stats". The
 audit reads it with `searchdata`, only when a selected rule declares `usage` (H17), and
-keeps GUIDs and counts per Model, never a name. Live-probed on the SE demo cluster,
+keeps GUIDs and counts per Model, with the name and id of each Org it was queried in,
+never a Model name. Live-probed on the SE demo cluster,
 2026-11-25 (ts-audit open-items #9):
 
 * The system Model is found by its exact name (`metadata/search`); its TML export is
@@ -19,8 +20,17 @@ keeps GUIDs and counts per Model, never a name. Live-probed on the SE demo clust
   time column asked for beside the keyword filter was dropped from the answer, so the
   last-used time is read by its own query over all history.
 * The history ran from 2023-10-01 to the day before the probe: about a day's lag.
-* The answer is the usage of the Org the session is in (`auth/session/user`
-  `current_org`), not the Primary Org's, so the Org is recorded with it.
+* Read from a non-primary Org, the answer is that Org's usage only; read from the
+  Primary Org it holds every Org's (2026-11-25: of 6 top Model IDs no Primary Org object
+  matched, 5 were Models in three other Orgs). The session's Org (`auth/session/user`
+  `current_org`) is recorded with it.
+* `[Org ID]` (a string, "0" for the Primary Org) and `[Org]` (its name) name the Org each
+  query ran in. They are read by a fourth query of their own (ORG_QUERY), so a build
+  that refuses them, or answers without them, leaves the rest of the usage readable:
+  only `model_orgs` is None. Grouped by Org, 7 of 3,015 Model IDs came back under more
+  than one Org, so a Model ID may carry several Orgs; each is kept with its own last
+  query, and the per-Model counts come from the queries with no Org column, never a
+  sum over Orgs.
 
 `ctx.usage` is None when not fetched and when any of it could not be read (the Model
 missing, refused, or a failed call: a warning names the status and path only); every
@@ -49,6 +59,8 @@ LAST_QUERY = "Maximum TS Query Start Time"
 FIRST_QUERY = "Minimum TS Query Start Time"
 QUERIES = "Queries"
 USERS = "Unique Number of User ID"
+ORG_ID = "Org ID"
+ORG_NAME = "Org"
 
 #: (query string, the columns it must answer, by name) for each `searchdata` call.
 HISTORY_QUERY = ("min [TS Query Start Time] max [TS Query Start Time]",
@@ -57,6 +69,9 @@ LAST_USED_QUERY = ("[Model ID] max [TS Query Start Time]", (MODEL_ID, LAST_QUERY
 WINDOW_QUERY = ("[Model ID] [Queries] unique count [User ID] "
                 f"[TS Query Start Time].'last {WINDOW_DAYS} days'",
                 (MODEL_ID, QUERIES, USERS))
+#: Each Model's Org(s), with the last query in each, over all history.
+ORG_QUERY = ("[Model ID] [Org ID] [Org] max [TS Query Start Time]",
+             (MODEL_ID, ORG_ID, ORG_NAME, LAST_QUERY))
 
 #: The id ThoughtSpot gives the Primary Org.
 PRIMARY_ORG_ID = 0
@@ -89,6 +104,40 @@ def org_label(usage: Optional[dict]) -> str:
     if oid is not None:
         return f"the Org with id {oid}"
     return "the audit's Org (its name could not be read)"
+
+
+def usage_scope(usage: Optional[dict]) -> Tuple[str, int]:
+    """Whose usage a reading is, as `(kind, Orgs it names)`; the report's usage.js
+    `usageScope` mirrors it, so a finding and the page agree:
+
+    * "all": read from the Primary Org and naming more than one Org — every Org's usage;
+    * "many": read from another Org (or an unread one) yet naming more than one;
+    * "hedge": read from the Primary Org with its Orgs not read, or taken before they
+      were (ts-cli 0.223.0), so which Orgs it covers is not known;
+    * "org": otherwise, the usage of the Org it was read in."""
+    usage = usage or {}
+    model_orgs, org_read = _model_orgs_of(usage)
+    count = len({o["id"] for rows in (model_orgs or {}).values() for o in rows})
+    primary = is_primary(usage)
+    if count > 1:
+        return ("all" if primary else "many"), count
+    if primary and org_read is not True:
+        return "hedge", count
+    return "org", count
+
+
+def usage_label(usage: Optional[dict]) -> str:
+    """Whose usage a reading is, in words (usage_scope): "usage of all Orgs, read from
+    the Primary Org", "usage of 3 Orgs, read from the Org 'X'", "usage read from the
+    Primary Org; which Orgs it covers was not read" or "usage of the Org 'X'"."""
+    kind, count = usage_scope(usage)
+    if kind == "all":
+        return "usage of all Orgs, read from the Primary Org"
+    if kind == "many":
+        return f"usage of {count} Orgs, read from {org_label(usage)}"
+    if kind == "hedge":
+        return "usage read from the Primary Org; which Orgs it covers was not read"
+    return f"usage of {org_label(usage)}"
 
 
 def model_usage(usage: dict, guid: str) -> Dict[str, Any]:
@@ -156,21 +205,59 @@ def corpus_usage(usage: Optional[dict], audited: Any) -> Optional[dict]:
     the Org, whether it is the Primary Org, the window, when it was read, the history's
     span, the rows dropped for a blank Model ID, and `gone` — each Model ID that matches
     no object the user can see now and is not audited, most queried first, or None when
-    that could not be listed. GUIDs and counts only: the system Model has no names."""
+    that could not be listed. With them, the Orgs (corpus_orgs): `org_read`, `orgs`, and
+    each `gone` entry's `orgs`. GUIDs, counts and Org names only: the system Model has no
+    Model names."""
     if not usage_readable(usage):
         return None
+    model_orgs, org_read = _model_orgs_of(usage)
     gone = None
     if isinstance(usage.get("not_visible"), list):
         gone = [dict(corpus_model_usage(usage, g), guid=g)
                 for g in usage["not_visible"] if g not in audited]
         for g in gone:
             del g["never"]
+            g["orgs"] = None if model_orgs is None else \
+                [dict(o) for o in model_orgs.get(g["guid"], [])]
         gone.sort(key=lambda g: (-g["queries_180d"], -(g["last_used"] or 0), g["guid"]))
     return {"org": usage.get("org"), "primary": is_primary(usage),
             "window_days": usage.get("window_days"), "fetched_at": usage.get("fetched_at"),
             "history": usage.get("history"),
             "history_days": days_since(usage.get("fetched_at"), usage["history"]["start"]),
-            "blank_rows": usage.get("blank_rows", 0), "gone": gone}
+            "blank_rows": usage.get("blank_rows", 0), "gone": gone,
+            "org_read": org_read, "orgs": corpus_orgs(model_orgs)}
+
+
+def _model_orgs_of(usage: dict) -> Tuple[Optional[Dict[str, list]], Optional[bool]]:
+    """`(model_orgs, org_read)`: each Model ID's Orgs and whether they were read — True
+    read, False fetched and not read (`model_orgs` None), None for a reading taken before
+    the Orgs were (ts-cli 0.223.0, a replayed snapshot), whose IDs then carry no Org: `{}`,
+    so each reads as "Org not recorded"."""
+    if "model_orgs" not in usage:
+        return {}, None
+    model_orgs = usage["model_orgs"]
+    if not isinstance(model_orgs, dict):
+        return None, False
+    return model_orgs, True
+
+
+def corpus_orgs(model_orgs: Optional[Dict[str, list]]) -> Optional[List[dict]]:
+    """Each Org the usage names, as `{id, name, models}` (`models`: the used Model IDs
+    queried in it), the most first; None when the Orgs were not read. A Model ID queried
+    in two Orgs counts in both."""
+    if model_orgs is None:
+        return None
+    orgs: Dict[str, dict] = {}
+    for rows in model_orgs.values():
+        for row in rows:
+            org = orgs.setdefault(row["id"], {"id": row["id"], "name": row.get("name"),
+                                              "models": 0})
+            org["models"] += 1
+    return sorted(orgs.values(), key=lambda o: (-o["models"], _org_sort(o["id"])))
+
+
+def _org_sort(oid: str) -> Tuple[int, Any]:
+    return (0, int(oid)) if oid.isdigit() else (1, oid)
 
 
 def idle_days_of(ran: Dict[str, Any]) -> Optional[float]:
@@ -259,6 +346,37 @@ def merge_rows(last_used: List[dict], window: List[dict]) -> Tuple[Dict[str, dic
     return models, blank
 
 
+def merge_orgs(rows: List[dict]) -> Dict[str, List[dict]]:
+    """`{Model GUID: [{id, name, last_used}, ...]}` from ORG_QUERY's rows: each Org a
+    Model ID was queried in, by Org id (a string), with the last query there, ordered by
+    Org id. A Model ID in several Orgs keeps one entry per Org, never merged. A row with
+    a blank Model ID or a blank Org id is dropped, so a Model ID with no Org recorded is
+    absent. Two rows for one Model and Org id (the Org renamed) are one entry, with the
+    later query and the name beside it."""
+    found: Dict[str, Dict[str, dict]] = {}
+    for row in rows:
+        guid, oid = row.get(MODEL_ID), _org_id(row.get(ORG_ID))
+        if not isinstance(guid, str) or not guid.strip() or oid is None:
+            continue
+        name = row.get(ORG_NAME)
+        entry = {"id": oid, "name": name if isinstance(name, str) and name else None,
+                 "last_used": _epoch(row.get(LAST_QUERY))}
+        orgs = found.setdefault(guid.strip(), {})
+        held = orgs.get(oid)
+        if held is None or (entry["last_used"] or 0) > (held["last_used"] or 0):
+            orgs[oid] = entry
+    return {g: [orgs[k] for k in sorted(orgs, key=_org_sort)] for g, orgs in found.items()}
+
+
+def _org_id(value: Any) -> Optional[str]:
+    """An Org id as a string ("7"; a whole float 7.0 too), None when blank or not one."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    return str(value).strip() or None
+
+
 # ── the fetch ───────────────────────────────────────────────────────────────
 
 def fetch_usage(client: Any, warnings: list) -> Optional[dict]:
@@ -268,11 +386,14 @@ def fetch_usage(client: Any, warnings: list) -> Optional[dict]:
         {"org": {"id", "name"}, "window_days": 180, "fetched_at": <epoch seconds>,
          "history": {"start", "end"}, "blank_rows": <rows with no Model ID>,
          "models": {<guid>: {"last_used", "queries_180d", "users_180d"}},
+         "model_orgs": {<guid>: [{"id", "name", "last_used"}, ...]} or None,
          "not_visible": [<guid>, ...] or None}
 
     `not_visible` lists the Model IDs that match no Model, Table or View the user can
     see in this Org now (deleted, in another Org, or not shared with them); None, with a warning, when
-    that search failed, which leaves the rest readable."""
+    that search failed, which leaves the rest readable. `model_orgs` is each Model ID's
+    Orgs (merge_orgs); None, with a warning, when ORG_QUERY was refused or answered
+    without the Org columns, which leaves the rest readable too."""
     from ts_cli.audit.context import _log
     _log("Fetching usage...")
     try:
@@ -298,6 +419,7 @@ def fetch_usage(client: Any, warnings: list) -> Optional[dict]:
             "history": {"start": _epoch(span.get(FIRST_QUERY)),
                         "end": _epoch(span.get(LAST_QUERY))},
             "blank_rows": blank, "models": models,
+            "model_orgs": _read_orgs(client, guid, warnings),
             "not_visible": _not_visible(client, models, warnings)}
 
 
@@ -362,6 +484,20 @@ def _query(client: Any, guid: str, query: str, wanted: Tuple[str, ...]) -> List[
         "query_string": query, "logical_table_identifier": guid,
         "data_format": "COMPACT", "record_size": -1})
     return _columns(answer, wanted, f"searchdata '{query}'")
+
+
+def _read_orgs(client: Any, guid: str, warnings: list) -> Optional[Dict[str, List[dict]]]:
+    """Each used Model ID's Orgs (ORG_QUERY, merge_orgs); None, with a warning naming
+    the status and path or the missing column, when they could not be read."""
+    from ts_cli.audit.context import _log
+    try:
+        return merge_orgs(_query(client, guid, *ORG_QUERY))
+    except NotRead as exc:
+        msg = ("The Org each used Model was queried in was not read, so the Cleanup view "
+               f"does not split the used Models by Org: {exc}")
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        return None
 
 
 def _not_visible(client: Any, models: Dict[str, dict], warnings: list) -> Optional[List[str]]:

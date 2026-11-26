@@ -4943,10 +4943,20 @@ queries and distinct users over the last 180 days (the keyword filter
 `searchdata` answers its columns in an order of its own. A paged `metadata/search` of
 the LOGICAL_TABLEs the user can see (500 a page, hidden objects included) says which
 Model IDs match nothing visible now. The current Org comes from `auth/session/user`
-(`current_org`) and is recorded with the usage: `searchdata` answers the usage of the
-Org the session is in, not the Primary Org's. The audit keeps GUIDs and counts only
-(the system Model has no Model names); a row with a blank Model ID is dropped and
-counted. The history lags by about a day. The corpus records how many whole days the
+(`current_org`) and is recorded with the usage. Read from a non-primary Org, `searchdata`
+answers that Org's usage only; read from the Primary Org, every Org's. A fourth query,
+`[Model ID] [Org ID] [Org] max [TS Query Start Time]`, gives each used Model ID the Org(s)
+it was queried in (`model_orgs`; the audit JSON's `corpus.usage.orgs`, `org_read` and each
+not-found ID's `orgs`). It runs on its own, so a refusal, or an answer without the Org
+columns, is a warning that leaves the rest of the usage readable and the Cleanup list
+unsplit ("Org not read"). A Model ID queried in several Orgs keeps one entry per Org with
+its last query there; its query and user counts are the Model's across every Org, never
+a sum per Org. The header says the usage covers all Orgs when it was read from the
+Primary Org and names more than one Org, and gives the count of Orgs the data names when
+it was read elsewhere. The Cleanup view splits the not-found IDs into this Org's, other
+Orgs' (grouped by Org, collapsed) and those with no Org recorded. The audit keeps GUIDs,
+counts and Org names and ids only (the system Model has no Model names); a row with a
+blank Model ID is dropped and counted. The history lags by about a day. The corpus records how many whole days the
 history covers before the read (`usage.history_days`) and the idle days H17 judged by
 (`usage.idle_days`); when the history covers fewer days than the 180-day window, the
 report labels the counts with the history's span, and when it covers fewer than the idle
@@ -4956,8 +4966,9 @@ answer, one that cannot be read whole, or a history with no first query leaves t
 naming the status and path only, and H17 judges no Model while the report says "Not
 read". A failed session or visible-object search is a warning that leaves the Org, or
 the list of used Models not found in this Org, unknown. A snapshot written before ts-cli
-0.223.0 holds no usage, so replaying H from it is refused: capture it again. Logic in
-`ts_cli/audit/usage.py`.
+0.223.0 holds no usage, so replaying H from it is refused: capture it again. One written
+by 0.223.0 holds usage without Orgs: it replays, and every not-found ID reads "Org not
+recorded". Logic in `ts_cli/audit/usage.py`.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

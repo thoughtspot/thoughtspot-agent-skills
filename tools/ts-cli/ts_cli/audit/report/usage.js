@@ -2,7 +2,10 @@
    D.C.us is the reading: {o Org name, oi Org id, pr 1 Primary / 0 another / null not read,
    w window days, at read at, hs/he history's first and last query (epoch seconds), hd whole
    days the history covers before the read, id the idle days H17 judged by, b rows
-   dropped for a blank Model ID, g [[guid, queries, users, last query]] or null}. It is
+   dropped for a blank Model ID, g [[guid, queries, users, last query, orgs]] or null,
+   each orgs [[Org id, Org name, last query there]] ([] none recorded, null not read; absent
+   before 0.224.0), or 1 Orgs read / 0 not read (absent before 0.224.0), os [[Org id, name,
+   used Model IDs]] or null}. It is
    null when the run fetched usage and could not read it, and absent when no selected rule
    needed it (or the JSON predates it). Each Model's `us` is {l last query, d days since,
    q queries, u users, n 1 when never queried}. What was not read says "Not read", never
@@ -60,27 +63,61 @@ function usageLastUsed(cm){
   if(us.n){
     var start = usageDate(D.C.us.hs);
     return {text: "No query", title: "No query in the usage history"+
-      (start ? ", which starts on "+start : "")+" ("+usageOrgName()+")"};
+      (start ? ", which starts on "+start : "")+" ("+usageWhose()+")"};
   }
   if(typeof us.d !== "number") return {text: "Unknown",
     title: "The history holds this Model but no query time; "+counts};
   return {text: us.d === 0 ? "Today" : usagePlural(us.d, "day")+" ago",
-          title: "Last queried on "+usageDate(us.l)+"; "+counts+" ("+usageOrgName()+")"};
+          title: "Last queried on "+usageDate(us.l)+"; "+counts+" ("+usageWhose()+")"};
 }
 
-/* The header line naming the Org whose usage the report shows and when it was read, and
-   a note when that is not the Primary Org's usage. "" when usage is absent. */
+/* How many Orgs the usage names (D.C.us.os); 0 when its Orgs were not read. */
+function usageOrgCount(){
+  var u = D.C && D.C.us;
+  return u && u.os ? u.os.length : 0;
+}
+
+/* Whose usage the reading is, as ts_cli/audit/usage.py usage_scope decides it, so the
+   page and H17's findings agree: "all" (read from the Primary Org, naming more than one
+   Org), "many" (read elsewhere yet naming more than one), "hedge" (read from the Primary
+   Org with its Orgs not read, or before they were: 0.223.0) or "org" (that Org's). */
+function usageScope(){
+  var u = D.C.us, n = usageOrgCount();
+  if(n > 1) return u.pr === 1 ? "all" : "many";
+  if(u.pr === 1 && u.or !== 1) return "hedge";
+  return "org";
+}
+/* The same, in words (usage_label): "usage of all Orgs, read from the Primary Org",
+   "usage of 3 Orgs, read from the Org ‘X’", "usage read from the Primary Org; which Orgs
+   it covers was not read", "usage of the Org ‘X’". */
+function usageWhose(){
+  var kind = usageScope();
+  if(kind === "all") return "usage of all Orgs, read from the Primary Org";
+  if(kind === "many") return "usage of "+usageOrgCount()+" Orgs, read from "+usageOrgName();
+  if(kind === "hedge") return "usage read from the Primary Org; which Orgs it covers was not read";
+  return "usage of "+usageOrgName();
+}
+
+/* The header line naming whose usage the report shows (usageScope) and when it was read,
+   and a note when it is one non-primary Org's only. "" when usage is absent. */
 function usageHeaderHtml(){
   var state = usageState();
   if(state === "absent") return "";
   if(state === "not_read") return '<span class="meta-item usage-meta">Usage: <strong>'+
     USAGE_NOT_READ+'</strong></span>';
-  return '<span class="meta-item usage-meta">Usage of <strong>'+esc(usageOrgName())+
-    '</strong>, read on '+esc(usageDate(D.C.us.at))+'</span>';
+  var u = D.C.us, n = usageOrgCount(), on = esc(usageDate(u.at)), kind = usageScope();
+  var text = kind === "all"
+    ? 'Usage of <strong>all Orgs</strong> ('+n+' in the usage history), read from the Primary Org on '+on
+    : kind === "many"
+    ? 'Usage of <strong>'+n+' Orgs</strong>, read from '+esc(usageOrgName())+' on '+on
+    : kind === "hedge"
+    ? 'Usage read from <strong>the Primary Org</strong> on '+on+'; which Orgs it covers was not read'
+    : 'Usage of <strong>'+esc(usageOrgName())+'</strong>, read on '+on;
+  return '<span class="meta-item usage-meta">'+text+'</span>';
 }
 
 function usageOrgNoteHtml(){
-  if(usageState() !== "read" || D.C.us.pr === 1) return "";
+  if(usageState() !== "read" || D.C.us.pr === 1 || usageOrgCount() > 1) return "";
   var text = D.C.us.pr === 0
     ? "Usage counts the queries in "+usageOrgName()+" only: this audit ran outside the "+
       "Primary Org, so queries made in other Orgs are not counted."
@@ -123,4 +160,32 @@ function usageUnjudgedLabel(ci){
   if(!usageUnjudged(ci)) return "";
   var state = usageState();
   return state === "not_read" ? USAGE_NOT_READ : state === "read" ? "Partly judged" : "Not collected";
+}
+
+/* The not-found Model IDs (D.C.us.g) split by the Org each was queried in:
+   {own: [[row, org], ...] (null when the audit's Org was not read), others: [{id, name,
+   rows}], the most IDs first, unrecorded: [row, ...] with no Org}. A Model ID queried in
+   several Orgs is listed under each, with that Org's last query. */
+function usageGoneByOrg(gone){
+  var u = D.C.us, mine = u.oi === null || u.oi === undefined ? null : String(u.oi);
+  var own = mine === null ? null : [], others = {}, order = [], unrecorded = [];
+  gone.forEach(function(g){
+    var orgs = g[4] || [];
+    if(!orgs.length){ unrecorded.push(g); return; }
+    orgs.forEach(function(o){
+      var k = String(o[0]);
+      if(k === mine){ own.push([g, o]); return; }
+      if(!others[k]){ others[k] = {id: k, name: o[1], rows: []}; order.push(k); }
+      others[k].rows.push([g, o]);
+    });
+  });
+  var groups = order.map(function(k){ return others[k]; });
+  groups.sort(function(a, b){
+    return b.rows.length - a.rows.length || a.id.localeCompare(b.id, undefined, {numeric: true});
+  });
+  return {own: own, others: groups, unrecorded: unrecorded};
+}
+
+function usageOrgLabel(id, name){
+  return name ? "the Org ‘"+name+"’" : "the Org with id "+id;
 }
