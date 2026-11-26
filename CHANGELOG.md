@@ -5,7 +5,14 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-26
+- docs: `.github/CONTRIBUTING.md` sets a stopping point for reviewing someone else's PR: a full first review labelling every finding Blocking or Backlog, one fix round, one re-review, at most one more round for a Blocking item left unfixed or a regression the fix commits introduced, and after that the maintainer fixes what is left at merge or closes the PR; Blocking items are resolved before merge. The maintainer may commit on the contributor's branch at merge with hooks disabled and nothing from the branch executed. The PR template gains a Coverage section
+- fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
+- chore: bump ts-cli to v0.224.1
+
 ## 2026-11-25
+- feat: `ts audit` reads the Org each used Model was queried in (`[Org ID]` and `[Org]`, a query of their own, so a build that refuses them leaves the rest of the usage readable). Read from the Primary Org with more than one Org in the usage, the report header says it covers all Orgs; the Cleanup view splits the used Model IDs not found into this Org's (deleted, or not shared with the audit's user), other Orgs' (one collapsed group per Org, no claim they are deleted) and those with no Org recorded. A Model ID queried in several Orgs is listed under each (ts-audit 3.27.0)
+- chore: bump ts-cli to v0.224.0
 - feat: `ts audit` reads each Model's usage from the system Model TS: AI and BI Stats (last query over all the history kept; queries and distinct users over 180 days; the Org it was read in) when a selected rule declares the new `usage` data; H17 (LOW) reports a Model with no query in 90 days or more, or none in a history that starts at least 90 days back; the report shows usage in each scorecard header, a Last used Dashboard column, the Org and read date in the header (with a note outside the Primary Org), and a Cleanup list of used Model IDs that match no visible object. Unread usage reads "Not read", never unused (ts-audit 3.26.0)
 - chore: bump ts-cli to v0.223.0
 - docs: `pr-ready` 1.1.0 adds Step 7, a stopping point for review: ship at once when nothing needs fixing, else one fix round (Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement or normal use) and one re-review; the rest goes to one dated backlog item. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text in a credentialed session, a weakened gate and silently wrong output are always Blockers. `CLAUDE.md` asks for one purpose per PR and bounded claims about behaviour

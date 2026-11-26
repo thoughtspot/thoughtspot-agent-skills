@@ -455,9 +455,14 @@
     at least 90 days before the read (a shorter history says nothing about a Model it
     does not hold). The usage is read
     from the system Model TS: AI and BI Stats: each Model's last query time over the
-    whole history it keeps, which lags by about a day. It is the usage of the Org the
-    audit runs in, so a Model queried only from another Org counts as not queried here.
-    A Model created since the history's last day reads as never queried. Not judged
+    whole history it keeps, which lags by about a day. Read from the Primary Org, the
+    usage counted queries made in every Org on the cluster probed, so a Model queried
+    only from another Org is not flagged; read from another Org, it counts that Org's
+    queries, so a Model queried only elsewhere counts as not queried there. The finding
+    says which it was.
+    A Model never queried and created less than 90 days before the read (its metadata
+    header's creation time) does not qualify: it has existed for less than 90 days. One
+    whose creation time is not recorded or not read is treated as above. Not judged
     when the usage could not be read (the system Model missing, refused, a failed call,
     or a history with no first query), never read as unused.
   # A code rule (code:idle_model) because its idle days are a tunable parameter and the
@@ -469,11 +474,12 @@
   scope: model
   severity: LOW
   parameters: {idle_days: 90}
-  message: "{idle} (usage of {org})"
+  message: "{idle} ({usage})"
   remediation: >-
     Ask the Model's owner whether anyone still needs it. Before removing it, run
     /ts-dependency-manager to see what depends on it: a Model can feed Liveboards and
-    Answers that nobody opened in the window, and usage counts this Org's queries only
+    Answers that nobody opened in the window, and usage read outside the Primary Org
+    counts that Org's queries only
   examples:
     fires: {fixture: human_model_idle, severity: LOW}
     silent: {fixture: human_model_recently_used}

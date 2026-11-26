@@ -515,6 +515,10 @@ are roughly ordered by value÷effort.
 | BL-619 | ts-audit follow-ups promised in #741 and #735 and never filed (null-test wording, P28 docstring, a calendar listed twice, a test-only helper, Ossie row 290, two H16 column reads) | 2027-01-31 |
 | BL-621 | Connection health check: `ts connections diagnose` + `ts-object-connection-health`, a stopgap for PDM-5106 (design drafted, not built) | 2027-01-31 |
 | BL-622 | ts-audit: flag idle connections that are still active, and recommend deactivating them (connection health piece 2) | 2027-02-28 |
+| BL-620 | ts-audit usage (H17): review leftovers and open questions (non-admin auditors, the searchdata spec check, new Models, clock skew, cost, locale, nits) | 2026-12-31 |
+| BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
+| BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
+| BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18701,13 +18705,27 @@ Open questions, each settled by a live probe:
    no object of any type in the Primary Org, some queried by up to 8 users in the last week.
    Probe whether the Primary Org's usage includes other Orgs' Models; if so, say so in the
    report and consider splitting the list by Org.
+   **Resolved 2026-11-25 (ts-cli 0.224.0):** it does; the header says so and Cleanup splits the list by Org (ts-audit open-items #9).
 
 Behaviour:
 
 4. **New Models read as never queried.** H17 reports a Model created inside the last
    `idle_days` that nobody has queried yet, worded "…which starts on <history start>", which
    implies years idle. Skip, or reword, a Model whose creation time (in the metadata header)
-   is under `idle_days` old.
+   is under `idle_days` old. **Resolved 2026-11-26** (ts-cli 0.224.1): skipped by the
+   header's `created` time.
+   Follow-ups from the fix's review (2026-11-26): the age test covers only never-queried
+   Models (a young Model the history holds with an older query, i.e. a GUID re-created
+   after deletion, still fires); `_created_by_id` in `engine/code_rules_human.py`
+   re-implements `fields_data_cache._headers_by_id` and keeps the last of a repeated id
+   where that keeps the first; a never-queried Model older than 90 days still reads "…which
+   starts on <history start>" rather than its creation date, as does the Last used
+   tooltip; no test mixes Model ages in one run or overrides `idle_days`; how `created`
+   behaves across a Worksheet-to-Model upgrade or re-import is not recorded in open-items
+   #9. Sibling class, pre-existing: H4 and H5 flag objects created yesterday as orphans.
+   From the re-review: pin that a young Model with an old query still fires (moving the
+   age check ahead of the never-queried branch passes all 27 H17 tests today); the test
+   `…younger_than_90_days_is_not_judged` and its docstring keep the old "not judged" wording.
 5. **"(0) No findings." for rules that did not run.** The Cleanup view prints it for H4, H5
    and H10 when their data was not collected (pre-existing; H17 was fixed in the usage PR).
    Key every cleanup section on `collected()` of its rule's `requires`.
@@ -18869,3 +18887,216 @@ docs: deactivation suspends "all activity". Its finding should say so, not claim
 saving (design doc open item 6).
 
 **Next step.** Design piece 2.
+
+## BL-623 — ts-audit usage by Org: review nits deferred from the Org PR `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-orgs` (ts-cli
+0.224.0); triaged under pr-ready Step 7. **Target:** 2026-12-31.
+
+**What.**
+
+1. For a 3.26.0 reading, the only not-found list is headed "Org not recorded (N)" and
+   never says its IDs match no visible object; empty, it reads "(0)" and "None."
+   (`report/views/cleanup.js`).
+2. When the audit's own Org, or the Orgs, were not read, notes still assume the groups are
+   other Orgs and that other Orgs' queries are not counted (`cleanup.js`, `report/usage.js`).
+3. Loose claims: the README says the header gives the count of Orgs when read elsewhere
+   (only when more than one); `report.py` and `usage.js` say `or` is "absent before
+   0.224.0" (also absent when 0.224.0 replays a 0.223.0 reading).
+4. No guard for Orgs read but the audit's own Org id matching none of them (an id-format
+   difference for a non-primary Org is not verified live): "Used in this Org, but not
+   found (0)" would read clean.
+5. `usage.py` `_org_sort` checks `isdigit()` then calls `int()` (a non-ASCII digit raises;
+   use `isdecimal()`); a renamed Org's later blank name replaces an earlier name.
+6. The Org query is a fourth all-history query under the 60 s timeout; a persistent socket
+   timeout aborts the whole audit. Add it to BL-620 item 8's timing.
+7. Audited Models in `corpus.models[].usage` carry no Org; only not-found IDs and the
+   `orgs` summary do.
+8. In a not-found row, "Last queried" is that Org's last query while Queries and Users are
+   the ID's totals across Orgs; the tooltip explains only the counts.
+9. Read from the Primary Org, the report carries every Org's name, often customer names on
+   a multi-tenant cluster. SKILL.md says so; consider a note at the report's top.
+10. BL-620 item 1 (non-admin auditors) now also bears on the "Usage of all Orgs" header,
+    which rests on one admin user's probe.
+
+From the re-review of the fix round:
+
+11. **Label for a one-Org history that is not the reading Org** (the remaining Should-fix).
+    Read from the Primary Org with the Org query succeeding, a history naming exactly one
+    Org that is not the Primary Org (or naming none) makes `usage_scope`
+    (`usage.py`, mirrored in `report/usage.js`) return "org", so the header, tooltips and
+    H17 say "usage of the Org 'Primary'" while Cleanup lists "Used in other Orgs".
+    Counts and verdicts are right; only the label is wrong. Return "org" only when the one
+    Org named is the reading Org; otherwise "all" from the Primary Org, or the hedge. The
+    two one-Org tests use Org "0" only; add one with another Org. Also: with the audit's
+    own Org unread, H17 says "the audit's Org (its name could not be read)" even when
+    the reading covers every Org.
+12. The Python and JS labels agree in kind but not in words ('Primary' vs ‘Primary’, the
+    unread-name wording), and the decision is written twice with no cross-check test;
+    carry the kind in `_compact_usage` so the page reads Python's decision.
+13. SKILL.md's H17 sentence and `code_rules_human.py`'s docstring omit the "usage of N
+    Orgs, read from the Org 'X'" form.
+14. The Cleanup heading for unread Orgs puts the count after the hedge ("…was not read
+    (4)"), so the count reads as part of the hedge.
+
+## BL-624 — ts-audit report: link every ThoughtSpot object to ThoughtSpot `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user request: from the report, a click on a Model's name
+(or an Open icon beside it) should open that object in ThoughtSpot, wherever the report
+can build the link. **Target:** 2026-12-31.
+
+**What exists today** (report JS on main at 86c168d7):
+
+- The scorecard's "Open in ThoughtSpot" button (`report/views/scorecard.js`), the
+  Cross-Model ↗ icon beside a Model (`views/crossmodel.js`), the Downstream consumers'
+  "Open" (`core.js` dependency link) and H10's Open column in Cleanup.
+- Two of these build the URL inline (`D.C.u + '/#/data/tables/' + guid`); `core.js` has
+  its own helper. There is no single place that maps an object type to its URL.
+
+**What.**
+
+1. **One URL helper** in `report/core.js` mapping object type (Model, Table, View,
+   Liveboard, Answer, Set) to its ThoughtSpot path, used by every view. Verify each path
+   live on the SE demo cluster before relying on it.
+2. **An Open ↗ icon beside every object name that is a ThoughtSpot object,** keeping the
+   name's own click for in-report navigation: the Dashboard heatmap, Cleanup (H4, H5, H17
+   and the rest), Object Map, Data Cache, the Formulas view's Model list, ERD tables, and
+   the scorecard's Tables.
+3. **Not-found usage IDs:** an ID used in this Org but not found gets no link (it matches no
+   visible object). An ID used in another Org: link only if a URL that switches Org is
+   verified live (the URL form for opening an object in another Org is unverified); else
+   none, and say why in the note.
+4. **Tests:** every link is built through the helper and escaped; a headless-Chrome test
+   per view asserts the icon's href for a synthetic cluster URL.
+
+## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user request 2026-11-25 (approved, then parked on
+2026-11-26 to end the build round on a stable skill). **Target:** 2027-01-31.
+
+**What.** On the Dashboard heatmap, where every audited Model is listed:
+
+1. Clicking "Last used" sorts by it (most idle first, then most recent).
+2. Usage filter chips above the heatmap: Active (queried in the last 90 days), Idle 90+
+   days, Never queried, and Not read (shown only when usage was not read). They combine
+   with the existing angle and severity filters, e.g. "in use, with High findings".
+3. No new section: the heatmap already lists every Model, and Cleanup lists H17's.
+
+---
+
+---
+
+## BL-626 — two ThoughtSpot formula facts no schema doc states `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** live probes on an internal ThoughtSpot cluster while
+building apache/ossie-converters#326. Both cost real cluster time to establish and neither
+is written down here. **Target:** 2027-01-31.
+
+**What.**
+
+1. **A formula resolves a column reference by its Table column display name only, never by
+   `db_column_name`.** The warehouse name is rejected at import, not silently misread:
+
+       [LINEORDER::Quantity]      -> imports
+       [LINEORDER::LO_QUANTITY]   -> ERROR, Formula addition failed. Search did not find
+                                     "LINEORDER::LO_QUANTITY" in your data or metadata
+
+   `[TABLE::Column]` appears throughout `thoughtspot-model-tml.md` and nowhere says which of
+   the two names `Column` is. I9 states the display-name rule for formula-to-*formula*
+   references, which is the near miss that makes this easy to assume is covered.
+
+2. **A formula may reference a Table column the Model does not surface** — one with no
+   `columns[]` entry at all. Verified end to end on a Snowflake-backed table: the model
+   imports, AgentQL generates `sum("ta_1"."QUANTITY")`, and the query returns a row.
+   `thoughtspot-model-tml.md:905` says a *formula* not referenced in `columns[]` is not
+   surfaced, which is a different statement and reads as if it covered this.
+
+**Why it matters.** Every `ts-convert-from-*` skill generates formulas, so (1) is a live
+hazard for all of them; it fails loudly, so it costs a cycle rather than correctness. (2)
+fails silently in the other direction: not knowing it does not break anything, it just leads
+to worse designs. It sent the #326 work down a "mint a hidden column, stash it, witness it on
+the return leg" path for an hour before a probe showed none of it was needed.
+
+**Where.** Both in `agents/shared/schemas/thoughtspot-model-tml.md`, in the formula section.
+(1) is also invariant-shaped — a hard rule with a known error and a live probe — so consider
+it as I24 in `ts-model-conversion-invariants.md`; I23 is currently the highest. Check the
+repo's convention for adding an invariant first.
+
+---
+
+## BL-627 — the SV and MV converters do not emit pre-aggregated measures `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** noticed while implementing the same construct upstream in
+apache/ossie-converters#326. **Target:** 2027-01-31.
+
+**What.** Neither `ts-convert-from-snowflake-sv` nor `ts-convert-from-databricks-mv` mentions
+`aggregation: AGGREGATE` or `is_pre_aggregated_measure` anywhere. A Semantic View or Metric
+View measure is a value the source has already aggregated; ThoughtSpot carries one as a
+column handed to the platform's own measure function:
+
+    # Table                           # Model
+    name: total_revenue               name: Revenue
+    db_column_name: total_revenue     column_id: SV_SALES::total_revenue
+    properties:                       properties:
+      column_type: MEASURE              column_type: MEASURE
+      aggregation: AGGREGATE            aggregation: AGGREGATE
+      index_type: DONT_INDEX            index_type: DONT_INDEX
+      is_pre_aggregated_measure: true
+
+`ts link build` writes exactly this (ts-cli 0.214.0), and I16 and I23 state the rules, so the
+knowledge is in the repo. It has not reached the two converters, which take the other route
+and translate a measure into a ThoughtSpot formula instead.
+
+**Why it matters.** Re-aggregating an already-aggregated measure is the silent kind of wrong
+answer, and it is what the pre-aggregated flag exists to prevent: without it a newer build
+plans the column as an ATTRIBUTE and refuses `AGG()` on it with
+`COLUMNS_NOT_GROUPED_OR_AGGREGATED` (I23), rather than quietly substituting an ordinary
+aggregate. A converter that emits a formula instead does not get that protection.
+
+**What to check first.** Whether the two converters currently emit a formula per measure, and
+whether that formula re-aggregates. If it does, this is a correctness gap rather than a
+fidelity one and should move to Tier 1. The upstream work in apache/ossie-converters#326 has
+the decision shape worth copying: the measure is minted as a column rather than taken from a
+field, because a field is never a measure, and its datatype must come from the document
+rather than be assumed.
+
+## BL-628 — Review rounds for someone else's PR: review leftovers from the rounds PR `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/external-review-rounds`
+(the "Review rounds" section of `.github/CONTRIBUTING.md`). **Target:** 2027-01-31.
+
+Nits the two reviews raised and the PR did not fix:
+
+1. **Re-review scope.** Item 2 has the re-review check each Blocking item "for its class
+   across the branch", wider than "a re-review of the fix commits only". Confirm the
+   wording is the intended one, or narrow it.
+2. **Coverage scope.** Item 5 asks Coverage of "a converter or translator"; the PR
+   template and `repo-publisher.md` also ask it of other code that reports an outcome
+   (Migrated, Merged, READY). Align them, and reword "what it converts" for the latter.
+3. **Coverage vs the coverage matrix.** For a converter, Coverage should list the
+   `references/coverage-matrix.md` rows the PR adds or changes, so the review judges the
+   change against the matrix that ships rather than a separate PR-body statement.
+4. **Exception wording.** Say "never force-push" (a push rejected because the
+   contributor pushed meanwhile is where one gets reached for) and "a throwaway clone"
+   (a worktree of the maintainer's own clone shares its git config). The session and
+   validator rules are attributed to spec §5 C5, which holds only the hooks-disabled,
+   nothing-executed and CI-rechecks parts; fix the attribution.
+5. **Item 6 overstates C5.** C5 removes `BL-` id and CHANGELOG collisions, only reduces
+   ts-cli version clashes and does nothing for code conflicts. Item 6 also says "ts-cli
+   version clashes" where the approved rule says version clashes generally.
+6. **Guard wording (item 4).** "What the code does not recognise" misses a construct it
+   parses but translates wrongly; say "what it cannot accept as converted".
+7. **Blocking vs Backlog.** No rule beyond items 4 and 7; adopt `pr-ready` Step 7 rule 1.
+8. **Maintainer fix commits get only CI.** Ask for a test with any maintainer fix that
+   changes behaviour.
+9. **"Why it works this way"** sends readers to the spec, which does not contain the
+   review-rounds rules.
+10. **Reading path, `:176`.** "no Claude Code session started in it" limits where a session
+    starts, not what it reads; reuse the exception's wording (no session reads, edits or
+    runs commands in that checkout, wherever it was started).
+11. **Same-repo PRs** have no "allow edits by maintainers" setting, but the exception and
+    item 3 read as if such a PR had edits off. Say the exception covers them.
+12. **"No credentials of any kind"** (item 1) should copy the spec's list (spec §8.3:
+    environment exports, Keychain, token caches, SSH keys and agents, key files, git
+    credential helpers, `gh` auth), and :161's "never run … the PR's tests" should point
+    at that exception.
