@@ -19807,3 +19807,16 @@ blocks merges.
 **First step.** Find the shared mechanism (`report_browser`, the Chrome invocation: a
 fixed timeout, a shared profile or port, load from a busy machine) and make the wait
 deterministic rather than raising a timeout.
+
+**Update (2026-11-27): cause found, main case fixed.** With an everyday Chrome open, macOS
+runs each headless launch from a temporary "code-sign clone" of the app bundle, which
+Chrome creates and removes; now and then a launch lands in a clone whose framework is gone
+and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
+stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
+failures, all this signature. `report_browser.render` now retries only that signature (up
+to 3 launches) and reports Chrome's exit code and stderr on any failure; the same stress
+run then gave 0 clone-race failures (4 launches recovered). **Still open:** one render in
+about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
+burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
+also hide a genuine hang; revisit if it is seen at normal load.
+
