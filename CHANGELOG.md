@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-27
+- fix: the Tableau and Sisense converters bracket a conditional that an operator follows (`IIF(…) + 1`, `IF(…) = 1`), which ThoughtSpot's greedy `else` otherwise read as part of the else branch; the Qlik converter flags an `If()` followed by more expression for review instead of returning unbalanced text (BL-649)
+- chore: bump ts-cli to v0.225.2
+
 ## 2026-11-26
 - fix: the Databricks and Snowflake converters bracket every conditional they emit (CASE, IF/IFF, COALESCE, NVL2). ThoughtSpot's `else` is greedy, so `COALESCE(is_deleted, false) = false` converted to a filter that kept only the deleted and NULL rows; `CASE … END = x` and `IF(…) + 1` were wrong the same way; `ts formula translate` for Snowflake and Databricks input too (BL-632)
 - chore: bump ts-cli to v0.225.1

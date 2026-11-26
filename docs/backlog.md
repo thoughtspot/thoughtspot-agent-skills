@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-649 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| ~~BL-649~~ | ~~Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals (the BL-632 class)~~ | DONE (2026-11-27) |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -19663,7 +19663,7 @@ From the re-review of the fix rounds:
 
 ## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, fix/bl-649-conditional-grouping, ts-cli 0.225.2). **Source:** the adversarial review of the BL-632 fix.
 
 **What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
 adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two

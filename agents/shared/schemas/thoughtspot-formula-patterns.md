@@ -167,7 +167,9 @@ is compared, combined or computed with. On its own, as a whole formula or a func
 argument, no brackets are needed (most translators have always emitted a conditional
 inside a call this way; the live probe tested only the first half). The Databricks and
 Snowflake translators build their CASE / IF / IFF / COALESCE / NVL2 output through
-`sql_forms.sqlf_if_chain`, which adds them; the Tableau, Sisense and Qlik translators do not yet
+`sql_forms.sqlf_if_chain`, which adds them. The Tableau and Sisense translators group a
+conditional only when an operator follows it, so the passes that match a bare
+`sum ( if … )` still see it; Qlik refuses an `If()` that does not span the expression
 (BL-649). For the two-argument null default, `ifnull ( [d] , false ) = false` avoids the
 question.
 
