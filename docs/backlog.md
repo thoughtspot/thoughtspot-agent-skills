@@ -18723,6 +18723,9 @@ Behaviour:
    tooltip; no test mixes Model ages in one run or overrides `idle_days`; how `created`
    behaves across a Worksheet-to-Model upgrade or re-import is not recorded in open-items
    #9. Sibling class, pre-existing: H4 and H5 flag objects created yesterday as orphans.
+   From the re-review: pin that a young Model with an old query still fires (moving the
+   age check ahead of the never-queried branch passes all 27 H17 tests today); the test
+   `…younger_than_90_days_is_not_judged` and its docstring keep the old "not judged" wording.
 5. **"(0) No findings." for rules that did not run.** The Cleanup view prints it for H4, H5
    and H10 when their data was not collected (pre-existing; H17 was fixed in the usage PR).
    Key every cleanup section on `collected()` of its rule's `requires`.
