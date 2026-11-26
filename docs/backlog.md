@@ -540,6 +540,7 @@ are roughly ordered by value÷effort.
 | BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 | BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
+| BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19733,6 +19734,37 @@ Both mostly fail at import rather than silently.
 
 **Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
 with a reason.
+
+## BL-651 — ts-audit: four small defects from the 2026-11-27 SE demo cluster run `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** a full, read-only audit of the SE demo cluster's 150-Model
+sample on ts-cli 0.225.1, run to check #755, #757 and #762. The run was clean: no warnings,
+no hidden dependents, and the candidates export matched the 14 retire candidates. These four
+predate or sit beside that work. **Target:** 2027-01-31.
+
+**What.**
+
+1. **D8 names a different duplicate Table between runs.** It reports on "the first object's
+   guid", and the metadata search returns a duplicate pair in either order. Between the
+   2026-11-26 and 2026-11-27 runs, 3 of its 6 findings moved to the other Table of the pair
+   with nothing changed on the cluster. So run-to-run diffs show phantom removals and
+   additions, and a remediation keyed on the GUID targets a different Table each time.
+   Pick deterministically (i.e. the lowest GUID, or the oldest object), and test with the
+   pair in both orders.
+2. **The report never shows the audit's own date.** `corpus.audit_date` is hard-coded to `""`
+   (`tools/ts-cli/ts_cli/audit/__init__.py`), so the Dashboard's "Date:" item
+   (`report/views/dashboard.js`) never renders. The only date shown is the usage read date,
+   in UTC and unlabelled: a run at 08:29 on 2026-11-27 in Sydney reads 2026-11-26. Record
+   the run time, and label the zone of any date shown.
+3. **Usage view details.**
+   - The intro repeats "read" ("Usage of all Orgs, read from the Primary Org, read on …").
+   - Idle dots with exactly one dependent sit on the line between "check first" and
+     "retire candidates", beside the "retire candidates" label: coloured correctly, easy to
+     misread.
+   - The disabled "Not judged 0" chip still shows as pressed.
+4. **Owner email addresses reach the candidates file.** An owner's display name can be a
+   full email address, and it is copied into the CSV and JSON export. Say so in SKILL.md's
+   "Candidates file" section, since the file is meant to be shared with owners.
 
 ---
 
