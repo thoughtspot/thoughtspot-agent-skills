@@ -429,7 +429,7 @@ this is [references/open-items.md](references/open-items.md) #9.
 ### Candidates file
 
 The Usage view exports the Models a reviewer selects as `ts-audit-candidates.json`, the
-input a later ts-dependency-manager and `ts share` list mode is to read (BL-628). Its
+input a later ts-dependency-manager and `ts share` list mode is to read (BL-645). Its
 shape is fixed within a `format` version: a later release may add fields (a reader
 ignores one it does not know), but renaming or removing one, or changing its meaning,
 needs a new version.

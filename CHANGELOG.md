@@ -8,6 +8,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ## 2026-11-26
 - feat: the `ts audit` report gains a Usage view (`#usage`, when the run fetched usage): a quadrant of every audited Model by days since its last query and its dependents, a sortable triage table (status, last used, queries, users, dependents by type, owner, created, worst finding) with status and "No dependents" filters, and an export of the selected Models as CSV or as a `ts-audit-candidates/1` JSON file, built in the browser. The audit JSON's per-Model usage gains `status`, `dependents`, `owner` and `created`, from data the audit already fetches (ts-audit 3.28.0)
 - chore: bump ts-cli to v0.225.0
+- docs: `.github/CONTRIBUTING.md` sets a stopping point for reviewing someone else's PR: a full first review labelling every finding Blocking or Backlog, one fix round, one re-review, at most one more round for a Blocking item left unfixed or a regression the fix commits introduced, and after that the maintainer fixes what is left at merge or closes the PR; Blocking items are resolved before merge. The maintainer may commit on the contributor's branch at merge with hooks disabled and nothing from the branch executed. The PR template gains a Coverage section
 - fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
 - chore: bump ts-cli to v0.224.1
 
