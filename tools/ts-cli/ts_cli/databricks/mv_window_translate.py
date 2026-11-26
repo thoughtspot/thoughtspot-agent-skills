@@ -164,7 +164,8 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
     # ThoughtSpot rejects at import; aggregate them as cross-measure inlining does
     # (BL-637, review of the first fix).
     from ts_cli.sql_forms import sqlf_aggregate_window_values
-    ts = sqlf_aggregate_window_values(ts)
+    if ts.count("first_value (") + ts.count("last_value (") >= 2:
+        ts = sqlf_aggregate_window_values(ts)  # only the probed multi-call shape
     return _formula_measure(measure, ts, annotations=_dedupe(annotations))
 
 

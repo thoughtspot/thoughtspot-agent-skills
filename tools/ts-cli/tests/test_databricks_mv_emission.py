@@ -214,3 +214,30 @@ measures:
         range: current
 """))
     assert ex["Net Balance"].count("sum ( last_value") == 2, ex["Net Balance"]
+
+
+# --- review round 2: paths that keep the source-column reading -------------------------
+
+LEAK = """
+dimensions:
+  - name: status
+    expr: "CASE WHEN status = 'X' THEN 'Cancelled' ELSE 'Open' END"
+  - name: region
+    expr: "COALESCE(source.region, 'Unknown')"
+  - name: region_total
+    expr: SUM(source.net) OVER (PARTITION BY region)
+measures:
+  - name: share_cancelled
+    expr: "SUM(source.amount) / (SELECT SUM(amount) FROM cat.sch.fact_orders WHERE status = 'X')"
+"""
+
+
+def test_a_scalar_subquery_reads_physical_columns_not_dimensions():
+    ex = _exprs(_mv(LEAK))
+    assert "[formula_Status]" not in ex["share_cancelled"], ex["share_cancelled"]
+    assert "[FACT_ORDERS::status] = 'X'" in ex["share_cancelled"]
+
+
+def test_an_lod_partition_reads_source_columns():
+    ex = _exprs(_mv(LEAK))
+    assert "{ [FACT_ORDERS::region] }" in ex["region_total"], ex["region_total"]

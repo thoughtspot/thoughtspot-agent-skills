@@ -149,6 +149,17 @@ def _scalar_text(scalars: list[dict], n: int, tables: dict,
     if n >= len(scalars):
         raise UntranslatableError(f"scalar placeholder #{n} has no parsed subquery")
     sc = scalars[n]
+    # A scalar subquery reads the physical table, so a name in it is that table's
+    # column, never an MV dimension (BL-629 review).
+    token = _DIM_REFS.set({})
+    try:
+        return _scalar_text_body(sc, tables, in_window, window_date_ref)
+    finally:
+        _DIM_REFS.reset(token)
+
+
+def _scalar_text_body(sc: dict, tables: dict, in_window: bool,
+                      window_date_ref: str | None) -> str:
     base = make_resolver(tables)
     if in_window:
         # The yesterday stand-in is only meaningful for the latest value of the
@@ -242,9 +253,15 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
         raise UntranslatableError(
             f"LOD aggregate '{dim['inner_agg']}' not mapped "
             f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
-    resolver = make_resolver(tables)
-    inner = translate_sql_expr(dim["inner_expr"], resolver)
-    dims = " , ".join(resolver(p) for p in dim["partition_by"])
+    # Source columns only: whether Databricks resolves an OVER (PARTITION BY …) name
+    # to an earlier dimension is unprobed, so an LOD keeps the pre-BL-629 reading.
+    token = _DIM_REFS.set({})
+    try:
+        resolver = make_resolver(tables)
+        inner = translate_sql_expr(dim["inner_expr"], resolver)
+        dims = " , ".join(resolver(p) for p in dim["partition_by"])
+    finally:
+        _DIM_REFS.reset(token)
     ts = (f"group_aggregate ( {agg} ( {inner} ) , {{ {dims} }} , "
           f"query_filters ( ) )")
     return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,

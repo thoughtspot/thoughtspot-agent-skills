@@ -1062,11 +1062,11 @@ shadowing the source column of the same name:
 |---|---|
 | A dimension defined **before** the shadowing dimension | the source column |
 | A dimension defined **after** it | the **dimension** (an earlier dimension shadows a same-named source column) |
-| A measure (incl. `FILTER (WHERE …)`) | the **dimension** (a measure sees every dimension) |
+| A measure's `FILTER (WHERE …)` clause (the case probed; other positions in a measure assumed the same) | the **dimension** |
 | The global `filter:` | the **source column** (the filter never reads a dimension) |
 | A backticked `display_name` | nothing: `UNRESOLVED_COLUMN` (a display name is a label, not an identifier) |
 
-`ts databricks translate-formulas` follows these rules (BL-629).
+`ts databricks translate-formulas` follows these rules for dimension and measure expressions and `filter:` (BL-629). Unprobed positions keep the source-column reading: a scalar subquery (it reads the physical table), an LOD `OVER (PARTITION BY …)`, and a window's `order:` dimension. Known gaps are listed in BL-629.
 
 ## Comparison with Snowflake Semantic Views
 
