@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-646 | Tableau and Sisense translators emit unbracketed conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -534,6 +535,7 @@ are roughly ordered by value÷effort.
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
 | BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
+| BL-647 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19201,7 +19203,7 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 ## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
 **Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.224.2) for the
-Databricks and Snowflake translators; the Tableau translator has the same defect and is the follow-up. **Raised to Tier 1
+Databricks and Snowflake translators; the Tableau and Sisense translators have the same defect, BL-646. **Raised to Tier 1
 2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
@@ -19524,3 +19526,42 @@ reactivation measures, but not the cohort measures without an activation date.
 
 **Fix direction.** Add (1) and (2) to `ts-databricks-formula-translation.md`, and (3) to the
 AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
+
+---
+
+## BL-646 — Tableau and Sisense translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
+
+**Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
+
+**What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
+adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two
+others still emit a bare conditional and splice it into a larger expression:
+
+- **Tableau** (`ts_cli/tableau/conditionals.py`: `convert_iif`, `convert_if_then`, the
+  CASE rewrite): `IIF([a] > 1, 1, 0) + 1`, `IF [a] > 1 THEN 1 ELSE 0 END + 1` and
+  `CASE [b] WHEN 'x' THEN 1 ELSE 0 END * 2` all come out with the operator inside the
+  else branch.
+- **Sisense** (`ts_cli/sisense/functions.py`): `IF([a] > 1, 1, 0) = 1` becomes
+  `if (…) then 1 else 0 = 1`, with status TRANSLATED.
+
+Qlik refuses these shapes; Power BI already brackets them.
+
+**Fix direction.** Bracket each emitted conditional, as `sql_forms.sqlf_if_chain` does. Tableau's
+text-rewriting pipeline needs care: `ensure_else_clause` inserts a missing `else` by walking
+each `if … then` block, so the bracket must enclose the inserted clause. Reuse
+`tests/test_conditional_grouping.py`'s detector, with its known gaps fixed (it misses a
+conditional's group closing early and treats `else b + 1` inside a group as a leak; no `in`).
+
+---
+
+## BL-647 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-646 (already wrong before BL-632). **Target:** 2027-01-31.
+
+**What.** In both SQL translators, `NOT COALESCE(a, 0) BETWEEN 0 AND 1` becomes
+`not ( x ) >= 0 and not ( x ) <= 1`: NOT binds to the operand, not to the predicate.
+`COALESCE(a, 0) IN (SELECT 1)` becomes `= [T::SELECT] 1`, reading the subquery as a column.
+Both mostly fail at import rather than silently.
+
+**Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
+with a reason.

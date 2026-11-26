@@ -106,13 +106,21 @@ def strip_sql_comments(expr: str, *, line_markers: tuple = ("--",), ident_quote:
 # --- grouping ----------------------------------------------------------------------------
 
 def _sqlf_close(text: str, i: int) -> int:
-    """Index of the ``)`` closing the ``(`` at ``text[i]``, skipping quoted text; -1 if none."""
-    depth, quote = 0, None
+    """Index of the ``)`` closing the ``(`` at ``text[i]``, skipping quoted text and ``[…]``
+    references; -1 if none. A quote inside a reference (``[T::cust's x]``) is part of the
+    name, not a string delimiter: read as one, two such names paired their apostrophes and
+    a group appeared to close at the end of the text (BL-632 review)."""
+    depth, quote, bracket = 0, None, False
     while i < len(text):
         ch = text[i]
-        if quote:
+        if bracket:
+            if ch == "]":
+                bracket = False
+        elif quote:
             if ch == quote:
                 quote = None
+        elif ch == "[":
+            bracket = True
         elif ch in "'\"":
             quote = ch
         elif ch == "(":

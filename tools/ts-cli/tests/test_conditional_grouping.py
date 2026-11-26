@@ -78,3 +78,23 @@ def test_unwrap_leaves_a_group_that_continues():
 def test_the_detector_fires_on_the_old_bare_form():
     # proves the check above can fail: this is what the translators used to emit
     assert _else_swallows("if ( [T::d] != null ) then [T::d] else false = false")
+
+
+# --- review finding: a quote inside a [...] reference is part of the name ----------------
+
+def _apostrophe(name: str) -> str:
+    return "[T::" + name.strip('`"') + "]"
+
+
+def test_apostrophes_in_two_names_do_not_unwrap_a_group_that_continues():
+    out = dbx("SUM(NVL2(`cust's x`, 1, 0) * NVL2(`owner's y`, 1, 0))", _apostrophe)
+    assert out == ("sum ( ( if ( [T::cust's x] != null ) then 1 else 0 ) * "
+                   "( if ( [T::owner's y] != null ) then 1 else 0 ) )")
+    out = sv('SUM(NULLIF(a, "b\'s") * NULLIF(c, "d\'s"))', _apostrophe)
+    assert out.startswith("sum ( ( if") and out.endswith(") )"), out
+
+
+def test_apostrophes_keep_a_compound_divisor_grouped():
+    # already wrong before BL-632: sqlf_is_atomic read the pair of apostrophes as a literal
+    out = dbx("try_divide(x, NVL2(`a's`, 1, 0) * NVL2(`b's`, 1, 0))", _apostrophe)
+    assert "/ ( ( if" in out, out
