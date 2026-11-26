@@ -84,6 +84,11 @@ The user chose B on 2026-11-19.
 
 A `--connection` that matches nothing is an error (exit 1, naming it), as in `ts audit`.
 
+**`--org` must not fall back silently.** `auth/token/full` ignores an Org given by name and
+mints a token in the default Org (`ts_cli/commands/share.py`). So resolve a name to its numeric
+id (`share._resolve_org_id`), and refuse to run if the session's `current_org` differs
+(`share.assert_org_context`). The output's `org` is the session's `current_org`, never the flag.
+
 ### Running
 
 - `--dry-run` resolves the scope and prints the count and a rough time range. It calls no
@@ -133,15 +138,25 @@ One status per connection. The rules are applied in this order:
 
 | Response | `status` | `reason` |
 |---|---|---|
-| HTTP 200, `connectivityStatus` is not `SUCCESSFUL` | `down` | `connection_failed` |
-| HTTP 200, any table or column status is not `SUCCESSFUL` | `drifted` | `objects_failed` |
+| HTTP 200 with a non-JSON body, or `connectivityStatus` missing or neither `SUCCESSFUL` nor `FAILED` | `unknown` | `unrecognised_response` |
+| HTTP 200, `connectivityStatus` is `FAILED` | `down` | `connection_failed` |
+| HTTP 200, `SUCCESSFUL`, any table or column status is not `SUCCESSFUL` | `drifted` | `objects_failed` |
+| HTTP 200, `SUCCESSFUL`, fewer tables in the response than Tables registered on the connection | `unknown` | `incomplete` |
 | HTTP 200, everything `SUCCESSFUL` | `healthy` | none |
 | HTTP 500, code 12136 | `unknown` | `oauth_not_authorised` |
 | Timeout | `unknown` | `timeout` |
-| Any other non-2xx, or a non-JSON body | `unknown` | `error` |
+| Any other non-2xx | `unknown` | `error` |
 
-Only `SUCCESSFUL` counts as success. I.e. a status of `PARTIAL`, should one ever appear, counts
-as a failure.
+`down` needs the one failing value the probes saw, `FAILED`. Anything else unexpected at
+connection level is `unknown`, so a proxy page or a new build's shape never reads as broken.
+
+At table and column level, only `SUCCESSFUL` counts as success. I.e. a table status of
+`PARTIAL`, should one ever appear, reads `drifted`.
+
+**Why the `incomplete` check.** Nothing shows that the response always lists every registered
+table. A shortfall, from permissions or a cap on a large connection, would otherwise read
+`healthy`. The registered count is one Table search by `dataSourceName`
+(`tables_on_connections` in `ts_cli/audit/scope.py`), with no warehouse query.
 
 **Proposed, not yet approved (2026-11-25): a deactivated connection is `inactive`.** Read
 `connectionDisabled` from the connection's `metadata/search` header before diagnosing. When it is
@@ -152,7 +167,9 @@ as a failure.
   Not probed; a query on one returned 500, code 12332.
 - Skipping it saves a warehouse call.
 
-The header read is one paginated call for every connection, with no warehouse query.
+The header read is one paginated call for every connection, with no warehouse query. If
+`inactive` is adopted, enumerate connections from `metadata/search`, which did list the
+deactivated connection (Appendix B). Whether `connection/search` lists one is open item 7.
 
 A connection with no registered tables is `healthy` with `tables_checked: 0`, so a consumer can
 tell it apart.
@@ -206,10 +223,12 @@ Steps:
 5. **Run.** Write the JSON to a run folder with the time in its name, as `ts-audit` does.
 6. **Summarise.** Counts first. Then `down`, `drifted` with their top failures, and `unknown`
    with reasons. Each group gets its next step:
-   - `down`: edit the connection's credentials or network settings. Suggest deleting it only
-     if it is unused and not a per-user OAuth connection (open item 1).
+   - `down`: edit the connection's credentials or network settings. If it should stay off,
+     deactivate it (Appendix B), which is reversible. Never suggest deleting it: no `ts`
+     command backs up what is built on a connection before deleting it.
    - `drifted`: re-sync the table, or remove the dead columns with `ts-dependency-manager`.
-   - `unknown` (OAuth): run the check as the connection's owner.
+   - `unknown` (OAuth): re-run the check as an admin who has authorised the connection.
+     Owning it is not what matters, and v1 refuses non-admins.
 
 ## Repo obligations
 
@@ -233,7 +252,7 @@ Per the root `CLAUDE.md` change-impact map:
 
 ## Open items to verify live
 
-Items 1 to 3 must be verified before merge.
+Items 1, 2, 3 and 7 must be verified before merge.
 
 1. **Per-user OAuth on Snowflake and Databricks.** The only OAuth sample was BigQuery (500,
    code 12136). Snowflake and Databricks are 1,797 of 1,815 connections. If an unauthorised
@@ -252,8 +271,11 @@ Items 1 to 3 must be verified before merge.
    Cache syncs. The docs say it suspends "all activity", and user queries do stop (Appendix B).
    Background work was not watched. **Not to be tested** (user, 2026-11-25): piece 2 relies
    on the docs, and its finding says so rather than claiming a measured saving (BL-622).
-7. **Three status-endpoint cases not run (piece 2).** Deactivating twice, a bad `status`
-   value, and `connection/search` while deactivated. The probe script ended before them.
+7. **Does `connection/search` list a deactivated connection? (piece 1).** If not, a run that
+   enumerates with it silently drops deactivated connections. The probe script ended before
+   this case.
+8. **Two status-endpoint cases not run (piece 2).** Deactivating twice, and a bad `status`
+   value.
 
 ## Appendix A: live probe, se-thoughtspot, 2026-11-18
 
@@ -303,7 +325,7 @@ mention indexing, sample values, Data Cache or scheduled jobs.
   admin may call it.
 - `connection/search` returns no status field, even with `include_details`.
 
-**Probe.** The probe user owned the connection ENCRYPTED_SEARCH_POC, which has one table.
+**Probe.** The probe user owned a one-table Snowflake connection, called `<probe-connection>` here.
 
 | Step | Result |
 |---|---|
@@ -312,7 +334,7 @@ mention indexing, sample values, Data Cache or scheduled jobs.
 | `searchdata` on the table | 200, one row |
 | Status `DEACTIVATED` | 204 |
 | `connectionDisabled` in the `metadata/search` header | `true` |
-| `searchdata` on the table | 500, code 12332, `CONNECTION_INACTIVE`: "The 'ENCRYPTED_SEARCH_POC' connection is inactive, so operations can't be performed right now." |
+| `searchdata` on the table | 500, code 12332, `CONNECTION_INACTIVE`: "The '<probe-connection>' connection is inactive, so operations can't be performed right now." |
 | Status `ACTIVATED` | 204. `connectionDisabled` back to `false`; `searchdata` 200 again |
 
 **What it shows.**
