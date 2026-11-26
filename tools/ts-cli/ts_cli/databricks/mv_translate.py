@@ -96,46 +96,31 @@ SCALAR_LOD_NOTE = (
     "blind to the query's grouping and search filters, like the subquery "
     "(BL-316 item 1).")
 
-# BL-629: an MV expression may name another dimension (`QUARTER(order_month)`,
-# a backticked display name). Set by translate_metric_view for the whole run:
-# casefolded dimension name / display name -> its ThoughtSpot reference, and the
-# name of the dimension being translated (never resolved to itself).
+# BL-629: an MV expression may name another dimension. Databricks scope, live-probed
+# 2026-11-27 (DBSQL 2026.35): only a dimension's `name` is an identifier (a
+# `display_name` is a label: a backticked one fails UNRESOLVED_COLUMN); a dimension
+# sees only the dimensions defined before it, and one of those shadows a same-named
+# source column; a measure sees every dimension; the global `filter:` sees source
+# columns only. translate_metric_view fills the map as dimensions translate, so a
+# later or skipped dimension is never a target.
 _DIM_REFS: ContextVar[dict[str, str]] = ContextVar("_DIM_REFS", default={})
-_CURRENT_DIM: ContextVar[str | None] = ContextVar("_CURRENT_DIM", default=None)
 
 
-def dimension_refs(dimensions: list[dict], tables: dict) -> dict[str, str]:
-    """Casefolded name and display name of each dimension -> the reference an
-    expression naming it should get: the column for a direct dimension, the
-    formula id for a computed or LOD one. A dimension whose own direct column
-    cannot be resolved is left out (its translation is skipped anyway)."""
-    refs: dict[str, str] = {}
-    for dim in dimensions:
-        if dim.get("kind") == "direct":
-            try:
-                table, column = resolve_parts(tables, dim["expr"])
-            except UntranslatableError:
-                continue
-            ref = f"[{table}::{column}]"
-        else:
-            ref = f"[{formula_id(display_title(dim))}]"
-        for key in {dim["name"], dim.get("display_name") or dim["name"]}:
-            refs.setdefault(key.casefold(), ref)
-    return refs
+def dimension_ref(entry: dict) -> str:
+    """The reference an expression naming a translated dimension gets: its column for a
+    direct dimension, its formula id otherwise."""
+    if entry["output_kind"] == "column":
+        return f"[{entry['table']}::{entry['column']}]"
+    return f"[{formula_id(display_title(entry))}]"
 
 
 def _dimension_ref(path: str) -> str | None:
-    """The reference for a bare identifier that names another dimension, else None.
-    Only an unqualified name can (`source.X` is always a column), matched
-    case-insensitively as Databricks does."""
+    """The reference for an unqualified name that is a visible dimension, else None
+    (`source.X` is always a column). Matched case-insensitively, as Databricks does."""
     segs = split_dot_path(path.strip())
     if len(segs) != 1:
         return None
-    key = segs[0].casefold()
-    current = _CURRENT_DIM.get()
-    if current is not None and key == current.casefold():
-        return None
-    return _DIM_REFS.get().get(key)
+    return _DIM_REFS.get().get(segs[0].casefold())
 
 
 def make_resolver(tables: dict, scalars: list[dict] | None = None,
@@ -237,14 +222,6 @@ def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list
 
 def translate_dimension(dim: dict, tables: dict) -> dict:
     """Translate one parsed dimension. Raises UntranslatableError to skip."""
-    token = _CURRENT_DIM.set(dim["name"])
-    try:
-        return _translate_dimension(dim, tables)
-    finally:
-        _CURRENT_DIM.reset(token)
-
-
-def _translate_dimension(dim: dict, tables: dict) -> dict:
     kind = dim["kind"]
     if kind == "direct":
         table, column = resolve_parts(tables, dim["expr"])
@@ -277,8 +254,13 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
 
 
 def translate_filter(filter_sql: str, tables: dict) -> dict:
-    """Translate the MV global filter: to the MV Filter boolean formula."""
-    ts = translate_sql_expr(filter_sql, make_resolver(tables))
+    """Translate the MV global filter: to the MV Filter boolean formula. The filter
+    reads source columns only, never a dimension (BL-629, live-probed)."""
+    token = _DIM_REFS.set({})
+    try:
+        ts = translate_sql_expr(filter_sql, make_resolver(tables))
+    finally:
+        _DIM_REFS.reset(token)
     # Same annotations[] channel as translated[] entries, so the skill's review
     # step surfaces a week-dependent filter too (BL-334 review).
     return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts,
@@ -438,7 +420,7 @@ def translate_metric_view(parsed: dict, tables: dict, *,
     """Translate a parse-mv result. Content failures -> skipped[]; only a
     malformed tables map raises (ValueError -> command exit 1)."""
     tables = normalize_tables(tables)
-    token = _DIM_REFS.set(dimension_refs(parsed["dimensions"], tables))
+    token = _DIM_REFS.set({})
     try:
         return _translate_metric_view(parsed, tables, allow_row_lag)
     finally:
@@ -453,10 +435,14 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     dag: dict[str, list[str]] = {}
     window_measures: list[str] = []
 
+    visible = _DIM_REFS.get()  # the dict set for this run, filled in place
     for dim in parsed["dimensions"]:
         _translate_item(lambda: translate_dimension(dim, tables),
                         dim["name"], "dimension",
                         translated, skipped, by_name, skip_names)
+        if dim["name"] in by_name and dim["name"] not in skip_names:
+            visible.setdefault(str(dim["name"]).casefold(),
+                               dimension_ref(by_name[dim["name"]]))
 
     deferred: list[dict] = []
     for m in parsed["measures"]:

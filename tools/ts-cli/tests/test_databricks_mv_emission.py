@@ -55,7 +55,7 @@ def test_a_computed_dimension_is_referenced_by_its_formula_id():
     assert ex["Day Quarter"] == "quarter_number ( [formula_Order Day] )"
 
 
-def test_a_direct_dimension_is_referenced_by_its_column_even_by_display_name():
+def test_a_direct_dimension_is_referenced_by_its_column():
     assert "[DIM_CHANNEL::DESCRIPTION]" in _exprs(_mv(DIMS))["Channel Group"]
 
 
@@ -83,6 +83,59 @@ dimensions:
     expr: UPPER(source.Region)
 """))
     assert "[FACT_ORDERS::Region]" in ex["Region Upper"] and "formula_" not in ex["Region Upper"]
+
+
+# Databricks scope, live-probed 2026-11-27 (DBSQL 2026.35): only `name` is an
+# identifier; a dimension sees only the ones defined before it (and one of those
+# shadows a same-named source column); a measure sees all; `filter:` sees columns.
+
+SCOPE = """
+dimensions:
+  - name: early_ref
+    expr: CONCAT('e:', region)
+  - name: region
+    expr: COALESCE(source.region, 'Unknown')
+    display_name: Sales Region
+  - name: late_ref
+    expr: CONCAT('l:', region)
+measures:
+  - name: uk
+    expr: COUNT(1) FILTER (WHERE region = 'UK')
+  - name: by_label
+    expr: COUNT(1) FILTER (WHERE sales_region = 'UK')
+filter: region <> 'X'
+"""
+
+
+def test_a_dimension_sees_only_dimensions_defined_before_it():
+    ex = _exprs(_mv(SCOPE))
+    assert ex["early_ref"].endswith("[FACT_ORDERS::region] )"), ex["early_ref"]
+    assert "[formula_Sales Region]" in ex["late_ref"]
+
+
+def test_a_measure_sees_every_dimension():
+    assert "[formula_Sales Region]" in _exprs(_mv(SCOPE))["uk"]
+
+
+def test_a_display_name_is_a_label_not_an_identifier():
+    assert "[FACT_ORDERS::sales_region]" in _exprs(_mv(SCOPE))["by_label"]
+
+
+def test_the_global_filter_reads_source_columns():
+    out = translate_metric_view(_mv(SCOPE), TABLES)
+    assert out["filter"]["ts_expr"] == "[FACT_ORDERS::region] != 'X'"
+
+
+def test_a_numeric_display_name_does_not_crash():
+    ex = _exprs(_mv("""
+dimensions:
+  - name: yr
+    expr: YEAR(source.ORDER_DATE)
+    display_name: 2024
+  - name: next_yr
+    expr: yr + 1
+"""))
+    assert ex["next_yr"] == "[formula_2024] + 1"
 
 
 # --- BL-630 ---------------------------------------------------------------------------
@@ -145,3 +198,19 @@ measures:
     assert ex["Opening"].startswith("first_value (")
     assert ex["Average Base"].count("sum ( first_value") == 1
     assert ex["Average Base"].count("sum ( last_value") == 1
+
+
+def test_a_windowed_measure_over_two_aggregates_is_aggregated():
+    ex = _exprs(_mv("""
+dimensions:
+  - name: Order Date
+    expr: source.ORDER_DATE
+measures:
+  - name: Net Balance
+    expr: SUM(source.BAL) - SUM(source.OVERDRAFT)
+    window:
+      - order: Order Date
+        semiadditive: last
+        range: current
+"""))
+    assert ex["Net Balance"].count("sum ( last_value") == 2, ex["Net Balance"]

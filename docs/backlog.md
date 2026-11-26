@@ -19127,7 +19127,7 @@ Nits the two reviews raised and the PR did not fix:
 
 ## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
 
-**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: the converter resolves dimension references; the lint XREF extension to `formulas[].expr` is still open). **Source:** converting three customer Metric Views offline with
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: the converter resolves a dimension named in a later dimension or a measure, under Databricks scope rules live-probed 2026-11-27 (`name` only; earlier dimensions only; one shadows a same-named source column; `filter:` reads source columns). Still open: a direct dimension whose expression is another dimension's name; a simple aggregate or `COUNT(DISTINCT)` over a computed dimension; and the lint XREF extension to `formulas[].expr`). **Source:** converting three customer Metric Views offline with
 `ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
 **Target:** 2026-12-15.
 
@@ -19354,7 +19354,7 @@ list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` 
 
 ## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
 
-**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: Databricks inlining wraps the calls, `sql_forms.sqlf_aggregate_window_values`; still open: the Snowflake translator references such a metric by formula id, and whether `sum ( [formula_X] )` imports is unprobed; and the lint rule). **Source:** live validation of three converted Metric Views on
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: Databricks wraps the calls after cross-measure inlining and in a multi-aggregate semi-additive window, `sql_forms.sqlf_aggregate_window_values`; still open: the Snowflake translator references such a metric by formula id, and whether `sum ( [formula_X] )` imports is unprobed; and the lint rule). **Source:** live validation of three converted Metric Views on
 simba-test against a Databricks fixture. **Target:** 2026-12-15.
 
 **What.** A measure built from two semi-additive measures, such as
