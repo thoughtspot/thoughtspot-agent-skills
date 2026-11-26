@@ -520,6 +520,7 @@ are roughly ordered by value÷effort.
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
 | ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
 | BL-628 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
+| BL-629 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
 
 ### Tier 4 — Deferred
 
@@ -19090,3 +19091,36 @@ of them is seen by neither.
 object's `status` and `dependents_total` as what the audit saw when it read the usage
 (`usage.read_at`), not as current: re-read dependents before any change.
 
+
+## BL-629 — ts-audit: investigate a ThoughtSpot Liveboard as the audit's output `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user direction: rather than build ever more custom HTML,
+push the audit's results to a destination and present them in a Liveboard, so a later run is
+only a data refresh. **Target:** 2027-02-28 (investigation and a recommendation; the build
+follows as its own items).
+
+**Idea.** `ts audit` gains a push of its results to a destination table set; a Model and a
+Liveboard are built once over those tables and shipped as TML; each run appends.
+
+**Investigate:**
+
+1. **What a Liveboard can draw.** Muze custom charts (`ts-object-liveboard-chart-builder`),
+   and ThoughtSpot's full HTML widgets / custom visualisations, for each view the HTML report
+   has today: the Dashboard heatmap, the scorecard, Cross-Model, Cleanup, the Usage quadrant and
+   triage table (3.28.0), Data Cache, the Formulas tree and graph, the ERD, and the planned
+   platform map. Per view: native chart, Muze, HTML widget, or not possible. Note interactivity
+   (drill-down, selection, export), size limits, and whether an HTML widget can be fed from the
+   Model's data.
+2. **Tables.** A small star keyed by `run_id`, so runs append and trends come free:
+   `audit_run` (cluster, Org, read date, versions), `audit_model` (per Model: usage, status,
+   owner, created, dependents, readiness), `audit_finding`, `audit_usage_unmatched`. Derived
+   from the audit JSON and versioned, like `ts-audit-candidates/1`.
+3. **Push.** Snowflake first (the existing Snowflake profile and `ts-load-source-data`),
+   Databricks later. Read-only on ThoughtSpot, write-only to the named schema.
+4. **Selection and hand-off.** Whether a Liveboard can produce the candidates list (BL-628's
+   input): a selection, a filtered Answer export, or an HTML widget's export.
+5. **Open questions:** findings carry object, Org and owner names, so the destination must be
+   the customer's own warehouse; one Liveboard per cluster or per Org; retention of past runs;
+   what stays in the HTML report (offline use, a cluster with no warehouse to write to).
+
+**Output:** a short recommendation (per view: where it lives) and the build items that follow.
