@@ -19046,3 +19046,35 @@ fidelity one and should move to Tier 1. The upstream work in apache/ossie-conver
 the decision shape worth copying: the measure is minted as a column rather than taken from a
 field, because a field is never a measure, and its datatype must come from the document
 rather than be assumed.
+
+## BL-628 — Review rounds for someone else's PR: review leftovers from the rounds PR `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/external-review-rounds`
+(the "Review rounds" section of `.github/CONTRIBUTING.md`). **Target:** 2027-01-31.
+
+Nits and one Should-fix the review raised and the PR did not fix:
+
+1. **Re-review scope.** Item 2 has the re-review check each Blocking item "for its class
+   across the branch", wider than "a re-review of the fix commits only". Confirm the
+   wording is the intended one, or narrow it.
+2. **Coverage scope.** Item 5 asks Coverage of "a converter or translator"; the PR
+   template and `repo-publisher.md` also ask it of other code that reports an outcome
+   (Migrated, Merged, READY). Align them, and reword "what it converts" for the latter.
+3. **Coverage vs the coverage matrix.** For a converter, Coverage should list the
+   `references/coverage-matrix.md` rows the PR adds or changes, so the review judges the
+   change against the matrix that ships rather than a separate PR-body statement.
+4. **Exception wording.** Say "never force-push" (a push rejected because the
+   contributor pushed meanwhile is where one gets reached for) and "a throwaway clone"
+   (a worktree of the maintainer's own clone shares its git config). The session and
+   validator rules are attributed to spec §5 C5, which holds only the hooks-disabled,
+   nothing-executed and CI-rechecks parts; fix the attribution.
+5. **Item 6 overstates C5.** C5 removes `BL-` id and CHANGELOG collisions, only reduces
+   ts-cli version clashes and does nothing for code conflicts. Item 6 also says "ts-cli
+   version clashes" where the approved rule says version clashes generally.
+6. **Guard wording (item 4).** "What the code does not recognise" misses a construct it
+   parses but translates wrongly; say "what it cannot accept as converted".
+7. **Blocking vs Backlog.** No rule beyond items 4 and 7; adopt `pr-ready` Step 7 rule 1.
+8. **Maintainer fix commits get only CI.** Ask for a test with any maintainer fix that
+   changes behaviour.
+9. **"Why it works this way"** sends readers to the spec, which does not contain the
+   review-rounds rules.

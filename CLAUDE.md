@@ -137,7 +137,8 @@ branches conflict there routinely. The resolutions are NOT symmetric:
   — so a renumber still needs a manual look at specs and audit reports.)
 
 After resolving, run `python3 tools/validate/check_backlog_integrity.py --root .`
-It catches a duplicated id, a citation left dangling by a renumber, and a stray
+(on someone else's branch, run `main`'s copy against that checkout instead, never the
+branch's own — `.github/CONTRIBUTING.md`, "The one exception"). It catches a duplicated id, a citation left dangling by a renumber, and a stray
 conflict marker.
 
 **What it does not catch.** Git can auto-merge a line from one item's section into
