@@ -18774,24 +18774,85 @@ Piece 2, not designed yet: connections as a subject in `ts audit`, reading piece
 (2026-11-25).
 
 **Next step.** The user approves the design doc. Then write the implementation plan.
-Three live probes in the doc's open items must pass before merge.
+Four live probes in the doc's open items (1, 2, 3 and 7) must pass before merge.
+
+**Design review leftovers** (the pr-ready review of the PR that filed this item; settle
+while planning):
+
+- Give `drifted` a next step per error code. `EXTERNAL_COLUMN_DATATYPE_MISMATCH` means the
+  column still exists with a new type, so removing it is the wrong advice.
+- Reuse what exists: `_fetch_connection_flags` (`ts_cli/audit/context.py`) pages CONNECTION
+  headers; `connectionDisabled` belongs beside `header_parameterized` and the `oauth` /
+  `oauth_m2m` flags in `ts_cli/audit/connection_facts.py`; `_post` in
+  `ts_cli/commands/dependency_cascade.py` is a never-retried call, but its refusal message
+  says the call "changes objects", and a bare `except SystemExit` would swallow the
+  invalid-token abort. Say what happens when the header read fails.
+- The dry-run example ("25 to 90 minutes") does not follow from the probe timings (about 8 to
+  68 minutes at 4 workers). The estimate should show the timeout worst case, `--workers`
+  needs a ceiling, and an aborted run's partial results need a rule.
+- Open item 1 may be wrong that BigQuery was the only OAuth sample: 12 of the cluster's 14
+  Databricks connections use OAuth, and Databricks connections were sampled healthy.
+- `errorString` carries driver messages that may quote a user name or host, and `--full`
+  passes the response through unfiltered. Say so, filter `raw` like the audit's allowlist,
+  and keep test fixtures synthetic.
+- Record a `get-rest-api-reference` search for a public diagnose endpoint
+  (`.claude/rules/api-research.md`).
+- Repo obligations also need: the internal-route list in `.claude/rules/ts-cli.md`; whether
+  the smoke test runs in CI (`CI_SMOKES` and `EXPECTED_CI_SMOKES`); open items 2, 3 and
+  Appendix B in the skill's `references/open-items.md`.
+- Appendix A counted 1,815 connections and Appendix B 1,866. Say whether that is growth or
+  hidden objects, since piece 1 joins the two lists.
+- If customers are meant to import the Python rather than run the CLI, name a supported
+  function.
+
+**Re-review leftovers** (shipped by the user's decision, 2026-11-26, without a second fix
+round; settle while planning):
+
+- A missing, null or unrecognised table or column status still reads `drifted`. It should
+  read `unknown`, `unrecognised_response`, as at connection level; only a present value
+  other than `SUCCESSFUL` is `drifted`.
+- BL-622's usage rollup misses legacy Worksheets, hidden Models and Views stacked more
+  than three deep (`models_reached` in `ts_cli/audit/scope.py`). A connection used only
+  through those would read idle.
+- Open item 5 becomes pre-merge if the `inactive` proposal is rejected. A deactivated
+  connection answering 200 with `FAILED` would read `down`.
+- A per-user OAuth result is the running admin's view: a table their warehouse role cannot
+  read fails. Mark it as such, and attach no column-removal advice.
+- The `incomplete` check counts `ONE_TO_ONE_LOGICAL` and `SQL_VIEW` Tables. If diagnose does
+  not list SQL Views, every connection with one reads `incomplete`. Name the subtypes,
+  compare counts live on one connection, and make a failed count read `unknown`.
+- The classification table needs a final row, "anything else: `unknown`, `error`". A 204 or
+  other non-200 2xx matches no row.
+- Minor: Org sources other than `--org` (`TS_ORG`, the profile) take the same silent
+  fallback, and `assert_org_context` exits 2 with a sharing message; say how to deactivate
+  (no `ts` command; Early Access UI or 26.6.0.cl API); give `unrecognised_response` and
+  `incomplete` a next step; compare table sets, not counts, and add `tables_registered`;
+  add open item 7 to the `references/open-items.md` obligation.
 
 ## BL-622 — ts-audit: flag idle connections that are still active, and recommend deactivating them `Tier 3`
 
 **Filed:** 2026-11-25. **Source:** connection deactivation probe on the SE demo cluster,
 recorded in `docs/superpowers/specs/2026-11-19-connection-health-design.md` Appendix B.
-**Target:** 2027-02-28. **Depends on:** BL-621 (piece 1).
+**Target:** 2027-02-28. **Depends on:** BL-621 (piece 1) and BL-620 (H17's open questions on
+the same usage read).
 
 **Why.** A connection nobody queries can still cost warehouse compute. The connection health
-design says Spotter indexing and row-count stats keep running against it. ThoughtSpot can
+design says Spotter indexing and row-count stats keep running against stale connections;
+whether that holds for idle ones is not measured (design open item 6). ThoughtSpot can
 deactivate a connection instead of deleting it, which blocks every query until it is
 activated again.
 
-**What.** Connection health piece 2: connections as a subject in `ts audit`.
+**What.** One part of connection health piece 2: the idle-connection rule. Piece 2 also
+brings piece 1's `down` and `drifted` results into `ts audit` (BL-621).
 
 - A rule for a connection that is active and idle. Idle means no Model or Table on it was
-  queried in 90 days, by H17's usage read. How to roll Model usage up to a connection, and
-  whether direct queries on a Table count, is open.
+  queried in 90 days, by H17's usage read. Roll Model usage up to a connection with
+  `ts_cli/audit/scope.py` (`tables_on_connections`, `models_reached`). Whether direct queries
+  on a Table count is open.
+- **H17's read is one Org's usage.** A connection whose Tables are published to other Orgs,
+  and queried only there, reads idle in the owning Org's audit. Deactivating it would stop
+  every tenant's queries. So the rule must not flag a connection with Tables published to
+  other Orgs unless their usage is read too, and its finding must name the Org it read.
 - Its remediation: deactivate it with
   `POST /api/rest/2.0/connections/{id}/status` and `{"status": "DEACTIVATED"}` (26.6.0.cl or
   later). It is reversible with `{"status": "ACTIVATED"}`.
