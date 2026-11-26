@@ -124,10 +124,33 @@ def convert_case_when(expr: str) -> str:
         if else_val:
             parts.append(f"else {else_val}")
 
-        replacement = " ".join(parts)
+        replacement = _group_if_followed(" ".join(parts), result, block_end)
         result = result[:m.start()] + replacement + result[block_end:]
 
     return result
+
+
+# ThoughtSpot's `else` is greedy: `if ( c ) then a else b + 1` adds 1 only on the else
+# branch (live-verified 2026-11-26, BL-632). A converted block that an operator follows
+# is therefore grouped. Only then: a block standing on its own keeps the bare form the
+# later passes (agg(if …) → agg_if, ensure_else_clause) match on (BL-646).
+_FOLLOWING_OPERATOR = re.compile(
+    r"\s*(?:[-+*/%^=<>!]|(?:and|or|in|not)\b)", re.IGNORECASE)
+
+
+def _followed_by_operator(text: str, pos: int) -> bool:
+    return bool(_FOLLOWING_OPERATOR.match(text, pos))
+
+
+def _group_if_followed(block: str, text: str, end: int) -> str:
+    """``block`` grouped when an operator follows position ``end`` of ``text``. A grouped
+    block with no terminal else gets ``else null`` first, which is what Tableau returns
+    when no branch matches, so ensure_else_clause never has to reach inside a group."""
+    if not _followed_by_operator(text, end):
+        return block
+    if not re.search(r"\belse\b(?!\s+if\b)", block, re.IGNORECASE):
+        block += " else null"
+    return f"( {block} )"
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +249,7 @@ def convert_if_then(expr: str) -> str:
         )
         if is_inner and not has_terminal_else:
             converted += " else null"
+        converted = _group_if_followed(converted, result, m.end())
         result = result[: m.start()] + converted + result[m.end():]
 
     # Fallback: remaining uppercase IF...THEN without a matching END
@@ -291,7 +315,8 @@ def convert_iif(expr: str) -> str:
             test = args[0].strip()
             a = args[1].strip()
             b = args[2].strip()
-            replacement = f"if ( {test} ) then {a} else {b}"
+            replacement = _group_if_followed(
+                f"if ( {test} ) then {a} else {b}", result, pos)
             result = result[:m.start()] + replacement + result[pos:]
 
     return result
