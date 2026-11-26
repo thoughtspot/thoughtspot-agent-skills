@@ -317,7 +317,7 @@ def _rewrite_conditionals(expr: str) -> tuple:
         return expr, err
     block = f"if ({cond}) then {then_v} else {else_v}"
     # ThoughtSpot's `else` is greedy (BL-632): group the conditional when an operator
-    # follows it, or `if (c) then 1 else 0 = 1` compares only the else branch (BL-646)
+    # follows it, or `if (c) then 1 else 0 = 1` compares only the else branch (BL-649)
     if re.match(r"\s*(?:[-+*/%^=<>!]|(?:and|or|in|not)\b)", tail_rw, re.IGNORECASE):
         block = f"( {block} )"
     return f"{expr[:m.start()]}{block}{tail_rw}", None

@@ -1,4 +1,4 @@
-"""BL-646: the BL-632 greedy-`else` class in the Tableau, Sisense and Qlik translators.
+"""BL-649: the BL-632 greedy-`else` class in the Tableau, Sisense and Qlik translators.
 
 ThoughtSpot's `else` is greedy (live-verified 2026-11-26): `if ( c ) then a else b + 1`
 adds 1 only on the else branch. A converted conditional that an operator follows is

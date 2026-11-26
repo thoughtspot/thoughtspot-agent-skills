@@ -532,7 +532,7 @@ def _split_call(expr: str, fname: str) -> Optional[list[str]]:
         return None
     # The call's own closing bracket must end the expression: `If(a, 1, 0) * Sum(b)`
     # also matches the greedy pattern, and splitting `a, 1, 0) * Sum(b` emitted
-    # unbalanced text marked TRANSLATED (BL-646). Refused, it is flagged for review.
+    # unbalanced text marked TRANSLATED (BL-649). Refused, it is flagged for review.
     for _ch, d, opaque in _scan(m.group(1), "([{", ")]}"):
         if not opaque and d < 0:
             return None

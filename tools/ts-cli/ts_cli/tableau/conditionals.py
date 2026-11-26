@@ -133,7 +133,7 @@ def convert_case_when(expr: str) -> str:
 # ThoughtSpot's `else` is greedy: `if ( c ) then a else b + 1` adds 1 only on the else
 # branch (live-verified 2026-11-26, BL-632). A converted block that an operator follows
 # is therefore grouped. Only then: a block standing on its own keeps the bare form the
-# later passes (agg(if …) → agg_if, ensure_else_clause) match on (BL-646).
+# later passes (agg(if …) → agg_if, ensure_else_clause) match on (BL-649).
 _FOLLOWING_OPERATOR = re.compile(
     r"\s*(?:[-+*/%^=<>!]|(?:and|or|in|not)\b)", re.IGNORECASE)
 
