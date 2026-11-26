@@ -51,8 +51,9 @@ as FAIL. Everything else is reported but does not block READY:
   reason). Read the terminal output: a `pip-audit` WARN here can be a failure in CI, where
   `pip-audit` is a hard gate.
 - **SKIP** (a check or smoke suite that ran but checked nothing, such as a smoke whose
-  fixture is missing) and **NOT RUN** (an opt-in check whose prerequisite is absent, or a
-  scoped gate the branch does not trigger): listed in the block with their reasons, under
+  fixture is missing) and **NOT RUN** (an opt-in check whose prerequisite is absent, a
+  scoped gate the branch does not trigger, or, on a run without `--full`, a smoke suite or
+  pytest invocation left to CI): listed in the block with their reasons, under
   "NOT RUN and SKIP".
 - **Tests skipped** for anything other than a missing module (data that is not present, a
   tool such as node or Chrome): listed there too, with their reasons.

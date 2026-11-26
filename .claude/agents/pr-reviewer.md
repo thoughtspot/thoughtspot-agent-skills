@@ -43,7 +43,8 @@ Any other value, or none, counts as no: stop at once. Read nothing from the bran
 - the evidence block path. The validators it lists already ran, and so did any smoke
   suite or pytest invocation it lists as run. A default run lists those NOT RUN
   (`fast run`): CI's required `validate` check runs them on the PR, so never count one
-  as passed, and do not run them yourself in its place. Do not re-report what the
+  as passed, and do not run whole suites in its place (targeted runs the sections
+  below ask for are fine). Do not re-report what the
   checks cover; spend the effort on what they cannot see. If no
   block was passed, or its first line names a different head from the range's: run
   nothing that stands in for it (never `scripts/pr-ready.sh`; see below), review the

@@ -1,12 +1,12 @@
 ---
 name: pr-ready
-description: "Run on your OWN branch before opening a PR, and before self-merging one. Runs everything CI checks locally against upstream main (`scripts/pr-ready.sh`), then an adversarial review of the branch's diff by the `pr-reviewer` agent (plus the conversion-consistency auditor when converters change), and writes both into one evidence block for the PR description. Advisory, not a required check. It executes the branch's code with your credentials, so it first asks you to confirm the branch is your own; for someone else's PR it stops and points to main's `scripts/check-pr.sh` and a human review."
+description: "Run on your OWN branch before opening a PR, and before self-merging one. Runs CI's fast checks locally against upstream main (`scripts/pr-ready.sh`; the test suites are left to CI unless `--full`), then an adversarial review of the branch's diff by the `pr-reviewer` agent (plus the conversion-consistency auditor when converters change), and writes both into one evidence block for the PR description. Advisory, not a required check. It executes the branch's code with your credentials, so it first asks you to confirm the branch is your own; for someone else's PR it stops and points to main's `scripts/check-pr.sh` and a human review."
 ---
 
 # pr-ready
 
 One local run of the review a PR would otherwise get only after it is opened: the
-CI-superset checks first, then a reviewer briefed to refute the diff. The output is
+fast checks first (CI runs the test suites), then a reviewer briefed to refute the diff. The output is
 an evidence block naming the head and base SHAs it describes, so a stale block is
 visible.
 
@@ -119,7 +119,8 @@ validators, a minute or two): the smoke suites and pytest are listed NOT RUN, be
 CI's `validate` check runs them on the PR and is required to merge, even with
 `--admin`. Do not add `--full` unless the user asks for it; a contributor may use it
 before asking a maintainer to approve CI on a fork PR. A `--full` run takes about ten
-minutes: give the Bash call a 600000 ms timeout, or run it in the background.
+minutes, about the 600000 ms limit of a foreground Bash call: run it in the
+background and wait for it to finish.
 
 Choosing the interpreter, in the block below:
 
@@ -219,32 +220,6 @@ shell):
 
 Pass the inputs, not your own reading of the change: a reviewer handed a conclusion
 tends to confirm it.
-
-**A docs-only diff is reviewed at `high`.** Docs-only means every changed file is a
-document for people on the list below, and none is generated. The list is
-deliberately short: it never takes in a file that changes what an agent does (any
-`CLAUDE.md`, skill, agent definition, rules file, memory or mapping doc), and a
-rename is never docs-only. Decide it with this block, never by reading the diff; when
-in doubt, it is not docs-only. The block checks the files; it cannot check the lines,
-so a "yes" still needs your read that no changed line is a command, code or config
-(the user's global rule applies on top of this list):
-
-```bash
-RANGE="$(python3 tools/validate/evidence.py range)" || exit 1
-FILES="$(git diff --name-only --no-renames "$RANGE")"
-DOCS_RE='^(docs/[^/].*\.md|\.github/CONTRIBUTING\.md|\.github/pull_request_template\.md|CHANGELOG\.md)$'
-if [ -n "$FILES" ] && ! printf '%s\n' "$FILES" | grep -Ev "$DOCS_RE" | grep -q . \
-   && ! printf '%s\n' "$FILES" | grep -E '^docs/(ossie|superpowers/plans)/' | grep -q . \
-   && ! git diff --name-only --no-renames --diff-filter=d "$RANGE" | xargs grep -lE 'GENERATED|[Dd]o not edit' 2>/dev/null | grep -q .; then
-  echo "docs-only: yes"; else echo "docs-only: no"; fi
-```
-
-For a docs-only diff, dispatch the reviewer with the Agent tool's `effort: high` in
-place of its frontmatter `max`, and tell it the diff was classed docs-only so it
-reports any file that should not have been. If the harness does not apply the
-override, the review runs at `max`, which fails safe. Everything else in Steps 3-7
-is unchanged, the re-review included: on a docs-only branch on 2026-11-26 the
-re-review of the fix commits found four must-fix defects the fix round introduced.
 
 ## Step 4: converters also get the converter audit
 
@@ -376,7 +351,7 @@ The ranks are the `pr-reviewer`'s ("Output format" in `.claude/agents/pr-reviewe
 4. **Otherwise, one fix round.** Brief the fixer to fix each item from 1 for its class
    across the branch, and to test what the fix itself introduces: a fix that adds
    normalisation or a new code path is new surface.
-5. **Then one re-review** (at `high` for a docs-only diff, as in Step 3). Before Step 3 empties `review.md`, copy it to
+5. **Then one re-review.** Before Step 3 empties `review.md`, copy it to
    `review-<earlier-head>.md` beside it. Run Steps 1-6 again and dispatch the
    `pr-reviewer` as a re-review, adding to Step 3's inputs the earlier review's head and
    the fix commits. The evidence gets the re-review with the earlier review's Blocker
@@ -404,7 +379,7 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-11-26 | A default run is fast checks only: the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check (`--full` runs them; `--post` implies it). A docs-only diff (only people-facing docs on Step 3's list: `docs/` minus generated files and the Ossie mapping, `CONTRIBUTING.md`, the PR template, `CHANGELOG.md`; never an instruction file, a mapping doc or a rename) is reviewed and re-reviewed at effort `high` |
+| 1.2.0 | 2026-11-26 | A default run is fast checks only: the check list, the PR-only gates and the validators run, and the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check (`--full` runs them; `--post` implies it) |
 | 1.1.0 | 2026-11-25 | Step 7, triage, fix once, ship: fix Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement, normal use or a fixed rank, or that the fixes introduced; send everything else to one dated backlog item (the next id free on upstream `main`, never found by reading PR text); ship at once when nothing needs fixing, else one fix round and one re-review of the branch's commits since the reviewed head; a merge of `main` touching only `CHANGELOG.md` and `docs/backlog.md`, or a commit changing only those, refreshes the evidence without a new review. Step 3 passes the user's stated requirements. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text brought into a credentialed session, a weakened gate, silently wrong output on any input and unread-as-clean are always Blockers |
 | 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |
 | 1.0.1 | 2026-10-29 | Before your first run: the virtual-environment route for a Python that refuses `pip install` (`uv venv` with `uv pip install --python`, or `python3.12 -m venv` with its own pip; the same quoted lines, no second copy) and `CHECKS_PYTHON` to name it; Step 1 exports an interpreter the user named as given (a typo stops the run), else keeps a `CHECKS_PYTHON` already set, else sets it to `~/.venvs/tas-ci/bin/python3.12` when that exists; Step 2 reports no evidence on exit 2; link to `.github/CONTRIBUTING.md` |

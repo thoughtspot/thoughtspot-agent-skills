@@ -19059,3 +19059,25 @@ fidelity one and should move to Tier 1. The upstream work in apache/ossie-conver
 the decision shape worth copying: the measure is minted as a column rather than taken from a
 field, because a field is never a measure, and its datatype must come from the document
 rather than be assumed.
+
+## BL-629 — pr-ready fast checks: review leftovers, and the docs-only review effort `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/pr-ready-scoped-checks`.
+**Target:** 2027-01-31.
+
+1. **Docs-only reviews at `high` (moved out of that PR, one purpose per PR).** Approved by
+   the maintainer: a docs-only diff is reviewed and re-reviewed at effort `high`, where
+   docs-only is an explicit list of people-facing docs. The review found the first
+   attempt's block classed mapping docs (`docs/function-maps/`), plans kept under
+   `docs/superpowers/specs/`, generated files without an uppercase marker
+   (`docs/open-items-index.md`, fidelity reports), deletions, renames and a new
+   `CLAUDE.md` as docs-only, and that it lacked `set -o pipefail`. Rebuild it as an
+   explicit path list; refuse any D/R/C from `git diff --name-status -M`; read names with
+   `-z`; test it as `test_pr_reviewer_brief.py` runs Step 1's block; take the PR template
+   off the list (agents fill it and it carries the confidentiality checkbox); and record
+   the exception in `.claude/rules/model-routing.md` and spec §5 C2 so they do not still
+   read "effort max" unqualified.
+2. **`docs/quality-gates.md` shows the unit-test trigger raw** (`if [ -n "$PY_STAGED" ]`):
+   teach `_humanise_trigger` in `generate_quality_gates.py` the new condition.
+3. **Step 7 has no path for a CI suite failure found after the review.** A fast default
+   makes that more likely; say whether its fix commit needs a re-review.

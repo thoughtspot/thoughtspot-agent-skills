@@ -6,7 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-26
-- docs: `pr-ready` 1.2.0 runs fast checks by default (validators and PR-only gates, a minute or two); the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check, and `--full` runs them. A docs-only diff (people-facing docs on an explicit list, never an instruction or mapping file) is reviewed and re-reviewed at effort `high` rather than `max`. Pre-commit skips the unit suites on a merge commit whose staged `.py` files all come from the merged side
+- feat: `pr-ready` 1.2.0 runs fast checks by default (validators and PR-only gates, a minute or two); the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check, and `--full` runs them. Pre-commit skips the unit suites on a merge commit whose staged `.py` files all come from the merged side
 - fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
 - chore: bump ts-cli to v0.224.1
 

@@ -460,17 +460,36 @@ run_pytest() {
   fi
 }
 
-# A merge commit stages every .py file the merged side changed, code its own branch has
-# already tested. Run the suites only for a .py file whose staged content matches
+# A merge OF MAIN stages every .py file main changed, code CI has already tested on
+# main. On such a merge, run the suites only for a .py file whose staged content is
 # neither side's tip unchanged: it differs from HEAD (it is staged) AND from MERGE_HEAD,
-# so it is a conflict resolution or a combination of both sides. CI runs everything.
-PY_STAGED="$(grep '\.py$' <<< "$STAGED")" || PY_STAGED=""
-if [ -n "$PY_STAGED" ] && git rev-parse -q --verify MERGE_HEAD >/dev/null; then
-  PY_STAGED="$(comm -12 <(sort <<< "$PY_STAGED") \
-               <(git diff --cached --name-only MERGE_HEAD -- '*.py' | sort))"
-  if [ -z "$PY_STAGED" ]; then
-    echo "  unit tests                     SKIP (merge commit: every staged .py file is the merged side's, already tested; CI runs the suites)"
+# so it is a conflict resolution or a combination of both sides. Each side was tested
+# on its own; the merged tree is tested by CI. A merge of any other branch runs the
+# suites as usual. (Extracted between these markers by test_precommit_merge_skip.py.)
+# BEGIN py-needing-tests
+py_needing_tests() {  # $1 = the staged file list; prints the .py files to test for
+  local py main_ref
+  py="$(grep '\.py$' <<< "$1")" || py=""
+  if [ -z "$py" ] || ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    printf '%s' "$py"; return
   fi
+  for main_ref in refs/remotes/upstream/main refs/remotes/origin/main; do
+    git rev-parse -q --verify "$main_ref" >/dev/null && break
+    main_ref=""
+  done
+  if [ -z "$main_ref" ] || ! git merge-base --is-ancestor MERGE_HEAD "$main_ref"; then
+    printf '%s' "$py"; return
+  fi
+  comm -12 <(sort <<< "$py") <(git diff --cached --name-only MERGE_HEAD -- '*.py' | sort)
+}
+# END py-needing-tests
+
+PY_STAGED="$(py_needing_tests "$STAGED")"
+PY_ANY="$(grep '\.py$' <<< "$STAGED")" || PY_ANY=""
+if [ -z "$PY_STAGED" ] && [ -n "$PY_ANY" ]; then
+  echo "  unit tests                     SKIP (a merge of main: each staged .py file is main's, tested on main; CI tests the merged tree)"
+  SKIPPED=$((SKIPPED + 1))
+  SKIPPED_LABELS="${SKIPPED_LABELS:+$SKIPPED_LABELS, }unit tests (merge of main)"
 fi
 
 if [ -n "$PY_STAGED" ]; then

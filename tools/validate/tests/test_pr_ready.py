@@ -851,3 +851,23 @@ def test_full_runs_the_suites(env, monkeypatch):
     _fast_main(env, "--no-review", "--full")
     assert ran == ["smokes", "pytest"]
     assert "fast checks only" not in _evidence(env)[1]
+
+
+def test_a_default_run_never_says_the_suites_ran(env, capsys):
+    _fast_main(env, "--no-review")
+    text = _evidence(env)[1]
+    assert "ran once here" not in text
+    assert "pytest ran as `python -m pytest`" not in text
+    assert "not run here (a fast run)" in text
+    out = capsys.readouterr().out
+    assert "prerequisite absent: )" not in out
+    assert "READY (fast checks; CI runs the suites)" in out
+
+
+def test_post_implies_full(env, monkeypatch):
+    ran = []
+    monkeypatch.setattr(pr_ready, "run_pytest", lambda *a, **k: ran.append("pytest") or [])
+    monkeypatch.setattr(pr_ready.rc, "run_smokes", lambda *a, **k: ran.append("smokes") or [])
+    monkeypatch.setattr(pr_ready, "_try_post", lambda *a, **k: "stubbed")
+    _fast_main(env, "--no-review", "--post", "42")
+    assert ran == ["smokes", "pytest"]
