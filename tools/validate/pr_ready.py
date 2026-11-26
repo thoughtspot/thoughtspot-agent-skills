@@ -31,8 +31,8 @@ same set CI runs, the way CI runs it, and every run writes down what it ran:
    - CI's credential-free smoke suites (`checks.CI_SMOKES`);
    - the pytest invocations, **read from the workflow's own step** each run
      (`pytest_invocations`), never a hand copy, with `-rs --color=no` added so every
-     skipped test is reported with its reason, and PYTEST_ADDOPTS dropped (CI sets
-     none). A skip for a module that cannot be imported, or that lacks an attribute
+     skipped test is reported with its reason, PYTEST_ADDOPTS dropped (CI sets none),
+     and the interpreter's directory first on PATH (as setup-python's is in CI). A skip for a module that cannot be imported, or that lacks an attribute
      the test needs (too old), is a missing tool, so FAIL (CI installs it), and the
      run prints CI's suite-job installs (`SUITE_PIP_INSTALLS`) as the remedy; other
      skips are listed. If pytest's own skipped count cannot be read, or does not
@@ -489,8 +489,10 @@ def _skip_problems(clean: str, listed: int) -> List[str]:
 def _pytest_env(python: str = "") -> dict:
     """The environment pytest runs in. The chosen interpreter's directory goes first on
     PATH: some tests start a shell that calls a bare `python3`, which otherwise finds
-    whatever is first on the user's PATH (often a system Python without pyyaml), not the
-    interpreter whose packages this run checked."""
+    whatever is first on the user's PATH (often a Python without pyyaml). For a virtual
+    environment, whose bin holds a `python3` that is the same interpreter, the child then
+    gets its packages; an interpreter outside a venv may sit beside a different
+    `python3` (BL-651)."""
     env = {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
     found = shutil.which(python) if python else None
     if found:
@@ -603,7 +605,8 @@ def not_reproduced(repo_root: Path, base_ref: str, dirty: bool,
         "pytest ran as `python -m pytest`, which puts the repo root first on sys.path; CI "
         "runs the bare `pytest` script, which does not, so a test importing a top-level "
         "name can pass here and fail there. `-rs --color=no` was added to report every "
-        "skip, and PYTEST_ADDOPTS (if set) was dropped, as CI sets none.",
+        "skip, PYTEST_ADDOPTS (if set) was dropped, as CI sets none, and the interpreter's "
+        "directory was put first on PATH, as setup-python's is in CI.",
     ] if full else []) + [
         "CI's fresh dependency install (`pip install -e tools/ts-cli[snowflake,qlik,xlsx]`): "
         "here the checks ran with this interpreter's packages, this checkout's "

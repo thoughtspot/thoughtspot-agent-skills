@@ -449,10 +449,13 @@ run_pytest() {
   local t0
   printf "  %-30s " "$label"
   t0=$(_now_ms)
-  # The chosen interpreter's directory first on PATH: tests that start a shell calling a
-  # bare `python3` must get this interpreter (and its packages), not the system one.
+  # The chosen interpreter's directory first on PATH, as an absolute path (a relative
+  # CHECKS_PYTHON would otherwise resolve against each child's working directory). For a
+  # virtual environment, whose bin holds a `python3` that is the same interpreter, a test
+  # that starts a shell calling a bare `python3` then gets its packages. An interpreter
+  # the search chose outside a venv may sit beside a different `python3` (BL-651).
   local py_dir
-  py_dir="$(dirname "$(command -v "$PYTHON_BIN")")"
+  py_dir="$(cd "$(dirname "$(command -v "$PYTHON_BIN")")" && pwd)"
   if output=$(PATH="$py_dir:$PATH" "$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
     printf "PASS "
     _record_duration "$label" "$t0"

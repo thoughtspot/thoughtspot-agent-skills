@@ -1,6 +1,6 @@
-"""pytest runs with the chosen interpreter's directory first on PATH (2026-11-26), so a
-test that starts a shell calling a bare `python3` gets that interpreter and its packages,
-not the system Python. Covers pr_ready's `_pytest_env` and the pre-commit hook's real
+"""pytest runs with the chosen interpreter's directory first on PATH (2026-11-26), so for
+a virtual environment a test that starts a shell calling a bare `python3` gets the venv's
+interpreter and packages. The stubs check the PATH order only. Covers pr_ready's `_pytest_env` and the pre-commit hook's real
 `run_pytest`, extracted from the hook."""
 import os
 import re
@@ -32,12 +32,31 @@ def test_pr_ready_puts_the_interpreter_first_on_path(tmp_path, monkeypatch):
     d = _stub_dir(tmp_path)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = pr_ready._pytest_env(str(d / "pythonX"))
-    assert env["PATH"].split(os.pathsep)[0] == str(d)
+    assert env["PATH"] == f"{d}{os.pathsep}/usr/bin:/bin"
 
 
 def test_pr_ready_without_an_interpreter_leaves_path(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     assert pr_ready._pytest_env("")["PATH"] == "/usr/bin:/bin"
+
+
+def _hook_run_pytest(tmp_path, python_bin, cwd):
+    text = HOOK.read_text(encoding="utf-8")
+    m = re.search(r"^run_pytest\(\) \{\n.*?^\}\n", text, re.S | re.M)
+    assert m, "run_pytest not found in pre-commit.sh"
+    script = ("FAILED=0\n_now_ms() { echo 0; }\n_record_duration() { :; }\n"
+              + m.group(0) + 'run_pytest label\necho "$output"\n')
+    return subprocess.run(["bash", "-c", script], cwd=cwd,
+                          env={"PATH": "/usr/bin:/bin", "PYTHON_BIN": python_bin},
+                          capture_output=True, text=True)
+
+
+def test_pre_commit_puts_an_absolute_dir_for_a_relative_interpreter(tmp_path):
+    # A relative CHECKS_PYTHON must not become a relative PATH entry, which each child
+    # would resolve against its own working directory.
+    d = _stub_dir(tmp_path)
+    r = _hook_run_pytest(tmp_path, "venv-bin/pythonX", cwd=tmp_path)
+    assert f"FOUND={d / 'python3'}" in r.stdout, r.stdout + r.stderr
 
 
 def test_pre_commit_run_pytest_puts_the_interpreter_first_on_path(tmp_path):
