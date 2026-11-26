@@ -64,6 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-632 | COALESCE emits an unparenthesised if/then/else; ThoughtSpot binds a following operator inside the else branch — an MV `COALESCE(is_deleted, false) = false` filter keeps ONLY the deleted rows (live-confirmed) | immediate |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
@@ -369,6 +370,13 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
+| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs | 2026-12-15 |
+| BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
+| BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
+| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` | 2026-12-15 |
+| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
+| BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
+| BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -519,6 +527,13 @@ are roughly ordered by value÷effort.
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
 | BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
+| BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
+| BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
+| BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
+| BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
+| BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
+| BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
+| BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -545,6 +560,7 @@ are roughly ordered by value÷effort.
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
+| BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
 
 ---
 
@@ -19100,8 +19116,415 @@ Nits the two reviews raised and the PR did not fix:
     environment exports, Keychain, token caches, SSH keys and agents, key files, git
     credential helpers, `gh` auth), and :161's "never run … the PR's tests" should point
     at that exception.
+---
 
-## BL-629 — pr-ready fast checks: review leftovers, and the docs-only review effort `Tier 3`
+## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** converting three customer Metric Views offline with
+`ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
+**Target:** 2026-12-15.
+
+**What.** A Metric View dimension may name another dimension: `QUARTER(order_month)`, or a
+CASE over a backticked display name (`` CASE WHEN `Channel Description` ILIKE '%web%' … ``).
+`translate-formulas` resolves every bare identifier through `resolve_parts`
+(`tools/ts-cli/ts_cli/databricks/mv_translate.py:46-67`), which maps a name with no alias
+prefix to the `source` table, so the output is a fake column on the fact table:
+
+    QUARTER(order_month)          -> quarter_number ( [ORDERS::order_month] )
+    `Channel Description` ILIKE … -> sql_bool_op ( "{0} ILIKE …" , [ORDERS::Channel Description] )
+
+The right targets are the other dimension's formula (`[formula_Month]`, via `formula_id`
+at `mv_translate.py:70`) or, for a direct-column dimension, its column
+(`[DIM_CHANNEL::DESCRIPTION]`). Measures already get this treatment (`MEASURE()` inlining);
+dimensions do not.
+
+**Why it matters.** The Model fails at import: there is no such column. The pre-import gate
+does not see it. `ts tml lint --dir`, with the generated Table TMLs in the batch, returned
+`clean: true` on a Model carrying `[ORDERS::order_month]` (probed 2026-11-26), because
+`lint_cross_references` (`tools/ts-cli/ts_cli/tml_lint.py:690`) checks `column_id` and join
+`on:` references only and states that `formulas[].expr` is out of scope.
+
+**Fix direction.** In `translate-formulas`, resolve an identifier that matches a dimension's
+`name` (or backticked display name) before treating it as a column: emit the dimension's
+`[formula_<Title>]` for a computed dimension, its column for a direct one, with a
+dependency order like the measure DAG. Separately, extend XREF to `[TABLE::COL]` references
+inside `formulas[].expr`. That would have caught this, and any later case of this class.
+
+---
+
+## BL-630 — from-databricks-mv: two columns with one display name, and a direct column is silently dropped `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** One MV had `order_month` with `display_name: Month` (a formula) and a direct
+dimension `Month: source.MONTH` (month number). `build-model` exited 0 and the Model had one
+`Month`: the month-number column was gone, with nothing in `name_renames` or on stderr. Two
+other MVs differed only in that `Month` was computed (`MONTH(order_month)`), and those
+failed loud: `duplicate display title(s): ['Month']`.
+
+The difference is the order of two passes in `mv_build_model.py`:
+`resolve_name_collisions` (call at line 108) runs first, and its column-vs-formula rule in
+`tools/ts-cli/ts_cli/formula_common.py:437-442` keeps the formula and drops any column with
+the same name. It computes `dropped` and never reports it. Only a formula-vs-formula clash
+reaches `_check_no_duplicate_display_names` (`mv_build_model.py:400`, called at 428).
+
+**Why it matters.** A column the source defines disappears from the Model, silently. The
+loud path shows the converter already treats a clash as an error, so the two cases should
+behave the same.
+
+**Fix direction.** Fail loud on every display-title clash, or rename deterministically and
+report it in `name_renames`. `resolve_name_collisions` is shared (`formula_common`) with
+other converters, so check what they rely on before changing the drop. The minimum is to
+surface `dropped` instead of discarding it.
+
+---
+
+## BL-631 — from-databricks-mv: `display_title` title-cases names that have no display_name, mangling acronyms `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `display_title` (`tools/ts-cli/ts_cli/databricks/mv_translate.py:76-78`) returns
+`entry["name"].replace("_", " ").title()` when there is no `display_name`. That is right for
+`order_month` → `Order Month`. But a v1.1 MV names most dimensions in their final form, and
+those get re-cased: `SKU Type` → `Sku Type`, `Is eBook` → `Is Ebook`, `API Channel` →
+`Api Channel`.
+
+**Why it matters.** The column names users and Spotter see are not the ones the source
+author wrote. No numbers change.
+
+**Fix direction.** Title-case only a snake_case identifier (no spaces, contains `_` or is
+all lower case). Use any other `name` verbatim. The workaround used was to set
+`display_name = name` in `parsed.json` before `build-model`.
+
+---
+
+## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** immediate. **Raised to Tier 1
+2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
+
+**What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
+`if ( a != null ) then a else b` with no outer parentheses, and the caller appends the rest
+of the expression. Reproduced with `translate_sql_expr`:
+
+    COALESCE(source.D, false) = false   ->  if ( [F::D] != null ) then [F::D] else false = false
+    COALESCE(source.D, 0) + 1           ->  if ( [F::D] != null ) then [F::D] else 0 + 1
+    (COALESCE(source.D, false)) = false ->  ( if ( … ) then [F::D] else false ) = false   (correct)
+
+The first is the shape of a common MV global filter (`COALESCE(is_deleted, false) = false`).
+`build-model` turns it into the `MV Filter` formula that every query is filtered on.
+
+**Why it matters.** Whether this is right depends on how ThoughtSpot parses an `else`
+branch, and no doc in this repo stated it.
+
+**Live-confirmed 2026-11-26 (simba-test, Databricks connection, synthetic fixture).** The
+`else` is greedy. The MV filter `if ( [F::D] != null ) then [F::D] else false = false` compiles to
+
+    WHERE CASE WHEN NOT(D IS NULL) THEN D ELSE (FALSE = FALSE) END IN (TRUE)
+
+so it keeps the rows where `D` is TRUE and the rows where it is NULL, and drops the rows where it
+is FALSE: the filter is inverted. A total that should be 361,523 (not deleted) came back 40,173
+(20,726 deleted + 19,447 NULL-flag). It imports and lints clean, with no error anywhere. By the
+same reading `COALESCE(x, 0) + 1` loses the `+ 1`.
+
+**Where it reaches.** `sql_forms` is shared: `sv_sql.py` imports it too, so the Snowflake
+converter emits the same form.
+
+**Fix direction.** Parenthesise the emitted chain, and emit `ifnull ( a , b )` for the
+two-argument case (`IFNULL`/`NVL` already take that path at `sql_forms.py:195-196`);
+`ifnull ( D , false ) = false` was live-verified correct in the same run. Add the
+greedy-`else` rule to the formula patterns doc. Then tell users of both converters which
+Models to re-convert: any with a `COALESCE` followed by an operator.
+
+---
+
+## BL-633 — `CAST(col AS STRING)` is dropped, including inside a pass-through such as `TO_DATE` `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `TO_DATE(CAST(fact.DATE_KEY AS STRING), 'yyyyMMdd')`, the usual way to turn an
+integer `yyyyMMdd` key into a date, translates to
+
+    sql_date_op ( "to_date({0}, 'yyyyMMdd')" , [FACT::DATE_KEY] )
+
+`STRING` is in `CAST_TYPES_WIDENING` (`tools/ts-cli/ts_cli/formula_common.py:52-55`), so
+`_construct_cast` (`tools/ts-cli/ts_cli/databricks/mv_sql_constructs.py:165-195`) returns the
+inner expression unchanged. Inside a `sql_*_op` pass-through the warehouse then receives
+`to_date(<int>, 'yyyyMMdd')`, an expression the source never wrote.
+
+**Why it matters.** Whether Databricks accepts `to_date(INT, fmt)` through implicit casting
+was not live-checked. If it does, the result matches. If not, every query that touches the
+column fails. Treating a cast to string as a no-op is also wrong more generally:
+ThoughtSpot `concat` and string comparisons do not promote a number.
+
+**Fix direction.** Keep `CAST(x AS STRING)` as `to_string ( x )` in ThoughtSpot context and
+as the literal `CAST({0} AS STRING)` inside a pass-through template. Remove `STRING`,
+`VARCHAR`, `TEXT` and `CHAR` from the widening set for the Databricks engine.
+
+---
+
+## BL-634 — from-databricks-mv: a window ordered by a date built from an integer key is refused, so semi-additive measures on it are skipped `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** Warehouses with integer date keys commonly order a semi-additive window by a
+derived date:
+
+    - name: order_month
+      expr: TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')
+    measures:
+      - name: Opening Balance
+        expr: SUM(source.OPENING_BALANCE)
+        window: [{order: order_month, semiadditive: first, range: current}]
+
+`_find_order_dim` (`tools/ts-cli/ts_cli/databricks/mv_window_translate.py:175-232`) accepts a
+direct column, a `DATE_TRUNC` of one, or a date-shifted `DATE_TRUNC`. Anything else is
+refused with "cannot determine the physical sort column" (line 230). Every measure windowed
+on that dimension goes to `skipped[]`, along with every measure that references one: in the three MVs converted, 12 windowed
+opening/closing balance measures plus 5 variances and averages built on them.
+
+**Why it matters.** The skip is loud, but these are usually the headline measures of a
+balance or subscriber model. The workaround used was to point `window.order` at a synthetic
+direct dimension over the integer key. A `yyyyMMdd` integer sorts exactly as the date does,
+so `first_value(sum(m), query_groups(), {[FACT::DATE_KEY]})` is the same ordering.
+
+**Fix direction.** Either recognise `TO_DATE(CAST(<int col> AS STRING), '<yyyyMMdd-family
+format>')` as day grain with `sort_ref` = the integer column (exact, because the format is
+order-preserving), or order by the dimension's own formula, as the shifted-week branch
+already does at line 208. The second is the general fix, but `first_value`/`last_value`
+ordered by a formula needs a live check first.
+
+---
+
+## BL-635 — from-databricks-mv: a whole-table dimension `MAX(<expr>) OVER ()` is rejected as an unsupported LOD shape `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `Latest Data Month: MAX(TO_DATE(…)) OVER ()`, the latest loaded period used to
+flag a partial month-to-date, fails `parse-mv` with "window function without the
+recognized AGG(...) OVER (PARTITION BY ...) LOD shape". `_LOD_RE`
+(`tools/ts-cli/ts_cli/databricks/mv_expr.py:63-65`) requires `PARTITION BY`, so the empty
+`OVER ()` falls through to the unsupported branch. The parse exits 1, and every dimension
+that references it is lost too (here `Is Month To Date`).
+
+**Mapping used by hand.** `group_aggregate ( max ( [formula_Month] ) , { } , { } )`, with
+the MV `filter:` carried as the model-level `filters:` block. Per the A3 finding
+(`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), the `{}` third argument ignores
+search filters but respects the model filter, which matches a DBX window evaluated after
+the MV's global filter. The whole-table scalar-subquery path already emits this form
+(`mv_translate.py:138`). **Live-verified 2026-11-26** (simba-test against a Databricks
+fixture): the dimension alone, grouped on with plain and semi-additive measures, matches the
+MV exactly, over a `sql_date_op` formula. **But** a row-level flag compared against it is
+wrong in ThoughtSpot; see BL-638 before emitting that pattern.
+
+**Fix direction.** Accept `AGG(expr) OVER ()` as an LOD with an empty partition (`{ }`), and
+use `{ }` rather than `query_filters()` as the filter argument when the MV has a global
+`filter:`. Live-verify one case before shipping.
+
+---
+
+## BL-636 — from-databricks-mv file-only path has no route when the warehouse cannot be described `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: the MV YAML was available, the workspace
+was not. **Target:** 2027-01-31.
+
+**What.** The file-only path (Step 10-FILE, `create: true` in `tables.json`) requires a
+`dbx_type` for every column, taken from `DESCRIBE TABLE`. When only the MV definitions are
+available, nothing produces the Table TMLs. The column list had to be scraped from the
+generated Model's `[T::C]` and `column_id` references, and types guessed from names and
+usage (`*_KEY` → bigint, summed → bigint, flags used in a boolean `COALESCE` → boolean, the
+rest string). Related to L11 (classification on the same path), which does not cover types.
+
+**Why it matters.** Wrong types fail the Table import, or worse, a DECIMAL read as bigint.
+The skill does not say this case exists.
+
+**Fix direction.** A `--infer-columns` mode on `build-model` that derives the column set per
+table from the parsed MV, marks every type `inferred`, and writes those types into a review
+list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` before import.
+
+---
+
+## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+simba-test against a Databricks fixture. **Target:** 2026-12-15.
+
+**What.** A measure built from two semi-additive measures, such as
+`(MEASURE(opening) + MEASURE(closing)) / 2` or `MEASURE(actual_open) - MEASURE(budget_open)`,
+is inlined by cross-measure inlining into
+`( ( first_value ( sum ( [T::a] ) , query_groups ( ) , { [T::d] } ) ) + ( last_value ( … ) ) ) / 2`.
+ThoughtSpot rejects the whole Model at import: *"Formula addition failed … Aggregation
+function must be applied directly over a rank-related function."* Removing the extra
+parentheses, referencing the two formulas by id, and dropping the column's `aggregation:`
+all fail the same way (probed live).
+
+**What works.** Wrapping each call in `sum ( )`:
+`( sum ( first_value ( … ) ) + sum ( last_value ( … ) ) ) / 2`. It imports, and matched
+Databricks cell for cell at total, per-dimension, per-month and filtered grains. (A
+`sum_if ( [d] = group_aggregate ( min ( [d] ) , query_groups ( ) , query_filters ( ) ) , [a] )`
+form also matched, but is the bigger change.) When `first_value`/`last_value` is the whole
+formula, it stays unwrapped; AgentQL queries that with `SUM()` already.
+
+**Where.** Cross-measure inlining in `ts_cli/databricks/mv_translate.py` (the `MEASURE()`
+substitution). The Snowflake translator inlines metric references the same way, so check
+`sv_translate.py` / `sv_window.py` too.
+
+**Fix direction.** After inlining, wrap every `first_value`/`last_value` call that is not
+the whole expression in `sum ( )`. Add a `ts tml lint` rule for the shape, since the
+converter output linted clean and only the import caught it.
+
+---
+
+## BL-638 — A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers in ThoughtSpot `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-637. **Target:** 2026-12-15.
+
+**What.** An MV dimension such as `is_partial_period: period = latest_period`, where
+`latest_period` is `MAX(period) OVER ()`, converts to
+`[formula_Period] = [formula_Latest Period]` over `group_aggregate ( max ( … ) , { } , { } )`.
+It imports, but ThoughtSpot's generated SQL is wrong in two ways (both read from
+`ts agentql generate-sql`, and confirmed against the Databricks numbers):
+
+1. **Grouped by the flag:** the CTE that computes the flag per period has no `GROUP BY`,
+   so it carries one row per fact row and the join to the measure CTE fans out. Every
+   measure was inflated by roughly 20x to 900x.
+2. **Filtered on the flag:** the flag's dependency pulls the period into the grain, and
+   `first_value`/`last_value` are partitioned by it. Each period is its own "first", and
+   the result is the sum over all periods. Plain sums were correct.
+
+Comparing the raw integer key to `group_aggregate ( max ( [T::key] ) , { } , { } )`
+behaves identically, so the formula's form is not the cause.
+
+**Forms tried (all live, all against the Databricks numbers).** Comparing the raw integer key,
+or wrapping both sides in `start_of_month ( )`, fails identically. Wrapping the LOD in an outer
+`max ( )` is rejected at import, and would make the flag a measure anyway. A `today()`-based
+flag matched, but only because the fixture's last month was the current month. It changes the
+meaning to "current calendar month", so it was rejected.
+
+**Workaround used.** A scalar subquery in a pass-through, with no LOD:
+`sql_bool_op ( "{0} = (SELECT MAX(<period expr>) FROM <fact fqn> WHERE <MV filter>)" , [formula_Period] )`.
+It keeps the MV's meaning and matched in every shape, including grouping and filtering with
+semi-additive measures. Its cost: the fact table's FQN and the MV filter are written into the
+formula as text, so they must be edited per environment, and lineage does not see them. A
+one-row SQL View (`SELECT MAX(key)`) LEFT-joined on the key also matched; it was not chosen,
+to avoid an extra object.
+
+**Fix direction.** (a) Raise the SQL generation defect with the ThoughtSpot query
+team, with the two `generate-sql` outputs (a reproduction on a two-table fixture). (b)
+Until fixed, have the converter emit the subquery pass-through (it has the MV source FQN and
+`filter:`), annotated. It must not emit the LOD comparison silently, because the numbers are wrong
+with no error.
+
+---
+
+## BL-639 — from-databricks-mv: no numeric fidelity step after import `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+simba-test against a synthetic Databricks fixture (see BL-637). **Target:** 2026-12-15.
+
+**What.** The skill ends at import and a summary report. In this run `ts tml lint` passed TML
+that could not import (BL-629, BL-637), and import accepted a Model that returned wrong
+numbers (BL-638). Only a cell-by-cell comparison of the same queries on both sides caught
+the last one. A prototype harness ran every measure through `MEASURE()` on the MV and AgentQL
+on the Model, over about 20 query shapes, and diffed 6,549 cells.
+
+**Fix direction.** `ts databricks verify`: given the MV FQN, the Model GUID and a list of query
+shapes (default: total, each shared dimension, the window order dimension), run both sides and
+report mismatches per measure. Wrap measures for AgentQL by the existing classify rule (`SUM`
+for raw columns and bare `first_value`/`last_value`, `AGG` otherwise). Normalise DATE values,
+which AgentQL returns as epoch seconds at midnight in the cluster time zone. A new skill step
+runs it when a warehouse and cluster are available.
+
+**The shapes must discriminate.** Two of this run's results passed only on lucky fixtures. A
+`today()`-based flag matched because the last fixture month was the current month, and a
+whole-table LOD looked right until a search filter was applied. Required shapes: group by
+and filter on every boolean flag; semi-additive measures across several periods; a search
+filter beside every LOD column; rows with NULL or unmatched foreign keys; case-sensitive
+`LIKE`. Required fixture property: the latest data period is not the current one. Related:
+angle 15 in `.claude/rules/repo-audit.md`.
+
+---
+
+## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2026-12-15.
+
+**What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
+replaced with "current calendar month" to make the numbers match, without asking. The user
+rejected it, and a faithful form existed (a scalar-subquery pass-through). Nothing in the
+skill's Step 10 review prompts for this.
+
+**Fix direction.** Step 10 lists every formula that differs from the direct translation, with
+the semantic difference stated in one line, and waits for approval of each. Apply the same
+rule in the other `ts-convert-from-*` skills that have a review checkpoint.
+
+---
+
+## BL-641 — from-databricks-mv: no entry point for Metric View YAML files `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: the MV definitions arrived as exported text
+files, with no workspace access. **Target:** 2027-01-31.
+
+**What.** Steps 1-4 assume a Databricks profile and fetch the YAML with `DESCRIBE TABLE
+EXTENDED`. Starting from files means skipping them by hand and normalising Windows line
+endings before `parse-mv`. The MV-on-MV check (Step 5) and table introspection cannot run,
+and the skill does not say what is lost.
+
+**Fix direction.** A "YAML files" entry at Step 0: read the files, strip `\r`, skip Steps 1-4,
+and record that source-type checks and column types are unverified (BL-636 for the types).
+
+---
+
+## BL-642 — from-databricks-mv: several MVs over shared tables need one table set and import plan `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: three MVs shared 10 of their 13 tables.
+**Target:** 2027-01-31.
+
+**What.** The skill converts one MV at a time, and `build-model` writes Table TML per Model.
+For a set of MVs, the tables were de-duplicated by hand and imported in a hand-made order
+(Tables, then their GUIDs stamped into each Model's `model_tables[].fqn`, then the Models).
+Name-only table references in a Model resolve wrongly if the cluster already has a Table of
+that name.
+
+**Fix direction.** A batch mode: one `tables.json` across the MVs, one Table TML per physical
+table, and an import plan that stamps GUIDs before the Model import.
+
+---
+
+## BL-643 — from-databricks-mv: offer one combined Model for MVs split by the chasm trap `Tier 4`
+
+**Filed:** 2026-11-26. **Source:** as BL-629; **parked by the user 2026-11-26**. **Trigger:**
+user request to resume.
+
+**What.** A Metric View cannot span two facts with a shared dimension, so customers split them
+(here: actuals and actual-vs-budget). ThoughtSpot handles the chasm trap, so the skill could
+offer one Model over all the facts. Requirement found: the facts must share a date dimension
+*table*. Here each MV computed its month from its own key, so a calendar table (or SQL View)
+joined on the date key is needed first. The same calendar view can carry "latest period" and
+"is month to date" as SQL columns, which avoids BL-638 entirely. Going to the lowest grain
+(daily subscriber fact plus budget) was also explored: it covers the base, additions, churn and
+reactivation measures, but not the cohort measures without an activation date.
+
+---
+
+## BL-644 — Record the MV validation's live findings in the mapping and AgentQL docs `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2027-01-31.
+
+**What.** Three findings from the live comparison are in no reference doc:
+
+1. `sql_bool_op` pass-throughs of `LIKE` / `ILIKE` keep Databricks' case sensitivity exactly;
+   a native `contains` would not (it is case-insensitive, BL-333). Matched on a fixture with
+   mixed-case values.
+2. `group_aggregate ( max ( x ) , { } , { } )` reproduces a dimension `MAX(x) OVER ()`
+   exactly, including ignoring a search filter while keeping the Model filter (BL-635).
+3. AgentQL `fetch-data` returns a DATE as epoch seconds at midnight in the cluster time zone,
+   not UTC.
+
+**Fix direction.** Add (1) and (2) to `ts-databricks-formula-translation.md`, and (3) to the
+AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
+
+## BL-645 — pr-ready fast checks: review leftovers, and the docs-only review effort `Tier 3`
 
 **Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/pr-ready-scoped-checks`.
 **Target:** 2027-01-31.
