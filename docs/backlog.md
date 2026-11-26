@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-646 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| BL-649 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -527,7 +527,7 @@ are roughly ordered by value÷effort.
 | BL-620 | ts-audit usage (H17): review leftovers and open questions (non-admin auditors, the searchdata spec check, new Models, clock skew, cost, locale, nits) | 2026-12-31 |
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
-| BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
+| ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
 | BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
 | BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
 | BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
@@ -535,7 +535,10 @@ are roughly ordered by value÷effort.
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
 | BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
-| BL-647 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
+| BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
+| BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
+| BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
+| BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18987,7 +18990,9 @@ can build the link. **Target:** 2026-12-31.
 4. **Tests:** every link is built through the helper and escaped; a headless-Chrome test
    per view asserts the icon's href for a synthetic cluster URL.
 
-## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3`
+## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3` — **RESOLVED 2026-11-26**
+
+**Status:** RESOLVED (2026-11-26, ts-audit 3.28.0): absorbed by the Usage view (`#usage`), whose triage table sorts every audited Model by last use and filters it by status (Active, Idle, Never queried, Too new, Not judged) and by "No dependents". The Dashboard heatmap is unchanged.
 
 **Filed:** 2026-11-26. **Source:** user request 2026-11-25 (approved, then parked on
 2026-11-26 to end the build round on a stable skill). **Target:** 2027-01-31.
@@ -19202,8 +19207,8 @@ all lower case). Use any other `name` verbatim. The workaround used was to set
 
 ## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
 
-**Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.224.2) for the
-Databricks and Snowflake translators; the Tableau, Sisense and Qlik translators have the same defect, BL-646. **Raised to Tier 1
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.225.1) for the
+Databricks and Snowflake translators; the Tableau, Sisense and Qlik translators have the same defect, BL-649. **Raised to Tier 1
 2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
 
 **What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
@@ -19548,9 +19553,115 @@ AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
    teach `_humanise_trigger` in `generate_quality_gates.py` the new condition.
 3. **Step 7 has no path for a CI suite failure found after the review.** A fast default
    makes that more likely; say whether its fix commit needs a re-review.
+
+## BL-646 — ts-dependency-manager and `ts share`: take a ts-audit candidates file `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the ts-audit Usage view (3.28.0), which exports the
+Models a reviewer selects as a `ts-audit-candidates/1` JSON file. **Target:** 2027-01-31.
+
+**What.** A list input that reads that file (its format is in ts-audit SKILL.md, "Candidates
+file"), for two consumers:
+
+1. **ts-dependency-manager.** One combined dry run and impact report across every GUID in the
+   file, with the overlaps shown (an Answer or Liveboard that depends on two of the listed
+   Models is one object, reported once against both), then the per-object delete with backup
+   and rollback as today.
+2. **`ts share`.** Revoke sharing on the same list: the gentler first step, which hides the
+   Models from their users without deleting anything, so a Model someone still needs is
+   found by the request to restore access.
+
+**Why.** Today both act on one object at a time (`ts dependency cascade-preview` and
+`cascade-delete` take one ref), so retiring the dozen or so idle Models a Usage view
+selects is a dozen separate runs and a dozen separate reports, and an overlap between two
+of them is seen by neither.
+
+**Notes.** Read the file's `format` and refuse a version it does not know. Treat each
+object's `status` and `dependents_total` as what the audit saw when it read the usage
+(`usage.read_at`), not as current: re-read dependents before any change.
+
+
+## BL-647 — ts-audit: investigate a ThoughtSpot Liveboard as the audit's output `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user direction: rather than build ever more custom HTML,
+push the audit's results to a destination and present them in a Liveboard, so a later run is
+only a data refresh. **Target:** 2027-02-28 (investigation and a recommendation; the build
+follows as its own items).
+
+**Idea.** `ts audit` gains a push of its results to a destination table set; a Model and a
+Liveboard are built once over those tables and shipped as TML; each run appends.
+
+**Investigate:**
+
+1. **What a Liveboard can draw.** Muze custom charts (`ts-object-liveboard-chart-builder`),
+   and ThoughtSpot's full HTML widgets / custom visualisations, for each view the HTML report
+   has today: the Dashboard heatmap, the scorecard, Cross-Model, Cleanup, the Usage quadrant and
+   triage table (3.28.0), Data Cache, the Formulas tree and graph, the ERD, and the planned
+   platform map. Per view: native chart, Muze, HTML widget, or not possible. Note interactivity
+   (drill-down, selection, export), size limits, and whether an HTML widget can be fed from the
+   Model's data.
+2. **Tables.** A small star keyed by `run_id`, so runs append and trends come free:
+   `audit_run` (cluster, Org, read date, versions), `audit_model` (per Model: usage, status,
+   owner, created, dependents, readiness), `audit_finding`, `audit_usage_unmatched`. Derived
+   from the audit JSON and versioned, like `ts-audit-candidates/1`.
+3. **Push.** Snowflake first (the existing Snowflake profile and `ts-load-source-data`),
+   Databricks later. Read-only on ThoughtSpot, write-only to the named schema.
+4. **Selection and hand-off.** Whether a Liveboard can produce the candidates list (BL-646's
+   input): a selection, a filtered Answer export, or an HTML widget's export.
+5. **Open questions:** findings carry object, Org and owner names, so the destination must be
+   the customer's own warehouse; one Liveboard per cluster or per Org; retention of past runs;
+   what stays in the HTML report (offline use, a cluster with no warehouse to write to).
+
+**Output:** a short recommendation (per view: where it lives) and the build items that follow.
+
+## BL-648 — ts-audit Usage view (3.28.0): review nits deferred `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-page`; triaged
+under pr-ready Step 7. **Target:** 2027-01-31.
+
+**What.**
+
+1. `usage_triage.py` `created_date`: an out-of-range `created` (1e17) raises and aborts the
+   run; H17 only compares numbers.
+2. `report/usage_quadrant.js`: the ±3 px jitter is wider than about 1 px per day near the
+   90-day line, so a dot at 89 or 90 days can be drawn on the wrong side (colour and
+   `data-quadrant` stay right).
+3. `views/usage.js`: an audit with no audited Models says the report "predates the Usage
+   view", with backticks shown literally.
+4. The candidates file says `window_days: 180` and `queries_180d` when the history is
+   shorter; it carries no history start.
+5. "Not recorded" (Owner cell, SKILL.md) also covers a header that was not read.
+6. `usage_triage.py`'s docstring says H17 imports it (H17 imports `usage.py`); `headers_by_id`
+   and `created_date` repeat `engine/code_rules_human._created_by_id` and `usage.iso_date`.
+7. The idle-days test exercises only the fallback.
+8. Export: no test writes a real file; the object URL is revoked at 0 ms (reported to break
+   downloads in some browsers); the CSV has no UTF-8 BOM, so Excel on Windows may garble
+   non-ASCII owner names and the curly quotes in `usage_scope`.
+9. `tools/ts-cli/CLAUDE.md`'s `REPORT_LIBS` list misses `usage.js`, `usage_quadrant.js` and
+   `usage_export.js`.
+10. BL-625 item 2 asked for chips that combine with the angle and severity filters; the view
+    gives a Worst-finding sort instead, and BL-625's resolution does not say that part was
+    dropped.
+11. The quadrant's grey band holds both Too new / not judged Models and Models whose Sets
+    were not read; each keeps its status colour, so the band mixes colours.
+
+From the re-review of the fix rounds:
+
+12. **H4 has the Usage view's old blind spot** (on main since before 3.28.0): "A Model the
+    dependents lookup did not list has none" (`catalog/rules/human.yaml`), so a VIEW-only
+    auditor whose Model's Liveboards are hidden (`hasInaccessibleDependents` without
+    `areInaccessibleDependentsReturned`), or an odd response shape, gets "Orphan model".
+    3.28.0 now records those Models as `dependents_incomplete`; H4 should not fire on them.
+13. A snapshot written before 3.28.0 cannot say which Models had hidden dependents, so the
+    Usage view reads their totals as complete (flagged on the page and as
+    `corpus.usage.dependents_checked: false`).
+14. The `--snapshot-out` description in the README does not name the `sets_incomplete` and
+    `dependents_incomplete` files; SKILL.md's "as ThoughtSpot's dependents lookup returns
+    them" is loose for Sets (the cohort listing); `dependents_scope` could point at
+    `usage.org`; `views/usage.js` reads a Model with no triage as 0 dependents (only a
+    hand-edited JSON reaches it); no test covers `discover_sets`' `unrecognised_row` path.
 ---
 
-## BL-646 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
+## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
 
 **Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
 
@@ -19579,9 +19690,9 @@ conditional's group closing early and treats `else b + 1` inside a group as a le
 
 ---
 
-## BL-647 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
+## BL-650 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-646 (already wrong before BL-632). **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Source:** as BL-649 (already wrong before BL-632). **Target:** 2027-01-31.
 
 **What.** In both SQL translators, `NOT COALESCE(a, 0) BETWEEN 0 AND 1` becomes
 `not ( x ) >= 0 and not ( x ) <= 1`: NOT binds to the operand, not to the predicate.

@@ -168,7 +168,7 @@ argument, no brackets are needed (most translators have always emitted a conditi
 inside a call this way; the live probe tested only the first half). The Databricks and
 Snowflake translators build their CASE / IF / IFF / COALESCE / NVL2 output through
 `sql_forms.sqlf_if_chain`, which adds them; the Tableau, Sisense and Qlik translators do not yet
-(BL-646). For the two-argument null default, `ifnull ( [d] , false ) = false` avoids the
+(BL-649). For the two-argument null default, `ifnull ( [d] , false ) = false` avoids the
 question.
 
 Conditions in `if` can include `and` / `or` and function calls:

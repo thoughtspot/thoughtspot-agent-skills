@@ -48,7 +48,8 @@ def _data(usage, needs=H_NEEDS, angles=("H",)):
 
 def test_the_corpus_carries_each_models_usage_and_the_reading():
     corpus = _data(_usage())["corpus"]
-    by_guid = {m["guid"]: m["usage"] for m in corpus["models"]}
+    keys = ("last_used", "days", "queries_180d", "users_180d", "never")  # 3.28's: test_audit_usage_page
+    by_guid = {m["guid"]: {k: m["usage"][k] for k in keys} for m in corpus["models"]}
     assert by_guid[IDLE] == {"last_used": fx.USAGE_READ_AT - 120 * 86400, "days": 120,
                              "queries_180d": 12, "users_180d": 3, "never": False}
     assert by_guid[BUSY]["days"] == 10 and by_guid[BUSY]["queries_180d"] == 12
@@ -83,7 +84,7 @@ def test_the_payload_compacts_the_reading():
         "Tenant B", 7, 0, 180, fx.USAGE_READ_AT)
     assert us["g"][0] == [GONE_A, 40, 6, fx.USAGE_READ_AT - 5 * 86400, []]
     by_mi = {payload["L"][cm["mi"]]["g"]: cm["us"] for cm in payload["C"]["m"]}
-    assert by_mi[NEVER] == {"l": None, "d": None, "q": 0, "u": 0, "n": 1}
+    assert {k: by_mi[NEVER][k] for k in "ldqun"} == {"l": None, "d": None, "q": 0, "u": 0, "n": 1}
     assert by_mi[BUSY]["d"] == 10
 
 
