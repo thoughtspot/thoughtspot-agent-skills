@@ -371,10 +371,10 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
-| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs | 2026-12-15 |
-| BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
+| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
+| ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
 | BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
-| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` | 2026-12-15 |
+| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
@@ -19127,7 +19127,7 @@ Nits the two reviews raised and the PR did not fix:
 
 ## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** converting three customer Metric Views offline with
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: the converter resolves dimension references; the lint XREF extension to `formulas[].expr` is still open). **Source:** converting three customer Metric Views offline with
 `ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
 **Target:** 2026-12-15.
 
@@ -19161,7 +19161,7 @@ inside `formulas[].expr`. That would have caught this, and any later case of thi
 
 ## BL-630 — from-databricks-mv: two columns with one display name, and a direct column is silently dropped `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.225.3: build-model fails loud on a column-vs-formula title clash). **Source:** as BL-629. **Target:** 2026-12-15.
 
 **What.** One MV had `order_month` with `display_name: Month` (a formula) and a direct
 dimension `Month: source.MONTH` (month number). `build-model` exited 0 and the Model had one
@@ -19354,7 +19354,7 @@ list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` 
 
 ## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: Databricks inlining wraps the calls, `sql_forms.sqlf_aggregate_window_values`; still open: the Snowflake translator references such a metric by formula id, and whether `sum ( [formula_X] )` imports is unprobed; and the lint rule). **Source:** live validation of three converted Metric Views on
 simba-test against a Databricks fixture. **Target:** 2026-12-15.
 
 **What.** A measure built from two semi-additive measures, such as
