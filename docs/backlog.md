@@ -373,6 +373,8 @@ are roughly ordered by value÷effort.
 | BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
 | BL-632 | COALESCE emits an unparenthesised if/then/else; a following operator may bind inside the else branch (MV filters, shared with SV) | 2026-12-15 |
 | BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
+| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` | 2026-12-15 |
+| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -19257,8 +19259,10 @@ the MV `filter:` carried as the model-level `filters:` block. Per the A3 finding
 (`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), the `{}` third argument ignores
 search filters but respects the model filter, which matches a DBX window evaluated after
 the MV's global filter. The whole-table scalar-subquery path already emits this form
-(`mv_translate.py:138`). **Not live-verified** for the `OVER ()` dimension, and not over a
-`sql_date_op` formula.
+(`mv_translate.py:138`). **Live-verified 2026-11-26** (simba-test against a Databricks
+fixture): the dimension alone, grouped on with plain and semi-additive measures, matches the
+MV exactly, over a `sql_date_op` formula. **But** a row-level flag compared against it is
+wrong in ThoughtSpot; see BL-638 before emitting that pattern.
 
 **Fix direction.** Accept `AGG(expr) OVER ()` as an LOD with an empty partition (`{ }`), and
 use `{ }` rather than `query_filters()` as the filter argument when the MV has a global
@@ -19284,3 +19288,68 @@ The skill does not say this case exists.
 **Fix direction.** A `--infer-columns` mode on `build-model` that derives the column set per
 table from the parsed MV, marks every type `inferred`, and writes those types into a review
 list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` before import.
+
+---
+
+## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+simba-test against a Databricks fixture. **Target:** 2026-12-15.
+
+**What.** A measure built from two semi-additive measures, such as
+`(MEASURE(opening) + MEASURE(closing)) / 2` or `MEASURE(actual_open) - MEASURE(budget_open)`,
+is inlined by cross-measure inlining into
+`( ( first_value ( sum ( [T::a] ) , query_groups ( ) , { [T::d] } ) ) + ( last_value ( … ) ) ) / 2`.
+ThoughtSpot rejects the whole Model at import: *"Formula addition failed … Aggregation
+function must be applied directly over a rank-related function."* Removing the extra
+parentheses, referencing the two formulas by id, and dropping the column's `aggregation:`
+all fail the same way (probed live).
+
+**What works.** Wrapping each call in `sum ( )`:
+`( sum ( first_value ( … ) ) + sum ( last_value ( … ) ) ) / 2`. It imports, and matched
+Databricks cell for cell at total, per-dimension, per-month and filtered grains. (A
+`sum_if ( [d] = group_aggregate ( min ( [d] ) , query_groups ( ) , query_filters ( ) ) , [a] )`
+form also matched, but is the bigger change.) When `first_value`/`last_value` is the whole
+formula, it stays unwrapped; AgentQL queries that with `SUM()` already.
+
+**Where.** Cross-measure inlining in `ts_cli/databricks/mv_translate.py` (the `MEASURE()`
+substitution). The Snowflake translator inlines metric references the same way, so check
+`sv_translate.py` / `sv_window.py` too.
+
+**Fix direction.** After inlining, wrap every `first_value`/`last_value` call that is not
+the whole expression in `sum ( )`. Add a `ts tml lint` rule for the shape, since the
+converter output linted clean and only the import caught it.
+
+---
+
+## BL-638 — A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers in ThoughtSpot `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-637. **Target:** 2026-12-15.
+
+**What.** An MV dimension such as `is_partial_period: period = latest_period`, where
+`latest_period` is `MAX(period) OVER ()`, converts to
+`[formula_Period] = [formula_Latest Period]` over `group_aggregate ( max ( … ) , { } , { } )`.
+It imports, but ThoughtSpot's generated SQL is wrong in two ways (both read from
+`ts agentql generate-sql`, and confirmed against the Databricks numbers):
+
+1. **Grouped by the flag:** the CTE that computes the flag per period has no `GROUP BY`,
+   so it carries one row per fact row and the join to the measure CTE fans out. Every
+   measure was inflated by roughly 20x to 900x.
+2. **Filtered on the flag:** the flag's dependency pulls the period into the grain, and
+   `first_value`/`last_value` are partitioned by it. Each period is its own "first", and
+   the result is the sum over all periods. Plain sums were correct.
+
+Comparing the raw integer key to `group_aggregate ( max ( [T::key] ) , { } , { } )`
+behaves identically, so the formula's form is not the cause.
+
+**Workaround used.** `start_of_month ( [formula_Month] ) = start_of_month ( today ( ) )`,
+with no LOD. It matched Databricks in every shape, including group-by and filter with
+semi-additive measures. It is a different definition: it equals "latest period in the data"
+only while the data is loaded through the current period, and it reads the clock in
+ThoughtSpot's time zone.
+
+**Fix direction.** (a) Raise the SQL generation defect with the ThoughtSpot query
+team, with the two `generate-sql` outputs (a reproduction on a two-table fixture). (b)
+Until fixed, have the converter refuse this pattern, or emit the `today()` form with an
+annotation. It must not emit the LOD comparison silently, because the numbers are wrong
+with no error.
