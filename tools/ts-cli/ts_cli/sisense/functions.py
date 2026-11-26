@@ -315,7 +315,12 @@ def _rewrite_conditionals(expr: str) -> tuple:
     tail_rw, err = _rewrite_conditionals(expr[close_idx + 1:])
     if err:
         return expr, err
-    return f"{expr[:m.start()]}if ({cond}) then {then_v} else {else_v}{tail_rw}", None
+    block = f"if ({cond}) then {then_v} else {else_v}"
+    # ThoughtSpot's `else` is greedy (BL-632): group the conditional when an operator
+    # follows it, or `if (c) then 1 else 0 = 1` compares only the else branch (BL-649)
+    if re.match(r"\s*(?:[-+*/%^=<>!]|(?:and|or|in|not)\b)", tail_rw, re.IGNORECASE):
+        block = f"( {block} )"
+    return f"{expr[:m.start()]}{block}{tail_rw}", None
 
 
 _ROUND_CALL = re.compile(r"(?<![A-Za-z0-9_])round\s*\(", re.IGNORECASE)

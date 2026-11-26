@@ -64,7 +64,7 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
-| BL-649 | Tableau, Sisense and Qlik translators emit unbracketed or unbalanced conditionals; ThoughtSpot's greedy `else` makes `IIF(…) + 1` / `IF(…) = 1` silently wrong (the BL-632 class) | immediate |
+| BL-649 | Tableau, Sisense and Qlik conditionals (the BL-632 class): direct shapes fixed 2026-11-27; still open — Tableau later-pass splices (`ZN(IIF)+1`, `RADIANS`, `MID`), right operands, string concat | 2026-12-15 |
 | ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
@@ -539,6 +539,7 @@ are roughly ordered by value÷effort.
 | BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 | BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
+| BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19663,7 +19664,7 @@ From the re-review of the fix rounds:
 
 ## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
 
-**Filed:** 2026-11-26. **Source:** the adversarial review of the BL-632 fix. **Target:** immediate.
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.2: the direct shapes below are fixed; see "Still open"). **Source:** the adversarial review of the BL-632 fix. **Target:** 2026-12-15.
 
 **What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
 adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two
@@ -19688,6 +19689,37 @@ each `if … then` block, so the bracket must enclose the inserted clause. Reuse
 `tests/test_conditional_grouping.py`'s detector, with its known gaps fixed (it misses a
 conditional's group closing early and treats `else b + 1` inside a group as a leak; no `in`).
 
+
+**Still open after ts-cli 0.225.2** (found by the PR #763 review; each is the same on main):
+
+1. **A later Tableau pass splices a bare conditional before an operator.** Grouping is decided from
+   the text after the block when it is converted, and later passes change that text:
+   `ZN(IIF([a]>1,[x],[y])) + 1` → `if … else [y] + 1` (`strip_ifnull_zero`, `cleanup.py`);
+   `RADIANS(IIF(…))` / `DEGREES` → `… else [y] * sql_double_op ( "PI()" )` (`functions.py`);
+   `MID([s], IIF(c,2,3), 2)` → `substr ( [s] , if … else 3 - 1 , 2 )`; `SIGN` / `INT` of an
+   IIF fail loudly.
+2. **A conditional as a right operand is never grouped:** `SUM([s]) < IIF(…)`, `[b] = IIF(…)`.
+   BL-060 live-confirmed that `sum(X) < if …` fails import. Whether `x + if … else …` parses as
+   intended is unprobed, and two tests pin that shape.
+3. **String concatenation:** `IIF([a]>1,'x','y') + 'z'` is now `( if … ) + 'z'`, which fails at
+   import (`+` is numeric only) rather than main's silently wrong `… else concat ( 'y' , 'z' )`.
+   The concat rewrite (`strings_types.py`) does not treat a group as an operand.
+4. **A right operand's missing ELSE gets `else 0`** (the converter's `ensure_else_clause`) while
+   `ts formula translate` gives `else null`: `IF [a]>1 THEN 1 END + IF [b] THEN 2 END` differs
+   from Tableau (NULL) on rows where the second condition is false.
+5. **A raw `IF … END` inside an `IIF` branch** (IIF converts first, so the inner block is still
+   unconverted when the IIF is grouped): `IIF([c], IF [a] THEN 2 END, 1) + 1` →
+   `( if ( [c] ) then if ( [a] ) then 2 else 1 else null ) + 1`, so the IIF's `else 1` binds to
+   the inner `if`. Wrong differently on main; `convert_if_then`'s uppercase-only `is_inner` is part
+   of the cause. An ELSEIF chain without ELSE inside an IIF does the same.
+6. **Sisense right operand:** `1 + IF(…)` and `[x] = IF(…)` stay bare, as item 2 for Tableau.
+7. Nits: a `CASE` containing `IF … END` is mis-bounded (`parsing.py::_find_matching_end` counts
+   CASE only); `… AND IIF([c],TRUE,FALSE) = FALSE` has its `) = false` rewritten to `= 0`.
+
+**Fix direction.** The durable fix is BL-440 (emit through a tree and printer instead of text
+rewrites); until then, apply the grouping as the last pass over the finished text, using block
+markers placed at conversion time.
+
 ---
 
 ## BL-650 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
@@ -19702,7 +19734,81 @@ Both mostly fail at import rather than silently.
 **Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
 with a reason.
 
-## BL-651 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
+## BL-651 — ts-audit: four small defects from the 2026-11-27 SE demo cluster run `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** a full, read-only audit of the SE demo cluster's 150-Model
+sample on ts-cli 0.225.1, run to check #755, #757 and #762. The run was clean: no warnings,
+no hidden dependents, and the candidates export matched the 14 retire candidates. These four
+predate or sit beside that work. **Target:** 2027-01-31.
+
+**What.**
+
+1. **D8 names a different duplicate Table between runs.** It reports on "the first object's
+   guid", and the metadata search returns a duplicate pair in either order. Between the
+   2026-11-26 and 2026-11-27 runs, 3 of its 6 findings moved to the other Table of the pair
+   with nothing changed on the cluster. So run-to-run diffs show phantom removals and
+   additions, and a remediation keyed on the GUID targets a different Table each time.
+   Pick deterministically (i.e. the lowest GUID, or the oldest object), and test with the
+   pair in both orders.
+2. **The report never shows the audit's own date.** `corpus.audit_date` is hard-coded to `""`
+   (`tools/ts-cli/ts_cli/audit/__init__.py`), so the Dashboard's "Date:" item
+   (`report/views/dashboard.js`) never renders. The only date shown is the usage read date,
+   in UTC and unlabelled: a run at 08:29 on 2026-11-27 in Sydney reads 2026-11-26. Record
+   the run time, and label the zone of any date shown.
+3. **Usage view details.**
+   - The intro repeats "read" ("Usage of all Orgs, read from the Primary Org, read on …").
+   - Idle dots with exactly one dependent sit on the line between "check first" and
+     "retire candidates", beside the "retire candidates" label: coloured correctly, easy to
+     misread.
+   - The disabled "Not judged 0" chip still shows as pressed.
+4. **Owner email addresses reach the candidates file.** An owner's display name can be a
+   full email address, and it is copied into the CSV and JSON export. Say so in SKILL.md's
+   "Candidates file" section, since the file is meant to be shared with owners.
+
+## BL-652 — Child processes of the local test runs find a bare `python3` or `ts` by PATH, not by the chosen interpreter `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `fix/checks-python-on-path`.
+**Target:** 2027-01-31.
+
+That PR puts the chosen interpreter's directory first on PATH for the hook's and
+`pr-ready`'s pytest runs, which fixes the case it was raised for: `CHECKS_PYTHON` naming a
+virtual environment, whose `bin/` holds a `python3` that is the same interpreter. Two
+siblings remain:
+
+1. **An interpreter the search chose outside a venv** (no `CHECKS_PYTHON`, Homebrew's
+   `python3.12` with pytest) can sit beside a different `python3` (Homebrew's 3.15, no
+   pyyaml), or in a keg directory with no `python3` at all, so a child's bare `python3`
+   is still the wrong one. Fix: prepend a private temporary directory holding `python3` and
+   `python` wrapper scripts that `exec` the interpreter's absolute path (wrappers, not
+   symlinks, which lose the venv), with a test whose stub directory has a different
+   `python3`.
+2. **`pr-ready --full`'s smoke runs** (`run_checks.py:178`) keep the inherited PATH;
+   `smoke_ts_convert_from_dbt.py:40` and `smoke_ts_convert_to_dbt.py:48` start a bare `ts`,
+   which locally is whatever `ts` is first on PATH, not the venv's.
+
+## BL-653 — Headless-Chrome audit report tests fail intermittently under the full suite `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** two pre-commit runs of the full suite on
+`fix/checks-python-on-path`, each failing one different Chrome-rendering test.
+**Target:** 2026-12-18.
+
+**What.** Under the full suite (~14,000 tests, ~12 minutes), one headless-Chrome test in the
+`ts audit` report fails per run, a different one each time, and the same test passes on
+every rerun alone (3 of 3, and 31 of 31 for its file):
+
+- `tools/ts-cli/tests/test_audit_formula_tree.py::test_links_carry_an_awkward_guid_verbatim`
+  — "the page produced no probe output; DOM head: ''" (an empty DOM).
+- `tools/ts-cli/tests/test_audit_model_nav.py::test_the_routes_reports_already_link_to_still_work[formulas/m-1/graph-v-formulas-formulas, columns and parameters]`.
+
+**Why it matters.** A flaky gate costs a ~12-minute rerun of the hook per hit, and teaches
+people to reach for `--no-verify` (it did, once, on 2026-11-27). If CI hits it too, it
+blocks merges.
+
+**First step.** Find the shared mechanism (`report_browser`, the Chrome invocation: a
+fixed timeout, a shared profile or port, load from a busy machine) and make the wait
+deterministic rather than raising a timeout.
+
+## BL-654 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
 
 **Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
 
@@ -19724,7 +19830,7 @@ measured or proposed and left out of that PR:
 
 **Done when.** Each of the three is built or declined with its reason here.
 
-## BL-652 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
+## BL-655 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
 
 **Filed:** 2026-11-27. **Source:** the pytest-xdist PR's trial runs. **Target:** 2027-01-31.
 

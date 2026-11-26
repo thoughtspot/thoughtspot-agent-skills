@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-27
+- fix: the Tableau and Sisense converters bracket an `IIF`/`IF`/`CASE`/`if()` that an operator directly follows (`IIF(…) + 1`, `IF(…) = 1`), which ThoughtSpot's greedy `else` otherwise read into the else branch; a Tableau string concatenation after one (`IIF(…) + 'z'`) now fails at import instead of returning a wrong string; the Qlik converter flags an `If()` followed by more expression for review instead of returning unbalanced text. Partial: conditionals that a later Tableau pass splices (`ZN(IIF(…)) + 1`, `RADIANS(IIF(…))`, `MID(…, IIF(…), …)`) and a conditional as a right operand are still open (BL-649)
+- chore: bump ts-cli to v0.225.2
 - ci: pytest runs in parallel with pytest-xdist (`-n auto`) in the `suite` and `pytest-matrix` jobs, and so in `pr-ready --full`, which needs `pytest-xdist==3.8.0` installed (pr-ready 1.2.1). The main suite took 8.5 minutes serially and about 2 at 18 workers locally. The report, ERD and quest explore-page tests' headless Chrome is retried once when it crashes before loading the page, which desktop Chrome on macOS does under load, and the customer-reference scanner's linear-time test measures CPU time rather than wall time, which the other workers inflate
 
 ## 2026-11-26
