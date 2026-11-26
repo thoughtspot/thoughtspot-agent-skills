@@ -132,6 +132,9 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _MISSING_MODULE = re.compile(
     r"could not import|No module named|ModuleNotFoundError|ImportError"
     r"|module '[\w.]+' has no attribute")
+#: pytest's usage error when a workflow line passes `-n` and pytest-xdist is not installed:
+#: no test runs, so there is no skip to read. The same missing tool as a skipped import.
+_NO_XDIST = re.compile(r"unrecognized arguments:.*(?:^|\s)-n(?:\s|$)", re.M)
 #: Environment variables that change what pytest runs or how it reports. CI sets none.
 _PYTEST_ENV_DROP = ("PYTEST_ADDOPTS",)
 
@@ -258,14 +261,14 @@ _PLUMBING = frozenset({"set -e", _PR_FETCH})
 #: remedy printed when a test is skipped for a missing module, and the prerequisite
 #: the pr-ready skill quotes.
 SUITE_PIP_INSTALLS: Tuple[str, ...] = (
-    "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
+    "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0",
     "pip install -e tools/ts-cli",
     'pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"',
 )
 #: The exact installs CI makes today, in any job (deliberate copies: a changed install
 #: changes what the checks run with, so it must be looked at, not waved through).
 _PIP_INSTALLS = frozenset(SUITE_PIP_INSTALLS + (
-    "pip install pytest pyyaml jsonschema==4.25.1",   # the pytest-matrix job's subset
+    "pip install pytest pyyaml jsonschema==4.25.1 pytest-xdist==3.8.0",   # the pytest-matrix job's subset
 ))
 #: An `echo` that only prints: no pipe, chaining, substitution or redirection.
 _ECHO = re.compile(r"echo [^|;&`<>]*")
@@ -525,7 +528,11 @@ def run_pytest(repo_root: Path, python: str, report: rc.Reporter) -> List[Result
         found = _skips(clean)
         skips = [text + (f" (x{n})" if n > 1 else "") for n, text in found]
         missing = [s for s in skips if _MISSING_MODULE.search(s)]
-        problems = _skip_problems(clean, sum(n for n, _ in found))
+        no_xdist = bool(_NO_XDIST.search(clean))
+        if no_xdist:
+            missing.append("pytest-xdist is not installed: pytest does not know `-n`")
+        # Without xdist nothing ran, so there is no stats line: that is not a second problem.
+        problems = [] if no_xdist else _skip_problems(clean, sum(n for n, _ in found))
         # Exit code, not the summary: a failing run's summary still contains "passed".
         status = "PASS" if code == 0 and not missing and not problems else "FAIL"
         result = {"id": "pytest " + " ".join(args), "status": status, "seconds": seconds,

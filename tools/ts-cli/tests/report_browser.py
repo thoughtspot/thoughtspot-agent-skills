@@ -20,6 +20,20 @@ _MAC = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROME = (shutil.which("google-chrome") or shutil.which("google-chrome-stable")
           or shutil.which("chromium") or (_MAC if os.path.exists(_MAC) else None))
 
+
+def _dump_dom(cmd, timeout):
+    """Chrome's `--dump-dom` run. Desktop Chrome on macOS can abort at startup under load:
+    dyld finds its temporary code-signing copy of the app bundle already removed, and Chrome
+    exits -6 having printed nothing (2026-11-27, about one launch in a few hundred with the
+    suite on 18 pytest-xdist workers; the same with launches serialised). A start that exits
+    non-zero with no output never loaded the page, so it is retried once; a page that loaded,
+    whatever it shows, is never retried."""
+    run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if run.returncode != 0 and not run.stdout:
+        run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return run
+
+
 _TRAP = ('<script>window.__errs=[];window.addEventListener("error",function(e){'
          'window.__errs.push(String(e.message||e));});</script>')
 _PROBE = """<script>
@@ -57,7 +71,9 @@ def render(html_text: str, tmp_path, route: str = "", actions: str = "",
            f"--user-data-dir={tmp_path / 'chrome-profile'}", f"--window-size={size}",
            "--virtual-time-budget=5000", "--dump-dom",
            page.resolve().as_uri() + (f"#{route}" if route else "")]
-    dom = subprocess.run(cmd, capture_output=True, text=True, timeout=120).stdout
+    run = _dump_dom(cmd, 120)
+    dom = run.stdout
     m = re.search(r'<pre id="__probe">(.*?)</pre>', dom, re.S)
-    assert m, f"the page produced no probe output; DOM head: {dom[:300]!r}"
+    assert m, (f"the page produced no probe output (Chrome exit {run.returncode}); "
+               f"DOM head: {dom[:300]!r}; stderr tail: {run.stderr[-600:]!r}")
     return json.loads(html.unescape(m.group(1)))

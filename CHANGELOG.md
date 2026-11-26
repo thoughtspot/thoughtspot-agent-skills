@@ -5,6 +5,9 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-27
+- ci: pytest runs in parallel with pytest-xdist (`-n auto`) in the `suite` and `pytest-matrix` jobs, and so in `pr-ready --full`, which needs `pytest-xdist==3.8.0` installed (pr-ready 1.2.1). The main suite took 8.5 minutes serially and about 2 at 18 workers locally. The report tests' headless Chrome is retried once when it crashes before loading the page, which desktop Chrome on macOS does under load
+
 ## 2026-11-26
 - fix: the Databricks and Snowflake converters bracket every conditional they emit (CASE, IF/IFF, COALESCE, NVL2). ThoughtSpot's `else` is greedy, so `COALESCE(is_deleted, false) = false` converted to a filter that kept only the deleted and NULL rows; `CASE … END = x` and `IF(…) + 1` were wrong the same way; `ts formula translate` for Snowflake and Databricks input too (BL-632)
 - chore: bump ts-cli to v0.225.1

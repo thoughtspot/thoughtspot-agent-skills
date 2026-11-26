@@ -216,7 +216,10 @@ def _scan_seconds(seed: str, size: int) -> float:
 def test_adversarial_line_scans_in_linear_time(name):
     seed = ADVERSARIAL[name]
     small = big = float("inf")
-    for _ in range(3):                    # best of up to 3, retried only while it looks bad
+    # Best of up to 5, retried only while it looks bad: under pytest-xdist the other workers'
+    # load lands on some timings and not others (2026-11-27: x8.7 once in nine 18-worker
+    # runs, on linear code). Quadratic code fails every attempt, at x16.
+    for _ in range(5):
         small = min(small, _scan_seconds(seed, 250_000))
         big = min(big, _scan_seconds(seed, 1_000_000))
         assert big < _CEILING_1M, f"{name}: {big:.2f}s at 1M"

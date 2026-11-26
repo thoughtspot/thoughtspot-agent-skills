@@ -19701,3 +19701,38 @@ Both mostly fail at import rather than silently.
 
 **Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
 with a reason.
+
+## BL-651 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
+
+**What.** CI and `pr-ready --full` now run pytest on every CPU. Three further steps were
+measured or proposed and left out of that PR:
+
+1. **Pre-commit runs the unit suites serially** (`scripts/pre-commit.sh`, `run_pytest`), about
+   8.5 minutes on a commit that changes a `.py` file. Add `-n auto` when the hook's Python
+   can import `xdist`, and keep the serial run when it cannot, so a contributor without it
+   is not blocked.
+2. **The `pytest-matrix` job re-runs all ~14,000 tests on four more interpreters** and is
+   the slowest part of the required check. Run 3.10 and 3.14, the ends of
+   `requires-python`, on every PR, and 3.11 and 3.13 on pushes to `main` and weekly.
+3. **Skip heavy areas by path only after 1 and 2.** The ts-audit report's browser tests
+   (~180 s serial) and quest's browser test could run only when their own paths change,
+   with a full run on every push to `main` so a wrong skip shows the same day. Never a
+   "docs-only, skip pytest" rule: on 2026-11-26 a change to
+   `.github/pull_request_template.md` failed `test_repo_publisher.py`.
+
+**Done when.** Each of the three is built or declined with its reason here.
+
+## BL-652 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR's trial runs. **Target:** 2027-01-31.
+
+**What.** pytest 9.2 warns `PytestRemovedIn10Warning: Class-scoped fixtures defined as
+instance methods are deprecated` for the `example` fixture in
+`tools/ts-cli/tests/test_worked_examples.py`. CI installs `pytest` unpinned, so the day
+pytest 10 is released that file fails on every PR.
+
+**Fix direction.** Make the fixture a `@classmethod` setting attributes on `cls`, as the
+warning says; or pin pytest's major version in the workflow's installs (and `pr_ready.py`'s
+copies of them) and move it deliberately.

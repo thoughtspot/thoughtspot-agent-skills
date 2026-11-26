@@ -284,7 +284,7 @@ def test_a_skip_for_a_missing_module_is_fail_and_listed(env, capsys):
     section = text.split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "tools/a/test_x.py:10: could not import 'openpyxl'" in section, section
     assert "missing module" in section and "counted as FAIL" in section, section
-    assert "| pytest | `pytest agents/cli/ts-object-model-erd/tests/ -q` | FAIL |" in text
+    assert "| pytest | `pytest agents/cli/ts-object-model-erd/tests/ -q -n auto` | FAIL |" in text
 
 
 def test_other_skips_are_listed_and_do_not_fail(env, capsys):
@@ -366,6 +366,37 @@ def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
         assert line in err, (line, err)
     # Named for the interpreter that ran, without the path to it (a home directory).
     assert "python3 -m pip" in err, err
+
+
+_NO_XDIST_OUTPUT = ("ERROR: usage: python -m pytest [options] [file_or_dir] [file_or_dir] [...]\n"
+                    "python -m pytest: error: unrecognized arguments: -n\n"
+                    "  inifile: None\n  rootdir: /repo\n")
+
+
+def test_a_missing_pytest_xdist_is_fail_with_cis_installs_as_the_remedy(env, capsys):
+    # CI passes `-n auto`; without pytest-xdist pytest stops at a usage error and runs
+    # nothing. That is a missing tool, reported as one, not an unreadable stats line.
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (4, _NO_XDIST_OUTPUT)}
+    assert _main(env, "--no-review") == 1
+    err = capsys.readouterr().err
+    assert "pytest-xdist is not installed" in err, err
+    for line in pr_ready.SUITE_PIP_INSTALLS:
+        assert line in err, (line, err)
+    assert "closing stats line was not found" not in err, err
+
+
+def test_an_unrecognised_argument_other_than_n_is_not_read_as_missing_xdist(env, capsys):
+    out = "python -m pytest: error: unrecognized arguments: --no-such-flag\n"
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (4, out)}
+    assert _main(env, "--no-review") == 1
+    err = capsys.readouterr().err
+    assert "pytest-xdist is not installed" not in err, err
+    assert "closing stats line was not found" in err, err
+
+
+def test_the_suite_install_includes_pytest_xdist_because_ci_passes_n():
+    assert any("-n" in args for args in pr_ready.pytest_invocations(pr_ready.REPO_ROOT))
+    assert "pytest-xdist==" in pr_ready.SUITE_PIP_INSTALLS[0]
 
 
 def test_the_install_remedy_offers_the_virtual_environment_route(monkeypatch):
@@ -751,8 +782,8 @@ def test_a_new_conditional_exit_in_the_aggregate_job_is_caught(tmp_path):
 
 def test_a_changed_pip_install_is_caught(tmp_path):
     orig = WORKFLOW.read_text(encoding="utf-8")
-    text = orig.replace("pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
-                        "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 && ./x.sh", 1)
+    text = orig.replace("pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0",
+                        "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0 && ./x.sh", 1)
     assert text != orig and _mutated(tmp_path, text)
 
 
