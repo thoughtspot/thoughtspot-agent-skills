@@ -492,7 +492,7 @@ def _pytest_env(python: str = "") -> dict:
     whatever is first on the user's PATH (often a Python without pyyaml). For a virtual
     environment, whose bin holds a `python3` that is the same interpreter, the child then
     gets its packages; an interpreter outside a venv may sit beside a different
-    `python3` (BL-651)."""
+    `python3` (BL-652)."""
     env = {k: v for k, v in os.environ.items() if k not in _PYTEST_ENV_DROP}
     found = shutil.which(python) if python else None
     if found:

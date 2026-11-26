@@ -453,7 +453,7 @@ run_pytest() {
   # CHECKS_PYTHON would otherwise resolve against each child's working directory). For a
   # virtual environment, whose bin holds a `python3` that is the same interpreter, a test
   # that starts a shell calling a bare `python3` then gets its packages. An interpreter
-  # the search chose outside a venv may sit beside a different `python3` (BL-651).
+  # the search chose outside a venv may sit beside a different `python3` (BL-652).
   local py_dir
   py_dir="$(cd "$(dirname "$(command -v "$PYTHON_BIN")")" && pwd)"
   if output=$(PATH="$py_dir:$PATH" "$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
