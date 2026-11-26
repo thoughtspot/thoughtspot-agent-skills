@@ -19342,14 +19342,22 @@ It imports, but ThoughtSpot's generated SQL is wrong in two ways (both read from
 Comparing the raw integer key to `group_aggregate ( max ( [T::key] ) , { } , { } )`
 behaves identically, so the formula's form is not the cause.
 
-**Workaround used.** `start_of_month ( [formula_Month] ) = start_of_month ( today ( ) )`,
-with no LOD. It matched Databricks in every shape, including group-by and filter with
-semi-additive measures. It is a different definition: it equals "latest period in the data"
-only while the data is loaded through the current period, and it reads the clock in
-ThoughtSpot's time zone.
+**Forms tried (all live, all against the Databricks numbers).** Comparing the raw integer key,
+or wrapping both sides in `start_of_month ( )`, fails identically. Wrapping the LOD in an outer
+`max ( )` is rejected at import, and would make the flag a measure anyway. A `today()`-based
+flag matched, but only because the fixture's last month was the current month. It changes the
+meaning to "current calendar month", so it was rejected.
+
+**Workaround used.** A scalar subquery in a pass-through, with no LOD:
+`sql_bool_op ( "{0} = (SELECT MAX(<period expr>) FROM <fact fqn> WHERE <MV filter>)" , [formula_Period] )`.
+It keeps the MV's meaning and matched in every shape, including grouping and filtering with
+semi-additive measures. Its cost: the fact table's FQN and the MV filter are written into the
+formula as text, so they must be edited per environment, and lineage does not see them. A
+one-row SQL View (`SELECT MAX(key)`) LEFT-joined on the key also matched; it was not chosen,
+to avoid an extra object.
 
 **Fix direction.** (a) Raise the SQL generation defect with the ThoughtSpot query
 team, with the two `generate-sql` outputs (a reproduction on a two-table fixture). (b)
-Until fixed, have the converter refuse this pattern, or emit the `today()` form with an
-annotation. It must not emit the LOD comparison silently, because the numbers are wrong
+Until fixed, have the converter emit the subquery pass-through (it has the MV source FQN and
+`filter:`), annotated. It must not emit the LOD comparison silently, because the numbers are wrong
 with no error.
