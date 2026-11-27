@@ -408,7 +408,9 @@ def _check_no_column_formula_clash(physical: list[dict],
     Both are MV dimensions or measures. The shared resolve_name_collisions keeps the
     formula and drops the column without a word, a rule other converters rely on
     (a Tableau calculation may shadow a field), so the MV builder refuses first."""
-    clash = {c["name"] for c in physical} & {f["name"] for f in formula_entries}
+    # ThoughtSpot names are case-insensitive (`Revenue` and `REVENUE` collide)
+    folded = {f["name"].casefold() for f in formula_entries}
+    clash = {c["name"] for c in physical if c["name"].casefold() in folded}
     if clash:
         raise ValueError(
             f"duplicate display title(s): {sorted(clash)} — set distinct "
@@ -427,9 +429,10 @@ def _check_no_duplicate_display_names(columns: list[dict]) -> None:
     seen: set[str] = set()
     dupes: set[str] = set()
     for c in columns:
-        if c["name"] in seen:
+        key = c["name"].casefold()  # ThoughtSpot names are case-insensitive
+        if key in seen:
             dupes.add(c["name"])
-        seen.add(c["name"])
+        seen.add(key)
     if dupes:
         raise ValueError(
             f"duplicate display title(s): {sorted(dupes)} — set distinct "

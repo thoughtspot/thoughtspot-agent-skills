@@ -16,6 +16,8 @@ it — this module has no top-level dependency on mv_sql.
 """
 from __future__ import annotations
 
+import re
+
 from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
 from ts_cli.sql_forms import (sqlf_if_chain, SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_safe_divide_form,
                                sqlf_trunc_toward_zero)
@@ -162,7 +164,9 @@ def _construct_case(cur, resolver) -> str:
 def _construct_cast(cur, resolver) -> str:
     from ts_cli.databricks.mv_sql import UntranslatableError, _expr_units
     cur.expect_op("(")
+    start = cur.i
     inner_units = _expr_units(cur, resolver, frozenset({"AS"}))
+    source = cur.toks[start:cur.i]  # the source's own tokens, before translation
     kind, text = cur.advance()
     if text != "AS":
         raise UntranslatableError("CAST without AS")
@@ -181,6 +185,12 @@ def _construct_cast(cur, resolver) -> str:
     special = _cast_64bit_or_decimal(type_name, params, inner)
     if special is not None:
         return special
+    if type_name in _CAST_TEXT:
+        return _cast_to_text(type_name, params, inner, source)
+    if type_name == "DATE" and _is_date_valued_call(inner):
+        # Already a date with no time part; ThoughtSpot rejects to_date over it
+        # ("Search did not find start_of_month (", live 2026-11-27).
+        return inner
     fn = CAST_MAP_LOAD_BEARING.get(type_name)
     if fn is not None:
         # Narrowing cast: the target changes the value, so it must be emitted.
@@ -192,6 +202,94 @@ def _construct_cast(cur, resolver) -> str:
     raise UntranslatableError(
         f"CAST target type '{type_name}' not recognised — add it to "
         "CAST_MAP_LOAD_BEARING or CAST_TYPES_WIDENING in ts_cli/formula_common.py")
+
+
+#: BL-633: a cast to text is not a widening no-op. ThoughtSpot's `concat` and string
+#: comparisons do not promote a number, and inside a pass-through the warehouse would
+#: receive an expression the source never wrote.
+_CAST_TEXT = frozenset({"STRING", "VARCHAR", "TEXT", "CHAR"})
+#: ThoughtSpot functions that return a DATE (no time part): CAST(<one> AS DATE) is a no-op.
+_DATE_VALUED_RE = re.compile(
+    r"^(start_of_(week|month|quarter|year)|to_date) \(")
+#: A physical column: the warehouse casts the source's own value, so the text is exact.
+_COLUMN_REF_RE = re.compile(r"^\[[^\[\]]+::[^\[\]]+\]$")
+#: Numeric aggregates: to_string takes a number (it rejects Text and a one-argument DATE).
+_NUMERIC_AGG_RE = re.compile(r"^(sum|count|average|unique count) \(")
+
+
+def _is_date_valued_call(inner: str) -> bool:
+    """One call to a date-valued function whose closing bracket ends the text."""
+    bare = _strip_outer_parens(inner)
+    if not _DATE_VALUED_RE.match(bare):
+        return False
+    depth = 0
+    for i, ch in enumerate(bare):
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth == 0 and ch == ")":
+            return i == len(bare) - 1
+    return False
+
+
+def _source_shape(source: list[tuple[str, str]]) -> str | None:
+    """'literal', 'column' or 'aggregate' when the source expression is exact to cast
+    to text by construction, else None. Read from the source tokens, not the
+    translation: a dropped widening cast (`CAST(qty AS DOUBLE)`) translates to the
+    bare column, but Databricks casts the DOUBLE ('5.0'), not the INT ('5')."""
+    kinds = [k for k, _ in source]
+    texts = [t.upper() for _, t in source]
+    if kinds in (["string"], ["number"]) or texts == ["NULL"]:
+        return "literal"
+    if kinds == ["ident"]:
+        return "column"
+    return "aggregate" if _one_column_aggregate(kinds, texts) else None
+
+
+def _one_column_aggregate(kinds: list[str], texts: list[str]) -> bool:
+    """SUM/COUNT/AVG of one column, COUNT(DISTINCT col) or COUNT(*)."""
+    if not (len(texts) >= 4 and kinds[0] == "ident" and texts[0] in ("SUM", "COUNT", "AVG")
+            and texts[1] == "(" and texts[-1] == ")"):
+        return False
+    body, body_kinds = texts[2:-1], kinds[2:-1]
+    if body == ["*"]:
+        return texts[0] == "COUNT"
+    if body[:1] == ["DISTINCT"]:
+        body, body_kinds = body[1:], body_kinds[1:]
+    return body_kinds == ["ident"]
+
+
+def _strip_outer_parens(s: str) -> str:
+    while s.startswith("( ") and s.endswith(" )"):
+        depth = 0
+        for i, ch in enumerate(s):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if depth == 0 and i < len(s) - 1:
+                return s
+        s = s[2:-2]
+    return s
+
+
+def _cast_to_text(type_name: str, params: list[str], inner: str,
+                  source: list[tuple[str, str]]) -> str:
+    """BL-633, bounded to the forms that are exact by construction: a literal or NULL
+    unchanged; a physical column through the warehouse's own cast; a numeric aggregate
+    through to_string. Anything else is refused: its text depends on the warehouse type
+    ThoughtSpot's translation produces (`start_of_month` may be a TIMESTAMP where the
+    source's `TRUNC` is a DATE), and a MIN/MAX or MEASURE() may be text or a date."""
+    from ts_cli.databricks.mv_sql import UntranslatableError
+    bare = _strip_outer_parens(inner)
+    shape = _source_shape(source)
+    if shape == "literal" and type_name != "CHAR":
+        return inner
+    if shape == "column" and _COLUMN_REF_RE.match(bare):
+        target = type_name + (f"({','.join(params)})" if params else "")
+        return f'sql_string_op ( "CAST({{0}} AS {target})" , {bare} )'
+    if shape == "aggregate" and _NUMERIC_AGG_RE.match(bare):
+        return f"to_string ( {bare} )"
+    raise UntranslatableError(
+        f"CAST(... AS {type_name}) over an expression: its text depends on the "
+        f"expression's warehouse type, which ThoughtSpot's translation may change "
+        f"(only a plain column, a literal or a SUM/COUNT/AVG of one column is "
+        f"translated)")
 
 
 def _cast_params(cur) -> list[str]:
