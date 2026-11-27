@@ -175,7 +175,7 @@ Parse the pattern: `AGG(col) OVER (PARTITION BY dim1, dim2)` →
 
 The third argument `query_filters()` ensures the LOD respects user-applied filters.
 
-**Whole-table window, `AGG(expr) OVER ()` (BL-635, ts-cli 0.225.4).** An empty
+**Whole-table window, `AGG(expr) OVER ()` (BL-635, ts-cli 0.225.5).** An empty
 `OVER ()`, such as `MAX(<date>) OVER ()` for the latest loaded period, maps to
 `group_aggregate ( max ( expr ) , { } , { } )`: one value over the whole source, blind
 to the query's grouping and search filters, as the window is in Databricks. `{ }`
@@ -419,7 +419,7 @@ Maps to ThoughtSpot `last_value` formula:
 last_value ( sum ( [FILLED_INVENTORY] ) , query_groups ( ) , { [balance_date] } )
 ```
 
-**Order by a date built from an integer key (BL-634, ts-cli 0.225.4).** When the
+**Order by a date built from an integer key (BL-634, ts-cli 0.225.5).** When the
 `order:` dimension is `TO_DATE(CAST(<key> AS STRING), 'yyyyMMdd')` (or `'yyyyMM'`, the
 pattern case-sensitive), the window is ordered by the integer key itself:
 `first_value ( sum ( [m] ) , query_groups ( ) , { [FACT::DATE_KEY] } )`. Those formats
