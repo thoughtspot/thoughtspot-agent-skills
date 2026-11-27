@@ -540,6 +540,8 @@ are roughly ordered by value÷effort.
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 | BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 | BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
+| BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
+| BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -567,6 +569,7 @@ are roughly ordered by value÷effort.
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
+| BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 
 ---
 
@@ -19822,3 +19825,64 @@ instead of a bare `TimeoutExpired`. **Still open:** one render in
 about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
 burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
 also hide a genuine hang; revisit if it is seen at normal load.
+
+## BL-654 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
+
+**What.** CI and `pr-ready --full` now run pytest on every CPU. Three further steps were
+measured or proposed and left out of that PR:
+
+1. **Pre-commit runs the unit suites serially** (`scripts/pre-commit.sh`, `run_pytest`), about
+   8.5 minutes on a commit that changes a `.py` file. Add `-n auto` when the hook's Python
+   can import `xdist`, and keep the serial run when it cannot, so a contributor without it
+   is not blocked.
+2. **The `pytest-matrix` job re-runs all ~14,000 tests on four more interpreters** and is
+   the slowest part of the required check. Run 3.10 and 3.14, the ends of
+   `requires-python`, on every PR, and 3.11 and 3.13 on pushes to `main` and weekly.
+3. **Skip heavy areas by path only after 1 and 2.** The ts-audit report's browser tests
+   (~180 s serial) and quest's browser test could run only when their own paths change,
+   with a full run on every push to `main` so a wrong skip shows the same day. Never a
+   "docs-only, skip pytest" rule: on 2026-11-26 a change to
+   `.github/pull_request_template.md` failed `test_repo_publisher.py`.
+
+**Done when.** Each of the three is built or declined with its reason here.
+
+## BL-655 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR's trial runs. **Target:** 2027-01-31.
+
+**What.** pytest 9.2 warns `PytestRemovedIn10Warning: Class-scoped fixtures defined as
+instance methods are deprecated` for the `example` fixture in
+`tools/ts-cli/tests/test_worked_examples.py`. CI installs `pytest` unpinned, so the day
+pytest 10 is released that file fails on every PR.
+
+**Fix direction.** Make the fixture a `@classmethod` setting attributes on `cls`, as the
+warning says; or pin pytest's major version in the workflow's installs (and `pr_ready.py`'s
+copies of them) and move it deliberately.
+
+## BL-656 — pytest-xdist PR: review leftovers `Tier 4`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `feat/pytest-parallel` (no
+Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
+
+1. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
+   code.** A failing test that quotes pytest's usage line is reported as "pytest-xdist is not
+   installed". Require exit 4 and anchor to `^\S*pytest: error: unrecognized arguments:`;
+   the note header still says "tests skipped for a missing module" for that case.
+2. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
+   CPU; CI: 4).
+3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" is one point of a
+   spread (the main invocation took 107-187 s across three evidence runs; record the range),
+   and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+4. **Four of five headless-Chrome call sites are untested** (main's code since #768):
+   `agents/cli/ts-object-model-erd/tests/browser.py` and the three launches in
+   `tools/quest/tests/smoke_explore.py` go through `run_chrome`, but only `render`'s call
+   site has a test, so one reverted to a bare `subprocess.run` would pass every test.
+
+The review's other Chrome-retry points (three `_dump_dom` copies, a retry condition broader
+than its docstrings, BL-653 not updated) were overtaken by #768, which
+merged first: one `run_chrome` in `report_browser.py` retrying only the code-sign-clone
+signature, used by every headless-Chrome helper. This PR took #768's version.
+
+**Done when.** Each is fixed or declined with its reason here.
