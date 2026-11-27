@@ -165,6 +165,28 @@ def flag_filter_shapes(dim: dict) -> list[dict]:
              "flag": dim["mv_name"]} for lit in ("true", "false")]
 
 
+def pick_filter_value(values: list) -> Optional[str]:
+    """A string value to filter on, or None. A filter on the only value would equal the
+    total, so two distinct values are needed. Skipped: a value holding a quote or a
+    backslash (Databricks and AgentQL escape them differently) and one equal to another
+    in all but case (AgentQL compares strings case-insensitively, BL-333)."""
+    texts = sorted({v for v in values if isinstance(v, str)})
+    if len(texts) < 2:
+        return None
+    lowered = [t.lower() for t in texts]
+    for t in texts:
+        if "'" not in t and "\\" not in t and lowered.count(t.lower()) == 1:
+            return t
+    return None
+
+
+def value_filter_shape(dim: dict, value: str) -> dict:
+    """The total filtered on one value of a string dimension: a search filter beside
+    every measure at once, LOD columns included."""
+    return {"label": f"{dim['title']} = '{value}'", "dims": [],
+            "filter": [dim["mv_name"], f"'{value}'"]}
+
+
 def default_shapes(plan: dict) -> list[dict]:
     """The total; each dimension on its own; and for each boolean flag, the total
     filtered `= true` and `= false`.
@@ -172,7 +194,8 @@ def default_shapes(plan: dict) -> list[dict]:
     A window's `order:` dimension is an MV dimension, so when the Model carries it, it is
     among the single-dimension shapes; the plan's `order_dimensions` says which are not.
     Grouping on a flag is its single-dimension shape. A filtered shape carries `flag`,
-    the dimension it needs to be BOOLEAN on Databricks."""
+    the dimension it needs to be BOOLEAN on Databricks. The command adds shapes that need
+    the data first: flags found by their Databricks type, and `value_filter_shape`."""
     shapes = [{"label": "total", "dims": [], "filter": None}]
     for d in plan["dimensions"]:
         shapes.append({"label": f"by {d['title']}", "dims": [d["mv_name"]], "filter": None})

@@ -148,6 +148,8 @@ def _verify_shape(shape: dict, ctx: dict) -> dict:
         return res
     for j, d in enumerate(shape["dims"]):
         ctx["dim_kinds"][d] = kinds[j]
+    if len(shape["dims"]) == 1 and not shape["filter"] and kinds[0] == "string":
+        ctx["dim_values"][shape["dims"][0]] = [row[0] for row in dbx_rows]
     blocks, res["agentql"], errors, notes = _thoughtspot_blocks(shape, ctx)
     res.update(mv.compare_shape(len(shape["dims"]), kinds, dbx_rows, blocks, measures,
                                 ctx["tz"]))
@@ -170,25 +172,35 @@ def _progress(n: int, res: dict) -> None:
     typer.echo(f"[{n}] {res['label']}: {status} ({detail})", err=True)
 
 
-def _run_shapes(shapes: list[dict], ctx: dict, add_boolean_flags: bool) -> list[dict]:
-    """Run every shape in order. With the default shapes, a dimension Databricks reports
-    as BOOLEAN that the name heuristic missed gets its two filtered shapes as well."""
-    queue = list(shapes)
-    flagged = {d["mv_name"] for d in ctx["plan"]["dimensions"] if d["flag"]}
+def _run_time_shapes(ctx: dict) -> list[dict]:
+    """Default shapes that need the data first: the two filtered totals for a dimension
+    Databricks reports as BOOLEAN that the name heuristic missed, and the total filtered
+    on one value of the first string dimension that has a usable one."""
+    dims = ctx["plan"]["dimensions"]
+    extra = []
+    for d in dims:
+        if not d["flag"] and ctx["dim_kinds"].get(d["mv_name"]) == "boolean":
+            extra.extend(mv.flag_filter_shapes(d))
+    for d in dims:
+        value = mv.pick_filter_value(ctx["dim_values"].get(d["mv_name"]) or [])
+        if value is not None:
+            extra.append(mv.value_filter_shape(d, value))
+            break
+    return extra
+
+
+def _run_shapes(shapes: list[dict], ctx: dict, defaults: bool) -> list[dict]:
+    """Run every shape in order; with the default shapes, then the run-time ones."""
     results: list[dict] = []
-    i = 0
-    while i < len(queue):
-        res = _verify_shape(queue[i], ctx)
+    queue = list(shapes)
+    while queue:
+        res = _verify_shape(queue.pop(0), ctx)
         res["status"] = mv.shape_status(res)
         results.append(res)
-        i += 1
-        _progress(i, res)
-        if add_boolean_flags and i == len(queue):
-            extra = [d for d in ctx["plan"]["dimensions"] if d["mv_name"] not in flagged
-                     and ctx["dim_kinds"].get(d["mv_name"]) == "boolean"]
-            for d in extra:
-                flagged.add(d["mv_name"])
-                queue.extend(mv.flag_filter_shapes(d))
+        _progress(len(results), res)
+        if defaults and not queue:
+            defaults = False
+            queue = _run_time_shapes(ctx)
     return results
 
 
@@ -240,8 +252,9 @@ def verify_cmd(
 
     Runs each query shape on both sides, MEASURE() on the Metric View and AgentQL on the
     Model, and compares every cell. Default shapes: the total, each dimension the Model
-    carries, and each boolean flag filtered = true and = false. MV measures that are not
-    Model columns are listed, not compared. Report JSON on stdout (or --output), one
+    carries, each boolean flag filtered = true and = false, and the total filtered on one
+    value of a string dimension (a search filter beside every measure). MV measures that
+    are not Model columns are listed, not compared. Report JSON on stdout (or --output), one
     progress line per shape on stderr. Exit 0 when every compared cell matches, 1 on any
     mismatch, any query error, or unreadable input.
     """
@@ -267,8 +280,8 @@ def verify_cmd(
     _, cli_profile, warehouse_id = dbx_warehouse(dbx_profile)
     ctx = {"plan": plan, "titles": titles, "mv_fqn": mv_fqn, "model_name": plan["model_name"],
            "guid": model_guid, "profile": profile, "cli_profile": cli_profile,
-           "warehouse_id": warehouse_id, "tz": tz, "dim_kinds": {}}
-    results = _run_shapes(shapes, ctx, add_boolean_flags=not shapes_path)
+           "warehouse_id": warehouse_id, "tz": tz, "dim_kinds": {}, "dim_values": {}}
+    results = _run_shapes(shapes, ctx, defaults=not shapes_path)
     report = {**mv.summarise(results), **head, "shapes": results}
     _emit(report, output)
     if report["status"] != "match":

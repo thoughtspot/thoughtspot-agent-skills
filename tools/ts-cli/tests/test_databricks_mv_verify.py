@@ -162,6 +162,24 @@ class TestShapes:
         assert {"label": "by Order Date", "dims": ["order_date"], "filter": None} \
             in mv.default_shapes(plan)
 
+    @pytest.mark.parametrize("values,want", [
+        (["West", "East", None, "East"], "East"),
+        (["East"], None),                          # the only value: equals the total
+        ([None, None], None),
+        (["O'Brien", "Smith"], "Smith"),           # quotes escape differently per side
+        (["a\\b", "c"], "c"),
+        (["east", "East", "West"], "West"),        # AgentQL would match both cases
+        (["east", "East"], None),
+        ([1, 2], None),                            # strings only
+    ])
+    def test_pick_filter_value(self, values, want):
+        assert mv.pick_filter_value(values) == want
+
+    def test_value_filter_shape(self):
+        shape = mv.value_filter_shape({"mv_name": "region", "title": "Region"}, "East")
+        assert shape == {"label": "Region = 'East'", "dims": [],
+                         "filter": ["region", "'East'"]}
+
     def test_parse_shapes_valid(self, plan):
         raw = [{"label": "r x d", "dims": ["region", "order_date"], "filter": None},
                {"label": "east", "dims": [], "filter": ["region", "'East'"]}]
@@ -427,7 +445,7 @@ CMD_MODEL = {"model": {
 def _aggregate(dims, measures, flt):
     groups: dict = {}
     for row in FACT:
-        if flt and row[flt[0]] is not flt[1]:
+        if flt and row[flt[0]] != flt[1]:
             continue
         acc = groups.setdefault(tuple(row[d] for d in dims), {"revenue": 0.0, "order_count": 0})
         acc["revenue"] += row["revenue"]
@@ -436,6 +454,8 @@ def _aggregate(dims, measures, flt):
 
 
 def _literal(text):
+    if text.startswith("'"):
+        return text[1:-1]
     return {"true": True, "false": False}[text]
 
 
@@ -453,7 +473,7 @@ class FakeDatabricks:
         select = sql.split(" FROM ")[0][len("SELECT "):]
         dims = [i.strip("`") for i in select.split(", ") if not i.startswith("MEASURE(")]
         measures = re.findall(r"MEASURE\(`([^`]+)`\)", sql)
-        m = re.search(r"WHERE `([^`]+)` = (\w+)", sql)
+        m = re.search(r"WHERE `([^`]+)` = (\w+|'[^']*')", sql)
         flt = (m.group(1), _literal(m.group(2))) if m else None
         cols = [{"name": c, "type_name": DBX_TYPES[c]} for c in dims + measures]
         data = [[_dbx_text(v) for v in row] for row in _aggregate(dims, measures, flt)]
@@ -496,7 +516,7 @@ class FakeAgentQL:
         if self.combined_error and len(measures) > 1 and dims:
             return {"status": "QUERY_GEN_ERROR", "rows": [], "columns": [],
                     "errors": [{"code": "QUERY_GEN_ERROR", "message": "synthetic"}]}
-        m = re.search(r'WHERE "t1"\."([^"]+)" = (\w+)', sql)
+        m = re.search(r'WHERE "t1"\."([^"]+)" = (\w+|\'[^\']*\')', sql)
         flt = (TITLE_TO_FIELD[m.group(1)], _literal(m.group(2))) if m else None
         rows = []
         for row in _aggregate(dims, measures, flt):
@@ -557,11 +577,29 @@ class TestCommand:
             "Is Gift = true": "skipped", "Is Gift = false": "skipped",
             # BOOLEAN on Databricks, missed by the name heuristic: added at run time
             "Returned = true": "match", "Returned = false": "match",
+            # a search filter beside every measure, on the first string dimension's
+            # first value
+            "Region = 'East'": "match",
         }
         assert report["summary"]["mismatches"] == 0
         assert report["summary"]["cells"] > 0
         region = next(s for s in report["shapes"] if s["label"] == "by Region")
         assert region["rows_databricks"] == region["rows_thoughtspot"] == 3   # NULL group too
+        east = report["shapes"][-1]
+        assert east["databricks_sql"].endswith("FROM `cat`.`sch`.`sales_mv` WHERE `region` = 'East'")
+        assert east["agentql"] == ['SELECT SUM("t1"."Revenue") AS "M0", AGG("t1"."Order Count") '
+                                   'AS "M1" FROM "Sales MV" AS "t1" WHERE "t1"."Region" = \'East\'']
+
+    def test_custom_shapes_get_no_run_time_additions(self, files, fakes):
+        fakes()
+        shapes = files["dir"] / "shapes.json"
+        shapes.write_text(json.dumps([{"label": "by region", "dims": ["region"],
+                                       "filter": None},
+                                      {"label": "by returned", "dims": ["returned"],
+                                       "filter": None}]))
+        result = runner.invoke(app, _args(files, "--shapes", str(shapes)))
+        assert [s["label"] for s in json.loads(result.stdout)["shapes"]] == [
+            "by region", "by returned"]
 
     def test_progress_line_per_shape_on_stderr(self, files, fakes):
         fakes()
