@@ -521,17 +521,24 @@ def _execute(plans: list, cli_profile: str, warehouse_id: str, cat: str, sch: st
     return results
 
 
-def _dbx_target(profile: str, catalog: Optional[str], schema: Optional[str]) -> tuple:
-    """(cli_profile, warehouse_id, catalog, schema) from the profile and the overrides."""
+def dbx_warehouse(profile: str) -> tuple[dict, str, str]:
+    """(profile dict, databricks CLI profile, warehouse id) for a named Databricks profile.
+    Also used by `ts databricks verify`."""
     prof = _load_dbx_profile(profile)
     http_path = prof.get("sql_warehouse_http_path", "")
     if not http_path:
         raise SystemExit("Profile has no sql_warehouse_http_path.")
+    return prof, prof.get("dbx_profile") or profile, http_path.rstrip("/").split("/")[-1]
+
+
+def _dbx_target(profile: str, catalog: Optional[str], schema: Optional[str]) -> tuple:
+    """(cli_profile, warehouse_id, catalog, schema) from the profile and the overrides."""
+    prof, cli_profile, warehouse_id = dbx_warehouse(profile)
     cat = catalog or prof.get("catalog")
     sch = schema or prof.get("schema")
     if not cat or not sch:
         raise SystemExit("catalog and schema required (profile or --catalog/--schema).")
-    return prof.get("dbx_profile") or profile, http_path.rstrip("/").split("/")[-1], cat, sch
+    return cli_profile, warehouse_id, cat, sch
 
 
 def _refuse_tables_without_data(tables: list, generate_sample: bool) -> None:

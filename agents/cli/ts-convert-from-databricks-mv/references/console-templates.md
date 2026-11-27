@@ -118,6 +118,13 @@ To import to ThoughtSpot when you have access:
 ### Not Mapped
 - Global filter: "{filter_expr}" — noted in model description, not enforced as a ThoughtSpot filter
 - MV `version` field — metadata only, not stored in ThoughtSpot
+
+### Numbers verified (Step 11c)
+**Status:** {status} — {shapes} shapes, {non_null_cells} cells with a value, {mismatches} mismatches
+**Search filter:** {search_filter.label} ({search_filter.status}), or why it did not run
+**Not compared:** {skipped_by_converter and not_verifiable measures, or "none"}
+**The data cannot show:** {each Step 11c data check the data lacks, or "none"}
+(Or: "Numbers not compared: {reason}" when Step 11c was skipped.)
 ```
 
 ### Suggested test questions template

@@ -378,7 +378,7 @@ are roughly ordered by value÷effort.
 | ~~BL-634~~ | ~~from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped~~ | DONE (2026-11-27) |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
-| BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
+| ~~BL-639~~ | ~~from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify`~~ | DONE (2026-11-27) |
 | ~~BL-640~~ | ~~Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved~~ | DONE (2026-11-27) |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
@@ -580,6 +580,7 @@ are roughly ordered by value÷effort.
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
 | BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
+| BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, three AgentQL quoting helpers | 2027-01-31 |
 
 ---
 
@@ -19494,8 +19495,18 @@ with no error.
 
 ## BL-639 — from-databricks-mv: no numeric fidelity step after import `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
-simba-test against a synthetic Databricks fixture (see BL-637). **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: `ts databricks verify`, ts-cli 0.228.0, run by
+the new Step 11c of `ts-convert-from-databricks-mv`. The default shapes are the total, each
+dimension, each boolean flag grouped and filtered both ways, and a search filter on one
+dimension value, which puts a filter beside every measure. When no dimension has a usable
+value, the run reports `incomplete`, not a match, unless a flag filter compared data. The
+command cannot create the data properties below, so the step checks the data for them and
+says which are missing. Run live on two of this fixture's views: 49 shapes, 6,178 cells, no
+mismatch; after the PR #773 review, one view again (13 shapes) plus the integer and
+`DATE '…'` search-filter literals. TIMESTAMP grouping keys are decoded but not
+live-verified. Follow-ups: BL-664.) **Source:** live
+validation of three converted Metric Views on simba-test against a synthetic Databricks fixture
+(see BL-637). **Target:** 2026-12-15.
 
 **What.** The skill ends at import and a summary report. In this run `ts tml lint` passed TML
 that could not import (BL-629, BL-637), and import accepted a Model that returned wrong
@@ -20162,3 +20173,32 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
    Unverified on Windows.
 
 **Done when.** Each item is fixed with its test or check, or declined here with the reason.
+
+## BL-664 — Follow-ups from the PR #773 review (`ts databricks verify`) `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #773 (BL-639). **Target:** 2027-01-31.
+
+1. **`ts-convert-from-snowflake-sv` has the gap BL-639 closed for Databricks.** Lint and
+   import pass, the numbers can still be wrong, and no step compares them. The round-trip
+   study found three constructs that import clean and return the wrong number
+   (`docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`). Fix direction: a
+   `ts snowflake verify` on the same plan and comparison modules, querying the Semantic
+   View on the warehouse, and a step in the skill.
+2. **`spotql._cell_value` reads a falsy value of an unmapped type as NULL.** When neither
+   the column's `type` nor the cell's `nullType` names a field, it takes the first field
+   that is not falsy. A 0, `false` or empty string then comes back as None. `verify`
+   reports that as a false match against a Databricks NULL (and a mismatch against Databricks' 0); other callers read it as NULL.
+3. **`quote_mv_fqn` cannot quote a partly quoted name.** It quotes every dot-separated part,
+   or, when the name holds a backtick, passes it through unchanged. A catalog, schema or
+   view whose name holds a dot works only when the caller quotes the whole name.
+4. **AgentQL identifier quoting is written three times**: `_dq` in
+   `ts_cli/databricks/mv_verify.py`, `_sq` in `ts_cli/aggregate/spotql_aggregate.py` and
+   `_q` in `ts_cli/formula_translate/validate.py`. One shared helper.
+
+5. **`ts databricks verify` leftovers from the PR #773 re-review.** A flag filter that excludes
+   no rows (a flag false on every row) still counts as the run's filtered shape, so the run can
+   read `match` without a search filter that removed anything; count a filtered shape only when
+   it removed rows. `tolerance_accepted` is a bare count: list which measures were accepted
+   within tolerance, since at DECIMAL scale it also absorbs a dropped `ROUND` or narrowing cast.
+
+**Done when.** Each item is fixed with its test, or declined here with the reason.
