@@ -123,7 +123,9 @@ Steps:
   9.5. Confirm Spotter enablement (re-run build-model + flag) . you choose
  10.   Review checkpoint — inspect TML before import ......... you confirm
  11.   Import Model TML — ts databricks build-model --profile . auto
- 12.   Verify import and produce summary report .............. auto
+ 11b.  Verify the import ..................................... auto
+ 11c.  Compare the numbers — ts databricks verify ............ auto (needs warehouse access)
+ 12.   Produce the summary report ............................ auto
 
 File-only mode: at Step 10, choose FILE to write TML files for manual import.
 YAML files instead of a workspace: see "Starting from Metric View YAML files" below.
@@ -160,6 +162,7 @@ work on copies in a working directory.
    - a `sql_query` source: options (D) and (T) need Databricks, so only (M) or (S) apply;
    - column data types, which Step 8B reads with `DESCRIBE TABLE` (BL-636);
    - that the source tables exist under the names the YAML uses.
+   - the numbers: Step 11c compares the Model with the Metric View on the warehouse.
 5. Tables and import, by what is available:
    - **A ThoughtSpot profile and existing Tables** for the sources: Step 8A as usual, then
      Steps 9 to 11. Step 8C (adding missing columns) needs `DESCRIBE TABLE`, so a missing
@@ -878,11 +881,74 @@ Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md
 
 ---
 
+### Step 11c: Verify the numbers — `ts databricks verify`
+
+Lint and import both passed Models that returned wrong numbers (BL-638). This step runs
+the same queries on the Metric View and on the Model, and compares every cell (BL-639).
+It needs the Databricks warehouse and the imported Model. Skip it in file-only mode and
+when starting from YAML files; then say in the Step 12 report that the numbers were not
+compared.
+
+**1. Check that the data can show a difference.** A match proves only what the data can
+show: two results in BL-639 matched on lucky data. Query the source tables (the SQL
+execution pattern above) and tell the user which of these the data lacks:
+
+- The latest period is not the current one. Otherwise a `today()`-based flag matches by
+  luck.
+- Rows with a NULL or unmatched foreign key, so a join that drops or keeps them shows.
+- Several periods for each semi-additive (`window:`) measure, so the total spans them.
+- Values that differ only in case, where a formula compares strings (`LIKE`, `=`).
+  ThoughtSpot compares strings case-insensitively (BL-333), so expect a difference there.
+
+Never add rows to the user's tables. When the data lacks one, the match cannot show that
+case; say so in the Step 12 report.
+
+**2. Run it.**
+
+```bash
+ts databricks verify \
+  --parsed parsed.json --model-tml "./tml_out/{model_name}.model.tml" \
+  --mv-fqn "{catalog}.{schema}.{view_name}" --model-guid {model_guid} \
+  --profile {profile} --dbx-profile {databricks_profile_name} \
+  --cluster-tz {cluster_time_zone} --output ./tml_out/verify_report.json
+```
+
+- `--model-tml` is the file Step 11 wrote; `--model-guid` is the GUID it returned.
+- `--dbx-profile` is the profile's `name` in `~/.claude/databricks-profiles.json` (Step 1),
+  not its `dbx_profile` field.
+- `--cluster-tz` is the ThoughtSpot cluster's time zone; ask the user if it is not known
+  (default `UTC`). AgentQL returns a DATE at midnight in that zone. If every date row shows
+  on one side only, the zone is wrong: run again with the right one.
+
+The default shapes are the total, each dimension, each boolean flag filtered `= true` and
+`= false`, and the total filtered on one string value. That last one puts a search filter
+beside every measure, LOD columns included. For a case the defaults miss, run it again with
+`--shapes`, which replaces them; the format is in `tools/ts-cli/README.md`. I.e. a monthly
+semi-additive measure grouped by year, or one region's rows by month:
+
+```json
+[{"label": "by year", "dims": ["order_year"], "filter": null},
+ {"label": "East by month", "dims": ["order_month"], "filter": ["region", "'East'"]}]
+```
+
+**3. Read the result.** Exit 0: every compared cell matched. Exit 1: show the user each
+shape that did not match, with the key, the measure and both values, or the error.
+Measures under `not_in_model` and `not_verifiable` were not compared; list them too.
+
+> **R1:** a mismatch is reported, never fixed by changing what a formula means. Look first
+> for a form that keeps the source's meaning. A fix that changes the meaning needs the
+> user's approval before the re-import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+> After a re-import, run this step again.
+
+---
+
 ### Step 12: Produce summary report
 
 After a successful import (or file output), generate the Markdown report
 (Model Import Complete header, Columns Imported, Formula Translation Log, Not
-Mapped) and, separately, 3-5 suggested Spotter test questions based on the
+Mapped). Add Step 11c's result: shapes and cells compared, any mismatches, the measures
+not compared, and what the data could not show (or that the numbers were not compared).
+Separately, give 3-5 suggested Spotter test questions based on the
 dimensions and measures present. Both templates:
 [references/console-templates.md](references/console-templates.md)
 "Step 12 — Summary report template" / "Suggested test questions template".
@@ -930,6 +996,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.22.0 | 2026-11-27 | **Verify the numbers (BL-639, ts-cli v0.228.0).** A new Step 11c runs `ts databricks verify` after import when the warehouse is reachable. It runs the same query shapes on the Metric View (`MEASURE()`) and the Model (AgentQL) and compares every cell. Default shapes: the total, each dimension, each boolean flag filtered `= true` and `= false`, and the total filtered on one string value, which puts a search filter beside every LOD column. `--cluster-tz` decodes DATE keys, which AgentQL returns at midnight in the cluster's zone. Before running, the step checks the data can show a difference: a latest period that is not the current one, NULL or unmatched keys, several periods per semi-additive measure, and values that differ only in case. A mismatch is reported, never fixed by changing a formula's meaning (R1). Step 12 reports the result. |
 | 1.21.0 | 2026-11-27 | **Start from Metric View YAML files (BL-641), and approve any change of meaning (R1, BL-640).** (1) A new entry at Step 0 for definitions held as files with no workspace access: work on copies (the YAML from a `CREATE … AS $$ … $$` wrapper, with its view name recorded), skip Steps 1-4, run Steps 5-12 per view, say what cannot be checked (the MV-on-MV check beyond the set, a SQL source, column types, that the tables exist), and route Step 8 by what exists: existing Tables via 8A, else column types from the user or a `--tables auto` preview. (2) **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.20.1 | 2026-11-27 | **Casts and names (ts-cli v0.227.2).** (1) A cast to text (`STRING`, `VARCHAR(n)`, `TEXT`, `CHAR`) is no longer dropped (BL-633). Over a column it is the warehouse's own cast, `sql_string_op ( "CAST({0} AS STRING)" , [T::x] )`; over `SUM`/`COUNT`/`AVG` it is `to_string`. Over any other expression it is skipped with the reason, because its text depends on the warehouse type. (2) `CAST(DATE_TRUNC('MONTH', d) AS DATE)` translates to `start_of_month ( d )`: ThoughtSpot rejected the `to_date ( start_of_month ( … ) )` it produced at import. (3) With no `display_name`, a `name` cased by its author (`SKU Type`, `Is eBook`) is used as written; snake_case, all-lower and all-upper names are still title-cased (BL-631). **Re-converting into an existing Model** (`--existing-guid`) renames such columns, and their formula ids, from the old title (`Sku Type`) to the name as written (`SKU Type`); check Answers and Liveboards that use them. Titles that differ only by case now fail as duplicates. Three converted Metric Views, imported unpatched, matched Databricks in 6,549 cells. |
 | 1.20.0 | 2026-11-27 | **Latest-period windows and flags convert (ts-cli v0.227.1).** (1) A window ordered by a date built from an integer key, `TO_DATE(CAST(key AS STRING), 'yyyyMMdd')` or `'yyyyMM'`, is ordered by the key, for `range: current` without an offset (BL-634); it was refused, skipping the semi-additive measures. (2) A whole-table dimension `AGG(expr) OVER ()` maps to `group_aggregate ( … , { } , { } )` (BL-635); `parse-mv` used to refuse it. (3) A dimension comparing a row to that dimension (`period = latest_period`) is emitted as a scalar subquery in `sql_bool_op`, because ThoughtSpot's SQL for the `group_aggregate` comparison gives wrong numbers (BL-638). It covers one comparison against a `MAX`/`MIN` `OVER ()` dimension over source columns of a three-part source; a computed dimension that reads it in any other form is skipped with the reason. A measure naming it is translated with a note that it is unverified. |

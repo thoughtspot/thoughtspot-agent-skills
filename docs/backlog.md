@@ -378,7 +378,7 @@ are roughly ordered by value÷effort.
 | ~~BL-634~~ | ~~from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped~~ | DONE (2026-11-27) |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
-| BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
+| ~~BL-639~~ | ~~from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify`~~ | DONE (2026-11-27) |
 | ~~BL-640~~ | ~~Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved~~ | DONE (2026-11-27) |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
@@ -19494,8 +19494,14 @@ with no error.
 
 ## BL-639 — from-databricks-mv: no numeric fidelity step after import `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
-simba-test against a synthetic Databricks fixture (see BL-637). **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: `ts databricks verify`, ts-cli 0.228.0, run by
+the new Step 11c of `ts-convert-from-databricks-mv`. The default shapes are the total, each
+dimension, each boolean flag grouped and filtered both ways, and a search filter beside every
+measure. The command cannot create the data properties below, so the step checks the data for
+them and says which are missing. Run live on two of this fixture's views: 49 shapes, 6,178
+cells, no mismatch. TIMESTAMP grouping keys are decoded but not live-verified.) **Source:** live
+validation of three converted Metric Views on simba-test against a synthetic Databricks fixture
+(see BL-637). **Target:** 2026-12-15.
 
 **What.** The skill ends at import and a summary report. In this run `ts tml lint` passed TML
 that could not import (BL-629, BL-637), and import accepted a Model that returned wrong

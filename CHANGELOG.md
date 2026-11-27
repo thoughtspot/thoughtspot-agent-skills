@@ -6,6 +6,8 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-27
+- feat: `ts databricks verify` checks that a Model converted from a Databricks Metric View returns the Metric View's numbers. It runs each query shape with `MEASURE()` on the Metric View and with AgentQL on the Model, and compares every cell. The default shapes are the total, each dimension, each boolean flag filtered `= true` and `= false`, and one search filter beside every measure. `ts-convert-from-databricks-mv` runs it in a new Step 11c, after checking the data can show a difference (BL-639; skill v1.22.0)
+- chore: bump ts-cli to v0.228.0
 - docs: every `ts-convert-from-*` skill asks the user to approve, before the first import and before re-imports in its fix loops, any converted formula edited by hand whose meaning now differs from the source (new conversion invariant R1, BL-640; the conversion-consistency auditor now checks it); `ts-convert-from-databricks-mv` can start from Metric View YAML files when there is no workspace access (BL-641)
 - fix: the Databricks Metric View converter keeps a cast to text over a plain column or a SUM/COUNT/AVG of one column (`CAST(x AS STRING)`) instead of dropping it, and skips one over any other expression; drops a `CAST(… AS DATE)` over a translated `start_of_month`/`start_of_week`/`start_of_quarter`/`start_of_year`/`to_date` (ThoughtSpot rejected `to_date ( start_of_month ( … ) )` at import); and uses a `name` its author cased (`SKU Type`) as written. Re-converting into an existing Model renames such columns (BL-631, BL-633)
 - chore: bump ts-cli to v0.227.2
