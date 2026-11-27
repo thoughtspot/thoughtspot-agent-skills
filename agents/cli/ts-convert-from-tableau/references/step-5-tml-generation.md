@@ -90,7 +90,8 @@ the whole workbook" rule — it binds one datasource to one existing table GUID,
      --column-name-map {workdir}/column_name_map.json --profile {profile_name}
    ```
 
-Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run.
+Column-id qualification and suffix/junk stripping are automatic (Tier-1) for every run,
+except for the `(Custom SQL Query<digits>)` columns `--warehouse-columns` keeps (Step 5b below).
 Dropped columns + their formulas appear in the result JSON's `reconcile_dropped` and the
 Step 12 report.
 

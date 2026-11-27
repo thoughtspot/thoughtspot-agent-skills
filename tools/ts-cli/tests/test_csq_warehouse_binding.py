@@ -276,3 +276,160 @@ def test_build_model_rejects_malformed_warehouse_columns(tmp_path):
          "--output-dir", str(tmp_path / "o"), "--warehouse-columns", str(wh)],
     )
     assert res.exit_code == 1
+
+
+# --- review round: equal captions, wiring branches, sqlproxy + name map -----
+
+def test_clean_columns_bound_column_sharing_a_caption_takes_its_own_name():
+    # Tableau lets LEVEL and LEVEL (Custom SQL Query8) share the caption
+    # "Level"; two equal names would collapse both Table columns onto one
+    # warehouse column, so the bound one is named by its full suffixed name.
+    for order in ((0, 1), (1, 0)):
+        cols = [
+            {"name": "Level", "db_column_name": "LEVEL", "column_type": "ATTRIBUTE"},
+            {"name": "Level", "db_column_name": LEVEL8, "column_type": "ATTRIBUTE"},
+        ]
+        out = clean_columns([cols[i] for i in order], "ORDERS", {LEVEL8.upper()})
+        by_db = {c["db_column_name"]: c["name"] for c in out}
+        assert by_db == {"LEVEL": "Level", LEVEL8: LEVEL8}
+
+
+def test_clean_columns_bound_column_keeps_a_distinct_caption():
+    cols = [
+        {"name": "Level", "db_column_name": "LEVEL", "column_type": "ATTRIBUTE"},
+        {"name": "Level 8", "db_column_name": LEVEL8, "column_type": "ATTRIBUTE"},
+    ]
+    out = clean_columns(cols, "ORDERS", {LEVEL8.upper()})
+    assert {c["db_column_name"]: c["name"] for c in out} == {"LEVEL": "Level", LEVEL8: "Level 8"}
+
+
+def _ds(tables, cols):
+    return {"tables": [{"name": t} for t in tables], "columns": _cols(*cols)}
+
+
+def test_resolve_bound_merge_mode_reads_the_live_model():
+    from ts_cli.tableau.build_model import resolve_bound_suffixed
+    existing = {"model": {
+        "model_tables": [{"name": "T"}],
+        "columns": [{"name": LEVEL8, "column_id": f"T::{LEVEL8}"}],
+        "formulas": [], "parameters": [],
+    }}
+    # merge mode ignores the warehouse list and reads the model
+    bound, msg = resolve_bound_suffixed(_ds(["T"], ["LEVEL", SALES8]), {"T": [SALES8]}, existing)
+    assert bound == {LEVEL8.upper()} and msg is None
+
+
+def test_resolve_bound_multi_table_datasource_binds_nothing():
+    from ts_cli.tableau.build_model import resolve_bound_suffixed
+    bound, msg = resolve_bound_suffixed(
+        _ds(["A", "B"], ["LEVEL", LEVEL8]), {"": ["LEVEL", LEVEL8]}, None)
+    assert bound == set() and msg is None
+
+
+def test_resolve_bound_single_table_binds_and_reports():
+    from ts_cli.tableau.build_model import resolve_bound_suffixed
+    bound, msg = resolve_bound_suffixed(
+        _ds(["T"], ["LEVEL", LEVEL8]), {"T": ["LEVEL", LEVEL8]}, None)
+    assert bound == {LEVEL8.upper()}
+    assert "1 suffixed column(s) kept" in msg and "of T" in msg
+
+
+def test_resolve_bound_key_miss_binds_nothing():
+    from ts_cli.tableau.build_model import resolve_bound_suffixed
+    bound, msg = resolve_bound_suffixed(
+        _ds(["T"], ["LEVEL", LEVEL8]), {"OTHER": ["LEVEL", LEVEL8]}, None)
+    assert bound == set() and "0 suffixed column(s) kept" in msg
+
+
+def test_warehouse_columns_ignored_with_existing_guid(tmp_path):
+    from ts_cli.commands.tableau import _load_warehouse_columns
+    wh = tmp_path / "wh.json"
+    wh.write_text(json.dumps({"ORDERS": ["LEVEL", LEVEL8]}))
+    assert _load_warehouse_columns(str(wh), "some-guid") == {}
+    assert _load_warehouse_columns(str(wh), None) == {"ORDERS": {"LEVEL", LEVEL8}}
+
+
+def test_build_model_equal_captions_stay_two_columns_and_lint_clean(tmp_path):
+    twb = tmp_path / "wb.twb"
+    twb.write_text(TWB.replace(
+        "<column name='[LEVEL]' datatype='string' role='dimension'/>",
+        "<column name='[LEVEL]' datatype='string' role='dimension' caption='Level'/>",
+    ).replace(
+        f"<column name='[{LEVEL8}]' datatype='string' role='dimension'/>",
+        f"<column name='[{LEVEL8}]' datatype='string' role='dimension' caption='Level'/>",
+    ))
+    wh = tmp_path / "wh.json"
+    wh.write_text(json.dumps({"ORDERS": ["LEVEL", LEVEL8, "SALES"]}))
+    out = tmp_path / "out"
+    res = runner.invoke(app, ["tableau", "build-model", str(twb), "--connection", "CONN",
+                              "--output-dir", str(out), "--warehouse-columns", str(wh)])
+    assert res.exit_code == 0, res.stdout + res.stderr
+    table = yaml.safe_load(next(out.glob("*.table.tml")).read_text())["table"]
+    assert sorted(c["db_column_name"] for c in table["columns"]) == ["LEVEL", LEVEL8, "SALES"]
+    assert len({c["name"] for c in table["columns"]}) == 3
+    lint = runner.invoke(app, ["tml", "lint", "--dir", str(out)])
+    assert json.loads(lint.stdout)["clean"] is True, lint.stdout
+
+
+SQLPROXY_TWB = f"""<?xml version='1.0'?>
+<workbook>
+  <datasource name='sqlproxy.a' caption='Campaigns'>
+    <connection class='sqlproxy' dbname='Campaigns'>
+      <relation name='sqlproxy' type='table' table='[sqlproxy]'/>
+      <metadata-records>
+        <metadata-record class='column'>
+          <remote-name>LEVEL</remote-name><local-name>[LEVEL]</local-name>
+          <parent-name>[sqlproxy]</parent-name><local-type>string</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>{LEVEL8}</remote-name><local-name>[{LEVEL8}]</local-name>
+          <parent-name>[sqlproxy]</parent-name><local-type>string</local-type>
+        </metadata-record>
+        <metadata-record class='column'>
+          <remote-name>SALES</remote-name><local-name>[SALES]</local-name>
+          <parent-name>[sqlproxy]</parent-name><local-type>real</local-type>
+        </metadata-record>
+      </metadata-records>
+    </connection>
+    <column name='[LEVEL]' datatype='string' role='dimension'/>
+    <column name='[{LEVEL8}]' datatype='string' role='dimension'/>
+    <column name='[SALES]' datatype='real' role='measure'/>
+    <column name='[Is Campaign]' datatype='integer' role='measure' caption='Is Campaign'>
+      <calculation class='tableau' formula="IF [{LEVEL8}] = 'campaign' THEN 1 ELSE 0 END"/>
+    </column>
+  </datasource>
+</workbook>
+"""
+
+
+@pytest.mark.parametrize("key,bound", [("CAMPAIGN_FLAT", True), ("sqlproxy", False)])
+def test_build_model_sqlproxy_keyed_by_mapped_table_name(tmp_path, key, bound):
+    # the warehouse file is keyed by the table name AFTER --table-name-map;
+    # the pre-map name binds nothing and the ref is stripped and warned
+    twb = tmp_path / "wb.twb"
+    twb.write_text(SQLPROXY_TWB)
+    name_map = tmp_path / "map.json"
+    name_map.write_text(json.dumps({"sqlproxy": "CAMPAIGN_FLAT"}))
+    wh = tmp_path / "wh.json"
+    wh.write_text(json.dumps({key: ["LEVEL", LEVEL8, "SALES"]}))
+    out = tmp_path / "out"
+    res = runner.invoke(app, ["tableau", "build-model", str(twb), "--connection", "CONN",
+                              "--output-dir", str(out), "--table-name-map", str(name_map),
+                              "--warehouse-columns", str(wh)])
+    assert res.exit_code == 0, res.stdout + res.stderr
+    table = yaml.safe_load(next(out.glob("*.table.tml")).read_text())["table"]
+    model_file = next(p for p in out.glob("*.model.tml") if ".phase0." not in p.name)
+    model = yaml.safe_load(model_file.read_text())["model"]
+    expr = next(f["expr"] for f in model["formulas"] if f["name"] == "Is Campaign")
+    dbs = sorted(c["db_column_name"] for c in table["columns"])
+    if bound:
+        assert table["name"] == "CAMPAIGN_FLAT"
+        assert dbs == ["LEVEL", LEVEL8, "SALES"]
+        assert f"[CAMPAIGN_FLAT::{LEVEL8}]" in expr
+        assert "Validation warnings" not in res.stderr
+        lint = runner.invoke(app, ["tml", "lint", "--dir", str(out)])
+        assert json.loads(lint.stdout)["clean"] is True, lint.stdout
+    else:
+        assert dbs == ["LEVEL", "SALES"]
+        assert "Custom SQL Query" not in expr
+        assert "Validation warnings" in res.stderr

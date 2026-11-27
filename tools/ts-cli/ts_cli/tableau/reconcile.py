@@ -200,9 +200,30 @@ def clean_columns(
     A column in ``bound`` (upper-cased suffixed names the warehouse really has,
     from ``bound_suffixed_columns``) keeps its name and ``db_column_name``
     verbatim and is deduped on that full name, so it survives next to its
-    unsuffixed sibling instead of being collapsed into it.
+    unsuffixed sibling instead of being collapsed into it. When its caption is
+    also another kept column's name (Tableau lets ``LEVEL`` and
+    ``LEVEL (Custom SQL Query8)`` share the caption ``Level``), it is named by
+    its full suffixed name instead: downstream maps are keyed by column name,
+    so two equal names would bind both Table columns to one warehouse column.
     """
     bound = bound or set()
+    out = _clean_columns_pass(columns, table_name, bound)
+    if bound:
+        counts: dict[str, int] = {}
+        for nc in out:
+            key = str(nc["name"]).upper()
+            counts[key] = counts.get(key, 0) + 1
+        for nc in out:
+            if (str(nc["db_column_name"]).upper() in bound
+                    and counts[str(nc["name"]).upper()] > 1):
+                nc["name"] = nc["db_column_name"]
+    return out
+
+
+def _clean_columns_pass(
+    columns: list[dict], table_name: str, bound: set[str],
+) -> list[dict]:
+    """One pass of ``clean_columns``: drop junk, strip unbound suffixes, dedupe."""
     out: list[dict] = []
     seen: set[str] = set()
     for c in columns:

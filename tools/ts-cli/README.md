@@ -2378,12 +2378,14 @@ ts tableau build-model "workbook.twbx" \
 | `--schema`, `-s` | no | GENERATE mode only. Warehouse schema for the emitted Table TML(s) `schema` field. Empty is fine for offline emission + local `ts tml lint`. |
 | `--reconcile-table` | no | GUID of an existing ThoughtSpot table to reconcile emitted columns against (consultant/stand-in-view case). Requires `--profile`. |
 | `--reconcile-plan` | no | With `--reconcile-table`: print the reconcile plan (suggested mappings + drops) as JSON and exit without writing TML. |
-| `--warehouse-columns` | no | GENERATE mode only. JSON file listing the target warehouse table's real column names: a list, a `{"columns": [...]}` table-metadata response (Unity Catalog `tables/get` shape), or `{"<table name>": [...]}` keyed by the ThoughtSpot table name after `--table-name-map`. On a single-table datasource, a `(Custom SQL Query N)` column that exists there verbatim (case-insensitive) is kept as its own column and formula refs keep pointing at it; without this flag every suffix is stripped and the column collapses onto its unsuffixed sibling. Ignored with `--existing-guid`, where merge mode keeps a suffixed ref when the existing model has that column. |
+| `--warehouse-columns` | no | GENERATE mode only. JSON file listing the target warehouse table's real column names: a list, a `{"columns": [...]}` table-metadata response (Unity Catalog `tables/get` shape), or `{"<table name>": [...]}` keyed by the ThoughtSpot table name after `--table-name-map`. On a single-table datasource, a `(Custom SQL Query N)` column that exists there verbatim (case-insensitive) is kept as its own column and formula refs keep pointing at it; without this flag a `(Custom SQL Query<digits>)` suffix is stripped and the column collapses onto its unsuffixed sibling (an unnumbered `(Custom SQL Query)` suffix is not stripped either way). When its caption is also another column's name, the kept column is named by its full suffixed name. Ignored with `--existing-guid`, where merge mode keeps a suffixed ref when the existing model has that column. |
 | `--column-name-map` | no | JSON file mapping datasource column → target column name (from the confirmed reconcile plan). Applies in GENERATE mode (with `--reconcile-table`, apply mode) and in MERGE mode (`--existing-guid`), where it rewrites re-derived formula refs so renamed columns resolve against the existing model. |
 
 Column-id qualification and suffix/junk stripping (Tier-1 cleanup) run automatically on
-every `build-model` call — the three flags above only add opt-in Tier-2 reconciliation
-against a real target schema.
+every `build-model` call, except that `--warehouse-columns` keeps the suffix on a
+`(Custom SQL Query<digits>)` column the warehouse table really has. `--table-name-map`,
+`--reconcile-table` and `--column-name-map` add opt-in Tier-2 reconciliation against a
+real target schema.
 
 **Pipeline steps:**
 
