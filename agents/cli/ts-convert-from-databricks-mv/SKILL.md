@@ -907,33 +907,50 @@ case; say so in the Step 12 report.
 
 ```bash
 ts databricks verify \
-  --parsed parsed.json --model-tml "./tml_out/{model_name}.model.tml" \
+  --parsed parsed.json --translated translated.json \
+  --model-tml "./tml_out/{model_name}.model.tml" \
   --mv-fqn "{catalog}.{schema}.{view_name}" --model-guid {model_guid} \
   --profile {profile} --dbx-profile {databricks_profile_name} \
-  --cluster-tz {cluster_time_zone} --output ./tml_out/verify_report.json
+  --cluster-tz {cluster_time_zone} --output "{work}/verify_report.json"
 ```
 
-- `--model-tml` is the file Step 11 wrote; `--model-guid` is the GUID it returned.
+- `--translated` is Step 6's output, so a measure the converter skipped is reported, not
+  failed.
+- `--model-tml` is the file Step 11 wrote; `--model-guid` is the GUID it returned. The
+  command plans from the imported Model's export and fails if it differs from the file.
 - `--dbx-profile` is the profile's `name` in `~/.claude/databricks-profiles.json` (Step 1),
   not its `dbx_profile` field.
 - `--cluster-tz` is the ThoughtSpot cluster's time zone; ask the user if it is not known
-  (default `UTC`). AgentQL returns a DATE at midnight in that zone. If every date row shows
-  on one side only, the zone is wrong: run again with the right one.
+  (default `UTC`). AgentQL returns a DATE at midnight in that zone. A wrong zone moves each
+  date by a day: monthly rows show on one side only, daily rows as value mismatches
+  between neighbouring days. Run again with the right zone.
+- `{work}` is a working folder outside the repository and the user's files (the
+  scratchpad, or a folder the user names). The report holds warehouse values.
 
 The default shapes are the total, each dimension, each boolean flag filtered `= true` and
-`= false`, and the total filtered on one string value. That last one puts a search filter
-beside every measure, LOD columns included. For a case the defaults miss, run it again with
-`--shapes`, which replaces them; the format is in `tools/ts-cli/README.md`. I.e. a monthly
-semi-additive measure grouped by year, or one region's rows by month:
+`= false`, and a search filter: the total filtered on one dimension value, which puts a
+filter beside every measure, LOD columns included. For a case the defaults miss, run it
+again with `--shapes`, which replaces them; the format is in `tools/ts-cli/README.md`.
+ThoughtSpot compares a string literal case-insensitively and Databricks does not, so pick
+a value with no case variant. E.g. a monthly semi-additive measure grouped by year, or one
+region's rows by month:
 
 ```json
 [{"label": "by year", "dims": ["order_year"], "filter": null},
  {"label": "East by month", "dims": ["order_month"], "filter": ["region", "'East'"]}]
 ```
 
-**3. Read the result.** Exit 0: every compared cell matched. Exit 1: show the user each
-shape that did not match, with the key, the measure and both values, or the error.
-Measures under `not_in_model` and `not_verifiable` were not compared; list them too.
+**3. Read the result.** Exit 0 only for status `match`. Otherwise show the user:
+
+- `mismatch`: each shape that did not match (key, measure, both values), and each entry
+  of `problems`: an MV entry the Model lacks (`missing`), one on a column of the wrong
+  type, or an imported Model that differs from the TML file.
+- `error`: each shape that could not run, with its error.
+- `no_data`: no shape compared a value. Say the numbers were not compared.
+- `incomplete`: no search filter ran (the `search_filter` entry says why). Add a filtered
+  shape with `--shapes`, or say the filter case was not compared.
+
+Also list what was not compared: `skipped_by_converter` and `not_verifiable`.
 
 > **R1:** a mismatch is reported, never fixed by changing what a formula means. Look first
 > for a form that keeps the source's meaning. A fix that changes the meaning needs the
@@ -946,8 +963,9 @@ Measures under `not_in_model` and `not_verifiable` were not compared; list them 
 
 After a successful import (or file output), generate the Markdown report
 (Model Import Complete header, Columns Imported, Formula Translation Log, Not
-Mapped). Add Step 11c's result: shapes and cells compared, any mismatches, the measures
-not compared, and what the data could not show (or that the numbers were not compared).
+Mapped, Numbers verified). The last holds Step 11c's status, the cells compared, any
+mismatches, the search filter, the measures not compared, and what the data could not show
+(or why the numbers were not compared).
 Separately, give 3-5 suggested Spotter test questions based on the
 dimensions and measures present. Both templates:
 [references/console-templates.md](references/console-templates.md)
@@ -996,7 +1014,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.22.0 | 2026-11-27 | **Verify the numbers (BL-639, ts-cli v0.228.0).** A new Step 11c runs `ts databricks verify` after import when the warehouse is reachable. It runs the same query shapes on the Metric View (`MEASURE()`) and the Model (AgentQL) and compares every cell. Default shapes: the total, each dimension, each boolean flag filtered `= true` and `= false`, and the total filtered on one string value, which puts a search filter beside every LOD column. `--cluster-tz` decodes DATE keys, which AgentQL returns at midnight in the cluster's zone. Before running, the step checks the data can show a difference: a latest period that is not the current one, NULL or unmatched keys, several periods per semi-additive measure, and values that differ only in case. A mismatch is reported, never fixed by changing a formula's meaning (R1). Step 12 reports the result. |
+| 1.22.0 | 2026-11-27 | **Verify the numbers (BL-639, ts-cli v0.228.0).** A new Step 11c runs `ts databricks verify` after import when the warehouse is reachable. It runs the same query shapes on the Metric View (`MEASURE()`) and the imported Model (AgentQL) and compares every cell by its Databricks type: counts and integers exactly, DECIMAL at its scale, text exactly, only DOUBLE within a tolerance. Default shapes: the total, each dimension, each boolean flag filtered `= true` and `= false`, and a search filter on one dimension value (a string, else an integer, else a date), which puts a filter beside every LOD column. When no value qualifies, the run is `incomplete`, not a match. An MV entry the Model lacks fails the run unless translate-formulas skipped it, as does one on a column of the wrong type, or an imported Model that differs from the TML file. `--cluster-tz` decodes DATE keys, which AgentQL returns at midnight in the cluster's zone. Before running, the step checks the data can show a difference: a latest period that is not the current one, NULL or unmatched keys, several periods per semi-additive measure, and values that differ only in case. A mismatch is reported, never fixed by changing a formula's meaning (R1). Step 12 reports the result in a new Numbers verified section. |
 | 1.21.0 | 2026-11-27 | **Start from Metric View YAML files (BL-641), and approve any change of meaning (R1, BL-640).** (1) A new entry at Step 0 for definitions held as files with no workspace access: work on copies (the YAML from a `CREATE … AS $$ … $$` wrapper, with its view name recorded), skip Steps 1-4, run Steps 5-12 per view, say what cannot be checked (the MV-on-MV check beyond the set, a SQL source, column types, that the tables exist), and route Step 8 by what exists: existing Tables via 8A, else column types from the user or a `--tables auto` preview. (2) **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.20.1 | 2026-11-27 | **Casts and names (ts-cli v0.227.2).** (1) A cast to text (`STRING`, `VARCHAR(n)`, `TEXT`, `CHAR`) is no longer dropped (BL-633). Over a column it is the warehouse's own cast, `sql_string_op ( "CAST({0} AS STRING)" , [T::x] )`; over `SUM`/`COUNT`/`AVG` it is `to_string`. Over any other expression it is skipped with the reason, because its text depends on the warehouse type. (2) `CAST(DATE_TRUNC('MONTH', d) AS DATE)` translates to `start_of_month ( d )`: ThoughtSpot rejected the `to_date ( start_of_month ( … ) )` it produced at import. (3) With no `display_name`, a `name` cased by its author (`SKU Type`, `Is eBook`) is used as written; snake_case, all-lower and all-upper names are still title-cased (BL-631). **Re-converting into an existing Model** (`--existing-guid`) renames such columns, and their formula ids, from the old title (`Sku Type`) to the name as written (`SKU Type`); check Answers and Liveboards that use them. Titles that differ only by case now fail as duplicates. Three converted Metric Views, imported unpatched, matched Databricks in 6,549 cells. |
 | 1.20.0 | 2026-11-27 | **Latest-period windows and flags convert (ts-cli v0.227.1).** (1) A window ordered by a date built from an integer key, `TO_DATE(CAST(key AS STRING), 'yyyyMMdd')` or `'yyyyMM'`, is ordered by the key, for `range: current` without an offset (BL-634); it was refused, skipping the semi-additive measures. (2) A whole-table dimension `AGG(expr) OVER ()` maps to `group_aggregate ( … , { } , { } )` (BL-635); `parse-mv` used to refuse it. (3) A dimension comparing a row to that dimension (`period = latest_period`) is emitted as a scalar subquery in `sql_bool_op`, because ThoughtSpot's SQL for the `group_aggregate` comparison gives wrong numbers (BL-638). It covers one comparison against a `MAX`/`MIN` `OVER ()` dimension over source columns of a three-part source; a computed dimension that reads it in any other form is skipped with the reason. A measure naming it is translated with a note that it is unverified. |

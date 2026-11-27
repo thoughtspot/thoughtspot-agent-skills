@@ -580,6 +580,7 @@ are roughly ordered by value÷effort.
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
 | BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
+| BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, four AgentQL quoting helpers | 2027-01-31 |
 
 ---
 
@@ -19496,10 +19497,14 @@ with no error.
 
 **Filed:** 2026-11-26. **Status:** DONE (2026-11-27: `ts databricks verify`, ts-cli 0.228.0, run by
 the new Step 11c of `ts-convert-from-databricks-mv`. The default shapes are the total, each
-dimension, each boolean flag grouped and filtered both ways, and a search filter beside every
-measure. The command cannot create the data properties below, so the step checks the data for
-them and says which are missing. Run live on two of this fixture's views: 49 shapes, 6,178
-cells, no mismatch. TIMESTAMP grouping keys are decoded but not live-verified.) **Source:** live
+dimension, each boolean flag grouped and filtered both ways, and a search filter on one
+dimension value, which puts a filter beside every measure. When no dimension has a usable
+value, the run reports `incomplete`, not a match, unless a flag filter compared data. The
+command cannot create the data properties below, so the step checks the data for them and
+says which are missing. Run live on two of this fixture's views: 49 shapes, 6,178 cells, no
+mismatch; after the PR #773 review, one view again (13 shapes) plus the integer and
+`DATE '…'` search-filter literals. TIMESTAMP grouping keys are decoded but not
+live-verified. Follow-ups: BL-664.) **Source:** live
 validation of three converted Metric Views on simba-test against a synthetic Databricks fixture
 (see BL-637). **Target:** 2026-12-15.
 
@@ -20168,3 +20173,26 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
    Unverified on Windows.
 
 **Done when.** Each item is fixed with its test or check, or declined here with the reason.
+
+## BL-664 — Follow-ups from the PR #773 review (`ts databricks verify`) `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #773 (BL-639). **Target:** 2027-01-31.
+
+1. **`ts-convert-from-snowflake-sv` has the gap BL-639 closed for Databricks.** Lint and
+   import pass, the numbers can still be wrong, and no step compares them. The round-trip
+   study found three constructs that import clean and return the wrong number
+   (`docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`). Fix direction: a
+   `ts snowflake verify` on the same plan and comparison modules, querying the Semantic
+   View on the warehouse, and a step in the skill.
+2. **`spotql._cell_value` reads a falsy value of an unmapped type as NULL.** When neither
+   the column's `type` nor the cell's `nullType` names a field, it takes the first field
+   that is not falsy. A 0, `false` or empty string then comes back as None. `verify`
+   reports that as a mismatch against Databricks' 0; other callers read it as NULL.
+3. **`quote_mv_fqn` cannot quote a partly quoted name.** It quotes every dot-separated part,
+   or, when the name holds a backtick, passes it through unchanged. A catalog, schema or
+   view whose name holds a dot works only when the caller quotes the whole name.
+4. **AgentQL identifier quoting is written three times**: `_dq` in
+   `ts_cli/databricks/mv_verify.py`, `_sq` in `ts_cli/aggregate/spotql_aggregate.py` and
+   `_q` in `ts_cli/formula_translate/validate.py`. One shared helper.
+
+**Done when.** Each item is fixed with its test, or declined here with the reason.
