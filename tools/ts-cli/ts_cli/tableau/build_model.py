@@ -168,18 +168,116 @@ def apply_table_name_map(
     return new_ds, new_scoped
 
 
-def strip_csq_suffixes(formulas: list[dict]) -> int:
+def parse_warehouse_columns(data) -> dict:
+    """Normalise a ``--warehouse-columns`` JSON document to ``{table: {cols}}``.
+
+    Accepted shapes:
+      - a list of column names (or of ``{"name": ...}`` objects): applies to
+        whichever single table the datasource binds to; returned under key ``""``
+      - ``{"columns": [...]}``: a table-metadata response (Unity Catalog
+        ``tables/get`` returns this shape); same as a bare list
+      - ``{"<table name>": [...], ...}``: per table, keyed by the ThoughtSpot
+        table name AFTER ``--table-name-map`` is applied
+
+    Raises ``ValueError`` on anything else, so a malformed file fails loudly
+    instead of silently disabling the binding.
+    """
+    def _names(items) -> set[str]:
+        if not isinstance(items, list):
+            raise ValueError("expected a list of column names")
+        out: set[str] = set()
+        for it in items:
+            if isinstance(it, str):
+                out.add(it)
+            elif isinstance(it, dict) and isinstance(it.get("name"), str):
+                out.add(it["name"])
+            else:
+                raise ValueError(f"column entry must be a name or {{'name': ...}}: {it!r}")
+        return out
+
+    if isinstance(data, list):
+        return {"": _names(data)}
+    if isinstance(data, dict):
+        if "columns" in data and isinstance(data["columns"], list):
+            return {"": _names(data["columns"])}
+        return {str(k): _names(v) for k, v in data.items()}
+    raise ValueError("expected a JSON list or object")
+
+
+def warehouse_columns_for(wh_map: dict, table_name: str) -> set[str]:
+    """The warehouse column set for one table: its own entry, else the unkeyed one."""
+    if not wh_map:
+        return set()
+    return wh_map.get(table_name) or wh_map.get("") or set()
+
+
+def load_warehouse_columns(path: str) -> dict:
+    """Read and parse a ``--warehouse-columns`` file; ``ValueError`` names the file."""
+    import json
+    from pathlib import Path
+    p = Path(path)
+    if not p.exists():
+        raise ValueError(f"Warehouse columns file not found: {path}")
+    try:
+        return parse_warehouse_columns(json.loads(p.read_text()))
+    except ValueError as exc:  # includes json.JSONDecodeError
+        raise ValueError(f"--warehouse-columns {path}: {exc}") from exc
+
+
+def resolve_bound_suffixed(
+    ds: dict, warehouse_columns: dict, existing_tml: dict | None,
+) -> tuple[set[str], str | None]:
+    """The ``(Custom SQL Query N)`` columns to keep distinct, plus a progress line.
+
+    Merge mode reads them off the live model (``live_suffixed_columns``).
+    GENERATE mode binds them from ``--warehouse-columns`` on a single-table
+    datasource (``reconcile.bound_suffixed_columns``); anything else keeps none.
+    """
+    if existing_tml is not None:
+        return live_suffixed_columns(existing_tml), None
+    if not warehouse_columns or len(ds.get("tables", [])) != 1:
+        return set(), None
+    from ts_cli.tableau.reconcile import bound_suffixed_columns
+    tbl = ds["tables"][0]["name"]
+    bound = bound_suffixed_columns(ds["columns"], warehouse_columns_for(warehouse_columns, tbl))
+    return bound, (f"  Warehouse columns: {len(bound)} suffixed column(s) kept "
+                   f"as distinct columns of {tbl}")
+
+
+def strip_csq_suffixes(formulas: list[dict], keep: set[str] | None = None) -> int:
     """Strip `` (Custom SQL QueryN)`` suffixes from bracketed refs, in place.
 
-    Returns the number of formulas whose expression changed.
+    A ref whose full suffixed column name (upper-cased) is in ``keep`` is a real
+    column of the target model and is left alone. Returns the number of formulas
+    whose expression changed.
     """
+    keep_upper = {k.upper() for k in (keep or ())}
+
+    def _sub(m: re.Match) -> str:
+        whole = m.group(0)[1:-1]
+        col = whole.rsplit("::", 1)[-1]
+        if col.upper() in keep_upper:
+            return m.group(0)
+        return f"[{m.group(1)}]"
+
     changed = 0
     for f in formulas:
-        new_expr = _CSQ_IN_REF.sub(r"[\1]", f["expr"])
+        new_expr = _CSQ_IN_REF.sub(_sub, f["expr"])
         if new_expr != f["expr"]:
             f["expr"] = new_expr
             changed += 1
     return changed
+
+
+def live_suffixed_columns(existing_tml: dict) -> set[str]:
+    """Upper-cased ``(Custom SQL Query N)`` column names the live model really has.
+
+    Merge mode's counterpart of ``reconcile.bound_suffixed_columns``: a model
+    built with ``--warehouse-columns`` carries those columns, so pre-import
+    validation must not report refs to them as unresolved aliases.
+    """
+    cols = collect_existing_model_context(existing_tml)["existing_cols"]
+    return {c.upper() for c in cols if _CSQ_IN_REF.search(f"[{c}]")}
 
 
 def collect_existing_model_context(existing_tml: dict) -> dict:
@@ -214,7 +312,10 @@ def prepare_formulas_for_merge(
     inline behavior), then builds the ``{expr, id, name}`` dicts the merge
     consumes. Returns ``(formula_dicts, bare_fixed_count)``.
     """
-    strip_csq_suffixes(cleaned_formulas)
+    # A suffixed column the live model really has (kept by --warehouse-columns
+    # at GENERATE time) must keep its suffix, or the ref silently rebinds to
+    # the unsuffixed sibling column.
+    strip_csq_suffixes(cleaned_formulas, ctx.get("existing_cols"))
 
     new_formula_names = {f["name"] for f in cleaned_formulas}
     all_formula_names = ctx["formula_names"] | new_formula_names

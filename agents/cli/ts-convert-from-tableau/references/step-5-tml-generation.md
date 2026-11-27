@@ -94,6 +94,31 @@ Column-id qualification and suffix/junk stripping are automatic (Tier-1) for eve
 Dropped columns + their formulas appear in the result JSON's `reconcile_dropped` and the
 Step 12 report.
 
+## Published/sqlproxy datasources landed as one flattened table — keep suffixed columns (Step 5b)
+
+When the datasource was landed as **one flattened table that keeps Tableau's suffixed names**
+(`LEVEL` and `LEVEL (Custom SQL Query8)` both exist as warehouse columns, holding different
+data), Tier-1 stripping is wrong: it collapses the suffixed column onto `LEVEL`, drops it from
+the Table TML, and every formula that read it silently reads `LEVEL` instead. Pass the target
+table's real column list so those columns are kept:
+
+```bash
+ts tableau build-model {workdir}/{workbook}.twb --connection "{connection_name}" \
+  --datasource "{datasource_name}" --output-dir {output_dir} \
+  --table-name-map {workdir}/table_name_map.json \
+  --warehouse-columns {workdir}/warehouse_columns.json
+```
+
+`warehouse_columns.json` is `{"<thoughtspot table name>": ["COL", "COL (Custom SQL Query8)", ...]}`
+(a bare list, or a `{"columns": [{"name": ...}]}` table-metadata response, also works). Get the
+names from the warehouse itself (for Databricks, the Unity Catalog table metadata;
+for Snowflake, `INFORMATION_SCHEMA.COLUMNS`); never from the TWB, which is the thing being
+checked. Keep the file in `{workdir}`, not `{output_dir}`. The stderr line
+`Warehouse columns: N suffixed column(s) kept` reports how many were bound; a suffixed ref the
+warehouse does not have is still stripped and still warned "Unresolved Custom SQL Query alias".
+Single-table datasources only: a datasource whose queries are separate warehouse relations is
+the multi-query case below.
+
 ## Multi-query datasources (one datasource that JOINS several Custom SQL Queries) — hand assembly onto multiple tables
 
 A published/`sqlproxy` datasource often joins several Custom SQL Queries server-side. GENERATE

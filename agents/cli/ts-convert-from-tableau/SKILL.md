@@ -1108,6 +1108,9 @@ formulas are added independently in Phase 2 via `build-model --existing-guid` **
 (Step 5a) differs from the TWB relation name (warehouse-normalized names, or a published
 datasource literally named `sqlproxy`); omit when names already match.
 
+**Flattened table keeping `(Custom SQL Query N)` names as real columns:** pass
+`--warehouse-columns` (see [references/step-5-tml-generation.md](references/step-5-tml-generation.md)).
+
 **Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
 When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
 case), emitted columns carry Tableau's `(Custom SQL Query N)` suffixes that may diverge from
@@ -2512,6 +2515,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.2 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.4). Tables imported by an earlier ts-cli keep caption names: regenerate them before scope 4 or a Phase-2 merge. |
+| 1.48.0 | 2026-11-27 | `--warehouse-columns` keeps warehouse-real `(Custom SQL Query N)` columns (ts-cli v0.227.0). |
 
-**Older entries (v1.0.0–v1.47.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
