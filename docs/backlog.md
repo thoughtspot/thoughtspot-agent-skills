@@ -20115,7 +20115,7 @@ source table's FQN, which a Tableau datasource may not give) or skips with the r
 
 **Filed:** 2026-11-27. **Source:** review of PR #771 (BL-631, BL-633). **Target:** 2027-01-31.
 
-All predate #771; it fixed the cases it was about and recorded these.
+Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base compared a date with a date, which was right); it is rare, so it was recorded rather than fixed.
 
 1. **`to_date` over other date-valued inputs.** ThoughtSpot rejected `to_date ( start_of_month ( … ) )`
    at import (live 2026-11-27), so #771 drops `CAST(… AS DATE)` over a translated `start_of_*` or

@@ -110,3 +110,30 @@ def test_titles_differing_only_by_case_fail_loud():
     from ts_cli.databricks.mv_build_model import _check_no_duplicate_display_names
     with pytest.raises(ValueError, match="duplicate display title"):
         _check_no_duplicate_display_names([{"name": "SKU Type"}, {"name": "Sku Type"}])
+
+
+# --- review round 2 (PR #771) ----------------------------------------------------
+@pytest.mark.parametrize("sql", [
+    "CONCAT(CAST(CAST(source.QTY AS DOUBLE) AS STRING), ' units')",  # '5.0' vs '5'
+    "CAST(SUM(CAST(source.QTY AS DOUBLE)) AS STRING)",
+    "CAST(SUM(source.A + source.B) AS STRING)",
+    "CAST('x' = source.S AS STRING)",
+])
+def test_cast_to_text_decided_from_the_source(sql):
+    from ts_cli.databricks.mv_sql import UntranslatableError
+    with pytest.raises(UntranslatableError, match="warehouse type"):
+        translate_sql_expr(sql, R)
+
+
+@pytest.mark.parametrize("sql,ts", [
+    ("CAST(COUNT(DISTINCT source.K) AS STRING)", "to_string ( unique count ( [FACT::K] ) )"),
+    ("CAST(COUNT(*) AS STRING)", "to_string ( count ( 1 ) )"),
+    ("CAST(AVG(source.K) AS STRING)", "to_string ( average ( [FACT::K] ) )"),
+])
+def test_cast_to_text_of_one_column_aggregate(sql, ts):
+    assert translate_sql_expr(sql, R) == ts
+
+
+def test_date_no_op_needs_one_whole_call():
+    out = translate_sql_expr("CAST(TRUNC(source.D, 'MM') + 1 AS DATE)", R)
+    assert out.startswith("to_date (")
