@@ -1665,7 +1665,7 @@ dropped formula. **Caps:** max 15 formulas attempted (park the rest), max 3 atte
 2. **Skip if not fixable** — the error references another parked formula (dependency chain
    — fix that one first) or indicates a missing table/column (structural, not an expression
    fix).
-3. **Attempt a fix** — rewrite the expression per the error (parenthesise, fix function
+3. **Attempt a fix** (approve a meaning change first, R1) — rewrite the expression per the error (parenthesise, fix function
    name, add `TABLE::` qualifier, wrap date literal in `to_date()`), export the current
    model (`ts tml export {model_guid} --profile {profile_name} --parse`), add the fixed
    formula as a new `formulas[]`+`columns[]` pair, import (`ts tml import --profile

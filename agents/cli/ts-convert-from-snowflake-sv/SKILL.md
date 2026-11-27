@@ -278,6 +278,8 @@ Require the user to type `done` after reviewing before proceeding.
 
 ### Step C5: Build the updated Model TML and import
 
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+
 Deep-copy the existing Model TML. Apply only the confirmed changes — full change-type
 → action mapping table (incl. `ai_context`/Instructions never-touch rules):
 [references/step-c-update-mode.md](references/step-c-update-mode.md) "Step C5 change-action mapping".
@@ -893,6 +895,8 @@ step is needed.
 
 ### Step 11: Import the model
 
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+
 Re-run `ts snowflake build-model` with `--profile` to import:
 
 ```bash
@@ -929,6 +933,8 @@ Follow [`ts-tml-import-gate.md` § 5](../../shared/schemas/ts-tml-import-gate.md
 ---
 
 ### Step 11c: Reconcile the Model against the Semantic View
+
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
 
 **A successful import is not a correct conversion.** Step 11b confirms the object exists
 and re-exports; it does not confirm a single number. Query the Model and compare it to the

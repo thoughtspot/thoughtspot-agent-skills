@@ -944,6 +944,8 @@ Skip to Step 9.
 
 ### Step 9: Review results
 
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+
 Print the raw JSON response. If `--include-semantic-report` was used, surface
 the per-model `semantic_report` breakdown — component name, type
 (dimension/measure/metric), import status, and the SQL → ThoughtSpot formula
@@ -1055,6 +1057,8 @@ user can't enumerate columns manually), say so plainly and fall through to
 Step 10.5 as the only safety net for this run.
 
 #### Step 10.4: Resync
+
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
 
 ```bash
 ts dbt generate-sync-tml \

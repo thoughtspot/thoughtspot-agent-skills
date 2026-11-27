@@ -513,6 +513,8 @@ coverage."
 
 ## Step 8 — Build zip + batch import all TMLs
 
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+
 Bundle all Table TMLs and the Model TML into a zip (for ThoughtSpot UI import), then
 import the same directory via the CLI. ThoughtSpot resolves `model_tables[].name:`
 references within the batch — no GUID capture required.

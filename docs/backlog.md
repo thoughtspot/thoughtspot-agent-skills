@@ -19521,7 +19521,7 @@ angle 15 in `.claude/rules/repo-audit.md`.
 
 ## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
 
-**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the pre-import step of all eight `ts-convert-from-*` skills). **Source:** as BL-639. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the first import of all eight `ts-convert-from-*` skills, at their fix-and-reimport steps, and in `ts-tml-import-gate.md`; the conversion-consistency auditor checks it. Not covered: a formula written by hand for a construct the converter refused, outside an import or number failure — e.g. Qlik's "recreate them as Model formulas"). **Source:** as BL-639. **Target:** 2026-12-15.
 
 **What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
 replaced with "current calendar month" to make the numbers match, without asking. The user

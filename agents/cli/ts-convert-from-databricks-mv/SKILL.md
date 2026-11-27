@@ -139,21 +139,32 @@ Do not begin Step 1 until the user confirms.
 ### Starting from Metric View YAML files (no workspace access)
 
 When the user has the Metric View definitions as files (an export, a repo, a paste)
-and no Databricks access, start there instead (BL-641):
+and no Databricks access, start there instead (BL-641). **Never edit the user's files:**
+work on copies in a working directory.
 
-1. Skip Steps 1-4 for Databricks. Still confirm the ThoughtSpot profile (Step 1) if the
-   result will be imported; for file-only output no profile is needed.
-2. For each file: strip a `CREATE ... AS $$ ... $$` wrapper if present, keeping only the
-   YAML, and normalise Windows line endings (`\r\n` to `\n`). Then run Step 5's
-   `ts databricks parse-mv <file> --output parsed.json` on it.
-3. Tell the user what cannot be checked without the workspace, before the Step 10 review:
-   - the MV-on-MV check in Step 5 (whether `source:` or a join source is itself a
-     Metric View);
-   - column data types, which Step 8 would read from the warehouse: Table TML built from
-     files has no verified types (BL-636);
+1. Skip Steps 1-4 for Databricks. The Prerequisites' Databricks items do not apply.
+2. For each file, record the view name from its `CREATE ... VIEW <catalog.schema.name>`
+   line, if any; it is the Model name and `--mv-fqn` in Step 9 (otherwise ask the user).
+   Write the YAML between `$$ ... $$` to a new file such as `work/<view>/mv.yaml`; a file
+   that is YAML already is copied as is. `parse-mv` reads LF and CRLF alike and expects
+   UTF-8, so re-save a UTF-16 export as UTF-8. A `.sql` file with several CREATE
+   statements gives one YAML file per view.
+3. Run Steps 5 to 12 once per view, each in its own `work/<view>/` directory
+   (`parsed.json`, `translated.json`, output TML), not one shared `parsed.json`.
+4. Tell the user what cannot be checked without the workspace, before the Step 10 review:
+   - Step 5's MV-on-MV check. With all the views' files at hand, compare each `source:`
+     and join source with the other views' names; that catches the chained case among
+     them, not a Metric View outside the set;
+   - a `sql_query` source: options (D) and (T) need Databricks, so only (M) or (S) apply;
+   - column data types, which Step 8B reads with `DESCRIBE TABLE` (BL-636);
    - that the source tables exist under the names the YAML uses.
-4. Continue at Step 5. Step 8 matches existing ThoughtSpot Tables by name, or writes Table
-   TML for the user to check; choose **FILE** at Step 10 when nothing can be imported yet.
+5. Tables and import, by what is available:
+   - **A ThoughtSpot profile and existing Tables** for the sources: Step 8A as usual, then
+     Steps 9 to 11.
+   - **No existing Tables:** Step 8B cannot run (it needs `DESCRIBE TABLE`, and a
+     `create: true` table needs a `dbx_type` per column). Either get the column types
+     from the user, or build a Model preview with `ts databricks build-model --tables auto`
+     (Model TML only, not for import) and choose **FILE** at Step 10.
 
 ---
 
@@ -825,6 +836,8 @@ update-vs-create `guid` and import-policy rules. Do not import until
 
 ### Step 11: Import the model
 
+> **R1:** a fix that changes a formula's meaning needs the user's approval before this import, listed with the difference ([invariant R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import)).
+
 **IMPORTANT — Updating vs creating:** without `--existing-guid`, ThoughtSpot
 always creates a **new** object, even when a model with the same name exists.
 To update in place, pass the existing model's GUID — `build-model` stamps it
@@ -912,7 +925,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.21.0 | 2026-11-27 | **Start from Metric View YAML files (BL-641), and approve any change of meaning (R1, BL-640).** (1) A new entry at Step 0 for definitions held as files with no workspace access: strip a `CREATE … AS $$ … $$` wrapper and Windows line endings, skip Steps 1-4, and tell the user what cannot be checked (the MV-on-MV check, column types, that the source tables exist). (2) **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
+| 1.21.0 | 2026-11-27 | **Start from Metric View YAML files (BL-641), and approve any change of meaning (R1, BL-640).** (1) A new entry at Step 0 for definitions held as files with no workspace access: work on copies (the YAML from a `CREATE … AS $$ … $$` wrapper, with its view name recorded), skip Steps 1-4, run Steps 5-12 per view, say what cannot be checked (the MV-on-MV check beyond the set, a SQL source, column types, that the tables exist), and route Step 8 by what exists: existing Tables via 8A, else column types from the user or a `--tables auto` preview. (2) **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.20.1 | 2026-11-27 | **Casts and names (ts-cli v0.227.2).** (1) A cast to text (`STRING`, `VARCHAR(n)`, `TEXT`, `CHAR`) is no longer dropped (BL-633). Over a column it is the warehouse's own cast, `sql_string_op ( "CAST({0} AS STRING)" , [T::x] )`; over `SUM`/`COUNT`/`AVG` it is `to_string`. Over any other expression it is skipped with the reason, because its text depends on the warehouse type. (2) `CAST(DATE_TRUNC('MONTH', d) AS DATE)` translates to `start_of_month ( d )`: ThoughtSpot rejected the `to_date ( start_of_month ( … ) )` it produced at import. (3) With no `display_name`, a `name` cased by its author (`SKU Type`, `Is eBook`) is used as written; snake_case, all-lower and all-upper names are still title-cased (BL-631). **Re-converting into an existing Model** (`--existing-guid`) renames such columns, and their formula ids, from the old title (`Sku Type`) to the name as written (`SKU Type`); check Answers and Liveboards that use them. Titles that differ only by case now fail as duplicates. Three converted Metric Views, imported unpatched, matched Databricks in 6,549 cells. |
 | 1.20.0 | 2026-11-27 | **Latest-period windows and flags convert (ts-cli v0.227.1).** (1) A window ordered by a date built from an integer key, `TO_DATE(CAST(key AS STRING), 'yyyyMMdd')` or `'yyyyMM'`, is ordered by the key, for `range: current` without an offset (BL-634); it was refused, skipping the semi-additive measures. (2) A whole-table dimension `AGG(expr) OVER ()` maps to `group_aggregate ( … , { } , { } )` (BL-635); `parse-mv` used to refuse it. (3) A dimension comparing a row to that dimension (`period = latest_period`) is emitted as a scalar subquery in `sql_bool_op`, because ThoughtSpot's SQL for the `group_aggregate` comparison gives wrong numbers (BL-638). It covers one comparison against a `MAX`/`MIN` `OVER ()` dimension over source columns of a three-part source; a computed dimension that reads it in any other form is skipped with the reason. A measure naming it is translated with a note that it is unverified. |
 | 1.19.3 | 2026-11-27 | **Three emission defects (ts-cli v0.225.3).** A dimension named in a later dimension's or a measure's expression, such as `QUARTER(order_month)`, became a nonexistent fact-table column and failed import. It now resolves to that dimension's formula id or column, under Databricks' scope rules (live-probed): by `name` only, only dimensions defined earlier, and never inside `filter:`. A direct dimension or a simple aggregate naming a computed dimension is still open (BL-629). A column and a formula with one display title no longer silently lose the column; build-model fails and names the title (BL-630). `first_value`/`last_value` inside arithmetic, from inlining semi-additive measures or from a multi-aggregate semi-additive window, is wrapped in `sum ( … )`, which ThoughtSpot requires at import (BL-637, live-verified) |
