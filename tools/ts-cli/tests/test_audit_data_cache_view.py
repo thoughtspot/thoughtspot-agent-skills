@@ -246,7 +246,7 @@ def test_the_view_lists_every_model_with_its_readiness(tmp_path):
     seen = shown["visible"]
     for text in ("Can’t use", "Can use", "Warning", "Custom calendar: Ship Date (Retail 445)",
                  "SQL pass-through: Upper", "Retail 445 (custom): Ship Date (from its Table)",
-                 "fiscal (code-based): Day", "4 of 4 Models",
+                 "fiscal (code-based): Day", "4 of 4 Models shown",
                  "Connection defines custom calendars: Warehouse B (1 custom calendar)"):
         assert text in seen, text
     nav = report_browser.render(_page(), tmp_path, "dashboard", actions=(
@@ -255,35 +255,115 @@ def test_the_view_lists_every_model_with_its_readiness(tmp_path):
     assert "Data Cache" in nav["extra"]
 
 
+_HEATMAP = ('window.__extra = {header: Array.prototype.some.call(document.querySelectorAll('
+            '".heatmap thead th"), function(th){ return th.textContent === "Data Cache"; }),'
+            ' rows: Array.prototype.map.call(document.querySelectorAll('
+            '".heatmap tbody tr"), function(tr){ var dc = tr.querySelector("a.dc-state"); '
+            'return [tr.querySelector(".model-name a").textContent, dc && dc.textContent, '
+            'dc && dc.getAttribute("href"), dc && dc.getAttribute("title")]; })};')
+
+
 @needs_chrome
-@pytest.mark.parametrize("pill, expected", [
-    ("blocked", ["Blocked Sales", "Passthrough Sales"]), ("ready", ["Ready Sales"]),
-    ("warning", ["Warned Sales"]),
-    ("all", ["Blocked Sales", "Passthrough Sales", "Ready Sales", "Warned Sales"])])
-def test_the_pills_filter_by_readiness(tmp_path, pill, expected):
-    click = (f'document.querySelector(\'#v-datacache .dc-pill[data-filter="blocked"]\').click();'
-             f'document.querySelector(\'#v-datacache .dc-pill[data-filter="{pill}"]\').click();')
-    shown = report_browser.render(_page(), tmp_path, "datacache", actions=click + _ROWS)
+def test_the_dashboard_heatmap_has_a_data_cache_column(tmp_path):
+    """Each heatmap row shows its Model's Data Cache readiness, as the Data Cache view
+    labels it, with the reasons on hover and a link to that Model's Data Cache page."""
+    shown = report_browser.render(_page(), tmp_path, "dashboard", actions=_HEATMAP)
+    assert shown["errors"] == [] and shown["extra"]["header"]
+    rows = {name: (label, href, title) for name, label, href, title in shown["extra"]["rows"]}
+    # The heatmap lists the Models with findings; Ready Sales has none.
+    assert {n: r[0] for n, r in rows.items()} == {
+        "Blocked Sales": "Can’t use", "Passthrough Sales": "Can’t use",
+        "Warned Sales": "Warning"}
+    # each links to that Model's own Data Cache page
+    assert {n: r[1] for n, r in rows.items()} == {
+        "Blocked Sales": "#datacache/m-blocked", "Passthrough Sales": "#datacache/m-sql",
+        "Warned Sales": "#datacache/m-warn"}
+    assert rows["Blocked Sales"][2] == (
+        "Data Cache: Can’t use — P19 Custom calendar")
+    assert rows["Warned Sales"][2] == (
+        "Data Cache: Warning — P22 Connection defines custom calendars")
+
+
+def _no_column(shown):
+    return (shown["errors"] == [] and shown["extra"]["rows"]
+            and not shown["extra"]["header"]
+            and all(row[1] is None for row in shown["extra"]["rows"]))
+
+
+@needs_chrome
+def test_the_heatmap_has_no_data_cache_column_for_json_from_before_it(tmp_path):
+    data = run_audit(None, [], ["P"], ctx=_estate())
+    for m in data["corpus"]["models"]:
+        m.pop("data_cache", None)
+    assert _no_column(report_browser.render(render_report(data), tmp_path, "dashboard",
+                                            actions=_HEATMAP))
+
+
+@needs_chrome
+def test_the_heatmap_has_no_data_cache_column_without_the_performance_angle(tmp_path):
+    """Without P, P19 to P28 did not run and every Model would read Not assessed: the
+    column is left out, as Spotter readiness is without A."""
+    page = render_report(run_audit(None, [], ["D"], ctx=_estate()))
+    assert _no_column(report_browser.render(page, tmp_path, "dashboard", actions=_HEATMAP))
+
+
+def _chip(f):
+    return 'document.querySelector(\'#v-datacache .fbar-chip[data-f="' + f + '"]\')'
+
+
+_CHIPS = ('window.__chips = function(){ return Array.prototype.map.call(document.querySelectorAll('
+          '"#v-datacache .fbar-chip"), function(b){ return [b.getAttribute("data-f"),'
+          ' b.getAttribute("aria-pressed"), b.querySelector(".fbar-count").textContent, b.disabled]; }); };')
+
+
+@needs_chrome
+def test_the_readiness_chips_are_multi_select_with_counts_and_all_resets(tmp_path):
+    """The shared filter bar (filter_bar.js): every chip on at first, switching one off
+    hides its Models, several can be off at once, and All switches every chip back on."""
+    rows = ('function names(){ return Array.prototype.map.call(document.querySelectorAll('
+            '"#v-datacache tbody tr[data-state]"), function(tr){ return tr.querySelector("a").textContent; }).sort(); }'
+            'function total(){ return document.querySelector("#v-datacache .fbar-total").textContent; }')
+    shown = report_browser.render(_page(), tmp_path, "datacache", actions=_CHIPS + rows + (
+        'var first = {chips: __chips(), names: names(), total: total()};'
+        + _chip("blocked") + '.click();'
+        'var noBlocked = {names: names(), total: total(), chips: __chips()};'
+        + _chip("warning") + '.click();'
+        'var two = names();'
+        + _chip("all") + '.click();'
+        'window.__extra = {first: first, noBlocked: noBlocked, two: two, reset: names(), chips: __chips()};'))
     assert shown["errors"] == []
-    assert sorted(name for name, _ in shown["extra"]) == expected
-    assert f"{len(expected)} of 4 Models" in shown["visible"]
+    x = shown["extra"]
+    assert x["first"]["chips"] == [["all", "true", "4", False], ["ready", "true", "1", False],
+                                   ["blocked", "true", "2", False], ["confirm", "true", "0", True],
+                                   ["warning", "true", "1", False], ["unknown", "true", "0", True]]
+    assert x["first"]["names"] == ["Blocked Sales", "Passthrough Sales", "Ready Sales", "Warned Sales"]
+    assert x["first"]["total"] == "4 of 4 Models shown"
+    assert x["noBlocked"]["names"] == ["Ready Sales", "Warned Sales"]
+    assert x["noBlocked"]["total"] == "2 of 4 Models shown"
+    assert [c[1] for c in x["noBlocked"]["chips"][:3]] == ["false", "true", "false"]  # All, ready, blocked
+    assert x["two"] == ["Ready Sales"]
+    assert x["reset"] == x["first"]["names"]
+    assert all(c[1] == "true" for c in x["chips"])
 
 
 @needs_chrome
-def test_to_confirm_and_not_assessed_have_their_own_state_and_pill(tmp_path):
+def test_to_confirm_and_not_assessed_have_their_own_state_and_chip(tmp_path):
     page = render_report(run_audit(None, [], ["P"], ctx=_to_confirm()))
     shown = report_browser.render(page, tmp_path, "datacache", actions=_ROWS)
     assert shown["errors"] == []
     assert ["Ready Sales", "confirm"] in shown["extra"]
     assert "To confirm" in shown["visible"]
-    click = ('document.querySelector(\'#v-datacache .dc-pill[data-filter="confirm"]\').click();')
-    picked = report_browser.render(page, tmp_path, "datacache", actions=click + _ROWS)
-    assert picked["errors"] == [] and picked["extra"] == [["Ready Sales", "confirm"]]
-    unknown = report_browser.render(_page(connections=None), tmp_path, "datacache", actions=(
-        'document.querySelector(\'#v-datacache .dc-pill[data-filter="unknown"]\').click();'
-        + _ROWS))
-    assert unknown["errors"] == []
-    assert sorted(unknown["extra"]) == [["Ready Sales", "unknown"], ["Warned Sales", "unknown"]]
+    # switching To confirm off hides exactly the Models that read To confirm
+    off = report_browser.render(page, tmp_path, "datacache", actions=_chip("confirm") + '.click();' + _ROWS)
+    assert off["errors"] == []
+    assert sorted(off["extra"]) == sorted(r for r in shown["extra"] if r[1] != "confirm")
+    unknown = report_browser.render(_page(connections=None), tmp_path, "datacache", actions=_ROWS)
+    gone = report_browser.render(_page(connections=None), tmp_path, "datacache",
+                                 actions=_chip("unknown") + '.click();' + _ROWS)
+    assert unknown["errors"] == [] and gone["errors"] == []
+    assert sorted(r for r in unknown["extra"] if r[1] == "unknown") == [
+        ["Ready Sales", "unknown"], ["Warned Sales", "unknown"]]
+    assert sorted(gone["extra"]) == sorted(r for r in unknown["extra"] if r[1] != "unknown")
 
 
 @needs_chrome

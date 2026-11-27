@@ -135,6 +135,11 @@ def adapt_tableau(expr: str, ctx: ColumnContext, role_hint: Optional[str] = None
     role = role_hint or ("measure" if re.search(
         r"\b(SUM|AVG|COUNTD?|MIN|MAX|MEDIAN|STDEV|VAR|ATTR|WINDOW_\w+|RUNNING_\w+)\s*\(",
         expr, re.I) else "attribute")
+    # No `datatype` to pass here (unlike build-model's path, which reads the
+    # real `<column datatype="...">` off the TWB): this adapter translates a
+    # standalone formula string with no such attribute available. Leaving it
+    # at translate_single's default (None) is the safe direction — it only
+    # narrows convert_string_concat's eligible operand set, never broadens it.
     out, errors, notes = translate_single(
         expr, role=role, scoped_columns=scoped, parameter_names=params,
         date_columns=date_cols)
@@ -301,7 +306,10 @@ def _adapt_sql(expr: str, ctx: ColumnContext, translate_fn) -> RawResult:
         return RawResult(None, NEEDS_REVIEW, [str(exc)])
     except Exception as exc:  # a parser error is still "untranslated", never a crash
         return RawResult(None, NEEDS_REVIEW, [f"{type(exc).__name__}: {exc}"])
-    return RawResult(out, TRANSLATED)
+    # the whole formula, shown to a person and spliced nowhere: the grouping the
+    # translator adds around a conditional (BL-632) is noise here
+    from ts_cli.sql_forms import sqlf_unwrap_conditional
+    return RawResult(sqlf_unwrap_conditional(out), TRANSLATED)
 
 
 def adapt_snowflake(expr: str, ctx: ColumnContext) -> RawResult:

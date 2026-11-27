@@ -60,23 +60,25 @@ _BODY = """<header>
       <option value="fact">Fact neighbourhood</option>
     </select>
   </div>
-  <div class="ctl-group">
-    <span class="group-label">Search</span>
-    <input id="finder" list="tablelist" placeholder="table name…" autocomplete="off">
+  <div class="ctl-group ctl-show">
+    <!-- The filter bar: one spec with the audit report's (ts_cli/audit/report/filter_bar.js) -->
+    <div class="fbar" id="filter-chips" role="group" aria-label="Show these tables">
+      <span class="fbar-label">Show</span>
+      <button type="button" class="fbar-chip fbar-all" data-f="all" aria-pressed="true">All <span class="fbar-count"></span></button>
+      <button type="button" class="fbar-chip" data-f="fact" aria-pressed="true">Fact <span class="fbar-count"></span></button>
+      <button type="button" class="fbar-chip" data-f="dim" aria-pressed="true">Dim <span class="fbar-count"></span></button>
+      <button type="button" class="fbar-chip" data-f="sql_view" aria-pressed="true">SQL View <span class="fbar-count"></span></button>
+      <button type="button" class="fbar-chip" data-f="alias" aria-pressed="true">Alias <span class="fbar-count"></span></button>
+      <button type="button" class="fbar-chip" data-f="rls" aria-pressed="true">RLS <span class="fbar-count"></span></button>
+      <input class="fbar-search" id="finder" type="search" list="tablelist" placeholder="Find a table" aria-label="Find a table" autocomplete="off">
+      <span class="fbar-total"></span>
+    </div>
     <datalist id="tablelist"></datalist>
   </div>
   <div class="ctl-group">
-    <span class="group-label">Filter</span>
-    <div class="filter-chips" id="filter-chips">
-      <button class="fchip on" data-f="all">All</button>
-      <button class="fchip" data-f="fact">Fact</button>
-      <button class="fchip" data-f="dim">Dim</button>
-      <button class="fchip" data-f="sql_view">SQL View</button>
-      <button class="fchip" data-f="alias">Alias</button>
-      <button class="fchip" data-f="rls">RLS</button>
-      <button class="fchip" data-f="rls_subgraph">RLS subgraph</button>
-      <button class="fchip" data-f="notes">Notes</button>
-    </div>
+    <span class="group-label">Focus</span>
+    <button type="button" class="minibtn focus-btn" id="focus-rls" aria-pressed="false" title="Only the tables row-level security involves: those a rule is defined on and those a rule references">RLS subgraph</button>
+    <button type="button" class="minibtn focus-btn" id="focus-notes" aria-pressed="false" title="Only the tables with a note, and the two ends of every join with one">Noted only</button>
   </div>
   <div class="spacer"></div>
   <div class="ctl-group actions">
@@ -167,7 +169,7 @@ _BODY = """<header>
   <div class="section-label">Reading the joins</div>
   <p class="sub">Each join carries a midpoint badge: <b style="background:#1E6FA8;color:#fff;border-radius:3px;padding:1px 5px;font-family:var(--mono)">M</b> = model-local (defined in this model only), <b style="background:#EDEFF2;color:#6B7480;border-radius:3px;padding:1px 5px;font-family:var(--mono)">T</b> = table-level (reusable, can ripple to other models). Switch <b>Notation</b> to <b>Crow's foot</b> to read cardinality instead of TS-style arrows. Click any join for its type, cardinality and definition.</p>
   <div class="section-label">Notes</div>
-  <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports. Use the <b>Notes</b> filter chip to highlight every noted object at any zoom level (it stays enabled as long as a note exists, including notes baked into a shared file). <b>Review notes</b> lists every note at once — table/join rows jump to that object, and each row can be deleted inline.</p>
+  <p class="sub">Add notes to any table or join via the side panel. Notes persist in your browser and travel with <b>Share HTML</b> exports. Use <b>Noted only</b> (under Focus) to show only the noted tables and the ends of every noted join (it stays enabled as long as a note exists, including notes baked into a shared file). <b>Review notes</b> lists every note at once — table/join rows jump to that object, and each row can be deleted inline.</p>
   <div class="section-label">Group by</div>
   <p class="sub"><b>Group by</b> colors tables into subject areas — a non-destructive overlay, never a layout change. <b>Name prefix</b> tokenizes each table id (e.g. <code>W_SFDC_ACCOUNT</code> → <b>Sfdc</b>). <b>Graph cluster</b> detects communities from the join graph — a hub-centric model may legitimately collapse to very few groups. <b>Fact neighbourhood</b> assigns every table to its nearest fact table by join distance — a model with many facts fragments into many groups. Each mode shows its own legend (swatch + label + count) top-left; click a legend row to dim everything outside that group (it only ever dims, never hides); click again — or switch mode, load a model, or click an empty area of the canvas — to clear the highlight. Switching modes or loading a model always resets to <b>None</b>.</p>
   <div class="section-label">Share HTML</div>
@@ -189,7 +191,9 @@ _TEMPLATE = """<!doctype html>
 def render_html(bundle, *, title="Model ERD"):
     css = _asset("renderer.css")
     js = _asset("renderer.js")
-    data = json.dumps(bundle, ensure_ascii=False)
+    # Every < and > escaped (JSON reads \u003c as "<"): a name holding "</script>" or
+    # "<!--<script" would otherwise end or swallow the data script.
+    data = json.dumps(bundle, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
     return _TEMPLATE.format(title=title, css=css, js=js, body=_BODY, data=data)
 
 

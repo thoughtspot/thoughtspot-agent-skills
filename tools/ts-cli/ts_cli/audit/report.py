@@ -27,8 +27,11 @@ REPORT_DIR = Path(__file__).parent / "report"
 VENDOR_DIR = Path(__file__).parent / "vendor"
 
 #: Scripts every view may call, between core.js and the views: shared code that is not
-#: a view of its own (the Formulas view's graph mode).
-REPORT_LIBS: List[str] = ["formula_graph.js"]
+#: a view of its own (the filter bar, the tab bar and breadcrumb of a Model's pages, the
+#: formula type filter and legend, the Formulas view's graph mode, the usage wording, and
+#: the Usage view's quadrant and candidates export: a file under views/ is a view).
+REPORT_LIBS: List[str] = ["filter_bar.js", "model_nav.js", "formula_types.js", "formula_graph.js",
+                          "usage.js", "usage_quadrant.js", "usage_export.js"]
 
 #: The graph's libraries, in load order (vendor/README.md): dagre, then Cytoscape, then
 #: the Cytoscape layout that drives dagre, which registers itself with Cytoscape.
@@ -42,6 +45,7 @@ REPORT_VIEWS: List[tuple] = [
     ("crossmodel", "views/crossmodel.js"),
     ("objectmap", "views/objectmap.js"),
     ("cleanup", "views/cleanup.js"),
+    ("usage", "views/usage.js"),
     ("formulas", "views/formulas.js"),
     ("datacache", "views/datacache.js"),
 ]
@@ -132,6 +136,13 @@ def metric_bar(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if _number(yellow) and yellow > green:
         return _bar(value, green, value <= green, "", "lower_is_better")
     return _bar(value, green, value >= green, "%", "higher_is_better")
+
+
+def _usage_rule_ids() -> List[str]:
+    """The rules that require `usage` (H17): with usage not read they judge no Model, so
+    the report must not show their empty sections as clean (report/usage.js)."""
+    from ts_cli.audit.catalog_model import load_catalog
+    return [r.id for r in load_catalog().rules.values() if "usage" in (r.requires or [])]
 
 
 def _catalog_meta() -> Dict[str, Any]:
@@ -284,7 +295,84 @@ def _compact_model(m: dict, model_index: dict, pasteable: Any = frozenset()) -> 
                                  {n for g, n in pasteable if g == m.get("guid")})
     if isinstance(m.get("data_cache"), dict):  # absent from JSON written before 3.23
         cm["dc"] = _compact_data_cache(m["data_cache"])
+    if isinstance(m.get("usage"), dict):  # only when usage was read (since 3.26)
+        cm["us"] = _compact_model_usage(m["usage"])
     return cm
+
+
+def _compact_model_usage(u: dict) -> dict:
+    """A Model's `usage`: `l` its last query (epoch seconds) or null, `d` whole days
+    since, `q` queries and `u` distinct users over the window, `n` 1 when the history
+    holds no query of it; since 3.28 (audit/usage_triage.py), `s` its status, `dp` its
+    dependents `[total (null unless complete), Liveboards, Answers, Sets (null when not
+    read), other, visible (a lower bound when not complete), what was not read in full
+    ("sets", "dependents"; [] when complete)]`, `dc` 0 when completeness is not known (a
+    snapshot from before 0.225.0), `ow` its
+    owner and `cr` its creation date (each null when not recorded)."""
+    out = {"l": u.get("last_used"), "d": u.get("days"), "q": u.get("queries_180d") or 0,
+           "u": u.get("users_180d") or 0}
+    if u.get("never"):
+        out["n"] = 1
+    if "status" in u:  # absent from JSON written before 3.28
+        dp = u.get("dependents") or {}
+        out.update({"s": u["status"], "ow": u.get("owner"), "cr": u.get("created"),
+                    "dp": [dp.get(k) for k in ("total", "liveboards", "answers", "sets",
+                                               "other", "visible", "not_read")]})
+        if dp.get("complete") is None and not dp.get("not_read"):
+            out["dc"] = 0
+    return out
+
+
+def _compact_usage(usage: Optional[dict]) -> Optional[dict]:
+    """`corpus.usage` (audit/usage.py corpus_usage), or None when it was not read: `o`
+    the Org's name, `oi` its id, `pr` 1 for the Primary Org, 0 for another, null when the
+    Org was not read; `w` the window in days, `at` when it was read, `hs`/`he` the
+    history's first and last query (epoch seconds); `hd` the whole days the history
+    covers before the read, `id` the idle days H17 judged by (null when it did not run);
+    `b` rows dropped for a blank Model ID; `g` the Model IDs no visible object matches, each [guid, queries, users, last
+    query, orgs] — orgs `[[Org id, Org name, last query there]]`, `[]` when no Org is
+    recorded, null when the Orgs were not read — or null when they could not be listed;
+    `or` 1 when each Model's Orgs were read, 0 when not (absent before 0.224.0); `os`
+    each Org the usage names, `[[id, name, used Model IDs]]`, or null when not read;
+    `si` the idle days each Model's status used (null before 3.28); `dk` whether the run
+    recorded which Models' dependents were read in full (false: a snapshot from before
+    0.225.0)."""
+    if not isinstance(usage, dict):
+        return None
+    org = usage.get("org") or {}
+    history = usage.get("history") or {}
+    gone = usage.get("gone")
+    primary = usage.get("primary")
+    out = {"o": org.get("name") or "", "oi": org.get("id"),
+           "pr": None if primary is None else (1 if primary else 0),
+           "w": usage.get("window_days"), "at": usage.get("fetched_at"),
+           "hs": history.get("start"), "he": history.get("end"),
+           "hd": usage.get("history_days"), "id": usage.get("idle_days"),
+           "b": usage.get("blank_rows") or 0, "g": _compact_gone(gone),
+           "si": usage.get("status_idle_days"), "dk": usage.get("dependents_checked")}
+    if usage.get("org_read") is not None:  # absent from JSON written before 0.224.0
+        out["or"] = 1 if usage["org_read"] else 0
+        orgs = usage.get("orgs")
+        out["os"] = None if not isinstance(orgs, list) else \
+            [[o.get("id"), o.get("name") or "", o.get("models") or 0] for o in orgs]
+    return out
+
+
+def _compact_gone(gone: Any) -> Optional[list]:
+    """`corpus.usage.gone` as `[[guid, queries, users, last query, orgs]]`; null when
+    the not-found IDs could not be listed."""
+    if not isinstance(gone, list):
+        return None
+    return [[g.get("guid", ""), g.get("queries_180d") or 0, g.get("users_180d") or 0,
+             g.get("last_used"), _compact_orgs(g.get("orgs", []))] for g in gone]
+
+
+def _compact_orgs(orgs: Any) -> Optional[list]:
+    """A not-found Model ID's Orgs, `[[id, name, last query]]`; null when not read."""
+    if not isinstance(orgs, list):
+        return None
+    return [[o.get("id"), o.get("name") or "", o.get("last_used")] for o in orgs
+            if isinstance(o, dict)]
 
 
 def _written_use(use: list, ref: str) -> list:
@@ -359,7 +447,7 @@ def compact_payload(data: dict) -> dict:
         "S": compact_summary,
         "K": _check_text(meta, data.get("check_meta") or {}),
         "G": {"categories": meta["categories"], "views": meta["views"],
-              "profiles": meta["profiles"]},
+              "profiles": meta["profiles"], "ur": _usage_rule_ids()},
     }
 
     if corpus:
@@ -426,6 +514,9 @@ def compact_payload(data: dict) -> dict:
         # Requested Models the export refused, so no rule saw (BL-516; absent in older JSON).
         if corpus.get("not_exported"):
             result["C"]["ne"] = list(corpus["not_exported"])
+        # Usage (since 3.26): null when fetched but not read, absent in older JSON.
+        if "usage" in corpus:
+            result["C"]["us"] = _compact_usage(corpus["usage"])
     else:
         result["C"] = None
 
@@ -444,12 +535,14 @@ def graph_script() -> str:
                      + [(VENDOR_DIR / name).read_text(encoding="utf-8") for name in GRAPH_VENDOR])
 
 
-def has_formula_chains(payload: dict) -> bool:
-    """Some audited Model has a formula built on another formula: only then is there a
-    graph worth drawing, and only then does the report carry its libraries."""
+def has_formulas(payload: dict) -> bool:
+    """Some audited Model has a formula: only then is there a graph to draw (its
+    formulas and the columns and parameters they use), and only then does the report
+    carry the graph's libraries. Every Model with formulas gets the Graph button, not
+    only one with a formula built on another (product owner, 2026-11-19: the lineage
+    from columns to formulas is worth drawing too)."""
     models = ((payload.get("C") or {}).get("m")) or []
-    return any(use[0] == 0 for cm in models for node in ((cm.get("ft") or {}).get("n") or [])
-               for use in node.get("u") or [])
+    return any((cm.get("ft") or {}).get("n") for cm in models)
 
 
 def render_report(data: dict) -> str:
@@ -457,7 +550,7 @@ def render_report(data: dict) -> str:
     erd_assets = _read_erd_assets()
     if erd_assets:
         payload["E"] = erd_assets
-    if has_formula_chains(payload):
+    if has_formulas(payload):
         # In the data, not the page's script: it runs only when a graph is first opened
         payload["V"] = graph_script()
     json_str = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")

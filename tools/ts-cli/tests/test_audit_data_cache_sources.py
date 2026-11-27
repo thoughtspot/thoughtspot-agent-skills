@@ -104,6 +104,8 @@ def test_a_sql_views_connection_comes_from_its_header():
     ({"name": "T", "connection": {"name": "C"}}, "snowflake", ""),
     ({"name": "T", "connection": {"name": "C"}}, "RDBMS_REDSHIFT", "RDBMS_REDSHIFT"),
     ({"name": "T", "connection": {"name": "C"}}, "DEFAULT", "DEFAULT"),
+    ({"name": "T", "connection": {"name": "C"}}, "RDBMS_MODE", "Analyst Studio"),
+    ({"name": "T", "connection": {"name": "C"}}, "mode", "Analyst Studio"),
     ({"name": "T", "connection": {"name": "C"}}, None, None),
     ({"name": "T", "connection": {"name": "C"}}, "", None),
     ({"name": "T"}, "RDBMS_SNOWFLAKE", "no connection"),
@@ -172,7 +174,7 @@ def test_p24_names_what_each_connection_uses():
     ctx = fx.build_cache_ctx(connections=[conn(parameterized=True)])
     assert _field(ctx, "@connection_cache_blockers") == ["Warehouse A: template variable"]
     m2m = fx.build_cache_ctx(connections=[dict(conn(oauth=True), oauth_m2m=True)])
-    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A: OAuth M2M (to confirm)"]
+    assert _field(m2m, "@connection_cache_blockers") == ["Warehouse A: OAuth client credentials (to confirm)"]
 
 
 def test_p24_attaches_to_confirm_to_its_own_reading():
@@ -185,7 +187,7 @@ def test_p24_attaches_to_confirm_to_its_own_reading():
         headers=[header("v1", "ONE_TO_ONE_LOGICAL", connection="Warehouse B")])
     assert _field(ctx, "@connection_cache_blockers") == [
         "Warehouse A: PrivateLink read from the host (to confirm); template variable",
-        "Warehouse B: OAuth M2M (to confirm)"]
+        "Warehouse B: OAuth client credentials (to confirm)"]
 
 
 def test_p24_matches_by_id_when_the_header_carries_one():
@@ -458,3 +460,28 @@ def test_each_rule_blocks_at_medium_in_performance(rule_id, evidence):
     assert rule.aggregate["mode"] == "each"
     assert set(rule.aggregate["where"]) == {"field", "len_gt"}   # what data_cache.py reads
     assert all(rule.profiles.get(p) is None for p in CAT.profiles)
+
+
+def test_a_databricks_oauth_client_pair_reads_to_confirm_end_to_end():
+    """A Databricks connection holding only OAuth2ClientId and OAuth2Secret, as every
+    Databricks OAuth connection on the SE demo cluster does, may be per-user OAuth or a
+    service principal: P24 marks it to confirm and the Model reads To confirm, while
+    the same pair on Snowflake stays a firm Can't use (product owner, 2026-11-19)."""
+    from ts_cli.audit import run_audit
+    from ts_cli.audit.connection_facts import connection_facts
+
+    def readiness(kind):
+        facts = connection_facts({
+            "id": "conn-0", "name": "Warehouse A", "data_warehouse_type": kind,
+            "details": {"configuration":
+                        '{"OAuth2ClientId": "x", "OAuth2Secret": "******", "host": "h"}'}})
+        facts["parameterized_connection"] = False
+        ctx = fx.build_cache_ctx(connections=[facts], headers=[header()], calendars=[])
+        [model] = run_audit(None, [], ["P"], ctx=ctx)["corpus"]["models"]
+        dc = model["data_cache"]
+        assert dc["not_assessed"] == [], dc["not_assessed"]
+        return dc["readiness"], _field(ctx, "@connection_cache_blockers")
+
+    assert readiness("DATABRICKS") == (
+        "confirm", ["Warehouse A: OAuth client credentials (to confirm)"])
+    assert readiness("SNOWFLAKE") == ("blocked", ["Warehouse A: OAuth"])

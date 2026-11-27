@@ -6,9 +6,13 @@
    written before definitions were kept), and `r` the roots, the formulas nothing uses.
    Clicking a formula, column or parameter opens the definition panel beside the tree:
    its expression with every reference a link, what it uses, what uses it and everything
-   that depends on it. The panel shows the expression as written; the tree's inline line
-   shows it by label. Following a link opens the tree down to that formula. The tree is
+   that depends on it. The panel shows the expression with each formula reference by the
+   name the tree uses (its column's name), as ThoughtSpot's formula editor does, and,
+   when that differs, the expression as the TML writes it, to copy; the tree's inline
+   line shows it by label. Following a link opens the tree down to that formula. The tree is
    one tab stop, moved through with the arrow keys.
+   Above the tree, the Model's tabs (model_nav.js) and the type chips and legend
+   (formula_types.js, which says how the chips filter the tree, the graph and search).
    Children are built only when a node is opened, since a formula many others use would
    otherwise be drawn once per path; a node already on the path is a circular reference. */
 var FORMULA_EXPAND_ALL_CAP = 2000;
@@ -74,7 +78,7 @@ function hiddenTag(node){
 function formulaRow(node){
   var row = el("div","ftree-row");
   var renamed = node.f && node.f !== node.n;
-  var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+
+  var html = '<span class="ftree-toggle" aria-hidden="true"></span>'+ftypeIcon(nodeMark(node), true)+
     '<span class="ftree-name"'+(renamed ? ' title="Formula: '+esc(node.f)+'"' : '')+'>'+esc(node.n)+'</span>';
   if(FORMULA_KINDS[node.k]) html += '<span class="ftree-tag ftree-kind" data-kind="'+node.k+'">'+node.k+'</span>';
   html += hiddenTag(node);
@@ -130,10 +134,11 @@ function formulaNode(tree, i, path, budget){
       }
       node.u.forEach(function(use){
         if(use[0] === 1){
-          ul.appendChild(formulaLeaf('<code class="ftree-col">'+esc(use[1])+'</code>', "ftree-colleaf", use, tree._view));
+          ul.appendChild(formulaLeaf(ftypeIcon("column", true)+'<code class="ftree-col">'+esc(use[1])+'</code>',
+            "ftree-colleaf", use, tree._view));
           budget.rows++;
         } else if(use[0] === 2){
-          ul.appendChild(formulaLeaf('<span class="ftree-tag ftree-param">parameter</span>'+
+          ul.appendChild(formulaLeaf(ftypeIcon("parameter", true)+'<span class="ftree-tag ftree-param">parameter</span>'+
             '<span class="ftree-name">'+esc(use[1])+'</span>', "ftree-paramleaf", use, tree._view));
           budget.rows++;
         } else if(here.indexOf(use[1]) !== -1){
@@ -146,6 +151,7 @@ function formulaNode(tree, i, path, budget){
       });
       li.appendChild(ul);
       li._built = true;
+      applyTreeFtypes(ul, tree);
     }
     li.classList.remove("collapsed");
     row.setAttribute("aria-expanded","true");
@@ -209,17 +215,36 @@ function refLink(tree, use, shown, untabbable){
    when it would only repeat the value, `[value]` (report.py's _compact_tree). */
 function written(s){ return s[2] !== undefined ? s[2] : "["+s[1]+"]"; }
 
-/* An expression's segments as HTML: text escaped, each reference a link, shown as
-   written (`asWritten`) or by its label. */
+/* A reference segment as the panel shows it: a formula in brackets by the name the tree
+   uses (`[formula_Date]` reads `[Transaction Date]`), a column or parameter as written. */
+function named(tree, s){ return s[0] === 0 ? "["+useLabel(tree, s)+"]" : written(s); }
+
+/* A link showing `named` form, its tooltip naming the kind, the label and, when it
+   differs, the reference as written. */
+function namedLink(tree, s, untabbable){
+  var link = refLink(tree, s, named(tree, s), untabbable);
+  return named(tree, s) === written(s) ? link
+    : link.replace(/ title="([^"]*)"/, function(m, t){ return ' title="'+t+esc(", written "+written(s))+'"'; });
+}
+
+/* An expression's segments as HTML: text escaped, each reference a link, shown by name
+   (`asWritten`, the panel's form: namedLink) or by its label (the tree's inline line). */
 function exprHtml(tree, x, asWritten, untabbable){
   return x.map(function(s){
-    return typeof s === "string" ? esc(s) : refLink(tree, s, asWritten && written(s), untabbable);
+    return typeof s === "string" ? esc(s) : asWritten ? namedLink(tree, s, untabbable)
+      : refLink(tree, s, false, untabbable);
   }).join("");
 }
 
-/* The expression as plain text, as written (`asWritten`, the panel's form) or by label
-   (the tree's inline line): search reads both, each whole, so a query may span
-   references and the text between them. */
+/* The expression as the panel shows it, in plain text (named). */
+function namedText(tree, x){
+  return (x || []).map(function(s){ return typeof s === "string" ? s : named(tree, s); }).join("");
+}
+
+/* The expression as plain text, as the TML writes it (`asWritten`: the panel's "As
+   written in TML" form) or by label (the tree's inline line). Search reads these and
+   the panel's own form (namedText), each whole, so a query may span references and the
+   text between them. */
 function exprText(tree, x, asWritten){
   return (x || []).map(function(s){
     return typeof s === "string" ? s : asWritten ? written(s) : useLabel(tree, s);
@@ -269,11 +294,26 @@ function inlinedHtml(tree, x, open){
     if(typeof s === "string") return esc(s);
     var helper = s[0] === 0 && tree.n[s[1]];
     if(!helper || !singleUse(helper) || !helper.x || !helper.x.length || open[s[1]])
-      return refLink(tree, s, written(s));
+      return namedLink(tree, s);
     open[s[1]] = true;
     var inner = inlinedHtml(tree, helper.x, open);
     delete open[s[1]];
     return '<span class="finl" title="'+esc("Pasted in: "+helper.n)+'">( '+inner+' )</span>';
+  }).join("");
+}
+
+/* inlinedHtml's text, each helper pasted in as it pastes them, every other reference in
+   `form` (`written`: the TML's own form, to copy; `named`: the panel's). */
+function inlinedText(tree, x, open, form){
+  return x.map(function(s){
+    if(typeof s === "string") return s;
+    var helper = s[0] === 0 && tree.n[s[1]];
+    if(!helper || !singleUse(helper) || !helper.x || !helper.x.length || open[s[1]])
+      return form === written ? written(s) : named(tree, s);
+    open[s[1]] = true;
+    var inner = inlinedText(tree, helper.x, open, form);
+    delete open[s[1]];
+    return "( "+inner+" )";
   }).join("");
 }
 
@@ -294,9 +334,18 @@ function detailHtml(tree, target){
     html += !node.x ? '<div class="fdetail-note">'+esc(FORMULA_NO_DEFS)+'</div>'
       : !node.x.length ? '<div class="fdetail-note">The TML gives this formula no expression, or one that is not text.</div>'
       : '<pre class="fdetail-expr">'+exprHtml(tree, node.x, true)+'</pre>';
+    if(node.x && node.x.length && namedText(tree, node.x) !== exprText(tree, node.x, true)){
+      html += '<div class="fdetail-label">As written in TML</div>'+
+        '<pre class="fdetail-expr fdetail-written">'+esc(exprText(tree, node.x, true))+'</pre>';
+    }
     if(node.x && usesSingleUse(tree, node)){
       html += '<div class="fdetail-label">Definition with single-use helpers pasted in</div>'+
         '<pre class="fdetail-expr fdetail-inlined">'+inlinedHtml(tree, node.x, opened(target[1]))+'</pre>';
+      var tmlInlined = inlinedText(tree, node.x, opened(target[1]), written);
+      if(tmlInlined !== inlinedText(tree, node.x, opened(target[1]), named)){
+        html += '<div class="fdetail-label">Pasted in, as written in TML</div>'+
+          '<pre class="fdetail-expr fdetail-written fdetail-inlined-written">'+esc(tmlInlined)+'</pre>';
+      }
     }
     html += '<div class="fdetail-label">Uses ('+node.u.length+')</div>'+
       linkList(tree, "fdetail-uses", node.u, "No columns, parameters or formulas.");
@@ -349,7 +398,11 @@ function revealRow(ul, tree, target, from){
         return r._target && useKey(r._target) === useKey(target); })[0]);
     if(hit) return target[0] === 0 ? hit.firstChild : hit;
   }
-  var at = target[0] === 0 ? target[1] : directUsers(tree, target)[0];
+  /* a column or parameter: under the first formula using it that the tree shows */
+  var users = target[0] === 0 ? [] : directUsers(tree, target), st = treeStates(tree);
+  var at = target[0] === 0 ? target[1] :
+    (users.filter(function(j){ return st[j] >= 1; })[0] !== undefined ?
+      users.filter(function(j){ return st[j] >= 1; })[0] : users[0]);
   if(at === undefined) return null;
   var path = pathTo(tree, at);
   if(!path) return null;
@@ -370,7 +423,8 @@ function revealRow(ul, tree, target, from){
 
 /* Every match, ranked: columns and parameters by name (there are few, and a column must
    not be pushed out of the shown list), then formulas by name, then formulas by
-   definition (as written or by label). The caller shows the first
+   definition (as the panel shows it, pasted-in forms included, as the TML writes it, or
+   by label). The caller shows the first
    FORMULA_SEARCH_CAP and says how many more there are. */
 function searchHits(tree, q){
   q = q.trim().toLowerCase();
@@ -380,8 +434,10 @@ function searchHits(tree, q){
     if(node.n.toLowerCase().indexOf(q) !== -1 || String(node.f).toLowerCase().indexOf(q) !== -1){
       byName.push([0, j]); return;
     }
-    if(exprText(tree, node.x, true).toLowerCase().indexOf(q) !== -1 ||
-       exprText(tree, node.x, false).toLowerCase().indexOf(q) !== -1) byDef.push([0, j]);
+    var forms = [namedText(tree, node.x), exprText(tree, node.x, true), exprText(tree, node.x, false)];
+    if(node.x && usesSingleUse(tree, node))   /* the pasted-in forms the panel also shows */
+      forms.push(inlinedText(tree, node.x, opened(j), named), inlinedText(tree, node.x, opened(j), written));
+    if(forms.some(function(f){ return f.toLowerCase().indexOf(q) !== -1; })) byDef.push([0, j]);
   });
   tree.n.forEach(function(node){ node.u.forEach(function(u){
     if(u[0] !== 0 && !seen[useKey(u)] && String(u[1]).toLowerCase().indexOf(q) !== -1){
@@ -391,13 +447,16 @@ function searchHits(tree, q){
   return other.concat(byName, byDef);
 }
 
+/* The matches of a shown type (formula_types.js), the rest counted. */
 function searchResultsHtml(tree, value){
   if(!value.trim()) return "";
-  var hits = searchHits(tree, value);
-  if(!hits.length) return '<span class="fdetail-none">No formula, column or parameter matches.</span>';
+  var all = searchHits(tree, value);
+  if(!all.length) return '<span class="fdetail-none">No formula, column or parameter matches.</span>';
+  var hits = all.filter(function(u){ return useShown(tree, u); }), off = all.length - hits.length;
   var more = hits.length - FORMULA_SEARCH_CAP;
   return hits.slice(0, FORMULA_SEARCH_CAP).map(function(u){ return refLink(tree, u); }).join("")+
-    (more > 0 ? '<span class="ftree-more">and '+more+' more: type more to narrow the list</span>' : '');
+    (more > 0 ? '<span class="ftree-more">and '+more+' more: type more to narrow the list</span>' : '')+
+    (off ? '<span class="ftree-more ftype-offcount">'+off+(hits.length ? ' more' : '')+' of a switched-off type</span>' : '');
 }
 
 /* The tree is one tab stop: the arrow keys move between visible rows (Right opens a
@@ -416,7 +475,7 @@ function wireTreeKeys(ul){
       var up = stop.parentNode.parentNode.closest("li.ftree-node");
       stop = up ? up.firstChild : null;
     }
-    stop = stop || $(".ftree-row[role=button]", ul);
+    stop = stop || rows()[0] || $(".ftree-row[role=button]", ul);  /* the first a chip left shown */
     if(stop) current(stop);
   };
   ul._keepTabStop();
@@ -464,8 +523,8 @@ function buildFormulaTree(c, guid){
   if(!tree || !tree.n.length){
     var why = !cm ? "This report has no such Model." :
       (predatesTree(cm) ? FORMULA_PREDATES : "This Model has no formulas.");
-    c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
-      '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>';
+    c.insertAdjacentHTML("beforeend", '<div class="view-placeholder"><div class="ph-icon">ƒ</div>'+
+      '<div class="ph-text">No formula tree</div><div class="ph-sub">'+esc(why)+'</div></div>');
     return;
   }
   var hdr = el("div","ftree-header");
@@ -473,13 +532,14 @@ function buildFormulaTree(c, guid){
     '<div class="ftree-sub">'+tree.n.length+' formula'+(tree.n.length === 1 ? '' : 's')+', '+
     tree.r.length+' at the top. Click a formula to see its definition and open what it uses; '+
     'in the tree, the arrow keys move between rows and Escape closes the definition.</div>'+
-    '<div class="header-actions"><input class="ftree-search" type="search" '+
-    'placeholder="Find a formula, column or parameter" aria-label="Find a formula, column or parameter">'+
+    '<div class="header-actions">'+
     '<button class="erd-btn ftree-expand">Expand all</button>'+
     '<button class="erd-btn ftree-collapse">Collapse all</button>'+
     (graphAvailable(tree) ? '<a class="erd-btn fgraph-mode" href="#formulas/'+esc(guid)+'/graph">Graph</a>' : '')+
-    '<a class="ts-link-btn" href="#model/'+esc(guid)+'">Model scorecard</a></div>';
+    '</div>';
   c.appendChild(hdr);
+  var bar = ftypeBar(tree, retype, false, function(){ return treeShownCount(tree); });
+  hdr.appendChild(bar);
   var results = el("div","ftree-results");
   c.appendChild(results);
   var note = el("div","ftree-note");
@@ -520,9 +580,19 @@ function buildFormulaTree(c, guid){
            screen, under the sheet (its scroll-margin-bottom) */
         if(row.scrollIntoView) row.scrollIntoView({block: "nearest"});
       }
+      bar._note(tree, target, !!row && row.offsetParent !== null);
       if(focusPanel) $(".fdetail-title", panel).focus();
     }
   };
+  /* a chip flipped: hide and fade rows, and say when the selection is off screen */
+  function retype(){
+    applyTreeFtypes(ul, tree);
+    ul._keepTabStop();
+    results.innerHTML = searchResultsHtml(tree, $(".ftree-search", hdr).value);
+    var sel = $(".ftree-selected", ul);
+    bar._note(tree, tree._selected, !!sel && sel.offsetParent !== null);
+    note.textContent = treeEmptyNote(tree, graphAvailable(tree));
+  }
   function closePanel(byMouse){
     var sel = $(".ftree-selected", ul);
     tree._selected = null;
@@ -530,6 +600,7 @@ function buildFormulaTree(c, guid){
     panel.classList.add("fdetail-empty");
     layout.classList.remove("ftree-has-detail");
     clearSelection();
+    bar._note(tree, null);
     if(!sel || sel.offsetParent === null) sel = $('.ftree-row[tabindex="0"]', ul);
     if(sel) sel.focus({preventScroll: !!byMouse});
   }
@@ -545,6 +616,8 @@ function buildFormulaTree(c, guid){
     ul.appendChild(li);
     if(li._open) li._open();  /* roots open one level */
   });
+  applyTreeFtypes(ul, tree);
+  note.textContent = treeEmptyNote(tree, graphAvailable(tree));  /* the chips carry over */
   c.appendChild(layout);
   wireTreeKeys(ul);
   /* after this turn: the router shows this view once it is built, and a hidden row
@@ -570,21 +643,25 @@ function buildFormulaTree(c, guid){
   });
 }
 
+/* Builds the view; returns whether it drew the graph. */
 function buildFormulas(D, guid, mode){
   var c = document.getElementById("v-formulas");
   if(c._cy){ c._cy.destroy(); c._cy = null; }  /* a graph left running would keep rendering */
   c.innerHTML = "";
   var cm = guid && findCorpusModel(guid);
-  if(mode === "graph" && cm && graphAvailable(cm.ft)) buildFormulaGraph(c, guid, cm.ft);
-  else if(guid) buildFormulaTree(c, guid);
+  if(guid && knownModel(guid)) c.appendChild(modelTabs(guid, "formulas"));
+  if(mode === "graph" && cm && graphAvailable(cm.ft)){ buildFormulaGraph(c, guid, cm.ft); return true; }
+  if(guid) buildFormulaTree(c, guid);
   else buildFormulasPicker(c);
+  return false;
 }
 
 /* ── Route registration (core.js's router dispatches by route name) ── */
 registerView({id: "formulas", routes: ["formulas"],
   nav: {hash: "#formulas", icon: "ƒ", label: "Formulas"},
   show: function(route){
-  buildFormulas(D, route.id, route.sub);
-  if(route.id) return {crumbs: ["Formulas", findModelName(route.id)], links: ["#formulas"]};
-  return {crumbs: ["Formulas"], links: []};
+  var graph = buildFormulas(D, route.id, route.sub);
+  if(!route.id) return {crumbs: ["Formulas"], links: []};
+  highlightSidebarModel(route.id);
+  return modelCrumbs(route.id, graph ? "Formula graph" : "Formulas");
 }});

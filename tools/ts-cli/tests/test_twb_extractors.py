@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from ts_cli.tableau.twb import (
     count_native_sets,
     extract_blends,
+    extract_parameters,
     extract_table_calc_addressing,
     detect_orphan_calcs,
     _extract_columns,
@@ -11,6 +12,7 @@ from ts_cli.tableau.twb import (
     _extract_tables,
     _build_column_table_map,
     _is_extract_wrapper,
+    _tableau_type_to_ts_param,
 )
 
 BLEND_XML = """
@@ -716,3 +718,95 @@ def test_count_native_sets_mixed_workbook_counts_only_real_sets():
     </datasources></workbook>
     """)
     assert count_native_sets(root) == 1
+
+
+# ---------------------------------------------------------------------------
+# extract_parameters / _tableau_type_to_ts_param
+# ---------------------------------------------------------------------------
+
+class TestTableauTypeToTsParam:
+    def test_integer_maps_to_int64_not_int(self):
+        """'INT' is not a valid value in the parameter data_type enum
+        (CHAR/INT64/DOUBLE/BOOL/DATE) -- it failed import as "Invalid
+        parameter" on a build whose parameters had never hit a real import
+        before."""
+        assert _tableau_type_to_ts_param("integer") == "INT64"
+
+    def test_datetime_maps_to_date_not_date_time(self):
+        """Same enum gap for 'DATE_TIME' -- parameters have no separate
+        date+time type, only DATE."""
+        assert _tableau_type_to_ts_param("datetime") == "DATE"
+
+    def test_unknown_type_defaults_to_char(self):
+        assert _tableau_type_to_ts_param("something-new") == "CHAR"
+
+
+class TestExtractParametersDefaultValue:
+    """default_value must come from the right source depending on whether
+    the parameter is list-based (CHAR) or free-form."""
+
+    @staticmethod
+    def _workbook(column_xml: str) -> ET.Element:
+        return ET.fromstring(f"""
+        <workbook><datasources>
+          <datasource name="Parameters">
+            {column_xml}
+          </datasource>
+        </datasources></workbook>
+        """)
+
+    def test_list_parameter_uses_alias_as_display_name(self):
+        """A list-based (CHAR) parameter's default_value must match a
+        choice's display_name, which is what `alias` holds for the
+        parameter's current value — not the internal `value`."""
+        root = self._workbook("""
+          <column caption="Grain" datatype="string" name="[Parameter 1]"
+                  value="&quot;m&quot;" alias="Month">
+            <members>
+              <member value="&quot;m&quot;" alias="Month"/>
+              <member value="&quot;q&quot;" alias="Quarter"/>
+            </members>
+          </column>
+        """)
+        params = extract_parameters(root)
+        assert params[0]["default_value"] == "Month"
+
+    def test_free_form_parameter_prefers_value_over_a_cosmetic_alias(self):
+        """A free-form (no list_config) numeric parameter whose `alias` is
+        just a cosmetic current-value label (not a real value) must not have
+        that label used as default_value — it broke the whole import when
+        ThoughtSpot tried to parse a non-numeric alias as a DOUBLE."""
+        root = self._workbook("""
+          <column caption="Threshold" datatype="real" name="[Parameter 2]"
+                  value="0.05" alias="Custom"/>
+        """)
+        params = extract_parameters(root)
+        assert params[0]["default_value"] == "0.05"
+        assert params[0]["data_type"] == "DOUBLE"
+
+    def test_free_form_parameter_falls_back_to_alias_when_value_is_empty(self):
+        root = self._workbook("""
+          <column caption="Label" datatype="string" name="[Parameter 3]"
+                  value="" alias="Fallback"/>
+        """)
+        params = extract_parameters(root)
+        assert params[0]["default_value"] == "Fallback"
+
+
+class TestExtractParametersRangeConfig:
+    def test_range_config_uses_schema_key_names(self):
+        """The model TML schema documents range_config as containing
+        range_min/range_max -- not min/max."""
+        root = ET.fromstring("""
+        <workbook><datasources>
+          <datasource name="Parameters">
+            <column caption="Count" datatype="integer" name="[Parameter 4]"
+                    value="5" param-domain-type="range">
+              <range min="1" max="26"/>
+            </column>
+          </datasource>
+        </datasources></workbook>
+        """)
+        params = extract_parameters(root)
+        assert params[0]["range_config"] == {"range_min": "1", "range_max": "26"}
+        assert params[0]["data_type"] == "INT64"

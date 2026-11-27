@@ -11,6 +11,7 @@ import typer
 import yaml
 
 from ts_cli.tableau.client import TableauClient, _resolve_tableau_profile
+from ts_cli.tableau.import_retry import _IMPORT_EXIT_ZERO, _import_with_retry
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +300,21 @@ def classify_formulas_cmd(
     print(json.dumps(result["tier_counts"]))
 
 
+class _ExportFailed(Exception):
+    """Raised by `_export_model_tml` instead of exiting the process directly —
+    README.md's "the command always prints its JSON report" contract means a
+    failure on one datasource (in a multi-datasource invocation) must still
+    let the loop finish and print `all_results` for every datasource already
+    processed, not kill the process mid-loop before anything is printed
+    (round-4 review)."""
+
+
 def _export_model_tml(existing_guid: str, profile: str) -> dict:
-    """Export an existing model's TML via the ts CLI (subprocess I/O)."""
+    """Export an existing model's TML via the ts CLI (subprocess I/O).
+
+    Raises `_ExportFailed` on failure — see that class's docstring for why
+    this isn't a direct `SystemExit`.
+    """
     import subprocess
 
     typer.echo(f"\n  Exporting existing model {existing_guid}...", err=True)
@@ -309,8 +323,9 @@ def _export_model_tml(existing_guid: str, profile: str) -> dict:
         capture_output=True, text=True,
     )
     if export_proc.returncode != 0:
-        typer.echo(f"  Export failed: {export_proc.stderr[:200]}", err=True)
-        raise SystemExit(1)
+        msg = f"Export failed: {export_proc.stderr[:200]}"
+        typer.echo(f"  {msg}", err=True)
+        raise _ExportFailed(msg)
     existing_tml = json.loads(export_proc.stdout)[0]["tml"]
     typer.echo(
         f"  Existing model: {len(existing_tml['model'].get('formulas', []))} formulas",
@@ -434,28 +449,6 @@ def _translate_and_validate(
     return translated, skipped, validation_issues, name_clashes
 
 
-def _collect_cascade_victims(
-    merged: dict, bad_name: str, err_detail: str
-) -> tuple[list[str], dict[str, str]]:
-    """Return the failed formula plus the transitive closure of formulas that
-    reference it, with a drop reason for each (breadth-first to a fixpoint)."""
-    to_drop = [bad_name]
-    reasons = {bad_name: err_detail}
-    seen = {bad_name}
-    i = 0
-    while i < len(to_drop):
-        victim = to_drop[i]
-        i += 1
-        token = f"[formula_{victim}]"
-        for fm in merged["model"].get("formulas", []):
-            dep = fm["name"]
-            if dep not in seen and token in fm.get("expr", ""):
-                seen.add(dep)
-                to_drop.append(dep)
-                reasons[dep] = f"depends on dropped formula '{victim}'"
-    return to_drop, reasons
-
-
 def _migrate_missing_parameters(
     existing_tml: dict, parameters: Optional[list]
 ) -> list[str]:
@@ -473,93 +466,6 @@ def _migrate_missing_parameters(
     added = [p for p in parameters if p.get("name") not in have]
     existing_params.extend(added)
     return [p["name"] for p in added]
-
-
-def _import_with_retry(
-    merged: dict,
-    ds: dict,
-    existing_guid: str,
-    profile: str,
-    max_retries: int,
-    result: dict,
-) -> None:
-    """Import merged TML, dropping failing formulas and retrying (subprocess I/O).
-
-    Mutates ``merged`` (formulas dropped on error), ``merged["_merge_stats"]``,
-    and ``result`` (import_status / updated_model_guid / dropped list).
-    """
-    import subprocess
-
-    from ts_cli.tableau.build_model import (
-        extract_imported_guid,
-        parse_import_error,
-        remove_formula,
-    )
-
-    stats = merged["_merge_stats"]
-    expr_by_fid = {f["id"]: f.get("expr", "") for f in merged["model"]["formulas"]}
-    original_by_name = {
-        c.get("caption", c.get("name", "")): c.get("formula", "")
-        for c in ds.get("calculated_fields", [])
-    }
-    dropped_on_import: list[dict] = []
-    for _attempt in range(max_retries):
-        import_tml = {k: v for k, v in merged.items() if not k.startswith("_")}
-        tml_str = json.dumps(import_tml)
-        import_proc = subprocess.run(
-            ["ts", "tml", "import", "--profile", profile, "--policy", "ALL_OR_NONE"],
-            input=json.dumps([tml_str]),
-            capture_output=True, text=True,
-        )
-        if import_proc.returncode != 0:
-            typer.echo(f"  Import failed: {import_proc.stderr[:200]}", err=True)
-            raise SystemExit(1)
-        import_result = json.loads(import_proc.stdout)
-        status = import_result[0]["response"]["status"]["status_code"]
-        if status == "OK":
-            result["import_status"] = status
-            result["updated_model_guid"] = (
-                extract_imported_guid(import_result) or existing_guid
-            )
-            typer.echo(f"  Import: OK", err=True)
-            break
-        msg = import_result[0]["response"]["status"].get("error_message", "")
-        parsed_err = parse_import_error(msg)
-        if parsed_err is None:
-            result["import_status"] = status
-            result["import_error"] = msg
-            typer.echo(f"  Import: {status} — {msg[:200]}", err=True)
-            break
-        bad_name, err_detail = parsed_err
-        typer.echo(f"  Import error on '{bad_name}': {err_detail} — dropping", err=True)
-        # Drop the failing formula, then cascade-drop any formula that
-        # references it — in THIS cycle — so a failed root (e.g. a date-window
-        # formula) doesn't cost one import round-trip per downstream dependent.
-        to_drop, reasons = _collect_cascade_victims(merged, bad_name, err_detail)
-        for victim in to_drop:
-            dropped_on_import.append({
-                "name": victim,
-                "expr": expr_by_fid.get(f"formula_{victim}", ""),
-                "error": reasons[victim],
-                "original_tableau": original_by_name.get(victim, ""),
-            })
-            remove_formula(merged, victim)
-            stats["added"] -= 1
-        if len(to_drop) > 1:
-            typer.echo(
-                f"    ↳ cascade-dropped {len(to_drop) - 1} dependent formula(s)",
-                err=True,
-            )
-        if stats["added"] <= 0:
-            typer.echo("  All new formulas dropped — nothing to import", err=True)
-            result["import_status"] = "SKIPPED"
-            break
-    else:
-        result["import_status"] = "ERROR"
-        result["import_error"] = "Max retry attempts exceeded"
-    if dropped_on_import:
-        result["formulas_dropped_on_import"] = dropped_on_import
-        result["formulas_added"] = stats["added"]
 
 
 def _merge_flow(
@@ -1163,7 +1069,20 @@ def _process_datasource(
     # fix sqlproxy→actual-table mapping before translation
     existing_tml = None
     if existing_guid:
-        existing_tml = _export_model_tml(existing_guid, profile)
+        try:
+            existing_tml = _export_model_tml(existing_guid, profile)
+        except _ExportFailed as exc:
+            # README.md's "always prints its JSON report" contract: a failed
+            # export must become this datasource's result, not kill the
+            # whole invocation before the caller's final `all_results` print
+            # — see _ExportFailed's docstring.
+            return {
+                "datasource": ds_name,
+                "model_name": name,
+                "existing_guid": existing_guid,
+                "import_status": "ERROR",
+                "import_error": str(exc),
+            }
         scoped_columns, scoping_msg = fix_sqlproxy_scoping(
             scoped_columns, existing_tml,
         )
@@ -1442,6 +1361,8 @@ def build_model_cmd(
         all_results.append(result)
 
     print(json.dumps(all_results, indent=2))
+    if any(r.get("import_status") not in _IMPORT_EXIT_ZERO for r in all_results):
+        raise SystemExit(1)
 
 
 def _resolve_lb_spec(data: dict, model_name, model_fqn, report_name) -> dict:

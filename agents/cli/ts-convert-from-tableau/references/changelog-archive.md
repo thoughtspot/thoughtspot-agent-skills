@@ -1,4 +1,4 @@
-# Changelog Archive (pre-1.45.0)
+# Changelog Archive (pre-1.47.2)
 
 Full version history for **ts-convert-from-tableau** below the version(s) currently kept
 inline in `SKILL.md`'s `## Changelog`. Moved here in the BL-128 second-round context-cost
@@ -10,6 +10,13 @@ archaeology ("when/why did X change"), not for executing the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.47.1 | 2026-11-27 | `IIF`/`IF`/`CASE` + operator bracketed (BL-649, partial) |
+| 1.47.0 | 2026-11-19 | Model/formula-engine fixes (ts-cli v0.220.1). Nested-`group_aggregate` false-flag fixed; a nested FIXED LOD parks, not migrates. `convert_string_concat` no longer concats a numeric `+` just because the formula is string-typed; a rejected pair no longer shares a conversion's budget, so long ladders convert fully. `to_string`/`str` drops only for a whole `concat()` argument; its masking token is control-character-delimited. `fix_double_aggregation` follows refs at any depth, adds `median`/`min_if`/`max_if`/`stddev_if`/`variance_if`, uses a quote-aware paren matcher; strips `sum()` only when some aggregate sits outside every `group_aggregate`. Import-retry no longer fails open; merge prints every datasource's result — BL-580/581/582/612. |
+| 1.46.3 | 2026-11-08 | A function the converter has never seen (CORR, VAR, QUARTER, LOG2, …) is excluded with the function named, not parked at import; DATETIME and `/* */` comments translate; UNION is the 16th spatial function (ts-cli v0.211.0, BL-460). |
+| 1.46.2 | 2026-11-08 | Step 10-charts: the new charts library is GA and the product default since 26.7 per release notes; enum is 52 values on a dev build. Legacy stays the default (BL-449). |
+| 1.46.1 | 2026-11-04 | `--existing-guid` merges declare `aggregation:` on new measure formulas (BL-509). |
+| 1.46.0 | 2026-10-07 | Exact week forms (v0.174.0, BL-373/380) |
+| 1.45.0 | 2026-10-07 | Week notes (ts-cli v0.170.0, BL-334 item 2): advisory `review_notes` on week-dependent formulas; `review_required` for a known non-Monday week start and for `DATEDIFF('week')` → `diff_days / 7`; `ISOWEEK`/`ISOYEAR`/`ISOQUARTER`/`WEEK` skipped as unmapped |
 | 1.44.4 | 2026-10-07 | **Trigonometry is radians; quote-bearing literals and `a * b / c` are exact (ts-cli v0.165.0, BL-364, BL-365).** `SIN` … `ATAN` / `COT` no longer convert by `180 / π` (ThoughtSpot trig is radians, live — the old forms were wrong for every non-zero input); `PI()` is the warehouse's `PI()`; `DEGREES` / `RADIANS` are bracketed. A literal holding a quote is double-quoted (`'it''s'` read as two quotes), a backslash doubled, and every product under a division bracketed. `INT(x)` is now parenthesised: `INT([x]) * 2` multiplied only the negative branch (#579 review). Coverage-matrix rows 32, 33, 132, 133, 138, 139 |
 | 1.44.3 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.44.2 | 2026-10-06 | **`DATEPART('weekday', d)` returns a number, not the day name (ts-cli v0.156.2, BL-334).** Now `( mod ( day_number_of_week ( d ) , 7 ) + 1 )` for a Sunday start. Week start: literal `start_of_week`, else the datasource's `<date-options start-of-week>`, else Sunday assumed and reported as a validation warning. `ISOWEEKDAY` / `'iso-weekday'` → `day_number_of_week` |

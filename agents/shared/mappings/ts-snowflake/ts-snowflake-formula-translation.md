@@ -175,11 +175,11 @@ Verified 2026-07-10, SE cluster.
 
 | ThoughtSpot → Snowflake | Snowflake → ThoughtSpot |
 |---|---|
-| `if ( [cond] ) then [a] else [b]` → `CASE WHEN cond THEN a ELSE b END` | `CASE WHEN cond THEN a ELSE b END` → `if ( [cond] ) then [a] else [b]` |
-| `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` |
+| `if ( [cond] ) then [a] else [b]` → `CASE WHEN cond THEN a ELSE b END` | `CASE WHEN cond THEN a ELSE b END` → `( if ( [cond] ) then [a] else [b] )` — bracketed: ThoughtSpot's `else` is greedy, so an unbracketed conditional followed by `=`, `+` etc. takes the operator into the else branch (BL-632, live 2026-11-26). Inside a function call the brackets are dropped. Same for `IFF` and `NVL2` |
+| `if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c]` → `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` | `CASE WHEN c1 THEN a WHEN c2 THEN b ELSE c END` → `( if ( [c1] ) then [a] else if ( [c2] ) then [b] else [c] )` (bracketed once, BL-632) |
 | `isnull ( [x] )` → `x IS NULL` | `x IS NULL` → `isnull ( [x] )` |
 | `not ( isnull ( [x] ) )` → `NOT (x IS NULL)` | `x IS NOT NULL` → `not ( isnull ( [x] ) )` — **there is no `isnotnull`** (rejected at import, 2026-10-06, BL-339); `sv_sql` already emits this form |
-| `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `if ( [x] != null ) then [x] else [default]` (n-ary: a chain); `IFNULL(x, default)` → `ifnull ( [x] , [default] )` |
+| `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `COALESCE(x, default)` → `( if ( [x] != null ) then [x] else [default] )` (n-ary: a chain, bracketed once, BL-632); `IFNULL(x, default)` → `ifnull ( [x] , [default] )` |
 | `ifnull ( [x] , [default] )` → `COALESCE(x, default)` | `NVL(x, default)` → `ifnull ( [x] , [default] )` — Snowflake's two-argument `NVL` is `COALESCE` with a fixed arity |
 | `ifnull ( [x] , 0 )` → `COALESCE(x, 0)` | `ZEROIFNULL(x)` → `ifnull ( [x] , 0 )`. **Fixed ts-cli 0.163.0 (BL-226):** it was a rename to `zeroifnull`, which is not in the ThoughtSpot catalog; `ifnull ( x , 0 )` is accepted (probe record §7) |
 | — | `COALESCE(x / NULLIF(y, 0), 0)`, `IFNULL(…, 0)`, `NVL(…, 0)`, `ZEROIFNULL(x / NULLIF(y, 0))` → `ifnull ( safe_divide ( [x] , [y] ) , 0 )` — 0 on a zero divisor **and** on a NULL operand; `COALESCE(x / NULLIF(y, 0), d)` with another `d` → `ifnull ( [x] / [y] , d )`. **Fixed ts-cli 0.163.0 (BL-357):** both were `safe_divide ( [x] , [y] )`, which is NULL on a NULL operand. See "Division and zero" below |

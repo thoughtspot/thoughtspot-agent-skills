@@ -38,6 +38,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from ts_cli.audit.connection_facts import warehouse_type
 from ts_cli.audit.engine import tml
 from ts_cli.audit.engine.fields import register
 from ts_cli.audit.engine.fields_data import _code, _own_table_and_paths, _rls_rules_of
@@ -58,15 +59,14 @@ from ts_cli.tml_rls_graph import _referenced_path_ids, _segment_joins
 #: (RDBMS_SNOWFLAKE and RDBMS_DATABRICKS both seen live; SE demo cluster, 2026-11-18,
 #: ts-audit open-items #17).
 CACHEABLE_WAREHOUSES = ("SNOWFLAKE", "DATABRICKS")
+#: How a finding names a source type with no plain name: `RDBMS_MODE` is an Analyst
+#: Studio dataset (on `AnalystStudio_connection`, which the connection search does not
+#: return; SE demo cluster, 2026-11-19). Data Cache does not serve one (product owner,
+#: 2026-11-19).
+_SOURCE_LABELS = {"MODE": "Analyst Studio"}
 
 
-def _warehouse(kind: Any) -> Optional[str]:
-    """A warehouse type as compared: upper case, edge spaces and an `RDBMS_` prefix
-    dropped; None for anything blank or not text."""
-    if not isinstance(kind, str) or not kind.strip():
-        return None
-    text = kind.strip().upper()
-    return text[len("RDBMS_"):] if text.startswith("RDBMS_") else text
+_warehouse = warehouse_type   # one normalisation, shared with P24's reading
 
 
 def source_type_problem(source: Dict[str, Any], connections: Any = None) -> Optional[str]:
@@ -90,7 +90,7 @@ def source_type_problem(source: Dict[str, Any], connections: Any = None) -> Opti
     if not kinds:
         return None
     other = [k for k in kinds if _warehouse(k) not in CACHEABLE_WAREHOUSES]
-    return other[0] if other else ""
+    return _SOURCE_LABELS.get(_warehouse(other[0]), other[0]) if other else ""
 
 
 @register("non_cloud_sources", uses={"connections"},
@@ -146,12 +146,14 @@ def connection_readings(item: dict, ctx: Any) -> List[Dict[str, Any]]:
 
 def _flag_reading(key: str, facts: list) -> Tuple[str, bool]:
     """How a finding names one flag, and whether it is a reading the team is to confirm
-    (open-items #18): OAuth read only from a client_id/client_secret pair (Databricks
-    OAuth M2M), and PrivateLink read from the host. A template variable, and OAuth read
-    from a setting named for it, are firm."""
+    (open-items #18): OAuth read only from client credentials, a client ID, a secret or
+    both (oauth_m2m, which per-user OAuth and a service principal both hold), and
+    PrivateLink read from the
+    host. A template variable, and OAuth read from any other setting named for it, are
+    firm."""
     if key == "oauth":
         m2m = all(f.get("oauth_m2m") is True for f in facts if f.get("oauth") is True)
-        return ("OAuth M2M", True) if m2m else ("OAuth", False)
+        return ("OAuth client credentials", True) if m2m else ("OAuth", False)
     if key == "privatelink":
         return "PrivateLink read from the host", True
     return "template variable", False

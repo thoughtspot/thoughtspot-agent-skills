@@ -121,7 +121,7 @@ def test_pre_cutover_payload_derives_categories_and_reads_the_catalog():
     # the run's own check text is kept; remediation and views come from the catalog
     assert payload["K"]["A1"]["t"] == "Spotter-ready >= 95% / General >= 50%; HIGH below half"
     assert payload["K"]["D8"]["r"].startswith("Run /ts-dependency-manager")
-    assert payload["G"]["views"]["cleanup"] == ["H4", "H5", "H10"]
+    assert payload["G"]["views"]["cleanup"] == ["H4", "H5", "H10", "H17"]
     assert "fn" not in payload["C"]  # no fetched_needs record in old JSON
 
 
@@ -259,7 +259,8 @@ def test_report_needs_cover_what_the_report_reads():
     unreadable = [p for p in walker.problems if not p.startswith("_count calls iterate")]
     assert unreadable == []
     reads = walker.reads
-    assert {"ai_instructions", "dependents", "sets", "calendars", "connections"} <= set(reads)
+    assert {"ai_instructions", "dependents", "sets", "calendars", "connections",
+            "usage"} <= set(reads)
     assert set(reads) <= REPORT_NEEDS, reads
 
 
@@ -437,6 +438,13 @@ def test_replay_of_a_legacy_letter_keyed_manifest(tmp_path):
     snap_h = tmp_path / "h"
     from ts_cli.audit.snapshot import write_snapshot
     write_snapshot(fx.registry_populated_context(), snap_h, ["H"])
+    # A legacy H capture predates usage, which H17 reads: H is refused, naming it
+    # (ts-audit 3.26.0); a capture recording usage among its needs replays.
+    with pytest.raises(SystemExit, match="usage"):
+        _replay(snap_h, ["H"], None)
+    from ts_cli.audit import data_needs
+    snap_h = tmp_path / "h2"
+    write_snapshot(fx.registry_populated_context(), snap_h, ["H"], needs=data_needs(["H"]))
     # checks_run counts the rules the selection runs: read from the catalog, so adding
     # or retiring an H rule moves both sides together.
     from ts_cli.audit.engine.run import selected_rules

@@ -878,6 +878,8 @@ def verify_render_cmd(
     profile: Optional[str] = _profile_option,
     org: Optional[str] = typer.Option(None, "--org",
                                        help="Org id/name the Liveboard lives in (default: profile/env org)"),
+    strict_data: bool = typer.Option(False, "--strict-data",
+                                     help="Also fail on suspect tiles (no rows, all zero, one all-NULL group)"),
 ) -> None:
     """Verify an imported Liveboard actually RENDERS — not merely that it imported.
 
@@ -887,14 +889,18 @@ def verify_render_cmd(
     - A chart tile with no axis encoding *loads data* (the board returns 200) but draws
       BLANK — the data check alone would pass it, so those tiles are flagged separately.
 
+    - A tile can return data that is silently wrong: a query that cannot combine two facts
+      answers 0 or one all-NULL group with no error. Those are listed as `suspect_tiles`
+      (advisory; `--strict-data` makes them fail the gate).
+
     Output: JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles":[{visual,error}],
-    "blank_chart_tiles":[{visual,chart_type}]}`. Exit 0 only if the board returns data AND has
-    no blank chart tiles — so a skill's import step can gate on it.
+    "blank_chart_tiles":[{visual,chart_type}], "suspect_tiles":[{visual,reason}]}`. Exit 0 only
+    if the board returns data AND has no blank chart tiles — so a skill's import step can gate on it.
 
     \b
       ts tml verify-render <liveboard-guid> --profile myprofile
     """
-    from ts_cli.render_check import classify_render, render_summary, chart_tiles_missing_axis
+    from ts_cli.render_check import classify_render, render_summary, chart_tiles_missing_axis, suspect_tiles
     client = ThoughtSpotClient(resolve_profile(profile), org=org)
 
     def _data(body: dict) -> tuple:
@@ -925,6 +931,7 @@ def verify_render_cmd(
             entry["visual"] = name
             per_viz.append(entry)
 
-    summary = render_summary(liveboard, board, per_viz, blank_tiles)
+    suspect = suspect_tiles(body) if board["rendered"] else []
+    summary = render_summary(liveboard, board, per_viz, blank_tiles, suspect, strict_data)
     print(json.dumps(summary))
     raise SystemExit(0 if summary["ok"] else 1)

@@ -388,19 +388,25 @@ def test_the_picker_the_sidebar_and_the_scorecard_link_reach_the_tree(tmp_path):
         '"#v-formulas .ftree-models a"), function(a){ return a.getAttribute("href"); });'))
     assert picker["errors"] == [] and "Sales" in picker["visible"]
     assert picker["extra"] == ["#formulas/m-1"]
+    # the Model's tabs lead back to its scorecard (they replaced the "Model scorecard" button)
     head = report_browser.render(page, tmp_path, "formulas/m-1", actions=(
-        'window.__extra = document.querySelector("#v-formulas .ftree-header a.ts-link-btn").getAttribute("href");'))
+        'window.__extra = document.querySelector(\'#v-formulas .model-tabs a[data-tab="scorecard"]\').getAttribute("href");'))
     assert head["errors"] == [] and head["extra"] == "#model/m-1"
     assert "7 formulas" in picker["visible"] and "Plain" not in picker["visible"]
     nav = ('var nav = document.querySelector(\'#sidebar-nav a[href="#formulas"]\');'
            'var link = document.querySelector(\'#v-scorecard a[href^="#formulas/"]\');'
            'window.__extra = {nav: nav && nav.textContent, link: link && link.getAttribute("href")};')
+    # the scorecard's Formulas tab (it replaced the "Formula tree" button)
     card = report_browser.render(page, tmp_path, "model/m-1", actions=nav)
-    assert card["errors"] == [] and "Formula tree" in card["visible"]
+    assert card["errors"] == [] and "Formulas" in card["visible"]
     assert card["extra"]["link"] == "#formulas/m-1"
     assert "Formulas" in card["extra"]["nav"]
-    other = report_browser.render(page, tmp_path, "model/m-9", actions=nav)
+    # a Model with no formulas has the tab, disabled with the reason, and no link
+    other = report_browser.render(page, tmp_path, "model/m-9", actions=nav + (
+        'var off = document.querySelector(\'#v-scorecard .model-tab-off[data-tab="formulas"]\');'
+        'window.__extra.off = off && [off.getAttribute("aria-disabled"), off.title];'))
     assert other["errors"] == [] and other["extra"]["link"] is None
+    assert other["extra"]["off"] == ["true", "This Model has no formulas."]
 
 
 @needs_chrome
@@ -456,12 +462,14 @@ def test_clicking_a_formula_shows_its_definition_uses_and_used_by(tmp_path):
         'row("Revenue").click();'
         'var p = panel();'
         'window.__extra = {expr: p.querySelector(".fdetail-expr").textContent,'
+        ' written: p.querySelector(".fdetail-written") && p.querySelector(".fdetail-written").textContent,'
         ' uses: Array.prototype.map.call(p.querySelectorAll(".fdetail-uses a.fref"), function(a){ return a.textContent; }),'
         ' usedBy: Array.prototype.map.call(p.querySelectorAll(".fdetail-usedby a.fref"), function(a){ return a.textContent; }),'
         ' selected: document.querySelectorAll("#v-formulas .ftree-selected").length};'))
     assert shown["errors"] == []
     x = shown["extra"]
-    assert x["expr"] == "sum ( [ORDERS::AMOUNT] )"   # as written: it can be copied back
+    assert x["expr"] == "sum ( [ORDERS::AMOUNT] )"   # a column reads as written
+    assert x["written"] is None   # nothing to show twice
     assert x["uses"] == ["ORDERS::AMOUNT"]
     assert x["usedBy"] == ["Gross Margin %", "Gross Margin"]
     assert x["selected"] >= 1
@@ -473,15 +481,18 @@ def test_a_reference_link_opens_that_formula_and_reveals_it_in_the_tree(tmp_path
     # Cost sits under Gross Margin, collapsed: following the link must open the path to it
     shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=_ROW + (
         'row("Gross Margin %").click();'
-        'var gm = link(panel().querySelector(".fdetail-expr"), "[formula_GM]"); var tip = gm.title; gm.click();'
+        'var gm = link(panel().querySelector(".fdetail-expr"), "[Gross Margin]"); var tip = gm.title;'
+        'var tml = panel().querySelector(".fdetail-written").textContent; gm.click();'
         'var title1 = panel().querySelector(".fdetail-title").textContent;'
         'link(panel().querySelector(".fdetail-expr"), "[Cost]").click();'
         'var r = row("Cost");'
-        'window.__extra = {tip: tip, title1: title1, title2: panel().querySelector(".fdetail-title").textContent,'
+        'window.__extra = {tip: tip, tml: tml, title1: title1, title2: panel().querySelector(".fdetail-title").textContent,'
         ' shown: !!r && r.offsetParent !== null, selected: !!r && r.classList.contains("ftree-selected")};'))
     assert shown["errors"] == []
     x = shown["extra"]
-    assert x["tip"] == "Formula: Gross Margin"
+    # a formula reference reads by the name the tree uses; the TML form is beneath
+    assert x["tip"] == "Formula: Gross Margin, written [formula_GM]"
+    assert x["tml"] == "[formula_GM] / [formula_Rev]"
     assert x["title1"] == "Gross Margin" and x["title2"] == "Cost"
     assert x["shown"] and x["selected"]
 
@@ -523,16 +534,20 @@ def test_search_finds_formulas_by_name_and_definition_and_columns(tmp_path):
               ' function(a){ return a.textContent; }); }')
     shown = report_browser.render(page, tmp_path, "formulas/m-1", actions=search + _ROW + (
         'var byName = find("margin"); var byExpr = find("orders::cost"); var none = find("zzz");'
+        'var shownForm = find("[gross margin] / [revenue]"); var tmlForm = find("[formula_gm] /");'
         'find("loop b"); document.querySelector("#v-formulas .ftree-results a.fref").click();'
         'var title = panel().querySelector(".fdetail-title").textContent;'
         'var cleared = find("");'
         'window.__extra = {byName: byName, byExpr: byExpr, none: none, title: title, cleared: cleared,'
+        ' shownForm: shownForm, tmlForm: tmlForm,'
         ' empty: document.querySelector("#v-formulas .ftree-results").textContent};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert x["byName"] == ["Gross Margin %", "Gross Margin"]
     assert "Cost" in x["byExpr"] and "ORDERS::COST" in x["byExpr"]
     assert x["none"] == [] and x["title"] == "Loop B" and x["cleared"] == [] and x["empty"] == ""
+    # a definition is found by the panel's form, by name, and by the TML's form
+    assert x["shownForm"] == ["Gross Margin %"] and x["tmlForm"] == ["Gross Margin %"]
 
 
 @needs_chrome
@@ -559,7 +574,7 @@ def test_definitions_and_search_results_are_escaped(tmp_path):
         ' expr: panel().querySelector(".fdetail-expr").textContent};'))
     assert shown["errors"] == []
     assert shown["extra"]["tags"] == 0
-    assert shown["extra"]["expr"] == "[formula_Y] + '<i>lit</i>'"
+    assert shown["extra"]["expr"] == "[<b>y</b>] + '<i>lit</i>'"
 
 
 @needs_chrome
@@ -701,7 +716,7 @@ def test_a_link_opens_under_the_formula_it_was_followed_from(tmp_path):
     page = _report(tmp_path, ("m-10", diamond))
     shown = report_browser.render(page, tmp_path, "formulas/m-10", actions=_ROW + (
         'row("B").click();'
-        'link(panel().querySelector(".fdetail-expr"), "[formula_D]").click();'
+        'link(panel().querySelector(".fdetail-expr"), "[D]").click();'
         'var sel = document.querySelector("#v-formulas .ftree .ftree-selected");'
         'var up = sel.parentNode.parentNode.closest("li.ftree-node");'
         'window.__extra = up.firstChild.querySelector(".ftree-name").textContent;'))
@@ -819,17 +834,27 @@ def test_a_hidden_formula_used_once_is_tagged_and_pasted_into_its_user(tmp_path)
         '  row(name).querySelectorAll(".ftree-tag"), function(t){ return t.textContent; }); };'
         'row("Gross Margin %").click();'
         'var inl = panel().querySelector(".fdetail-inlined");'
+        'var inlTml = panel().querySelector(".fdetail-inlined-written");'
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        'function find(q){ s.value = q; s.dispatchEvent(new Event("input"));'
+        ' return Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-results a.fref"),'
+        ' function(a){ return a.textContent; }); }'
+        'var pasted = find("( [revenue] - ( sum"), pastedTml = find("( [formula_rev] - ( sum"); find("");'
         'var gmTags = tags("Gross Margin"), gmpTags = tags("Gross Margin %");'
         'row("Revenue").click();'
         'var revInl = panel().querySelector(".fdetail-inlined");'
         'window.__extra = {gm: gmTags, gmp: gmpTags, inl: inl && inl.textContent,'
         ' links: inl ? Array.prototype.map.call(inl.querySelectorAll("a.fref"), function(a){ return a.textContent; }) : null,'
-        ' revInl: revInl === null};'))
+        ' inlTml: inlTml && inlTml.textContent, revInl: revInl === null, pasted: pasted, pastedTml: pastedTml};'))
     assert shown["errors"] == []
     x = shown["extra"]
     assert "used once, hidden" in x["gm"] and "used once, hidden" not in x["gmp"]
-    assert x["inl"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
-    assert x["links"] == ["[formula_Rev]", "[ORDERS::COST]", "[formula_Rev]"]
+    assert x["inl"] == "( [Revenue] - ( sum ( [ORDERS::COST] ) ) ) / [Revenue]"
+    assert x["links"] == ["[Revenue]", "[ORDERS::COST]", "[Revenue]"]
+    # the TML's own form, to copy into the formula that uses the helper
+    assert x["inlTml"] == "( [formula_Rev] - ( sum ( [ORDERS::COST] ) ) ) / [formula_Rev]"
+    # search finds a formula by its pasted-in definition, in either form
+    assert x["pasted"] == ["Gross Margin %"] and x["pastedTml"] == ["Gross Margin %"]
     assert x["revInl"]   # uses no single-use helper: no second definition
 
 
@@ -862,5 +887,5 @@ def test_only_what_h16_reports_is_tagged_and_pasted(tmp_path):
     assert x["tags"]["B"] == "hidden helper" and x["tags"]["A"] == "hidden helper"
     assert x["tags"]["Shared"] == "MEASURE,hidden helper"
     assert x["tags"]["Filtered"] == "MEASURE,hidden helper"
-    assert x["top"] == "( 1 ) + [formula_S2] + [formula_F]"
+    assert x["top"] == "( 1 ) + [Shared] + [Filtered]"
     assert x["a"]   # nothing in a cycle is pasted

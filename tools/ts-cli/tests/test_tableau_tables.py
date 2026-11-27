@@ -19,7 +19,10 @@ def test_build_table_tml_shape_and_invariants():
     assert t["db"] == "DB" and t["schema"] == "PUBLIC"
     cols = {c["name"]: c for c in t["columns"]}
     assert all("db_column_name" in c for c in t["columns"])
-    assert cols["Order Date"]["db_column_properties"]["data_type"] == "DATE_TIME"
+    # columns are named by their physical name (a Model column_id resolves
+    # against the Table column `name`); the caption lives on the Model column
+    assert all(c["name"] == c["db_column_name"] for c in t["columns"])
+    assert cols["Order_Date"]["db_column_properties"]["data_type"] == "DATE_TIME"
     assert cols["Sales"]["properties"]["aggregation"] == "SUM"
     assert dropped == []
 
@@ -115,12 +118,12 @@ def test_build_table_tml_infers_role_when_column_type_absent():
     ]}
     obj, _ = build_table_tml(table, "CONN", "DB", "SCHEMA")
     cols = {c["name"]: c for c in obj["table"]["columns"]}
-    assert cols["Order ID"]["properties"]["column_type"] == "ATTRIBUTE"
-    assert "aggregation" not in cols["Order ID"]["properties"]
+    assert cols["Order_ID"]["properties"]["column_type"] == "ATTRIBUTE"
+    assert "aggregation" not in cols["Order_ID"]["properties"]
     assert cols["Sales"]["properties"]["column_type"] == "MEASURE"
     assert cols["Sales"]["properties"]["aggregation"] == "SUM"
-    assert cols["Customer Name"]["properties"]["column_type"] == "ATTRIBUTE"
-    assert "aggregation" not in cols["Customer Name"]["properties"]
+    assert cols["Customer_Name"]["properties"]["column_type"] == "ATTRIBUTE"
+    assert "aggregation" not in cols["Customer_Name"]["properties"]
 
 
 def test_build_table_tml_column_type_from_parse_wins_over_inference():
@@ -147,14 +150,15 @@ def test_build_table_tml_table_map_and_column_map_override_physical_names_only()
         table_map=table_map, column_map=column_map,
     )
     t = obj["table"]
-    # display name stays the Tableau name; only the physical db_table is remapped
+    # the table keeps the Tableau name; only the physical db_table is remapped
     assert t["name"] == "Sales Orders"
     assert t["db_table"] == "FCT_SALES_ORDERS"
+    # a column is named by its (mapped) physical name, so a Model column_id
+    # built from db_column_name resolves against it
     cols = {c["name"]: c for c in t["columns"]}
-    assert cols["Sales Amount"]["name"] == "Sales Amount"
-    assert cols["Sales Amount"]["db_column_name"] == "SALES_AMT"
+    assert cols["SALES_AMT"]["db_column_name"] == "SALES_AMT"
     # unmapped column falls back to the derived physical name, not dropped
-    assert cols["Order ID"]["db_column_name"] == "Order_ID"
+    assert cols["Order_ID"]["db_column_name"] == "Order_ID"
     assert dropped == []
 
 
@@ -168,7 +172,7 @@ def test_build_table_tml_unmapped_column_is_not_dropped():
         table, "CONN", "DB", "SCHEMA",
         column_map={"Orders": {}},  # present but empty — "Order ID" is unmapped
     )
-    assert [c["name"] for c in obj["table"]["columns"]] == ["Order ID"]
+    assert [c["name"] for c in obj["table"]["columns"]] == ["Order_ID"]
     assert dropped == []
 
 
@@ -208,6 +212,6 @@ def test_canonical_ts_data_types_pass_through():
     assert dt["ID"] == "INT64"
     assert dt["Amount"] == "DOUBLE"
     assert dt["Active"] == "BOOL"
-    assert dt["Birth Date"] == "DATE"
-    assert dt["Created At"] == "DATE_TIME"
+    assert dt["Birth_Date"] == "DATE"
+    assert dt["Created_At"] == "DATE_TIME"
     assert dt["Description"] == "VARCHAR"

@@ -33,6 +33,22 @@ class AuditContext:
     # value. Fetched when a selected rule declares `connections`; None when not fetched
     # or the search failed, as for `calendars` (P24 then skips every Model).
     connections: Optional[list] = None
+    # Per-Model usage from the system Model "TS: AI and BI Stats" (audit/usage.py:
+    # GUIDs and counts, the Org it was read in), fetched when a selected rule declares
+    # `usage`. None when not fetched or not read, never an empty reading: H17 then
+    # judges no Model, and the report says "Not read", never "unused".
+    usage: Optional[dict] = None
+    # The Models whose Set listing failed or was incomplete (sets/discover.py
+    # `incomplete`), when Sets were looked up; None when they were not, or a snapshot
+    # written before ts-cli 0.225.0 (usage_triage.sets_unread then reads the run's
+    # warnings). Such a Model's Sets, and so its dependents, are not known, never 0.
+    sets_incomplete: Optional[list] = None
+    # The Models whose own dependents reading was incomplete (_dependents_incomplete:
+    # dependents hidden from this user, a body that is not a list, the Model missing from
+    # its batch's answer, or no dependents map for it); [] when every one read clean, None
+    # in a snapshot written before ts-cli 0.225.0 (which Models is not known). What WAS
+    # returned stays in `dependents`; the Usage view reads the total as a lower bound.
+    dependents_incomplete: Optional[list] = None
     model_guids: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     # Which bar the AI-readiness checks measure against (BL-399): a catalog profile id
@@ -139,6 +155,9 @@ def make_context(
     assessment="general",
     calendars=None,
     connections=None,
+    usage=None,
+    sets_incomplete=None,
+    dependents_incomplete=None,
 ) -> AuditContext:
     return AuditContext(
         models=models or [],
@@ -149,6 +168,9 @@ def make_context(
         answers=answers or [],
         calendars=calendars,  # None and [] differ: not fetched, and fetched with none
         connections=connections,  # likewise
+        usage=usage,  # None: not fetched or not read
+        sets_incomplete=sets_incomplete,  # None: Sets not looked up
+        dependents_incomplete=dependents_incomplete,  # None: not recorded
         model_guids=model_guids or [],
         warnings=warnings or [],
         assessment=assessment,
@@ -183,7 +205,7 @@ def _model_refs(models: list, model_guids: list) -> list:
 
 
 def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
-                        warnings: list) -> None:
+                        warnings: list) -> list:
     """Record each discovered Set under its Model, and its consumers under its own GUID.
 
     Sets are not in a Model's dependents (BL-324), so H5 had nothing to read.
@@ -192,10 +214,11 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
     ``check_h5`` treats as silence, never as an orphan (BL-302). A Set whose
     dependents are hidden from this user, or whose only dependent is another Set,
     must not read as unused (ruling R14). A Model whose Set listing is incomplete
-    contributes no Set rows at all — only a warning.
+    contributes no Set rows at all — only a warning — and is returned, by GUID, so
+    nothing reads its Sets as none (AuditContext.sets_incomplete).
     """
     if not model_refs:
-        return
+        return []
     _log("Discovering Sets...")
     found = discover_sets(client, model_refs)
     for model_guid, sets in found["sets"].items():
@@ -218,6 +241,35 @@ def _add_set_dependents(client: Any, model_refs: list, dependents: dict,
         msg = f"Set discovery {note['kind']} for {note['object']}: {note['detail']}"
         _log(f"Warning: {msg}")
         warnings.append(msg)
+    return list(dict.fromkeys(found.get("incomplete") or []))
+
+
+def _dependents_incomplete(body: Any, guids: list, refs: list, warnings: list) -> list:
+    """The Models among `guids` whose dependents this answer does not give in full, each
+    with a warning naming the Model and why: a body that is not a list, an answer with
+    no item carrying a dependents map for it (missing from the batch, or no map), or
+    dependents hidden from this user and not returned (sets/consumers.py, ruling R17: a
+    failure must never read as the more favourable "no dependents"). What it does return
+    is still recorded by the caller."""
+    from ts_cli.sets.consumers import _dependents_hidden, _own_item
+    names = {r["guid"]: r["name"] for r in refs}
+    out = []
+    for guid in guids:
+        if not isinstance(body, list):
+            why = "the dependents answer was not a list"
+        else:
+            item = _own_item(body, guid)
+            if item is None:
+                why = "the dependents answer did not include this Model"
+            elif _dependents_hidden(item.get("dependent_objects") or {}):
+                why = "some dependents are not visible to this user (hasInaccessibleDependents)"
+            else:
+                continue
+        msg = f"Dependents of Model {names.get(guid, guid)} ({guid}) not fully read: {why}"
+        _log(f"Warning: {msg}")
+        warnings.append(msg)
+        out.append(guid)
+    return out
 
 
 _AI_INSTRUCTIONS_PATH = "/api/rest/2.0/ai/instructions/get"
@@ -256,16 +308,18 @@ _FATAL_STATUSES = {401: "the credential was refused after re-authentication",
                    429: "rate limited — retry later"}
 
 
-def _read_answer(resp: Any, path: str, body: bool = True) -> Tuple[Any, Optional[str]]:
+def _read_answer(resp: Any, path: str, body: bool = True,
+                 method: str = "POST") -> Tuple[Any, Optional[str]]:
     """`(decoded JSON, None)` for a 2xx JSON answer to a conditional fetch; `(None,
     reason)` for any other answer, the reason being `format_http_error`'s secret-free
     line (a final 1xx or 3xx too: `resp.ok` passes both) or the JSON error. A final 401
     or a 429 (_FATAL_STATUSES) ends the run once, `SystemExit(1)`. With `body=False`
     the line names the status and path only, never the response body (format_http_error
-    quotes up to 500 characters of it): for a search whose answers hold credentials."""
+    quotes up to 500 characters of it): for a search whose answers hold credentials.
+    `method` is the request's, for the line."""
     from ts_cli.client import format_http_error
-    line = format_http_error("POST", path, resp) if body \
-        else f"ThoughtSpot API {resp.status_code} on POST {path}"
+    line = format_http_error(method, path, resp) if body \
+        else f"ThoughtSpot API {resp.status_code} on {method} {path}"
     if resp.status_code in _FATAL_STATUSES:
         print(f"{line} — {_FATAL_STATUSES[resp.status_code]}; aborting the audit",
               file=sys.stderr)
@@ -676,7 +730,8 @@ def build_context(
     TML of the dependents' Answers), `sets` (Set discovery and each Set's consumers) and
     `calendars` (every connection's registered custom calendars, one paged search) and
     `connections` (each connection's derived facts: two paged searches, the
-    connections with details and their CONNECTION metadata headers).
+    connections with details and their CONNECTION metadata headers) and `usage` (each
+    Model's queries, from the system Model TS: AI and BI Stats: audit/usage.py).
     `dependents` may be in `needs` but is fetched regardless. Anything that is not a
     `requires` value — a category letter from a caller still passing angles — is
     rejected, not silently ignored.
@@ -692,6 +747,8 @@ def build_context(
     answers = []
     calendars = None
     connections = None
+    usage = None
+    sets_incomplete = None
 
     # Model TML (with associated Table TML), metadata and dependents below are fetched
     # for every audit and must stay so: rules read Model and Table TML without declaring
@@ -737,6 +794,8 @@ def build_context(
         _build_dependents_payload, _normalize_dependents_response,
     )
     all_guids = list(set(model_guids + model_guids_from_tml + table_guids_from_tml))
+    model_set = set(model_guids_from_tml)  # the audited Models: not exported is not judged
+    dependents_incomplete: list = []
 
     if all_guids:
         dep_batch = 15
@@ -747,7 +806,11 @@ def build_context(
                 json=_build_dependents_payload(batch, "LOGICAL_TABLE"),
                 timeout=300,
             )
-            dep_rows = _normalize_dependents_response(resp.json())
+            body = resp.json()
+            dependents_incomplete += _dependents_incomplete(
+                body, [g for g in batch if g in model_set], _model_refs(models, model_guids),
+                warnings)
+            dep_rows = _normalize_dependents_response(body)
             for row in dep_rows:
                 src = row["source_guid"]
                 dependents.setdefault(src, []).append(row)
@@ -762,11 +825,15 @@ def build_context(
         answers = _export_answers(client, dependents, warnings)
     if "sets" in needs:
         # The SET rows are for H5; check_h4 ignores them (ruling R15).
-        _add_set_dependents(client, _model_refs(models, model_guids), dependents, warnings)
+        sets_incomplete = _add_set_dependents(client, _model_refs(models, model_guids),
+                                              dependents, warnings)
     if "calendars" in needs:
         calendars = _fetch_calendars(client, warnings)
     if "connections" in needs:
         connections = _fetch_connections(client, warnings)
+    if "usage" in needs:
+        from ts_cli.audit.usage import fetch_usage
+        usage = fetch_usage(client, warnings)
 
     _log(f"Context ready: {len(models)} model(s), {len(tables)} table(s), "
          f"{len(answers)} answer(s)")
@@ -780,6 +847,9 @@ def build_context(
         answers=answers,
         calendars=calendars,
         connections=connections,
+        usage=usage,
+        sets_incomplete=sets_incomplete,
+        dependents_incomplete=sorted(dependents_incomplete),
         model_guids=model_guids,
         warnings=warnings,
     )

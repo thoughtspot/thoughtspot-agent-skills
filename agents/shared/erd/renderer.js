@@ -16,7 +16,23 @@ const svg=$("svg"),vp=$("viewport"),gEdges=$("edges"),gNodes=$("nodes"),inspecto
 const tFind=$("findings-toggle"),colSel=$("col-mode");
 const tOrth=$("orth-toggle");
 const groupSel=$("group-mode");
-let activeFilters=new Set(["all"]);
+// ---- Show bar ----
+// ONE SPEC with the audit report's filter bar (ts_cli/audit/report/filter_bar.js): the
+// same markup (render.py), class names, behaviour and wording, and the CSS between the
+// filter-bar markers is byte-identical in renderer.css and the report's styles.css (the
+// report's tests/test_audit_filter_bar.py checks it). "Show", an All chip, a toggle chip
+// per table kind with its count, then the search box and the shown count. Every chip
+// starts on; switching one off HIDES the tables it covers (a table any switched-off chip
+// covers is hidden, so the overlapping SQL View, Alias and RLS chips combine with Fact and
+// Dim) and their joins, and the diagram is laid out again over what is left; All
+// switches every chip back on. RLS subgraph and Noted only are not kinds of table but
+// views of the model, so they are the Focus toggles beside the bar: each hides every
+// table outside it, and they combine with the chips.
+const SHOW_CHIPS={fact:t=>t.kind==="fact",dim:t=>t.kind==="dim",sql_view:t=>!!t.is_sql_view,
+  alias:t=>!!t.alias_of,rls:t=>!!(t.rls&&t.rls.length)};
+let showOn={fact:true,dim:true,sql_view:true,alias:true,rls:true};
+let focusRls=false,focusNotes=false;
+let allNodes=[],allEdges=[],hiddenIds=new Set();
 let GROUP_MODE="none",groupCache={},groupHighlight=null;
 
 const reduce=matchMedia("(prefers-reduced-motion:reduce)").matches;
@@ -259,16 +275,18 @@ function persistNotes(){try{localStorage.setItem(NOTES_KEY,JSON.stringify(notes)
 // review panel, clear-all — routes through here so the chip/filter state and the redraw
 // never drift from what's actually persisted.
 function syncNotesChip(){
-  const chip=document.querySelector('#filter-chips .fchip[data-f="notes"]');
+  const chip=$("focus-notes");
   const count=Object.keys(notes).length,any=count>0;
   if(chip)chip.disabled=!any;
   const btn=$("notes-review-btn");
   if(btn)btn.textContent="Review notes"+(any?` (${count})`:"");
-  // B3: never leave the diagram ghosted behind a disabled chip
-  if(!any && activeFilters.has("notes")){activeFilters.delete("notes");if(!activeFilters.size)activeFilters.add("all");}
-  syncChips();
+  // B3: never leave the diagram emptied behind a disabled toggle
+  if(!any&&focusNotes){focusNotes=false;return true;}
+  syncShowBar();
+  return false;
 }
-function commitNotes(){ persistNotes(); syncNotesChip(); renderAll(); }
+// Under Noted only, a note added or removed changes what is shown: lay it out again.
+function commitNotes(){ persistNotes(); if(syncNotesChip()||focusNotes)applyShow(); else renderAll(); }
 // The notes-review panel never sets `selected` (it's a list view, not a table/edge
 // selection), so routing by `selected` alone landed back on a stale table/edge view or
 // the overview when Clear was pressed from inside Review notes. Detect that view directly.
@@ -308,8 +326,12 @@ function wireNotes(id,isEdge){
   if(dl)dl.onclick=()=>{delete notes[id];refresh("Note deleted");};
 }
 const hasAll=m=>m&&MODEL.tables.every(t=>m[t.id]);
-function captureLayout(){const m={};nodes.forEach(n=>m[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});savedPos[layoutName]=m;persistSaved();updateSavedBadge();}
-function updateSavedBadge(){$("saved-badge").classList.toggle("on",hasAll(savedPos[layoutName]));}
+// While the Show bar hides tables, a drag moves this filtered layout only: it is kept
+// for the session and never saved over the whole model's positions.
+function captureLayout(){const m={};nodes.forEach(n=>m[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});
+  if(hiddenIds.size){layoutCache[layoutKey(layoutName)]=m;return;}
+  savedPos[layoutName]=m;persistSaved();updateSavedBadge();}
+function updateSavedBadge(){$("saved-badge").classList.toggle("on",!hiddenIds.size&&hasAll(savedPos[layoutName]));}
 
 // ---- LAYOUTS ----
 function computeOrganic(){
@@ -451,10 +473,34 @@ function computeLayered(dir){
 }
 function computeFor(name){return name==="organic"?computeOrganic():name==="star"?computeStar()
   :name==="network"?computeNetwork():computeLayered(name);}
+// A layout is cached per set of hidden tables: the whole model under its name, a
+// filtered one under the name and the hidden ids.
+function layoutKey(name){return hiddenIds.size?name+"|"+[...hiddenIds].sort().join(","):name;}
 function getLayout(name){
+  const key=layoutKey(name);
+  if(layoutCache[key])return layoutCache[key];
+  layoutCache[key]=hiddenIds.size?computeShown(name):computeFor(name);
+  return layoutCache[key];
+}
+// Lay out only the shown tables: the layouts read MODEL's tables and joins and undir
+// (nodes and edges already hold only the shown ones), so they see the model less the
+// hidden tables while this runs.
+function computeShown(name){
+  const keepM=MODEL,keepU=undir;
+  MODEL=Object.assign({},MODEL,{tables:MODEL.tables.filter(t=>!hiddenIds.has(t.id)),
+    joins:MODEL.joins.filter(j=>!hiddenIds.has(j.from)&&!hiddenIds.has(j.to))});
+  undir={};MODEL.tables.forEach(t=>undir[t.id]=[]);
+  MODEL.joins.forEach(j=>{undir[j.from].push(j.to);undir[j.to].push(j.from);});
+  try{return computeFor(name);}finally{MODEL=keepM;undir=keepU;}
+}
+// The whole model's layout, whatever is hidden (Share HTML bakes the whole model).
+// computeOrganic moves the node objects themselves, which are the ones on screen, so
+// their places are put back: working out a layout must never move the diagram.
+function fullLayout(name){
   if(layoutCache[name])return layoutCache[name];
-  layoutCache[name]=computeFor(name);
-  return layoutCache[name];
+  const keepN=nodes,keepE=edges,at=allNodes.map(n=>[n.x,n.y]);nodes=allNodes;edges=allEdges;
+  try{return layoutCache[name]=computeFor(name);}
+  finally{nodes=keepN;edges=keepE;allNodes.forEach((n,i)=>{n.x=at[i][0];n.y=at[i][1];});}
 }
 
 // ---- tween ----
@@ -473,7 +519,7 @@ function setLayout(name){layoutName=name;
   const layered=name==="lr"||name==="tb";
   tOrth.disabled=!layered;$("orth-wrap").style.opacity=layered?1:.4;
   updateSavedBadge();
-  tweenTo(hasAll(savedPos[name])?savedPos[name]:getLayout(name));}
+  tweenTo(!hiddenIds.size&&hasAll(savedPos[name])?savedPos[name]:getLayout(name));}
 const VIEW_LS_KEY="ts-erd-view";
 // A stored choice wins; the hash is only a first-visit default (screenshots, links).
 // The match is exact: the audit report and others put their own routes in the hash.
@@ -501,20 +547,49 @@ function setView(v,persist){
 }
 
 // ---- focus / path ----
-function tableMatchesFilter(t){
-  if(activeFilters.has("all"))return true;
-  if(activeFilters.has("fact")&&t.kind==="fact")return true;
-  if(activeFilters.has("dim")&&t.kind==="dim")return true;
-  if(activeFilters.has("sql_view")&&t.is_sql_view)return true;
-  if(activeFilters.has("alias")&&t.alias_of)return true;
-  if(activeFilters.has("rls")&&t.rls&&t.rls.length>0)return true;
-  if(activeFilters.has("rls_subgraph")&&((t.rls&&t.rls.length>0)||t.in_rls_path))return true;
-  if(activeFilters.has("notes")&&notes[t.id])return true;
-  return false;
+// The tables with a note, and the two ends of every join with one.
+function notedIds(){const s=new Set(Object.keys(notes).filter(k=>tableById[k]));
+  MODEL.joins.forEach(j=>{if(notes[j.name]){s.add(j.from);s.add(j.to);}});return s;}
+function tableShown(t,noted){
+  if(Object.keys(SHOW_CHIPS).some(f=>!showOn[f]&&SHOW_CHIPS[f](t)))return false;
+  if(focusRls&&!((t.rls&&t.rls.length)||t.in_rls_path))return false;
+  return !focusNotes||noted.has(t.id);
 }
+// Hide what the Show bar and the Focus toggles leave out, and lay out the rest again.
+function applyShow(){
+  const noted=notedIds();
+  hiddenIds=new Set(MODEL.tables.filter(t=>!tableShown(t,noted)).map(t=>t.id));
+  nodes=allNodes.filter(n=>!hiddenIds.has(n.t.id));
+  edges=allEdges.filter(e=>!hiddenIds.has(e.j.from)&&!hiddenIds.has(e.j.to));
+  focusSet=[];focusMode=null;selected=null;clearGroupHighlight();
+  syncShowBar();
+  setLayout(layoutName);
+}
+function syncShowBar(){
+  const bar=$("filter-chips");if(!bar)return;
+  const counts={};Object.keys(SHOW_CHIPS).forEach(f=>counts[f]=MODEL.tables.filter(SHOW_CHIPS[f]).length);
+  bar.querySelectorAll(".fbar-chip").forEach(b=>{
+    const f=b.dataset.f,all=f==="all";
+    b.querySelector(".fbar-count").textContent=all?MODEL.tables.length:counts[f];
+    if(!all)b.disabled=!counts[f];
+    const on=all?Object.keys(SHOW_CHIPS).every(k=>!counts[k]||showOn[k]):showOn[f];
+    b.setAttribute("aria-pressed",on?"true":"false");
+  });
+  syncShownTotal();
+  $("focus-rls").setAttribute("aria-pressed",String(focusRls));$("focus-rls").disabled=!securedTables.length;
+  $("focus-notes").setAttribute("aria-pressed",String(focusNotes));
+}
+// "N of M tables shown" counts what is drawn: a join-tree or compare focus hides the
+// tables outside it (hideOutOfFocus), so renderNodes refreshes it after every draw.
+function syncShownTotal(){
+  const el=document.querySelector("#filter-chips .fbar-total");if(!el)return;
+  const keep=hideOutOfFocus()?focusGroup():null;
+  const drawn=keep?nodes.filter(n=>keep.has(n.t.id)).length:nodes.length;
+  el.textContent=drawn+" of "+MODEL.tables.length+" tables shown";
+}
+// Something hidden was asked for (the finder, a link in the side panel): show everything.
+function revealAll(){Object.keys(showOn).forEach(k=>showOn[k]=true);focusRls=focusNotes=false;applyShow();}
 function focusGroup(){
-  if(!activeFilters.has("all")&&!focusSet.length){
-    const k=new Set();MODEL.tables.forEach(t=>{if(tableMatchesFilter(t))k.add(t.id);});return k;}
   if(!focusSet.length)return null;
   const keep=new Set(focusSet);
   if(focusMode==="tree"){
@@ -526,8 +601,6 @@ function focusGroup(){
     // single-click: the table's immediate neighbourhood.
     focusSet.forEach(id=>(undir[id]||[]).forEach(n=>keep.add(n)));
   }
-  if(!activeFilters.has("all")){const filtered=new Set();MODEL.tables.forEach(t=>{if(tableMatchesFilter(t))filtered.add(t.id);});
-    return new Set([...keep].filter(id=>filtered.has(id)));}
   return keep;
 }
 // In tree / compare focus, out-of-scope tables are hidden outright rather than dimmed.
@@ -613,15 +686,10 @@ function renderEdges(){
     if(hot){stroke="#9AA4B1";sw=2;dash="6 4";mk="url(#arrow)";}
     if(onPath||sel){stroke="#1E6FA8";sw=3;dash="0";mk="url(#arrow-sel)";}
     if(net){mk="none";if(!(onPath||sel||hot||annotated)){stroke="#B8C0CB";sw=1.2;}}
-    // Notes filter: a noted edge stays emphasized even if its endpoints fall outside
-    // the highlighted subgraph (e.g. a note on a join between two otherwise-unrelated tables).
-    const notesKeep=activeFilters.has("notes")&&annotated;
-    // notesKeep only un-dims (ghost) a noted edge; it must NOT un-hide (gone) it,
-    // or a noted edge would float vividly between two hidden nodes when the Notes
-    // filter is combined with a tree/compare focus. hideOutOfFocus() may only promote
-    // to "gone" for the FOCUS reason (focusGhost) — a group highlight never hides.
+    // hideOutOfFocus() may only promote to "gone" for the FOCUS reason (focusGhost) — a
+    // group highlight never hides. (Tables the Show bar hides are not in `edges` at all.)
     const goneNow=hideOutOfFocus()&&focusGhost;
-    const g=NS_el("g",{class:"edge-g"+(ghost?(goneNow?" gone":(notesKeep?"":" ghost")):""),style:"cursor:pointer"},gEdges);
+    const g=NS_el("g",{class:"edge-g"+(ghost?(goneNow?" gone":" ghost"):""),style:"cursor:pointer"},gEdges);
     NS_el("path",{class:"edge",fill:"none",d:G.d,stroke,"stroke-width":sw,"stroke-dasharray":dash,"marker-end":crow?"none":mk,"stroke-linejoin":"round","vector-effect":"non-scaling-stroke"},g);
     NS_el("path",{d:G.d,stroke:"transparent","stroke-width":16,fill:"none","vector-effect":"non-scaling-stroke"},g);
     if(crow){const card=e.j.card,parts=(card&&card.includes("_TO_"))?card.split("_TO_"):["MANY","ONE"];
@@ -753,6 +821,7 @@ function renderNodes(){
     g.addEventListener("dblclick",ev=>{ev.stopPropagation();const tree=joinTree(t.id);focusSet=[...tree];focusMode="tree";selected={type:"table",id:t.id};renderAll();showTable(t.id);});
   });
   lastLod=isLod;
+  syncShownTotal();
 }
 function renderAll(){renderEdges();renderNodes();}
 
@@ -902,13 +971,16 @@ function enableDrag(g,n){let dragging=false,off=null,moved=false;
 
 // ---- selection / inspector ----
 function selectTable(id,additive){
+  if(hiddenIds.has(id))revealAll();
   if(additive){const i=focusSet.indexOf(id);if(i>=0)focusSet.splice(i,1);else focusSet.push(id);
     focusMode=focusSet.length>1?"compare":"neighbourhood";}
   else {focusSet=[id];focusMode="neighbourhood";}
   selected={type:"table",id};renderAll();
   if(focusSet.length>1)showCompare();else if(focusSet.length===1)showTable(focusSet[0]);else showOverview();
 }
-function selectEdge(name){selected={type:"edge",id:name};renderAll();showEdge(name);}
+function selectEdge(name){
+  const j=MODEL.joins.find(x=>x.name===name);if(j&&(hiddenIds.has(j.from)||hiddenIds.has(j.to)))revealAll();
+  selected={type:"edge",id:name};renderAll();showEdge(name);}
 
 const ROLE_TAG={MEASURE:["m","measure"],ATTR:["a","attribute"],FORMULA:["f","formula"]};
 // Every embedment is read back via `dataset` (the browser decodes entities before that
@@ -1050,7 +1122,7 @@ function showEdge(name){const j=MODEL.joins.find(x=>x.name===name);if(!j){showOv
 
 function showRlsSubgraph(){
   let h=`<button class="backlink" id="back">← Overview</button><h2>Secured subgraph</h2>
-    <p class="sub">Only tables involved in row-level security stay vivid: the tables a rule is defined on, plus any table those rules reference. Everything else is ghosted.</p>
+    <p class="sub">Only tables involved in row-level security are shown: the tables a rule is defined on, plus any table those rules reference. Everything else is hidden.</p>
     <div class="section-label">Secured tables (${securedTables.length})</div>`;
   MODEL.tables.filter(t=>t.rls&&t.rls.length).forEach(t=>{
     h+=`<div style="font-size:11.5px;font-weight:600;margin-bottom:6px;font-family:var(--mono);cursor:pointer" data-go="${esc(t.id)}">🔒 ${esc(t.id)}</div>`+t.rls.map(r=>ruleCard(r,t.id)).join("");});
@@ -1058,7 +1130,7 @@ function showRlsSubgraph(){
   h+=`<div class="section-label">In RLS path (${inPath.length})</div>
     <p class="sub">${inPath.length?inPath.map(x=>`<span class="chip" data-go="${esc(x)}" style="cursor:pointer">${esc(x)}</span>`).join(""):"None — no rule references another table."}</p>
     <p class="note">Tables referenced inside another table's RLS expression. Changes to their data affect that rule's row filtering.</p>`;
-  inspector.innerHTML=h;$("back").onclick=()=>{activeFilters=new Set(["all"]);syncChips();renderAll();showOverview();};
+  inspector.innerHTML=h;$("back").onclick=()=>{focusRls=false;applyShow();showOverview();};
   inspector.querySelectorAll("[data-go]").forEach(e=>e.onclick=()=>selectTable(e.dataset.go,false));inspector.scrollTop=0;
 }
 
@@ -1109,7 +1181,7 @@ function showNotesReview(){
     :`<p class="sub">No notes yet — add one from any table or join's inspector.</p>`;
   inspector.innerHTML=h;
   // showTable's back pattern (clear focusSet/selected -> showOverview), NOT
-  // showRlsSubgraph's (which resets activeFilters and would wipe an active filter).
+  // showRlsSubgraph's (which switches RLS subgraph off and would undo a Focus).
   $("back").onclick=()=>{focusSet=[];selected=null;renderAll();showOverview();};
   wireNotesReview();inspector.scrollTop=0;
 }
@@ -1119,20 +1191,18 @@ document.querySelectorAll("#layout-seg button").forEach(b=>b.onclick=()=>setLayo
 document.querySelectorAll("#view-seg button").forEach(b=>b.onclick=()=>setView(b.dataset.v,true));
 document.querySelectorAll("#notation-seg button").forEach(b=>b.onclick=()=>{notation=b.dataset.n;
   document.querySelectorAll("#notation-seg button").forEach(x=>x.classList.toggle("on",x.dataset.n===notation));renderEdges();});
-colSel.onchange=()=>{colMode=colSel.value;layoutCache={};nodes.forEach(sizeNode);
-  layoutCache.organic=computeOrganic();setLayout(layoutName);};
-$("reset-pos").onclick=()=>{delete savedPos[layoutName];persistSaved();
-  layoutCache[layoutName]=computeFor(layoutName);setLayout(layoutName);};
+colSel.onchange=()=>{colMode=colSel.value;layoutCache={};allNodes.forEach(sizeNode);setLayout(layoutName);};
+$("reset-pos").onclick=()=>{if(!hiddenIds.size){delete savedPos[layoutName];persistSaved();}
+  delete layoutCache[layoutKey(layoutName)];setLayout(layoutName);};
 tFind.onchange=renderAll; tOrth.onchange=renderEdges;
-function syncChips(){document.querySelectorAll("#filter-chips .fchip").forEach(c=>c.classList.toggle("on",activeFilters.has(c.dataset.f)));}
-document.querySelectorAll("#filter-chips .fchip").forEach(c=>c.addEventListener("click",()=>{
+document.querySelectorAll("#filter-chips .fbar-chip").forEach(c=>c.addEventListener("click",()=>{
+  if(c.disabled)return;
   const f=c.dataset.f;
-  if(f==="all"){activeFilters=new Set(["all"]);}
-  else{activeFilters.delete("all");if(activeFilters.has(f))activeFilters.delete(f);else activeFilters.add(f);
-    if(!activeFilters.size)activeFilters.add("all");}
-  syncChips();focusSet=[];selected=null;clearGroupHighlight();renderAll();
-  if(activeFilters.has("rls_subgraph"))showRlsSubgraph();else showOverview();
+  if(f==="all")Object.keys(showOn).forEach(k=>showOn[k]=true);else showOn[f]=!showOn[f];
+  applyShow();if(focusRls)showRlsSubgraph();else showOverview();
 }));
+$("focus-rls").onclick=()=>{focusRls=!focusRls;applyShow();if(focusRls)showRlsSubgraph();else showOverview();};
+$("focus-notes").onclick=()=>{focusNotes=!focusNotes;applyShow();if(focusRls)showRlsSubgraph();else showOverview();};
 
 // ---- Group by (subject-area grouping) ----
 groupSel.onchange=()=>{GROUP_MODE=groupSel.value;clearGroupHighlight();renderAll();renderLegend();};
@@ -1177,8 +1247,8 @@ function renderLegend(){
 function shareState(){
   const layout=VIEW==="network"?cardLayout:layoutName;
   let pos;
-  if(VIEW==="network"){
-    const src=hasAll(savedPos[layout])?savedPos[layout]:(layoutCache[layout]||getLayout(layout));
+  if(VIEW==="network"||hiddenIds.size){
+    const src=hasAll(savedPos[layout])?savedPos[layout]:fullLayout(layout);
     pos={};Object.keys(src).forEach(id=>pos[id]={x:Math.round(src[id].x),y:Math.round(src[id].y)});
   }else{pos={};nodes.forEach(n=>pos[n.t.id]={x:Math.round(n.x),y:Math.round(n.y)});}
   return {model:MODEL.model.name,layout,positions:pos,notes:notes};
@@ -1187,10 +1257,13 @@ function shareHTML(){
   const doc=document.documentElement.outerHTML;
   const dataEl=document.getElementById("erd-data");
   if(!dataEl)return;
-  const state=JSON.stringify(shareState());
+  // escaped as render.py escapes the data: a note holding a closing script tag must not end it
+  const state=JSON.stringify(shareState()).replace(/</g,"\\u003c").replace(/>/g,"\\u003e");
   const newScript=`window.__ERD_DATA__ = ${dataEl.textContent.split("=").slice(1).join("=").trim().replace(/;$/,"")};
 window.ERD_INITIAL_STATE = ${state};`;
-  const full=doc.replace(dataEl.outerHTML,`<script id="erd-data">${newScript}<\/script>`);
+  // a function, not a string: a replacement string reads $&, $', $` and $$ as patterns,
+  // so a note or a name holding one would splice the page
+  const full=doc.replace(dataEl.outerHTML,()=>`<script id="erd-data">${newScript}<\/script>`);
   const blob=new Blob(["<!doctype html>\n"+full],{type:"text/html"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download=(MODEL.model.name||"erd").replace(/[^a-zA-Z0-9_-]/g,"_")+"-erd.html";
@@ -1249,15 +1322,6 @@ function loadModel(m){
   MODEL.joins.forEach(j=>{adj[j.from].push(j.to);undir[j.from].push(j.to);undir[j.to].push(j.from);});
 
   securedTables=MODEL.tables.filter(t=>t.rls&&t.rls.length).map(t=>t.id);
-  const hasRls=securedTables.length>0;
-  const hasSqlView=MODEL.tables.some(t=>t.is_sql_view);
-  const hasAlias=MODEL.tables.some(t=>t.alias_of);
-  const hasFact=MODEL.tables.some(t=>t.kind==="fact");
-  const hasDim=MODEL.tables.some(t=>t.kind==="dim");
-  document.querySelectorAll("#filter-chips .fchip").forEach(c=>{
-    const f=c.dataset.f;if(f==="all")return;
-    c.disabled=(f==="rls"||f==="rls_subgraph")?!hasRls:f==="sql_view"?!hasSqlView:f==="alias"?!hasAlias:f==="fact"?!hasFact:f==="dim"?!hasDim:false;
-  });
 
   LS_KEY="ts-erd-layout:"+MODEL.model.name;
   NOTES_KEY="ts-erd-notes:"+MODEL.model.name;
@@ -1278,14 +1342,15 @@ function loadModel(m){
   _initDone=true;
 
   _seed=20260627;
-  nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;
+  allNodes=nodes=MODEL.tables.map((t,i)=>{const a=i/MODEL.tables.length*Math.PI*2;
     return {t,w:NODE_W,h:nodeHeight(t),x:480+Math.cos(a)*240+(rnd()-.5)*40,y:340+Math.sin(a)*200+(rnd()-.5)*40};});
   nodeById={};nodes.forEach(n=>nodeById[n.t.id]=n);
-  edges=MODEL.joins.map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
+  allEdges=edges=MODEL.joins.map(j=>({j,s:nodeById[j.from],t:nodeById[j.to]}));
+  hiddenIds=new Set();Object.keys(showOn).forEach(k=>showOn[k]=true);focusRls=focusNotes=false;
 
   layoutCache={organic:computeOrganic()};
-  focusSet=[];selected=null;activeFilters=new Set(["all"]);
-  syncChips();
+  focusSet=[];selected=null;
+  syncShowBar();
   // §4/§7.8 reset: grouping is never persisted across a model load — a stale computed
   // grouping or a stale select value would both be wrong for the newly-loaded model.
   GROUP_MODE="none";groupSel.value="none";groupCache={};clearGroupHighlight();renderLegend();

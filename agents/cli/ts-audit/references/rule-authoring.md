@@ -166,8 +166,8 @@ must word that finding from a placeholder instead.
 | | Values |
 |---|---|
 | `scope` | `model`, `model.column`, `model.formula`, `model.filter`, `model.table`, `join`, `table`, `table.rls_rule`, `rls_column_ref`, `answer`, `answer.table_ref`, `answer.formula`, `set`, `metadata` |
-| `requires` | `model_tml`, `table_tml`, `metadata`, `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections` |
-| `uses` | `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections` (conditional data only) |
+| `requires` | `model_tml`, `table_tml`, `metadata`, `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections`, `usage` |
+| `uses` | `dependents`, `ai_instructions`, `answers`, `sets`, `calendars`, `connections`, `usage` (conditional data only) |
 | Band `op` | `lt`, `lte`, `gt`, `gte`, `eq` |
 | Severities | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
 
@@ -293,7 +293,7 @@ whichever category selected each rule:
 | Data | Fetched |
 |---|---|
 | `model_tml`, `table_tml`, `metadata`, `dependents` | every audit, whatever the rules declare |
-| `ai_instructions`, `answers`, `sets`, `calendars`, `connections` | only when a selected rule declares them |
+| `ai_instructions`, `answers`, `sets`, `calendars`, `connections`, `usage` | only when a selected rule declares them |
 
 - **`requires`** both fetches the data and gates: an object lacking it is **skipped**.
   A3 requires `ai_instructions`, so a Model whose lookup failed is not judged.
@@ -301,7 +301,7 @@ whichever category selected each rule:
   without it: a rule that `uses: [ai_instructions]` would judge a Model whose lookup
   failed as uncoached, where A3, which requires them, skips it.
 - `uses` takes only conditional data (`dependents`, `ai_instructions`, `answers`, `sets`,
-  `calendars`, `connections`).
+  `calendars`, `connections`, `usage`).
   Model and Table TML and metadata are always fetched, so there is nothing to declare.
   `dependents` is fetched every audit today but is still declared, because Set discovery
   writes into it.
@@ -320,6 +320,23 @@ whichever category selected each rule:
   answers each connection's configuration, credentials included; the fetch keeps no
   value of it, so neither may a rule, a field or a test. Null when not fetched or the
   search failed, as for `calendars` (P24; P23 falls back to the metadata header).
+  A snapshot keeps these derived facts, never the settings, so changing how
+  `connection_facts` derives any of them needs a `FACTS_VERSION` bump in that module
+  (an older snapshot is then refused for the rules that read them) and the matching
+  golden-table rows in `tests/test_audit_connections_data.py`.
+- `usage` is each Model's queries, read once per audit from the system Model TS: AI and
+  BI Stats with `searchdata` (`audit/usage.py`): `{org, window_days, fetched_at, history:
+  {start, end}, blank_rows, models: {<guid>: {last_used, queries_180d, users_180d}},
+  model_orgs: {<guid>: [{id, name, last_used}]}, not_visible}`, GUIDs, counts and Org
+  names and ids, read in the Org the audit runs in (from the Primary Org it holds every
+  Org's). `model_orgs` is null when the Orgs could not be read, and absent from a reading
+  taken before ts-cli 0.224.0; the rest is still readable. `usage` is null when not
+  fetched and when it could not be read (the system Model missing or refused, a failed
+  call, or a history with no first query), and the availability check treats a reading
+  without a history start as not read too, so a rule that `requires: [usage]` judges no
+  Model rather than read "never queried" (H17). Judge relative to `fetched_at`, never
+  the clock, so a replay agrees with the live run. The report says "Not read" for it,
+  never "unused".
 - Neither key is overridable per profile.
 
 **The read-declaration gate.** Each derived field (`@register(name, uses=...)`), code rule

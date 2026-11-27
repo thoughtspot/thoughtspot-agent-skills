@@ -1,0 +1,487 @@
+"""The Formulas view's type chips and legend (report/formula_types.js): Columns,
+Parameters, Measure formulas and Attribute formulas (a formula of no stated kind counts
+as an attribute), shared by the tree and the graph for the session. The graph hides a
+switched-off type's nodes and edges; the tree hides its rows, keeping a switched-off
+formula, faded, when something shown is under it."""
+from __future__ import annotations
+
+import pytest
+
+import report_browser
+from ts_cli.audit import run_audit
+from ts_cli.audit.context import make_context
+from ts_cli.audit.report import render_report
+
+needs_chrome = pytest.mark.skipif(report_browser.CHROME is None,
+                                  reason="headless Chrome not installed")
+
+
+def _f(fid, name, expr):
+    return {"id": fid, "name": name, "expr": expr}
+
+
+def _col(name, fid, kind="MEASURE"):
+    return {"name": name, "formula_id": fid, "properties": {"column_type": kind}}
+
+
+#: Two measures, two attributes and a helper no column surfaces (no stated kind).
+TYPES = {
+    "name": "Typed",
+    "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+    "parameters": [{"name": "Sep", "data_type": "VARCHAR"}],
+    "formulas": [
+        _f("formula_Rev", "Revenue", "sum ( [ORDERS::AMOUNT] )"),
+        _f("formula_Helper", "Helper", "sum ( [ORDERS::COST] ) * 2"),
+        _f("formula_Top", "Top", "[formula_Rev] + [formula_Helper]"),
+        _f("formula_Region", "Region Label", "concat ( [ORDERS::REGION] , [Sep] )"),
+        _f("formula_Label2", "Label Two", "concat ( [formula_Region] , 'x' )"),
+    ],
+    "columns": [_col("Revenue", "formula_Rev"), _col("Top", "formula_Top"),
+                _col("Region Label", "formula_Region", "ATTRIBUTE"),
+                _col("Label Two", "formula_Label2", "ATTRIBUTE")],
+}
+
+
+def _page(*models):
+    models = models or (("m-1", TYPES),)
+    ctx = make_context(models=[{"guid": g, "model": m} for g, m in models],
+                       model_guids=[g for g, _ in models])
+    return render_report(run_audit(None, [g for g, _ in models], ctx=ctx))
+
+
+def _chip(t):
+    return 'document.querySelector(\'#v-formulas .fbar-chip[data-f="' + t + '"]\')'
+
+
+_CY = 'function cy(){ return document.getElementById("v-formulas")._cy; }'
+_LABELS = 'function labels(){ return cy().nodes().map(function(n){ return n.data("label"); }).sort(); }'
+_CHIPS = ('function chips(){ return Array.prototype.map.call(document.querySelectorAll('
+          '"#v-formulas .fbar-chip:not(.fbar-all)"), function(b){ return [b.getAttribute("data-f"),'
+          ' b.getAttribute("aria-pressed"), b.querySelector(".fbar-count").textContent]; }); }')
+ALL = sorted(["Revenue", "Helper", "Top", "Region Label", "Label Two",
+              "ORDERS::AMOUNT", "ORDERS::COST", "ORDERS::REGION", "Sep"])
+
+
+@needs_chrome
+def test_the_graph_hides_a_switched_off_type_and_its_edges_and_restores_it(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1/graph", actions=_CY + _LABELS + _CHIPS + (
+        'var first = {chips: chips(), nodes: labels(), edges: cy().edges().length};'
+        + _chip("column") + '.click();'
+        'var noCols = {nodes: labels(), edges: cy().edges().length, pressed: chips()[0][1],'
+        ' sub: document.querySelector("#v-formulas .fgraph-sub").textContent};'
+        + _chip("attribute") + '.click();'
+        'var noAttr = labels();'
+        + _chip("column") + '.click();' + _chip("attribute") + '.click();'
+        'window.__extra = {first: first, noCols: noCols, noAttr: noAttr, back: labels(),'
+        ' edges: cy().edges().length, chips: chips()};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    # Helper has no column: it is counted with the attributes
+    assert x["first"]["chips"] == [["column", "true", "3"], ["parameter", "true", "1"],
+                                   ["measure", "true", "2"], ["attribute", "true", "3"]]
+    assert x["first"]["nodes"] == ALL and x["first"]["edges"] == 7
+    assert x["noCols"]["nodes"] == sorted(["Revenue", "Helper", "Top", "Region Label", "Label Two", "Sep"])
+    assert x["noCols"]["edges"] == 4      # Top's two, Region Label's parameter, Label Two's
+    assert x["noCols"]["pressed"] == "false"
+    assert "6 formulas, columns and parameters (3 more switched off by the type chips)" in x["noCols"]["sub"]
+    assert x["noAttr"] == sorted(["Revenue", "Top", "Sep"])
+    assert x["back"] == ALL and x["edges"] == 7
+    assert all(c[1] == "true" for c in x["chips"])
+
+
+@needs_chrome
+def test_each_type_has_one_mark_in_the_graph_and_the_legend(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1/graph", actions=_CY + (
+        'function shapes(cls){ return cy().$("node." + cls).map(function(n){'
+        '  return [n.data("label"), n.style("shape")]; }).sort(); }'
+        'var legend = document.querySelector("#v-formulas .ftype-legend");'
+        'window.__extra = {measure: shapes("measure"), attribute: shapes("attribute"),'
+        ' nokind: shapes("nokind"), column: shapes("column"), parameter: shapes("parameter"),'
+        ' keys: Array.prototype.map.call(legend.querySelectorAll(".ftype-key"), function(k){'
+        '  var s = k.querySelector("svg"); return [s ? s.getAttribute("class") : null, k.textContent]; })};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["measure"] == [["Revenue", "round-rectangle"], ["Top", "round-rectangle"]]
+    assert x["attribute"] == [["Label Two", "cut-rectangle"], ["Region Label", "cut-rectangle"]]
+    assert x["nokind"] == [["Helper", "barrel"]]
+    assert {s for _, s in x["column"]} == {"rectangle"} and x["parameter"] == [["Sep", "tag"]]
+    assert x["keys"] == [
+        ["ftype-ico ftype-column", "Table column"], ["ftype-ico ftype-parameter", "Parameter"],
+        ["ftype-ico ftype-measure", "Measure formula"], ["ftype-ico ftype-attribute", "Attribute formula"],
+        ["ftype-ico ftype-nokind", "Formula of no stated kind (with Attribute formulas)"],
+        [None, "Dashed: hidden"], [None, "Amber: hidden, used once (H16)"]]
+
+
+_ROWS = ('function rows(){ return Array.prototype.filter.call(document.querySelectorAll('
+         '"#v-formulas .ftree-row[role=button]"), function(r){ return r.offsetParent !== null; })'
+         '.map(function(r){ var n = r.querySelector(".ftree-name, .ftree-col");'
+         ' return [n.textContent, r.parentNode.classList.contains("ftree-dimmed")]; }); }')
+
+
+@needs_chrome
+def test_the_tree_hides_rows_and_keeps_a_switched_off_formula_with_shown_rows_under_it(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_ROWS + (
+        'document.querySelector(".ftree-expand").click();'
+        'var all = rows();'
+        + _chip("column") + '.click();' + _chip("measure") + '.click();'
+        'var off = rows();'
+        + _chip("column") + '.click();' + _chip("measure") + '.click();'
+        'window.__extra = {all: all, off: off, back: rows(),'
+        ' marks: document.querySelectorAll("#v-formulas .ftype-off, #v-formulas .ftree-dimmed").length,'
+        ' icons: Array.prototype.map.call(document.querySelectorAll("#v-formulas .ftree-row svg.ftype-ico"),'
+        '  function(s){ return s.getAttribute("aria-label"); }).filter(function(v, i, a){ return a.indexOf(v) === i; }).sort()};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    names = [r[0] for r in x["all"]]
+    assert names == ["Top", "Revenue", "ORDERS::AMOUNT", "Helper", "ORDERS::COST",
+                     "Label Two", "Region Label", "ORDERS::REGION", "Sep"]
+    # columns and measures off: Revenue (a measure over a column) goes; Top, a measure,
+    # stays faded because Helper, of no stated kind (an attribute), is under it
+    assert x["off"] == [["Top", True], ["Helper", False], ["Label Two", False],
+                        ["Region Label", False], ["Sep", False]]
+    assert x["back"] == x["all"] and x["marks"] == 0
+    assert x["icons"] == sorted(["Attribute formula", "Formula of no stated kind (with Attribute formulas)",
+                                 "Measure formula", "Parameter", "Table column"])
+
+
+@needs_chrome
+def test_switching_measures_off_hides_measures_though_their_columns_are_shown(tmp_path):
+    """The owner's bug (2026-11-19): with only Measure formulas off, a measure over a
+    column stayed, faded, because its column was shown, so nothing seemed to hide.
+    A shown column or parameter does not keep a switched-off formula; only a shown
+    formula under it does, as the way down to that formula."""
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_ROWS + (
+        'document.querySelector(".ftree-expand").click();'
+        + _chip("measure") + '.click();'
+        'window.__extra = rows();'))
+    assert shown["errors"] == []
+    # Revenue (a measure over ORDERS::AMOUNT) goes with its column; Top stays faded,
+    # as the way to Helper (of no stated kind, shown with the attributes)
+    assert shown["extra"] == [["Top", True], ["Helper", False], ["ORDERS::COST", False],
+                              ["Label Two", False], ["Region Label", False],
+                              ["ORDERS::REGION", False], ["Sep", False]]
+
+
+@needs_chrome
+def test_search_leaves_out_switched_off_types_and_counts_them(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=(
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        's.value = "re"; s.dispatchEvent(new Event("input"));'
+        'function hits(){ var r = document.querySelector("#v-formulas .ftree-results");'
+        ' return [Array.prototype.map.call(r.querySelectorAll("a.fref"), function(a){ return a.textContent; }),'
+        '  (r.querySelector(".ftype-offcount") || {}).textContent || ""]; }'
+        'var before = hits();' + _chip("column") + '.click();'
+        'window.__extra = {before: before, after: hits()};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    # columns and parameters by name, then formulas by name, then by definition
+    assert x["before"] == [["ORDERS::REGION", "Revenue", "Region Label", "Top", "Label Two"], ""]
+    assert x["after"] == [["Revenue", "Region Label", "Top", "Label Two"], "1 more of a switched-off type"]
+
+
+@needs_chrome
+def test_a_link_to_a_switched_off_node_says_so_and_offers_to_show_it(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1/graph", actions=_CY + (
+        _chip("column") + '.click();'
+        'cy().nodes().filter(function(n){ return n.data("label") === "Revenue"; }).emit("tap");'
+        'var p = document.querySelector("#v-formulas .fdetail");'
+        'Array.prototype.find.call(p.querySelectorAll("a.fref"), function(a){'
+        '  return a.textContent === "ORDERS::AMOUNT"; }).click();'
+        'var note = document.querySelector("#v-formulas .ftype-note");'
+        'var said = {note: note.textContent, title: p.querySelector(".fdetail-title").textContent,'
+        ' focus: cy().$(".focus").length};'
+        'note.querySelector(".ftype-reveal").click();'
+        'window.__extra = {said: said, after: note.textContent,'
+        ' pressed: ' + _chip("column") + '.getAttribute("aria-pressed"),'
+        ' focus: cy().$(".focus").map(function(n){ return n.data("label"); }),'
+        ' active: document.activeElement.getAttribute("data-f")};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["said"]["title"] == "ORDERS::AMOUNT", "the definition still opens"
+    assert x["said"]["focus"] == 0
+    assert "ORDERS::AMOUNT is not shown: Columns are switched off." in x["said"]["note"]
+    assert "Show columns" in x["said"]["note"]
+    assert x["after"] == "" and x["pressed"] == "true"
+    assert x["focus"] == ["ORDERS::AMOUNT"] and x["active"] == "column"
+
+
+@needs_chrome
+def test_the_chips_hold_across_the_tree_and_the_graph(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_CY + (
+        _chip("parameter") + '.click();'
+        'location.hash = "#formulas/m-1/graph";'
+        'setTimeout(function(){ window.__extra = {pressed: ' + _chip("parameter") + '.getAttribute("aria-pressed"),'
+        ' params: cy().$("node.parameter").length, legend: !!document.querySelector("#v-formulas .ftype-legend")}; }, 50);'),
+        settle_ms=300)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"pressed": "false", "params": 0, "legend": True}
+
+
+def _big(n):
+    """n formulas in chains of five, each link one column: past the graph's cap."""
+    formulas, columns = [], []
+    for i in range(n):
+        expr = f"sum ( [ORDERS::C{i}] )" if i % 5 == 0 else f"[formula_F{i - 1}] + [ORDERS::C{i}]"
+        formulas.append(_f(f"formula_F{i}", f"F{i}", expr))
+        columns.append(_col(f"F{i}", f"formula_F{i}"))
+    return {"name": "Big", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": formulas, "columns": columns}
+
+
+@needs_chrome
+def test_past_the_cap_switching_columns_off_can_draw_the_model_whole(tmp_path):
+    shown = report_browser.render(_page(("m-3", _big(200))), tmp_path, "formulas/m-3/graph", actions=_CY + (
+        'var before = cy().nodes().length;' + _chip("column") + '.click();'
+        'window.__extra = {before: before, after: cy().nodes().length,'
+        ' sub: document.querySelector("#v-formulas .fgraph-sub").textContent};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["before"] == 10       # one chain of five formulas and their five columns
+    assert x["after"] == 200
+    assert x["sub"].startswith("200 formulas, columns and parameters (200 more switched off")
+
+
+@needs_chrome
+def test_the_tree_shows_the_legend_and_says_when_every_type_is_off(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=(
+        'var legend = document.querySelector("#v-formulas .ftype-legend").textContent;'
+        'Array.prototype.forEach.call(document.querySelectorAll("#v-formulas .fbar-chip:not(.fbar-all)"),'
+        ' function(b){ b.click(); });'
+        'window.__extra = {legend: legend, note: document.querySelector("#v-formulas .ftree-note").textContent,'
+        ' rows: Array.prototype.filter.call(document.querySelectorAll("#v-formulas .ftree-row[role=button]"),'
+        '  function(r){ return r.offsetParent !== null; }).length};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    for text in ("Table column", "Parameter", "Measure formula", "Attribute formula",
+                 "Faded: switched off, kept as the way to a shown formula under it"):
+        assert text in x["legend"]
+    assert x["rows"] == 0 and "Every type is switched off" in x["note"]
+
+
+def _mostly_columns(n=30):
+    """n formulas each built on one column only, and one short chain: with Columns
+    off, all but the chain are left with no edges."""
+    formulas = [_f(f"formula_S{i}", f"Single {i}", f"sum ( [ORDERS::C{i}] )") for i in range(n)]
+    formulas += [_f("formula_A", "Chain A", "sum ( [ORDERS::A] )"),
+                 _f("formula_B", "Chain B", "[formula_A] * 2"),
+                 _f("formula_C", "Chain C", "[formula_B] + [formula_A]")]
+    return {"name": "Columns", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": formulas, "columns": [_col(f["name"], f["id"]) for f in formulas]}
+
+
+@needs_chrome
+def test_nodes_left_without_edges_are_gridded_beside_the_rest_and_all_start_in_view(tmp_path):
+    """Switching Columns off leaves most formulas with no edge; dagre alone stacks
+    them in one tall column, most of it off screen."""
+    shown = report_browser.render(_page(("m-7", _mostly_columns())), tmp_path, "formulas/m-7/graph",
+                                  actions=_CY + _chip("column") + '.click();'
+        'setTimeout(function(){ var c = cy(), w = c.width(), h = c.height(), bb = c.nodes().boundingBox(),'
+        '  out = c.nodes().filter(function(n){ var b = n.renderedBoundingBox();'
+        '    return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length;'
+        '  window.__extra = {nodes: c.nodes().length, out: out, ratio: bb.h / bb.w}; }, 100);',
+                                  settle_ms=400)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["nodes"] == 33
+    assert x["out"] == 0, "every node starts in view"
+    assert x["ratio"] < 1.5, "not one tall column"
+
+
+@needs_chrome
+def test_the_chips_are_multi_select_with_counts_and_all_resets(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_CHIPS + (
+        'function all(){ var b = ' + _chip("all") + '; return [b.getAttribute("aria-pressed"),'
+        ' b.querySelector(".fbar-count").textContent]; }'
+        'function total(){ return document.querySelector("#v-formulas .fbar-total").textContent; }'
+        'var first = {all: all(), total: total()};'
+        + _chip("column") + '.click();' + _chip("parameter") + '.click();'
+        'var two = {all: all(), chips: chips(), total: total()};'
+        + _chip("all") + '.click();'
+        'window.__extra = {first: first, two: two, reset: {all: all(), chips: chips(), total: total()}};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["first"] == {"all": ["true", "9"], "total": "9 of 9 items shown"}
+    assert x["two"]["all"] == ["false", "9"]
+    assert [c[1] for c in x["two"]["chips"]] == ["false", "false", "true", "true"]
+    assert x["two"]["total"] == "5 of 9 items shown"
+    assert x["reset"]["all"][0] == "true" and all(c[1] == "true" for c in x["reset"]["chips"])
+    assert x["reset"]["total"] == "9 of 9 items shown"
+
+
+_TOTAL = 'function total(){ return document.querySelector("#v-formulas .fbar-total").textContent; }'
+
+
+@needs_chrome
+def test_the_tree_counts_what_it_shows_and_says_why_it_is_empty(tmp_path):
+    """Columns and parameters sit only under formulas in the tree: with both formula
+    types off it is empty, and the count and the note must say so."""
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_ROWS + _TOTAL + (
+        'document.querySelector(".ftree-expand").click();'
+        + _chip("measure") + '.click();'
+        'var noMeasures = {total: total(), rows: rows().length};'
+        + _chip("attribute") + '.click();'
+        'window.__extra = {noMeasures: noMeasures, total: total(), rows: rows().length,'
+        ' note: document.querySelector("#v-formulas .ftree-note").textContent};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    # measures off: Helper, Label Two and Region Label, and ORDERS::COST, ORDERS::REGION
+    # and Sep under them (Top stays faded as the way to Helper, and is not counted)
+    assert x["noMeasures"] == {"total": "6 of 9 items shown", "rows": 7}
+    assert x["rows"] == 0 and x["total"] == "0 of 9 items shown"
+    assert "Columns and parameters are shown only under a formula" in x["note"]
+    assert "use the Graph" in x["note"]
+
+
+@needs_chrome
+def test_a_column_hidden_under_switched_off_formulas_says_so_and_can_be_shown(tmp_path):
+    shown = report_browser.render(_page(), tmp_path, "formulas/m-1", actions=_ROWS + (
+        _chip("measure") + '.click();'
+        'var s = document.querySelector("#v-formulas .ftree-search");'
+        's.value = "AMOUNT"; s.dispatchEvent(new Event("input"));'
+        'document.querySelector("#v-formulas .ftree-results a.fref").click();'
+        'var note = document.querySelector("#v-formulas .ftype-note");'
+        'var said = {note: note.textContent, title: document.querySelector("#v-formulas .fdetail-title").textContent};'
+        'note.querySelector(".ftype-reveal").click();'
+        'var sel = document.querySelector("#v-formulas .ftree-selected");'
+        'window.__extra = {said: said, after: note.textContent,'
+        ' measure: ' + _chip("measure") + '.getAttribute("aria-pressed"),'
+        ' selected: sel && sel.offsetParent !== null ? sel.textContent : null};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["said"]["title"] == "ORDERS::AMOUNT"
+    assert "ORDERS::AMOUNT is not shown: the formulas it sits under are switched off" in x["said"]["note"]
+    assert "Show measure formulas" in x["said"]["note"]
+    assert x["after"] == "" and x["measure"] == "true"
+    assert x["selected"] is not None and "ORDERS::AMOUNT" in x["selected"]
+
+
+def _singles(n):
+    return {"name": "Singles", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": [_f(f"formula_S{i}", f"Single {i}", f"sum ( [ORDERS::C{i}] )") for i in range(n)],
+            "columns": [_col(f"Single {i}", f"formula_S{i}") for i in range(n)]}
+
+
+_IN_VIEW = ('setTimeout(function(){ var c = cy(), w = c.width(), h = c.height();'
+            '  window.__extra = {nodes: c.nodes().length, out: c.nodes().filter(function(n){'
+            '    var b = n.renderedBoundingBox(); return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length}; }, 100);')
+
+
+@needs_chrome
+@pytest.mark.parametrize("columns_on, nodes", [(False, 150), (True, 300)])
+def test_many_small_parts_all_open_in_view_up_to_the_cap(tmp_path, columns_on, nodes):
+    """150 formulas on one column each: with Columns off, 150 lone nodes; with them on,
+    150 two-node parts (300 nodes, the cap). Every one starts on screen."""
+    shown = report_browser.render(_page(("m-8", _singles(150))), tmp_path, "formulas/m-8/graph",
+                                  actions=_CY + ('' if columns_on else _chip("column") + '.click();') + _IN_VIEW,
+                                  settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"nodes": nodes, "out": 0}
+
+
+@needs_chrome
+def test_past_the_cap_the_graph_opens_on_a_shown_root(tmp_path):
+    """With Attribute formulas off, the largest lineage under the cap is still the
+    attribute root's (its 30 columns are shown); the graph must open on a shown root."""
+    formulas = [_f(f"formula_M{i}", f"M{i}", f"sum ( [ORDERS::C{i}] )") for i in range(160)]
+    formulas.append(_f("formula_Big", "Big Attr", " + ".join(f"[ORDERS::A{i}]" for i in range(30))))
+    model = {"name": "Mixed", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}], "formulas": formulas,
+             "columns": [_col(f"M{i}", f"formula_M{i}") for i in range(160)]
+             + [_col("Big Attr", "formula_Big", "ATTRIBUTE")]}
+    shown = report_browser.render(_page(("m-9", model)), tmp_path, "formulas/m-9/graph", actions=_CY + (
+        _chip("attribute") + '.click();'
+        'var sub = document.querySelector("#v-formulas .fgraph-sub").textContent;'
+        'var named = (sub.match(/lineage of (.+?) \\(/) || [])[1];'
+        'window.__extra = {sub: sub, named: named, drawn: cy().nodes().filter(function(n){'
+        ' return n.data("label") === named; }).length};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert "too many to draw at once" in x["sub"]
+    assert x["named"] != "Big Attr" and x["drawn"] == 1, x["sub"]
+
+
+def _on_columns(n, k):
+    """n formulas, each summing one of k columns: one connected part per column, its
+    formulas in one tall rank."""
+    return {"name": "Tall", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}],
+            "formulas": [_f(f"formula_T{i}", f"Total {i}", f"sum ( [ORDERS::C{i % k}] )") for i in range(n)],
+            "columns": [_col(f"Total {i}", f"formula_T{i}") for i in range(n)]}
+
+
+_IN_VIEW_Z = ('setTimeout(function(){ var c = cy(), w = c.width(), h = c.height();'
+              '  window.__extra = {nodes: c.nodes().length, zoom: c.zoom(), out: c.nodes().filter(function(n){'
+              '    var b = n.renderedBoundingBox(); return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length}; }, 100);')
+
+
+@needs_chrome
+@pytest.mark.parametrize("size", ["1400,900", "1280,720"])
+@pytest.mark.parametrize("n, k", [(40, 1), (80, 1), (150, 5)])
+def test_a_tall_part_opens_wholly_in_view_and_legible(tmp_path, n, k, size):
+    """Many measures over one amount column: dagre puts them in one rank, one tall
+    column. The rank is wrapped into several columns, so every node starts in view."""
+    shown = report_browser.render(_page(("m-t", _on_columns(n, k))), tmp_path, "formulas/m-t/graph",
+                                  actions=_CY + _IN_VIEW_Z, size=size, settle_ms=600)
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["nodes"] == n + k and x["out"] == 0
+    assert x["zoom"] >= 0.35, "labels stay legible"
+
+
+@needs_chrome
+def test_past_the_cap_the_graph_counts_what_it_draws(tmp_path):
+    shown = report_browser.render(_page(("m-3", _big(200))), tmp_path, "formulas/m-3/graph", actions=_CY + _TOTAL + (
+        'var first = {drawn: cy().nodes().length, total: total()};'
+        + _chip("column") + '.click();'
+        'window.__extra = {first: first, drawn: cy().nodes().length, total: total()};'))
+    assert shown["errors"] == []
+    x = shown["extra"]
+    assert x["first"] == {"drawn": 10, "total": "10 of 400 items shown"}
+    assert x["total"] == "%d of 400 items shown" % x["drawn"]
+
+
+_OFF = ('function off(){ var c = cy(), w = c.width(), h = c.height(); return c.nodes().filter(function(n){'
+        ' var b = n.renderedBoundingBox(); return b.x1 < 0 || b.y1 < 0 || b.x2 > w || b.y2 > h; }).length; }')
+
+
+def _pick_in_tree(name):
+    return ('var row = Array.prototype.find.call(document.querySelectorAll("#v-formulas .ftree-row"),'
+            ' function(r){ var n = r.querySelector(".ftree-name"); return n && n.textContent === "' + name + '"; });'
+            'row.click();')
+
+
+@needs_chrome
+@pytest.mark.parametrize("size", ["1400,900", "1280,720"])
+@pytest.mark.parametrize("model, guid, name", [
+    (_singles(12), "m-s", "Single 0"), (_on_columns(40, 1), "m-t", "Total 0")])
+def test_a_selection_carried_from_the_tree_keeps_every_node_in_view(tmp_path, size, model, guid, name):
+    """The fit shows every node; the selection must not re-centre the graph off it."""
+    shown = report_browser.render(_page((guid, model)), tmp_path, "formulas/" + guid, actions=(
+        _CY + _OFF + _pick_in_tree(name) + 'location.hash = "#formulas/' + guid + '/graph";'
+        'setTimeout(function(){ window.__extra = {off: off(),'
+        ' focus: cy().$(".focus").map(function(n){ return n.data("label"); })}; }, 150);'),
+        size=size, settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "focus": [name]}
+
+
+@needs_chrome
+def test_flipping_a_chip_with_a_selection_keeps_every_node_in_view(tmp_path):
+    shown = report_browser.render(_page(("m-t", _on_columns(40, 1))), tmp_path, "formulas/m-t/graph", actions=(
+        _CY + _OFF + 'cy().nodes().filter(function(n){ return n.data("label") === "Total 39"; }).emit("tap");'
+        + _chip("column") + '.click();'
+        'setTimeout(function(){ window.__extra = {off: off(), nodes: cy().nodes().length}; }, 150);'),
+        size="1280,720", settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "nodes": 40}
+
+
+@needs_chrome
+def test_a_deep_chain_opens_whole(tmp_path):
+    formulas = [_f("formula_D0", "Deep formula number 0", "sum ( [ORDERS::A] )")] + [
+        _f(f"formula_D{i}", f"Deep formula number {i}", f"[formula_D{i - 1}] + 1") for i in range(1, 100)]
+    model = {"name": "Deep", "model_tables": [{"name": "ORDERS", "fqn": "t-1"}], "formulas": formulas,
+             "columns": [_col("Deep formula number 99", "formula_D99")]}
+    shown = report_browser.render(_page(("m-d", model)), tmp_path, "formulas/m-d/graph", actions=(
+        _CY + _OFF + 'setTimeout(function(){ window.__extra = {off: off(), nodes: cy().nodes().length}; }, 150);'),
+        settle_ms=600)
+    assert shown["errors"] == []
+    assert shown["extra"] == {"off": 0, "nodes": 101}

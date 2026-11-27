@@ -31,6 +31,10 @@ from ts_cli.formula_text import ts_finalize_formula
 #   count           -> `unique count`  (distinct)
 #   countduplicates -> `count`         (exact total; NOT approximate)
 
+# The Sisense aggregations (a JAQL `agg`, or the same word as a formula function): their
+# ThoughtSpot names are FUNCTION_MAP's, the one table both readers use.
+AGG_FUNCTIONS = ("sum", "avg", "average", "count", "dupcount", "countduplicates", "min", "max")
+
 # Sisense formula function -> TML formula function (deterministic 1:1 subset only).
 FUNCTION_MAP: dict[str, str] = {
     # aggregation (see the count note above: Sisense count == distinct; dupCount == total)
@@ -315,7 +319,12 @@ def _rewrite_conditionals(expr: str) -> tuple:
     tail_rw, err = _rewrite_conditionals(expr[close_idx + 1:])
     if err:
         return expr, err
-    return f"{expr[:m.start()]}if ({cond}) then {then_v} else {else_v}{tail_rw}", None
+    block = f"if ({cond}) then {then_v} else {else_v}"
+    # ThoughtSpot's `else` is greedy (BL-632): group the conditional when an operator
+    # follows it, or `if (c) then 1 else 0 = 1` compares only the else branch (BL-649)
+    if re.match(r"\s*(?:[-+*/%^=<>!]|(?:and|or|in|not)\b)", tail_rw, re.IGNORECASE):
+        block = f"( {block} )"
+    return f"{expr[:m.start()]}{block}{tail_rw}", None
 
 
 _ROUND_CALL = re.compile(r"(?<![A-Za-z0-9_])round\s*\(", re.IGNORECASE)

@@ -11,7 +11,11 @@
    for it. The
    readiness is read off the fields the rules P19-P28 judge by, so it says what their
    findings say. JSON written before this view has no `dc`: its Models read "Not
-   assessed". */
+   assessed". #datacache lists every Model; #datacache/<guid> is one Model's page
+   (model_nav.js), its row alone under the Model's tabs, with a way back to the list:
+   the filter bar, which belongs to the list, is left out there. The list's filter bar is
+   the shared one (filter_bar.js): a chip per readiness, multi-select, all on at first,
+   switching one off hides its Models; the search narrows what the chips leave. */
 var DC_STATES = {
   ready: {label: "Can use", cls: "dc-ready"},
   blocked: {label: "Can’t use", cls: "dc-blocked"},
@@ -19,13 +23,12 @@ var DC_STATES = {
   warning: {label: "Warning", cls: "dc-warning"},
   unknown: {label: "Not assessed", cls: "dc-unknown"}
 };
-var DC_FILTERS = [["all", "All"], ["ready", "Can use"], ["blocked", "Can’t use"],
-  ["confirm", "To confirm"], ["warning", "Warning"], ["unknown", "Not assessed"]];
+var DC_ORDER = ["ready", "blocked", "confirm", "warning", "unknown"];
 var DC_CHECKS = {P19: "custom calendars", P20: "SQL pass-through", P21: "semantic query",
   P22: "connection calendars", P23: "source types", P24: "connection settings",
   P25: "Table variables", P26: "formula parameters", P27: "SQL Views", P28: "RLS rules"};
 var DC_NO_DATA = {s: "unknown", r: [], k: [], cc: null, na: []};
-var _dcFilter = "all";
+var _dcOn = {ready: true, blocked: true, confirm: true, warning: true, unknown: true};
 var _dcSearch = "";
 
 function dcRows(){
@@ -118,41 +121,48 @@ function dcRowHtml(row){
     '<td>'+dcCalendarsHtml(row)+'</td></tr>';
 }
 
+/* The list's filter bar: a chip per readiness, with its count, and the search box. */
 function dcToolbar(rows, onChange){
-  var bar = el("div", "crossmodel-filter dc-filter");
-  var counts = {all: rows.length};
+  var counts = {};
   rows.forEach(function(r){ counts[r.state] = (counts[r.state] || 0) + 1; });
-  DC_FILTERS.forEach(function(f){
-    var b = el("button", "dc-pill"+(f[0] === _dcFilter ? " active" : ""),
-      esc(f[1])+' <span class="dc-pill-count">'+(counts[f[0]] || 0)+'</span>');
-    b.setAttribute("data-filter", f[0]);
-    b.setAttribute("aria-pressed", f[0] === _dcFilter ? "true" : "false");
-    b.addEventListener("click", function(){ _dcFilter = f[0]; onChange(); });
-    bar.appendChild(b);
-  });
-  var search = document.createElement("input");
-  search.type = "search";
-  search.placeholder = "Search Models, reasons, calendars…";
-  search.setAttribute("aria-label", "Search Data Cache readiness");
-  search.value = _dcSearch;
-  search.addEventListener("input", function(){ _dcSearch = search.value; onChange(true); });
-  bar.appendChild(search);
-  bar.appendChild(el("span", "cm-count dc-count", ""));
-  return bar;
+  var panel = el("div", "fbar-panel dc-filter");
+  panel.appendChild(filterBar({label: "Show Models by Data Cache readiness", on: _dcOn,
+    chips: DC_ORDER.map(function(f){ return {f: f, label: DC_STATES[f].label, count: counts[f] || 0}; }),
+    search: {cls: "dc-search", placeholder: "Search Models, reasons, calendars…",
+             aria: "Search Data Cache readiness", value: _dcSearch}},
+    onChange, function(value){ _dcSearch = value; onChange(); }));
+  return panel;
 }
 
 function dcShown(rows){
   var term = _dcSearch.trim().toLowerCase();
   return rows.filter(function(r){
-    return (_dcFilter === "all" || r.state === _dcFilter)
-      && (!term || dcSearchText(r).indexOf(term) !== -1);
+    return _dcOn[r.state] && (!term || dcSearchText(r).indexOf(term) !== -1);
   });
 }
 
-function buildDataCache(D){
+/* One Model's page: its tabs, its row, and the way back to every Model. */
+function buildDataCacheModel(c, rows, guid){
+  var row = rows.filter(function(r){ return r.guid === guid; })[0];
+  if(row) c.appendChild(modelTabs(guid, "datacache"));
+  var back = el("div", "crossmodel-filter dc-one", row ?
+    'Showing 1 Model of '+rows.length+'. <a class="dc-all" href="#datacache">Show all '+rows.length+' Models</a>' :
+    'This report has no such Model. <a class="dc-all" href="#datacache">Show all '+rows.length+' Models</a>');
+  c.appendChild(back);
+  if(!row) return;
+  var table = el("table", "cleanup-table dc-table");
+  table.innerHTML = '<thead><tr><th>Model</th><th>Data Cache</th><th>Reasons</th>'+
+    '<th>Calendars in use</th></tr></thead><tbody>'+dcRowHtml(row)+'</tbody>';
+  var wrap = el("div", "crossmodel-wrap");
+  wrap.appendChild(table);
+  c.appendChild(wrap);
+}
+
+function buildDataCache(D, guid){
   var c = document.getElementById("v-datacache");
   c.innerHTML = "";
   var rows = dcRows();
+  if(rows.length && guid){ buildDataCacheModel(c, rows, guid); return; }
   if(!rows.length){
     c.innerHTML = '<div class="view-placeholder"><div class="ph-icon">⚡</div>'+
       '<div class="ph-text">No Models in this report</div>'+
@@ -166,7 +176,7 @@ function buildDataCache(D){
     "View, or an RLS rule beyond its Table\u2019s own columns. A connection that defines "+
     "custom calendars is a warning, since a query that picks one at run time is not cached. "+
     "To confirm: the only reasons are readings the product team is to review (OAuth read "+
-    "from a client ID and secret, PrivateLink read from the host, a measure only flagged "+
+    "from client credentials (a client ID or secret), PrivateLink read from the host, a measure only flagged "+
     "pre-aggregated, an RLS rule\u2019s \u201c= null\u201d test, a custom calendar named in "+
     "a formula, a code-based calendar name that a custom calendar also has). Anything "+
     "the audit could not read makes a Model Not assessed, never Can use."));
@@ -175,23 +185,23 @@ function buildDataCache(D){
     '<th>Calendars in use</th></tr></thead><tbody></tbody>';
   var wrap = el("div", "crossmodel-wrap");
   wrap.appendChild(table);
-  function render(keepToolbar){
+  var bar = dcToolbar(rows, render);
+  function render(){
     var shown = dcShown(rows);
     table.tBodies[0].innerHTML = shown.length ? shown.map(dcRowHtml).join("") :
       '<tr><td colspan="4" class="empty-state">No Models match.</td></tr>';
-    if(!keepToolbar){
-      var old = c.querySelector(".dc-filter"), fresh = dcToolbar(rows, render);
-      if(old) c.replaceChild(fresh, old); else c.insertBefore(fresh, wrap);
-    }
-    c.querySelector(".dc-count").textContent = shown.length+" of "+rows.length+" Models";
+    $(".fbar", bar)._total(shown.length+" of "+rows.length+" Models shown");
   }
+  c.appendChild(bar);
   c.appendChild(wrap);
-  render(false);
+  render();
 }
 
 registerView({id: "datacache", routes: ["datacache"],
   nav: {hash: "#datacache", icon: "⚡", label: "Data Cache"},
   show: function(route){
-  buildDataCache(D);
-  return {crumbs: ["Data Cache"], links: []};
+  buildDataCache(D, route.id);
+  if(!route.id || !findCorpusModel(route.id)) return {crumbs: ["Data Cache"], links: []};
+  highlightSidebarModel(route.id);
+  return modelCrumbs(route.id, "Data Cache");
 }});

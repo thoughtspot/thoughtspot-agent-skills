@@ -119,6 +119,9 @@ in order:
 - **Evidence**: the whole evidence file from 4a, pasted as it is, never edited.
 - **Live evidence**: the `references/open-items.md` entries that record live
   behaviour, or "N/A" and why.
+- **Coverage**: for a converter, a translator or other code that reports an outcome
+  for its own output, what it converts and what it reports for review instead, or
+  "N/A".
 - **New runtime dependencies**: each new third-party package with its provenance, or
   "None".
 - **Supersedes #N — every earlier review point mapped**: the user's mapping, or

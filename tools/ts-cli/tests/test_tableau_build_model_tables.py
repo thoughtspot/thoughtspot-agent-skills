@@ -136,6 +136,35 @@ def test_end_to_end_build_model_is_lint_clean(tmp_path):
     assert lint_result.exit_code == 0
 
 
+def test_captioned_column_id_resolves_against_table_column_name(tmp_path):
+    """A Model column_id `TABLE::X` resolves X against the Table column's `name`,
+    not its db_column_name (live: a `::<physical name>` id was rejected while the
+    Table column was named by its caption). `ts tml lint --dir` indexes both, so it
+    cannot catch this; assert it directly. The caption stays on the Model column."""
+    twb = tmp_path / "wb.twb"
+    twb.write_text(LINT_TWB)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    result = runner.invoke(
+        app,
+        ["tableau", "build-model", str(twb), "--connection", "CONN",
+         "--output-dir", str(out_dir), "--database", "DB", "--schema", "PUBLIC"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    table = yaml.safe_load(next(out_dir.glob("*.table.tml")).read_text())["table"]
+    table_names = {c["name"] for c in table["columns"]}
+    assert "CUST_NM" in table_names and "Customer Name" not in table_names
+
+    model_file = next(p for p in out_dir.glob("*.model.tml") if ".phase0." not in p.name)
+    model = yaml.safe_load(model_file.read_text())["model"]
+    for c in model["columns"]:
+        if c.get("column_id"):
+            assert c["column_id"].split("::", 1)[1] in table_names, c
+    by_id = {c.get("column_id", "").split("::")[-1]: c["name"] for c in model["columns"]}
+    assert by_id["CUST_NM"] == "Customer Name"
+
+
 # ---------------------------------------------------------------------------
 # 3. No-reparse guardrail
 # ---------------------------------------------------------------------------
@@ -199,12 +228,13 @@ def test_multi_table_assigns_owned_columns_and_collects_unowned(tmp_path):
         doc = yaml.safe_load(f.read_text())
         docs[doc["table"]["name"]] = doc["table"]
 
+    # Table columns are named by physical name (what the Model column_id uses)
     orders_cols = {c["name"] for c in docs["Orders"]["columns"]}
     customers_cols = {c["name"] for c in docs["Customers"]["columns"]}
-    assert orders_cols == {"Order ID", "Sales"}
-    assert customers_cols == {"Customer Name"}
-    assert "Mystery Column" not in orders_cols
-    assert "Mystery Column" not in customers_cols
+    assert orders_cols == {"ORDER_ID", "SALES"}
+    assert customers_cols == {"CUST_NAME"}
+    assert "MYSTERY" not in orders_cols
+    assert "MYSTERY" not in customers_cols
 
 
 # ---------------------------------------------------------------------------

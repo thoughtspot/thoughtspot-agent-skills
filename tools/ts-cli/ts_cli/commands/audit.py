@@ -64,7 +64,21 @@ def _uncaptured(selection: list, profile: str, captured: set) -> Optional[str]:
     cats = list(dict.fromkeys(c for r in readers for c in r.categories if c in known))
     return (f"Angle(s) {', '.join(cats)} read data not captured in this snapshot: "
             f"{', '.join(missing)} (rules {', '.join(r.id for r in readers)}). "
-            "Re-capture with those angles, or drop them from --angles.")
+            "Re-capture with those angles, or drop them from `ts audit run --angles`.")
+
+
+def _stale_note(snapshot_in: Path, why: str) -> str:
+    """When data `why` names was captured but derived by an older ts-cli (snapshot
+    stale_needs), say so: the files are there, so "not captured" alone would mislead."""
+    from ts_cli.audit.snapshot import SnapshotError, snapshot_stale_needs
+    try:
+        stale = sorted(n for n in snapshot_stale_needs(snapshot_in) if n in why)
+    except SnapshotError:
+        return ""
+    if not stale:
+        return ""
+    return (f" The snapshot holds {', '.join(stale)}, but derived by an older ts-cli than "
+            "this one reads: capture it again.")
 
 
 def _replay(snapshot_in: Path, angle_list: Optional[list],
@@ -87,7 +101,7 @@ def _replay(snapshot_in: Path, angle_list: Optional[list],
     profile = _assessment(assessment_name if assessment_name is not None else ctx.assessment)
     why = _uncaptured(selection, profile, needs)
     if why:
-        raise SystemExit(f"{why} (snapshot: {snapshot_in})")
+        raise SystemExit(f"{why}{_stale_note(snapshot_in, why)} (snapshot: {snapshot_in})")
     if assessment_name is not None and profile != _assessment(ctx.assessment):
         typer.echo(f"Note: --assessment {profile} overrides the "
                    f"snapshot's captured assessment ({ctx.assessment}).", err=True)

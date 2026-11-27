@@ -778,9 +778,15 @@ ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
 | `liveboard` (arg) | required | GUID or name of the imported Liveboard |
 | `--profile`, `-p` | first profile | Profile to use |
 | `--org` | profile/env org | Org id or name the Liveboard lives in |
+| `--strict-data` | off | Also fail when a tile is suspect (see below) |
+
+It also lists **suspect tiles**: a tile that returns no rows, a single row of zeros, or one
+all-NULL group. That is the shape of a query that could not combine two facts — a measure filter
+on one fact with an attribute from another answers 0 with no error. A real zero is possible, so
+this is advisory unless `--strict-data` is passed.
 
 **Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}],
-"blank_chart_tiles": [{visual, chart_type}]}`.
+"blank_chart_tiles": [{visual, chart_type}], "suspect_tiles": [{visual, reason}]}`.
 **Exit code** is `0` only if the board returns data **and** has no blank chart tiles, `1`
 otherwise — so a conversion skill can gate its import step on it
 (`ts tml import ... && ts tml verify-render <guid>`).
@@ -2407,6 +2413,13 @@ ts tableau build-model "workbook.twbx" \
 | `--max-retries` | Max import retry iterations for formula errors (default: 25) |
 | `--profile`, `-p` | ThoughtSpot profile for API calls |
 
+**Exit code (merge mode):** the command always prints its JSON report, then exits 1 if any
+datasource's `import_status` is `ERROR`, exit 0 otherwise — `OK`, `WARNING`, `SKIPPED`, and
+`import_status` absent (nothing new to import) are all non-failure outcomes. **This is a
+behaviour change**: previously the command exited 0 even on `ERROR`, so a caller relying on
+the exit code alone to detect an import failure must check it now, not just parse the
+report.
+
 **Sqlproxy remapping:** when the TWB uses published datasources (Tableau Server
 `sqlproxy` tables), the parser sees synthetic table names like `"Custom SQL Query"`.
 `build-model` automatically remaps these columns to the target ThoughtSpot table:
@@ -2939,6 +2952,48 @@ output directory; prints a counts summary JSON to stdout.
 
 ---
 
+
+## `ts sisense` — Sisense → ThoughtSpot converter
+
+Offline: every subcommand reads a Sisense bundle JSON (`{dashboard, widgets, datamodel}`) from
+disk. `parse` prints the inventory; `build-model` emits Table + Model TML and `mapping.json`;
+`build-liveboard` emits the Liveboard. Skill: `agents/cli/ts-convert-from-sisense`.
+
+### `ts sisense build-liveboard`
+
+Two binding modes. Default: bind to the Model `build-model` generates (`--model-name`, the same
+connection/database/schema options). `--target-model`: bind to an EXISTING Model through its
+exported TML — fields resolve by table instance + column (role copies by name or by the
+relation's foreign-key column), Sisense `count` becomes `unique count`, widget filters become
+search filters, tab sets keep their active tab, titles become `custom_name`, rich text and
+tab-set titles become note tiles, the layout becomes the tile grid, `--drill` dashboards become
+details tables, and dashboard filters become chips with `excluded_visualizations`. Exported with
+`--associated`, the Tables map warehouse column names onto renamed Table columns and give the
+warehouse tables the binding is checked against. What is carried is decided by an allowlist on
+both sides: every dashboard, widget, panel, filter and data-model setting it does not read, and
+the Model's own filters, `join_progressive`, join types and column properties, are NEEDS REVIEW
+in `migration-report.json` on every tile they affect.
+
+```bash
+ts tml export <model-guid> --include-obj-id --associated --profile myprofile > target-model.json
+ts sisense build-liveboard --input bundle.json --target-model target-model.json --out out/ \
+  --drill _drill_case_list.dash --overrides overrides.json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input`, `-i` | required | Sisense bundle JSON |
+| `--out`, `-o` | required | Output dir: `<name>.liveboard.tml` (+ `.answer.tml` per widget in default mode, `migration-report.json` in `--target-model` mode) |
+| `--model-name` | — | Model the answers bind to; required without `--target-model` |
+| `--target-model` | — | Model TML file — raw YAML/JSON, or the JSON `ts tml export` prints. Its root `obj_id` (`--include-obj-id`) is used for the viz binding |
+| `--drill` | — | A jump-to-dashboard target's `.dash` or bundle JSON; repeatable |
+| `--model-fqn` | — | Model GUID. In `--target-model` mode it is used when given, else the TML's `guid` |
+| `--report-name` | dashboard title | Liveboard name |
+| `--overrides` | — | JSON: `report_name`, and in `--target-model` mode `field_map` (`{"[Table.col]": "Model Column"}`, or `{"[Table.col]": {"<agg>": "Model Column", "": "Model Column"}}` keyed by Sisense aggregation, `""` for the plain column) `filter_map` (`{"[Table.col]": "<search fragment>"}` when every filter on that dim has one condition, else `{"[Table.col]": [{"when": <Sisense filter>, "search": "<fragment>"}]}`; `[column] op value` terms only, on a column that is neither a measure nor a date) and `connections` (`{"<Sisense connection>": "<ThoughtSpot connection>"}`). Overrides go through the same checks as a native binding |
+
+**Output:** JSON summary on stdout (`answers`, `visuals_migrated`, `approximated`,
+`merged_tabs`, `needs_review`, `filter_chips`, `liveboard`); each NEEDS REVIEW row is echoed to
+stderr with its reason.
 
 ## Piping and scripting
 
@@ -4867,7 +4922,7 @@ ts audit report audit.json -o report.html
 | `--angles`, `-a` | all | Comma-separated catalog categories, a subset of `A,D,H,P,S`; a rule runs when any of its categories is selected. A repeated letter counts once; an unknown letter, or a value naming none (`""`, `","`), is a usage error — omit the flag for all |
 | `--assessment` | `general` | The assessment profile (`spotter` = Spotter-ready, `general`): which bar the profile-aware rules measure against. What each profile changes — pass marks, severities, lines — is generated from the rule catalog into `agents/cli/ts-audit/SKILL.md` (Step 2b) and `agents/cli/ts-audit/references/check-catalog.md`; it lives in `ts_cli/audit/catalog/` (`profiles.yaml` and each rule's `profiles:` block). The report header names the assessment used. With `--snapshot-in` the default is the assessment the snapshot was captured with; passing the flag overrides it (noted on stderr) |
 | `--output`, `-o` | stdout | Write the JSON report to a file |
-| `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, custom calendars, connection settings (derived facts only), warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `needs` — the data fetched —, `files`). Refused if the data would not read back unchanged. The directory is checked before anything is fetched: refused inside a git work tree (a snapshot is real exported TML), or when it is non-empty and holds no earlier snapshot (a `manifest.json` that reads as one `--snapshot-out` wrote; any other file of that name does not count) |
+| `--snapshot-out` | — | Also write the fetched audit data (Model, Table and Answer TML, dependents, metadata, AI instructions, custom calendars, connection settings (derived facts only), usage (GUIDs and counts), warnings) to this directory, then audit as normal. One JSON file per field plus `manifest.json` (`format`, `ts_cli_version`, `created`, `angles`, `needs` — the data fetched —, `files`). Refused if the data would not read back unchanged. The directory is checked before anything is fetched: refused inside a git work tree (a snapshot is real exported TML), or when it is non-empty and holds no earlier snapshot (a `manifest.json` that reads as one `--snapshot-out` wrote; any other file of that name does not count) |
 | `--snapshot-in` | — | Audit a `--snapshot-out` directory instead of fetching: no profile, no network. `--angles` defaults to the captured angles. Any selection may be replayed whose rules read only data the snapshot captured (its manifest's `needs`); one whose rules read data that was not captured is an error naming the rules and the missing data — e.g. `--angles H` (Answers, Sets) on a snapshot taken with `--angles A`, while `--angles D` on the same snapshot replays, since D reads only always-fetched data. Cannot be combined with `--snapshot-out` |
 
 **Fire rates.** `ts audit fire-rates --snapshot-in <dir> [--assessment general|spotter]`
@@ -4884,8 +4939,8 @@ whatever it finds (1 on a usage error or an unreadable snapshot). `scripts/pr-re
 
 **What is fetched.** Model TML with its associated Table TML, metadata headers (of the
 Models and of every source they use, SQL Views included) and dependents, always; AI
-instructions, Answer TML, Sets, the connections' custom calendars and the connections'
-settings only when a selected rule declares them (`requires`/`uses`), so a narrow
+instructions, Answer TML, Sets, the connections' custom calendars, the connections'
+settings and each Model's usage only when a selected rule declares them (`requires`/`uses`), so a narrow
 `--angles` fetches less. The JSON records
 what was fetched as `corpus.fetched_needs`. On the AI-instructions lookup, a final 401 (after
 the client's one re-authentication), a 429, or any `requests` exception raised by the
@@ -4905,8 +4960,13 @@ unreadable source no longer ends the audit.
 The connection search answers each connection's configuration, credentials included:
 the fetch reduces each connection to its id, name, type and whether it uses OAuth,
 PrivateLink or a template variable (and whether the OAuth reading rests only on a
-`client_id` and `client_secret` pair, `oauth_m2m`), and keeps, logs and reports no
-configuration value. The search shows a parameterized connection's settings without
+client ID or secret, `oauth_m2m`: a set key whose name, ignoring case and punctuation, contains `clientid` or `clientsecret`
+(`client_id`, `clientId`, `Client Secret`, `clientSecretKey`), alone or both, with no
+key naming OAuth (a word starting `oauth`, so `no_auth` does not) on any
+connection, or on a Databricks connection (or one whose type the search does not give)
+`OAuth2ClientId`, `OAuth2Secret` or both with no other setting naming OAuth, which per-user OAuth and a service principal both
+hold, so P24 reads it as to confirm), and keeps, logs and reports no configuration
+value. The search shows a parameterized connection's settings without
 their `${var}` tokens, so a paged `metadata/search` of CONNECTION headers adds whether
 each connection is parameterized (`parameterizedConnection` or `isParameterized`). A
 connection with no header, or every connection when that search fails, reads as
@@ -4914,7 +4974,75 @@ unknown, and P24 leaves its Models not assessed. A refused connection search is 
 alone, never its response body.
 Any other exception is a bug and propagates unchanged. A snapshot captured before
 ts-cli 0.219.0 holds neither calendars nor connection settings, so replaying the P
-angle from it is refused (P22 and P24 read them): capture it again.
+angle from it is refused (P22 and P24 read them): capture it again. Its connection
+facts are derived when they are fetched and the settings are dropped, so the snapshot
+records the version of that derivation (`derived` in its manifest). One that records
+an older version, or none (any snapshot written before ts-cli 0.221.0, which read the
+Databricks pair as firm OAuth), has its connection facts counted as not captured:
+replaying P from it is refused, saying so, and so is `ts audit fire-rates` on it,
+which replays every angle the snapshot captured. Capture it again.
+
+**Usage (`usage`, for H17 and the report).** Read from ThoughtSpot's own system Model
+"TS: AI and BI Stats", found by its exact name with `metadata/search`, through
+`POST /api/rest/2.0/searchdata` (`record_size: -1`): the history's first and last query
+time, each Model's last query time over all the history it keeps, and each Model's
+queries and distinct users over the last 180 days (the keyword filter
+`[TS Query Start Time].'last 180 days'`). Every value is read by its column name, since
+`searchdata` answers its columns in an order of its own. A paged `metadata/search` of
+the LOGICAL_TABLEs the user can see (500 a page, hidden objects included) says which
+Model IDs match nothing visible now. The current Org comes from `auth/session/user`
+(`current_org`) and is recorded with the usage. Read from a non-primary Org, `searchdata`
+answers that Org's usage only; read from the Primary Org, every Org's. A fourth query,
+`[Model ID] [Org ID] [Org] max [TS Query Start Time]`, gives each used Model ID the Org(s)
+it was queried in (`model_orgs`; the audit JSON's `corpus.usage.orgs`, `org_read` and each
+not-found ID's `orgs`). It runs on its own, so a refusal, or an answer without the Org
+columns, is a warning that leaves the rest of the usage readable and the Cleanup list
+unsplit ("Org not read"). A Model ID queried in several Orgs keeps one entry per Org with
+its last query there; its query and user counts are the Model's across every Org, never
+a sum per Org. The header says the usage covers all Orgs when it was read from the
+Primary Org and names more than one Org, and gives the count of Orgs the data names when
+it was read elsewhere. The Cleanup view splits the not-found IDs into this Org's, other
+Orgs' (grouped by Org, collapsed) and those with no Org recorded. The audit keeps GUIDs,
+counts and Org names and ids only (the system Model has no Model names); a row with a
+blank Model ID is dropped and counted. The history lags by about a day. The corpus records how many whole days the
+history covers before the read (`usage.history_days`) and the idle days H17 judged by
+(`usage.idle_days`); when the history covers fewer days than the 180-day window, the
+report labels the counts with the history's span, and when it covers fewer than the idle
+days, H17's report sections say it was partly judged rather than "No findings". A final 401, a 429 or a `requests` exception
+aborts once; the system Model missing or ambiguous, any other refusal, a non-JSON
+answer, one that cannot be read whole, or a history with no first query leaves the usage unread (null), with a warning
+naming the status and path only, and H17 judges no Model while the report says "Not
+read". A failed session or visible-object search is a warning that leaves the Org, or
+the list of used Models not found in this Org, unknown. A snapshot written before ts-cli
+0.223.0 holds no usage, so replaying H from it is refused: capture it again. One written
+by 0.223.0 holds usage without Orgs: it replays, and every not-found ID reads "Org not
+recorded". Logic in `ts_cli/audit/usage.py`.
+
+**The Usage view (since 0.225.0).** With usage read, each audited Model's
+`corpus.models[].usage` also carries its `status` (`active`, `idle`, `never`, `too_new`
+or `not_judged`, from H17's own reading, so the view and H17 agree), its `dependents`
+(`total`, `liveboards`, `answers`, `sets` and `other`, from the dependents lookup the
+audit already runs, which returns the dependents the audit's user can see in its Org;
+`visible`, their sum, and `complete`. `total` is null, and `visible` a lower bound, when
+the Model's dependents were not read in full: its Sets not fetched, not known to be
+fetched, or its Set lookup failed (the context's `sets_incomplete`; an older snapshot's
+warnings name them), or its own dependents reading incomplete — dependents hidden from
+the user and not returned (`hasInaccessibleDependents` without
+`areInaccessibleDependentsReturned`), a body that is not a list, or the Model missing
+from its batch's answer or without a dependents map (the context's
+`dependents_incomplete`, with a warning naming the Model). `complete` is null for a
+snapshot from before 0.225.0, which did not record that check), its `owner` (the metadata
+header's author display name, else author name) and its `created` date; `corpus.usage`
+gains `status_idle_days`, the idle days the statuses used (H17's, else the catalog's),
+and `dependents_checked`, false when the run did not record which dependents were read
+in full (a snapshot from before 0.225.0).
+No new call. The report's Usage view (`#usage`, a sidebar link only when the run
+fetched usage; "Not read" when it could not read it) draws one dot per Model by days
+since its last query and its dependents, lists the Models in a sortable table with
+status and "No dependents" filters, and exports the selected rows as CSV or as the
+`ts-audit-candidates/1` JSON (ts-audit SKILL.md, "Candidates file"), built in the
+browser, each stating that its dependents are those visible to the audit's user in this
+Org (`dependents_scope`). Logic in `ts_cli/audit/usage_triage.py`.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

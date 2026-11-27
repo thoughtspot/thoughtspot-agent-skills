@@ -6,6 +6,30 @@ function readinessByGuid(){
   if(D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.rs) out[m.g] = cm.rs; });
   return out;
 }
+/* Each Model's Data Cache readiness (`dc`, see views/datacache.js), by GUID; empty, so
+   the heatmap shows no column, for JSON written before 3.23.0 (none carries it) and for
+   a run without the Performance angle (P19 to P28 did not run, so every Model would read
+   Not assessed), as Spotter readiness shows only when its angle ran. A report that does
+   not record its angles (`ar` empty) keeps the column. */
+function dataCacheByGuid(){
+  var out = {};
+  if(dataCacheRan() && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m && cm.dc) out[m.g] = cm.dc; });
+  return out;
+}
+/* One heatmap cell: the Data Cache view's pill, its reasons on hover, linking to the
+   Model's own Data Cache page (#datacache/<guid>). */
+function dataCacheCell(dc, guid){
+  if(!dc) return '<td></td>';
+  var st = DC_STATES[dc.s] || DC_STATES.unknown;
+  var why = (dc.r || []).map(function(r){
+    return r.c+' '+r.l+(r.q ? ' (to confirm)' : '');
+  });
+  if(dc.na && dc.na.length) why.push('Not checked: '+dc.na.map(function(c){
+    return DC_CHECKS[c] || c; }).join(', '));
+  return '<td><a class="dc-state '+st.cls+'" href="#datacache/'+esc(guid)+'" title="'+
+    esc('Data Cache: '+st.label+(why.length ? ' — '+why.join('; ') : ''))+'">'+
+    st.label+'</a></td>';
+}
 
 /* ── Build Dashboard ── */
 /* A note listing what the run could not judge, or '' when `list` is empty. */
@@ -31,6 +55,7 @@ function buildDashboard(){
     if(D.C.p) html += '<span class="meta-item">Profile: <strong>'+esc(D.C.p)+'</strong></span>';
     if(D.C.as) html += '<span class="meta-item">Assessment: <strong>'+esc(D.C.as)+'</strong></span>';
     if(D.C.dt) html += '<span class="meta-item">Date: <strong>'+esc(D.C.dt)+'</strong></span>';
+    html += usageHeaderHtml();
     if(D.C.ar && D.C.ar.length > 0){
       html += '<div class="angles">';
       D.C.ar.forEach(function(code){
@@ -43,6 +68,8 @@ function buildDashboard(){
     html += '<span class="meta-item">Audit report &mdash; no corpus data</span>';
   }
   html += '</div>';
+  /* Usage outside the Primary Org is that Org's only (usage.js). */
+  html += usageOrgNoteHtml();
 
   /* Items no rule judged: malformed TML (BL-406 item 10, BL-501). Shown, never silent. */
   html += notJudgedBox(D.C && D.C.ur, 'Could not be read', 'item', 'not judged',
@@ -220,6 +247,14 @@ function buildHeatmap(){
   var showReadiness = Object.keys(readiness).length > 0;
   /* not an angle-col: that class makes a header a category filter */
   if(showReadiness) html += '<th class="score-col" title="'+esc(READINESS_TITLE)+'">Spotter readiness</th>';
+  var dataCache = dataCacheByGuid();
+  var showDataCache = Object.keys(dataCache).length > 0;
+  if(showDataCache) html += '<th class="score-col" title="Whether ThoughtSpot’s Data Cache can serve the Model (rules P19 to P28); see the Data Cache view">Data Cache</th>';
+  /* Last used: shown when the run fetched usage (H17), each cell "Not read" when it could not */
+  var showUsage = usageState() !== "absent";
+  var corpusByGuid = {};
+  if(showUsage && D.C && D.C.m) D.C.m.forEach(function(cm){ var m = D.L[cm.mi]; if(m) corpusByGuid[m.g] = cm; });
+  if(showUsage) html += '<th class="score-col usage-col" title="Days since the Model was last queried, from ThoughtSpot’s own usage history (TS: AI and BI Stats), in the Org named above">Last used</th>';
   angleKeys.forEach(function(a){
     html += '<th class="angle-col" data-angle="'+a+'" title="Filter by '+ANGLE_LABELS[a]+'">'+
             ANGLE_LABELS[a]+'</th>';
@@ -228,16 +263,21 @@ function buildHeatmap(){
 
   rows.forEach(function(r){
     html += '<tr>';
-    html += '<td class="model-name"><a href="#model/'+r.g+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
+    html += '<td class="model-name"><a href="#model/'+esc(r.g)+'" title="'+esc(r.n)+'">'+esc(r.n)+'</a></td>';
     if(showReadiness){
       var rs = readiness[r.g];
       html += rs ? '<td><span class="readiness" data-level="'+esc(rs.l)+'" title="'+esc(READINESS_LABEL[rs.l]||rs.l)+'">'+
                    Math.floor(rs.s)+'</span></td>' : '<td></td>';
     }
+    if(showDataCache) html += dataCacheCell(dataCache[r.g], r.g);
+    if(showUsage){
+      var lu = usageLastUsed(corpusByGuid[r.g]);
+      html += '<td class="usage-cell" title="'+esc(lu.title)+'">'+esc(lu.text)+'</td>';
+    }
     angleKeys.forEach(function(a){
       var sev = r.cells[a] || "NONE";
       var cellText = sev === "NONE" ? "" : sev === "PASS" ? "✓" : sev.charAt(0);
-      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+r.g+'" data-angle="'+a+
+      html += '<td><span class="cell" data-severity="'+sev+'" data-guid="'+esc(r.g)+'" data-angle="'+a+
               '" title="'+esc(r.n)+' / '+(ANGLE_LABELS[a]||a)+': '+sev+'" role="button" tabindex="0">'+cellText+'</span></td>';
     });
     html += '</tr>';
