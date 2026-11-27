@@ -5,7 +5,7 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I23, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I23, N1, R1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -942,6 +942,41 @@ model:
 model:
   name: "TEST_SV_DUNDER_MIFFLIN_SALES"   # WRONG — environment marker in production TML
 ```
+
+---
+
+## Process
+
+### R1 — A formula whose meaning differs from the source is approved before import
+
+**Rule:** When a faithful translation fails (import rejects it, lint flags it, or a check
+shows wrong numbers), do not substitute a formula with a different meaning to get past
+the failure. Look for a form that keeps the source's meaning first. If none exists, list
+every such formula at the skill's review checkpoint, before import, with the source
+expression, the proposed formula and the difference in one line, and wait for the user
+to approve each. On a "no", leave the formula out and report it as not migrated.
+
+The rule covers the agent's own hand edits during the run, including in a fix-and-reimport
+loop after an import error or a number check. It applies at every import, not only the
+first. A converter's own documented approximations (a `pending_verification` annotation,
+an `Approximated` status, a NEEDS REVIEW row) stay surfaced as each skill does today.
+
+**Why:** a substitute that makes the numbers match can pass because of the test data. On
+2026-11-26 a Metric View flag "latest month in the data" was replaced with "current
+calendar month" (`today()`). It matched only because the fixture's last month was the
+current month. The user rejected it, and a faithful form existed (a scalar subquery in
+`sql_bool_op`; BL-638, BL-640).
+
+**Applies to:** every `ts-convert-from-*` skill, at every Model import: the first, and
+each re-import in a fix loop or after a number check. On a "yes", report the formula as
+approximated, with the difference, not as migrated.
+
+**Correct:** "`Is Month To Date`: source `record_month = MAX(record_month) OVER ()`
+(latest month in the data); proposed
+`start_of_month ( [formula_Month] ) = start_of_month ( today ( ) )` (current calendar month):
+differs whenever the latest month in the data is not the current month. Approve? [Y/N]"
+
+**Wrong:** editing the formula to `today ( )` and reporting the conversion as matched.
 
 ---
 

@@ -84,6 +84,13 @@ never faked. `--lower-db-table` lowercases `db_table` for Databricks (folds unqu
 Read `mapping.json`.
 
 ### Step 2 — Validate & import the model
+
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 Lint locally first (structural invariants the server accepts silently), then import:
 ```bash
 ts tml lint --dir out/ --pattern '*.tml'
@@ -246,6 +253,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.1 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.1.0 | 2026-11-27 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Region > Country > City) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. An allowlist at every level of the dashboard export and of the target Model (its filters, join types, join_progressive, column properties and warehouse tables) decides what is carried; anything not read or not verified is NEEDS REVIEW on the chip and every tile it affects, and an accounting gate names any plotted field a tile does not show. |
 | 1.0.9 | 2026-11-27 | **A conditional that an operator follows is bracketed (ts-cli v0.225.2, BL-649).** ThoughtSpot's `else` is greedy: `if ( c ) then a else b + 1` adds 1 only on the else branch (BL-632, live-verified). `IF([a] > 1, 1, 0) = 1` converted to `if (…) then 1 else 0 = 1`, marked Migrated. It is now `( if (…) then 1 else 0 ) = 1`. A conditional standing alone is unchanged |
 | 1.0.8 | 2026-11-08 | **The aggregation table no longer maps `count` to `COUNT_DISTINCT` (BL-447).** Sisense `count` is a distinct count; the mapping doc and coverage matrix now give the `unique count` formula, as invariant I5 requires. The uncalled `AGG_MAP` / `translate_agg` behind that row was deleted; no Model output changes |

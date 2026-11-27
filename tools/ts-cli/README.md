@@ -3766,6 +3766,129 @@ title, unsupported join), the zero-column-table guard, non-empty
 `invariant_findings`/`lint_findings`, an unreadable/invalid input file, or an
 import failure.
 
+### `ts databricks verify`
+
+Check that a Model converted from a Databricks Metric View returns the Metric View's
+numbers (BL-639). Each query shape runs on both sides: `MEASURE()` on the Metric View,
+AgentQL on the imported Model. Then every cell is compared. Lint and import can both pass
+a Model that returns wrong numbers; this check catches it. It only reads, on both sides.
+
+```bash
+ts databricks verify \
+  --parsed parsed.json --translated translated.json \
+  --model-tml "tml_out/Sales MV.model.tml" \
+  --mv-fqn main.analytics.sales_mv --model-guid <model-guid> \
+  --profile my-ts-profile --dbx-profile my-dbx-profile \
+  --cluster-tz America/Los_Angeles --output ~/verify/sales_mv_report.json
+```
+
+| Option | Required | Meaning |
+|---|---|---|
+| `--parsed` / `-p` | yes | `parsed.json` from `ts databricks parse-mv` |
+| `--model-tml` | yes | The `.model.tml` that `build-model` wrote (YAML; exported JSON also reads) |
+| `--mv-fqn` | yes | The Metric View, `catalog.schema.view`. Each part is backtick-quoted, unless the value already holds a backtick |
+| `--translated` / `-t` | no | `translated.json` from `translate-formulas`. An MV entry it skipped is reported, not failed. Without it, every MV entry the Model lacks fails the run |
+| `--model-guid` | unless `--dry-run` | GUID of the imported Model |
+| `--profile` | no | ThoughtSpot profile (default: `TS_PROFILE` or the first profile) |
+| `--dbx-profile` | unless `--dry-run` | Databricks profile name in `~/.claude/databricks-profiles.json`, as `ts load databricks` uses. Its `sql_warehouse_http_path` picks the warehouse |
+| `--cluster-tz` | no, default `UTC` | IANA time zone of the ThoughtSpot cluster. AgentQL returns a DATE as epoch seconds at midnight in that zone, so a wrong zone moves each date a day. On monthly data that shows as rows on one side only; on daily data, as values compared against the next day's |
+| `--shapes` | no | A JSON list that replaces the default shapes: `{"label": str, "dims": [MV dimension names], "filter": [MV dimension name, SQL literal] or null}`. The literal is used as written on both sides. ThoughtSpot compares string literals case-insensitively and Databricks does not, so a string filter can differ for that reason alone |
+| `--output` / `-o` | no | Write the report here; stdout then gets `{status, summary, report}`. The report holds warehouse values, so keep it out of a repository |
+| `--dry-run` | no | Print the plan (from `--model-tml`) and both queries for every shape. Run nothing |
+
+**The plan.** Outside `--dry-run`, the command exports the imported Model's TML and plans
+from that, because AgentQL queries it. A column whose name, type or aggregation differs
+from `--model-tml` fails the run. Each MV measure and dimension is looked up by its
+display title (the name `build-model` gives it), ignoring case:
+
+- a measure on a MEASURE column, or a dimension on another column, is compared
+- one the converter skipped (from `--translated`) is listed under `skipped_by_converter`
+- one with no column, not skipped, is `missing` and fails the run
+- one on a column of the wrong type is `wrong_column_type` and fails the run
+
+The AgentQL wrapper for a formula column follows `ts agentql classify-columns`: `AGG`
+for an aggregate formula, `SUM` for a semi-additive `first_value`/`last_value` one. A raw
+column is wrapped in its own aggregation: `SUM`, `AVG`, `MIN`, `MAX`, `COUNT` or
+`COUNT(DISTINCT …)`. Only the `SUM` form has been checked live. A raw `STD_DEVIATION`
+or `VARIANCE` column cannot be queried in AgentQL; it is listed under `not_verifiable`.
+
+**Default shapes.**
+
+- the total
+- each MV dimension the Model carries, on its own (a window's `order:` dimension among them)
+- for each boolean flag, the total filtered `= true`, and again `= false`
+- the search filter: the total filtered on one dimension value, which puts a filter
+  beside every measure, LOD columns included
+
+A flag is a dimension whose Model formula is a `sql_bool_op`, or one named `is_…` or
+`has_…` (any case). A dimension Databricks reports as BOOLEAN, when grouped, is a flag
+too. A flag whose Databricks type is not BOOLEAN has its filtered shapes skipped,
+whichever way it was found.
+
+The search filter takes the first dimension, in this order, with two or more usable
+values, and its first value in sorted order:
+
+- a string; never an empty value, one with spaces at either end, one holding a quote or
+  a backslash, or one equal to another in all but case
+- an integer
+- a date, written `DATE 'yyyy-mm-dd'` (`TO_DATE(…)` failed in AgentQL on Databricks)
+
+When none qualifies, a skipped `search filter` entry says why. The run is then
+`incomplete`, unless a flag filter compared data. Shapes that need the data are added at
+run time, so `--dry-run` does not show them and `--shapes` turns them off. No default
+shape supplies what the data must contain; see the skill's Step 11c.
+
+**How cells are compared.** Rows are matched on their grouping values:
+
+- a NULL group matches a NULL group
+- a DATE is decoded in `--cluster-tz`; a TIMESTAMP too, to the second (AgentQL's
+  precision is not live-verified, so fractional seconds are not compared)
+- booleans compare in any case, and numbers by value
+
+A measure cell is compared by its Databricks type. NULL matches only NULL, never 0.
+
+| Databricks type | Match when |
+|---|---|
+| `BYTE`, `SHORT`, `INT`, `LONG` (a `COUNT` is `LONG`) | exactly equal |
+| `DECIMAL` | equal at its scale, rounded half up (relative 1e-12 if the scale is unknown) |
+| `DOUBLE`, `FLOAT` | within a relative or absolute 1e-9 |
+| `DATE`, `TIMESTAMP`, `BOOLEAN` | equal after decoding, as grouping values are |
+| anything else, `STRING` among them | the exact same text |
+
+A cell accepted within a tolerance but not equal is counted in `tolerance_accepted`.
+
+A shape is an error when its Databricks result is split into chunks or truncated. So is
+an AgentQL result at the 100,000-row cap, a row of the wrong width, or a missing result
+schema. When the AgentQL query with every measure fails with a query error, each measure
+runs on its own. So one measure that AgentQL cannot combine with others does not hide
+the rest. A shape where both sides return no rows, or every compared cell is NULL on
+both, is `no_data`.
+
+**Output:** the report JSON. It holds `status` and `summary` (shape counts by status,
+`cells`, `non_null_cells`, `tolerance_accepted`, `mismatches`, `problems`). Then
+`mv_fqn`, `model_name`, `model_guid`, `cluster_tz`, `problems[]`, `model_differences[]`,
+`measures[]`, `dimensions[]`, `order_dimensions[]`, `skipped_by_converter`, `missing`,
+`wrong_column_type[]`, `not_verifiable[]` and `search_filter`. Each entry of `shapes[]`
+has:
+
+- `status`, and the queries run: `databricks_sql` and `agentql`
+- row counts, `cells`, `non_null_cells`, `tolerance_accepted` and `mismatch_count`
+- the first 50 `mismatches`: `{key, measure, databricks, thoughtspot}`, or `{key, issue}` for a row on one side only
+- `errors[]`, `notes[]` or `skipped`, where they apply
+
+One progress line per shape goes to stderr, and one per problem.
+
+**Status and exit code.** The run's `status` is the first of these that applies; exit 0
+only for `match`, else 1:
+
+- `error`: a shape could not be run
+- `mismatch`: a cell disagrees, or a problem in the plan
+- `no_data`: no shape compared a non-NULL cell
+- `incomplete`: default shapes, and no filtered shape compared data
+- `match`
+
+Bad input, or no measure to compare, also exits 1.
+
 ### `ts databricks build-mv`
 
 Emit Databricks Metric View `.sql` file(s) (`CREATE OR REPLACE VIEW ... WITH

@@ -378,10 +378,11 @@ are roughly ordered by value÷effort.
 | ~~BL-634~~ | ~~from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped~~ | DONE (2026-11-27) |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
-| BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
-| BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
+| ~~BL-639~~ | ~~from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify`~~ | DONE (2026-11-27) |
+| ~~BL-640~~ | ~~Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved~~ | DONE (2026-11-27) |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
+| BL-665 | Sisense `--target-model`: a formula-only column chart is emitted with no `axis_configs`; plus #746 report follow-ups | 2026-12-18 |
 
 ### Tier 3 — Opportunistic
 
@@ -537,7 +538,7 @@ are roughly ordered by value÷effort.
 | ~~BL-633~~ | ~~`CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through~~ | DONE (2026-11-27) |
 | ~~BL-635~~ | ~~from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape~~ | DONE (2026-11-27) |
 | BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
-| BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
+| ~~BL-641~~ | ~~from-databricks-mv: no entry point for Metric View YAML files without workspace access~~ | DONE (2026-11-27) |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
 | BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
 | BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
@@ -579,6 +580,9 @@ are roughly ordered by value÷effort.
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
+| BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
+| BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, three AgentQL quoting helpers | 2027-01-31 |
+| BL-666 | Tableau `--warehouse-columns` review leftovers: multi-table merge binds a suffixed ref to the wrong table, silent no-ops, warehouse spelling, one suffix rule in three regexes, ratchet offset, `verify` after `--table-name-map` | 2027-01-31 |
 
 ---
 
@@ -19493,8 +19497,18 @@ with no error.
 
 ## BL-639 — from-databricks-mv: no numeric fidelity step after import `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
-simba-test against a synthetic Databricks fixture (see BL-637). **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: `ts databricks verify`, ts-cli 0.228.0, run by
+the new Step 11c of `ts-convert-from-databricks-mv`. The default shapes are the total, each
+dimension, each boolean flag grouped and filtered both ways, and a search filter on one
+dimension value, which puts a filter beside every measure. When no dimension has a usable
+value, the run reports `incomplete`, not a match, unless a flag filter compared data. The
+command cannot create the data properties below, so the step checks the data for them and
+says which are missing. Run live on two of this fixture's views: 49 shapes, 6,178 cells, no
+mismatch; after the PR #773 review, one view again (13 shapes) plus the integer and
+`DATE '…'` search-filter literals. TIMESTAMP grouping keys are decoded but not
+live-verified. Follow-ups: BL-664.) **Source:** live
+validation of three converted Metric Views on simba-test against a synthetic Databricks fixture
+(see BL-637). **Target:** 2026-12-15.
 
 **What.** The skill ends at import and a summary report. In this run `ts tml lint` passed TML
 that could not import (BL-629, BL-637), and import accepted a Model that returned wrong
@@ -19521,7 +19535,7 @@ angle 15 in `.claude/rules/repo-audit.md`.
 
 ## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the first import of all eight `ts-convert-from-*` skills, at their fix-and-reimport steps, and in `ts-tml-import-gate.md`; the conversion-consistency auditor checks it. What R1 does not cover yet is BL-663). **Source:** as BL-639. **Target:** 2026-12-15.
 
 **What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
 replaced with "current calendar month" to make the numbers match, without asking. The user
@@ -19536,7 +19550,7 @@ rule in the other `ts-convert-from-*` skills that have a review checkpoint.
 
 ## BL-641 — from-databricks-mv: no entry point for Metric View YAML files `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629: the MV definitions arrived as exported text
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-convert-from-databricks-mv 1.21.0: "Starting from Metric View YAML files" at Step 0; column types stay BL-636). **Source:** as BL-629: the MV definitions arrived as exported text
 files, with no workspace access. **Target:** 2027-01-31.
 
 **What.** Steps 1-4 assume a Databricks profile and fetch the YAML with `DESCRIBE TABLE
@@ -20138,5 +20152,140 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
    casts check `expr_is_aggregated` on the inner text, which is still a `__MVREF_n__` placeholder for
    `MEASURE(m)`: `BROUND(MEASURE(revenue), 2)` passes where `BROUND(SUM(x), 2)` is refused.
    `sqlf_resolver_is_aggregated` (`sql_forms.py`) answers it. (#771's cast to text refuses it.)
+
+**Done when.** Each item is fixed with a test, or recorded here as declined with its reason.
+
+---
+
+## BL-663 — R1 and YAML-entry leftovers from the PR #772 review `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** review of PR #772 (BL-640, BL-641). **Target:** 2027-01-31.
+
+1. **R1 does not cover a formula written by hand for a construct the converter refused**,
+   outside an import or number failure: Qlik's "recreate them as Model formulas" (Step 4)
+   and the Databricks `skipped[]` manual builds. Decide whether R1 should, and cite it there.
+2. **The eight R1 citations are copies**, and they already differ (Tableau's is one short
+   sentence, held by its context-cost ceiling). Nothing keeps them in line, as
+   `check_i7_gate.py` does for I7. Either a validator, or one shared sentence each cites.
+3. **Tableau's fix cycle marks an approved change of meaning "✅ Migrated"**; R1 says to
+   report it as approximated. Needs room under the Tableau ratchet (1 token left).
+4. **`Path.read_text()` without an encoding** (43 calls in `ts_cli/commands/`, 18 pass one):
+   on Windows with Python 3.10-3.14 it decodes with the ANSI code page, so a UTF-8 file with
+   non-ASCII names decodes wrongly with no error. `parse-mv` is one (`commands/databricks.py`).
+   Unverified on Windows.
+
+**Done when.** Each item is fixed with its test or check, or declined here with the reason.
+
+## BL-664 — Follow-ups from the PR #773 review (`ts databricks verify`) `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #773 (BL-639). **Target:** 2027-01-31.
+
+1. **`ts-convert-from-snowflake-sv` has the gap BL-639 closed for Databricks.** Lint and
+   import pass, the numbers can still be wrong, and no step compares them. The round-trip
+   study found three constructs that import clean and return the wrong number
+   (`docs/reviews/2026-09-08-sv-patterns-roundtrip-fidelity.md`). Fix direction: a
+   `ts snowflake verify` on the same plan and comparison modules, querying the Semantic
+   View on the warehouse, and a step in the skill.
+2. **`spotql._cell_value` reads a falsy value of an unmapped type as NULL.** When neither
+   the column's `type` nor the cell's `nullType` names a field, it takes the first field
+   that is not falsy. A 0, `false` or empty string then comes back as None. `verify`
+   reports that as a false match against a Databricks NULL (and a mismatch against Databricks' 0); other callers read it as NULL.
+3. **`quote_mv_fqn` cannot quote a partly quoted name.** It quotes every dot-separated part,
+   or, when the name holds a backtick, passes it through unchanged. A catalog, schema or
+   view whose name holds a dot works only when the caller quotes the whole name.
+4. **AgentQL identifier quoting is written three times**: `_dq` in
+   `ts_cli/databricks/mv_verify.py`, `_sq` in `ts_cli/aggregate/spotql_aggregate.py` and
+   `_q` in `ts_cli/formula_translate/validate.py`. One shared helper.
+
+5. **`ts databricks verify` leftovers from the PR #773 re-review.** A flag filter that excludes
+   no rows (a flag false on every row) still counts as the run's filtered shape, so the run can
+   read `match` without a search filter that removed anything; count a filtered shape only when
+   it removed rows. `tolerance_accepted` is a bare count: list which measures were accepted
+   within tolerance, since at DECIMAL scale it also absorbs a dropped `ROUND` or narrowing cast.
+
+**Done when.** Each item is fixed with its test, or declined here with the reason.
+
+---
+
+## BL-665 — Sisense `--target-model`: a formula-only column chart is emitted with no `axis_configs`; #746 report follow-ups `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the maintainer review of PR #746 (the one-page HTML migration
+report), which requested changes. **Target:** 2026-12-18.
+
+**Converter bug (the reason this is Tier 2).** On the `--target-model` path, a column chart whose
+only value is a Sisense formula is emitted with no `axis_configs`. `ts tml lint` flags it ("Generate
+the tile with the converter's build-liveboard, not by hand"), and the tile renders blank. #746 worked
+around it in SKILL.md by holding the tile back from import; the review asked for that sentence to go,
+because the fix belongs in the converter (`.claude/rules/ts-cli.md`). Fix it in
+`ts_cli/sisense/` so the tile is either built with valid axes or reported NEEDS REVIEW and left out
+by the converter itself, with a test on a formula-only column chart.
+
+**Report follow-ups #746 may leave for later** (the review did not block on these):
+1. `render_report_html.py`'s `target_model_text` re-implements `commands/sisense.py:_load_tml`; on
+   the `--parse` export shape it reports "0 table instances … 0 columns, 0 formulas". Reuse the
+   loader.
+2. Its `REASONS` table is a second hand-kept copy of the converter's NEEDS REVIEW wording, with no
+   gate keeping the two in step. Group by a reason code the converter emits, or drop the table.
+3. The bundle, the report and the Liveboard TML are never checked against each other: with a
+   reused out-dir, a page titled "Acme Visits" showed "What shipped: Zeta Board".
+4. The reconcile check marks a match within an unstated 1%. State the tolerance on the page, or
+   compare exactly.
+5. The documented command needs the skill directory and PyYAML, which `python3` lacks when ts-cli is
+   a uv tool. A `ts sisense` command would settle this and items 1 to 2.
+6. Smaller: the footer's "(N rows)" is the NEEDS REVIEW count; "Listed below with the reason" shows
+   no reason; `--board-url` accepts `javascript:`; "Filter bar ✓ N chips" ticks whatever the chips'
+   status; `fmt(None)` prints "None".
+7. The converter's report rows carry no widget oid, so the report can only match widgets to tiles by
+   title. Add the oid to each row.
+
+**Done when.** The converter bug is fixed with its test, and each report item is fixed (in #746 or
+after it) or declined here with the reason.
+
+## BL-666 — Tableau `--warehouse-columns`: review leftovers from the CSQ suffixed-column PR `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** pr-ready review of `fix/tableau-csq-suffixed-columns` (the
+`pr-reviewer` and the conversion-consistency auditor, head `034edc88`). **Target:** 2027-01-31.
+
+None of these changes a number on the inputs reviewed; each is a narrower path the flag does not
+cover yet, or a duplicated rule.
+
+1. **Merge into a multi-table Model can bind a suffixed ref to the wrong table.** `_remap_multi_table`
+   (`tableau/build_model.py`) scopes a suffixed key by its base name, so with `LEVEL` on table A and
+   `LEVEL (Custom SQL Query8)` on table B the ref becomes `[A::LEVEL (Custom SQL Query8)]`; the
+   model-wide keep and `live_suffixed_columns` then suppress the pre-import warning, and the formula
+   fails at import and is dropped by the retry (base warned and stripped it). Key the keep and the
+   suppression by `TABLE::COL`, or look up the full suffixed name first.
+2. **The flag can do nothing without saying so.** No stderr line on a multi-relation datasource or
+   with `--existing-guid` (unlike `--table-name-map`); a keyed file whose key misses only prints
+   "0 suffixed column(s) kept"; a bare list or `{"columns": …}` file applies to every single-table
+   datasource in a whole-workbook run. The multi-table GENERATE path keeps the suffixed Model column
+   but strips the ref (pre-existing), though the flag holds the fact needed to keep it.
+3. **A case-insensitive match keeps the workbook's spelling** in `db_column_name`
+   (`reconcile.bound_suffixed_columns` / `clean_columns`); emit the warehouse's spelling, since a
+   quoted identifier is case-sensitive. Whether ThoughtSpot matches `db_column_name` case-insensitively
+   is unverified.
+4. **One suffix rule, three spellings.** `reconcile._SUFFIX` (`\d+`) and `build_model._CSQ_SUFFIX` /
+   `_CSQ_IN_REF` (`\d*`); the GENERATE keep (`strip_suffix_in_expr(bound=)`) and the merge keep
+   (`strip_csq_suffixes(keep=)`) disagree on an unnumbered `(Custom SQL Query)` ref, on a suffixed
+   string literal, and on `LEVEL(Custom SQL Query8)`. One shared regex and one keep/strip function in
+   `reconcile.py`, with `build_model` delegating. `load_warehouse_columns` reads a file inside a module
+   documented as pure: move it with the other loaders (item 5).
+5. **`commands/tableau.py` ratchet.** Raised 1596 → 1625 for the option's wiring. Moving the three JSON
+   option loaders (`_load_table_name_map`, `_load_column_name_map`, `_load_warehouse_columns`, ~55
+   lines) to `tableau/` would bring it back under 1596; lower the ratchet then. The ratchet comment
+   should also name `reconcile.py` and `validate.py`, where most of the logic is.
+6. **Wording and output.** `--help` does not say "single-table datasource"; no minimum ts-cli version
+   beside the flag in SKILL.md / step-5; the `INFORMATION_SCHEMA.COLUMNS` advice needs a reshaping step
+   (raw `[{"COLUMN_NAME": …}]` is rejected); the bound count is on stderr only, not in the result JSON
+   the Step 12 report reads.
+7. **Loader robustness.** `read_text()` with no encoding (cp1252 on Windows below Python 3.15); a
+   directory or unreadable path escapes `except ValueError` as a traceback. The sibling loaders share
+   the pattern.
+8. **`ts tableau verify` after `--table-name-map`.** Reports "Physical table(s) dropped from the model:
+   sqlproxy" whenever the map renames `sqlproxy` (`tableau/verify.py`), so Step 6's fidelity gate fails
+   on correct output for the Step 5b procedure. Pre-existing; teach `verify.py` the rename (BL-314
+   class) with a test that a genuine drop still fails.
+9. **I3 advisory.** A generated formula MEASURE carries no `index_type: DONT_INDEX` (auditor WARN;
+   not new in this PR).
 
 **Done when.** Each item is fixed with a test, or recorded here as declined with its reason.

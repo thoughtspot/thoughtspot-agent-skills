@@ -27,7 +27,7 @@ audited and nothing reported a gap. Same failure `_dirs.py` was created to end
 ```bash
 ls -d agents/cli/ts-convert-*/                          # every converter
 ls -d agents/shared/mappings/*/                         # every mapping family
-grep -nE '^### (I|PT|N)[0-9]+' \
+grep -nE '^### (I|PT|N|R)[0-9]+' \
   agents/shared/schemas/ts-model-conversion-invariants.md   # every invariant
 ```
 
@@ -86,9 +86,14 @@ belongs in that validator instead (the two-bucket rule).
 
 ## Checks (per from-skill)
 
-For each invariant I1–I7 and N1: confirm the skill states the rule (or cites the
-invariants doc at `../../shared/schemas/ts-model-conversion-invariants.md`) AND that
-its worked TML examples obey it. Report `file:line` of the first violation.
+For each invariant the grep above lists (I*, N*, and the process rules R*): confirm the
+skill states the rule (or cites the invariants doc at
+`../../shared/schemas/ts-model-conversion-invariants.md`) AND that its worked TML examples
+obey it. Report `file:line` of the first violation.
+
+For **R1** specifically: every step that imports a Model, including a fix-and-reimport
+loop or a re-import after a number check, must reach an R1 citation before the import
+runs. An import path that bypasses one is a finding.
 
 ### I1 — Every formulas[] example has a paired columns[] entry with formula_id
 
