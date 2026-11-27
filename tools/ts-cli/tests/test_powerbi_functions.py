@@ -4,6 +4,8 @@ Pure functions, no live cluster (per .claude/rules/ts-cli.md). Covers the safe s
 plus the cluster-verified extensions (sum_if, group_aggregate, [formula_<name>] id-refs,
 ROUND-increment, 2-arg CEILING, diff_days) and the NEEDS-REVIEW gate.
 """
+import pytest
+
 from ts_cli.powerbi.functions import translate_dax
 
 
@@ -276,3 +278,424 @@ def test_distinctcount_inside_divide():
     expr, status, _ = translate_dax("DIVIDE(SUM(Sales[Amount]), DISTINCTCOUNT(Sales[Customer]))")
     assert status == "Approximated"
     assert "unique count([Sales::Customer])" in expr and "isnull([Sales::Customer])" in expr
+
+
+def test_split_args_tracks_braces():
+    """DAX writes a value set as `T[Status] IN {"a","b"}`. Without brace tracking the
+    commas inside the set split it into arguments that are not arguments, so every
+    CALCULATE carrying an IN-set was read wrongly."""
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('DISTINCTCOUNT(T[k]), T[Status] IN {"x","y"}') == [
+        "DISTINCTCOUNT(T[k])", 'T[Status] IN {"x","y"}']
+
+
+# --- Round-4 review of the gated-measures PR: _split_args reaches every DAX path -------
+
+@pytest.mark.parametrize("dax,expected", [
+    # main gave this; brace tracking without string skipping mis-split it into
+    # "then '{', 'b' else 0", labelled Migrated
+    ('IF(T[c] = 1, "{", "b")', "(if ([T::c] = 1) then '{' else 'b')"),
+    ('IF(T[c] = 1, "}", "b")', "(if ([T::c] = 1) then '}' else 'b')"),
+])
+def test_quoted_text_is_not_argument_structure(dax, expected):
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (expected, "Migrated")
+
+
+@pytest.mark.parametrize("dax", ['IF(T[s] = "a,b", 1, 0)', 'IF(T[s] = "a)b", 1, 0)'])
+def test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main(dax):
+    """The quote-aware splitter reads these correctly, but the rewrites after it still
+    reach inside strings (BL-611), so a measure the legacy splitter misread stays NEEDS
+    REVIEW, as on main."""
+    expr, status, note = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-611" in note
+
+
+def test_split_args_skips_strings_quoted_names_and_brackets():
+    from ts_cli.powerbi.functions import _split_args
+    assert _split_args('T[c] = 1, "{", "b"') == ["T[c] = 1", '"{"', '"b"']
+    assert _split_args('"a,b", \'Bob\'\'s, (x)\'[c], T[a,b]') == [
+        '"a,b"', "'Bob''s, (x)'[c]", "T[a,b]"]
+    assert _split_args('"say ""a,b"""') == ['"say ""a,b"""']
+
+
+def test_in_set_inside_if():
+    """A one-member set inside a call reads the same to both splitters and translates, as
+    on main; a set whose commas sit inside a call stays NEEDS REVIEW, as on main, until the
+    rewrites skip quoted text (BL-611)."""
+    expr, status, _ = translate_dax('IF(T[s] IN {"a"}, 1, 0)')
+    assert (expr, status) == ("(if ([T::s] IN {'a'}) then 1 else 0)", "Migrated")
+    expr, status, note = translate_dax('IF(T[s] IN {"a","b"}, 1, 0)')
+    assert (expr, status) == (None, "NEEDS REVIEW") and "BL-611" in note
+
+
+# --- Round-5 review: the splitter must not open new inputs to _calc_approx ---------
+
+_CALC_SHAPES = {
+    "ratio": "CALCULATE(SUM(Sales[Profit]) / SUM(Sales[Revenue]), {f})",
+    "times 100": "CALCULATE(SUM(Sales[Profit]) * 100, {f})",
+    "countrows distinct": "CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), {f})",
+    "count": "CALCULATE(COUNT(Sales[Cust]), {f})",
+    "filter all": "CALCULATE(SUM(Sales[Profit]), FILTER(ALL(Sales), {f}))",
+}
+_NEW_FILTERS = {
+    "in set": 'Sales[Region] IN {"East","West"}',
+    "comma in string": 'Sales[Region] = "East,West"',
+    "paren in string": 'Sales[Region] = "East)"',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_CALC_SHAPES))
+@pytest.mark.parametrize("filt", sorted(_NEW_FILTERS))
+def test_calculate_the_quote_aware_split_newly_reads_stays_needs_review(shape, filt):
+    """_calc_approx keeps only the first aggregate's argument (a ratio became its
+    numerator, `* 100` vanished, ALL was dropped). Before the quote-aware splitter these
+    inputs failed to split and were NEEDS REVIEW; they still are (BL-609)."""
+    expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f=_NEW_FILTERS[filt]))
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.xfail(strict=True, reason="BL-609: _calc_approx drops parts of the expression "
+                   "on an `=` filter, as on main; flips to a pass when BL-609 lands")
+@pytest.mark.parametrize("shape", sorted(_CALC_SHAPES))
+def test_calculate_with_an_equals_filter_should_need_review(shape):
+    expr, status, _ = translate_dax(_CALC_SHAPES[shape].format(f='Sales[Region] = "East"'))
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+def test_in_set_inside_calculate_sum_needs_review():
+    expr, status, _ = translate_dax('CALCULATE(SUM(T[x]), T[s] IN {"a","b"})')
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+def test_plain_equals_calculate_still_approximates_as_on_main():
+    expr, status, _ = translate_dax('CALCULATE(SUM(T[x]), T[s] = "a")')
+    assert (expr, status) == ("sum_if([T::s] = 'a', [T::x])", "Approximated")
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(NOT Fact[s] IN {"a","b"}, 1, 0)',
+    'IF(NOT(Fact[s] IN {"a"}), 1, 0)',
+    'NOT(T[s] IN {"a"})',
+    'IF(NOT [s] IN {"a"}, 1, 0)',
+    "IF(NOT 'My T'[s] IN {\"a\"}, 1, 0)",
+    'IF(not Fact[s] in {"a"}, 1, 0)',
+])
+def test_not_before_an_in_set_needs_review(dax):
+    """A blank s is not in the set: TRUE in DAX, but ThoughtSpot's not ( NULL in {…} )
+    is NULL and falls to else. Inferred, not probed (BL-610). The gated parser refuses
+    the same shape."""
+    from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-610" in (_in_set_reason(dax) or "")
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(Fact[s] IN {"a", 1.50}, 1, 0)', 'IF(Fact[s] IN {"a", 1.0}, 1, 0)',
+    'IF(Fact[s] IN {"a", 01}, 1, 0)', 'IF(Fact[s] IN {"a", 1}, 1, 0)',
+    'T[s] IN {2.5, "a"}', 'IF(Fact[s] IN {"a", 99999999999999999999}, 1, 0)',
+    'IF(Fact[s] IN {"a", TRUE}, 1, 0)', 'IF(Fact[s] IN {"a", BLANK()}, 1, 0)',
+    'IF(Fact[s] IN {"a", Fact[t]}, 1, 0)',
+])
+def test_mixed_in_set_on_the_main_path_needs_review(dax):
+    """DAX compares a mixed set as text, each number in its own form (1.50 as "1.5").
+    This path rewrites no literal, so even a plain integer would be emitted bare against
+    a text column; every mixed set is refused (the gated parser writes plain ones as text)."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax,expected", [
+    ('IF(Fact[s] IN {2.5}, 1, 0)', "(if ([Fact::s] IN {2.5}) then 1 else 0)"),
+    ('IF(NOT ISBLANK(T[a]) && T[s] IN {"a"}, 1, 0)',
+     "(if (not isnull([T::a]) and [T::s] IN {'a'}) then 1 else 0)"),
+    ('IF(T[s] IN {"NOT x"}, 1, 0)', None),     # NOT inside a string is not a NOT
+    ('IF(NOTE[s] IN {"a"}, 1, 0)', "(if ([NOTE::s] IN {'a'}) then 1 else 0)"),
+    ('IF(T[s] IN {"1"}, 1, 0)', "(if ([T::s] IN {'1'}) then 1 else 0)"),
+])
+def test_in_sets_that_still_translate(dax, expected):
+    expr, status, _ = translate_dax(dax)
+    assert status == "Migrated"
+    if expected:
+        assert expr == expected
+
+
+def test_plain_int64():
+    from ts_cli.powerbi.functions import plain_int64
+    assert all(plain_int64(v) for v in ("0", "-1", "10", "9223372036854775807",
+                                        "-9223372036854775808"))
+    assert not any(plain_int64(v) for v in ("01", "-0", "1.0", "+1", "9223372036854775808",
+                                            "-9223372036854775809", "9" * 5000))
+
+
+# --- Round-6 review: a [ or ] the two splitters read differently --------------------
+
+_BRACKET_CALCS = [
+    # a "[" or "]" inside a string: the earlier splitter counted it as depth, failed to
+    # split and left the measure NEEDS REVIEW; read correctly, _calc_approx drops parts
+    # (the first counts every open row, not just those with "[" in the title)
+    'CALCULATE(COUNTROWS(FILTER(Fact, CONTAINSSTRING(Fact[Title], "["))), Fact[Status] = "Open")',
+    'CALCULATE(SUM(Fact[Amount]) * IF(Fact[Tag] = "[", 2, 1), Fact[Status] = "East")',
+    'CALCULATE(SUM(Fact[Amount]) * IF(Fact[Tag] = "]", 2, 1), Fact[Status] = "East")',
+    # a [column] whose parens close before they open: equal counts, not nested
+    'CALCULATE(SUM(Fact[x]) + Fact[a),(b], Fact[s] = "x")',
+    # a ] outside any [column]
+    'CALCULATE(SUM(Fact[x]) * 2 ], Fact[s] = "x")',
+    'CALCULATE(SUM(Fact[x]) * 2 ], ALL(Fact[r]))',
+]
+
+
+@pytest.mark.parametrize("dax", _BRACKET_CALCS)
+def test_calculate_with_a_bracket_the_splitters_read_differently_needs_review(dax):
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax", _BRACKET_CALCS[:2])
+def test_formula_translate_refuses_a_bracket_in_a_string_inside_calculate(dax):
+    """`ts formula translate --from dax` shares translate_dax, and returned both of these
+    APPROXIMATED with part of the expression dropped."""
+    from ts_cli.formula_translate.engine import translate as ft_translate
+    r = ft_translate(dax, "dax")
+    assert (r["status"], r["formula"]) == ("NEEDS_REVIEW", None)
+
+
+@pytest.mark.parametrize("dax", [
+    'CALCULATE(SUM(T[x]) * IF(MAX(T[s]) IN {"a","b"}, 2, 1), ALL(T[r]))',
+    'CALCULATE(SUM(T[x]) * IF(MAX(T[s]) = "a,b", 2, 1), ALL(T[r]))',
+])
+def test_calculate_all_the_quote_aware_split_newly_reads_stays_needs_review(dax):
+    """The group_aggregate rewrite has the same gate as _approx_calculate: a body the
+    earlier splitter could not read stays NEEDS REVIEW, as on main, rather than being
+    rewritten by code written against that splitter."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+# --- Round-6 review: refuse the NOT ... IN class, not its spellings -------------------
+
+@pytest.mark.parametrize("dax", [
+    # NOT over an operand holding the set, however the operand is spelled
+    'IF(NOT ((T[s])) IN {"a","b"}, 1, 0)',
+    'IF(NOT UPPER(T[s]) IN {"A","B"}, 1, 0)',
+    'IF(NOT T[n] + 0 IN {1, 2}, 1, 0)',
+    'IF(NOT (T[n] > 1 && T[s] IN {"a","b"}), 1, 0)',
+    'IF(NOT OR(T[n] > 1, T[s] IN {"a","b"}), 1, 0)',
+    'IF(T[n] > 1 && NOT T[s] IN {"a","b"}, 1, 0)',
+    # the set's result compared, which negates it as surely as NOT does
+    'IF(T[s] IN {"a","b"} = FALSE, 1, 0)',
+    'IF(T[s] IN {"a","b"} <> TRUE, 1, 0)',
+    'IF(T[s] IN {"a","b"} == FALSE(), 1, 0)',
+    'IF(FALSE = (T[s] IN {"a","b"}), 1, 0)',
+    'IF((T[s] IN {"a","b"} && T[n] > 1) = FALSE, 1, 0)',
+    'IF(AND(T[s] IN {"a","b"}, T[n] > 1) <> TRUE, 1, 0)',
+])
+def test_a_negated_or_compared_in_set_needs_review(dax):
+    """A blank s is not in the set: FALSE in DAX, NULL in ThoughtSpot. As a condition the
+    two agree (both take else); negated or compared they do not (BL-610). The last four
+    were Migrated on main too, because their set's commas sat inside parens. Most of these
+    are now refused first by the whole-measure splitter check, so the negation scan is
+    asserted on its own as well: it must keep refusing when BL-611 lifts that check."""
+    from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-610" in (_in_set_reason(dax) or "")
+
+
+@pytest.mark.parametrize("dax", [
+    'IF((T[a], T[b]) IN {("x", 1), ("y", 2)}, 1, 0)',
+    '(T[a], T[b]) IN {("x", 1), ("y", 2)}',
+    'IF(T[n] IN {T[m], 2}, 1, 0)',
+    'IF(T[n] IN {1 + 1, 3}, 1, 0)',
+])
+def test_an_in_set_member_that_is_not_a_literal_needs_review(dax):
+    """ThoughtSpot's `in` takes a list of literals: a row constructor, a column or an
+    expression in the set is refused (the second was Migrated on main)."""
+    from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "literal" in (_in_set_reason(dax) or "")
+
+
+@pytest.mark.parametrize("dax,expected", [
+    # a comparison or NOT beside the set, not over it, leaves it a plain condition
+    ('IF(T[n] > 1 && T[s] IN {"a"}, 1, 0)',
+     "(if ([T::n] > 1 and [T::s] IN {'a'}) then 1 else 0)"),
+    ('IF(T[s] IN {"a"} && T[n] > 1, 1, 0)',
+     "(if ([T::s] IN {'a'} and [T::n] > 1) then 1 else 0)"),
+    ('IF(NOT ISBLANK(T[a]) || T[s] IN {"a"}, 1, 0)',
+     "(if (not isnull([T::a]) or [T::s] IN {'a'}) then 1 else 0)"),
+    # IF turns the set back into a value both sides agree on, so comparing that is exact
+    ('IF(IF(T[s] IN {"a"}, 1, 0) = 1, 1, 0)',
+     "(if ((if ([T::s] IN {'a'}) then 1 else 0) = 1) then 1 else 0)"),
+])
+def test_a_set_beside_a_negation_it_is_not_under_still_translates(dax, expected):
+    """One-member sets, so the whole-measure splitter check passes and the negation scan
+    alone decides. The multi-member spellings are asserted against the scan below."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (expected, "Migrated")
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(T[n] > 1 && T[s] IN {"a","b"}, 1, 0)',
+    'IF(T[s] IN {"a","b"} && T[n] > 1, 1, 0)',
+    'IF(NOT ISBLANK(T[a]) || T[s] IN {"a","b"}, 1, 0)',
+    'IF(IF(T[s] IN {"a","b"}, 1, 0) = 1, 1, 0)',
+    'IF(Fact[s] IN {1, 2.5}, 1, 0)',
+])
+def test_the_negation_scan_passes_a_multi_member_set_it_is_not_over(dax):
+    """Refused today by the whole-measure splitter check (BL-611), but the negation scan
+    must not be what refuses them, or lifting that check would leave them refused."""
+    from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
+    assert _in_set_reason(dax) is None
+    assert translate_dax(dax)[1] == "NEEDS REVIEW"
+
+
+# --- A non-ASCII letter outside quotes must not crash the IN-set scan ----------------
+
+_NON_ASCII = [
+    "SUM(Fact[Amount]) // 1º trimestre",
+    "SUM(Fact[Amount]) -- Ärger",
+    "SUM(Fact[Amount]) // 売上",
+    'IF(Fact[s] IN {"a","b"}, 1, 0) // é',
+]
+
+
+@pytest.mark.parametrize("dax", _NON_ASCII)
+def test_a_non_ascii_letter_outside_quotes_does_not_raise(dax):
+    """_in_set_negated matched a word only from an ASCII letter but entered that branch
+    for any letter, so a comment such as `// 売上` raised AttributeError and took the
+    whole build down; main translated these measures."""
+    expr, status, _ = translate_dax(dax, home_table="Fact")
+    assert status in ("Migrated", "Approximated", "NEEDS REVIEW")
+
+
+def test_build_model_survives_a_measure_with_a_non_ascii_comment():
+    import pathlib
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent))
+    from test_powerbi_build_model import _inv
+    from ts_cli.powerbi.build_model import assemble
+    inv = _inv()
+    fact = inv["tables"][0]
+    fact["measures"] += [{"name": f"Commented {i}", "expression": dax}
+                         for i, dax in enumerate(_NON_ASCII[:3])]
+    _, mapping = assemble(inv, {}, "C", "d", "s", "LEFT_OUTER", False)
+    names = {r["name"] for r in mapping["measures"]}
+    assert {f"Commented {i}" for i in range(3)} <= names
+
+
+# --- Round-7 (maintainer) fixes: every input from the 2026-11-19 review ----------------
+
+_ROUND7_WHOLE_MEASURE = [
+    # blocking 1: a set or a comma-bearing string OUTSIDE the CALCULATE let the lossy
+    # rewrite run (main refused the measure)
+    'IF(MAX(Sales[Region]) IN {"East","West"}, CALCULATE(SUM(Sales[Profit]) / '
+    'SUM(Sales[Revenue]), Sales[Channel] = "Online"), 0)',
+    'IF(MAX(Sales[Size]) = "Small, Medium", CALCULATE(SUM(Sales[Profit]) * 100, '
+    'Sales[Channel] = "Online"), 0)',
+    'IF(MAX(Dates[Region]) IN {"a","b"}, CALCULATE(SUM(Sales[Amt]), FILTER(ALL(Dates[Date]), '
+    'Dates[Date] <= MAX(Dates[Date]))), 0)',
+    # blocking 3: string literals rewritten where main refused the measure
+    'IF(T[s] = "a,  b", 1, 0)',
+    'IF(T[s] IN {"a  b","c"}, 1, 0)',
+    'IF(T[s] = "x <> y, z", 1, 0)',
+    'IF(T[s] IN {"a && b","c"}, 1, 0)',
+    'IF(T[s] = "[Region], x", 1, 0)',
+]
+
+
+@pytest.mark.parametrize("dax", _ROUND7_WHOLE_MEASURE)
+def test_a_measure_the_legacy_splitter_misread_stays_needs_review(dax):
+    expr, status, note = translate_dax(dax, home_table="T", home_cols={"Region"})
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-611" in note
+
+
+@pytest.mark.parametrize("dax", [
+    # blocking 2: IF hands its then/else branch's truth value out
+    'IF(IF(T[Region] = "EU", T[Country] IN {"DE","FR"}, TRUE) = FALSE, 1, 0)',
+    'IF(IF(T[Region] = "EU", T[Country] IN {"DE"}, TRUE) = FALSE, 1, 0)',
+    'IF(IF(T[Region] = "EU", T[Country] IN {"DE"}, TRUE) <> TRUE, 1, 0)',
+    'IF(ISBLANK(IF(T[Region] = "EU", T[Country] IN {"DE"}, TRUE)), 1, 0)',
+    'IF(NOT IF(T[Region] = "EU", T[Country] IN {"DE"}, TRUE), 1, 0)',
+    'IF(IF(T[Region] = "EU", TRUE, T[Country] IN {"DE"}) = FALSE, 1, 0)',
+    'IF(SWITCH(T[Region], "EU", T[Country] IN {"DE"}, TRUE) = FALSE, 1, 0)',
+    'IF(COALESCE(T[Country] IN {"DE"}, TRUE) = FALSE, 1, 0)',
+    # a blank test over a set compares it (was "not this PR"; refused now as well)
+    'IF(ISBLANK(T[s] IN {"a"}), 1, 0)',
+])
+def test_a_set_reaching_a_comparison_through_a_branch_needs_review(dax):
+    from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert "BL-610" in (_in_set_reason(dax) or "")   # SWITCH is also refused upstream
+
+
+def test_an_if_condition_still_turns_a_set_into_a_value():
+    """IF's condition is not handed out: comparing IF's own value is exact."""
+    expr, status, _ = translate_dax('IF(IF(T[s] IN {"a"}, 1, 0) = 1, 1, 0)')
+    assert status == "Migrated"
+
+
+@pytest.mark.parametrize("dax", [
+    'IF(T[s] IN ({"a"}), 1, 0)',
+    'IF(T[s] IN /*c*/ {"a"}, 1, 0)',
+    'IF(T[s] IN VALUES(T[t]), 1, 0)',
+    'IF(T[n] > 1 /* && */ || T[s] IN {"a"}, 1, 0)',
+    'IF(T[s] IN {"a"}, 1, 0) // note',
+])
+def test_an_in_set_spelled_otherwise_or_beside_a_comment_needs_review(dax):
+    """should-fix 2: these skipped the IN checks; build-model does not strip comments."""
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax", ['IF(T[s] = "IN (x)", 1, 0)', "IF('IN T'[s] = 1, 1, 0)",
+                                 'IF(T[INDEX] = 1, 1, 0)', 'SUM(T[x]) // a comment'])
+def test_in_inside_quotes_or_a_name_and_a_comment_without_a_set_still_translate(dax):
+    assert translate_dax(dax)[1] in ("Migrated", "Approximated")
+
+
+# --- Round-7 re-review: split-site comparison, and literals the gated path emits -------
+
+@pytest.mark.parametrize("dax", [
+    'CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[Metric] = "[Revenue]")',
+    'CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[Metric] IN {"[Revenue]", "x"})',
+    'CALCULATE(DISTINCTCOUNT(Orders[a"b]), Orders[Metric] IN {100, "[Revenue]"})',
+    'VAR a = CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[Metric] = "[Revenue]") '
+    'VAR b = CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[s] = "y") RETURN a / b',
+])
+def test_a_gated_literal_the_reference_rewrite_changed_needs_review(dax):
+    """_refs_to_ids reaches inside quoted text (BL-611), so "[Revenue]" with a sibling
+    measure Revenue became '[formula_Revenue]', a value no row holds."""
+    expr, status, _ = translate_dax(dax, home_table="Orders",
+                                    measure_dax={"Revenue": "SUM(Orders[Amt])"})
+    assert (expr, status) == (None, "NEEDS REVIEW")
+
+
+def test_a_gated_literal_with_no_sibling_reference_still_converts():
+    expr, status, _ = translate_dax(
+        'CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[Metric] = "[Revenue]")',
+        home_table="Orders", measure_dax={"Margin": "SUM(Orders[Amt])"})
+    assert status == "Approximated" and "'[Revenue]'" in expr
+
+
+@pytest.mark.parametrize("dax", ["DISTINCTCOUNT(T[a]]b])", "DISTINCTCOUNT(T[Amount [USD]]])",
+                                 "DISTINCTCOUNT(T[a[b])", "DISTINCTCOUNT('T]'[c])"])
+def test_a_call_synthesised_by_an_expansion_is_checked_too(dax):
+    """DISTINCTCOUNT expands to an IF(ISBLANK(x), 1, 0) the legacy splitter misreads when x
+    holds a bracket; main refused these, and checking only the original text let them by."""
+    assert translate_dax(dax)[:2] == (None, "NEEDS REVIEW")
+
+
+@pytest.mark.parametrize("dax", ['CONCATENATE(T[Last], ", ")', 'CONCATENATE("(", T[s])',
+                                 'CONCATENATE(T[s], ")")', "SUM('Sales, EU'[Amount])",
+                                 "DIVIDE(SUM('Sales, EU'[a]), SUM('Sales, EU'[b]))",
+                                 "IF('T,x'[c] = 1, 1, 0)"])
+def test_a_call_main_never_split_is_not_refused(dax):
+    """The legacy comparison runs where a call is split, not at every paren: these
+    translated on main and still do."""
+    assert translate_dax(dax)[1] in ("Migrated", "Approximated")
