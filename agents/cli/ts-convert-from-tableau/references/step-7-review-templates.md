@@ -34,6 +34,10 @@ Sets ({S}) — semantic reinterpretations, REVIEW each matches intent:   # omit 
   ⚙ {name} → interactive filter on {anchor} (set control; IF-[Set] calcs collapsed to measure+filter)
   ⊘ {name} → DEFERRED ({intersect/computed except 2c | set action}) — manual
 
+Joins that changed meaning ({J}) — approve each (R1):   # kind "join_review" in validation_warnings; omit if none
+  ⚠ {warning}   e.g. joined on the bare columns without INT(): can match different rows
+    approve? Y / N   (N: remove the join from the TML, or fix the key in the warehouse)
+
 Will NOT migrate ({K}):
   - {name}: {reason}
   # if none: "Nothing omitted — full coverage."

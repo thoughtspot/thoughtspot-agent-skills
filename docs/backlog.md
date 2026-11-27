@@ -383,6 +383,7 @@ are roughly ordered by value÷effort.
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
 | BL-665 | Sisense `--target-model`: a formula-only column chart is emitted with no `axis_configs`; plus #746 report follow-ups | 2026-12-18 |
+| BL-667 | Follow-ups from the per-datasource `--table-name-map` PR: a test for the `join_review` wiring, Step 7's decline path, relationship operands read from `metadata-record`s, wrapper allow-list, `obj_id` reuse, non-Latin slugs in sibling converters | 2027-01-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -11355,7 +11356,10 @@ keys        [{"left": "INT", "right": "INT"}]
 ```
 
 Neither side names a table the datasource has, and `INT` is a type rather than a column, so
-the entry binds to nothing downstream. **Pre-existing and outside SCAL-330635's changes** —
+the entry binds to nothing downstream. **Third shape fixed 2026-11-27** (ts-cli 0.230.0):
+one function around a key is unwrapped before the reference is read. Shapes 1 and 2 still
+emit no join, but are no longer silent: a relationship whose table cannot be read, or whose
+condition is not one `=` (an `AND` composite, `<=`), is reported in `join_warnings`. **Pre-existing and outside SCAL-330635's changes** —
 byte-identical output was produced by `main` and by that branch, which touched
 `_extract_joins` only and never `_extract_noodle_joins`. Recorded here because it is the same
 function and the same class of silent loss as the two shapes above; whether it is a third
@@ -20239,3 +20243,82 @@ by the converter itself, with a test on a formula-only column chart.
 
 **Done when.** The converter bug is fixed with its test, and each report item is fixed (in #746 or
 after it) or declined here with the reason.
+
+## BL-667 — Follow-ups from the per-datasource `--table-name-map` PR `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review (pr-reviewer and
+conversion-consistency auditor) of branch `fix/tableau-per-datasource-table-map`
+(ts-cli 0.230.0). **Target:** 2027-01-15.
+
+The review's Blocker and the Should-fixes a user would hit were fixed in that PR. These
+were not:
+
+1. **Read a relationship operand's table from the parse, not the text.**
+   `noodle_joins._relationship_operand` reads the owning table out of `[col (Table)]`, so a
+   bare operand, `DATETRUNC('month', [TS (Q1)])`, `INT(STR([ID (Q1)]))` and a column whose
+   own name ends in parentheses (`[Sales (USD)]`) are skipped (now with a warning).
+   `twb._metadata_column_records` already maps each local name to its `parent-name` table and
+   resolved all four on the reviewer's probe. Overlaps BL-278 shape 2.
+2. **Which wrappers to unwrap.** Any one-argument function is unwrapped and the join made on
+   the bare columns, reported for review. `INT`/`STR` keep most joins intact; `DATE`, `UPPER`,
+   `TRIM`, `ROUND`, `YEAR` change which rows match. Decide an allow-list (skip the rest), or
+   carry the wrapper into the join as a formula.
+3. **Cross-run `obj_id`.** A display name `Orders` gets `obj_id` `orders-tableau`, the same as
+   any table named `ORDERS` imported by an earlier run. Check on a cluster whether an import
+   carrying that `obj_id` and no `guid` updates the earlier object. Within a run the conflict
+   check now covers it; a non-ASCII name's `obj_id` carries a hash of the name.
+4. **A name-only target over `sqlproxy`.** `{"sqlproxy": {"name": "Orders"}}` keeps the parsed
+   `db_table`, the literal `sqlproxy`, which is never a warehouse table. Refuse it, or say in the
+   README and SKILL.md that a `sqlproxy` target needs `db_table` (auditor WARN).
+5. **Map validation messages.** An unknown key in a target (`{"name", "schema"}`) is refused as
+   "not a datasource in this workbook", and the test pins that text; an object target placed
+   directly under a datasource key (a natural shorthand for a one-table datasource) is read as a
+   flat entry and maps nothing. Name the real mistake in both.
+6. **README precision.** "`fqn` and the Table's `db_table` take the `db_table`": the Table gets
+   the sanitised last segment, the Model's `tables[].fqn` the raw value.
+7. **Stale comment.** `tableau/joins.py` says it mirrors `parse_ref()` in
+   `_extract_noodle_joins`; that is now `noodle_joins._relationship_operand`.
+8. **`]]` in a relationship key.** `[A]]B (Q1)]` keeps Tableau's escape in the join key, so
+   `on:` names `A]]B` against the Table column `A]B` and lint fails it (XREF). Same as before
+   this PR; unescape it with a test.
+9. **Table vs SQL View names.** The conflict check covers Tables only: a display name equal
+   to another datasource's Custom SQL relation name builds a Table and a SQL View with one
+   name (exit 0). Already possible with string targets; extend the check to `sql_views`.
+
+From the third review (head 72f22b56), shipped without a further round by the user's rule
+(no Blocker, ship):
+
+10. **No test for the `join_review` wiring (Should-fix).** Setting `twb.py`'s
+    `"join_reviews"` to `[]`, folding reviews into `join_warnings`, or dropping the `REVIEW:`
+    stderr lines leaves every test green. Add a parse- or build-model-level test on a
+    two-table direct datasource with `INT([ID (A)]) = INT([ID (B)])`, asserting a non-empty
+    `join_reviews` and the `kind: "join_review"` entry.
+11. **Step 7's "N" leaves an unjoined table (Should-fix).** `step-7-review-templates.md`
+    says to remove a declined join; the Model then has a table joined to nothing, which
+    the parser's own comment says import rejects, and lint has no unjoined-table check.
+    Offer options that still import: separate single-table Models (Step 3's `S`), a SQL
+    View that keeps the cast, or fixing the key type in the warehouse.
+12. **Hand-assembled models (auditor WARN).** Blend-merged and multi-query models are
+    built by hand, get no Step 5b `validation_warnings`, and the hand-assembly procedure
+    never cites the parse's `datasources[].join_reviews`. Cite it in the R1 line and in
+    `step-5-tml-generation.md`.
+13. **Non-Latin slugs elsewhere (auditor WARN, reviewer Nit).** Move `tables.name_slug` to a
+    shared module and use it in the PowerBI, Sisense and Qlik table emitters (all turn a
+    non-Latin name into `obj`), and for the Model, SQL View and cohort file names in
+    `commands/tableau.py`: two datasources captioned `注文` and `返品` write one
+    `.model.tml`, and the first Model is lost with nothing reporting it (same before this PR).
+14. **Warning text and stale records.** The AND / `<=` warning names no relationship;
+    `<=` belongs to BL-219, whose text still says the noodle extractor drops non-`=`
+    relationships unlogged and lacks `join_warnings`; BL-278's Affects line still names
+    `twb.py`; `noodle_joins.py`'s module docstring still says two lists are returned.
+15. **Migration report.** `migration-report-format.md` classifies `kind: "join"` entries by
+    `_extract_joins`'s phrases only, with no row for `no table named`, `cannot be read` or
+    `its condition is`; `join_review` is routed to "Formulas needing review", a formula
+    table, and called "Joins that changed meaning" in the Step 7 template. Use one label.
+16. **Rewritten physical names.** The conflict check compares the `db_table` after
+    `tables._dbname`, so `Order Details` and `Order_Details` (or two non-Latin names, which
+    become `col`) are one Table. Predates this PR (Fix #C); requirement 2's "db_table keeps
+    the physical table" does not hold for names with spaces or non-Latin characters. The
+    README's "refused before anything is written" reads as absolute.
+
+**Done when.** Each item is fixed with a test, or declined here with the reason.

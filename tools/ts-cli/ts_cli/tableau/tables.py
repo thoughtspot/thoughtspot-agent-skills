@@ -9,6 +9,7 @@ invariants" and agents/shared/schemas/thoughtspot-table-tml.md):
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from ts_cli.powerbi.tables import _is_key_col
@@ -26,8 +27,19 @@ _TML_TYPE = {
 }
 
 
+def name_slug(name, sep: str) -> str:
+    """ASCII slug of a table name for file names and obj_ids. A name holding
+    non-ASCII characters gets a hash of the name appended, so two such names
+    (which share their ASCII part, often empty) stay apart."""
+    text = str(name)
+    s = re.sub(r"[^A-Za-z0-9]+", sep, text).strip(sep).lower()
+    if not text.isascii():
+        s = f"{s}{sep}{hashlib.sha1(text.encode()).hexdigest()[:8]}".strip(sep)
+    return s
+
+
 def _slug(name):
-    return re.sub(r"[^A-Za-z0-9]+", "-", str(name)).strip("-").lower() or "obj"
+    return name_slug(name, "-") or "obj"
 
 
 def _dbname(name):
