@@ -379,6 +379,7 @@ are roughly ordered by value÷effort.
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
+| BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -543,6 +544,7 @@ are roughly ordered by value÷effort.
 | BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
 | BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
 | BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
+| BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19951,3 +19953,49 @@ here was outside that PR's one purpose. **Target:** 2026-12-11 for item 2, 2026-
    formula's name, and Table TML is written from the cleaned columns, so the column disappears
    from the Table too (a join on it dangles; lint catches it). Under the Table-is-physical rule
    the Table should keep every physical column (pre-existing).
+
+---
+
+## BL-658 — ts-convert-from-sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** PR #672 review, round 6 (should-fix 4).
+**Target:** 2027-01-31.
+
+**What.** Five modules each check part of a tile's join path: `target_paths.path_problem`,
+`target_paths.loop_problem` / `sisense_closure`, `target_model.role_conflict`,
+`target_chips._reach_problem` / `_copy_problem`, and `target_answers._Binder.no_fact_problem`.
+Each chip is checked against a tile alone, with one combined pass on top
+(`target_chips._tree_rows`, for multi-fact queries and loops only). Today every chip with a
+condition flags its tiles anyway, through the range-chip open item (#5) or the value-matching
+row (#8). That hides the cases the per-chip checks still see one at a time; once #5 and #8 are
+verified, those cases will surface.
+
+**Do.** Build each tile's whole join tree once, on both sides: the Model's tree from its facts to
+every instance its columns, filters and chips read, and Sisense's tree from its fact tables (or
+its one linking table) over the relations. Compare the two trees hop for hop. Then retire the
+per-case checks it subsumes, keeping their tests as regression cases. Land it before #5 or #8 is
+closed.
+
+---
+
+## BL-659 — Sisense `--target-model`: round-6 review leftovers `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the maintainer's round-6 re-review of PR #672 (head `331849dd`),
+which found no blocker. **Target:** 2027-01-31.
+
+1. **`isBetween` and `isCondition` are accepted with any value** (`sisense/parsing.py`, the
+   `_EXPLICIT_OK` rule covers `explicit` only). `{"from":1,"to":10,"isBetween":false}` on a key
+   comes back Migrated as `>= 1 <= 10`. Same class as round 3's `explicit` point: accept only
+   `true` or absent. Not shown to change meaning in Sisense today.
+2. **A `field_map` onto an instance the widget's facts cannot reach skips the path check**
+   (`target_answers._path_problem` checks only anchors that reach the instance). With the PR's
+   fixture, `Cost by status` with `[fact_visit.cost]` → `Case Visit Total` is Migrated with no
+   note. Masked in practice: once the Sisense tables name their warehouse tables, the physical
+   check flags it. Refuse an unreachable instance as `resolve_instance` does for native bindings,
+   and soften the "the whole join path" claim in the coverage matrix until then.
+3. **Two gaps that matter only when a JAQL item has no `datatype`.** The date-measure-with-no-level
+   flag needs `datatype: datetime`, and `_same_measure` (`target_filters.py`) ignores `by.level`,
+   so a ranking by a count of months can be carried as a count of days. Widgets built in the
+   Sisense UI carry `datatype`.
+4. `_unmappable` refuses every unknown-kind filter (`contains`, …) even when keyed; a keyed entry
+   would be safe for those kinds. Possible relaxation.
