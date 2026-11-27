@@ -378,8 +378,8 @@ are roughly ordered by value÷effort.
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
+| BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
-| BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -544,6 +544,7 @@ are roughly ordered by value÷effort.
 | BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
 | BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
 | BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
+| BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -19888,6 +19889,70 @@ merged first: one `run_chrome` in `report_browser.py` retrying only the code-sig
 signature, used by every headless-Chrome helper. This PR took #768's version.
 
 **Done when.** Each is fixed or declined with its reason here.
+
+---
+
+## BL-657 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review (`pr-reviewer` + `conversion-consistency-auditor`)
+of `fix/tableau-table-column-physical-names` (#767; ts-cli 0.225.4, ts-convert-from-tableau 1.47.2),
+which names Tableau Table TML columns by physical name, and the maintainer review of #767. Everything
+here was outside that PR's one purpose. **Target:** 2026-12-11 for item 2, 2026-12-15 for the rest.
+
+**Should-fix (a lint gate gap, and a silent wrong binding in merge mode).**
+
+1. **`ts tml lint --dir` passes the class of bug that PR fixed.** `_table_column_names`
+   (`ts_cli/commands/tml.py`) indexes both a Table column's `name` and its `db_column_name`, so a
+   Model `column_id` `TABLE::X` that matches only `db_column_name` reads as resolved, though import
+   resolves X against `name` only (error 14547). `test_lint_dir_renamed_column_resolves_via_db_column_name`
+   pins the wrong behaviour, and `table_aggregations` (`ts_cli/tml_lint.py`) rests on the same
+   premise. Fix: resolve against `name` only (or warn when only `db_column_name` matches), flip that
+   test, add one proving the failure is caught. Also correct the stale claims: lint called "the
+   model<->table name-alignment arbiter" in `tests/test_tableau_build_model_tables.py`, and 14547's
+   cause list in `agents/shared/schemas/ts-model-conversion-invariants.md` and `ts-tml-import-gate.md`.
+2. **Merge mode can silently rewrite a bare ref to the wrong column (pre-existing code, made reachable
+   by #767 — do this first).**
+   `build_col_table_map` / `build_column_lookup` (`ts_cli/model_builder.py`) put `column_id` suffixes
+   and display names into one upper-cased dict, so a display name (`Region` on one column) can
+   overwrite another column's physical suffix (`REGION`). Reproduced via
+   `prepare_formulas_for_merge`: `[REGION] = 'West'` came out bound to `BILLING_REGION`. Fires only
+   for refs still bare after translation. Before #767 a Model with a captioned column failed at
+   Phase 1, so Phase 2 never ran; now it imports and the standard Phase-2 formula step
+   (`build-model --existing-guid`) binds silently: a TWB with `[REGION]` captioned "Sales Region"
+   and then `[BILLING_REGION]` captioned "Region" rewrites `[REGION] = 'West'` to
+   `[Orders::BILLING_REGION] = 'West'`, which passes `filter_unresolvable_formulas` and imports. Needs
+   a column with no metadata-record and a caption equal (ignoring case) to another column's
+   physical name. Fix in its own PR: index every `column_id` suffix first, then add display names
+   with `setdefault`, in both functions, with that repro as a test.
+
+**Nits and warnings.**
+
+3. Duplicate Table column `name` is not guarded in the single-datasource path: two parse columns
+   resolving to one physical name (two captions over one `remote-name`, `_dbname` collapsing
+   `Order ID`/`Order_ID`, or a case-only pair `region`/`REGION`) emit duplicate names. Dedupe on
+   `db_name` first-seen-wins as the `table_registry` path does, or lint for duplicate `name`.
+4. `tableau/tables.py` still takes the name through the caption-keyed `cmap`
+   (`commands/tableau.py`): two datasources captioning different physical columns of one table the
+   same way emit the second physical name twice (loud; pre-existing). Name from the parse column's
+   `db_column_name`, or key `cmap` by it.
+5. The new test checks `column_id` suffixes only; add a two-table fixture with a join and a formula
+   on a captioned column so join `on:` and `[TABLE::X]` formula refs are pinned too.
+6. Upgrade note (the skill line and coverage-matrix row 140 landed in #767): still open is whether
+   re-importing a regenerated Table over its GUID renames its columns and what that does to
+   Answers and Liveboards on it. Not live-verified.
+7. The formula translator builds `[TABLE::X]` from the Tableau local name, not `db_column_name`
+   (`strings_types.py`, `col_table_map` keyed by local name). A column whose local name differs
+   from its remote name (`[REGION1]` over `REGION`, no caption) gives `[T1::REGION1]`, which
+   matches no Table column; lint does not parse formula bodies, so it passes and the formula
+   fails at import. Loud, but build X from `db_column_name` there too.
+8. Wording: `tableau/tables.py`'s module docstring still says it mirrors PowerBI's shape and speaks
+   of a display name (Power BI keeps display names on Table columns); the `_write_table_tml_files`
+   docstring says the cmap sets `db_column_name` only; rename
+   `test_build_table_tml_table_map_and_column_map_override_physical_names_only`.
+9. The name-collision drop (`formula_common.py`) removes a physical column whose caption equals a
+   formula's name, and Table TML is written from the cleaned columns, so the column disappears
+   from the Table too (a join on it dangles; lint catches it). Under the Table-is-physical rule
+   the Table should keep every physical column (pre-existing).
 
 ---
 
