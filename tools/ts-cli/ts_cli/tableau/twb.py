@@ -295,7 +295,7 @@ def parse_twb(twb_path: str | Path) -> dict:
         # Modern Tableau stores joins as logical relationships (the "noodle"), not physical
         # <relation join=...>; pick those up too, or a multi-table model imports with no join
         # and ThoughtSpot rejects it. See reference-tableau-model-discovery-algorithm.
-        noodle_joins, noodle_warnings = _extract_noodle_joins(ds, sql_views, tables)
+        noodle_joins, noodle_warnings, join_reviews = _extract_noodle_joins(ds, sql_views, tables)
         joins += noodle_joins
         join_warnings += noodle_warnings
         calcs, calc_map = _extract_calculated_fields(ds)
@@ -314,6 +314,9 @@ def parse_twb(twb_path: str | Path) -> dict:
             # Surfaced to the caller instead of silently dropped, so
             # build-model can fold them into its warnings/report.
             "join_warnings": join_warnings,
+            # Joins made on the bare columns of a key wrapped in a function:
+            # they can match different rows, so the skill asks before import.
+            "join_reviews": join_reviews,
             "calculated_fields": calcs,
             "calc_map": calc_map,
             "col_table_map": col_table_map,
@@ -519,6 +522,11 @@ def format_parse_warnings(parsed: dict) -> str:
         f"\nWARNING: {w}"
         for ds in parsed.get("datasources") or []
         for w in ds.get("join_warnings") or []
+    ]
+    out += [
+        f"\nREVIEW: {w}"
+        for ds in parsed.get("datasources") or []
+        for w in ds.get("join_reviews") or []
     ]
     return "".join(out)
 

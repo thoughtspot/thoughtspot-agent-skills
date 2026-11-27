@@ -1449,7 +1449,7 @@ ts tableau verify \
   --dir /tmp/ts_tableau_mig/output/{workbook_name}
 ```
 
-Add Step 5b's `--table-name-map`, if any.
+Add Step 5b's `--table-name-map`, if any (v0.230.0+).
 
 This aggregates every full Model TML's per-model report (`models[]` + `summary`) into one
 JSON on stdout, non-zero exit if ANY model has an ERROR, plus a human summary on stderr. How
@@ -1485,7 +1485,7 @@ attempted for each, and ask whether to proceed with import anyway or make manual
 
 ## Step 7 — Review Checkpoint & Import
 
-> **R1:** before import, list any formula edited by hand whose meaning differs from the source, with the difference, and get approval (invariant R1).
+> **R1:** before import, list any formula edited by hand whose meaning differs from the source, and every `kind: "join_review"` join in Step 5b's `validation_warnings`, with the difference, and get approval (invariant R1).
 
 > **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (model already exists)
 > and **scope 5** (no model — tables imported in Step 6 only).
@@ -1686,9 +1686,8 @@ Save `{parked_formulas}` (the remaining parked list) for Steps 12 and 12.5.
 ---
 
 Report validation warnings regardless of pace:
-- If `validation_warnings` is non-empty: surface warnings. Entries are not all about
-  formulas — `kind: "join"`: *skipped* → Join warnings; *joined on the bare columns
-  without* a function → Formulas needing review, for approval (R1). An entry without that marker is a formula that may have syntax
+- If `validation_warnings` is non-empty: surface them. Not all are about
+  formulas — `kind: "join"` → Join warnings; `"join_review"` → Formulas needing review. An entry without that marker is a formula that may have syntax
   issues but was still attempted, or carries `review_notes` (assumed-Sunday weekday; week
   start, BL-334) — surface them; `review_required` ones go under Formulas needing review.
 

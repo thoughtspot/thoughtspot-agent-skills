@@ -1327,7 +1327,8 @@ def build_model_cmd(
     table_registry: dict = {}
     from ts_cli.tableau.build_model import table_name_map_for
     name_maps = _load_table_name_map(
-        table_name_map, existing_guid, [d["name"] for d in parsed["datasources"]], datasources)
+        table_name_map, existing_guid, [d["name"] for d in parsed["datasources"]],
+        parsed["datasources"])
 
     all_results = []
     for ds in datasources:

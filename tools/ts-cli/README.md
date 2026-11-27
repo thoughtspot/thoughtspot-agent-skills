@@ -2480,7 +2480,11 @@ To give the ThoughtSpot table a readable name over the physical table, use an ob
 formula scopes take the `name`; `fqn` and the Table's `db_table` take the `db_table`. A
 target with only `name` keeps the parsed `db_table`. build-model writes one Table per
 name, so a map that would put two physical tables under one name (or two names that
-make the same `<slug>.table.tml`) is refused before anything is written. Pass the same
+make the same `<slug>.table.tml`) is refused before anything is written, checked over
+every datasource even with `--datasource`. Tables are compared by the `db_table` the
+Table TML gets (last segment, case kept): `ORDERS` and `ANALYTICS.PUBLIC.ORDERS` are one
+table, `orders` and `ORDERS` two. A name with non-ASCII characters gets a hash suffix
+in its file name and `obj_id`, so two such names stay apart. Pass the same
 map to `ts tableau verify`, or a mapped table reads as dropped. Implemented by
 `resolve_table_name_maps()` / `table_name_map_for()` in the same module.
 

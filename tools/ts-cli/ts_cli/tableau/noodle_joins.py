@@ -69,7 +69,7 @@ def _relationship_operand(op: str) -> tuple[str, Optional[str], Optional[str]]:
 
 def _extract_noodle_joins(
     ds: ET.Element, sql_views: list[dict], tables: Optional[list[dict]] = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], list[str]]:
     """Extract logical-relationship ("noodle") joins from `<relationships>`.
 
     Modern Tableau stores joins as logical relationships in
@@ -88,9 +88,11 @@ def _extract_noodle_joins(
     relationships between its server-side logical tables, and no model table
     exists to join. With no ``tables`` and no ``sql_views`` to check against,
     nothing is dropped. A relationship whose table cannot be read from either
-    operand is skipped with a warning (BL-278). A key wrapped in a function is
-    joined on the bare column, with a warning that the join may match different
-    rows than the source.
+    operand, or whose condition is not one ``=`` comparison (an ``AND`` of several,
+    ``<=``), is skipped with a warning (BL-278). A key wrapped in a function is
+    joined on the bare column and reported in the third list, ``reviews``: the
+    join can match different rows than the source. Returns
+    ``(joins, warnings, reviews)``.
     """
     grain = {v.get("name"): _detail_id_count(v) for v in sql_views}
     known = {t.get("name") for t in (tables or [])} | {v.get("name") for v in sql_views}
@@ -98,13 +100,14 @@ def _extract_noodle_joins(
 
     joins: list[dict] = []
     warnings: list[str] = []
+    reviews: list[str] = []
     for rel in ds.findall(".//relationships/relationship"):
-        join, warning = _relationship_join(rel, known, grain)
-        if warning:
-            warnings.append(warning)
+        join, message = _relationship_join(rel, known, grain)
         if join:
             joins.append(join)
-    return joins, warnings
+        if message:
+            (reviews if join else warnings).append(message)
+    return joins, warnings, reviews
 
 
 def _skip_reason(lop: str, ltab: Optional[str], rop: str, rtab: Optional[str],
@@ -122,11 +125,15 @@ def _skip_reason(lop: str, ltab: Optional[str], rop: str, rtab: Optional[str],
 def _relationship_join(
     rel: ET.Element, known: set, grain: dict,
 ) -> tuple[Optional[dict], Optional[str]]:
-    """One `<relationship>` as ``(join or None, warning or None)``."""
-    eq = rel.find("./expression[@op='=']")
-    exprs = eq.findall("./expression") if eq is not None else []
-    if len(exprs) < 2:
+    """One `<relationship>` as ``(join or None, message or None)``: with a join,
+    the message is a review note; without one, why it was skipped."""
+    cond = rel.find("./expression")
+    if cond is None:
         return None, None
+    exprs = cond.findall("./expression") if cond.get("op") == "=" else []
+    if len(exprs) < 2:
+        return None, (f"relationship skipped: its condition is {cond.get('op')!r}, "
+                      "and only one '=' comparison is read (BL-278)")
     lop, rop = exprs[0].get("op", ""), exprs[1].get("op", "")
     lcol, ltab, lwrap = _relationship_operand(lop)
     rcol, rtab, rwrap = _relationship_operand(rop)

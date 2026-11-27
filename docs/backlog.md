@@ -11357,9 +11357,9 @@ keys        [{"left": "INT", "right": "INT"}]
 
 Neither side names a table the datasource has, and `INT` is a type rather than a column, so
 the entry binds to nothing downstream. **Third shape fixed 2026-11-27** (ts-cli 0.230.0):
-one function around a key is unwrapped before the reference is read, and every relationship
-`_extract_noodle_joins` skips (shapes 1 and 2 included) is now reported in `join_warnings`.
-Shapes 1 and 2 are still open. **Pre-existing and outside SCAL-330635's changes** —
+one function around a key is unwrapped before the reference is read. Shapes 1 and 2 still
+emit no join, but are no longer silent: a relationship whose table cannot be read, or whose
+condition is not one `=` (an `AND` composite, `<=`), is reported in `join_warnings`. **Pre-existing and outside SCAL-330635's changes** —
 byte-identical output was produced by `main` and by that branch, which touched
 `_extract_joins` only and never `_extract_noodle_joins`. Recorded here because it is the same
 function and the same class of silent loss as the two shapes above; whether it is a third
@@ -20265,7 +20265,8 @@ were not:
    carry the wrapper into the join as a formula.
 3. **Cross-run `obj_id`.** A display name `Orders` gets `obj_id` `orders-tableau`, the same as
    any table named `ORDERS` imported by an earlier run. Check on a cluster whether an import
-   carrying that `obj_id` and no `guid` updates the earlier object.
+   carrying that `obj_id` and no `guid` updates the earlier object. Within a run the conflict
+   check now covers it; a non-ASCII name's `obj_id` carries a hash of the name.
 4. **A name-only target over `sqlproxy`.** `{"sqlproxy": {"name": "Orders"}}` keeps the parsed
    `db_table`, the literal `sqlproxy`, which is never a warehouse table. Refuse it, or say in the
    README and SKILL.md that a `sqlproxy` target needs `db_table` (auditor WARN).
@@ -20277,5 +20278,11 @@ were not:
    the sanitised last segment, the Model's `tables[].fqn` the raw value.
 7. **Stale comment.** `tableau/joins.py` says it mirrors `parse_ref()` in
    `_extract_noodle_joins`; that is now `noodle_joins._relationship_operand`.
+8. **`]]` in a relationship key.** `[A]]B (Q1)]` keeps Tableau's escape in the join key, so
+   `on:` names `A]]B` against the Table column `A]B` and lint fails it (XREF). Same as before
+   this PR; unescape it with a test.
+9. **Table vs SQL View names.** The conflict check covers Tables only: a display name equal
+   to another datasource's Custom SQL relation name builds a Table and a SQL View with one
+   name (exit 0). Already possible with string targets; extend the check to `sql_views`.
 
 **Done when.** Each item is fixed with a test, or declined here with the reason.

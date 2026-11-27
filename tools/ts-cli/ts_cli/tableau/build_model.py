@@ -172,8 +172,19 @@ def table_name_map_for(maps: dict[str, dict], datasource_name: str) -> dict | No
 
 
 def table_file_slug(name: str) -> str:
-    """The stem of the ``<slug>.table.tml`` file build-model writes a Table to."""
-    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "table"
+    """The stem of the ``<slug>.table.tml`` file build-model writes a Table to;
+    its ASCII part is the obj_id's (``tables.name_slug``)."""
+    from ts_cli.tableau.tables import name_slug
+    return name_slug(name.lower(), "_") or "table"
+
+
+def _table_claim(table: dict, name_map: dict) -> tuple[str, str, bool]:
+    """``(ThoughtSpot name, db_table as the Table TML gets it, mapped?)`` for one table."""
+    from ts_cli.tableau.tables import _parsed_db_table
+    target = _table_target(name_map[table["name"]]) if table["name"] in name_map else None
+    name = target["name"] if target else table["name"]
+    db = (target or {}).get("db_table") or table.get("db_table") or table["name"]
+    return name, _parsed_db_table({"db_table": db}) or db, target is not None
 
 
 def table_name_map_conflicts(datasources: list[dict], maps: dict[str, dict]) -> list[str]:
@@ -185,26 +196,28 @@ def table_name_map_conflicts(datasources: list[dict], maps: dict[str, dict]) -> 
     become one Table and one datasource's Model reads the other's physical
     table, with no error. Before display names, a mapped name always was its
     ``db_table``. Only groups holding a mapped table are checked: unmapped tables
-    that share a name are the existing cross-datasource column merge.
+    that share a name are the existing cross-datasource column merge. A table is
+    compared by the ``db_table`` the Table TML gets (``tables._parsed_db_table``:
+    the last segment, case kept), so ``ORDERS`` and ``ANALYTICS.PUBLIC.ORDERS`` are
+    one table and ``orders`` and ``ORDERS`` are two: some warehouses tell them apart.
     Returns one message per conflicting file; empty when there is none.
     """
     claims: dict[str, list[tuple]] = {}
     for ds in datasources:
         name_map = table_name_map_for(maps, ds.get("name", "")) or {}
         for t in ds.get("tables", []):
-            target = _table_target(name_map[t["name"]]) if t["name"] in name_map else None
-            name = target["name"] if target else t["name"]
-            db = (target or {}).get("db_table") or t.get("db_table") or t["name"]
+            name, db, mapped = _table_claim(t, name_map)
             claims.setdefault(table_file_slug(name), []).append(
-                (name, db, ds.get("name", ""), t["name"], target is not None))
+                (name, db, ds.get("name", ""), t["name"], mapped))
     problems = []
     for slug, group in claims.items():
-        if any(c[4] for c in group) and len({(c[0], c[1].upper()) for c in group}) > 1:
+        if any(c[4] for c in group) and len({(c[0], c[1]) for c in group}) > 1:
             who = "; ".join(f"datasource {c[2]!r} table {c[3]!r} -> {c[0]!r} over {c[1]!r}"
                             for c in group)
             problems.append(f"--table-name-map would write two physical tables to one "
-                            f"ThoughtSpot table ({slug}.table.tml): {who}. "
-                            "Give each physical table its own name.")
+                            f"ThoughtSpot table ({slug}.table.tml): {who}. Use one name "
+                            "per physical table, and spell a table the same way (case "
+                            "included) wherever it appears.")
     return problems
 
 
@@ -531,16 +544,20 @@ def build_generated_tables_map(
 
 
 def join_warning_entries(ds: dict) -> list[dict]:
-    """`validation_warnings` entries for the joins `_extract_joins` skipped.
+    """`validation_warnings` entries for the datasource's joins.
 
+    `kind: "join"`: joins and relationships the parser skipped (`join_warnings`).
+    `kind: "join_review"`: joins it made on the bare columns of a key wrapped in a
+    function (`join_reviews`), which can match different rows than the source and
+    need approval before import (invariant R1).
     Carries `kind` because the rest of that list is per-FORMULA —
     `validate_pre_import` returns `{name: <formula name>, warnings}` — while
-    this is per-datasource: same shape, different meaning. The migration report
-    selects on the marker rather than matching warning text, which changes.
+    these are per-datasource: same shape, different meaning. The skill and the
+    report select on the marker rather than matching warning text, which changes.
     """
-    if not ds.get("join_warnings"):
-        return []
-    return [{"kind": "join", "name": ds["name"], "warnings": ds["join_warnings"]}]
+    return [{"kind": kind, "name": ds["name"], "warnings": ds[key]}
+            for kind, key in (("join", "join_warnings"), ("join_review", "join_reviews"))
+            if ds.get(key)]
 
 
 def build_blend_plan(blend_graph: dict, datasources: list[dict]) -> dict:
