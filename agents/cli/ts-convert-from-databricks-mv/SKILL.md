@@ -143,13 +143,15 @@ and no Databricks access, start there instead (BL-641). **Never edit the user's 
 work on copies in a working directory.
 
 1. Skip Steps 1-4 for Databricks. The Prerequisites' Databricks items do not apply.
+   Confirm the ThoughtSpot profile (Step 1) when the result will be imported.
 2. For each file, record the view name from its `CREATE ... VIEW <catalog.schema.name>`
    line, if any; it is the Model name and `--mv-fqn` in Step 9 (otherwise ask the user).
-   Write the YAML between `$$ ... $$` to a new file such as `work/<view>/mv.yaml`; a file
+   Write the YAML between `$$ ... $$` to a new file in a working folder outside the user's
+   files (the scratchpad, or a folder the user names), such as `<work>/<view>/mv.yaml`; a file
    that is YAML already is copied as is. `parse-mv` reads LF and CRLF alike and expects
    UTF-8, so re-save a UTF-16 export as UTF-8. A `.sql` file with several CREATE
    statements gives one YAML file per view.
-3. Run Steps 5 to 12 once per view, each in its own `work/<view>/` directory
+3. Run Steps 5 to 12 once per view, each in its own `<work>/<view>/` directory
    (`parsed.json`, `translated.json`, output TML), not one shared `parsed.json`.
 4. Tell the user what cannot be checked without the workspace, before the Step 10 review:
    - Step 5's MV-on-MV check. With all the views' files at hand, compare each `source:`
@@ -160,11 +162,14 @@ work on copies in a working directory.
    - that the source tables exist under the names the YAML uses.
 5. Tables and import, by what is available:
    - **A ThoughtSpot profile and existing Tables** for the sources: Step 8A as usual, then
-     Steps 9 to 11.
+     Steps 9 to 11. Step 8C (adding missing columns) needs `DESCRIBE TABLE`, so a missing
+     column goes to the user instead.
    - **No existing Tables:** Step 8B cannot run (it needs `DESCRIBE TABLE`, and a
      `create: true` table needs a `dbx_type` per column). Either get the column types
-     from the user, or build a Model preview with `ts databricks build-model --tables auto`
-     (Model TML only, not for import) and choose **FILE** at Step 10.
+     from the user, or build a Model preview: run Step 6's `translate-formulas` **and**
+     Step 9's `build-model` both with `--tables auto`, so the table names agree (Model TML
+     only, not for import), and choose **FILE** at Step 10. The same applies with existing
+     Tables but no ThoughtSpot profile.
 
 ---
 

@@ -579,6 +579,7 @@ are roughly ordered by value÷effort.
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
+| BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
 
 ---
 
@@ -19521,7 +19522,7 @@ angle 15 in `.claude/rules/repo-audit.md`.
 
 ## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
 
-**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the first import of all eight `ts-convert-from-*` skills, at their fix-and-reimport steps, and in `ts-tml-import-gate.md`; the conversion-consistency auditor checks it. Not covered: a formula written by hand for a construct the converter refused, outside an import or number failure — e.g. Qlik's "recreate them as Model formulas"). **Source:** as BL-639. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the first import of all eight `ts-convert-from-*` skills, at their fix-and-reimport steps, and in `ts-tml-import-gate.md`; the conversion-consistency auditor checks it. What R1 does not cover yet is BL-663). **Source:** as BL-639. **Target:** 2026-12-15.
 
 **What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
 replaced with "current calendar month" to make the numbers match, without asking. The user
@@ -20140,3 +20141,24 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
    `sqlf_resolver_is_aggregated` (`sql_forms.py`) answers it. (#771's cast to text refuses it.)
 
 **Done when.** Each item is fixed with a test, or recorded here as declined with its reason.
+
+---
+
+## BL-663 — R1 and YAML-entry leftovers from the PR #772 review `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** review of PR #772 (BL-640, BL-641). **Target:** 2027-01-31.
+
+1. **R1 does not cover a formula written by hand for a construct the converter refused**,
+   outside an import or number failure: Qlik's "recreate them as Model formulas" (Step 4)
+   and the Databricks `skipped[]` manual builds. Decide whether R1 should, and cite it there.
+2. **The eight R1 citations are copies**, and they already differ (Tableau's is one short
+   sentence, held by its context-cost ceiling). Nothing keeps them in line, as
+   `check_i7_gate.py` does for I7. Either a validator, or one shared sentence each cites.
+3. **Tableau's fix cycle marks an approved change of meaning "✅ Migrated"**; R1 says to
+   report it as approximated. Needs room under the Tableau ratchet (1 token left).
+4. **`Path.read_text()` without an encoding** (43 calls in `ts_cli/commands/`, 18 pass one):
+   on Windows with Python 3.10-3.14 it decodes with the ANSI code page, so a UTF-8 file with
+   non-ASCII names decodes wrongly with no error. `parse-mv` is one (`commands/databricks.py`).
+   Unverified on Windows.
+
+**Done when.** Each item is fixed with its test or check, or declined here with the reason.

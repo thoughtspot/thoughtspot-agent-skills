@@ -967,8 +967,9 @@ calendar month" (`today()`). It matched only because the fixture's last month wa
 current month. The user rejected it, and a faithful form existed (a scalar subquery in
 `sql_bool_op`; BL-638, BL-640).
 
-**Applies to:** every `ts-convert-from-*` skill, at the step where the user confirms the
-import.
+**Applies to:** every `ts-convert-from-*` skill, at every Model import: the first, and
+each re-import in a fix loop or after a number check. On a "yes", report the formula as
+approximated, with the difference, not as migrated.
 
 **Correct:** "`Is Month To Date`: source `record_month = MAX(record_month) OVER ()`
 (latest month in the data); proposed
