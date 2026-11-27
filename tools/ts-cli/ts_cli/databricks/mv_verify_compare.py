@@ -182,6 +182,18 @@ def _at_scale(d: Decimal, scale: int) -> Decimal:
         return d.quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
 
 
+def _decimal_close(da: Decimal, db: Decimal, scale: Optional[int]) -> bool:
+    """Equal at the DECIMAL's scale, or (unknown scale) within DECIMAL_REL_TOL.
+    ThoughtSpot returns a double: past ~15 significant digits it cannot hold the value at
+    its scale, so a value within 2 ulps of the double is also accepted (else a correct
+    DECIMAL(38,18) sum fails every cell)."""
+    if scale is None:
+        return abs(da - db) <= Decimal(DECIMAL_REL_TOL) * max(abs(da), abs(db))
+    fa, fb = float(da), float(db)
+    return (_at_scale(da, scale) == _at_scale(db, scale)
+            or abs(fa - fb) <= 2 * math.ulp(max(abs(fa), abs(fb))))
+
+
 def _compare_numbers(a: Any, b: Any, spec: dict) -> str:
     da, db = _decimal(a), _decimal(b)
     if da is None or db is None:
@@ -193,15 +205,7 @@ def _compare_numbers(a: Any, b: Any, spec: dict) -> str:
     if spec["kind"] == "integer" or not (da.is_finite() and db.is_finite()):
         return DIFFERENT
     if spec["kind"] == "decimal":
-        if spec.get("scale") is not None:
-            # ThoughtSpot returns a double: past ~15 significant digits it cannot hold the
-            # value at its scale, so a value within 2 ulps of the double is also accepted
-            # (else a correct DECIMAL(38,18) sum fails every cell)
-            same = (_at_scale(da, spec["scale"]) == _at_scale(db, spec["scale"])
-                    or abs(float(da) - float(db))
-                    <= 2 * math.ulp(max(abs(float(da)), abs(float(db)))))
-        else:
-            same = abs(da - db) <= Decimal(DECIMAL_REL_TOL) * max(abs(da), abs(db))
+        same = _decimal_close(da, db, spec.get("scale"))
     else:
         same = math.isclose(float(da), float(db), rel_tol=FLOAT_REL_TOL,
                             abs_tol=FLOAT_ABS_TOL)
