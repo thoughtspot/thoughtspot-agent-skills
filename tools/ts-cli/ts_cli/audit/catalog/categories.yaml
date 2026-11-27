@@ -17,7 +17,7 @@
   angle_key: human
   label: Human Readiness
   order: 3
-  description: Name quality, hidden columns, orphans, direct table connections, formula promotion candidates.
+  description: Name quality, hidden columns, orphans, Models nobody has queried, direct table connections, formula promotion candidates.
 - id: P
   angle_key: performance
   label: Performance

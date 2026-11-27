@@ -449,7 +449,14 @@ run_pytest() {
   local t0
   printf "  %-30s " "$label"
   t0=$(_now_ms)
-  if output=$("$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
+  # The chosen interpreter's directory first on PATH, as an absolute path (a relative
+  # CHECKS_PYTHON would otherwise resolve against each child's working directory). For a
+  # virtual environment, whose bin holds a `python3` that is the same interpreter, a test
+  # that starts a shell calling a bare `python3` then gets its packages. An interpreter
+  # the search chose outside a venv may sit beside a different `python3` (BL-652).
+  local py_dir
+  py_dir="$(cd "$(dirname "$(command -v "$PYTHON_BIN")")" && pwd)"
+  if output=$(PATH="$py_dir:$PATH" "$PYTHON_BIN" -m pytest "$@" -q --tb=short 2>&1); then
     printf "PASS "
     _record_duration "$label" "$t0"
   else
@@ -460,7 +467,46 @@ run_pytest() {
   fi
 }
 
-if grep -q '\.py$' <<< "$STAGED"; then
+# A merge OF MAIN stages every .py file main changed, code CI has already tested on
+# main. On such a merge, run the suites only for a .py file whose staged content is
+# neither side's tip unchanged: it differs from HEAD (it is staged) AND from MERGE_HEAD,
+# so it is a conflict resolution or a combination of both sides. Each side was tested
+# on its own; the merged tree is tested by CI. A merge of any other branch runs the
+# suites as usual. (Extracted between these markers by test_precommit_merge_skip.py.)
+# BEGIN py-needing-tests
+py_needing_tests() {  # $1 = the staged file list; prints the .py files to test for
+  local py main_ref
+  py="$(grep '\.py$' <<< "$1")" || py=""
+  if [ -z "$py" ] || ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    printf '%s' "$py"; return
+  fi
+  # Main is found by the canonical repo's URL, never by remote name: in a fork clone
+  # `origin/main` is the fork's copy, which CI may never have tested.
+  local remote url
+  main_ref=""
+  for remote in $(git remote); do
+    url="$(git remote get-url "$remote" 2>/dev/null)" || continue
+    if grep -Eiq '^(https://([^@/]+@)?github\.com/|ssh://git@github\.com(:22)?/|git@github\.com:)thoughtspot/thoughtspot-agent-skills(\.git)?/?$' <<< "$url" \
+       && git rev-parse -q --verify "refs/remotes/$remote/main" >/dev/null; then
+      main_ref="refs/remotes/$remote/main"; break
+    fi
+  done
+  if [ -z "$main_ref" ] || ! git merge-base --is-ancestor MERGE_HEAD "$main_ref"; then
+    printf '%s' "$py"; return
+  fi
+  comm -12 <(sort <<< "$py") <(git diff --cached --name-only MERGE_HEAD -- '*.py' | sort)
+}
+# END py-needing-tests
+
+PY_STAGED="$(py_needing_tests "$STAGED")"
+PY_ANY="$(grep '\.py$' <<< "$STAGED")" || PY_ANY=""
+if [ -z "$PY_STAGED" ] && [ -n "$PY_ANY" ]; then
+  echo "  unit tests                     SKIP (a merge of main: each staged .py file is main's, tested on main; CI tests the merged tree)"
+  SKIPPED=$((SKIPPED + 1))
+  SKIPPED_LABELS="${SKIPPED_LABELS:+$SKIPPED_LABELS, }unit tests (merge of main)"
+fi
+
+if [ -n "$PY_STAGED" ]; then
   run_pytest "unit tests (ts-cli)"      tools/ts-cli/tests/ tools/validate/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/
   run_pytest "unit tests (erd)"         agents/cli/ts-object-model-erd/tests/
 fi

@@ -211,8 +211,8 @@ def _app():
 
 #: Every conditional data kind: a capture of every angle fetches them all (a snapshot
 #: written without `needs` reads as a legacy, angle-keyed one, which lacks calendars
-#: and connections).
-ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections"}
+#: and connections, and usage).
+ALL_NEEDS = {"ai_instructions", "answers", "sets", "calendars", "connections", "usage"}
 
 
 def test_cli_snapshot_in_needs_no_profile(tmp_path, no_profiles):

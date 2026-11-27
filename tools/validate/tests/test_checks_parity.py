@@ -194,8 +194,20 @@ def _precommit_unmanaged_scripts() -> list[str]:
     return found
 
 
+#: pytest options in the workflow's lines that take a separate value (`-n auto`).
+_PYTEST_OPTS_WITH_VALUE = {"-n", "--dist", "--maxprocesses"}
+
+
 def _pytest_dirs(args: list[str]) -> set[str]:
-    return {a.rstrip("/") for a in args if not a.startswith("-")}
+    dirs, skip = set(), False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in _PYTEST_OPTS_WITH_VALUE:
+            skip = True
+        elif not a.startswith("-"):
+            dirs.add(a.rstrip("/"))
+    return dirs
 
 
 # ── workflow side ──────────────────────────────────────────────────────────────

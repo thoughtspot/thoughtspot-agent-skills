@@ -897,3 +897,45 @@ def human_helper_visible_or_reused() -> AuditContext:
                    "expr": "[formula_Gross] - [formula_Cost]"}])
     model["model"]["filters"] = [{"column": ["Filtered"], "oper": ">", "values": ["0"]}]
     return make_context(models=[model])
+
+
+# ── H17: Models with no query in 90 days or more, or none in the history ──
+
+#: When the synthetic usage was read: 2026-11-25 00:00 UTC, epoch seconds.
+USAGE_READ_AT = 1_795_564_800
+_DAY = 86400
+
+
+_NO_ORGS = object()
+
+
+def build_usage(models=None, org=None, start=1_696_118_400, read_at=USAGE_READ_AT,
+                not_visible=(), model_orgs=_NO_ORGS) -> dict:
+    """A `usage` reading as audit/usage.py fetches it: `models` maps a Model GUID to
+    days since its last query (None for a row with no query time) or to a full row.
+    `model_orgs` ({guid: [{id, name, last_used}]}, or None when not read) is left out
+    unless given, as a reading taken before 0.224.0 read each Model's Org."""
+    rows = {}
+    for guid, value in (models or {}).items():
+        if isinstance(value, dict):
+            rows[guid] = value
+        else:
+            rows[guid] = {"last_used": None if value is None else read_at - value * _DAY,
+                          "queries_180d": 0 if value is None or value > 180 else 12,
+                          "users_180d": 0 if value is None or value > 180 else 3}
+    usage = {"org": org or {"id": 0, "name": "Primary"}, "window_days": 180,
+             "fetched_at": read_at, "history": {"start": start, "end": read_at - _DAY},
+             "blank_rows": 0, "models": rows, "not_visible": list(not_visible)}
+    if model_orgs is not _NO_ORGS:
+        usage["model_orgs"] = model_orgs
+    return usage
+
+
+def human_model_idle() -> AuditContext:
+    """Model m-1's last query was 120 days before the usage was read (H17 LOW)."""
+    return make_context(models=[build_human_model()], usage=build_usage({"m-1": 120}))
+
+
+def human_model_recently_used() -> AuditContext:
+    """Model m-1 was queried 10 days before the usage was read."""
+    return make_context(models=[build_human_model()], usage=build_usage({"m-1": 10}))

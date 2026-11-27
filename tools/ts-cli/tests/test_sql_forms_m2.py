@@ -55,7 +55,7 @@ class TestDivision:
     def test_sum_then_divide_is_not_the_division_form(self, t):
         # the first argument is a sum, not one division: the generic chain
         assert t("COALESCE(a + b / NULLIF(c, 0), 0)", r) == (
-            "if ( [T::a] + [T::b] / [T::c] != null ) then [T::a] + [T::b] / [T::c] else 0")
+            "( if ( [T::a] + [T::b] / [T::c] != null ) then [T::a] + [T::b] / [T::c] else 0 )")
 
     def test_snowflake_div0_guards_a_null_dividend(self):
         assert sf("DIV0(N1, N2)", r) == \
@@ -197,8 +197,8 @@ class TestDatabricksCoverage:
     @pytest.mark.parametrize("src,out", [
         ("NVL(N1, -1)", "ifnull ( [T::N1] , - 1 )"),
         ("NVL2(N1, 1, 0)", "( if ( [T::N1] != null ) then 1 else 0 )"),
-        ("COALESCE(N1, N2, 0)", "if ( [T::N1] != null ) then [T::N1] else "
-                                "if ( [T::N2] != null ) then [T::N2] else 0"),
+        ("COALESCE(N1, N2, 0)", "( if ( [T::N1] != null ) then [T::N1] else "
+                                "if ( [T::N2] != null ) then [T::N2] else 0 )"),
         ("zeroifnull(N1)", "ifnull ( [T::N1] , 0 )"),
         ("concat_ws('-', S1, S2)", 'sql_string_op ( "concat_ws(\'-\', {0}, {1})" , [T::S1] , [T::S2] )'),
         ("INSTR(S1, 'a')", 'sql_int_op ( "instr({0}, \'a\')" , [T::S1] )'),

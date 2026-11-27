@@ -56,6 +56,9 @@ class Client:
         self.calls.append((url, json, kw))
         if url.endswith("/metadata/tml/export"):
             return _response(200, [{"edoc": yaml.safe_dump(MODEL)}])
+        if (json or {}).get("include_dependent_objects"):  # a clean "no dependents"
+            return _response(200, [{"metadata_id": m["identifier"],
+              "dependent_objects": {"dependents": {m["identifier"]: {}}}} for m in json["metadata"]])
         if url.endswith(SEARCH):
             return self.search(json)
         return _response(200, [])

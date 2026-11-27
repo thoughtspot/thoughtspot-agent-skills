@@ -103,8 +103,12 @@ def build_columns_and_formulas(
             "entry": {"column_type": "ATTRIBUTE", "comment": None, "synonyms": [],
                       "aggregation": None}, "mv_name": None})
 
-    # 2. collisions: drops physical columns shadowed by a formula name;
-    #    parameter renames never fire (MVs have no parameters).
+    # 2. collisions. A column and a formula with one display title are two MV
+    #    dimensions/measures: the shared helper would keep the formula and drop
+    #    the column without a word (BL-630), so fail loud here as the
+    #    formula-vs-formula clash already does (_check_no_duplicate_display_names).
+    #    Parameter renames never fire (MVs have no parameters).
+    _check_no_column_formula_clash(physical, formula_entries)
     physical, formula_entries, rename_map = resolve_name_collisions(
         physical, formula_entries, [])
 
@@ -395,6 +399,20 @@ def build_description(comment: str | None, mv_fqn: str | None, has_filter: bool)
     if has_filter:
         parts.append("MV Filter applied automatically via model filter.")
     return " ".join(parts)
+
+
+def _check_no_column_formula_clash(physical: list[dict],
+                                   formula_entries: list[dict]) -> None:
+    """Fail loud when a column and a formula share a display title (BL-630).
+
+    Both are MV dimensions or measures. The shared resolve_name_collisions keeps the
+    formula and drops the column without a word, a rule other converters rely on
+    (a Tableau calculation may shadow a field), so the MV builder refuses first."""
+    clash = {c["name"] for c in physical} & {f["name"] for f in formula_entries}
+    if clash:
+        raise ValueError(
+            f"duplicate display title(s): {sorted(clash)} — set distinct "
+            f"display_name values in the MV")
 
 
 def _check_no_duplicate_display_names(columns: list[dict]) -> None:

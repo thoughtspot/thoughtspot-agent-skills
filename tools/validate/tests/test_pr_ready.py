@@ -154,6 +154,12 @@ def _push_extra_commit(e, target, name):
 
 
 def _main(e, *argv):
+    """A full run (the suites this file tests run only under --full); _fast_main is
+    the default run."""
+    return pr_ready.main(["--full", *argv], repo_root=e.work, python="python3")
+
+
+def _fast_main(e, *argv):
     return pr_ready.main(list(argv), repo_root=e.work, python="python3")
 
 
@@ -278,7 +284,7 @@ def test_a_skip_for_a_missing_module_is_fail_and_listed(env, capsys):
     section = text.split("## NOT RUN and SKIP", 1)[1].split("\n## ", 1)[0]
     assert "tools/a/test_x.py:10: could not import 'openpyxl'" in section, section
     assert "missing module" in section and "counted as FAIL" in section, section
-    assert "| pytest | `pytest agents/cli/ts-object-model-erd/tests/ -q` | FAIL |" in text
+    assert "| pytest | `pytest agents/cli/ts-object-model-erd/tests/ -q -n auto` | FAIL |" in text
 
 
 def test_other_skips_are_listed_and_do_not_fail(env, capsys):
@@ -360,6 +366,37 @@ def test_a_missing_module_fail_prints_cis_installs_as_the_remedy(env, capsys):
         assert line in err, (line, err)
     # Named for the interpreter that ran, without the path to it (a home directory).
     assert "python3 -m pip" in err, err
+
+
+_NO_XDIST_OUTPUT = ("ERROR: usage: python -m pytest [options] [file_or_dir] [file_or_dir] [...]\n"
+                    "python -m pytest: error: unrecognized arguments: -n\n"
+                    "  inifile: None\n  rootdir: /repo\n")
+
+
+def test_a_missing_pytest_xdist_is_fail_with_cis_installs_as_the_remedy(env, capsys):
+    # CI passes `-n auto`; without pytest-xdist pytest stops at a usage error and runs
+    # nothing. That is a missing tool, reported as one, not an unreadable stats line.
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (4, _NO_XDIST_OUTPUT)}
+    assert _main(env, "--no-review") == 1
+    err = capsys.readouterr().err
+    assert "pytest-xdist is not installed" in err, err
+    for line in pr_ready.SUITE_PIP_INSTALLS:
+        assert line in err, (line, err)
+    assert "closing stats line was not found" not in err, err
+
+
+def test_an_unrecognised_argument_other_than_n_is_not_read_as_missing_xdist(env, capsys):
+    out = "python -m pytest: error: unrecognized arguments: --no-such-flag\n"
+    env.commands.answers = {"pytest agents/cli/ts-object-model-erd/tests/": (4, out)}
+    assert _main(env, "--no-review") == 1
+    err = capsys.readouterr().err
+    assert "pytest-xdist is not installed" not in err, err
+    assert "closing stats line was not found" in err, err
+
+
+def test_the_suite_install_includes_pytest_xdist_because_ci_passes_n():
+    assert any("-n" in args for args in pr_ready.pytest_invocations(pr_ready.REPO_ROOT))
+    assert "pytest-xdist==" in pr_ready.SUITE_PIP_INSTALLS[0]
 
 
 def test_the_install_remedy_offers_the_virtual_environment_route(monkeypatch):
@@ -745,8 +782,8 @@ def test_a_new_conditional_exit_in_the_aggregate_job_is_caught(tmp_path):
 
 def test_a_changed_pip_install_is_caught(tmp_path):
     orig = WORKFLOW.read_text(encoding="utf-8")
-    text = orig.replace("pip install pytest pyyaml radon pip-audit jsonschema==4.25.1",
-                        "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 && ./x.sh", 1)
+    text = orig.replace("pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0",
+                        "pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0 && ./x.sh", 1)
     assert text != orig and _mutated(tmp_path, text)
 
 
@@ -811,3 +848,59 @@ def test_scoped_quality_gates_failure_is_hard(env, capsys):
     _commit(env.work, "tools/validate/check_new.py")
     env.checks.answers = {"generate_quality_gates.py": (1, "FAIL  stale\n")}
     assert _main(env, "--no-review") == 1
+
+
+# ---- the default (fast) run leaves the smokes and pytest to CI (2026-11-26) ----
+
+def test_a_default_run_lists_pytest_and_smokes_not_run_and_is_ready(env, capsys):
+    assert _fast_main(env, "--no-review") == 0
+    _, text = _evidence(env)
+    assert "fast checks only" in text
+    assert "**READY**" in text
+    for args in pr_ready.pytest_invocations(env.work):
+        assert f"`pytest {' '.join(args)}` — NOT RUN: fast run" in text
+    for suite in pr_ready.rc.CI_SMOKES:
+        assert f"`{suite}` — NOT RUN: fast run" in text
+    assert "| pytest |" in text and "| PASS |" not in text.split("| pytest |", 1)[1].split("\n", 1)[0]
+
+
+def test_a_default_run_still_fails_on_a_failing_check(env, monkeypatch):
+    # A fast run narrows only the suites: the check list still decides the verdict.
+    real = pr_ready.rc.run
+    def failing(*a, **k):
+        return real(*a, **k) + [{"id": "planted", "status": "FAIL", "seconds": 0.0,
+                                  "output_tail": "FAIL planted"}]
+    monkeypatch.setattr(pr_ready.rc, "run", failing)
+    assert _fast_main(env, "--no-review") == 1
+    assert "NOT READY" in _evidence(env)[1]
+
+
+def test_full_runs_the_suites(env, monkeypatch):
+    ran = []
+    monkeypatch.setattr(pr_ready, "run_pytest", lambda *a, **k: ran.append("pytest") or [])
+    monkeypatch.setattr(pr_ready.rc, "run_smokes", lambda *a, **k: ran.append("smokes") or [])
+    _fast_main(env, "--no-review", "--full")
+    assert ran == ["smokes", "pytest"]
+    assert "fast checks only" not in _evidence(env)[1]
+
+
+def test_a_default_run_never_says_the_suites_ran(env, capsys):
+    _fast_main(env, "--no-review")
+    text = _evidence(env)[1]
+    assert "ran once here" not in text
+    assert "pytest ran as `python -m pytest`" not in text
+    assert "not run here (a fast run)" in text
+    out = capsys.readouterr().out
+    assert "prerequisite absent: fast run" not in out
+    assert "(fast run: CI" in out
+    assert "suite job on Python" in text
+    assert "READY (fast checks; CI runs the suites)" in out
+
+
+def test_post_implies_full(env, monkeypatch):
+    ran = []
+    monkeypatch.setattr(pr_ready, "run_pytest", lambda *a, **k: ran.append("pytest") or [])
+    monkeypatch.setattr(pr_ready.rc, "run_smokes", lambda *a, **k: ran.append("smokes") or [])
+    monkeypatch.setattr(pr_ready, "_try_post", lambda *a, **k: "stubbed")
+    _fast_main(env, "--no-review", "--post", "42")
+    assert ran == ["smokes", "pytest"]
