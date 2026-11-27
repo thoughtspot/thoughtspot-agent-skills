@@ -1484,6 +1484,12 @@ attempted for each, and ask whether to proceed with import anyway or make manual
 
 ## Step 7 — Review Checkpoint & Import
 
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 > **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (model already exists)
 > and **scope 5** (no model — tables imported in Step 6 only).
 
@@ -2512,6 +2518,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.47.3 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.47.2 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.4). Tables imported by an earlier ts-cli keep caption names: regenerate them before scope 4 or a Phase-2 merge. |
 
 **Older entries (v1.0.0–v1.47.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

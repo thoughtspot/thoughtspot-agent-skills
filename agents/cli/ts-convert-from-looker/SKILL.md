@@ -450,6 +450,12 @@ Report any violations to the user and fix before proceeding.
 
 ## Step 7.5 — Migration gaps review + write gaps file
 
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 Before importing, show the user exactly what was translated, what was approximated,
 and what was omitted — so they can weigh gaps *before* committing to the import.
 
@@ -900,6 +906,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.0.8 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.0.7 | 2026-10-07 | Documents that string comparisons become case-insensitive in ThoughtSpot (BL-333, accepted). No behaviour change. |
 | 1.0.6 | 2026-10-06 | **`SUBSTR(col, pos, len)` mapping row corrected** (BL-340 class): SQL `SUBSTR` is 1-based and ThoughtSpot `substr` zero-based, so the identity row shifted every substring one character; it is now `substr ( [T::COL] , pos - 1 , len )` for a literal `pos` ≥ 1 (and `strlen` for the 2-argument form), with a `sql_string_op` pass-through for a `pos` ≤ 0 or a non-literal `pos` — the Snowflake / Databricks translators' rule |
 | 1.0.5 | 2026-09-22 | **I7 marker added at the classification step.** The skill already stated the rule in prose at §4a and checklisted it at step 6e — what it lacked was the machine-checkable marker, so no gate could tell it apart from a skill that said nothing, and the prose sat *after* the dimension and measure verdicts it needed to govern. The gate now heads Step 4, ahead of all three untranslatable verdicts; the §4a prose and the 6e checklist are unchanged. Now gated by `check_i7_gate.py`, which requires the literal `MANDATORY (I7)` marker in a blockquote citing this skill's own dialect mapping and the invariants doc (2026-09-22 audit finding 9.3). |

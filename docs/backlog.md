@@ -379,7 +379,7 @@ are roughly ordered by value÷effort.
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
-| BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
+| ~~BL-640~~ | ~~Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved~~ | DONE (2026-11-27) |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
 
@@ -537,7 +537,7 @@ are roughly ordered by value÷effort.
 | ~~BL-633~~ | ~~`CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through~~ | DONE (2026-11-27) |
 | ~~BL-635~~ | ~~from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape~~ | DONE (2026-11-27) |
 | BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
-| BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
+| ~~BL-641~~ | ~~from-databricks-mv: no entry point for Metric View YAML files without workspace access~~ | DONE (2026-11-27) |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
 | BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
 | BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
@@ -19521,7 +19521,7 @@ angle 15 in `.claude/rules/repo-audit.md`.
 
 ## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27: conversion invariant R1, cited at the pre-import step of all eight `ts-convert-from-*` skills). **Source:** as BL-639. **Target:** 2026-12-15.
 
 **What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
 replaced with "current calendar month" to make the numbers match, without asking. The user
@@ -19536,7 +19536,7 @@ rule in the other `ts-convert-from-*` skills that have a review checkpoint.
 
 ## BL-641 — from-databricks-mv: no entry point for Metric View YAML files `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629: the MV definitions arrived as exported text
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-convert-from-databricks-mv 1.21.0: "Starting from Metric View YAML files" at Step 0; column types stay BL-636). **Source:** as BL-629: the MV definitions arrived as exported text
 files, with no workspace access. **Target:** 2027-01-31.
 
 **What.** Steps 1-4 assume a Databricks profile and fetch the YAML with `DESCRIBE TABLE

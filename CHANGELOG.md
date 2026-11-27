@@ -6,6 +6,7 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 ---
 
 ## 2026-11-27
+- docs: every `ts-convert-from-*` skill asks the user to approve, before import, any converted formula edited by hand whose meaning now differs from the source (new conversion invariant R1, BL-640); `ts-convert-from-databricks-mv` can start from Metric View YAML files when there is no workspace access (BL-641)
 - fix: the Databricks Metric View converter keeps a cast to text over a plain column or a SUM/COUNT/AVG of one column (`CAST(x AS STRING)`) instead of dropping it, and skips one over any other expression; drops a `CAST(… AS DATE)` over a translated `start_of_month`/`start_of_week`/`start_of_quarter`/`start_of_year`/`to_date` (ThoughtSpot rejected `to_date ( start_of_month ( … ) )` at import); and uses a `name` its author cased (`SKU Type`) as written. Re-converting into an existing Model renames such columns (BL-631, BL-633)
 - chore: bump ts-cli to v0.227.2
 - fix: the Databricks Metric View converter orders a window by the integer key behind a `TO_DATE(CAST(key AS STRING), 'yyyyMMdd')` dimension, accepts a whole-table `AGG(expr) OVER ()` dimension, and emits a dimension comparing a row to it as a scalar subquery, because ThoughtSpot's SQL for the `group_aggregate` comparison gives wrong numbers (BL-634, BL-635, BL-638)

@@ -825,6 +825,12 @@ Store the answer as a flag for `ts snowflake build-model`:
 
 ### Step 10: Review checkpoint
 
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 Before importing, show the user a summary assembled from `parsed.json`,
 `translated.json`, and `tables.json` — tables with fact/join annotations, columns by
 type, the formula translation log, filter labels, verified queries, and the Spotter
@@ -1034,6 +1040,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.28.4 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.28.3 | 2026-11-26 | **Conditionals are bracketed (ts-cli v0.225.1, BL-632).** ThoughtSpot's `else` is greedy: `if ( c ) then a else b = x` compiles to `CASE WHEN c THEN a ELSE (b = x) END`. A `CASE`, `IFF`, `NVL2` or `COALESCE` followed by an operator in a Semantic View expression therefore converted to a silently wrong formula (live-verified on the shared translator code). Every conditional is now emitted as `( if … )`. As a whole call argument the brackets are dropped. **Re-convert any Model whose expressions have a conditional followed by an operator** |
 | 1.28.2 | 2026-11-08 | **A distinct-count fact is a `unique count` formula, and a renamed pass-through fact keeps its own default (ts-cli v0.212.0, BL-447, BL-448).** A fact whose Cortex Analyst `default_aggregation` is `count_distinct` becomes `unique count ( <row value> )` in every form (pass-through, `T.COL as col`, computed); the rename and computed forms used to carry `aggregation: COUNT_DISTINCT` on a formula, which ThoughtSpot stores as an attribute on a text column, so search listed ids instead of counting them. A metric over such a fact reads its row value, never the formula, and a `COUNT`/`MIN`/`MAX` of the fact's column (qualified, by declared name or unqualified) is a formula such as `count ( [T::col] )`, never a physical measure on the key, which ThoughtSpot would demote on a text column. If the count was its table's only column, build-model selects the key as an attribute too and reports it (`reselected_columns`). The CA lookup is by the fact's declared name: `S.UNIQUE_CUSTOMERS as s.customer_id` was summed, and a pass-through could take another fact's default |
 | 1.28.1 | 2026-10-07 | **The compiled `safe_divide` form reads back as `safe_divide` (ts-cli v0.173.0, BL-374).** A metric or fact written `CASE WHEN b = 0 THEN 0 ELSE a / NULLIF(b, 0) END` (also `IFF` / `IF`, or ELSE `a / b`) — what `ts-convert-to-snowflake-sv` emits — becomes `safe_divide ( a , b )` instead of `if ( b = 0 ) then 0 else a / b`. Same value on every NULL / zero input; `b` must be the same expression in both places, and any other shape keeps the literal reading. SQL comments (`--`, `//`, `/* */`) in a metric, fact or dimension expression are now stripped (BL-382); they were tokenised into a garbage formula |

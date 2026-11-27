@@ -97,6 +97,13 @@ Set Analysis using current-selection (`$`) context, Qlik variables, and function
 ThoughtSpot equivalent are flagged `NEEDS REVIEW` — never faked. Read `mapping.json`.
 
 ### Step 2 — Validate & import the model
+
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 Lint, then import the tables + model, VALIDATE_ONLY first, then real:
 ```bash
 ts tml lint --dir out/ --pattern '*.tml'
@@ -161,6 +168,7 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.5 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.2.4 | 2026-11-27 | **An `If()` followed by more expression is flagged for review instead of mistranslated (ts-cli v0.225.2, BL-649).** `If(a > 1, 1, 0) * Sum(b)` matched the whole-expression `If(…)` pattern greedily. It returned unbalanced text (`if (a > 1) then 1 else 0) * sum(b`) marked translated. It is now refused with "Could not parse If() structure". An `If()` that is the whole expression is unchanged |
 | 1.2.3 | 2026-11-08 | The demo-provisioning note names `--generate-sample`: `ts load databricks` now refuses a schema-only source without it, as `ts load snowflake` already did (ts-cli 0.210.0, BL-550). Version may be renumbered at merge |
 | 1.2.2 | 2026-11-08 | **The lint gate runs (BL-545).** Steps 2 and 3 passed TML files to `ts tml lint` and `ts tml import` as bare arguments, which neither command accepts (exit 2, "Got unexpected extra argument(s)"), so no model invariant was ever linted on this path. The globs were also wrong: `build-model` writes `table.<name>.tml` / `model.<name>.tml`, so `out/*.table.tml` matched nothing. Lint now reads `--dir out/ --pattern '*.tml'`; the model import names each Table, then the Model, with `--file`, because `--order tableau` ranks by suffix and would put a Qlik Model first; the liveboard steps use `--pattern 'liveboard.*.tml'`. VALIDATE_ONLY still runs first |

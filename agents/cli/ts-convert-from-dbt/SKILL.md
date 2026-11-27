@@ -684,6 +684,12 @@ If **S**, also collect the Model names for `--worksheets`.
 
 ### Step 7: Review checkpoint
 
+> **R1 — approve any change of meaning.** If a converted formula was edited by hand during this
+> run to get past an import error, a lint finding or a number mismatch, and its meaning now differs
+> from the source, list each one before import: the source expression, the formula, and the
+> difference in one line. Wait for the user to approve each. Look for a form that keeps the source's
+> meaning first. See [R1](../../shared/schemas/ts-model-conversion-invariants.md#r1--a-formula-whose-meaning-differs-from-the-source-is-approved-before-import).
+
 There is no dry-run mode — `generate-tml` creates and imports objects
 immediately. Show the user exactly what will run before executing it:
 
@@ -1162,6 +1168,7 @@ object itself.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.1.4 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.1.3 | 2026-11-18 | **`ts_calendar_type` values corrected.** The tag table called the value "a calendar name"; it now gives the product owner's ruling: `calendar`, `fiscal` and `default` name code-based calendars, and any other value names a connection-scoped custom calendar. |
 | 1.1.2 | 2026-11-04 | **`ts_formula` measures declare an aggregation.** A MEASURE `ts_formula` column with no `ts_aggregation` now gets one from `spotql_ops.formula_aggregation` (SUM, or for a bare `group_aggregate` / `last_value` the re-aggregation its inner aggregate implies); a declared `ts_aggregation` is kept (BL-509). |
 | 1.1.1 | 2026-10-29 | Requires ts-cli 0.192.0. ZIP_FILE: `--file` is required on every `generate-tml` / `generate-sync-tml` call (without it ThoughtSpot answers a misleading 400 that reads as a bad archive; the CLI now explains it names a missing `--file`); the artifact-generating command now depends on the engine — `dbt docs generate` (Core) vs `dbt compile --write-catalog` (Fusion), with the verified behaviour of each; ZIP_FILE `create` needs `--project-name` (refused locally; the server rejected a create without it on one cluster), taken from `dbt_project.yml` `name:` in Step 2. |

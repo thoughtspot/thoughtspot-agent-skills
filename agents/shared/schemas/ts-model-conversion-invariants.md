@@ -5,7 +5,7 @@
 Canonical hard rules for any skill that converts a source (Tableau / Snowflake SV /
 Databricks MV / …) into ThoughtSpot **Model TML**. Every "convert-from" skill MUST
 satisfy all invariants below. The `conversion-consistency-auditor` subagent checks
-skills against this file; keep the IDs (I1–I23, N1, EXC1) stable so the auditor can cite
+skills against this file; keep the IDs (I1–I23, N1, R1, EXC1) stable so the auditor can cite
 them without ambiguity.
 
 > Source skills that established these rules: `ts-convert-from-snowflake-sv` (I1–I4, I6–I7),
@@ -942,6 +942,34 @@ model:
 model:
   name: "TEST_SV_DUNDER_MIFFLIN_SALES"   # WRONG — environment marker in production TML
 ```
+
+---
+
+### R1 — A formula whose meaning differs from the source is approved before import
+
+**Rule:** When a faithful translation fails (import rejects it, lint flags it, or a check
+shows wrong numbers), do not substitute a formula with a different meaning to get past
+the failure. Look for a form that keeps the source's meaning first. If none exists, list
+every such formula at the skill's review checkpoint, before import, with the source
+expression, the proposed formula and the difference in one line, and wait for the user
+to approve each. A converter's own documented approximation (a `pending_verification`
+annotation, an `Approximated` status, a NEEDS REVIEW row) is surfaced the same way; this
+rule adds the agent's own hand edits made during the run.
+
+**Why:** a substitute that makes the numbers match can pass because of the test data. On
+2026-11-26 a Metric View flag "latest month in the data" was replaced with "current
+calendar month" (`today()`). It matched only because the fixture's last month was the
+current month. The user rejected it, and a faithful form existed (a scalar subquery in
+`sql_bool_op`; BL-638, BL-640).
+
+**Applies to:** every `ts-convert-from-*` skill, at the step where the user confirms the
+import.
+
+**Correct:** "`Is Month To Date`: source `record_month = MAX(record_month) OVER ()`
+(latest month in the data); proposed `start_of_month ( [Month] ) = start_of_month ( today ( ) )`
+(current calendar month): differs once the data stops at an earlier month. Approve? [Y/N]"
+
+**Wrong:** editing the formula to `today ( )` and reporting the conversion as matched.
 
 ---
 
