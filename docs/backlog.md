@@ -580,7 +580,7 @@ are roughly ordered by value÷effort.
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
 | BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
-| BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, four AgentQL quoting helpers | 2027-01-31 |
+| BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, three AgentQL quoting helpers | 2027-01-31 |
 
 ---
 
@@ -20187,12 +20187,18 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
 2. **`spotql._cell_value` reads a falsy value of an unmapped type as NULL.** When neither
    the column's `type` nor the cell's `nullType` names a field, it takes the first field
    that is not falsy. A 0, `false` or empty string then comes back as None. `verify`
-   reports that as a mismatch against Databricks' 0; other callers read it as NULL.
+   reports that as a false match against a Databricks NULL (and a mismatch against Databricks' 0); other callers read it as NULL.
 3. **`quote_mv_fqn` cannot quote a partly quoted name.** It quotes every dot-separated part,
    or, when the name holds a backtick, passes it through unchanged. A catalog, schema or
    view whose name holds a dot works only when the caller quotes the whole name.
 4. **AgentQL identifier quoting is written three times**: `_dq` in
    `ts_cli/databricks/mv_verify.py`, `_sq` in `ts_cli/aggregate/spotql_aggregate.py` and
    `_q` in `ts_cli/formula_translate/validate.py`. One shared helper.
+
+5. **`ts databricks verify` leftovers from the PR #773 re-review.** A flag filter that excludes
+   no rows (a flag false on every row) still counts as the run's filtered shape, so the run can
+   read `match` without a search filter that removed anything; count a filtered shape only when
+   it removed rows. `tolerance_accepted` is a bare count: list which measures were accepted
+   within tolerance, since at DECIMAL scale it also absorbs a dropped `ROUND` or narrowing cast.
 
 **Done when.** Each item is fixed with its test, or declined here with the reason.

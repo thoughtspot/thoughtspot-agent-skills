@@ -18,7 +18,7 @@ A cell accepted within a tolerance but not equal is counted per shape
 
 Keys: a DATE arrives from AgentQL as epoch seconds (or milliseconds) at midnight in the
 ThoughtSpot cluster's time zone, so it needs that zone to decode (live-checked on the run
-BL-639 records). TIMESTAMP keys are decoded in the same zone to the microsecond, the
+BL-639 records). TIMESTAMP keys are decoded in the same zone to the second, the
 Databricks value converted to that zone; that is not live-verified. A wrong reading
 shows as rows on one side only or as values compared against the wrong group, never as
 a silent match.
@@ -134,7 +134,9 @@ def _timestamp_text(value: Any, tz: _dt.tzinfo) -> str:
             return text
         if when.tzinfo is not None:
             when = when.astimezone(tz)
-    return when.strftime("%Y-%m-%d %H:%M:%S.%f")
+    # to the second: whether AgentQL returns fractional seconds is unverified, and a
+    # whole-second epoch against a fractional key would put every row on one side
+    return when.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _decimal(value: Any) -> Optional[Decimal]:
@@ -192,7 +194,12 @@ def _compare_numbers(a: Any, b: Any, spec: dict) -> str:
         return DIFFERENT
     if spec["kind"] == "decimal":
         if spec.get("scale") is not None:
-            same = _at_scale(da, spec["scale"]) == _at_scale(db, spec["scale"])
+            # ThoughtSpot returns a double: past ~15 significant digits it cannot hold the
+            # value at its scale, so a value within 2 ulps of the double is also accepted
+            # (else a correct DECIMAL(38,18) sum fails every cell)
+            same = (_at_scale(da, spec["scale"]) == _at_scale(db, spec["scale"])
+                    or abs(float(da) - float(db))
+                    <= 2 * math.ulp(max(abs(float(da)), abs(float(db)))))
         else:
             same = abs(da - db) <= Decimal(DECIMAL_REL_TOL) * max(abs(da), abs(db))
     else:

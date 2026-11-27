@@ -323,7 +323,9 @@ def verify_cmd(
     false, and a search filter on one dimension value. Report JSON on stdout (or
     --output), one progress line per shape on stderr. Exit 0 only when the status is
     match; 1 on a mismatch, a query error, an MV entry the Model lacks or types wrongly,
-    no non-NULL cell compared, no search filter run, or unreadable input.
+    an imported Model that differs from --model-tml, no non-NULL cell compared, no
+    filtered shape compared data (no search filter and no flag filter), or unreadable
+    input.
     """
     tz = _zone(cluster_tz)
     if not dry_run and (not model_guid or not dbx_profile):

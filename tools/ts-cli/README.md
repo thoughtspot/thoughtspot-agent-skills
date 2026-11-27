@@ -3838,8 +3838,8 @@ shape supplies what the data must contain; see the skill's Step 11c.
 **How cells are compared.** Rows are matched on their grouping values:
 
 - a NULL group matches a NULL group
-- a DATE is decoded in `--cluster-tz`; a TIMESTAMP too, to the microsecond (not
-  live-verified)
+- a DATE is decoded in `--cluster-tz`; a TIMESTAMP too, to the second (AgentQL's
+  precision is not live-verified, so fractional seconds are not compared)
 - booleans compare in any case, and numbers by value
 
 A measure cell is compared by its Databricks type. NULL matches only NULL, never 0.

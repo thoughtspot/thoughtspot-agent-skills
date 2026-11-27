@@ -331,16 +331,24 @@ class TestNormalise:
         assert mvc.norm_key("2024-03-01", "date", TOKYO) == "2024-03-01"
         assert mvc.norm_key("2024-03-01T00:00:00.000Z", "date", TOKYO) == "2024-03-01"
 
-    def test_timestamp_to_the_microsecond(self):
+    def test_timestamp_to_the_second(self):
+        # AgentQL's precision is unverified: a whole-second epoch must pair with a
+        # fractional Databricks key instead of putting the row on one side only
         when = dt.datetime(2024, 3, 1, 9, 30, 0, 123000, tzinfo=TOKYO)
         epoch_ms = int(when.timestamp() * 1000)
-        assert mvc.norm_key(epoch_ms, "timestamp", TOKYO) == "2024-03-01 09:30:00.123000"
+        assert mvc.norm_key(epoch_ms, "timestamp", TOKYO) == "2024-03-01 09:30:00"
         assert mvc.norm_key("2024-03-01T00:30:00.123Z", "timestamp", TOKYO) == \
-            "2024-03-01 09:30:00.123000"
-        assert mvc.norm_key("2024-03-01T00:30:00.124Z", "timestamp", TOKYO) != \
+            mvc.norm_key(int(when.timestamp()), "timestamp", TOKYO)
+        assert mvc.norm_key("2024-03-01 09:30:01", "timestamp", TOKYO) != \
             mvc.norm_key(epoch_ms, "timestamp", TOKYO)
-        assert mvc.norm_key("2024-03-01 09:30:00", "timestamp", TOKYO) == \
-            "2024-03-01 09:30:00.000000"
+
+    def test_decimal_beyond_double_precision_is_close(self):
+        from decimal import Decimal
+        exact = Decimal("123456.123456789012345678")
+        spec = {"kind": "decimal", "scale": 18}
+        assert mvc.compare_cells(exact, float(exact), spec, UTC) == mvc.CLOSE
+        assert mvc.compare_cells(Decimal("1000000000000.00"), 1000000000000.01,
+                                 {"kind": "decimal", "scale": 2}, UTC) == mvc.DIFFERENT
 
     def test_boolean_case_insensitive(self):
         assert mvc.norm_key(True, "boolean", UTC) == mvc.norm_key("true", "boolean", UTC)
