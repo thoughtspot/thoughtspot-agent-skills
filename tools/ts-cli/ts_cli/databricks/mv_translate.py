@@ -19,6 +19,7 @@ translate_window_measure so it remains part of this module's public API.
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from typing import Callable
 
 from ts_cli.databricks.mv_expr import (
@@ -27,6 +28,7 @@ from ts_cli.databricks.mv_expr import (
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
+from ts_cli.sql_forms import sqlf_aggregate_window_values
 from ts_cli.formula_week import week_start_note
 from ts_cli.databricks.mv_window_translate import translate_window_measure
 
@@ -94,6 +96,33 @@ SCALAR_LOD_NOTE = (
     "blind to the query's grouping and search filters, like the subquery "
     "(BL-316 item 1).")
 
+# BL-629: an MV expression may name another dimension. Databricks scope, live-probed
+# 2026-11-27 (DBSQL 2026.35): only a dimension's `name` is an identifier (a
+# `display_name` is a label: a backticked one fails UNRESOLVED_COLUMN); a dimension
+# sees only the dimensions defined before it, and one of those shadows a same-named
+# source column; a measure sees every dimension; the global `filter:` sees source
+# columns only. translate_metric_view fills the map as dimensions translate, so a
+# later or skipped dimension is never a target.
+_DIM_REFS: ContextVar[dict[str, str]] = ContextVar("_DIM_REFS", default={})
+
+
+def dimension_ref(entry: dict) -> str:
+    """The reference an expression naming a translated dimension gets: its column for a
+    direct dimension, its formula id otherwise."""
+    if entry["output_kind"] == "column":
+        return f"[{entry['table']}::{entry['column']}]"
+    return f"[{formula_id(display_title(entry))}]"
+
+
+def _dimension_ref(path: str) -> str | None:
+    """The reference for an unqualified name that is a visible dimension, else None
+    (`source.X` is always a column). Matched case-insensitively, as Databricks does."""
+    segs = split_dot_path(path.strip())
+    if len(segs) != 1:
+        return None
+    return _DIM_REFS.get().get(segs[0].casefold())
+
+
 def make_resolver(tables: dict, scalars: list[dict] | None = None,
                   in_window: bool = False,
                   window_date_ref: str | None = None) -> Callable[[str], str]:
@@ -107,6 +136,9 @@ def make_resolver(tables: dict, scalars: list[dict] | None = None,
         if m:
             return _scalar_text(scalars or [], int(m.group(1)), tables, in_window,
                                 window_date_ref)
+        dim_ref = _dimension_ref(path)
+        if dim_ref is not None:
+            return dim_ref
         table, column = resolve_parts(tables, path)
         return f"[{table}::{column}]"
     return resolve
@@ -117,6 +149,17 @@ def _scalar_text(scalars: list[dict], n: int, tables: dict,
     if n >= len(scalars):
         raise UntranslatableError(f"scalar placeholder #{n} has no parsed subquery")
     sc = scalars[n]
+    # A scalar subquery reads the physical table, so a name in it is that table's
+    # column, never an MV dimension (BL-629 review).
+    token = _DIM_REFS.set({})
+    try:
+        return _scalar_text_body(sc, tables, in_window, window_date_ref)
+    finally:
+        _DIM_REFS.reset(token)
+
+
+def _scalar_text_body(sc: dict, tables: dict, in_window: bool,
+                      window_date_ref: str | None) -> str:
     base = make_resolver(tables)
     if in_window:
         # The yesterday stand-in is only meaningful for the latest value of the
@@ -210,9 +253,15 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
         raise UntranslatableError(
             f"LOD aggregate '{dim['inner_agg']}' not mapped "
             f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
-    resolver = make_resolver(tables)
-    inner = translate_sql_expr(dim["inner_expr"], resolver)
-    dims = " , ".join(resolver(p) for p in dim["partition_by"])
+    # Source columns only: whether Databricks resolves an OVER (PARTITION BY …) name
+    # to an earlier dimension is unprobed, so an LOD keeps the pre-BL-629 reading.
+    token = _DIM_REFS.set({})
+    try:
+        resolver = make_resolver(tables)
+        inner = translate_sql_expr(dim["inner_expr"], resolver)
+        dims = " , ".join(resolver(p) for p in dim["partition_by"])
+    finally:
+        _DIM_REFS.reset(token)
     ts = (f"group_aggregate ( {agg} ( {inner} ) , {{ {dims} }} , "
           f"query_filters ( ) )")
     return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
@@ -222,8 +271,13 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
 
 
 def translate_filter(filter_sql: str, tables: dict) -> dict:
-    """Translate the MV global filter: to the MV Filter boolean formula."""
-    ts = translate_sql_expr(filter_sql, make_resolver(tables))
+    """Translate the MV global filter: to the MV Filter boolean formula. The filter
+    reads source columns only, never a dimension (BL-629, live-probed)."""
+    token = _DIM_REFS.set({})
+    try:
+        ts = translate_sql_expr(filter_sql, make_resolver(tables))
+    finally:
+        _DIM_REFS.reset(token)
     # Same annotations[] channel as translated[] entries, so the skill's review
     # step surfaces a week-dependent filter too (BL-334 review).
     return {"name": "MV Filter", "column_type": "ATTRIBUTE", "ts_expr": ts,
@@ -383,6 +437,14 @@ def translate_metric_view(parsed: dict, tables: dict, *,
     """Translate a parse-mv result. Content failures -> skipped[]; only a
     malformed tables map raises (ValueError -> command exit 1)."""
     tables = normalize_tables(tables)
+    token = _DIM_REFS.set({})
+    try:
+        return _translate_metric_view(parsed, tables, allow_row_lag)
+    finally:
+        _DIM_REFS.reset(token)
+
+
+def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> dict:
     translated: list[dict] = []
     skipped: list[dict] = []
     by_name: dict[str, dict] = {}       # name -> translated entry
@@ -390,10 +452,14 @@ def translate_metric_view(parsed: dict, tables: dict, *,
     dag: dict[str, list[str]] = {}
     window_measures: list[str] = []
 
+    visible = _DIM_REFS.get()  # the dict set for this run, filled in place
     for dim in parsed["dimensions"]:
         _translate_item(lambda: translate_dimension(dim, tables),
                         dim["name"], "dimension",
                         translated, skipped, by_name, skip_names)
+        if dim["name"] in by_name and dim["name"] not in skip_names:
+            visible.setdefault(str(dim["name"]).casefold(),
+                               dimension_ref(by_name[dim["name"]]))
 
     deferred: list[dict] = []
     for m in parsed["measures"]:
@@ -545,7 +611,8 @@ def _inline_and_translate(m, parsed, tables, by_name, skip_names,
                 f"references '{ref}', which was skipped or does not exist")
         return f"( {_inline_text(by_name[ref])} )"
 
-    entry["ts_expr"] = _PLACEHOLDER_RE.sub(substitute, entry["ts_expr"])
+    entry["ts_expr"] = sqlf_aggregate_window_values(
+        _PLACEHOLDER_RE.sub(substitute, entry["ts_expr"]))
     # The week note must see the INLINED text: MEASURE(mon_rev) / 2 carries the
     # referenced measure's start_of_week only after substitution (BL-334 review).
     entry["annotations"] = _with_week_note(entry["annotations"], entry["ts_expr"])
