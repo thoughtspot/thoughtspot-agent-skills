@@ -195,27 +195,87 @@ covers the TML path. This API would add coverage for instructions set only via t
 
 ---
 
-## Phase 2 — Usage Analysis (future)
+## Phase 2 — Usage Analysis
 
-### #9 — searchdata against BI Server — DEFERRED to BL-081 (usage stats)
+### #9 — searchdata against the usage system Model — VERIFIED live 2026-11-25
 
-Need to verify `POST /api/rest/2.0/searchdata` works with the BI Server system model:
-- Does it accept the BI Server model GUID as `logical_table_identifier`?
-- What is the maximum `record_size`? Does pagination work?
+Live-probed, read-only, on the SE demo cluster on 2026-11-25, for H17 and the report's
+usage (ts-audit 3.26.0). **The SpotterCode REST spec was not consulted:** the MCP asked
+for a sign-in the session could not give, so every row below is a live reading, not a
+spec reading, and should be checked against `get-rest-api-reference(apiName:
+"searchData")` when the MCP is reachable.
 
-### #10 — BI Server Spotter coverage — DEFERRED to BL-081 (usage stats)
+The usage lives in the system Model **TS: AI and BI Stats** (metadata subtype WORKSHEET),
+not "TS: BI Server" as this item first assumed. `metadata/search` finds it by its exact
+name (`name_pattern`). Its TML export is refused (FORBIDDEN), so its columns cannot be
+read from TML; they were found by querying.
 
-Does the TS: BI Server system model capture Spotter/AI search interactions,
-or only classic Search interactions?
+`POST /api/rest/2.0/searchdata` with `{"query_string": ..., "logical_table_identifier":
+<its GUID>, "data_format": "COMPACT", "record_size": -1}`:
 
-### #11 — User Action enum — DEFERRED to BL-081 (usage stats)
+| Query | Answer |
+|---|---|
+| `[Model ID] [Queries] unique count [User ID] max [TS Query Start Time]` | 3,012 rows (every Model ID with a query, all history). `column_names` came back as Model ID, Maximum TS Query Start Time, Queries, Unique Number of User ID: **an order of its own, not the query's.** The audit reads every value by column name |
+| `min [TS Query Start Time] max [TS Query Start Time]` | One row: the history ran from 2023-10-01 to the day before the probe (about a day's lag) |
+| `[Model ID] [Queries] unique count [User ID] [TS Query Start Time].'last 180 days'` | 1,847 rows, 1,513,848 queries in all. **This is the window the audit uses** |
+| The same with `min [TS Query Start Time]` added | 1,847 rows, the same sum, but the min column was **dropped** from the answer: a min or max of the time column beside its keyword filter is not answered. The audit reads the last-used time with its own all-history query |
+| `... [TS Query Start Time] last 180 days` (no `.'...'`) | 400, code 11020, "Invalid value token: last" |
+| `... [TS Query Start Time] >= '2026-05-29'` | 3,012 rows, 17,384,170 queries: **the filter was silently ignored** (every row, all history). Not used |
+| `... [TS Query Start Time] after '05/28/2026'` | 1,847 rows, 1,513,848 queries, oldest query 180.2 days back: the same as the keyword form, which confirms it |
+| `[Model Name]` | 400, code 11020, "Column: model name not found": the Model keeps no names |
 
-Full `User Action` values in BI Server? Need the enum to filter appropriately.
+Columns used: `[Model ID]` (a GUID string; "" for a query on no Model, which the audit
+drops and counts: 2 such rows in the 3,012), `[Queries]` (summed), `[User ID]` (counted
+distinct), `[TS Query Start Time]` (epoch seconds; bare, it buckets by month). Of the
+3,012 Model IDs, 1,911 matched a current Model and 1,101 matched no object visible then
+(deleted, or in another Org); 483 of the 2,394 current Models had no row.
 
-### #12 — Query Text column parsability — DEFERRED to BL-081 (usage stats)
+**The Org.** From a non-primary Org (a client built with an `org`), the system Model is
+visible and `searchdata` answers **that Org's** usage, not the Primary Org's. The session's
+Org is `GET /api/rest/2.0/auth/session/user` → `current_org` `{id, name}`, which the audit
+records with the usage, and the report says when it is not the Primary Org (id 0).
 
-Does `[Query Text]` contain `[column_name]` tokens parseable for column-level
-usage analysis?
+**Org columns, and the Primary Org's reach — VERIFIED live 2026-11-25** (ts-audit 3.27.0;
+read-only, from the Primary Org; counts only recorded here):
+
+| Query | Answer |
+|---|---|
+| `[Org]` / `[Org ID]` | Answered as columns named `Org` (the name) and `Org ID` (a **string**, `"0"` for the Primary Org, where `current_org.id` is the number 0: the audit compares them as strings) |
+| `[Model ID] max [TS Query Start Time]` | 3,015 rows, 3,015 distinct Model IDs (2 rows with a blank Model ID) |
+| `[Model ID] [Org ID] [Org] max [TS Query Start Time]` | 3,039 rows, still 3,015 distinct Model IDs; columns Model ID, Org ID, Org, Maximum TS Query Start Time. 18 distinct Org IDs, the Primary Org's among them; no blank Org ID; one name per Org ID. **7 Model IDs came back under more than one Org**; the blank Model ID under 17 |
+| `[Model ID] [Queries] unique count [User ID] [TS Query Start Time].'last 180 days'` | 1,850 rows, 1,850 distinct Model IDs |
+| The same with `[Org ID] [Org]` | 1,874 rows, the same 1,850 Model IDs, the same 7 under more than one Org |
+
+So, read from the Primary Org, the usage holds **every Org's** queries, not the Primary
+Org's alone (an earlier check found 5 of the 6 most-queried unmatched Model IDs as Models
+in three other Orgs, 1 in none). Grouping by Org splits a Model ID queried in several
+Orgs into one row per Org, so the audit reads the Orgs with a query of its own
+(`ORG_QUERY`) and keeps its per-Model counts from the queries with no Org column: a
+distinct-user count summed over Orgs would overcount. Not verified: whether a build
+without the Org columns refuses the query (400, as `[Model Name]` is) or answers without
+them; the audit handles both as "Org not read".
+
+**Not verified:** whether `record_size: -1` ever answers fewer rows than exist on a larger
+cluster (the audit refuses an answer holding fewer rows than its
+`available_data_row_count`); and the paging of the visible-object search (500 a page)
+against a cluster with more than 2,394 Models.
+
+### #10 — Usage: Spotter coverage — DEFERRED to BL-081
+
+Does TS: AI and BI Stats count Spotter (AI) queries alongside classic Search, and can
+they be told apart? Not probed on 2026-11-25. H17 and the report count every query the
+Model holds, whatever produced it, so this changes no reading they give; it matters
+only for a future rule about Spotter use.
+
+### #11 — Usage: the kinds of user action — DEFERRED to BL-081
+
+Which user actions does the Model record, and should any be left out of a Model's query
+count? Not probed. The audit counts `[Queries]` as the Model sums them, unfiltered.
+
+### #12 — Usage: column-level use — DEFERRED to BL-081
+
+Can the query history say which columns a query used, for dead-column detection? Not
+probed. The audit reads usage per Model only.
 
 ---
 

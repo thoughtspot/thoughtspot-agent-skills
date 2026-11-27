@@ -5,7 +5,26 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-27
+- fix: the Tableau and Sisense converters bracket an `IIF`/`IF`/`CASE`/`if()` that an operator directly follows (`IIF(…) + 1`, `IF(…) = 1`), which ThoughtSpot's greedy `else` otherwise read into the else branch; a Tableau string concatenation after one (`IIF(…) + 'z'`) now fails at import instead of returning a wrong string; the Qlik converter flags an `If()` followed by more expression for review instead of returning unbalanced text. Partial: conditionals that a later Tableau pass splices (`ZN(IIF(…)) + 1`, `RADIANS(IIF(…))`, `MID(…, IIF(…), …)`) and a conditional as a right operand are still open (BL-649)
+- chore: bump ts-cli to v0.225.2
+- ci: pytest runs in parallel with pytest-xdist (`-n auto`) in the `suite` and `pytest-matrix` jobs, and so in `pr-ready --full`, which needs `pytest-xdist==3.8.0` installed (pr-ready 1.2.1). The main suite took 8.5 minutes serially and about 2 at 18 workers locally. The customer-reference scanner's linear-time test measures CPU time rather than wall time, which the other workers inflate
+
+## 2026-11-26
+- fix: the Databricks and Snowflake converters bracket every conditional they emit (CASE, IF/IFF, COALESCE, NVL2). ThoughtSpot's `else` is greedy, so `COALESCE(is_deleted, false) = false` converted to a filter that kept only the deleted and NULL rows; `CASE … END = x` and `IF(…) + 1` were wrong the same way; `ts formula translate` for Snowflake and Databricks input too (BL-632)
+- chore: bump ts-cli to v0.225.1
+- feat: the `ts audit` report gains a Usage view (`#usage`, when the run fetched usage): a quadrant of every audited Model by days since its last query and its dependents, a sortable triage table (status, last used, queries, users, dependents by type, owner, created, worst finding) with status and "No dependents" filters, and an export of the selected Models as CSV or as a `ts-audit-candidates/1` JSON file, built in the browser. The audit JSON's per-Model usage gains `status`, `dependents`, `owner` and `created`, from data the audit already fetches (ts-audit 3.28.0)
+- chore: bump ts-cli to v0.225.0
+- feat: `pr-ready` 1.2.0 runs fast checks by default (validators and PR-only gates, a minute or two); the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check, and `--full` runs them. Pre-commit skips the unit suites on a merge of `main` (found by the canonical repo's URL) whose staged `.py` files are all main's
+- docs: `.github/CONTRIBUTING.md` sets a stopping point for reviewing someone else's PR: a full first review labelling every finding Blocking or Backlog, one fix round, one re-review, at most one more round for a Blocking item left unfixed or a regression the fix commits introduced, and after that the maintainer fixes what is left at merge or closes the PR; Blocking items are resolved before merge. The maintainer may commit on the contributor's branch at merge with hooks disabled and nothing from the branch executed. The PR template gains a Coverage section
+- fix: `ts audit` H17 no longer reports a never-queried Model created less than 90 days (`idle_days`) before the usage was read, by its metadata header's creation time (ts-audit 3.27.1)
+- chore: bump ts-cli to v0.224.1
+
 ## 2026-11-25
+- feat: `ts audit` reads the Org each used Model was queried in (`[Org ID]` and `[Org]`, a query of their own, so a build that refuses them leaves the rest of the usage readable). Read from the Primary Org with more than one Org in the usage, the report header says it covers all Orgs; the Cleanup view splits the used Model IDs not found into this Org's (deleted, or not shared with the audit's user), other Orgs' (one collapsed group per Org, no claim they are deleted) and those with no Org recorded. A Model ID queried in several Orgs is listed under each (ts-audit 3.27.0)
+- chore: bump ts-cli to v0.224.0
+- feat: `ts audit` reads each Model's usage from the system Model TS: AI and BI Stats (last query over all the history kept; queries and distinct users over 180 days; the Org it was read in) when a selected rule declares the new `usage` data; H17 (LOW) reports a Model with no query in 90 days or more, or none in a history that starts at least 90 days back; the report shows usage in each scorecard header, a Last used Dashboard column, the Org and read date in the header (with a note outside the Primary Org), and a Cleanup list of used Model IDs that match no visible object. Unread usage reads "Not read", never unused (ts-audit 3.26.0)
+- chore: bump ts-cli to v0.223.0
 - docs: `pr-ready` 1.1.0 adds Step 7, a stopping point for review: ship at once when nothing needs fixing, else one fix round (Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement or normal use) and one re-review; the rest goes to one dated backlog item. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text in a credentialed session, a weakened gate and silently wrong output are always Blockers. `CLAUDE.md` asks for one purpose per PR and bounded claims about behaviour
 
 ## 2026-11-19

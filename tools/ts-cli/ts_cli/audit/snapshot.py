@@ -9,7 +9,7 @@ A snapshot is a directory holding one JSON file per ``AuditContext`` field plus
 
 ``angles`` records what the capture was asked for, ``needs`` what it fetched: the
 data always fetched (``context.ALWAYS_FETCHED``) and the conditional data (AI
-instructions, Answer TML, Sets, custom calendars, connection settings) a selected rule declares in ``requires`` or ``uses``
+instructions, Answer TML, Sets, custom calendars, connection settings, usage) a selected rule declares in ``requires`` or ``uses``
 (``engine.run.needs_for``, under every profile). A replay refuses a selection whose rules read data the
 snapshot did not capture, rather than report it clean. A manifest written before
 ``needs`` was recorded is read by what its angles fetched then
@@ -56,10 +56,15 @@ LEGACY_ANGLE_NEEDS = {"A": frozenset({"ai_instructions"}),
 
 
 #: AuditContext fields added after snapshots were first written, with the value one
-#: written before them reads as: `calendars` and `connections` (2026-11-18) as None,
-#: not fetched. Such a snapshot's `needs` lacks the data too, so a replay of a rule that
-#: reads it is refused (``captured_needs``), never run on the default.
-ADDED_FIELDS = {"calendars": None, "connections": None}
+#: written before them reads as: `calendars` and `connections` (2026-11-18) and `usage`
+#: (2026-11-25) as None, not fetched. Such a snapshot's `needs` lacks the data too, so a
+#: replay of a rule that reads it is refused (``captured_needs``), never run on the default.
+#: `sets_incomplete` (ts-cli 0.225.0) reads as None, not recorded: the Usage view then
+#: finds a failed Set lookup by the run's own warning (usage_triage.sets_unread).
+#: `dependents_incomplete` (0.225.0) reads as None too: which Models' dependents were
+#: hidden is not known, so the Usage view reads their completeness as unknown.
+ADDED_FIELDS = {"calendars": None, "connections": None, "usage": None,
+                "sets_incomplete": None, "dependents_incomplete": None}
 
 
 class SnapshotError(Exception):

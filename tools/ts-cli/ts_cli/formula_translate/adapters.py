@@ -306,7 +306,10 @@ def _adapt_sql(expr: str, ctx: ColumnContext, translate_fn) -> RawResult:
         return RawResult(None, NEEDS_REVIEW, [str(exc)])
     except Exception as exc:  # a parser error is still "untranslated", never a crash
         return RawResult(None, NEEDS_REVIEW, [f"{type(exc).__name__}: {exc}"])
-    return RawResult(out, TRANSLATED)
+    # the whole formula, shown to a person and spliced nowhere: the grouping the
+    # translator adds around a conditional (BL-632) is noise here
+    from ts_cli.sql_forms import sqlf_unwrap_conditional
+    return RawResult(sqlf_unwrap_conditional(out), TRANSLATED)
 
 
 def adapt_snowflake(expr: str, ctx: ColumnContext) -> RawResult:
