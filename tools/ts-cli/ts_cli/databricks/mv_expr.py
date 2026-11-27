@@ -203,6 +203,17 @@ def extract_cross_refs(expr: str) -> tuple[list[str], list[str]]:
     return refs, lod
 
 
+def _parens_balanced(s: str) -> bool:
+    """True when no `)` closes before its `(` — the regexes' `\((.*)\)` can span
+    `MAX(a) - MIN(b)` as one argument."""
+    depth = 0
+    for ch in s:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def classify_dimension_expr(expr: str) -> dict:
     """Classify a dimension expr: direct | computed | lod_window | unsupported."""
     e = strip_sql_comments(expr)
@@ -222,7 +233,8 @@ def classify_dimension_expr(expr: str) -> dict:
         # ordered-set aggregates (ORDER BY inside the AGG(...) argument
         # list itself, e.g. ARRAY_AGG(x ORDER BY y) OVER (...)) — these
         # have no group_aggregate analogue on ThoughtSpot.
-        if (not inner_expr or _OVER_RE.search(masked_inner)
+        if (not inner_expr or not _parens_balanced(masked_inner)
+                or _OVER_RE.search(masked_inner)
                 or _WINDOW_EXTRAS_RE.search(masked_inner)
                 or _WINDOW_EXTRAS_RE.search(masked_tail)):
             return {"kind": "unsupported",

@@ -187,7 +187,8 @@ def _int_key_annotations(window: dict, order: dict) -> list[dict]:
             f"the key)")
     return [{"kind": "order_by_int_key", "detail": (
         f"window ordered by the integer key behind '{window['order']}' "
-        f"(TO_DATE(CAST(key AS STRING), 'yyyyMMdd') sorts as the key does)")}]
+        f"(a date-formatted integer key sorts as the date does, for keys that are "
+        f"valid dates)")}]
 
 
 def _trunc_order(m, resolver) -> dict | None:

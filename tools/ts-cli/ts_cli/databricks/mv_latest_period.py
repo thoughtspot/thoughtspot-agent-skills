@@ -15,10 +15,16 @@ from __future__ import annotations
 import re
 
 from ts_cli.databricks.mv_expr import mask_string_literals, split_dot_path
+from ts_cli.sql_forms import strip_sql_comments
 from ts_cli.databricks.mv_sql import UntranslatableError
 
 _CMP_OPS = ("<=", ">=", "<>", "!=", "=", "<", ">")
-_NAME_RE = re.compile(r"`[^`]+`|[A-Za-z_][\w$]*(?:\.(?:`[^`]+`|[A-Za-z_][\w$]*))*")
+_SEG = r"(?:`[^`]+`|[A-Za-z_][\w$]*)"
+_NAME_RE = re.compile(rf"{_SEG}(?:\.{_SEG})*")
+_FIRST_SEG_RE = re.compile(_SEG)
+# An operator that binds looser than a comparison, or is a predicate of its own: on
+# the non-latest side it would regroup the comparison inside the template.
+_LOOSE_KW_RE = re.compile(r"\b(AND|OR|NOT|IS|IN|BETWEEN|LIKE|RLIKE|ILIKE)\b", re.IGNORECASE)
 _SQL_AGGS = {"MAX", "MIN"}
 
 PASSTHROUGH_NOTE = (
@@ -32,6 +38,26 @@ def whole_table_lods(parsed: dict) -> dict[str, dict]:
     """casefolded name -> parsed dimension, for every `AGG(expr) OVER ()` dimension."""
     return {str(d["name"]).casefold(): d for d in parsed["dimensions"]
             if d["kind"] == "lod_window" and not d["partition_by"]}
+
+
+def clean_sql(sql: str) -> str:
+    """Comments stripped, and newlines outside string literals made spaces, so the
+    text can sit on one line inside a sql_bool_op template."""
+    sql = strip_sql_comments(sql)
+    masked = mask_string_literals(sql)
+    return "".join(" " if m in "\r\n" else c for c, m in zip(sql, masked)).strip()
+
+
+def _strip_parens(s: str) -> str:
+    """`(x)` -> `x` while the outer parentheses wrap the whole text."""
+    while s.startswith("(") and s.endswith(")"):
+        masked, depth = mask_string_literals(s), 0
+        for i, ch in enumerate(masked):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if depth == 0 and i < len(s) - 1:
+                return s
+        s = s[1:-1].strip()
+    return s
 
 
 def _bare_names(sql: str) -> list[tuple[int, int, str]]:
@@ -53,10 +79,16 @@ def _unquote(seg: str) -> str:
     return seg[1:-1] if seg.startswith("`") else seg
 
 
+def names_in(expr: str) -> list[str]:
+    """Every unqualified (single-segment) name in an expression, unquoted."""
+    return [_unquote(name) for _, _, name in _bare_names(clean_sql(expr))
+            if len(split_dot_path(name)) == 1]
+
+
 def references(expr: str, lods: dict[str, dict]) -> list[str]:
     """Names of the whole-table LOD dimensions an expression references unqualified."""
     found = []
-    for _, _, name in _bare_names(expr):
+    for _, _, name in _bare_names(clean_sql(expr)):
         segs = split_dot_path(name)
         if len(segs) == 1 and _unquote(segs[0]).casefold() in lods:
             found.append(_unquote(segs[0]).casefold())
@@ -64,6 +96,7 @@ def references(expr: str, lods: dict[str, dict]) -> list[str]:
 
 
 def _split_comparison(expr: str) -> tuple[str, str, str]:
+    expr = _strip_parens(clean_sql(expr))
     masked = mask_string_literals(expr)
     depth, hits, i = 0, [], 0
     while i < len(masked):
@@ -82,7 +115,7 @@ def _split_comparison(expr: str) -> tuple[str, str, str]:
     if len(hits) != 1:
         raise UntranslatableError("not a single comparison")
     pos, op = hits[0]
-    return expr[:pos].strip(), op, expr[pos + len(op):].strip()
+    return _strip_parens(expr[:pos].strip()), op, _strip_parens(expr[pos + len(op):].strip())
 
 
 def _source_sql(sql: str, what: str) -> str:
@@ -95,7 +128,8 @@ def _source_sql(sql: str, what: str) -> str:
             continue
         if len(segs) == 2 and _unquote(segs[0]).casefold() == "source":
             out.append(sql[last:start])
-            out.append(segs[1])
+            first = _FIRST_SEG_RE.match(name)
+            out.append(name[first.end() + 1:])  # the column as written, backticks kept
             last = end
             continue
         raise UntranslatableError(
@@ -118,7 +152,8 @@ def _sides(dim: dict, lods: dict[str, dict], why: str) -> tuple[str, str, str, b
             if len(split_dot_path(s)) == 1 and _unquote(s).casefold() in lods]
     on_right = bool(side) and side[0] == right
     other = left if on_right else right
-    if len(side) != 1 or references(other, lods):
+    if len(side) != 1 or references(other, lods) or _LOOSE_KW_RE.search(
+            mask_string_literals(other)):
         raise UntranslatableError(
             f"{why} does not compare one plain expression to one latest dimension")
     return op, other, _unquote(side[0]).casefold(), on_right
@@ -130,17 +165,23 @@ def _subquery(lod: dict, parsed: dict, why: str) -> str:
             f"{why} uses {lod['inner_agg']}, and only MAX/MIN latest dimensions are "
             f"emitted as a subquery")
     src = parsed.get("source") or {}
-    if src.get("kind") != "table_fqn":
-        raise UntranslatableError(f"{why} needs a table source to query")
+    if src.get("kind") != "table_fqn" or len(split_dot_path(src.get("raw") or "")) != 3:
+        raise UntranslatableError(
+            f"{why} needs a three-part catalog.schema.table source: the subquery runs "
+            f"on ThoughtSpot's connection, where a shorter name resolves elsewhere")
     try:
-        sql = (f"SELECT {lod['inner_agg']}({_source_sql(lod['inner_expr'], 'the latest dimension')})"
-               f" FROM {src['raw']}")
+        inner = _source_sql(clean_sql(lod["inner_expr"]), "the latest dimension")
+        sql = f"SELECT {lod['inner_agg']}({inner}) FROM {src['raw']}"
         if parsed.get("filter"):
-            sql += f" WHERE {_source_sql(parsed['filter'], 'the MV filter')}"
+            sql += f" WHERE {_source_sql(clean_sql(parsed['filter']), 'the MV filter')}"
     except UntranslatableError as exc:
         raise UntranslatableError(f"{why} cannot be a subquery: {exc}") from None
-    if any(c in sql for c in '"{}'):
-        raise UntranslatableError(f"{why} has a double quote or brace in its SQL")
+    if any(c in sql for c in '"{}\\'):
+        # as formula_common / sql_forms refuse: ThoughtSpot strips a backslash in a
+        # sql_*_op template (live, docs/reviews/2026-10-06-formula-semantics-probes.md)
+        raise UntranslatableError(
+            f"{why} has a double quote, brace or backslash in its SQL, which a "
+            f"sql_bool_op template cannot carry")
     return sql
 
 

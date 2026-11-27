@@ -28,7 +28,7 @@ from ts_cli.databricks.mv_expr import (
     strip_sql_comments,
 )
 from ts_cli.databricks.mv_latest_period import (
-    PASSTHROUGH_NOTE, references, translate_latest_period_flag, whole_table_lods)
+    PASSTHROUGH_NOTE, names_in, references, translate_latest_period_flag, whole_table_lods)
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 from ts_cli.sql_forms import sqlf_aggregate_window_values
 from ts_cli.formula_week import week_start_note
@@ -263,6 +263,8 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
         raise UntranslatableError(
             f"LOD aggregate '{dim['inner_agg']}' not mapped "
             f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
+    if not dim["partition_by"]:
+        _refuse_dimension_names_in_window(dim)
     # Source columns only: whether Databricks resolves an OVER (PARTITION BY …) name
     # to an earlier dimension is unprobed, so an LOD keeps the pre-BL-629 reading.
     token = _DIM_REFS.set({})
@@ -286,6 +288,18 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
                   ts_expr=ts,
                   annotations=[{"kind": "lod_filter_asymmetry",
                                 "detail": _LOD_ASYMMETRY_NOTE}])
+
+
+def _refuse_dimension_names_in_window(dim: dict) -> None:
+    """Whether Databricks reads a bare name inside an OVER () argument as an earlier
+    dimension or as the source column is unprobed (BL-629), and the two can differ
+    (a truncated month vs the raw date), so a name that is both is refused."""
+    shadowed = [n for n in names_in(dim["inner_expr"]) if n.casefold() in _DIM_REFS.get()]
+    if shadowed:
+        raise UntranslatableError(
+            f"'{shadowed[0]}' inside the OVER () argument names an earlier dimension; "
+            f"whether Databricks reads it as that dimension or as the source column "
+            f"there is unprobed (BL-629)")
 
 
 def translate_filter(filter_sql: str, tables: dict) -> dict:
@@ -476,7 +490,17 @@ def _translate_dimension_in_mv(dim: dict, parsed: dict, tables: dict,
                           ts_expr=ts, annotations=[{"kind": "subquery_passthrough",
                                                     "detail": PASSTHROUGH_NOTE.format(
                                                         lod=lods[named[0]]["name"])}])
-    return translate_dimension(dim, tables)
+    entry = translate_dimension(dim, tables)
+    # Fail closed: whatever the expression's form, a dimension whose translation
+    # still reads a whole-table LOD is the comparison BL-638 found wrong.
+    leaked = [lods[n]["name"] for n, ref in _DIM_REFS.get().items()
+              if n in lods and ref in (entry.get("ts_expr") or "")]
+    if leaked:
+        raise UntranslatableError(
+            f"dimension '{dim['name']}' reads the whole-table OVER () dimension "
+            f"'{leaked[0]}' in a form not emitted as a subquery; the group_aggregate "
+            f"comparison gives wrong numbers in ThoughtSpot (BL-638)")
+    return entry
 
 
 _LOD_IN_MEASURE_NOTE = (
@@ -486,8 +510,12 @@ _LOD_IN_MEASURE_NOTE = (
 
 
 def _flag_measures_on_whole_table_lods(translated: list[dict], lods: dict[str, dict],
-                                       visible: dict[str, str]) -> None:
+                                       visible: dict[str, str],
+                                       by_name: dict[str, dict]) -> None:
     refs = {visible[n]: lods[n]["name"] for n in lods if n in visible}
+    # ANY_VALUE(latest) inlines the LOD's own text rather than its reference
+    refs.update({by_name[lods[n]["name"]]["ts_expr"]: lods[n]["name"]
+                 for n in lods if n in visible and lods[n]["name"] in by_name})
     for entry in translated:
         if entry.get("role") != "measure":
             continue
@@ -546,7 +574,7 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                               by_name, skip_names, window_measures, allow_row_lag)
 
-    _flag_measures_on_whole_table_lods(translated, lods, visible)
+    _flag_measures_on_whole_table_lods(translated, lods, visible, by_name)
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
     if parsed["filter"] is not None:

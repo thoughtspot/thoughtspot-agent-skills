@@ -195,8 +195,15 @@ sql_bool_op ( "{0} = (SELECT MAX(<expr>) FROM <source fqn> WHERE <MV filter>)" ,
 ```
 
 It covers one comparison (`=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`) between one
-expression and one `MAX`/`MIN` `OVER ()` dimension over source columns only. Any other
-expression that names the whole-table dimension is skipped with the reason. The
+expression and one `MAX`/`MIN` `OVER ()` dimension over source columns only, for a
+three-part `catalog.schema.table` source. The other side may not hold `AND`, `OR`,
+`NOT`, `IS`, `IN`, `BETWEEN` or `LIKE`, which would regroup the comparison. The SQL may
+not hold a double quote, a brace or a backslash (ThoughtSpot strips a backslash in a
+template). A computed dimension that reads the whole-table dimension in any other form
+is skipped with the reason; a direct dimension or a partitioned LOD naming it still
+falls to a nonexistent column, which fails at import (BL-629). An `OVER ()` argument
+naming an earlier dimension is skipped, because Databricks' reading of a name there is
+unprobed. The
 subquery names the source table and repeats the MV filter as text, so it must be
 edited per environment and lineage does not see it. A **measure** that names the
 whole-table dimension is translated, with a `pending_verification` annotation: that
@@ -415,7 +422,8 @@ last_value ( sum ( [FILLED_INVENTORY] ) , query_groups ( ) , { [balance_date] } 
 `order:` dimension is `TO_DATE(CAST(<key> AS STRING), 'yyyyMMdd')` (or `'yyyyMM'`, the
 pattern case-sensitive), the window is ordered by the integer key itself:
 `first_value ( sum ( [m] ) , query_groups ( ) , { [FACT::DATE_KEY] } )`. Those formats
-sort the integer exactly as the date. Only `range: current` without an `offset` is
+sort the integer exactly as the date, for keys that are valid dates (a sentinel such
+as `99999999` does not). Only `range: current` without an `offset` is
 mapped on such a dimension; a date interval cannot be counted on the key, so a
 trailing, leading, cumulative or offset window over it is refused. Live-verified
 2026-11-26 as the hand-built workaround (semi-additive opening and closing balances

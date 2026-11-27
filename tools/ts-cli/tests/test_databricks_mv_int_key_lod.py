@@ -174,3 +174,85 @@ class TestLatestPeriodFlag:
         out = _run(mv=mv)
         skip = next(s for s in out["skipped"] if s["name"] == "is_mtd")
         assert "BL-638" in skip["reason"] and "source column" in skip["reason"]
+
+
+# --- review round 1 (PR #770) ----------------------------------------------------
+def _mv(**subs):
+    mv = MV
+    for old, new in subs.items():
+        mv = mv.replace(old, new)
+    return mv
+
+
+def _flag(out):
+    return next((e for e in out["translated"] if e["name"] == "is_mtd"), None)
+
+
+def _skip(out, name="is_mtd"):
+    return next(s for s in out["skipped"] if s["name"] == name)
+
+
+class TestReviewRound1:
+    @pytest.mark.parametrize("flag", [
+        '"-- it\'s the month-to-date flag\\nrecord_month = latest_month"',
+        '"/* month\'s flag */ record_month = latest_month"',
+        '"record_month = latest_month -- current month"',
+        '"(record_month = latest_month)"',
+        '"record_month = (latest_month)"',
+    ])
+    def test_comments_and_parentheses_still_give_the_subquery(self, flag):
+        assert _flag(_run(flag))["ts_expr"].startswith('sql_bool_op ( "{0} = (SELECT MAX(')
+
+    @pytest.mark.parametrize("flag", [
+        "source.IS_OPEN AND record_month = latest_month",
+        "source.IS_OPEN OR record_month = latest_month",
+        "NOT record_month = latest_month",
+        "record_month IS NOT NULL = latest_month",
+    ])
+    def test_looser_operator_on_the_other_side_is_skipped(self, flag):
+        assert "BL-638" in _skip(_run(flag))["reason"]
+
+    def test_backslash_in_the_filter_is_refused(self):
+        out = _run(mv=_mv(**{"coalesce(source.IS_DELETED, false) = false":
+                             "source.CODE LIKE 'A\\\\_%'"}))
+        assert "backslash" in _skip(out)["reason"]
+
+    def test_backticked_columns_keep_their_backticks(self):
+        out = _run(mv=_mv(**{
+            "MAX(TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')) OVER ()":
+                "MAX(source.`Month Start`) OVER ()",
+            "filter: coalesce(source.IS_DELETED, false) = false":
+                'filter: "`source`.`Is Deleted` = false"'}))
+        assert _flag(out)["ts_expr"] == (
+            'sql_bool_op ( "{0} = (SELECT MAX(`Month Start`) FROM cat.sch.fact '
+            'WHERE `Is Deleted` = false)" , [formula_Month] )')
+
+    @pytest.mark.parametrize("source", ["sch.fact", "fact"])
+    def test_short_source_name_is_refused(self, source):
+        out = _run(mv=_mv(**{"source: cat.sch.fact": f"source: {source}"}))
+        assert "three-part" in _skip(out)["reason"]
+
+    def test_filter_comment_and_newline_do_not_reach_the_template(self):
+        out = _run(mv=_mv(**{"filter: coalesce(source.IS_DELETED, false) = false":
+                             "filter: |\n  source.IS_DELETED = false -- live rows\n  AND source.BAL > 0"}))
+        ts = _flag(out)["ts_expr"]
+        assert "--" not in ts and "\n" not in ts
+        assert "WHERE IS_DELETED = false" in ts
+        assert ts.endswith('AND BAL > 0)" , [formula_Month] )')
+
+    def test_over_argument_naming_an_earlier_dimension_is_skipped(self):
+        mv = _mv(**{"MAX(TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')) OVER ()":
+                    "MAX(record_month) OVER ()"})
+        out = _run(mv=mv)
+        assert "unprobed" in _skip(out, "latest_month")["reason"]
+        # the flag then falls to the BL-629 nonexistent-column path, which fails at import
+        assert "group_aggregate" not in _flag(out)["ts_expr"]
+
+    def test_any_value_measure_gets_the_note(self):
+        mv = MV + "  - name: Months Behind\n    expr: DATEDIFF(ANY_VALUE(latest_month), MAX(record_month))\n"
+        ent = _by(_run(mv=mv), "Months Behind")
+        assert "pending_verification" in [a["kind"] for a in ent["annotations"]]
+
+    def test_unbalanced_over_argument_stays_unsupported(self):
+        assert classify_dimension_expr(
+            "MAX(source.a) - MIN(source.b) OVER ()")["kind"] == "unsupported"
