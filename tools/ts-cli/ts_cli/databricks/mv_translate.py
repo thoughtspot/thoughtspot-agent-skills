@@ -79,7 +79,14 @@ def formula_id(title: str) -> str:
 
 def display_title(entry: dict) -> str:
     """The ThoughtSpot column name build-model gives a parsed/translated entry."""
-    return entry.get("display_name") or entry["name"].replace("_", " ").title()
+    if entry.get("display_name"):
+        return entry["display_name"]
+    name = str(entry["name"])
+    # BL-631: title-case only a snake_case identifier; a name already written for
+    # people (`SKU Type`, `Is eBook`, `CustomerName`) is used as written.
+    if " " not in name and ("_" in name or name == name.lower()):
+        return name.replace("_", " ").title()
+    return name
 
 
 _SCALAR_RE = re.compile(r"^__MVSCALAR_(\d+)__$")

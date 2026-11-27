@@ -16,6 +16,8 @@ it — this module has no top-level dependency on mv_sql.
 """
 from __future__ import annotations
 
+import re
+
 from ts_cli.formula_common import CAST_MAP_LOAD_BEARING, CAST_TYPES_WIDENING
 from ts_cli.sql_forms import (sqlf_if_chain, SQLF_DIV_MARK, sqlf_rounded_cast, sqlf_safe_divide_form,
                                sqlf_trunc_toward_zero)
@@ -181,6 +183,12 @@ def _construct_cast(cur, resolver) -> str:
     special = _cast_64bit_or_decimal(type_name, params, inner)
     if special is not None:
         return special
+    if type_name in _CAST_TEXT:
+        return _cast_to_text(type_name, params, inner)
+    if type_name == "DATE" and _DATE_VALUED_RE.match(inner):
+        # Already a date with no time part; ThoughtSpot rejects to_date over it
+        # ("Search did not find start_of_month (", live 2026-11-27).
+        return inner
     fn = CAST_MAP_LOAD_BEARING.get(type_name)
     if fn is not None:
         # Narrowing cast: the target changes the value, so it must be emitted.
@@ -192,6 +200,25 @@ def _construct_cast(cur, resolver) -> str:
     raise UntranslatableError(
         f"CAST target type '{type_name}' not recognised — add it to "
         "CAST_MAP_LOAD_BEARING or CAST_TYPES_WIDENING in ts_cli/formula_common.py")
+
+
+#: BL-633: a cast to text is not a widening no-op. ThoughtSpot's `concat` and string
+#: comparisons do not promote a number, and inside a pass-through the warehouse would
+#: receive an expression the source never wrote.
+_CAST_TEXT = frozenset({"STRING", "VARCHAR", "TEXT", "CHAR"})
+#: ThoughtSpot functions that return a DATE (no time part): CAST(<one> AS DATE) is a no-op.
+_DATE_VALUED_RE = re.compile(
+    r"^(start_of_(week|month|quarter|year)|to_date) \(")
+
+
+def _cast_to_text(type_name: str, params: list[str], inner: str) -> str:
+    """Row level, the warehouse's own cast (any input type); over an aggregate, which a
+    sql_*_op cannot wrap, ThoughtSpot's to_string (a numeric aggregate)."""
+    from ts_cli.formula_common import expr_is_aggregated
+    if expr_is_aggregated(inner):
+        return f"to_string ( {inner} )"
+    target = type_name + (f"({','.join(params)})" if params else "")
+    return f'sql_string_op ( "CAST({{0}} AS {target})" , {inner} )'
 
 
 def _cast_params(cur) -> list[str]:

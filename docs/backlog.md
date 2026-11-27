@@ -530,8 +530,8 @@ are roughly ordered by value÷effort.
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
 | ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
-| BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
-| BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
+| ~~BL-631~~ | ~~from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`)~~ | DONE (2026-11-27) |
+| ~~BL-633~~ | ~~`CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through~~ | DONE (2026-11-27) |
 | ~~BL-635~~ | ~~from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape~~ | DONE (2026-11-27) |
 | BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
@@ -19196,7 +19196,7 @@ surface `dropped` instead of discarding it.
 
 ## BL-631 — from-databricks-mv: `display_title` title-cases names that have no display_name, mangling acronyms `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: only a snake_case or all-lower-case `name` is title-cased; any other is used as written). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `display_title` (`tools/ts-cli/ts_cli/databricks/mv_translate.py:76-78`) returns
 `entry["name"].replace("_", " ").title()` when there is no `display_name`. That is right for
@@ -19256,7 +19256,7 @@ Models to re-convert: any with a `COALESCE` followed by an operator.
 
 ## BL-633 — `CAST(col AS STRING)` is dropped, including inside a pass-through such as `TO_DATE` `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: a cast to text is `sql_string_op ( "CAST({0} AS STRING)" , x )`, or `to_string` over an aggregate. Live: Databricks also accepts `to_date(<int>, fmt)`, so the dropped cast inside `to_date` had returned the right value; the risk was `concat` and string comparisons). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `TO_DATE(CAST(fact.DATE_KEY AS STRING), 'yyyyMMdd')`, the usual way to turn an
 integer `yyyyMMdd` key into a date, translates to

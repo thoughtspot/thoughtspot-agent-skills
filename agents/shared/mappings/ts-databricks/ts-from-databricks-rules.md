@@ -136,7 +136,9 @@ Each dimension entry:
 ```
 Is expr a direct column reference (single identifier, no functions)?
   YES → ATTRIBUTE column
-        name: use display_name (or name if no display_name)
+        name: use display_name; with none, title-case a snake_case or all-lower-case
+              name (order_month → Order Month) and use any other name as written
+              (SKU Type stays SKU Type; BL-631)
         column_id: use the physical column name from expr
         description: use comment
         properties.synonyms: use synonyms list (with synonym_type: USER_DEFINED)
